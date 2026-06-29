@@ -9,8 +9,17 @@ Complete command-line interface reference for Javinizer Go.
   - [init](#init)
   - [scrape](#scrape)
   - [sort](#sort)
+  - [update](#update)
+  - [tui](#tui)
   - [actress](#actress)
   - [genre](#genre)
+  - [tag](#tag)
+  - [token](#token)
+  - [word](#word)
+  - [logs](#logs)
+  - [history](#history)
+  - [config](#config)
+  - [version](#version)
   - [info](#info)
   - [completion](#completion)
 - [Common Workflows](#common-workflows)
@@ -18,12 +27,13 @@ Complete command-line interface reference for Javinizer Go.
 
 ## Global Flags
 
-These flags work with all commands:
+These flags are available on the root command and inherited by every subcommand (run `javinizer <command> --help` to see command-specific flags):
 
 ```bash
 --config string   # Path to config file (default "configs/config.yaml")
 --verbose, -v     # Enable debug logging
 --help, -h        # Show help for any command
+--version         # Print version and exit (root command only; not available on subcommands)
 ```
 
 ### Custom Config Example
@@ -90,7 +100,17 @@ javinizer scrape <ID> [flags]
 
 **Flags:**
 ```bash
---scrapers strings   # Specific scraper(s) to use (e.g., r18dev, dmm)
+-s, --scrapers strings       # Comma-separated subset of enabled scrapers to use (e.g., 'r18dev,dmm')
+-f, --force                  # Force refresh metadata from scrapers (clear cache)
+    --actress-db             # Enable actress database lookup (overrides config)
+    --no-actress-db          # Disable actress database lookup (overrides config)
+    --scrape-actress         # Enable actress scraping (overrides config)
+    --no-scrape-actress      # Disable actress scraping (overrides config)
+    --genre-replacement      # Enable genre replacement (overrides config)
+    --no-genre-replacement   # Disable genre replacement (overrides config)
+    --browser                # Enable browser mode for DMM video pages (overrides config)
+    --no-browser             # Disable browser mode for DMM video pages (overrides config)
+    --browser-timeout int    # Browser timeout in seconds (overrides config, 0=use config)
 ```
 
 **Examples:**
@@ -100,30 +120,44 @@ Scrape from all enabled scrapers:
 javinizer scrape IPX-535
 ```
 
-Scrape from specific source:
+Scrape from specific scrapers:
 ```bash
-javinizer scrape IPX-535 --source r18dev
+javinizer scrape IPX-535 --scrapers r18dev,dmm
+```
+
+Force a cache refresh:
+```bash
+javinizer scrape IPX-535 --force
 ```
 
 **Output:**
+
+Only enabled scrapers run — by default just `r18dev`. The movie is printed as a table and cached in the database (title abbreviated here for readability):
+
 ```
-Scraping metadata for: IPX-535
+--------------- ----------------------------------------------------------------------------------------------------
+ID            : IPX-535
+ContentID     : ipx00535
+Title         : 3, 2, 1, GO! Sudden Follow-Up...
+ReleaseDate   : 2020-09-13
+Runtime       : 119 min
+Director      : ZAMPA
+Maker         : Idea Pocket
+Label         : Dish
+Series        : Instant Sex? You Mean, Here? Right Now?!
+Actresses (1) :
+              : [1] Sakura Momo (桜空もも) - ID: 1039157
+              : Thumb: https://pics.dmm.co.jp/mono/actjpgs/sakura_momo4.jpg
+Genres        : Older Sister, Big Tits, Quickie, Featured Actress, Blowjob, Digital Mosaic, Hi-Def, Exclusive
+                Distribution, 4K
+Translations  : English (r18dev), Japanese (r18dev)
+Sources       : r18dev
+--------------- ----------------------------------------------------------------------------------------------------
 
-📡 Scraping from r18dev...
-✅ r18dev scraped successfully
+Source URLs:
 
-📡 Scraping from dmm...
-✅ dmm scraped successfully
-
-🎬 Movie: IPX-535
-Title: Beautiful Day
-Studio: Idea Pocket
-Release Date: 2020-09-13
-Runtime: 120 minutes
-Actresses: Momo Sakura
-Genres: Solowork, Beautiful Girl, Slender
-
-💾 Saved to database
+  r18dev       : https://r18.dev/videos/vod/movies/detail/-/combined=ipx00535/json
+--------------- ----------------------------------------------------------------------------------------------------
 ```
 
 **Behavior:**
@@ -154,10 +188,11 @@ javinizer sort <path> [flags]
     --force-refresh      # Force refresh metadata from scrapers (clear cache)
 -f, --force-update       # Force update existing files
 -h, --help               # Help for sort command
+    --link-mode string   # Link mode for copy operations: none, hard, soft (default "none")
 -m, --move               # Move files instead of copying
     --nfo                # Generate NFO files (default true)
 -r, --recursive          # Scan subdirectories recursively (default true)
--p, --scrapers strings   # Scraper priority (comma-separated, e.g., 'r18dev,dmm')
+-p, --scrapers strings   # Scraper priority override — comma-separated subset of enabled scrapers (e.g., 'r18dev,dmm')
 ```
 
 **Examples:**
@@ -242,7 +277,7 @@ Found 3 video file(s)
 📝 Planning file organization...
 
 IPX-535.mp4
-  → /Users/you/Videos/IPX-535 [Idea Pocket] - Beautiful Day (2020)/IPX-535.mp4
+  → /Users/you/Videos/IPX-535 [Idea Pocket] - 3, 2, 1, GO! Sudden Follow-Up... (2020)/IPX-535.mp4
   NFO: IPX-535.nfo
   Media: 5 files
 
@@ -279,6 +314,94 @@ Files organized: 3 (dry-run)
 6. Downloads media files (if enabled)
 7. Organizes files into folders
 8. Renames files according to template
+
+---
+
+### `update`
+
+Re-scrape files and update NFO files and media **in place** — without moving or renaming the video files. Use this for files that already have an NFO you want to merge new scraper data into rather than replace.
+
+```bash
+javinizer update <path> [flags]
+```
+
+**Arguments:**
+- `<path>`: Directory to scan for video files
+
+**Flags:**
+```bash
+    --array-strategy string    # Array field merge strategy: merge or replace (default "merge")
+    --download                 # Download media (covers, screenshots, etc.) (default true)
+-n, --dry-run                  # Preview operations without making changes
+    --extrafanart              # Download extrafanart (screenshots)
+    --force-overwrite          # Ignore existing NFO, use only scraper data (destructive)
+    --force-refresh            # Force refresh metadata from scrapers (clear cache)
+    --preserve-nfo             # Never overwrite NFO fields, only add missing data (conservative)
+    --preset string            # Merge strategy preset: conservative, gap-fill, or aggressive (overrides scalar/array strategies)
+    --scalar-strategy string   # Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing, or fill-missing-only (default "prefer-nfo")
+-p, --scrapers strings         # Scraper priority (comma-separated, e.g., 'r18dev,dmm')
+```
+
+**Merge strategy presets:**
+- `conservative` — `scalar=prefer-nfo`, `array=merge` (keep existing NFO values)
+- `gap-fill` — `scalar=fill-missing-only`, `array=merge` (only fill empty fields)
+- `aggressive` — `scalar=prefer-scraper`, `array=replace` (prefer fresh scraper data)
+
+**Examples:**
+
+```bash
+# Preview an in-place update (conservative merge)
+javinizer update ~/Videos --dry-run --preset conservative
+
+# Apply an aggressive refresh of metadata + artwork
+javinizer update ~/Videos --preset aggressive
+
+# Only fill in fields missing from the existing NFO
+javinizer update ~/Videos --preset gap-fill
+```
+
+**What it does:**
+1. Scans directory for video files and extracts JAV IDs
+2. Scrapes metadata (uses cache unless `--force-refresh`)
+3. Merges scraper data with the existing NFO using the selected strategy
+4. Writes the updated NFO next to the source file
+5. Downloads media (cover, poster, screenshots, etc.) — no file moves or renames
+
+---
+
+### `tui`
+
+Launch the interactive Terminal User Interface for browsing, selecting, and organizing JAV files with real-time progress tracking. See [TUI Guide](./11-tui.md) for the full keyboard reference and workflow.
+
+```bash
+javinizer tui [path] [flags]
+```
+
+**Flags:**
+```bash
+-s, --source string          # Source directory to scan (alternative to positional arg)
+-d, --dest string            # Destination directory (default: same as source)
+-r, --recursive              # Scan subdirectories recursively (default true)
+-m, --move                   # Move files instead of copying
+    --link-mode string       # Link mode for copy operations: none, hard, soft (default "none")
+-n, --dry-run                # Preview operations without making changes
+    --extrafanart            # Download extrafanart (screenshots)
+-p, --scrapers strings       # Scraper priority (comma-separated, e.g., 'r18dev,dmm')
+    --update-mode            # Update mode: merge metadata with existing NFO and skip file organization
+    --preset string          # Merge strategy preset: conservative, gap-fill, or aggressive (used in update mode)
+    --scalar-strategy string # Scalar field merge strategy for update mode (default "prefer-nfo")
+    --array-strategy string  # Array field merge strategy for update mode (default "merge")
+```
+
+**Examples:**
+
+```bash
+# Launch in a directory
+javinizer tui ~/Videos
+
+# Update mode (merge metadata into existing NFO, no file moves)
+javinizer tui ~/Videos --update-mode --preset conservative
+```
 
 ---
 
@@ -324,6 +447,15 @@ javinizer actress merge --target 12 --source 34 --non-interactive --prefer sourc
 2. Prompts you for each conflicting field (`target` or `source` value).
 3. Asks for final confirmation.
 4. Applies merge in one transaction: moves movie links, deduplicates associations, merges aliases, deletes source actress.
+
+#### `actress export` / `actress import`
+
+Export actresses to JSON, or import actresses from a JSON file:
+
+```bash
+javinizer actress export > actresses.json
+javinizer actress import actresses.json
+```
 
 ---
 
@@ -415,6 +547,143 @@ javinizer genre remove "Blow"
 ✅ Genre replacement removed: 'Blow'
 ```
 
+#### `genre export` / `genre import`
+
+Export genre replacements to JSON, or import them from a JSON file:
+
+```bash
+javinizer genre export > genres.json
+javinizer genre import genres.json
+```
+
+---
+
+### `tag`
+
+Manage custom tags for individual movies. Tags are stored in the database and appear in generated NFO files.
+
+```bash
+javinizer tag add <movie-id> <tag>...
+javinizer tag remove <movie-id> <tag>...
+javinizer tag list [movie-id]
+javinizer tag search <tag>
+javinizer tag tags
+```
+
+**Examples:**
+
+```bash
+# Add tags to a movie
+javinizer tag add IPX-535 favorite 4k
+
+# List tags for a movie
+javinizer tag list IPX-535
+
+# Find every movie with a tag
+javinizer tag search favorite
+
+# List all unique tags in the database
+javinizer tag tags
+```
+
+---
+
+### `token`
+
+Create, revoke, and list API tokens for programmatic access to the Javinizer API.
+
+```bash
+javinizer token create [flags]
+javinizer token list [flags]
+javinizer token revoke <id-or-prefix>
+```
+
+`--json` is a persistent flag on `token`, so it is inherited by `create`, `list`, and `revoke` for machine-readable output. `token create` also accepts `--name` to label the token.
+
+**Flags:**
+```bash
+--json            # Output in JSON format (available on create, list, and revoke)
+--name string     # Optional name for the token (create only)
+```
+
+**Examples:**
+
+```bash
+# Create a named token (the full token value is shown only once)
+javinizer token create --name "media-server"
+
+# List tokens as JSON
+javinizer token list --json
+
+# Revoke a token by ID or prefix (e.g., jv_abc12345)
+javinizer token revoke jv_abc12345
+```
+
+---
+
+### `word`
+
+Manage word replacements for uncensoring metadata strings. Mirrors `genre` for word-level substitution applied during scraping.
+
+```bash
+javinizer word add <original> <replacement>
+javinizer word list
+javinizer word remove <original>
+javinizer word export > words.json
+javinizer word import words.json
+```
+
+---
+
+### `logs`
+
+View and search structured event logs for debugging and bug reporting.
+
+```bash
+javinizer logs list [flags]     # List recent events
+javinizer logs stats            # Show event statistics
+```
+
+---
+
+### `history`
+
+View and manage the history of scrape, organize, download, and NFO operations.
+
+```bash
+javinizer history list          # List recent operations
+javinizer history movie <id>    # Show history for a specific movie
+javinizer history stats         # Show operation statistics
+javinizer history clean         # Clean up old history records
+javinizer history revert <id>   # Revert an organize batch job
+```
+
+---
+
+### `config`
+
+Configuration management commands.
+
+```bash
+javinizer config migrate        # Migrate configuration to current version
+```
+
+---
+
+### `version`
+
+Show build and release version information.
+
+```bash
+javinizer version [flags]
+```
+
+**Flags:**
+```bash
+-s, --short   # Show only the short version
+-c, --check   # Check for updates
+```
+
 ---
 
 ### `info`
@@ -425,7 +694,8 @@ Display current configuration and system information.
 javinizer info
 ```
 
-**Output:**
+**Output:** (fresh `javinizer init`, default config)
+
 ```
 === Javinizer Configuration ===
 Config file: configs/config.yaml
@@ -433,36 +703,37 @@ Database: data/javinizer.db (sqlite)
 Server: localhost:8080
 
 Scrapers:
-  r18dev: enabled (priority 1)
-  dmm: enabled (priority 2)
-
-Metadata Priority:
-  Title: r18dev → dmm
-  Description: dmm → r18dev
-  Actress: r18dev → dmm
-  Genre: r18dev → dmm
-  ...
-
-File Matching:
-  Extensions: .mp4, .mkv, .avi, .wmv, .flv
-  Min Size: 0 MB
-  Exclude: *-trailer*, *-sample*
-  Custom Regex: disabled
+  Priority: [r18dev libredmm dmm javlibrary javdb javbus jav321 mgstage tokyohot aventertainment caribbeancom dlgetchu fc2 javstash]
+  - R18.dev: true
+  - LibreDMM (Fanza, MGStage, SOD, FC2): false
+  - DMM/Fanza: false
+  - JavLibrary: false
+  - JavDB: false
+  - JavBus: false
+  - Jav321: false
+  - MGStage: false
+  - Tokyo-Hot: false
+  - AV Entertainment: false
+  - Caribbeancom: false
+  - DLGetchu: false
+  - FC2: false
+  - Javstash: false
 
 Output:
-  Folder: <ID> [<STUDIO>] - <TITLE> (<YEAR>)
-  File: <ID>
-  Download Cover: true
-  Download Poster: true
-  Download Screenshots: false
-  Download Trailer: false
+  - Folder format: <ID> [<STUDIO>] - <TITLE> (<YEAR>)
+  - File format: <ID><IF:MULTIPART>-pt<PART></IF>
+  - Download cover: true
+  - Download extrafanart: true
 
-NFO:
-  Enabled: true
-  Display Name: <TITLE>
-  Filename: <ID>.nfo
-  Actress Language: English
+Update:
+  - Current version: v1.0.0-rc1
+  - Update enabled: true
+  - Check interval: 24 hours
+  - Last checked: never
+  - Latest version: (unknown)
 ```
+
+Only `r18dev` is enabled by default; the other scrapers are listed in priority order with their enabled state. Enable additional scrapers in `config.yaml` to aggregate more sources.
 
 **When to use:**
 - Verify configuration is loaded correctly
@@ -566,7 +837,7 @@ Edit `config.yaml`:
 output:
   download_cover: true
   download_poster: true
-  download_screenshots: true
+  download_extrafanart: true
   download_trailer: true
   download_actress: true
 ```
@@ -730,24 +1001,15 @@ javinizer api --host 0.0.0.0 --port 9000
 javinizer api --verbose
 ```
 
-**API Endpoints:**
+Once running, the interactive Web UI is available at `http://localhost:8080/`. See the [API Reference](./07-api-reference.md) for the full list of REST endpoints, request/response schemas, and the Scalar/Swagger docs at `/docs` and `/swagger/index.html`.
 
-- `GET /health` - Health check and scraper status
-- `GET /api/v1/auth/status` - Authentication/setup status
-- `POST /api/v1/auth/setup` - First-run username/password setup
-- `POST /api/v1/auth/login` - Login and issue session cookie
-- `POST /api/v1/scrape` - Scrape metadata for a movie ID
-- `GET /api/v1/movies/:id` - Get movie metadata by ID
-- `GET /api/v1/movies` - List cached movies
-- `GET /api/v1/config` - Get current configuration
-
-**Example API Usage:**
+**Quick example API usage:**
 
 ```bash
 # Health check
 curl http://localhost:8080/health
 
-# First-run setup (stores cookie for authenticated requests)
+# First-run setup (stores a session cookie for authenticated requests)
 curl -X POST http://localhost:8080/api/v1/auth/setup \
   -H "Content-Type: application/json" \
   -c cookies.txt \
@@ -759,24 +1021,8 @@ curl -X POST http://localhost:8080/api/v1/scrape \
   -H "Content-Type: application/json" \
   -d '{"id": "IPX-535"}'
 
-# Get movie from cache
-curl http://localhost:8080/api/v1/movie/IPX-535
-```
-
-**Response Format:**
-
-```json
-{
-  "cached": false,
-  "movie": {
-    "id": "IPX-535",
-    "title": "Movie Title",
-    "actresses": [...],
-    "genres": [...],
-    ...
-  },
-  "sources_used": 2
-}
+# Get a cached movie by JAV ID
+curl -b cookies.txt http://localhost:8080/api/v1/movies/IPX-535
 ```
 
 ---

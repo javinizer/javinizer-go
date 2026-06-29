@@ -47,8 +47,7 @@ This project uses standard Go tooling for testing and coverage.
 | `make coverage-html` | Open HTML coverage report in browser | Visual coverage analysis |
 | `make coverage-pkg` | Display coverage breakdown by package | Identify specific gaps |
 | `make coverage-check` | Verify Codecov-compatible line coverage meets 75% threshold | Pre-push validation |
-| `make ci` | Run full CI suite (vet + lint + coverage + race) | Before opening PR |
-
+| `make ci` | Run full CI suite locally (vet, lint, vuln, coverage-check, test-race, config-drift, check-import-guard, check-mocks) | Before opening PR |
 ### Running Specific Package Tests
 
 ```bash
@@ -1235,30 +1234,52 @@ func TestSomething(t *testing.T) {
 
 ### GitHub Actions Workflow
 
-The project uses `.github/workflows/test.yml` with 5 parallel jobs:
+The project uses `.github/workflows/test.yml`, which defines **9 jobs** that run in parallel on every push and pull request targeting `master`, `main`, and `develop` (no job declares `needs:`, so all 9 start at once):
 
-1. **Unit Tests & Coverage**
-   - Runs all tests
-   - Generates coverage report
-   - Enforces 75% minimum coverage
-   - Uploads to Codecov
+1. **Unit Tests & Coverage** (`test`)
+   - Runs `go test` across all packages
+   - Generates `coverage.out` via Go's built-in `-coverprofile` / `-coverpkg`
+   - Enforces the 75% Codecov-compatible line-coverage threshold (`./scripts/check_coverage.sh 75 coverage.out`)
+   - Uploads coverage to Codecov (skipped when running under `act`)
+   - Archives `coverage.out` as a build artifact
 
-2. **Race Detector Tests**
-   - Runs `-race` on concurrent packages
-   - Catches data races in worker pool, TUI, websockets, API
+2. **Race Detector Tests** (`race-tests`)
+   - Runs `go test -race` on `internal/worker`, `internal/tui`, `internal/websocket`, `internal/api`
+   - Catches data races in the worker pool, TUI, websockets, and API
 
-3. **Linting & Code Quality**
-   - `go vet`
-   - `golangci-lint`
-   - Code formatting check
+3. **Linting & Code Quality** (`lint`)
+   - `make vet` (go vet)
+   - `./scripts/check_api_file_size.sh 700 internal/api` (enforces the 700-line guardrail on `internal/api`)
+   - `golangci-lint` (pinned to `v2.9.0`, `--timeout=5m`)
+   - `gofmt` formatting check
 
-4. **Build Verification**
-   - Builds CLI binary
-   - Verifies executable creation
+4. **Vulnerability Scan** (`vuln`)
+   - Runs `govulncheck` against the module
 
-5. **Docker Build Verification**
-   - Builds Docker image
-   - Verifies embedded version metadata
+5. **Unit Tests (Windows)** (`test-windows`)
+   - Runs `go test -short ./...` on `windows-latest` to catch platform-specific failures
+
+6. **Frontend Tests** (`frontend-tests`)
+   - `npm ci --prefix web/frontend`
+   - `npm run test --prefix web/frontend` (Vitest)
+
+7. **Build Verification** (`build`)
+   - `make build` (CLI binary with the embedded frontend)
+   - Generates Swagger docs and fails if `docs/swagger/` is out of date
+   - `make check-mocks` (fails if mockery mocks are out of date)
+   - Verifies the binary exists, reports its version, and serves the bundled (non-placeholder) web UI
+
+8. **Docker Build Verification** (`docker-build`)
+   - Builds the Docker image (`linux/amd64`, not pushed)
+   - Verifies `javinizer version --short` output and the `org.opencontainers.image.version` label match the resolved version
+
+9. **Fullstack E2E Tests** (`fullstack-e2e`)
+   - Runs `make test-e2e-fullstack` (Playwright)
+   - Real browser → SvelteKit frontend → Go API server (`cmd/javinizer-e2e` with the deterministic `e2emock` scraper substituted at the scraper seam) → worker pipeline → in-memory SQLite
+   - Hermetic and deterministic (no real network scraping); uploads the Playwright report on failure
+   - Has no job-level `if:` gate, so it runs on every push and PR
+
+> **Local simulation:** `make simulate-ci` runs a 7-job subset locally (Unit, Race, Lint, Vuln, Frontend, Build, Docker) via `scripts/simulate-ci.sh`. It does **not** simulate `test-windows` or `fullstack-e2e`. See `docs/13-local-ci-testing.md` for details.
 
 ### CI Failure Scenarios
 
@@ -1297,10 +1318,18 @@ chmod +x .git/hooks/pre-commit
 
 ### What the Hook Checks
 
-1. **Code Formatting** - Fails if code is not `gofmt`-formatted
-2. **Go Vet** - Fails if `go vet` finds issues
-3. **Fast Unit Tests** - Runs `go test -short` (30s timeout)
-4. **Build Verification** - Ensures code compiles
+`scripts/pre-commit.sample` runs 8 checks, after a guard that blocks `.planning/` from being committed:
+
+1. **Code formatting** (`[1/8]`) - `gofmt -l .`; fails if any file is unformatted (run `make fmt` to fix)
+2. **golangci-lint** (`[2/8]`) - runs `golangci-lint run ./...` if installed at v2.4.0+ (warns and skips otherwise)
+3. **go vet** (`[3/8]`) - `go vet ./...`
+4. **Fast unit tests** (`[4/8]`) - `go test -short -timeout=60s ./...`
+5. **Build verification** (`[5/8]`) - `go build ./cmd/javinizer`
+6. **Swagger documentation** (`[6/8]`) - runs `make swagger` and fails if `docs/swagger/` is out of date
+7. **Frontend formatting** (`[7/8]`) - `prettier --check` on staged frontend files (skipped if no frontend files are staged or `node_modules` is absent)
+8. **Frontend type check** (`[8/8]`) - `svelte-check --threshold error` (only when `web/frontend/src/` files changed)
+
+> Checks 7 and 8 run only when frontend files are staged, and checks 2, 6, 7, and 8 degrade gracefully (warn/skip) if the required tooling is not installed locally.
 
 ### Bypassing the Hook
 
@@ -1391,8 +1420,7 @@ cat .git/hooks/pre-commit
 - [Testify Documentation](https://github.com/stretchr/testify)
 - [Go Race Detector](https://go.dev/doc/articles/race_detector)
 - [Table-Driven Tests](https://dave.cheney.net/2019/05/07/prefer-table-driven-tests)
-- [go-acc Coverage Tool](https://github.com/ory/go-acc)
-
+- [Go coverage profiling (`go test -coverprofile`)](https://pkg.go.dev/testing#hdr-Coverage)
 ## Contributing
 
 When adding new features:
@@ -1426,7 +1454,7 @@ The project uses the following testing frameworks and tools:
 
 | Framework/Tool | Version | Purpose |
 |---------------|---------|---------|
-| Go `testing` package | Standard library (Go 1.25.0) | Core test framework |
+| Go `testing` package | Standard library (Go 1.26.0) | Core test framework |
 | `github.com/stretchr/testify` | v1.11.1 | Assertions and test helpers |
 | `go.uber.org/goleak` | v1.3.0 | Goroutine leak detection |
 | `github.com/spf13/afero` | v1.15.0 | In-memory filesystem for tests |
@@ -1436,29 +1464,50 @@ The project uses the following testing frameworks and tools:
 No additional setup is required beyond the standard Go installation. All testing dependencies are managed through `go.mod`.
 
 **Prerequisites:**
-- Go 1.25.0 or later
+- Go 1.26.0 or later
 - Dependencies installed (`go mod download` or `make deps`)
 
 ### Test Helpers
 
 The project provides a shared test utilities package at `internal/testutil/` with helper functions:
 
-| Helper | Purpose | Usage |
-|--------|---------|-------|
-| `CaptureOutput()` | Captures stdout/stderr for CLI testing | Test console output without side effects |
-| `CreateRootCommandWithConfig()` | Creates cobra command with config flag | Test commands that need `--config` |
-| `SetupTestDB()` | Creates temporary database with migrations | Integration tests requiring database |
-| `CreateTestConfig()` | Generates test configuration file | Unit/integration tests needing config |
+| Helper | Signature | Purpose |
+|--------|-----------|---------|
+| `CaptureOutput(t, fn)` | `(stdout, stderr string)` | Captures stdout/stderr from a function for CLI/console testing |
+| `CreateTestConfig(t, customizeFn)` | `(configPath string, cfg *config.Config)` | Writes a temp `config.yaml` in `t.TempDir()` and returns its path plus the loaded config |
+| `CreateTestVideoFile(t, dir, filename)` | `string` | Writes a dummy video file with placeholder content |
+| `InvalidConfigPath(t)` | `string` | Returns a path to a config file containing invalid YAML (file exists but fails to parse) |
+| `UnreachableConfigPath(t)` | `string` | Deprecated alias for `InvalidConfigPath` (kept for legacy callers) |
+
+The package also provides fluent test-data **builders** in `internal/testutil/builders.go`:
+
+| Builder | Purpose |
+|---------|---------|
+| `NewMovieBuilder()` | Build a `*models.Movie` with chained setters |
+| `NewActressBuilder()` | Build a `*models.Actress` with chained setters |
+| `NewScraperResultBuilder()` | Build a `*models.ScraperResult` with chained setters |
+
+> **Note:** `testutil` does **not** provide a database-setup helper (there is no `SetupTestDB` or `CreateRootCommandWithConfig` in the package). Tests that need a real database create one inline — typically `CreateTestConfig` with `cfg.Database.DSN = ":memory:"`, then `database.New(cfg)` and `db.RunMigrationsOnStartup(ctx)` — as shown in the `setupTestDB` example in the Testing Scrape Command section above.
 
 **Example:**
 
 ```go
-import "github.com/javinizer/javinizer-go/internal/testutil"
+import (
+    "testing"
 
-func TestWithDatabase(t *testing.T) {
-    configPath, dbPath := testutil.SetupTestDB(t)
-    // Database is ready with all migrations applied
-    // Temporary directory is auto-cleaned by t.TempDir()
+    "github.com/javinizer/javinizer-go/internal/config"
+    "github.com/javinizer/javinizer-go/internal/testutil"
+)
+
+func TestWithConfig(t *testing.T) {
+    configPath, cfg := testutil.CreateTestConfig(t, func(c *config.Config) {
+        c.Database.DSN = ":memory:"
+        c.Scrapers.Priority = []string{"dmm"}
+    })
+    // configPath points to a temp config.yaml (auto-cleaned via t.TempDir())
+    // cfg is the loaded *config.Config with your customizations applied
+    _ = configPath
+    _ = cfg
 }
 ```
 
@@ -1472,17 +1521,26 @@ func TestWithDatabase(t *testing.T) {
 
 ### Goroutine Leak Detection
 
-For tests involving concurrent code, use `goleak` to detect leaked goroutines:
+For tests involving concurrent code, use `goleak` to detect leaked goroutines. The project uses **per-test** verification (via `defer goleak.VerifyNone(t, ...)`) rather than a single `TestMain` hook, so leaks are attributed to the specific test that caused them:
 
 ```go
 import (
     "testing"
+
     "go.uber.org/goleak"
 )
 
-func TestMain(m *testing.M) {
-    goleak.VerifyTestMain(m)
+func TestConcurrentThing(t *testing.T) {
+    defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+    // ... exercise concurrent code ...
 }
 ```
 
-This is automatically run in CI for packages in `internal/worker/`, `internal/tui/`, `internal/websocket/`, and `internal/api/`.
+`goleak` is currently used in:
+
+- `internal/api/core/update_checker_test.go` (`goleak.VerifyNone(t, goleak.IgnoreCurrent())`)
+- `internal/api/realtime/ws_test.go` (ignores `database/sql.(*DB).connectionOpener`)
+- `internal/update/wiring_test.go`
+
+It is **not** wired into `internal/worker/`, `internal/tui/`, or `internal/websocket/`, and `.github/workflows/test.yml` has no dedicated goleak enforcement step — goleak runs only as part of the normal `go test` invocations for the three packages above. The CI-level guard for concurrency correctness across `worker`, `tui`, `websocket`, and `api` is the separate [Race Detector Tests](#race-detector-tests) job.

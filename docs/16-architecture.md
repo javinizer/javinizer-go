@@ -1,5 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
-
 # Architecture Overview
 
 Javinizer Go is a metadata scraper and file organizer for Japanese Adult Videos (JAV), written in Go. The system provides multiple user interfaces (CLI, TUI, REST API, and Web UI) and processes video files through a pipeline that extracts JAV IDs, scrapes metadata from multiple sources, aggregates results, persists to a database, and organizes files according to configurable templates.
@@ -26,9 +24,10 @@ The architecture follows a layered design with clear separation between interfac
 ┌─────────────────────────────────────────────────────────────────────┐
 │                     Orchestration Layer                              │
 │  ┌──────────────────────────────────────────────────────────────┐  │
-│  │           Worker Pool (concurrent task execution)            │  │
-│  │           - Semaphore-based concurrency control              │  │
-│  │           - Progress tracking and error aggregation          │  │
+│  │     Workflow seam (internal/workflow) + BatchJobInterface    │  │
+│  │     - Scrape / Apply / Rescrape phases (worker.BatchJobInterface) │  │
+│  │     - Bounded fan-out worker pool per phase                  │  │
+│  │     - Progress reporting and error aggregation               │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
                          │
@@ -63,7 +62,7 @@ A typical file organization operation follows this pipeline:
 
 4. **Result Aggregation** - `internal/aggregator` merges multiple `ScraperResult` objects into a single `Movie` model using field-level priority configuration. For each field (title, actresses, genres, etc.), the aggregator selects the first non-empty value from the priority-ordered results. Genre replacements and actress alias conversions are applied during aggregation.
 
-5. **Translation** (optional) - `internal/translation` translates metadata fields (title, description, maker, etc.) to a target language using configured providers (DeepL, Google, LibreTranslate).
+5. **Translation** (optional) - `internal/translation` translates metadata fields (title, description, maker, etc.) to a target language using configured providers (DeepL, Google, OpenAI, OpenAI-compatible, Anthropic).
 
 6. **Database Persistence** - `internal/database` stores the aggregated `Movie` to SQLite, including actresses, genres, translations, and screenshots. Historical operations are tracked for rollback capability.
 
@@ -73,7 +72,7 @@ A typical file organization operation follows this pipeline:
 
 9. **NFO Generation** - `internal/nfo` creates Kodi/Plex-compatible NFO metadata files with the scraped information.
 
-10. **Progress Reporting** - Throughout the pipeline, `internal/worker/progress` tracks task status and broadcasts updates via WebSocket to connected UI clients.
+10. **Progress Reporting** - Throughout the pipeline, the workflow seam and `internal/worker` phase hooks track job/phase status and broadcast updates via WebSocket to connected UI clients.
 
 ## Key Abstractions
 
@@ -83,22 +82,26 @@ The `Scraper` interface defines the contract for all metadata sources:
 
 ```go
 type Scraper interface {
-    Name() string                              // Scraper identifier (e.g., "r18dev")
-    Search(id string) (*ScraperResult, error) // Scrape by JAV ID
-    GetURL(id string) (string, error)          // Resolve URL for ID
-    IsEnabled() bool                           // Check if enabled in config
-    Config() *models.ScraperSettings           // Scraper-specific config
-    Close() error                              // Cleanup resources
+    Name() string                                              // Scraper identifier (e.g., "r18dev")
+    Search(ctx context.Context, id string) (*ScraperResult, error) // Scrape by JAV ID
+    GetURL(ctx context.Context, id string) (string, error)     // Resolve URL for ID
+    IsEnabled() bool                                           // Check if enabled in config
+    Config() *models.ScraperSettings                           // Scraper-specific config
+    Close() error                                              // Cleanup resources
 }
 ```
 
-Optional interfaces extend scraper capabilities:
-- `URLHandler` - Handle direct URL scraping (extract ID from URL)
-- `DirectURLScraper` - Scrape from URL instead of ID search
-- `ScraperQueryResolver` - Normalize non-standard IDs
-- `ContentIDResolver` - Resolve JAV ID to DMM content-ID format
+Optional interfaces extend scraper capabilities. Consumers detect them with a
+type assertion (e.g., `handler, ok := scraper.(URLHandler)`) rather than
+assuming support:
+- `URLHandler` - Direct URL scraping: `CanHandleURL`, `ExtractIDFromURL`, and `ScrapeURL(ctx, url)` for scraper-specific URLs
+- `DownloadProxyResolver` - Resolve per-host download proxy config for media fetched from scraper-specific CDN hosts
+- `ScraperQueryResolver` - Declare and normalize non-standard identifier formats a scraper can handle
+- `ContentIDResolver` - Resolve a JAV ID to its DMM content-ID format (e.g., `ipx-123` → `118BDP-00118`)
+- `ContentIDResolverCtx` - Context-aware variant of `ContentIDResolver` for scrapers whose lookup issues HTTP; callers assert this first and fall back to `ContentIDResolver`
+- `HTMLParser` - Parse a pre-fetched `goquery.Document` into a `ScraperResult`, enabling tests with static HTML fixtures
 
-**Location:** `internal/models/scraper.go:119-139`
+**Location:** `internal/models/scraper.go:132-153` (core interface); optional interfaces at `:159-226`
 
 ### Aggregator Interface (`internal/aggregator/aggregator.go`)
 
@@ -106,48 +109,85 @@ The `AggregatorInterface` merges multiple scraper results into a unified `Movie`
 
 ```go
 type AggregatorInterface interface {
-    Aggregate(results []*models.ScraperResult) (*models.Movie, error)
-    GetResolvedPriorities() map[string][]string
+    Aggregate(results []*models.ScraperResult) (*models.Movie, *AggregateResult, error)
+    AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, *AggregateResult, error)
+    ReloadReplacementCaches(ctx context.Context)
 }
 ```
 
-The aggregator applies field-level priority merging, genre replacement rules, actress alias conversion, and configured translation. Each field (title, actresses, genres, etc.) uses the same global scraper priority, preferring earlier scrapers for non-empty values.
+The `AggregatorInterface` exposes three operations: `Aggregate` runs the default
+priority merge; `AggregateWithPriority` overrides the scraper order for a single
+call (used by per-job scraper filters); and `ReloadReplacementCaches` hot-reloads
+the genre, word, and alias replacement maps after a mutation without rebuilding
+the whole workflow factory. `Aggregate` returns a `*AggregateResult` alongside the
+`*models.Movie` — it carries `FieldSources` (which scraper filled each field) and
+`ResolvedPriorities` (the per-field priority lists actually used), so callers
+never need to inspect hidden aggregator state. Each field uses its per-field
+priority list when configured — a per-field list is **exclusive** (no global
+fallback) — otherwise it falls back to the global `scrapers.priority` list,
+preferring earlier scrapers for non-empty values. Genre replacement, word
+replacement, actress alias resolution, and actress merging are delegated to
+focused sub-processors composed in `New`.
 
-**Location:** `internal/aggregator/aggregator.go:22-28`
+**Location:** `internal/aggregator/aggregator.go:20-32`
 
 ### Repository Interfaces (`internal/database/interfaces.go`)
 
 Database operations are abstracted through repository interfaces for testability:
 
-- `MovieRepositoryInterface` - CRUD operations for movies
-- `ActressRepositoryInterface` - Actress database management
-- `MovieTranslationRepositoryInterface` - Multi-language metadata
-- `GenreReplacementRepositoryInterface` - Genre mapping rules
+- `MovieRepositoryInterface` - CRUD and upsert for movies (incl. translations and screenshots)
+- `ActressRepositoryInterface` - Actress management and lookups
+- `GenreRepositoryInterface` - Genre catalog management
+- `GenreTranslationRepositoryInterface` - Per-language genre translations
+- `ActressTranslationRepositoryInterface` - Per-language actress translations
+- `GenreReplacementRepositoryInterface` - Genre mapping/replacement rules
+- `WordReplacementRepositoryInterface` - Word mapping/replacement rules
 - `HistoryRepositoryInterface` - Operation tracking and rollback
-- `ActressAliasRepositoryInterface` - Actress name normalization
+- `ActressAliasRepositoryInterface` - Actress name normalization/aliases
 - `MovieTagRepositoryInterface` - Custom movie tags
-- `ContentIDMappingRepositoryInterface` - ID format mappings
+- `ContentIDMappingRepositoryInterface` - Search-ID → content-ID mappings (type alias of `models.ContentIDMappingRepositoryInterface`)
 - `JobRepositoryInterface` - Background job tracking
+- `BatchFileOperationRepositoryInterface` - Batch file-operation records
+- `ApiTokenRepositoryInterface` - API token management
+- `EventRepositoryInterface` - System event log
+
+Movie-language translations are persisted by an internal `movieTranslationRepository`
+(no public interface) invoked through the movie save path, so there is no
+`MovieTranslationRepositoryInterface` in this file.
 
 **Location:** `internal/database/interfaces.go`
 
-### Worker Pool (`internal/worker/pool.go`)
+### Workflow Seam & BatchJobInterface (`internal/workflow`, `internal/worker`)
 
-The `Pool` manages concurrent task execution with semaphore-based concurrency control:
+The orchestration layer is a unified `Workflow` abstraction. Ad-hoc task types
+(`ScrapeTask`/`DownloadTask`/`OrganizeTask`/`NFOTask`) have been consolidated
+onto this single seam, and the worker pool executes phase-based jobs.
+
+`workflow.WorkflowInterface` (`internal/workflow/interfaces.go`) exposes the
+seam methods callers invoke:
 
 ```go
-type Pool struct {
-    sem        *semaphore.Weighted  // Limits concurrent workers
-    ctx        context.Context      // Cancellation support
-    maxWorkers int64                // Configured worker limit
-    timeout    time.Duration        // Per-task timeout
-    progress   *ProgressTracker     // Status broadcasting
+type WorkflowInterface interface {
+    Scrape(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, *OrchestrationMeta, error)
+    Apply(ctx context.Context, cmd ApplyCmd, progress scrape.ProgressFunc) (*ApplyResult, error)
+    Preview(...) (*PreviewResult, error)
+    Compare(...) (*CompareResult, error)
+    ScanAndMatch(...) (*ScanAndMatchResult, error)
 }
 ```
 
-Tasks implement the `Task` interface with `ID()`, `Type()`, `Description()`, and `Execute(ctx)` methods. The pool handles task submission, execution, timeout enforcement, progress updates, and error aggregation.
+`worker.BatchJobInterface` (`internal/worker/batch_job_interface.go`) drives
+batch jobs through three phases — **scrape**, **apply**, and **rescrape** —
+with bounded fan-out concurrency per phase, progress reporting, and error
+aggregation. It composes narrow sub-interfaces (`JobReader`, `MovieLookup`,
+`PhaseController`, `JobCanceller`, `JobEditor`) so handlers depend on the
+narrowest view they need.
 
-**Location:** `internal/worker/pool.go:13-23`
+At startup, `SetReconstructionDeps` re-hydrates infrastructure dependencies on
+jobs loaded from the database, so post-restart apply/rescrape and movie-edit
+persistence continue to work.
+
+**Location:** `internal/workflow/interfaces.go`, `internal/worker/batch_job_interface.go`
 
 ## Directory Structure
 
@@ -165,13 +205,26 @@ javinizer-go/
 │
 ├── internal/                # Private application code
 │   ├── api/                 # REST API server (Gin framework)
-│   │   ├── server/          # Server setup and routing
-│   │   ├── batch/           # Batch operations (organize, scrape)
+│   │   ├── server/          # Gin router composition, middleware, docs/static, OpenAPI spec
+│   │   ├── contracts/       # Wire-format projection layer (DTOs, movie_view)
+│   │   ├── core/            # Dependency container, runtime state, path/security helpers
+│   │   ├── middleware/      # Shared HTTP middleware (job-ID validation, rate limiting)
+│   │   ├── apperrors/       # Typed API error mapping and HTTP error responses
+│   │   ├── batch/           # Batch operations (organize, scrape, rescrape)
 │   │   ├── movie/           # Movie CRUD endpoints
-│   │   ├── actress/         # Actress management endpoints
-│   │   ├── auth/            # Authentication middleware
+│   │   ├── actress/         # Actress management endpoints (incl. export/import)
+│   │   ├── genre/           # Genre catalog and genre/word replacement endpoints
+│   │   ├── file/            # Filesystem browsing and directory scan endpoints
+│   │   ├── jobs/            # Background job, operation, and revert endpoints
 │   │   ├── history/         # History and rollback endpoints
-│   │   └── system/          # Config and scraper info endpoints
+│   │   ├── events/          # System event log endpoints
+│   │   ├── token/           # API token management endpoints
+│   │   ├── version/         # Version and update-check endpoints
+│   │   ├── realtime/        # WebSocket progress streaming
+│   │   ├── auth/            # Authentication middleware
+│   │   ├── system/          # Config, scraper info, proxy test, translation endpoints
+│   │   ├── temp/            # Temp/cropped poster and image serving endpoints
+│   │   └── testkit/         # API test helpers and mock builders
 │   │
 │   ├── aggregator/          # Multi-source metadata merging
 │   │   └── aggregator.go    # Priority-based field selection
@@ -216,25 +269,32 @@ javinizer-go/
 │   │   └── [more scrapers]  # Additional sources
 │   │
 │   ├── scraperutil/         # Scraper utilities
-│   │   ├── registry.go      # Scraper configuration and initialization
-│   │   └── priority.go      # Scraper priority resolution
+│   │   ├── scraper_registry.go   # Centralized scraper registry (registration catalog)
+│   │   └── registration_catalog.go # Scraper configuration and initialization
 │   │
 │   ├── template/            # Template engine for output naming
 │   │   └── engine.go        # <ID>, <TITLE>, <MAKER>, etc.
 │   │
 │   ├── translation/         # Metadata translation service
-│   │   └── service.go       # DeepL, Google, LibreTranslate
+│   │   └── service.go       # OpenAI, DeepL, Google, OpenAI-compatible, Anthropic
 │   │
 │   ├── tui/                 # Terminal UI (Bubble Tea)
 │   │   ├── model.go         # Application state
 │   │   ├── views/           # UI components
 │   │   └── interfaces.go    # Pool and progress abstractions
 │   │
-│   ├── worker/              # Concurrent task processing
-│   │   ├── pool.go          # Worker pool management
-│   │   ├── progress.go      # Status tracking and WebSocket broadcast
-│   │   ├── tasks.go         # Task definitions (scrape, organize, download)
-│   │   └── single_scrape.go # Single file scraping workflow
+│   ├── worker/              # Phase-based batch job execution
+│   │   ├── batch_job_interface.go # BatchJobInterface (scrape/apply/rescrape phases)
+│   │   ├── scrape_phase.go  # Scrape phase
+│   │   ├── apply_phase.go   # Apply (organize/NFO/download) phase
+│   │   ├── rescrape_phase.go # Rescrape phase
+│   │   ├── job_store.go     # In-memory job store and reconstruction
+│   │   └── progress_fn.go   # Progress reporting and WebSocket broadcast
+│   │
+│   ├── workflow/            # Workflow seam (unified orchestration abstraction)
+│   │   ├── interfaces.go    # WorkflowInterface (Scrape/Apply/Preview/Compare/ScanAndMatch)
+│   │   ├── factory.go       # Dependency wiring / factory boundary
+│   │   └── [orchestrators]  # scrape/apply/compare/preview/scanmatch orchestrators
 │   │
 │   ├── config/              # Configuration loading and validation
 │   ├── httpclient/          # HTTP client factory with proxy support
@@ -258,5 +318,5 @@ javinizer-go/
 - **`cmd/` vs `internal/`** - Entry points and command wiring are public in `cmd/`, while all business logic remains in `internal/` to prevent external dependencies.
 - **`internal/api/` organization** - API endpoints are grouped by domain (movie, actress, batch, history) rather than by HTTP method, making it easier to understand the capabilities of each resource.
 - **`internal/scraper/` structure** - Each scraper is a subpackage with its own implementation, allowing independent testing and configuration while sharing utilities in `internal/scraperutil/`.
-- **`internal/worker/` isolation** - The worker pool is a pure concurrency primitive with no knowledge of scraping or organization logic, making it reusable and testable in isolation.
+- **`internal/worker/` + `internal/workflow/` separation** - The `workflow` seam owns scrape/apply/rescrape orchestration; `worker` provides the phase-based `BatchJobInterface` and bounded fan-out execution. Neither knows about UI concerns, keeping them reusable and testable in isolation.
 - **`web/frontend/` separation** - The SvelteKit frontend is a standalone project that communicates only via the REST API and WebSocket, enabling independent development and hot-reload during development.

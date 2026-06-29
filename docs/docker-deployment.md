@@ -37,15 +37,14 @@ cd javinizer-go
 cp .env.example .env
 # Edit .env to set your PUID, PGID, and MEDIA_PATH
 
-# 3. Build the Docker image
-docker build -t javinizer:latest .
-
-# 5. Run with Docker Compose
+# 3. Run with Docker Compose (pulls the pre-built image from GHCR)
 docker-compose up -d
 
-# 6. Access the web UI
+# 4. Access the web UI
 open http://localhost:8080
 ```
+
+To build the image locally instead of pulling the pre-built one, see [Building the Image](#building-the-image).
 
 ---
 
@@ -53,7 +52,7 @@ open http://localhost:8080
 
 - **Docker**: 20.10+ ([Install Docker](https://docs.docker.com/get-docker/))
 - **Docker Compose**: 2.0+ (included with Docker Desktop)
-- **Disk Space**: ~500MB for image + your JAV library
+- **Disk Space**: ~1 GB free for the runtime image (it bundles Chromium for browser automation) plus space for your JAV library
 
 ---
 
@@ -72,13 +71,15 @@ docker build \
   .
 ```
 
+> **Note:** The default `docker-compose.yml` pulls the pre-built image `ghcr.io/javinizer/javinizer-go:latest` and has its `build:` section commented out. To run a locally-built image with Compose, edit `docker-compose.yml`: comment out the `image:` line and uncomment the `build:` section.
+
 ### Build Process
 
 The Dockerfile uses a multi-stage build:
 
-1. **Stage 1 (frontend-builder)**: Builds the SvelteKit frontend with Node.js 20
-2. **Stage 2 (go-builder)**: Compiles the Go binary with SQLite support
-3. **Stage 3 (runtime)**: Creates a minimal Alpine runtime image (~80MB)
+1. **Stage 1 (frontend-builder)**: Builds the SvelteKit frontend with Node.js 20 (`node:20-alpine`)
+2. **Stage 2 (go-builder)**: Compiles the Go binary with CGO SQLite support (`golang:1.26-alpine`)
+3. **Stage 3 (runtime)**: `alpine:3.21` runtime image bundling Chromium (for browser automation), its font libraries (`nss`, `freetype`, `harfbuzz`, `ttf-freefont`), SQLite, and `su-exec`. Chromium and its supporting libraries are the largest dependencies, so the runtime image is several hundred MB uncompressed — allocate disk accordingly.
 
 **Build time**: ~2-3 minutes on modern hardware
 
@@ -107,15 +108,14 @@ docker-compose restart
 ### Updating the Application
 
 ```bash
-# Pull latest changes
-git pull
+# Pull the latest image from GHCR
+docker-compose pull
 
-# Rebuild the image
-docker-compose build
-
-# Restart with new image
+# Restart with the new image
 docker-compose up -d
 ```
+
+If you build locally (the `build:` section enabled in `docker-compose.yml`), use `docker-compose build` instead of `docker-compose pull`.
 
 ---
 
@@ -163,6 +163,15 @@ Javinizer uses a `.env` file to configure Docker Compose variables. This makes i
 | `MEDIA_PATH` | Path to your JAV library on host | `/path/to/your/jav-library` | Yes |
 | `HOST_PORT` | Port to expose on host | 8080 | No |
 | `TZ` | Timezone (IANA format) | UTC | No |
+| `UMASK` | File creation mask (e.g. `002`, `022`); overrides `config.yaml` | `002` | No |
+| `LOG_LEVEL` | Log verbosity (`debug`, `info`, `warn`, `error`); overrides `config.yaml` | `info` | No |
+| `JAVINIZER_TEMP_DIR` | Temp directory for file processing | `/javinizer/temp` | No |
+| `JAVINIZER_SETUP_TRUSTED_CIDRS` | Trusted CIDRs for the first-run `/auth/setup` endpoint (Docker bridge gateway) | `172.16.0.0/12` | No |
+| `JAVINIZER_SETUP_SECRET` | Bootstrap secret sent as `X-Setup-Secret` header for `/auth/setup` (takes precedence over the CIDR check) | _(unset)_ | No |
+| `FLARESOLVERR_HOST_PORT` | Host port for the optional FlareSolverr service | 8191 | No |
+| `FLARESOLVERR_LOG_LEVEL` | FlareSolverr log verbosity | `info` | No |
+| `FLARESOLVERR_LOG_HTML` | Log FlareSolverr HTML responses | `false` | No |
+| `FLARESOLVERR_CAPTCHA_SOLVER` | FlareSolverr captcha solver | `none` | No |
 
 ### Alternative: Command-Line Variables
 
@@ -185,6 +194,7 @@ Contains all application data:
 - `javinizer.db` - SQLite database (cached metadata)
 - `logs/` - Application logs
 - `cache/` - Temporary cache files
+- `temp/` - Temporary files (poster processing, etc.)
 
 **Host mount**: `./data:/javinizer`
 
@@ -236,8 +246,16 @@ environment:
   # Database location
   - JAVINIZER_DB=/javinizer/javinizer.db
 
-  # Log directory
+  # Log directory (applies only when logging.output includes a file target)
   - JAVINIZER_LOG_DIR=/javinizer/logs
+
+  # Temp directory for file processing
+  - JAVINIZER_TEMP_DIR=/javinizer/temp
+
+  # Trusted CIDRs for the first-run /auth/setup endpoint. In Docker the host
+  # reaches the container via the bridge gateway, which is not localhost from
+  # the container's view; without this, setup is only reachable from inside.
+  - JAVINIZER_SETUP_TRUSTED_CIDRS=172.16.0.0/12
 
   # Timezone (affects log timestamps)
   - TZ=America/New_York
@@ -264,14 +282,24 @@ server:
 scrapers:
   priority: ["r18dev", "dmm"]
 
-  # Proxy configuration (optional)
+  # HTTP/SOCKS5 proxy configuration (optional).
+  # Connection settings live under named profiles; a scraper selects one
+  # with `profile:`. A top-level `url:` is rejected as a legacy field.
   proxy:
     enabled: true
-    url: "http://proxy.example.com:8080"
+    default_profile: "main"
+    profiles:
+      main:
+        url: "http://proxy.example.com:8080"
+        # username: ""   # Optional authentication
+        # password: ""   # Optional authentication
 
 output:
-  organize_directory: "/media/organized"
-  folder_template: "<ID> [<STUDIO>] - <TITLE> (<YEAR>)"
+  # Destination for organize operations is configured at runtime
+  # (e.g. `javinizer sort --dest /media/organized` or via the Web UI/API),
+  # not in config.yaml.
+  folder_format: "<ID> [<STUDIO>] - <TITLE> (<YEAR>)"
+  file_format: "<ID><IF:MULTIPART>-pt<PART></IF>"
 ```
 
 **Changes take effect** after restarting the container:
@@ -459,6 +487,12 @@ The default configuration binds to `0.0.0.0:8080` (all interfaces). For producti
    ```
 3. **Complete first-run authentication setup** in Web UI (built-in single-user auth)
 
+   In Docker the host connects through the bridge gateway, which is not
+   localhost from the container's perspective. Set `JAVINIZER_SETUP_TRUSTED_CIDRS`
+   in `.env` (default `172.16.0.0/12`) so the `/auth/setup` endpoint accepts the
+   request, or set `JAVINIZER_SETUP_SECRET` and send it as the `X-Setup-Secret`
+   header. See [Available Variables](#available-variables).
+
 ---
 
 ## Production Deployment
@@ -487,7 +521,7 @@ services:
 
     environment:
       - TZ=UTC
-      - JAVINIZER_LOG_LEVEL=info  # Reduce log verbosity
+      - LOG_LEVEL=info  # Reduce log verbosity (overrides config.yaml)
 
     healthcheck:
       interval: 30s
@@ -598,22 +632,26 @@ The build pipeline is defined in `.github/workflows/cli-release.yml`:
 The test workflow (`.github/workflows/test.yml`) runs on every push and pull request:
 
 **Jobs**:
-- **Unit Tests**: Runs `go test ./...` with coverage reporting to Codecov
+- **Unit Tests & Coverage**: Runs `go test ./...` with coverage reporting to Codecov
 - **Race Detector**: Tests concurrent code with race detection enabled
-- **Linting**: Runs `golangci-lint`, `go vet`, and format checks
+- **Linting & Code Quality**: Runs `golangci-lint`, `go vet`, format checks, and an internal API file-size guardrail
+- **Vulnerability Scan**: Runs `govulncheck` against the Go dependency graph
+- **Unit Tests (Windows)**: Runs the unit test suite on Windows to catch platform-specific issues
+- **Frontend Tests**: Runs the Vitest suite for the SvelteKit frontend
 - **Build Verification**: Compiles binary and verifies embedded web UI
 - **Docker Build**: Builds Docker image and verifies metadata
+- **Fullstack E2E Tests** (`fullstack-e2e`): Runs a real browser → SvelteKit → Go API → worker pipeline (`make test-e2e-fullstack`)
 
-**Coverage Threshold**: 75% minimum line coverage enforced
+**Coverage Threshold**: 75% minimum line coverage enforced (via `scripts/check_coverage.sh`)
 
 ### Release Types
 
 | Type | Trigger | Version Format | Latest Tag | Prerelease |
 |------|---------|----------------|------------|------------|
-| Stable | Tag push `v*` (e.g., `v1.2.3`) | `vX.Y.Z` | ✅ | No |
-| Prerelease | Manual dispatch | `vX.Y.Z-rc.N` | ✅ | Yes |
-| Nightly | Scheduled (midnight UTC) | `vX.Y.Z-nightly-YYYYMMDD` | No | Yes |
-| Snapshot | Manual dispatch | `v0.0.0-snapshot.YYYYMMDDHHMMSS-HASH` | No | Yes |
+| Stable | Tag push `v*` (e.g., `v1.2.3`) or manual dispatch | `vX.Y.Z` | ✅ | No |
+| Prerelease | Manual dispatch | `vX.Y.Z-rc.N` (e.g., `v1.2.3-rc.1`) | ✅ | Yes |
+| Nightly | Scheduled (midnight UTC) | `0.0.0-nightly.<7-char-commit>` (e.g., `0.0.0-nightly.abc1234`) | No | Yes |
+| Snapshot | Manual dispatch | User-supplied (e.g., `v1.2.3-snapshot.1`); if no version is given, a nightly is produced | No | Yes |
 
 ---
 
@@ -639,16 +677,18 @@ If a deployment encounters issues, you can revert to a previous version:
 
 3. **Redeploy the previous version**:
    ```bash
-   # Option 1: Pull specific version from GHCR
-   docker pull ghcr.io/javinizer/javinizer-go:v1.2.3
-   docker tag ghcr.io/javinizer/javinizer-go:v1.2.3 javinizer:latest
+   # Option 1: Pin a specific version tag in docker-compose.yml
+   # Edit the `image:` line to the desired version, e.g.:
+   #   image: ghcr.io/javinizer/javinizer-go:v1.2.3
+   docker-compose pull
    docker-compose up -d
    
-   # Option 2: Build from previous Git tag
+   # Option 2: Build from a previous Git tag
+   # Enable the `build:` section in docker-compose.yml (comment out `image:`), then:
    git checkout v1.2.3
    docker-compose build
    docker-compose up -d
-   git checkout master  # Return to main branch
+   git checkout main  # Return to the main branch
    ```
 
 4. **Verify the rollback**:
@@ -678,8 +718,9 @@ If a deployment encounters issues, you can revert to a previous version:
    # Backup current binary
    cp /usr/local/bin/javinizer /usr/local/bin/javinizer.backup
    
-   # Replace with previous version
-   tar -xzf javinizer-v1.2.3-linux-amd64.tar.gz
+   # Replace with previous version (release assets are bare binaries,
+   # downloaded ready-to-run — just make it executable before moving)
+   chmod +x javinizer-v1.2.3-linux-amd64
    sudo mv javinizer-v1.2.3-linux-amd64 /usr/local/bin/javinizer
    sudo chmod +x /usr/local/bin/javinizer
    ```
@@ -734,13 +775,11 @@ Javinizer does not currently include built-in monitoring or observability integr
 For production deployments, consider adding external monitoring:
 
 **Application Performance Monitoring (APM)**:
-<!-- VERIFY: APM integration configuration -->
 - Integrate a Go APM library (e.g., OpenTelemetry, Datadog) for tracing
 - Add instrumentation to key functions (scraper execution, database queries)
 - Export traces to an observability platform
 
 **Log Aggregation**:
-<!-- VERIFY: Log aggregation platform configuration -->
 - Forward container logs to a centralized logging platform (ELK, Loki, CloudWatch)
 - Use log forwarding agents (Promtail, Fluentd, Filebeat)
 - Configure structured logging for better parsing

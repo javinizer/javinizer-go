@@ -53,6 +53,9 @@ javinizer tui /source/path -d /destination/path
 # Move files instead of copying
 javinizer tui /source/path -d /dest/path -m
 
+# Hard-link files instead of copying (incompatible with --move)
+javinizer tui /source/path -d /dest/path --link-mode hard
+
 # Dry-run mode (preview only)
 javinizer tui /source/path --dry-run
 
@@ -79,10 +82,41 @@ javinizer tui /source \
 -r, --recursive          # Scan subdirectories recursively (default true)
 -m, --move               # Move files instead of copying
 -n, --dry-run            # Preview operations without making changes
+    --link-mode string   # Link mode for copy operations: none, hard, soft (default "none")
     --extrafanart        # Download extrafanart (screenshots)
 -p, --scrapers strings   # Scraper priority (comma-separated)
+    --update-mode        # Update mode: merge metadata with existing NFO and skip file organization
+    --preset string      # Merge strategy preset: conservative, gap-fill, or aggressive (update mode)
+    --scalar-strategy string  # Scalar field merge strategy for update mode (default "prefer-nfo")
+    --array-strategy string   # Array field merge strategy for update mode (default "merge")
 -v, --verbose            # Enable debug logging
 ```
+
+### Update Mode
+
+Pass `--update-mode` to merge freshly scraped metadata into existing NFO files without moving or renaming the video files. This mirrors the `javinizer update` CLI command (see [CLI Reference](./03-cli-reference.md#update)). Use `--preset` (`conservative`, `gap-fill`, `aggressive`) or the explicit `--scalar-strategy` / `--array-strategy` flags to control how existing NFO values are preserved or overwritten.
+
+`--preset` expands to a fixed scalar + array strategy pair:
+
+| Preset | Scalar strategy | Array strategy | Behavior |
+|--------|------------------|-----------------|----------|
+| `conservative` | `preserve-existing` | `merge` | Keep all existing NFO values; only merge missing array entries |
+| `gap-fill` | `fill-missing-only` | `merge` | Only fill NFO fields that are empty; merge arrays |
+| `aggressive` | `prefer-scraper` | `replace` | Trust freshly scraped data; overwrite existing NFO entirely |
+
+When `--preset` is set it overrides `--scalar-strategy` and `--array-strategy`. Valid scalar strategies are `prefer-nfo` (default), `prefer-scraper`, `merge-arrays`, `preserve-existing`, and `fill-missing-only`; valid array strategies are `merge` (default) and `replace`. You can also toggle update mode at runtime from the Settings view (see below).
+
+### Link Mode
+
+`--link-mode` controls how files are placed in the destination during copy operations:
+
+| Value | Behavior |
+|-------|----------|
+| `none` (default) | Copy files normally |
+| `hard` | Create hard links in the destination instead of copying |
+| `soft` | Create symbolic links in the destination instead of copying |
+
+Link mode is mutually exclusive with move mode. The TUI rejects the combination at startup — whether move mode comes from the `--move` flag or from `move_files: true` in `config.yaml` — but the two paths report it differently. When `--move` is set, startup fails with `--link-mode can only be used when --move is disabled`; when move mode comes only from `move_files: true` in `config.yaml` (with no `--move` flag), startup fails with `--link-mode can only be used when move mode is disabled (move_files is false and --move is not set)`. The Settings view likewise refuses to enable the Move Files toggle while link mode is active.
 
 ## Interface
 
@@ -168,6 +202,25 @@ Logs
 15:04:40 [ERROR] Failed to download: connection timeout
 ```
 
+### Settings View
+
+A list of runtime processing toggles you can flip without restarting the TUI. Navigate with `↑`/`↓` (or `k`/`j`) and press `Space` to flip the highlighted row:
+
+| # | Setting | Effect when enabled |
+|---|---------|---------------------|
+| 0 | Dry Run | Preview operations without writing any files |
+| 1 | Force Update | Overwrite existing organized files/NFO |
+| 2 | Force Refresh | Clear cached DB metadata and rescrape |
+| 3 | Move Files | Move files instead of copying (persisted to `config.yaml`; cannot be enabled while link mode is active) |
+| 4 | Scrape | Query scrapers for metadata |
+| 5 | Download | Fetch cover, poster, screenshots, and actress images |
+| 6 | Extrafanart | Download extrafanart (screenshots) |
+| 7 | Organize | Move/copy files to the destination with formatted names |
+| 8 | NFO | Generate Kodi-compatible NFO files |
+| 9 | Update Mode | Merge metadata into existing NFO without organizing files (auto-disables Organize) |
+
+Toggling **Move Files** (row 3) is written back to `config.yaml` so it survives restarts. Toggling **Update Mode** (row 9) automatically disables — and later re-enables — **Organize**.
+
 ## Keyboard Shortcuts
 
 ### Global
@@ -175,10 +228,12 @@ Logs
 | Key | Action |
 |-----|--------|
 | `?` | Toggle help view |
-| `1` | Switch to browser view |
+| `1` / `b` | Switch to browser view |
 | `2` | Switch to dashboard view |
 | `3` | Switch to logs view |
+| `4` | Switch to settings view |
 | `Tab` | Cycle through views |
+| `d` | Dismiss the processing-complete banner |
 | `q` / `Ctrl+C` | Quit application |
 
 ### Browser View
@@ -198,16 +253,49 @@ Logs
 | `Enter` | Start processing selected files |
 | `p` | Pause/resume processing |
 
+### Manual Search Modal
+
+From Browser view, press `m` to open the manual search modal. Type a JAV ID or URL and tick exactly which scrapers to query (none are selected by default — pick at least one).
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Toggle focus between the ID input and the scraper list |
+| `↑` / `↓` | Move the scraper-list cursor (when the list is focused) |
+| `Space` | Tick/untick the highlighted scraper (when the list is focused) |
+| `Enter` | Run the scrape with the entered ID and selected scrapers |
+| `Esc` | Cancel and close |
+
 ### Actress Merge Modal
 
-From Browser view, press `M` to open manual actress merge.
+From Browser view, press `M` to open the manual actress merge modal. This merges one actress record (the **source**) into another (the **target**, the survivor) and re-points the source's movies and aliases to the target.
 
-- Input `target` actress ID (survivor) and `source` actress ID (to be merged/deleted).
-- Press `Enter` on source ID to load conflict preview.
-- Navigate conflicts with `↑/↓`.
-- Choose per-field resolution with `t` (keep target) or `s` (use source).
-- Press `Enter` to apply merge.
-- Press `r` to go back to ID input, or `Esc` to cancel.
+**Input step** — enter numeric actress IDs:
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `↑` / `↓` | Switch between Target ID and Source ID fields |
+| `Enter` | On Target: move focus to Source. On Source: load the conflict preview |
+| `Esc` / `q` | Cancel and close |
+
+**Conflict step** — resolve differing fields before applying:
+
+| Key | Action |
+|-----|--------|
+| `↑` / `k` | Previous conflicting field |
+| `↓` / `j` | Next conflicting field |
+| `t` / `h` / `←` | Keep the target value for this field |
+| `s` / `l` / `→` | Use the source value for this field |
+| `Space` | Toggle between target and source for this field |
+| `Enter` | Apply the merge |
+| `r` | Go back to ID input |
+| `Esc` / `q` | Cancel and close |
+
+**Result step** — shows updated-movie, resolved-conflict, and added-alias counts:
+
+| Key | Action |
+|-----|--------|
+| `Enter` / `Esc` / `q` | Close the modal |
+| `r` | Start a new merge keeping the same target ID |
 
 ### Logs View
 
@@ -223,7 +311,15 @@ From Browser view, press `M` to open manual actress merge.
 
 | Key | Action |
 |-----|--------|
-| `r` | Refresh statistics |
+| `r` | Reset the elapsed-time clock / refresh statistics |
+
+### Settings View
+
+| Key | Action |
+|-----|--------|
+| `↑` / `k` | Move cursor up |
+| `↓` / `j` | Move cursor down |
+| `Space` | Toggle the highlighted setting |
 
 ## Configuration
 
@@ -231,16 +327,22 @@ The TUI uses settings from `configs/config.yaml`:
 
 ```yaml
 performance:
-  max_workers: 5          # Concurrent tasks (1-20)
-  worker_timeout: 300     # Task timeout in seconds
+  max_workers: 5          # Concurrent tasks (1-100)
+  worker_timeout: 300     # Task timeout in seconds (10-3600)
   buffer_size: 100        # Progress update buffer
-  update_interval: 100    # UI refresh rate (ms)
+  update_interval: 100    # UI refresh rate in ms (10-5000)
 
 logging:
-  output: data/logs/javinizer-tui.log  # Log file location
+  output: "stdout,data/logs/javinizer.log"  # See note below
   level: info             # debug, info, warn, error
   format: text            # text or json
+  max_size_mb: 10         # Max size in MB before rotation (0 = disabled)
+  max_backups: 5          # Rotated files to keep (0 = unlimited)
+  max_age_days: 0         # Max age in days to keep (0 = no limit)
+  compress: true          # Compress rotated files
 ```
+
+The TUI runs with `tea.WithAltScreen`, so the logger is reconfigured to **file-only** output at startup: any `stdout`/`stderr` targets in `logging.output` are stripped so logs cannot corrupt the TUI display. The remaining file target is used as-is, so with the default config the TUI writes to `data/logs/javinizer.log`. If `logging.output` contains no file target at all, it falls back to `data/logs/javinizer-tui.log`. Log rotation settings (`max_size_mb`, `max_backups`, `max_age_days`, `compress`) are preserved.
 
 ### Performance Tuning
 
@@ -262,7 +364,7 @@ logging:
 
 When you press Enter, each selected file goes through:
 
-1. **Scrape**: Query configured scrapers (R18Dev, DMM) for metadata
+1. **Scrape**: Query your configured scrapers (e.g. R18Dev, DMM) for metadata
 2. **Download**: Fetch cover, poster, screenshots, and actress images
 3. **Organize**: Move/copy file to destination with formatted name
 4. **NFO**: Generate Kodi-compatible NFO file with metadata
@@ -336,7 +438,7 @@ javinizer tui /downloads -d /organized --move
 - Failed tasks are logged with details
 - Other tasks continue processing
 - Re-run TUI to retry failed files
-- Check logs at `data/logs/javinizer-tui.log`
+- Check the log file (default `data/logs/javinizer.log` — see [Configuration](#configuration))
 
 ## Tips & Tricks
 
@@ -368,8 +470,8 @@ echo $COLUMNS x $LINES
 # Try with explicit path
 javinizer tui .
 
-# Check logs
-cat data/logs/javinizer-tui.log
+# Check logs (default file target from logging.output)
+cat data/logs/javinizer.log
 ```
 
 ### Files not matched
@@ -413,7 +515,7 @@ cat data/logs/javinizer-tui.log
 ### Components
 
 - **Model**: Application state and logic
-- **Views**: Browser, Dashboard, Logs, Help
+- **Views**: Browser, Dashboard, Logs, Settings (Help is a `?` toggle overlay, not a tab)
 - **Components**: Reusable UI widgets
 - **Coordinator**: Task submission and lifecycle
 - **Worker Pool**: Concurrent task execution

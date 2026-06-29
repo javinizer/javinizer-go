@@ -42,13 +42,15 @@ IPX-535 - Beautiful Day (2020)
 Add modifiers after a colon:
 
 ```
-<TITLE:upper>
+<ID:lower>
 ```
 
 Result:
 ```
-BEAUTIFUL DAY
+ipx-535
 ```
+
+The modifiers available depend on the tag (see [Modifiers](#modifiers) below). For example, case modifiers only work on `<ID>` and `<CONTENTID>`.
 
 ## Available Tags
 
@@ -132,12 +134,14 @@ Modifiers change how tag values are displayed. Add them after a colon:
 
 ### Case Modifiers
 
-Not yet implemented - coming soon!
+Convert tag values to a specific case. **Case modifiers are only supported on the `<ID>` and `<CONTENTID>` tags.** Other tags (such as `<TITLE>`, `<MAKER>`, etc.) do not apply case conversion — `:upper`/`:lower` on those tags is treated as an unrecognized modifier and the original value is returned unchanged.
 
-Planned modifiers:
-- `:upper` - Convert to UPPERCASE
-- `:lower` - Convert to lowercase
-- `:title` - Convert To Title Case
+| Modifier | Description | Example |
+|----------|-------------|--------|
+| `:upper` or `:uppercase` | Convert to UPPERCASE | `<CONTENTID:upper>` → `IPX00535` |
+| `:lower` or `:lowercase` | Convert to lowercase | `<ID:lower>` → `ipx-535` |
+
+Title-case conversion is not supported. An unrecognized modifier is ignored and the original value is returned unchanged. To change a non-ID field's case, preprocess the value in your scraper/config or use the `<ACTORS>` tag's modifier syntax for actress names.
 
 ### Date Modifiers
 
@@ -157,13 +161,15 @@ Customize date formatting for `<RELEASEDATE>`:
 ```yaml
 # In config.yaml
 output:
-  folder_format: "<ID> - <TITLE> (<RELEASEDATE:YYYY/MM/DD>)"
+  folder_format: "<ID> - <TITLE> (<RELEASEDATE:YYYY-MM-DD>)"
 ```
 
 Result:
 ```
-IPX-535 - Beautiful Day (2020/09/13)
+IPX-535 - Beautiful Day (2020-09-13)
 ```
+
+> **Slash separators don't survive path sanitization.** A format like `<RELEASEDATE:YYYY/MM/DD>` renders `2020/09/13`, but when used in `folder_format` the `/` characters are sanitized to `_` (yielding `2020_09_13`), and in `file_format` they become `-` (yielding `2020-09-13`). Use `-` or `.` separators if you want the date to appear literally in a name, or split the date across `subfolder_format` entries (for example, `["<YEAR>", "<RELEASEDATE:MM>", "<RELEASEDATE:DD>"]`) to turn it into nested folders.
 
 ### Delimiter Modifiers
 
@@ -197,10 +203,12 @@ output:
   folder_format: "<ACTORS:DELIM= | >"
 ```
 
-Result:
+Result (on-disk folder name):
 ```
-Sakura Momo | Mikami Yua | Anzai Rara
+Sakura Momo - Mikami Yua - Anzai Rara
 ```
+
+> **Note:** `DELIM= | ` overrides `actress_delimiter` to join with ` | `, but `|` is sanitized to `-` in folder names (see [Special Characters](#special-characters)). The raw, pre-sanitization join is `Sakura Momo | Mikami Yua | Anzai Rara`.
 
 The `DELIM=` value is the literal string after the `=` sign. It can contain spaces, commas, or any other characters:
 
@@ -410,6 +418,8 @@ Results:
 
 ### Folder Formats
 
+> **Single folder vs. nested paths:** `folder_format` renders **one** folder name. Any `/` or `\` in the rendered value is replaced with `_` — it does **not** create a nested folder. To build a multi-level hierarchy (for example, Studio → Year → Movie), use `subfolder_format`, a list where each entry becomes one folder level (empty results are skipped). `folder_format` is always the deepest folder, the one that holds the files.
+
 **Default (Recommended):**
 ```yaml
 output:
@@ -424,28 +434,35 @@ output:
 ```
 Result: `IPX-535 - Beautiful Day/`
 
-**Studio/Year Organization:**
+**Studio/Year Organization (nested via `subfolder_format`):**
 ```yaml
 output:
-  folder_format: "<STUDIO>/<YEAR>/<ID> - <TITLE>"
+  subfolder_format: ["<STUDIO>", "<YEAR>"]
+  folder_format: "<ID> - <TITLE>"
 ```
 Result: `Idea Pocket/2020/IPX-535 - Beautiful Day/`
 
-**Actress-based:**
+> **Don't put `/` in `folder_format` to nest.** `folder_format: "<STUDIO>/<YEAR>/<ID> - <TITLE>"` renders `Idea Pocket/2020/IPX-535 - Beautiful Day` and then sanitizes the slashes to underscores, producing a single folder named `Idea Pocket_2020_IPX-535 - Beautiful Day` — almost never what you want. Use `subfolder_format` for nesting.
+
+**Actress-based (nested via `subfolder_format`):**
 ```yaml
 output:
-  folder_format: "<ACTRESSES>/<ID> - <TITLE>"
+  subfolder_format: ["<ACTRESSES>"]
+  folder_format: "<ID> - <TITLE>"
 ```
 Result: `Sakura Momo/IPX-535 - Beautiful Day/`
 
 > **Note:** Actress names use LastName FirstName order by default. Set `first_name_order: true` for FirstName LastName order, or use the tag-level `:FIRST` modifier.
 
-**Date-based:**
+**Date-based (nested via `subfolder_format`):**
 ```yaml
 output:
-  folder_format: "<YEAR>/<MONTH>/<ID> - <TITLE>"
+  subfolder_format: ["<YEAR>", "<RELEASEDATE:MM>"]
+  folder_format: "<ID> - <TITLE>"
 ```
 Result: `2020/09/IPX-535 - Beautiful Day/`
+
+> There is no `<MONTH>` or `<DAY>` tag. Derive month/day components from `<RELEASEDATE:format>` (for example, `<RELEASEDATE:MM>` → `09`, `<RELEASEDATE:DD>` → `13`; see [Date Modifiers](#date-modifiers)). Put each path level in its own `subfolder_format` list entry — embedding `/` inside a single entry (for example, `<RELEASEDATE:YYYY/MM>`) turns the slash into `_` and yields `2020_09` instead of `2020/09`.
 
 **Content ID:**
 ```yaml
@@ -461,18 +478,20 @@ output:
 ```
 Result: `IPX-535 - 美しい日 (Beautiful Day)/`
 
-**Japanese actress names:**
+**Japanese actress names (nested via `subfolder_format`):**
 ```yaml
 output:
   actress_language_ja: true
-  folder_format: "<ACTRESSES>/<ID> - <TITLE>"
+  subfolder_format: ["<ACTRESSES>"]
+  folder_format: "<ID> - <TITLE>"
 ```
 Result: `波多野結衣, 上原亜衣/IPX-535 - Beautiful Day/`
 
-**Mixed: Japanese folder, Latin file:**
+**Mixed: Japanese folder, Latin file (nested via `subfolder_format`):**
 ```yaml
 output:
-  folder_format: "<ACTORS:JA>/<ID> - <TITLE>"
+  subfolder_format: ["<ACTORS:JA>"]
+  folder_format: "<ID> - <TITLE>"
   file_format: "<ID> - <ACTORS>"
 ```
 Result:
@@ -509,14 +528,18 @@ Result: `IPX-535 - Sakura Momo, Mikami Yua - Beautiful Day.mp4`
 output:
   file_format: "<ID> - <ACTORS:DELIM=|>"
 ```
-Result: `IPX-535 - Sakura Momo|Mikami Yua.mp4`
+Result: `IPX-535 - Sakura Momo-Mikami Yua.mp4`
+
+> **Note:** The `|` character is sanitized to `-` in file and folder names (see [Special Characters](#special-characters)), so the requested join `Sakura Momo|Mikami Yua` is written to disk as `Sakura Momo-Mikami Yua`. Use `DELIM=&` or `DELIM=, ` for a separator that survives sanitization.
 
 **With Date:**
 ```yaml
 output:
-  file_format: "<ID> (<YEAR>-<MONTH>-<DAY>)"
+  file_format: "<ID> (<RELEASEDATE:YYYY-MM-DD>)"
 ```
 Result: `IPX-535 (2020-09-13).mp4`
+
+`<RELEASEDATE>` (no modifier) defaults to the same `YYYY-MM-DD` form, so `<ID> (<RELEASEDATE>)` produces the identical result. There are no `<MONTH>` or `<DAY>` tags.
 
 **Studio and ID:**
 ```yaml
@@ -555,7 +578,8 @@ IPX-535 - Beautiful Day/
 **Studio Organization:**
 ```yaml
 output:
-  folder_format: "<STUDIO>/<YEAR>/<ID> - <TITLE> (<ACTORS:DELIM= & >)"
+  subfolder_format: ["<STUDIO>", "<YEAR>"]
+  folder_format: "<ID> - <TITLE> (<ACTORS:DELIM= & >)"
   file_format: "<ID> - <TITLE>"
 ```
 Result:
@@ -569,13 +593,15 @@ Idea Pocket/
 **Multi-part Files:**
 ```yaml
 output:
-  file_format: "<ID>-part<INDEX>"
+  file_format: "<ID>-pt<PART>"
 ```
 Result:
 ```
-IPX-535-part1.mp4
-IPX-535-part2.mp4
+IPX-535-pt1.mp4
+IPX-535-pt2.mp4
 ```
+
+Use `<PART>` (or its alias `<DISC>`) for the part/disc number. The default `file_format` is `<ID><IF:MULTIPART>-pt<PART></IF>`, which only appends the `-pt<N>` suffix for multi-part files (see [Conditional Logic](#conditional-logic)). Note that `<INDEX>` is the screenshot index, not the part number.
 
 ## Advanced Usage
 
@@ -625,14 +651,18 @@ IPX-535 - Sakura Momo & Mikami Yua & Anzai Rara
 
 ```yaml
 output:
-  folder_format: "<ACTORS:DELIM= & >/<ID> - <TITLE>"
+  subfolder_format: ["<ACTORS:DELIM= & >"]
+  folder_format: "<ID> - <TITLE>"
   file_format: "<ID> - <ACTORS:DELIM=_>"
 ```
 
 Result:
 ```
-Sakura Momo & Mikami Yua/IPX-535 - Beautiful Day.mp4
+Sakura Momo & Mikami Yua/IPX-535 - Beautiful Day/
+  IPX-535 - Sakura Momo_Mikami Yua.mp4
 ```
+
+The same `<ACTORS>` list is joined with ` & ` in the folder path and with `_` in the file name — the `DELIM=` override applies per tag.
 
 **First actress only:**
 
@@ -683,12 +713,13 @@ Momo Sakura, Yui Hatano
 ```yaml
 output:
   first_name_order: false
-  folder_format: "<ACTORS:FIRST>/<ID> - <TITLE>"
+  subfolder_format: ["<ACTORS:FIRST>"]
+  folder_format: "<ID> - <TITLE>"
 ```
 
-Result (even though config says LastName FirstName):
+Result (even though config says LastName FirstName, the actress subfolder uses FirstName LastName):
 ```
-Momo Sakura, Yui Hatano
+Momo Sakura, Yui Hatano/IPX-535 - Beautiful Day/
 ```
 
 | Modifier | Effect |
@@ -730,19 +761,21 @@ Result:
 ```yaml
 output:
   actress_language_ja: false
-  folder_format: "<ACTORS:JA>/<ID> - <TITLE>"
+  subfolder_format: ["<ACTORS:JA>"]
+  folder_format: "<ID> - <TITLE>"
 ```
 
 Result:
 ```
-波多野結衣, 上原亜衣
+波多野結衣, 上原亜衣/IPX-535 - Beautiful Day/
 ```
 
 **Fallback:** Use `JA|EN` to prefer Japanese but fall back to Latin when the Japanese name is unavailable:
 
 ```yaml
 output:
-  folder_format: "<ACTORS:JA|EN>/<ID> - <TITLE>"
+  subfolder_format: ["<ACTORS:JA|EN>"]
+  folder_format: "<ID> - <TITLE>"
 ```
 
 | Modifier | Effect |
@@ -755,13 +788,16 @@ output:
 
 ```yaml
 output:
-  folder_format: "<ACTORS:JA,FIRST,DELIM= | >/<ID>"
+  subfolder_format: ["<ACTORS:JA,FIRST,DELIM= & >"]
+  folder_format: "<ID>"
 ```
 
 Result:
 ```
-結衣 波多野 | 亜衣 上原/IPX-535
+結衣 波多野 & 亜衣 上原/IPX-535
 ```
+
+> **Note:** A `|` delimiter would be sanitized to `-` in folder and file names, so prefer `&`, `-`, or `_` for delimiters that end up in paths.
 
 > **Note:** `actress_language_ja` only affects the `<ACTORS>`/`<ACTRESSES>`/`<ACTRESS>`/`<ACTRESSNAME>` tags. Other fields like `<TITLE>` use the general [language modifiers](#language-modifiers) (e.g., `<TITLE:ja>`).
 
@@ -788,7 +824,8 @@ When `group_actress` is enabled and `<ACTRESSES>` appears in your folder templat
 ```yaml
 output:
   group_actress: true
-  folder_format: "<ACTRESSES>/<ID> - <TITLE>"
+  subfolder_format: ["<ACTRESSES>"]
+  folder_format: "<ID> - <TITLE>"
 ```
 
 Results:
@@ -838,7 +875,8 @@ output:
   group_actress: true
   first_name_order: true
   actress_language_ja: true
-  folder_format: "<ACTRESSES>/<ID> - <TITLE>"
+  subfolder_format: ["<ACTRESSES>"]
+  folder_format: "<ID> - <TITLE>"
 ```
 
 Results:
@@ -852,11 +890,13 @@ Results:
 
 ### Combining Tags
 
-You can use multiple tags in creative ways:
+You can use multiple tags in creative ways. Remember that `folder_format` is a single folder (slashes become `_`); use `subfolder_format` for each nesting level.
 
 **Year in multiple places:**
-```
-<YEAR>/<STUDIO> [<YEAR>]/<ID> - <TITLE>
+```yaml
+output:
+  subfolder_format: ["<YEAR>", "<STUDIO> [<YEAR>]"]
+  folder_format: "<ID> - <TITLE>"
 ```
 
 Result:
@@ -865,14 +905,18 @@ Result:
 ```
 
 **Date components:**
-```
-<YEAR>/<MONTH> - <DAY>/<ID>
+```yaml
+output:
+  subfolder_format: ["<YEAR>", "<RELEASEDATE:MM - DD>"]
+  folder_format: "<ID>"
 ```
 
 Result:
 ```
 2020/09 - 13/IPX-535
 ```
+
+There are no `<MONTH>` or `<DAY>` tags — derive them from `<RELEASEDATE:format>` (for example, `<RELEASEDATE:MM - DD>` → `09 - 13`).
 
 ### NFO Templates
 
@@ -894,20 +938,22 @@ metadata:
 ```
 Result: `IPX-535 - Beautiful Day.nfo`
 
-**Display name in NFO:**
+**Display title in NFO:**
 ```yaml
 metadata:
   nfo:
-    display_name: "<ID> - <TITLE> (<YEAR>)"
+    display_title: "<ID> - <TITLE> (<YEAR>)"
 ```
 
-This appears as the `<title>` field inside the NFO file.
+This appears as the `<title>` field inside the NFO file. The key is `display_title` (not `display_name`, which was removed in an earlier rename and is now ignored).
 
 ## Special Characters
 
 ### Automatic Sanitization
 
-Javinizer automatically removes or replaces characters that are invalid in filenames:
+Javinizer automatically removes or replaces characters that are invalid in file and folder names. **File names and folder names are sanitized separately, and they differ for path separators** (`/` and `\`).
+
+**File names** (`file_format`, NFO filenames, image filenames):
 
 | Character | Replacement | Reason |
 |-----------|-------------|--------|
@@ -919,13 +965,35 @@ Javinizer automatically removes or replaces characters that are invalid in filen
 | `"` | `'` | Quote |
 | `<` | `(` | Redirect operator |
 | `>` | `)` | Redirect operator |
-| `|` | `-` | Pipe operator |
+| `\|` | `-` | Pipe operator |
+
+File names are also trimmed of leading/trailing spaces and dots, and runs of multiple spaces are collapsed to one.
+
+**Folder names** (each `subfolder_format` entry and the `folder_format` result):
+
+| Character | Replacement | Reason |
+|-----------|-------------|--------|
+| `/` | `_` | Directory separator (kept out of a single folder name) |
+| `\` | `_` | Windows path separator |
+| `:` | ` -` | Drive letter separator (Windows) |
+| `*` | (removed) | Wildcard |
+| `?` | (removed) | Wildcard |
+| `"` | `'` | Quote |
+| `<` | `(` | Redirect operator |
+| `>` | `)` | Redirect operator |
+| `\|` | `-` | Pipe operator |
+
+> **Why `/` and `\` become `_` in folders:** each folder is a single path component, so a literal slash inside a rendered folder name would be ambiguous. This is why embedding `/` in `folder_format` produces a single folder with underscores instead of nested folders — use `subfolder_format` (one entry per level) to build a hierarchy.
+
+**Trailing dots and spaces (folder names):**
+
+Windows does not allow folder names to end with a space or dot. When a rendered folder name ends with `.` or ` .`, Javinizer trims the trailing dots/spaces and appends a `~` marker. For example, a title truncated to `My Title...` becomes the folder `My Title~`. This also prevents SMB/NAS shares from mangling such names into short 8.3 aliases like `MYTITL~1`.
 
 **Example:**
 
 Title from scraper: `Love & Peace: The Movie?`
 
-After sanitization: `Love & Peace - The Movie`
+After sanitization (file name): `Love & Peace - The Movie`
 
 ### Manual Escaping
 

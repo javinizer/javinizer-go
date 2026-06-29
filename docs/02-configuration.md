@@ -92,25 +92,41 @@ Javinizer supports multiple metadata scrapers that can be enabled/disabled and p
 config_version: 3
 
 scrapers:
-  user_agent: "Javinizer (+https://github.com/javinizer/javinizer-go)"
+  user_agent: ""  # Default: Chrome-like UA. r18dev uses the Javinizer UA automatically.
   priority:
-    - dmm
     - r18dev
-    - mgstage
+    - libredmm
+    - dmm
     - javlibrary
     - javdb
-  proxy:      # Optional global proxy for all scrapers
+    - javbus
+    - jav321
+    - mgstage
+    - tokyohot
+    - aventertainment
+    - caribbeancom
+    - dlgetchu
+    - fc2
+    - javstash
+  proxy:                  # Optional global proxy for all scrapers
     enabled: false
-    url: ""
+    default_profile: "main"   # Profile used by default when proxy is enabled
+    profiles:
+      main:
+        url: ""           # Examples: "http://proxy.example.com:8080", "socks5://localhost:1080"
+        username: ""      # Optional authentication
+        password: ""      # Optional authentication
+      backup:
+        url: ""
+        username: ""
+        password: ""
 ```
 
-**user_agent**: HTTP User-Agent header sent to scraper websites. This identifies your scraper to the server.
+**user_agent**: HTTP User-Agent header sent to scraper websites. Empty by default — Javinizer then sends a Chrome-like User-Agent, and the r18dev scraper automatically uses the `Javinizer (+https://github.com/javinizer/javinizer-go)` UA. Set this only to override the default.
 
-**priority**: Order to query scrapers. First scraper is tried first. If it fails, the next one is attempted.
+**priority**: Order to query scrapers. First scraper is tried first. If it fails, the next one is attempted. The default list contains all 14 supported scrapers (`r18dev, libredmm, dmm, javlibrary, javdb, javbus, jav321, mgstage, tokyohot, aventertainment, caribbeancom, dlgetchu, fc2, javstash`).
 
-**proxy**: Global proxy used by all scrapers by default.
-
-Each scraper can also define its own `proxy` block (`scrapers.<name>.proxy`) to override global proxy settings with scraper-level granularity.
+**proxy**: Global HTTP/SOCKS5 proxy used by all scrapers by default. Define reusable connection profiles under `profiles`, pick the global default with `default_profile`, and enable with `enabled: true`. A direct top-level `url`/`username`/`password` is **not** supported — the config loader rejects those legacy fields. Each scraper can override via `scrapers.<name>.proxy` with `profile: <name>` to reference a profile from `scrapers.proxy.profiles`. FlareSolverr is configured separately at `scrapers.flaresolverr` (global) or `scrapers.<name>.flaresolverr` (per-scraper) — it is **not** nested under `proxy`.
 
 ### R18.dev Scraper
 
@@ -139,11 +155,12 @@ DMM (Digital Media Mart) is the official source for many JAV releases.
 ```yaml
 scrapers:
   dmm:
-    enabled: true           # Enable/disable DMM scraper
-    scrape_actress: false   # Include actress data from DMM
+    enabled: false          # Enable/disable DMM scraper (default: false)
+    use_browser: true       # Enable browser for DMM streaming pages
+    # scrape_actress: true  # Optional: inherits global scrape_actress (default: true)
 ```
 
-**scrape_actress**: Whether to scrape actress information from DMM. This is slower due to HTML parsing.
+**scrape_actress**: Whether to scrape actress information from DMM. When unset, inherits the global `scrapers.scrape_actress` (default `true`). DMM actress scraping is slower due to HTML parsing.
 
 **Pros**:
 - Official source
@@ -162,10 +179,10 @@ JavLibrary is useful as a supplemental source and often benefits from FlareSolve
 scrapers:
   javlibrary:
     enabled: false
-    language: "en"       # en, ja, cn, tw
-    rate_limit: 1000  # milliseconds
+    language: "ja"          # en, ja, cn, tw (default: ja)
     base_url: "http://www.javlibrary.com"
-    use_flaresolverr: true
+    # rate_limit: 1000      # Delay between requests in ms (0 = no delay)
+    use_flaresolverr: false  # Enable to use global FlareSolverr for Cloudflare bypass
 ```
 
 ### JavDB Scraper
@@ -175,16 +192,18 @@ JavDB can be useful as a supplemental source. It may require both proxy routing 
 ```yaml
 scrapers:
   javdb:
-    enabled: true
+    enabled: false
     base_url: "https://javdb.com"
-    rate_limit: 1000
-    use_flaresolverr: true
-    proxy:                # Optional per-scraper override
-      enabled: true
-      url: "http://proxy.example.com:8080"
-      flaresolverr:
-        enabled: true
-        url: "http://localhost:8191/v1"
+    # rate_limit: 1000      # Delay between requests in ms (0 = no delay)
+    use_flaresolverr: false  # Enable to use global FlareSolverr for Cloudflare bypass
+    # Per-scraper proxy override: enable and reference a named profile.
+    # FlareSolverr is a sibling key (scrapers.javdb.flaresolverr), NOT nested under proxy.
+    # proxy:
+    #   enabled: true
+    #   profile: main        # References scrapers.proxy.profiles.main
+    # flaresolverr:
+    #   enabled: true
+    #   url: "http://localhost:8191/v1"
 ```
 
 ## Metadata Priority
@@ -205,85 +224,129 @@ metadata:
 
 If R18.dev returns a title, use it. If not, use DMM's title.
 
+### Per-Field Priority Semantics
+
+A per-field priority list is **exclusive**: when a field lists specific scrapers,
+only those scrapers contribute to that field — the global `scrapers.priority`
+list is **not** merged in as a fallback. This matches the original PowerShell
+Javinizer behavior.
+
+- **Key present with scrapers** (e.g. `series: [tokyohot]`): only the listed
+  scrapers populate the field. If none of them ran or lack the field, the field
+  is left empty (no global fallback).
+- **Key absent**: the field inherits the global `scrapers.priority` list.
+- **Key present as an empty list** (`series: []`): inherits the global list
+  (equivalent to omitting the key).
+- **Skip a field entirely**: point it at a scraper that won't run or use the
+  `__skip__` sentinel (e.g. `series: ["__skip__"]`), which matches no scraper
+  and leaves the field empty.
+
+This exclusivity applies consistently to both the default scrape path and the
+`--scrapers` / selected-scrapers path.
+
 ### Field-by-Field Priority
+
+The default per-field priorities (matching `configs/config.yaml.example`) favor DMM for most fields; only the vertical poster (`poster_url`) favors R18.dev. Valid field keys are exactly the 18 resolved by the aggregator: `id`, `content_id`, `title`, `original_title`, `description`, `release_date`, `runtime`, `director`, `maker`, `label`, `series`, `poster_url`, `cover_url`, `screenshot_url`, `trailer_url`, `actress`, `genre`, `rating`. Other keys (e.g. the legacy `alternate_title`) are not recognized and are ignored.
 
 ```yaml
 metadata:
   priority:
     # Basic Information
     id:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     content_id:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     title:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
-    alternate_title:
-      - r18dev
+    original_title:
       - dmm
+      - r18dev
+      - libredmm
 
     # Descriptions favor DMM (more detailed)
     description:
       - dmm
       - r18dev
+      - libredmm
 
     # Release Information
     release_date:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     runtime:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     # Studio/Production
     director:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     maker:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     label:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     series:
+      - dmm
       - r18dev
+      - libredmm
+
+    # Media — vertical poster favors R18.dev; cover/screenshots favor DMM
+    poster_url:
+      - r18dev
+      - libredmm
       - dmm
 
-    # Media
     cover_url:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     screenshot_url:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     trailer_url:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     # Categorical
     actress:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     genre:
-      - r18dev
       - dmm
+      - r18dev
+      - libredmm
 
     # Ratings favor DMM
     rating:
       - dmm
       - r18dev
+      - libredmm
 ```
 
 ### Customization Examples
@@ -333,24 +396,14 @@ metadata:
 
 **required_fields**: Fields that must have data for the movie to be considered valid. If any required field is missing, the aggregation may fail or warn.
 
-### CSV Settings (Legacy - Now Database-Based)
+### CSV Settings (Legacy — Removed)
 
-These settings are maintained for backward compatibility but are no longer used:
+Javinizer Go replaced the PowerShell version's CSV-based actress/genre thumbprints with a SQLite database. The legacy `metadata.thumb_csv` and `metadata.genre_csv` keys are **not part of the config schema** and are silently ignored — they are not "maintained for backward compatibility". Use the database-backed features instead:
 
-```yaml
-metadata:
-  thumb_csv:
-    enabled: true
-    path: data/actress.csv
-    auto_add: true
-
-  genre_csv:
-    enabled: true
-    path: data/genres.csv
-    auto_add: true
-```
-
-**Note**: Javinizer Go uses SQLite database for actress and genre management. See [Genre Management](./05-genre-management.md) for the new approach.
+- Actress images: `metadata.actress_database` and the `javinizer actress` commands.
+- Genre normalization: `metadata.genre_replacement` and the `javinizer genre` commands (see [Genre Management](./05-genre-management.md)).
+- Word/text replacement: `metadata.word_replacement` and the `javinizer word` commands.
+- Per-movie tags: `metadata.tag_database` and the `javinizer tag` commands.
 
 ## NFO Settings
 
@@ -360,16 +413,21 @@ Configure Kodi/Plex-compatible NFO file generation.
 metadata:
   nfo:
     enabled: true                    # Generate NFO files
-    display_name: <TITLE>            # Movie display name in NFO
+    display_title: <TITLE>           # Movie display name in NFO (was display_name)
     filename_template: <ID>.nfo      # NFO filename pattern
     first_name_order: true           # Actress name order (true = First Last)
     actress_language_ja: false       # Use Japanese actress names
-    unknown_actress_text: Unknown    # Placeholder for missing actress
+    per_file: false                  # One NFO per multi-part file when true
+    unknown_actress_mode: skip       # skip (default) or fallback
+    unknown_actress_text: Unknown    # Placeholder used in fallback mode
     actress_as_tag: false            # Add actress names as tags
+    add_generic_role: false          # Add generic "Actress" role to all actresses
+    alt_name_role: false             # Use alternate (Japanese) name in role field
+    include_originalpath: false      # Include source filename in NFO
     include_stream_details: false    # Include video stream metadata
     include_fanart: true             # Include fanart URL
     include_trailer: true            # Include trailer URL
-    rating_source: themoviedb        # Rating source identifier
+    rating_source: r18dev            # Rating source identifier
     tag: []                          # Additional custom tags
     tagline: ""                      # Custom tagline template
     credits: []                      # Additional credits
@@ -379,9 +437,11 @@ metadata:
 
 **enabled**: Master switch for NFO generation.
 
-**display_name**: Template for the `<title>` field in NFO. Uses template tags (see [Template System](./04-template-system.md)).
+**display_title**: Template for the `<title>` field in NFO. Uses template tags (see [Template System](./04-template-system.md)). (The legacy `display_name` key was renamed to `display_title` and is no longer recognized.)
 
 **filename_template**: Pattern for NFO filename. Default `<ID>.nfo` creates files like `IPX-535.nfo`.
+
+**per_file**: When `true`, generate one NFO per multi-part file instead of one per movie. Default `false`.
 
 **first_name_order**:
 - `true`: "Momo Sakura"
@@ -389,9 +449,17 @@ metadata:
 
 **actress_language_ja**: Use Japanese names when available (e.g., "桜空もも" instead of "Momo Sakura").
 
-**unknown_actress_text**: Placeholder text when actress information is missing.
+**unknown_actress_mode**: How to handle a movie with no actress. `skip` (default) omits the actress block entirely; `fallback` inserts `unknown_actress_text` as a placeholder actress.
+
+**unknown_actress_text**: Placeholder text used when `unknown_actress_mode: fallback` and no actress is found.
 
 **actress_as_tag**: If true, adds each actress name as a `<tag>` in the NFO for better searchability.
+
+**add_generic_role**: If true, adds a generic "Actress" `<role>` to every actress entry.
+
+**alt_name_role**: If true, uses the alternate (Japanese) name in the actress `<role>` field.
+
+**include_originalpath**: If true, records the original source filename in the NFO. Note the spelling: `include_originalpath` (no underscore between `original` and `path`).
 
 **include_stream_details**: Adds `<fileinfo><streamdetails>` section (requires video file analysis - not yet implemented).
 
@@ -399,7 +467,7 @@ metadata:
 
 **include_trailer**: Includes `<trailer>` URL in NFO.
 
-**rating_source**: Source identifier for the rating (e.g., "themoviedb", "imdb", "dmm").
+**rating_source**: Source identifier for the rating. Defaults to the first scraper in `scrapers.priority` (`r18dev` with the default priority list). Common values: `r18dev`, `dmm`, `libredmm`, or any scraper name.
 
 **tag**: Array of custom tags to add to every NFO:
 
@@ -476,9 +544,9 @@ Control how files and folders are organized and named.
 ```yaml
 output:
   folder_format: "<ID> [<STUDIO>] - <TITLE> (<YEAR>)"
-  file_format: "<ID>"
-  subfolder_format: []  # Optional nested folder hierarchy
-  delimiter: ", "
+  file_format: "<ID><IF:MULTIPART>-pt<PART></IF>"
+  subfolder_format: ["<ID>"]  # Optional nested folder hierarchy
+  actress_delimiter: ", "    # Legacy alias: delimiter
   download_cover: true
   download_poster: true
   download_extrafanart: false  # Screenshots in extrafanart/ subfolder
@@ -488,9 +556,9 @@ output:
 
 ### Naming Templates
 
-**folder_format**: Template for folder names. Example result:
+**folder_format**: Template for folder names. Example result (title abbreviated — IPX-535's actual title is much longer, and special characters are sanitized for filesystem compatibility):
 ```
-IPX-535 [Idea Pocket] - Beautiful Day (2020)/
+IPX-535 [Idea Pocket] - 3, 2, 1, GO! Sudden Follow-Up... (2020)/
 ```
 
 **file_format**: Template for filenames (extension added automatically). Example:
@@ -507,7 +575,7 @@ subfolder_format: []
 Results in:
 ```
 dest/
-  IPX-535 [Idea Pocket] - Title (2020)/
+  IPX-535 [Idea Pocket] - 3, 2, 1, GO! Sudden Follow-Up... (2020)/
     IPX-535.mp4
 ```
 
@@ -519,7 +587,7 @@ Results in:
 ```
 dest/
   2020/
-    IPX-535 [Idea Pocket] - Title (2020)/
+    IPX-535 [Idea Pocket] - 3, 2, 1, GO! Sudden Follow-Up... (2020)/
       IPX-535.mp4
 ```
 
@@ -532,7 +600,7 @@ Results in:
 dest/
   2020/
     Idea Pocket/
-      IPX-535 [Idea Pocket] - Title (2020)/
+      IPX-535 [Idea Pocket] - 3, 2, 1, GO! Sudden Follow-Up... (2020)/
         IPX-535.mp4
   2021/
     S1 NO.1 STYLE/
@@ -551,9 +619,9 @@ See [Template System](./04-template-system.md) for available tags and modifiers.
 
 ### Download Options
 
-**download_cover**: Download cover/poster image (`<ID>-poster.jpg`).
+**download_cover**: Download the horizontal cover/fanart image (`<ID>-fanart.jpg`).
 
-**download_poster**: Download poster image (`<ID>-fanart.jpg`).
+**download_poster**: Download the vertical poster image (`<ID>-poster.jpg`).
 
 **download_extrafanart**: Download screenshot images to `extrafanart/` subfolder (`fanart1.jpg`, `fanart2.jpg`, etc.).
 
@@ -570,9 +638,9 @@ See [Template System](./04-template-system.md) for available tags and modifiers.
 
 ### Delimiter
 
-**delimiter**: String used to join multiple values (e.g., actress names, genres) in templates.
+**actress_delimiter**: String used to join multiple values (e.g., actress names, genres) in templates. The legacy `delimiter` key is retained as a backward-compatible alias and is copied into `actress_delimiter` during config normalization.
 
-Example with `delimiter: ", "`:
+Example with `actress_delimiter: ", "`:
 ```
 Actresses: Sakura Momo, Mikami Yua, Anzai Rara
 ```
@@ -583,11 +651,13 @@ Actresses: Sakura Momo, Mikami Yua, Anzai Rara
 
 **group_actress_name**: Folder name used when `group_actress` is enabled and multiple actresses are found. Default: `@Group`.
 
+**group_unknown_actress_name**: Folder name used when `group_actress` is enabled and the actress list is empty or contains only an unknown actress. Default: `@Unknown`.
+
 Example with `group_actress: true`:
 ```
 Template: <ACTRESSES>/<ID> - <TITLE>
-Multiple actresses: @Group/IPX-535 - Beautiful Day/
-Single actress:     Sakura Momo/IPX-535 - Solo Title/
+Multiple actresses: @Group/IPX-535 - 3, 2, 1, GO! Sudden Follow-Up.../
+Single actress:     Sakura Momo/IPX-535 - 3, 2, 1, GO! Sudden Follow-Up.../
 ```
 
 ### Actress Name Ordering
@@ -793,7 +863,7 @@ find data/logs/ -name "*.log" -mtime +30 -delete
 ```yaml
 output:
   download_poster: false
-  download_screenshots: false
+  download_extrafanart: false
   download_trailer: false
   download_actress: false
 
@@ -807,7 +877,7 @@ file_matching:
 output:
   download_cover: true
   download_poster: true
-  download_screenshots: true
+  download_extrafanart: true
   download_trailer: true
   download_actress: true
 ```
@@ -841,8 +911,8 @@ Result:
 ```
 Idea Pocket/
   2020/
-    IPX-535 - Beautiful Day/
-      IPX-535 - Beautiful Day.mp4
+    IPX-535 - 3, 2, 1, GO! Sudden Follow-Up.../
+      IPX-535 - 3, 2, 1, GO! Sudden Follow-Up....mp4
 ```
 
 ## Validation
@@ -858,7 +928,7 @@ This displays your current configuration and verifies it's valid.
 ## Advanced Tips
 
 1. **Backup your config**: Keep a copy of `config.yaml` with your preferred settings
-2. **Test changes with dry-run**: Use `--dry-run` to preview the effect of config changes
+2. **Test changes with dry-run**: Use `--dry-run` (`sort -n`) to preview organize operations without making changes
 3. **Genre filtering**: Use `ignore_genres` to filter unwanted categories
 4. **Priority tuning**: Experiment with different scraper priorities for best results
 5. **Template testing**: Test folder/file formats before processing large batches
@@ -880,7 +950,7 @@ api:
 
 Run with:
 ```bash
-docker run -v /host/videos:/data/videos javinizer/javinizer
+docker run -v /host/videos:/data/videos ghcr.io/javinizer/javinizer-go:latest
 ```
 
 #### Windows Containers
@@ -894,7 +964,7 @@ api:
 
 Run with:
 ```powershell
-docker run -v C:\host\videos:C:\data\videos javinizer/javinizer
+docker run -v C:\host\videos:C:\data\videos ghcr.io/javinizer/javinizer-go:latest
 ```
 
 ### WSL2 Considerations
@@ -934,10 +1004,9 @@ api:
 ### Docker Compose Example
 
 ```yaml
-version: '3'
 services:
   javinizer:
-    image: javinizer/javinizer:latest
+    image: ghcr.io/javinizer/javinizer-go:latest
     ports:
       - "8080:8080"
     volumes:
@@ -1080,8 +1149,10 @@ The following settings will cause the application to fail on startup if misconfi
 | Setting | Failure Condition | Error Message |
 |---------|------------------|---------------|
 | Config file parsing | Invalid YAML syntax | `Failed to load config: <error>` |
-| Config version | Newer version than supported | `config version X is newer than supported version Y` |
-| Javstash scraper | Enabled without API key | `javstash: api_key is required (set in config or JAVSTASH_API_KEY env var)` |
+| Config version | Newer version than supported | `config version X is newer than supported version Y; please update Javinizer` |
+| Javstash scraper | Enabled without API key | `javstash: api_key is required (set in config)` (or set the `JAVSTASH_API_KEY` env var) |
+| Scrapers proxy | `enabled: true` without `default_profile` | `scrapers.proxy.default_profile is required when scrapers.proxy.enabled is true` |
+| Scrapers proxy | `default_profile` / per-scraper `profile` references an unknown profile | `scrapers.proxy.default_profile references unknown profile "X"` |
 
 **Note:** Javinizer creates a default configuration file on first run if one doesn't exist. No settings are required to be set manually.
 
@@ -1091,7 +1162,7 @@ These settings don't prevent startup but may cause operations to fail:
 
 | Setting | Failure Condition | Context |
 |---------|------------------|---------|
-| Proxy configuration | Enabled with empty URL | Proxy is automatically disabled with warning |
+| Proxy profile | Enabled proxy whose selected profile has an empty `url` | Requests go direct (no proxy); may fail on region-blocked sources |
 | Translation provider | Enabled without API key | Translation will fail but scraping continues |
 | Required fields | Missing required field data | Aggregation fails if `metadata.required_fields` has missing data |
 
@@ -1101,8 +1172,6 @@ The application logs warnings for misconfigured settings but continues to run:
 
 | Setting | Warning Condition | Behavior |
 |---------|------------------|----------|
-| Scraper proxy | `enabled: true` with empty URL | Disabled with warning message |
-| Download proxy | `enabled: true` with empty URL | Disabled with warning message |
 | Umask | Invalid octal value | Error logged, umask not applied |
 
 ### Default Behavior Without Configuration
@@ -1114,14 +1183,14 @@ When no configuration file exists:
 3. **Logs**: Output to `stdout` and `data/logs/javinizer.log`
 4. **Scrapers**: All scrapers available with default settings
 5. **Server**: Binds to `localhost:8080`
-6. **Security**: Empty allowed directories (no allowlist restriction, but built-in denylist applies)
+6. **Security**: Empty allowed directories denies all API file access (secure by default). Configure `api.security.allowed_directories` to enable access.
 
 ### Minimal Configuration Required
 
 For most use cases, you only need to customize:
 
 ```yaml
-# Optional: API security (recommended for production)
+# Required for API file operations (empty allowed_directories denies all access)
 api:
   security:
     allowed_directories:
@@ -1143,10 +1212,14 @@ server:
 
 api:
   security:
-    allowed_directories: []  # No allowlist restriction
+    allowed_directories: []  # Empty = deny all API file access (secure by default)
     denied_directories: []   # Only built-in system directories blocked
     max_files_per_scan: 10000
     scan_timeout_seconds: 30
+    rate_limit:
+      requests_per_minute: 60
+    trusted_proxies: []
+    force_secure_cookies: false
     allowed_origins:
       - "http://localhost:8080"
       - "http://localhost:5173"
@@ -1158,23 +1231,23 @@ api:
 
 ```yaml
 scrapers:
-  user_agent: "Javinizer (+https://github.com/javinizer/javinizer-go)"
+  user_agent: ""  # Default: Chrome-like UA. r18dev uses the Javinizer UA automatically.
   referer: "https://www.dmm.co.jp/"
   timeout_seconds: 30
   request_timeout_seconds: 60
   priority:
-    - dmm
     - r18dev
     - libredmm
-    - mgstage
+    - dmm
     - javlibrary
     - javdb
     - javbus
     - jav321
+    - mgstage
     - tokyohot
     - aventertainment
-    - dlgetchu
     - caribbeancom
+    - dlgetchu
     - fc2
     - javstash
   scrape_actress: true
@@ -1192,6 +1265,16 @@ scrapers:
     stealth_mode: true
   proxy:
     enabled: false
+    default_profile: "main"
+    profiles:
+      main:
+        url: ""
+        username: ""
+        password: ""
+      backup:
+        url: ""
+        username: ""
+        password: 
 ```
 
 ### File Matching Defaults
@@ -1219,7 +1302,7 @@ output:
   folder_format: "<ID> [<STUDIO>] - <TITLE> (<YEAR>)"
   file_format: "<ID><IF:MULTIPART>-pt<PART></IF>"
   subfolder_format: ["<ID>"]
-  delimiter: ", "
+  actress_delimiter: ", "
   max_title_length: 100
   max_path_length: 240
   # Max height in pixels for cropped posters. 0 = no cap (preserve source resolution).
@@ -1232,12 +1315,12 @@ output:
     - .ssa
     - .smi
     - .vtt
-  rename_folder_in_place: false
   # Move files instead of copying (default: false / copy). Persisted by the TUI Settings toggle.
   move_files: false
   rename_file: true
   group_actress: false
   # group_actress_name: "@Group"
+  # group_unknown_actress_name: "@Unknown"
   # first_name_order: false
   poster_format: "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg"
   fanart_format: "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg"
@@ -1303,20 +1386,24 @@ system:
 metadata:
   nfo:
     enabled: true
-    display_name: "<TITLE>"
+    display_title: "<TITLE>"
     filename_template: "<ID>.nfo"
     first_name_order: true
     actress_language_ja: false
     per_file: false
+    unknown_actress_mode: "skip"
     unknown_actress_text: "Unknown"
     actress_as_tag: false
     add_generic_role: false
     alt_name_role: false
-    include_original_path: false
+    include_originalpath: false
     include_stream_details: false
     include_fanart: true
     include_trailer: true
-    rating_source: "dmm"  # First scraper in priority list
+    rating_source: "r18dev"  # First scraper in default priority list
+    tag: []
+    tagline: ""
+    credits: []
 ```
 
 ### Translation Defaults
@@ -1374,10 +1461,17 @@ metadata:
   genre_replacement:
     enabled: true
     auto_add: true
+  word_replacement:
+    enabled: false  # Opt-in: rewrites all text fields from the replacement database
   tag_database:
     enabled: false
   ignore_genres: []
 ```
+
+**word_replacement**: Opt-in (default `false`). When enabled, text fields are
+rewritten using the word-replacement database. Because it rewrites all text
+fields, it is off by default — enable it only if you maintain a replacement
+database.
 
 ### How Defaults Are Applied
 
@@ -1476,7 +1570,7 @@ Use Docker volumes to inject environment-specific configuration:
 # docker-compose.yml
 services:
   javinizer:
-    image: javinizer/javinizer:latest
+    image: ghcr.io/javinizer/javinizer-go:latest
     volumes:
       - ./config/prod:/config:ro  # Production config
       - ./data:/data

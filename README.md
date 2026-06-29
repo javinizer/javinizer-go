@@ -1,58 +1,24 @@
 # Javinizer Go
 
-Javinizer Go is a metadata scraper and file organizer for Japanese Adult Videos (JAV), with CLI, TUI, API, and a web UI.
+A metadata scraper and file organizer for Japanese Adult Videos (JAV), with CLI, TUI, REST API, and a web UI. A Go recreation of the original [Javinizer](https://github.com/jvlflame/Javinizer).
 
-[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Test & Coverage](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml/badge.svg)](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/javinizer/javinizer-go/branch/main/graph/badge.svg)](https://codecov.io/gh/javinizer/javinizer-go)
 [![Discord](https://img.shields.io/discord/608449512352120834?color=brightgreen&style=plastic&label=discord)](https://discord.gg/Pds7xCpzpc)
 
-## Features
+---
 
-| Feature | What it does | Why it helps |
-|---|---|---|
-| Multi-source scraping | Pulls metadata from R18.dev, DMM/Fanza, and optional sources. | Better match quality and fewer missing fields. |
-| Smart file organization | Renames and organizes files/folders using templates. | Keeps large libraries consistent and searchable. |
-| Dry-run safety | Shows a full preview before making any changes. | Reduces risk when processing many files. |
-| NFO generation | Creates Kodi/Plex-compatible NFO metadata files. | Improves media center indexing and display quality. |
-| Media downloads | Downloads cover, poster, fanart, trailer, and actress images. | Produces complete, polished library entries. |
-| Multiple interfaces | Use CLI, interactive TUI, or API + web UI. | Lets you choose fast automation or manual review. |
+## Quick Start
 
-## Supported Scrapers
-
-| Scraper | Enabled by default (`config.yaml.example`) | Language options | Notes |
-|---|---|---|---|
-| `r18dev` | Yes | `en`, `ja` | JSON API scraper with rate-limit handling options. |
-| `dmm` | No | N/A | Supports optional browser mode for JS-rendered pages; placeholder detection for screenshots. |
-| `libredmm` | No | N/A | Aggregates Fanza, MGStage, SOD, and FC2 sources. |
-| `mgstage` | No | N/A | Usually requires age-verification cookie (`adc=1`). |
-| `javlibrary` | No | `en`, `ja`, `cn`, `tw` | Can use FlareSolverr for Cloudflare challenges. |
-| `javdb` | No | N/A | Can use FlareSolverr; proxy-friendly setup. |
-| `javbus` | No | `ja`, `en`, `zh` | Multi-language support. |
-| `jav321` | No | N/A | Alternative index source. |
-| `tokyohot` | No | `ja`, `en`, `zh` | Tokyo-Hot specific source. |
-| `aventertainment` | No | `en`, `ja` | Supports bonus screenshot scraping option. |
-| `dlgetchu` | No | N/A | DLsite/Getchu-related source. |
-| `caribbeancom` | No | `ja`, `en` | Caribbeancom-specific source. |
-| `fc2` | No | N/A | FC2 source. |
-| `javstash` | No | `en`, `ja` | GraphQL API scraper; requires API key from javstash.org. |
-
-## Installation
-
-### Docker (Recommended)
-
-The easiest way to get started is with Docker:
+The fastest way to try Javinizer is Docker — one command gives you the web UI:
 
 ```bash
-# 1) Create data directory and download config
 mkdir -p ./data
 curl -o ./data/config.yaml \
   https://raw.githubusercontent.com/javinizer/javinizer-go/main/configs/config.yaml.example
 
-# 2) Edit config.yaml with your settings (scrapers, output paths, etc.)
-
-# 3) Run container
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -p 8080:8080 \
@@ -61,396 +27,335 @@ docker run --rm \
   ghcr.io/javinizer/javinizer-go:latest
 ```
 
-Open [http://localhost:8080](http://localhost:8080) to access the web UI.
+Open **http://localhost:8080**, create your admin login on first startup, and start scraping.
 
-**Notes:**
-- Replace `/path/to/your/media` with the path to your JAV library
-- On Unraid, use your share owner mapping (commonly `--user 99:100`)
-- Use a pinned tag (e.g., `v0.1.2-alpha`) for reproducible deployments
-- `latest` tracks the most recent release
+- Replace `/path/to/your/media` with your JAV library path.
+- On Unraid, use `--user 99:100`.
+- Prefer a [binary](#prebuilt-binaries) or [build from source](#build-from-source) for a native install.
 
-### Docker Compose
+> **First time?** Skim [Features](#features) to see what it does, then jump to [Usage](#usage) or the [Web UI](#web-ui) section.
 
-For a more complete setup with optional FlareSolverr support:
+---
+
+## Features
+
+| Feature | What it does | Why it helps |
+|---|---|---|
+| Multi-source scraping | Pulls metadata from R18.dev, DMM/Fanza, and 12+ more sources. | Better match quality and fewer missing fields. |
+| Smart file organization | Renames and organizes files/folders using templates. | Keeps large libraries consistent and searchable. |
+| Dry-run safety | Shows a full preview before making any changes. | Reduces risk when processing many files. |
+| NFO generation | Creates Kodi/Plex-compatible NFO metadata files. | Improves media center indexing and display quality. |
+| Media downloads | Downloads cover, poster, fanart, trailer, and actress images. | Produces complete, polished library entries. |
+| Manual scrape | Per-file ID/URL overrides before a batch runs. | Handle files whose filenames have no usable JAV ID. |
+| Multiple interfaces | Use CLI, interactive TUI, REST API, or web UI. | Fast automation or manual review — your choice. |
+
+## Supported Scrapers
+
+| Scraper | Enabled by default | Languages | Notes |
+|---|---|---|---|
+| `r18dev` | Yes | `en`, `ja` | JSON API scraper with rate-limit handling. |
+| `dmm` | No | N/A | Optional browser mode for JS-rendered pages. |
+| `libredmm` | No | N/A | Aggregates Fanza, MGStage, SOD, and FC2. |
+| `mgstage` | No | N/A | Usually requires age-verification cookie (`adc=1`). |
+| `javlibrary` | No | `en`, `ja`, `cn`, `tw` | Can use FlareSolverr for Cloudflare challenges. |
+| `javdb` | No | N/A | Can use FlareSolverr; proxy-friendly. |
+| `javbus` | No | `ja`, `en`, `zh` | Multi-language support. |
+| `jav321` | No | N/A | Alternative index source. |
+| `tokyohot` | No | `ja`, `en`, `zh` | Tokyo-Hot specific source. |
+| `aventertainment` | No | `en`, `ja` | Bonus screenshot scraping option. |
+| `dlgetchu` | No | N/A | DLsite/Getchu-related source. |
+| `caribbeancom` | No | `ja`, `en` | Caribbeancom-specific source. |
+| `fc2` | No | N/A | FC2 source. |
+| `javstash` | No | `en`, `ja` | GraphQL API scraper; requires API key from javstash.org. |
+
+---
+
+## Installation
+
+### Docker (Recommended)
+
+See [Quick Start](#quick-start) above. For a complete setup with optional FlareSolverr support, use Docker Compose:
 
 ```bash
-# 1) Download example files
-curl -o .env \
-  https://raw.githubusercontent.com/javinizer/javinizer-go/main/.env.example
-curl -o docker-compose.yml \
-  https://raw.githubusercontent.com/javinizer/javinizer-go/main/docker-compose.yml
-
-# 2) Edit .env to configure paths and settings
-# MEDIA_PATH=/path/to/your/jav-library
-# PUID=1000
-# PGID=1000
-# TZ=America/New_York
-
-# 3) Start services
+curl -o .env https://raw.githubusercontent.com/javinizer/javinizer-go/main/.env.example
+curl -o docker-compose.yml https://raw.githubusercontent.com/javinizer/javinizer-go/main/docker-compose.yml
+# Edit .env: MEDIA_PATH=/path/to/your/library, PUID, PGID, TZ
 docker-compose up -d
 ```
 
-The `docker-compose.yml` includes:
-- **javinizer**: Main API server + web UI
-- **flaresolverr** (optional): Cloudflare challenge solver for JavDB/JavLibrary
+The compose file includes **javinizer** (API + web UI) and an optional **flaresolverr** (Cloudflare solver for JavDB/JavLibrary). See the [Docker Deployment Guide](./docs/docker-deployment.md) for details.
 
-See [Docker Deployment Guide](./docs/docker-deployment.md) for complete documentation.
+**Tag policy:** `latest` tracks the most recent release; pin a tag (e.g. `v1.0.0-rc1`) for reproducible deployments.
 
 ### Prebuilt Binaries
 
-Download pre-compiled binaries from [GitHub Releases](https://github.com/javinizer/javinizer-go/releases):
+Download from [GitHub Releases](https://github.com/javinizer/javinizer-go/releases) — available for `linux-amd64`, `linux-arm64`, `darwin-amd64`, `darwin-arm64`, `darwin-universal`, and `windows-amd64`. Binaries include the CLI, TUI, API server, and embedded web UI.
 
-**Available platforms:**
-- `linux-amd64` - Linux x86_64
-- `linux-arm64` - Linux ARM64 (e.g., Raspberry Pi)
-- `darwin-amd64` - macOS Intel
-- `darwin-arm64` - macOS Apple Silicon
-- `darwin-universal` - macOS Universal (Intel + Apple Silicon)
-- `windows-amd64` - Windows x86_64
+**Linux / macOS:**
 
-**Installation:**
 ```bash
-# Example for Linux amd64
-wget https://github.com/javinizer/javinizer-go/releases/download/v0.1.2-alpha/javinizer-linux-amd64.tar.gz
-tar -xzf javinizer-linux-amd64.tar.gz
+# Download (example: Linux x86_64 — pick the asset matching your OS/arch)
+curl -L -o javinizer https://github.com/javinizer/javinizer-go/releases/download/v1.0.0-rc1/javinizer-v1.0.0-rc1-linux-amd64
+
+chmod +x javinizer
 sudo mv javinizer /usr/local/bin/
+
 javinizer version
 ```
 
-**Note:** Prebuilt binaries include CLI, TUI, API server, and embedded web UI.
+**Windows:**
+
+Download `javinizer-v1.0.0-rc1-windows-amd64.exe` from the [latest release](https://github.com/javinizer/javinizer-go/releases/latest), then run in PowerShell:
+
+```powershell
+# Save it somewhere convenient (e.g. a tools folder or your Downloads)
+# Optional: rename for ease of use
+Rename-Item javinizer-v1.0.0-rc1-windows-amd64.exe javinizer.exe
+
+# Run from the same folder
+.\javinizer.exe version
+```
+
+To run `javinizer` from anywhere, add its folder to your `PATH` (System Properties → Environment Variables → Path → New), or copy `javinizer.exe` into a folder that's already on your `PATH`.
+
+```powershell
+# Start the web UI, then open http://localhost:8080
+.\javinizer.exe init
+.\javinizer.exe web
+```
+
+> Windows builds are CLI/TUI/API + embedded web UI, same as the other platforms. CGO/SQLite is statically linked, so no separate runtime is required.
 
 ### Build from Source
 
-Requires Go 1.25+ and CGO (for SQLite support). For embedded web UI builds, Node.js 20+ is also required (Node 22 used in CI).
+Requires Go 1.26+ and CGO (for SQLite). For the embedded web UI, Node.js 20+ is also required (Node 22 used in CI).
 
 ```bash
 go install github.com/javinizer/javinizer-go/cmd/javinizer@latest
 
-# Or clone and build manually (single binary with embedded web UI)
+# Or clone and build a single binary with the embedded web UI:
 git clone https://github.com/javinizer/javinizer-go.git
 cd javinizer-go
 make build
 ./bin/javinizer version
 ```
 
-The `make build` target now builds the frontend bundle and embeds it into the Go binary.
+`make build` compiles the frontend bundle and embeds it into the Go binary. For CLI-only builds without the frontend: `go build -o bin/javinizer ./cmd/javinizer`.
+
+---
 
 ## Usage
 
-### Interactive TUI (Terminal UI)
+### Start the web UI
 
-Browse and scrape files interactively with real-time progress:
+```bash
+javinizer init          # creates a default config.yaml + database
+javinizer web           # starts the server at http://localhost:8080
+# Custom port/host:
+javinizer web --host 0.0.0.0 --port 8081
+```
+
+`web` is an alias of `api` — same server. Use `web` for the embedded UI entrypoint, `api` for backend/frontend-dev workflows. On first startup, the web UI prompts you to create an admin login (stored in `auth.credentials.json` next to your config). Delete that file to reset the password.
+
+### Organize a folder
+
+```bash
+javinizer sort ~/Videos --dry-run   # preview renames/moves first
+javinizer sort ~/Videos             # scrape + organize for real
+```
+
+### Scrape a single ID
+
+```bash
+javinizer scrape IPX-535
+javinizer scrape SSIS-123 --force   # force-refresh cached metadata
+```
+
+### Update metadata in place
+
+Re-scrape and merge into already-organized files (supports merge presets/strategies):
+
+```bash
+javinizer update ~/Videos/IPX-535
+javinizer update ~/Videos --dry-run
+```
+
+### Interactive TUI
 
 ```bash
 javinizer tui ~/Videos
 ```
 
-See [TUI Guide](./docs/11-tui.md) for keyboard shortcuts and workflows.
+See the [TUI Guide](./docs/11-tui.md) for keyboard shortcuts and workflows.
 
-### File Organization
-
-Scan, scrape metadata, and organize files using templates:
+### Manage your library
 
 ```bash
-# Dry-run mode (preview changes without modifying files)
-javinizer sort ~/Videos --dry-run
-
-# Actually organize files
-javinizer sort ~/Videos
-```
-
-### Manual Scraping
-
-Scrape metadata for a specific JAV ID:
-
-```bash
-javinizer scrape IPX-535
-javinizer scrape SSIS-123 --force  # Force refresh cached metadata
-```
-
-### Update Existing Metadata
-
-Re-scrape and update metadata for already organized files:
-
-```bash
-javinizer update ~/Videos/IPX-535
-javinizer update ~/Videos --dry-run  # Preview updates for entire library
-```
-
-### Manage Tags
-
-Add custom tags to movies (appears in NFO files):
-
-```bash
+# Tags (written to NFO files)
 javinizer tag add IPX-535 "favorite" "4K"
-javinizer tag list IPX-535
-javinizer tag remove IPX-535 "favorite"
-javinizer tag search "favorite"     # Find movies by tag
-javinizer tag tags                  # List all unique tags
+javinizer tag search "favorite"
+
+# Genre / word replacement rules
+javinizer genre add "Creampie" "Cream Pie"
+javinizer word add "censored" "original"
+
+# Actress database
+javinizer actress merge --target <id> --source <id>   # merge duplicates
+javinizer actress export
+
+# History & logs
+javinizer history list
+javinizer logs list
+
+# API tokens (for programmatic access)
+javinizer token create
+javinizer token list --json
+
+# Config & version
+javinizer config migrate      # upgrade an older config to the current schema
+javinizer info                # show config, scrapers, and DB status
+javinizer version --check     # show version + check for updates
 ```
 
-### Genre Management
+See the [CLI Reference](./docs/03-cli-reference.md) for every command and flag.
 
-View and modify genre replacement rules:
-
-```bash
-javinizer genre list
-javinizer genre add "Creampie" "Cream Pie"  # Replace "Creampie" with "Cream Pie"
-javinizer genre remove "Creampie"
-```
-
-### History Tracking
-
-View file organization operations:
-
-```bash
-javinizer history list           # List recent operations
-javinizer history stats           # Show operation statistics
-javinizer history movie <id>      # Show history for specific movie
-javinizer history clean --days 30 # Clean records older than 30 days
-```
-
-### System Info
-
-Display configuration, scrapers, and database status:
-
-```bash
-javinizer info  # Show current configuration and database status
-```
-
-### API + Web Server (`web` Alias)
-
-Start the unified server (recommended via `web` alias):
-
-```bash
-javinizer web
-
-# Equivalent legacy command
-javinizer api
-
-# Custom port
-PORT=9000 javinizer web
-
-# With flags
-javinizer web --host 0.0.0.0 --port 8081
-```
-
-`javinizer api` and `javinizer web` invoke the same backend server command, but they represent different usage intents:
-- Use `javinizer api` for backend/API-focused workflows and frontend development (`npm run dev` hot reload).
-- Use `javinizer web` when you want the embedded browser UI entrypoint from the Go binary.
-
-**What this server provides:**
-- `GET /` - Embedded Web UI (single-binary distribution)
-- `GET /api/v1/...` - REST API endpoints
-- `GET /ws/progress` - WebSocket progress stream
-- `GET /docs` - Scalar API docs UI
-- `GET /swagger/index.html` - Swagger UI
-
-**Authentication (built-in):**
-- On first startup, open Web UI and create default username/password.
-- Credentials are stored in `auth.credentials.json` next to your `config.yaml`.
-- API and WebSocket endpoints require a session cookie after setup.
-- To reset password: stop server, delete `auth.credentials.json`, restart, and run setup again.
+---
 
 ## Web UI
 
-The web application provides a modern interface for managing your JAV library.
+Available in Docker and in the binary (embedded), at `http://localhost:8080`.
 
-**Availability:**
-- ✅ **Docker**: Web UI is included and available at `localhost:8080`
-- ✅ **CLI/Binary**: Web UI is embedded in the binary and served at `localhost:8080`
+| Page | What you do there |
+|---|---|
+| **Dashboard** | Quick stats and recent activity. |
+| **Browse** | View organized movies with covers and metadata; send files to a manual scrape. |
+| **Manual** | Per-file JAV ID/URL overrides before a batch runs (for files with no usable filename ID). |
+| **Review** | Batch-scrape files, crop posters, and edit metadata before organizing. |
+| **Jobs** | Monitor active batch jobs with real-time WebSocket progress. |
+| **Actresses** | Browse the actress database with images. |
+| **History** | View and roll back organization operations. |
+| **Settings** | Configure scrapers, output templates, and proxy settings. |
 
-**How to access:**
+**API docs** are served alongside the UI: [Scalar UI](http://localhost:8080/docs) and [Swagger UI](http://localhost:8080/swagger/index.html). See the [API Reference](./docs/07-api-reference.md) for endpoint documentation.
+
+### Web development
+
+**Production build (single binary with embedded UI):**
 ```bash
-# Using Docker (recommended)
-docker run -p 8080:8080 -v ./data:/javinizer ghcr.io/javinizer/javinizer-go:latest
-# Open http://localhost:8080
+make build && javinizer web
 ```
 
-**Pages:**
-- **Dashboard** - Quick stats and recent activity
-- **Browse** - View organized movies with covers and metadata
-- **Review** - Batch scrape files, crop posters, edit metadata before organizing
-- **Jobs** - Monitor active batch jobs and progress in real-time
-- **Actresses** - Browse actress database with images
-- **History** - View and rollback organization operations
-- **Settings** - Configure scrapers, output templates, and proxy settings
-
-**API Documentation:**
-- **Scalar UI**: [http://localhost:8080/docs](http://localhost:8080/docs) - Interactive API documentation
-- **Swagger UI**: [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html) - OpenAPI spec viewer
-
-See [API Reference](./docs/07-api-reference.md) for endpoint documentation.
-
-### Web Development
-
-To build and use the web UI with a local installation:
-
-**Option 1: Production build (single binary with embedded UI)**
+**Dev mode (hot reload):**
 ```bash
-# Build binary (includes web bundle)
-make build
-
-# Start API/web server
-javinizer web
-# Open http://localhost:8080
+javinizer api        # terminal 1: backend
+make web-dev         # terminal 2: frontend at http://localhost:5174 (proxies API to :8080)
 ```
 
-**Option 2: Development mode (hot reload)**
-```bash
-# Terminal 1: Start backend API server
-javinizer api
+See `web/frontend/README.md` for more.
 
-# Terminal 2: Start frontend dev server with hot reload
-make web-dev
-# Open http://localhost:5174 (proxies API calls to :8080)
+---
+
+## Configuration
+
+Javinizer uses a YAML config file. Initialize one with `javinizer init`, then edit it.
+
+**Key sections:**
+- **Scrapers** — enable/disable sources, set priorities, configure proxies.
+- **Metadata** — per-field scraper priorities, translation, genre filtering, word replacement.
+- **Output** — folder/file naming templates, download options.
+- **File Matching** — extensions, size filters, regex patterns.
+- **NFO** — Kodi/Plex metadata format options.
+
+**Per-field priority semantics:** a per-field scraper list is **exclusive** (no global fallback). An absent key or empty list `[]` inherits the global priority; `["__skip__"]` leaves that field empty. See the [Configuration Guide](./docs/02-configuration.md) for the full schema and the [example config](./configs/config.yaml.example).
+
+### Multi-language template tags
+
+Template tags can select a language for translated fields:
+
+```yaml
+output:
+  folder_format: <ID> [<MAKER:JA>] - <TITLE:EN> (<YEAR>)
+# → ROYD-191 [ROYD] - A Beautiful Day (2024)
 ```
 
-The development server provides:
-- Hot module replacement (instant updates on file changes)
-- Better error messages
-- Faster iteration
+- `<TITLE:EN>` — English title; `<TITLE:JA|EN>` — Japanese with English fallback.
+- Supported tags: `TITLE`, `MAKER`, `LABEL`, `SERIES`, `DIRECTOR`, `DESCRIPTION`, `ORIGINALTITLE`, `STUDIO` (synonym for `MAKER`).
+- Language codes are lowercase 2-letter (`en`, `ja`, `zh`, …); regional variants are normalized to the base language.
 
-See `web/frontend/README.md` for more details.
+See the [Template System](./docs/04-template-system.md) for full syntax and functions.
+
+---
 
 ## Environment Variables
 
-Docker deployments support environment variable overrides:
+Docker deployments support environment-variable overrides.
 
-### Core Variables
+### Core
 
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `PUID` | Runtime user ID for container process (preferred) | `1000` | `99` (common on Unraid) |
-| `PGID` | Runtime group ID for container process (preferred) | `1000` | `100` (common on Unraid) |
-| `USER_ID` | Legacy alias for `PUID` | `1000` | `1000` |
-| `GROUP_ID` | Legacy alias for `PGID` | `1000` | `1000` |
-| `JAVINIZER_CONFIG` | Path to config file | `/javinizer/config.yaml` | `/custom/config.yaml` |
-| `JAVINIZER_DB` | Path to SQLite database | `/javinizer/javinizer.db` | `/custom/db.db` |
-| `JAVINIZER_LOG_DIR` | Relocate file targets from `logging.output` to this directory (does not enable file logging by itself) | `/javinizer/logs` | `/custom/logs` |
-| `JAVINIZER_TEMP_DIR` | Temp directory for downloads | `data/temp` | `/custom/temp` |
-| `LOG_LEVEL` | Logging verbosity | `info` | `debug`, `warn`, `error` |
-| `UMASK` | File permission mask | `002` | `022` (owner-only write) |
-| `TZ` | Timezone for logs | `UTC` | `America/New_York` |
-
-### Translation API Keys
-
-| Variable | Description | Example |
+| Variable | Description | Default |
 |----------|-------------|---------|
-| `TRANSLATION_PROVIDER` | Translation provider | `openai`, `deepl`, `google`, `anthropic` |
-| `TRANSLATION_SOURCE_LANGUAGE` | Source language | `ja` |
-| `TRANSLATION_TARGET_LANGUAGE` | Target language | `en` |
-| `OPENAI_API_KEY` | OpenAI API key | `sk-...` |
-| `DEEPL_API_KEY` | DeepL API key | `...` |
-| `GOOGLE_TRANSLATE_API_KEY` | Google Translate API key | `...` |
-| `ANTHROPIC_API_KEY` | Anthropic API key | `...` |
+| `PUID` / `PGID` | Runtime user/group ID for the container process | `1000` |
+| `USER_ID` / `GROUP_ID` | Legacy aliases for `PUID`/`PGID` | `1000` |
+| `JAVINIZER_CONFIG` | Path to config file | `/javinizer/config.yaml` |
+| `JAVINIZER_DB` | Path to SQLite database | `/javinizer/javinizer.db` |
+| `JAVINIZER_LOG_DIR` | Relocate file log targets to this directory | `/javinizer/logs` |
+| `JAVINIZER_TEMP_DIR` | Temp directory for downloads | `data/temp` |
+| `LOG_LEVEL` | Logging verbosity | `info` |
+| `UMASK` | File permission mask | `002` |
+| `TZ` | Timezone for logs | `UTC` |
 
-### Scraper API Keys
+### Translation & Scraper API Keys
 
-| Variable | Description |
-|----------|-------------|
+| Variable | Purpose |
+|----------|---------|
+| `TRANSLATION_PROVIDER` | `openai`, `deepl`, `google`, or `anthropic` |
+| `TRANSLATION_SOURCE_LANGUAGE` / `TRANSLATION_TARGET_LANGUAGE` | e.g. `ja` → `en` |
+| `OPENAI_API_KEY` / `DEEPL_API_KEY` / `GOOGLE_TRANSLATE_API_KEY` / `ANTHROPIC_API_KEY` | Provider keys |
 | `JAVSTASH_API_KEY` | JavStash GraphQL API key (get from javstash.org) |
 
 ### Development
 
-| Variable | Description |
-|----------|-------------|
+| Variable | Purpose |
+|----------|---------|
 | `CHROME_BIN` | Chrome binary path for browser scraping |
 | `GH_TOKEN` | GitHub token (avoids rate limits for update checks) |
 
-`JAVINIZER_LOG_DIR` examples:
-- `logging.output: stdout` + `JAVINIZER_LOG_DIR=/custom/logs` -> `stdout` (no file output)
-- `logging.output: "stdout,data/logs/javinizer.log"` + `JAVINIZER_LOG_DIR=/custom/logs` -> `"stdout,/custom/logs/javinizer.log"`
-
-**Example:**
 ```bash
 docker run --rm \
-  -e LOG_LEVEL=debug \
-  -e TZ=Asia/Tokyo \
+  -e LOG_LEVEL=debug -e TZ=Asia/Tokyo \
   -p 9000:8080 \
-  -v "$(pwd)/data:/javinizer" \
-  -v "/media/jav:/media" \
+  -v "$(pwd)/data:/javinizer" -v "/media/jav:/media" \
   ghcr.io/javinizer/javinizer-go:latest
 ```
 
 See `.env.example` for Docker Compose configuration.
 
-## Configuration
-
-Javinizer uses a YAML configuration file to control scrapers, output templates, and behavior.
-
-**Key configuration sections:**
-- **Scrapers**: Enable/disable sources, set priorities, configure proxies
-- **Metadata**: Field-level scraper priorities, translation, genre filtering
-- **Output**: Folder/file naming templates, download options
-- **File Matching**: Extensions, size filters, regex patterns
-- **NFO**: Kodi/Plex metadata format options
-
-**Documentation:**
-- [Configuration Guide](./docs/02-configuration.md) - Detailed option reference
-- [Example Config](./configs/config.yaml.example) - Fully commented configuration
-- [Template System](./docs/04-template-system.md) - Output template syntax and functions
-- [Genre Management](./docs/05-genre-management.md) - Genre replacement workflow
-
-**Initialize config:**
-```bash
-javinizer init  # Creates default config.yaml in current directory
-```
-
-## Multi-Language Template Tags
-
-Template tags support language selection for translated metadata fields.
-
-### Syntax
-
-- `<TITLE:EN>` - English title translation
-- `<TITLE:JA>` - Japanese title translation
-- `<TITLE:JA|EN>` - Japanese with English fallback (tries JA first, then EN)
-- `<TITLE>` - Base field (uses scraped/original value)
-
-### Supported Tags
-
-Only these tags support language selection: `TITLE`, `MAKER`, `LABEL`, `SERIES`, `DIRECTOR`, `DESCRIPTION`, `ORIGINALTITLE`, `STUDIO` (synonym for `MAKER`)
-
-### Limitations
-
-- Language codes are normalized to base language only (e.g., `en-US` → `en`)
-- Regional/script variants cannot be distinguished
-- Language codes must be lowercase 2-letter codes (`en`, `ja`, `zh`, `ko`, etc.)
-
-### Example
-
-```yaml
-output:
-  folder_format: <ID> [<MAKER:JA>] - <TITLE:EN> (<YEAR>)
-```
-
-Result: `ROYD-191 [ROYD] - A Beautiful Day (2024)`
-
-See [Template System](./docs/04-template-system.md) for full documentation.
+---
 
 ## Documentation
 
-- [Getting Started](./docs/01-getting-started.md) - Installation and first steps
-- [Docker Deployment](./docs/docker-deployment.md) - Container setup and management
-- [Configuration](./docs/02-configuration.md) - Config file reference
-- [CLI Reference](./docs/03-cli-reference.md) - Command-line interface guide
-- [TUI Guide](./docs/11-tui.md) - Interactive terminal UI
-- [API Reference](./docs/07-api-reference.md) - REST API endpoints
-- [Template System](./docs/04-template-system.md) - Output naming templates
-- [Genre Management](./docs/05-genre-management.md) - Genre replacement rules
-- [Testing Guide](./docs/12-testing-guide.md) - Testing practices and coverage
-- [Development Guide](./docs/09-development.md) - Contributing and development setup
-- [Architecture](./docs/16-architecture.md) - System architecture overview
-- [Troubleshooting](./docs/10-troubleshooting.md) - Common issues and solutions
+| Guide | Covers |
+|---|---|
+| [Getting Started](./docs/01-getting-started.md) | Installation and first steps |
+| [Docker Deployment](./docs/docker-deployment.md) | Container setup and management |
+| [Configuration](./docs/02-configuration.md) | Config file reference |
+| [CLI Reference](./docs/03-cli-reference.md) | Every command and flag |
+| [TUI Guide](./docs/11-tui.md) | Interactive terminal UI |
+| [API Reference](./docs/07-api-reference.md) | REST API endpoints |
+| [Template System](./docs/04-template-system.md) | Output naming templates |
+| [Genre Management](./docs/05-genre-management.md) | Genre replacement rules |
+| [User Guide](./docs/14-user-guide.md) | Web UI workflows |
+| [Architecture](./docs/16-architecture.md) | System architecture overview |
+| [Development](./docs/09-development.md) | Contributing and dev setup |
+| [Testing](./docs/12-testing-guide.md) | Testing practices and coverage |
+| [Troubleshooting](./docs/10-troubleshooting.md) | Common issues and solutions |
 
 ## Support
 
 - **Issues**: [github.com/javinizer/javinizer-go/issues](https://github.com/javinizer/javinizer-go/issues)
 - **Discussions**: [github.com/javinizer/javinizer-go/discussions](https://github.com/javinizer/javinizer-go/discussions)
+- **Discord**: [invite link](https://discord.gg/Pds7xCpzpc)
 
 ## License
 
-This project is a Go recreation of the original [Javinizer](https://github.com/jvlflame/Javinizer).
-
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE). This project is a Go recreation of the original [Javinizer](https://github.com/jvlflame/Javinizer).

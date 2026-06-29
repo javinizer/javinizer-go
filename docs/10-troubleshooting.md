@@ -97,6 +97,8 @@ sqlite3 data/javinizer.db "PRAGMA integrity_check;"
 sqlite3 data/javinizer.db ".recover" | sqlite3 data/javinizer-recovered.db
 ```
 
+> **Note:** The database path defaults to `data/javinizer.db` (set via `database.dsn` in `config.yaml`, or overridden by the `JAVINIZER_DB` environment variable). If you customized it, adjust the paths in the commands above.
+
 ## Scraping Issues
 
 ### "Failed to scrape: timeout"
@@ -104,10 +106,18 @@ sqlite3 data/javinizer.db ".recover" | sqlite3 data/javinizer-recovered.db
 **Problem**: Network timeout or slow connection
 
 **Solutions**:
-- Check internet connection
-- Try again later (site may be down)
-- Use different scraper: `--scrapers dmm`
-- Increase timeout in code (requires rebuild)
+- Check your internet connection
+- Try again later (the site may be down or slow)
+- Use a different scraper: `javinizer scrape IPX-535 --scrapers dmm`
+- Increase the scrape timeout in `config.yaml` (no rebuild required):
+
+```yaml
+scrapers:
+  timeout_seconds: 60          # HTTP client timeout per request (1–300, default 30)
+  request_timeout_seconds: 120 # Overall request timeout (1–600, default 60)
+  browser:
+    timeout: 60                # Browser-mode page timeout (default 30)
+```
 
 ### "404 Not Found"
 
@@ -145,9 +155,10 @@ javinizer scrape IPX-535 --scrapers dmm
 **Problem**: Too many requests to scraper
 
 **Solutions**:
-- Wait a few minutes
-- Reduce concurrent requests
-- Spread out batch operations
+- Wait a few minutes and retry
+- Lower concurrency in `config.yaml` (`performance.max_workers`, default 5, range 1–100)
+- Add a per-scraper delay in milliseconds (e.g. `scrapers.r18dev.rate_limit`; r18dev defaults to 0 (no delay))
+- Spread batch operations out over time
 
 ## File Matching Issues
 
@@ -160,16 +171,21 @@ javinizer scrape IPX-535 --scrapers dmm
 # Check path exists
 ls -la /path/to/videos
 
-# Verify file extensions in config
+# Verify file extensions in config (defaults: .mp4, .mkv, .avi, .wmv, .flv)
 file_matching:
   extensions: [.mp4, .mkv, .avi, .wmv, .flv]
 
-# Check exclude patterns
+# Check exclude patterns (defaults: *-trailer*, *-sample*)
 file_matching:
   exclude_patterns: ["*-trailer*", "*-sample*"]
 
-# Try recursive scan
-javinizer sort /path --recursive
+# Files smaller than min_size_mb are skipped (0 = no limit)
+file_matching:
+  min_size_mb: 0
+
+# Recursive scanning is ON by default, so --recursive is rarely the fix.
+# To scan only the top-level directory, disable it explicitly:
+javinizer sort /path --recursive=false
 ```
 
 ### "ID not detected"
@@ -233,10 +249,11 @@ For Docker/Unraid deployments:
 **Problem**: File path exceeds OS limits (Windows: 260 chars)
 
 **Solutions**:
-- Simplify template format
+- Simplify the template format
 - Remove long fields like `<TITLE>`
-- Use shorter destination path
-- On Windows: Enable long paths in registry
+- Use a shorter destination path
+- Lower the path/title caps in `config.yaml`: `output.max_path_length` (default 240) and `output.max_title_length` (default 100)
+- On Windows: enable long paths in the registry
 
 ## NFO Generation Issues
 
@@ -266,10 +283,11 @@ For Docker/Unraid deployments:
 **Problem**: Image download failed
 
 **Solutions**:
-- Check internet connection
-- Verify URL is accessible
-- Check disk space
-- Retry operation
+- Check your internet connection
+- Verify the image URL is accessible (it may be region-locked or behind a CDN that needs `scrapers.referer`/proxy)
+- Check available disk space
+- Confirm the download is enabled in `config.yaml` (`output.download_cover`, `output.download_poster`) and raise `output.download_timeout` (default 60s) if downloads time out
+- Retry the operation
 
 ### "Downloaded file is corrupt"
 
@@ -292,9 +310,9 @@ javinizer sort /path
 
 **Solutions**:
 - Check tag syntax: `<TAG>` not `{TAG}` or `[TAG]`
-- Verify tag name is correct (case-sensitive)
-- Check if field has data: `javinizer scrape ID`
-- Review template in config:
+- Verify the tag name is correct — tags are case-insensitive (`<TITLE>`, `<title>`, and `<Title>` all work); see the full [tag reference](./04-template-system.md#available-tags)
+- Check whether the field actually has data: `javinizer scrape IPX-535`
+- Review the template in `config.yaml`:
 
 ```yaml
 output:
@@ -318,19 +336,20 @@ output:
 **Problem**: Metadata fetching takes too long
 
 **Solutions**:
-- Use database cache (pre-scrape IDs)
-- Enable only necessary scrapers
-- Check network connection
-- Consider scraper reliability (R18.dev is usually faster)
+- Reuse the database cache — already-scraped IDs are not re-fetched unless you pass `--force` (`scrape`) or `--force-refresh` (`sort`)
+- Enable only the scrapers you need: trim `scrapers.priority` in `config.yaml`, or pass a subset per run with `--scrapers r18dev,dmm`
+- Check your network connection and proxy/FlareSolverr setup (Cloudflare-protected sites require FlareSolverr)
+- Consider scraper reliability (R18.dev is usually faster than browser-driven scrapers)
 
 ### "High memory usage"
 
 **Problem**: Javinizer using too much RAM
 
 **Solutions**:
-- Process smaller batches
-- Clear database cache if very large
-- Report issue with details
+- Process smaller batches (scan a smaller directory)
+- Lower concurrency in `config.yaml` (`performance.max_workers`, default 5) so fewer scrapes run at once
+- Clear the database cache if it has grown very large
+- Report the issue with details
 
 ## Genre Replacement Issues
 
@@ -362,9 +381,9 @@ logging:
   output: stdout
 ```
 
-Then run command:
+Then run the command, capturing the output to a file (logs go to `stdout` when `output: stdout`, so redirect both streams):
 ```bash
-javinizer sort /path --dry-run 2> debug.log
+javinizer sort /path --dry-run 2>&1 | tee debug.log
 ```
 
 ## Getting Help
@@ -395,9 +414,9 @@ javinizer sort /path --dry-run 2> debug.log
 
 ### "context deadline exceeded"
 
-- Network timeout
-- Increase timeout or retry
-- Check internet connection
+- Network/scraper timeout — the request exceeded the configured limit
+- Raise the scrape timeouts in `config.yaml` (`scrapers.timeout_seconds`, `scrapers.request_timeout_seconds`) and retry
+- Check your internet connection and proxy/FlareSolverr availability
 
 ### "database schema mismatch"
 

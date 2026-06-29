@@ -7,33 +7,56 @@ Guide for contributing to and developing Javinizer Go.
 ```
 javinizer-go/
 ├── cmd/
-│   └── javinizer/        # CLI + API entrypoint
+│   ├── coveragecheck/ # Coverage threshold checker CLI
+│   ├── javinizer/     # CLI + API entrypoint
+│   └── javinizer-e2e/ # End-to-end test binary
 ├── internal/
-│   ├── aggregator/       # Metadata aggregation
-│   ├── api/              # API handlers
-│   ├── config/           # Configuration management
-│   ├── database/         # Database layer (GORM)
-│   ├── downloader/       # Media downloads
-│   ├── history/          # History tracking
-│   ├── httpclient/       # HTTP client + FlareSolverr support
-│   ├── image/            # Image processing
-│   ├── imageutil/        # Image utilities
-│   ├── logging/          # Logging
-│   ├── matcher/          # File/ID matching
-│   ├── mediainfo/        # MediaInfo extraction
-│   ├── models/           # Data models
-│   ├── nfo/              # NFO generation
-│   ├── organizer/        # File organization
-│   ├── scanner/          # File scanning
-│   ├── scraper/          # Scrapers
-│   ├── template/         # Template engine
-│   ├── translation/      # Translation service
-│   ├── tui/              # Terminal UI
-│   ├── version/          # Version metadata
-│   ├── websocket/        # Websocket hub
-│   └── worker/           # Concurrent workers
-├── web/                  # Frontend source
-├── configs/              # Default configuration
+│   ├── aggregator/      # Metadata aggregation
+│   ├── api/             # API server, handlers & domain packages
+│   ├── challengedetect/ # Cloudflare challenge detection
+│   ├── commandutil/     # Cobra command & dependency wiring helpers
+│   ├── config/          # Configuration management
+│   ├── coverage/        # Coverage report helpers
+│   ├── database/        # Database layer (GORM)
+│   ├── downloader/      # Media downloads
+│   ├── enumutil/        # Generic string-backed enum helpers
+│   ├── eventlog/        # Structured event log emission & stats
+│   ├── formatter/       # Movie metadata formatting
+│   ├── fsutil/          # Filesystem helpers (afero)
+│   ├── history/         # History tracking
+│   ├── httpclient/      # HTTP client + FlareSolverr support
+│   ├── imageutil/       # Image utilities
+│   ├── logging/         # Logging
+│   ├── matcher/         # File/ID matching
+│   ├── mediainfo/       # MediaInfo extraction
+│   ├── mocks/           # Generated mockery mocks (do not edit)
+│   ├── models/          # Data models
+│   ├── nfo/             # NFO generation
+│   ├── operationmode/   # OperationMode type (CLI/API/TUI)
+│   ├── organizer/       # File organization
+│   ├── panicutil/       # Shared panic recovery utilities
+│   ├── poster/          # Poster image generation & management
+│   ├── ratelimit/       # Rate limiting
+│   ├── scanner/         # File scanning
+│   ├── scrape/          # Scrape orchestration (cache, provenance, translation)
+│   ├── scraper/         # Scraper implementations & registration
+│   ├── scraperconfig/   # Scraper configuration types
+│   ├── scraperutil/     # Scraper registry & shared utilities
+│   ├── ssrf/            # SSRF protection / URL validation
+│   ├── template/        # Template engine
+│   ├── testutil/        # Shared test utilities
+│   ├── translation/     # Translation service
+│   ├── tui/             # Terminal UI
+│   ├── update/          # Self-update checking & service
+│   ├── version/         # Version metadata
+│   ├── websocket/       # Websocket hub
+│   ├── worker/          # Concurrent workers
+│   └── workflow/        # Sort/apply/compare workflow orchestration
+├── web/
+│   ├── frontend/ # SvelteKit frontend source (npm / Vite)
+│   ├── dist/     # Embedded web bundle (built by `make web-build`)
+│   └── embed.go  # go:embed of dist/ into the binary
+├── configs/              # Default configuration (config.yaml.example)
 ├── data/                 # Runtime data
 ├── docs/                 # Documentation
 └── scripts/              # Dev/CI helper scripts
@@ -43,7 +66,7 @@ javinizer-go/
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Git
 - SQLite3 (for DB inspection)
 
@@ -82,61 +105,115 @@ go test ./... -v
 
 ## Adding a New Scraper
 
-### 1. Create Scraper Package
+Scrapers implement the `models.Scraper` interface (`internal/models/scraper.go`)
+and are registered as metadata via `scraperutil.ScraperRegistration`. The
+registry itself is `scraperutil.NewScraperRegistry()` (in `internal/scraperutil`);
+each scraper package exposes a `Register(reg scraperutil.ScraperRegistrar)`
+function, and `internal/scraper/registration.go` wires every package into the
+registry through `RegisterAll`. Per-scraper user settings live under
+`scrapers.<name>` in the config and are resolved into
+`cfg.Scrapers.Overrides[<name>]` (a `*models.ScraperSettings`) at startup.
+
+### 1. Implement the Scraper interface
+
+The interface requires six methods. Note that `Search` and `GetURL` take a
+`context.Context` (for cancellation/timeout through rate limiters and HTTP
+clients), `GetURL` returns an error, and `Config()`/`Close()` are required:
 
 ```go
 // internal/scraper/newscraper/newscraper.go
 package newscraper
 
 import (
-    "github.com/javinizer/javinizer-go/internal/config"
+    "context"
+    "fmt"
+    "net/http"
+    "time"
+
     "github.com/javinizer/javinizer-go/internal/models"
+    "github.com/javinizer/javinizer-go/internal/scraperconfig"
 )
 
 type Scraper struct {
-    config *models.ScraperSettings
-    client *http.Client
+    settings *scraperconfig.ScraperSettings
+    client   *http.Client
 }
 
-func New(cfg *config.Config) *Scraper {
+func newScraper(settings *scraperconfig.ScraperSettings) *Scraper {
     return &Scraper{
-        config: cfg.Scrapers.Overrides["newscraper"],
-        client: &http.Client{Timeout: 30 * time.Second},
+        settings: settings,
+        client:   &http.Client{Timeout: 30 * time.Second},
     }
 }
 
-func (s *Scraper) Name() string {
-    return "newscraper"
-}
+func (s *Scraper) Name() string                          { return "newscraper" }
+func (s *Scraper) IsEnabled() bool                       { return s.settings != nil && s.settings.Enabled }
+func (s *Scraper) Config() *scraperconfig.ScraperSettings { return s.settings }
+func (s *Scraper) Close() error                          { return nil }
 
-func (s *Scraper) IsEnabled() bool {
-    return s.config != nil && s.config.Enabled
-}
-
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
-    // Implement scraping logic
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+    // Implement scraping logic, honoring ctx for cancellation/timeouts.
     return &models.ScraperResult{
-        ID:    id,
-        Title: "...",
+        Source: "newscraper",
+        ID:     id,
+        Title:  "...",
         // ... other fields
     }, nil
 }
 
-func (s *Scraper) GetURL(id string) string {
-    return fmt.Sprintf("https://newscraper.com/movie/%s", id)
+func (s *Scraper) GetURL(ctx context.Context, id string) (string, error) {
+    return fmt.Sprintf("https://newscraper.com/movie/%s", id), nil
 }
 ```
 
-### 2. Register Scraper
+### 2. Register the scraper
+
+Add a `module.go` in the package that registers a `ScraperRegistration`
+(constructor, defaults, priority, and optional options/validator). The
+constructor receives typed `scraperutil.ScraperDeps` and returns the
+`models.Scraper` instance — it is called at startup with the resolved
+per-scraper settings:
 
 ```go
-// cmd/javinizer/root.go
-import "github.com/javinizer/javinizer-go/internal/scraper/newscraper"
+// internal/scraper/newscraper/module.go
+package newscraper
 
-registry := models.NewScraperRegistry()
-registry.Register(r18dev.New(cfg))
-registry.Register(dmm.New(cfg))
-registry.Register(newscraper.New(cfg))  // Add here
+import (
+    "github.com/javinizer/javinizer-go/internal/config"
+    "github.com/javinizer/javinizer-go/internal/models"
+    "github.com/javinizer/javinizer-go/internal/scraperutil"
+)
+
+func Register(reg scraperutil.ScraperRegistrar) {
+    reg.Register(scraperutil.ScraperRegistration{
+        Name:        "newscraper",
+        Description: "New Scraper",
+        Priority:    50,
+        Defaults: models.ScraperSettings{
+            Enabled:   true,
+            Language:  "en",
+            UserAgent: config.DefaultUserAgent,
+        },
+        Constructor: func(deps scraperutil.ScraperDeps) (models.Scraper, error) {
+            return newScraper(&deps.Settings), nil
+        },
+    })
+}
+```
+
+### 3. Wire it into RegisterAll
+
+Finally, call your `Register` from `internal/scraper/registration.go`, the
+single place that enumerates every shipped scraper:
+
+```go
+// internal/scraper/registration.go
+func RegisterAll(reg scraperutil.ScraperRegistrar) {
+    r18dev.Register(reg)
+    dmm.Register(reg)
+    // ...other scrapers...
+    newscraper.Register(reg) // Add here
+}
 ```
 
 ## Building and Releasing
@@ -144,20 +221,40 @@ registry.Register(newscraper.New(cfg))  // Add here
 ### Build for Current Platform
 
 ```bash
+# Build CLI only (no frontend)
 go build -o bin/javinizer ./cmd/javinizer
+
+# Build single binary (API + embedded Web UI) — requires the frontend bundle
+make build
 ```
 
+`make build` depends on `make web-build` (it embeds `web/dist`), so the
+frontend must be built first. Run `make web-build` once (or let the `build`
+target do it), otherwise the embedded UI falls back to placeholder assets.
+
 ### Cross-Compile
+
+For one-off local builds you can set `GOOS`/`GOARCH` directly:
 
 ```bash
 # Linux
 GOOS=linux GOARCH=amd64 go build -o bin/javinizer-linux-amd64 ./cmd/javinizer
 
-# macOS
-GOOS=darwin GOARCH=amd64 go build -o bin/javinizer-darwin-amd64 ./cmd/javinizer
+# macOS (Apple Silicon)
+GOOS=darwin GOARCH=arm64 go build -o bin/javinizer-darwin-arm64 ./cmd/javinizer
 
 # Windows
 GOOS=windows GOARCH=amd64 go build -o bin/javinizer-windows-amd64.exe ./cmd/javinizer
+```
+
+For release artifacts, prefer the Makefile targets, which embed the web bundle
+(`CGO_ENABLED=1` with release LDFLAGS) and produce a universal macOS binary:
+
+```bash
+make build-cli-linux    # bin/javinizer-linux-amd64
+make build-cli-darwin   # bin/javinizer-darwin-universal (amd64 + arm64 via lipo)
+make build-cli-windows  # bin/javinizer-windows-amd64.exe
+make build-cli-all      # all of the above
 ```
 
 ### Release Workflow (GitHub Actions)
@@ -181,19 +278,28 @@ Manual dispatch (`workflow_dispatch`) also supports snapshot/stable/prerelease r
 
 Published tags are determined by release type:
 
-- Version tag: always (for example `v0.1.1`, `v0.1.1-alpha`, `v0.1.1-nightly.20260316`)
+- Version tag: always (for example `v0.1.1`, `v0.1.1-alpha`, `0.0.0-nightly.<sha7>`)
 - `latest`: published for versioned release builds
 - Stable-only aliases: `v<major>`, `v<major>.<minor>`
-- Nightly aliases: `nightly`, `nightly-YYYYMMDD`, and `sha-<shortsha>`
+- Nightly aliases: `nightly` and `nightly-<full-sha>`
 
 ### CI Quality Gates
 
+CI is defined in `.github/workflows/test.yml` and runs 9 jobs in parallel on
+every push and pull request. The local gate `make ci` mirrors the Go-side
+checks: `vet`, `lint`, `vuln`, `coverage-check`, `test-race`, `config-drift`,
+`check-import-guard`, and `check-mocks`. Run `make ci-full` to also run the
+frontend suite (`make web-test`), or `make simulate-ci` to replay the GitHub
+Actions jobs locally.
+
 Main CI checks include:
 
-- Unit/integration tests
-- Coverage threshold enforcement
-- Race detector tests
-- Linting/static analysis
+- Unit/integration tests (Linux + Windows)
+- Coverage threshold enforcement (75% line coverage)
+- Race detector tests (`internal/worker`, `internal/tui`, `internal/websocket`, `internal/api`)
+- Linting and static analysis (go vet, golangci-lint v2.9.0, gofmt)
+- Vulnerability scanning (govulncheck)
+- Frontend tests (Vitest)
 - Build and Docker verification
 
 ### Internal API Structure
@@ -218,10 +324,10 @@ The project uses the following tools for code quality:
   - Run: `make vet` or `go vet ./...`
   - CI: Required to pass in CI pipeline
 
-- **golangci-lint** - Comprehensive linter suite (v2.4.0+)
+- **golangci-lint** - Comprehensive linter suite (v2.9.0+)
   - Config: `.golangci.yml`
   - Run: `make lint` or `golangci-lint run`
-  - CI: Required to pass with 5m timeout
+  - CI: Required to pass (pinned to v2.9.0 in `.github/workflows/test.yml`)
 
 ### Run Commands
 
@@ -338,16 +444,22 @@ fix(batch): resolve race condition in job processing
    - Linting passes (`make lint`)
    - Build succeeds (`make build`)
    - Swagger documentation is up to date
+   - Mockery mocks are up to date
 
 ### CI Pipeline
 
-All pull requests trigger the following CI jobs (`.github/workflows/test.yml`):
+All pull requests trigger the following CI jobs (`.github/workflows/test.yml`),
+which run in parallel:
 
-- **Unit Tests & Coverage** - Runs all tests and checks 75% coverage threshold
-- **Race Detector Tests** - Tests concurrent packages with race detector
-- **Linting & Code Quality** - Runs go vet, golangci-lint, and format check
-- **Build Verification** - Builds binary, generates Swagger docs, and verifies embedded web UI
-- **Docker Build Verification** - Builds Docker image and verifies metadata
+- **Unit Tests & Coverage** (`test`) - Runs all Go tests and enforces the 75% line-coverage threshold
+- **Race Detector Tests** (`race-tests`) - Runs the race detector on `internal/worker`, `internal/tui`, `internal/websocket`, and `internal/api`
+- **Linting & Code Quality** (`lint`) - Runs go vet, golangci-lint (v2.9.0), gofmt check, and the `internal/api` file-size guardrail
+- **Vulnerability Scan** (`vuln`) - Runs `govulncheck ./...`
+- **Unit Tests (Windows)** (`test-windows`) - Runs the Go test suite on Windows
+- **Frontend Tests** (`frontend-tests`) - Runs the Vitest suite (`npm run test --prefix web/frontend`)
+- **Build Verification** (`build`) - Builds the CLI, generates and verifies Swagger docs, verifies mockery mocks are up to date, and verifies the embedded web UI
+- **Docker Build Verification** (`docker-build`) - Builds the Docker image and verifies image metadata
+- **Fullstack E2E Tests** (`fullstack-e2e`) - Runs the Playwright fullstack E2E suite (`make test-e2e-fullstack`)
 
 ### Pre-commit Checklist
 
