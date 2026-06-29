@@ -232,6 +232,8 @@
 								onUseScreenshotAsCover={s.useScreenshotAsCover}
 								onResetPoster={s.resetPoster}
 							onResetCover={s.resetCover}
+							canResetPoster={s.canResetPoster}
+							canResetCover={s.canResetCover}
 								previewImageURL={s.reviewPageController.previewImageURL}
 							/>
 

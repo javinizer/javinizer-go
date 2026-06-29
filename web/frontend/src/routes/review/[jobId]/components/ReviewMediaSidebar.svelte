@@ -21,6 +21,8 @@
 		onUseScreenshotAsCover: (url: string) => void;
 		onResetPoster?: () => void;
 		onResetCover?: () => void;
+		canResetPoster?: boolean;
+		canResetCover?: boolean;
 		previewImageURL: (url: string | undefined) => string;
 	}
 
@@ -40,6 +42,8 @@
 		onUseScreenshotAsCover,
 		onResetPoster,
 		onResetCover,
+		canResetPoster = true,
+		canResetCover = true,
 		previewImageURL
 	}: Props = $props();
 </script>
@@ -55,7 +59,7 @@
 							size="sm"
 							variant="outline"
 							onclick={onResetPoster}
-							disabled={!currentMovie.id}
+							disabled={!currentMovie.id || !canResetPoster}
 							class="text-xs"
 							title="Reset to original scraped poster"
 						>
@@ -116,7 +120,7 @@
 						size="sm"
 						variant="outline"
 						onclick={onResetCover}
-						disabled={!currentMovie.id}
+						disabled={!currentMovie.id || !canResetCover}
 						class="text-xs"
 						title="Reset to original scraped cover"
 					>

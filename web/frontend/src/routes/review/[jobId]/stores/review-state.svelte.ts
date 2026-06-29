@@ -647,6 +647,27 @@ export function createReviewState(pageStore: Page) {
 		posterPreviewOverrides.delete(currentResult.file_path);
 	}
 
+	// Whether the current movie has drifted from its scraped baseline — mirrors
+	// resetPoster/resetCover's no-op guards so the Reset button is disabled
+	// exactly when Reset would do nothing (UX: no "reset" when already at baseline).
+	const canResetPoster = $derived.by(() => {
+		if (!currentResult || !currentMovie) return false;
+		const original = originalPosterState.get(currentResult.file_path);
+		if (!original || !original.poster_url) return false;
+		return (
+			currentMovie.poster_url !== original.poster_url ||
+			currentMovie.cropped_poster_url !== original.cropped_poster_url ||
+			currentMovie.should_crop_poster !== original.should_crop_poster
+		);
+	});
+
+	const canResetCover = $derived.by(() => {
+		if (!currentResult || !currentMovie) return false;
+		const original = originalCoverState.get(currentResult.file_path);
+		if (original === undefined) return false;
+		return currentMovie.cover_url !== original;
+	});
+
 	function resetPoster() {
 		if (!currentResult || !currentMovie) return;
 
@@ -1470,6 +1491,12 @@ export function createReviewState(pageStore: Page) {
 		},
 		get currentResult() {
 			return currentResult;
+		},
+		get canResetPoster() {
+			return canResetPoster;
+		},
+		get canResetCover() {
+			return canResetCover;
 		},
 		get currentMovie() {
 			return currentMovie;

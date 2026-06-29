@@ -130,3 +130,28 @@ func backupCoverOriginal(current, next *models.Movie) {
 		next.Poster.OriginalCoverURL = current.Poster.CoverURL
 	}
 }
+
+// establishScrapedBaseline sets the poster-original revert group on target
+// from source's current poster fields, establishing the scraper's value as
+// the Reset baseline. Called by both the initial scrape phase and the
+// rescrape phase (merge + non-merge paths) so the review UI's Reset always
+// returns to what the scraper produced — never a stale prior-content value
+// carried across a content-id change, and never empty (which would leave
+// Reset without a target until the first manual edit).
+//
+// This is the eager counterpart to backupPosterOriginals: backupPosterOriginals
+// snapshots the pre-edit state lazily on the first manual edit, while
+// establishScrapedBaseline snapshots the scraped state eagerly at scrape time.
+// Mirrors backupPosterOriginals' field grouping (PosterURL/CroppedPosterURL/
+// ShouldCropPoster) and extends it to CoverURL, which the lazy backup handles
+// separately via backupCoverOriginal.
+func establishScrapedBaseline(target, source *models.Movie) {
+	if target == nil || source == nil {
+		return
+	}
+	shouldCrop := source.Poster.ShouldCropPoster
+	target.Poster.OriginalPosterURL = source.Poster.PosterURL
+	target.Poster.OriginalCroppedPosterURL = source.Poster.CroppedPosterURL
+	target.Poster.OriginalShouldCropPoster = &shouldCrop
+	target.Poster.OriginalCoverURL = source.Poster.CoverURL
+}

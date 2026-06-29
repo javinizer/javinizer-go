@@ -315,6 +315,12 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			if existing, getErr := inputs.ResultMap.GetMovieResult(lookup.FilePath); getErr == nil && existing != nil && existing.Movie != nil {
 				movieResult.Movie = mergeRescrapeMovie(existing.Movie, movieResult.Movie, cmd.Merge, lookup.FilePath)
 			}
+		} else {
+			// Non-merge (wholesale-replace) path: the scraped movie carries no
+			// Original* (scrapers don't populate them), so without this the
+			// revert baseline would be wiped on rescrape. Establish the scraper
+			// baseline from the scraped movie's own poster fields.
+			establishScrapedBaseline(movieResult.Movie, movieResult.Movie)
 		}
 
 		// Commit result
@@ -355,5 +361,48 @@ func mergeRescrapeMovie(existing, scraped *models.Movie, opts workflow.MergeOpti
 		return scraped
 	}
 	merged.Merged.ID = scraped.ID
+
+	// Image URLs (PosterURL/CoverURL) are content-bound scraped assets, not
+	// curated metadata. The generic merge treats them as ordinary string
+	// fields, so the default prefer-nfo rescrape preserves the existing
+	// movie's images — defeating the rescrape's purpose (a refresh rescrape
+	// kept a stale/broken poster) and, when the rescrape resolves a different
+	// content-id, leaving images that belong to a different movie on the
+	// resolved content. CroppedPosterURL is already special-cased to always
+	// use the scraped value in the merge engine; PosterURL/CoverURL are
+	// reconciled here, locally to the rescrape path (the shared merge engine
+	// is intentionally untouched so the organize/apply path can still
+	// preserve a user's on-disk NFO images).
+	//
+	// Rule:
+	//   - content-id change: take the scraper's images, clearing when the
+	//     scraper has none (the existing images are for different content).
+	//   - same content: take the scraper's images when it provides them
+	//     (a rescrape should refresh), otherwise keep the merged value so a
+	//     scraper that found no image doesn't wipe a valid existing one.
+	if existing != nil && scraped.ID != "" && scraped.ID != existing.ID {
+		merged.Merged.Poster.CoverURL = strings.TrimSpace(scraped.Poster.CoverURL)
+		merged.Merged.Poster.PosterURL = strings.TrimSpace(scraped.Poster.PosterURL)
+	} else {
+		if strings.TrimSpace(scraped.Poster.CoverURL) != "" {
+			merged.Merged.Poster.CoverURL = scraped.Poster.CoverURL
+		}
+		if strings.TrimSpace(scraped.Poster.PosterURL) != "" {
+			merged.Merged.Poster.PosterURL = scraped.Poster.PosterURL
+		}
+	}
+
+	// The poster-original group (OriginalPosterURL/OriginalCroppedPosterURL/
+	// OriginalShouldCropPoster/OriginalCoverURL) is the revert baseline the
+	// review UI restores on Reset — it must track the scraper's value, not be
+	// preserved across content changes. The generic prefer-nfo merge would
+	// carry the existing (possibly previous-content) Original* forward, so a
+	// rescrape that resolved a different content-id would leave the revert
+	// target pointing at the old content's images. Re-establish the baseline
+	// from the freshly scraped movie so Reset always returns to what this
+	// rescrape produced. (The frontend already falls back to the current field
+	// when Original* is empty, so an empty scraper value is the correct
+	// baseline when the scraper found no image.)
+	establishScrapedBaseline(merged.Merged, scraped)
 	return merged.Merged
 }

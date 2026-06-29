@@ -223,3 +223,35 @@ func TestPersistFunc_SatisfiesPersister(t *testing.T) {
 	var _ persister = persistFunc(nil)
 	var _ persister = persistFunc(func() {})
 }
+
+// TestScrapePhase_Run_EstablishesScrapedBaseline verifies the initial scrape
+// eagerly sets the poster-original revert group (Original*) to the scraper's
+// value, so the review UI's Reset has a baseline immediately — symmetric with
+// the rescrape path. Without this, Original* stays empty until the first
+// manual edit snapshots it lazily via backupPosterOriginals.
+func TestScrapePhase_Run_EstablishesScrapedBaseline(t *testing.T) {
+	movie := &models.Movie{
+		ID:    "TEST-001",
+		Title: "Scraped Title",
+	}
+	movie.Poster.PosterURL = "https://scraper.invalid/poster.jpg"
+	movie.Poster.CoverURL = "https://scraper.invalid/cover.jpg"
+	movie.Poster.ShouldCropPoster = true
+	wf := &stubWorkflow{scrapeResult: &scrape.ScrapeResult{Movie: movie}}
+	inputs := makeInputs(wf)
+	updater := inputs.Updater.(*stubUpdater)
+
+	NewScrapePhase().Run(context.Background(), inputs, []string{"file.mp4"}, ScrapePhaseConfig{})
+
+	r := updater.getResult("file.mp4")
+	require.NotNil(t, r)
+	require.NotNil(t, r.Movie)
+	assert.Equal(t, "https://scraper.invalid/poster.jpg", r.Movie.Poster.OriginalPosterURL)
+	assert.Equal(t, "https://scraper.invalid/cover.jpg", r.Movie.Poster.OriginalCoverURL)
+	if r.Movie.Poster.OriginalShouldCropPoster == nil || !*r.Movie.Poster.OriginalShouldCropPoster {
+		t.Fatal("OriginalShouldCropPoster should mirror the scraped ShouldCropPoster (true)")
+	}
+	// No PosterGen in this test, so CroppedPosterURL is empty and its baseline
+	// mirrors that (the rescrape path captures the generated crop separately).
+	assert.Equal(t, "", r.Movie.Poster.OriginalCroppedPosterURL)
+}

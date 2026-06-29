@@ -264,6 +264,16 @@ func interpretScrapeResult(
 		fileResult.PosterGenerated = true
 	}
 
+	// Establish the scraped poster state as the Reset baseline so the review
+	// UI's Reset returns to what this scrape produced. Done after poster
+	// generation so the generated CroppedPosterURL is captured too. Mirrors the
+	// rescrape path (establishScrapedBaseline) for full symmetry — without it,
+	// Original* stays empty until the first manual edit snapshots it lazily via
+	// backupPosterOriginals, which is inconsistent with the rescrape baseline.
+	if fileResult.Movie != nil {
+		establishScrapedBaseline(fileResult.Movie, fileResult.Movie)
+	}
+
 	inputs.Updater.UpdateFileResult(filePath, fileResult)
 	if prov != nil {
 		inputs.Updater.SetProvenance(filePath, prov)
