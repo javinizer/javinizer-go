@@ -63,6 +63,20 @@ func (o *OutputConfig) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
+	// Legacy alias: "delimiter" was the pre-rename key for actress_delimiter
+	// (still accepted in YAML via LegacyDelimiter + normalize). json:"-" keeps
+	// LegacyDelimiter out of JSON entirely, so without this remap a JSON
+	// payload carrying the legacy key would be silently dropped. Honor it
+	// only when the canonical actress_delimiter is absent so an explicit
+	// canonical value always wins (and a stray legacy "" cannot wipe it).
+	if _, hasCanonical := probe["actress_delimiter"]; !hasCanonical {
+		if raw, hasLegacy := probe["delimiter"]; hasLegacy {
+			probe["actress_delimiter"] = raw
+			delete(probe, "delimiter")
+			data, _ = json.Marshal(probe)
+		}
+	}
+
 	if err := json.Unmarshal(data, &o.Template); err != nil {
 		return err
 	}
