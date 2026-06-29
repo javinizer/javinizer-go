@@ -138,12 +138,27 @@ func TestOutputConfigJSON_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.Download, restored.Download)
 }
 
-// TestOutputConfigUnmarshalJSON_InvalidJSON verifies malformed input errors
-// at the top-level probe unmarshal (line 47-48).
+// TestOutputConfigUnmarshalJSON_InvalidJSON verifies invalid input surfaces an
+// error from UnmarshalJSON. Two cases: (1) syntactically invalid JSON is
+// rejected by json.Unmarshal's own checkValid before UnmarshalJSON runs;
+// (2) valid JSON of the wrong type (array) reaches UnmarshalJSON and fails
+// the probe unmarshal into map[string]json.RawMessage, exercising the
+// top-level error-return branch.
 func TestOutputConfigUnmarshalJSON_InvalidJSON(t *testing.T) {
-	var o OutputConfig
-	err := json.Unmarshal([]byte("{not json"), &o)
-	assert.Error(t, err)
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"malformed json", "{not json"},
+		{"valid json wrong type (array)", "[]"},
+		{"valid json wrong type (number)", "42"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var o OutputConfig
+			assert.Error(t, json.Unmarshal([]byte(c.raw), &o))
+		})
+	}
 }
 
 // TestOutputConfigUnmarshalJSON_NestedPathError verifies a malformed nested
@@ -268,12 +283,25 @@ func TestNFOConfigJSON_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.Extra, restored.Extra)
 }
 
-// TestNFOConfigUnmarshalJSON_InvalidJSON verifies malformed input errors
-// at the top-level probe unmarshal (line 46-47).
+// TestNFOConfigUnmarshalJSON_InvalidJSON verifies invalid input surfaces an
+// error from UnmarshalJSON. The valid-JSON-wrong-type (array) case reaches
+// UnmarshalJSON and fails the probe unmarshal into map[string]json.RawMessage,
+// exercising the top-level error-return branch.
 func TestNFOConfigUnmarshalJSON_InvalidJSON(t *testing.T) {
-	var n NFOConfig
-	err := json.Unmarshal([]byte("}bad json{"), &n)
-	assert.Error(t, err)
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"malformed json", "}bad json{"},
+		{"valid json wrong type (array)", "[]"},
+		{"valid json wrong type (number)", "42"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var n NFOConfig
+			assert.Error(t, json.Unmarshal([]byte(c.raw), &n))
+		})
+	}
 }
 
 // TestNFOConfigUnmarshalJSON_NestedPathError verifies a malformed nested
