@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.0-rc2] - 2026-06-30
+
+### Added
+
+- Manual scrape: per-file ID/URL override + /manual review route (#68)
+
+### Fixed
+
+- WebUI Output/NFO settings broken by nested JSON (#70) — OutputConfig and NFOConfig serialized as nested objects while the frontend read a flat shape, leaving download checkboxes unchecked and dropping saves; also fixed the delimiter ↔ actress_delimiter mismatch and guarded array .join() against undefined. Closes #69.
+- Rescrape: refresh images and reset baseline on content-id change (#67)
+- Poster: preserve original cover URL across resets
+
+### Changed
+
+- Docs: fix accuracy across all docs per audit (18 files)
+- CI(docker): bump login-action to v4.2.0 (Node 24 runtime)
+- Test: reach 100% coverage on Output/NFO UnmarshalJSON probe branch
+
 ## [v1.0.0-rc1] - 2026-06-28
 
 ### Changed
