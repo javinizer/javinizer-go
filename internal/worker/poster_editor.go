@@ -156,9 +156,19 @@ func establishScrapedBaseline(target, source *models.Movie) {
 	if target == nil || source == nil {
 		return
 	}
-	shouldCrop := source.Poster.ShouldCropPoster
-	target.Poster.OriginalPosterURL = strings.TrimSpace(source.Poster.PosterURL)
-	target.Poster.OriginalCroppedPosterURL = strings.TrimSpace(source.Poster.CroppedPosterURL)
-	target.Poster.OriginalShouldCropPoster = &shouldCrop
+	posterURL := strings.TrimSpace(source.Poster.PosterURL)
+	croppedURL := strings.TrimSpace(source.Poster.CroppedPosterURL)
+	target.Poster.OriginalPosterURL = posterURL
+	target.Poster.OriginalCroppedPosterURL = croppedURL
+	// Only anchor the crop baseline when there's a real poster baseline. When
+	// the scraper found no image, leave OriginalShouldCropPoster nil so the
+	// frontend falls back to the current field (matching the empty-URL
+	// fallback) instead of a non-nil false that could spuriously enable Reset.
+	if posterURL != "" || croppedURL != "" {
+		shouldCrop := source.Poster.ShouldCropPoster
+		target.Poster.OriginalShouldCropPoster = &shouldCrop
+	} else {
+		target.Poster.OriginalShouldCropPoster = nil
+	}
 	target.Poster.OriginalCoverURL = strings.TrimSpace(source.Poster.CoverURL)
 }

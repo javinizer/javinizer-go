@@ -7,6 +7,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Tests below assert the EXPECTED rescrape image-refresh semantics across the
@@ -262,4 +263,28 @@ func TestRescrapeImage_SameID_PaddedScraperURLTrimmed(t *testing.T) {
 	assert.Equal(t, "https://new.invalid/poster.jpg", merged.Poster.PosterURL)
 	assert.Equal(t, "https://new.invalid/cover.jpg", merged.Poster.OriginalCoverURL)
 	assert.Equal(t, "https://new.invalid/poster.jpg", merged.Poster.OriginalPosterURL)
+}
+
+// When the scraper found no poster image, establishScrapedBaseline leaves
+// OriginalShouldCropPoster nil (not a non-nil false) so the frontend falls
+// back to the current field — matching the empty-URL fallback. A non-nil
+// false would combine with an edited currentMovie to spuriously enable Reset.
+func TestEstablishScrapedBaseline_EmptyPoster_LeavesCropBaselineNil(t *testing.T) {
+	target := &models.Movie{Poster: models.PosterState{ShouldCropPoster: true}}
+	source := &models.Movie{Poster: models.PosterState{ShouldCropPoster: false}}
+	establishScrapedBaseline(target, source)
+	assert.Equal(t, "", target.Poster.OriginalPosterURL)
+	assert.Equal(t, "", target.Poster.OriginalCroppedPosterURL)
+	assert.Nil(t, target.Poster.OriginalShouldCropPoster, "crop baseline must be nil when no poster baseline exists")
+	assert.Equal(t, "", target.Poster.OriginalCoverURL)
+}
+
+// A scraper with a poster image anchors the crop baseline, mirroring the
+// scraped ShouldCropPoster so Reset reflects the rescrape's crop intent.
+func TestEstablishScrapedBaseline_WithPoster_AnchorsCropBaseline(t *testing.T) {
+	target := &models.Movie{}
+	source := &models.Movie{Poster: models.PosterState{PosterURL: "https://x.invalid/p.jpg", ShouldCropPoster: true}}
+	establishScrapedBaseline(target, source)
+	require.NotNil(t, target.Poster.OriginalShouldCropPoster)
+	assert.True(t, *target.Poster.OriginalShouldCropPoster)
 }

@@ -634,18 +634,26 @@ export function createReviewState(pageStore: Page) {
 	// in-review rescrape, where the snapshot maps would go stale and Reset
 	// would restore the *prior* content's image. The `|| current` fallback
 	// covers older movies persisted before the baseline was eagerly set.
+	//
+	// The fallback reads from the unedited loaded movie (`currentResult.movie`)
+	// — NOT `currentMovie`, which may already be an `editedMovies` override.
+	// Anchoring the fallback to the edited movie would make the baseline drift
+	// with the edit, so Reset (which compares the edited `currentMovie` against
+	// this baseline) would no-op incorrectly for legacy rows.
 	const posterBaseline = $derived.by(() => {
-		if (!currentMovie) return undefined;
+		if (!currentResult || !currentResult.movie) return undefined;
+		const loaded = currentResult.movie;
 		return {
-			poster_url: currentMovie.original_poster_url || currentMovie.poster_url || '',
-			cropped_poster_url: currentMovie.original_cropped_poster_url || currentMovie.cropped_poster_url || '',
-			should_crop_poster: currentMovie.original_should_crop_poster ?? currentMovie.should_crop_poster ?? false,
+			poster_url: loaded.original_poster_url || loaded.poster_url || '',
+			cropped_poster_url: loaded.original_cropped_poster_url || loaded.cropped_poster_url || '',
+			should_crop_poster: loaded.original_should_crop_poster ?? loaded.should_crop_poster ?? false,
 		};
 	});
 
 	const coverBaseline = $derived.by(() => {
-		if (!currentMovie) return undefined;
-		return currentMovie.original_cover_url || currentMovie.cover_url || '';
+		if (!currentResult || !currentResult.movie) return undefined;
+		const loaded = currentResult.movie;
+		return loaded.original_cover_url || loaded.cover_url || '';
 	});
 
 	// Whether the current movie has drifted from its scraped baseline — mirrors

@@ -320,7 +320,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// with existing) or in the unified establishScrapedBaseline call below
 		// (non-merge, or merge-enabled with no prior result).
 		baselineFromScraped := true
-		if cmd.MergeEnabled && movieResult.Movie != nil {
+		if cmd.MergeEnabled && movieResult.Movie != nil && inputs.ResultMap != nil {
 			if existing, getErr := inputs.ResultMap.GetMovieResult(lookup.FilePath); getErr == nil && existing != nil && existing.Movie != nil {
 				movieResult.Movie = mergeRescrapeMovie(existing.Movie, movieResult.Movie, cmd.Merge, lookup.FilePath)
 				baselineFromScraped = false // mergeRescrapeMovie already established it
@@ -367,9 +367,15 @@ func mergeRescrapeMovie(existing, scraped *models.Movie, opts workflow.MergeOpti
 	merged, err := nfo.MergeMovieMetadataWithOptions(scraped, existing, opts.ScalarStrategy, opts.ArrayStrategy)
 	if err != nil {
 		logging.Errorf("rescrape merge failed for %s, falling back to replace: %v", filePath, err)
+		// Establish the scraped baseline on the wholesale-replace fallback so
+		// the caller's baselineFromScraped=false expectation still holds; without
+		// this the returned movie would carry no Original* and Reset would have
+		// no target until the first manual edit snapshotted it lazily.
+		establishScrapedBaseline(scraped, scraped)
 		return scraped
 	}
 	if merged == nil || merged.Merged == nil {
+		establishScrapedBaseline(scraped, scraped)
 		return scraped
 	}
 	merged.Merged.ID = scraped.ID
@@ -392,16 +398,27 @@ func mergeRescrapeMovie(existing, scraped *models.Movie, opts workflow.MergeOpti
 	//   - same content: take the scraper's images when it provides them
 	//     (a rescrape should refresh), otherwise keep the merged value so a
 	//     scraper that found no image doesn't wipe a valid existing one.
+	takeScraperImages := false
 	if existing != nil && scraped.ID != "" && scraped.ID != existing.ID {
 		merged.Merged.Poster.CoverURL = strings.TrimSpace(scraped.Poster.CoverURL)
 		merged.Merged.Poster.PosterURL = strings.TrimSpace(scraped.Poster.PosterURL)
+		takeScraperImages = true
 	} else {
 		if strings.TrimSpace(scraped.Poster.CoverURL) != "" {
 			merged.Merged.Poster.CoverURL = strings.TrimSpace(scraped.Poster.CoverURL)
+			takeScraperImages = true
 		}
 		if strings.TrimSpace(scraped.Poster.PosterURL) != "" {
 			merged.Merged.Poster.PosterURL = strings.TrimSpace(scraped.Poster.PosterURL)
+			takeScraperImages = true
 		}
+	}
+	// When the scraper's poster is authoritative (content-id change, or it
+	// provided a fresh image), carry its crop state too — otherwise the merged
+	// movie would keep the existing (possibly different) ShouldCropPoster and
+	// Reset would not reflect the rescrape's crop intent.
+	if takeScraperImages {
+		merged.Merged.Poster.ShouldCropPoster = scraped.Poster.ShouldCropPoster
 	}
 
 	// The poster-original group (OriginalPosterURL/OriginalCroppedPosterURL/
