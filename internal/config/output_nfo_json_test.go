@@ -138,11 +138,42 @@ func TestOutputConfigJSON_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.Download, restored.Download)
 }
 
-// TestOutputConfigUnmarshalJSON_InvalidJSON verifies malformed input errors.
+// TestOutputConfigUnmarshalJSON_InvalidJSON verifies malformed input errors
+// at the top-level probe unmarshal (line 47-48).
 func TestOutputConfigUnmarshalJSON_InvalidJSON(t *testing.T) {
 	var o OutputConfig
 	err := json.Unmarshal([]byte("{not json"), &o)
 	assert.Error(t, err)
+}
+
+// TestOutputConfigUnmarshalJSON_NestedPathError verifies a malformed nested
+// payload (Template present but not an object) errors via the nested branch.
+func TestOutputConfigUnmarshalJSON_NestedPathError(t *testing.T) {
+	var o OutputConfig
+	err := json.Unmarshal([]byte(`{"Template":"not-an-object"}`), &o)
+	assert.Error(t, err)
+}
+
+// TestOutputConfigUnmarshalJSON_FlatSubStructErrors verifies type-mismatched
+// values in each flat sub-struct field surface an error from every per-group
+// unmarshal branch (Template/Operation/MediaFormat/Download).
+func TestOutputConfigUnmarshalJSON_FlatSubStructErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"template field wrong type", `{"max_title_length":"not-int"}`},
+		{"operation field wrong type", `{"rename_file":"not-bool"}`},
+		{"mediaformat field wrong type", `{"screenshot_padding":"not-int"}`},
+		{"download field wrong type", `{"download_timeout":"not-int"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var o OutputConfig
+			err := json.Unmarshal([]byte(c.raw), &o)
+			assert.Error(t, err)
+		})
+	}
 }
 
 // TestNFOConfigMarshalJSON_Flat verifies NFOConfig serializes to a flat JSON
@@ -237,11 +268,41 @@ func TestNFOConfigJSON_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.Extra, restored.Extra)
 }
 
-// TestNFOConfigUnmarshalJSON_InvalidJSON verifies malformed input errors.
+// TestNFOConfigUnmarshalJSON_InvalidJSON verifies malformed input errors
+// at the top-level probe unmarshal (line 46-47).
 func TestNFOConfigUnmarshalJSON_InvalidJSON(t *testing.T) {
 	var n NFOConfig
 	err := json.Unmarshal([]byte("}bad json{"), &n)
 	assert.Error(t, err)
+}
+
+// TestNFOConfigUnmarshalJSON_NestedPathError verifies a malformed nested
+// payload (Feature present but not an object) errors via the nested branch.
+func TestNFOConfigUnmarshalJSON_NestedPathError(t *testing.T) {
+	var n NFOConfig
+	err := json.Unmarshal([]byte(`{"Feature":"not-an-object"}`), &n)
+	assert.Error(t, err)
+}
+
+// TestNFOConfigUnmarshalJSON_FlatSubStructErrors verifies type-mismatched
+// values in each flat sub-struct field surface an error from every per-group
+// unmarshal branch (Feature/Format/Extra).
+func TestNFOConfigUnmarshalJSON_FlatSubStructErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"feature field wrong type", `{"enabled":"not-bool"}`},
+		{"format field wrong type", `{"first_name_order":"not-bool"}`},
+		{"extra field wrong type", `{"tag":"not-an-array"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var n NFOConfig
+			err := json.Unmarshal([]byte(c.raw), &n)
+			assert.Error(t, err)
+		})
+	}
 }
 
 // TestNFOConfigUnmarshalJSON_NullArrays verifies null array fields decode to
