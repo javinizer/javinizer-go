@@ -125,3 +125,29 @@ func TestValidateManualURL_RedactsQueryInError(t *testing.T) {
 	assert.NotContains(t, err.Error(), "token=secret", "query token must be redacted from the error")
 	assert.NotContains(t, err.Error(), "secret")
 }
+
+// The length cap is a CHARACTER (rune) limit, not a byte limit. A multibyte
+// input (e.g. CJK IDs) at the rune cap must pass even though its byte length
+// exceeds the cap; one rune over must fail.
+func TestValidateAndSanitizeManualInputs_LengthCapIsRuneCount(t *testing.T) {
+	// '中' is 3 bytes; 4096 runes = 12288 bytes, well over the old byte cap.
+	atCap := strings.Repeat("中", maxManualInputLen)     // exactly the cap → pass
+	overCap := strings.Repeat("中", maxManualInputLen+1) // one rune over → fail
+
+	if _, err := validateAndSanitizeManualInputs(map[string]string{"/d/a.mp4": atCap}, []string{"/d/a.mp4"}, nil); err != nil {
+		t.Fatalf("input at the rune cap should pass, got: %v", err)
+	}
+	_, err := validateAndSanitizeManualInputs(map[string]string{"/d/a.mp4": overCap}, []string{"/d/a.mp4"}, nil)
+	require.Error(t, err, "one rune over the cap should fail even though byte length >> cap")
+	assert.Contains(t, err.Error(), "exceeds")
+}
+
+// A malformed URL triggering a url.Parse error must not echo the raw input
+// (which may carry a query token) back in the 400.
+func TestValidateManualURL_RedactsParseError(t *testing.T) {
+	// A control char in the host forces url.Parse to fail while keeping a
+	// query-like token; the error must not contain the token.
+	err := validateManualURL("https://exa\tmple.com/v/123?token=secret", nil)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "token=secret", "parse error must not echo the raw query token")
+}

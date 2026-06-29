@@ -29,7 +29,8 @@
 	import {
 		loadManualInputs,
 		persistManualInputs,
-		clearManualInputs
+		clearManualInputs,
+		batchKeyFromFiles
 	} from '$lib/stores/manual-inputs-session';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -41,6 +42,9 @@
 
 	let snapshot: PendingScrape | null = $state(null);
 	let rows: ManualRow[] = $state([]);
+	// Fixed at mount from the initial file set so edits/removals don't rekey
+	// the persisted manual inputs mid-session.
+	let batchKey = '';
 	let submitting = $state(false);
 	let errorMsg = $state<string | null>(null);
 	let showScraperModal = $state(false);
@@ -126,22 +130,23 @@
 	onMount(() => {
 		const snap = getPendingScrape();
 		if (!snap) {
-			goto('/browse', { replaceState: true });
+			void goto('/browse', { replaceState: true });
 			return;
 		}
 		snapshot = snap;
-		const stored = loadManualInputs();
+		batchKey = batchKeyFromFiles(snap.files);
+		const stored = loadManualInputs(batchKey);
 		const merged = mergeManualInputs(stored, snap.files);
 		rows = snap.files.map((f) => ({ filePath: f, input: merged[f] ?? '' }));
 	});
 
 	$effect(() => {
-		if (!snapshot) return;
+		if (!snapshot || !batchKey) return;
 		const map = mergeManualInputs(
 			Object.fromEntries(rows.map((r) => [r.filePath, r.input])),
 			rows.map((r) => r.filePath)
 		);
-		persistManualInputs(map);
+		persistManualInputs(batchKey, map);
 	});
 
 	// Persist inherited-setting edits (operation mode, destination, scrapers,
@@ -156,6 +161,12 @@
 
 	function removeRow(idx: number) {
 		rows = rows.filter((_, i) => i !== idx);
+		if (snapshot) {
+			// Keep snapshot.files in sync with the visible rows so refresh
+			// recovery (which rebuilds from snapshot.files) doesn't restore a
+			// removed file, and the persisted pending-scrape stays consistent.
+			snapshot = { ...snapshot, files: rows.map((row) => row.filePath) };
+		}
 	}
 
 	function clearAllOverrides() {
@@ -182,7 +193,7 @@
 			await queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
 			clearPendingScrape();
 			rows = [];
-			clearManualInputs();
+			clearManualInputs(batchKey);
 		} catch (e) {
 			errorMsg = e instanceof Error ? e.message : 'Failed to start manual scrape';
 		} finally {
@@ -204,7 +215,7 @@
 						Review each file and override its ID or URL before scraping.
 					</p>
 				</div>
-				<Button variant="ghost" size="sm" onclick={() => goto('/browse')}>
+				<Button variant="ghost" size="sm" onclick={() => void goto('/browse')}>
 					{#snippet children()}
 						<ArrowLeft class="h-4 w-4" aria-hidden="true" />
 						Back to browse

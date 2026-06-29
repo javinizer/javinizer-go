@@ -117,9 +117,9 @@
 		if (scrapeStateHydrated) return;
 		scrapeStateHydrated = true;
 		if (typeof sessionStorage === 'undefined') return;
-		const raw = sessionStorage.getItem(STORAGE_KEY_SCRAPE_STATE);
-		if (!raw) return;
 		try {
+			const raw = sessionStorage.getItem(STORAGE_KEY_SCRAPE_STATE);
+			if (!raw) return;
 			const saved = JSON.parse(raw) as Partial<BrowseScrapeState>;
 			if (Array.isArray(saved.selectedFiles)) selectedFiles = saved.selectedFiles;
 			if (saved.operationMode === 'scrape' || saved.operationMode === 'update') operationMode = saved.operationMode;
@@ -127,9 +127,17 @@
 			if (typeof saved.operationModeOverrideTouched === 'boolean') operationModeOverrideTouched = saved.operationModeOverrideTouched;
 			if (typeof saved.forceRefresh === 'boolean') forceRefresh = saved.forceRefresh;
 			if (typeof saved.showScraperSelector === 'boolean') showScraperSelector = saved.showScraperSelector;
-			if (Array.isArray(saved.selectedScrapers) && saved.selectedScrapers.length > 0) {
+			if (
+				Array.isArray(saved.selectedScrapers) &&
+				saved.selectedScrapers.every((s) => typeof s === 'string')
+			) {
 				selectedScrapers = saved.selectedScrapers;
-				scrapersInitialized = true;
+				// A saved empty array is a deliberate user choice (no scrapers);
+				// only re-run the default “all enabled” initializer when the
+				// saved value is truly absent.
+				if (saved.showScraperSelector || saved.selectedScrapers.length > 0) {
+					scrapersInitialized = true;
+				}
 			}
 			if (saved.selectedPreset !== undefined) selectedPreset = saved.selectedPreset;
 			if (saved.scalarStrategy) scalarStrategy = saved.scalarStrategy;
@@ -154,8 +162,16 @@
 			arrayStrategy,
 			manualScrapeMode
 		};
-		sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify(state));
+		try {
+			sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify(state));
+		} catch {}
 	});
+
+	function clearSelection() {
+		selectedFiles = [];
+		clearPendingScrape();
+		clearManualInputs();
+	}
 
 	function getSettingsOperationMode(): OperationMode {
 		if (config) {
@@ -332,7 +348,7 @@
 				effectiveOperationMode: effectiveOperationMode,
 				isInPlaceImplied: isInPlaceImplied,
 				showScraperSelector: showScraperSelector,
-				destination: destinationPath,
+				destination: operationMode === 'update' ? '' : destinationPath,
 				selectedScrapers: showScraperSelector ? selectedScrapers : [],
 				force: forceRefresh,
 				preset: operationMode === 'update' ? (selectedPreset as 'conservative' | 'gap-fill' | 'aggressive' | undefined) : undefined,
@@ -340,7 +356,7 @@
 				arrayStrategy: operationMode === 'update' ? arrayStrategy : undefined
 			})
 		);
-		goto('/manual');
+		void goto('/manual');
 	}
 
 	async function startBatchScrape() {
@@ -678,9 +694,7 @@
 						<Button
 							variant="ghost"
 							size="sm"
-							onclick={() => {
-								selectedFiles = [];
-							}}
+								onclick={clearSelection}
 						>
 							{#snippet children()}
 								Clear All
@@ -835,7 +849,7 @@
 							{selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} selected
 						</span>
 						<button
-							onclick={() => { selectedFiles = []; clearPendingScrape(); clearManualInputs(); }}
+									onclick={clearSelection}
 							class="text-xs text-muted-foreground hover:text-destructive transition-colors"
 						>
 							(clear)

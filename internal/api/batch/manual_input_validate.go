@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/scrape"
@@ -40,7 +41,11 @@ func sanitizeManualInput(input string) string {
 func validateManualURL(input string, registry matcher.URLScraperLister) error {
 	u, err := url.Parse(input)
 	if err != nil {
-		return fmt.Errorf("malformed manual input: %w", err)
+		// url.Parse errors embed the raw input verbatim (e.g.
+		// `parse "https://…?token=secret": …`), which would leak a signed-URL
+		// token into the 400 response. The specific parse detail isn't
+		// actionable for the client, so return a fixed message.
+		return fmt.Errorf("malformed manual input")
 	}
 	if u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("unsupported URL scheme %q: only http and https are allowed", u.Scheme)
@@ -86,7 +91,7 @@ func validateAndSanitizeManualInputs(
 			return nil, fmt.Errorf("manual_inputs key %q is not in files", path)
 		}
 		sanitized := strings.TrimSpace(sanitizeManualInput(raw))
-		if len(sanitized) > maxManualInputLen {
+		if utf8.RuneCountInString(sanitized) > maxManualInputLen {
 			return nil, fmt.Errorf("manual input for %q exceeds %d characters", path, maxManualInputLen)
 		}
 		if sanitized == "" {

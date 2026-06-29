@@ -22,9 +22,12 @@ func RedactURLQuery(input string) string {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return input
 	}
-	if u.RawQuery == "" && u.Fragment == "" {
+	if u.RawQuery == "" && u.Fragment == "" && u.User == nil {
 		return input
 	}
+	// Clear userinfo (user:pass@) as well as query/fragment — a URL carrying
+	// credentials must not leak them into logs or persisted identifiers.
+	u.User = nil
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String()

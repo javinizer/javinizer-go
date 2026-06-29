@@ -19,6 +19,8 @@ func TestRedactURLQuery(t *testing.T) {
 		{"plain ID unchanged (no scheme)", "IPX-123", "IPX-123"},
 		{"plain ID with question mark unchanged (no scheme)", "ABC-?123", "ABC-?123"},
 		{"empty unchanged", "", ""},
+		{"userinfo stripped", "https://user:pass@example.com/v/123?token=secret", "https://example.com/v/123"},
+		{"userinfo stripped even without query", "https://user:pass@example.com/v/123", "https://example.com/v/123"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
