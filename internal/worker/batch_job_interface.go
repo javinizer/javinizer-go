@@ -353,6 +353,7 @@ type jobEditorImpl struct {
 	lifecycle    *JobLifecycle
 	posterEditor *PosterEditor
 	movieRepo    database.MovieRepositoryInterface
+	actressRepo  database.ActressRepositoryInterface
 }
 
 func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie *models.Movie) error {
@@ -364,6 +365,23 @@ func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie
 		backupCoverOriginal(current.Movie, movie)
 		return current, nil
 	})
+
+	// Apply explicit actress name edits before the movie upsert. The shared
+	// MovieUpserter only fills missing actress fields, which would discard a
+	// review-page name edit; renaming the record by ID here overwrites it, and
+	// doing so before Upsert makes Upsert's name-based lookup find the renamed
+	// record so the in-memory clone (and NFO generation) carries the edit.
+	if je.actressRepo != nil {
+		for i := range movie.Actresses {
+			a := &movie.Actresses[i]
+			if a.ID == 0 {
+				continue
+			}
+			if err := je.actressRepo.Update(ctx, a); err != nil {
+				return fmt.Errorf("persist actress name edit: %w", err)
+			}
+		}
+	}
 
 	// persist to DB first, then update in-memory. If DB persist
 	// fails, the in-memory state is not updated — no divergence. If DB persist

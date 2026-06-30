@@ -28,6 +28,7 @@ type JobStore struct {
 	jobRepo           database.JobRepositoryInterface
 	batchFileOpRepo   database.BatchFileOperationRepositoryInterface
 	movieRepo         database.MovieRepositoryInterface
+	actressRepo       database.ActressRepositoryInterface
 	persistence       JobPersistencer
 	tempDir           string
 	templateEngine    template.EngineInterface
@@ -58,6 +59,16 @@ type JobStoreOption func(*JobStore)
 func WithPersistence(p JobPersistencer) JobStoreOption {
 	return func(s *JobStore) {
 		s.persistence = p
+	}
+}
+
+// WithActressRepo sets the actress repository used to persist explicit actress
+// name edits made on the review page (rename by primary key). When unset, the
+// edit path skips the overwrite and behaves as before (edits are discarded by
+// the shared upserter's fill-missing merge).
+func WithActressRepo(r database.ActressRepositoryInterface) JobStoreOption {
+	return func(s *JobStore) {
+		s.actressRepo = r
 	}
 }
 
@@ -213,6 +224,7 @@ func buildAdapters(job *BatchJob) *jobAdapters {
 			lifecycle:    job.lifecycle,
 			posterEditor: job.posterEditor,
 			movieRepo:    job.deps.MovieRepo,
+			actressRepo:  job.deps.ActressRepo,
 		},
 	}
 }
@@ -275,6 +287,9 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 	}
 	if job.deps.MovieRepo == nil {
 		job.deps.MovieRepo = s.movieRepo
+	}
+	if job.deps.ActressRepo == nil {
+		job.deps.ActressRepo = s.actressRepo
 	}
 
 	s.mu.Lock()

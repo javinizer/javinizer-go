@@ -234,6 +234,9 @@ func (c *jobController) setDepsFromConfig(cfg *JobConfig) {
 		c.job.deps.MovieRepo = cfg.MovieRepo
 		c.job.posterEditor = NewPosterEditor(c.job.resultIndex, c.job.results, cfg.MovieRepo)
 	}
+	if cfg.ActressRepo != nil {
+		c.job.deps.ActressRepo = cfg.ActressRepo
+	}
 	if cfg.HistoryRepo != nil {
 		c.job.deps.HistoryRepo = cfg.HistoryRepo
 	}

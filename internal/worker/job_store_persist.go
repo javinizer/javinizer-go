@@ -93,12 +93,15 @@ func (s *JobStore) reconstructResultTracker(dbJob *models.Job) *ResultTracker {
 // (created via getAdapters/buildAdapters) can persist movie edits to the
 // database. Without this, reconstructed jobs have nil MovieRepo and
 // UpdateMovie() silently skips DB persistence.
-func wireJobDeps(job *BatchJob, movieRepo database.MovieRepositoryInterface, persistFn func()) {
+func wireJobDeps(job *BatchJob, movieRepo database.MovieRepositoryInterface, actressRepo database.ActressRepositoryInterface, persistFn func()) {
 	job.attachLifecycleCallback()
 	job.posterEditor = NewPosterEditor(job.resultIndex, job.results, movieRepo)
 	job.controller = newJobController(job)
 	if movieRepo != nil {
 		job.deps.MovieRepo = movieRepo
+	}
+	if actressRepo != nil {
+		job.deps.ActressRepo = actressRepo
 	}
 	if persistFn != nil {
 		job.deps.PersistFn = persistFn
@@ -147,7 +150,7 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 	}
 
 	// Step 3: Wire shared dependencies
-	wireJobDeps(batchJob, s.movieRepo, func() { s.persistence.PersistJob(batchJob) })
+	wireJobDeps(batchJob, s.movieRepo, s.actressRepo, func() { s.persistence.PersistJob(batchJob) })
 
 	// Step 3b: Restore infrastructure deps that are not persisted in the DB
 	// but are required for apply/rescrape phases. These are set on the JobStore

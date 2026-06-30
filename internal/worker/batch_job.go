@@ -32,6 +32,7 @@ type BatchJobDeps struct {
 	BatchCfg        BatchJobConfig                                 // Narrow config fields (replaces *config.Config)
 	BatchFileOpRepo database.BatchFileOperationRepositoryInterface // Batch file operations repository
 	MovieRepo       database.MovieRepositoryInterface              // Movie persistence for batch editing
+	ActressRepo     database.ActressRepositoryInterface            // Actress persistence for explicit review-page edits
 	HistoryRepo     database.HistoryRepositoryInterface            // History repository
 	Emitter         eventlog.EventEmitter                          // Event emission for audit trail
 	PersistFn       func()                                         // Callback to persist job state to database
@@ -159,7 +160,7 @@ func newBatchJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 
 	// Per P-2: wireJobDeps centralizes attachLifecycleCallback, posterEditor,
 	// controller, and PersistFn wiring shared with reconstructBatchJob.
-	wireJobDeps(job, nil, nil)
+	wireJobDeps(job, nil, nil, nil)
 
 	if len(jobCfg) > 0 && jobCfg[0] != nil {
 		cfg := jobCfg[0]
