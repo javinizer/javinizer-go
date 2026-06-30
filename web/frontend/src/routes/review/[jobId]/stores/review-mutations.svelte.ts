@@ -197,6 +197,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			deps.clearPosterPreviewOverrides();
 			deps.clearEditStorage();
 			invalidateJobQueries();
+			deps.toastSuccess('Changes saved to database');
 		},
 		onError: (err: Error) => {
 			deps.toastError(`Failed to save edits: ${err.message}`);

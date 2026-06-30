@@ -1537,6 +1537,8 @@ export function createReviewState(pageStore: Page) {
 		useScreenshotAsPoster,
 		useScreenshotAsCover,
 		saveAllEdits,
+		get isSavingEdits() { return mutations.saveEditsMutation.isPending; },
+		get editedMovieCount() { return editedMovies.size; },
 		get selectedMovieIds() {
 			return selectedMovieIds;
 		},

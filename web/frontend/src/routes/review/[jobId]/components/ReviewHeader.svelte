@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
-	import { ChevronDown, ChevronUp, Image, LayoutGrid, List, LoaderCircle, Play, RefreshCw, Settings2, X, CheckSquare, Square, Trash2, RotateCcw, MousePointerClick } from 'lucide-svelte';
+	import { ChevronDown, ChevronUp, Image, LayoutGrid, List, LoaderCircle, Play, RefreshCw, Settings2, X, CheckSquare, Square, Trash2, RotateCcw, MousePointerClick, Save } from 'lucide-svelte';
 	import type { CompletenessTier } from '$lib/utils/completeness';
 
 	interface Props {
@@ -30,6 +30,10 @@
 		onClose: () => void;
 		onUpdateAll: () => void;
 		onOrganizeAll: () => void;
+		onSaveAll: () => void;
+		hasEdits: boolean;
+		editCount: number;
+		savingEdits: boolean;
 	}
 
 		let {
@@ -58,7 +62,11 @@
 		onBulkRescrape,
 		onClose,
 		onUpdateAll,
-		onOrganizeAll
+		onOrganizeAll,
+		onSaveAll,
+		hasEdits,
+		editCount,
+		savingEdits
 	}: Props = $props();
 
 	$effect(() => {
@@ -126,6 +134,18 @@
 			</Button>
 		</div>
 		<div class="h-8 w-px bg-border"></div>
+		{#if hasEdits}
+			<Button onclick={onSaveAll} disabled={savingEdits || organizing} title="Save pending edits to the database">
+				{#snippet children()}
+					{#if savingEdits}
+						<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
+					{:else}
+						<Save class="h-4 w-4 mr-2" />
+					{/if}
+					{savingEdits ? 'Saving...' : `Save changes${editCount > 1 ? ` (${editCount})` : ''}`}
+				{/snippet}
+			</Button>
+		{/if}
 		<Button variant="outline" onclick={onClose} disabled={organizing}>
 			{#snippet children()}
 				<X class="h-4 w-4 mr-2" />

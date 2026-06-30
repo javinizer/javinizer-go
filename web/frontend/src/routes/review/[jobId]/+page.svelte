@@ -171,6 +171,10 @@
 						onClose={() => goto('/browse')}
 						onUpdateAll={s.updateAll}
 						onOrganizeAll={s.organizeAll}
+						onSaveAll={s.saveAllEdits}
+						hasEdits={s.editedMovieCount > 0}
+						editCount={s.editedMovieCount}
+						savingEdits={s.isSavingEdits}
 					/>
 
 					<OrganizeStatusCard
