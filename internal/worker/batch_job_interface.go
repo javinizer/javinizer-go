@@ -371,7 +371,9 @@ func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie
 	// review-page name edit; renaming the record by ID here overwrites it, and
 	// doing so before Upsert makes Upsert's name-based lookup find the renamed
 	// record so the in-memory clone (and NFO generation) carries the edit.
-	if je.actressRepo != nil {
+	// Gated on movieRepo so the in-memory-only edit path (no DB persistence)
+	// never mutates the database.
+	if je.actressRepo != nil && je.movieRepo != nil {
 		for i := range movie.Actresses {
 			a := &movie.Actresses[i]
 			if a.ID == 0 {

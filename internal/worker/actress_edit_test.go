@@ -91,6 +91,34 @@ func TestUpdateMovie_ActressRenamesByID(t *testing.T) {
 		assert.Equal(t, "Yui", got.FirstName, "curated actress name must not be clobbered on the scrape/shared path")
 	})
 
+	t.Run("in-memory-only path (movieRepo nil) does not mutate the DB", func(t *testing.T) {
+		db := newActressEditTestDB(t)
+		repos := db.Repositories()
+		curated := seedCuratedActress(t, repos.ActressRepo)
+
+		// actressRepo is wired but movieRepo is nil: the in-memory-only edit path
+		// must not rename (no DB persistence).
+		jq := NewJobStore(nil, nil, nil, "", nil, nil, WithActressRepo(repos.ActressRepo))
+		job := jq.CreateJobBatch([]string{"file1.mp4"})
+		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "ABC-001", Actresses: []models.Actress{curated}},
+		})
+
+		ej, ok := jq.GetJobForEdit(job.ID.String())
+		require.True(t, ok)
+
+		edited := curated
+		edited.FirstName = "Yui-Edited"
+		require.NoError(t, ej.UpdateMovie(context.Background(), "file1.mp4",
+			&models.Movie{ID: "ABC-001", Actresses: []models.Actress{edited}}))
+
+		got, err := repos.ActressRepo.FindByID(context.Background(), curated.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "Yui", got.FirstName, "in-memory-only path must not mutate the actresses table")
+	})
+
 	t.Run("new actress (ID==0) is left to the upserter, not force-renamed", func(t *testing.T) {
 		db := newActressEditTestDB(t)
 		repos := db.Repositories()
