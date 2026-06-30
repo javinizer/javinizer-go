@@ -257,7 +257,7 @@
 <div class="space-y-4">
 	<div class="flex items-center justify-between">
 		<h3 class="text-lg font-semibold">Actresses ({actresses.length})</h3>
-		<Button onclick={openAddActress} size="sm">
+		<Button onclick={openAddActress} size="sm" disabled={savingEdits || organizing}>
 			{#snippet children()}
 				<Plus class="h-4 w-4 mr-2" />
 				Add Actress
@@ -268,7 +268,7 @@
 	{#if actresses.length === 0}
 		<div class="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
 			<p>No actresses added</p>
-			<Button onclick={openAddActress} size="sm" class="mt-2">
+			<Button onclick={openAddActress} size="sm" class="mt-2" disabled={savingEdits || organizing}>
 				{#snippet children()}
 					<Plus class="h-4 w-4 mr-2" />
 					Add First Actress
@@ -314,7 +314,7 @@
 						</div>
 
 						<div class="flex gap-1">
-							<Button variant="outline" size="sm" onclick={() => openEditActress(index)} class="flex-1" disabled={organizing}>
+							<Button variant="outline" size="sm" onclick={() => openEditActress(index)} class="flex-1" disabled={savingEdits || organizing}>
 								{#snippet children()}
 									<SquarePen class="h-3 w-3" />
 								{/snippet}
@@ -323,7 +323,7 @@
 								variant="outline"
 								size="sm"
 								onclick={() => removeActress(index)}
-								class="flex-1 text-destructive hover:bg-destructive/10" disabled={organizing}
+								class="flex-1 text-destructive hover:bg-destructive/10" disabled={savingEdits || organizing}
 							>
 								{#snippet children()}
 									<Trash2 class="h-3 w-3" />
