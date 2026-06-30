@@ -14,7 +14,7 @@
 	interface Props {
 		movie: Movie;
 		onUpdate: (movie: Movie) => void;
-		onPersistEdits?: () => void;
+		onPersistEdits?: () => void | Promise<void>;
 		actressSources?: Record<string, string>;
 		showFieldSources?: boolean;
 	}
@@ -121,7 +121,7 @@
 
 	function notifyParent() {
 		onUpdate({ ...movie, actresses });
-		onPersistEdits?.();
+		void Promise.resolve(onPersistEdits?.()).catch(() => {});
 	}
 
 	function openAddActress() {

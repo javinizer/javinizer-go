@@ -30,7 +30,7 @@
 		onClose: () => void;
 		onUpdateAll: () => void;
 		onOrganizeAll: () => void;
-		onSaveAll: () => void;
+		onSaveAll: () => void | Promise<void>;
 		hasEdits: boolean;
 		editCount: number;
 		savingEdits: boolean;
@@ -135,7 +135,7 @@
 		</div>
 		<div class="h-8 w-px bg-border"></div>
 		{#if hasEdits}
-			<Button onclick={onSaveAll} disabled={savingEdits || organizing} title="Save pending edits to the database">
+			<Button onclick={() => { void Promise.resolve(onSaveAll()).catch(() => {}); }} disabled={savingEdits || organizing} title="Save pending edits to the database">
 				{#snippet children()}
 					{#if savingEdits}
 						<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
