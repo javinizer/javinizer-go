@@ -42,6 +42,27 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 	return nil
 }
 
+// RenameNameFields updates only the editable name columns (first_name,
+// last_name, japanese_name) of the actress identified by id. It is used by the
+// review-page edit path to apply an explicit actress rename without clobbering
+// other columns (created_at, dmm_id, thumb_url, aliases) the way a full-row
+// Save would. Callers should gate on a name-field change to avoid bumping
+// updated_at for unedited actresses.
+func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, firstName, lastName, japaneseName string) error {
+	if id == 0 {
+		return wrapDBErr("rename", "actress id 0", ErrInvalidLookup)
+	}
+	updates := map[string]interface{}{
+		"first_name":    firstName,
+		"last_name":     lastName,
+		"japanese_name": japaneseName,
+	}
+	if err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
+	}
+	return nil
+}
+
 // FindByID loads an actress by its primary key.
 func (r *ActressRepository) FindByID(ctx context.Context, id uint) (*models.Actress, error) {
 	return r.BaseRepository.FindByID(ctx, id)

@@ -185,20 +185,24 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					movieToSave.title = movieToSave.display_title;
 				}
 				const resultId = job?.results?.[filePath]?.result_id;
-				if (!resultId) return Promise.resolve();
+				if (!resultId) return null;
 				return deps.updateBatchMovie(deps.getJobId(), resultId, movieToSave);
 			});
 
-			if (savePromises.length > 0) {
-				await Promise.all(savePromises);
+			const sent = savePromises.filter((p): p is Promise<unknown> => p !== null);
+			if (sent.length > 0) {
+				await Promise.all(sent);
 			}
+			return sent.length;
 		},
-		onSuccess: () => {
+		onSuccess: (sent: number) => {
+			if (sent > 0) {
+				invalidateJobQueries();
+				deps.toastSuccess('Changes saved to database');
+			}
 			deps.clearEditedMovies();
 			deps.clearPosterPreviewOverrides();
 			deps.clearEditStorage();
-			invalidateJobQueries();
-			deps.toastSuccess('Changes saved to database');
 		},
 		onError: (err: Error) => {
 			deps.toastError(`Failed to save edits: ${err.message}`);

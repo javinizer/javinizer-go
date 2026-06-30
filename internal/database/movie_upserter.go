@@ -327,6 +327,21 @@ func (u *MovieUpserter) resolveActressGroup(tx *gorm.DB, actresses []models.Actr
 	return nil
 }
 
+// lookupActressByID finds an actress by its primary key. It is used for the
+// review-page edit path (actresses carrying a DB id) so a rename that produces
+// a name collision resolves to the renamed record by id rather than to the
+// colliding record by name.
+func lookupActressByID(tx *gorm.DB, act *models.Actress) (models.Actress, bool, error) {
+	var found models.Actress
+	if err := tx.First(&found, act.ID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return found, false, nil
+		}
+		return found, false, err
+	}
+	return found, true, nil
+}
+
 // lookupActressByDMMID finds an actress by DMM ID.
 func lookupActressByDMMID(tx *gorm.DB, act *models.Actress) (models.Actress, bool, error) {
 	var found models.Actress
@@ -384,18 +399,27 @@ func (u *MovieUpserter) ensureActressesExistTx(tx *gorm.DB, actresses []models.A
 		return nil
 	}
 
+	var idGroup []actressGroupEntry
 	var dmmGroup []actressGroupEntry
 	var jpGroup []actressGroupEntry
 	var nameGroup []actressGroupEntry
 
 	for i := range actresses {
 		a := &actresses[i]
-		if a.DMMID != 0 {
+		if a.ID != 0 {
+			idGroup = append(idGroup, actressGroupEntry{index: i, act: a})
+		} else if a.DMMID != 0 {
 			dmmGroup = append(dmmGroup, actressGroupEntry{index: i, act: a})
 		} else if a.JapaneseName != "" {
 			jpGroup = append(jpGroup, actressGroupEntry{index: i, act: a})
 		} else if a.FirstName != "" || a.LastName != "" {
 			nameGroup = append(nameGroup, actressGroupEntry{index: i, act: a})
+		}
+	}
+
+	if len(idGroup) > 0 {
+		if err := u.resolveActressGroup(tx, actresses, idGroup, lookupActressByID); err != nil {
+			return err
 		}
 	}
 

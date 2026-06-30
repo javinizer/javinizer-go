@@ -1064,6 +1064,81 @@ func (_c *MockActressRepositoryInterface_PreviewMerge_Call) RunAndReturn(run fun
 	return _c
 }
 
+// RenameNameFields provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) RenameNameFields(ctx context.Context, id uint, firstName string, lastName string, japaneseName string) error {
+	ret := _mock.Called(ctx, id, firstName, lastName, japaneseName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RenameNameFields")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, string, string, string) error); ok {
+		r0 = returnFunc(ctx, id, firstName, lastName, japaneseName)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockActressRepositoryInterface_RenameNameFields_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RenameNameFields'
+type MockActressRepositoryInterface_RenameNameFields_Call struct {
+	*mock.Call
+}
+
+// RenameNameFields is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id uint
+//   - firstName string
+//   - lastName string
+//   - japaneseName string
+func (_e *MockActressRepositoryInterface_Expecter) RenameNameFields(ctx any, id any, firstName any, lastName any, japaneseName any) *MockActressRepositoryInterface_RenameNameFields_Call {
+	return &MockActressRepositoryInterface_RenameNameFields_Call{Call: _e.mock.On("RenameNameFields", ctx, id, firstName, lastName, japaneseName)}
+}
+
+func (_c *MockActressRepositoryInterface_RenameNameFields_Call) Run(run func(ctx context.Context, id uint, firstName string, lastName string, japaneseName string)) *MockActressRepositoryInterface_RenameNameFields_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		var arg4 string
+		if args[4] != nil {
+			arg4 = args[4].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_RenameNameFields_Call) Return(err error) *MockActressRepositoryInterface_RenameNameFields_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_RenameNameFields_Call) RunAndReturn(run func(ctx context.Context, id uint, firstName string, lastName string, japaneseName string) error) *MockActressRepositoryInterface_RenameNameFields_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Search provides a mock function for the type MockActressRepositoryInterface
 func (_mock *MockActressRepositoryInterface) Search(ctx context.Context, query string) ([]models.Actress, error) {
 	ret := _mock.Called(ctx, query)

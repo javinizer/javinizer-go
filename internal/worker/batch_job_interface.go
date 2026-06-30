@@ -379,7 +379,17 @@ func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie
 			if a.ID == 0 {
 				continue
 			}
-			if err := je.actressRepo.Update(ctx, a); err != nil {
+			existing, err := je.actressRepo.FindByID(ctx, a.ID)
+			if err != nil {
+				if database.IsNotFound(err) {
+					continue
+				}
+				return fmt.Errorf("load actress for rename: %w", err)
+			}
+			if existing.FirstName == a.FirstName && existing.LastName == a.LastName && existing.JapaneseName == a.JapaneseName {
+				continue
+			}
+			if err := je.actressRepo.RenameNameFields(ctx, a.ID, a.FirstName, a.LastName, a.JapaneseName); err != nil {
 				return fmt.Errorf("persist actress name edit: %w", err)
 			}
 		}

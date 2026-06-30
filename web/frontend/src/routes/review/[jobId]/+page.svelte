@@ -285,6 +285,8 @@
 									movie={s.currentMovie!}
 									onUpdate={s.updateCurrentMovie}
 								onPersistEdits={s.saveAllEdits}
+								savingEdits={s.isSavingEdits}
+								organizing={s.organizing}
 									actressSources={s.currentResult.actress_sources}
 									showFieldSources={s.showFieldScraperSources}
 								/>

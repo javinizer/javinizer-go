@@ -754,7 +754,7 @@ export function createReviewState(pageStore: Page) {
 	}
 
 	async function saveAllEdits() {
-		return mutations.saveEditsMutation.mutateAsync();
+		await mutations.saveEditsMutation.mutateAsync();
 	}
 
 	const organizeController = createOrganizeController({

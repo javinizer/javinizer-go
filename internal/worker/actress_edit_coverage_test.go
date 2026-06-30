@@ -2,10 +2,13 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,12 +27,13 @@ func TestUpdateMovie_ActressRenameError(t *testing.T) {
 	db := newActressEditTestDB(t)
 	repos := db.Repositories()
 
-	// A separately-closed DB backs the actress repo so Update fails, while the
-	// real (open) movieRepo satisfies the gate. The rename loop runs before
-	// movieRepo.Upsert, so the failure aborts UpdateMovie with a wrapped error.
-	badDB := newActressEditTestDB(t)
-	badRepo := badDB.Repositories().ActressRepo
-	require.NoError(t, badDB.Close())
+	// Mock actress repo: FindByID returns the existing (old-name) record so the
+	// rename is attempted, then RenameNameFields fails. A real (open) movieRepo
+	// satisfies the gate; Upsert never runs because the rename aborts first.
+	badRepo := mocks.NewMockActressRepositoryInterface(t)
+	badRepo.EXPECT().FindByID(mock.Anything, uint(1)).Return(
+		&models.Actress{ID: 1, FirstName: "Yui", LastName: "", JapaneseName: "波多野結衣"}, nil)
+	badRepo.EXPECT().RenameNameFields(mock.Anything, uint(1), "Yui-Edited", "", "波多野結衣").Return(errors.New("boom"))
 
 	jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(badRepo))
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
