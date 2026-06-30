@@ -84,6 +84,11 @@ func scrapeResultToMovieResult(fmi models.FileMatchInfo, result *scrape.ScrapeRe
 		StartedAt:     result.StartedAt,
 		EndedAt:       &now,
 	}
+	// Populate OriginalFileName from the source file so templates (e.g. NFO
+	// <FILENAME>) resolve; the scrape workflow builds the movie from the ID only.
+	if result.Movie != nil && result.Movie.OriginalFileName == "" && fmi.Name != "" {
+		result.Movie.OriginalFileName = fmi.Name
+	}
 	if meta != nil {
 		// Struct copy from OrchestrationMeta's embedded OrchestrationState.
 		// A single assignment replaces the five individual field copies.
