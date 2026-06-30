@@ -71,9 +71,11 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 	const queryClient = deps.getQueryClient();
 
 	function invalidateJobQueries() {
-		void queryClient.invalidateQueries({ queryKey: ['batch-job', deps.getJobId()] });
-		void queryClient.invalidateQueries({ queryKey: ['batch-job-slim', deps.getJobId()] });
-		void queryClient.invalidateQueries({ queryKey: ['actresses'] });
+		return Promise.all([
+			queryClient.invalidateQueries({ queryKey: ['batch-job', deps.getJobId()] }),
+			queryClient.invalidateQueries({ queryKey: ['batch-job-slim', deps.getJobId()] }),
+			queryClient.invalidateQueries({ queryKey: ['actresses'] }),
+		]);
 	}
 
 	const posterFromUrlMutation = createMutation(() => ({
@@ -126,7 +128,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				});
 			}
 
-			invalidateJobQueries();
+			void invalidateJobQueries();
 		},
 		onError: (err: Error) => {
 			deps.toastError(`Failed to set poster from screenshot: ${err.message}`);
@@ -157,7 +159,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				}
 			}
 			deps.toastSuccess('Movie excluded from organization');
-			invalidateJobQueries();
+			void invalidateJobQueries();
 
 			const movieResultsLength = deps.getMovieResultsLength();
 			const postExcludeLength = movieResultsLength - 1;
@@ -195,9 +197,9 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			}
 			return sent.length;
 		},
-		onSuccess: (sent: number) => {
+		onSuccess: async (sent: number) => {
 			if (sent > 0) {
-				invalidateJobQueries();
+				await invalidateJobQueries().catch(() => {});
 				deps.toastSuccess('Changes saved to database');
 			}
 			deps.clearEditedMovies();
@@ -243,7 +245,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			deps.toastSuccess('Poster crop updated');
 			deps.setShowPosterCropModal(false);
 
-			invalidateJobQueries();
+			void invalidateJobQueries();
 		},
 		onError: (err: Error) => {
 			deps.toastError(err.message || 'Failed to update poster crop');
@@ -276,7 +278,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				);
 			}
 
-			invalidateJobQueries();
+			void invalidateJobQueries();
 		},
 		onError: (err: Error) => {
 			deps.toastError(`Failed to exclude movies: ${err.message}`);
@@ -323,7 +325,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				deps.toastSuccess(`Rescraped ${data.succeeded} movie${data.succeeded !== 1 ? 's' : ''}`);
 			}
 
-			invalidateJobQueries();
+			void invalidateJobQueries();
 		},
 		onError: (err: Error) => {
 			deps.toastError(`Failed to rescrape movies: ${err.message}`);

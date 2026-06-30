@@ -307,6 +307,11 @@ func (u *MovieUpserter) resolveActressGroup(tx *gorm.DB, actresses []models.Actr
 			}
 			actresses[g.index] = existing
 		} else {
+			// A missing ID-keyed entry (idGroup) references a stale/deleted primary
+			// key; create a genuinely new record with an auto-assigned id instead of
+			// re-inserting with the stale PK (which could resurrect the row or merge
+			// onto a reused id). For DMM/JP/Name groups the id is already 0.
+			g.act.ID = 0
 			if err := raceRetryCreate(tx, g.act, func(tx *gorm.DB) error {
 				found, ok, findErr := lookupFn(tx, g.act)
 				if !ok {

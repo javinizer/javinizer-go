@@ -197,3 +197,42 @@ func TestUpdateMovie_Rename_MultiPart_Idempotent(t *testing.T) {
 	// beyond a single bump (allow a small clock epsilon).
 	assert.True(t, got.UpdatedAt.After(time.Time{}), "updated_at is set")
 }
+
+// CodeRabbit (PR #73): a stale/missing idGroup ID (the referenced actress was
+// deleted) must be created as a genuinely new record with an auto-assigned id,
+// not re-inserted with the stale primary key (which could resurrect the row or
+// collide with a reused id).
+func TestUpdateMovie_Rename_StaleID_CreatesFreshNotResurrected(t *testing.T) {
+	db := newActressEditTestDB(t)
+	repos := db.Repositories()
+	b := seedNamedActress(t, repos.ActressRepo, "", "", "X")
+	const staleID uint = 999999
+	require.NotEqual(t, staleID, b.ID)
+
+	jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
+	job := jq.CreateJobBatch([]string{"file1.mp4"})
+	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "M-1"},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{ID: "M-1", Actresses: []models.Actress{
+			{ID: staleID, JapaneseName: "Y"},
+		}},
+	})
+
+	ej, ok := jq.GetJobForEdit(job.ID.String())
+	require.True(t, ok)
+	require.NoError(t, ej.UpdateMovie(context.Background(), "file1.mp4",
+		&models.Movie{ID: "M-1", Actresses: []models.Actress{
+			{ID: staleID, JapaneseName: "Y"},
+		}}))
+
+	res, _ := job.results.GetMovieResult("file1.mp4")
+	require.NotEmpty(t, res.Movie.Actresses)
+	got := res.Movie.Actresses[0]
+	assert.NotEqual(t, staleID, got.ID, "stale ID must not be resurrected; a fresh auto PK should be assigned")
+	assert.NotZero(t, got.ID, "a new actress row should be created")
+	assert.Equal(t, "Y", got.JapaneseName)
+	dbGot, err := repos.ActressRepo.FindByID(context.Background(), got.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Y", dbGot.JapaneseName)
+}
