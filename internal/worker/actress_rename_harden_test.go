@@ -96,8 +96,14 @@ func TestUpdateMovie_Rename_BumpsUpdatedAtOnlyForRenamed(t *testing.T) {
 	repos := db.Repositories()
 	a := seedNamedActress(t, repos.ActressRepo, "Umi", "Yatsugake", "八掛うみ")
 	b := seedNamedActress(t, repos.ActressRepo, "Rin", "", "rin")
-	beforeA := a.UpdatedAt
-	beforeB := b.UpdatedAt
+	// Seed a known-old updated_at so the rename's autoUpdateTime is deterministically
+	// newer than the pre-rename value. Without this, the Create and the rename can
+	// land in the same timestamp-resolution unit on fast/Windows runners, making
+	// the After() assertion flaky.
+	oldTime := time.Now().Add(-time.Hour)
+	require.NoError(t, db.Exec("UPDATE actresses SET updated_at = ? WHERE id IN (?, ?)", oldTime, a.ID, b.ID).Error)
+	beforeA, _ := repos.ActressRepo.FindByID(context.Background(), a.ID)
+	beforeB, _ := repos.ActressRepo.FindByID(context.Background(), b.ID)
 
 	jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
@@ -116,8 +122,8 @@ func TestUpdateMovie_Rename_BumpsUpdatedAtOnlyForRenamed(t *testing.T) {
 
 	gotA, _ := repos.ActressRepo.FindByID(context.Background(), a.ID)
 	gotB, _ := repos.ActressRepo.FindByID(context.Background(), b.ID)
-	assert.True(t, gotA.UpdatedAt.After(beforeA), "renamed actress A must have updated_at bumped")
-	assert.True(t, gotB.UpdatedAt.Equal(beforeB), "unedited sibling B must NOT have updated_at bumped")
+	assert.True(t, gotA.UpdatedAt.After(beforeA.UpdatedAt), "renamed actress A must have updated_at bumped")
+	assert.True(t, gotB.UpdatedAt.Equal(beforeB.UpdatedAt), "unedited sibling B must NOT have updated_at bumped")
 }
 
 // A3: renaming a DMMID=0 actress to a colliding JapaneseName must keep the movie
