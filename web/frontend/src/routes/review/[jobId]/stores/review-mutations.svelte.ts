@@ -73,6 +73,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 	function invalidateJobQueries() {
 		void queryClient.invalidateQueries({ queryKey: ['batch-job', deps.getJobId()] });
 		void queryClient.invalidateQueries({ queryKey: ['batch-job-slim', deps.getJobId()] });
+		void queryClient.invalidateQueries({ queryKey: ['actresses'] });
 	}
 
 	const posterFromUrlMutation = createMutation(() => ({

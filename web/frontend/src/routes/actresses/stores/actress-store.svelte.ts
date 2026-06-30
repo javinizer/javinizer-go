@@ -70,6 +70,8 @@ export function createActressStore() {
 				toastStore.success('Actress created');
 			}
 			queryClient.invalidateQueries({ queryKey: ['actresses'] });
+			queryClient.invalidateQueries({ queryKey: ['batch-job'] });
+			queryClient.invalidateQueries({ queryKey: ['batch-job-slim'] });
 			resetForm();
 		},
 		onError: (err: Error) => {
@@ -90,6 +92,8 @@ export function createActressStore() {
 				resetForm();
 			}
 			queryClient.invalidateQueries({ queryKey: ['actresses'] });
+			queryClient.invalidateQueries({ queryKey: ['batch-job'] });
+			queryClient.invalidateQueries({ queryKey: ['batch-job-slim'] });
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message);
@@ -151,6 +155,8 @@ export function createActressStore() {
 			selectedIds = selectedIds.filter((id) => id !== variables.source_id);
 			mergeSourceQueue = mergeSourceQueue.slice(1);
 			queryClient.invalidateQueries({ queryKey: ['actresses'] });
+			queryClient.invalidateQueries({ queryKey: ['batch-job'] });
+			queryClient.invalidateQueries({ queryKey: ['batch-job-slim'] });
 			queryClient.invalidateQueries({ queryKey: ['actress-merge-preview'] });
 			advanceMergeQueue();
 		},

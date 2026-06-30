@@ -284,6 +284,7 @@
 								<ActressEditor
 									movie={s.currentMovie!}
 									onUpdate={s.updateCurrentMovie}
+								onPersistEdits={s.saveAllEdits}
 									actressSources={s.currentResult.actress_sources}
 									showFieldSources={s.showFieldScraperSources}
 								/>
