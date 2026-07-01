@@ -13,6 +13,14 @@ import (
 	"strings"
 )
 
+// nullSentinel is the internal marker for a SQL NULL carried in a DumpRow's
+// Values. It is distinct from the dump's "\N" text marker: ParseDump detects
+// NULL on the RAW field (before COPY-escape decoding) and substitutes this
+// sentinel, so a decoded value can never collide with the NULL marker (a
+// literal "\N" produced by decoding "\\N" stays a real string, not NULL).
+// nullableValue binds this sentinel as SQL nil.
+const nullSentinel = "\x00__r18devdump_null__\x00"
+
 // DumpRow is one row from any COPY block in the pg_dump, with its table name,
 // column names (parsed from the COPY header), and tab-delimited values.
 type DumpRow struct {
@@ -60,7 +68,16 @@ func ParseDump(r io.Reader, emit func(DumpRow) error) error {
 
 		values := strings.Split(line, "\t")
 		for i, v := range values {
-			values[i] = decodeCopyField(v)
+			// Detect NULL on the raw field BEFORE decoding: the dump marks NULL
+			// as exactly "\N", while a literal "\N" in the data is escaped as
+			// "\\N" and must decode to the real string "\N", not NULL. Carry
+			// NULL as a private sentinel so nullableValue can bind nil without
+			// any collision with decoded text.
+			if v == "\\N" {
+				values[i] = nullSentinel
+			} else {
+				values[i] = decodeCopyField(v)
+			}
 		}
 		if err := emit(DumpRow{Table: table, Columns: columns, Values: values}); err != nil {
 			return err
@@ -137,9 +154,10 @@ const derivedVideoTable = "derived_video"
 // decodeCopyField unescapes a single PostgreSQL COPY text-format field. The
 // pg_dump text format encodes special characters with a backslash escape:
 // \n (newline), \t (tab), \r (CR), \b (backspace), \f (form feed), \v
-// (vertical tab), \\ (literal backslash). The NULL marker \N is preserved
-// verbatim so downstream import logic can distinguish NULL from an empty
-// string. A backslash not followed by a recognized escape is kept literal.
+// (vertical tab), \\ (literal backslash). NULL is handled separately by
+// ParseDump (detected on the raw field) before this runs, so a literal "\N"
+// produced by decoding "\\N" is a real string, not a NULL marker. A backslash
+// not followed by a recognized escape is kept literal.
 func decodeCopyField(s string) string {
 	if !strings.ContainsRune(s, '\\') {
 		return s
@@ -149,12 +167,6 @@ func decodeCopyField(s string) string {
 	for i := 0; i < len(s); i++ {
 		if s[i] != '\\' {
 			b.WriteByte(s[i])
-			continue
-		}
-		// Backslash escape. Preserve \N as the NULL sentinel.
-		if i+1 < len(s) && s[i+1] == 'N' {
-			b.WriteString("\\N")
-			i++
 			continue
 		}
 		if i+1 >= len(s) {

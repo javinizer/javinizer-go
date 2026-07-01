@@ -60,10 +60,10 @@ func parseVideos(r io.Reader) ([]videoRow, error) {
 		}
 		contentID := row.Values[cidIdx]
 		dvdID := row.Values[didIdx]
-		if dvdID == "\\N" {
+		if dvdID == nullSentinel {
 			dvdID = ""
 		}
-		if contentID == "" || contentID == "\\N" {
+		if contentID == "" || contentID == nullSentinel {
 			return nil
 		}
 		rows = append(rows, videoRow{ContentID: contentID, DVDID: dvdID})
@@ -269,13 +269,16 @@ func (c *chunkReader) Read(p []byte) (int, error) {
 }
 
 // TestParseDump_DecodeCopyEscapes verifies that PostgreSQL COPY text-format
-// escapes are decoded: \n, \t, \r, \\ become the literal characters, while
-// the \N NULL marker is preserved verbatim for downstream NULL handling.
+// escapes are decoded: \n, \t, \r, \\ become the literal characters. NULL is
+// detected on the raw field and carried as nullSentinel; a literal "\N"
+// produced by decoding "\\N" stays a real string (NOT NULL), proving the
+// NULL/text collision is avoided.
 func TestParseDump_DecodeCopyEscapes(t *testing.T) {
 	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n" +
 		"118esc00001\tESC\\t-1\n" + // dvd_id contains an escaped tab
 		"118esc00002\tESC\\\\-2\n" + // dvd_id contains an escaped backslash
-		"118esc00003\t\\N\n" + // NULL dvd_id (sentinel preserved)
+		"118esc00003\t\\N\n" + // NULL dvd_id (raw \N -> nullSentinel)
+		"118esc00004\tESC\\\\N-4\n" + // escaped backslash + N -> literal "\N" (NOT NULL)
 		"\\.\n"
 	var got []DumpRow
 	if err := ParseDump(strings.NewReader(dump), func(r DumpRow) error {
@@ -284,8 +287,8 @@ func TestParseDump_DecodeCopyEscapes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ParseDump: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("got %d rows, want 3", len(got))
+	if len(got) != 4 {
+		t.Fatalf("got %d rows, want 4", len(got))
 	}
 	// Escaped tab decoded to a literal tab.
 	if got[0].Values[1] != "ESC\t-1" {
@@ -295,9 +298,13 @@ func TestParseDump_DecodeCopyEscapes(t *testing.T) {
 	if got[1].Values[1] != "ESC\\-2" {
 		t.Errorf("row 1 dvd_id: got %q, want %q (escaped backslash decoded)", got[1].Values[1], "ESC\\-2")
 	}
-	// NULL marker preserved verbatim (not decoded).
-	if got[2].Values[1] != "\\N" {
-		t.Errorf("row 2 dvd_id: got %q, want %q (NULL sentinel preserved)", got[2].Values[1], "\\N")
+	// Raw \N -> NULL sentinel.
+	if got[2].Values[1] != nullSentinel {
+		t.Errorf("row 2 dvd_id: got %q, want nullSentinel (NULL)", got[2].Values[1])
+	}
+	// Escaped \\N -> literal "\N" string, NOT the NULL sentinel.
+	if got[3].Values[1] != "ESC\\N-4" {
+		t.Errorf("row 3 dvd_id: got %q, want %q (escaped \\N decodes to literal backslash-N, not NULL)", got[3].Values[1], "ESC\\N-4")
 	}
 }
 

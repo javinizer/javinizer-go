@@ -345,15 +345,14 @@ func mapDumpRow(row DumpRow, storedCols []string) []string {
 	mapped := make([]string, len(storedCols))
 	for i, col := range storedCols {
 		if present[col] {
-			// Preserve the dump's \N NULL marker verbatim — nullableValue
-			// converts it to SQL NULL below. Do NOT collapse \N to "" here:
-			// that would erase the distinction between a genuine NULL and an
-			// empty string, mutating real empty-string values into NULL.
+			// The dump's NULL marker has already been converted to nullSentinel
+			// by ParseDump; carry it through so nullableValue binds SQL nil. A
+			// genuine empty string stays "" (distinct from NULL).
 			mapped[i] = colMap[col]
 		} else {
 			// Column absent from this COPY block's header — there is no value
 			// to store, so bind NULL (not an empty string).
-			mapped[i] = "\\N"
+			mapped[i] = nullSentinel
 		}
 	}
 
@@ -367,7 +366,7 @@ func mapDumpRow(row DumpRow, storedCols []string) []string {
 		for i, col := range storedCols {
 			if col == "dvd_id_norm" {
 				did := colMap["dvd_id"]
-				if did == "\\N" || did == "" {
+				if did == nullSentinel || did == "" {
 					mapped[i] = ""
 				} else {
 					mapped[i] = normalizeDVDID(did)
@@ -420,13 +419,14 @@ func insertBatch(ctx context.Context, tx *sql.Tx, dumpTable string, batch []Dump
 	return n, nil
 }
 
-// nullableValue converts a dump value to its SQLite binding. The dump's \N
-// NULL marker binds as SQL nil so INTEGER columns (runtime_mins, ordinality)
-// stay clean and TEXT columns round-trip as NULL on read (letting lookups
-// scan them with sql.Null* without error). A genuine empty string is preserved
-// as "" — it is distinct from NULL in the source dump and must not be coerced.
+// nullableValue converts a dump value to its SQLite binding. ParseDump has
+// already converted the dump's NULL marker to nullSentinel, which binds as SQL
+// nil so INTEGER columns (runtime_mins, ordinality) stay clean and TEXT
+// columns round-trip as NULL on read (letting lookups scan them with sql.Null*
+// without error). A genuine empty string is preserved as "" — it is distinct
+// from NULL in the source dump and must not be coerced.
 func nullableValue(val string) any {
-	if val == "\\N" {
+	if val == nullSentinel {
 		return nil
 	}
 	return val
