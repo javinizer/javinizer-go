@@ -6,6 +6,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -59,7 +60,13 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 		return fmt.Errorf("failed to finalize scraper config: %w", err)
 	}
 
-	r18DumpLookup, r18DumpCloser := commandutil.OpenR18DevDumpLookup(cfg)
+	r18DumpLookup, r18DumpCloser, dumpErr := commandutil.OpenR18DevDumpLookup(cfg)
+	if dumpErr != nil {
+		// Surface a broken dump setup (permission denied, corrupt file) instead
+		// of silently downgrading to "absent". The reload keeps working via HTTP
+		// fallback, but the failure is logged so it is diagnosable.
+		logging.Warnf("%v", dumpErr)
+	}
 	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
 	if err != nil {
 		if r18DumpCloser != nil {

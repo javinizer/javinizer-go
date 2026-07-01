@@ -48,24 +48,34 @@ func dumpConfig(t *testing.T, dumpPath string) *config.Config {
 }
 
 // TestOpenR18DevDumpLookup_Branches covers the edge paths of the wiring
-// helper that the bootstrap e2e tests don't hit: nil config, disabled feature,
-// a non-ENOENT stat error (permission denied), and an unreadable dump file
-// (Open failure). Each must return (nil, nil) — the HTTP fallback path —
-// without panicking, and the stat-error case must not be treated as a clean
-// "not downloaded" miss.
+// helper: nil config, disabled feature, a non-ENOENT stat error (permission
+// denied), and an unreadable dump file (Open failure). nil-cfg/disabled/ENOENT
+// return (nil, nil, nil) — the clean HTTP fallback path. Real filesystem/Open
+// errors are surfaced as a non-nil error (not downgraded to a clean miss) so a
+// broken dump setup is diagnosable.
 func TestOpenR18DevDumpLookup_Branches(t *testing.T) {
 	t.Run("nil config", func(t *testing.T) {
-		lookup, closer := OpenR18DevDumpLookup(nil)
+		lookup, closer, err := OpenR18DevDumpLookup(nil)
 		assert.Nil(t, lookup)
 		assert.Nil(t, closer)
+		assert.NoError(t, err)
 	})
 
 	t.Run("disabled", func(t *testing.T) {
 		cfg := dumpConfig(t, seedDumpDB(t))
 		cfg.Metadata.R18DevDump.Enabled = false
-		lookup, closer := OpenR18DevDumpLookup(cfg)
+		lookup, closer, err := OpenR18DevDumpLookup(cfg)
 		assert.Nil(t, lookup)
 		assert.Nil(t, closer)
+		assert.NoError(t, err)
+	})
+
+	t.Run("absent file is a clean fallback (ENOENT)", func(t *testing.T) {
+		cfg := dumpConfig(t, filepath.Join(t.TempDir(), "does-not-exist.db"))
+		lookup, closer, err := OpenR18DevDumpLookup(cfg)
+		assert.Nil(t, lookup)
+		assert.Nil(t, closer)
+		assert.NoError(t, err, "ENOENT must be a clean fallback, not an error")
 	})
 
 	t.Run("stat error not ENOENT (unreadable parent dir)", func(t *testing.T) {
@@ -80,9 +90,11 @@ func TestOpenR18DevDumpLookup_Branches(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
 
 		cfg := dumpConfig(t, filepath.Join(lockedDir, "r18dev_dump.db"))
-		lookup, closer := OpenR18DevDumpLookup(cfg)
+		lookup, closer, err := OpenR18DevDumpLookup(cfg)
 		assert.Nil(t, lookup)
 		assert.Nil(t, closer)
+		require.Error(t, err, "non-ENOENT stat error must be surfaced, not downgraded")
+		assert.Contains(t, err.Error(), "cannot stat")
 	})
 
 	t.Run("open failure (corrupt file)", func(t *testing.T) {
@@ -91,9 +103,11 @@ func TestOpenR18DevDumpLookup_Branches(t *testing.T) {
 		// A non-empty, non-SQLite file: Open must fail to parse the header.
 		require.NoError(t, os.WriteFile(corrupt, []byte("not a sqlite database"), 0o600))
 		cfg := dumpConfig(t, corrupt)
-		lookup, closer := OpenR18DevDumpLookup(cfg)
+		lookup, closer, err := OpenR18DevDumpLookup(cfg)
 		assert.Nil(t, lookup)
 		assert.Nil(t, closer)
+		require.Error(t, err, "a corrupt dump file must surface an error")
+		assert.Contains(t, err.Error(), "failed to open")
 	})
 }
 

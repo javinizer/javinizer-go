@@ -154,7 +154,14 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 			return nil, fmt.Errorf("failed to finalize scraper config: %w", err)
 		}
 
-		r18DumpLookup, r18DumpCloser := OpenR18DevDumpLookup(cfg)
+		r18DumpLookup, r18DumpCloser, dumpErr := OpenR18DevDumpLookup(cfg)
+		if dumpErr != nil {
+			// A broken dump setup (permission denied, corrupt file) is surfaced
+			// here rather than silently downgraded to "absent". The app keeps
+			// working via HTTP fallback, but the failure is logged so it is
+			// diagnosable instead of looking like the dump was never downloaded.
+			logging.Warnf("%v", dumpErr)
+		}
 		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), database.NewContentIDMappingRepository(deps.DB), r18DumpLookup)
 		if err != nil {
 			// Only close a DB we created here; never close an injected one
