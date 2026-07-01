@@ -234,3 +234,43 @@ func TestE2E_DumpWiring_FullBootstrapScrapeUsesDump(t *testing.T) {
 	assert.True(t, instance.IsEnabled(), "r18dev should be enabled by default")
 	assert.Equal(t, "r18dev", instance.Name())
 }
+
+// TestOpenR18DevDumpLookup_DefaultPath covers the branch where rc.Path is
+// empty, so the default relative path (data/r18dev/r18dev_dump.db) is used.
+// By chdir-ing into a temp dir, the default path resolves to a non-existent
+// location → clean ENOENT fallback.
+func TestOpenR18DevDumpLookup_DefaultPath(t *testing.T) {
+	cfg := &config.Config{
+		Database: config.DatabaseConfig{Type: "sqlite", DSN: filepath.Join(t.TempDir(), "test.db")},
+	}
+	cfg.Metadata.R18DevDump.Enabled = true
+	cfg.Metadata.R18DevDump.Path = "" // exercise the default-path branch
+
+	t.Chdir(t.TempDir()) // default relative path won't exist here
+	lookup, closer, err := OpenR18DevDumpLookup(cfg)
+	assert.Nil(t, lookup, "default path absent → clean fallback")
+	assert.Nil(t, closer)
+	assert.NoError(t, err, "ENOENT on default path must be a clean fallback")
+}
+
+// TestE2E_NewDependencies_CorruptDumpWarned covers the dumpErr warn branch in
+// NewDependenciesWithOptions (line 158-164): a corrupt dump file surfaces a
+// warning but bootstrap continues via HTTP fallback.
+func TestE2E_NewDependencies_CorruptDumpWarned(t *testing.T) {
+	dir := t.TempDir()
+	corrupt := filepath.Join(dir, "r18dev_dump.db")
+	require.NoError(t, os.WriteFile(corrupt, []byte("not a sqlite database"), 0o600))
+	cfg := dumpConfig(t, corrupt)
+	// Use a separate DB DSN so we don't collide with other tests.
+	cfg.Database.DSN = filepath.Join(dir, "test.db")
+
+	deps, err := NewDependencies(cfg)
+	require.NoError(t, err, "corrupt dump should warn but not abort bootstrap")
+	defer func() { _ = deps.Close() }()
+
+	// The r18dev scraper must still be registered (HTTP fallback path).
+	reg := deps.GetRegistry()
+	instance, ok := reg.GetInstance("r18dev")
+	require.True(t, ok, "r18dev scraper should be registered despite corrupt dump")
+	require.NotNil(t, instance)
+}

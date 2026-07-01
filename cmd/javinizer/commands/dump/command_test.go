@@ -14,6 +14,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/javinizer/javinizer-go/internal/commandutil"
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/r18devdump"
 )
 
@@ -258,6 +260,185 @@ func TestSearch_LookupErrorPropagated(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "lookup failed") {
 			t.Errorf("expected a 'lookup failed' error, got: %v", err)
+		}
+	})
+}
+
+// TestResolveDumpPath_DefaultAndExplicit covers both branches of resolveDumpPath.
+func TestResolveDumpPath_DefaultAndExplicit(t *testing.T) {
+	cfg := &config.Config{}
+	if got := resolveDumpPath(cfg); got != commandutil.DefaultR18DevDumpPath {
+		t.Errorf("empty path: got %q, want default %q", got, commandutil.DefaultR18DevDumpPath)
+	}
+	cfg.Metadata.R18DevDump.Path = "/custom/path.db"
+	if got := resolveDumpPath(cfg); got != "/custom/path.db" {
+		t.Errorf("explicit path: got %q, want /custom/path.db", got)
+	}
+}
+
+// TestFileSize_Errors covers the filepath.Abs and os.Stat error branches.
+func TestFileSize_Errors(t *testing.T) {
+	// os.Stat on a non-existent file.
+	if _, err := fileSize(filepath.Join(t.TempDir(), "nope.db")); err == nil {
+		t.Error("expected error for non-existent file")
+	}
+}
+
+// TestNewUpdateCmd_RunE covers the update command's RunE closure (which calls
+// runDownload with updateOnly=true via cobra context).
+func TestNewUpdateCmd_RunE(t *testing.T) {
+	srv := newDumpHTTPServer(t)
+	defer srv.Close()
+	origURL := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL
+	defer func() { r18devdump.LatestDumpURL = origURL }()
+
+	tmp := t.TempDir()
+	runInDir(t, tmp, func() {
+		cmd := newUpdateCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetContext(context.Background())
+		cmd.Flags().String("config", "config.yaml", "")
+		// First call seeds the dump (update path with no existing dump).
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("update RunE: %v", err)
+		}
+	})
+}
+
+// TestRunDownload_ConfigLoadError covers the config-load error branch.
+func TestRunDownload_ConfigLoadError(t *testing.T) {
+	// Point config at a path that can't be loaded as a valid config.
+	err := runDownload(context.Background(), &bytes.Buffer{}, "/nonexistent/dir/bad.yaml", false)
+	if err == nil || !strings.Contains(err.Error(), "failed to load config") {
+		t.Fatalf("expected config-load error, got: %v", err)
+	}
+}
+
+// TestRunStatus_ConfigLoadError covers the runStatus config-load error branch.
+func TestRunStatus_ConfigLoadError(t *testing.T) {
+	err := runStatus(&bytes.Buffer{}, "/nonexistent/dir/bad.yaml")
+	if err == nil || !strings.Contains(err.Error(), "failed to load config") {
+		t.Fatalf("expected config-load error, got: %v", err)
+	}
+}
+
+// TestRunSearch_ConfigLoadError covers the runSearch config-load error branch.
+func TestRunSearch_ConfigLoadError(t *testing.T) {
+	err := runSearch(&bytes.Buffer{}, "/nonexistent/dir/bad.yaml", "IPX-535")
+	if err == nil || !strings.Contains(err.Error(), "failed to load config") {
+		t.Fatalf("expected config-load error, got: %v", err)
+	}
+}
+
+// TestRunStatus_StatsError covers the runStatus stats-error branch: the dump
+// DB exists but its videos/dump_meta tables are missing, so Stats fails.
+func TestRunStatus_StatsError(t *testing.T) {
+	srv := newDumpHTTPServer(t)
+	defer srv.Close()
+	origURL := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL
+	defer func() { r18devdump.LatestDumpURL = origURL }()
+
+	tmp := t.TempDir()
+	runInDir(t, tmp, func() {
+		var buf bytes.Buffer
+		if err := runDownload(context.Background(), &buf, "config.yaml", false); err != nil {
+			t.Fatalf("runDownload: %v", err)
+		}
+		// Corrupt: drop the videos table so Stats fails.
+		dbPath := filepath.Join("data", "r18dev", "r18dev_dump.db")
+		c, err := sql.Open("sqlite3", dbPath)
+		if err != nil {
+			t.Fatalf("open corruptor: %v", err)
+		}
+		if _, err := c.Exec("DROP TABLE videos"); err != nil {
+			c.Close()
+			t.Fatalf("drop videos: %v", err)
+		}
+		c.Close()
+		buf.Reset()
+		err = runStatus(&buf, "config.yaml")
+		if err == nil || !strings.Contains(err.Error(), "failed to read dump stats") {
+			t.Fatalf("expected stats error, got: %v", err)
+		}
+	})
+}
+
+// TestRunSearch_ContentIDLookupError covers the content_id lookup error branch
+// (CR2): LookupByDVDID misses (ErrDumpMiss) but LookupByContentID returns a
+// real error. We recreate the videos table without the dvd_id column so the
+// content_id query fails.
+func TestRunSearch_ContentIDLookupError(t *testing.T) {
+	srv := newDumpHTTPServer(t)
+	defer srv.Close()
+	origURL := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL
+	defer func() { r18devdump.LatestDumpURL = origURL }()
+
+	tmp := t.TempDir()
+	runInDir(t, tmp, func() {
+		var buf bytes.Buffer
+		if err := runDownload(context.Background(), &buf, "config.yaml", false); err != nil {
+			t.Fatalf("runDownload: %v", err)
+		}
+		// Recreate videos with only content_id + dvd_id_norm (no dvd_id column).
+		// LookupByDVDID succeeds (misses on a non-existent ID → ErrDumpMiss),
+		// then LookupByContentID fails (dvd_id column missing → real error).
+		dbPath := filepath.Join("data", "r18dev", "r18dev_dump.db")
+		c, err := sql.Open("sqlite3", dbPath)
+		if err != nil {
+			t.Fatalf("open corruptor: %v", err)
+		}
+		if _, err := c.Exec("DROP TABLE videos; CREATE TABLE videos (content_id TEXT, dvd_id_norm TEXT)"); err != nil {
+			c.Close()
+			t.Fatalf("recreate videos: %v", err)
+		}
+		c.Close()
+		buf.Reset()
+		err = runSearch(&buf, "config.yaml", "NOPE-999")
+		if err == nil || !strings.Contains(err.Error(), "content_id lookup failed") {
+			t.Fatalf("expected content_id lookup error, got: %v", err)
+		}
+	})
+}
+
+// TestRunDownload_DownloadError covers the Download error branch by pointing
+// at an unreachable endpoint.
+func TestRunDownload_DownloadError(t *testing.T) {
+	origURL := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = "http://127.0.0.1:1/unreachable"
+	defer func() { r18devdump.LatestDumpURL = origURL }()
+
+	tmp := t.TempDir()
+	runInDir(t, tmp, func() {
+		err := runDownload(context.Background(), &bytes.Buffer{}, "config.yaml", false)
+		if err == nil || !strings.Contains(err.Error(), "dump download failed") {
+			t.Fatalf("expected download error, got: %v", err)
+		}
+	})
+}
+
+// TestRunStatus_SourceDateOutput covers the SourceDate output branch: when
+// the dump has a source_date, status output includes it.
+func TestRunStatus_SourceDateOutput(t *testing.T) {
+	tmp := t.TempDir()
+	runInDir(t, tmp, func() {
+		// Seed a dump directly with a source date (no HTTP needed).
+		dbPath := filepath.Join("data", "r18dev", "r18dev_dump.db")
+		dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+		_, err := r18devdump.Import(context.Background(), strings.NewReader(dump), dbPath, r18devdump.ImportOptions{
+			SourceDate: "2026-04-28",
+		})
+		if err != nil {
+			t.Fatalf("Import: %v", err)
+		}
+		var buf bytes.Buffer
+		if err := runStatus(&buf, "config.yaml"); err != nil {
+			t.Fatalf("runStatus: %v", err)
+		}
+		if !strings.Contains(buf.String(), "Source date: 2026-04-28") {
+			t.Errorf("status output missing source date: %s", buf.String())
 		}
 	})
 }

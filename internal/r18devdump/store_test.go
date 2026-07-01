@@ -3,6 +3,7 @@ package r18devdump
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -398,4 +399,310 @@ func TestLookupMovie_NamedEntityAndTrailerErrors(t *testing.T) {
 	if m.TrailerURL != "" {
 		t.Errorf("trailer should degrade to empty on query error, got %q", m.TrailerURL)
 	}
+}
+
+// TestLookup_EmptyNormalizedID covers the norm=="" guard branches in
+// LookupByDVDID and LookupMovie: an ID that normalizes to empty (e.g. "---")
+// returns ErrDumpMiss without hitting the database.
+func TestLookup_EmptyNormalizedID(t *testing.T) {
+	path := seedDump(t, "118ipx00535	IPX-535")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	for _, id := range []string{"---", "-", "   ", "!@#"} {
+		if _, err := store.LookupByDVDID(ctx, id); err != models.ErrDumpMiss {
+			t.Errorf("LookupByDVDID(%q): got %v, want ErrDumpMiss", id, err)
+		}
+		if _, err := store.LookupMovie(ctx, id); err != models.ErrDumpMiss {
+			t.Errorf("LookupMovie(%q): got %v, want ErrDumpMiss", id, err)
+		}
+	}
+}
+
+// TestLookupByContentID_Miss covers the ErrNoRows branch of LookupByContentID
+// (a content_id that doesn't exist in the videos table).
+func TestLookupByContentID_Miss(t *testing.T) {
+	path := seedDump(t, "118ipx00535	IPX-535")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	if _, err := store.LookupByContentID(context.Background(), "nonexistent999"); err != models.ErrDumpMiss {
+		t.Errorf("LookupByContentID miss: got %v, want ErrDumpMiss", err)
+	}
+}
+
+// TestLookupDirector_SecondQueryError covers the lookupDirector branch where
+// the first query (video_directors) succeeds but the second (directors) fails.
+// Dropping ONLY the directors table (not video_directors) triggers this.
+func TestLookupDirector_SecondQueryError(t *testing.T) {
+	path := importFullDump(t)
+	corruptor, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open corruptor: %v", err)
+	}
+	if _, err := corruptor.Exec("DROP TABLE directors"); err != nil {
+		corruptor.Close()
+		t.Fatalf("drop directors: %v", err)
+	}
+	corruptor.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	// LookupMovie must not abort; director degrades to nil.
+	m, err := store.LookupMovie(context.Background(), "ABW-013")
+	if err != nil {
+		t.Fatalf("degraded director must not abort: %v", err)
+	}
+	if m == nil || m.ContentID != "118abw00013" {
+		t.Fatalf("core data must resolve: %+v", m)
+	}
+	if m.Director != nil {
+		t.Errorf("director should degrade to nil, got %+v", m.Director)
+	}
+}
+
+// TestLookupNamedEntity_ErrNoRows covers the ErrNoRows branch of
+// lookupNamedEntity: the movie has a maker_id/label_id/series_id, but those
+// rows were deleted from the makers/labels/series tables.
+func TestLookupNamedEntity_ErrNoRows(t *testing.T) {
+	path := importFullDump(t)
+	corruptor, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open corruptor: %v", err)
+	}
+	// Delete all maker/label/series rows so the foreign-key lookups return
+	// ErrNoRows (not a query error — the tables exist, just no matching rows).
+	for _, tbl := range []string{"makers", "labels", "series"} {
+		if _, err := corruptor.Exec("DELETE FROM " + tbl); err != nil {
+			corruptor.Close()
+			t.Fatalf("delete from %s: %v", tbl, err)
+		}
+	}
+	corruptor.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	m, err := store.LookupMovie(context.Background(), "ABW-013")
+	if err != nil {
+		t.Fatalf("missing named entities must not abort: %v", err)
+	}
+	if m == nil || m.ContentID != "118abw00013" {
+		t.Fatalf("core data must resolve: %+v", m)
+	}
+	if m.Maker != nil || m.Label != nil || m.Series != nil {
+		t.Errorf("named entities should be nil on ErrNoRows")
+	}
+}
+
+// TestLookupDirector_ErrNoRows covers the ErrNoRows branch of lookupDirector's
+// second query: video_directors has a director_id, but that director was
+// deleted from the directors table.
+func TestLookupDirector_ErrNoRows(t *testing.T) {
+	path := importFullDump(t)
+	corruptor, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open corruptor: %v", err)
+	}
+	if _, err := corruptor.Exec("DELETE FROM directors"); err != nil {
+		corruptor.Close()
+		t.Fatalf("delete directors: %v", err)
+	}
+	corruptor.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	m, err := store.LookupMovie(context.Background(), "ABW-013")
+	if err != nil {
+		t.Fatalf("missing director must not abort: %v", err)
+	}
+	if m == nil || m.ContentID != "118abw00013" {
+		t.Fatalf("core data must resolve: %+v", m)
+	}
+	if m.Director != nil {
+		t.Errorf("director should be nil on ErrNoRows")
+	}
+}
+
+// TestLookupCategories_QueryError covers the lookupCategories error branch by
+// dropping the categories table (the JOIN fails).
+func TestLookupCategories_QueryError(t *testing.T) {
+	path := importFullDump(t)
+	corruptor, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open corruptor: %v", err)
+	}
+	if _, err := corruptor.Exec("DROP TABLE categories"); err != nil {
+		corruptor.Close()
+		t.Fatalf("drop categories: %v", err)
+	}
+	corruptor.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	m, err := store.LookupMovie(context.Background(), "ABW-013")
+	if err != nil {
+		t.Fatalf("categories error must not abort: %v", err)
+	}
+	if m == nil || m.ContentID != "118abw00013" {
+		t.Fatalf("core data must resolve: %+v", m)
+	}
+	if len(m.Categories) != 0 {
+		t.Errorf("categories should degrade to empty, got %d", len(m.Categories))
+	}
+}
+
+// TestStats_LoadMetaError covers the loadMeta error branches by dropping the
+// dump_meta table. Stats must return an error (it calls loadMeta).
+func TestStats_LoadMetaError(t *testing.T) {
+	path := seedDump(t, "118ipx00535	IPX-535")
+	corruptor, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open corruptor: %v", err)
+	}
+	if _, err := corruptor.Exec("DROP TABLE dump_meta"); err != nil {
+		corruptor.Close()
+		t.Fatalf("drop dump_meta: %v", err)
+	}
+	corruptor.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	if _, err := store.Stats(context.Background()); err == nil {
+		t.Error("Stats should error when dump_meta is missing")
+	}
+}
+
+// TestImport_MkdirAllFailure covers the MkdirAll error branch of Import by
+// pointing the path at a sub-path of an existing file (not a directory).
+func TestImport_MkdirAllFailure(t *testing.T) {
+	// Create a file, then use a path underneath it — MkdirAll fails because
+	// the parent is a file, not a directory.
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	badPath := filepath.Join(blocker, "sub", "r18dev_dump.db")
+	_, err := Import(context.Background(), strings.NewReader(""), badPath, ImportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "create dump dir") {
+		t.Fatalf("expected create-dump-dir error, got: %v", err)
+	}
+}
+
+// TestImport_CanceledContext covers the ctx.Err() guard in the emit closure:
+// a canceled context makes emit return immediately, which ParseDump propagates.
+func TestImport_CanceledContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r18dev_dump.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	_, err := Import(ctx, strings.NewReader(dump), path, ImportOptions{})
+	if err == nil {
+		t.Fatal("expected an error from canceled context, got nil")
+	}
+}
+
+// TestImport_BatchFlushAndSkipTable covers three branches:
+//   - len(batch) == 0 guard in flush (line 244): after a mid-stream flush,
+//     flushAll encounters an empty residual batch for that table.
+//   - !ok skip-table guard in emit (line 277): a COPY for a table we don't
+//     store is silently skipped.
+//   - len(batches) >= importBatchSize triggers flush (line 283): 41+ rows
+//     for derived_video forces a mid-stream batch flush.
+func TestImport_BatchFlushAndSkipTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r18dev_dump.db")
+	// Generate 80 rows for derived_video (2× importBatchSize=40) so the
+	// residual batch is empty after the second mid-stream flush — this hits
+	// the len(batch)==0 guard in flush during flushAll.
+	var sb strings.Builder
+	sb.WriteString("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n")
+	for i := 0; i < 80; i++ {
+		fmt.Fprintf(&sb, "118ipx%05d\tIPX-%d\n", i, i)
+	}
+	sb.WriteString("\\.\n")
+	// A table we don't store — emit must skip it (line 277).
+	sb.WriteString("COPY public.unknown_table (col) FROM stdin;\nsomedata\n\\.\n")
+	res, err := Import(context.Background(), strings.NewReader(sb.String()), path, ImportOptions{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if res.Rows != 80 {
+		t.Errorf("Rows: got %d, want 80", res.Rows)
+	}
+	// Verify the store opens and the data is queryable.
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	cid, err := store.LookupByDVDID(context.Background(), "IPX-79")
+	if err != nil {
+		t.Fatalf("LookupByDVDID: %v", err)
+	}
+	if cid != "118ipx00079" {
+		t.Errorf("content_id: got %q, want 118ipx00040", cid)
+	}
+}
+
+// TestImport_EmitCtxCanceledMidStream covers the ctx.Err() guard inside emit
+// (line 273): a reader that cancels the context AFTER the schema is created
+// but BEFORE data rows are emitted, so emit's ctx.Err() check is reached.
+func TestImport_EmitCtxCanceledMidStream(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r18dev_dump.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	// Use a reader that cancels the context when the data COPY starts.
+	r := &cancelingReader{
+		data:   "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n",
+		cancel: cancel,
+	}
+	_, err := Import(ctx, r, path, ImportOptions{})
+	if err == nil {
+		t.Fatal("expected error from canceled context mid-stream")
+	}
+}
+
+// cancelingReader cancels the context when it encounters the first data byte
+// after the COPY header line (the '\n' after "FROM stdin;").
+type cancelingReader struct {
+	data     string
+	cancel   context.CancelFunc
+	canceled bool
+}
+
+func (r *cancelingReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	// Cancel after we've read past the COPY header line.
+	if !r.canceled && strings.Contains(r.data, "FROM stdin;") {
+		idx := strings.Index(r.data, "\n")
+		if idx >= 0 {
+			n := copy(p, r.data[:idx+1])
+			r.data = r.data[idx+1:]
+			r.cancel()
+			r.canceled = true
+			return n, nil
+		}
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
 }

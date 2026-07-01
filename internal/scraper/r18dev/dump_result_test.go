@@ -264,3 +264,77 @@ func TestResultFromDump_EmptyMovie(t *testing.T) {
 	assert.Empty(t, result.Actresses)
 	assert.Empty(t, result.Genres)
 }
+
+// TestResultFromDump_DirectorJapaneseLanguage covers the ja-language director
+// branch (line 122-124): when language is "ja" and a director is present, the
+// result.Director prefers NameKanji over NameRomaji.
+func TestResultFromDump_DirectorJapaneseLanguage(t *testing.T) {
+	cfg := createTestSettings(true)
+	cfg.Enabled = true
+	cfg.Language = "ja"
+	s := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
+	d := &models.DumpMovie{
+		ContentID: "118abw00013", DVDID: "ABW-013",
+		Director: &models.DumpDirector{NameKanji: "監督名", NameRomaji: "Kantoku Mei"},
+	}
+	result := s.resultFromDump(d)
+	assert.Equal(t, "監督名", result.Director, "ja director branch should prefer NameKanji")
+}
+
+// TestResultFromDump_DirectorEnglishLanguage covers the else branch of the
+// director language selection (NameRomaji preferred when language != "ja").
+func TestResultFromDump_DirectorEnglishLanguage(t *testing.T) {
+	cfg := createTestSettings(true)
+	cfg.Enabled = true
+	cfg.Language = "en"
+	s := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
+	d := &models.DumpMovie{
+		ContentID: "118abw00013", DVDID: "ABW-013",
+		Director: &models.DumpDirector{NameKanji: "監督名", NameRomaji: "Kantoku Mei"},
+	}
+	result := s.resultFromDump(d)
+	assert.Equal(t, "Kantoku Mei", result.Director, "en director branch should prefer NameRomaji")
+}
+
+// TestResultFromDump_ActressSingleWordName covers the single-word actress name
+// branch (line 166-168): when NameRomaji has only one part, the synthesized
+// filename uses that single word (not the two-word lastname_firstname format).
+func TestResultFromDump_ActressSingleWordName(t *testing.T) {
+	cfg := createTestSettings(true)
+	s := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
+	d := &models.DumpMovie{
+		ContentID: "118abw00013", DVDID: "ABW-013",
+		Actresses: []models.DumpActress{{
+			ID: "1", NameRomaji: "Maki", // single word, no ImageURL
+		}},
+	}
+	result := s.resultFromDump(d)
+	require.Len(t, result.Actresses, 1)
+	assert.Contains(t, result.Actresses[0].ThumbURL, "maki.jpg",
+		"single-word name should synthesize as the word itself")
+}
+
+// TestSearchFromDump_ContextCanceled covers the context.Canceled branch of
+// searchFromDump's error switch (line 261-264): a canceled context should
+// fall back to HTTP at debug level (not warn), treated as benign.
+func TestSearchFromDump_ContextCanceled(t *testing.T) {
+	dump := &stubDumpLookup{lookupErr: context.Canceled}
+	s, _ := newScraperWithBlockedHTTP(t, dump)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, ok := s.searchFromDump(ctx, "IPX-535")
+	assert.False(t, ok, "canceled lookup should fall back to HTTP")
+	assert.Nil(t, result, "no result on cancellation")
+}
+
+// TestSearchFromDump_ContextDeadlineExceeded covers the DeadlineExceeded arm
+// of the same case.
+func TestSearchFromDump_ContextDeadlineExceeded(t *testing.T) {
+	dump := &stubDumpLookup{lookupErr: context.DeadlineExceeded}
+	s, _ := newScraperWithBlockedHTTP(t, dump)
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	result, ok := s.searchFromDump(ctx, "IPX-535")
+	assert.False(t, ok)
+	assert.Nil(t, result)
+}
