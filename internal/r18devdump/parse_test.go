@@ -267,3 +267,55 @@ func (c *chunkReader) Read(p []byte) (int, error) {
 	c.pos += n
 	return n, nil
 }
+
+// TestParseDump_DecodeCopyEscapes verifies that PostgreSQL COPY text-format
+// escapes are decoded: \n, \t, \r, \\ become the literal characters, while
+// the \N NULL marker is preserved verbatim for downstream NULL handling.
+func TestParseDump_DecodeCopyEscapes(t *testing.T) {
+	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n" +
+		"118esc00001\tESC\\t-1\n" + // dvd_id contains an escaped tab
+		"118esc00002\tESC\\\\-2\n" + // dvd_id contains an escaped backslash
+		"118esc00003\t\\N\n" + // NULL dvd_id (sentinel preserved)
+		"\\.\n"
+	var got []DumpRow
+	if err := ParseDump(strings.NewReader(dump), func(r DumpRow) error {
+		got = append(got, r)
+		return nil
+	}); err != nil {
+		t.Fatalf("ParseDump: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d rows, want 3", len(got))
+	}
+	// Escaped tab decoded to a literal tab.
+	if got[0].Values[1] != "ESC\t-1" {
+		t.Errorf("row 0 dvd_id: got %q, want %q (escaped tab decoded)", got[0].Values[1], "ESC\t-1")
+	}
+	// Escaped backslash decoded to a single backslash.
+	if got[1].Values[1] != "ESC\\-2" {
+		t.Errorf("row 1 dvd_id: got %q, want %q (escaped backslash decoded)", got[1].Values[1], "ESC\\-2")
+	}
+	// NULL marker preserved verbatim (not decoded).
+	if got[2].Values[1] != "\\N" {
+		t.Errorf("row 2 dvd_id: got %q, want %q (NULL sentinel preserved)", got[2].Values[1], "\\N")
+	}
+}
+
+// TestParseDump_EmptyStringDistinctFromNull verifies that a genuine empty
+// string field is preserved as "" (not coerced to the NULL marker) so the
+// import path can keep NULL and empty-string distinct.
+func TestParseDump_EmptyStringDistinctFromNull(t *testing.T) {
+	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n" +
+		"118emp00001\t\n" + // empty-string dvd_id
+		"\\.\n"
+	var got []DumpRow
+	if err := ParseDump(strings.NewReader(dump), func(r DumpRow) error {
+		got = append(got, r)
+		return nil
+	}); err != nil {
+		t.Fatalf("ParseDump: %v", err)
+	}
+	if len(got) != 1 || got[0].Values[1] != "" {
+		t.Fatalf("empty string should stay empty, got %+v", got)
+	}
+}

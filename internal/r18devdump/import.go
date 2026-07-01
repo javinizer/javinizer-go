@@ -329,21 +329,32 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 // order for its table. For derived_video, it computes dvd_id_norm and converts
 // NULLs. For other tables, it maps by column name.
 func mapDumpRow(row DumpRow, storedCols []string) []string {
-	// Build a column->value map from the dump row.
+	// Build a column->value map from the dump row, and track which columns are
+	// present in the COPY header. A column absent from the header is a genuine
+	// NULL (bind \N so nullableValue emits SQL nil); a column present but
+	// empty is a real empty string and must stay "" (distinct from NULL).
 	colMap := make(map[string]string, len(row.Columns))
+	present := make(map[string]bool, len(row.Columns))
 	for i, col := range row.Columns {
 		if i < len(row.Values) {
 			colMap[col] = row.Values[i]
+			present[col] = true
 		}
 	}
 
 	mapped := make([]string, len(storedCols))
 	for i, col := range storedCols {
-		val := colMap[col]
-		if val == "\\N" {
-			val = ""
+		if present[col] {
+			// Preserve the dump's \N NULL marker verbatim — nullableValue
+			// converts it to SQL NULL below. Do NOT collapse \N to "" here:
+			// that would erase the distinction between a genuine NULL and an
+			// empty string, mutating real empty-string values into NULL.
+			mapped[i] = colMap[col]
+		} else {
+			// Column absent from this COPY block's header — there is no value
+			// to store, so bind NULL (not an empty string).
+			mapped[i] = "\\N"
 		}
-		mapped[i] = val
 	}
 
 	// derived_video carries one computed column (dvd_id_norm) that is not
@@ -409,13 +420,13 @@ func insertBatch(ctx context.Context, tx *sql.Tx, dumpTable string, batch []Dump
 	return n, nil
 }
 
-// nullableValue converts a dump value to its SQLite binding. mapDumpRow has
-// already normalized the dump's \N NULL marker to "", so an empty string here
-// represents a genuine NULL and binds as SQL nil. This keeps INTEGER columns
-// (runtime_mins, ordinality) clean and lets TEXT columns round-trip as NULL on
-// read, so lookups scan them with sql.Null* without error.
+// nullableValue converts a dump value to its SQLite binding. The dump's \N
+// NULL marker binds as SQL nil so INTEGER columns (runtime_mins, ordinality)
+// stay clean and TEXT columns round-trip as NULL on read (letting lookups
+// scan them with sql.Null* without error). A genuine empty string is preserved
+// as "" — it is distinct from NULL in the source dump and must not be coerced.
 func nullableValue(val string) any {
-	if val == "" {
+	if val == "\\N" {
 		return nil
 	}
 	return val

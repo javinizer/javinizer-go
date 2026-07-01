@@ -2,6 +2,7 @@ package dump
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/r18devdump"
 	"github.com/spf13/cobra"
 )
@@ -60,7 +62,7 @@ func newDownloadCmd() *cobra.Command {
 		Short: "Download the latest r18.dev dump and build the lookup database",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configFile, _ := cmd.Flags().GetString("config")
-			return runDownload(cmd.OutOrStdout(), configFile, false)
+			return runDownload(cmd.Context(), cmd.OutOrStdout(), configFile, false)
 		},
 	}
 }
@@ -71,7 +73,7 @@ func newUpdateCmd() *cobra.Command {
 		Short: "Re-download the dump only if a newer version is available",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configFile, _ := cmd.Flags().GetString("config")
-			return runDownload(cmd.OutOrStdout(), configFile, true)
+			return runDownload(cmd.Context(), cmd.OutOrStdout(), configFile, true)
 		},
 	}
 }
@@ -99,7 +101,7 @@ func newSearchCmd() *cobra.Command {
 	}
 }
 
-func runDownload(w io.Writer, configFile string, updateOnly bool) error {
+func runDownload(ctx context.Context, w io.Writer, configFile string, updateOnly bool) error {
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -109,7 +111,7 @@ func runDownload(w io.Writer, configFile string, updateOnly bool) error {
 	var currentSourceURL string
 	if updateOnly {
 		if store, err := r18devdump.Open(path); err == nil {
-			stats, err := store.Stats(context.Background())
+			stats, err := store.Stats(ctx)
 			_ = store.Close()
 			if err == nil {
 				currentSourceURL = stats.SourceURL
@@ -118,7 +120,6 @@ func runDownload(w io.Writer, configFile string, updateOnly bool) error {
 	}
 
 	client := &http.Client{Timeout: 0} // stream; rely on context cancellation
-	ctx := context.Background()
 
 	fmt.Fprintf(w, "Fetching r18.dev dump from %s\n", r18devdump.DumpURLOverride())
 	if updateOnly && currentSourceURL != "" {
@@ -213,10 +214,14 @@ func runSearch(w io.Writer, configFile, id string) error {
 	if cid, err := store.LookupByDVDID(ctx, id); err == nil {
 		fmt.Fprintf(w, "%s -> content_id: %s\n", id, cid)
 		return nil
+	} else if !errors.Is(err, models.ErrDumpMiss) {
+		return fmt.Errorf("dvd_id lookup failed for %s: %w", id, err)
 	}
 	if did, err := store.LookupByContentID(ctx, id); err == nil {
 		fmt.Fprintf(w, "%s -> dvd_id: %s\n", id, did)
 		return nil
+	} else if !errors.Is(err, models.ErrDumpMiss) {
+		return fmt.Errorf("content_id lookup failed for %s: %w", id, err)
 	}
 	logging.Debugf("dump search: %s not found", id)
 	fmt.Fprintf(w, "No match for %s in the local dump.\n", id)

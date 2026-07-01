@@ -3,6 +3,7 @@ package dump
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -88,7 +89,7 @@ func TestDownloadStatusSearch(t *testing.T) {
 		var buf bytes.Buffer
 
 		// download
-		if err := runDownload(&buf, "config.yaml", false); err != nil {
+		if err := runDownload(context.Background(), &buf, "config.yaml", false); err != nil {
 			t.Fatalf("runDownload: %v\noutput: %s", err, buf.String())
 		}
 		out := buf.String()
@@ -201,12 +202,12 @@ func TestUpdate_UnchangedSkips(t *testing.T) {
 	runInDir(t, tmp, func() {
 		var buf bytes.Buffer
 		// First download.
-		if err := runDownload(&buf, "config.yaml", false); err != nil {
+		if err := runDownload(context.Background(), &buf, "config.yaml", false); err != nil {
 			t.Fatalf("first download: %v", err)
 		}
 		// Second download as "update" should detect the same source URL and skip.
 		buf.Reset()
-		if err := runDownload(&buf, "config.yaml", true); err != nil {
+		if err := runDownload(context.Background(), &buf, "config.yaml", true); err != nil {
 			t.Fatalf("update: %v", err)
 		}
 		if !strings.Contains(buf.String(), "unchanged") && !strings.Contains(buf.String(), "Unchanged") {

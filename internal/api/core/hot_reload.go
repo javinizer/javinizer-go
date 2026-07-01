@@ -47,6 +47,9 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	if cfg == nil {
 		return fmt.Errorf("ReloadConfig: config is nil")
 	}
+	if r.deps.CoreDeps == nil {
+		return fmt.Errorf("ReloadConfig: CoreDeps is not initialized")
+	}
 	reg := scraperutil.NewScraperRegistry()
 	scraper.RegisterAll(reg)
 
@@ -64,14 +67,16 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 		}
 		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
-	if r.deps.CoreDeps == nil {
-		return fmt.Errorf("ReloadConfig: CoreDeps is not initialized")
-	}
-	// Swap the dump sidecar handle so the previous read connection is released.
-	if old := r.deps.CoreDeps.ReplaceR18DevDumpCloser(r18DumpCloser); old != nil {
+	// Swap the reloadables BEFORE retiring the old dump handle. Closing the
+	// old closer first would leave a window where the still-active scraper
+	// registry references a closed SQLite connection and dump-backed searches
+	// fail. Replacing first ensures new lookups route to the new dump store
+	// before the old one is released.
+	old := r.deps.CoreDeps.ReplaceR18DevDumpCloser(r18DumpCloser)
+	r.deps.CoreDeps.ReplaceReloadable(cfg, newRegistry)
+	if old != nil {
 		_ = old.Close()
 	}
-	r.deps.CoreDeps.ReplaceReloadable(cfg, newRegistry)
 
 	// Rebuild APIConfig and invalidate the workflow factories.
 	r.invalidateFactories(cfg)

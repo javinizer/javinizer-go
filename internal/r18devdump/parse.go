@@ -59,6 +59,9 @@ func ParseDump(r io.Reader, emit func(DumpRow) error) error {
 		}
 
 		values := strings.Split(line, "\t")
+		for i, v := range values {
+			values[i] = decodeCopyField(v)
+		}
 		if err := emit(DumpRow{Table: table, Columns: columns, Values: values}); err != nil {
 			return err
 		}
@@ -130,3 +133,55 @@ func parseCopyHeader(line string) (copyHeader, bool) {
 
 // derivedVideoTable is the dump table name for the main video metadata table.
 const derivedVideoTable = "derived_video"
+
+// decodeCopyField unescapes a single PostgreSQL COPY text-format field. The
+// pg_dump text format encodes special characters with a backslash escape:
+// \n (newline), \t (tab), \r (CR), \b (backspace), \f (form feed), \v
+// (vertical tab), \\ (literal backslash). The NULL marker \N is preserved
+// verbatim so downstream import logic can distinguish NULL from an empty
+// string. A backslash not followed by a recognized escape is kept literal.
+func decodeCopyField(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' {
+			b.WriteByte(s[i])
+			continue
+		}
+		// Backslash escape. Preserve \N as the NULL sentinel.
+		if i+1 < len(s) && s[i+1] == 'N' {
+			b.WriteString("\\N")
+			i++
+			continue
+		}
+		if i+1 >= len(s) {
+			b.WriteByte('\\')
+			continue
+		}
+		switch s[i+1] {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case 'r':
+			b.WriteByte('\r')
+		case 'b':
+			b.WriteByte('\b')
+		case 'f':
+			b.WriteByte('\f')
+		case 'v':
+			b.WriteByte('\v')
+		case '\\':
+			b.WriteByte('\\')
+		default:
+			// Unknown escape: keep the backslash and the next char verbatim.
+			b.WriteByte('\\')
+			b.WriteByte(s[i+1])
+		}
+		i++
+	}
+	return b.String()
+}

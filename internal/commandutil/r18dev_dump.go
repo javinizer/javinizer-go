@@ -32,8 +32,15 @@ func OpenR18DevDumpLookup(cfg *config.Config) (models.R18DevDumpLookup, io.Close
 		path = DefaultR18DevDumpPath
 	}
 	if _, err := os.Stat(path); err != nil {
-		// Not downloaded yet. Not an error — the scraper falls back to HTTP.
-		logging.Debugf("R18.dev dump lookup: %s not present, using HTTP fallback", path)
+		if os.IsNotExist(err) {
+			// Not downloaded yet. Not an error — the scraper falls back to HTTP.
+			logging.Debugf("R18.dev dump lookup: %s not present, using HTTP fallback", path)
+			return nil, nil
+		}
+		// A real filesystem problem (permission denied, I/O error). Log at
+		// warn so a broken dump setup is diagnosable rather than silently
+		// looking like the dump was never downloaded.
+		logging.Warnf("R18.dev dump lookup disabled: cannot stat %s: %v", path, err)
 		return nil, nil
 	}
 	store, err := r18devdump.Open(path)

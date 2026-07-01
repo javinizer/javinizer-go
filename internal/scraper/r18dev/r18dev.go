@@ -364,6 +364,13 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return result, nil
 	}
 
+	// If the context was cancelled (e.g. user hit Ctrl+C) during the dump
+	// lookup, do not fall through to rate-limit-prone HTTP work — surface the
+	// cancellation immediately so the caller stops cleanly.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("R18.dev search cancelled before HTTP fallback: %w", err)
+	}
+
 	// HTTP fallback: resolve URL → fetch → parse
 	resolver := &r18ContentIDResolver{scraper: s}
 
