@@ -1180,4 +1180,11 @@ func TestAPIRuntime_ReloadConfig_OldCloserClosed(t *testing.T) {
 	require.NoError(t, rt.ReloadConfig(cfg))
 	// Second reload finds the old closer non-nil and closes it (line 84-86).
 	require.NoError(t, rt.ReloadConfig(cfg))
+
+	// Release the currently-held dump handle so Windows can delete the .db
+	// file during t.TempDir() cleanup (Windows refuses to delete a file with
+	// an open SQLite handle).
+	if c := deps.CoreDeps.ReplaceR18DevDumpCloser(nil); c != nil {
+		_ = c.Close()
+	}
 }

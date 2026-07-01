@@ -306,10 +306,22 @@ func TestNewUpdateCmd_RunE(t *testing.T) {
 	})
 }
 
+// invalidConfigFile writes a YAML file with invalid content and returns its
+// path. config.LoadOrCreate treats a missing file as "create defaults" (no
+// error), so to exercise the parse-error branch we need a file that exists
+// but contains malformed YAML.
+func invalidConfigFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bad.yaml")
+	if err := os.WriteFile(path, []byte(": not valid: yaml: [unclosed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // TestRunDownload_ConfigLoadError covers the config-load error branch.
 func TestRunDownload_ConfigLoadError(t *testing.T) {
-	// Point config at a path that can't be loaded as a valid config.
-	err := runDownload(context.Background(), &bytes.Buffer{}, "/nonexistent/dir/bad.yaml", false)
+	err := runDownload(context.Background(), &bytes.Buffer{}, invalidConfigFile(t), false)
 	if err == nil || !strings.Contains(err.Error(), "failed to load config") {
 		t.Fatalf("expected config-load error, got: %v", err)
 	}
@@ -317,7 +329,7 @@ func TestRunDownload_ConfigLoadError(t *testing.T) {
 
 // TestRunStatus_ConfigLoadError covers the runStatus config-load error branch.
 func TestRunStatus_ConfigLoadError(t *testing.T) {
-	err := runStatus(&bytes.Buffer{}, "/nonexistent/dir/bad.yaml")
+	err := runStatus(&bytes.Buffer{}, invalidConfigFile(t))
 	if err == nil || !strings.Contains(err.Error(), "failed to load config") {
 		t.Fatalf("expected config-load error, got: %v", err)
 	}
@@ -325,7 +337,7 @@ func TestRunStatus_ConfigLoadError(t *testing.T) {
 
 // TestRunSearch_ConfigLoadError covers the runSearch config-load error branch.
 func TestRunSearch_ConfigLoadError(t *testing.T) {
-	err := runSearch(&bytes.Buffer{}, "/nonexistent/dir/bad.yaml", "IPX-535")
+	err := runSearch(&bytes.Buffer{}, invalidConfigFile(t), "IPX-535")
 	if err == nil || !strings.Contains(err.Error(), "failed to load config") {
 		t.Fatalf("expected config-load error, got: %v", err)
 	}

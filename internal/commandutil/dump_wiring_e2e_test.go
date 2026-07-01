@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -79,6 +80,9 @@ func TestOpenR18DevDumpLookup_Branches(t *testing.T) {
 	})
 
 	t.Run("stat error not ENOENT (unreadable parent dir)", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("POSIX permission bits don't block os.Stat on Windows")
+		}
 		if os.Geteuid() == 0 {
 			t.Skip("running as root bypasses permission checks")
 		}
