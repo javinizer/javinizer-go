@@ -379,3 +379,24 @@ func TestParseDump_EmptyStringDistinctFromNull(t *testing.T) {
 		t.Fatalf("empty string should stay empty, got %+v", got)
 	}
 }
+
+// TestParseDump_QuotedTableWithSchema covers the '".' branch of the quoted
+// table name stripping (line 121): a COPY with a schema-qualified quoted
+// table name like public."schema"."table" must extract "schema" as the table.
+func TestParseDump_QuotedTableWithSchema(t *testing.T) {
+	dump := `COPY public."schema"."table" (col) FROM stdin;
+val1
+\.
+`
+	var gotTable string
+	err := ParseDump(strings.NewReader(dump), func(row DumpRow) error {
+		gotTable = row.Table
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ParseDump: %v", err)
+	}
+	if gotTable != "schema" {
+		t.Errorf("table name: got %q, want %q", gotTable, "schema")
+	}
+}

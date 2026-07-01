@@ -706,3 +706,68 @@ func (r *cancelingReader) Read(p []byte) (int, error) {
 	r.data = r.data[n:]
 	return n, nil
 }
+
+// TestImport_FlushAllError covers the flushAll error propagation (lines 263,
+// 293-296): a reader that cancels the context when returning EOF causes the
+// residual batch flush (in flushAll → insertBatch → tx.ExecContext) to fail
+// with a canceled-context error, which Import surfaces as "insert rows".
+func TestImport_FlushAllError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r18dev_dump.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	// Reader returns valid COPY data (< importBatchSize rows, so no mid-stream
+	// flush — the residual stays in batches), then cancels the context on EOF
+	// so flushAll's insertBatch fails on the canceled context.
+	r := &cancelOnEOFReader{
+		data:   "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n",
+		cancel: cancel,
+	}
+	_, err := Import(ctx, r, path, ImportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "insert rows") {
+		t.Fatalf("expected insert-rows error, got: %v", err)
+	}
+}
+
+// cancelOnEOFReader returns the data, then cancels the context when EOF is
+// reached. This ensures the context is canceled AFTER ParseDump finishes but
+// BEFORE flushAll runs.
+type cancelOnEOFReader struct {
+	data     string
+	cancel   context.CancelFunc
+	canceled bool
+}
+
+func (r *cancelOnEOFReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		if !r.canceled {
+			r.cancel()
+			r.canceled = true
+		}
+		return 0, io.EOF
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+// TestImport_WriteMetaError covers the writeMeta error branch (lines 298-299,
+// 445): by generating exactly importBatchSize (40) rows, the 40th row triggers
+// a mid-stream flush that empties the batch. The reader then cancels the
+// context on EOF, so flushAll succeeds (empty residual) but writeMeta's
+// tx.ExecContext fails on the canceled context → "write dump_meta" error.
+func TestImport_WriteMetaError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r18dev_dump.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	var sb strings.Builder
+	sb.WriteString("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n")
+	for i := 0; i < importBatchSize; i++ {
+		fmt.Fprintf(&sb, "118ipx%05d\tIPX-%d\n", i, i)
+	}
+	sb.WriteString("\\.\n")
+	r := &cancelOnEOFReader{data: sb.String(), cancel: cancel}
+	_, err := Import(ctx, r, path, ImportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "write dump_meta") {
+		t.Fatalf("expected write-dump_meta error, got: %v", err)
+	}
+}

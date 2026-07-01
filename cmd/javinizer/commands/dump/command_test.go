@@ -11,12 +11,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/r18devdump"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func gzipBytes(t *testing.T, s string) []byte {
@@ -452,5 +456,58 @@ func TestRunStatus_SourceDateOutput(t *testing.T) {
 		if !strings.Contains(buf.String(), "Source date: 2026-04-28") {
 			t.Errorf("status output missing source date: %s", buf.String())
 		}
+	})
+}
+
+// TestRunDownload_ImportError covers the import-error branch (line 145): the
+// download succeeds but Import fails because the dump path's parent is a file
+// (not a directory), so MkdirAll fails.
+func TestRunDownload_ImportError(t *testing.T) {
+	srv := newDumpHTTPServer(t)
+	defer srv.Close()
+	origURL := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL
+	defer func() { r18devdump.LatestDumpURL = origURL }()
+
+	tmp := t.TempDir()
+	runInDir(t, tmp, func() {
+		// Create "data" as a regular file so Import's MkdirAll("data/r18dev")
+		// fails with "not a directory".
+		require.NoError(t, os.WriteFile("data", []byte("x"), 0o600))
+		err := runDownload(context.Background(), &bytes.Buffer{}, "config.yaml", false)
+		require.Error(t, err, "import should fail when dump dir cannot be created")
+		assert.Contains(t, err.Error(), "create dump dir")
+	})
+}
+
+// TestRunDownload_ProgressOutput covers the progress-throttle print branch
+// (lines 135-136): when the download takes >1s, the progress callback prints
+// the MB downloaded. The server writes the gzip body in two chunks with a
+// 1.1s gap so the second chunk triggers the throttled print.
+func TestRunDownload_ProgressOutput(t *testing.T) {
+	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	gz := gzipBytes(t, dumpBody)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		// Write first chunk, then wait >1s so the progress callback's throttle
+		// fires on the second chunk.
+		_, _ = w.Write(gz[:1])
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(1100 * time.Millisecond)
+		_, _ = w.Write(gz[1:])
+	}))
+	defer srv.Close()
+	origURL := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL
+	defer func() { r18devdump.LatestDumpURL = origURL }()
+
+	tmp := t.TempDir()
+	runInDir(t, tmp, func() {
+		var buf bytes.Buffer
+		err := runDownload(context.Background(), &buf, "config.yaml", false)
+		require.NoError(t, err)
+		assert.Contains(t, buf.String(), "downloaded", "progress output should include downloaded MB")
 	})
 }

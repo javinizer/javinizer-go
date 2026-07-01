@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -188,5 +189,40 @@ func TestDownload_FetchError(t *testing.T) {
 	_, err := Download(context.Background(), &http.Client{}, "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil {
 		t.Fatal("expected a fetch error for an unreachable endpoint")
+	}
+}
+
+// TestDownload_BuildRequestError covers the http.NewRequestWithContext error
+// branch (line 54): an invalid URL (control character) causes request building
+// to fail before any HTTP call.
+func TestDownload_BuildRequestError(t *testing.T) {
+	orig := LatestDumpURL
+	// A URL with a control character is rejected by url.Parse → NewRequest fails.
+	setLatestDumpURL("http://example.com/\x7f")
+	defer setLatestDumpURL(orig)
+
+	_, err := Download(context.Background(), &http.Client{}, "", nil, func(io.Reader, DownloadResult) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "build request") {
+		t.Fatalf("expected build-request error, got: %v", err)
+	}
+}
+
+// TestDownload_ImportFnError covers the importFn error branch (line 91): the
+// download succeeds and gunzips, but importFn returns an error that Download
+// propagates.
+func TestDownload_ImportFnError(t *testing.T) {
+	srv, latest := newDumpServer(t)
+	defer srv.Close()
+
+	orig := LatestDumpURL
+	setLatestDumpURL(latest)
+	defer setLatestDumpURL(orig)
+
+	importErr := errors.New("import failed")
+	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error {
+		return importErr
+	})
+	if err != importErr {
+		t.Fatalf("expected importFn error, got: %v", err)
 	}
 }
