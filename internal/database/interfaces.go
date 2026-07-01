@@ -108,6 +108,7 @@ type ActressAliasRepositoryInterface interface {
 	List(ctx context.Context) ([]models.ActressAlias, error)
 	Delete(ctx context.Context, aliasName string) error
 	GetAliasMap(ctx context.Context) (map[string]string, error)
+	GetAliasGroup(ctx context.Context, name string) (AliasGroup, error)
 }
 
 // MovieTagRepositoryInterface defines the contract for movie tag operations

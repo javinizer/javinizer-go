@@ -141,6 +141,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/actresses/alias-group": {
+            "get": {
+                "description": "Resolve a name to its full set of known names (canonical plus all aliases that resolve to it). Returns empty canonical/names when the name is unknown to the alias table.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "Get actress alias group",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Actress name (alias or canonical) to resolve",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.aliasGroupResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/actresses/merge": {
             "post": {
                 "description": "Merge a source actress into a target actress with field-level target/source resolutions.",
@@ -6473,6 +6514,20 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_api_actress.aliasGroupResponse": {
+            "type": "object",
+            "properties": {
+                "canonical": {
+                    "type": "string"
+                },
+                "names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

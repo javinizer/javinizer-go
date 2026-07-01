@@ -70,7 +70,7 @@ func (m *actressMerger) Merge(sources []actressSource, opts actressMergeOptions)
 		for _, info := range src.Actresses {
 			hadAnyActressFromScrapers = true
 
-			nameKey := resolveNameKey(info.JapaneseName, info.FirstName, info.LastName)
+			nameKey := resolveCanonicalNameKey(opts.AliasResolver, info.JapaneseName, info.FirstName, info.LastName)
 
 			if opts.SkipUnknown && unknownTextLower != "" && isUnknownActress(info, nameKey, unknownTextLower) {
 				continue
@@ -85,7 +85,7 @@ func (m *actressMerger) Merge(sources []actressSource, opts actressMergeOptions)
 
 			if existing == nil && nameKey != "" {
 				for _, actress := range actressByDMMID {
-					actressNameKey := resolveNameKey(actress.JapaneseName, actress.FirstName, actress.LastName)
+					actressNameKey := resolveCanonicalNameKey(opts.AliasResolver, actress.JapaneseName, actress.FirstName, actress.LastName)
 					if actressNameKey == nameKey {
 						existing = actress
 						foundInDMMIDMap = true

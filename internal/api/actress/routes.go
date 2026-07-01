@@ -12,6 +12,7 @@ func RegisterRoutes(protected *gin.RouterGroup, deps ActressDeps) {
 	protected.PUT("/actresses/:id", updateActress(deps))
 	protected.DELETE("/actresses/:id", deleteActress(deps))
 	protected.GET("/actresses/search", searchActresses(deps))
+	protected.GET("/actresses/alias-group", getAliasGroup(deps))
 	protected.POST("/actresses/merge/preview", previewActressMerge(deps))
 	protected.POST("/actresses/merge", mergeActresses(deps))
 	protected.GET("/actresses/export", exportActresses(deps))

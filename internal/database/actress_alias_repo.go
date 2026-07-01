@@ -3,7 +3,9 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -95,4 +97,115 @@ func (r *ActressAliasRepository) GetAliasMap(ctx context.Context) (map[string]st
 		result[a.AliasName] = a.CanonicalName
 	}
 	return result, nil
+}
+
+// AliasGroup is the set of all known names for a single performer: the
+// canonical name plus every alias that resolves to it.
+type AliasGroup struct {
+	Canonical string   // The canonical (preferred) name; empty when name is unknown.
+	Names     []string // Canonical first, then aliases, deduplicated, order-stable.
+}
+
+// GetAliasGroup resolves a name to its full known-names group. The input may
+// be either an alias or a canonical name. When the name is not present in the
+// alias table at all, Canonical is empty and Names is nil — callers should
+// treat this as "no known aliases, nothing to choose between". The returned
+// Names slice is deduplicated and order-stable (canonical first, then aliases
+// in the order the database returns them).
+func (r *ActressAliasRepository) GetAliasGroup(ctx context.Context, name string) (AliasGroup, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return AliasGroup{}, nil
+	}
+
+	aliasMap, err := r.GetAliasMap(ctx)
+	if err != nil {
+		return AliasGroup{}, err
+	}
+
+	// Resolve the input to its canonical form. If the name is an alias, follow
+	// the mapping; otherwise treat the name itself as canonical.
+	canonical := name
+	if c, ok := aliasMap[name]; ok {
+		canonical = c
+	}
+
+	// Gather every alias that points at this canonical.
+	matching, err := r.FindByCanonicalName(ctx, canonical)
+	if err != nil {
+		return AliasGroup{}, err
+	}
+	// FindByCanonicalName uses a Find() query, which returns an empty slice
+	// (not IsNotFound) when nothing matches. An empty result means the name is
+	// neither an alias nor a canonical in the table — there is no group.
+	if len(matching) == 0 {
+		return AliasGroup{}, nil
+	}
+
+	seen := make(map[string]struct{}, len(matching)+1)
+	names := make([]string, 0, len(matching)+1)
+	add := func(n string) {
+		if n == "" {
+			return
+		}
+		if _, ok := seen[n]; ok {
+			return
+		}
+		seen[n] = struct{}{}
+		names = append(names, n)
+	}
+
+	add(canonical)
+	for _, a := range matching {
+		add(a.AliasName)
+	}
+
+	if len(names) == 0 {
+		return AliasGroup{}, nil
+	}
+	return AliasGroup{Canonical: canonical, Names: names}, nil
+}
+
+var defaultActressAliases []models.ActressAlias
+
+func init() {
+	// Curated rename mappings for well-known AV actresses who have changed
+	// stage names. Canonical form is the most current name. Each alias maps
+	// directly to the canonical (no transitive chains) so that single-hop
+	// resolution collapses all of a performer's credits into one entry.
+	//
+	// Sources: ja.wikipedia.org and community wikis (seesaawiki av_neme,
+	// av-wiki.net), cross-checked across multiple titles.
+	defaultActressAliases = []models.ActressAlias{
+		// 新セリナ — renamed 青木桃 → 朝日芹奈 (2022-10) → 堤セリナ (2024-03) → 新セリナ (2025-04)
+		{AliasName: "青木桃", CanonicalName: "新セリナ"},
+		{AliasName: "朝日芹奈", CanonicalName: "新セリナ"},
+		{AliasName: "堤セリナ", CanonicalName: "新セリナ"},
+		// 尾崎えりか — renamed 与田さくら → 尾崎えりか (2022-09)
+		{AliasName: "与田さくら", CanonicalName: "尾崎えりか"},
+		// 日向ゆら — renamed 広瀬みつき → 日向ゆら (2022-08)
+		{AliasName: "広瀬みつき", CanonicalName: "日向ゆら"},
+	}
+}
+
+// SeedDefaultActressAliases inserts the built-in default actress alias mappings
+// into the repository. Existing user-curated aliases are preserved: only
+// alias names that are not already present are inserted, so a user's choice of
+// canonical name for an alias is never overwritten by the seed.
+func SeedDefaultActressAliases(ctx context.Context, repo ActressAliasRepositoryInterface) {
+	for i := range defaultActressAliases {
+		a := defaultActressAliases[i]
+		_, err := repo.FindByAliasName(ctx, a.AliasName)
+		if err == nil {
+			// Already present (possibly user-curated) — leave it untouched.
+			continue
+		}
+		if !IsNotFound(err) {
+			logging.Warnf("failed to seed actress alias %q: %v", a.AliasName, err)
+			continue
+		}
+		if err := repo.Create(ctx, &a); err != nil {
+			logging.Warnf("failed to seed actress alias %q: %v", a.AliasName, err)
+		}
+	}
 }

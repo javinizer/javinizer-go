@@ -407,6 +407,11 @@ export interface ActressUpsertRequest {
 
 export type ActressMergeResolution = 'target' | 'source';
 
+export interface ActressAliasGroup {
+	canonical: string;
+	names: string[];
+}
+
 export interface ActressMergePreviewRequest {
 	target_id: number;
 	source_id: number;

@@ -6,7 +6,7 @@
 	import { alertDialog, confirmDialog } from '$lib/stores/dialog.svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { apiClient } from '$lib/api/client';
-	import type { Movie, Actress } from '$lib/api/types';
+	import type { Movie, Actress, ActressAliasGroup } from '$lib/api/types';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 	import { Plus, SquarePen, Trash2, X, Save, Search } from 'lucide-svelte';
@@ -45,6 +45,14 @@
 	let isSearchFocused = $state(false);
 	let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	let searchRequestId = 0;
+
+	// Alias group for the actress currently being edited. When the resolver
+	// knows more than one name for this performer (canonical + aliases), a
+	// "Write to NFO as" dropdown is shown so the user can pick which name the
+	// NFO <name> tag gets. The chosen value is written to japanese_name.
+	let aliasGroup = $state<ActressAliasGroup | null>(null);
+	let aliasGroupFetching = $state(false);
+	let aliasRequestId = 0;
 
 	async function searchActresses(query: string) {
 		const requestId = ++searchRequestId;
@@ -91,6 +99,48 @@
 		thumbPreviewError = false;
 	});
 
+	// Fetch the alias group for the actress being edited whenever her Japanese
+	// name changes. The dropdown only renders when the group has >1 name, so a
+	// silent no-op for actresses with no known aliases is fine. Stale requests
+	// are discarded via aliasRequestId.
+	async function fetchAliasGroup(name: string) {
+		const requestId = ++aliasRequestId;
+		const trimmed = name.trim();
+		if (!trimmed) {
+			if (requestId === aliasRequestId) {
+				aliasGroup = null;
+				aliasGroupFetching = false;
+			}
+			return;
+		}
+		if (requestId === aliasRequestId) aliasGroupFetching = true;
+		try {
+			const group = await apiClient.actresses.getAliasGroup(trimmed);
+			if (requestId === aliasRequestId) {
+				aliasGroup = group.names.length > 1 ? group : null;
+			}
+		} catch (error) {
+			if (requestId === aliasRequestId) {
+				console.error('Failed to fetch actress alias group:', error);
+				aliasGroup = null;
+			}
+		} finally {
+			if (requestId === aliasRequestId) aliasGroupFetching = false;
+		}
+	}
+
+	// Debounce the alias fetch so manual typing in the Japanese-name field does
+	// not hit the API per keystroke.
+	let aliasDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+	$effect(() => {
+		const name = editingActress.japanese_name ?? '';
+		if (aliasDebounceTimer) { clearTimeout(aliasDebounceTimer); aliasDebounceTimer = null; }
+		aliasDebounceTimer = setTimeout(() => fetchAliasGroup(name), 300);
+		return () => {
+			if (aliasDebounceTimer) { clearTimeout(aliasDebounceTimer); aliasDebounceTimer = null; }
+		};
+	});
+
 	// Debounced copy of the thumbnail URL used ONLY for the preview <img src>
 	// and its {#if}/fallback, so rapid typing does not re-fetch per keystroke.
 	// The input stays bound to the live editingActress.thumb_url, and the
@@ -134,6 +184,7 @@
 			japanese_name: '',
 			thumb_url: ''
 		};
+		aliasGroup = null;
 		showEditModal = true;
 		loadAllActresses(); // Load actresses when opening modal
 	}
@@ -141,6 +192,7 @@
 	function openEditActress(index: number) {
 		editingIndex = index;
 		editingActress = { ...actresses[index] };
+		aliasGroup = null;
 		showEditModal = true;
 		loadAllActresses(); // Load actresses when opening modal
 	}
@@ -158,6 +210,7 @@
 		}
 
 		showEditModal = false;
+		aliasGroup = null;
 		notifyParent();
 	}
 
@@ -170,6 +223,7 @@
 
 	function cancelEdit() {
 		showEditModal = false;
+		aliasGroup = null;
 		if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null; }
 		searchQuery = '';
 		showSearchResults = false;
@@ -462,6 +516,27 @@
 								placeholder="e.g., 西宮ゆめ"
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
+							{#if aliasGroupFetching}
+								<p class="mt-1 text-xs text-muted-foreground">Checking known aliases…</p>
+							{:else if aliasGroup}
+								<label class="mt-2 text-xs font-medium block" for="actress-nfo-name">Write to NFO as</label>
+								<select
+									id="actress-nfo-name"
+									value={editingActress.japanese_name}
+									onchange={(event) => {
+										editingActress.japanese_name = (event.currentTarget as HTMLSelectElement).value;
+									}}
+									class="mt-1 w-full px-3 py-2 border rounded-md bg-background text-sm focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+									title="This actress has multiple known names; pick the one to write to the NFO"
+								>
+									{#each aliasGroup.names as name}
+										<option value={name}>{name}{name === aliasGroup.canonical ? ' (current)' : ''}</option>
+									{/each}
+								</select>
+								<p class="mt-1 text-xs text-muted-foreground">
+									{aliasGroup.names.length} known names for this performer. Selected name is written to the NFO &lt;name&gt; tag.
+								</p>
+							{/if}
 						</div>
 
 						<div>

@@ -7,6 +7,7 @@ package mocks
 import (
 	"context"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -284,6 +285,72 @@ func (_c *MockActressAliasRepositoryInterface_FindByCanonicalName_Call) Return(a
 }
 
 func (_c *MockActressAliasRepositoryInterface_FindByCanonicalName_Call) RunAndReturn(run func(ctx context.Context, canonicalName string) ([]models.ActressAlias, error)) *MockActressAliasRepositoryInterface_FindByCanonicalName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetAliasGroup provides a mock function for the type MockActressAliasRepositoryInterface
+func (_mock *MockActressAliasRepositoryInterface) GetAliasGroup(ctx context.Context, name string) (database.AliasGroup, error) {
+	ret := _mock.Called(ctx, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAliasGroup")
+	}
+
+	var r0 database.AliasGroup
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (database.AliasGroup, error)); ok {
+		return returnFunc(ctx, name)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) database.AliasGroup); ok {
+		r0 = returnFunc(ctx, name)
+	} else {
+		r0 = ret.Get(0).(database.AliasGroup)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressAliasRepositoryInterface_GetAliasGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAliasGroup'
+type MockActressAliasRepositoryInterface_GetAliasGroup_Call struct {
+	*mock.Call
+}
+
+// GetAliasGroup is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+func (_e *MockActressAliasRepositoryInterface_Expecter) GetAliasGroup(ctx any, name any) *MockActressAliasRepositoryInterface_GetAliasGroup_Call {
+	return &MockActressAliasRepositoryInterface_GetAliasGroup_Call{Call: _e.mock.On("GetAliasGroup", ctx, name)}
+}
+
+func (_c *MockActressAliasRepositoryInterface_GetAliasGroup_Call) Run(run func(ctx context.Context, name string)) *MockActressAliasRepositoryInterface_GetAliasGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressAliasRepositoryInterface_GetAliasGroup_Call) Return(aliasGroup database.AliasGroup, err error) *MockActressAliasRepositoryInterface_GetAliasGroup_Call {
+	_c.Call.Return(aliasGroup, err)
+	return _c
+}
+
+func (_c *MockActressAliasRepositoryInterface_GetAliasGroup_Call) RunAndReturn(run func(ctx context.Context, name string) (database.AliasGroup, error)) *MockActressAliasRepositoryInterface_GetAliasGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }

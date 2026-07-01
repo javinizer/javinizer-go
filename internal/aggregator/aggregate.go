@@ -361,6 +361,26 @@ func resolveNameKey(japaneseName, firstName, lastName string) string {
 	return models.NormalizeActressNameKey(lastName + " " + firstName)
 }
 
+// resolveCanonicalNameKey returns the bucket key used to deduplicate actresses
+// across sources. When an aliasResolver is available and maps the incoming
+// name to a canonical form, the canonical form is normalized and used as the
+// key — so two scrapers crediting the same person under different alias names
+// (e.g. JavDB's 青木桃 vs libredmm's 朝日芹奈) collapse into one entry.
+// Unlike Resolve (which renames the display name and is gated by
+// ConvertAlias), this keying path is gated only by ActressDatabase.Enabled:
+// removing duplicates is always correct. Falls back to resolveNameKey when
+// the resolver is absent, disabled, or has no alias for the name.
+func resolveCanonicalNameKey(resolver aliasResolverInterface, japaneseName, firstName, lastName string) string {
+	if resolver != nil {
+		if canonical := resolver.CanonicalName(japaneseName, firstName, lastName); canonical != "" {
+			if k := models.NormalizeActressNameKey(canonical); k != "" {
+				return k
+			}
+		}
+	}
+	return resolveNameKey(japaneseName, firstName, lastName)
+}
+
 func (a *Aggregator) getActressesByPriorityWithSource(
 	results map[string]*models.ScraperResult,
 	priority []string,

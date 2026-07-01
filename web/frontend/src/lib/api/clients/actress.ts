@@ -9,6 +9,7 @@ import type {
 	ActressMergeResponse,
 	ActressesImportRequest,
 	ImportResponse,
+	ActressAliasGroup,
 } from '../types';
 import { BaseClient } from './common';
 
@@ -72,5 +73,10 @@ export class ActressClient extends BaseClient {
 			method: 'POST',
 			body: JSON.stringify(request),
 		});
+	}
+
+	async getAliasGroup(name: string): Promise<ActressAliasGroup> {
+		const query = new URLSearchParams({ name });
+		return this.request<ActressAliasGroup>(`/api/v1/actresses/alias-group?${query}`);
 	}
 }

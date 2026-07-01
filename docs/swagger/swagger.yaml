@@ -2345,6 +2345,15 @@ definitions:
       total:
         type: integer
     type: object
+  internal_api_actress.aliasGroupResponse:
+    properties:
+      canonical:
+        type: string
+      names:
+        items:
+          type: string
+        type: array
+    type: object
   internal_api_events.deleteEventsResponse:
     properties:
       deleted:
@@ -2795,6 +2804,35 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update actress
+      tags:
+      - actress
+  /api/v1/actresses/alias-group:
+    get:
+      description: Resolve a name to its full set of known names (canonical plus all
+        aliases that resolve to it). Returns empty canonical/names when the name is
+        unknown to the alias table.
+      parameters:
+      - description: Actress name (alias or canonical) to resolve
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.aliasGroupResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Get actress alias group
       tags:
       - actress
   /api/v1/actresses/merge:

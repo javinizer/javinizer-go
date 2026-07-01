@@ -122,6 +122,12 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 		// which was a latent bug in the CLI path.
 		database.SeedDefaultWordReplacements(ctx, database.NewWordReplacementRepository(db))
 
+		// Seed built-in actress alias mappings (well-known stage-name changes).
+		// Insert-only: user-curated aliases are never overwritten. Populated
+		// regardless of actress_database.enabled so the data is ready if the
+		// feature is later turned on; the aliasResolver only reads it when enabled.
+		database.SeedDefaultActressAliases(ctx, database.NewActressAliasRepository(db))
+
 		deps.DB = db
 		ownsDB = true
 	}

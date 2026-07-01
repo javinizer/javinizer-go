@@ -115,3 +115,54 @@ func TestActressAliasRepository(t *testing.T) {
 		assert.Greater(t, len(aliases), 0)
 	})
 }
+
+func TestSeedDefaultActressAliases(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressAliasRepository(db)
+
+	SeedDefaultActressAliases(context.TODO(), repo)
+
+	m, err := repo.GetAliasMap(context.TODO())
+	require.NoError(t, err)
+	assert.NotEmpty(t, m)
+	// DOCP-392 rename mappings are present and resolve to the current name.
+	assert.Equal(t, "新セリナ", m["青木桃"])
+	assert.Equal(t, "新セリナ", m["朝日芹奈"])
+	assert.Equal(t, "新セリナ", m["堤セリナ"])
+	assert.Equal(t, "尾崎えりか", m["与田さくら"])
+	assert.Equal(t, "日向ゆら", m["広瀬みつき"])
+}
+
+func TestSeedDefaultActressAliases_Idempotent(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressAliasRepository(db)
+
+	SeedDefaultActressAliases(context.TODO(), repo)
+	list1, err := repo.List(context.TODO())
+	require.NoError(t, err)
+
+	SeedDefaultActressAliases(context.TODO(), repo)
+	list2, err := repo.List(context.TODO())
+	require.NoError(t, err)
+
+	assert.Equal(t, len(list1), len(list2), "seeding twice should not duplicate entries")
+}
+
+// TestSeedDefaultActressAliases_PreservesUserCanonical verifies the seed is
+// insert-only: a user's curated canonical for an alias is not overwritten.
+func TestSeedDefaultActressAliases_PreservesUserCanonical(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressAliasRepository(db)
+
+	// User prefers the release-time name as canonical for this alias.
+	require.NoError(t, repo.Create(context.TODO(), &models.ActressAlias{
+		AliasName:     "青木桃",
+		CanonicalName: "朝日芹奈",
+	}))
+
+	SeedDefaultActressAliases(context.TODO(), repo)
+
+	found, err := repo.FindByAliasName(context.TODO(), "青木桃")
+	require.NoError(t, err)
+	assert.Equal(t, "朝日芹奈", found.CanonicalName, "user-curated canonical must not be overwritten by seed")
+}
