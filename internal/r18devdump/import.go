@@ -205,8 +205,11 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		return ImportResult{}, fmt.Errorf("open temp dump db: %w", err)
 	}
 	committed := false
+	closed := false
 	defer func() {
-		_ = db.Close()
+		if !closed {
+			_ = db.Close()
+		}
 		if !committed {
 			_ = os.Remove(tmpPath)
 		}
@@ -305,6 +308,16 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		return ImportResult{}, fmt.Errorf("wal checkpoint: %w", err)
 	}
 
+	// Close the write connection before the rename. On POSIX the open handle
+	// would follow the inode across rename, but Windows refuses to rename a
+	// file that still has an open handle ("The process cannot access the file
+	// because it is being used by another process"). Closing here also
+	// ensures the WAL is fully checkpointed and the -wal/-shm sidecars are
+	// cleaned up before the rename on every platform.
+	if err := db.Close(); err != nil {
+		return ImportResult{}, fmt.Errorf("close temp dump db: %w", err)
+	}
+	closed = true
 	if err := os.Rename(tmpPath, path); err != nil {
 		return ImportResult{}, fmt.Errorf("rename tmp db: %w", err)
 	}

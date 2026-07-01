@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -204,7 +205,18 @@ func TestNilStoreIsSafe(t *testing.T) {
 // leaves intact (unlinked but alive until Close), so reads never observe a
 // half-written database. A fresh Open after the import sees the new data.
 // Run with -race to confirm no data races.
+//
+// This invariant is POSIX-only: rename over a file with open handles relies on
+// the kernel unlinking the old inode while the open fd keeps it alive. Windows
+// locks files that are open, so the rename is refused ("The process cannot
+// access the file because it is being used by another process"). The
+// production import path (close-then-rename) still works on Windows when no
+// reader is open; only the concurrent-reader-during-rename case is unsupported
+// there.
 func TestImport_ConcurrentReadWhileImporting(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("atomic rename over an open reader relies on POSIX inode semantics; Windows locks open files")
+	}
 	path := seedDump(t, "118ipx00535	IPX-535")
 
 	reader, err := Open(path)
