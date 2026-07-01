@@ -289,6 +289,9 @@ linters:
       - path: cmd/javinizer/commands/sort/command\.go
         linters:
           - errcheck
+      - path: cmd/javinizer/commands/dump/command\.go
+        linters:
+          - errcheck
       - path: cmd/javinizer/commands/update/command\.go
         linters:
           - errcheck

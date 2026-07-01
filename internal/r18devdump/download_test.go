@@ -1,0 +1,166 @@
+package r18devdump
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func setLatestDumpURL(u string) {
+	LatestDumpURL = u
+}
+
+// gzipped serves content as a gzip stream.
+func gzipped(t *testing.T, body string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	if _, err := gw.Write([]byte(body)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func newDumpServer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	gz := gzipped(t, dumpBody)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dumps/r18dotdev_dump_2026-04-28.sql.gz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(gz)
+	})
+	mux.HandleFunc("/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dumps/r18dotdev_dump_2026-04-28.sql.gz", http.StatusFound)
+	})
+	srv := httptest.NewServer(mux)
+	return srv, srv.URL + "/latest"
+}
+
+func TestDownload_Import(t *testing.T) {
+	srv, latest := newDumpServer(t)
+	defer srv.Close()
+
+	// Override the package endpoint to point at the test server.
+	orig := LatestDumpURL
+	setLatestDumpURL(latest)
+	defer setLatestDumpURL(orig)
+
+	var received strings.Builder
+	gotURL := ""
+	res, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+		gotURL = d.FinalURL
+		_, err := io.Copy(&received, r)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if res.Unchanged {
+		t.Error("expected a real download, not unchanged")
+	}
+	if res.SourceDate != "2026-04-28" {
+		t.Errorf("SourceDate = %q, want 2026-04-28", res.SourceDate)
+	}
+	if !strings.Contains(gotURL, "2026-04-28") {
+		t.Errorf("FinalURL = %q, want to contain date", gotURL)
+	}
+	if !strings.Contains(received.String(), "118ipx00535") {
+		t.Errorf("importFn received decompressed body without expected row: %q", received.String())
+	}
+}
+
+func TestDownload_UnchangedSkipsImport(t *testing.T) {
+	srv, latest := newDumpServer(t)
+	defer srv.Close()
+	orig := LatestDumpURL
+	setLatestDumpURL(latest)
+	defer setLatestDumpURL(orig)
+
+	// First download to discover the final (dated) URL.
+	first, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
+	if err != nil {
+		t.Fatalf("first Download: %v", err)
+	}
+	finalURL := first.FinalURL
+
+	// Second download with currentSourceURL == finalURL must skip.
+	importCalled := false
+	res, err := Download(context.Background(), srv.Client(), finalURL, nil, func(io.Reader, DownloadResult) error {
+		importCalled = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("second Download: %v", err)
+	}
+	if !res.Unchanged {
+		t.Error("expected Unchanged=true")
+	}
+	if importCalled {
+		t.Error("importFn should not be called when unchanged")
+	}
+}
+
+func TestDownload_ProgressReported(t *testing.T) {
+	srv, latest := newDumpServer(t)
+	defer srv.Close()
+	orig := LatestDumpURL
+	setLatestDumpURL(latest)
+	defer setLatestDumpURL(orig)
+
+	var lastProgress int64
+	res, err := Download(context.Background(), srv.Client(), "", func(n int64) {
+		lastProgress = n
+	}, func(r io.Reader, d DownloadResult) error {
+		_, _ = io.Copy(io.Discard, r)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if res.Bytes <= 0 {
+		t.Errorf("Bytes = %d, want > 0", res.Bytes)
+	}
+	if lastProgress <= 0 {
+		t.Errorf("progress callback never reported bytes, last = %d", lastProgress)
+	}
+}
+
+func TestDownload_NonOKStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer srv.Close()
+	orig := LatestDumpURL
+	setLatestDumpURL(srv.URL)
+	defer setLatestDumpURL(orig)
+
+	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
+	if err == nil {
+		t.Fatal("expected error for non-200 status")
+	}
+}
+
+func TestDownload_InvalidGzip(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("this is not a gzip stream"))
+	}))
+	defer srv.Close()
+	orig := LatestDumpURL
+	setLatestDumpURL(srv.URL)
+	defer setLatestDumpURL(orig)
+
+	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
+	if err == nil {
+		t.Fatal("expected gunzip error for non-gzip body")
+	}
+}

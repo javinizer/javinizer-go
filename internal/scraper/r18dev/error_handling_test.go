@@ -88,7 +88,7 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 			name: "empty search ID",
 			setupFunc: func() (*scraper, error) {
 				settings := models.ScraperSettings{Enabled: true}
-				scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
+				scraper := newScraper(&settings, nil, models.FlareSolverrConfig{}, nil)
 				_, err := scraper.Search(context.Background(), "")
 				return scraper, err
 			},
@@ -114,7 +114,7 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 // TestErrorMessages_NoSensitiveData ensures no API keys or internal paths in errors
 func TestErrorMessages_NoSensitiveData(t *testing.T) {
 	settings := models.ScraperSettings{Enabled: true}
-	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{}, nil)
 
 	// Trigger various errors and check none leak sensitive data
 	sensitivePatterns := []string{
@@ -224,7 +224,7 @@ func TestMissingRequiredFields(t *testing.T) {
 // Benchmark_ErrorHandling measures performance of error path
 func Benchmark_ErrorHandling(b *testing.B) {
 	settings := models.ScraperSettings{Enabled: true}
-	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{}, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

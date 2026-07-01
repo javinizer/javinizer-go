@@ -175,7 +175,7 @@ func TestNewScraperV5(t *testing.T) {
 		Enabled: true,
 	}
 
-	s := newScraper(settings, nil, models.FlareSolverrConfig{})
+	s := newScraper(settings, nil, models.FlareSolverrConfig{}, nil)
 	require.NotNil(t, s)
 	assert.True(t, s.enabled)
 }

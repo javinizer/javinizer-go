@@ -56,12 +56,20 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 		return fmt.Errorf("failed to finalize scraper config: %w", err)
 	}
 
-	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), r.deps.Repos.ContentIDMappingRepo)
+	r18DumpLookup, r18DumpCloser := commandutil.OpenR18DevDumpLookup(cfg)
+	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
 	if err != nil {
+		if r18DumpCloser != nil {
+			_ = r18DumpCloser.Close()
+		}
 		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
 	if r.deps.CoreDeps == nil {
 		return fmt.Errorf("ReloadConfig: CoreDeps is not initialized")
+	}
+	// Swap the dump sidecar handle so the previous read connection is released.
+	if old := r.deps.CoreDeps.ReplaceR18DevDumpCloser(r18DumpCloser); old != nil {
+		_ = old.Close()
 	}
 	r.deps.CoreDeps.ReplaceReloadable(cfg, newRegistry)
 

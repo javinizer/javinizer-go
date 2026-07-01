@@ -33,7 +33,7 @@ type ScraperRegistryConfig struct {
 // initFromRegistration populates a scraperutil.ScraperRegistry with scraper instances
 // by building ScraperDeps from ScraperRegistryConfig and calling constructors from
 // registration metadata.
-func initFromRegistration(reg *scraperutil.ScraperRegistry, cfg ScraperRegistryConfig, contentIDRepo models.ContentIDMappingRepositoryInterface) (*scraperutil.ScraperRegistry, error) {
+func initFromRegistration(reg *scraperutil.ScraperRegistry, cfg ScraperRegistryConfig, contentIDRepo models.ContentIDMappingRepositoryInterface, r18DevDump models.R18DevDumpLookup) (*scraperutil.ScraperRegistry, error) {
 	depsMap := make(map[string]scraperutil.ScraperDeps, len(cfg.Overrides))
 	for name, settings := range cfg.Overrides {
 		deps := scraperutil.ScraperDeps{
@@ -47,6 +47,9 @@ func initFromRegistration(reg *scraperutil.ScraperRegistry, cfg ScraperRegistryC
 		if contentIDRepo != nil {
 			deps.ContentIDRepo = contentIDRepo
 		}
+		if r18DevDump != nil {
+			deps.R18DevDump = r18DevDump
+		}
 		depsMap[name] = deps
 	}
 
@@ -59,6 +62,6 @@ func initFromRegistration(reg *scraperutil.ScraperRegistry, cfg ScraperRegistryC
 // NewDefaultScraperRegistryFrom initializes scrapers in an existing registry from
 // the provided config. Used for hot-reload scenarios where the registry metadata
 // (registration entries) is already populated.
-func NewDefaultScraperRegistryFrom(reg *scraperutil.ScraperRegistry, cfg ScraperRegistryConfig, contentIDRepo models.ContentIDMappingRepositoryInterface) (*scraperutil.ScraperRegistry, error) {
-	return initFromRegistration(reg, cfg, contentIDRepo)
+func NewDefaultScraperRegistryFrom(reg *scraperutil.ScraperRegistry, cfg ScraperRegistryConfig, contentIDRepo models.ContentIDMappingRepositoryInterface, r18DevDump models.R18DevDumpLookup) (*scraperutil.ScraperRegistry, error) {
+	return initFromRegistration(reg, cfg, contentIDRepo, r18DevDump)
 }

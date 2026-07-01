@@ -46,12 +46,13 @@ type scraper struct {
 	proxyOverride     *models.ProxyConfig
 	downloadProxy     *models.ProxyConfig
 	rateLimiter       *ratelimit.Limiter
-	settings          models.ScraperSettings // stores the full settings for Config() method
+	settings          models.ScraperSettings  // stores the full settings for Config() method
+	dumpLookup        models.R18DevDumpLookup // optional local dump for exact content_id resolution
 }
 
 // New creates a new R18.dev scraper
 // newScraper creates a new R18.dev scraper.
-func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig, dumpLookup models.R18DevDumpLookup) *scraper {
 	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.R18DevHeaders()),
 		httpclient.WithScraperHeaders(httpclient.RefererHeader("https://r18.dev/")),
@@ -93,6 +94,7 @@ func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfi
 		proxyOverride:     settings.Proxy,
 		downloadProxy:     settings.DownloadProxy,
 		settings:          *settings,
+		dumpLookup:        dumpLookup,
 	}
 
 	if settings.RateLimit > 0 {
@@ -283,6 +285,12 @@ type r18ContentIDResolver struct {
 func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (string, bool) {
 	s := r.scraper
 
+	// The local r18.dev dump is consulted once, up front, by Search via
+	// searchFromDump (LookupMovie). By the time this resolver runs, the dump
+	// has already missed, so there is no point re-querying the same dvd_id_norm
+	// index here — fall straight through to HTTP resolution. ResolveURL is only
+	// called from Search, so it never runs before searchFromDump.
+
 	// Step 1: Try to lookup content_id using dvd_id with multiple ID variations
 	idVariations := []string{
 		normalizeIDWithoutStripping(id),
@@ -350,7 +358,13 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("R18.dev scraper is disabled")
 	}
 
-	// Use the content-ID resolver seam: resolve URL → fetch → parse
+	// Zero-HTTP fast path: when the local r18.dev dump is present and has this
+	// movie, return a complete ScraperResult with no r18.dev API call at all.
+	if result, ok := s.searchFromDump(ctx, id); ok {
+		return result, nil
+	}
+
+	// HTTP fallback: resolve URL → fetch → parse
 	resolver := &r18ContentIDResolver{scraper: s}
 
 	var finalURL string

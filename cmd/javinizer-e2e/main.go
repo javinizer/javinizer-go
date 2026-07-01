@@ -131,6 +131,7 @@ func run() error {
 	registry, err := scraper.NewDefaultScraperRegistryFrom(reg,
 		scraper.ScraperRegistryConfigFromApp(cfg),
 		database.NewContentIDMappingRepository(db),
+		nil, // e2e does not use the local r18.dev dump
 	)
 	if err != nil {
 		return fmt.Errorf("init scraper registry: %w", err)
