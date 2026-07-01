@@ -242,4 +242,34 @@ func TestGetAliasGroup(t *testing.T) {
 		assert.Contains(t, g.Names, "広瀬みつき")
 		assert.NotContains(t, g.Names, "別の女優")
 	})
+
+	t.Run("alias equal to canonical is deduplicated", func(t *testing.T) {
+		// A self-referential row (alias == canonical) exercises the dedup guard:
+		// add(canonical) adds it to seen, then add(alias) must skip it.
+		require.NoError(t, repo.Create(context.TODO(), &models.ActressAlias{
+			AliasName: "新セリナ", CanonicalName: "新セリナ",
+		}))
+		g, err := repo.GetAliasGroup(context.TODO(), "新セリナ")
+		require.NoError(t, err)
+		assert.Equal(t, "新セリナ", g.Canonical)
+		// 新セリナ appears exactly once despite being both canonical and an alias.
+		count := 0
+		for _, n := range g.Names {
+			if n == "新セリナ" {
+				count++
+			}
+		}
+		assert.Equal(t, 1, count, "canonical must not be duplicated when it also appears as an alias")
+	})
+
+	t.Run("empty alias name is skipped", func(t *testing.T) {
+		// A row with an empty AliasName exercises the n == "" guard in add().
+		require.NoError(t, repo.Create(context.TODO(), &models.ActressAlias{
+			AliasName: "", CanonicalName: "尾崎えりか",
+		}))
+		g, err := repo.GetAliasGroup(context.TODO(), "尾崎えりか")
+		require.NoError(t, err)
+		assert.Equal(t, "尾崎えりか", g.Canonical)
+		assert.NotContains(t, g.Names, "", "empty alias names must not appear in the group")
+	})
 }
