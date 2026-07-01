@@ -308,6 +308,59 @@ func TestParseDump_DecodeCopyEscapes(t *testing.T) {
 	}
 }
 
+// TestDecodeCopyField_AllEscapes verifies every PostgreSQL COPY text escape
+// sequence decodes correctly, including the rarely-hit branches (backspace,
+// form feed, vertical tab, a trailing lone backslash, and an unknown escape).
+func TestDecodeCopyField_AllEscapes(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"no escapes", "no escapes"},             // fast path (no backslash)
+		{"line\\nbreak", "line\nbreak"},          // \n
+		{"tab\\there", "tab\there"},              // \t
+		{"cr\\rreturn", "cr\rreturn"},            // \r
+		{"bs\\bhere", "bs\bhere"},                // \b
+		{"ff\\fhere", "ff\fhere"},                // \f
+		{"vt\\vhere", "vt\vhere"},                // \v
+		{"back\\\\slash", "back\\slash"},         // \\
+		{"unknown\\qescape", "unknown\\qescape"}, // unknown escape kept verbatim
+		{"lone\\", "lone\\"},                     // trailing lone backslash
+	}
+	for _, c := range cases {
+		if got := decodeCopyField(c.in); got != c.want {
+			t.Errorf("decodeCopyField(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestParseCopyHeader_QuotedForms covers the quoted public/schema and quoted
+// table-name branches of parseCopyHeader that the basic fixtures don't hit.
+func TestParseCopyHeader_QuotedForms(t *testing.T) {
+	cases := []struct {
+		line  string
+		table string
+		cols  int
+	}{
+		{`COPY "public"."derived_video" (content_id, dvd_id) FROM stdin;`, "derived_video", 2},
+		{`COPY "public"."video_actresses" FROM stdin;`, "video_actresses", 0},
+		{`COPY public."video_categories" (content_id, name) FROM stdin;`, "video_categories", 2},
+	}
+	for _, c := range cases {
+		h, ok := parseCopyHeader(c.line)
+		if !ok {
+			t.Errorf("parseCopyHeader(%q): expected ok", c.line)
+			continue
+		}
+		if h.table != c.table {
+			t.Errorf("parseCopyHeader(%q) table = %q, want %q", c.line, h.table, c.table)
+		}
+		if len(h.columns) != c.cols {
+			t.Errorf("parseCopyHeader(%q) cols = %d, want %d", c.line, len(h.columns), c.cols)
+		}
+	}
+	if _, ok := parseCopyHeader("COPY schema.foo (a) FROM stdin;"); ok {
+		t.Error("non-public schema should not parse")
+	}
+}
+
 // TestParseDump_EmptyStringDistinctFromNull verifies that a genuine empty
 // string field is preserved as "" (not coerced to the NULL marker) so the
 // import path can keep NULL and empty-string distinct.

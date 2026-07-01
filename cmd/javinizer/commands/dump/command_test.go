@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/javinizer/javinizer-go/internal/r18devdump"
 )
@@ -212,6 +215,49 @@ func TestUpdate_UnchangedSkips(t *testing.T) {
 		}
 		if !strings.Contains(buf.String(), "unchanged") && !strings.Contains(buf.String(), "Unchanged") {
 			t.Errorf("update did not skip unchanged dump: %s", buf.String())
+		}
+	})
+}
+
+// TestSearch_LookupErrorPropagated covers the CR2 error path: when the store
+// returns a non-ErrDumpMiss error (here: the videos table is dropped, so the
+// query fails), runSearch must surface it instead of masking it as "No match".
+func TestSearch_LookupErrorPropagated(t *testing.T) {
+	srv := newDumpHTTPServer(t)
+	defer srv.Close()
+	origURL := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL
+	defer func() { r18devdump.LatestDumpURL = origURL }()
+
+	tmp := t.TempDir()
+	runInDir(t, tmp, func() {
+		var buf bytes.Buffer
+		// Download to seed a valid sidecar DB.
+		if err := runDownload(context.Background(), &buf, "config.yaml", false); err != nil {
+			t.Fatalf("runDownload: %v", err)
+		}
+
+		// Corrupt the sidecar: drop the videos table so lookups fail with a
+		// real query error (not ErrDumpMiss).
+		dbPath := filepath.Join("data", "r18dev", "r18dev_dump.db")
+		corruptor, err := sql.Open("sqlite3", dbPath)
+		if err != nil {
+			t.Fatalf("open corruptor: %v", err)
+		}
+		if _, err := corruptor.Exec("DROP TABLE videos"); err != nil {
+			corruptor.Close()
+			t.Fatalf("drop videos: %v", err)
+		}
+		corruptor.Close()
+
+		// A search must now return an error (propagated), NOT "No match".
+		buf.Reset()
+		err = runSearch(&buf, "config.yaml", "IPX-535")
+		if err == nil {
+			t.Fatalf("expected a propagated lookup error, got nil; output: %s", buf.String())
+		}
+		if !strings.Contains(err.Error(), "lookup failed") {
+			t.Errorf("expected a 'lookup failed' error, got: %v", err)
 		}
 	})
 }

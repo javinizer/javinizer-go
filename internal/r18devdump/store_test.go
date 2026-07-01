@@ -278,3 +278,25 @@ type errorReader struct{}
 func (errorReader) Read([]byte) (int, error) {
 	return 0, io.ErrUnexpectedEOF
 }
+
+// TestImport_EmptyPathErrors covers the empty-path guard in Import.
+func TestImport_EmptyPathErrors(t *testing.T) {
+	_, err := Import(context.Background(), strings.NewReader(""), "", ImportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "path is empty") {
+		t.Fatalf("expected empty-path error, got: %v", err)
+	}
+}
+
+// TestSqliteTableName_DefaultAndMapped covers the default (passthrough) branch
+// and the unmapped-table case of sqliteTableName.
+func TestSqliteTableName_DefaultAndMapped(t *testing.T) {
+	if got := sqliteTableName("unknown_table"); got != "unknown_table" {
+		t.Errorf("unknown table should pass through, got %q", got)
+	}
+	if got := sqliteTableName("makers"); got != "makers" {
+		t.Errorf("makers should map to makers, got %q", got)
+	}
+	if got := sqliteTableName("derived_video_actress"); got != "video_actresses" {
+		t.Errorf("derived_video_actress should map to video_actresses, got %q", got)
+	}
+}

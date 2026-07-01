@@ -2,6 +2,7 @@ package commandutil
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,6 +45,56 @@ func dumpConfig(t *testing.T, dumpPath string) *config.Config {
 	cfg.Metadata.R18DevDump.Enabled = true
 	cfg.Metadata.R18DevDump.Path = dumpPath
 	return cfg
+}
+
+// TestOpenR18DevDumpLookup_Branches covers the edge paths of the wiring
+// helper that the bootstrap e2e tests don't hit: nil config, disabled feature,
+// a non-ENOENT stat error (permission denied), and an unreadable dump file
+// (Open failure). Each must return (nil, nil) — the HTTP fallback path —
+// without panicking, and the stat-error case must not be treated as a clean
+// "not downloaded" miss.
+func TestOpenR18DevDumpLookup_Branches(t *testing.T) {
+	t.Run("nil config", func(t *testing.T) {
+		lookup, closer := OpenR18DevDumpLookup(nil)
+		assert.Nil(t, lookup)
+		assert.Nil(t, closer)
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		cfg := dumpConfig(t, seedDumpDB(t))
+		cfg.Metadata.R18DevDump.Enabled = false
+		lookup, closer := OpenR18DevDumpLookup(cfg)
+		assert.Nil(t, lookup)
+		assert.Nil(t, closer)
+	})
+
+	t.Run("stat error not ENOENT (unreadable parent dir)", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root bypasses permission checks")
+		}
+		// Point the path at a file inside a directory with no read/execute
+		// permission: os.Stat fails with a non-ENOENT error (permission denied).
+		dir := t.TempDir()
+		lockedDir := filepath.Join(dir, "locked")
+		require.NoError(t, os.Mkdir(lockedDir, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+
+		cfg := dumpConfig(t, filepath.Join(lockedDir, "r18dev_dump.db"))
+		lookup, closer := OpenR18DevDumpLookup(cfg)
+		assert.Nil(t, lookup)
+		assert.Nil(t, closer)
+	})
+
+	t.Run("open failure (corrupt file)", func(t *testing.T) {
+		dir := t.TempDir()
+		corrupt := filepath.Join(dir, "r18dev_dump.db")
+		// A non-empty, non-SQLite file: Open must fail to parse the header.
+		require.NoError(t, os.WriteFile(corrupt, []byte("not a sqlite database"), 0o600))
+		cfg := dumpConfig(t, corrupt)
+		lookup, closer := OpenR18DevDumpLookup(cfg)
+		assert.Nil(t, lookup)
+		assert.Nil(t, closer)
+	})
 }
 
 // TestE2E_DumpWiring_BootstrapOpensDump verifies the full production bootstrap

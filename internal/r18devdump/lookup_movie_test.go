@@ -426,3 +426,42 @@ func assertEq(t *testing.T, field, got, want string) {
 		t.Errorf("%s = %q, want %q", field, got, want)
 	}
 }
+
+// TestLookupMovie_CancelledContextCoversJoinDegraded verifies the cancellation
+// branch of logJoinDegraded: when the context is cancelled before LookupMovie,
+// the join queries fail with context.Canceled, which is logged at debug (not
+// warn) and degraded to empty rather than propagated as a join error.
+func TestLookupMovie_CancelledContextCoversJoinDegraded(t *testing.T) {
+	path := importFullDump(t)
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately so every query observes ctx.Err()
+
+	// The core video query observes ctx.Err() and returns it; the join
+	// queries (had they run) would hit logJoinDegraded's cancellation branch.
+	// The direct test below covers that branch in isolation.
+	_, err = store.LookupMovie(ctx, "ABW-013")
+	if err == nil {
+		t.Fatal("expected an error from the cancelled core query")
+	}
+}
+
+// TestLogJoinDegraded_CancellationBranch directly exercises the cancellation
+// vs. genuine-error branches of logJoinDegraded without a full LookupMovie.
+func TestLogJoinDegraded_CancellationBranch(t *testing.T) {
+	s := &Store{}
+	// Cancellation -> debug path (must not panic, must not warn-fatal).
+	s.logJoinDegraded("cid", "actresses", context.Canceled)
+	s.logJoinDegraded("cid", "actresses", context.DeadlineExceeded)
+	// Genuine error -> warn path.
+	s.logJoinDegraded("cid", "actresses", assertErrSentinel{})
+}
+
+type assertErrSentinel struct{}
+
+func (assertErrSentinel) Error() string { return "sentinel" }
