@@ -101,6 +101,14 @@ func run() error {
 		return fmt.Errorf("migrate DB: %w", err)
 	}
 
+	// Seed built-in default data (actress alias rename mappings + word
+	// replacements) so E2E specs that exercise the alias-aware dedup +
+	// "Write to NFO as" dropdown have the same baseline data production
+	// gets via commandutil.NewDependenciesWithOptions. That helper only
+	// seeds when it owns the DB; here we inject the DB, so seed explicitly.
+	database.SeedDefaultWordReplacements(context.Background(), database.NewWordReplacementRepository(db))
+	database.SeedDefaultActressAliases(context.Background(), database.NewActressAliasRepository(db))
+
 	// Build a scraper registry pre-populated with ONLY the e2emock scraper.
 	// Production wires all of r18dev/dmm/javdb/... via scraper.RegisterAll;
 	// we substitute the e2emock so tests are offline + deterministic. Every

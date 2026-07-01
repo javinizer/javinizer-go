@@ -27,6 +27,12 @@
 //     the API / DOM verbatim (commit 42d89e65 regression
 //     class — the verbose "no result" message must not be
 //     collapsed to a hardcoded "no result").
+//   - "ALIAS-*"    → success. Returns an actress whose JapaneseName is a
+//     seeded alias (朝日芹奈, which the bootstrap seed maps to
+//     canonical 新セリナ) so the fullstack alias-aware dedup +
+//     per-movie "Write to NFO as" dropdown can be exercised
+//     end-to-end against the real alias-resolver + real
+//     actress_aliases table.
 //   - anything else → returns an error so accidental misuse fails loud
 //     rather than producing green results.
 //
@@ -120,8 +126,10 @@ func (s *Scraper) Search(_ context.Context, id string) (*models.ScraperResult, e
 		return successResult(id), nil
 	case strings.HasPrefix(upper, "FAIL-"):
 		return nil, fmt.Errorf("e2emock: movie %s not found — simulating a 404 from the source", id)
+	case strings.HasPrefix(upper, "ALIAS-"):
+		return aliasResult(id), nil
 	default:
-		return nil, fmt.Errorf("e2emock: unrecognized ID %q — use GOOD-* / MULTI-* prefix for success, FAIL-* for verbose failure (this guard prevents accidental green results)", id)
+		return nil, fmt.Errorf("e2emock: unrecognized ID %q — use GOOD-* / MULTI-* prefix for success, FAIL-* for verbose failure, ALIAS-* for alias dedup (this guard prevents accidental green results)", id)
 	}
 }
 
@@ -149,4 +157,22 @@ func successResult(id string) *models.ScraperResult {
 		CoverURL:   fmt.Sprintf("https://e2e.invalid/cover-%s.jpg", id),
 		TrailerURL: "",
 	}
+}
+
+// aliasResult returns a ScraperResult whose actress carries a JapaneseName
+// that the bootstrap seed (database.SeedDefaultActressAliases) maps to a
+// canonical. 朝日芹奈 → 新セリナ, with 青木桃 and 堤セリナ as the other known
+// aliases. This lets fullstack E2E specs exercise the real alias-aware dedup
+// and the per-movie "Write to NFO as" dropdown against the real
+// alias_resolver + actress_aliases table without a dedicated seeding endpoint.
+func aliasResult(id string) *models.ScraperResult {
+	res := successResult(id)
+	res.Title = "E2E Alias Movie " + id
+	res.Actresses = []models.ActressInfo{{
+		FirstName:    "Asahi",
+		LastName:     "Serina",
+		JapaneseName: "朝日芹奈",
+		DMMID:        2,
+	}}
+	return res
 }
