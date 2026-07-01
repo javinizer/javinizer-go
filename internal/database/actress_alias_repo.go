@@ -121,21 +121,29 @@ func (r *ActressAliasRepository) GetAliasGroup(ctx context.Context, name string)
 		return AliasGroup{}, nil
 	}
 
-	// Resolve the input to its canonical form via a single indexed lookup. If
-	// the name is an alias, follow the mapping; otherwise treat the name itself
-	// as canonical (it may be a canonical with aliases, resolved below).
+	// Resolve the canonical form. Prefer treating `name` as a canonical when
+	// rows point at it; only follow the alias mapping when `name` is not itself
+	// a canonical. This avoids returning the wrong group when a name is both a
+	// former name (alias) of one performer and the current name (canonical) of
+	// another. Order is deterministic (FindByCanonicalName sorts by alias_name)
+	// so the dropdown is stable.
 	canonical := name
-	if a, err := r.FindByAliasName(ctx, name); err == nil {
-		canonical = a.CanonicalName
-	} else if !IsNotFound(err) {
-		return AliasGroup{}, err
-	}
-
-	// Gather every alias that points at this canonical. Order is deterministic
-	// (FindByCanonicalName sorts by alias_name) so the dropdown is stable.
-	matching, err := r.FindByCanonicalName(ctx, canonical)
+	matching, err := r.FindByCanonicalName(ctx, name)
 	if err != nil {
 		return AliasGroup{}, err
+	}
+	if len(matching) == 0 {
+		// `name` is not a canonical — try following it as an alias. The alias
+		// row itself guarantees FindByCanonicalName returns at least one row.
+		if a, ferr := r.FindByAliasName(ctx, name); ferr == nil {
+			canonical = a.CanonicalName
+			matching, err = r.FindByCanonicalName(ctx, canonical)
+			if err != nil {
+				return AliasGroup{}, err
+			}
+		} else if !IsNotFound(ferr) {
+			return AliasGroup{}, ferr
+		}
 	}
 	// FindByCanonicalName uses a Find() query, which returns an empty slice
 	// (not IsNotFound) when nothing matches. An empty result means the name is

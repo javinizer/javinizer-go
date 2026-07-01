@@ -224,4 +224,22 @@ func TestGetAliasGroup(t *testing.T) {
 		assert.Equal(t, "尾崎えりか", g.Canonical)
 		assert.Equal(t, []string{"尾崎えりか", "与田さくら"}, g.Names)
 	})
+
+	t.Run("name that is both an alias and a canonical prefers the canonical group", func(t *testing.T) {
+		// Seed 日向ゆら as a canonical (alias 広瀬みつき points at it), then make
+		// 日向ゆら ALSO an alias of a different performer to simulate the collision.
+		require.NoError(t, repo.Create(context.TODO(), &models.ActressAlias{
+			AliasName: "広瀬みつき", CanonicalName: "日向ゆら",
+		}))
+		require.NoError(t, repo.Create(context.TODO(), &models.ActressAlias{
+			AliasName: "日向ゆら", CanonicalName: "別の女優",
+		}))
+		g, err := repo.GetAliasGroup(context.TODO(), "日向ゆら")
+		require.NoError(t, err)
+		// Canonical wins: group is 日向ゆら's own, not 別の女優's.
+		assert.Equal(t, "日向ゆら", g.Canonical)
+		assert.Contains(t, g.Names, "日向ゆら")
+		assert.Contains(t, g.Names, "広瀬みつき")
+		assert.NotContains(t, g.Names, "別の女優")
+	})
 }
