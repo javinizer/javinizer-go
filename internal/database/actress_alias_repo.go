@@ -62,10 +62,13 @@ func (r *ActressAliasRepository) FindByAliasName(ctx context.Context, aliasName 
 }
 
 // FindByCanonicalName returns all alias records pointing at the given
-// canonical actress name.
+// canonical actress name, ordered by alias_name for deterministic output.
 func (r *ActressAliasRepository) FindByCanonicalName(ctx context.Context, canonicalName string) ([]models.ActressAlias, error) {
 	var aliases []models.ActressAlias
-	err := r.GetDB().WithContext(ctx).Where("canonical_name = ?", canonicalName).Find(&aliases).Error
+	err := r.GetDB().WithContext(ctx).
+		Where("canonical_name = ?", canonicalName).
+		Order("alias_name").
+		Find(&aliases).Error
 	if err != nil {
 		return nil, wrapDBErr("find", fmt.Sprintf("actress aliases for %s", canonicalName), err)
 	}
@@ -118,19 +121,18 @@ func (r *ActressAliasRepository) GetAliasGroup(ctx context.Context, name string)
 		return AliasGroup{}, nil
 	}
 
-	aliasMap, err := r.GetAliasMap(ctx)
-	if err != nil {
+	// Resolve the input to its canonical form via a single indexed lookup. If
+	// the name is an alias, follow the mapping; otherwise treat the name itself
+	// as canonical (it may be a canonical with aliases, resolved below).
+	canonical := name
+	if a, err := r.FindByAliasName(ctx, name); err == nil {
+		canonical = a.CanonicalName
+	} else if !IsNotFound(err) {
 		return AliasGroup{}, err
 	}
 
-	// Resolve the input to its canonical form. If the name is an alias, follow
-	// the mapping; otherwise treat the name itself as canonical.
-	canonical := name
-	if c, ok := aliasMap[name]; ok {
-		canonical = c
-	}
-
-	// Gather every alias that points at this canonical.
+	// Gather every alias that points at this canonical. Order is deterministic
+	// (FindByCanonicalName sorts by alias_name) so the dropdown is stable.
 	matching, err := r.FindByCanonicalName(ctx, canonical)
 	if err != nil {
 		return AliasGroup{}, err
@@ -160,9 +162,6 @@ func (r *ActressAliasRepository) GetAliasGroup(ctx context.Context, name string)
 		add(a.AliasName)
 	}
 
-	if len(names) == 0 {
-		return AliasGroup{}, nil
-	}
 	return AliasGroup{Canonical: canonical, Names: names}, nil
 }
 

@@ -3,6 +3,7 @@ package actress
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,8 +11,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/database"
+	mocks "github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -101,4 +104,37 @@ func setupActressAliasTestDB(t *testing.T) (*database.DB, database.ActressAliasR
 	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	t.Cleanup(func() { _ = db.Close() })
 	return db, db.Repositories().ActressAliasRepo
+}
+
+func TestGetAliasGroup_NilRepo(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// ActressDeps with no alias repository wired — handler must short-circuit
+	// with an empty 200 response rather than nil-deref.
+	deps := ActressDeps{}
+	router := gin.New()
+	router.GET("/actresses/alias-group", getAliasGroup(deps))
+
+	req := httptest.NewRequest(http.MethodGet, "/actresses/alias-group?name=x", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp aliasGroupResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Empty(t, resp.Canonical)
+	assert.Empty(t, resp.Names)
+}
+
+func TestGetAliasGroup_RepoError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := mocks.NewMockActressAliasRepositoryInterface(t)
+	repo.EXPECT().GetAliasGroup(mock.Anything, "朝日芹奈").
+		Return(database.AliasGroup{}, errors.New("db unavailable"))
+	deps := ActressDeps{ContentRepos: database.ContentRepos{ActressAliasRepo: repo}}
+	router := gin.New()
+	router.GET("/actresses/alias-group", getAliasGroup(deps))
+
+	req := httptest.NewRequest(http.MethodGet, "/actresses/alias-group?name="+url.QueryEscape("朝日芹奈"), nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }

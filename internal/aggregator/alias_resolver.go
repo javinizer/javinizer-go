@@ -79,11 +79,14 @@ func (ar *aliasResolver) Resolve(actress *models.Actress) {
 		return
 	}
 
-	// Check cache with read lock
 	ar.mu.RLock()
 	defer ar.mu.RUnlock()
 
-	// Try Japanese name first
+	// Japanese-name matches map directly to the canonical JapaneseName (no
+	// First/Last split). Romanized matches split the canonical into LastName /
+	// FirstName when it is two words, else fall back to JapaneseName. We check
+	// the Japanese path first so its precedence and write behavior are
+	// preserved — lookupLocked itself is precedence-agnostic about the result.
 	if actress.JapaneseName != "" {
 		if canonical, found := ar.cache[actress.JapaneseName]; found {
 			actress.JapaneseName = canonical
@@ -91,35 +94,17 @@ func (ar *aliasResolver) Resolve(actress *models.Actress) {
 		}
 	}
 
-	// Try FirstName LastName combination
 	if actress.FirstName != "" && actress.LastName != "" {
-		fullName := actress.FirstName + " " + actress.LastName
-		if canonical, found := ar.cache[fullName]; found {
-			if len(canonical) > 0 {
-				first, last := models.SplitFullName(canonical)
-				if last != "" && !strings.Contains(last, " ") {
-					actress.LastName = first
-					actress.FirstName = last
-				} else {
-					actress.JapaneseName = canonical
-				}
-			}
+		canonical, found := ar.lookupLocked("", actress.FirstName, actress.LastName)
+		if !found || canonical == "" {
 			return
 		}
-
-		// Try LastName FirstName combination
-		reverseName := actress.LastName + " " + actress.FirstName
-		if canonical, found := ar.cache[reverseName]; found {
-			if len(canonical) > 0 {
-				first, last := models.SplitFullName(canonical)
-				if last != "" && !strings.Contains(last, " ") {
-					actress.LastName = first
-					actress.FirstName = last
-				} else {
-					actress.JapaneseName = canonical
-				}
-			}
-			return
+		first, last := models.SplitFullName(canonical)
+		if last != "" && !strings.Contains(last, " ") {
+			actress.LastName = first
+			actress.FirstName = last
+		} else {
+			actress.JapaneseName = canonical
 		}
 	}
 }

@@ -134,6 +134,11 @@
 	let aliasDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {
 		const name = editingActress.japanese_name ?? '';
+		// Skip the refetch when the name is already part of the loaded group:
+		// the select onchange writes to japanese_name, so without this guard
+		// picking an alias would re-fire the effect, briefly hide the select
+		// behind "Checking known aliases…", and make a redundant network call.
+		if (aliasGroup && aliasGroup.names.includes(name)) return;
 		if (aliasDebounceTimer) { clearTimeout(aliasDebounceTimer); aliasDebounceTimer = null; }
 		aliasDebounceTimer = setTimeout(() => fetchAliasGroup(name), 300);
 		return () => {
@@ -529,8 +534,8 @@
 									class="mt-1 w-full px-3 py-2 border rounded-md bg-background text-sm focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 									title="This actress has multiple known names; pick the one to write to the NFO"
 								>
-									{#each aliasGroup.names as name}
-										<option value={name}>{name}{name === aliasGroup.canonical ? ' (current)' : ''}</option>
+								{#each aliasGroup.names as name}
+										<option value={name}>{name}{name === aliasGroup.canonical ? ' (canonical)' : ''}</option>
 									{/each}
 								</select>
 								<p class="mt-1 text-xs text-muted-foreground">
