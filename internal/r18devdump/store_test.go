@@ -300,3 +300,102 @@ func TestSqliteTableName_DefaultAndMapped(t *testing.T) {
 		t.Errorf("derived_video_actress should map to video_actresses, got %q", got)
 	}
 }
+
+// TestLookup_QueryErrorsPropagated covers the non-ErrNoRows error branches of
+// LookupByDVDID, LookupByContentID, LookupMovie, and Stats. Dropping the
+// videos table makes every query against it fail at runtime with a real error
+// (not sql.ErrNoRows), exercising the error-return paths.
+func TestLookup_QueryErrorsPropagated(t *testing.T) {
+	path := seedDump(t, "118ipx00535	IPX-535")
+
+	corruptor, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open corruptor: %v", err)
+	}
+	if _, err := corruptor.Exec("DROP TABLE videos"); err != nil {
+		corruptor.Close()
+		t.Fatalf("drop videos: %v", err)
+	}
+	corruptor.Close()
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	if _, err := store.LookupByDVDID(ctx, "IPX-535"); err == nil || errors.Is(err, models.ErrDumpMiss) {
+		t.Errorf("LookupByDVDID: expected a real error, got %v", err)
+	}
+	if _, err := store.LookupByContentID(ctx, "118ipx00535"); err == nil || errors.Is(err, models.ErrDumpMiss) {
+		t.Errorf("LookupByContentID: expected a real error, got %v", err)
+	}
+	if _, err := store.LookupMovie(ctx, "IPX-535"); err == nil || errors.Is(err, models.ErrDumpMiss) {
+		t.Errorf("LookupMovie: expected a real error, got %v", err)
+	}
+	if _, err := store.Stats(ctx); err == nil {
+		t.Errorf("Stats: expected an error, got nil")
+	}
+}
+
+// TestLookup_NilStoreAndEmptyID covers the early-return guards.
+func TestLookup_NilStoreAndEmptyID(t *testing.T) {
+	var s *Store
+	ctx := context.Background()
+	if _, err := s.LookupByDVDID(ctx, "IPX-535"); err != models.ErrDumpMiss {
+		t.Errorf("nil store LookupByDVDID: got %v, want ErrDumpMiss", err)
+	}
+	if _, err := s.LookupByContentID(ctx, "x"); err != models.ErrDumpMiss {
+		t.Errorf("nil store LookupByContentID: got %v, want ErrDumpMiss", err)
+	}
+	if _, err := s.LookupMovie(ctx, "IPX-535"); err != models.ErrDumpMiss {
+		t.Errorf("nil store LookupMovie: got %v, want ErrDumpMiss", err)
+	}
+	if _, err := s.Stats(ctx); err == nil {
+		t.Error("nil store Stats: expected error")
+	}
+}
+
+// TestLookupMovie_NamedEntityAndTrailerErrors covers the error branches of
+// lookupNamedEntity (maker/label/series), lookupDirector, and lookupTrailer by
+// dropping their tables. Each must degrade gracefully (nil/empty) rather than
+// abort LookupMovie, hitting logJoinDegraded's warn path.
+func TestLookupMovie_NamedEntityAndTrailerErrors(t *testing.T) {
+	path := importFullDump(t)
+
+	corruptor, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open corruptor: %v", err)
+	}
+	for _, tbl := range []string{"makers", "labels", "series", "directors", "video_directors", "trailers"} {
+		if _, err := corruptor.Exec("DROP TABLE " + tbl); err != nil {
+			corruptor.Close()
+			t.Fatalf("drop %s: %v", tbl, err)
+		}
+	}
+	corruptor.Close()
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	// LookupMovie must not abort despite every named-entity/trailer join
+	// failing; core video data is still returned.
+	m, err := store.LookupMovie(context.Background(), "ABW-013")
+	if err != nil {
+		t.Fatalf("degraded joins must not abort LookupMovie: %v", err)
+	}
+	if m == nil || m.ContentID != "118abw00013" {
+		t.Fatalf("core video data must still resolve, got: %+v", m)
+	}
+	if m.Maker != nil || m.Label != nil || m.Series != nil || m.Director != nil {
+		t.Errorf("named entities should degrade to nil on query error")
+	}
+	if m.TrailerURL != "" {
+		t.Errorf("trailer should degrade to empty on query error, got %q", m.TrailerURL)
+	}
+}

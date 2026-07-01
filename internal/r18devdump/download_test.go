@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -162,5 +163,30 @@ func TestDownload_InvalidGzip(t *testing.T) {
 	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil {
 		t.Fatal("expected gunzip error for non-gzip body")
+	}
+}
+
+// TestDumpURLOverride_EnvVar covers the JAVINIZER_R18DEV_DUMP_URL env-var
+// branch of DumpURLOverride.
+func TestDumpURLOverride_EnvVar(t *testing.T) {
+	orig := os.Getenv("JAVINIZER_R18DEV_DUMP_URL")
+	t.Setenv("JAVINIZER_R18DEV_DUMP_URL", "https://mirror.example.com/dump.sql.gz")
+	defer os.Setenv("JAVINIZER_R18DEV_DUMP_URL", orig)
+
+	if got := DumpURLOverride(); got != "https://mirror.example.com/dump.sql.gz" {
+		t.Errorf("DumpURLOverride env: got %q, want mirror URL", got)
+	}
+}
+
+// TestDownload_FetchError covers the client.Do error branch (e.g. a request to
+// an unreachable endpoint).
+func TestDownload_FetchError(t *testing.T) {
+	orig := LatestDumpURL
+	setLatestDumpURL("http://127.0.0.1:1/unreachable") // port 1: connection refused
+	defer setLatestDumpURL(orig)
+
+	_, err := Download(context.Background(), &http.Client{}, "", nil, func(io.Reader, DownloadResult) error { return nil })
+	if err == nil {
+		t.Fatal("expected a fetch error for an unreachable endpoint")
 	}
 }
