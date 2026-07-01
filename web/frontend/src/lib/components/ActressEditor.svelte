@@ -99,8 +99,9 @@
 		thumbPreviewError = false;
 	});
 
-	// Fetch the alias group for the actress being edited whenever her Japanese
-	// name changes. The dropdown only renders when the group has >1 name, so a
+	// Fetch the alias group for the actress being edited, keyed on a
+	// name-form-agnostic lookup (Japanese name preferred, else romanized
+	// "First Last"). The dropdown only renders when the group has >1 name, so a
 	// silent no-op for actresses with no known aliases is fine. Stale requests
 	// are discarded via aliasRequestId.
 	async function fetchAliasGroup(name: string) {
@@ -129,15 +130,30 @@
 		}
 	}
 
-	// Debounce the alias fetch so manual typing in the Japanese-name field does
-	// not hit the API per keystroke.
+	// Debounce the alias fetch so manual typing does not hit the API per
+	// keystroke.
 	let aliasDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {
-		const name = editingActress.japanese_name ?? '';
+		// Name-form-agnostic lookup: prefer the Japanese name, fall back to the
+		// romanized "First Last" form so an actress with only romanized names can
+		// still resolve a known alias group. The chosen alias is always written
+		// back to japanese_name (the NFO <name> source), regardless of which form
+		// matched — see the select onchange below.
+		const jp = (editingActress.japanese_name ?? '').trim();
+		const first = (editingActress.first_name ?? '').trim();
+		const last = (editingActress.last_name ?? '').trim();
+		const name = jp || `${first} ${last}`.trim();
+		if (!name) {
+			aliasGroup = null;
+			return;
+		}
 		// Skip the refetch when the name is already part of the loaded group:
 		// the select onchange writes to japanese_name, so without this guard
 		// picking an alias would re-fire the effect, briefly hide the select
 		// behind "Checking known aliases…", and make a redundant network call.
+		// This holds for both forms: the matched lookup name is always present in
+		// the returned group (canonical + its aliases), so once it's loaded the
+		// guard short-circuits further fetches for that name.
 		if (aliasGroup && aliasGroup.names.includes(name)) return;
 		if (aliasDebounceTimer) { clearTimeout(aliasDebounceTimer); aliasDebounceTimer = null; }
 		aliasDebounceTimer = setTimeout(() => fetchAliasGroup(name), 300);
