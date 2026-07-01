@@ -146,13 +146,13 @@ bench:
 
 # Generate coverage report using Go's built-in coverage
 # Uses -coverpkg to aggregate coverage across all packages in a single run
-# Excludes: mocks (generated), tui (interactive UI), docs (generated API docs), testutil (test helpers), coveragecheck (coverage utility), coverage (coverage utility), web (frontend)
+# Excludes: mocks (generated), tui (interactive UI), docs (generated API docs), testutil (test helpers), coveragecheck (coverage utility), coverage (coverage utility), javinizer-e2e (E2E test binary — boots a mock backend for Playwright; exercised by the fullstack-e2e suite, not unit tests), web (frontend)
 # Output: coverage.out (compatible with go tool cover and Codecov)
 # Shows: per-package test output, then displays clean line coverage summary
 coverage:
 	@echo "Running tests and generating coverage report..."
 	@rm -f coverage.out
-	@pkgs=$$(go list ./... | grep -Ev '(/cmd/coveragecheck$$)|(/internal/coverage$$)|(/(mocks|tui|docs|testutil|web)(/|$$))'); \
+	@pkgs=$$(go list ./... | grep -Ev '(/cmd/(coveragecheck|javinizer-e2e)$$)|(/internal/coverage$$)|(/(mocks|tui|docs|testutil|web)(/|$$))'); \
 	go test -covermode=atomic -coverprofile=coverage.out -coverpkg=$$(echo $$pkgs | tr ' ' ',') -count=1 $$pkgs 2>&1 | awk '/^(ok|github)/ { print; fflush() }'
 	@echo ""
 	@go run ./cmd/coveragecheck --metric line --profile coverage.out 2>/dev/null
