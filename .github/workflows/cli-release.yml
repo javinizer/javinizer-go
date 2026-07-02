@@ -772,3 +772,113 @@ jobs:
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs: [prepare-release, create-release]
+    # Only update the tap for stable releases. Prereleases (v1.0.0-rc.*) never
+    # reach the tap, so `brew upgrade` never hands a user a release candidate.
+    # Also skip nightlies/snapshots (create_release == 'false').
+    if: needs.prepare-release.outputs.create_release == 'true' && needs.prepare-release.outputs.prerelease != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout javinizer-go (formula template + render script)
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Download release bundle (checksums.txt)
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-bundle-${{ needs.prepare-release.outputs.version }}
+          path: ./release
+
+      - name: Render formula
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          ./scripts/homebrew/render-formula.sh "$VERSION" ./release/checksums.txt scripts/homebrew/javinizer.rb.tmpl > out/javinizer.rb
+          echo "=== rendered Formula/javinizer.rb ==="
+          cat out/javinizer.rb
+
+      - name: Checkout tap repo
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: javinizer/homebrew-tap
+          path: tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+
+      - name: Commit formula to tap
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p tap/Formula
+          cp out/javinizer.rb tap/Formula/javinizer.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/javinizer.rb
+          if git diff --cached --quiet; then
+            echo "No formula changes to commit."
+          else
+            git commit -m "brew: javinizer ${VERSION}"
+            git push
+          fi
+
+  update-scoop-bucket:
+    name: Update Scoop bucket
+    needs: [prepare-release, create-release]
+    # Only update the bucket for stable releases. Prereleases (v1.0.0-rc.*) never
+    # reach the bucket, so `scoop update` never hands a user a release candidate.
+    # Also skip nightlies/snapshots (create_release == 'false').
+    if: needs.prepare-release.outputs.create_release == 'true' && needs.prepare-release.outputs.prerelease != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout javinizer-go (manifest template + render script)
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Download release bundle (checksums.txt)
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-bundle-${{ needs.prepare-release.outputs.version }}
+          path: ./release
+
+      - name: Render manifest
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          ./scripts/scoop/render-manifest.sh "$VERSION" ./release/checksums.txt scripts/scoop/javinizer.json.tmpl > out/javinizer.json
+          echo "=== rendered bucket/javinizer.json ==="
+          cat out/javinizer.json
+
+      - name: Checkout bucket repo
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: javinizer/scoop-javinizer
+          path: bucket-repo
+          ssh-key: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+
+      - name: Commit manifest to bucket
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p bucket-repo/bucket
+          cp out/javinizer.json bucket-repo/bucket/javinizer.json
+          cd bucket-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/javinizer.json
+          if git diff --cached --quiet; then
+            echo "No manifest changes to commit."
+          else
+            git commit -m "scoop: javinizer ${VERSION}"
+            git push
+          fi

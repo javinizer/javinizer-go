@@ -67,6 +67,63 @@ Javinizer Go is a modern, high-performance metadata scraper and file organizer f
 
 ## Installation
 
+### Homebrew (macOS / Linux)
+
+Once a stable `v1.0.0` is published, the Homebrew tap is the recommended install on macOS:
+
+```bash
+brew tap javinizer/homebrew-tap https://github.com/javinizer/homebrew-tap
+brew install javinizer
+brew upgrade javinizer   # update to the latest stable release later
+```
+
+The formula installs a prebuilt binary (CGO/SQLite is statically linked). The tap is updated automatically on each **stable** release; prereleases never reach it.
+
+### Scoop (Windows)
+
+Once a stable `v1.0.0` is published, the Scoop bucket is the recommended install on Windows:
+
+```powershell
+scoop bucket add javinizer https://github.com/javinizer/scoop-javinizer
+scoop install javinizer
+scoop update javinizer   # update to the latest stable release later
+```
+
+The manifest installs the prebuilt `javinizer-windows-amd64.exe` and shims it as `javinizer`. The bucket is updated automatically on each **stable** release; prereleases never reach it. This is the recommended Windows install path until release binaries are Authenticode-signed (issue [#72](https://github.com/javinizer/javinizer-go/issues/72)).
+
+### One-shot installer
+
+Downloads the latest **stable** release, verifies its SHA256 against `checksums.txt`, and puts `javinizer` on your `PATH`. Prereleases are opt-in: pass `--pre-release` / `-PreRelease` to install the newest release including prereleases.
+
+```bash
+# Linux / macOS
+curl -sSL https://raw.githubusercontent.com/javinizer/javinizer-go/main/scripts/install.sh | bash
+# latest pre-release:
+curl -sSL https://raw.githubusercontent.com/javinizer/javinizer-go/main/scripts/install.sh | bash -s -- --pre-release
+```
+
+```powershell
+# Windows (PowerShell) — installs to %LOCALAPPDATA%\javinizer\bin, no admin required
+irm https://raw.githubusercontent.com/javinizer/javinizer-go/main/scripts/install.ps1 | iex
+# latest pre-release:
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/javinizer/javinizer-go/main/scripts/install.ps1))) -PreRelease
+```
+
+The Windows installer runs `Unblock-File` to strip the Mark-of-the-Web tag that can otherwise cause an "Access is denied" error under Smart App Control (issue [#72](https://github.com/javinizer/javinizer-go/issues/72)).
+
+### Self-upgrade
+
+After a binary install, update in place without re-downloading by hand:
+
+```bash
+javinizer upgrade           # download + verify + replace the running binary
+javinizer upgrade --check   # just report whether an update is available
+```
+
+If javinizer was installed via Homebrew (or Scoop), `upgrade` detects that and tells you to use `brew upgrade javinizer` / `scoop update javinizer` instead.
+
+> `javinizer upgrade` updates the **program**; `javinizer update` refreshes **metadata** for your files. They are different commands.
+
 ### Pre-built Binary (Linux / macOS)
 
 Each release ships a single ready-to-run executable — no archive to extract. Download the asset matching your OS and architecture from the [Releases page](https://github.com/javinizer/javinizer-go/releases), make it executable, and put it on your `PATH`:

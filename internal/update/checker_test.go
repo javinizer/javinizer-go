@@ -757,3 +757,45 @@ func TestCheckLatestVersion_SkipLatestGoesStraightToList(t *testing.T) {
 	assert.True(t, info.NoStableLatest)
 	assert.Equal(t, 0, latestHit, "/releases/latest never hit when skipLatest is set")
 }
+
+// preRelease must consult the /releases list (newest release, including
+// prereleases) even when /releases/latest would return a valid stable release —
+// so a user on stable can jump to a newer prerelease. Unlike skipLatest, it
+// must NOT set NoStableLatest (a stable latest may well exist; the list was
+// chosen deliberately, not because /releases/latest 404'd).
+func TestCheckLatestVersion_PreReleaseUsesListEvenWithStableLatest(t *testing.T) {
+	var latestHit int
+	// The list returns a NEWER prerelease than the stable /releases/latest would.
+	mockList := []map[string]interface{}{{
+		"tag_name":   "v1.1.0-rc1",
+		"prerelease": true,
+	}}
+	listBytes, _ := json.Marshal(mockList)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/javinizer/javinizer-go/releases/latest":
+			latestHit++
+			// A stable latest exists — but preRelease must not even ask.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"tag_name":"v1.0.0","prerelease":false}`))
+		case "/repos/javinizer/javinizer-go/releases":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(listBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	chk := newGitHubCheckerWithBaseURL("javinizer/javinizer-go", server.URL)
+	chk.SetPreRelease(true)
+
+	info, err := chk.CheckLatestVersion(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, "v1.1.0-rc1", info.Version, "preRelease must return the newest release (incl. prerelease)")
+	assert.True(t, info.Prerelease)
+	assert.False(t, info.NoStableLatest, "preRelease must not set NoStableLatest")
+	assert.Equal(t, 0, latestHit, "/releases/latest must not be hit when preRelease is set")
+}

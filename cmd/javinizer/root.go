@@ -21,6 +21,7 @@ import (
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/token"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/tui"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/update"
+	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/upgrade"
 	versioncmd "github.com/javinizer/javinizer-go/cmd/javinizer/commands/version"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/word"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -80,6 +81,7 @@ func init() {
 		tag.NewCommand(),
 		tui.NewCommand(),
 		update.NewCommand(),
+		upgrade.NewCommand(),
 		word.NewCommand(),
 		versioncmd.NewCommand(),
 	)
@@ -91,7 +93,10 @@ func shouldSkipConfigInit(cmd *cobra.Command) bool {
 	}
 
 	// Built-in/help/version paths should not require config or logger setup.
-	if cmd.Name() == "version" || cmd.Name() == "help" || cmd.Name() == "completion" {
+	// `upgrade` also runs without config: it only talks to GitHub and replaces
+	// the binary, and forcing config init would create a config file as a side
+	// effect of a self-update.
+	if cmd.Name() == "version" || cmd.Name() == "help" || cmd.Name() == "completion" || cmd.Name() == "upgrade" {
 		return true
 	}
 

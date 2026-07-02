@@ -32,7 +32,7 @@ Open **http://localhost:8080**, create your admin login on first startup, and st
 
 - Replace `/path/to/your/media` with your JAV library path.
 - On Unraid, use `--user 99:100`.
-- Prefer a [binary](#prebuilt-binaries) or [build from source](#build-from-source) for a native install.
+- Prefer [Homebrew](#homebrew-macos--linux), a [one-shot installer](#one-shot-install-linux--macos--windows), a [binary](#prebuilt-binaries-manual-download), or [build from source](#build-from-source) for a native install.
 
 > **First time?** Skim [Features](#features) to see what it does, then jump to [Usage](#usage) or the [Web UI](#web-ui) section.
 
@@ -88,7 +88,55 @@ The compose file includes **javinizer** (API + web UI) and an optional **flareso
 
 **Tag policy:** `latest` tracks the most recent release; pin a tag (e.g. `v1.0.0-rc1`) for reproducible deployments.
 
-### Prebuilt Binaries
+### Homebrew (macOS / Linux)
+
+Once a stable `v1.0.0` is published, install via the Homebrew tap (recommended for macOS):
+
+```bash
+brew tap javinizer/homebrew-tap https://github.com/javinizer/homebrew-tap
+brew install javinizer
+
+brew upgrade javinizer   # update to the latest stable release later
+```
+
+The formula installs a prebuilt binary (CGO/SQLite is statically linked into each release asset, so Homebrew does not build from source or pull a SQLite dependency). The tap is updated automatically on each **stable** release; prereleases never reach it, so `brew upgrade` never hands you a release candidate.
+
+### Scoop (Windows)
+
+Once a stable `v1.0.0` is published, install via the Scoop bucket (recommended for Windows):
+
+```powershell
+scoop bucket add javinizer https://github.com/javinizer/scoop-javinizer
+scoop install javinizer
+
+scoop update javinizer   # update to the latest stable release later
+```
+
+The manifest installs the prebuilt `javinizer-windows-amd64.exe` and shims it as `javinizer`. The bucket is updated automatically on each **stable** release; prereleases never reach it, so `scoop update` never hands you a release candidate. This is the recommended Windows install path until release binaries are Authenticode-signed (see [issue #72](https://github.com/javinizer/javinizer-go/issues/72) — Scoop downloads via a trusted process and verifies the hash from the manifest, sidestepping the manual Mark-of-the-Web / Smart App Control friction of a raw browser download).
+
+### One-shot install (Linux / macOS / Windows)
+
+The installers download the latest **stable** release, verify its SHA256 against `checksums.txt`, and put `javinizer` on your `PATH`. Prereleases are opt-in: pass `--pre-release` (Linux/macOS) or `-PreRelease` (Windows) to install the newest release including prereleases.
+
+**Linux / macOS:**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/javinizer/javinizer-go/main/scripts/install.sh | bash
+# install the latest pre-release instead:
+curl -sSL https://raw.githubusercontent.com/javinizer/javinizer-go/main/scripts/install.sh | bash -s -- --pre-release
+```
+
+**Windows** (PowerShell) — installs to `%LOCALAPPDATA%\javinizer\bin` (no admin required):
+
+```powershell
+irm https://raw.githubusercontent.com/javinizer/javinizer-go/main/scripts/install.ps1 | iex
+# install the latest pre-release instead:
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/javinizer/javinizer-go/main/scripts/install.ps1))) -PreRelease
+```
+
+The Windows installer also runs `Unblock-File` on the downloaded binary, which strips the Mark-of-the-Web tag that can otherwise trigger an "Access is denied" error under Smart App Control (see [issue #72](https://github.com/javinizer/javinizer-go/issues/72)).
+
+### Prebuilt Binaries (manual download)
 
 Download from [GitHub Releases](https://github.com/javinizer/javinizer-go/releases) — available for `linux-amd64`, `linux-arm64`, `darwin-amd64`, `darwin-arm64`, `darwin-universal`, and `windows-amd64`. Binaries include the CLI, TUI, API server, and embedded web UI.
 
@@ -104,7 +152,7 @@ sudo mv javinizer /usr/local/bin/
 javinizer version
 ```
 
-> **One-shot install (from v1.0.0 stable):** once a non-prerelease `v1.0.0` is published, `releases/latest` resolves and you can fetch the latest binary directly — no version in the URL:
+> **One-shot download (from v1.0.0 stable):** once a non-prerelease `v1.0.0` is published, `releases/latest` resolves and you can fetch the latest binary directly — no version in the URL:
 > ```bash
 > curl -L -o javinizer https://github.com/javinizer/javinizer-go/releases/latest/download/javinizer-linux-amd64
 > ```
@@ -122,6 +170,8 @@ Rename-Item javinizer-windows-amd64.exe javinizer.exe
 .\javinizer.exe version
 ```
 
+> **Windows 11 + Smart App Control:** Windows release binaries are not yet Authenticode-signed (see the [Code signing policy](./CODE_SIGNING_POLICY.md) — SignPath Foundation signing is pending). If Smart App Control is in enforcement mode it may block the unsigned binary with an "Access is denied" error. The one-shot `install.ps1` above runs `Unblock-File` automatically; for a manual download, unblock it by right-clicking the `.exe` → Properties → check **Unblock** → OK (equivalently `Unblock-File .\javinizer.exe`), or build from source (below — locally-built binaries carry no Mark-of-the-Web and are not gated by SAC).
+
 To run `javinizer` from anywhere, add its folder to your `PATH` (System Properties → Environment Variables → Path → New), or copy `javinizer.exe` into a folder that's already on your `PATH`.
 
 ```powershell
@@ -131,6 +181,23 @@ To run `javinizer` from anywhere, add its folder to your `PATH` (System Properti
 ```
 
 > Windows builds are CLI/TUI/API + embedded web UI, same as the other platforms. CGO/SQLite is statically linked, so no separate runtime is required.
+
+### Self-upgrade
+
+Once installed from a binary or `install.sh`, update in place without re-downloading by hand:
+
+```bash
+javinizer upgrade           # download + verify + replace the running binary
+javinizer upgrade --check   # just report whether an update is available
+javinizer upgrade --force   # reinstall even if already at the latest version
+javinizer upgrade --prerelease  # upgrade to the newest release, including prereleases
+```
+
+The new binary is verified against the release `checksums.txt` before the swap. If javinizer was installed via **Homebrew** or **Scoop**, `upgrade` detects that and tells you to use `brew upgrade javinizer` / `scoop update javinizer` instead, so it never clobbers a package-manager install.
+
+By default `upgrade` targets the latest **stable** release. Add `--prerelease` to jump to a newer release candidate (e.g. `v1.1.0-rc1`) when you want to track prereleases.
+
+> Note: `javinizer upgrade` updates the **program**; `javinizer update` refreshes **metadata** for your existing files. They are different commands.
 
 ### Build from Source
 

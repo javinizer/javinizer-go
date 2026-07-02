@@ -77,7 +77,7 @@ func NewCommand() *cobra.Command {
 					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "Update available: %s (current: %s)\n", latestVer, current); err != nil {
 						return err
 					}
-					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "Run 'javinizer update' to update.\n"); err != nil {
+					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "Run 'javinizer upgrade' to update.\n"); err != nil {
 						return err
 					}
 				} else {

@@ -72,6 +72,18 @@ type ConditionalChecker interface {
 	SetSkipLatest(skip bool)
 }
 
+// PreReleaseChecker is an OPTIONAL capability a Checker may implement to opt
+// into prerelease discovery. When SetPreRelease(true) is called, the checker
+// consults the /releases list endpoint (the single most recent release,
+// including prereleases) instead of /releases/latest (stable only). The
+// self-upgrade command uses this so a user on a stable release can opt into
+// jumping to a newer prerelease with `javinizer upgrade --prerelease`. It is
+// separate from ConditionalChecker so adding it cannot disturb the service
+// layer's ETag/skipLatest probes (and the mockChecker that implements them).
+type PreReleaseChecker interface {
+	SetPreRelease(enable bool)
+}
+
 // checker is an alias retaining the original unexported name used internally.
 type checker = Checker
 
@@ -87,6 +99,10 @@ type githubChecker struct {
 	// skipLatest, when true, skips the /releases/latest call (which 404s for a
 	// prerelease-only repo) and goes straight to the /releases list.
 	skipLatest bool
+	// preRelease, when true, always consults the /releases list (the newest
+	// release, including prereleases) instead of /releases/latest (stable
+	// only). Set via SetPreRelease by callers that want prerelease discovery.
+	preRelease bool
 }
 
 // SetIfNoneMatch implements ConditionalChecker.
@@ -94,6 +110,11 @@ func (c *githubChecker) SetIfNoneMatch(etag string) { c.ifNoneMatch = etag }
 
 // SetSkipLatest implements ConditionalChecker.
 func (c *githubChecker) SetSkipLatest(skip bool) { c.skipLatest = skip }
+
+// SetPreRelease implements PreReleaseChecker. When enabled, CheckLatestVersion
+// uses the /releases list endpoint so the newest release (including
+// prereleases) is returned, instead of /releases/latest (stable only).
+func (c *githubChecker) SetPreRelease(enable bool) { c.preRelease = enable }
 
 // newGitHubChecker creates a new GitHub checker.
 // The repo should be in format "owner/repo" (e.g., "javinizer/javinizer-go").
@@ -128,6 +149,24 @@ func newGitHubCheckerWithBaseURL(repo, baseURL string) *githubChecker {
 // prerelease-only repo — is skipped entirely, going straight to the /releases
 // list and halving API calls.
 func (c *githubChecker) CheckLatestVersion(ctx context.Context) (*versionInfo, error) {
+	// PreRelease opt-in: consult the /releases list so the newest release
+	// (including prereleases) is returned, instead of /releases/latest which
+	// excludes them. This lets a user on a stable release jump to a newer
+	// prerelease via `javinizer upgrade --prerelease`. Inlined (rather than
+	// reusing latestFromReleaseList) so the error context and the
+	// NoStableLatest flag don't carry the 404-fallback framing that doesn't
+	// apply when the list was chosen deliberately.
+	if c.preRelease {
+		versions, etag, err := c.getRecentReleases(ctx, 1)
+		if err != nil {
+			return nil, fmt.Errorf("prerelease release lookup failed: %w", err)
+		}
+		if len(versions) == 0 {
+			return nil, fmt.Errorf("no releases found")
+		}
+		v := versions[0]
+		return &versionInfo{Version: v, TagName: v, Prerelease: IsPrerelease(v), ETag: etag}, nil
+	}
 	// Skip the /releases/latest 404 we already know is coming for a
 	// prerelease-only repo; go straight to the list endpoint.
 	if c.skipLatest {

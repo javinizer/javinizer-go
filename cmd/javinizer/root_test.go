@@ -44,7 +44,7 @@ func TestRootCommand_SubcommandCount(t *testing.T) {
 
 func TestRootCommand_SubcommandNames(t *testing.T) {
 	// Test that all expected subcommands are present
-	expectedCommands := []string{"actress", "api", "genre", "history", "info", "init", "logs", "scrape", "sort", "tag", "tui", "update", "version"}
+	expectedCommands := []string{"actress", "api", "genre", "history", "info", "init", "logs", "scrape", "sort", "tag", "tui", "update", "upgrade", "version"}
 
 	subcommands := rootCmd.Commands()
 	commandNames := make(map[string]bool)
@@ -82,6 +82,7 @@ func TestShouldSkipConfigInit(t *testing.T) {
 	assert.True(t, shouldSkipConfigInit(&cobra.Command{Use: "version"}))
 	assert.True(t, shouldSkipConfigInit(&cobra.Command{Use: "help"}))
 	assert.True(t, shouldSkipConfigInit(&cobra.Command{Use: "completion"}))
+	assert.True(t, shouldSkipConfigInit(&cobra.Command{Use: "upgrade"}))
 
 	cmd := &cobra.Command{Use: "scrape"}
 	cmd.Flags().Bool("version", false, "show version")

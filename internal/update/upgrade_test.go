@@ -1,0 +1,502 @@
+package update
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// stubChecker returns a fixed latest version without touching the network.
+type stubChecker struct {
+	version string
+	err     error
+}
+
+func (s *stubChecker) CheckLatestVersion(_ context.Context) (*VersionInfo, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &VersionInfo{Version: s.version, TagName: s.version}, nil
+}
+
+func TestAssetName(t *testing.T) {
+	tests := []struct {
+		name    string
+		goos    string
+		goarch  string
+		want    string
+		wantErr bool
+	}{
+		{"darwin universal", "darwin", "amd64", "javinizer-darwin-universal", false},
+		{"darwin arm64 still universal", "darwin", "arm64", "javinizer-darwin-universal", false},
+		{"linux amd64", "linux", "amd64", "javinizer-linux-amd64", false},
+		{"linux arm64", "linux", "arm64", "javinizer-linux-arm64", false},
+		{"windows amd64", "windows", "amd64", "javinizer-windows-amd64.exe", false},
+		{"windows arm64 unsupported (no CI build)", "windows", "arm64", "", true},
+		{"linux 386 unsupported", "linux", "386", "", true},
+		{"freebsd unsupported", "freebsd", "amd64", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := AssetName(tc.goos, tc.goarch)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDetectInstallMethod(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want InstallMethod
+	}{
+		{"homebrew cellar", "/opt/homebrew/Cellar/javinizer/1.0.0/bin/javinizer", InstallMethodHomebrew},
+		{"linuxbrew cellar", "/home/linuxbrew/.linuxbrew/Cellar/javinizer/1.0.0/bin/javinizer", InstallMethodHomebrew},
+		{"scoop apps", "C:/Users/me/scoop/apps/javinizer/current/javinizer.exe", InstallMethodScoop},
+		{"manual usr local", "/usr/local/bin/javinizer", InstallMethodManual},
+		{"manual home bin", "/home/choong/bin/javinizer", InstallMethodManual},
+		{"manual windows", "C:/Tools/javinizer.exe", InstallMethodManual},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, DetectInstallMethod(tc.path))
+		})
+	}
+}
+
+func TestInstallMethodString(t *testing.T) {
+	tests := []struct {
+		method InstallMethod
+		want   string
+	}{
+		{InstallMethodManual, "manual"},
+		{InstallMethodHomebrew, "homebrew"},
+		{InstallMethodScoop, "scoop"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.want, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.method.String())
+		})
+	}
+}
+
+func TestParseChecksums(t *testing.T) {
+	const asset = "javinizer-linux-amd64"
+	tests := []struct {
+		name    string
+		data    string
+		want    string
+		wantErr bool
+	}{
+		{"two-space format", "abc123  javinizer-linux-amd64\n", "abc123", false},
+		{"star format", "abc123 *javinizer-linux-amd64\n", "abc123", false},
+		{"multiple entries", "deadbeef  javinizer-darwin-universal\nabc123  javinizer-linux-amd64\nfff  javinizer-windows-amd64.exe\n", "abc123", false},
+		{"missing asset", "deadbeef  javinizer-darwin-universal\n", "", true},
+		{"empty", "", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseChecksums([]byte(tc.data), asset)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestReplaceBinary_Unix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only replace path")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "javinizer")
+	source := filepath.Join(dir, "new")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
+	require.NoError(t, os.WriteFile(source, []byte("new"), 0o755))
+
+	require.NoError(t, ReplaceBinary(target, source))
+
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(got))
+	_, err = os.Stat(source)
+	assert.True(t, os.IsNotExist(err), "source should have been renamed away")
+}
+
+func TestUpgrade_CheckOnly_Available(t *testing.T) {
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion: "v0.0.1",
+		CheckOnly:      true,
+		Checker:        &stubChecker{version: "v9.9.9"},
+		Out:            &out,
+	})
+	require.NoError(t, err)
+	assert.False(t, res.UpToDate)
+	assert.False(t, res.Upgraded)
+	assert.Contains(t, out.String(), "Update available: v9.9.9")
+}
+
+func TestUpgrade_CheckOnly_UpToDate(t *testing.T) {
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion: "v9.9.9",
+		CheckOnly:      true,
+		Checker:        &stubChecker{version: "v9.9.9"},
+		Out:            &out,
+	})
+	require.NoError(t, err)
+	assert.True(t, res.UpToDate)
+	assert.False(t, res.Upgraded)
+	assert.Contains(t, out.String(), "Already up to date")
+}
+
+func TestUpgrade_HomebrewHandoff(t *testing.T) {
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion: "v0.0.1",
+		Checker:        &stubChecker{version: "v9.9.9"},
+		ExePath:        "/opt/homebrew/Cellar/javinizer/1.0.0/bin/javinizer",
+		Out:            &out,
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Handoff)
+	assert.False(t, res.Upgraded)
+	assert.Equal(t, InstallMethodHomebrew, res.InstallMethod)
+	assert.Contains(t, out.String(), "brew upgrade javinizer")
+}
+
+// newAssetServer serves a release asset plus its checksums.txt from a fake
+// release download tree. It returns the real asset name for the host platform
+// so the test is OS-agnostic.
+func newAssetServer(t *testing.T, assetBytes []byte, checksums string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/checksums.txt"):
+			_, _ = w.Write([]byte(checksums))
+		case strings.HasSuffix(r.URL.Path, "javinizer-darwin-universal"),
+			strings.HasSuffix(r.URL.Path, "javinizer-linux-amd64"),
+			strings.HasSuffix(r.URL.Path, "javinizer-linux-arm64"),
+			strings.HasSuffix(r.URL.Path, "javinizer-windows-amd64.exe"):
+			_, _ = w.Write(assetBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+func TestUpgrade_FullReplace(t *testing.T) {
+	asset, err := AssetName(runtime.GOOS, runtime.GOARCH)
+	require.NoError(t, err)
+
+	assetBytes := []byte("new-binary-content")
+	sum := sha256.Sum256(assetBytes)
+	checksums := fmt.Sprintf("%x  %s\n", sum, asset)
+	server := newAssetServer(t, assetBytes, checksums)
+	defer server.Close()
+
+	exePath := filepath.Join(t.TempDir(), "javinizer")
+	require.NoError(t, os.WriteFile(exePath, []byte("old"), 0o755))
+
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion:  "v0.0.1",
+		DownloadBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Checker:         &stubChecker{version: "v9.9.9"},
+		ExePath:         exePath,
+		Out:             &out,
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Upgraded)
+	assert.Equal(t, "v9.9.9", res.LatestVersion)
+	assert.Equal(t, asset, res.AssetName)
+
+	got, err := os.ReadFile(exePath)
+	require.NoError(t, err)
+	assert.Equal(t, "new-binary-content", string(got))
+}
+
+func TestUpgrade_ChecksumMismatch_Aborts(t *testing.T) {
+	asset, err := AssetName(runtime.GOOS, runtime.GOARCH)
+	require.NoError(t, err)
+
+	assetBytes := []byte("new-binary-content")
+	// Deliberately wrong checksum.
+	checksums := fmt.Sprintf("deadbeef  %s\n", asset)
+	server := newAssetServer(t, assetBytes, checksums)
+	defer server.Close()
+
+	exePath := filepath.Join(t.TempDir(), "javinizer")
+	require.NoError(t, os.WriteFile(exePath, []byte("old"), 0o755))
+
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion:  "v0.0.1",
+		DownloadBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Checker:         &stubChecker{version: "v9.9.9"},
+		ExePath:         exePath,
+		Out:             &out,
+	})
+	require.Error(t, err)
+	assert.False(t, res.Upgraded)
+	assert.Contains(t, err.Error(), "checksum mismatch")
+
+	// The running binary must be untouched on verification failure.
+	got, err := os.ReadFile(exePath)
+	require.NoError(t, err)
+	assert.Equal(t, "old", string(got))
+}
+
+func TestUpgrade_Force_ReinstallLatest(t *testing.T) {
+	asset, err := AssetName(runtime.GOOS, runtime.GOARCH)
+	require.NoError(t, err)
+
+	assetBytes := []byte("reinstalled")
+	sum := sha256.Sum256(assetBytes)
+	checksums := fmt.Sprintf("%x  %s\n", sum, asset)
+	server := newAssetServer(t, assetBytes, checksums)
+	defer server.Close()
+
+	exePath := filepath.Join(t.TempDir(), "javinizer")
+	require.NoError(t, os.WriteFile(exePath, []byte("old"), 0o755))
+
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion:  "v9.9.9", // same as latest — would be "up to date" without --force
+		Force:           true,
+		DownloadBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Checker:         &stubChecker{version: "v9.9.9"},
+		ExePath:         exePath,
+		Out:             &out,
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Upgraded)
+	assert.Contains(t, out.String(), "forced")
+
+	got, err := os.ReadFile(exePath)
+	require.NoError(t, err)
+	assert.Equal(t, "reinstalled", string(got))
+}
+
+func TestUpgrade_ScoopHandoff(t *testing.T) {
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion: "v0.0.1",
+		Checker:        &stubChecker{version: "v9.9.9"},
+		ExePath:        "C:/Users/me/scoop/apps/javinizer/current/javinizer.exe",
+		Out:            &out,
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Handoff)
+	assert.False(t, res.Upgraded)
+	assert.Equal(t, InstallMethodScoop, res.InstallMethod)
+	assert.Contains(t, out.String(), "scoop update javinizer")
+}
+
+func TestUpgrade_AlreadyUpToDate_NonCheckPath(t *testing.T) {
+	// The non-check-only "already up to date" branch (result.UpToDate && !Force,
+	// CheckOnly == false) was previously unexercised — TestUpgrade_CheckOnly_upToDate
+	// uses CheckOnly: true.
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion: "v9.9.9",
+		Checker:        &stubChecker{version: "v9.9.9"},
+		ExePath:        filepath.Join(t.TempDir(), "javinizer"),
+		Out:            &out,
+	})
+	require.NoError(t, err)
+	assert.True(t, res.UpToDate)
+	assert.False(t, res.Upgraded)
+	assert.Contains(t, out.String(), "Already up to date")
+}
+
+func TestUpgrade_ChecksumsDownloadFailure_Aborts(t *testing.T) {
+	// A release missing checksums.txt (the asset is served but checksums 404)
+	// must abort without touching the running binary.
+	assetBytes := []byte("new-binary-content")
+	sum := sha256.Sum256(assetBytes)
+	// Server serves the asset but 404s checksums.txt.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/checksums.txt") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(assetBytes)
+	}))
+	defer server.Close()
+	_ = sum
+
+	exePath := filepath.Join(t.TempDir(), "javinizer")
+	require.NoError(t, os.WriteFile(exePath, []byte("old"), 0o755))
+
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion:  "v0.0.1",
+		DownloadBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Checker:         &stubChecker{version: "v9.9.9"},
+		ExePath:         exePath,
+		Out:             &out,
+	})
+	require.Error(t, err)
+	assert.False(t, res.Upgraded)
+	assert.Contains(t, err.Error(), "download checksums")
+
+	// Running binary untouched.
+	got, err := os.ReadFile(exePath)
+	require.NoError(t, err)
+	assert.Equal(t, "old", string(got))
+}
+
+func TestReplaceBinary_Windows_Success(t *testing.T) {
+	// replaceBinaryWindows uses only os.Rename/os.Remove, so it is testable on
+	// any OS despite the runtime.GOOS gate in ReplaceBinary.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "javinizer.exe")
+	source := filepath.Join(dir, "new.exe")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
+	require.NoError(t, os.WriteFile(source, []byte("new"), 0o755))
+
+	require.NoError(t, replaceBinaryWindows(target, source))
+
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(got))
+	// The .old backup must be cleaned up on success.
+	_, err = os.Stat(target + ".old")
+	assert.True(t, os.IsNotExist(err), ".old should be removed on success")
+}
+
+func TestReplaceBinary_Windows_RollbackOnFailure(t *testing.T) {
+	// If the new-binary rename fails (source missing), the previous binary is
+	// restored to target and an error is returned — the install is not bricked.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "javinizer.exe")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
+	// No source file -> the second os.Rename(source, target) will fail.
+
+	err := replaceBinaryWindows(target, filepath.Join(dir, "missing.exe"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "install new binary")
+
+	// Previous binary restored.
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "old", string(got))
+}
+
+func TestReplaceBinary_Windows_SelfHealFromBrick(t *testing.T) {
+	// Simulate a prior interrupted upgrade: target is missing, only .old exists.
+	// replaceBinaryWindows must restore .old -> target (so os.Remove(old) below
+	// doesn't delete the only good copy) and then complete the upgrade.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "javinizer.exe")
+	old := target + ".old"
+	source := filepath.Join(dir, "new.exe")
+	require.NoError(t, os.WriteFile(old, []byte("previous"), 0o755))
+	require.NoError(t, os.WriteFile(source, []byte("new"), 0o755))
+
+	require.NoError(t, replaceBinaryWindows(target, source))
+
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(got))
+	_, err = os.Stat(old)
+	assert.True(t, os.IsNotExist(err), ".old should be removed after self-heal upgrade")
+}
+
+// prereleaseAwareChecker is a stubChecker that also implements PreReleaseChecker,
+// recording whether the caller opted into prerelease discovery.
+type prereleaseAwareChecker struct {
+	stubChecker
+	gotPreRelease bool
+}
+
+func (p *prereleaseAwareChecker) SetPreRelease(enable bool) { p.gotPreRelease = enable }
+
+func TestUpgrade_PreRelease_FlowsToChecker(t *testing.T) {
+	stub := &prereleaseAwareChecker{stubChecker: stubChecker{version: "v1.1.0-rc1"}}
+	var out bytes.Buffer
+	_, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion: "v1.0.0",
+		PreRelease:     true,
+		CheckOnly:      true,
+		Checker:        stub,
+		Out:            &out,
+	})
+	require.NoError(t, err)
+	assert.True(t, stub.gotPreRelease, "PreRelease must be threaded to the checker via SetPreRelease")
+	assert.Contains(t, out.String(), "v1.1.0-rc1")
+}
+
+func TestUpgrade_PreRelease_NotSetByDefault(t *testing.T) {
+	stub := &prereleaseAwareChecker{stubChecker: stubChecker{version: "v1.1.0"}}
+	var out bytes.Buffer
+	_, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion: "v1.0.0",
+		CheckOnly:      true,
+		Checker:        stub,
+		Out:            &out,
+	})
+	require.NoError(t, err)
+	assert.False(t, stub.gotPreRelease, "PreRelease must not be set by default")
+}
+
+func TestUpgrade_PreRelease_AllowsPrereleaseUpgrade(t *testing.T) {
+	// End-to-end: with PreRelease, a newer prerelease is installed through the
+	// full download/verify/replace path (the prerelease tag flows into the
+	// download URL). Confirms prereleases are accepted, not rejected, when opted in.
+	asset, err := AssetName(runtime.GOOS, runtime.GOARCH)
+	require.NoError(t, err)
+
+	assetBytes := []byte("rc-binary")
+	sum := sha256.Sum256(assetBytes)
+	checksums := fmt.Sprintf("%x  %s\n", sum, asset)
+	server := newAssetServer(t, assetBytes, checksums)
+	defer server.Close()
+
+	exePath := filepath.Join(t.TempDir(), "javinizer")
+	require.NoError(t, os.WriteFile(exePath, []byte("old"), 0o755))
+
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion:  "v1.0.0",
+		PreRelease:      true,
+		DownloadBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Checker:         &stubChecker{version: "v1.1.0-rc1"},
+		ExePath:         exePath,
+		Out:             &out,
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Upgraded)
+	assert.Equal(t, "v1.1.0-rc1", res.LatestVersion)
+	assert.Contains(t, out.String(), "prerelease")
+
+	got, err := os.ReadFile(exePath)
+	require.NoError(t, err)
+	assert.Equal(t, "rc-binary", string(got))
+}
