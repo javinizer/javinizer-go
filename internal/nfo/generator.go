@@ -325,6 +325,10 @@ func unescapeQuotesInText(s string) string {
 		stText = iota
 		stTag
 	)
+	const (
+		encQuote = "&#34;"
+		encApos  = "&#39;"
+	)
 	state := stText
 	var quote byte
 	var b strings.Builder
@@ -338,12 +342,12 @@ func unescapeQuotesInText(s string) string {
 				state = stTag
 				quote = 0
 				i++
-			} else if c == '&' && i+5 <= len(s) && s[i:i+5] == "&#34;" {
+			} else if c == '&' && i+len(encQuote) <= len(s) && s[i:i+len(encQuote)] == encQuote {
 				b.WriteByte('"')
-				i += 5
-			} else if c == '&' && i+5 <= len(s) && s[i:i+5] == "&#39;" {
+				i += len(encQuote)
+			} else if c == '&' && i+len(encApos) <= len(s) && s[i:i+len(encApos)] == encApos {
 				b.WriteByte('\'')
-				i += 5
+				i += len(encApos)
 			} else {
 				b.WriteByte(c)
 				i++
