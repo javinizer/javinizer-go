@@ -277,13 +277,17 @@ func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 
 	// Encode to an in-memory buffer first so we can post-process the XML.
 	// Go's encoding/xml escapes " and ' to numeric character references
-	// (&#34; and &#39;) in element text. This is valid XML, but NFO consumers
-	// like Jellyfin/Emby display them literally instead of decoding them.
-	// Only <, >, and & need escaping in element text — " and ' are valid
-	// unescaped in XML text content (they're only required in attribute
-	// values). The replacement is safe because any literal & in the source
-	// text is already escaped to &amp; by the encoder, so &#34;/&#39; in the
-	// output can only come from the encoder escaping a "/' character.
+	// (&#34; and &#39;) in both element text and attribute values. This is
+	// valid XML, but NFO consumers like Jellyfin/Emby display them literally
+	// in element text instead of decoding them.
+	//
+	// Only <, >, and & need escaping in XML element text — " and ' are valid
+	// unescaped there (they're only required inside attribute values). We
+	// therefore reverse the " / ' escaping, but ONLY in element text content.
+	// Unescaping inside tags would corrupt attribute values (e.g.
+	// name="Bob&#34;s" would become name="Bob"s" — broken XML). The
+	// unescapeQuotesInText helper walks the buffer with a tag-aware state
+	// machine so attribute values are left untouched.
 	var buf bytes.Buffer
 	buf.WriteString(xml.Header)
 	encoder := xml.NewEncoder(&buf)
@@ -293,8 +297,7 @@ func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 	}
 	buf.WriteString("\n")
 
-	output := strings.ReplaceAll(buf.String(), "&#34;", "\"")
-	output = strings.ReplaceAll(output, "&#39;", "'")
+	output := unescapeQuotesInText(buf.String())
 
 	file, err := g.fs.Create(path)
 	if err != nil {
@@ -307,6 +310,66 @@ func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 	}
 
 	return nil
+}
+
+// unescapeQuotesInText reverses Go's encoding/xml escaping of " and ' to
+// numeric character references (&#34; and &#39;) but ONLY in element text
+// content — never inside tags or attribute values, where those characters
+// must remain escaped to keep the XML well-formed. It walks the buffer with a
+// tag-aware state machine: text between '>' and '<' is unescaped, while
+// everything inside '<...>' (including attribute values) is left untouched.
+// Quote tracking inside tags ensures a '>' appearing within a quoted
+// attribute value does not prematurely end the tag.
+func unescapeQuotesInText(s string) string {
+	const (
+		stText = iota
+		stTag
+	)
+	state := stText
+	var quote byte
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		c := s[i]
+		switch state {
+		case stText:
+			if c == '<' {
+				b.WriteByte(c)
+				state = stTag
+				quote = 0
+				i++
+			} else if c == '&' && i+5 <= len(s) && s[i:i+5] == "&#34;" {
+				b.WriteByte('"')
+				i += 5
+			} else if c == '&' && i+5 <= len(s) && s[i:i+5] == "&#39;" {
+				b.WriteByte('\'')
+				i += 5
+			} else {
+				b.WriteByte(c)
+				i++
+			}
+		case stTag:
+			if quote != 0 {
+				b.WriteByte(c)
+				if c == quote {
+					quote = 0
+				}
+				i++
+			} else if c == '"' || c == '\'' {
+				quote = c
+				b.WriteByte(c)
+				i++
+			} else if c == '>' {
+				b.WriteByte(c)
+				state = stText
+				i++
+			} else {
+				b.WriteByte(c)
+				i++
+			}
+		}
+	}
+	return b.String()
 }
 
 // extractStreamDetails extracts video/audio stream information from a video file
