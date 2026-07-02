@@ -919,3 +919,30 @@ func TestLoadMeta_RowsErr(t *testing.T) {
 		cancel2()
 	}
 }
+
+// TestImport_BeginTxError covers the BeginTx error branch (line 234): with a
+// very short context timeout (~50µs), schema creation (DDL) often completes
+// but BeginTx fails with "context deadline exceeded". The test runs multiple
+// iterations because the timing is inherently racy — schema creation and
+// BeginTx are both sub-millisecond, so the timeout must fire in the narrow
+// window between them.
+func TestImport_BeginTxError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r18dev_dump.db")
+	hitBeginTx := false
+	for i := 0; i < 20; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Microsecond)
+		_, err := Import(ctx, strings.NewReader(""), path, ImportOptions{})
+		cancel()
+		if err != nil && strings.Contains(err.Error(), "begin tx") {
+			hitBeginTx = true
+			break
+		}
+		_ = os.Remove(path + ".tmp")
+		_ = os.Remove(path + ".tmp-wal")
+		_ = os.Remove(path + ".tmp-shm")
+	}
+	if !hitBeginTx {
+		t.Skip("BeginTx error not triggered in 20 iterations — timing-dependent on this machine")
+	}
+}

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode"
@@ -34,11 +33,7 @@ type Store struct {
 // error if the file does not exist or is not a valid dump database; callers
 // should treat that as "dump not available" and fall back to HTTP resolution.
 func Open(path string) (*Store, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return nil, fmt.Errorf("resolve dump db path: %w", err)
-	}
-	dsn := fmt.Sprintf("file:%s?mode=ro&_busy_timeout=5000", abs)
+	dsn := fmt.Sprintf("file:%s?mode=ro&_busy_timeout=5000", path)
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open dump db: %w", err)
@@ -47,7 +42,7 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping dump db: %w", err)
 	}
-	return &Store{db: db, path: abs}, nil
+	return &Store{db: db, path: path}, nil
 }
 
 // Close releases the underlying database connection.

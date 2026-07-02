@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
@@ -229,11 +228,7 @@ func runSearch(w io.Writer, configFile, id string) error {
 }
 
 func fileSize(path string) (int64, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return 0, err
-	}
-	info, err := os.Stat(abs)
+	info, err := os.Stat(path)
 	if err != nil {
 		return 0, err
 	}
