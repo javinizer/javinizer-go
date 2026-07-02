@@ -372,15 +372,37 @@ func downloadAndReplace(ctx context.Context, opts UpgradeOptions, exePath, tag, 
 }
 
 // downloadTo streams a URL into w, capping the total bytes read at maxSize.
+// It enforces HTTPS end to end: the initial URL and every redirect must be
+// https, because a checksum fetched over the same insecure channel as the
+// binary authenticates nothing (a MITM could swap both). An oversized response
+// fails closed rather than being silently truncated into a partial parse.
 func downloadTo(ctx context.Context, client *http.Client, url string, w io.Writer, maxSize int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing non-HTTPS download URL: %s", req.URL.Redacted())
+	}
 	req.Header.Set("User-Agent", "Javinizer-Updater")
 	req.Header.Set("Accept", "application/octet-stream")
 
-	resp, err := client.Do(req)
+	safeClient := *client
+	baseRedirect := safeClient.CheckRedirect
+	safeClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("refusing non-HTTPS redirect URL: %s", req.URL.Redacted())
+		}
+		if baseRedirect != nil {
+			return baseRedirect(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -389,8 +411,12 @@ func downloadTo(ctx context.Context, client *http.Client, url string, w io.Write
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
-	if _, err := io.Copy(w, io.LimitReader(resp.Body, maxSize)); err != nil {
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxSize+1))
+	if err != nil {
 		return fmt.Errorf("read body: %w", err)
+	}
+	if n > maxSize {
+		return fmt.Errorf("response exceeds maximum size of %d bytes for %s", maxSize, url)
 	}
 	return nil
 }

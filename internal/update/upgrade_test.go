@@ -186,11 +186,11 @@ func TestUpgrade_HomebrewHandoff(t *testing.T) {
 }
 
 // newAssetServer serves a release asset plus its checksums.txt from a fake
-// release download tree. It returns the real asset name for the host platform
-// so the test is OS-agnostic.
+// release download tree over TLS. downloadTo enforces HTTPS, so test servers
+// must be TLS; server.Client() returns a client that trusts the test cert.
 func newAssetServer(t *testing.T, assetBytes []byte, checksums string) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/checksums.txt"):
 			_, _ = w.Write([]byte(checksums))
@@ -339,7 +339,7 @@ func TestUpgrade_ChecksumsDownloadFailure_Aborts(t *testing.T) {
 	assetBytes := []byte("new-binary-content")
 	sum := sha256.Sum256(assetBytes)
 	// Server serves the asset but 404s checksums.txt.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/checksums.txt") {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -499,4 +499,204 @@ func TestUpgrade_PreRelease_AllowsPrereleaseUpgrade(t *testing.T) {
 	got, err := os.ReadFile(exePath)
 	require.NoError(t, err)
 	assert.Equal(t, "rc-binary", string(got))
+}
+
+func TestDownloadTo_RefusesNonHTTPS(t *testing.T) {
+	// downloadTo must refuse a plain-HTTP URL outright: a checksum fetched over
+	// the same insecure channel as the binary authenticates nothing.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer server.Close()
+
+	var buf bytes.Buffer
+	err := downloadTo(context.Background(), server.Client(), server.URL+"/asset", &buf, 1024)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-HTTPS")
+	assert.Empty(t, buf.Bytes())
+}
+
+func TestDownloadTo_RefusesHTTPRedirect(t *testing.T) {
+	// A TLS server that redirects to a plain-HTTP target: the upgrade must
+	// refuse to follow the redirect rather than fetch the asset insecurely.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("insecure"))
+	}))
+	defer target.Close()
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/asset", http.StatusFound)
+	}))
+	defer server.Close()
+
+	var buf bytes.Buffer
+	err := downloadTo(context.Background(), server.Client(), server.URL+"/asset", &buf, 1024)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-HTTPS redirect")
+	assert.Empty(t, buf.Bytes())
+}
+
+func TestDownloadTo_ErrorsWhenExceedingSizeCap(t *testing.T) {
+	// An oversized response must fail closed rather than be silently truncated
+	// into a partial (and potentially valid-looking) parse.
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("x"), 100))
+	}))
+	defer server.Close()
+
+	var buf bytes.Buffer
+	err := downloadTo(context.Background(), server.Client(), server.URL, &buf, 50)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds maximum size")
+}
+
+func TestDownloadTo_HTTPStatusError(t *testing.T) {
+	// A non-200 TLS response surfaces a clear HTTP-status error.
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	var buf bytes.Buffer
+	err := downloadTo(context.Background(), server.Client(), server.URL, &buf, 1024)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 500")
+}
+
+func TestDownloadTo_RequestError(t *testing.T) {
+	// A transport-level failure (server gone) surfaces as an error rather than
+	// a silent success.
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	server.Close()
+
+	var buf bytes.Buffer
+	err := downloadTo(context.Background(), server.Client(), server.URL, &buf, 1024)
+	require.Error(t, err)
+}
+
+func TestDownloadTo_ChainsBaseCheckRedirect(t *testing.T) {
+	// A caller-supplied CheckRedirect must still be invoked (chained) after the
+	// HTTPS check passes, so custom redirect policy is preserved.
+	called := false
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/asset" {
+			http.Redirect(w, r, "/final", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	c := server.Client()
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		called = true
+		return nil
+	}
+	var buf bytes.Buffer
+	require.NoError(t, downloadTo(context.Background(), c, server.URL+"/asset", &buf, 1024))
+	assert.True(t, called, "base CheckRedirect must be chained after the HTTPS check")
+	assert.Equal(t, "ok", buf.String())
+}
+
+func TestDownloadTo_StopsAfterTenRedirects(t *testing.T) {
+	// An HTTPS redirect loop must be bounded; downloadTo refuses to follow past
+	// 10 redirects rather than looping forever.
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, r.URL.Path, http.StatusFound)
+	}))
+	defer server.Close()
+
+	var buf bytes.Buffer
+	err := downloadTo(context.Background(), server.Client(), server.URL+"/loop", &buf, 1024)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stopped after 10 redirects")
+}
+
+func TestUpgrade_EmptyCurrentVersion_ReturnsError(t *testing.T) {
+	// Also exercises resolveUpgradeDefaults' default HTTPClient + Out paths
+	// (both nil -> production defaults) before the version guard fires.
+	_, err := Upgrade(context.Background(), UpgradeOptions{CurrentVersion: ""})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "current version is required")
+}
+
+func TestResolveExePath_FallbackOnSymlinkError(t *testing.T) {
+	// A path that does not exist makes EvalSymlinks fail; resolveExePath falls
+	// back to the raw path rather than erroring, so an interrupted upgrade
+	// (binary just replaced) still yields a usable target.
+	got, err := resolveExePath(filepath.Join(t.TempDir(), "does-not-exist"))
+	require.NoError(t, err)
+	assert.Contains(t, got, "does-not-exist")
+}
+
+func TestResolveExePath_UsesOsExecutableWhenEmpty(t *testing.T) {
+	// An empty override resolves to the running binary's path via os.Executable.
+	got, err := resolveExePath("")
+	require.NoError(t, err)
+	assert.NotEmpty(t, got)
+}
+
+func TestVerifyFileSHA256_OpenError(t *testing.T) {
+	err := verifyFileSHA256(filepath.Join(t.TempDir(), "missing"), "abc")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "open downloaded asset")
+}
+
+func TestUpgrade_DownloadAssetFailure_Aborts(t *testing.T) {
+	// checksums.txt is served (valid) but the asset 404s: the upgrade must abort
+	// with a "download asset" error and leave the running binary untouched.
+	asset, err := AssetName(runtime.GOOS, runtime.GOARCH)
+	require.NoError(t, err)
+
+	assetBytes := []byte("never-served")
+	sum := sha256.Sum256(assetBytes)
+	checksums := fmt.Sprintf("%x  %s\n", sum, asset)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/checksums.txt") {
+			_, _ = w.Write([]byte(checksums))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	exePath := filepath.Join(t.TempDir(), "javinizer")
+	require.NoError(t, os.WriteFile(exePath, []byte("old"), 0o755))
+
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion:  "v0.0.1",
+		DownloadBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Checker:         &stubChecker{version: "v9.9.9"},
+		ExePath:         exePath,
+		Out:             &out,
+	})
+	require.Error(t, err)
+	assert.False(t, res.Upgraded)
+	assert.Contains(t, err.Error(), "download asset")
+
+	got, err := os.ReadFile(exePath)
+	require.NoError(t, err)
+	assert.Equal(t, "old", string(got))
+}
+
+func TestReplaceBinary_Unix_PermissionDenied(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only replace path")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root — permission test is meaningless")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "javinizer")
+	source := filepath.Join(dir, "new")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
+	require.NoError(t, os.WriteFile(source, []byte("new"), 0o755))
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	err := replaceBinaryUnix(target, source)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "permission denied")
 }

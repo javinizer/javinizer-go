@@ -42,26 +42,26 @@ Write-Step 'Javinizer CLI Installer'
 # By default only the latest STABLE release is installed (GitHub's
 # /releases/latest excludes prereleases). If no stable release exists yet, the
 # installer stops and points the user at -PreRelease (or the Releases page)
-# rather than silently installing a prerelease — prereleases are opt-in.
+# rather than silently installing a prerelease -- prereleases are opt-in.
 # With -PreRelease, the /releases list endpoint returns the newest release
 # including prereleases (e.g. v1.0.0-rc3).
 function Get-LatestTag {
+    # Branch on -PreRelease first so the list endpoint is the primary path when
+    # opted in: otherwise a newer prerelease is ignored whenever a stable exists.
+    if ($PreRelease) {
+        $list = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=1" -Headers @{ 'User-Agent' = 'Javinizer-Installer' }
+        $latest = @($list)[0]
+        if (-not $latest -or -not $latest.tag_name) { Die 'Failed to fetch latest release version.' }
+        return $latest.tag_name
+    }
+
     try {
         $r = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers @{ 'User-Agent' = 'Javinizer-Installer' } -ErrorAction Stop
         if ($r.tag_name) { return $r.tag_name }
     } catch {
-        if ($PreRelease) {
-            Write-Warn 'No stable latest release; fetching most recent release (incl. prereleases)...'
-        } else {
-            Die "No stable release is available yet. Javinizer is currently in pre-release. To install the latest pre-release, re-run with -PreRelease, or download a specific release from https://github.com/$Repo/releases"
-        }
+        Die "No stable release is available yet. Javinizer is currently in pre-release. To install the latest pre-release, re-run with -PreRelease, or download a specific release from https://github.com/$Repo/releases"
     }
-    if (-not $PreRelease) {
-        Die "No stable release is available yet. To install the latest pre-release, re-run with -PreRelease, or download from https://github.com/$Repo/releases"
-    }
-    $list = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=1" -Headers @{ 'User-Agent' = 'Javinizer-Installer' }
-    if (-not $list -or -not $list[0].tag_name) { Die 'Failed to fetch latest release version.' }
-    return $list[0].tag_name
+    Die "No stable release is available yet. To install the latest pre-release, re-run with -PreRelease, or download from https://github.com/$Repo/releases"
 }
 
 $tag = Get-LatestTag
@@ -94,13 +94,21 @@ try {
     Die "Could not download checksums.txt from $checksumUrl"
 }
 
-# checksums.txt is sha256sum output: "<hash>  <name>"
-$expected = (Select-String -Path $checksumPath -Pattern $assetName -SimpleMatch | Select-Object -First 1).Line -split '\s+' | Select-Object -First 1
+# checksums.txt is sha256sum output: "<hash>  <name>". Match the asset field
+# exactly (a substring match can pick a sibling asset like a .sig file).
+$expected = $null
+foreach ($line in Get-Content -Path $checksumPath) {
+    $fields = $line -split '\s+'
+    if ($fields.Count -ge 2 -and ($fields[1] -in @($assetName, "*$assetName"))) {
+        $expected = $fields[0]
+        break
+    }
+}
 if (-not $expected) { Die "Checksum for $assetName not found in checksums.txt" }
 
 $actual = (Get-FileHash -Algorithm SHA256 -Path $assetPath).Hash.ToLower()
 if ($actual -ne $expected.ToLower()) {
-    Die "Checksum mismatch! Expected $expected, got $actual — refusing to install."
+    Die "Checksum mismatch! Expected $expected, got $actual -- refusing to install."
 }
 Write-OK 'Checksum verified'
 

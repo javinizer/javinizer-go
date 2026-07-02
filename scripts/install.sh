@@ -114,13 +114,13 @@ calculate_sha256() {
 # newest release including prereleases (e.g. v1.0.0-rc3).
 get_latest_version() {
     echo -e "${YELLOW}Fetching latest release...${NC}"
-    VERSION=$(curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-
-    if [ -z "$VERSION" ]; then
-        if [ "$PRE_RELEASE" = true ]; then
-            echo -e "${YELLOW}No stable 'latest' release; fetching most recent release (incl. prereleases)...${NC}"
-            VERSION=$(curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=1" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | head -1)
-        else
+    # Branch on PRE_RELEASE first so the list endpoint is the primary path when
+    # opted in: otherwise a newer prerelease is ignored whenever a stable exists.
+    if [ "$PRE_RELEASE" = true ]; then
+        VERSION=$(curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=1" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | head -1)
+    else
+        VERSION=$(curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [ -z "$VERSION" ]; then
             echo -e "${RED}No stable release is available yet.${NC}"
             echo -e "${YELLOW}Javinizer is currently in pre-release. To install the latest pre-release, re-run with --pre-release:${NC}"
             echo -e "${GREEN}  curl -sSL https://raw.githubusercontent.com/javinizer/javinizer-go/main/scripts/install.sh | bash -s -- --pre-release${NC}"
