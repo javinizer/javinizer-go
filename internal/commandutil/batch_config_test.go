@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBatchJobConfigFromAppConfig(t *testing.T) {
@@ -57,6 +58,26 @@ func TestCLIApplyOptions_ToApplyPhaseConfig_Defaults(t *testing.T) {
 	assert.False(t, cfg.DryRun)
 	assert.False(t, cfg.GenerateNFO)
 	assert.False(t, cfg.Download)
-	assert.NotNil(t, cfg.DownloadExtrafanart)
-	assert.False(t, *cfg.DownloadExtrafanart)
+	assert.Nil(t, cfg.DownloadExtrafanart, "unset flag must yield nil so config default is respected")
+}
+
+// TestCLIApplyOptions_ToApplyPhaseConfig_ExtrafanartNotSetIsNil reproduces issue #79:
+// when the --extrafanart flag is NOT set, the resulting ApplyPhaseConfig must
+// carry a nil *bool so the downloader falls back to the config default
+// (download_extrafanart: true). A non-nil &false unconditionally overrides the
+// config default and silently disables extrafanart downloads — exactly what
+// `javinizer sort` (no --extrafanart) was doing.
+func TestCLIApplyOptions_ToApplyPhaseConfig_ExtrafanartNotSetIsNil(t *testing.T) {
+	opts := CLIApplyOptions{} // no flag set
+	cfg := opts.ToApplyPhaseConfig()
+	assert.Nil(t, cfg.DownloadExtrafanart, "unset --extrafanart must be nil so the config default is respected")
+}
+
+// TestCLIApplyOptions_ToApplyPhaseConfig_ExtrafanartExplicitlyEnabled is the
+// positive control: an explicitly-enabled flag yields a non-nil &true override.
+func TestCLIApplyOptions_ToApplyPhaseConfig_ExtrafanartExplicitlyEnabled(t *testing.T) {
+	opts := CLIApplyOptions{DownloadExtrafanart: true}
+	cfg := opts.ToApplyPhaseConfig()
+	require.NotNil(t, cfg.DownloadExtrafanart)
+	assert.True(t, *cfg.DownloadExtrafanart)
 }

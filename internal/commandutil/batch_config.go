@@ -37,7 +37,16 @@ type CLIApplyOptions struct {
 
 // ToApplyPhaseConfig converts CLIApplyOptions to a worker.ApplyPhaseConfig.
 func (o CLIApplyOptions) ToApplyPhaseConfig() worker.ApplyPhaseConfig {
-	downloadExtrafanart := o.DownloadExtrafanart
+	// The --extrafanart flag is a force-enable: only emit a non-nil override
+	// when it is explicitly set. A non-nil &false would override the config
+	// default (download_extrafanart) and silently disable extrafanart downloads
+	// for `sort`/`update` runs that simply omit the flag (issue #79). nil lets
+	// the downloader fall back to the resolved config value.
+	var downloadExtrafanart *bool
+	if o.DownloadExtrafanart {
+		t := true
+		downloadExtrafanart = &t
+	}
 	return worker.ApplyPhaseConfig{
 		OrganizeOptions: workflow.OrganizeOptions{
 			Skip:        o.SkipOrganize,
@@ -50,6 +59,6 @@ func (o CLIApplyOptions) ToApplyPhaseConfig() worker.ApplyPhaseConfig {
 		DryRun:              o.DryRun,
 		GenerateNFO:         o.GenerateNFO,
 		Download:            o.Download,
-		DownloadExtrafanart: &downloadExtrafanart,
+		DownloadExtrafanart: downloadExtrafanart,
 	}
 }

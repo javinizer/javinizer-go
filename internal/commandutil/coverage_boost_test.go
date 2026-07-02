@@ -80,14 +80,14 @@ func TestBatchJobConfigFromAppConfig_Defaults(t *testing.T) {
 	assert.Equal(t, cfg.Metadata.NFO.Feature.Enabled, result.NFOEnabled)
 }
 
-// TestCLIApplyOptions_ToApplyPhaseConfig_NilExtrafanart tests that DownloadExtrafanart pointer is set.
+// TestCLIApplyOptions_ToApplyPhaseConfig_NilExtrafanart tests that an unset
+// --extrafanart yields a nil *bool so the downloader uses the config default.
 func TestCLIApplyOptions_ToApplyPhaseConfig_NilExtrafanart(t *testing.T) {
 	opts := CLIApplyOptions{
 		DownloadExtrafanart: false,
 	}
 	cfg := opts.ToApplyPhaseConfig()
-	assert.NotNil(t, cfg.DownloadExtrafanart)
-	assert.False(t, *cfg.DownloadExtrafanart)
+	assert.Nil(t, cfg.DownloadExtrafanart)
 }
 
 // TestCLIApplyOptions_ToApplyPhaseConfig_AllSet tests full option mapping.
