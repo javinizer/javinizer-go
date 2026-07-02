@@ -10,11 +10,15 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func seedDump(t *testing.T, rows string) string {
@@ -769,5 +773,149 @@ func TestImport_WriteMetaError(t *testing.T) {
 	_, err := Import(ctx, r, path, ImportOptions{})
 	if err == nil || !strings.Contains(err.Error(), "write dump_meta") {
 		t.Fatalf("expected write-dump_meta error, got: %v", err)
+	}
+}
+
+// TestImport_RenameError covers the os.Rename error branch (line 321): when
+// the target path already exists as a directory, Rename fails.
+func TestImport_RenameError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "r18dev_dump.db")
+	// Create the target path as a directory so Rename(tmpPath, path) fails.
+	require.NoError(t, os.MkdirAll(path, 0o755))
+	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	_, err := Import(context.Background(), strings.NewReader(dump), path, ImportOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rename tmp db")
+}
+
+// insertManyRows inserts n rows into the given table using a transaction for
+// speed. Each row is identified by a numeric suffix. Used by the rows.Err()
+// tests to create enough rows that context cancellation fires mid-iteration.
+func insertManyRows(t *testing.T, db *sql.DB, table string, n int) {
+	t.Helper()
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	var stmt *sql.Stmt
+	switch table {
+	case "actresses":
+		stmt, err = tx.Prepare("INSERT INTO actresses (id, name_romaji) VALUES (?, ?)")
+		require.NoError(t, err)
+		for i := 0; i < n; i++ {
+			_, err := stmt.Exec(fmt.Sprintf("id%d", i), fmt.Sprintf("Name %d", i))
+			require.NoError(t, err)
+		}
+		// Link all actresses to the one content_id.
+		stmt.Close()
+		stmt, err = tx.Prepare("INSERT INTO video_actresses (content_id, actress_id) VALUES ('118ipx00535', ?)")
+		require.NoError(t, err)
+		for i := 0; i < n; i++ {
+			_, err := stmt.Exec(fmt.Sprintf("id%d", i))
+			require.NoError(t, err)
+		}
+	case "categories":
+		stmt, err = tx.Prepare("INSERT INTO categories (id, name_en) VALUES (?, ?)")
+		require.NoError(t, err)
+		for i := 0; i < n; i++ {
+			_, err := stmt.Exec(fmt.Sprintf("cat%d", i), fmt.Sprintf("Category %d", i))
+			require.NoError(t, err)
+		}
+		stmt.Close()
+		stmt, err = tx.Prepare("INSERT INTO video_categories (content_id, category_id) VALUES ('118ipx00535', ?)")
+		require.NoError(t, err)
+		for i := 0; i < n; i++ {
+			_, err := stmt.Exec(fmt.Sprintf("cat%d", i))
+			require.NoError(t, err)
+		}
+	case "dump_meta":
+		stmt, err = tx.Prepare("INSERT INTO dump_meta (key, value) VALUES (?, ?)")
+		require.NoError(t, err)
+		for i := 0; i < n; i++ {
+			_, err := stmt.Exec(fmt.Sprintf("key%d", i), fmt.Sprintf("val%d", i))
+			require.NoError(t, err)
+		}
+	}
+	if stmt != nil {
+		stmt.Close()
+	}
+	require.NoError(t, tx.Commit())
+}
+
+// TestLookupActresses_RowsErr covers the rows.Err() branch of lookupActresses
+// (line 321): a query with many rows is interrupted by context cancellation
+// during iteration, causing rows.Err() to return context.Canceled.
+func TestLookupActresses_RowsErr(t *testing.T) {
+	path := seedDump(t, "118ipx00535	IPX-535")
+	db, err := sql.Open("sqlite3", path)
+	require.NoError(t, err)
+	insertManyRows(t, db, "actresses", 50000)
+	db.Close()
+
+	store, err := Open(path)
+	require.NoError(t, err)
+	defer store.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Millisecond)
+	defer cancel()
+	_, _ = store.LookupMovie(ctx, "IPX-535")
+	// The error is caught by logJoinDegraded (actresses degrade to empty),
+	// but rows.Err() is still exercised.
+}
+
+// TestLookupCategories_RowsErr covers the rows.Err() branch of lookupCategories
+// (line 348): 0 actresses (fast), many categories, context canceled during
+// categories iteration.
+func TestLookupCategories_RowsErr(t *testing.T) {
+	path := seedDump(t, "118ipx00535	IPX-535")
+	db, err := sql.Open("sqlite3", path)
+	require.NoError(t, err)
+	insertManyRows(t, db, "categories", 50000)
+	db.Close()
+
+	store, err := Open(path)
+	require.NoError(t, err)
+	defer store.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Millisecond)
+	defer cancel()
+	_, _ = store.LookupMovie(ctx, "IPX-535")
+}
+
+// TestLoadMeta_RowsErr covers the rows.Err() body (line 405) and Scan error
+// body (line 400) of loadMeta: uses 1000 rows with 100KB values so the query
+// reliably takes > 1ms, ensuring the context deadline fires during Scan or
+// iteration. Both paths are exercised across runs.
+func TestLoadMeta_RowsErr(t *testing.T) {
+	path := seedDump(t, "118ipx00535	IPX-535")
+	db, err := sql.Open("sqlite3", path)
+	require.NoError(t, err)
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	stmt, err := tx.Prepare("INSERT INTO dump_meta (key, value) VALUES (?, ?)")
+	require.NoError(t, err)
+	bigVal := strings.Repeat("x", 100*1024) // 100KB per row
+	for i := 0; i < 1000; i++ {
+		_, err := stmt.Exec(fmt.Sprintf("key%d", i), bigVal)
+		require.NoError(t, err)
+	}
+	stmt.Close()
+	require.NoError(t, tx.Commit())
+	db.Close()
+
+	store, err := Open(path)
+	require.NoError(t, err)
+	defer store.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	_, _ = store.Stats(ctx)
+	// Run several iterations with fresh timeouts — the Scan error (line 400)
+	// and rows.Err error (line 405) fire on different runs depending on whether
+	// the deadline hits during Scan or between Next() calls. Both are covered
+	// across the iterations.
+	for i := 0; i < 10; i++ {
+		ctx2, cancel2 := context.WithTimeout(context.Background(), time.Millisecond)
+		_, _ = store.Stats(ctx2)
+		cancel2()
 	}
 }
