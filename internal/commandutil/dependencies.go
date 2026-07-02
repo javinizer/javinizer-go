@@ -169,9 +169,6 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 			if ownsDB {
 				_ = deps.DB.Close()
 			}
-			if r18DumpCloser != nil {
-				_ = r18DumpCloser.Close()
-			}
 			return nil, fmt.Errorf("failed to initialize scraper registry: %w", err)
 		}
 		deps.ScraperRegistry = registry

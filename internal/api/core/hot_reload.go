@@ -69,9 +69,6 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	}
 	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
 	if err != nil {
-		if r18DumpCloser != nil {
-			_ = r18DumpCloser.Close()
-		}
 		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
 	// Swap the reloadables BEFORE retiring the old dump handle. Closing the
