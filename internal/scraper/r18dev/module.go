@@ -56,7 +56,7 @@ func Register(reg scraperutil.ScraperRegistrar) {
 		},
 		Priority: 100,
 		Constructor: func(deps scraperutil.ScraperDeps) (models.Scraper, error) {
-			return newScraper(&deps.Settings, deps.GlobalProxy, deps.FlareSolverr), nil
+			return newScraper(&deps.Settings, deps.GlobalProxy, deps.FlareSolverr, deps.R18DevDump), nil
 		},
 		ValidateFn: validateScraperSettings,
 	})

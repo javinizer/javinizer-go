@@ -62,7 +62,7 @@ func TestNewDefaultScraperRegistry_ValidConfig(t *testing.T) {
 		"test-registry-scraper": {Enabled: true},
 	})
 
-	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil)
+	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, registry)
@@ -82,7 +82,7 @@ func TestNewDefaultScraperRegistry_SkipsNilConstructor(t *testing.T) {
 		"nil-constructor-scraper": {Enabled: true},
 	})
 
-	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil)
+	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, registry)
@@ -102,7 +102,7 @@ func TestNewDefaultScraperRegistry_SkipsMissingConfig(t *testing.T) {
 	})
 	cfg := testConfigWithOverrides(map[string]*models.ScraperSettings{})
 
-	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil)
+	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, registry)
@@ -124,7 +124,7 @@ func TestNewDefaultScraperRegistry_SkipsConstructorError(t *testing.T) {
 		"error-constructor-scraper": {Enabled: true},
 	})
 
-	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil)
+	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, registry)
@@ -152,7 +152,7 @@ func TestNewDefaultScraperRegistry_MultipleScrapers(t *testing.T) {
 		"C": {Enabled: true},
 	})
 
-	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil)
+	registry, err := NewDefaultScraperRegistryFrom(reg, cfg, nil, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, registry)

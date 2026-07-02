@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/r18devdump"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
@@ -1094,4 +1096,95 @@ func TestHashProxyConfig_ComplexStruct(t *testing.T) {
 
 	assert.Equal(t, hash1, hash2, "Same config should produce same hash")
 	assert.NotEqual(t, hash1, hash3, "Different config should produce different hash")
+}
+
+// ---------------------------------------------------------------------------
+// APIRuntime.ReloadConfig — additional uncovered branches
+// ---------------------------------------------------------------------------
+
+// TestAPIRuntime_ReloadConfig_NilCfg covers the cfg == nil guard (line 51-53).
+func TestAPIRuntime_ReloadConfig_NilCfg(t *testing.T) {
+	deps := &APIDeps{}
+	rt := NewAPIRuntime(deps)
+	err := rt.ReloadConfig(nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config is nil")
+}
+
+// TestAPIRuntime_ReloadConfig_NilCoreDepsGuard covers the CoreDeps == nil
+// guard (line 59-61): when ReplaceReloadable was never called, CoreDeps is
+// still nil and ReloadConfig must refuse.
+func TestAPIRuntime_ReloadConfig_NilCoreDepsGuard(t *testing.T) {
+	deps := &APIDeps{CoreDeps: nil}
+	rt := NewAPIRuntime(deps)
+	cfg := config.DefaultConfig(nil, nil)
+	err := rt.ReloadConfig(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CoreDeps is not initialized")
+}
+
+// TestAPIRuntime_ReloadConfig_DumpErrWarned covers the dumpErr != nil warn
+// branch (line 71-75): when the dump path is corrupt, OpenR18DevDumpLookup
+// surfaces an error that is logged at warn but reload continues.
+func TestAPIRuntime_ReloadConfig_DumpErrWarned(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Metadata.R18DevDump.Enabled = true
+	// Point at a corrupt (non-SQLite) file so OpenR18DevDumpLookup returns an error.
+	corrupt := filepath.Join(t.TempDir(), "corrupt.db")
+	require.NoError(t, os.WriteFile(corrupt, []byte("not sqlite"), 0o600))
+	cfg.Metadata.R18DevDump.Path = corrupt
+
+	deps := &APIDeps{}
+	rt := NewAPIRuntime(deps)
+	rt.ReplaceReloadable(cfg, scraperutil.NewScraperRegistry())
+
+	// ReloadConfig must succeed despite the broken dump (warn + HTTP fallback).
+	err := rt.ReloadConfig(cfg)
+	require.NoError(t, err, "broken dump should warn but not abort reload")
+}
+
+// TestAPIRuntime_ReloadConfig_RuntimeInvalidatesPoster covers the
+// invalidateFactories Runtime != nil branch (line 143-145): when rt.Runtime
+// is set, InvalidatePosterManager is called.
+func TestAPIRuntime_ReloadConfig_RuntimeInvalidatesPoster(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	deps := &APIDeps{}
+	rt := NewAPIRuntime(deps)
+	rt.ReplaceReloadable(cfg, scraperutil.NewScraperRegistry())
+	// Set a non-nil Runtime so the InvalidatePosterManager branch is taken.
+	rt.Runtime = &RuntimeState{}
+
+	err := rt.ReloadConfig(cfg)
+	require.NoError(t, err)
+}
+
+// TestAPIRuntime_ReloadConfig_OldCloserClosed covers the `if old != nil`
+// branch (line 84-86): when ReloadConfig is called twice with a valid dump,
+// the second call finds the previous dump closer non-nil and closes it.
+func TestAPIRuntime_ReloadConfig_OldCloserClosed(t *testing.T) {
+	// Seed a valid dump file so OpenR18DevDumpLookup returns a non-nil closer.
+	dumpPath := filepath.Join(t.TempDir(), "r18dev_dump.db")
+	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	_, err := r18devdump.Import(context.Background(), strings.NewReader(dump), dumpPath, r18devdump.ImportOptions{})
+	require.NoError(t, err)
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Metadata.R18DevDump.Enabled = true
+	cfg.Metadata.R18DevDump.Path = dumpPath
+
+	deps := &APIDeps{}
+	rt := NewAPIRuntime(deps)
+	rt.ReplaceReloadable(cfg, scraperutil.NewScraperRegistry())
+
+	// First reload opens the dump and stores its closer.
+	require.NoError(t, rt.ReloadConfig(cfg))
+	// Second reload finds the old closer non-nil and closes it (line 84-86).
+	require.NoError(t, rt.ReloadConfig(cfg))
+
+	// Release the currently-held dump handle so Windows can delete the .db
+	// file during t.TempDir() cleanup (Windows refuses to delete a file with
+	// an open SQLite handle).
+	if c := deps.CoreDeps.ReplaceR18DevDumpCloser(nil); c != nil {
+		_ = c.Close()
+	}
 }

@@ -5159,6 +5159,14 @@ const docTemplate = `{
                 "priority": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.PriorityConfig"
                 },
+                "r18dev_dump": {
+                    "description": "Local r18.dev dump lookup (SQLite-backed)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.R18DevDumpConfig"
+                        }
+                    ]
+                },
                 "required_fields": {
                     "type": "array",
                     "items": {
@@ -5519,6 +5527,19 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_config.R18DevDumpConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Consult local dump before HTTP content_id resolution",
+                    "type": "boolean"
+                },
+                "path": {
+                    "description": "Sidecar SQLite path (empty = default data/r18dev/r18dev_dump.db)",
+                    "type": "string"
                 }
             }
         },

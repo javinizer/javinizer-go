@@ -90,7 +90,7 @@ func TestNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scraper := newScraper(&tt.settings, testGlobalProxy, testGlobalFlareSolverr)
+			scraper := newScraper(&tt.settings, testGlobalProxy, testGlobalFlareSolverr, nil)
 			assert.NotNil(t, scraper)
 			assert.NotNil(t, scraper.client)
 			assert.Equal(t, tt.enabled, scraper.enabled)
@@ -100,7 +100,7 @@ func TestNew(t *testing.T) {
 
 func TestScraper_Name(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 	assert.Equal(t, "r18dev", scraper.Name())
 }
 
@@ -116,7 +116,7 @@ func TestScraper_IsEnabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := createTestSettings(tt.enabled)
-			scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+			scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 			assert.Equal(t, tt.enabled, scraper.IsEnabled())
 		})
 	}
@@ -124,7 +124,7 @@ func TestScraper_IsEnabled(t *testing.T) {
 
 func TestScraper_GetURL(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name        string
@@ -187,7 +187,7 @@ func TestScraper_Search_Success(t *testing.T) {
 
 	// Create scraper with test server URL
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	// Override base URL for testing (we need to modify the client to use test server)
 	// For now, we'll test the parsing logic separately since we can't easily override the URL
@@ -261,7 +261,7 @@ func TestScraper_Search_Success(t *testing.T) {
 
 func TestScraper_Search_LegacyFormat(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	var data r18Response
 	err := json.Unmarshal(loadTestData(t, "legacy_format_response.json"), &data)
@@ -293,7 +293,7 @@ func TestScraper_Search_LegacyFormat(t *testing.T) {
 
 func TestScraper_Search_MinimalData(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	var data r18Response
 	err := json.Unmarshal(loadTestData(t, "minimal_response.json"), &data)
@@ -322,7 +322,7 @@ func TestScraper_Search_MinimalData(t *testing.T) {
 
 func TestScraper_Search_EmptyArrays(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	var data r18Response
 	err := json.Unmarshal(loadTestData(t, "empty_arrays_response.json"), &data)
@@ -591,7 +591,7 @@ func TestGetPreferredString(t *testing.T) {
 
 func TestActressThumbURLGeneration(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name           string
@@ -658,7 +658,7 @@ func TestActressThumbURLGeneration(t *testing.T) {
 
 func TestInvalidDateParsing(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	data := &r18Response{
 		DVDID:       "TEST-001",
@@ -676,7 +676,7 @@ func TestInvalidDateParsing(t *testing.T) {
 
 func TestFallbackBehavior(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name        string
@@ -760,7 +760,7 @@ func TestFallbackBehavior(t *testing.T) {
 
 func TestImageURLFallbacks(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name        string
@@ -859,7 +859,7 @@ func TestImageURLFallbacks(t *testing.T) {
 
 func TestScreenshotURLFallbacks(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name          string
@@ -930,7 +930,7 @@ func TestScreenshotURLFallbacks(t *testing.T) {
 
 func TestTrailerURLFallbacks(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name        string
@@ -1010,7 +1010,7 @@ func TestTrailerURLFallbacks(t *testing.T) {
 
 func TestSeriesFallbackPriority(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name     string
@@ -1103,7 +1103,7 @@ func TestContentIDToIDEdgeCases(t *testing.T) {
 
 func TestActressNameParsing(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name          string
@@ -1169,7 +1169,7 @@ func TestActressNameParsing(t *testing.T) {
 
 func TestIDResolution(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name        string
@@ -1230,7 +1230,7 @@ func TestParseResponse_LanguageHandling(t *testing.T) {
 	t.Run("english mode", func(t *testing.T) {
 		cfg := createTestSettings(true)
 		cfg.Language = "en"
-		scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+		scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 		result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 		require.NoError(t, err)
@@ -1243,7 +1243,7 @@ func TestParseResponse_LanguageHandling(t *testing.T) {
 	t.Run("japanese mode", func(t *testing.T) {
 		cfg := createTestSettings(true)
 		cfg.Language = "ja"
-		scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+		scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 		result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 		require.NoError(t, err)
@@ -1275,7 +1275,7 @@ func TestNormalizeLanguage(t *testing.T) {
 // TestParseResponse_TitleFallback verifies title fallback logic
 func TestParseResponse_TitleFallback(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name          string
@@ -1328,7 +1328,7 @@ func TestParseResponse_TitleFallback(t *testing.T) {
 // TestParseResponse_DescriptionFallback verifies description fallback logic
 func TestParseResponse_DescriptionFallback(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name        string
@@ -1377,7 +1377,7 @@ func TestParseResponse_DescriptionFallback(t *testing.T) {
 // TestParseResponse_ReleaseDateVariants verifies date parsing with various formats
 func TestParseResponse_ReleaseDateVariants(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name        string
@@ -1433,7 +1433,7 @@ func TestParseResponse_ReleaseDateVariants(t *testing.T) {
 // TestParseResponse_RuntimeVariants verifies runtime handling
 func TestParseResponse_RuntimeVariants(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name     string
@@ -1482,7 +1482,7 @@ func TestParseResponse_RuntimeVariants(t *testing.T) {
 // TestParseResponse_EmptyFields verifies handling of empty/missing optional fields
 func TestParseResponse_EmptyFields(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	data := &r18Response{
 		DVDID:     "TEST-001",
@@ -1520,7 +1520,7 @@ func TestParseResponse_EmptyFields(t *testing.T) {
 // TestActressThumbURLFallback verifies actress thumbnail URL generation
 func TestActressThumbURLFallback(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name           string
@@ -1603,7 +1603,7 @@ func TestActressThumbURLFallback(t *testing.T) {
 // TestCategoryParsing verifies genre/category extraction
 func TestCategoryParsing(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	tests := []struct {
 		name       string
@@ -1761,7 +1761,7 @@ func TestSearch_Success(t *testing.T) {
 	defer server.Close()
 
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	// The search will hit the real API since baseURL is a const
 	// This is a design limitation - for full testing we'd need DI
@@ -1782,7 +1782,7 @@ func TestSearch_NotFound(t *testing.T) {
 		t.Skip("set JAVINIZER_RUN_LIVE_API_TESTS=1 to run the live r18.dev network test")
 	}
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	result, err := scraper.Search(context.Background(), "nonexistent-12345")
 
@@ -1797,7 +1797,7 @@ func TestWaitForRateLimit(t *testing.T) {
 		RateLimit: 100,
 	}
 
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 	_ = scraper.rateLimiter.Wait(context.Background())
 
 	start := time.Now()
@@ -1814,7 +1814,7 @@ func TestWaitForRateLimit_NoDelay(t *testing.T) {
 		RateLimit: 0,
 	}
 
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	start := time.Now()
 	_ = scraper.rateLimiter.Wait(context.Background())
@@ -1825,7 +1825,7 @@ func TestWaitForRateLimit_NoDelay(t *testing.T) {
 
 func TestUpdateLastRequestTime(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	_ = scraper.rateLimiter.Wait(context.Background())
 }
@@ -1857,13 +1857,13 @@ func TestNew_DefaultMaxRetries(t *testing.T) {
 		RetryCount: 0, // Default should be 3
 	}
 
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 	assert.Equal(t, 3, scraper.maxRetries)
 }
 
 func TestScraper_Search_ROYD191(t *testing.T) {
 	cfg := createTestSettings(true)
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	var data r18Response
 	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
@@ -1898,7 +1898,7 @@ func TestScraper_Search_ROYD191_Japanese(t *testing.T) {
 		Enabled:  true,
 		Language: "ja",
 	}
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	var data r18Response
 	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
@@ -1924,7 +1924,7 @@ func TestScraper_TranslationsPopulated(t *testing.T) {
 		Enabled:  true,
 		Language: "en", // Default to English, but should populate both
 	}
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	var data r18Response
 	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
@@ -2097,7 +2097,7 @@ func TestSearch_BlankDVDIDIntegration(t *testing.T) {
 			defer server.Close()
 
 			cfg := createTestSettings(true)
-			scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+			scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 			dvdIDURL := fmt.Sprintf("%s/videos/vod/movies/detail/-/%s/json", server.URL, tt.dvdIDPath)
 			resp, err := scraper.client.R().Get(dvdIDURL)
@@ -2139,7 +2139,7 @@ func TestSearch_AP288_BlankDVDID(t *testing.T) {
 		RetryCount: 5,
 		RateLimit:  2000,
 	}
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

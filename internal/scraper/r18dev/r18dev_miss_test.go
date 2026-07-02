@@ -823,7 +823,7 @@ func TestNewScraper_JapaneseLanguage(t *testing.T) {
 		Enabled:  true,
 		Language: "ja",
 	}
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 	require.NotNil(t, scraper)
 	assert.Equal(t, "ja", scraper.language)
 }
@@ -834,7 +834,7 @@ func TestNewScraper_WithRateLimit(t *testing.T) {
 		Language:  "en",
 		RateLimit: 100,
 	}
-	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr)
+	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 	require.NotNil(t, scraper)
 }
 

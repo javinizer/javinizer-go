@@ -50,6 +50,7 @@ type ScraperDeps struct {
 	GlobalProxy   *models.ProxyConfig
 	FlareSolverr  models.FlareSolverrConfig
 	ContentIDRepo models.ContentIDMappingRepositoryInterface
+	R18DevDump    models.R18DevDumpLookup
 
 	TimeoutSeconds int
 	ScrapeActress  bool

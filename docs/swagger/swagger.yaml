@@ -1385,6 +1385,10 @@ definitions:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOConfig'
       priority:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.PriorityConfig'
+      r18dev_dump:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.R18DevDumpConfig'
+        description: Local r18.dev dump lookup (SQLite-backed)
       required_fields:
         items:
           type: string
@@ -1636,6 +1640,15 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.R18DevDumpConfig:
+    properties:
+      enabled:
+        description: Consult local dump before HTTP content_id resolution
+        type: boolean
+      path:
+        description: Sidecar SQLite path (empty = default data/r18dev/r18dev_dump.db)
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_config.RateLimitConfig:
     properties:
