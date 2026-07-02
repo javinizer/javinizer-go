@@ -292,6 +292,10 @@ func (s *Service) BackgroundCheck(ctx context.Context) {
 
 	state := s.forceCheckLocked(ctx)
 
+	if state.Source == UpdateSourceError {
+		logging.Debugf("Update check failed: %s", state.Error)
+		return
+	}
 	if state.Available {
 		logging.Infof("Update available: %s", state.Version)
 	} else {

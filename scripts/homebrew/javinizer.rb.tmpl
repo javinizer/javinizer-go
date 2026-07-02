@@ -20,14 +20,8 @@ class Javinizer < Formula
   end
 
   on_macos do
-    on_arm do
-      url "https://github.com/javinizer/javinizer-go/releases/download/__TAG__/javinizer-darwin-universal"
-      sha256 "__DARWIN_SHA256__"
-    end
-    on_intel do
-      url "https://github.com/javinizer/javinizer-go/releases/download/__TAG__/javinizer-darwin-universal"
-      sha256 "__DARWIN_SHA256__"
-    end
+    url "https://github.com/javinizer/javinizer-go/releases/download/__TAG__/javinizer-darwin-universal"
+    sha256 "__DARWIN_SHA256__"
   end
 
   on_linux do
