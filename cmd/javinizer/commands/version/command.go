@@ -43,17 +43,17 @@ var runVersionCheck = func(ctx context.Context, configFile string) (*checkOutcom
 	} else {
 		service = update.NewService(ucfg)
 	}
-	state, err := service.ForceCheck(ctx)
+	state, _ := service.ForceCheck(ctx)
 
 	if state != nil && state.Source == update.UpdateSourceDisabled {
 		return &checkOutcome{disabled: true}, nil
 	}
 
-	if err != nil || state == nil || state.Version == "" || state.Source == update.UpdateSourceError {
+	// ForceCheck translates every failure into the state's Source/Error fields
+	// (it never returns a non-nil Go error), so branch on the state, not err.
+	if state == nil || state.Version == "" || state.Source == update.UpdateSourceError {
 		var errorMsg string
-		if err != nil {
-			errorMsg = err.Error()
-		} else if state != nil && state.Error != "" {
+		if state != nil && state.Error != "" {
 			errorMsg = state.Error
 		} else {
 			errorMsg = "Unknown error occurred while checking for updates"

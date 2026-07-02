@@ -338,6 +338,15 @@ func (c *failingChecker) CheckLatestVersion(_ context.Context) (*update.VersionI
 	return nil, c.err
 }
 
+// emptyErrorChecker returns a VersionInfo whose processing yields an
+// UpdateSourceError state with an empty Error string, covering the
+// "Unknown error" fallthrough branch.
+type emptyErrorChecker struct{}
+
+func (c *emptyErrorChecker) CheckLatestVersion(_ context.Context) (*update.VersionInfo, error) {
+	return &update.VersionInfo{Version: ""}, nil
+}
+
 // TestRunVersionCheck_RealErrorBranch covers the runVersionCheck error-translation
 // branch (ForceCheck returns an UpdateSourceError state) by injecting a failing
 // checker into the service — no network, no shared on-disk cache, deterministic.
@@ -367,4 +376,34 @@ scrapers:
 	require.NotNil(t, outcome)
 	assert.NotEmpty(t, outcome.errMsg, "the ForceCheck failure must surface as an error message")
 	assert.Contains(t, outcome.errMsg, "github unreachable")
+}
+
+// TestRunVersionCheck_UnknownErrorFallthrough covers the "Unknown error"
+// branch: an error state with an empty Error string surfaces the generic
+// message rather than an empty one.
+func TestRunVersionCheck_UnknownErrorFallthrough(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	configText := `config_version: 3
+system:
+  version_check_enabled: true
+  version_check_interval_hours: 24
+scrapers:
+  priority:
+    - r18
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(configText), 0644))
+
+	prev := updateChecker
+	updateChecker = &emptyErrorChecker{}
+	t.Cleanup(func() { updateChecker = prev })
+
+	prevPath := updateStatePath
+	updateStatePath = filepath.Join(t.TempDir(), "update-state.json")
+	t.Cleanup(func() { updateStatePath = prevPath })
+
+	outcome, err := runVersionCheck(context.Background(), cfgPath)
+	require.NoError(t, err)
+	require.NotNil(t, outcome)
+	assert.Contains(t, outcome.errMsg, "Unknown error occurred while checking for updates")
 }
