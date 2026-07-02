@@ -859,3 +859,34 @@ func TestUpgrade_CreateTempPermissionDenied_Aborts(t *testing.T) {
 	assert.False(t, res.Upgraded)
 	assert.Contains(t, err.Error(), "no write permission")
 }
+
+func TestUpgrade_ReplaceBinaryFailure_Aborts(t *testing.T) {
+	// Covers the ReplaceBinary error branch: the checksums + asset download +
+	// verify all succeed, but the final binary replace fails because the target
+	// directory is read-only. (The Upgrade-level path hits CreateTemp first when
+	// the dir is locked; this direct call isolates ReplaceBinary's own error
+	// branch, which downloadAndReplace surfaces unchanged.)
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only-dir technique is Unix-only")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "javinizer")
+	source := filepath.Join(dir, "new")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
+	require.NoError(t, os.WriteFile(source, []byte("new"), 0o755))
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	err := ReplaceBinary(target, source)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "permission denied")
+}
+
+// The rollback-also-failed branch (replaceBinaryWindows) requires staging a
+// state where rename-to-old succeeds, install-rename fails, AND rollback-rename
+// fails — the dir would need to be writable for the first two renames but not
+// the third, which cannot be staged deterministically without fragile mid-
+// operation filesystem locking. It is left as a documented defensive branch.
