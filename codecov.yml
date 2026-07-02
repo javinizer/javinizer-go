@@ -10,13 +10,14 @@ coverage:
         threshold: 1%
     patch:
       default:
-        # Informational only: reports how well *new* code is tested without
-        # gating the PR. New features legitimately include defensive error
-        # branches (sync/close/chmod failures, OS-specific dispatch, rollback
-        # paths) that are impractical to exercise without fragile tests; the
-        # project status above (90%+) is the real coverage gate. This keeps
-        # patch coverage visible as reviewer guidance, not a block.
-        informational: true
+        # New/changed code in a PR must be at least 80% covered — a standard
+        # floor that catches genuinely untested features while accepting that
+        # defensive error branches (sync/close/chmod failures, OS-specific
+        # dispatch, rollback-also-fails paths) are impractical to exercise
+        # without fragile tests. The project status above (90%+) remains the
+        # primary overall gate; this is a real (non-informational) floor so a
+        # PR that ships mostly-untested code still fails.
+        target: 80%
 
 comment:
   layout: "reach,diff,flags,files"
