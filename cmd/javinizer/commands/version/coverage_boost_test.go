@@ -3,6 +3,7 @@ package version
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -183,4 +184,147 @@ func TestNewCommand_CheckConfigError(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load config")
+}
+
+// failWriter is a writer that always returns an error, for covering the
+// write-error sub-branches in the --check output paths.
+type failWriter struct{}
+
+func (failWriter) Write(_ []byte) (int, error) { return 0, errors.New("write failed") }
+
+// failAfterN fails on the (n+1)th write, succeeding the first n.
+type failAfterN struct{ n int }
+
+func (w *failAfterN) Write(p []byte) (int, error) {
+	if w.n <= 0 {
+		return 0, errors.New("write failed")
+	}
+	w.n--
+	return len(p), nil
+}
+
+// TestNewCommand_CheckAvailable_StdoutWriteError covers the write-error branch
+// after writing "Update available" to stdout.
+func TestNewCommand_CheckAvailable_StdoutWriteError(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return &checkOutcome{available: true, version: "v9.9.9"}, nil
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	cmd.SetOut(failWriter{})
+	cmd.SetArgs([]string{"--check"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write failed")
+}
+
+// TestNewCommand_CheckAvailable_StderrWriteError covers the write-error branch
+// after writing "Update available" to stderr (stdout succeeds first).
+func TestNewCommand_CheckAvailable_StderrWriteError(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return &checkOutcome{available: true, version: "v9.9.9"}, nil
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(failWriter{})
+	cmd.SetArgs([]string{"--check"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write failed")
+}
+
+// TestNewCommand_CheckAvailable_RunHintWriteError covers the write-error branch
+// after writing "Run 'javinizer upgrade'" to stderr (the second stderr write).
+func TestNewCommand_CheckAvailable_RunHintWriteError(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return &checkOutcome{available: true, version: "v9.9.9"}, nil
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&failAfterN{n: 1}) // first stderr write ok, second fails
+	cmd.SetArgs([]string{"--check"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write failed")
+}
+
+// TestNewCommand_CheckDisabled_StdoutWriteError covers the write-error branch
+// in the disabled path.
+func TestNewCommand_CheckDisabled_StdoutWriteError(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return &checkOutcome{disabled: true}, nil
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	cmd.SetOut(failWriter{})
+	cmd.SetArgs([]string{"--check"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write failed")
+}
+
+// TestNewCommand_CheckUpToDate_StdoutWriteError covers the write-error branch
+// in the up-to-date path.
+func TestNewCommand_CheckUpToDate_StdoutWriteError(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return &checkOutcome{available: false, version: "v1.0.0"}, nil
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	cmd.SetOut(failWriter{})
+	cmd.SetArgs([]string{"--check"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write failed")
+}
+
+// TestNewCommand_CheckError_StderrWriteError covers the write-error branch in
+// the error-message path (writing "Error checking for updates" to stderr).
+func TestNewCommand_CheckError_StderrWriteError(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return &checkOutcome{errMsg: "network unreachable"}, nil
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	cmd.SetErr(failWriter{})
+	cmd.SetArgs([]string{"--check"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write failed")
+}
+
+// TestLoadConfigForCheck_PrepareError covers the config.Prepare failure path in
+// loadConfigForCheck (an unsupported config version makes Prepare error).
+func TestLoadConfigForCheck_PrepareError(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	// A config_version far in the future triggers Prepare's "newer than
+	// supported" error.
+	configText := `config_version: 999
+system:
+  version_check_enabled: true
+  version_check_interval_hours: 24
+scrapers:
+  priority:
+    - r18
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(configText), 0644))
+
+	_, err := loadConfigForCheck(cfgPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "newer than supported")
 }
