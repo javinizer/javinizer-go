@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/update"
 	appversion "github.com/javinizer/javinizer-go/internal/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -327,4 +328,43 @@ scrapers:
 	_, err := loadConfigForCheck(cfgPath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "newer than supported")
+}
+
+// failingChecker is a Checker stub whose CheckLatestVersion always errors, used
+// to drive the real service's ForceCheck into the UpdateSourceError branch.
+type failingChecker struct{ err error }
+
+func (c *failingChecker) CheckLatestVersion(_ context.Context) (*update.VersionInfo, error) {
+	return nil, c.err
+}
+
+// TestRunVersionCheck_RealErrorBranch covers the runVersionCheck error-translation
+// branch (ForceCheck returns an UpdateSourceError state) by injecting a failing
+// checker into the service — no network, no shared on-disk cache, deterministic.
+func TestRunVersionCheck_RealErrorBranch(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	configText := `config_version: 3
+system:
+  version_check_enabled: true
+  version_check_interval_hours: 24
+scrapers:
+  priority:
+    - r18
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(configText), 0644))
+
+	prev := updateChecker
+	updateChecker = &failingChecker{err: errors.New("github unreachable")}
+	t.Cleanup(func() { updateChecker = prev })
+
+	prevPath := updateStatePath
+	updateStatePath = filepath.Join(t.TempDir(), "update-state.json")
+	t.Cleanup(func() { updateStatePath = prevPath })
+
+	outcome, err := runVersionCheck(context.Background(), cfgPath)
+	require.NoError(t, err, "runVersionCheck translates the error into an outcome, not a Go error")
+	require.NotNil(t, outcome)
+	assert.NotEmpty(t, outcome.errMsg, "the ForceCheck failure must surface as an error message")
+	assert.Contains(t, outcome.errMsg, "github unreachable")
 }

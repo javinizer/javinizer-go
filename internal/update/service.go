@@ -12,8 +12,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/version"
 )
 
-// service handles update checking with caching and background refresh.
-type service struct {
+// Service handles update checking with caching and background refresh.
+type Service struct {
 	checker    checker
 	store      *stateStore
 	statePath  string
@@ -37,7 +37,7 @@ type UpdateConfig struct {
 
 // NewService creates a new update service with production defaults (the real
 // GitHub checker and the default cache path). Existing callers are unaffected.
-func NewService(cfg UpdateConfig) *service {
+func NewService(cfg UpdateConfig) *Service {
 	return NewServiceWithOptions(cfg, ServiceOptions{})
 }
 
@@ -58,7 +58,7 @@ type ServiceOptions struct {
 // zero-value opts reproduces NewService behavior exactly, so production callers
 // can keep using NewService while tests inject a stub Checker and a temp-dir
 // StatePath for hermetic, network-free coverage.
-func NewServiceWithOptions(cfg UpdateConfig, opts ServiceOptions) *service {
+func NewServiceWithOptions(cfg UpdateConfig, opts ServiceOptions) *Service {
 	interval := time.Duration(cfg.VersionCheckIntervalHours) * time.Hour
 	if interval <= 0 {
 		interval = defaultCheckInterval
@@ -76,7 +76,7 @@ func NewServiceWithOptions(cfg UpdateConfig, opts ServiceOptions) *service {
 		chk = newGitHubChecker(defaultRepo)
 	}
 
-	return &service{
+	return &Service{
 		checker:    chk,
 		store:      store,
 		statePath:  statePath,
@@ -90,13 +90,13 @@ func NewServiceWithOptions(cfg UpdateConfig, opts ServiceOptions) *service {
 // Exposed so callers (e.g. the API bootstrap) can start the background ticker
 // with the same interval the service uses for staleness checks, rather than
 // re-deriving (and possibly diverging from) the default-interval logic.
-func (s *service) Interval() time.Duration {
+func (s *Service) Interval() time.Duration {
 	return s.interval
 }
 
 // GetStatus returns the current update status.
 // If the cached state is stale, it performs a background check.
-func (s *service) GetStatus(ctx context.Context) (*updateState, error) {
+func (s *Service) GetStatus(ctx context.Context) (*updateState, error) {
 	if !s.enabled {
 		return &updateState{
 			Source: UpdateSourceDisabled,
@@ -140,7 +140,7 @@ func (s *service) GetStatus(ctx context.Context) (*updateState, error) {
 // endpoint and BackgroundCheck both flow through here. BackgroundCheck already
 // holds checkMu and calls forceCheckLocked directly to avoid a non-reentrant
 // deadlock.
-func (s *service) ForceCheck(ctx context.Context) (*updateState, error) {
+func (s *Service) ForceCheck(ctx context.Context) (*updateState, error) {
 	if !s.enabled {
 		return &updateState{
 			Source: UpdateSourceDisabled,
@@ -148,11 +148,15 @@ func (s *service) ForceCheck(ctx context.Context) (*updateState, error) {
 	}
 	s.checkMu.Lock()
 	defer s.checkMu.Unlock()
-	return s.forceCheckLocked(ctx)
+	return s.forceCheckLocked(ctx), nil
 }
 
 // forceCheckLocked is the ForceCheck body; the caller MUST hold s.checkMu.
-func (s *service) forceCheckLocked(ctx context.Context) (*updateState, error) {
+// It returns only the state — every error is translated into the state's
+// Error/Source fields rather than a Go error, so callers always get a usable
+// state (never a nil + error pair). ForceCheck wraps it to add the disabled
+// short-circuit and the (always-nil here) error return for API compatibility.
+func (s *Service) forceCheckLocked(ctx context.Context) *updateState {
 	logging.Info("Checking for updates...")
 
 	// Thread the cached ETag + "no-stable-latest" flag into the checker so this
@@ -196,13 +200,13 @@ func (s *service) forceCheckLocked(ctx context.Context) (*updateState, error) {
 					(!cached.Prerelease || !s.stableOnly)
 				_ = s.store.SaveState(cached)
 				logging.Debugf("Update check: not modified (304), keeping cached state")
-				return cached, nil
+				return cached
 			}
 			// No cached state to reuse — fall through to the error path below.
 			return &updateState{
 				Source: UpdateSourceError,
 				Error:  "not modified but no cached state available",
-			}, nil
+			}
 		}
 
 		logging.Debugf("Update check failed: %v", err)
@@ -214,13 +218,13 @@ func (s *service) forceCheckLocked(ctx context.Context) (*updateState, error) {
 			state.Error = err.Error()
 			state.Source = UpdateSourceCached
 			_ = s.store.SaveState(state)
-			return state, nil
+			return state
 		}
 
 		return &updateState{
 			Source: UpdateSourceError,
 			Error:  err.Error(),
-		}, nil
+		}
 	}
 
 	// Check if update is available
@@ -262,11 +266,11 @@ func (s *service) forceCheckLocked(ctx context.Context) (*updateState, error) {
 		}
 	}
 
-	return state, nil
+	return state
 }
 
 // ShouldCheck determines if a check should be performed.
-func (s *service) ShouldCheck(state *updateState) bool {
+func (s *Service) ShouldCheck(state *updateState) bool {
 	if state == nil || state.CheckedAt == "" {
 		return true
 	}
@@ -275,7 +279,7 @@ func (s *service) ShouldCheck(state *updateState) bool {
 
 // BackgroundCheck performs a non-blocking update check.
 // Uses caller-provided context for proper cancellation/timeout propagation.
-func (s *service) BackgroundCheck(ctx context.Context) {
+func (s *Service) BackgroundCheck(ctx context.Context) {
 	// Use a new context with timeout for the check itself
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -286,11 +290,7 @@ func (s *service) BackgroundCheck(ctx context.Context) {
 	s.checkMu.Lock()
 	defer s.checkMu.Unlock()
 
-	state, err := s.forceCheckLocked(ctx)
-	if err != nil {
-		logging.Debugf("Background update check failed: %v", err)
-		return
-	}
+	state := s.forceCheckLocked(ctx)
 
 	if state.Available {
 		logging.Infof("Update available: %s", state.Version)
@@ -300,7 +300,7 @@ func (s *service) BackgroundCheck(ctx context.Context) {
 }
 
 // StartBackgroundCheck starts a background goroutine for periodic checks.
-func (s *service) StartBackgroundCheck(ctx context.Context, interval time.Duration) {
+func (s *Service) StartBackgroundCheck(ctx context.Context, interval time.Duration) {
 	if !s.enabled {
 		return
 	}
@@ -335,7 +335,7 @@ func (s *service) StartBackgroundCheck(ctx context.Context, interval time.Durati
 }
 
 // IsUpdateAvailable checks if an update is available without modifying state.
-func (s *service) IsUpdateAvailable(ctx context.Context) (bool, error) {
+func (s *Service) IsUpdateAvailable(ctx context.Context) (bool, error) {
 	state, err := s.GetStatus(ctx)
 	if err != nil {
 		return false, err
@@ -344,7 +344,7 @@ func (s *service) IsUpdateAvailable(ctx context.Context) (bool, error) {
 }
 
 // GetLatestVersion returns the latest version without checking availability.
-func (s *service) GetLatestVersion(ctx context.Context) (string, error) {
+func (s *Service) GetLatestVersion(ctx context.Context) (string, error) {
 	state, err := s.GetStatus(ctx)
 	if err != nil {
 		return "", err

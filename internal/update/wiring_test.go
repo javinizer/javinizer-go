@@ -41,7 +41,7 @@ func (c *countingChecker) callsCount() int {
 // newStubService builds a hermetic service backed by a countingChecker and a
 // temp-dir cache path, so tests neither hit the network nor write to the real
 // data directory.
-func newStubService(t *testing.T, enabled bool) (*service, *countingChecker) {
+func newStubService(t *testing.T, enabled bool) (*Service, *countingChecker) {
 	t.Helper()
 	chk := &countingChecker{}
 	svc := NewServiceWithOptions(UpdateConfig{

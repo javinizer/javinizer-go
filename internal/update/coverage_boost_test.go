@@ -26,7 +26,7 @@ func TestService_ForceCheck_MockServer(t *testing.T) {
 	store := newStateStore(statePath, defaultCheckInterval)
 
 	chk := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-	svc := &service{
+	svc := &Service{
 		checker:   chk,
 		store:     store,
 		statePath: statePath,
@@ -42,7 +42,7 @@ func TestService_ForceCheck_MockServer(t *testing.T) {
 
 func TestService_ForceCheck_DisabledCoverage(t *testing.T) {
 	tmpDir := t.TempDir()
-	svc := &service{
+	svc := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     newStateStore(filepath.Join(tmpDir, "state.json"), defaultCheckInterval),
 		statePath: filepath.Join(tmpDir, "state.json"),
@@ -69,7 +69,7 @@ func TestService_ForceCheck_ErrorWithCache(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := &service{
+	svc := &Service{
 		checker:   newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL),
 		store:     store,
 		statePath: statePath,
@@ -92,7 +92,7 @@ func TestService_ForceCheck_ErrorNoCache(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := &service{
+	svc := &Service{
 		checker:   newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL),
 		store:     newStateStore(statePath, defaultCheckInterval),
 		statePath: statePath,
@@ -111,7 +111,7 @@ func TestService_GetStatus_CachedState(t *testing.T) {
 	store := newStateStore(statePath, defaultCheckInterval)
 	store.SetState(&updateState{Version: "v1.0.0", CheckedAt: time.Now().UTC().Format(time.RFC3339), Available: true, Source: UpdateSourceFresh})
 
-	svc := &service{
+	svc := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
@@ -130,7 +130,7 @@ func TestService_GetStatus_Empty(t *testing.T) {
 	statePath := filepath.Join(tmpDir, "state.json")
 	store := newStateStore(statePath, defaultCheckInterval)
 
-	svc := &service{
+	svc := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
@@ -151,7 +151,7 @@ func TestService_GetStatus_StaleTriggersBg(t *testing.T) {
 	oldTime := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
 	store.SetState(&updateState{Version: "v0.9.0", CheckedAt: oldTime, Source: UpdateSourceCached})
 
-	svc := &service{
+	svc := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
@@ -172,7 +172,7 @@ func TestService_IsUpdateAvailable_Cached(t *testing.T) {
 	store := newStateStore(statePath, defaultCheckInterval)
 	store.SetState(&updateState{Version: "v2.0.0", Available: true, CheckedAt: time.Now().UTC().Format(time.RFC3339), Source: UpdateSourceFresh})
 
-	svc := &service{
+	svc := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
@@ -191,7 +191,7 @@ func TestService_GetLatestVersion_Cached(t *testing.T) {
 	store := newStateStore(statePath, defaultCheckInterval)
 	store.SetState(&updateState{Version: "v3.0.0", CheckedAt: time.Now().UTC().Format(time.RFC3339), Source: UpdateSourceFresh})
 
-	svc := &service{
+	svc := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
@@ -217,7 +217,7 @@ func TestService_BackgroundCheck_MockServer(t *testing.T) {
 	store := newStateStore(statePath, defaultCheckInterval)
 
 	chk := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-	svc := &service{
+	svc := &Service{
 		checker:   chk,
 		store:     store,
 		statePath: statePath,
@@ -243,7 +243,7 @@ func TestService_StartBgCheck_Cancel(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := &service{
+	svc := &Service{
 		checker:   newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL),
 		store:     newStateStore(statePath, defaultCheckInterval),
 		statePath: statePath,

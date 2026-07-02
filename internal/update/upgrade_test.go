@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -699,4 +700,162 @@ func TestReplaceBinary_Unix_PermissionDenied(t *testing.T) {
 	err := replaceBinaryUnix(target, source)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "permission denied")
+}
+
+func TestUpgrade_CheckerError_ReturnsWrappedError(t *testing.T) {
+	// Covers the CheckLatestVersion error branch: the checker failing must
+	// surface a wrapped "failed to check latest release" error.
+	var out bytes.Buffer
+	_, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion: "v0.0.1",
+		Checker:        &stubChecker{err: errors.New("boom")},
+		Out:            &out,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to check latest release")
+	assert.Contains(t, err.Error(), "boom")
+}
+
+func TestUpgrade_EmptyTagNameFallsBackToVersion(t *testing.T) {
+	// Covers the `if result.TagName == ""` branch: a checker returning a
+	// VersionInfo with no TagName must fall back to Version for the download URL.
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion: "v0.0.1",
+		CheckOnly:      true,
+		Checker:        &emptyTagChecker{version: "v9.9.9"},
+		Out:            &out,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "v9.9.9", res.TagName, "empty TagName must fall back to Version")
+}
+
+// emptyTagChecker returns a VersionInfo with an empty TagName so the
+// TagName-fallback branch in Upgrade is exercised.
+type emptyTagChecker struct{ version string }
+
+func (c *emptyTagChecker) CheckLatestVersion(_ context.Context) (*VersionInfo, error) {
+	return &VersionInfo{Version: c.version}, nil
+}
+
+func TestReplaceBinary_Unix_MissingSource(t *testing.T) {
+	// Covers the generic (non-permission) error branch of replaceBinaryUnix:
+	// renaming a missing source over an existing target fails.
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only replace path")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "javinizer")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o755))
+
+	err := replaceBinaryUnix(target, filepath.Join(dir, "missing"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "replace binary")
+	assert.NotContains(t, err.Error(), "permission denied")
+}
+
+func TestReplaceBinary_Windows_MissingTargetNoOld(t *testing.T) {
+	// Covers the `rename current binary to .old` error branch: when target is
+	// missing and no .old exists, os.Rename(target, old) fails. replaceBinaryWindows
+	// uses only os.Rename/os.Remove so it is testable on any OS.
+	dir := t.TempDir()
+	source := filepath.Join(dir, "new.exe")
+	require.NoError(t, os.WriteFile(source, []byte("new"), 0o755))
+
+	err := replaceBinaryWindows(filepath.Join(dir, "missing.exe"), source)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rename current binary to .old")
+}
+
+func TestReplaceBinary_Windows_RestoreOldFails(t *testing.T) {
+	// Covers the `restore previous binary from .old` error branch: target is
+	// missing, .old exists, but restoring it fails because the directory is
+	// read-only (the rename can't write target into the dir).
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only-dir technique is Unix-only")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "javinizer.exe")
+	old := target + ".old"
+	require.NoError(t, os.WriteFile(old, []byte("previous"), 0o755))
+	// Read-only dir: os.Rename(old, target) cannot create target here.
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	err := replaceBinaryWindows(target, filepath.Join(dir, "new.exe"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "restore previous binary from .old")
+}
+
+func TestUpgrade_MalformedChecksums_Aborts(t *testing.T) {
+	// Covers the ParseChecksums error branch in downloadAndReplace: checksums.txt
+	// is served but does not list the asset, so parsing fails before any download.
+	// Checksums for a DIFFERENT asset -> ParseChecksums won't find ours.
+	checksums := "deadbeef  some-other-asset\n"
+	server := newAssetServer(t, []byte("unused"), checksums)
+	defer server.Close()
+
+	exePath := filepath.Join(t.TempDir(), "javinizer")
+	require.NoError(t, os.WriteFile(exePath, []byte("old"), 0o755))
+
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion:  "v0.0.1",
+		DownloadBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Checker:         &stubChecker{version: "v9.9.9"},
+		ExePath:         exePath,
+		Out:             &out,
+	})
+	require.Error(t, err)
+	assert.False(t, res.Upgraded)
+	assert.Contains(t, err.Error(), "not found in checksums.txt")
+
+	// Running binary untouched.
+	got, err := os.ReadFile(exePath)
+	require.NoError(t, err)
+	assert.Equal(t, "old", string(got))
+}
+
+func TestUpgrade_CreateTempPermissionDenied_Aborts(t *testing.T) {
+	// Covers the CreateTemp permission-error branch in downloadAndReplace: the
+	// target directory is read-only, so the temp file cannot be created. The
+	// checksums download succeeds (proving the flow got past it) before failing.
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only-dir technique is Unix-only")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root")
+	}
+	asset, err := AssetName(runtime.GOOS, runtime.GOARCH)
+	require.NoError(t, err)
+
+	assetBytes := []byte("new-binary-content")
+	sum := sha256.Sum256(assetBytes)
+	checksums := fmt.Sprintf("%x  %s\n", sum, asset)
+	server := newAssetServer(t, assetBytes, checksums)
+	defer server.Close()
+
+	dir := t.TempDir()
+	exePath := filepath.Join(dir, "javinizer")
+	require.NoError(t, os.WriteFile(exePath, []byte("old"), 0o755))
+	// Read-only dir: CreateTemp cannot write here.
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	var out bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeOptions{
+		CurrentVersion:  "v0.0.1",
+		DownloadBaseURL: server.URL,
+		HTTPClient:      server.Client(),
+		Checker:         &stubChecker{version: "v9.9.9"},
+		ExePath:         exePath,
+		Out:             &out,
+	})
+	require.Error(t, err)
+	assert.False(t, res.Upgraded)
+	assert.Contains(t, err.Error(), "no write permission")
 }

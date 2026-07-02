@@ -53,7 +53,7 @@ func TestService_GetStatus_Disabled(t *testing.T) {
 	// Override the state path for testing
 	store := newStateStore(statePath, defaultCheckInterval)
 
-	service := &service{
+	service := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
@@ -71,7 +71,7 @@ func TestService_ForceCheck(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	service := &service{
+	service := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     newStateStore(statePath, defaultCheckInterval),
 		statePath: statePath,
@@ -99,7 +99,7 @@ func TestService_BackgroundCheck(t *testing.T) {
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
 	store := newStateStore(statePath, defaultCheckInterval)
-	service := &service{
+	service := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
@@ -144,7 +144,7 @@ func TestService_IsUpdateAvailable(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	service := &service{
+	service := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     newStateStore(statePath, defaultCheckInterval),
 		statePath: statePath,
@@ -163,7 +163,7 @@ func TestService_GetLatestVersion(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	service := &service{
+	service := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     newStateStore(statePath, defaultCheckInterval),
 		statePath: statePath,
@@ -190,7 +190,7 @@ func TestService_StartBackgroundCheck(t *testing.T) {
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
 	store := newStateStore(statePath, defaultCheckInterval)
-	service := &service{
+	service := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
@@ -219,7 +219,7 @@ func TestService_StartBackgroundCheck_Disabled(t *testing.T) {
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
 	store := newStateStore(statePath, defaultCheckInterval)
-	service := &service{
+	service := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
@@ -245,7 +245,7 @@ func TestService_ShouldCheck(t *testing.T) {
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
 	store := newStateStore(statePath, 24*time.Hour)
-	service := &service{
+	service := &Service{
 		store:    store,
 		interval: 24 * time.Hour,
 		enabled:  true,
@@ -283,7 +283,7 @@ func TestService_GetStatus_WithExistingState(t *testing.T) {
 	err := saveStateToFile(afero.NewOsFs(), statePath, initialState)
 	require.NoError(t, err)
 
-	service := &service{
+	service := &Service{
 		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     newStateStore(statePath, 24*time.Hour),
 		statePath: statePath,
@@ -307,7 +307,7 @@ func TestService_ForceCheck_PrereleaseToStableIsAvailable(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	service := &service{
+	service := &Service{
 		checker: &mockChecker{
 			version: &versionInfo{
 				Version:    "v1.6.0",
@@ -340,10 +340,10 @@ func TestService_ForceCheck_StableOnlyConfig(t *testing.T) {
 	defer func() { appversion.Version = origVersion }()
 	appversion.Version = "v0.3.14-alpha"
 
-	mkService := func(stableOnly bool) *service {
+	mkService := func(stableOnly bool) *Service {
 		tmpDir := t.TempDir()
 		statePath := filepath.Join(tmpDir, "update_cache.json")
-		return &service{
+		return &Service{
 			checker: &mockChecker{
 				version: &versionInfo{
 					Version:    "v0.3.15-alpha",
@@ -408,7 +408,7 @@ func TestService_ForceCheck_NotModifiedKeepsCachedState(t *testing.T) {
 	require.NoError(t, store.SaveState(prior))
 
 	chk := &mockChecker{err: ErrNotModified}
-	svc := &service{
+	svc := &Service{
 		checker:    chk,
 		store:      store,
 		statePath:  statePath,
@@ -455,7 +455,7 @@ func TestService_ForceCheck_NotModifiedWithoutCache(t *testing.T) {
 	store := newStateStore(statePath, defaultCheckInterval) // empty cache
 
 	chk := &mockChecker{err: ErrNotModified}
-	svc := &service{
+	svc := &Service{
 		checker:   chk,
 		store:     store,
 		statePath: statePath,
@@ -497,7 +497,7 @@ func TestService_ForceCheck_NotModifiedReEvaluatesStableOnly(t *testing.T) {
 	require.NoError(t, store.SaveState(prior))
 
 	chk := &mockChecker{err: ErrNotModified}
-	svc := &service{
+	svc := &Service{
 		checker:    chk,
 		store:      store,
 		statePath:  statePath,
@@ -547,7 +547,7 @@ func TestService_ForceCheck_NotModifiedReEnablesWhenStableOnlyCleared(t *testing
 	require.NoError(t, store.SaveState(prior))
 
 	chk := &mockChecker{err: ErrNotModified}
-	svc := &service{
+	svc := &Service{
 		checker:    chk,
 		store:      store,
 		statePath:  statePath,
@@ -580,7 +580,7 @@ func TestService_ForceCheck_ResetsConditionalHintsWhenCacheEmpty(t *testing.T) {
 		gotIfNoneMatch: `W/"stale-from-prior-check"`,
 		gotSkipLatest:  true,
 	}
-	svc := &service{
+	svc := &Service{
 		checker:   chk,
 		store:     store,
 		statePath: statePath,

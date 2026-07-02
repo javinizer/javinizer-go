@@ -11,6 +11,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// updateChecker, when non-nil, is injected into the update service so tests
+// can drive the --check error branches deterministically without network or a
+// shared on-disk cache. Production leaves it nil (NewService is used).
+var updateChecker update.Checker
+
+// updateStatePath, when non-empty, overrides the on-disk cache location for the
+// update service. Tests set it to a temp dir so no stale cached state masks a
+// checker failure. Production leaves it empty (the real data dir is used).
+var updateStatePath string
+
 // runVersionCheck performs a sync update check and translates the service's
 // internal state into the simple outcome the command's output branches need.
 // It is a package-level variable so tests can swap it for a stub, covering the
@@ -22,11 +32,17 @@ var runVersionCheck = func(ctx context.Context, configFile string) (*checkOutcom
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	service := update.NewService(update.UpdateConfig{
+	ucfg := update.UpdateConfig{
 		Enabled:                   cfg.System.VersionCheckEnabled,
 		VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
 		StableOnly:                cfg.System.VersionCheckStableOnly,
-	})
+	}
+	var service *update.Service
+	if updateChecker != nil {
+		service = update.NewServiceWithOptions(ucfg, update.ServiceOptions{Checker: updateChecker, StatePath: updateStatePath})
+	} else {
+		service = update.NewService(ucfg)
+	}
 	state, err := service.ForceCheck(ctx)
 
 	if state != nil && state.Source == update.UpdateSourceDisabled {
