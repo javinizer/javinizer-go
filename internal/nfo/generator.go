@@ -1,6 +1,7 @@
 package nfo
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -274,30 +275,35 @@ func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Create file
+	// Encode to an in-memory buffer first so we can post-process the XML.
+	// Go's encoding/xml escapes " and ' to numeric character references
+	// (&#34; and &#39;) in element text. This is valid XML, but NFO consumers
+	// like Jellyfin/Emby display them literally instead of decoding them.
+	// Only <, >, and & need escaping in element text — " and ' are valid
+	// unescaped in XML text content (they're only required in attribute
+	// values). The replacement is safe because any literal & in the source
+	// text is already escaped to &amp; by the encoder, so &#34;/&#39; in the
+	// output can only come from the encoder escaping a "/' character.
+	var buf bytes.Buffer
+	buf.WriteString(xml.Header)
+	encoder := xml.NewEncoder(&buf)
+	encoder.Indent("", "  ")
+	if err := encoder.Encode(nfo); err != nil {
+		return fmt.Errorf("failed to encode NFO: %w", err)
+	}
+	buf.WriteString("\n")
+
+	output := strings.ReplaceAll(buf.String(), "&#34;", "\"")
+	output = strings.ReplaceAll(output, "&#39;", "'")
+
 	file, err := g.fs.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create NFO file: %w", err)
 	}
 	defer func() { _ = file.Close() }()
 
-	// Write XML header
-	if _, err := file.WriteString(xml.Header); err != nil {
-		return fmt.Errorf("failed to write XML header: %w", err)
-	}
-
-	// Create encoder with indentation
-	encoder := xml.NewEncoder(file)
-	encoder.Indent("", "  ")
-
-	// Encode NFO
-	if err := encoder.Encode(nfo); err != nil {
-		return fmt.Errorf("failed to encode NFO: %w", err)
-	}
-
-	// Write final newline
-	if _, err := file.WriteString("\n"); err != nil {
-		return fmt.Errorf("failed to write final newline: %w", err)
+	if _, err := file.WriteString(output); err != nil {
+		return fmt.Errorf("failed to write NFO file: %w", err)
 	}
 
 	return nil
