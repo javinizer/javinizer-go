@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 
@@ -24,6 +25,7 @@ type Generator struct {
 	templateEngine template.EngineInterface
 	config         *Config
 	mediaAnalyzer  mediaAnalyzer
+	encodeFunc     func(io.Writer, *Movie) error
 }
 
 // NewGenerator returns an NFO generator that writes to fs using the given config.
@@ -66,6 +68,7 @@ func newGeneratorWithAnalyzer(fs afero.Fs, cfg *Config, ma mediaAnalyzer) *Gener
 		templateEngine: engine,
 		config:         &cfgCopy,
 		mediaAnalyzer:  ma,
+		encodeFunc:     writeNFOXML,
 	}
 }
 
@@ -289,14 +292,9 @@ func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 	// unescapeQuotesInText helper walks the buffer with a tag-aware state
 	// machine so attribute values are left untouched.
 	var buf bytes.Buffer
-	buf.WriteString(xml.Header)
-	encoder := xml.NewEncoder(&buf)
-	encoder.Indent("", "  ")
-	if err := encoder.Encode(nfo); err != nil {
-		return fmt.Errorf("failed to encode NFO: %w", err)
+	if err := g.encodeFunc(&buf, nfo); err != nil {
+		return err
 	}
-	buf.WriteString("\n")
-
 	output := unescapeQuotesInText(buf.String())
 
 	file, err := g.fs.Create(path)
@@ -309,6 +307,25 @@ func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 		return fmt.Errorf("failed to write NFO file: %w", err)
 	}
 
+	return nil
+}
+
+// writeNFOXML encodes an NFO Movie to the given writer as indented XML with a
+// leading header and trailing newline. It is separated from WriteNFO so the
+// encoding error paths can be exercised directly in tests with a failing
+// writer.
+func writeNFOXML(w io.Writer, nfo *Movie) error {
+	if _, err := w.Write([]byte(xml.Header)); err != nil {
+		return fmt.Errorf("failed to write XML header: %w", err)
+	}
+	encoder := xml.NewEncoder(w)
+	encoder.Indent("", "  ")
+	if err := encoder.Encode(nfo); err != nil {
+		return fmt.Errorf("failed to encode NFO: %w", err)
+	}
+	if _, err := w.Write([]byte("\n")); err != nil {
+		return fmt.Errorf("failed to write final newline: %w", err)
+	}
 	return nil
 }
 

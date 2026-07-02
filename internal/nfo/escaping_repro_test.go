@@ -1,12 +1,69 @@
 package nfo
 
 import (
+	"bytes"
+	"encoding/xml"
+	"errors"
+	"fmt"
+	"io"
 	"testing"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// failingWriter is an io.Writer that always returns an error.
+type failingWriter struct{}
+
+func (failingWriter) Write(p []byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+// failAfterNWriter succeeds for the first N bytes then fails.
+type failAfterNWriter struct {
+	remaining int
+}
+
+func (w *failAfterNWriter) Write(p []byte) (int, error) {
+	if w.remaining <= 0 {
+		return 0, errors.New("write failed")
+	}
+	n := len(p)
+	if n > w.remaining {
+		n = w.remaining
+	}
+	w.remaining -= n
+	if n < len(p) {
+		return n, errors.New("write failed")
+	}
+	return n, nil
+}
+
+// failingWriteFs wraps an afero.Fs and returns files that fail on Write.
+type failingWriteFs struct {
+	afero.Fs
+}
+
+type failingWriteFile struct {
+	afero.File
+}
+
+func (fs *failingWriteFs) Create(name string) (afero.File, error) {
+	f, err := fs.Fs.Create(name)
+	if err != nil {
+		return nil, err
+	}
+	return &failingWriteFile{File: f}, nil
+}
+
+func (f *failingWriteFile) Write(p []byte) (int, error) {
+	return 0, errors.New("disk full")
+}
+
+func (f *failingWriteFile) WriteString(s string) (int, error) {
+	return 0, errors.New("disk full")
+}
 
 func TestWriteNFO_SpecialCharactersNotNumericEscaped(t *testing.T) {
 	fs := afero.NewMemMapFs()
@@ -149,4 +206,51 @@ func TestUnescapeQuotesInText(t *testing.T) {
 			assert.Equal(t, tc.want, unescapeQuotesInText(tc.in))
 		})
 	}
+}
+
+func TestWriteNFOXML_HeaderWriteError(t *testing.T) {
+	err := writeNFOXML(failingWriter{}, &Movie{Title: "test"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write XML header")
+}
+
+func TestWriteNFOXML_EncodeError(t *testing.T) {
+	w := &failAfterNWriter{remaining: len(xml.Header)}
+	err := writeNFOXML(w, &Movie{Title: "test"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to encode NFO")
+}
+
+func TestWriteNFOXML_NewlineWriteError(t *testing.T) {
+	nfo := &Movie{Title: "test"}
+	var buf bytes.Buffer
+	require.NoError(t, writeNFOXML(&buf, nfo))
+	totalSize := buf.Len()
+
+	w := &failAfterNWriter{remaining: totalSize - 1}
+	err := writeNFOXML(w, nfo)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write final newline")
+}
+
+func TestWriteNFO_WriteFailure(t *testing.T) {
+	fs := &failingWriteFs{Fs: afero.NewMemMapFs()}
+	gen := NewGenerator(fs, &Config{})
+	nfo := &Movie{Title: `Test`}
+
+	err := gen.WriteNFO(nfo, "/test.nfo")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write NFO file")
+}
+
+func TestWriteNFO_EncodeFailure(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	gen := NewGenerator(fs, &Config{})
+	gen.encodeFunc = func(io.Writer, *Movie) error {
+		return fmt.Errorf("injected encode failure")
+	}
+
+	err := gen.WriteNFO(&Movie{Title: "test"}, "/test.nfo")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "injected encode failure")
 }
