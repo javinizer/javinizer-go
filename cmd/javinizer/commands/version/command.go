@@ -1,6 +1,7 @@
 package version
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -9,6 +10,61 @@ import (
 	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/spf13/cobra"
 )
+
+// runVersionCheck performs a sync update check and translates the service's
+// internal state into the simple outcome the command's output branches need.
+// It is a package-level variable so tests can swap it for a stub, covering the
+// --check output paths (available / up-to-date / disabled / error) without
+// touching the network — mirroring the upgrade command's SetRunUpgrade seam.
+var runVersionCheck = func(ctx context.Context, configFile string) (*checkOutcome, error) {
+	cfg, err := loadConfigForCheck(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	service := update.NewService(update.UpdateConfig{
+		Enabled:                   cfg.System.VersionCheckEnabled,
+		VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+		StableOnly:                cfg.System.VersionCheckStableOnly,
+	})
+	state, err := service.ForceCheck(ctx)
+
+	if state != nil && state.Source == update.UpdateSourceDisabled {
+		return &checkOutcome{disabled: true}, nil
+	}
+
+	if err != nil || state == nil || state.Version == "" || state.Source == update.UpdateSourceError {
+		var errorMsg string
+		if err != nil {
+			errorMsg = err.Error()
+		} else if state != nil && state.Error != "" {
+			errorMsg = state.Error
+		} else {
+			errorMsg = "Unknown error occurred while checking for updates"
+		}
+		return &checkOutcome{errMsg: errorMsg}, nil
+	}
+
+	return &checkOutcome{available: state.Available, version: state.Version}, nil
+}
+
+// checkOutcome is the result of a --check invocation, decoupling the command's
+// output branches from the update package's internal state type so tests can
+// drive every branch without constructing internal types.
+type checkOutcome struct {
+	disabled  bool
+	available bool
+	version   string
+	errMsg    string
+}
+
+// SetRunVersionCheck swaps the version-check implementation and returns the
+// previous one, so tests can inject a stub and restore it afterwards.
+func SetRunVersionCheck(fn func(ctx context.Context, configFile string) (*checkOutcome, error)) func(context.Context, string) (*checkOutcome, error) {
+	prev := runVersionCheck
+	runVersionCheck = fn
+	return prev
+}
 
 // NewCommand creates the version command.
 func NewCommand() *cobra.Command {
@@ -21,38 +77,19 @@ func NewCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if check {
-				// Perform a sync check using the service
-				ctx := cmd.Context()
 				configFile, _ := cmd.Flags().GetString("config")
-				cfg, err := loadConfigForCheck(configFile)
+				outcome, err := runVersionCheck(cmd.Context(), configFile)
 				if err != nil {
-					return fmt.Errorf("failed to load config: %w", err)
+					return err
 				}
 
-				service := update.NewService(update.UpdateConfig{
-					Enabled:                   cfg.System.VersionCheckEnabled,
-					VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
-					StableOnly:                cfg.System.VersionCheckStableOnly,
-				})
-				state, err := service.ForceCheck(ctx)
-
-				if state != nil && state.Source == update.UpdateSourceDisabled {
+				if outcome.disabled {
 					_, werr := fmt.Fprintln(cmd.OutOrStdout(), "Update checks are disabled in configuration")
 					return werr
 				}
 
-				// Check for errors - ForceCheck may return err OR set state.Source to UpdateSourceError.
-				if err != nil || state == nil || state.Version == "" || state.Source == update.UpdateSourceError {
-					// Print error to stderr
-					var errorMsg string
-					if err != nil {
-						errorMsg = err.Error()
-					} else if state.Error != "" {
-						errorMsg = state.Error
-					} else {
-						errorMsg = "Unknown error occurred while checking for updates"
-					}
-					_, ferr := fmt.Fprintf(cmd.ErrOrStderr(), "Error checking for updates: %v\n", errorMsg)
+				if outcome.errMsg != "" {
+					_, ferr := fmt.Fprintf(cmd.ErrOrStderr(), "Error checking for updates: %v\n", outcome.errMsg)
 					if ferr != nil {
 						return ferr
 					}
@@ -60,17 +97,14 @@ func NewCommand() *cobra.Command {
 				}
 
 				current := version.Short()
-				latestVer := state.Version
+				latestVer := outcome.version
 
-				// state.Available already reflects the build version comparison AND
+				// outcome.available already reflects the build version comparison AND
 				// the user's version_check_stable_only policy (prerelease
 				// suppression). Reusing it keeps the CLI consistent with the API/UI
 				// — recomputing CompareVersions here would surface a prerelease the
 				// service deliberately suppressed.
-				updateAvailable := state.Available
-
-				// Print to stdout for easy parsing
-				if updateAvailable {
+				if outcome.available {
 					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Update available: %s (current: %s)\n", latestVer, current); err != nil {
 						return err
 					}

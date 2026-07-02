@@ -48,11 +48,7 @@ Note: 'javinizer upgrade' updates the program itself; 'javinizer update' updates
 metadata for your existing files. They are different commands.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			result, err := runUpgrade(ctx, update.UpgradeOptions{
+			result, err := runUpgrade(cmd.Context(), update.UpgradeOptions{
 				CurrentVersion: version.Short(),
 				CheckOnly:      check,
 				Force:          force,

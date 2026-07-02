@@ -2,6 +2,7 @@ package version
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,4 +107,80 @@ system:
 	err := cmd.Execute()
 	require.NoError(t, err)
 	assert.Contains(t, out.String(), "Update checks are disabled")
+}
+
+var errConfigFail = configLoadErr{}
+
+type configLoadErr struct{}
+
+func (configLoadErr) Error() string { return "failed to load config: missing" }
+
+// TestNewCommand_CheckUpdateAvailable covers the --check output branch where an
+// update IS available — including the "Run 'javinizer upgrade'" hint. Uses a
+// stubbed runVersionCheck so no network is needed.
+func TestNewCommand_CheckUpdateAvailable(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return &checkOutcome{available: true, version: "v9.9.9"}, nil
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"--check"})
+
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, out.String(), "Update available: v9.9.9")
+	assert.Contains(t, errBuf.String(), "Run 'javinizer upgrade' to update.")
+}
+
+// TestNewCommand_CheckUpToDate covers the --check output branch where the user
+// is already on the latest version.
+func TestNewCommand_CheckUpToDate(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return &checkOutcome{available: false, version: "v1.0.0"}, nil
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--check"})
+
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, out.String(), "You are running the latest version")
+}
+
+// TestNewCommand_CheckError covers the --check error-output branch.
+func TestNewCommand_CheckError(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return &checkOutcome{errMsg: "network unreachable"}, nil
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"--check"})
+
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, errBuf.String(), "Error checking for updates: network unreachable")
+}
+
+// TestNewCommand_CheckConfigError covers the --check path where config loading
+// itself fails — the error must propagate from RunE.
+func TestNewCommand_CheckConfigError(t *testing.T) {
+	restore := SetRunVersionCheck(func(_ context.Context, _ string) (*checkOutcome, error) {
+		return nil, errConfigFail
+	})
+	defer SetRunVersionCheck(restore)
+
+	cmd := NewCommand()
+	cmd.SetArgs([]string{"--check"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to load config")
 }

@@ -799,3 +799,35 @@ func TestCheckLatestVersion_PreReleaseUsesListEvenWithStableLatest(t *testing.T)
 	assert.False(t, info.NoStableLatest, "preRelease must not set NoStableLatest")
 	assert.Equal(t, 0, latestHit, "/releases/latest must not be hit when preRelease is set")
 }
+
+func TestCheckLatestVersion_PreReleasePropagatesListError(t *testing.T) {
+	// When the /releases list call itself fails (500), preRelease must surface the
+	// error rather than falling back to /releases/latest.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	chk := newGitHubCheckerWithBaseURL("javinizer/javinizer-go", server.URL)
+	chk.SetPreRelease(true)
+
+	_, err := chk.CheckLatestVersion(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "prerelease release lookup failed")
+}
+
+func TestCheckLatestVersion_PreReleaseEmptyList(t *testing.T) {
+	// An empty releases list under preRelease must error ("no releases found")
+	// rather than returning a nil/zero-value result.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+
+	chk := newGitHubCheckerWithBaseURL("javinizer/javinizer-go", server.URL)
+	chk.SetPreRelease(true)
+
+	_, err := chk.CheckLatestVersion(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no releases found")
+}
