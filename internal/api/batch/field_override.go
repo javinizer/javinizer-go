@@ -103,6 +103,8 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		deps.GetJobStore().PersistJobByID(jobID)
+
 		var movieView *contracts.MovieView
 		if result != nil && result.Movie != nil {
 			movieView = contracts.MovieViewFromModel(result.Movie)

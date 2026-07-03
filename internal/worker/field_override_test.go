@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -266,5 +268,61 @@ func TestApplyFieldOverride_AllFields(t *testing.T) {
 				assert.Equal(t, dmm.ShouldCropPoster, movie.Poster.ShouldCropPoster)
 			}
 		})
+	}
+}
+
+func TestApplyFieldOverride_ConcurrentDifferentFieldsSameResult(t *testing.T) {
+	for iter := 0; iter < 50; iter++ {
+		movie, prov := overrideFixture()
+		filePath := "test.mp4"
+		resultID := "res-001"
+
+		tracker := NewResultTracker(1, []string{filePath})
+		mr := &MovieResult{
+			ResultID:      resultID,
+			FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movie.ID},
+			Movie:         movie,
+			Status:        models.JobStatusCompleted,
+		}
+		tracker.Updater().UpdateFileResult(filePath, mr)
+		tracker.Updater().SetProvenance(filePath, prov)
+
+		je := &jobEditorImpl{
+			updater:  tracker.Updater(),
+			accessor: tracker,
+			tracker:  tracker,
+		}
+
+		var wg sync.WaitGroup
+		ready := make(chan struct{})
+		errs := make([]error, 2)
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-ready
+			_, _, errs[0] = je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
+		}()
+		go func() {
+			defer wg.Done()
+			<-ready
+			_, _, errs[1] = je.ApplyFieldOverride(context.Background(), resultID, "title", "r18dev")
+		}()
+		close(ready)
+		wg.Wait()
+
+		require.NoError(t, errs[0], "maker override failed on iter %d", iter)
+		require.NoError(t, errs[1], "title override failed on iter %d", iter)
+
+		final, _, ok := tracker.GetFileResultByResultID(resultID)
+		require.True(t, ok)
+		require.NotNil(t, final.Movie)
+		assert.Equal(t, "DMM Studio", final.Movie.Maker, "maker override lost on iter %d", iter)
+		assert.Equal(t, "R18 Title", final.Movie.Title, "title override lost on iter %d", iter)
+
+		finalProv := tracker.GetProvenance(filePath)
+		require.NotNil(t, finalProv)
+		assert.Equal(t, "dmm", finalProv.FieldSources["maker"], "maker provenance lost on iter %d", iter)
+		assert.Equal(t, "r18dev", finalProv.FieldSources["title"], "title provenance lost on iter %d", iter)
 	}
 }
