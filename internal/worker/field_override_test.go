@@ -2,13 +2,16 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -429,4 +432,41 @@ func TestApplyFieldOverride_NilProvenanceUsesSynthesizedFallback(t *testing.T) {
 	require.NotNil(t, res)
 	require.NotNil(t, prov)
 	assert.Equal(t, "scraper", prov.FieldSources["maker"])
+}
+
+func TestApplyFieldOverride_UnregisteredKeyHitsDefault(t *testing.T) {
+	movie, prov := overrideFixture()
+	fieldOverrideKeys["__test_no_case__"] = struct{}{}
+	defer delete(fieldOverrideKeys, "__test_no_case__")
+	err := applyFieldOverride(movie, prov, "__test_no_case__", "dmm")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unhandled field")
+}
+
+func TestUpdateMovie_DBPersistError(t *testing.T) {
+	movie, _ := overrideFixture()
+	filePath := "test.mp4"
+	tracker := NewResultTracker(1, []string{filePath})
+	repo := mocks.NewMockMovieRepositoryInterface(t)
+	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
+	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker, movieRepo: repo}
+	err := je.UpdateMovie(context.Background(), filePath, movie)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "persist movie update")
+}
+
+func TestApplyFieldOverride_PersistErrorWrapped(t *testing.T) {
+	movie, _ := overrideFixture()
+	filePath := "test.mp4"
+	resultID := "res-001"
+	tracker := NewResultTracker(1, []string{filePath})
+	tracker.Updater().UpdateFileResult(filePath, &MovieResult{
+		ResultID: resultID, FileMatchInfo: models.FileMatchInfo{Path: filePath}, Movie: movie, Status: models.JobStatusCompleted,
+	})
+	repo := mocks.NewMockMovieRepositoryInterface(t)
+	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
+	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker, movieRepo: repo}
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "scraper")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "persist field override")
 }
