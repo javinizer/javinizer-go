@@ -29,6 +29,27 @@ func authBypassed(auth commandutil.AuthProvider) bool {
 	return ok && d.IsDisabled()
 }
 
+func resolveAuth(c *gin.Context, rt *core.APIRuntime) (deps *core.APIDeps, handled bool) {
+	if rt == nil {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
+			Error: "authentication is unavailable",
+		})
+		return nil, true
+	}
+	deps = rt.Deps()
+	if deps == nil || deps.Auth == nil {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
+			Error: "authentication is unavailable",
+		})
+		return nil, true
+	}
+	if authBypassed(deps.Auth) {
+		c.Next()
+		return deps, true
+	}
+	return deps, false
+}
+
 func securityConfig(rt *core.APIRuntime) *core.SecurityNarrowConfig {
 	if rt == nil {
 		return nil
@@ -39,22 +60,8 @@ func securityConfig(rt *core.APIRuntime) *core.SecurityNarrowConfig {
 //nolint:unused // used by same-package tests
 func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if rt == nil {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-				Error: "authentication is unavailable",
-			})
-			return
-		}
-		deps := rt.Deps()
-		if deps == nil || deps.Auth == nil {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-				Error: "authentication is unavailable",
-			})
-			return
-		}
-
-		if authBypassed(deps.Auth) {
-			c.Next()
+		deps, handled := resolveAuth(c, rt)
+		if handled {
 			return
 		}
 
@@ -95,22 +102,8 @@ func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 
 func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if rt == nil {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-				Error: "authentication is unavailable",
-			})
-			return
-		}
-		deps := rt.Deps()
-		if deps == nil || deps.Auth == nil {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-				Error: "authentication is unavailable",
-			})
-			return
-		}
-
-		if authBypassed(deps.Auth) {
-			c.Next()
+		deps, handled := resolveAuth(c, rt)
+		if handled {
 			return
 		}
 
