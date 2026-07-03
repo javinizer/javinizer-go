@@ -266,3 +266,93 @@ func TestSnapshot_BatchWorkflow_And_ScanOnlyWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, scan)
 }
+
+// badRegexSnapshotConfig returns a config whose matching regex is invalid, so
+// the workflow factory cannot be built (buildMatcher fails with a non-Scraper
+// construction error → buildWorkflowFactoryFrom returns nil). This drives the
+// factory-unavailable error/nil branches in the snapshot accessors.
+func badRegexSnapshotConfig() *config.Config {
+	cfg := snapshotTestConfig(1111, 100, `(unclosed[`)
+	return cfg
+}
+
+// TestSnapshot_WorkflowFactory_SameEpoch_FactoryUnavailable covers the
+// same-epoch path where the shared cache build returns nil (bad regex) →
+// WorkflowFactory returns an error rather than a factory.
+func TestSnapshot_WorkflowFactory_SameEpoch_FactoryUnavailable(t *testing.T) {
+	rt := newSnapshotTestRuntime(t, badRegexSnapshotConfig())
+	snap := rt.Snapshot()
+
+	f, err := snap.WorkflowFactory()
+	assert.Nil(t, f)
+	assert.Error(t, err)
+
+	// PosterGen delegates to WorkflowFactory → nil on the error path.
+	assert.Nil(t, snap.PosterGen())
+
+	// BatchWorkflow / ScanOnlyWorkflow propagate the WorkflowFactory error.
+	_, err = snap.BatchWorkflow("job-1")
+	assert.Error(t, err)
+	_, err = snap.ScanOnlyWorkflow()
+	assert.Error(t, err)
+}
+
+// TestSnapshot_WorkflowFactory_StaleEpoch_FactoryUnavailable covers the
+// stale-epoch path where buildWorkflowFactoryFrom(s.cfg, ...) returns nil →
+// WorkflowFactory returns an error.
+func TestSnapshot_WorkflowFactory_StaleEpoch_FactoryUnavailable(t *testing.T) {
+	cfgBad := badRegexSnapshotConfig()
+	cfgGood := snapshotTestConfig(2222, 200, `([A-Z]+-\d+)`)
+	rt := newSnapshotTestRuntime(t, cfgBad)
+
+	snap := rt.Snapshot()
+	// Reload to a good-regex epoch so the snapshot is stale.
+	rt.ReplaceReloadable(cfgGood, scraperutil.NewScraperRegistry())
+
+	f, err := snap.WorkflowFactory()
+	assert.Nil(t, f, "stale snapshot with bad regex must not build a factory")
+	assert.Error(t, err)
+}
+
+// TestSnapshot_BatchJobFactory_StaleEpoch_PosterGenNil covers the stale-epoch
+// BatchJobFactory path where PosterGen is nil (workflow factory unavailable for
+// the snapshot's captured cfg) → returns nil without panicking and without
+// touching the shared cache.
+func TestSnapshot_BatchJobFactory_StaleEpoch_PosterGenNil(t *testing.T) {
+	cfgBad := badRegexSnapshotConfig()
+	cfgGood := snapshotTestConfig(2222, 200, `([A-Z]+-\d+)`)
+	rt := newSnapshotTestRuntime(t, cfgBad)
+
+	snap := rt.Snapshot()
+	rt.ReplaceReloadable(cfgGood, scraperutil.NewScraperRegistry())
+
+	// Stale snapshot's captured cfg has a bad regex → PosterGen nil →
+	// BatchJobFactory returns nil on the stale-epoch fresh-build path.
+	assert.Nil(t, snap.BatchJobFactory())
+	// Shared cache for the new (good) epoch is untouched by the stale build.
+	assert.Nil(t, rt.batchJobFactory.value, "stale-epoch build must not write the shared cache")
+}
+
+// TestSnapshot_BatchJobFactory_SameEpoch_FactoryUnavailable covers the
+// same-epoch path where the shared cache build returns nil (bad regex →
+// PosterGen nil → buildBatchJobFactory returns nil before touching the
+// JobStore) → BatchJobFactory returns nil without panicking.
+func TestSnapshot_BatchJobFactory_SameEpoch_FactoryUnavailable(t *testing.T) {
+	rt := newSnapshotTestRuntime(t, badRegexSnapshotConfig())
+	snap := rt.Snapshot()
+	// sameEpoch=true; cache build returns nil (PosterGen nil) → returns nil.
+	assert.Nil(t, snap.BatchJobFactory())
+}
+
+// TestSnapshot_PosterManager_NoRuntimeState covers the rs == nil branch: when
+// the runtime has no RuntimeState, PosterManager builds directly from snap.cfg
+// without routing through the shared cache.
+func TestSnapshot_PosterManager_NoRuntimeState(t *testing.T) {
+	cfg := snapshotTestConfig(1111, 100, `([A-Z]+-\d+)`)
+	cfg.System.TempDir = "/tmp/snapNoRT"
+	rt := newSnapshotTestRuntime(t, cfg)
+	// Intentionally do NOT call EnsureRuntime → rs is nil.
+	snap := rt.Snapshot()
+	pm := snap.PosterManager()
+	require.NotNil(t, pm)
+}

@@ -191,10 +191,11 @@ func StartScrapeUseCase(
 
 	matchInfo := fileMatchInfoMap
 
+	// BatchWorkflow above already returns an error when the workflow factory is
+	// unavailable, and buildPosterGenerator always returns a non-nil generator on
+	// a built factory — so BatchJobFactory cannot be nil here. Guarding it would
+	// be dead code (unreachable: BatchWorkflow errors first on a broken factory).
 	factory := snap.BatchJobFactory()
-	if factory == nil {
-		return nil, fmt.Errorf("batch job factory unavailable — workflow factory not ready; retry the request")
-	}
 
 	job := factory.CreateJob(allFiles, worker.BatchJobOptions{
 		ID:                    jobID,

@@ -230,3 +230,28 @@ func TestHotReload_Race_CrossAccessor_SnapshotIsConsistent(t *testing.T) {
 
 	wg.Wait()
 }
+
+// TestReplaceReloadable_FiresPauseAfterRegistry covers the test-only
+// reloadPauseAfterRegistry seam on the ReplaceReloadable path (distinct from
+// ReloadConfig's seam). It asserts the seam fires after the atomic publish so
+// the new cfg/registry are already visible when it runs.
+func TestReplaceReloadable_FiresPauseAfterRegistry(t *testing.T) {
+	cfgA := newHotReloadRaceConfig("hostA", 1111, 100)
+	cfgB := newHotReloadRaceConfig("hostB", 2222, 200)
+	rt := newHotReloadRaceRuntime(t, cfgA)
+
+	fired := make(chan struct{})
+	rt.reloadPauseAfterRegistry = func() {
+		require.Equal(t, "hostB", rt.deps.CoreDeps.GetConfig().Server.Host,
+			"seam must fire after the cfg/registry are published")
+		close(fired)
+	}
+
+	rt.ReplaceReloadable(cfgB, scraperutil.NewScraperRegistry())
+	require.NotNil(t, rt.GetAPIConfig(), "APIConfig must be rebuilt after ReplaceReloadable")
+	select {
+	case <-fired:
+	default:
+		t.Fatal("reloadPauseAfterRegistry seam did not fire")
+	}
+}
