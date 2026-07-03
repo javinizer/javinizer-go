@@ -134,3 +134,28 @@ func TestStartScrapeUseCase_BatchWorkflowError(t *testing.T) {
 	})
 	assert.Error(t, err)
 }
+
+// TestBatchRescrapeMovies_RunningJob_409 covers the rescrapeNotAllowed=true
+// branch in batchRescrapeMovies: a running job must be rejected with 409 before
+// the handler reaches the factory/snapshot section.
+func TestBatchRescrapeMovies_RunningJob_409(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	initTestWebSocket(t)
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.API.Security.AllowedDirectories = []string{"/path"}
+	deps := createTestDeps(t, cfg, "")
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
+	setJobStatus(job, models.JobStatusRunning)
+
+	router := gin.New()
+	router.POST("/batch/:id/movies/batch-rescrape", batchRescrapeMovies(testkit.GetTestRuntime(deps)))
+
+	body, _ := json.Marshal(contracts.BulkRescrapeRequest{MovieIDs: []string{"IPX-535"}, SelectedScrapers: []string{"mock"}})
+	req := httptest.NewRequest("POST", "/batch/"+job.GetID()+"/movies/batch-rescrape", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code, "body=%s", w.Body.String())
+}
