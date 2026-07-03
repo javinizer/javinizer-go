@@ -31,7 +31,12 @@ func scanDirectory(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		apiCfg := rt.GetAPIConfig()
+		// Take one consistent snapshot so the APIConfig (security/scanner settings)
+		// and the scan-only workflow come from the same reload epoch. Reading them
+		// via separate accessors could mix old/new state if a config reload lands
+		// between the calls (issue #44).
+		snap := rt.Snapshot()
+		apiCfg := snap.APIConfig()
 		scanCfg := apiCfg.ScannerConfig()
 
 		dirFile, validPath, err := core.ValidateAndOpenPath(req.Path, apiCfg.SecurityConfig())
@@ -41,7 +46,7 @@ func scanDirectory(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		defer func() { _ = dirFile.Close() }()
 
-		wf, wfErr := rt.GetScanOnlyWorkflow()
+		wf, wfErr := snap.ScanOnlyWorkflow()
 		if wfErr != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: wfErr.Error()})
 			return

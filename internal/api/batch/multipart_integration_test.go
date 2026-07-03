@@ -182,7 +182,7 @@ func TestMultipartPreviewLetterPatternDiscoveryFlow(t *testing.T) {
 
 	// Run discovery to get metadata
 	apiCfg := core.ConfigFromAppConfig(cfg)
-	allFiles, fileMatchInfo := discoverSiblingPartsWithMetadata(context.Background(), files, testkit.GetTestRuntime(deps), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
+	allFiles, fileMatchInfo := discoverSiblingPartsWithMetadata(context.Background(), files, testkit.GetTestRuntime(deps).Snapshot(), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
 
 	t.Logf("Discovered %d files", len(allFiles))
 	for path, info := range fileMatchInfo {

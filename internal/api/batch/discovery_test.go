@@ -18,7 +18,7 @@ func TestDiscoverSiblingParts_AdditionalScenarios(t *testing.T) {
 		cfg := config.DefaultConfig(nil, nil)
 		apiCfg := core.ConfigFromAppConfig(cfg)
 		deps := createTestDeps(t, cfg, "")
-		files, metadata := discoverSiblingPartsWithMetadata(context.Background(), nil, testkit.GetTestRuntime(deps), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
+		files, metadata := discoverSiblingPartsWithMetadata(context.Background(), nil, testkit.GetTestRuntime(deps).Snapshot(), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
 		assert.Empty(t, files)
 		assert.Nil(t, metadata)
 	})
@@ -33,7 +33,7 @@ func TestDiscoverSiblingParts_AdditionalScenarios(t *testing.T) {
 
 		apiCfg := core.ConfigFromAppConfig(cfg)
 		deps := createTestDeps(t, cfg, "")
-		got, metadata := discoverSiblingPartsWithMetadata(context.Background(), []string{filePath}, testkit.GetTestRuntime(deps), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
+		got, metadata := discoverSiblingPartsWithMetadata(context.Background(), []string{filePath}, testkit.GetTestRuntime(deps).Snapshot(), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
 		assert.Equal(t, []string{filePath}, got)
 		assert.NotNil(t, metadata)
 		// Non-multipart files should still have metadata
@@ -56,7 +56,7 @@ func TestDiscoverSiblingParts_AdditionalScenarios(t *testing.T) {
 
 		apiCfg := core.ConfigFromAppConfig(cfg)
 		deps := createTestDeps(t, cfg, "")
-		got, metadata := discoverSiblingPartsWithMetadata(context.Background(), []string{partA}, testkit.GetTestRuntime(deps), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
+		got, metadata := discoverSiblingPartsWithMetadata(context.Background(), []string{partA}, testkit.GetTestRuntime(deps).Snapshot(), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
 		assert.ElementsMatch(t, []string{partA, partB}, got)
 		// Both parts should have multipart metadata
 		assert.True(t, metadata[partA].IsMultiPart)
@@ -77,7 +77,7 @@ func TestDiscoverSiblingParts_AdditionalScenarios(t *testing.T) {
 
 		apiCfg := core.ConfigFromAppConfig(cfg)
 		deps := createTestDeps(t, cfg, "")
-		got, metadata := discoverSiblingPartsWithMetadata(context.Background(), []string{partA}, testkit.GetTestRuntime(deps), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
+		got, metadata := discoverSiblingPartsWithMetadata(context.Background(), []string{partA}, testkit.GetTestRuntime(deps).Snapshot(), apiCfg.SecurityConfig(), apiCfg.ScannerConfig())
 		assert.Equal(t, []string{partA}, got)
 		// Since directory is disallowed, the seam cannot scan it, so metadata
 		// may be empty for files in disallowed directories. This is correct:

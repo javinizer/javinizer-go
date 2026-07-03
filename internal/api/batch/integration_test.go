@@ -201,7 +201,7 @@ func TestResolveOrganizeApplyConfig_WiresProgressHooks(t *testing.T) {
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 	job := &stubControlledJob{}
 
-	applyOpts, err := resolveOrganizeApplyConfig(rt, factory, job, contracts.OrganizeRequest{
+	applyOpts, err := resolveOrganizeApplyConfig(core.NewSnapshotForTesting(rt, core.APIConfig{}), factory, job, contracts.OrganizeRequest{
 		Destination:   "", // in-place needs no destination
 		OperationMode: string(operationmode.OperationModeInPlace),
 	})
@@ -226,7 +226,7 @@ func TestResolveUpdateApplyConfig_WiresProgressHooks(t *testing.T) {
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 	job := &stubControlledJob{}
 
-	applyOpts, err := resolveUpdateApplyConfig(rt, factory, job, contracts.UpdateRequest{})
+	applyOpts, err := resolveUpdateApplyConfig(core.NewSnapshotForTesting(rt, core.APIConfig{}), factory, job, contracts.UpdateRequest{})
 	require.NoError(t, err)
 	assert.NotNil(t, applyOpts.OnFileProgress, "OnFileProgress must be wired on the update path too")
 	assert.NotNil(t, applyOpts.OnPhaseComplete, "OnPhaseComplete must be wired on the update path too")
@@ -289,7 +289,7 @@ func TestResolveOrganizeApplyConfig_OnFileProgressBroadcastsToHub(t *testing.T) 
 	registerClientOnHub(t, hub, serverConn, clientConn)
 
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
-	applyOpts, err := resolveOrganizeApplyConfig(rt, factory, &stubControlledJob{}, contracts.OrganizeRequest{
+	applyOpts, err := resolveOrganizeApplyConfig(core.NewSnapshotForTesting(rt, core.APIConfig{}), factory, &stubControlledJob{}, contracts.OrganizeRequest{
 		OperationMode: string(operationmode.OperationModeInPlace),
 	})
 	require.NoError(t, err)
@@ -336,7 +336,7 @@ func TestResolveUpdateApplyConfig_OnFileProgressBroadcastsToHub(t *testing.T) {
 	registerClientOnHub(t, hub, serverConn, clientConn)
 
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
-	applyOpts, err := resolveUpdateApplyConfig(rt, factory, &stubControlledJob{}, contracts.UpdateRequest{})
+	applyOpts, err := resolveUpdateApplyConfig(core.NewSnapshotForTesting(rt, core.APIConfig{}), factory, &stubControlledJob{}, contracts.UpdateRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, applyOpts.OnFileProgress, "OnFileProgress must be wired on the update path")
 

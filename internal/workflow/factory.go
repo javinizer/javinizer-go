@@ -571,6 +571,13 @@ func (f *WorkflowFactory) Scanner() scanner.ScannerInterface {
 	return f.fc.Scanner
 }
 
+// MaxFilesPerScan returns the per-scan file limit the factory was built from.
+// Exposed for hot-reload consistency diagnostics so callers can verify a cached
+// factory's config-derived value matches the current APIConfig snapshot.
+func (f *WorkflowFactory) MaxFilesPerScan() int {
+	return f.fc.MaxFilesPerScan
+}
+
 // ReloadReplacementCaches refreshes the aggregator's genre, word, and alias
 // replacement caches in-place, without destroying the WorkflowFactory or
 // rebuilding the scraper, matcher, organizer, downloader, or NFO generator.

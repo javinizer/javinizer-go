@@ -197,13 +197,15 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 	}, nil
 }
 
-// apiWorkflowFactory adapts APIRuntime to the WorkflowFactory interface.
+// apiWorkflowFactory adapts a RuntimeSnapshot to the WorkflowFactory interface,
+// so the orchestrator builds workflows from the snapshot's pinned epoch rather
+// than re-reading CoreDeps (issue #44).
 type apiWorkflowFactory struct {
-	rt *core.APIRuntime
+	snap *core.RuntimeSnapshot
 }
 
 func (f *apiWorkflowFactory) GetBatchWorkflow(jobID string) (workflow.WorkflowInterface, error) {
-	return f.rt.GetBatchWorkflow(jobID)
+	return f.snap.BatchWorkflow(jobID)
 }
 
 // runtimeStateBroadcaster adapts *core.RuntimeState to ProgressBroadcaster.

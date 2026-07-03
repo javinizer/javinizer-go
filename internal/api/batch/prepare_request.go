@@ -19,7 +19,11 @@ import (
 // job from store, and status-check. Returns the resolved job, API config,
 // resolved seam strings, and parsed body map. If any step fails, it writes
 // an error response to the gin context and returns a non-nil error.
-func prepareBatchRequest(deps *core.APIDeps, rt *core.APIRuntime, c *gin.Context, opts ...prepareOption) (worker.BatchJobInterface, error) {
+//
+// The snapshot pins a consistent reload epoch so the batch config defaults
+// read here match the workflow/factory the caller reads from the same snapshot
+// (issue #44).
+func prepareBatchRequest(snap *core.RuntimeSnapshot, c *gin.Context, opts ...prepareOption) (worker.BatchJobInterface, error) {
 	cfg := defaultPrepareConfig()
 	for _, o := range opts {
 		o(&cfg)
@@ -43,7 +47,7 @@ func prepareBatchRequest(deps *core.APIDeps, rt *core.APIRuntime, c *gin.Context
 		}
 	}
 
-	apiCfg := rt.GetAPIConfig()
+	apiCfg := snap.APIConfig()
 	batchCfg := apiCfg.BatchConfig()
 
 	// Extract seam string fields from the generic body map. A present but
@@ -67,7 +71,7 @@ func prepareBatchRequest(deps *core.APIDeps, rt *core.APIRuntime, c *gin.Context
 	}
 
 	// Fetch job from store.
-	job, ok := deps.GetJobStore().GetBatchJob(jobID)
+	job, ok := snap.RT().Deps().GetJobStore().GetBatchJob(jobID)
 	if !ok {
 		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
 		return nil, fmt.Errorf("job not found: %s", jobID)

@@ -148,8 +148,14 @@ func StartScrapeUseCase(
 	rt *core.APIRuntime,
 	input StartScrapeInput,
 ) (*StartScrapeOutput, error) {
+	// Take one consistent snapshot so the APIConfig (security/scanner settings),
+	// the batch workflow, and the batch job factory all come from the same reload
+	// epoch. Reading them via separate accessors could mix old/new state if a
+	// config reload lands between the calls (issue #44).
+	snap := rt.Snapshot()
+
 	// Auto-discover sibling multi-part files
-	allFiles, fileMatchInfoMap := discoverSiblingPartsWithMetadata(ctx, input.Files, rt, rt.GetAPIConfig().SecurityConfig(), rt.GetAPIConfig().ScannerConfig())
+	allFiles, fileMatchInfoMap := discoverSiblingPartsWithMetadata(ctx, input.Files, snap, snap.APIConfig().SecurityConfig(), snap.APIConfig().ScannerConfig())
 
 	if len(allFiles) > len(input.Files) {
 		logging.Infof("Auto-discovered %d sibling files for batch job (original: %d, total: %d)",
@@ -178,14 +184,14 @@ func StartScrapeUseCase(
 	// ensuring RevertLog records are associated with the correct job for revert support.
 	jobID := uuid.New().String()
 
-	wf, err := rt.GetBatchWorkflow(jobID)
+	wf, err := snap.BatchWorkflow(jobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create workflow: %w", err)
 	}
 
 	matchInfo := fileMatchInfoMap
 
-	factory := rt.GetBatchJobFactory()
+	factory := snap.BatchJobFactory()
 
 	job := factory.CreateJob(allFiles, worker.BatchJobOptions{
 		ID:                    jobID,

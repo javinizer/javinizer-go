@@ -34,13 +34,17 @@ func isDirAllowed(fs afero.Fs, dir string, secCfg *core.SecurityNarrowConfig) bo
 // This preserves multipart info (IsMultiPart, PartNumber, PartSuffix) from the discovery phase
 // so it's available when creating FileResults during scraping.
 // Uses the ScanAndMatch seam to avoid direct scanner/matcher imports.
-func discoverSiblingPartsWithMetadata(ctx context.Context, files []string, rt *core.APIRuntime, secCfg *core.SecurityNarrowConfig, scanCfg *core.ScannerNarrowConfig) ([]string, map[string]models.FileMatchInfo) {
+//
+// The snapshot pins a consistent reload epoch so the workflow used for sibling
+// discovery matches the security/scanner config the caller read from the same
+// snapshot (issue #44).
+func discoverSiblingPartsWithMetadata(ctx context.Context, files []string, snap *core.RuntimeSnapshot, secCfg *core.SecurityNarrowConfig, scanCfg *core.ScannerNarrowConfig) ([]string, map[string]models.FileMatchInfo) {
 	if len(files) == 0 {
 		return files, nil
 	}
 
-	deps := rt.Deps()
-	wf, wfErr := rt.GetBatchWorkflow("")
+	deps := snap.RT().Deps()
+	wf, wfErr := snap.BatchWorkflow("")
 	if wfErr != nil {
 		logging.Warnf("Failed to create workflow for sibling discovery: %v, using original files only", wfErr)
 		return files, nil

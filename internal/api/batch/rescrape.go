@@ -44,7 +44,12 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		job, err := prepareBatchRequest(rt.Deps(), rt, c, withSkipRunningCheck())
+		// One snapshot so the batch config defaults (prepareBatchRequest), the
+		// workflow factory, and the batch job factory all see the same reload
+		// epoch (issue #44).
+		snap := rt.Snapshot()
+
+		job, err := prepareBatchRequest(snap, c, withSkipRunningCheck())
 		if err != nil {
 			return
 		}
@@ -70,21 +75,21 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		// Additional status check for rescrape-specific allowed states.
-		snap := job.GetStatus()
-		if rescrapeNotAllowed(snap) {
-			if snap.IsDeleted {
+		statusSnap := job.GetStatus()
+		if rescrapeNotAllowed(statusSnap) {
+			if statusSnap.IsDeleted {
 				writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
 			} else {
-				writeErrorResponse(c, http.StatusConflict, false, fmt.Sprintf("Cannot rescrape %s job", snap.Status))
+				writeErrorResponse(c, http.StatusConflict, false, fmt.Sprintf("Cannot rescrape %s job", statusSnap.Status))
 			}
 			return
 		}
 
-		// Delegate to orchestrator for resolve→construct→execute pipeline
+		// Delegate to orchestrator for resolve→construct→execute pipeline.
 		orch := NewRescrapeOrchestrator(RescrapeDeps{
 			JobStore:  rt.Deps().GetJobStore(),
-			WfFactory: &apiWorkflowFactory{rt: rt},
-			Factory:   rt.GetBatchJobFactory(),
+			WfFactory: &apiWorkflowFactory{snap: snap},
+			Factory:   snap.BatchJobFactory(),
 			Persist:   rt.Deps().GetJobStore(),
 			Broadcast: nil, // no progress broadcast for single rescrape
 			ServerCtx: rt.ServerCtx(),

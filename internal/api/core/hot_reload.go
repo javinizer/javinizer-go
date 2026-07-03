@@ -22,10 +22,16 @@ import (
 // ---------------------------------------------------------------------------
 
 // ReplaceReloadable swaps config-coupled runtime components atomically.
-// Config is stored via atomic.Pointer INSIDE the write lock so that
-// GetConfig (which reads atomic-first) cannot see new config while
-// GetRegistry (mutex-protected) still returns
-// old values. This prevents a split-brain window during hot-reload.
+//
+// The registry swap, the APIConfig snapshot rebuild, and the cached-factory
+// invalidation all happen under a single reloadMu.Lock so a concurrent reader
+// (GetAPIConfig / Snapshot) cannot observe a mix of old/new state across the
+// three holders. Config is stored via atomic.Pointer inside the same critical
+// section as the registry swap, so GetConfig and GetRegistry stay consistent.
+//
+// The test-only reloadPauseAfterRegistry seam fires AFTER the atomic publish,
+// so a paused reloader exposes a fully consistent (post-publish) state — the
+// race it widens is closed by the lock.
 func (r *APIRuntime) ReplaceReloadable(cfg *config.Config, registry *scraperutil.ScraperRegistry) {
 	if cfg == nil {
 		panic("core: APIRuntime.ReplaceReloadable() called with nil config — this is a programming error")
@@ -33,11 +39,14 @@ func (r *APIRuntime) ReplaceReloadable(cfg *config.Config, registry *scraperutil
 	if r.deps.CoreDeps == nil {
 		r.deps.CoreDeps = &commandutil.CoreDeps{}
 	}
+	r.reloadMu.Lock()
 	r.deps.CoreDeps.ReplaceReloadable(cfg, registry)
+	r.invalidateFactoriesLocked(cfg)
+	r.reloadMu.Unlock()
 
-	// Rebuild APIConfig from new config and invalidate the workflow factories
-	// so the next request rebuilds them from the fresh config/registry.
-	r.invalidateFactories(cfg)
+	if r.reloadPauseAfterRegistry != nil {
+		r.reloadPauseAfterRegistry()
+	}
 }
 
 // ReloadConfig rebuilds the scraper registry from the given config and atomically
@@ -71,6 +80,13 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
+	// Atomic publication (issue #44): swap the dump closer, publish cfg+registry,
+	// rebuild the APIConfig snapshot, and invalidate the cached factories all
+	// under one reloadMu.Lock so concurrent readers cannot observe a mix of
+	// old/new state across the three holders. The slow registry construction
+	// above stays outside the lock; only pointer swaps and cheap invalidations
+	// are inside. Lock order is reloadMu → CoreDeps.mu.
+	r.reloadMu.Lock()
 	// Swap the reloadables BEFORE retiring the old dump handle. Closing the
 	// old closer first would leave a window where the still-active scraper
 	// registry references a closed SQLite connection and dump-backed searches
@@ -78,12 +94,20 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	// before the old one is released.
 	old := r.deps.CoreDeps.ReplaceR18DevDumpCloser(r18DumpCloser)
 	r.deps.CoreDeps.ReplaceReloadable(cfg, newRegistry)
+	r.invalidateFactoriesLocked(cfg)
+	r.reloadMu.Unlock()
 	if old != nil {
 		_ = old.Close()
 	}
 
-	// Rebuild APIConfig and invalidate the workflow factories.
-	r.invalidateFactories(cfg)
+	// Test seams fire after the atomic publish so readers observe a consistent
+	// snapshot; nil in production.
+	if r.reloadPauseAfterRegistry != nil {
+		r.reloadPauseAfterRegistry()
+	}
+	if r.reloadPauseAfterAPICfg != nil {
+		r.reloadPauseAfterAPICfg()
+	}
 
 	return nil
 }
@@ -124,13 +148,14 @@ func InvalidateWorkflowCachesOnRuntime(rt *APIRuntime) func() {
 	}
 }
 
-// invalidateFactories rebuilds the APIConfig snapshot and nils all cached
-// workflow factories so they are reconstructed from the new config on next access.
-// Also invalidates the cached poster manager on RuntimeState.
-func (r *APIRuntime) invalidateFactories(cfg *config.Config) {
-	r.apiMu.Lock()
+// invalidateFactoriesLocked rebuilds the APIConfig snapshot and nils all cached
+// workflow factories so they are reconstructed from the new config on next
+// access. Also invalidates the cached poster manager on RuntimeState.
+//
+// Caller must hold r.reloadMu so the apiCfg publish and factory invalidation
+// are atomic relative to the registry swap in ReplaceReloadable/ReloadConfig.
+func (r *APIRuntime) invalidateFactoriesLocked(cfg *config.Config) {
 	r.apiCfg = ConfigFromAppConfig(cfg)
-	r.apiMu.Unlock()
 
 	r.workflowFactory.Invalidate()
 	r.batchJobFactory.Invalidate()

@@ -134,12 +134,14 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 
 		// Resolve the max poster height: request-level override wins over the
 		// configured default. 0 means no cap (preserve source resolution).
-		maxPosterHeight := rt.GetAPIConfig().BatchConfig().MaxPosterHeight
+		// Snapshot so apiCfg and the poster manager see the same reload epoch (issue #44).
+		snap := rt.Snapshot()
+		maxPosterHeight := snap.APIConfig().BatchConfig().MaxPosterHeight
 		if req.MaxPosterHeight != nil {
 			maxPosterHeight = *req.MaxPosterHeight
 		}
 
-		cropResult, err := rt.GetPosterManager().CropWithBounds(c.Request.Context(), jobID, posterID, req.X, req.Y, req.Width, req.Height, maxPosterHeight)
+		cropResult, err := snap.PosterManager().CropWithBounds(c.Request.Context(), jobID, posterID, req.X, req.Y, req.Width, req.Height, maxPosterHeight)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
@@ -203,9 +205,11 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		apiCfg := rt.GetAPIConfig()
-		batchCfg := apiCfg.BatchConfig()
-		posterResult, err := rt.GetPosterManager().DownloadFromURL(c.Request.Context(), jobID, posterID, req.URL, batchCfg.ScraperUserAgent, batchCfg.ScraperReferer)
+		// Snapshot so apiCfg (user-agent/referer) and the poster manager see the
+		// same reload epoch (issue #44).
+		snap := rt.Snapshot()
+		batchCfg := snap.APIConfig().BatchConfig()
+		posterResult, err := snap.PosterManager().DownloadFromURL(c.Request.Context(), jobID, posterID, req.URL, batchCfg.ScraperUserAgent, batchCfg.ScraperReferer)
 		if err != nil {
 			if strings.Contains(err.Error(), "SSRF") || strings.Contains(err.Error(), "invalid URL") {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})

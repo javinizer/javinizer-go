@@ -20,13 +20,13 @@ import (
 // the fully-validated ApplyPhaseConfig. Handlers become thin:
 // parse request → call builder → launch. Builder is testable without gin.
 func resolveOrganizeApplyConfig(
-	rt *core.APIRuntime,
+	snap *core.RuntimeSnapshot,
 	factory worker.BatchJobFactoryInterface,
 	job worker.BatchJobInterface,
 	req contracts.OrganizeRequest,
 ) (worker.ApplyPhaseConfig, error) {
-	deps := rt.Deps()
-	apiCfg := rt.GetAPIConfig()
+	deps := snap.RT().Deps()
+	apiCfg := snap.APIConfig()
 	batchCfg := apiCfg.BatchConfig()
 	secCfg := apiCfg.SecurityConfig()
 
@@ -76,7 +76,7 @@ func resolveOrganizeApplyConfig(
 	applyOpts.GenerateNFO = !req.SkipNFO
 	applyOpts.Download = !req.SkipDownload
 	applyOpts.OperationModeOverride = resolved.OperationMode
-	sink := newOrganizeBroadcastSink(rt)
+	sink := newOrganizeBroadcastSink(snap.RT())
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, false /* isUpdate */, sink)
@@ -109,12 +109,12 @@ func resolveOrganizeApplyConfig(
 // the fully-validated ApplyPhaseConfig. Handlers become thin:
 // parse request → call builder → launch. Builder is testable without gin.
 func resolveUpdateApplyConfig(
-	rt *core.APIRuntime,
+	snap *core.RuntimeSnapshot,
 	factory worker.BatchJobFactoryInterface,
 	job worker.BatchJobInterface,
 	req contracts.UpdateRequest,
 ) (worker.ApplyPhaseConfig, error) {
-	deps := rt.Deps()
+	deps := snap.RT().Deps()
 	resolvedUpdate, seamErr := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
 		Preset:         req.Preset,
 		ScalarStrategy: req.ScalarStrategy,
@@ -138,7 +138,7 @@ func resolveUpdateApplyConfig(
 	)
 	applyOpts.GenerateNFO = !req.SkipNFO
 	applyOpts.Download = !req.SkipDownload
-	sink := newOrganizeBroadcastSink(rt)
+	sink := newOrganizeBroadcastSink(snap.RT())
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, true /* isUpdate */, sink)

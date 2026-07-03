@@ -131,7 +131,7 @@ func TestResolveOrganizeApplyConfig_WiresOnFileOrganizeStart(t *testing.T) {
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 	job := &stubControlledJob{}
 
-	applyOpts, err := resolveOrganizeApplyConfig(rt, factory, job, contracts.OrganizeRequest{
+	applyOpts, err := resolveOrganizeApplyConfig(core.NewSnapshotForTesting(rt, core.APIConfig{}), factory, job, contracts.OrganizeRequest{
 		Destination:   "", // in-place needs no destination
 		OperationMode: string(operationmode.OperationModeInPlace),
 	})
@@ -151,7 +151,7 @@ func TestResolveUpdateApplyConfig_WiresOnFileOrganizeStart(t *testing.T) {
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 	job := &stubControlledJob{}
 
-	applyOpts, err := resolveUpdateApplyConfig(rt, factory, job, contracts.UpdateRequest{})
+	applyOpts, err := resolveUpdateApplyConfig(core.NewSnapshotForTesting(rt, core.APIConfig{}), factory, job, contracts.UpdateRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, applyOpts.OnFileOrganizeStart, "OnFileOrganizeStart must be wired on the update path too")
 

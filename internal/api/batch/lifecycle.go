@@ -146,7 +146,8 @@ func getBatchJobSlim(deps *core.APIDeps, c *gin.Context, jobID string) {
 func cancelBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		deps := rt.Deps()
-		job, err := prepareBatchRequest(deps, rt, c, withSkipRunningCheck())
+		snap := rt.Snapshot()
+		job, err := prepareBatchRequest(snap, c, withSkipRunningCheck())
 		if err != nil {
 			return
 		}
@@ -162,7 +163,7 @@ func cancelBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 
 		tempDir := job.GetStatus().TempDir
 		if tempDir == "" {
-			tempDir = rt.GetAPIConfig().BatchConfig().TempDir
+			tempDir = snap.APIConfig().BatchConfig().TempDir
 		}
 
 		// Wait for the job to reach a terminal state before cleaning up temp posters.
