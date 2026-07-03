@@ -39,6 +39,11 @@ export function buildBreadcrumbPath(currentPath: string, index: number): string 
 	return sep + selectedParts.join(sep);
 }
 
+export function pathSeparator(path?: string): string {
+	if (path && (/^[A-Za-z]:/.test(path) || path.startsWith('\\\\') || path.startsWith('//'))) return '\\';
+	return '/';
+}
+
 export function isRootPath(currentPath: string): boolean {
 	if (!currentPath) return true;
 	if (currentPath === '/') return true;
