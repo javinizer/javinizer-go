@@ -104,6 +104,47 @@ func NewMockActressRepo() *database.ActressRepository {
 	return database.NewActressRepository(db)
 }
 
+// NoOpAuth is a test-only commandutil.AuthProvider that bypasses authentication.
+// The auth middleware type-asserts to an IsDisabled() capability; only NoOpAuth
+// satisfies it, so the production *AuthManager always enforces real auth and this
+// path is unreachable in production. Test setup helpers auto-wire NoOpAuth via
+// GetTestRuntime so integration tests reach protected handlers without
+// per-test credentials. Tests that assert the fail-closed path set
+// deps.Auth = nil after retrieving the runtime.
+type NoOpAuth struct{}
+
+// SessionTTL returns a fixed one-hour TTL. Unused on the pass-through path.
+func (NoOpAuth) SessionTTL() time.Duration { return time.Hour }
+
+// IsInitialized always reports true. Unused on the pass-through path.
+func (NoOpAuth) IsInitialized() bool { return true }
+
+// AuthenticateSession always succeeds with a placeholder username.
+func (NoOpAuth) AuthenticateSession(string) (string, error) { return "test", nil }
+
+// Setup is a no-op that always succeeds.
+func (NoOpAuth) Setup(string, string) error { return nil }
+
+// Login always succeeds and returns a placeholder session ID.
+func (NoOpAuth) Login(string, string, bool) (string, error) { return "test-session", nil }
+
+// Logout is a no-op.
+func (NoOpAuth) Logout(string) {}
+
+// ValidateToken always succeeds and returns a placeholder token ID.
+func (NoOpAuth) ValidateToken(context.Context, string) (string, error) { return "test-token", nil }
+
+// UpdateTokenLastUsed is a no-op that always succeeds.
+func (NoOpAuth) UpdateTokenLastUsed(context.Context, string) error { return nil }
+
+// GetEnv always returns the empty string.
+func (NoOpAuth) GetEnv(string) string { return "" }
+
+// IsDisabled reports that authentication is bypassed. Only NoOpAuth implements
+// this; the production *AuthManager does not, so the middleware's type assertion
+// never matches in production.
+func (NoOpAuth) IsDisabled() bool { return true }
+
 // CreateTestDeps creates minimal *core.APIDeps for testing.
 // Per DEEP-2: the APIRuntime is stored internally and can be retrieved
 // via GetTestRuntime(deps). This avoids requiring all test callers to
@@ -181,6 +222,13 @@ var runtimeMap sync.Map
 // and returned. This prevents nil-pointer dereferences in test helpers
 // that construct *APIDeps directly and then call runtime methods.
 func GetTestRuntime(deps *core.APIDeps) *core.APIRuntime {
+	// Tests that don't care about auth get a pass-through NoOpAuth so the
+	// fail-closed middleware (nil deps.Auth → 503) doesn't block them. Tests
+	// that need real auth set deps.Auth before calling this; tests that need
+	// to assert the fail-closed path set deps.Auth = nil AFTER this call.
+	if deps != nil && deps.Auth == nil {
+		deps.Auth = NoOpAuth{}
+	}
 	val, ok := runtimeMap.Load(deps)
 	if ok {
 		return val.(*core.APIRuntime)

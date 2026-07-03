@@ -1057,7 +1057,8 @@ func TestRequireAuthenticated_NilDeps(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 	testRouter.ServeHTTP(w, req)
-	assert.True(t, called)
+	assert.False(t, called, "handler must not run when auth is unavailable")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
 func TestRequireTokenOrSession_ExportedWrapper(t *testing.T) {
@@ -1068,7 +1069,8 @@ func TestRequireTokenOrSession_ExportedWrapper(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 	testRouter.ServeHTTP(w, req)
-	assert.True(t, called)
+	assert.False(t, called, "handler must not run when auth is unavailable")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
 func TestRequireTokenOrSession_EmptyBearerValue(t *testing.T) {

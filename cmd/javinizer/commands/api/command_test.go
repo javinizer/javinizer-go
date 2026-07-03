@@ -14,6 +14,7 @@ import (
 	api "github.com/javinizer/javinizer-go/cmd/javinizer/commands/api"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	apiserver "github.com/javinizer/javinizer-go/internal/api/server"
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -142,6 +143,7 @@ func createTestAPIServer(t *testing.T) *core.APIRuntime {
 		JobStore: jobStore,
 	}
 	deps.CoreDeps.SetConfig(cfg)
+	deps.Auth = testkit.NoOpAuth{}
 
 	rt := core.NewAPIRuntime(deps)
 	return rt

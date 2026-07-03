@@ -19,7 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
-// --- requireTokenOrSession: nil deps calls c.Next() ---
+// --- requireTokenOrSession: nil deps fails closed (503) ---
 
 func TestRequireTokenOrSession_Miss2_NilDeps(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -31,7 +31,8 @@ func TestRequireTokenOrSession_Miss2_NilDeps(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.True(t, called)
+	assert.False(t, called, "handler must not run when auth is unavailable")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
 // --- requireTokenOrSession: Bearer token without jv_ prefix ---
@@ -206,7 +207,7 @@ func TestRequireTokenOrSession_Miss2_SessionAuthNotInitialized(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-// --- authMiddleware: nil deps with Bearer token should call c.Next() ---
+// --- requireTokenOrSession: nil deps with Bearer token still fails closed (503) ---
 
 func TestRequireTokenOrSession_Miss2_NilDepsWithBearer(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -219,7 +220,8 @@ func TestRequireTokenOrSession_Miss2_NilDepsWithBearer(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.True(t, called)
+	assert.False(t, called, "handler must not run when auth is unavailable")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
 // --- setupAuth: remote setup with valid bootstrap secret ---

@@ -41,8 +41,10 @@ func TestLoginAuth_Miss_NilDeps(t *testing.T) {
 func TestLoginAuth_Miss_NilAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	deps := &core.APIDeps{}
+	rt := testkit.GetTestRuntime(deps)
+	deps.Auth = nil
 	router := gin.New()
-	router.POST("/login", loginAuth(testkit.GetTestRuntime(deps)))
+	router.POST("/login", loginAuth(rt))
 
 	body := []byte(`{"username":"admin","password":"password123"}`)
 	req := httptest.NewRequest("POST", "/login", bytes.NewReader(body))
@@ -183,8 +185,10 @@ func TestGetAuthStatus_Miss_NilDeps(t *testing.T) {
 func TestGetAuthStatus_Miss_NilAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	deps := &core.APIDeps{}
+	rt := testkit.GetTestRuntime(deps)
+	deps.Auth = nil
 	router := gin.New()
-	router.GET("/status", getAuthStatus(testkit.GetTestRuntime(deps)))
+	router.GET("/status", getAuthStatus(rt))
 
 	req := httptest.NewRequest("GET", "/status", nil)
 	w := httptest.NewRecorder()
@@ -305,8 +309,10 @@ func TestSetupAuth_Miss_NilDeps(t *testing.T) {
 func TestSetupAuth_Miss_NilAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	deps := &core.APIDeps{}
+	rt := testkit.GetTestRuntime(deps)
+	deps.Auth = nil
 	router := gin.New()
-	router.POST("/setup", setupAuth(testkit.GetTestRuntime(deps)))
+	router.POST("/setup", setupAuth(rt))
 
 	body := []byte(`{"username":"admin","password":"password123"}`)
 	req := httptest.NewRequest("POST", "/setup", bytes.NewReader(body))
@@ -360,8 +366,10 @@ func TestLogoutAuth_Miss_NilDeps(t *testing.T) {
 func TestLogoutAuth_Miss_NilAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	deps := &core.APIDeps{}
+	rt := testkit.GetTestRuntime(deps)
+	deps.Auth = nil
 	router := gin.New()
-	router.POST("/logout", logoutAuth(testkit.GetTestRuntime(deps)))
+	router.POST("/logout", logoutAuth(rt))
 
 	req := httptest.NewRequest("POST", "/logout", nil)
 	w := httptest.NewRecorder()
@@ -370,21 +378,25 @@ func TestLogoutAuth_Miss_NilAuth(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-// --- requireTokenOrSession: nil Auth with session cookie should call c.Next() ---
+// --- requireTokenOrSession: nil auth with cookie still fails closed (503) ---
 
 func TestRequireTokenOrSession_Miss_NilAuthWithCookie(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	deps := &core.APIDeps{}
+	rt := testkit.GetTestRuntime(deps)
+	deps.Auth = nil
 	called := false
 	router := gin.New()
-	router.GET("/test", requireTokenOrSession(testkit.GetTestRuntime(deps)), func(c *gin.Context) { called = true })
+	router.GET("/test", requireTokenOrSession(rt), func(c *gin.Context) { called = true })
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "some-session"})
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.True(t, called)
+	// A cookie must not bypass fail-closed: nil auth still returns 503.
+	assert.False(t, called, "handler must not run when auth is unavailable")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
 // --- requireTokenOrSession: initialized but non-NotFound session error ---
