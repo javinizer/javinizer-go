@@ -523,6 +523,16 @@ func (n *noOpLogger) Warnf(_ string, _ ...any)  {}
 func (n *noOpLogger) Error(_ ...any)            {}
 func (n *noOpLogger) Errorf(_ string, _ ...any) {}
 
+// SetOutput swaps the global logger's output writer and returns a restoration
+// function. Intended for tests that need to assert on log output. Call the
+// returned function (typically deferred) to restore the previous writer.
+func SetOutput(w io.Writer) func() {
+	l := getLogger()
+	prev := l.Out
+	l.SetOutput(w)
+	return func() { l.SetOutput(prev) }
+}
+
 // GetFileOutputs extracts file paths from a comma-separated output string.
 // Returns only file paths (excludes "stdout" and "stderr").
 // Returns nil if no file outputs are found.

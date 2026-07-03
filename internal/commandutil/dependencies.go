@@ -3,6 +3,7 @@ package commandutil
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -50,6 +51,10 @@ type CoreDeps struct {
 	// Logger is the structured logger seam. Defaults to GlobalLogger() when nil.
 	// Inject a mock/spy in tests; production code leaves this nil for the global default.
 	Logger logging.Logger
+
+	// r18DumpCloser holds the local r18.dev dump sidecar handle (when opened)
+	// so it can be released in Close().
+	r18DumpCloser io.Closer
 
 	// config is the single source of truth for the application config.
 	// Both CLI (set once at construction) and API (hot-reloaded via
@@ -160,7 +165,15 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 			return nil, fmt.Errorf("failed to finalize scraper config: %w", err)
 		}
 
-		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), database.NewContentIDMappingRepository(deps.DB))
+		r18DumpLookup, r18DumpCloser, dumpErr := OpenR18DevDumpLookup(cfg)
+		if dumpErr != nil {
+			// A broken dump setup (permission denied, corrupt file) is surfaced
+			// here rather than silently downgraded to "absent". The app keeps
+			// working via HTTP fallback, but the failure is logged so it is
+			// diagnosable instead of looking like the dump was never downloaded.
+			logging.Warnf("%v", dumpErr)
+		}
+		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), database.NewContentIDMappingRepository(deps.DB), r18DumpLookup)
 		if err != nil {
 			// Only close a DB we created here; never close an injected one
 			// (avoids leaking or double-closing injected handles).
@@ -170,6 +183,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 			return nil, fmt.Errorf("failed to initialize scraper registry: %w", err)
 		}
 		deps.ScraperRegistry = registry
+		deps.r18DumpCloser = r18DumpCloser
 	}
 
 	// Use injected logger or default to GlobalLogger
@@ -255,10 +269,22 @@ func (d *CoreDeps) ReplaceReloadable(cfg *config.Config, registry *scraperutil.S
 // Close closes all resources held by the CoreDeps.
 // Should be called when done using the CoreDeps.
 func (d *CoreDeps) Close() error {
+	if d.r18DumpCloser != nil {
+		_ = d.r18DumpCloser.Close()
+	}
 	if d.DB != nil {
 		return d.DB.Close()
 	}
 	return nil
+}
+
+// ReplaceR18DevDumpCloser swaps the local r18.dev dump sidecar handle, returning
+// the previous closer (if any) for the caller to close. Used by API hot-reload
+// to release the old read connection when the config (or dump path) changes.
+func (d *CoreDeps) ReplaceR18DevDumpCloser(newCloser io.Closer) io.Closer {
+	old := d.r18DumpCloser
+	d.r18DumpCloser = newCloser
+	return old
 }
 
 // bootstrapResult holds the fully initialized dependency stack:

@@ -323,6 +323,14 @@ metadata:
     tag_database:
         enabled: false  # Enable per-movie tag lookup (opt-in feature)
 
+    # Local r18.dev dump lookup (SQLite-backed)
+    # When the dump database is present (created by `javinizer dump download`),
+    # the r18.dev scraper resolves content_ids locally instead of via
+    # rate-limit-prone HTTP probing. Harmless when the file is absent.
+    r18dev_dump:
+        enabled: true  # Activates automatically once the dump is downloaded
+        path: data/r18dev/r18dev_dump.db  # Sidecar SQLite path (relative to working dir)
+
     # Metadata translation pipeline
     translation:
         enabled: false                # Opt-in: disabled by default

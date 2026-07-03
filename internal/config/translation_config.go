@@ -23,6 +23,7 @@ type MetadataConfig struct {
 	GenreReplacement GenreReplacementConfig `yaml:"genre_replacement" json:"genre_replacement"` // Genre replacement/normalization (SQLite-backed)
 	WordReplacement  WordReplacementConfig  `yaml:"word_replacement" json:"word_replacement"`   // Word uncensor/text replacement (SQLite-backed)
 	TagDatabase      tagDatabaseConfig      `yaml:"tag_database" json:"tag_database"`           // Per-movie tag database (SQLite-backed)
+	R18DevDump       R18DevDumpConfig       `yaml:"r18dev_dump" json:"r18dev_dump"`             // Local r18.dev dump lookup (SQLite-backed)
 	Translation      TranslationConfig      `yaml:"translation" json:"translation"`             // Metadata translation pipeline
 	IgnoreGenres     []string               `yaml:"ignore_genres" json:"ignore_genres"`
 	RequiredFields   []string               `yaml:"required_fields" json:"required_fields"`
@@ -298,6 +299,14 @@ type WordReplacementConfig struct {
 // tagDatabaseConfig holds per-movie tag database configuration
 type tagDatabaseConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"` // Enable per-movie tag lookup from database
+}
+
+// R18DevDumpConfig holds configuration for the local r18.dev dump sidecar.
+// When enabled and the dump database is present, the r18.dev scraper consults
+// it for exact content_id resolution before falling back to live HTTP probing.
+type R18DevDumpConfig struct {
+	Enabled bool   `yaml:"enabled" json:"enabled"` // Consult local dump before HTTP content_id resolution
+	Path    string `yaml:"path" json:"path"`       // Sidecar SQLite path (empty = default data/r18dev/r18dev_dump.db)
 }
 
 // completenessConfig holds completeness scoring configuration

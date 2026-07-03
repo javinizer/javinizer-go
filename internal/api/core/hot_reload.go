@@ -6,6 +6,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -47,6 +48,9 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	if cfg == nil {
 		return fmt.Errorf("ReloadConfig: config is nil")
 	}
+	if r.deps.CoreDeps == nil {
+		return fmt.Errorf("ReloadConfig: CoreDeps is not initialized")
+	}
 	reg := scraperutil.NewScraperRegistry()
 	scraper.RegisterAll(reg)
 
@@ -56,14 +60,27 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 		return fmt.Errorf("failed to finalize scraper config: %w", err)
 	}
 
-	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), r.deps.Repos.ContentIDMappingRepo)
+	r18DumpLookup, r18DumpCloser, dumpErr := commandutil.OpenR18DevDumpLookup(cfg)
+	if dumpErr != nil {
+		// Surface a broken dump setup (permission denied, corrupt file) instead
+		// of silently downgrading to "absent". The reload keeps working via HTTP
+		// fallback, but the failure is logged so it is diagnosable.
+		logging.Warnf("%v", dumpErr)
+	}
+	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
 	if err != nil {
 		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
-	if r.deps.CoreDeps == nil {
-		return fmt.Errorf("ReloadConfig: CoreDeps is not initialized")
-	}
+	// Swap the reloadables BEFORE retiring the old dump handle. Closing the
+	// old closer first would leave a window where the still-active scraper
+	// registry references a closed SQLite connection and dump-backed searches
+	// fail. Replacing first ensures new lookups route to the new dump store
+	// before the old one is released.
+	old := r.deps.CoreDeps.ReplaceR18DevDumpCloser(r18DumpCloser)
 	r.deps.CoreDeps.ReplaceReloadable(cfg, newRegistry)
+	if old != nil {
+		_ = old.Close()
+	}
 
 	// Rebuild APIConfig and invalidate the workflow factories.
 	r.invalidateFactories(cfg)

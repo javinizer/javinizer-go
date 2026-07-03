@@ -168,6 +168,10 @@ func defaultMetadataConfig() MetadataConfig {
 		TagDatabase: tagDatabaseConfig{
 			Enabled: false, // Opt-in feature for per-movie custom tags
 		},
+		R18DevDump: R18DevDumpConfig{
+			Enabled: true,                         // Harmless without the dump file; activates on `javinizer dump download`
+			Path:    "data/r18dev/r18dev_dump.db", // Relative to working dir, like the main DB
+		},
 		Translation:  defaultTranslationConfig(),
 		IgnoreGenres: []string{},
 		NFO:          defaultNFOConfig(),
