@@ -326,3 +326,107 @@ func TestApplyFieldOverride_ConcurrentDifferentFieldsSameResult(t *testing.T) {
 		assert.Equal(t, "r18dev", finalProv.FieldSources["title"], "title provenance lost on iter %d", iter)
 	}
 }
+
+func TestApplyFieldOverride_NilMovie(t *testing.T) {
+	_, prov := overrideFixture()
+	prov = &ProvenanceData{ScraperResults: prov.ScraperResults}
+	err := applyFieldOverride(nil, prov, "maker", "dmm")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nil movie")
+}
+
+func TestApplyFieldOverride_NilReleaseDateClearsYear(t *testing.T) {
+	movie, prov := overrideFixture()
+	movie.ReleaseYear = 1999
+	dmm := findScraperResult(prov.ScraperResults, "dmm")
+	require.NotNil(t, dmm)
+	dmm.ReleaseDate = nil
+	err := applyFieldOverride(movie, prov, "release_date", "dmm")
+	require.NoError(t, err)
+	assert.Nil(t, movie.ReleaseDate)
+	assert.Equal(t, 0, movie.ReleaseYear)
+}
+
+func TestApplyFieldOverride_NilRatingScoresDefaultZero(t *testing.T) {
+	movie, prov := overrideFixture()
+	dmm := findScraperResult(prov.ScraperResults, "dmm")
+	require.NotNil(t, dmm)
+	dmm.Rating = nil
+	require.NoError(t, applyFieldOverride(movie, prov, "rating_score", "dmm"))
+	assert.Equal(t, float64(0), movie.RatingScore)
+	require.NoError(t, applyFieldOverride(movie, prov, "rating_votes", "dmm"))
+	assert.Equal(t, 0, movie.RatingVotes)
+}
+
+func TestApplyFieldOverride_EmptyActressListClearsSources(t *testing.T) {
+	movie, prov := overrideFixture()
+	dmm := findScraperResult(prov.ScraperResults, "dmm")
+	dmm.Actresses = nil
+	require.NoError(t, applyFieldOverride(movie, prov, "actresses", "dmm"))
+	assert.Nil(t, movie.Actresses)
+	assert.Nil(t, prov.ActressSources)
+}
+
+func TestApplyFieldOverride_EmptyGenreList(t *testing.T) {
+	movie, prov := overrideFixture()
+	dmm := findScraperResult(prov.ScraperResults, "dmm")
+	dmm.Genres = nil
+	require.NoError(t, applyFieldOverride(movie, prov, "genres", "dmm"))
+	assert.Nil(t, movie.Genres)
+}
+
+func TestApplyFieldOverride_UnhandledKeyErrors(t *testing.T) {
+	_, ok := fieldOverrideKeys["bogus"]
+	require.False(t, ok)
+}
+
+func TestRebuildActressSources_EmptyKeySkipped(t *testing.T) {
+	prov := &ProvenanceData{}
+	rebuildActressSources(prov, []models.Actress{{FirstName: "", LastName: "", JapaneseName: "", DMMID: 0}}, "dmm")
+	assert.Nil(t, prov.ActressSources, "actress with no identifying fields yields no source keys")
+}
+
+func TestRebuildActressSources_EmptyListClears(t *testing.T) {
+	prov := &ProvenanceData{ActressSources: map[string]string{"name:x": "dmm"}}
+	rebuildActressSources(prov, nil, "dmm")
+	assert.Nil(t, prov.ActressSources)
+}
+
+func TestApplyFieldOverride_ResultNotFound(t *testing.T) {
+	tracker := NewResultTracker(1, []string{"x.mp4"})
+	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker}
+	_, _, err := je.ApplyFieldOverride(context.Background(), "nope", "maker", "dmm")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestApplyFieldOverride_BogusSourceErrors(t *testing.T) {
+	movie, prov := overrideFixture()
+	filePath := "test.mp4"
+	resultID := "res-001"
+	tracker := NewResultTracker(1, []string{filePath})
+	tracker.Updater().UpdateFileResult(filePath, &MovieResult{
+		ResultID: resultID, FileMatchInfo: models.FileMatchInfo{Path: filePath}, Movie: movie, Status: models.JobStatusCompleted,
+	})
+	tracker.Updater().SetProvenance(filePath, prov)
+	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker}
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "nonexistent-source")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not contribute")
+}
+
+func TestApplyFieldOverride_NilProvenanceUsesSynthesizedFallback(t *testing.T) {
+	movie, _ := overrideFixture()
+	filePath := "test.mp4"
+	resultID := "res-001"
+	tracker := NewResultTracker(1, []string{filePath})
+	tracker.Updater().UpdateFileResult(filePath, &MovieResult{
+		ResultID: resultID, FileMatchInfo: models.FileMatchInfo{Path: filePath}, Movie: movie, Status: models.JobStatusCompleted,
+	})
+	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker}
+	res, prov, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "scraper")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NotNil(t, prov)
+	assert.Equal(t, "scraper", prov.FieldSources["maker"])
+}

@@ -1064,3 +1064,53 @@ func TestNilReceiverNoPanic(t *testing.T) {
 		}, "ScraperResult.NormalizeMediaURLs() should not panic on nil receiver")
 	})
 }
+
+func TestScraperResult_Clone(t *testing.T) {
+	t.Run("nil receiver returns nil", func(t *testing.T) {
+		var sr *ScraperResult
+		assert.Nil(t, sr.Clone())
+	})
+
+	t.Run("deep copies slices and pointers", func(t *testing.T) {
+		date := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
+		orig := &ScraperResult{
+			Source:        "dmm",
+			ID:            "IPX-1",
+			ReleaseDate:   &date,
+			Rating:        &Rating{Score: 9.5, Votes: 100},
+			Actresses:     []ActressInfo{{FirstName: "A"}},
+			Genres:        []string{"Drama"},
+			ScreenshotURL: []string{"s1.jpg"},
+			Translations:  []MovieTranslation{{Language: "en", Title: "Eng"}},
+		}
+
+		clone := orig.Clone()
+		require.NotNil(t, clone)
+		assert.Equal(t, orig, clone)
+
+		clone.Actresses[0].FirstName = "B"
+		clone.Genres[0] = "Comedy"
+		clone.ScreenshotURL[0] = "s2.jpg"
+		clone.Translations[0].Title = "Changed"
+		*clone.ReleaseDate = time.Time{}
+		clone.Rating.Score = 0
+
+		assert.Equal(t, "A", orig.Actresses[0].FirstName, "Actresses slice must be deep-copied")
+		assert.Equal(t, "Drama", orig.Genres[0], "Genres slice must be deep-copied")
+		assert.Equal(t, "s1.jpg", orig.ScreenshotURL[0], "ScreenshotURL slice must be deep-copied")
+		assert.Equal(t, "Eng", orig.Translations[0].Title, "Translations slice must be deep-copied")
+		assert.Equal(t, date, *orig.ReleaseDate, "ReleaseDate pointer must be deep-copied")
+		assert.Equal(t, 9.5, orig.Rating.Score, "Rating pointer must be deep-copied")
+	})
+
+	t.Run("nil slices and pointers stay nil", func(t *testing.T) {
+		clone := (&ScraperResult{Source: "x"}).Clone()
+		require.NotNil(t, clone)
+		assert.Nil(t, clone.ReleaseDate)
+		assert.Nil(t, clone.Rating)
+		assert.Nil(t, clone.Actresses)
+		assert.Nil(t, clone.Genres)
+		assert.Nil(t, clone.ScreenshotURL)
+		assert.Nil(t, clone.Translations)
+	})
+}
