@@ -192,6 +192,9 @@ func StartScrapeUseCase(
 	matchInfo := fileMatchInfoMap
 
 	factory := snap.BatchJobFactory()
+	if factory == nil {
+		return nil, fmt.Errorf("batch job factory unavailable — workflow factory not ready; retry the request")
+	}
 
 	job := factory.CreateJob(allFiles, worker.BatchJobOptions{
 		ID:                    jobID,

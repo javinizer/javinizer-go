@@ -112,6 +112,15 @@ type APIRuntime struct {
 	// Rebuilt on every config hot-reload via ConfigFromAppConfig under reloadMu.
 	apiCfg APIConfig
 
+	// reloadGen is bumped under reloadMu on every config publication (reload /
+	// SetConfig). RuntimeSnapshot captures it so its factory accessors can tell
+	// whether a reload has landed since the snapshot was taken: a generation
+	// match means the shared caches are still valid for this snapshot, while a
+	// mismatch means the caches may hold a newer epoch and must not be served.
+	// Comparing generations is more robust than cfg-pointer equality, which
+	// misses a reload that reuses the same *config.Config with a new registry.
+	reloadGen uint64
+
 	// workflowFactory caches the shared dependency sub-graph (scraper, matcher,
 	// organizer, downloader, NFO generator, template engine, scanner, poster
 	// generator). Nil until first access; niled on config reload so the next
@@ -232,6 +241,7 @@ type RuntimeSnapshot struct {
 	cfg      *config.Config
 	registry *scraperutil.ScraperRegistry
 	apiCfg   APIConfig
+	gen      uint64
 }
 
 // Config returns the application config captured in this snapshot.
@@ -261,20 +271,20 @@ func (r *APIRuntime) Snapshot() *RuntimeSnapshot {
 		cfg:      r.deps.CoreDeps.GetConfig(),
 		registry: r.deps.CoreDeps.GetRegistry(),
 		apiCfg:   r.apiCfg,
+		gen:      r.reloadGen,
 	}
 }
 
 // WorkflowFactory returns a WorkflowFactory consistent with this snapshot.
 //
-// If no reload has landed since the snapshot was taken (the current config
-// pointer still equals the snapshot's config), the shared lazy cache is reused
-// — the cache is only populated/invalidated under reloadMu, and holding
-// reloadMu.RLock here prevents a reload from invalidating it mid-read, so the
-// cached factory was necessarily built from the snapshot's config. This keeps
-// the hot path (cache hit) cheap.
+// If no reload has landed since the snapshot was taken (reloadGen unchanged),
+// the shared lazy cache is reused — the cache is only populated/invalidated
+// under reloadMu, and holding reloadMu.RLock here prevents a reload from
+// invalidating it mid-read, so the cached factory was necessarily built from
+// the snapshot's config. This keeps the hot path (cache hit) cheap.
 //
-// If a reload has landed (config pointer differs), the shared cache may now hold
-// a factory built from a newer config. Rather than serve a mismatched factory,
+// If a reload has landed (generation differs), the shared cache may now hold a
+// factory built from a newer config. Rather than serve a mismatched factory,
 // this builds a fresh factory from the snapshot's captured cfg/registry WITHOUT
 // caching it — caching a stale-epoch build would stomp the newer cache. This
 // rebuild only happens on a request that straddles a reload (rare), so the perf
@@ -282,8 +292,7 @@ func (r *APIRuntime) Snapshot() *RuntimeSnapshot {
 func (s *RuntimeSnapshot) WorkflowFactory() (*workflow.WorkflowFactory, error) {
 	r := s.rt
 	r.reloadMu.RLock()
-	currentCfg := r.deps.CoreDeps.GetConfig()
-	sameEpoch := currentCfg == s.cfg
+	sameEpoch := r.reloadGen == s.gen
 	var cached any
 	if sameEpoch {
 		// Safe under RLock: a reload cannot invalidate the cache concurrently.
@@ -353,20 +362,27 @@ func (s *RuntimeSnapshot) Matcher() matcher.MatcherInterface {
 // BatchJobFactory constructs a BatchJobFactory consistent with this snapshot.
 //
 // Hot path (no reload since the snapshot): reuses the shared lazy cache under
-// reloadMu.RLock — matching WorkflowFactory()'s gen-check — so SetReconstructionDeps
-// (which iterates every job in the store) runs once per reload epoch, not once
-// per request. Only when a reload has landed mid-request does this build fresh
-// from snap.APIConfig()/PosterGen()/Matcher() without caching, so a stale-epoch
-// request still gets a consistent factory without poisoning the newer cache.
+// reloadMu.RLock — matching WorkflowFactory()'s generation check — so
+// SetReconstructionDeps (which iterates every job in the store) runs once per
+// reload epoch, not once per request. Only when a reload has landed mid-request
+// does this build fresh from snap.APIConfig()/PosterGen()/Matcher() without
+// caching, so a stale-epoch request still gets a consistent factory without
+// poisoning the newer cache.
+//
+// The stale-epoch fresh build deliberately does NOT call SetReconstructionDeps:
+// that mutates the shared JobStore and every reconstructed job, so a stale
+// request could otherwise roll current jobs back to old Matcher/PosterGen/
+// BatchCfg after the new epoch was published. Reconstruction hydration stays on
+// the current-epoch lazy build path (buildBatchJobFactory), which is always
+// up-to-date by definition.
 func (s *RuntimeSnapshot) BatchJobFactory() worker.BatchJobFactoryInterface {
 	r := s.rt
 	r.reloadMu.RLock()
-	currentCfg := r.deps.CoreDeps.GetConfig()
-	sameEpoch := currentCfg == s.cfg
+	sameEpoch := r.reloadGen == s.gen
 	var cached any
 	if sameEpoch {
 		// Safe under RLock: a reload cannot invalidate the cache concurrently,
-		// and the cache was populated from s.cfg if sameEpoch holds.
+		// and the cache was populated from this generation if sameEpoch holds.
 		cached = r.batchJobFactory.Get()
 	}
 	r.reloadMu.RUnlock()
@@ -376,6 +392,10 @@ func (s *RuntimeSnapshot) BatchJobFactory() worker.BatchJobFactoryInterface {
 	if sameEpoch {
 		return nil
 	}
+	// Reload landed between snapshot and here: build fresh from the snapshot's
+	// own apiCfg/PosterGen/Matcher so the factory is internally consistent with
+	// snap.APIConfig(). Not cached, and does NOT call SetReconstructionDeps —
+	// see the doc comment above.
 	batchCfg := s.apiCfg.BatchConfig()
 	posterGen := s.PosterGen()
 	if posterGen == nil {
@@ -389,9 +409,6 @@ func (s *RuntimeSnapshot) BatchJobFactory() worker.BatchJobFactoryInterface {
 		ScraperPriority: batchCfg.ScraperPriority,
 		NFOEnabled:      batchCfg.NFOEnabled,
 	}
-	// Re-hydrate reconstructed jobs with infrastructure deps (matcher, posterGen,
-	// batchCfg) that were not available at JobStore construction time.
-	r.deps.JobStore.SetReconstructionDeps(matcherIface, posterGen, workerBatchCfg)
 	return worker.NewBatchJobFactory(
 		r.deps.JobStore,
 		nil, // WF is per-job (BatchWorkflow), not shared across all jobs
@@ -403,23 +420,35 @@ func (s *RuntimeSnapshot) BatchJobFactory() worker.BatchJobFactoryInterface {
 }
 
 // PosterManager returns a PosterManager built from the snapshot's config (for
-// tempDir) so it is consistent with snap.APIConfig(). Mirrors GetPosterManager
-// but uses snap.cfg instead of re-reading CoreDeps. Returns nil if the snapshot
+// tempDir) so it is consistent with snap.APIConfig(). Returns nil if the snapshot
 // has no config (e.g. a test-only snapshot from NewSnapshotForTesting).
+//
+// Only routes through the shared RuntimeState cache when the snapshot's
+// generation is current; a stale snapshot otherwise builds an uncached manager
+// from snap.cfg so it can neither read nor repopulate the global cache with a
+// mismatched TempDir from a different epoch.
 func (s *RuntimeSnapshot) PosterManager() poster.PosterManagerInterface {
 	if s.cfg == nil {
 		return nil
 	}
 	r := s.rt
-	rs := r.GetRuntime()
-	if rs == nil {
+	buildFromSnap := func() poster.PosterManagerInterface {
 		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
 		return poster.NewPosterManager(r.deps.GetFs(), s.cfg.System.TempDir, httpClient)
 	}
-	return rs.GetPosterManager(func() poster.PosterManagerInterface {
-		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
-		return poster.NewPosterManager(r.deps.GetFs(), s.cfg.System.TempDir, httpClient)
-	})
+	rs := r.GetRuntime()
+	if rs == nil {
+		return buildFromSnap()
+	}
+	// Stale snapshot: don't touch the shared cache — build an uncached manager
+	// from this snapshot's captured config.
+	r.reloadMu.RLock()
+	current := r.reloadGen == s.gen
+	r.reloadMu.RUnlock()
+	if !current {
+		return buildFromSnap()
+	}
+	return rs.GetPosterManager(buildFromSnap)
 }
 
 // NewSnapshotForTesting builds a RuntimeSnapshot without requiring a configured
@@ -633,12 +662,14 @@ func (r *APIRuntime) SetConfig(cfg *config.Config) {
 	if r.deps.CoreDeps == nil {
 		r.deps.CoreDeps = &commandutil.CoreDeps{}
 	}
-	// Publish cfg and apiCfg together under reloadMu so a concurrent
-	// GetAPIConfig/Snapshot cannot see new cfg with stale apiCfg.
+	// Publish cfg, apiCfg, generation bump, and factory invalidation together
+	// under reloadMu — the same atomic path reload uses — so a concurrent
+	// GetAPIConfig/Snapshot cannot see new cfg with stale apiCfg or stale cached
+	// factories.
 	r.reloadMu.Lock()
 	defer r.reloadMu.Unlock()
 	r.deps.CoreDeps.SetConfig(cfg)
-	r.apiCfg = ConfigFromAppConfig(cfg)
+	r.invalidateFactoriesLocked(cfg)
 }
 
 // ReloadConfig is defined in hot_reload.go.

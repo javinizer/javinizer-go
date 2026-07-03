@@ -82,7 +82,12 @@ func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		applyOpts, resolveErr := resolveOrganizeApplyConfig(snap, snap.BatchJobFactory(), job, req)
+		factory := snap.BatchJobFactory()
+		if factory == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "batch job factory unavailable — workflow factory not ready; retry the request"})
+			return
+		}
+		applyOpts, resolveErr := resolveOrganizeApplyConfig(snap, factory, job, req)
 		if resolveErr != nil {
 			if resolveErr.Error() == "Access denied to requested directory" {
 				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: resolveErr.Error()})
@@ -153,7 +158,12 @@ func updateBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 		// One snapshot so the apply-config builder (apiCfg) and prepareAndLaunchApply
 		// (workflow) see the same reload epoch (issue #44).
 		snap := rt.Snapshot()
-		applyOpts, err := resolveUpdateApplyConfig(snap, snap.BatchJobFactory(), job, req)
+		factory := snap.BatchJobFactory()
+		if factory == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "batch job factory unavailable — workflow factory not ready; retry the request"})
+			return
+		}
+		applyOpts, err := resolveUpdateApplyConfig(snap, factory, job, req)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return

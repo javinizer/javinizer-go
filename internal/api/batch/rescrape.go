@@ -86,10 +86,15 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		// Delegate to orchestrator for resolve→construct→execute pipeline.
+		factory := snap.BatchJobFactory()
+		if factory == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "batch job factory unavailable — workflow factory not ready; retry the request"})
+			return
+		}
 		orch := NewRescrapeOrchestrator(RescrapeDeps{
 			JobStore:  rt.Deps().GetJobStore(),
 			WfFactory: &apiWorkflowFactory{snap: snap},
-			Factory:   snap.BatchJobFactory(),
+			Factory:   factory,
 			Persist:   rt.Deps().GetJobStore(),
 			Broadcast: nil, // no progress broadcast for single rescrape
 			ServerCtx: rt.ServerCtx(),

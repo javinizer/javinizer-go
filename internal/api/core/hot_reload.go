@@ -156,6 +156,7 @@ func InvalidateWorkflowCachesOnRuntime(rt *APIRuntime) func() {
 // are atomic relative to the registry swap in ReplaceReloadable/ReloadConfig.
 func (r *APIRuntime) invalidateFactoriesLocked(cfg *config.Config) {
 	r.apiCfg = ConfigFromAppConfig(cfg)
+	r.reloadGen++
 
 	r.workflowFactory.Invalidate()
 	r.batchJobFactory.Invalidate()
