@@ -94,6 +94,15 @@ func TestApplyFieldOverride_NoScraperResults(t *testing.T) {
 	assert.Contains(t, err.Error(), "did not contribute")
 }
 
+func TestApplyFieldOverride_SynthesizedSourceFallback(t *testing.T) {
+	movie := &models.Movie{ID: "ABC-001", Title: "Cached Title", Maker: "Cached Maker"}
+	prov := &ProvenanceData{}
+	err := applyFieldOverride(movie, prov, "maker", "scraper")
+	require.NoError(t, err)
+	assert.Equal(t, "Cached Maker", movie.Maker)
+	assert.Equal(t, "scraper", prov.FieldSources["maker"])
+}
+
 func overrideFixture() (*models.Movie, *ProvenanceData) {
 	dmmDate := time.Date(2021, 6, 1, 0, 0, 0, 0, time.UTC)
 	prov := &ProvenanceData{

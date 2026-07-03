@@ -180,7 +180,8 @@ func TestRun_CacheHit(t *testing.T) {
 	assert.NotNil(t, movie)
 	assert.Equal(t, "IPX-123", movie.ID)
 	assert.Equal(t, "Cached Movie", movie.Title)
-	assert.Nil(t, results, "Cache hit should not return scraper results")
+	assert.Len(t, results, 1, "Cache hit should return one synthesized scraper result for the source-merge modal")
+	assert.NotEmpty(t, results[0].Source, "synthesized result must carry a source label")
 }
 
 // TestRun_ForceRefresh tests that --force flag clears cache and scrapes fresh

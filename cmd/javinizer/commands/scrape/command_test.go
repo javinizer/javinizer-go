@@ -329,7 +329,8 @@ matching:
 
 	require.NoError(t, err)
 	assert.NotNil(t, movie)
-	assert.Nil(t, results) // Cache hit returns nil results
+	assert.Len(t, results, 1, "Cache hit returns one synthesized scraper result")
+	assert.NotEmpty(t, results[0].Source)
 
 	// Verify: should have updated the translation (replaced old with new)
 	assert.Len(t, movie.Translations, 1, "should replace old translation with new one")
@@ -418,7 +419,8 @@ matching:
 
 	require.NoError(t, err)
 	assert.NotNil(t, movie)
-	assert.Nil(t, results) // Cache hit
+	assert.Len(t, results, 1, "Cache hit returns one synthesized scraper result")
+	assert.NotEmpty(t, results[0].Source)
 
 	// Verify: should have only 1 translation (no new one added)
 	assert.Len(t, movie.Translations, 1, "should NOT add duplicate translation")

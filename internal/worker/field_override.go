@@ -12,25 +12,26 @@ import (
 // the aggregator (stringFieldSpecs + the dedicated assign* methods) and
 // buildFieldSourcesFromCachedMovie, so the override speaks the same language
 // as the existing "via {source}" provenance tooltips.
-var fieldOverrideKeys = map[string]struct{}{
-	"id": {}, "content_id": {}, "title": {}, "display_title": {},
-	"original_title": {}, "description": {}, "director": {}, "maker": {},
-	"label": {}, "series": {}, "runtime": {}, "release_date": {},
-	"rating_score": {}, "rating_votes": {}, "actresses": {}, "genres": {},
-	"screenshot_urls": {}, "poster_url": {}, "cover_url": {},
-	"trailer_url": {}, "should_crop_poster": {},
+var supportedFieldOverrideKeys = []string{
+	"id", "content_id", "title", "display_title", "original_title",
+	"description", "director", "maker", "label", "series", "runtime",
+	"release_date", "rating_score", "rating_votes", "actresses", "genres",
+	"screenshot_urls", "poster_url", "cover_url", "trailer_url",
+	"should_crop_poster",
 }
+
+var fieldOverrideKeys = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(supportedFieldOverrideKeys))
+	for _, k := range supportedFieldOverrideKeys {
+		m[k] = struct{}{}
+	}
+	return m
+}()
 
 // SupportedFieldOverrideKeys returns the field-source keys a user may override
 // via the review-page source viewer, in a stable order for UI rendering.
 func SupportedFieldOverrideKeys() []string {
-	return []string{
-		"id", "content_id", "title", "display_title", "original_title",
-		"description", "director", "maker", "label", "series", "runtime",
-		"release_date", "rating_score", "rating_votes", "actresses", "genres",
-		"screenshot_urls", "poster_url", "cover_url", "trailer_url",
-		"should_crop_poster",
-	}
+	return append([]string(nil), supportedFieldOverrideKeys...)
 }
 
 // applyFieldOverride overwrites a single field on movie with the value from the
@@ -57,6 +58,15 @@ func applyFieldOverride(movie *models.Movie, prov *ProvenanceData, fieldKey, sou
 		return fmt.Errorf("unsupported field: %s", fieldKey)
 	}
 	result := findScraperResult(prov.ScraperResults, source)
+	if result == nil {
+		// Legacy/cache-hit movies may carry no persisted raw ScraperResults,
+		// but getBatchMovieSources synthesizes a single-source envelope from
+		// the cached movie for display. Mirror that fallback here so the
+		// displayed source remains selectable.
+		if synth := scrape.ScraperResultFromCachedMovie(movie); synth != nil {
+			result = findScraperResult([]*models.ScraperResult{synth}, source)
+		}
+	}
 	if result == nil {
 		return fmt.Errorf("source %q did not contribute to this movie", source)
 	}
@@ -141,6 +151,8 @@ func applyFieldOverride(movie *models.Movie, prov *ProvenanceData, fieldKey, sou
 	case "should_crop_poster":
 		movie.Poster.ShouldCropPoster = result.ShouldCropPoster
 		setFieldSource("should_crop_poster")
+	default:
+		return fmt.Errorf("unhandled field: %s", fieldKey)
 	}
 	return nil
 }
