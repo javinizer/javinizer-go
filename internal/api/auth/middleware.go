@@ -9,10 +9,46 @@ import (
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/api/token"
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 const sessionCookieName = "javinizer_session"
+
+// authDisabler is an optional capability of AuthProvider implementations that
+// explicitly bypasses authentication. Only the test-only testkit.NoOpAuth
+// implements it; the production *AuthManager does not, so this path is
+// unreachable in production. This keeps the test pass-through out of the
+// production AuthProvider contract and free of any config-level bypass flag.
+type authDisabler interface {
+	IsDisabled() bool
+}
+
+func authBypassed(auth commandutil.AuthProvider) bool {
+	d, ok := auth.(authDisabler)
+	return ok && d.IsDisabled()
+}
+
+func resolveAuth(c *gin.Context, rt *core.APIRuntime) (deps *core.APIDeps, handled bool) {
+	if rt == nil {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
+			Error: "authentication is unavailable",
+		})
+		return nil, true
+	}
+	deps = rt.Deps()
+	if deps == nil || deps.Auth == nil {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
+			Error: "authentication is unavailable",
+		})
+		return nil, true
+	}
+	if authBypassed(deps.Auth) {
+		c.Next()
+		return deps, true
+	}
+	return deps, false
+}
 
 func securityConfig(rt *core.APIRuntime) *core.SecurityNarrowConfig {
 	if rt == nil {
@@ -24,13 +60,8 @@ func securityConfig(rt *core.APIRuntime) *core.SecurityNarrowConfig {
 //nolint:unused // used by same-package tests
 func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if rt == nil {
-			c.Next()
-			return
-		}
-		deps := rt.Deps()
-		if deps == nil || deps.Auth == nil {
-			c.Next()
+		deps, handled := resolveAuth(c, rt)
+		if handled {
 			return
 		}
 
@@ -71,13 +102,8 @@ func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 
 func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if rt == nil {
-			c.Next()
-			return
-		}
-		deps := rt.Deps()
-		if deps == nil || deps.Auth == nil {
-			c.Next()
+		deps, handled := resolveAuth(c, rt)
+		if handled {
 			return
 		}
 

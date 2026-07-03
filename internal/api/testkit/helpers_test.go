@@ -3,6 +3,7 @@ package testkit
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -87,4 +88,32 @@ func TestCleanupServerHub(t *testing.T) {
 func TestCleanupServerHub_NilDeps(t *testing.T) {
 	// Should not panic
 	CleanupServerHub(t, (*core.APIRuntime)(nil))
+}
+
+func TestNoOpAuth_InterfaceMethods(t *testing.T) {
+	auth := NoOpAuth{}
+
+	assert.Equal(t, time.Hour, auth.SessionTTL())
+	assert.True(t, auth.IsInitialized())
+
+	username, err := auth.AuthenticateSession("any-session")
+	assert.NoError(t, err)
+	assert.NotEmpty(t, username)
+
+	assert.NoError(t, auth.Setup("user", "pass"))
+
+	sessionID, err := auth.Login("user", "pass", false)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, sessionID)
+
+	auth.Logout("any-session")
+
+	ctx := context.Background()
+	tokenID, err := auth.ValidateToken(ctx, "any-hash")
+	assert.NoError(t, err)
+	assert.NotEmpty(t, tokenID)
+
+	assert.NoError(t, auth.UpdateTokenLastUsed(ctx, "any-id"))
+	assert.Empty(t, auth.GetEnv("ANY_KEY"))
+	assert.True(t, auth.IsDisabled())
 }
