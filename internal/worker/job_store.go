@@ -221,6 +221,7 @@ func buildAdapters(job *BatchJob) *jobAdapters {
 		editor: &jobEditorImpl{
 			updater:      job.results,
 			accessor:     job.results,
+			tracker:      job.results,
 			lifecycle:    job.lifecycle,
 			posterEditor: job.posterEditor,
 			movieRepo:    job.deps.MovieRepo,

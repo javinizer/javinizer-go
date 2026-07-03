@@ -41,6 +41,94 @@ func (_m *MockBatchJobInterface) EXPECT() *MockBatchJobInterface_Expecter {
 	return &MockBatchJobInterface_Expecter{mock: &_m.Mock}
 }
 
+// ApplyFieldOverride provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) ApplyFieldOverride(ctx context.Context, resultID string, fieldKey string, source string) (*worker.MovieResult, *worker.ProvenanceData, error) {
+	ret := _mock.Called(ctx, resultID, fieldKey, source)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyFieldOverride")
+	}
+
+	var r0 *worker.MovieResult
+	var r1 *worker.ProvenanceData
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*worker.MovieResult, *worker.ProvenanceData, error)); ok {
+		return returnFunc(ctx, resultID, fieldKey, source)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) *worker.MovieResult); ok {
+		r0 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*worker.MovieResult)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) *worker.ProvenanceData); ok {
+		r1 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*worker.ProvenanceData)
+		}
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, string) error); ok {
+		r2 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockBatchJobInterface_ApplyFieldOverride_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyFieldOverride'
+type MockBatchJobInterface_ApplyFieldOverride_Call struct {
+	*mock.Call
+}
+
+// ApplyFieldOverride is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resultID string
+//   - fieldKey string
+//   - source string
+func (_e *MockBatchJobInterface_Expecter) ApplyFieldOverride(ctx any, resultID any, fieldKey any, source any) *MockBatchJobInterface_ApplyFieldOverride_Call {
+	return &MockBatchJobInterface_ApplyFieldOverride_Call{Call: _e.mock.On("ApplyFieldOverride", ctx, resultID, fieldKey, source)}
+}
+
+func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) Run(run func(ctx context.Context, resultID string, fieldKey string, source string)) *MockBatchJobInterface_ApplyFieldOverride_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) Return(movieResult *worker.MovieResult, provenanceData *worker.ProvenanceData, err error) *MockBatchJobInterface_ApplyFieldOverride_Call {
+	_c.Call.Return(movieResult, provenanceData, err)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) RunAndReturn(run func(ctx context.Context, resultID string, fieldKey string, source string) (*worker.MovieResult, *worker.ProvenanceData, error)) *MockBatchJobInterface_ApplyFieldOverride_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Cancel provides a mock function for the type MockBatchJobInterface
 func (_mock *MockBatchJobInterface) Cancel() {
 	_mock.Called()
@@ -595,6 +683,59 @@ func (_c *MockBatchJobInterface_GetMovieResultsForMovieID_Call) Return(movieResu
 }
 
 func (_c *MockBatchJobInterface_GetMovieResultsForMovieID_Call) RunAndReturn(run func(movieID string) []*worker.MovieResult) *MockBatchJobInterface_GetMovieResultsForMovieID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetProvenance provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) GetProvenance(filePath string) *worker.ProvenanceData {
+	ret := _mock.Called(filePath)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetProvenance")
+	}
+
+	var r0 *worker.ProvenanceData
+	if returnFunc, ok := ret.Get(0).(func(string) *worker.ProvenanceData); ok {
+		r0 = returnFunc(filePath)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*worker.ProvenanceData)
+		}
+	}
+	return r0
+}
+
+// MockBatchJobInterface_GetProvenance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetProvenance'
+type MockBatchJobInterface_GetProvenance_Call struct {
+	*mock.Call
+}
+
+// GetProvenance is a helper method to define mock.On call
+//   - filePath string
+func (_e *MockBatchJobInterface_Expecter) GetProvenance(filePath any) *MockBatchJobInterface_GetProvenance_Call {
+	return &MockBatchJobInterface_GetProvenance_Call{Call: _e.mock.On("GetProvenance", filePath)}
+}
+
+func (_c *MockBatchJobInterface_GetProvenance_Call) Run(run func(filePath string)) *MockBatchJobInterface_GetProvenance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_GetProvenance_Call) Return(provenanceData *worker.ProvenanceData) *MockBatchJobInterface_GetProvenance_Call {
+	_c.Call.Return(provenanceData)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_GetProvenance_Call) RunAndReturn(run func(filePath string) *worker.ProvenanceData) *MockBatchJobInterface_GetProvenance_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -84,13 +84,22 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			_ = deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie)
 		}
 
-		// Cached if Scrape seam returned from cache with no scraper results
-		cached := len(result.ScraperResults) == 0 && result.Movie != nil
+		// Cached if the scrape seam served from the movie DB cache. Read the
+		// explicit flag rather than inferring from ScraperResults length, since
+		// cache hits now populate ScraperResults (synthesized) for the source viewer.
+		cached := result.Cached
+		// SourcesUsed reports live scrapers consulted. On a cache hit the
+		// single ScraperResults entry is synthesized from the cached movie, not
+		// a real scraper, so report 0.
+		sourcesUsed := len(result.ScraperResults)
+		if cached {
+			sourcesUsed = 0
+		}
 
 		c.JSON(http.StatusOK, contracts.ScrapeResponse{
 			Cached:      cached,
 			Movie:       contracts.MovieViewFromModel(result.Movie),
-			SourcesUsed: len(result.ScraperResults),
+			SourcesUsed: sourcesUsed,
 		})
 	}
 }

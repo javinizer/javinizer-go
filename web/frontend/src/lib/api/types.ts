@@ -107,6 +107,64 @@ export interface PosterFromURLResponse {
 	poster_url: string;
 }
 
+export interface ScraperRating {
+	score?: number;
+	votes?: number;
+}
+
+// ActressInfo is the scraper-side actress shape (raw, pre-aggregation). It is a
+// subset of the persisted Actress model — no DB id/aliases.
+export interface ActressInfo {
+	dmm_id?: number;
+	first_name?: string;
+	last_name?: string;
+	japanese_name?: string;
+	thumb_url?: string;
+}
+
+// ScraperResult is the raw per-source result retained in-memory for the review
+// source viewer. Mirrors backend models.ScraperResult JSON.
+export interface ScraperResult {
+	source?: string;
+	source_url?: string;
+	language?: string;
+	id?: string;
+	content_id?: string;
+	title?: string;
+	original_title?: string;
+	description?: string;
+	release_date?: string;
+	runtime?: number;
+	director?: string;
+	maker?: string;
+	label?: string;
+	series?: string;
+	rating?: ScraperRating;
+	actresses?: ActressInfo[];
+	genres?: string[];
+	poster_url?: string;
+	cover_url?: string;
+	should_crop_poster?: boolean;
+	screenshot_urls?: string[];
+	trailer_url?: string;
+	translations?: MovieTranslation[];
+}
+
+export interface SourceResultsResponse {
+	results: ScraperResult[];
+}
+
+export interface FieldOverrideRequest {
+	field: string;
+	source: string;
+}
+
+export interface FieldOverrideResponse {
+	movie?: Movie;
+	field_sources?: Record<string, string>;
+	actress_sources?: Record<string, string>;
+}
+
 export interface BatchRescrapeRequest {
 	force?: boolean;
 	selected_scrapers?: string[];

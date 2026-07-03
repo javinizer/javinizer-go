@@ -1088,6 +1088,72 @@
                 }
             }
         },
+        "/api/v1/batch/{id}/results/{resultId}/field-override": {
+            "post": {
+                "description": "Cherry-pick a single field's value from the named source's raw scraper results, overwriting the aggregated movie field and updating provenance attribution. Mirrors the original Javinizer \"Replace\" button (javinizergui.ps1:2538).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Override a field with a source's value",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Result ID",
+                        "name": "resultId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Field + source override",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldOverrideRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldOverrideResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/batch/{id}/results/{resultId}/poster-crop": {
             "post": {
                 "description": "Re-crop a temp poster for the review page using fixed-size crop coordinates",
@@ -1351,6 +1417,48 @@
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/batch/{id}/results/{resultId}/sources": {
+            "get": {
+                "description": "Returns each successful scraper's raw ScraperResult for the movie, used by the review-page source viewer to offer per-field overrides. ScraperResults are persisted in the job envelope and survive server restarts. A synthesized single-source fallback is returned only for legacy envelopes persisted before this feature or when provenance was never set.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Get per-source raw scraper results for a movie",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Result ID",
+                        "name": "resultId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.SourceResultsResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -3718,6 +3826,45 @@
                 "scraped_value": {}
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.FieldOverrideRequest": {
+            "type": "object",
+            "required": [
+                "field",
+                "source"
+            ],
+            "properties": {
+                "field": {
+                    "description": "Field is the canonical field-source key to override (e.g. \"maker\",\n\"title\", \"actresses\", \"genres\"). Must be one of the keys surfaced by the\nsource viewer / field_sources map.",
+                    "type": "string",
+                    "example": "maker"
+                },
+                "source": {
+                    "description": "Source is the scraper source name whose raw value should win the field\n(e.g. \"dmm\", \"r18dev\"). Must be one of the sources that contributed to\nthis movie.",
+                    "type": "string",
+                    "example": "dmm"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.FieldOverrideResponse": {
+            "type": "object",
+            "properties": {
+                "actress_sources": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "field_sources": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "movie": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo": {
             "type": "object",
             "properties": {
@@ -4861,6 +5008,17 @@
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.SourceResultsResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.ScraperResult"
+                    }
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.TranslationModelsRequest": {
             "type": "object",
             "required": [
@@ -5907,6 +6065,27 @@
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_models.ActressInfo": {
+            "type": "object",
+            "properties": {
+                "dmm_id": {
+                    "description": "DMM actress ID for unique identification",
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "thumb_url": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_models.ActressTranslation": {
             "type": "object",
             "properties": {
@@ -6294,6 +6473,17 @@
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_models.Rating": {
+            "type": "object",
+            "properties": {
+                "score": {
+                    "type": "number"
+                },
+                "votes": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_models.RevertOutcomeEnum": {
             "type": "string",
             "enum": [
@@ -6383,6 +6573,98 @@
                 "value": {
                     "type": "string",
                     "example": "en"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.ScraperResult": {
+            "type": "object",
+            "properties": {
+                "actresses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressInfo"
+                    }
+                },
+                "content_id": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "description": "Landscape/fanart image",
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "director": {
+                    "type": "string"
+                },
+                "genres": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "language": {
+                    "description": "ISO 639-1 code: en, ja, zh, etc.",
+                    "type": "string"
+                },
+                "maker": {
+                    "type": "string"
+                },
+                "original_title": {
+                    "description": "Japanese/original language title",
+                    "type": "string"
+                },
+                "poster_url": {
+                    "description": "Portrait/box art image",
+                    "type": "string"
+                },
+                "rating": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Rating"
+                },
+                "release_date": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "integer"
+                },
+                "screenshot_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "series": {
+                    "type": "string"
+                },
+                "should_crop_poster": {
+                    "description": "Whether poster needs cropping from cover",
+                    "type": "boolean"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "trailer_url": {
+                    "type": "string"
+                },
+                "translations": {
+                    "description": "Additional language translations (optional)",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation"
+                    }
                 }
             }
         },

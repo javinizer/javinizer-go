@@ -199,6 +199,9 @@ func TestTryCache_CacheHitNoTranslationUncovered(t *testing.T) {
 	assert.Equal(t, StatusCompleted, result.Status)
 	assert.Equal(t, "Cached Movie", result.Movie.Title)
 	assert.False(t, result.NeedsPersistence)
+	assert.True(t, result.Cached)
+	require.Len(t, result.ScraperResults, 1)
+	assert.Equal(t, "scraper", result.ScraperResults[0].Source)
 }
 
 // --- Apply translation (apply_translation.go) ---

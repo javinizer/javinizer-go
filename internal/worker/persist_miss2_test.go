@@ -187,6 +187,10 @@ func TestPersistMiss2_Reconstruct_EnvelopeWithProvenance(t *testing.T) {
 			"file1.mp4": {
 				FieldSources:   map[string]string{"title": "r18dev"},
 				ActressSources: map[string]string{"actress_0": "dmm"},
+				ScraperResults: []*models.ScraperResult{
+					{Source: "r18dev", Title: "R18 Title", Maker: "R18 Maker"},
+					{Source: "dmm", Title: "DMM Title"},
+				},
 			},
 		},
 	}
@@ -207,6 +211,12 @@ func TestPersistMiss2_Reconstruct_EnvelopeWithProvenance(t *testing.T) {
 	prov := result.results.Provenance["file1.mp4"]
 	require.NotNil(t, prov)
 	assert.Equal(t, "r18dev", prov.FieldSources["title"])
+	// ScraperResults must survive the persist/reconstruct round-trip so the
+	// review source viewer works after a backend restart.
+	require.Len(t, prov.ScraperResults, 2)
+	assert.Equal(t, "r18dev", prov.ScraperResults[0].Source)
+	assert.Equal(t, "R18 Maker", prov.ScraperResults[0].Maker)
+	assert.Equal(t, "dmm", prov.ScraperResults[1].Source)
 }
 
 type successJobRepo struct{}

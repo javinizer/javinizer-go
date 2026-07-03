@@ -28,6 +28,9 @@ import type {
 	BatchExcludeResponse,
 	BulkRescrapeRequest,
 	BulkRescrapeResponse,
+	SourceResultsResponse,
+	FieldOverrideRequest,
+	FieldOverrideResponse,
 } from '../types';
 import { BaseClient } from './common';
 
@@ -85,6 +88,26 @@ export class JobClient extends BaseClient {
 	): Promise<PosterFromURLResponse> {
 		return this.request<PosterFromURLResponse>(
 			`/api/v1/batch/${jobId}/results/${resultId}/poster-from-url`,
+			{
+				method: 'POST',
+				body: JSON.stringify(request),
+			},
+		);
+	}
+
+	async getBatchMovieSources(jobId: string, resultId: string): Promise<SourceResultsResponse> {
+		return this.request<SourceResultsResponse>(
+			`/api/v1/batch/${jobId}/results/${resultId}/sources`,
+		);
+	}
+
+	async overrideBatchMovieField(
+		jobId: string,
+		resultId: string,
+		request: FieldOverrideRequest,
+	): Promise<FieldOverrideResponse> {
+		return this.request<FieldOverrideResponse>(
+			`/api/v1/batch/${jobId}/results/${resultId}/field-override`,
 			{
 				method: 'POST',
 				body: JSON.stringify(request),

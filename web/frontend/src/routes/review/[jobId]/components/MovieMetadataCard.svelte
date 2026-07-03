@@ -3,7 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import MovieEditor from '$lib/components/MovieEditor.svelte';
-	import { LoaderCircle, RotateCcw } from 'lucide-svelte';
+	import { LoaderCircle, RotateCcw, TableProperties } from 'lucide-svelte';
 
 	interface Props {
 		currentMovie: Movie;
@@ -11,6 +11,7 @@
 		showFieldScraperSources: boolean;
 		isRescraping: boolean;
 		onOpenRescrape: () => void;
+		onOpenSourceViewer: () => void;
 		onResetCurrentMovie: () => void;
 		onUpdateCurrentMovie: (movie: Movie) => void;
 	}
@@ -21,6 +22,7 @@
 		showFieldScraperSources = $bindable(false),
 		isRescraping,
 		onOpenRescrape,
+		onOpenSourceViewer,
 		onResetCurrentMovie,
 		onUpdateCurrentMovie
 	}: Props = $props();
@@ -40,6 +42,12 @@
 					Show scraper per field
 				</label>
 				<div class="flex gap-2">
+					<Button variant="outline" size="sm" onclick={onOpenSourceViewer}>
+						{#snippet children()}
+							<TableProperties class="h-4 w-4 mr-2" />
+							Sources
+						{/snippet}
+					</Button>
 					<Button variant="outline" size="sm" onclick={onOpenRescrape} disabled={isRescraping}>
 						{#snippet children()}
 							{#if isRescraping}

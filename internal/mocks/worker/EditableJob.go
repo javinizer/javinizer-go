@@ -39,6 +39,94 @@ func (_m *MockEditableJob) EXPECT() *MockEditableJob_Expecter {
 	return &MockEditableJob_Expecter{mock: &_m.Mock}
 }
 
+// ApplyFieldOverride provides a mock function for the type MockEditableJob
+func (_mock *MockEditableJob) ApplyFieldOverride(ctx context.Context, resultID string, fieldKey string, source string) (*worker.MovieResult, *worker.ProvenanceData, error) {
+	ret := _mock.Called(ctx, resultID, fieldKey, source)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyFieldOverride")
+	}
+
+	var r0 *worker.MovieResult
+	var r1 *worker.ProvenanceData
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*worker.MovieResult, *worker.ProvenanceData, error)); ok {
+		return returnFunc(ctx, resultID, fieldKey, source)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) *worker.MovieResult); ok {
+		r0 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*worker.MovieResult)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) *worker.ProvenanceData); ok {
+		r1 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*worker.ProvenanceData)
+		}
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, string) error); ok {
+		r2 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockEditableJob_ApplyFieldOverride_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyFieldOverride'
+type MockEditableJob_ApplyFieldOverride_Call struct {
+	*mock.Call
+}
+
+// ApplyFieldOverride is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resultID string
+//   - fieldKey string
+//   - source string
+func (_e *MockEditableJob_Expecter) ApplyFieldOverride(ctx any, resultID any, fieldKey any, source any) *MockEditableJob_ApplyFieldOverride_Call {
+	return &MockEditableJob_ApplyFieldOverride_Call{Call: _e.mock.On("ApplyFieldOverride", ctx, resultID, fieldKey, source)}
+}
+
+func (_c *MockEditableJob_ApplyFieldOverride_Call) Run(run func(ctx context.Context, resultID string, fieldKey string, source string)) *MockEditableJob_ApplyFieldOverride_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockEditableJob_ApplyFieldOverride_Call) Return(movieResult *worker.MovieResult, provenanceData *worker.ProvenanceData, err error) *MockEditableJob_ApplyFieldOverride_Call {
+	_c.Call.Return(movieResult, provenanceData, err)
+	return _c
+}
+
+func (_c *MockEditableJob_ApplyFieldOverride_Call) RunAndReturn(run func(ctx context.Context, resultID string, fieldKey string, source string) (*worker.MovieResult, *worker.ProvenanceData, error)) *MockEditableJob_ApplyFieldOverride_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ExcludeFile provides a mock function for the type MockEditableJob
 func (_mock *MockEditableJob) ExcludeFile(filePath string) {
 	_mock.Called(filePath)
@@ -514,6 +602,59 @@ func (_c *MockEditableJob_GetMovieResultsForMovieID_Call) Return(movieResults []
 }
 
 func (_c *MockEditableJob_GetMovieResultsForMovieID_Call) RunAndReturn(run func(movieID string) []*worker.MovieResult) *MockEditableJob_GetMovieResultsForMovieID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetProvenance provides a mock function for the type MockEditableJob
+func (_mock *MockEditableJob) GetProvenance(filePath string) *worker.ProvenanceData {
+	ret := _mock.Called(filePath)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetProvenance")
+	}
+
+	var r0 *worker.ProvenanceData
+	if returnFunc, ok := ret.Get(0).(func(string) *worker.ProvenanceData); ok {
+		r0 = returnFunc(filePath)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*worker.ProvenanceData)
+		}
+	}
+	return r0
+}
+
+// MockEditableJob_GetProvenance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetProvenance'
+type MockEditableJob_GetProvenance_Call struct {
+	*mock.Call
+}
+
+// GetProvenance is a helper method to define mock.On call
+//   - filePath string
+func (_e *MockEditableJob_Expecter) GetProvenance(filePath any) *MockEditableJob_GetProvenance_Call {
+	return &MockEditableJob_GetProvenance_Call{Call: _e.mock.On("GetProvenance", filePath)}
+}
+
+func (_c *MockEditableJob_GetProvenance_Call) Run(run func(filePath string)) *MockEditableJob_GetProvenance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockEditableJob_GetProvenance_Call) Return(provenanceData *worker.ProvenanceData) *MockEditableJob_GetProvenance_Call {
+	_c.Call.Return(provenanceData)
+	return _c
+}
+
+func (_c *MockEditableJob_GetProvenance_Call) RunAndReturn(run func(filePath string) *worker.ProvenanceData) *MockEditableJob_GetProvenance_Call {
 	_c.Call.Return(run)
 	return _c
 }

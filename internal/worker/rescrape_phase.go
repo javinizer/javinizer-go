@@ -171,6 +171,7 @@ func replaceRescrapeResult(outcome *RescrapeResult, filePath string, movieResult
 		outcome.Movie = movieResult.Movie
 		outcome.FieldSources = prov.FieldSources
 		outcome.ActressSources = prov.ActressSources
+		outcome.ScraperResults = prov.ScraperResults
 	} else {
 		outcome.Movie = movieResult.Movie
 	}

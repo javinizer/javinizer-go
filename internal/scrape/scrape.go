@@ -110,6 +110,13 @@ type ScrapeResult struct {
 	Status         ScrapeStatus
 	Message        string
 
+	// Cached indicates this result was served from the movie DB cache
+	// (tryCache) rather than a live scrape. Set so downstream consumers can
+	// distinguish a cache hit from a live scrape without inferring it from
+	// ScraperResults length (which is now populated on cache hits too, via
+	// ScraperResultFromCachedMovie, for the review source viewer).
+	Cached bool `json:"cached,omitempty"`
+
 	// Internal enrichment signals — read by the workflow orchestrator and propagated
 	// to OrchestrationMeta. Downstream consumers (MovieResult, API) should read from
 	// OrchestrationMeta, not from these fields directly.

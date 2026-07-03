@@ -439,7 +439,7 @@ func TestActressSourceKeyFromModel(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.expected, actressSourceKeyFromModel(tc.actress))
+			assert.Equal(t, tc.expected, ActressSourceKey(tc.actress))
 		})
 	}
 }

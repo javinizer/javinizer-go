@@ -43,6 +43,42 @@ type ScraperResult struct {
 	Translations     []MovieTranslation `json:"translations,omitempty"` // Additional language translations (optional)
 }
 
+// Clone returns a deep copy of the ScraperResult, including all slice and
+// pointer fields. Used by ProvenanceData.Clone to isolate the raw per-scraper
+// results retained for the review-page source viewer from the scrape path's
+// in-flight values.
+func (r *ScraperResult) Clone() *ScraperResult {
+	if r == nil {
+		return nil
+	}
+	copied := *r
+	if r.ReleaseDate != nil {
+		t := *r.ReleaseDate
+		copied.ReleaseDate = &t
+	}
+	if r.Rating != nil {
+		rating := *r.Rating
+		copied.Rating = &rating
+	}
+	if r.Actresses != nil {
+		copied.Actresses = make([]ActressInfo, len(r.Actresses))
+		copy(copied.Actresses, r.Actresses)
+	}
+	if r.Genres != nil {
+		copied.Genres = make([]string, len(r.Genres))
+		copy(copied.Genres, r.Genres)
+	}
+	if r.ScreenshotURL != nil {
+		copied.ScreenshotURL = make([]string, len(r.ScreenshotURL))
+		copy(copied.ScreenshotURL, r.ScreenshotURL)
+	}
+	if r.Translations != nil {
+		copied.Translations = make([]MovieTranslation, len(r.Translations))
+		copy(copied.Translations, r.Translations)
+	}
+	return &copied
+}
+
 // NormalizeMediaURLs applies post-scrape media URL normalization hooks.
 //
 // The cover (landscape jacket) is upgraded to pl.jpg when available, as that

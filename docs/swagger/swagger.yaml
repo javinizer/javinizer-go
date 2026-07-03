@@ -395,6 +395,39 @@ definitions:
         type: string
       scraped_value: {}
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.FieldOverrideRequest:
+    properties:
+      field:
+        description: |-
+          Field is the canonical field-source key to override (e.g. "maker",
+          "title", "actresses", "genres"). Must be one of the keys surfaced by the
+          source viewer / field_sources map.
+        example: maker
+        type: string
+      source:
+        description: |-
+          Source is the scraper source name whose raw value should win the field
+          (e.g. "dmm", "r18dev"). Must be one of the sources that contributed to
+          this movie.
+        example: dmm
+        type: string
+    required:
+    - field
+    - source
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.FieldOverrideResponse:
+    properties:
+      actress_sources:
+        additionalProperties:
+          type: string
+        type: object
+      field_sources:
+        additionalProperties:
+          type: string
+        type: object
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo:
     properties:
       is_dir:
@@ -1187,6 +1220,13 @@ definitions:
         example: seconds
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.SourceResultsResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ScraperResult'
+        type: array
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.TranslationModelsRequest:
     properties:
       api_key:
@@ -1905,6 +1945,20 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_models.ActressInfo:
+    properties:
+      dmm_id:
+        description: DMM actress ID for unique identification
+        type: integer
+      first_name:
+        type: string
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_models.ActressTranslation:
     properties:
       actress_id:
@@ -2181,6 +2235,13 @@ definitions:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scraperconfig.ProxyProfile'
         type: object
     type: object
+  github_com_javinizer_javinizer-go_internal_models.Rating:
+    properties:
+      score:
+        type: number
+      votes:
+        type: integer
+    type: object
   github_com_javinizer_javinizer-go_internal_models.RevertOutcomeEnum:
     enum:
     - reverted
@@ -2253,6 +2314,69 @@ definitions:
       value:
         example: en
         type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.ScraperResult:
+    properties:
+      actresses:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressInfo'
+        type: array
+      content_id:
+        type: string
+      cover_url:
+        description: Landscape/fanart image
+        type: string
+      description:
+        type: string
+      director:
+        type: string
+      genres:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      label:
+        type: string
+      language:
+        description: 'ISO 639-1 code: en, ja, zh, etc.'
+        type: string
+      maker:
+        type: string
+      original_title:
+        description: Japanese/original language title
+        type: string
+      poster_url:
+        description: Portrait/box art image
+        type: string
+      rating:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Rating'
+      release_date:
+        type: string
+      runtime:
+        type: integer
+      screenshot_urls:
+        items:
+          type: string
+        type: array
+      series:
+        type: string
+      should_crop_poster:
+        description: Whether poster needs cropping from cover
+        type: boolean
+      source:
+        type: string
+      source_url:
+        type: string
+      title:
+        type: string
+      trailer_url:
+        type: string
+      translations:
+        description: Additional language translations (optional)
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation'
+        type: array
     type: object
   github_com_javinizer_javinizer-go_internal_models.UnknownActressMode:
     enum:
@@ -3314,6 +3438,52 @@ paths:
       summary: Exclude movie from batch organization
       tags:
       - web
+  /api/v1/batch/{id}/results/{resultId}/field-override:
+    post:
+      consumes:
+      - application/json
+      description: Cherry-pick a single field's value from the named source's raw
+        scraper results, overwriting the aggregated movie field and updating provenance
+        attribution. Mirrors the original Javinizer "Replace" button (javinizergui.ps1:2538).
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Result ID
+        in: path
+        name: resultId
+        required: true
+        type: string
+      - description: Field + source override
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldOverrideRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldOverrideResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Override a field with a source's value
+      tags:
+      - web
   /api/v1/batch/{id}/results/{resultId}/poster-crop:
     post:
       consumes:
@@ -3495,6 +3665,38 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Rescrape movie in batch job
+      tags:
+      - web
+  /api/v1/batch/{id}/results/{resultId}/sources:
+    get:
+      description: Returns each successful scraper's raw ScraperResult for the movie,
+        used by the review-page source viewer to offer per-field overrides. ScraperResults
+        are persisted in the job envelope and survive server restarts. A synthesized
+        single-source fallback is returned only for legacy envelopes persisted before
+        this feature or when provenance was never set.
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Result ID
+        in: path
+        name: resultId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.SourceResultsResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Get per-source raw scraper results for a movie
       tags:
       - web
   /api/v1/batch/{id}/update:

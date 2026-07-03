@@ -143,6 +143,7 @@ export function createReviewState(pageStore: Page) {
 	let showAllPreviewScreenshots = $state(false);
 
 	let showPosterCropModal = $state(false);
+	let showSourceViewerModal = $state(false);
 	let posterCropLoadError = $state<string | null>(null);
 	let cropSourceURL = $state('');
 	let cropImageElement = $state<HTMLImageElement | null>(null);
@@ -424,6 +425,10 @@ export function createReviewState(pageStore: Page) {
 		},
 		updateBatchMoviePosterFromURL: (mutationJobId, resultId, body) =>
 			apiClient.updateBatchMoviePosterFromURL(mutationJobId, resultId, body),
+		getBatchMovieSources: (mutationJobId, resultId) =>
+			apiClient.getBatchMovieSources(mutationJobId, resultId),
+		overrideBatchMovieField: (mutationJobId, resultId, body) =>
+			apiClient.overrideBatchMovieField(mutationJobId, resultId, body),
 		excludeBatchMovie: (mutationJobId, resultId) =>
 			apiClient.excludeBatchMovie(mutationJobId, resultId),
 		updateBatchMovie: (mutationJobId, resultId, movie) =>
@@ -944,6 +949,20 @@ export function createReviewState(pageStore: Page) {
 		rescrapeController.applyRescrapePreset(preset);
 	}
 
+	function openSourceViewerModal() {
+		if (!currentResult) return;
+		showSourceViewerModal = true;
+	}
+
+	function loadSources(resultId: string) {
+		return apiClient.getBatchMovieSources(jobId, resultId);
+	}
+
+	function applyFieldOverride(field: string, source: string) {
+		if (!currentResult) return;
+		return mutations.applyFieldOverrideAsync(currentResult.result_id, field, source);
+	}
+
 	async function openRescrapeModal(movieId: string) {
 		bulkRescrapeMovieIds = [];
 		rescrapeTargetResult = null;
@@ -1374,6 +1393,18 @@ export function createReviewState(pageStore: Page) {
 		},
 		set showPosterCropModal(v) {
 			showPosterCropModal = v;
+		},
+		get showSourceViewerModal() {
+			return showSourceViewerModal;
+		},
+		set showSourceViewerModal(v) {
+			showSourceViewerModal = v;
+		},
+		openSourceViewerModal,
+		loadSources,
+		applyFieldOverride,
+		get fieldOverridePending() {
+			return mutations.fieldOverrideMutation.isPending;
 		},
 		get posterCropLoadError() {
 			return posterCropLoadError;

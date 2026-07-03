@@ -559,6 +559,59 @@ func (_c *MockControlledJob_GetMovieResultsForMovieID_Call) RunAndReturn(run fun
 	return _c
 }
 
+// GetProvenance provides a mock function for the type MockControlledJob
+func (_mock *MockControlledJob) GetProvenance(filePath string) *worker.ProvenanceData {
+	ret := _mock.Called(filePath)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetProvenance")
+	}
+
+	var r0 *worker.ProvenanceData
+	if returnFunc, ok := ret.Get(0).(func(string) *worker.ProvenanceData); ok {
+		r0 = returnFunc(filePath)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*worker.ProvenanceData)
+		}
+	}
+	return r0
+}
+
+// MockControlledJob_GetProvenance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetProvenance'
+type MockControlledJob_GetProvenance_Call struct {
+	*mock.Call
+}
+
+// GetProvenance is a helper method to define mock.On call
+//   - filePath string
+func (_e *MockControlledJob_Expecter) GetProvenance(filePath any) *MockControlledJob_GetProvenance_Call {
+	return &MockControlledJob_GetProvenance_Call{Call: _e.mock.On("GetProvenance", filePath)}
+}
+
+func (_c *MockControlledJob_GetProvenance_Call) Run(run func(filePath string)) *MockControlledJob_GetProvenance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockControlledJob_GetProvenance_Call) Return(provenanceData *worker.ProvenanceData) *MockControlledJob_GetProvenance_Call {
+	_c.Call.Return(provenanceData)
+	return _c
+}
+
+func (_c *MockControlledJob_GetProvenance_Call) RunAndReturn(run func(filePath string) *worker.ProvenanceData) *MockControlledJob_GetProvenance_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetResults provides a mock function for the type MockControlledJob
 func (_mock *MockControlledJob) GetResults() []worker.MovieResult {
 	ret := _mock.Called()

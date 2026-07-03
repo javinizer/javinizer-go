@@ -75,6 +75,7 @@ func TestScrapeMovie(t *testing.T) {
 			validateFn: func(t *testing.T, resp *contracts.ScrapeResponse) {
 				assert.True(t, resp.Cached)
 				assert.Equal(t, "Cached Movie", resp.Movie.Title)
+				assert.Equal(t, 0, resp.SourcesUsed)
 			},
 		},
 		{

@@ -48,7 +48,7 @@ func buildActressSourcesFromScrapeResults(
 
 	sourcesByActressKey := make(map[string]string)
 	for _, actress := range actresses {
-		targetKey := actressSourceKeyFromModel(actress)
+		targetKey := ActressSourceKey(actress)
 		if targetKey == "" {
 			continue
 		}
@@ -86,7 +86,9 @@ func buildActressSourcesFromScrapeResults(
 	return sourcesByActressKey
 }
 
-func actressSourceKeyFromModel(actress models.Actress) string {
+// ActressSourceKey returns a stable provenance key for an actress, preferring
+// DMMID, then normalized Japanese name, then normalized first/last name combos.
+func ActressSourceKey(actress models.Actress) string {
 	if actress.DMMID > 0 {
 		return "dmmid:" + strconv.Itoa(actress.DMMID)
 	}
@@ -192,7 +194,7 @@ func buildActressSourcesFromCachedMovie(movie *models.Movie) map[string]string {
 
 	sourcesByActressKey := make(map[string]string)
 	for _, actress := range movie.Actresses {
-		key := actressSourceKeyFromModel(actress)
+		key := ActressSourceKey(actress)
 		if key == "" {
 			continue
 		}
@@ -203,4 +205,72 @@ func buildActressSourcesFromCachedMovie(movie *models.Movie) map[string]string {
 		return nil
 	}
 	return sourcesByActressKey
+}
+
+// ScraperResultFromCachedMovie rebuilds a single synthetic ScraperResult from
+// a persisted Movie, so the review-page source viewer has per-field values to
+// display when the raw per-scraper results are absent. This is a fallback for
+// legacy envelopes persisted before ScraperResults were persisted, or when
+// provenance was never set (e.g. cache-hit scrapes that pre-date this
+// feature). Mirrors buildFieldSourcesFromCachedMovie: the source label is the
+// movie's SourceName (or "scraper"), and every non-empty field is attributed
+// to it. It does not restore the original multi-scraper breakdown, which
+// requires a fresh (force) re-scrape.
+func ScraperResultFromCachedMovie(movie *models.Movie) *models.ScraperResult {
+	if movie == nil {
+		return nil
+	}
+	source := strings.TrimSpace(movie.SourceName)
+	if source == "" {
+		source = "scraper"
+	}
+	r := &models.ScraperResult{
+		Source:           source,
+		SourceURL:        movie.SourceURL,
+		ID:               movie.ID,
+		ContentID:        movie.ContentID,
+		Title:            movie.Title,
+		OriginalTitle:    movie.OriginalTitle,
+		Description:      movie.Description,
+		ReleaseDate:      movie.ReleaseDate,
+		Runtime:          movie.Runtime,
+		Director:         movie.Director,
+		Maker:            movie.Maker,
+		Label:            movie.Label,
+		Series:           movie.Series,
+		PosterURL:        movie.Poster.PosterURL,
+		CoverURL:         movie.Poster.CoverURL,
+		ShouldCropPoster: movie.Poster.ShouldCropPoster,
+		TrailerURL:       movie.TrailerURL,
+		Genres:           genreNamesFromModel(movie.Genres),
+		ScreenshotURL:    append([]string(nil), movie.Screenshots...),
+		Translations:     append([]models.MovieTranslation(nil), movie.Translations...),
+	}
+	if len(movie.Actresses) > 0 {
+		r.Actresses = make([]models.ActressInfo, 0, len(movie.Actresses))
+		for _, a := range movie.Actresses {
+			r.Actresses = append(r.Actresses, models.ActressInfo{
+				DMMID:        a.DMMID,
+				FirstName:    a.FirstName,
+				LastName:     a.LastName,
+				JapaneseName: a.JapaneseName,
+				ThumbURL:     a.ThumbURL,
+			})
+		}
+	}
+	if movie.RatingScore > 0 || movie.RatingVotes > 0 {
+		r.Rating = &models.Rating{Score: movie.RatingScore, Votes: movie.RatingVotes}
+	}
+	return r
+}
+
+func genreNamesFromModel(genres []models.Genre) []string {
+	if len(genres) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(genres))
+	for _, g := range genres {
+		out = append(out, g.Name)
+	}
+	return out
 }

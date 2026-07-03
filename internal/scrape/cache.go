@@ -6,6 +6,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/translation"
 )
 
@@ -69,6 +70,8 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		Movie:              scrapedToReturn,
 		FieldSources:       fieldSources,
 		ActressSources:     actressSources,
+		ScraperResults:     []*models.ScraperResult{ScraperResultFromCachedMovie(cached)},
+		Cached:             true,
 		TranslationWarning: translationWarning,
 		TranslationOutput:  translationOutput,
 		Status:             StatusCompleted,

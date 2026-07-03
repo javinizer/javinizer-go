@@ -146,6 +146,16 @@ class APIClient {
 	) {
 		return this.jobs.updateBatchMoviePosterFromURL(jobId, resultId, request);
 	}
+	async getBatchMovieSources(jobId: string, resultId: string) {
+		return this.jobs.getBatchMovieSources(jobId, resultId);
+	}
+	async overrideBatchMovieField(
+		jobId: string,
+		resultId: string,
+		request: Parameters<JobClient['overrideBatchMovieField']>[2],
+	) {
+		return this.jobs.overrideBatchMovieField(jobId, resultId, request);
+	}
 	async excludeBatchMovie(jobId: string, resultId: string) {
 		return this.jobs.excludeBatchMovie(jobId, resultId);
 	}

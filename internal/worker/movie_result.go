@@ -15,6 +15,13 @@ import (
 type ProvenanceData struct {
 	FieldSources   map[string]string `json:"field_sources,omitempty"`
 	ActressSources map[string]string `json:"actress_sources,omitempty"`
+	// ScraperResults holds the raw per-scraper results that produced the
+	// aggregated Movie, retained so the review page can offer per-field source
+	// overrides without a re-scrape. Persisted in the job envelope (unlike the
+	// original in-memory-only design) so the multi-scraper source view survives
+	// a backend restart — the review window routinely spans restarts. Served
+	// via the dedicated /sources endpoint, not the main job response.
+	ScraperResults []*models.ScraperResult `json:"scraper_results,omitempty"`
 }
 
 // Clone returns a deep copy of the ProvenanceData.
@@ -33,6 +40,12 @@ func (p *ProvenanceData) Clone() *ProvenanceData {
 		copied.ActressSources = make(map[string]string, len(p.ActressSources))
 		for k, v := range p.ActressSources {
 			copied.ActressSources[k] = v
+		}
+	}
+	if p.ScraperResults != nil {
+		copied.ScraperResults = make([]*models.ScraperResult, len(p.ScraperResults))
+		for i, sr := range p.ScraperResults {
+			copied.ScraperResults[i] = sr.Clone()
 		}
 	}
 	return &copied
@@ -98,10 +111,11 @@ func scrapeResultToMovieResult(fmi models.FileMatchInfo, result *scrape.ScrapeRe
 	}
 
 	var prov *ProvenanceData
-	if result.FieldSources != nil || result.ActressSources != nil {
+	if result.FieldSources != nil || result.ActressSources != nil || result.ScraperResults != nil {
 		prov = &ProvenanceData{
 			FieldSources:   result.FieldSources,
 			ActressSources: result.ActressSources,
+			ScraperResults: result.ScraperResults,
 		}
 	}
 	return mr, prov

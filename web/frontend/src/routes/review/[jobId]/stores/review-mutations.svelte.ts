@@ -6,10 +6,12 @@ import type {
 	BatchExcludeResponse,
 	BulkRescrapeRequest,
 	BulkRescrapeResponse,
+	FieldOverrideResponse,
 	FileResult,
 	Movie,
 	PosterCropResponse,
 	PosterFromURLResponse,
+	SourceResultsResponse,
 } from '$lib/api/types';
 import {
 	normalizeCropBox,
@@ -18,6 +20,7 @@ import {
 	type PosterPreviewOverride,
 	type PosterCropMetrics,
 } from '../review-utils';
+import { overlayFieldOverride } from './overlay-field-override';
 
 interface ReviewMutationsDeps {
 	getJobId: () => string;
@@ -44,6 +47,12 @@ interface ReviewMutationsDeps {
 		resultId: string,
 		body: { url: string },
 	) => Promise<PosterFromURLResponse>;
+	getBatchMovieSources: (jobId: string, resultId: string) => Promise<SourceResultsResponse>;
+	overrideBatchMovieField: (
+		jobId: string,
+		resultId: string,
+		body: { field: string; source: string },
+	) => Promise<FieldOverrideResponse>;
 	excludeBatchMovie: (jobId: string, resultId: string) => Promise<unknown>;
 	updateBatchMovie: (jobId: string, resultId: string, movie: Movie) => Promise<unknown>;
 	updateBatchMoviePosterCrop: (
@@ -332,6 +341,67 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		},
 	}));
 
+	// overlayFieldOverride is imported from ./overlay-field-override so it can be
+	// unit-tested independently (the .svelte.ts module can't export locals).
+
+	const fieldOverrideMutation = createMutation(() => ({
+		mutationFn: async ({
+			resultId,
+			field,
+			source,
+		}: {
+			resultId: string;
+			field: string;
+			source: string;
+		}) => {
+			return deps.overrideBatchMovieField(deps.getJobId(), resultId, { field, source });
+		},
+		onSuccess: (data: FieldOverrideResponse, { resultId, field, source }) => {
+			const currentJob = deps.getJob();
+			if (currentJob && data.movie) {
+				const updatedJob: BatchJobResponse = {
+					...currentJob,
+					results: { ...currentJob.results },
+				};
+				for (const [filePath, result] of Object.entries(updatedJob.results)) {
+					const r = result as FileResult;
+					if (r.result_id === resultId) {
+						updatedJob.results[filePath] = {
+							...r,
+							movie: data.movie,
+							field_sources: data.field_sources ?? r.field_sources,
+							actress_sources: data.actress_sources ?? r.actress_sources,
+						};
+					}
+				}
+				deps.skipJobSync();
+				deps.setJob(updatedJob);
+
+				// Overlay the overridden field onto any in-flight edit so a subsequent
+				// Save doesn't clobber the override (and unsaved edits to other fields survive).
+				const editedMovies = deps.getEditedMovies();
+				for (const [filePath, movie] of editedMovies) {
+					const editedResultId = currentJob.results?.[filePath]?.result_id;
+					if (editedResultId === resultId && data.movie) {
+						const merged: Movie = { ...movie };
+						overlayFieldOverride(merged, field, data.movie);
+						editedMovies.set(filePath, merged);
+					}
+				}
+			}
+			deps.toastSuccess(`Replaced ${field} from ${source}`);
+			void invalidateJobQueries();
+		},
+		onError: (err: Error) => {
+			deps.toastError(`Failed to override field: ${err.message}`);
+			},
+	}));
+
+	async function applyFieldOverrideAsync(resultId: string, field: string, source: string) {
+		if (!deps.getJob()) return;
+		await fieldOverrideMutation.mutateAsync({ resultId, field, source });
+	}
+
 	return {
 		posterFromUrlMutation,
 		applyPosterFromUrl,
@@ -341,6 +411,8 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		bulkRescrapeMutation,
 		saveEditsMutation,
 		posterCropMutation,
-		applyPosterCropAsync
+		applyPosterCropAsync,
+		fieldOverrideMutation,
+		applyFieldOverrideAsync,
 	};
 }

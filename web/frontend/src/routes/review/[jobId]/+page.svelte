@@ -20,6 +20,8 @@
 	import ReviewMediaSidebar from './components/ReviewMediaSidebar.svelte';
 	import RescrapeModal from './components/RescrapeModal.svelte';
 	import BulkRescrapeProgress from './components/BulkRescrapeProgress.svelte';
+	import SourceViewerModal from './components/SourceViewerModal.svelte';
+	import type { ScraperResult } from '$lib/api/types';
 	import SourceFilesCard from './components/SourceFilesCard.svelte';
 	import UnidentifiedFilesCard from './components/UnidentifiedFilesCard.svelte';
 	import { createReviewState } from './stores/review-state.svelte';
@@ -52,6 +54,42 @@
 		if (!shouldSyncTab(currentParam, activeTab)) return;
 		void goto(buildTabUrl($page.url, activeTab), { replaceState: true, noScroll: true, keepFocus: true });
 	});
+
+	let sourceViewerLoading = $state(false);
+	let sourceViewerResults: ScraperResult[] = $state([]);
+	let pendingOverrideField = $state<string | null>(null);
+
+	async function loadSourcesForCurrent() {
+		if (!s.currentResult) return;
+		sourceViewerLoading = true;
+		try {
+			const resp = await s.loadSources(s.currentResult.result_id);
+			sourceViewerResults = resp.results ?? [];
+		} catch (err) {
+			sourceViewerResults = [];
+			console.error('Failed to load sources', err);
+		} finally {
+			sourceViewerLoading = false;
+		}
+	}
+
+	function openSourceViewer() {
+		if (!s.currentResult) return;
+		sourceViewerResults = [];
+		s.openSourceViewerModal();
+		void loadSourcesForCurrent();
+	}
+
+	async function handleApplyOverride(field: string, source: string) {
+		if (!s.currentResult) return;
+		pendingOverrideField = field;
+		try {
+			await s.applyFieldOverride(field, source);
+			await loadSourcesForCurrent();
+		} finally {
+			pendingOverrideField = null;
+		}
+	}
 </script>
 
 <div class="container mx-auto px-4 py-8">
@@ -276,6 +314,7 @@
 								bind:showFieldScraperSources={s.showFieldScraperSources}
 								isRescraping={s.rescrapingStates.get(s.currentResult?.result_id || '') || false}
 								onOpenRescrape={() => s.currentResult && s.openRescrapeModal(s.currentResult.movie_id)}
+							onOpenSourceViewer={openSourceViewer}
 								onResetCurrentMovie={s.resetCurrentMovie}
 								onUpdateCurrentMovie={s.updateCurrentMovie}
 							/>
@@ -423,4 +462,14 @@
 	progress={s.bulkRescrapeProgress}
 	active={s.bulkRescraping}
 	onDismiss={() => { s.dismissBulkRescrapeProgress(); }}
+/>
+
+<SourceViewerModal
+	bind:show={s.showSourceViewerModal}
+	loading={sourceViewerLoading}
+	results={sourceViewerResults}
+	fieldSources={s.currentResult?.field_sources}
+	pendingField={pendingOverrideField}
+	onLoad={loadSourcesForCurrent}
+	onApply={handleApplyOverride}
 />

@@ -110,3 +110,7 @@ func (s *stubMovieLookup) GetFileResultByResultID(resultID string) (*worker.Movi
 	}
 	return nil, "", false
 }
+
+func (s *stubMovieLookup) GetProvenance(filePath string) *worker.ProvenanceData {
+	return nil
+}

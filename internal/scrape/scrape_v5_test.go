@@ -62,13 +62,13 @@ func TestBuildActressSourcesFromCachedMovie_V5_EmptySourceName(t *testing.T) {
 
 func TestActressSourceKeyFromModel_V5_DMMID(t *testing.T) {
 	actress := models.Actress{DMMID: 100, JapaneseName: "Test"}
-	key := actressSourceKeyFromModel(actress)
+	key := ActressSourceKey(actress)
 	assert.Equal(t, "dmmid:100", key)
 }
 
 func TestActressSourceKeyFromModel_V5_JapaneseName(t *testing.T) {
 	actress := models.Actress{JapaneseName: "田中"}
-	key := actressSourceKeyFromModel(actress)
+	key := ActressSourceKey(actress)
 	assert.Contains(t, key, "田中")
 }
 
