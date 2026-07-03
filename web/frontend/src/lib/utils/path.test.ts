@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitPath, buildPathUp, buildBreadcrumbPath, isRootPath } from './path';
+import { splitPath, buildPathUp, buildBreadcrumbPath, isRootPath, pathSeparator } from './path';
 
 describe('splitPath', () => {
 	it('splits Unix paths', () => {
@@ -105,6 +105,27 @@ describe('buildBreadcrumbPath', () => {
 	it('builds single-component Windows path', () => {
 		expect(buildBreadcrumbPath('C:\\Users', 1)).toBe('C:\\Users');
 	});
+});
+
+describe('pathSeparator', () => {
+	const cases: Array<{ name: string; input: string | undefined; expected: string }> = [
+		{ name: 'Windows drive letter with backslash', input: 'C:\\Users\\foo', expected: '\\' },
+		{ name: 'Windows drive letter with forward slash', input: 'C:/Users/foo', expected: '\\' },
+		{ name: 'different Windows drive', input: 'D:\\Movies', expected: '\\' },
+		{ name: 'UNC backslash', input: '\\\\server\\share\\path', expected: '\\' },
+		{ name: 'UNC forward-slash', input: '//server/share/path', expected: '\\' },
+		{ name: 'POSIX absolute', input: '/Users/foo', expected: '/' },
+		{ name: 'POSIX absolute media', input: '/media/x', expected: '/' },
+		{ name: 'relative path defaults to POSIX', input: 'relative/path', expected: '/' },
+		{ name: 'undefined defaults to POSIX', input: undefined, expected: '/' },
+		{ name: 'empty string defaults to POSIX', input: '', expected: '/' }
+	];
+
+	for (const { name, input, expected } of cases) {
+		it(name, () => {
+			expect(pathSeparator(input)).toBe(expected);
+		});
+	}
 });
 
 describe('isRootPath', () => {

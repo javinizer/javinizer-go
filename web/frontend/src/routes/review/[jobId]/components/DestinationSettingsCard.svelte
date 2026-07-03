@@ -3,6 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import { FolderOpen } from 'lucide-svelte';
+	import { pathSeparator } from '$lib/utils/path';
 
 	type OrganizeOperation = 'move' | 'copy' | 'hardlink' | 'softlink';
 
@@ -32,6 +33,9 @@
 
 	let opMode = $derived(preview?.operation_mode || effectiveOperationMode || 'organize');
 	let needsDestination = $derived(opMode === 'organize');
+	let sep = $derived(
+		pathSeparator(destinationPath || preview?.full_path || preview?.source_path || preview?.subfolder_path)
+	);
 	let isInPlaceImplied = $derived(
 		effectiveOperationMode === 'organize' && opMode === 'in-place-norenamefolder'
 	);
@@ -170,7 +174,7 @@
 
 			{#snippet screenshotList(indentPx: number)}
 				{#if preview!.screenshots && preview!.screenshots!.length > 0}
-					<div class="text-muted-foreground break-all" style="margin-left: {indentPx}px">📁 extrafanart/</div>
+					<div class="text-muted-foreground break-all" style="margin-left: {indentPx}px">📁 extrafanart{sep}</div>
 					{#each (showAllPreviewScreenshots ? preview!.screenshots! : preview!.screenshots!.slice(0, 3)) as screenshot}
 						<div class="break-all" style="margin-left: {indentPx + 4}px">🖼️ {screenshot}</div>
 					{/each}
@@ -241,9 +245,9 @@
 					{/if}
 					{#if preview.full_path}
 						{@const targetDir = extractParentDir(preview.full_path)}
-						<div class="text-muted-foreground break-all">📁 {targetDir}/</div>
+						<div class="text-muted-foreground break-all">📁 {targetDir}{sep}</div>
 					{:else if preview.folder_name}
-						<div class="text-muted-foreground break-all">📁 {preview.folder_name}/</div>
+						<div class="text-muted-foreground break-all">📁 {preview.folder_name}{sep}</div>
 					{/if}
 					{#if preview.video_files && preview.video_files.length > 0}
 						{#each preview.video_files as videoFile}
@@ -309,9 +313,9 @@
 				<div class="mt-3 p-3 bg-accent/50 rounded border border-dashed overflow-hidden">
 					<p class="text-xs font-medium mb-2 text-muted-foreground">Preview:</p>
 					<div class="font-mono text-xs space-y-1 overflow-x-auto">
-						<div class="text-muted-foreground break-all">📁 {destinationPath}/</div>
+						<div class="text-muted-foreground break-all">📁 {destinationPath}{sep}</div>
 						{#each allPathParts as part, index}
-							<div class="text-muted-foreground break-all" style="margin-left: {(index + 1) * 4}px">📁 {part}/</div>
+							<div class="text-muted-foreground break-all" style="margin-left: {(index + 1) * 4}px">📁 {part}{sep}</div>
 						{/each}
 						{#if preview.video_files && preview.video_files.length > 0}
 							{#each preview.video_files as videoFile}
