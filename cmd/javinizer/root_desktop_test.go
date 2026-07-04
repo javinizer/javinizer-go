@@ -96,3 +96,32 @@ func TestPersistentPreRun_CLIBuildLeavesConfigDefault(t *testing.T) {
 	got, _ := cmd.Flags().GetString("config")
 	assert.Equal(t, "configs/config.yaml", got, "CLI build must leave --config at its default")
 }
+
+// TestPersistentPreRun_DesktopBuildLogsPortableEnvError covers the
+// SetupPortableEnv error branch in the desktop PersistentPreRun hook: when
+// the portable env cannot be set up (no home dir discoverable), the hook
+// must log to stderr and continue rather than panicking. It then falls
+// through to shouldSkipConfigInit, which short-circuits for the `version`
+// subcommand so initConfig() is not reached.
+func TestPersistentPreRun_DesktopBuildLogsPortableEnvError(t *testing.T) {
+	orig := desktop.BuildDesktop
+	desktop.BuildDesktop = "1"
+	defer func() { desktop.BuildDesktop = orig }()
+
+	origCfg := cfgFile
+	defer func() { cfgFile = origCfg }()
+	cfgFile = "configs/config.yaml"
+
+	// Force SetupPortableEnv -> UserDataDir to fail by clearing every env var
+	// os.UserConfigDir / os.UserHomeDir consult.
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("AppData", "")
+	t.Setenv("USERPROFILE", "")
+
+	cmd := &cobra.Command{Use: "version"}
+	cmd.Flags().String("config", "configs/config.yaml", "config file path")
+
+	// Must not panic; the error is logged and execution continues.
+	assert.NotPanics(t, func() { rootCmd.PersistentPreRun(cmd, nil) })
+}

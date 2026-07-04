@@ -125,3 +125,43 @@ func TestSetupPortableEnv_HomeDirFallback(t *testing.T) {
 	// No assertion on error: both success (HOME fallback) and failure (no
 	// HOME) are acceptable. This covers the error-handling branch either way.
 }
+
+// TestUserDataDir_MkdirAllFailure covers the os.MkdirAll error branch in
+// UserDataDir: when the resolved config dir cannot be created (e.g. a parent
+// path component is a regular file), UserDataDir must return an error.
+func TestUserDataDir_MkdirAllFailure(t *testing.T) {
+	// os.UserConfigDir() resolves to ~/Library/Application Support on macOS
+	// and $XDG_CONFIG_HOME on Linux. Setting HOME to a regular-file path
+	// makes MkdirAll fail with "not a directory" on both platforms.
+	blocker, err := os.CreateTemp(t.TempDir(), "blocker")
+	if err != nil {
+		t.Fatalf("create blocker file: %v", err)
+	}
+	defer blocker.Close()
+	t.Setenv("HOME", blocker.Name())
+	t.Setenv("XDG_CONFIG_HOME", blocker.Name()+"/sub")
+
+	_, err = UserDataDir()
+	if err == nil {
+		t.Fatal("UserDataDir() should fail when MkdirAll cannot create the dir")
+	}
+}
+
+// TestSetupPortableEnv_MkdirAllFailure covers the os.MkdirAll error branch in
+// SetupPortableEnv: when the data/logs dirs cannot be created under the
+// user-data dir, SetupPortableEnv must return an error.
+func TestSetupPortableEnv_MkdirAllFailure(t *testing.T) {
+	blocker, err := os.CreateTemp(t.TempDir(), "blocker")
+	if err != nil {
+		t.Fatalf("create blocker file: %v", err)
+	}
+	defer blocker.Close()
+	t.Setenv("HOME", blocker.Name())
+	t.Setenv("XDG_CONFIG_HOME", blocker.Name()+"/sub")
+	t.Setenv("JAVINIZER_DB", "")
+	t.Setenv("JAVINIZER_LOG_DIR", "")
+
+	if err := SetupPortableEnv(); err == nil {
+		t.Fatal("SetupPortableEnv() should fail when MkdirAll cannot create the data dirs")
+	}
+}
