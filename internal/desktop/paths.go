@@ -6,6 +6,11 @@ import (
 	"path/filepath"
 )
 
+var (
+	userConfigDirFn = os.UserConfigDir
+	userHomeDirFn   = os.UserHomeDir
+)
+
 // appDataDirName is the per-user directory name under the OS config dir.
 const appDataDirName = "Javinizer"
 
@@ -16,9 +21,9 @@ const appDataDirName = "Javinizer"
 //   - Windows: %APPDATA%\Javinizer
 //   - Linux: $XDG_CONFIG_HOME/Javinizer or ~/.config/Javinizer
 func UserDataDir() (string, error) {
-	base, err := os.UserConfigDir()
+	base, err := userConfigDirFn()
 	if err != nil || base == "" {
-		home, homeErr := os.UserHomeDir()
+		home, homeErr := userHomeDirFn()
 		if homeErr != nil {
 			return "", fmt.Errorf("desktop: cannot locate user data dir: %w", homeErr)
 		}

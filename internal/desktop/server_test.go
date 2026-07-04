@@ -2,11 +2,15 @@ package desktop
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/javinizer/javinizer-go/internal/config"
 )
 
 // writeTestConfig creates a minimal config file in t.TempDir() with an
@@ -168,6 +172,83 @@ func TestServerInstance_StartServer_InvalidConfig(t *testing.T) {
 
 	if inst.BaseURL() == "" {
 		t.Error("BaseURL() is empty even though StartServer succeeded")
+	}
+}
+
+// TestStartServer_ListenFails covers the net.Listen error branch (server.go
+// ~L56-58): when the free-port listener cannot be created, StartServer must
+// surface the error. Listen on 127.0.0.1:0 essentially never fails, so the
+// listenFn seam is swapped to return a deterministic error.
+func TestStartServer_ListenFails(t *testing.T) {
+	origListen, origLoad := listenFn, loadConfigFn
+	t.Cleanup(func() { listenFn, loadConfigFn = origListen, origLoad })
+
+	listenFn = func(ctx context.Context) (net.Listener, error) {
+		return nil, errors.New("simulated listen failure")
+	}
+	loadConfigFn = func(path string) (*config.Config, error) {
+		return &config.Config{}, nil
+	}
+
+	_, err := StartServer(context.Background(), "unused.yaml")
+	if err == nil {
+		t.Fatal("StartServer() with failing listener should error, got nil")
+	}
+}
+
+// TestStartServer_PrepareFails covers the second config.Prepare error branch
+// (server.go ~L63-66): after env overrides, an invalid config must abort
+// startup and close the already-bound listener. LoadOrCreate always returns a
+// valid (prepared) config, so the loadConfigFn seam is swapped to return a
+// config whose version is too new -> Prepare fails before reaching Validate.
+func TestStartServer_PrepareFails(t *testing.T) {
+	origListen, origLoad := listenFn, loadConfigFn
+	t.Cleanup(func() { listenFn, loadConfigFn = origListen, origLoad })
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("create listener: %v", err)
+	}
+	defer ln.Close() // idempotent; the error path also closes it
+
+	listenFn = func(ctx context.Context) (net.Listener, error) { return ln, nil }
+	loadConfigFn = func(path string) (*config.Config, error) {
+		return &config.Config{ConfigVersion: config.CurrentConfigVersion + 1}, nil
+	}
+
+	_, err = StartServer(context.Background(), "unused.yaml")
+	if err == nil {
+		t.Fatal("StartServer() with invalid config should error, got nil")
+	}
+}
+
+// TestStartServer_ServeError covers the non-ErrServerClosed Serve error branch
+// (server.go ~L102-104): when the underlying listener is closed externally
+// (not via Shutdown), srv.Serve returns a non-ErrServerClosed error which must
+// be logged and inst.done closed.
+func TestStartServer_ServeError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	t.Setenv("JAVINIZER_DB", ":memory:")
+	configPath := writeTestConfig(t)
+
+	inst, err := StartServer(context.Background(), configPath)
+	if err != nil {
+		t.Fatalf("StartServer() error: %v", err)
+	}
+	defer inst.Shutdown() // drains rt/deps/db even though Serve already errored
+
+	// Close the underlying listener directly (NOT Shutdown) so Serve returns a
+	// non-ErrServerClosed error, exercising the error-log branch.
+	_ = inst.listener.Close()
+
+	select {
+	case <-inst.Done():
+		// done closed after Serve returned its error
+	case <-time.After(5 * time.Second):
+		t.Fatal("Done() did not close after external listener close")
 	}
 }
 

@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,9 +69,65 @@ func TestSetupPortableEnv_PreservesExistingEnv(t *testing.T) {
 	}
 }
 
+// TestSetupPortableEnv_DataDirMkdirAllFailure covers the os.MkdirAll error
+// branch inside SetupPortableEnv (paths.go:60-62): UserDataDir succeeds, but
+// the `data` subdir cannot be created because a regular file already exists at
+// that path. Cross-platform: all home/config env vars are pointed at a temp
+// dir so UserDataDir resolves deterministically under it on every OS.
+func TestSetupPortableEnv_DataDirMkdirAllFailure(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("AppData", tmp)
+	t.Setenv("LOCALAPPDATA", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("JAVINIZER_DB", "")
+	t.Setenv("JAVINIZER_LOG_DIR", "")
+
+	// Let UserDataDir create its dir, then plant a regular file at the `data`
+	// subdir path so the subsequent MkdirAll(dataDir) inside SetupPortableEnv
+	// fails with "not a directory".
+	dir, err := UserDataDir()
+	if err != nil {
+		t.Fatalf("UserDataDir() setup error: %v", err)
+	}
+	dataPath := filepath.Join(dir, "data")
+	if err := os.WriteFile(dataPath, []byte("blocker"), 0o644); err != nil {
+		t.Fatalf("seed blocker file: %v", err)
+	}
+
+	if err := SetupPortableEnv(); err == nil {
+		t.Fatal("SetupPortableEnv() should fail when dataDir MkdirAll fails, got nil")
+	}
+}
+
 func TestIsDesktopBuild_DefaultFalse(t *testing.T) {
 	if IsDesktopBuild() {
 		t.Fatal("IsDesktopBuild() = true in a normal (non -X injected) build; want false")
+	}
+}
+
+// TestUserDataDir_HomeFallback covers the branch where os.UserConfigDir fails
+// but os.UserHomeDir succeeds (e.g. Windows with %AppData% unset but
+// %USERPROFILE% set). On Linux/macOS these two functions both consult $HOME
+// and so cannot diverge, so the seam (userConfigDirFn/userHomeDirFn) is swapped
+// to exercise the `base = filepath.Join(home, ".javinizer")` fallback.
+func TestUserDataDir_HomeFallback(t *testing.T) {
+	origCfg, origHome := userConfigDirFn, userHomeDirFn
+	t.Cleanup(func() {
+		userConfigDirFn, userHomeDirFn = origCfg, origHome
+	})
+	tmp := t.TempDir()
+	userConfigDirFn = func() (string, error) { return "", fmt.Errorf("no config dir") }
+	userHomeDirFn = func() (string, error) { return tmp, nil }
+
+	dir, err := UserDataDir()
+	if err != nil {
+		t.Fatalf("UserDataDir() error: %v", err)
+	}
+	want := filepath.Join(tmp, ".javinizer", appDataDirName)
+	if dir != want {
+		t.Errorf("UserDataDir() = %q, want %q", dir, want)
 	}
 }
 

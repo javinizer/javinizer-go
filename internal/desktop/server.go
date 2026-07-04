@@ -15,6 +15,13 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
+var (
+	listenFn = func(ctx context.Context) (net.Listener, error) {
+		return (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
+	}
+	loadConfigFn = config.LoadOrCreate
+)
+
 // ServerInstance is a running API server bound to a free localhost port.
 // It serves the REST API and the embedded Web UI (web/dist) — the same surface
 // the `javinizer api` command exposes — so the desktop webview can load it.
@@ -37,7 +44,7 @@ type ServerInstance struct {
 //
 // The server runs until ctx is cancelled or Shutdown is called.
 func StartServer(ctx context.Context, configFile string) (*ServerInstance, error) {
-	cfg, err := config.LoadOrCreate(configFile)
+	cfg, err := loadConfigFn(configFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
@@ -45,7 +52,7 @@ func StartServer(ctx context.Context, configFile string) (*ServerInstance, error
 
 	// Bind to a free localhost port. The listener holds the port across the
 	// (slow) bootstrap below, so the URL we report to the window stays valid.
-	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
+	ln, err := listenFn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("desktop: failed to find free port: %w", err)
 	}
