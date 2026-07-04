@@ -270,138 +270,97 @@ func GenreTranslationViewToModel(v *GenreTranslationView) *models.GenreTranslati
 	}
 }
 
-// ActressViewSliceFromModels maps a slice of Actresses to ActressViews.
-// A nil input yields a nil result so the JSON shape (null vs []) is preserved.
-func ActressViewSliceFromModels(ms []models.Actress) []ActressView {
+// sliceFromModels maps a slice of persistence models to contract views via
+// conv. A nil input yields a nil result so the JSON shape (null vs []) is
+// preserved. It is the shared implementation behind every *SliceFromModels
+// helper, keeping nil-handling and value-semantics identical across DTOs.
+func sliceFromModels[M any, V any](ms []M, conv func(*M) *V) []V {
 	if ms == nil {
 		return nil
 	}
-	vs := make([]ActressView, len(ms))
+	vs := make([]V, len(ms))
 	for i := range ms {
-		vs[i] = *ActressViewFromModel(&ms[i])
+		vs[i] = *conv(&ms[i])
 	}
 	return vs
+}
+
+// sliceToModels is the inverse of sliceFromModels, mapping contract views back
+// to persistence models. A nil input yields a nil result so the JSON shape
+// (null vs []) is preserved.
+func sliceToModels[V any, M any](vs []V, conv func(*V) *M) []M {
+	if vs == nil {
+		return nil
+	}
+	ms := make([]M, len(vs))
+	for i := range vs {
+		ms[i] = *conv(&vs[i])
+	}
+	return ms
+}
+
+// ActressViewSliceFromModels maps a slice of Actresses to ActressViews.
+// A nil input yields a nil result so the JSON shape (null vs []) is preserved.
+func ActressViewSliceFromModels(ms []models.Actress) []ActressView {
+	return sliceFromModels(ms, ActressViewFromModel)
 }
 
 // ActressViewSliceToModels maps a slice of ActressViews to Actresses.
 // A nil input yields a nil result so the JSON shape (null vs []) is preserved.
 func ActressViewSliceToModels(vs []ActressView) []models.Actress {
-	if vs == nil {
-		return nil
-	}
-	ms := make([]models.Actress, len(vs))
-	for i := range vs {
-		ms[i] = *ActressViewToModel(&vs[i])
-	}
-	return ms
+	return sliceToModels(vs, ActressViewToModel)
 }
 
 // GenreViewSliceFromModels maps a slice of Genres to GenreViews.
 // A nil input yields a nil result so the JSON shape (null vs []) is preserved.
 func GenreViewSliceFromModels(ms []models.Genre) []GenreView {
-	if ms == nil {
-		return nil
-	}
-	vs := make([]GenreView, len(ms))
-	for i := range ms {
-		vs[i] = *GenreViewFromModel(&ms[i])
-	}
-	return vs
+	return sliceFromModels(ms, GenreViewFromModel)
 }
 
 // GenreViewSliceToModels maps a slice of GenreViews to Genres.
 // A nil input yields a nil result so the JSON shape (null vs []) is preserved.
 func GenreViewSliceToModels(vs []GenreView) []models.Genre {
-	if vs == nil {
-		return nil
-	}
-	ms := make([]models.Genre, len(vs))
-	for i := range vs {
-		ms[i] = *GenreViewToModel(&vs[i])
-	}
-	return ms
+	return sliceToModels(vs, GenreViewToModel)
 }
 
 // MovieTranslationViewSliceFromModels maps a slice of MovieTranslations to
 // MovieTranslationViews. A nil input yields a nil result so the JSON shape
 // (null vs []) is preserved.
 func MovieTranslationViewSliceFromModels(ms []models.MovieTranslation) []MovieTranslationView {
-	if ms == nil {
-		return nil
-	}
-	vs := make([]MovieTranslationView, len(ms))
-	for i := range ms {
-		vs[i] = *MovieTranslationViewFromModel(&ms[i])
-	}
-	return vs
+	return sliceFromModels(ms, MovieTranslationViewFromModel)
 }
 
 // MovieTranslationViewSliceToModels maps a slice of MovieTranslationViews to
 // MovieTranslations. A nil input yields a nil result so the JSON shape
 // (null vs []) is preserved.
 func MovieTranslationViewSliceToModels(vs []MovieTranslationView) []models.MovieTranslation {
-	if vs == nil {
-		return nil
-	}
-	ms := make([]models.MovieTranslation, len(vs))
-	for i := range vs {
-		ms[i] = *MovieTranslationViewToModel(&vs[i])
-	}
-	return ms
+	return sliceToModels(vs, MovieTranslationViewToModel)
 }
 
 // ActressTranslationViewSliceFromModels maps a slice of ActressTranslations to
 // ActressTranslationViews. A nil input yields a nil result so the JSON shape
 // (null vs []) is preserved.
 func ActressTranslationViewSliceFromModels(ms []models.ActressTranslation) []ActressTranslationView {
-	if ms == nil {
-		return nil
-	}
-	vs := make([]ActressTranslationView, len(ms))
-	for i := range ms {
-		vs[i] = *ActressTranslationViewFromModel(&ms[i])
-	}
-	return vs
+	return sliceFromModels(ms, ActressTranslationViewFromModel)
 }
 
 // ActressTranslationViewSliceToModels maps a slice of ActressTranslationViews
 // to ActressTranslations. A nil input yields a nil result so the JSON shape
 // (null vs []) is preserved.
 func ActressTranslationViewSliceToModels(vs []ActressTranslationView) []models.ActressTranslation {
-	if vs == nil {
-		return nil
-	}
-	ms := make([]models.ActressTranslation, len(vs))
-	for i := range vs {
-		ms[i] = *ActressTranslationViewToModel(&vs[i])
-	}
-	return ms
+	return sliceToModels(vs, ActressTranslationViewToModel)
 }
 
 // GenreTranslationViewSliceFromModels maps a slice of GenreTranslations to
 // GenreTranslationViews. A nil input yields a nil result so the JSON shape
 // (null vs []) is preserved.
 func GenreTranslationViewSliceFromModels(ms []models.GenreTranslation) []GenreTranslationView {
-	if ms == nil {
-		return nil
-	}
-	vs := make([]GenreTranslationView, len(ms))
-	for i := range ms {
-		vs[i] = *GenreTranslationViewFromModel(&ms[i])
-	}
-	return vs
+	return sliceFromModels(ms, GenreTranslationViewFromModel)
 }
 
 // GenreTranslationViewSliceToModels maps a slice of GenreTranslationViews to
 // GenreTranslations. A nil input yields a nil result so the JSON shape
 // (null vs []) is preserved.
 func GenreTranslationViewSliceToModels(vs []GenreTranslationView) []models.GenreTranslation {
-	if vs == nil {
-		return nil
-	}
-	ms := make([]models.GenreTranslation, len(vs))
-	for i := range vs {
-		ms[i] = *GenreTranslationViewToModel(&vs[i])
-	}
-	return ms
+	return sliceToModels(vs, GenreTranslationViewToModel)
 }
