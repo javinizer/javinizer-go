@@ -47,13 +47,16 @@ mkdir -p "$appdir/usr/bin"
 cp "$binary" "$appdir/usr/bin/javinizer"
 chmod +x "$appdir/usr/bin/javinizer"
 
-# Icon (optional). Without one, linuxdeploy uses a default; a real icon should
-# be wired in for proper desktop integration.
-icon_args=()
+# Icon. linuxdeploy errors if the .desktop Icon= entry has no matching file,
+# so we always provide one: use the caller's icon if given, else a 1x1
+# placeholder PNG (a real icon should be wired in for polished desktop
+# integration, but a placeholder unblocks the build).
 if [ -n "$icon" ] && [ -f "$icon" ]; then
 	cp "$icon" "$appdir/javinizer.png"
-	icon_args=(--icon-file "$appdir/javinizer.png")
+else
+	printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\x0f\x00\x00\x01\x00\x01\x00\x00\x00\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB\x60\x82' > "$appdir/javinizer.png"
 fi
+icon_args=(--icon-file "$appdir/javinizer.png")
 
 # .desktop entry
 cat > "$appdir/javinizer.desktop" <<EOF
