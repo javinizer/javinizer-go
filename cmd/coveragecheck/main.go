@@ -25,14 +25,22 @@ func runWithAnalyze(args []string, stdout, stderr io.Writer, analyze analyzeProf
 	var minCoverage float64
 	var profilePath string
 	var metric string
+	var patch bool
+	var baseRef string
 
 	fs := flag.NewFlagSet("coveragecheck", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Float64Var(&minCoverage, "min", 75, "minimum required coverage percentage")
 	fs.StringVar(&profilePath, "profile", "coverage.out", "path to coverage profile")
 	fs.StringVar(&metric, "metric", "line", "coverage metric to enforce: line or statement")
+	fs.BoolVar(&patch, "patch", false, "check patch coverage (new/changed lines vs base ref) like codecov/patch")
+	fs.StringVar(&baseRef, "base", "main", "git base ref for --patch (the merge-base is used so a behind branch still diffs against the fork point)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	if patch {
+		return runPatchCheck(profilePath, baseRef, minCoverage, stdout, stderr)
 	}
 
 	summary, err := analyze(profilePath)

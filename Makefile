@@ -1,5 +1,5 @@
 .PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
-.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci ci-full config-drift config-sync check-import-guard check-mocks simulate-ci
+.PHONY: coverage coverage-fast coverage-html coverage-check coverage-pkg coverage-patch coverage-patch-check coverage-func ci ci-full config-drift config-sync check-import-guard check-mocks simulate-ci
 .PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-field-drop test-e2e-cli test-e2e-live test-coverage
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: build-app-darwin build-app-windows build-app-linux build-app-all
@@ -33,6 +33,8 @@ help:
 	@echo "  make coverage-html      - Generate HTML coverage report (coverage.html)"
 	@echo "  make coverage-pkg       - Display per-package coverage breakdown"
 	@echo "  make coverage-check     - Enforce 75%% Codecov-compatible line coverage"
+	@echo "  make coverage-patch     - Show patch coverage (new/changed lines vs main)"
+	@echo "  make coverage-patch-check - Enforce 80%% patch coverage (mirrors codecov/patch)"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  make fmt                - Format code with go fmt"
@@ -179,6 +181,19 @@ coverage-pkg: coverage
 # Check if coverage meets minimum threshold using Codecov-compatible line coverage.
 coverage-check: coverage
 	@./scripts/check_coverage.sh 75 coverage.out
+
+# Show patch coverage (new/changed lines vs main) — mirrors codecov/patch.
+# Reads codecov.yml's ignore list and go.mod's module path so the local result
+# matches what codecov reports on the PR. Requires a clean working tree with
+# the base ref (main) available locally (git fetch upstream main first if not).
+coverage-patch: coverage
+	@go run ./cmd/coveragecheck --patch --profile coverage.out --base main
+
+# Enforce 80%% patch coverage (matching codecov.yml's patch target). Fails the
+# build if any new/changed lines are uncovered. Use before pushing to catch
+# codecov/patch failures locally instead of after a CI round-trip.
+coverage-patch-check: coverage
+	@go run ./cmd/coveragecheck --patch --profile coverage.out --base main --min 80
 
 # Test coverage goal - enforces 90% line coverage
 test-coverage: coverage
