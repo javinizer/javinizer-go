@@ -72,16 +72,20 @@ EOF
 export APPIMAGE_EXTRACT_AND_RUN=1
 export ARCH="$ld_arch"
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+# linuxdeploy discovers plugins (e.g. linuxdeploy-plugin-gtk.sh) via PATH.
+export PATH="$workdir:$PATH"
 
 echo "Downloading linuxdeploy ($ld_arch)..."
 curl -fsSL -o "$workdir/linuxdeploy" \
 	"https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${ld_arch}.AppImage"
 chmod +x "$workdir/linuxdeploy"
 
-echo "Downloading linuxdeploy-plugin-gtk ($ld_arch)..."
-curl -fsSL -o "$workdir/linuxdeploy-plugin-gtk" \
-	"https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk-${ld_arch}.sh"
-chmod +x "$workdir/linuxdeploy-plugin-gtk"
+echo "Downloading linuxdeploy-plugin-gtk..."
+# The plugin is a single arch-independent shell script (no arch suffix).
+# linuxdeploy discovers it via PATH by the name linuxdeploy-plugin-gtk.sh.
+curl -fsSL -o "$workdir/linuxdeploy-plugin-gtk.sh" \
+	"https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh"
+chmod +x "$workdir/linuxdeploy-plugin-gtk.sh"
 
 # linuxdeploy + the GTK plugin scan the binary's library dependencies and
 # bundle webkit2gtk + gtk3 (and their transitive deps) into the AppDir, then
