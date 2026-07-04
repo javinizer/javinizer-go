@@ -137,7 +137,7 @@ verify_sha256() {
 }
 
 echo "Downloading linuxdeploy $LINUXDEPLOY_VERSION ($ld_arch)..."
-curl -fsSL -o "$workdir/linuxdeploy" \
+curl -fsSL --connect-timeout 10 --max-time 120 -o "$workdir/linuxdeploy" \
 	"https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-${ld_arch}.AppImage"
 verify_sha256 "$workdir/linuxdeploy" "$linuxdeploy_sha256"
 chmod +x "$workdir/linuxdeploy"
@@ -145,7 +145,7 @@ chmod +x "$workdir/linuxdeploy"
 echo "Downloading linuxdeploy-plugin-gtk ($LINUXDEPLOY_PLUGIN_GTK_REF)..."
 # The plugin is a single arch-independent shell script (no arch suffix).
 # linuxdeploy discovers it via PATH by the name linuxdeploy-plugin-gtk.sh.
-curl -fsSL -o "$workdir/linuxdeploy-plugin-gtk.sh" \
+curl -fsSL --connect-timeout 10 --max-time 60 -o "$workdir/linuxdeploy-plugin-gtk.sh" \
 	"https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/${LINUXDEPLOY_PLUGIN_GTK_REF}/linuxdeploy-plugin-gtk.sh"
 verify_sha256 "$workdir/linuxdeploy-plugin-gtk.sh" "$LINUXDEPLOY_PLUGIN_GTK_SHA256"
 chmod +x "$workdir/linuxdeploy-plugin-gtk.sh"
