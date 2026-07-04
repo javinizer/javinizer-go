@@ -115,6 +115,33 @@ scoop update javinizer   # update to the latest stable release later
 
 The manifest installs the prebuilt `javinizer-windows-amd64.exe` and shims it as `javinizer`. The bucket is updated automatically on each **stable** release; prereleases never reach it, so `scoop update` never hands you a release candidate. Scoop downloads via a trusted process and verifies the hash from the manifest, making this the recommended Windows install path.
 
+### Desktop app (clickable GUI)
+
+The desktop app is a single clickable application that opens a native window over the embedded API server and Web UI — the same surface as `javinizer api`, no browser needed. It is a **separate package** from the CLI so both can coexist:
+
+```bash
+# macOS — Homebrew Cask (installs Javinizer.app to /Applications)
+brew tap javinizer/homebrew-tap https://github.com/javinizer/homebrew-tap
+brew install --cask javinizer-app
+# trust the tap first on Homebrew 6.0+ if you skipped it above:
+# brew trust --cask javinizer/tap/javinizer-app
+```
+
+```powershell
+# Windows — Scoop (shim: javinizer-app; Start Menu shortcut: Javinizer)
+scoop bucket add javinizer https://github.com/javinizer/scoop-javinizer
+scoop install javinizer-app
+```
+
+```bash
+# Linux — AppImage (direct download; self-contained, no package manager needed)
+curl -L -o Javinizer.AppImage https://github.com/javinizer/javinizer-go/releases/latest/download/Javinizer-linux-x86_64.AppImage
+chmod +x Javinizer.AppImage
+./Javinizer.AppImage
+```
+
+The app is **unsigned** — see [Desktop App (macOS / Windows / Linux)](docs/17-desktop-app.md) for first-launch Gatekeeper / Smart App Control notes. The cask and bucket are updated automatically on each **stable** release; prereleases never reach them.
+
 ### One-shot install (Linux / macOS / Windows)
 
 The installers download the latest **stable** release, verify its SHA256 against `checksums.txt`, and put `javinizer` on your `PATH`. Prereleases are opt-in: pass `--pre-release` (Linux/macOS) or `-PreRelease` (Windows) to install the newest release including prereleases.

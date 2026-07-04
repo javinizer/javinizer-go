@@ -1,8 +1,40 @@
-# Desktop App (macOS / Windows)
+# Desktop App (macOS / Windows / Linux)
 
 Javinizer can be packaged as a single clickable desktop application that opens
 a native window over the embedded API server and Web UI. All CLI and TUI
 subcommands remain available inside the same binary.
+
+## Installation
+
+The desktop app is a **separate package** from the CLI so both can coexist. It
+is published to the same package-manager taps on each **stable** release
+(prereleases never reach them):
+
+```bash
+# macOS — Homebrew Cask (installs Javinizer.app to /Applications)
+brew tap javinizer/homebrew-tap https://github.com/javinizer/homebrew-tap
+brew install --cask javinizer-app
+```
+
+```powershell
+# Windows — Scoop (shim: javinizer-app; Start Menu shortcut: Javinizer)
+scoop bucket add javinizer https://github.com/javinizer/scoop-javinizer
+scoop install javinizer-app
+```
+
+```bash
+# Linux — AppImage (direct download; self-contained, no package manager needed)
+curl -L -o Javinizer.AppImage \
+  https://github.com/javinizer/javinizer-go/releases/latest/download/Javinizer-linux-x86_64.AppImage
+chmod +x Javinizer.AppImage
+./Javinizer.AppImage
+```
+
+Linux has no Homebrew/Scoop package because AppImages are self-contained and
+need no package manager — and Homebrew casks are macOS-only. For arm64 Linux,
+swap `x86_64` for `aarch64` in the asset name.
+
+To build from source instead, see [Build](#build) below.
 
 ## How it works
 
@@ -14,6 +46,8 @@ WebSocket both work with **zero frontend changes**.
 
 - **macOS** — WKWebView (WebKit)
 - **Windows** — WebView2
+- **Linux** — WebKitGTK (via the `webkit2_41` build tag, which selects
+  libwebkit2gtk-4.1)
 
 The `desktop` Go build tag isolates the Wails dependency so it never enters the
 normal CLI/test build. A second tag, `production`, is required by Wails to
@@ -27,11 +61,15 @@ still prints help.
 ```bash
 make build-app-darwin    # → bin/Javinizer.app (universal: x86_64 + arm64)
 make build-app-windows   # → bin/Javinizer.exe
-make build-app-all
+make build-app-linux     # → bin/Javinizer-linux-<arch>.AppImage (host arch only)
+make build-app-all       # → darwin + windows (Linux must be built on Linux)
 ```
 
-Both targets run `make web-build` first, so the frontend is embedded into the
-binary via `//go:embed`.
+All targets run `make web-build` first, so the frontend is embedded into the
+binary via `//go:embed`. `build-app-all` covers macOS + Windows (the two that
+cross-compile cleanly); the Linux AppImage must be built on Linux because its
+packaging step (`scripts/package-app-linux.sh`) runs `linuxdeploy` +
+`appimagetool`, which are Linux-only binaries.
 
 ### Prerequisites
 
@@ -43,6 +81,13 @@ binary via `//go:embed`.
   requires CGO for `go-webview2`). Cross-compiling from macOS needs a mingw
   cross-compiler as `CC` (e.g. `x86_64-w64-mingw32-gcc`); for releases, build on
   a `windows-latest` runner instead (see `.github/workflows/cli-release.yml`).
+- **Linux**: the WebKitGTK development headers and GTK 3. On Ubuntu/Debian:
+  ```bash
+  sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+  ```
+  The `build-app-linux` target selects the `webkit2_41` build tag (libwebkit2gtk-4.1,
+  Ubuntu 24.04's version). The AppImage packaging bundles `libwebkit2gtk` +
+  `gtk3` so the resulting AppImage runs on any distro without preinstalling them.
 
 ## Launch
 

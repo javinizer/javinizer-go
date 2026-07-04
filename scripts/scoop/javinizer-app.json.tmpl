@@ -1,0 +1,34 @@
+{
+    "version": "__VERSION__",
+    "description": "JAV metadata scraper and organizer — desktop app (clickable GUI over the embedded API server and Web UI)",
+    "homepage": "https://github.com/javinizer/javinizer-go",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/javinizer/javinizer-go/releases/download/v__VERSION__/Javinizer.exe",
+            "hash": "__APP_HASH__"
+        }
+    },
+    "bin": [
+        ["Javinizer.exe", "javinizer-app"]
+    ],
+    "shortcuts": [
+        ["Javinizer.exe", "Javinizer"]
+    ],
+    "notes": "The Javinizer app is unsigned. Windows Smart App Control or Defender may warn on first launch; this is expected. The CLI (javinizer) is a separate package: scoop install javinizer. See: https://github.com/javinizer/javinizer-go/blob/main/docs/17-desktop-app.md",
+    "checkver": {
+        "github": "https://github.com/javinizer/javinizer-go",
+        "regex": "v?(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/javinizer/javinizer-go/releases/download/v$version/Javinizer.exe",
+                "hash": {
+                    "url": "$baseurl/checksums.txt",
+                    "regex": "^([a-fA-F0-9]{64})\\s+\\*?Javinizer\\.exe$"
+                }
+            }
+        }
+    }
+}

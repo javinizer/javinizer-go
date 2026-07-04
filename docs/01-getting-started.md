@@ -92,6 +92,33 @@ scoop update javinizer   # update to the latest stable release later
 
 The manifest installs the prebuilt `javinizer-windows-amd64.exe` and shims it as `javinizer`. The bucket is updated automatically on each **stable** release; prereleases never reach it. This is the recommended Windows install path until release binaries are Authenticode-signed (issue [#72](https://github.com/javinizer/javinizer-go/issues/72)).
 
+### Desktop app (clickable GUI)
+
+The desktop app opens a native window over the embedded API server and Web UI — the same surface as `javinizer api`, no browser needed. CLI and TUI subcommands remain available inside the same binary. It is a **separate package** from the CLI so both can coexist; see [Desktop App (macOS / Windows / Linux)](17-desktop-app.md) for details.
+
+```bash
+# macOS — Homebrew Cask (installs Javinizer.app to /Applications)
+brew tap javinizer/homebrew-tap https://github.com/javinizer/homebrew-tap
+brew install --cask javinizer-app
+# trust the tap first on Homebrew 6.0+ if you skipped it above:
+# brew trust --cask javinizer/tap/javinizer-app
+```
+
+```powershell
+# Windows — Scoop (shim: javinizer-app; Start Menu shortcut: Javinizer)
+scoop bucket add javinizer https://github.com/javinizer/scoop-javinizer
+scoop install javinizer-app
+```
+
+```bash
+# Linux — AppImage (direct download; self-contained, no package manager needed)
+curl -L -o Javinizer.AppImage https://github.com/javinizer/javinizer-go/releases/latest/download/Javinizer-linux-x86_64.AppImage
+chmod +x Javinizer.AppImage
+./Javinizer.AppImage
+```
+
+The app is **unsigned** — expect a one-time Gatekeeper (macOS) or Smart App Control (Windows) prompt on first launch; see [the desktop-app docs](17-desktop-app.md#the-app-is-unsigned). The cask and bucket are updated automatically on each **stable** release; prereleases never reach them.
+
 ### One-shot installer
 
 Downloads the latest **stable** release, verifies its SHA256 against `checksums.txt`, and puts `javinizer` on your `PATH`. Prereleases are opt-in: pass `--pre-release` / `-PreRelease` to install the newest release including prereleases.

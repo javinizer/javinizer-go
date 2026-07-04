@@ -58,14 +58,27 @@ brew install javinizer
 brew upgrade javinizer   # updates to the latest stable release
 ```
 
+The **desktop app** (clickable macOS GUI) is a separate Cask in the same tap:
+
+```bash
+brew install --cask javinizer-app   # installs Javinizer.app to /Applications
+brew upgrade --cask javinizer-app
+```
+
+On Homebrew 6.0+, trust the tap once before installing either: `brew trust --formula javinizer/tap/javinizer` and `brew trust --cask javinizer/tap/javinizer-app` (or set `HOMEBREW_NO_REQUIRE_TAP_TRUST=1`).
+
 ## Notes
 
 - The tap is only updated for **stable** releases. Prereleases (`v1.0.0-rc.*`)
   do not push to the tap, so `brew upgrade` never hands a user a release
   candidate unless they explicitly downgrade.
-- The formula installs prebuilt binaries (CGO/SQLite is statically linked into
-  each release asset), so Homebrew does not need to build from source or pull
-  in a SQLite dependency.
+- The formula (`Formula/javinizer.rb`) installs prebuilt CLI binaries
+  (CGO/SQLite is statically linked into each release asset), so Homebrew does
+  not need to build from source or pull in a SQLite dependency.
+- The cask (`Casks/javinizer-app.rb`) installs the unsigned `Javinizer.app`
+  bundle to `/Applications`. It is macOS-only (casks cannot target Linux); the
+  Linux desktop app is an AppImage distributed as a direct download from the
+  Releases page.
 - `javinizer upgrade` (self-upgrade) detects a Homebrew install by its Cellar
   path and tells the user to run `brew upgrade javinizer` instead, so the two
   channels never fight each other.

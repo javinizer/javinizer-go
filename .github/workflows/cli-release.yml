@@ -1088,8 +1088,11 @@ jobs:
           set -euo pipefail
           mkdir -p out
           ./scripts/homebrew/render-formula.sh "$VERSION" ./release/checksums.txt scripts/homebrew/javinizer.rb.tmpl > out/javinizer.rb
+          ./scripts/homebrew/render-formula.sh "$VERSION" ./release/checksums.txt scripts/homebrew/javinizer-app.cask.tmpl > out/javinizer-app.rb
           echo "=== rendered Formula/javinizer.rb ==="
           cat out/javinizer.rb
+          echo "=== rendered Casks/javinizer-app.rb ==="
+          cat out/javinizer-app.rb
 
       - name: Checkout tap repo
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -1103,12 +1106,13 @@ jobs:
           VERSION: ${{ needs.prepare-release.outputs.version }}
         run: |
           set -euo pipefail
-          mkdir -p tap/Formula
+          mkdir -p tap/Formula tap/Casks
           cp out/javinizer.rb tap/Formula/javinizer.rb
+          cp out/javinizer-app.rb tap/Casks/javinizer-app.rb
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/javinizer.rb
+          git add Formula/javinizer.rb Casks/javinizer-app.rb
           if git diff --cached --quiet; then
             echo "No formula changes to commit."
           else
@@ -1143,8 +1147,11 @@ jobs:
           set -euo pipefail
           mkdir -p out
           ./scripts/scoop/render-manifest.sh "$VERSION" ./release/checksums.txt scripts/scoop/javinizer.json.tmpl > out/javinizer.json
+          ./scripts/scoop/render-manifest.sh "$VERSION" ./release/checksums.txt scripts/scoop/javinizer-app.json.tmpl > out/javinizer-app.json
           echo "=== rendered bucket/javinizer.json ==="
           cat out/javinizer.json
+          echo "=== rendered bucket/javinizer-app.json ==="
+          cat out/javinizer-app.json
 
       - name: Checkout bucket repo
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -1160,10 +1167,11 @@ jobs:
           set -euo pipefail
           mkdir -p bucket-repo/bucket
           cp out/javinizer.json bucket-repo/bucket/javinizer.json
+          cp out/javinizer-app.json bucket-repo/bucket/javinizer-app.json
           cd bucket-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bucket/javinizer.json
+          git add bucket/javinizer.json bucket/javinizer-app.json
           if git diff --cached --quiet; then
             echo "No manifest changes to commit."
           else

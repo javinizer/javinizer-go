@@ -55,16 +55,27 @@ scoop install javinizer
 scoop update javinizer   # updates to the latest stable release
 ```
 
+The **desktop app** (clickable Windows GUI) is a separate manifest in the same bucket:
+
+```powershell
+scoop install javinizer-app   # shim: javinizer-app; Start Menu shortcut: Javinizer
+scoop update javinizer-app
+```
+
 ## Notes
 
 - The bucket is only updated for **stable** releases. Prereleases
   (`v1.0.0-rc.*`) do not push to the bucket, so `scoop update` never hands a
   user a release candidate.
-- The manifest (`bucket/javinizer.json`) installs the prebuilt
+- The CLI manifest (`bucket/javinizer.json`) installs the prebuilt
   `javinizer-windows-amd64.exe` and shims it as `javinizer`. CGO/SQLite is
   statically linked into the binary, so no separate runtime is required.
-- The manifest includes `checkver` (stable-only regex) and `autoupdate` blocks
-  so it is well-formed for Scoop tooling and self-documenting, even though CI
+- The app manifest (`bucket/javinizer-app.json`) installs the unsigned
+  `Javinizer.exe` desktop app, shims it as `javinizer-app` (to avoid clobbering
+  the CLI `javinizer` shim), and adds a Start Menu shortcut. It is a separate
+  package so the CLI and GUI can coexist.
+- Both manifests include `checkver` (stable-only regex) and `autoupdate` blocks
+  so they are well-formed for Scoop tooling and self-documenting, even though CI
   also writes concrete version + hash per release.
 - `javinizer upgrade` (self-upgrade) detects a Scoop install by its apps path
   and tells the user to run `scoop update javinizer` instead, so the two

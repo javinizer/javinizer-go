@@ -26,20 +26,31 @@ sha_for() {
 darwin_sha="$(sha_for 'javinizer-darwin-universal')"
 linux_amd64_sha="$(sha_for 'javinizer-linux-amd64')"
 linux_arm64_sha="$(sha_for 'javinizer-linux-arm64')"
+darwin_app_sha="$(sha_for 'Javinizer-macos-universal.zip')"
 
 if [[ -z "$darwin_sha" || -z "$linux_amd64_sha" || -z "$linux_arm64_sha" ]]; then
-    echo "error: missing one or more required checksums in $checksums" >&2
-    echo "  darwin-universal: ${darwin_sha:-<missing>}" >&2
-    echo "  linux-amd64:      ${linux_amd64_sha:-<missing>}" >&2
-    echo "  linux-arm64:      ${linux_arm64_sha:-<missing>}" >&2
+    echo "error: missing one or more required CLI checksums in $checksums" >&2
+    echo "  darwin-universal:      ${darwin_sha:-<missing>}" >&2
+    echo "  linux-amd64:           ${linux_amd64_sha:-<missing>}" >&2
+    echo "  linux-arm64:           ${linux_arm64_sha:-<missing>}" >&2
+    exit 1
+fi
+
+if [[ -z "$darwin_app_sha" ]]; then
+    echo "error: missing desktop-app checksum (Javinizer-macos-universal.zip) in $checksums" >&2
+    echo "  This is required to render the javinizer-app cask. If this release did" >&2
+    echo "  not build the desktop app, the cask cannot be published." >&2
     exit 1
 fi
 
 # Use '|' as the sed delimiter so the release URLs (which contain '/') substitute cleanly.
+# All placeholders are substituted on every render; each template only uses the
+# ones it needs, so unused substitutions are no-ops.
 sed \
     -e "s|__VERSION__|${version}|g" \
     -e "s|__TAG__|${tag}|g" \
     -e "s|__DARWIN_SHA256__|${darwin_sha}|g" \
     -e "s|__LINUX_AMD64_SHA256__|${linux_amd64_sha}|g" \
     -e "s|__LINUX_ARM64_SHA256__|${linux_arm64_sha}|g" \
+    -e "s|__DARWIN_APP_SHA256__|${darwin_app_sha}|g" \
     "$template"
