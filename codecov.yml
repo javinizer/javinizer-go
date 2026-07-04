@@ -27,6 +27,12 @@ ignore:
   # not compile them, so they never appear in coverage.out; without this
   # ignore, adding an e2e test file fails the 80% patch gate on every PR.
   - "test/e2e/**"
+  # Desktop-only build-tagged file (//go:build desktop). The real Wails
+  # runner pulls in per-platform webview headers and must not enter the
+  # default build/test path; without this ignore, its new lines all count
+  # as patch misses and fail the 80% gate. The non-tagged companion logic
+  # (paths.go, server.go, redirector.go, app_stub.go) IS covered.
+  - "internal/desktop/app.go"
   # swag-generated API docs + //go:embed wrappers (no testable logic).
   - "docs/swagger/**"
   # //go:embed wrapper for the built frontend; the frontend has its own
