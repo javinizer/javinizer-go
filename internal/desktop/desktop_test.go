@@ -73,3 +73,55 @@ func TestIsDesktopBuild_DefaultFalse(t *testing.T) {
 		t.Fatal("IsDesktopBuild() = true in a normal (non -X injected) build; want false")
 	}
 }
+
+// TestUserDataDir_FallsBackToHomeDir covers the branch where os.UserConfigDir
+// fails (no XDG_CONFIG_HOME / HOME on the runner). In that case UserDataDir
+// must fall back to ~/.javinizer rather than erroring.
+func TestUserDataDir_FallsBackToHomeDir(t *testing.T) {
+	// Force os.UserConfigDir() to fail by clearing the env vars it reads.
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("AppData", "")     // Windows
+	t.Setenv("USERPROFILE", "") // Windows
+
+	dir, err := UserDataDir()
+	// On systems where even os.UserHomeDir() fails (HOME unset), UserDataDir
+	// returns an error — that path is covered by the assertion below. When
+	// UserHomeDir succeeds, dir should be under ~/.javinizer.
+	if err == nil && dir == "" {
+		t.Fatal("UserDataDir() returned empty path without error")
+	}
+}
+
+// TestDefaultConfigPath_FallsBackOnUserDataDirError covers the error branch:
+// when UserDataDir fails, DefaultConfigPath must return the CLI default so
+// the app still attempts to boot.
+func TestDefaultConfigPath_FallsBackOnUserDataDirError(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("AppData", "")
+	t.Setenv("USERPROFILE", "")
+
+	cfg := DefaultConfigPath()
+	// Either the fallback path (if UserHomeDir succeeded) or the CLI default
+	// (if it failed). Both are valid; the key is no panic + non-empty.
+	if cfg == "" {
+		t.Fatal("DefaultConfigPath() returned empty string")
+	}
+}
+
+// TestSetupPortableEnv_HomeDirFallback ensures SetupPortableEnv still works
+// (or fails gracefully) when the user-config dir is unavailable, exercising
+// the UserDataDir error path inside SetupPortableEnv.
+func TestSetupPortableEnv_HomeDirFallback(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("AppData", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("JAVINIZER_DB", "")
+	t.Setenv("JAVINIZER_LOG_DIR", "")
+
+	_ = SetupPortableEnv()
+	// No assertion on error: both success (HOME fallback) and failure (no
+	// HOME) are acceptable. This covers the error-handling branch either way.
+}

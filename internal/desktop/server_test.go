@@ -99,6 +99,16 @@ func TestServerInstance_Shutdown_Idempotent(t *testing.T) {
 	_ = firstErr
 }
 
+// TestServerInstance_Shutdown_NilServer covers the s.srv == nil branch in
+// Shutdown: a ServerInstance that never started (or was constructed without
+// a server) must ShutDown without panicking and return nil.
+func TestServerInstance_Shutdown_NilServer(t *testing.T) {
+	inst := &ServerInstance{srv: nil}
+	if err := inst.Shutdown(); err != nil {
+		t.Errorf("Shutdown() with nil server returned error: %v; want nil", err)
+	}
+}
+
 // TestServerInstance_DoneClosesAfterShutdown verifies that Done() blocks
 // before Shutdown and is closed after Shutdown completes.
 func TestServerInstance_DoneClosesAfterShutdown(t *testing.T) {
