@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/coverage"
 	"gopkg.in/yaml.v3"
@@ -26,8 +27,11 @@ type gitDiffFunc func(baseRef string) ([]byte, error)
 
 var gitDiff gitDiffFunc = runGitDiff
 
+const gitDiffTimeout = 30 * time.Second
+
 func runGitDiff(baseRef string) ([]byte, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), gitDiffTimeout)
+	defer cancel()
 	mergeBase, err := exec.CommandContext(ctx, "git", "merge-base", baseRef, "HEAD").Output() //nolint:gosec // baseRef is a git ref from the user/Makefile, not untrusted input
 	if err != nil {
 		return nil, fmt.Errorf("git merge-base %s HEAD: %w", baseRef, err)

@@ -75,6 +75,9 @@ fi
 icon_args=(--icon-file "$appdir/javinizer.png")
 
 # .desktop entry
+# Embed the version (X-AppImage-Version) so the AppImage carries a build
+# identifier — matches package-app-darwin.sh, which bakes version into
+# CFBundleVersion. Without this the accepted $3 arg was unused (SC2034).
 cat > "$appdir/javinizer.desktop" <<EOF
 [Desktop Entry]
 Name=Javinizer
@@ -84,6 +87,7 @@ Icon=javinizer
 Type=Application
 Categories=Utility;
 Terminal=false
+X-AppImage-Version=${version}
 EOF
 
 # Download arch-appropriate AppImage tooling. GitHub runners often lack FUSE
@@ -94,16 +98,56 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 # linuxdeploy discovers plugins (e.g. linuxdeploy-plugin-gtk.sh) via PATH.
 export PATH="$workdir:$PATH"
 
-echo "Downloading linuxdeploy ($ld_arch)..."
+# Pinned, verified build tooling. Previously these were fetched from the
+# mutable `continuous` tag (linuxdeploy) and `master` branch (plugin) with no
+# integrity check, so a compromised/altered upstream artifact would flow into
+# release AppImages undetected and builds weren't reproducible. Pinning to a
+# tagged release + commit SHA with sha256 verification makes every tooling
+# update intentional and detected.
+#
+# To update: bump LINUXDEPLOY_VERSION + the matching per-arch sha256 below,
+# and/or LINUXDEPLOY_PLUGIN_GTK_REF + its sha256, after verifying the new
+# artifacts locally.
+LINUXDEPLOY_VERSION="1-alpha-20251107-1"
+LINUXDEPLOY_PLUGIN_GTK_REF="7a3fbc31a9e5075073ff8790f26effbac5f84453"
+LINUXDEPLOY_SHA256_X86_64="c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d"
+LINUXDEPLOY_SHA256_AARCH64="620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff"
+LINUXDEPLOY_PLUGIN_GTK_SHA256="b0f4cbc684a0103a9651f0955b635eaea0096b3a66c0f5a2c2aa337960375171"
+
+case "$ld_arch" in
+	x86_64)  linuxdeploy_sha256="$LINUXDEPLOY_SHA256_X86_64" ;;
+	aarch64) linuxdeploy_sha256="$LINUXDEPLOY_SHA256_AARCH64" ;;
+esac
+
+verify_sha256() {
+	local file="$1" expected="$2"
+	local actual
+	if command -v sha256sum >/dev/null 2>&1; then
+		actual="$(sha256sum "$file" | awk '{print $1}')"
+	else
+		actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+	fi
+	if [ "$actual" != "$expected" ]; then
+		echo "error: sha256 mismatch for $file" >&2
+		echo "  expected: $expected" >&2
+		echo "  actual:   $actual" >&2
+		echo "  if this is an intentional tooling update, refresh the pinned hash in $0" >&2
+		exit 1
+	fi
+}
+
+echo "Downloading linuxdeploy $LINUXDEPLOY_VERSION ($ld_arch)..."
 curl -fsSL -o "$workdir/linuxdeploy" \
-	"https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${ld_arch}.AppImage"
+	"https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-${ld_arch}.AppImage"
+verify_sha256 "$workdir/linuxdeploy" "$linuxdeploy_sha256"
 chmod +x "$workdir/linuxdeploy"
 
-echo "Downloading linuxdeploy-plugin-gtk..."
+echo "Downloading linuxdeploy-plugin-gtk ($LINUXDEPLOY_PLUGIN_GTK_REF)..."
 # The plugin is a single arch-independent shell script (no arch suffix).
 # linuxdeploy discovers it via PATH by the name linuxdeploy-plugin-gtk.sh.
 curl -fsSL -o "$workdir/linuxdeploy-plugin-gtk.sh" \
-	"https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh"
+	"https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/${LINUXDEPLOY_PLUGIN_GTK_REF}/linuxdeploy-plugin-gtk.sh"
+verify_sha256 "$workdir/linuxdeploy-plugin-gtk.sh" "$LINUXDEPLOY_PLUGIN_GTK_SHA256"
 chmod +x "$workdir/linuxdeploy-plugin-gtk.sh"
 
 # linuxdeploy + the GTK plugin scan the binary's library dependencies and

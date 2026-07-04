@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -466,6 +467,59 @@ github.com/javinizer/javinizer-go/pkg/covered.go:1.1,3.1 1 1
 	}
 	if !strings.Contains(stdout.String(), "PASSED") {
 		t.Fatalf("stdout should contain PASSED, got: %s", stdout.String())
+	}
+}
+
+func TestRunGitDiff_RealGitRepo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping git subprocess test in short mode")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	run("init")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test")
+	run("config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(dir, "file.go"), []byte("package p\n"), 0o644); err != nil {
+		t.Fatalf("write base file: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "base")
+
+	if err := os.WriteFile(filepath.Join(dir, "file.go"), []byte("package p\n\nfunc f() {}\n"), 0o644); err != nil {
+		t.Fatalf("write head file: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "head")
+
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	out, err := runGitDiff("HEAD~1")
+	if err != nil {
+		t.Fatalf("runGitDiff: %v", err)
+	}
+	if !bytes.Contains(out, []byte("func f()")) {
+		t.Fatalf("runGitDiff output missing added line, got: %s", out)
 	}
 }
 
