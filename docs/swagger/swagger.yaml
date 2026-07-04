@@ -76,6 +76,54 @@ definitions:
         example: 27
         type: integer
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ActressTranslationView:
+    properties:
+      actress_id:
+        type: integer
+      created_at:
+        type: string
+      display_name:
+        type: string
+      first_name:
+        type: string
+      id:
+        type: integer
+      japanese_name:
+        type: string
+      language:
+        type: string
+      last_name:
+        type: string
+      source_name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ActressView:
+    properties:
+      aliases:
+        type: string
+      created_at:
+        type: string
+      dmm_id:
+        type: integer
+      first_name:
+        type: string
+      id:
+        type: integer
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+      translations:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressTranslationView'
+        type: array
+      updated_at:
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.AuthCredentialsRequest:
     properties:
       password:
@@ -461,6 +509,34 @@ definitions:
         example: 1024000000
         type: integer
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.GenreTranslationView:
+    properties:
+      created_at:
+        type: string
+      genre_id:
+        type: integer
+      id:
+        type: integer
+      language:
+        type: string
+      name:
+        type: string
+      source_name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.GenreView:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+      translations:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.GenreTranslationView'
+        type: array
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.HealthResponse:
     properties:
       build_date:
@@ -568,12 +644,45 @@ definitions:
         description: Field-level data source tracking
         type: object
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.MovieTranslationView:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      director:
+        type: string
+      id:
+        type: integer
+      label:
+        type: string
+      language:
+        type: string
+      maker:
+        type: string
+      movie_id:
+        type: string
+      original_title:
+        type: string
+      series:
+        type: string
+      settings_hash:
+        type: string
+      source_name:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.MovieView:
     properties:
       actresses:
-        description: Relationships
+        description: |-
+          Relationships (contract DTOs — see collection_views.go; persistence
+          models.* types never cross the API boundary)
         items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressView'
         type: array
       code:
         description: Canonical JAV code (e.g., "IPX-535"). Renamed from content_id.
@@ -597,7 +706,7 @@ definitions:
         type: string
       genres:
         items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.GenreView'
         type: array
       id:
         description: Secondary identifier — often equals Code but can differ.
@@ -661,7 +770,7 @@ definitions:
         type: string
       translations:
         items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieTranslationView'
         type: array
       updated_at:
         type: string

@@ -3379,6 +3379,79 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ActressTranslationView": {
+            "type": "object",
+            "properties": {
+                "actress_id": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "source_name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ActressView": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "dmm_id": {
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "thumb_url": {
+                    "type": "string"
+                },
+                "translations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressTranslationView"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.AuthCredentialsRequest": {
             "type": "object",
             "required": [
@@ -3912,6 +3985,49 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.GenreTranslationView": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "genre_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source_name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.GenreView": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "translations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.GenreTranslationView"
+                    }
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.HealthResponse": {
             "type": "object",
             "properties": {
@@ -4067,14 +4183,61 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.MovieTranslationView": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "director": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "maker": {
+                    "type": "string"
+                },
+                "movie_id": {
+                    "type": "string"
+                },
+                "original_title": {
+                    "type": "string"
+                },
+                "series": {
+                    "type": "string"
+                },
+                "settings_hash": {
+                    "type": "string"
+                },
+                "source_name": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.MovieView": {
             "type": "object",
             "properties": {
                 "actresses": {
-                    "description": "Relationships",
+                    "description": "Relationships (contract DTOs — see collection_views.go; persistence\nmodels.* types never cross the API boundary)",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressView"
                     }
                 },
                 "code": {
@@ -4107,7 +4270,7 @@ const docTemplate = `{
                 "genres": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.GenreView"
                     }
                 },
                 "id": {
@@ -4196,7 +4359,7 @@ const docTemplate = `{
                 "translations": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieTranslationView"
                     }
                 },
                 "updated_at": {

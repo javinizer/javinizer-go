@@ -56,10 +56,11 @@ type MovieView struct {
 	OriginalFileName string   `json:"original_filename"`
 	Screenshots      []string `json:"screenshot_urls"`
 
-	// Relationships
-	Actresses    []models.Actress          `json:"actresses"`
-	Genres       []models.Genre            `json:"genres"`
-	Translations []models.MovieTranslation `json:"translations"`
+	// Relationships (contract DTOs — see collection_views.go; persistence
+	// models.* types never cross the API boundary)
+	Actresses    []ActressView          `json:"actresses"`
+	Genres       []GenreView            `json:"genres"`
+	Translations []MovieTranslationView `json:"translations"`
 
 	// Source provenance
 	SourceName string `json:"source_name"` // Primary source
@@ -72,9 +73,10 @@ type MovieView struct {
 
 // MovieViewFromModel maps a persistence-layer Movie to an API-layer MovieView.
 // The single rename (content_id → code) is the only wire-format change.
-// PosterState fields are lifted to top-level MovieView fields.
-// Slice fields are shared (not deep-copied) — callers must treat the
-// MovieView as read-only or copy slices before mutation.
+// PosterState fields are lifted to top-level MovieView fields. Relationship
+// collections (Actresses/Genres/Translations) are projected through contract
+// DTOs and copied into fresh slices, so the view does not alias the model.
+// Screenshots remains a shared string slice — treat it as read-only.
 func MovieViewFromModel(m *models.Movie) *MovieView {
 	if m == nil {
 		return nil
@@ -107,9 +109,9 @@ func MovieViewFromModel(m *models.Movie) *MovieView {
 		TrailerURL:               m.TrailerURL,
 		OriginalFileName:         m.OriginalFileName,
 		Screenshots:              m.Screenshots,
-		Actresses:                m.Actresses,
-		Genres:                   m.Genres,
-		Translations:             m.Translations,
+		Actresses:                ActressViewSliceFromModels(m.Actresses),
+		Genres:                   GenreViewSliceFromModels(m.Genres),
+		Translations:             MovieTranslationViewSliceFromModels(m.Translations),
 		SourceName:               m.SourceName,
 		SourceURL:                m.SourceURL,
 		CreatedAt:                m.CreatedAt,
@@ -145,9 +147,9 @@ func MovieViewToModel(v *MovieView) *models.Movie {
 		TrailerURL:       v.TrailerURL,
 		OriginalFileName: v.OriginalFileName,
 		Screenshots:      v.Screenshots,
-		Actresses:        v.Actresses,
-		Genres:           v.Genres,
-		Translations:     v.Translations,
+		Actresses:        ActressViewSliceToModels(v.Actresses),
+		Genres:           GenreViewSliceToModels(v.Genres),
+		Translations:     MovieTranslationViewSliceToModels(v.Translations),
 		SourceName:       v.SourceName,
 		SourceURL:        v.SourceURL,
 		CreatedAt:        v.CreatedAt,
