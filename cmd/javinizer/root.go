@@ -78,10 +78,14 @@ func init() {
 	// config init so ApplyEnvironmentOverrides picks the portable paths up.
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		if desktop.IsDesktopBuild() {
-			if err := desktop.SetupPortableEnv(); err != nil {
-				_, _ = fmt.Fprintf(os.Stderr, "desktop: %v\n", err)
-			}
+			// Only set up the portable env when the user did not pass a custom
+			// --config. With a custom config, the user owns their data layout;
+			// injecting JAVINIZER_DB/LOG_DIR here would have ApplyEnvironmentOverrides
+			// override that file's DB/log settings with the portable paths.
 			if cfgFile == "" || cfgFile == "configs/config.yaml" {
+				if err := desktop.SetupPortableEnv(); err != nil {
+					_, _ = fmt.Fprintf(os.Stderr, "desktop: %v\n", err)
+				}
 				cfgFile = desktop.DefaultConfigPath()
 			}
 			// Write the resolved path back to the flag so subcommands that read
@@ -131,7 +135,13 @@ func shouldSkipConfigInit(cmd *cobra.Command) bool {
 	// `upgrade` also runs without config: it only talks to GitHub and replaces
 	// the binary, and forcing config init would create a config file as a side
 	// effect of a self-update.
+	// `app` on a non-desktop build always errors (the desktop runner is a
+	// build-tagged stub), so initConfig would create config/DB/log files before
+	// the command fails — the same side-effect concern as `upgrade`.
 	if cmd.Name() == "version" || cmd.Name() == "help" || cmd.Name() == "completion" || cmd.Name() == "upgrade" {
+		return true
+	}
+	if cmd.Name() == "app" && !desktop.IsDesktopBuild() {
 		return true
 	}
 

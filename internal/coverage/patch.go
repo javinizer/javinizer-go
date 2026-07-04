@@ -117,6 +117,27 @@ func analyzePatch(r io.Reader, opts PatchOptions) (PatchSummary, error) {
 	fileLines := make(map[string]map[int]*lineState)
 	changedFiles := make(map[string]bool)
 
+	// Seed every patch line as a miss first. A changed file that appears in
+	// the coverage profile will overwrite these with covered/partial states
+	// below; a changed file with NO profile entry keeps its misses. Without
+	// this, percentage() sees Total==0 and returns 100%, letting a
+	// fully-untested diff pass the patch gate (the bug CodeRabbit flagged).
+	//
+	// The CLI layer (cmd/coveragecheck) is responsible for filtering out
+	// files in packages excluded from `go test -coverpkg` before calling
+	// this function, so they don't show up as false misses here.
+	for repoPath, lines := range opts.PatchLines {
+		if isIgnored(repoPath) {
+			continue
+		}
+		changedFiles[repoPath] = true
+		state := make(map[int]*lineState, len(lines))
+		for line := range lines {
+			state[line] = &lineState{}
+		}
+		fileLines[repoPath] = state
+	}
+
 	for _, entry := range merged {
 		repoPath := toRepoPath(entry.file)
 		if isIgnored(repoPath) {

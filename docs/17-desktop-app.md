@@ -14,6 +14,8 @@ is published to the same package-manager taps on each **stable** release
 # macOS — Homebrew Cask (installs Javinizer.app to /Applications)
 brew tap javinizer/homebrew-tap https://github.com/javinizer/homebrew-tap
 brew install --cask javinizer-app
+# trust the tap first on Homebrew 6.0+ if you skipped it above:
+# brew trust --cask javinizer/tap/javinizer-app
 ```
 
 ```powershell

@@ -296,3 +296,40 @@ func TestCompileIgnoreGlob(t *testing.T) {
 		})
 	}
 }
+
+// TestAnalyzePatch_PatchLineMissingFromProfile covers the case CodeRabbit
+// flagged: a changed file with no coverage blocks in the profile. Without the
+// miss-seeding fix, such a file disappears from Total entirely and percentage()
+// returns 100% (Total==0), letting a fully-untested diff pass the patch gate.
+// With the fix, every patch line with no profile entry counts as a miss.
+func TestAnalyzePatch_PatchLineMissingFromProfile(t *testing.T) {
+	t.Parallel()
+
+	profile := strings.NewReader(`mode: count
+github.com/javinizer/javinizer-go/pkg/covered.go:5.1,7.1 1 1
+`)
+
+	summary, err := analyzePatch(profile, PatchOptions{
+		PatchLines: PatchLineSet{
+			"pkg/covered.go":  {5: true, 6: true},
+			"pkg/untested.go": {10: true, 11: true},
+		},
+		ModulePrefix: testModulePrefix,
+	})
+	if err != nil {
+		t.Fatalf("analyzePatch() error = %v", err)
+	}
+
+	if summary.Total != 4 {
+		t.Fatalf("Total = %d, want 4 (untested.go lines must count as misses, not disappear)", summary.Total)
+	}
+	if summary.Hit != 2 {
+		t.Fatalf("Hit = %d, want 2", summary.Hit)
+	}
+	if summary.Miss != 2 {
+		t.Fatalf("Miss = %d, want 2 (the untested.go lines)", summary.Miss)
+	}
+	if got := summary.Percent; got < 49.9 || got > 50.1 {
+		t.Fatalf("Percent = %.2f, want about 50.0 (2 hit / 4 total) — a fully-untested file must NOT pass at 100%%", got)
+	}
+}

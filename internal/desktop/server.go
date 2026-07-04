@@ -86,6 +86,9 @@ func StartServer(ctx context.Context, configFile string) (*ServerInstance, error
 	srv := &http.Server{
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	inst := &ServerInstance{

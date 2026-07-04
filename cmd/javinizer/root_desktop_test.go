@@ -125,3 +125,41 @@ func TestPersistentPreRun_DesktopBuildLogsPortableEnvError(t *testing.T) {
 	// Must not panic; the error is logged and execution continues.
 	assert.NotPanics(t, func() { rootCmd.PersistentPreRun(cmd, nil) })
 }
+
+// TestPersistentPreRun_DesktopBuildCustomConfigSkipsPortableEnv verifies the
+// fix for a data-integrity regression: when the user passes a custom --config,
+// PersistentPreRun must NOT call SetupPortableEnv. Otherwise the injected
+// JAVINIZER_DB/JAVINIZER_LOG_DIR would override that file's DB/log settings
+// via ApplyEnvironmentOverrides, silently redirecting the user's data. The
+// custom config path is preserved as-is.
+func TestPersistentPreRun_DesktopBuildCustomConfigSkipsPortableEnv(t *testing.T) {
+	orig := desktop.BuildDesktop
+	desktop.BuildDesktop = "1"
+	defer func() { desktop.BuildDesktop = orig }()
+
+	origCfg := cfgFile
+	defer func() { cfgFile = origCfg }()
+	customPath := "/custom/path/config.yaml"
+	cfgFile = customPath
+
+	origDB := os.Getenv("JAVINIZER_DB")
+	origLog := os.Getenv("JAVINIZER_LOG_DIR")
+	defer func() {
+		os.Setenv("JAVINIZER_DB", origDB)
+		os.Setenv("JAVINIZER_LOG_DIR", origLog)
+	}()
+	// Poison the env vars so any SetupPortableEnv call would overwrite them; if
+	// the guard works, they stay empty.
+	os.Setenv("JAVINIZER_DB", "")
+	os.Setenv("JAVINIZER_LOG_DIR", "")
+
+	cmd := &cobra.Command{Use: "version"}
+	cmd.Flags().String("config", customPath, "config file path")
+
+	rootCmd.PersistentPreRun(cmd, nil)
+
+	got, _ := cmd.Flags().GetString("config")
+	assert.Equal(t, customPath, got, "custom --config must be preserved untouched on desktop builds")
+	assert.Empty(t, os.Getenv("JAVINIZER_DB"), "custom --config must skip SetupPortableEnv (no JAVINIZER_DB injection)")
+	assert.Empty(t, os.Getenv("JAVINIZER_LOG_DIR"), "custom --config must skip SetupPortableEnv (no JAVINIZER_LOG_DIR injection)")
+}

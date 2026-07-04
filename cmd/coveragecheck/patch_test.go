@@ -421,3 +421,76 @@ func TestRunWithAnalyze_PatchFlag(t *testing.T) {
 		}
 	})
 }
+
+func TestRunPatchCheck_FiltersFilesNotInProfile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Profile covers pkg/covered.go only; pkg/excluded.go is in a package
+	// excluded from `go test -coverpkg` (no profile entries).
+	profileContent := `mode: count
+github.com/javinizer/javinizer-go/pkg/covered.go:1.1,3.1 1 1
+`
+	profilePath := filepath.Join(dir, "coverage.out")
+	if err := os.WriteFile(profilePath, []byte(profileContent), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module github.com/javinizer/javinizer-go\n\ngo 1.24\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "codecov.yml"), []byte("ignore: []\n"), 0o644); err != nil {
+		t.Fatalf("write codecov.yml: %v", err)
+	}
+
+	origGitDiff, origModulePrefix, origGetwd := gitDiff, modulePrefix, osGetwd
+	t.Cleanup(func() { gitDiff, modulePrefix, osGetwd = origGitDiff, origModulePrefix, origGetwd })
+
+	// Diff touches both files, but only covered.go is in the profile.
+	gitDiff = func(baseRef string) ([]byte, error) {
+		return []byte("diff --git a/pkg/covered.go b/pkg/covered.go\n+++ b/pkg/covered.go\n@@ -1,1 +1,2 @@\n+added\n" +
+			"diff --git a/pkg/excluded.go b/pkg/excluded.go\n+++ b/pkg/excluded.go\n@@ -1,1 +1,2 @@\n+added\n"), nil
+	}
+	modulePrefix = func(repoRoot string) (string, error) {
+		return "github.com/javinizer/javinizer-go/", nil
+	}
+	osGetwd = func() (string, error) { return dir, nil }
+
+	var stdout, stderr bytes.Buffer
+	exitCode := runPatchCheck(profilePath, "main", 80, &stdout, &stderr)
+
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0 (excluded.go must not count as misses); stderr=%s", exitCode, stderr.String())
+	}
+	// covered.go L1 is hit (count=1), excluded.go is filtered out → 100%.
+	if !strings.Contains(stdout.String(), "100.00%") {
+		t.Fatalf("stdout should contain 100.00%% (excluded file filtered out), got: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "PASSED") {
+		t.Fatalf("stdout should contain PASSED, got: %s", stdout.String())
+	}
+}
+
+func TestProfileFileSet(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	profileContent := `mode: count
+github.com/javinizer/javinizer-go/pkg/a.go:1.1,3.1 1 1
+github.com/javinizer/javinizer-go/pkg/b.go:5.1,7.1 1 0
+`
+	profilePath := filepath.Join(dir, "coverage.out")
+	if err := os.WriteFile(profilePath, []byte(profileContent), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	files, err := profileFileSet(profilePath, "github.com/javinizer/javinizer-go/")
+	if err != nil {
+		t.Fatalf("profileFileSet() error = %v", err)
+	}
+
+	if !files["pkg/a.go"] || !files["pkg/b.go"] {
+		t.Fatalf("expected pkg/a.go and pkg/b.go in profileFileSet, got %v", files)
+	}
+	if files["pkg/c.go"] {
+		t.Fatalf("pkg/c.go should not be in profileFileSet")
+	}
+}

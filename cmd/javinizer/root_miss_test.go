@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/desktop"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/cobra"
@@ -34,6 +35,30 @@ func TestShouldSkipConfigInit_VersionFlagNotChanged(t *testing.T) {
 func TestShouldSkipConfigInit_NoVersionFlag(t *testing.T) {
 	cmd := &cobra.Command{Use: "sort"}
 	assert.False(t, shouldSkipConfigInit(cmd), "command without version flag should not skip")
+}
+
+// TestShouldSkipConfigInit_AppCommandCLIBuild tests that the `app` command
+// skips config init on a non-desktop (CLI) build. The desktop runner is a
+// build-tagged stub that always errors on CLI builds, so initConfig would
+// create config/DB/log files as a side effect of a failing command.
+func TestShouldSkipConfigInit_AppCommandCLIBuild(t *testing.T) {
+	orig := desktop.BuildDesktop
+	desktop.BuildDesktop = "0"
+	defer func() { desktop.BuildDesktop = orig }()
+
+	cmd := &cobra.Command{Use: "app"}
+	assert.True(t, shouldSkipConfigInit(cmd), "app command on a CLI build should skip config init (stub always errors)")
+}
+
+// TestShouldSkipConfigInit_AppCommandDesktopBuild tests that the `app` command
+// still runs config init on a real desktop build (it needs the config to boot).
+func TestShouldSkipConfigInit_AppCommandDesktopBuild(t *testing.T) {
+	orig := desktop.BuildDesktop
+	desktop.BuildDesktop = "1"
+	defer func() { desktop.BuildDesktop = orig }()
+
+	cmd := &cobra.Command{Use: "app"}
+	assert.False(t, shouldSkipConfigInit(cmd), "app command on a desktop build should run config init")
 }
 
 // TestInitConfig_DownloadProxyEmptyURL tests the download proxy validation

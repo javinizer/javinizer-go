@@ -44,6 +44,36 @@ func runGitDiff(baseRef string) ([]byte, error) {
 	return out, nil
 }
 
+// profileFileSet reads a coverage profile and returns the set of repo-relative
+// file paths that have at least one coverage block. Used to filter patch lines
+// so files in packages excluded from `go test -coverpkg` don't show as false
+// misses (they have no profile entries).
+func profileFileSet(profilePath, modulePrefix string) (map[string]bool, error) {
+	data, err := os.ReadFile(profilePath)
+	if err != nil {
+		return nil, fmt.Errorf("read profile: %w", err)
+	}
+	files := make(map[string]bool)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "mode:") {
+			continue
+		}
+		colon := strings.LastIndex(line, ":")
+		if colon == -1 {
+			continue
+		}
+		file := strings.TrimPrefix(line[:colon], modulePrefix)
+		files[file] = true
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan profile: %w", err)
+	}
+	return files, nil
+}
+
 // parseGitDiff parses `git diff --unified=0` output and returns the added-line
 // set per file. Renames/deletes are skipped; only added or modified lines count.
 // Paths are normalized to forward slashes (repo-relative).
@@ -62,6 +92,15 @@ func parseGitDiff(diff []byte) coverage.PatchLineSet {
 			if rest := strings.TrimPrefix(line, "+++ "); strings.HasPrefix(rest, "b/") {
 				currentFile = strings.TrimPrefix(rest, "b/")
 				currentFile = strings.ReplaceAll(currentFile, "\\", "/")
+				// Only Go source files have coverage profile entries; non-Go
+				// changes (YAML, Markdown, Makefile) would otherwise be seeded
+				// as misses and skew the patch coverage toward 0%%. Test files
+				// (_test.go) are also excluded — `go test -cover` does not emit
+				// coverage blocks for test files themselves, and codecov's patch
+				// coverage likewise excludes them.
+				if !strings.HasSuffix(currentFile, ".go") || strings.HasSuffix(currentFile, "_test.go") {
+					currentFile = ""
+				}
 			} else {
 				currentFile = ""
 			}
@@ -211,6 +250,24 @@ func runPatchCheck(profilePath, baseRef string, minCoverage float64, stdout, std
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 2
+	}
+
+	// Filter patchLines to files that appear in the coverage profile. Files in
+	// packages excluded from `go test -coverpkg` (e.g. this repo excludes
+	// cmd/coveragecheck + internal/coverage as test utilities) have no profile
+	// entries; without this filter, the library would seed every line of an
+	// excluded package as a miss and skew patch coverage toward 0%%. Codecov
+	// achieves the same effect via its ignore list + the packages it actually
+	// instruments.
+	profileFiles, err := profileFileSet(profilePath, modPrefix)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 2
+	}
+	for f := range patchLines {
+		if !profileFiles[f] {
+			delete(patchLines, f)
+		}
 	}
 
 	summary, err := coverage.AnalyzeProfilePatch(profilePath, coverage.PatchOptions{

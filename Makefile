@@ -438,6 +438,16 @@ DESKTOP_LDFLAGS := -ldflags "\
 	-X github.com/javinizer/javinizer-go/internal/version.BuildDate=$(BUILD_DATE) \
 	-X github.com/javinizer/javinizer-go/internal/desktop.BuildDesktop=1"
 
+# Windows desktop builds need -H windowsgui (the GUI subsystem flag) so the
+# .exe doesn't open a console window on launch. The Wails CLI adds this
+# automatically, but these targets build via `go build` directly.
+DESKTOP_LDFLAGS_WINDOWS := -ldflags "\
+	-w -s -H windowsgui \
+	-X github.com/javinizer/javinizer-go/internal/version.Version=$(VERSION) \
+	-X github.com/javinizer/javinizer-go/internal/version.Commit=$(COMMIT) \
+	-X github.com/javinizer/javinizer-go/internal/version.BuildDate=$(BUILD_DATE) \
+	-X github.com/javinizer/javinizer-go/internal/desktop.BuildDesktop=1"
+
 build-app-darwin: web-build
 	@echo "Building desktop app for macOS - $(VERSION)..."
 	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 CGO_LDFLAGS="-framework UniformTypeIdentifiers" \
@@ -460,7 +470,7 @@ build-app-darwin: web-build
 build-app-windows: web-build
 	@echo "Building desktop app for Windows - $(VERSION)..."
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
-		./scripts/with_embedded_web.sh go build -tags '$(DESKTOP_TAGS)' $(DESKTOP_LDFLAGS) \
+		./scripts/with_embedded_web.sh go build -tags '$(DESKTOP_TAGS)' $(DESKTOP_LDFLAGS_WINDOWS) \
 		-o bin/Javinizer.exe ./cmd/javinizer
 	@echo "Windows desktop app built: bin/Javinizer.exe"
 

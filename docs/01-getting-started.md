@@ -115,6 +115,8 @@ scoop install javinizer-app
 curl -L -o Javinizer.AppImage https://github.com/javinizer/javinizer-go/releases/latest/download/Javinizer-linux-x86_64.AppImage
 chmod +x Javinizer.AppImage
 ./Javinizer.AppImage
+
+# For arm64 Linux, swap `x86_64` for `aarch64` in the asset name.
 ```
 
 The app is **unsigned** — expect a one-time Gatekeeper (macOS) or Smart App Control (Windows) prompt on first launch; see [the desktop-app docs](17-desktop-app.md#the-app-is-unsigned). The cask and bucket are updated automatically on each **stable** release; prereleases never reach them.
