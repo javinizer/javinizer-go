@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -167,6 +168,84 @@ func TestServerInstance_StartServer_InvalidConfig(t *testing.T) {
 
 	if inst.BaseURL() == "" {
 		t.Error("BaseURL() is empty even though StartServer succeeded")
+	}
+}
+
+// TestStartServer_InvalidYAML covers the config.LoadOrCreate error branch:
+// a config file with invalid YAML syntax must surface as a StartServer error
+// before any listener or server is created.
+func TestStartServer_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := tmpDir + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte("::: not valid yaml ::: [[[\n  : bad"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := StartServer(context.Background(), configPath)
+	if err == nil {
+		t.Fatal("StartServer() with invalid YAML should fail, got nil")
+	}
+}
+
+// TestStartServer_CorruptCredentials covers the apiauth.NewAuthManager error
+// branch: a valid config with a corrupt auth.credentials.json next to it must
+// surface as a StartServer error (the listener is closed on failure).
+func TestStartServer_CorruptCredentials(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	t.Setenv("JAVINIZER_DB", ":memory:")
+	configPath := writeTestConfig(t)
+	// Write a corrupt credentials file alongside the config (same dir).
+	if err := os.WriteFile(
+		filepath.Dir(configPath)+"/auth.credentials.json",
+		[]byte("::: not valid json :::"), 0o600,
+	); err != nil {
+		t.Fatalf("write corrupt credentials: %v", err)
+	}
+
+	_, err := StartServer(context.Background(), configPath)
+	if err == nil {
+		t.Fatal("StartServer() with corrupt credentials should fail, got nil")
+	}
+}
+
+// TestStartServer_InvalidDBPath covers the apicore.BootstrapAPI error branch:
+// a valid config whose database DSN points to an unwritable path (under a
+// regular file) must surface as a StartServer error. The listener is closed
+// on failure, so no resource leak.
+func TestStartServer_InvalidDBPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+	// Create a regular file to use as a blocker — a DSN under it can't be created.
+	blocker, err := os.CreateTemp(tmpDir, "blocker")
+	if err != nil {
+		t.Fatalf("create blocker: %v", err)
+	}
+	defer blocker.Close()
+
+	configPath := tmpDir + "/config.yaml"
+	configContent := `config_version: 3
+database:
+  dsn: "` + blocker.Name() + `/sub/javinizer.db"
+  type: sqlite
+server:
+  host: localhost
+  port: 8080
+system:
+  temp_dir: ` + tmpDir + `
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err = StartServer(context.Background(), configPath)
+	if err == nil {
+		t.Fatal("StartServer() with invalid DB path should fail, got nil")
 	}
 }
 
