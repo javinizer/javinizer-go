@@ -560,7 +560,7 @@ jobs:
           VERSION: ${{ needs.prepare-release.outputs.version }}
         run: |
           set -euo pipefail
-          ./scripts/package-app-darwin.sh dist/javinizer-app-darwin-universal dist/Javinizer.app "${VERSION}"
+          ./scripts/package-app-darwin.sh dist/javinizer-app-darwin-universal dist/Javinizer.app "${VERSION}" internal/desktop/icons/javinizer.icns
           # Release assets must be flat files; zip the .app bundle.
           cd dist && ditto -c -k --keepParent Javinizer.app Javinizer-macos-universal.zip
           rm -rf Javinizer.app javinizer-app-darwin-universal
@@ -613,6 +613,17 @@ jobs:
           if (Select-String -Path web/dist/index.html -Pattern 'Javinizer Web UI Placeholder' -Quiet) {
             throw "Placeholder web bundle detected in release build input"
           }
+
+      - name: Embed Windows icon
+        shell: pwsh
+        run: |
+          # Generate a .syso COFF resource from the .ico so `go build`
+          # embeds it into the .exe (Explorer/taskbar shows the app icon).
+          # rsrc is pinned via `go run`; the .syso must live in the main
+          # package dir (cmd/javinizer) for go build to link it.
+          go run github.com/akavel/rsrc@v0.10.2 `
+            -ico internal/desktop/icons/javinizer.ico `
+            -o cmd/javinizer/javinizer.syso
 
       - name: Build desktop binary
         shell: pwsh
@@ -722,7 +733,7 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/package-app-linux.sh "dist/javinizer-app-linux-${{ matrix.arch }}" \
-            "dist/Javinizer-linux-${{ matrix.appimage_arch }}.AppImage" "${VERSION}"
+            "dist/Javinizer-linux-${{ matrix.appimage_arch }}.AppImage" "${VERSION}" internal/desktop/icons/javinizer.png
           rm -f "dist/javinizer-app-linux-${{ matrix.arch }}"
 
       - name: Upload artifact
