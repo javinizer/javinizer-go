@@ -478,6 +478,259 @@ jobs:
           name: windows-amd64
           path: dist/*
 
+  build-desktop-darwin:
+    name: Build desktop app (macOS)
+    needs: [prepare-release, build-web-assets]
+    if: github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: false
+
+      - name: Download web assets
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: web-dist
+          path: .artifacts/web-dist
+
+      - name: Restore web assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf web/dist
+          mkdir -p web/dist
+          cp -R .artifacts/web-dist/. web/dist/
+
+      - name: Verify embedded web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f web/dist/index.html
+          test -d web/dist/_app
+          if grep -q "Javinizer Web UI Placeholder" web/dist/index.html; then
+            echo "Placeholder web bundle detected in release build input"
+            exit 1
+          fi
+
+      - name: Build AMD64 and ARM64 desktop binaries
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          CGO_LDFLAGS: '-framework UniformTypeIdentifiers'
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          COMMIT: ${{ needs.prepare-release.outputs.commit }}
+          BUILD_DATE: ${{ needs.prepare-release.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          # -tags desktop,production: `desktop` pulls in the Wails runner
+          # (internal/desktop/app.go); `production` is required by Wails to
+          # enable its real frontend (the default build returns an error).
+          # -X .../internal/desktop.BuildDesktop=1 makes a no-arg launch open
+          # the GUI instead of printing help.
+          for arch in amd64 arm64; do
+            GOOS=darwin GOARCH="${arch}" go build -trimpath -tags 'desktop,production' \
+              -ldflags="-w -s \
+                -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} \
+                -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
+                -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE} \
+                -X github.com/javinizer/javinizer-go/internal/desktop.BuildDesktop=1" \
+              -o "dist/javinizer-app-darwin-${arch}" ./cmd/javinizer
+          done
+
+      - name: Create universal binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          lipo -create dist/javinizer-app-darwin-amd64 dist/javinizer-app-darwin-arm64 \
+            -output dist/javinizer-app-darwin-universal
+          # Per-arch intermediates are no longer needed once the universal exists.
+          rm -f dist/javinizer-app-darwin-amd64 dist/javinizer-app-darwin-arm64
+
+      - name: Package .app bundle
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          ./scripts/package-app-darwin.sh dist/javinizer-app-darwin-universal dist/Javinizer.app "${VERSION}"
+          # Release assets must be flat files; zip the .app bundle.
+          cd dist && ditto -c -k --keepParent Javinizer.app Javinizer-macos-universal.zip
+          rm -rf Javinizer.app javinizer-app-darwin-universal
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: desktop-darwin
+          path: dist/*
+
+  build-desktop-windows:
+    name: Build desktop app (Windows)
+    needs: [prepare-release, build-web-assets]
+    if: github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: false
+
+      - name: Download web assets
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: web-dist
+          path: .artifacts/web-dist
+
+      - name: Restore web assets
+        shell: pwsh
+        run: |
+          if (Test-Path web/dist) {
+            Remove-Item web/dist -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force -Path web/dist | Out-Null
+          Copy-Item .artifacts/web-dist/* web/dist -Recurse -Force
+
+      - name: Verify embedded web bundle
+        shell: pwsh
+        run: |
+          if (-not (Test-Path web/dist/index.html)) {
+            throw "web/dist/index.html is missing"
+          }
+          if (-not (Test-Path web/dist/_app)) {
+            throw "web/dist/_app is missing"
+          }
+          if (Select-String -Path web/dist/index.html -Pattern 'Javinizer Web UI Placeholder' -Quiet) {
+            throw "Placeholder web bundle detected in release build input"
+          }
+
+      - name: Build desktop binary
+        shell: pwsh
+        env:
+          CGO_ENABLED: '1'
+          GOOS: windows
+          GOARCH: amd64
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          COMMIT: ${{ needs.prepare-release.outputs.commit }}
+          BUILD_DATE: ${{ needs.prepare-release.outputs.build_date }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          # See build-desktop-darwin for the tags/ldflags rationale.
+          go build -trimpath -tags 'desktop,production' -ldflags "-w -s -X github.com/javinizer/javinizer-go/internal/version.Version=$env:VERSION -X github.com/javinizer/javinizer-go/internal/version.Commit=$env:COMMIT -X github.com/javinizer/javinizer-go/internal/version.BuildDate=$env:BUILD_DATE -X github.com/javinizer/javinizer-go/internal/desktop.BuildDesktop=1" -o "dist/Javinizer.exe" ./cmd/javinizer
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: desktop-windows
+          path: dist/*
+
+  build-desktop-linux:
+    name: Build desktop app (Linux, ${{ matrix.arch }})
+    needs: [prepare-release, build-web-assets]
+    if: github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners per arch: CGO + pkg-config against webkit2gtk
+          # needs native libs, and linuxdeploy/appimagetool are themselves
+          # arch-specific (no cross-compile).
+          - arch: amd64
+            runner: ubuntu-latest
+            goarch: amd64
+            appimage_arch: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            goarch: arm64
+            appimage_arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: false
+
+      - name: Install webkit2gtk + gtk3 dev dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+
+      - name: Download web assets
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: web-dist
+          path: .artifacts/web-dist
+
+      - name: Restore web assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf web/dist
+          mkdir -p web/dist
+          cp -R .artifacts/web-dist/. web/dist/
+
+      - name: Verify embedded web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f web/dist/index.html
+          test -d web/dist/_app
+          if grep -q "Javinizer Web UI Placeholder" web/dist/index.html; then
+            echo "Placeholder web bundle detected in release build input"
+            exit 1
+          fi
+
+      - name: Build desktop binary
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          COMMIT: ${{ needs.prepare-release.outputs.commit }}
+          BUILD_DATE: ${{ needs.prepare-release.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # webkit2_41 selects libwebkit2gtk-4.1 (Ubuntu 24.04's version).
+          # See build-desktop-darwin for the desktop/production tags rationale.
+          go build -trimpath -tags 'desktop,production,webkit2_41' -ldflags="-w -s \
+            -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} \
+            -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
+            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE} \
+            -X github.com/javinizer/javinizer-go/internal/desktop.BuildDesktop=1" \
+            -o "dist/javinizer-app-linux-${{ matrix.arch }}" ./cmd/javinizer
+
+      - name: Build AppImage
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          ./scripts/package-app-linux.sh "dist/javinizer-app-linux-${{ matrix.arch }}" \
+            "dist/Javinizer-linux-${{ matrix.appimage_arch }}.AppImage" "${VERSION}"
+          rm -f "dist/javinizer-app-linux-${{ matrix.arch }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: desktop-linux-${{ matrix.arch }}
+          path: dist/*
+
   build-docker:
     name: Build Docker image (${{ matrix.platform }})
     needs: prepare-release
@@ -618,7 +871,7 @@ jobs:
 
   create-release:
     name: Create GitHub release
-    needs: [prepare-release, build-linux, build-darwin, build-windows-amd64, merge-manifest]
+    needs: [prepare-release, build-linux, build-darwin, build-windows-amd64, build-desktop-darwin, build-desktop-windows, build-desktop-linux, merge-manifest]
     if: needs.prepare-release.outputs.create_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -733,6 +986,30 @@ jobs:
         with:
           name: windows-amd64
           path: ./artifacts/windows-amd64
+
+      - name: Download desktop-darwin artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: desktop-darwin
+          path: ./artifacts/desktop-darwin
+
+      - name: Download desktop-windows artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: desktop-windows
+          path: ./artifacts/desktop-windows
+
+      - name: Download desktop-linux-amd64 artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: desktop-linux-amd64
+          path: ./artifacts/desktop-linux-amd64
+
+      - name: Download desktop-linux-arm64 artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: desktop-linux-arm64
+          path: ./artifacts/desktop-linux-arm64
 
       - name: Consolidate release files
         shell: bash

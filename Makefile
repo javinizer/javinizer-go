@@ -2,6 +2,7 @@
 .PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci ci-full config-drift config-sync check-import-guard check-mocks simulate-ci
 .PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-field-drop test-e2e-cli test-e2e-live test-coverage
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
+.PHONY: build-app-darwin build-app-windows build-app-linux build-app-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
 .PHONY: docker-build docker-build-no-cache docker-run docker-stop docker-clean docker-push docker-test docker-logs docker-help
 .PHONY: docker-compose-up docker-compose-down docker-compose-restart docker-compose-logs docker-compose-build
@@ -69,6 +70,12 @@ help:
 	@echo "  make build-cli-darwin   - Build for macOS (universal binary)"
 	@echo "  make build-cli-windows  - Build for Windows (amd64)"
 	@echo "  make build-cli-all      - Build for all platforms"
+	@echo ""
+	@echo "Desktop App (clickable .app/.exe):"
+	@echo "  make build-app-darwin   - Build macOS .app bundle (universal)"
+	@echo "  make build-app-windows  - Build Windows .exe"
+	@echo "  make build-app-linux    - Build Linux AppImage (host arch; needs webkit2gtk-4.1 + gtk3)"
+	@echo "  make build-app-all      - Build desktop app for all platforms"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-help        - Show Docker-specific commands"
@@ -388,6 +395,79 @@ build-cli-windows: web-build
 build-cli-all: build-cli-linux build-cli-darwin build-cli-windows
 	@echo "All CLI binaries built successfully!"
 	@ls -lh bin/
+
+# ============================================================================
+# Desktop App Build Targets (clickable .app / .exe via Wails)
+# ============================================================================
+#
+# These produce a single clickable application that opens a native desktop
+# window over the embedded API server + Web UI. CLI and TUI subcommands are
+# preserved inside the same binary.
+#
+# Build tags:
+#   desktop    - compiles internal/desktop/app.go (the Wails runner); without
+#                it, app_stub.go provides a no-op so normal CLI/test builds
+#                never pull in the Wails dependency or its webview headers.
+#   production - Wails requires this (or `dev`) to enable its real frontend;
+#                the default build returns "will not build without the correct
+#                build tags".
+#
+# -X internal/desktop.BuildDesktop=1 makes a no-arg launch open the GUI instead
+# of printing help (CLI release builds keep BuildDesktop=0 → help on no-args).
+
+DESKTOP_TAGS := desktop,production
+DESKTOP_LDFLAGS := -ldflags "\
+	-w -s \
+	-X github.com/javinizer/javinizer-go/internal/version.Version=$(VERSION) \
+	-X github.com/javinizer/javinizer-go/internal/version.Commit=$(COMMIT) \
+	-X github.com/javinizer/javinizer-go/internal/version.BuildDate=$(BUILD_DATE) \
+	-X github.com/javinizer/javinizer-go/internal/desktop.BuildDesktop=1"
+
+build-app-darwin: web-build
+	@echo "Building desktop app for macOS - $(VERSION)..."
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 CGO_LDFLAGS="-framework UniformTypeIdentifiers" \
+		./scripts/with_embedded_web.sh go build -tags '$(DESKTOP_TAGS)' $(DESKTOP_LDFLAGS) \
+		-o bin/javinizer-app-darwin-amd64 ./cmd/javinizer
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 CGO_LDFLAGS="-framework UniformTypeIdentifiers" \
+		./scripts/with_embedded_web.sh go build -tags '$(DESKTOP_TAGS)' $(DESKTOP_LDFLAGS) \
+		-o bin/javinizer-app-darwin-arm64 ./cmd/javinizer
+	lipo -create bin/javinizer-app-darwin-amd64 bin/javinizer-app-darwin-arm64 \
+		-output bin/javinizer-app-darwin-universal
+	rm -f bin/javinizer-app-darwin-amd64 bin/javinizer-app-darwin-arm64
+	./scripts/package-app-darwin.sh bin/javinizer-app-darwin-universal \
+		bin/Javinizer.app $(VERSION)
+	@echo "macOS desktop app built: bin/Javinizer.app"
+
+# NOTE: Wails v2 Windows builds require CGO (go-webview2). This target must
+# run on a Windows runner (e.g. GitHub Actions windows-latest) or on a host
+# with mingw installed and CC=x86_64-w64-mingw32-gcc set. Cross-compiling
+# from macOS without mingw will fail at the link step.
+build-app-windows: web-build
+	@echo "Building desktop app for Windows - $(VERSION)..."
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
+		./scripts/with_embedded_web.sh go build -tags '$(DESKTOP_TAGS)' $(DESKTOP_LDFLAGS) \
+		-o bin/Javinizer.exe ./cmd/javinizer
+	@echo "Windows desktop app built: bin/Javinizer.exe"
+
+# Linux desktop build: produces an AppImage that bundles libwebkit2gtk + gtk3
+# so it runs on any distro without preinstalling webkit. Build deps (Ubuntu):
+#   sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+# AppImage packaging (scripts/package-app-linux.sh) downloads linuxdeploy +
+# appimagetool at runtime and must run on Linux. The webkit2_41 tag selects
+# libwebkit2gtk-4.1 (Ubuntu 24.04's version).
+build-app-linux: web-build
+	@echo "Building desktop app for Linux - $(VERSION)..."
+	CGO_ENABLED=1 GOOS=linux GOARCH=$$(go env GOARCH) \
+		./scripts/with_embedded_web.sh go build -tags '$(DESKTOP_TAGS),webkit2_41' $(DESKTOP_LDFLAGS) \
+		-o bin/javinizer-app-linux-$$(go env GOARCH) ./cmd/javinizer
+	./scripts/package-app-linux.sh bin/javinizer-app-linux-$$(go env GOARCH) \
+		bin/Javinizer-linux-$$(uname -m).AppImage $(VERSION)
+	@echo "Linux desktop app built: bin/Javinizer-linux-$$(uname -m).AppImage"
+
+build-app-all: build-app-darwin build-app-windows
+	@echo "All cross-platform desktop apps built successfully!"
+	@echo "(Linux AppImage must be built on Linux: make build-app-linux)"
+	@ls -lh bin/Javinizer.app bin/Javinizer.exe
 
 # ============================================================================
 # Local GitHub Actions Testing with act
