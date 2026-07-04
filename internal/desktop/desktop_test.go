@@ -139,7 +139,10 @@ func TestUserDataDir_MkdirAllFailure(t *testing.T) {
 	}
 	defer blocker.Close()
 	t.Setenv("HOME", blocker.Name())
-	t.Setenv("XDG_CONFIG_HOME", blocker.Name()+"/sub")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(blocker.Name(), "sub"))
+	t.Setenv("AppData", blocker.Name())
+	t.Setenv("LOCALAPPDATA", blocker.Name())
+	t.Setenv("USERPROFILE", blocker.Name())
 
 	_, err = UserDataDir()
 	if err == nil {
@@ -157,7 +160,10 @@ func TestSetupPortableEnv_MkdirAllFailure(t *testing.T) {
 	}
 	defer blocker.Close()
 	t.Setenv("HOME", blocker.Name())
-	t.Setenv("XDG_CONFIG_HOME", blocker.Name()+"/sub")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(blocker.Name(), "sub"))
+	t.Setenv("AppData", blocker.Name())
+	t.Setenv("LOCALAPPDATA", blocker.Name())
+	t.Setenv("USERPROFILE", blocker.Name())
 	t.Setenv("JAVINIZER_DB", "")
 	t.Setenv("JAVINIZER_LOG_DIR", "")
 
