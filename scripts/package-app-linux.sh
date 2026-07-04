@@ -21,7 +21,11 @@ if [ "$#" -lt 3 ]; then
 fi
 
 binary="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
-out_appimage="$2"
+# Resolve the output path to absolute up front: this script cd's into a
+# temp workdir to run linuxdeploy, and a relative out_appimage would
+# resolve against the wrong directory.
+mkdir -p "$(dirname "$2")"
+out_appimage="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 version="$3"
 icon="${4:-}"
 
