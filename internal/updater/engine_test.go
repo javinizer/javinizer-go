@@ -558,6 +558,9 @@ func TestEngine_CreateTargetDirFailure(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses file permission checks")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ACLs do not enforce read-only via chmod the way the test assumes")
+	}
 	readOnly := t.TempDir()
 	if err := os.Chmod(readOnly, 0o500); err != nil {
 		t.Fatalf("chmod read-only: %v", err)
