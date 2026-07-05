@@ -97,7 +97,12 @@ func TestLinuxSwapper_CanSwap_WritableDir(t *testing.T) {
 }
 
 func TestLinuxSwapper_CanSwap_ReadOnlyDir(t *testing.T) {
-	// A read-only dir must fail CanSwap with a permission hint.
+	// A read-only dir must fail CanSwap with a permission hint. Skipped when
+	// running as root (CI containers), since root bypasses file permission
+	// checks and CanSwap would succeed.
+	if os.Geteuid() == 0 {
+		t.Skip("CanSwap permission check is bypassed by root")
+	}
 	dir := t.TempDir()
 	bundle := filepath.Join(dir, "Javinizer.AppImage")
 	if err := os.WriteFile(bundle, []byte("#!/bin/sh\n"), 0o755); err != nil {
@@ -115,8 +120,9 @@ func TestLinuxSwapper_CanSwap_ReadOnlyDir(t *testing.T) {
 	}
 }
 
-func TestLinuxSwapper_Target_NotExecutable(t *testing.T) {
-	// APPIMAGE points at a non-executable file: Target must reject it.
+func TestLinuxSwapper_Target_NotExecutableFallback(t *testing.T) {
+	// APPIMAGE points at a non-executable file: Target falls back to the
+	// symlink-resolved running executable (the test binary) rather than erroring.
 	dir := t.TempDir()
 	bundle := filepath.Join(dir, "Javinizer.AppImage")
 	if err := os.WriteFile(bundle, []byte("not executable"), 0o600); err != nil {
@@ -125,8 +131,15 @@ func TestLinuxSwapper_Target_NotExecutable(t *testing.T) {
 	t.Setenv("APPIMAGE", bundle)
 
 	s := &linuxSwapper{}
-	if _, err := s.Target(); err == nil {
-		t.Fatal("Target should fail for non-executable APPIMAGE")
+	got, err := s.Target()
+	if err != nil {
+		t.Fatalf("Target should fall back to executable, not error: %v", err)
+	}
+	if got == bundle {
+		t.Error("Target should not return the non-executable APPIMAGE; should fall back to exe")
+	}
+	if !fileExistsAndExecutable(got) {
+		t.Errorf("fallback target %q is not executable", got)
 	}
 }
 
