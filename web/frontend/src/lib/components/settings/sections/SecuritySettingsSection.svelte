@@ -6,8 +6,9 @@
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
 	import PathInput from '$lib/components/PathInput.svelte';
+	import AllowedDirectoriesEditor from '$lib/components/AllowedDirectoriesEditor.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import { FolderPlus, Trash2, Save, Star, Folder } from 'lucide-svelte';
+	import { FolderPlus, Trash2, Save, Folder } from 'lucide-svelte';
 	import type { Config, SettingsConfig, SecurityUpdateRequest } from '$lib/api/types';
 
 	interface Props {
@@ -53,7 +54,6 @@
 		}
 	});
 
-	let newAllowedDir = $state('');
 	let newDeniedDir = $state('');
 	let newUncServer = $state('');
 
@@ -73,21 +73,6 @@
 		if (a.length !== b.length) return false;
 		for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
 		return true;
-	}
-
-	function addAllowedDir() {
-		const path = newAllowedDir.trim();
-		if (!path) return;
-		if (draft.allowed_directories.includes(path)) {
-			toastStore.error('Directory already in the allowed list', 3000);
-			return;
-		}
-		draft.allowed_directories = [...draft.allowed_directories, path];
-		newAllowedDir = '';
-	}
-
-	function removeAllowedDir(index: number) {
-		draft.allowed_directories = draft.allowed_directories.filter((_, i) => i !== index);
 	}
 
 	function addDeniedDir() {
@@ -165,56 +150,10 @@
 			Javinizer will only scan and operate inside these directories. With no allowed directories configured, all file operations are blocked.
 		</p>
 
-		{#if draft.allowed_directories.length === 0}
-			<div class="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
-				No allowed directories configured. Add one below to enable scanning.
-			</div>
-		{:else}
-			<ul class="space-y-2 mb-3">
-				{#each draft.allowed_directories as dir, index (dir + '-' + index)}
-					<li class="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
-						{#if index === 0}
-							<span
-								class="inline-flex items-center gap-1 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 text-xs font-medium px-2 py-0.5 shrink-0"
-								title="The first allowed directory is used as the default scan path"
-							>
-								<Star class="h-3 w-3" />
-								Default
-							</span>
-						{:else}
-							<Folder class="h-4 w-4 text-muted-foreground shrink-0" />
-						{/if}
-						<span class="flex-1 min-w-0 truncate font-mono text-sm">{dir}</span>
-						<button
-							type="button"
-							class="text-muted-foreground hover:text-destructive transition-colors shrink-0"
-							title="Remove directory"
-							aria-label="Remove allowed directory {dir}"
-							onclick={() => removeAllowedDir(index)}
-						>
-							<Trash2 class="h-4 w-4" />
-						</button>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-
-		<div class="flex items-start gap-2">
-			<PathInput
-				bind:value={newAllowedDir}
-				placeholder="Add a directory (e.g. /mnt/videos)"
-				whitelistPaths={draft.allowed_directories}
-				class="flex-1"
-			/>
-			<Button variant="outline" size="sm" onclick={addAllowedDir} disabled={!newAllowedDir.trim()} title="Add allowed directory">
-				{#snippet children()}
-					<FolderPlus class="h-4 w-4" />
-				{/snippet}
-			</Button>
-		</div>
-		<p class="text-xs text-muted-foreground mt-1">
-			Autocomplete uses the current allowed directories. Type the first path manually if the list is empty.
-		</p>
+		<AllowedDirectoriesEditor
+			bind:directories={draft.allowed_directories}
+			whitelistPaths={draft.allowed_directories}
+		/>
 	</SettingsSubsection>
 
 	<SettingsSubsection title="Denied Directories">

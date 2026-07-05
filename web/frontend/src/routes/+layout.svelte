@@ -9,11 +9,15 @@
 	import DialogContainer from '$lib/components/ui/DialogContainer.svelte';
 	import BackgroundJobIndicator from '$lib/components/BackgroundJobIndicator.svelte';
 	import ProgressModal from '$lib/components/ProgressModal.svelte';
+	import AllowedDirectoriesEditor from '$lib/components/AllowedDirectoriesEditor.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
+	import { toastStore } from '$lib/stores/toast';
 	import { getBackgroundJobState, reopenModal, dismiss, closeModal } from '$lib/stores/background-job.svelte';
 	import { getQueryClient } from '$lib/query/client';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
+	import { Save, FolderCheck, ArrowRight } from 'lucide-svelte';
 	import '../app.css';
 
 	let { children } = $props();
@@ -34,6 +38,14 @@
 	let loginUsername = $state('');
 	let loginPassword = $state('');
 	let loginRememberMe = $state(true);
+	let setupNeedsDirs = $state(false);
+	let setupDirs = $state<string[]>([]);
+	let setupDirsSubmitting = $state(false);
+	let setupSecurityDefaults = $state({
+		denied_directories: [] as string[],
+		allow_unc: false,
+		allowed_unc_servers: [] as string[],
+	});
 
 	function syncWebSocketAuthState() {
 		if (authAuthenticated) {
@@ -85,11 +97,61 @@
 			setupPasswordConfirm = '';
 			loginPassword = '';
 			await refreshAuthStatus();
+			if (authAuthenticated) {
+				try {
+					const fresh = await apiClient.getConfig();
+					const sec = fresh?.api?.security;
+					setupSecurityDefaults = {
+						denied_directories: [...(sec?.denied_directories ?? [])],
+						allow_unc: sec?.allow_unc ?? false,
+						allowed_unc_servers: [...(sec?.allowed_unc_servers ?? [])],
+					};
+					setupDirs = [...(sec?.allowed_directories ?? [])];
+				} catch {
+					setupSecurityDefaults = {
+						denied_directories: [],
+						allow_unc: false,
+						allowed_unc_servers: [],
+					};
+					setupDirs = [];
+				}
+				setupNeedsDirs = true;
+			}
 		} catch (error) {
 			authError = error instanceof Error ? error.message : 'Failed to initialize authentication';
 		} finally {
 			authSubmitting = false;
 		}
+	}
+
+	async function handleSetupDirsSubmit(event: SubmitEvent) {
+		event.preventDefault();
+		authError = null;
+		setupDirsSubmitting = true;
+		try {
+			await apiClient.updateSecurityConfig({
+				allowed_directories: setupDirs,
+				denied_directories: setupSecurityDefaults.denied_directories,
+				allow_unc: setupSecurityDefaults.allow_unc,
+				allowed_unc_servers: setupSecurityDefaults.allowed_unc_servers,
+			});
+			setupNeedsDirs = false;
+			if (setupDirs.length > 0) {
+				toastStore.success('Allowed directories saved. Ready to scan.', 4000);
+			} else {
+				toastStore.info('You can add allowed directories later in Settings → Security.', 5000);
+			}
+		} catch (error) {
+			authError = error instanceof Error ? error.message : 'Failed to save allowed directories';
+		} finally {
+			setupDirsSubmitting = false;
+		}
+	}
+
+	function handleSetupDirsSkip() {
+		setupNeedsDirs = false;
+		setupDirs = [];
+		toastStore.info('You can add allowed directories later in Settings → Security.', 5000);
 	}
 
 	async function handleLoginSubmit(event: SubmitEvent) {
@@ -289,6 +351,48 @@
 					</button>
 				</form>
 			{/if}
+		</div>
+	</div>
+{:else if setupNeedsDirs}
+	<div class="min-h-screen bg-background flex items-center justify-center px-4 py-10">
+		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm space-y-4">
+			<div class="space-y-1">
+				<h1 class="text-2xl font-bold">Add Allowed Directories</h1>
+				<p class="text-sm text-muted-foreground">
+					Add the folders you want to scan for videos; you can change this later in Settings → Security.
+					With no allowed directories configured, all file operations are blocked.
+				</p>
+			</div>
+
+			{#if authError}
+				<div class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+					{authError}
+				</div>
+			{/if}
+
+			<AllowedDirectoriesEditor
+				bind:directories={setupDirs}
+				whitelistPaths={setupDirs}
+				emptyHint="No directories added yet. Add one below to enable scanning, or skip and add later."
+			/>
+
+			<form class="space-y-2" onsubmit={handleSetupDirsSubmit}>
+				<Button type="submit" disabled={setupDirsSubmitting} class="w-full">
+					{#snippet children()}
+						<FolderCheck class="h-4 w-4 mr-2" />
+						{setupDirsSubmitting ? 'Saving...' : 'Save & Continue'}
+					{/snippet}
+				</Button>
+			</form>
+			<button
+				type="button"
+				disabled={setupDirsSubmitting}
+				onclick={handleSetupDirsSkip}
+				class="w-full inline-flex items-center justify-center gap-1 rounded-md px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-60"
+			>
+				Skip for now
+				<ArrowRight class="h-3.5 w-3.5" />
+			</button>
 		</div>
 	</div>
 {:else}
