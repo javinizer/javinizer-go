@@ -831,3 +831,26 @@ func TestCheckLatestVersion_PreReleaseEmptyList(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no releases found")
 }
+
+func TestNewChecker_DefaultRepo(t *testing.T) {
+	chk := NewChecker(defaultRepo)
+	require.NotNil(t, chk)
+	// The returned checker must be usable: a CheckLatestVersion call should
+	// not panic and should return a typed result or error (network errors are
+	// fine in tests without network; we only assert the constructor wires up).
+	_, _ = chk.CheckLatestVersion(context.Background())
+}
+
+func TestNewCheckerWithBaseURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name": "v1.2.3", "name": "v1.2.3", "html_url": "https://example.com", "prerelease": false}`))
+	}))
+	defer server.Close()
+
+	chk := NewCheckerWithBaseURL("javinizer/javinizer-go", server.URL)
+	require.NotNil(t, chk)
+
+	info, err := chk.CheckLatestVersion(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "v1.2.3", info.Version)
+}

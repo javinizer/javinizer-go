@@ -1,12 +1,14 @@
 package commandutil
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/javinizer/javinizer-go/internal/updater"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -302,4 +304,35 @@ func TestDependencies_APISpecificFields(t *testing.T) {
 	assert.NotNil(t, deps.GetConfig())
 	assert.NotNil(t, deps.DB)
 	assert.NotNil(t, deps.ScraperRegistry)
+}
+
+// stubBundleUpdater is a no-op BundleUpdater for accessor tests.
+type stubBundleUpdater struct{}
+
+func (stubBundleUpdater) Upgrade(ctx context.Context, opts updater.UpgradeOptions) (*updater.UpgradeResult, error) {
+	return nil, nil
+}
+func (stubBundleUpdater) Status() updater.Status             { return updater.Status{} }
+func (stubBundleUpdater) Relaunch(ctx context.Context) error { return nil }
+
+func TestCoreDeps_BundleUpdater_DefaultNil(t *testing.T) {
+	cfg := &config.Config{Database: config.DatabaseConfig{DSN: filepath.Join(t.TempDir(), "test.db")}}
+	deps, err := NewDependencies(cfg)
+	require.NoError(t, err)
+	defer func() { _ = deps.Close() }()
+
+	assert.Nil(t, deps.BundleUpdater(), "BundleUpdater should be nil by default")
+}
+
+func TestCoreDeps_SetBundleUpdater(t *testing.T) {
+	cfg := &config.Config{Database: config.DatabaseConfig{DSN: filepath.Join(t.TempDir(), "test.db")}}
+	deps, err := NewDependencies(cfg)
+	require.NoError(t, err)
+	defer func() { _ = deps.Close() }()
+
+	u := stubBundleUpdater{}
+	deps.SetBundleUpdater(u)
+	assert.NotNil(t, deps.BundleUpdater(), "BundleUpdater should be set")
+	deps.SetBundleUpdater(nil)
+	assert.Nil(t, deps.BundleUpdater(), "BundleUpdater should be nil after reset")
 }

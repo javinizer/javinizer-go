@@ -95,3 +95,54 @@ func TestLinuxSwapper_CanSwap_WritableDir(t *testing.T) {
 		t.Errorf("CanSwap on user-writable dir: %v", err)
 	}
 }
+
+func TestLinuxSwapper_CanSwap_ReadOnlyDir(t *testing.T) {
+	// A read-only dir must fail CanSwap with a permission hint.
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "Javinizer.AppImage")
+	if err := os.WriteFile(bundle, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	t.Setenv("APPIMAGE", bundle)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	s := &linuxSwapper{}
+	if err := s.CanSwap(); err == nil {
+		t.Fatal("CanSwap on read-only dir should fail")
+	}
+}
+
+func TestLinuxSwapper_Target_NotExecutable(t *testing.T) {
+	// APPIMAGE points at a non-executable file: Target must reject it.
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "Javinizer.AppImage")
+	if err := os.WriteFile(bundle, []byte("not executable"), 0o600); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	t.Setenv("APPIMAGE", bundle)
+
+	s := &linuxSwapper{}
+	if _, err := s.Target(); err == nil {
+		t.Fatal("Target should fail for non-executable APPIMAGE")
+	}
+}
+
+func TestLinuxSwapper_SwapAndRelaunch_CancelledContext(t *testing.T) {
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "Javinizer.AppImage")
+	if err := os.WriteFile(bundle, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	t.Setenv("APPIMAGE", bundle)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s := &linuxSwapper{}
+	if err := s.SwapAndRelaunch(ctx, bundle, 1); err == nil {
+		t.Fatal("SwapAndRelaunch with cancelled context should fail")
+	}
+}
