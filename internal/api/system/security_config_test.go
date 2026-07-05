@@ -134,6 +134,68 @@ func TestUpdateSecurityConfig_PreservesOtherSections(t *testing.T) {
 	assert.Equal(t, []string{"/new"}, saved.API.Security.AllowedDirectories)
 }
 
+// TestUpdateSecurityConfig_MissingFieldRejected verifies that a partial payload
+// missing one of the four required keys is rejected with 400 and does NOT wipe
+// the existing security config on disk. Without the raw-JSON key check, a body
+// like {"allow_unc": true} would unmarshal with allowed_directories=nil and
+// silently clear the allowlist.
+func TestUpdateSecurityConfig_MissingFieldRejected(t *testing.T) {
+	initial := config.DefaultConfig(nil, nil)
+	initial.API.Security.AllowedDirectories = []string{"/keep"}
+	initial.API.Security.DeniedDirectories = []string{"/deny"}
+	initial.API.Security.AllowUNC = false
+	initial.API.Security.AllowedUNCServers = []string{"\\\\srv\\share"}
+
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	coreDeps := createTestDeps(t, initial, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
+
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "missing allowed_directories",
+			payload: `{"denied_directories":[],"allow_unc":false,"allowed_unc_servers":[]}`,
+		},
+		{
+			name:    "missing denied_directories",
+			payload: `{"allowed_directories":[],"allow_unc":false,"allowed_unc_servers":[]}`,
+		},
+		{
+			name:    "missing allow_unc",
+			payload: `{"allowed_directories":[],"denied_directories":[],"allowed_unc_servers":[]}`,
+		},
+		{
+			name:    "missing allowed_unc_servers",
+			payload: `{"allowed_directories":[],"denied_directories":[],"allow_unc":false}`,
+		},
+		{
+			name:    "only allow_unc present",
+			payload: `{"allow_unc":true}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+			req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBufferString(tc.payload))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+			assert.Contains(t, w.Body.String(), "Missing required field")
+		})
+	}
+
+	saved := deps.CoreDeps.GetConfig()
+	assert.Equal(t, []string{"/keep"}, saved.API.Security.AllowedDirectories, "allowlist must not be wiped by a rejected payload")
+	assert.Equal(t, []string{"/deny"}, saved.API.Security.DeniedDirectories)
+	assert.False(t, saved.API.Security.AllowUNC)
+	assert.Equal(t, []string{"\\\\srv\\share"}, saved.API.Security.AllowedUNCServers)
+}
+
 // TestUpdateSecurityConfig_ValidateAndApplyError exercises the ValidateAndApply
 // error branch in updateSecurityConfig — the path that calls
 // mapConfigErrorToHTTP and returns the mapped status. A persist failure (config

@@ -1,6 +1,8 @@
 package system
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -45,8 +47,27 @@ func updateSecurityConfig(rt *core.APIRuntime) gin.HandlerFunc {
 	svc := NewConfigUpdateService(rt, deps.ConfigFile)
 
 	return func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format"})
+			return
+		}
+
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format"})
+			return
+		}
+
+		for _, key := range []string{"allowed_directories", "denied_directories", "allow_unc", "allowed_unc_servers"} {
+			if _, ok := raw[key]; !ok {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Missing required field: " + key})
+				return
+			}
+		}
+
 		var req SecurityUpdateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := json.Unmarshal(body, &req); err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format"})
 			return
 		}

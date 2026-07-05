@@ -8,11 +8,13 @@ import { toastStore } from '$lib/stores/toast';
 vi.mock('$lib/api/client', () => ({
 	apiClient: {
 		updateSecurityConfig: vi.fn(),
+		getConfig: vi.fn(),
 	},
 }));
 
 const mod = await import('$lib/api/client');
 const mockUpdateSecurityConfig = vi.mocked(mod.apiClient.updateSecurityConfig);
+const mockGetConfig = vi.mocked(mod.apiClient.getConfig);
 
 if (!Element.prototype.animate) {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,6 +80,7 @@ function renderSection(config: SettingsConfig) {
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	mockGetConfig.mockResolvedValue(makeConfig() as unknown as SettingsConfig);
 });
 
 afterEach(() => {
@@ -198,3 +201,43 @@ describe('SecuritySettingsSection', () => {
 		expect(mockUpdateSecurityConfig).toHaveBeenCalledTimes(1);
 	});
 });
+
+	it('rehydrates the draft from the fresh config query after a successful save', async () => {
+		mockUpdateSecurityConfig.mockResolvedValue({
+			security: {
+				allowed_directories: ['/persisted'],
+				denied_directories: [],
+				max_files_per_scan: 0,
+				scan_timeout_seconds: 0,
+				allowed_origins: [],
+				allow_unc: true,
+				allowed_unc_servers: ['\\\\srv\\share'],
+				rate_limit: { requests_per_minute: 0 },
+				trusted_proxies: [],
+				force_secure_cookies: false,
+			},
+		});
+		mockGetConfig.mockResolvedValue(
+			makeConfig({
+				allowed_directories: ['/persisted'],
+				allow_unc: true,
+				allowed_unc_servers: ['\\\\srv\\share'],
+			}) as unknown as SettingsConfig,
+		);
+
+		const { container } = renderSection(makeConfig({ allowed_directories: ['/existing'] }));
+		await expandSection(container);
+
+		const removeBtn = container.querySelector('button[aria-label^="Remove allowed directory"]') as HTMLButtonElement;
+		await fireEvent.click(removeBtn);
+
+		const save = Array.from(container.querySelectorAll('button')).find(
+			(b) => b.textContent?.includes('Save Security'),
+		) as HTMLButtonElement;
+		await waitFor(() => expect(save.hasAttribute('disabled')).toBe(false));
+		await fireEvent.click(save);
+
+		await waitFor(() => expect(mockGetConfig).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(container.textContent).toContain('/persisted'));
+		await waitFor(() => expect(save.hasAttribute('disabled')).toBe(true));
+	});

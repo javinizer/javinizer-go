@@ -8,7 +8,7 @@
 	import PathInput from '$lib/components/PathInput.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { FolderPlus, Trash2, Save, Star, Folder } from 'lucide-svelte';
-	import type { SettingsConfig, SecurityUpdateRequest } from '$lib/api/types';
+	import type { Config, SettingsConfig, SecurityUpdateRequest } from '$lib/api/types';
 
 	interface Props {
 		config: SettingsConfig;
@@ -26,8 +26,8 @@
 		allowed_unc_servers: string[];
 	};
 
-	function snapshot(): SecurityDraft {
-		const sec = config?.api?.security;
+	function snapshot(cfg: SettingsConfig): SecurityDraft {
+		const sec = cfg?.api?.security;
 		return {
 			allowed_directories: [...(sec?.allowed_directories ?? [])],
 			denied_directories: [...(sec?.denied_directories ?? [])],
@@ -36,13 +36,20 @@
 		};
 	}
 
-	let draft = $state<SecurityDraft>(snapshot());
-
+	let hydratedConfig = $state<SettingsConfig | null>(null);
 	let lastConfigRef: SettingsConfig | null = null;
+	let draft = $state<SecurityDraft>({
+		allowed_directories: [],
+		denied_directories: [],
+		allow_unc: false,
+		allowed_unc_servers: [],
+	});
+
 	$effect(() => {
-		if (config !== lastConfigRef) {
-			lastConfigRef = config;
-			draft = snapshot();
+		const cfg = hydratedConfig ?? config;
+		if (cfg !== lastConfigRef) {
+			lastConfigRef = cfg;
+			draft = snapshot(cfg);
 		}
 	});
 
@@ -51,10 +58,15 @@
 	let newUncServer = $state('');
 
 	let dirty = $derived(
-		!arrayEqual(draft.allowed_directories, config?.api?.security?.allowed_directories ?? []) ||
-			!arrayEqual(draft.denied_directories, config?.api?.security?.denied_directories ?? []) ||
-			draft.allow_unc !== (config?.api?.security?.allow_unc ?? false) ||
-			!arrayEqual(draft.allowed_unc_servers, config?.api?.security?.allowed_unc_servers ?? []),
+		(() => {
+			const sec = (hydratedConfig ?? config)?.api?.security;
+			return (
+				!arrayEqual(draft.allowed_directories, sec?.allowed_directories ?? []) ||
+				!arrayEqual(draft.denied_directories, sec?.denied_directories ?? []) ||
+				draft.allow_unc !== (sec?.allow_unc ?? false) ||
+				!arrayEqual(draft.allowed_unc_servers, sec?.allowed_unc_servers ?? [])
+			);
+		})(),
 	);
 
 	function arrayEqual(a: string[], b: string[]): boolean {
@@ -120,7 +132,13 @@
 				allowed_unc_servers: [...(data.security.allowed_unc_servers ?? [])],
 			};
 			toastStore.success('Security settings saved and reloaded', 4000);
-			void queryClient.invalidateQueries({ queryKey: ['config'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] }).then(async () => {
+				const fresh = await queryClient.fetchQuery<Config>({
+					queryKey: ['config'],
+					queryFn: () => apiClient.getConfig(),
+				});
+				hydratedConfig = fresh as unknown as SettingsConfig;
+			});
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || 'Failed to save security settings', 5000);

@@ -11,7 +11,7 @@ import (
 // (desktop/docker/cli) into each request's context so error handlers can tailor
 // operator guidance to how javinizer is running. The environment is a
 // process-level constant read from CoreDeps; nil deps fall back to CLI.
-func InstallEnvironmentInjector(deps commandutil.CoreDepsReader) gin.HandlerFunc {
+func InstallEnvironmentInjector(deps *commandutil.CoreDeps) gin.HandlerFunc {
 	var env system.Environment
 	if deps != nil {
 		env = deps.InstallEnvironment()
