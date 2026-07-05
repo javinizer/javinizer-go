@@ -686,7 +686,10 @@ func TestEngine_CloseTempFileFailure(t *testing.T) {
 	defer srv.Close()
 
 	orig := closeTempFile
-	closeTempFile = func(f *os.File) error { return fmt.Errorf("close failed: bad fd") }
+	closeTempFile = func(f *os.File) error {
+		_ = f.Close() // release the handle so t.TempDir cleanup can remove the file on Windows
+		return fmt.Errorf("close failed: bad fd")
+	}
 	t.Cleanup(func() { closeTempFile = orig })
 
 	_, err := e.Upgrade(context.Background(), UpgradeOptions{})
