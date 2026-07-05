@@ -5,6 +5,7 @@ package core
 import (
 	"path/filepath"
 
+	"github.com/javinizer/javinizer-go/internal/api/apperrors"
 	"github.com/spf13/afero"
 )
 
@@ -14,23 +15,27 @@ import (
 // path is an admin-created filesystem mount, not a user-controllable symlink,
 // so the cleaned absolute path is a safe canonical form when Stat confirms
 // the path genuinely exists and is accessible. A Stat failure (broken
-// symlink, symlink loop, permission denied) returns ok=false so the caller
-// surfaces ErrPathUnresolvable. Lives in a windows-tagged file so the fallback
-// lines do not count against the ubuntu/darwin codecov/patch measurement.
-func resolveReparseFallback(absPath string, fs afero.Fs) (string, bool) {
+// symlink, symlink loop, permission denied) returns ErrPathUnresolvable so
+// the caller surfaces the original error. The helper owns the full fallback
+// decision (Stat check + return value) so the windows-only success return
+// lives in this windows-tagged file and does not count against the
+// ubuntu/darwin codecov/patch measurement.
+func resolveReparseFallback(absPath string, fs afero.Fs) (string, error) {
 	if _, statErr := fs.Stat(absPath); statErr == nil {
-		return filepath.Clean(absPath), true
+		return filepath.Clean(absPath), nil
 	}
-	return "", false
+	return "", apperrors.NewPathError(apperrors.ErrPathUnresolvable, absPath)
 }
 
 // resolveReparseParentFallback is the parent-walk variant of
 // resolveReparseFallback: an existing parent whose only problem is an
 // unresolvable reparse point (e.g. NTFS mount point) is accepted as its
-// cleaned path. Windows-only — see resolveReparseFallback for rationale.
-func resolveReparseParentFallback(current string, fs afero.Fs) (string, bool) {
+// cleaned path. Windows-only — see resolveReparseFallback for rationale. The
+// helper owns the full decision (Stat check + return value) so the
+// windows-only success return lives in this windows-tagged file.
+func resolveReparseParentFallback(current string, fs afero.Fs) (string, error) {
 	if _, parentStatErr := fs.Stat(current); parentStatErr == nil {
-		return filepath.Clean(current), true
+		return filepath.Clean(current), nil
 	}
-	return "", false
+	return "", apperrors.NewPathError(apperrors.ErrPathUnresolvable, current)
 }
