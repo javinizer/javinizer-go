@@ -581,3 +581,40 @@ func TestEngine_CreateTargetDirFailure(t *testing.T) {
 		t.Fatalf("Status = %q, want %q", got, StateFailed)
 	}
 }
+
+func TestEngine_CreateTempFailure(t *testing.T) {
+	// Cover the os.CreateTemp error branch in Upgrade: the engine's MkdirAll
+	// on the target dir must SUCCEED, but the subsequent CreateTemp in that
+	// dir must fail. We achieve that by pre-creating the target dir (so
+	// MkdirAll is a no-op) and then making it read-only so CreateTemp cannot
+	// write. Skipped on Windows (chmod doesn't enforce) and as root (bypasses
+	// perms) — same gate as TestEngine_CreateTargetDirFailure.
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permission checks")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ACLs do not enforce read-only via chmod the way the test assumes")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	target := filepath.Join(dir, "fake-bundle")
+	sw := &mockSwapper{target: target}
+	asset := []byte("bytes")
+	e, srv := newTestEngine(t, sw, "v1.0.0", "v9.9.9", asset, "")
+	defer srv.Close()
+
+	_, err := e.Upgrade(context.Background(), UpgradeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "create temp file") {
+		t.Fatalf("err = %v, want create temp file", err)
+	}
+	if got := e.Status().State; got != StateFailed {
+		t.Fatalf("Status = %q, want %q", got, StateFailed)
+	}
+	if sw.swapInvoked() {
+		t.Fatal("SwapAndRelaunch should not be invoked on CreateTemp failure")
+	}
+}

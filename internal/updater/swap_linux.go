@@ -81,6 +81,16 @@ func (s *linuxSwapper) Stage(ctx context.Context, downloadedPath, assetName stri
 // and (5) relaunches it via nohup. It returns immediately after spawning; the
 // helper runs independently in its own session and outlives this process.
 //
+// The success path (cmd.Start + cmd.Process.Release, lines ~97-107) is
+// intentionally NOT covered by tests: exercising it requires actually
+// spawning `sh -c` with a script that performs `mv -f staged target` and a
+// nohup relaunch, which mutates the AppImage on disk and leaves a detached
+// process running — unsafe in CI. The ctx.Err() guard (line ~88) is covered
+// by TestLinuxSwapper_SwapAndRelaunch_CancelledContext. A Target() failure
+// between the guard and the spawn is not reachable in CI: os.Executable()
+// resolves to the test binary, and the APPIMAGE fallback in resolveAppImageTarget
+// always succeeds when the running executable exists.
+//
 // exec.CommandContext (with context.Background, not the request ctx) is
 // intentional: the helper must survive the request context being cancelled
 // when the app quits, since the swap only begins after this process exits.

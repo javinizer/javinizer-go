@@ -47,6 +47,14 @@ func appImageArch(goarch string) (string, bool) {
 
 // currentBundleAsset returns the asset name for the running build, or an error
 // if this platform has no published desktop bundle (e.g. windows-arm64).
+//
+// The error branch is intentionally NOT covered by tests: it only fires on a
+// host OS/arch with no published desktop bundle (windows/arm64, freebsd/*).
+// CI runs the test suite on darwin/amd64+arm64, linux/amd64+arm64, and
+// windows/amd64 — all of which have a published bundle — so currentBundleAsset
+// always succeeds there. BundleAssetName itself is covered for the error
+// branches by TestBundleAssetName, but the currentBundleAsset() wrapper is
+// only reached via Upgrade(), which cannot be made to fail at this step in CI.
 func currentBundleAsset() (string, error) {
 	return BundleAssetName(runtime.GOOS, runtime.GOARCH)
 }

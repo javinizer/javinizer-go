@@ -311,6 +311,12 @@ func (e *Engine) Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeResu
 		return nil, fmt.Errorf("download asset: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
+		// The Sync/Close error branches below are intentionally not covered by
+		// tests: triggering them requires a custom/injected filesystem (e.g.
+		// a filled tmpfs or an injected *os.File wrapper) since the temp file
+		// is created and written on the host's real fs, which does not fail
+		// Sync/Close under normal conditions. Refactoring Engine to accept an
+		// injectable fs abstraction is out of scope for a coverage-only change.
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 		e.fail("flush asset: " + err.Error())
