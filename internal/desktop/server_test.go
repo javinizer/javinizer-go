@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	apicore "github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 )
 
@@ -361,5 +362,25 @@ func TestServerInstance_ContextCancelTriggersShutdown(t *testing.T) {
 	case <-inst.Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("Done() did not close within 5s after context cancel")
+	}
+}
+
+// TestServerInstance_Deps verifies that Deps() returns the API dependencies
+// the desktop bootstrap wires into the ServerInstance (the bundle updater is
+// injected via CoreDeps.SetBundleUpdater off this accessor).
+func TestServerInstance_Deps(t *testing.T) {
+	deps := &apicore.APIDeps{}
+	inst := &ServerInstance{deps: deps}
+	if inst.Deps() != deps {
+		t.Fatal("Deps() should return the wired APIDeps pointer")
+	}
+}
+
+// TestServerInstance_Deps_Nil verifies Deps() returns nil after Shutdown has
+// released the dependencies (the zero value).
+func TestServerInstance_Deps_Nil(t *testing.T) {
+	inst := &ServerInstance{}
+	if inst.Deps() != nil {
+		t.Fatal("Deps() should be nil on a freshly constructed ServerInstance")
 	}
 }
