@@ -235,10 +235,10 @@ func Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeResult, error) {
 	result.InstallEnvironment = opts.Environment
 
 	// Environment-aware handoff: docker images are read-only (an in-place
-	// binary replace would be lost on container recreate) and desktop builds
-	// are native bundles whose inner binary can't be swapped without orphaning
-	// the .app/.exe/.AppImage wrapper. In both cases, defer to the right
-	// upgrade path instead of attempting a self-swap that would silently fail
+	// binary replace would be lost on container recreate), and desktop builds
+	// perform a bundle-level self-swap via the in-app "Update & restart" button
+	// rather than via this CLI command. In both cases, defer to the right
+	// upgrade path instead of attempting a CLI swap that would silently fail
 	// or break the install. This runs after the up-to-date check so a no-op
 	// upgrade still reports "already up to date" without a handoff.
 	if opts.Environment == system.EnvironmentDocker || opts.Environment == system.EnvironmentDesktop {
@@ -343,7 +343,7 @@ func downloadAndReplace(ctx context.Context, opts UpgradeOptions, exePath, tag, 
 
 	_, _ = fmt.Fprintf(out, "Downloading checksums...\n")
 	var checksums bytes.Buffer
-	if err := downloadTo(ctx, opts.HTTPClient, checksumURL, &checksums, maxChecksumSize); err != nil {
+	if err := DownloadTo(ctx, opts.HTTPClient, checksumURL, &checksums, maxChecksumSize); err != nil {
 		return fmt.Errorf("download checksums: %w", err)
 	}
 	expected, err := ParseChecksums(checksums.Bytes(), asset)
@@ -371,7 +371,7 @@ func downloadAndReplace(ctx context.Context, opts UpgradeOptions, exePath, tag, 
 	}()
 
 	_, _ = fmt.Fprintf(out, "Downloading %s...\n", asset)
-	if err := downloadTo(ctx, opts.HTTPClient, assetURL, tmp, maxAssetSize); err != nil {
+	if err := DownloadTo(ctx, opts.HTTPClient, assetURL, tmp, maxAssetSize); err != nil {
 		return fmt.Errorf("download asset: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
@@ -381,7 +381,7 @@ func downloadAndReplace(ctx context.Context, opts UpgradeOptions, exePath, tag, 
 		return fmt.Errorf("close asset: %w", err)
 	}
 
-	if err := verifyFileSHA256(tmpPath, expected); err != nil {
+	if err := VerifyFileSHA256(tmpPath, expected); err != nil {
 		return err
 	}
 
@@ -398,12 +398,12 @@ func downloadAndReplace(ctx context.Context, opts UpgradeOptions, exePath, tag, 
 	return nil
 }
 
-// downloadTo streams a URL into w, capping the total bytes read at maxSize.
+// DownloadTo streams a URL into w, capping the total bytes read at maxSize.
 // It enforces HTTPS end to end: the initial URL and every redirect must be
 // https, because a checksum fetched over the same insecure channel as the
 // binary authenticates nothing (a MITM could swap both). An oversized response
 // fails closed rather than being silently truncated into a partial parse.
-func downloadTo(ctx context.Context, client *http.Client, url string, w io.Writer, maxSize int64) error {
+func DownloadTo(ctx context.Context, client *http.Client, url string, w io.Writer, maxSize int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -448,8 +448,8 @@ func downloadTo(ctx context.Context, client *http.Client, url string, w io.Write
 	return nil
 }
 
-// verifyFileSHA256 reads the file at path and compares its SHA256 to expected.
-func verifyFileSHA256(path, expected string) error {
+// VerifyFileSHA256 reads the file at path and compares its SHA256 to expected.
+func VerifyFileSHA256(path, expected string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open downloaded asset: %w", err)

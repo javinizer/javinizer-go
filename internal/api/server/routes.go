@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/auth"
 	"github.com/javinizer/javinizer-go/internal/api/batch"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/api/desktop"
 	"github.com/javinizer/javinizer-go/internal/api/events"
 	"github.com/javinizer/javinizer-go/internal/api/file"
 	"github.com/javinizer/javinizer-go/internal/api/genre"
@@ -156,6 +157,7 @@ func registerAPIV1Routes(router *gin.Engine, rt *core.APIRuntime) {
 	genre.RegisterRoutes(writeProtected, genreDeps, genreInvalidateCaches)
 	system.RegisterRoutes(protected, rt)
 	apiversion.RegisterRoutes(protected, deps)
+	desktop.RegisterRoutes(protected, deps)
 	file.RegisterRoutes(writeProtected, rt)
 	batch.RegisterRoutes(writeProtected, rt)
 	historyLogger := historypkg.NewLogger(deps.Repos.HistoryRepo)

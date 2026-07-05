@@ -40,9 +40,40 @@ To build from source instead, see [Build](#build) below.
 
 ## Updating
 
-Because the app is a native bundle (not a self-swappable binary), `javinizer
-upgrade` refuses to replace it in place and points you to the right path
-instead:
+Desktop builds self-update in place. When a new release is available, the Web
+UI's update banner shows an **"Update & restart"** button — click it and the
+app downloads the new bundle, verifies it, swaps the old bundle out, and
+relaunches itself. No terminal, package manager, or manual download required.
+The button appears only for genuine desktop installs
+(`install_environment === desktop`) that have an update pending, so if you're
+running the CLI server instead of the desktop app you won't see it.
+
+### How the in-app update works
+
+1. **Download** — the backend fetches the new bundle for your platform (macOS
+   `.zip`, Windows `.exe`, Linux `.AppImage`) to a temporary file next to the
+   current one.
+2. **Verify** — the bundle's SHA256 is checked against the published
+   `checksums.txt` before anything is swapped.
+3. **Swap** — a detached helper waits for the app to exit, then renames the
+   running bundle aside and moves the new one into place.
+4. **Relaunch** — the helper starts the new app, which reopens its window and
+   reconnects to its (new) local server port automatically.
+
+The app quits during the swap and the new window opens on its own when the
+relaunch finishes — you don't need to relaunch anything by hand. The swapped
+bundle is still unsigned (see [The app is unsigned](#the-app-is-unsigned)), but
+the swap avoids re-triggering first-launch friction: on **macOS** the new
+`.app` has its `com.apple.quarantine` attribute stripped, so Gatekeeper does
+not re-prompt the relaunched copy; on **Windows** the old `.exe` is renamed to
+`.old` and cleaned up on the next launch; on **Linux** the AppImage is renamed
+in place (located via the AppImage runtime's `APPIMAGE` path).
+
+### Alternative: package managers
+
+If you installed via a package manager, or prefer not to use the in-app
+button, the same taps republish on each **stable** release (prereleases never
+reach them):
 
 | Install method | Update command |
 |----------------|-----------------|
@@ -50,10 +81,16 @@ instead:
 | Windows Scoop | `scoop update javinizer-app` |
 | Linux AppImage | Download the latest `Javinizer-linux-x86_64.AppImage` from the [releases page](https://github.com/javinizer/javinizer-go/releases) and replace the old file |
 
-The cask and bucket are republished automatically on each **stable** release
-(prereleases never reach them). The Web UI's update banner also detects the
-desktop environment and shows a "Desktop app" badge with a link to the releases
-page, so you don't have to remember the command.
+For arm64 Linux, swap `x86_64` for `aarch64` in the asset name. Quit the
+running app before replacing the bundle manually.
+
+### `javinizer upgrade` (CLI)
+
+The `javinizer upgrade` command still **hands off** for desktop installs: a
+separate CLI process can't quit the running GUI or swap its own bundle, so it
+points you to the in-app button (or the package-manager commands above) rather
+than replacing the app in place. It continues to self-update CLI-only installs
+normally.
 
 ## How it works
 

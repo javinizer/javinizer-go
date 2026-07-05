@@ -6,6 +6,8 @@ import (
 	"context"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/updater"
+	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/logger"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -35,6 +37,13 @@ func Run(opts Options) error {
 	// OnShutdown (e.g. on early error). Shutdown is idempotent.
 	defer func() { _ = srv.Shutdown() }()
 
+	relauncher := &wailsRelauncher{}
+	srv.Deps().CoreDeps.SetBundleUpdater(updater.NewEngine(
+		newBundleSwapper(),
+		version.Short(),
+		updater.WithRelauncher(relauncher),
+	))
+
 	return wails.Run(&options.App{
 		Title:                    "Javinizer",
 		Width:                    1280,
@@ -46,6 +55,9 @@ func Run(opts Options) error {
 		LogLevel:                 logger.INFO,
 		LogLevelProduction:       logger.WARNING,
 		EnableDefaultContextMenu: true,
+		OnStartup: func(wctx context.Context) {
+			relauncher.setContext(wctx)
+		},
 		OnShutdown: func(_ context.Context) {
 			_ = srv.Shutdown()
 		},

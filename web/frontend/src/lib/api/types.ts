@@ -1180,6 +1180,34 @@ export interface VersionStatusResponse {
 	error?: string;
 }
 
+// Desktop self-upgrade (desktop builds only). POST /api/v1/desktop/upgrade
+// triggers a bundle download → verify → stage → relaunch cycle. On 200 the old
+// app window closes and a new one opens at a fresh server port (the redirector
+// self-heals the webview), so the client just holds its spinner — no polling.
+export interface DesktopUpgradeRequest {
+	force?: boolean;
+}
+
+export interface DesktopUpgradeResponse {
+	status: string;
+	version?: string;
+}
+
+export type DesktopUpgradeState =
+	| 'idle'
+	| 'downloading'
+	| 'verifying'
+	| 'staging'
+	| 'swapping'
+	| 'relaunching'
+	| 'failed';
+
+export interface DesktopUpgradeStatus {
+	state: DesktopUpgradeState;
+	version?: string;
+	error?: string;
+}
+
 // Import/Export types
 export interface ImportResponse {
 	imported: number;

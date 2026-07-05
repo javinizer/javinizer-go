@@ -1,4 +1,5 @@
 import { BaseClient, AuthClient, SystemClient, getAPIBaseURL } from './clients/common';
+import type { DesktopUpgradeRequest, DesktopUpgradeResponse } from './types';
 import { JobClient, FileClient, ScraperClient } from './clients/jobs';
 import { ActressClient } from './clients/actress';
 import { ReplacementClient } from './clients/replacement';
@@ -96,6 +97,14 @@ class APIClient {
 	}
 	async checkVersion() {
 		return this.system.checkVersion();
+	}
+
+	// Desktop self-upgrade (desktop builds only; 404 otherwise).
+	async upgradeDesktop(request: DesktopUpgradeRequest) {
+		return this.request<DesktopUpgradeResponse>('/api/v1/desktop/upgrade', {
+			method: 'POST',
+			body: JSON.stringify(request),
+		});
 	}
 
 	// File operations

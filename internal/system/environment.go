@@ -103,8 +103,8 @@ func DetectEnvironment(fs afero.Fs, isDesktop bool) Environment {
 //
 //   - docker:  `docker pull <image>:latest` then recreate the container
 //     (compose users: `docker compose pull && docker compose up -d`).
-//   - desktop: download the new bundle from the GitHub releases page; a
-//     self-swap would replace only the inner binary and break the bundle.
+//   - desktop: click "Update & restart" in the app (bundle-level self-swap),
+//     or download the new bundle from the GitHub releases page as a fallback.
 //   - cli:     run `javinizer upgrade` (or `brew upgrade javinizer` /
 //     `scoop update javinizer` for package-managed installs).
 func UpgradeInstructions(env Environment) string {
@@ -114,8 +114,8 @@ func UpgradeInstructions(env Environment) string {
 			"  docker pull " + dockerImageRef + ":latest\n" +
 			"  # docker compose users: docker compose pull && docker compose up -d"
 	case EnvironmentDesktop:
-		return "Desktop app: download the new bundle from https://github.com/javinizer/javinizer-go/releases " +
-			"and replace your existing app. In-app self-update is not yet supported."
+		return "Desktop app: click \"Update & restart\" in the app, or download the new bundle " +
+			"from https://github.com/javinizer/javinizer-go/releases and replace your existing app."
 	default:
 		return "Run `javinizer upgrade` to update. " +
 			"If installed via Homebrew or Scoop, use `brew upgrade javinizer` or `scoop update javinizer` instead."

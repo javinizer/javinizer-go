@@ -123,14 +123,15 @@ test.describe('History API: real contract against the e2emock backend', () => {
 		// (movie_id). Each must resolve without 500 even when the filtered
 		// set is empty. A regression in any filter branch (e.g., a nil repo
 		// method, a bad query) would 500 here.
-		for (const params of [
+		const filterCases: Record<string, string>[] = [
 			{ operation: 'scrape' },
 			{ operation: 'organize' },
 			{ status: 'success' },
 			{ status: 'failed' },
 			{ status: 'reverted' },
 			{ movie_id: 'NONEXISTENT-999' },
-		]) {
+		];
+		for (const params of filterCases) {
 			const body = await getHistory(request, params);
 			expect(body.records, `${JSON.stringify(params)}: records must be an array`).toEqual([]);
 			expect(body.total, `${JSON.stringify(params)}: total must be 0`).toBe(0);

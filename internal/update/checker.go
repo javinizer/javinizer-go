@@ -116,10 +116,22 @@ func (c *githubChecker) SetSkipLatest(skip bool) { c.skipLatest = skip }
 // prereleases) is returned, instead of /releases/latest (stable only).
 func (c *githubChecker) SetPreRelease(enable bool) { c.preRelease = enable }
 
-// newGitHubChecker creates a new GitHub checker.
-// The repo should be in format "owner/repo" (e.g., "javinizer/javinizer-go").
-// Production callers should pass defaultRepo; the parameter is kept for tests
-// that point at a stub server with an arbitrary path segment.
+// NewChecker returns a Checker that consults the GitHub releases API for the
+// given owner/repo (e.g., "javinizer/javinizer-go"). It is exported so callers
+// outside internal/update (e.g. the desktop bundle updater) can build a real
+// checker without duplicating the GitHub client logic. Production callers
+// should pass defaultRepo; the parameter is kept for tests that point at a
+// stub server with an arbitrary path segment.
+func NewChecker(repo string) Checker {
+	return newGitHubChecker(repo)
+}
+
+// NewCheckerWithBaseURL is like NewChecker but overrides the GitHub API base
+// URL (for tests pointing at an httptest server).
+func NewCheckerWithBaseURL(repo, baseURL string) Checker {
+	return newGitHubCheckerWithBaseURL(repo, baseURL)
+}
+
 func newGitHubChecker(repo string) *githubChecker {
 	return &githubChecker{
 		repo:       repo,

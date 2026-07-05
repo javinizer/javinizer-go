@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraper/e2emock"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/system"
+	"github.com/javinizer/javinizer-go/internal/updater"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -47,6 +48,11 @@ type CoreDepsReader interface {
 	// so handlers can surface environment-specific upgrade guidance. Set once
 	// at bootstrap via SetInstallEnvironment; defaults to CLI.
 	InstallEnvironment() system.Environment
+	// BundleUpdater returns the desktop bundle self-upgrade engine, or nil on
+	// non-desktop builds. Set once at bootstrap (internal/desktop StartServer)
+	// via SetBundleUpdater; nil on CLI/docker builds, so the desktop upgrade
+	// API handler returns 404.
+	BundleUpdater() updater.BundleUpdater
 }
 
 // CoreDeps contains shared dependencies that both CLI and API commands need.
@@ -68,6 +74,12 @@ type CoreDeps struct {
 	// desktop.IsDesktopBuild() is reachable without the import cycle the API
 	// layer would hit. Defaults to CLI until set.
 	installEnvironment system.Environment
+
+	// bundleUpdater drives the desktop bundle self-upgrade (download + swap +
+	// relaunch). Set once at bootstrap on desktop builds via SetBundleUpdater;
+	// nil on CLI/docker builds. Guarded by mu so the API handler can read it
+	// concurrently.
+	bundleUpdater updater.BundleUpdater
 
 	// config is the single source of truth for the application config.
 	// Both CLI (set once at construction) and API (hot-reloaded via
@@ -256,6 +268,24 @@ func (d *CoreDeps) SetInstallEnvironment(env system.Environment) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.installEnvironment = env
+}
+
+// BundleUpdater returns the desktop bundle self-upgrade engine, or nil on
+// non-desktop builds (CLI/docker). The desktop upgrade API handler checks this
+// to return 404 when self-upgrade is unavailable.
+func (d *CoreDeps) BundleUpdater() updater.BundleUpdater {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.bundleUpdater
+}
+
+// SetBundleUpdater records the desktop bundle self-upgrade engine. Called once
+// at bootstrap on desktop builds (internal/desktop StartServer, which can import
+// internal/updater without the cycle the API layer would hit). Nil on CLI/docker.
+func (d *CoreDeps) SetBundleUpdater(u updater.BundleUpdater) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.bundleUpdater = u
 }
 
 // SetConfig atomically sets the configuration (thread-safe).

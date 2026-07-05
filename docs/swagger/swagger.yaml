@@ -2531,6 +2531,33 @@ definitions:
       username:
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_updater.State:
+    enum:
+    - idle
+    - downloading
+    - verifying
+    - staging
+    - swapping
+    - relaunching
+    - failed
+    type: string
+    x-enum-varnames:
+    - StateIdle
+    - StateDownloading
+    - StateVerifying
+    - StateStaging
+    - StateSwapping
+    - StateRelaunching
+    - StateFailed
+  github_com_javinizer_javinizer-go_internal_updater.Status:
+    properties:
+      error:
+        type: string
+      state:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_updater.State'
+      version:
+        type: string
+    type: object
   internal_api_actress.actressRequest:
     properties:
       aliases:
@@ -2600,6 +2627,18 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  internal_api_desktop.upgradeRequest:
+    properties:
+      force:
+        type: boolean
+    type: object
+  internal_api_desktop.upgradeResponse:
+    properties:
+      status:
+        type: string
+      version:
+        type: string
     type: object
   internal_api_events.deleteEventsResponse:
     properties:
@@ -4002,6 +4041,66 @@ paths:
       summary: Update configuration
       tags:
       - system
+  /api/v1/desktop/upgrade:
+    post:
+      consumes:
+      - application/json
+      description: Download, verify, and stage the latest desktop bundle, then relaunch
+        the app. Desktop builds only.
+      parameters:
+      - description: Upgrade options (force re-download even when up to date)
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_api_desktop.upgradeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_desktop.upgradeResponse'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Upgrade the desktop bundle
+      tags:
+      - desktop
+  /api/v1/desktop/upgrade/status:
+    get:
+      description: Return the current desktop bundle upgrade state (idle/downloading/verifying/staging/swapping/relaunching/failed).
+        Desktop builds only.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_updater.Status'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get desktop upgrade status
+      tags:
+      - desktop
   /api/v1/events:
     delete:
       description: Delete events older than a specified number of days

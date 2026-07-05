@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import UpdateIndicator from './UpdateIndicator.svelte';
 import QueryClientWrapper from './QueryClientWrapper.svelte';
 import type { VersionStatusResponse } from '$lib/api/types';
+import { toastStore } from '$lib/stores/toast';
 
 // The component drives its state through createVersionStatusQuery() →
 // apiClient.getVersionStatus() and a createMutation() → apiClient.checkVersion().
@@ -12,12 +13,14 @@ vi.mock('$lib/api/client', () => ({
 	apiClient: {
 		getVersionStatus: vi.fn(),
 		checkVersion: vi.fn(),
+		upgradeDesktop: vi.fn(),
 	},
 }));
 
 const mod = await import('$lib/api/client');
 const mockGetVersionStatus = vi.mocked(mod.apiClient.getVersionStatus);
 const mockCheckVersion = vi.mocked(mod.apiClient.checkVersion);
+const mockUpgradeDesktop = vi.mocked(mod.apiClient.upgradeDesktop);
 
 // jsdom lacks the Web Animations API; Svelte's `transition:fly` (popover intro)
 // calls element.animate(). Stub it so the open path runs under vitest.
@@ -77,6 +80,10 @@ function renderWithClient(status: VersionStatusResponse | null) {
 
 beforeEach(() => {
 	vi.clearAllMocks();
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
 });
 
 describe('UpdateIndicator', () => {
@@ -213,5 +220,89 @@ describe('UpdateIndicator', () => {
 			expect(link?.getAttribute('target')).toBe('_blank');
 			expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
 		});
+	});
+
+	it('shows an "Update & restart" button for desktop installs (instead of View release)', async () => {
+		const { container } = renderWithClient(
+			makeStatus({ install_environment: 'desktop', prerelease: false, latest: 'v1.2.0' }),
+		);
+		let button: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			button = container.querySelector('button[aria-label="Update available"]');
+			expect(button).toBeTruthy();
+		});
+		await fireEvent.click(button!);
+
+		await waitFor(() => {
+			// Desktop replaces the releases-link CTA with an in-app upgrade button.
+			const upgradeBtn = container.querySelector('button[aria-label="Update and restart"]');
+			expect(upgradeBtn).toBeTruthy();
+			expect(container.textContent).toContain('Update & restart');
+			expect(container.querySelector('a[href*="releases"]')).toBeNull();
+		});
+	});
+
+	it('calls upgradeDesktop and enters a Restarting… state on click', async () => {
+		mockUpgradeDesktop.mockResolvedValue({ status: 'relaunching', version: 'v1.2.0' });
+		const { container } = renderWithClient(
+			makeStatus({ install_environment: 'desktop', prerelease: false, latest: 'v1.2.0' }),
+		);
+		let button: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			button = container.querySelector('button[aria-label="Update available"]');
+			expect(button).toBeTruthy();
+		});
+		await fireEvent.click(button!);
+
+		let upgradeBtn: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			upgradeBtn = container.querySelector('button[aria-label="Update and restart"]');
+			expect(upgradeBtn).toBeTruthy();
+		});
+		await fireEvent.click(upgradeBtn!);
+
+		await waitFor(() => {
+			expect(mockUpgradeDesktop).toHaveBeenCalledWith({ force: false });
+			// Spinner state: label flips to "Restarting…" and the button is disabled.
+			expect(container.textContent).toContain('Restarting');
+			expect(upgradeBtn!.hasAttribute('disabled')).toBe(true);
+		});
+		// On 200 the relaunch takes over — the spinner state is held, no revert.
+		expect(mockUpgradeDesktop).toHaveBeenCalledTimes(1);
+		expect(container.textContent).toContain('Restarting');
+	});
+
+	it('toasts the error and reverts to the button when the upgrade fails', async () => {
+		mockUpgradeDesktop.mockRejectedValue(new Error('a bundle upgrade is already in progress'));
+		const errorSpy = vi.spyOn(toastStore, 'error');
+		const { container } = renderWithClient(
+			makeStatus({ install_environment: 'desktop', prerelease: false, latest: 'v1.2.0' }),
+		);
+		let button: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			button = container.querySelector('button[aria-label="Update available"]');
+			expect(button).toBeTruthy();
+		});
+		await fireEvent.click(button!);
+
+		let upgradeBtn: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			upgradeBtn = container.querySelector('button[aria-label="Update and restart"]');
+			expect(upgradeBtn).toBeTruthy();
+		});
+		await fireEvent.click(upgradeBtn!);
+
+		await waitFor(() => {
+			expect(mockUpgradeDesktop).toHaveBeenCalledWith({ force: false });
+			expect(errorSpy).toHaveBeenCalled();
+		});
+		// Reverted: label is back to "Update & restart" and the button is re-enabled.
+		await waitFor(() => {
+			expect(container.textContent).toContain('Update & restart');
+			expect(upgradeBtn!.hasAttribute('disabled')).toBe(false);
+		});
+		expect(errorSpy).toHaveBeenCalledWith(
+			expect.stringContaining('a bundle upgrade is already in progress'),
+		);
 	});
 });

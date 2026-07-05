@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/actress"
@@ -63,6 +64,26 @@ func initDesktopDefault() {
 	}
 }
 
+// cleanupStaleWindowsOldExe removes a leftover <exe>.old from a prior
+// interrupted desktop self-upgrade. Windows can't overwrite a running exe, so
+// the upgrade renames it to .old and the detached helper deletes it after the
+// swap; if the helper was killed before cleanup, the .old survives and is
+// cleared here on the next launch. No-op on non-Windows.
+func cleanupStaleWindowsOldExe() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		_ = os.Remove(resolved + ".old")
+	} else {
+		_ = os.Remove(exe + ".old")
+	}
+}
+
 func init() {
 	// Customize version template
 	rootCmd.SetVersionTemplate(version.Info() + "\n")
@@ -78,6 +99,7 @@ func init() {
 	// config init so ApplyEnvironmentOverrides picks the portable paths up.
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		if desktop.IsDesktopBuild() {
+			cleanupStaleWindowsOldExe()
 			// Only set up the portable env when the user did not pass a custom
 			// --config. With a custom config, the user owns their data layout;
 			// injecting JAVINIZER_DB/LOG_DIR here would have ApplyEnvironmentOverrides

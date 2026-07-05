@@ -1673,6 +1673,95 @@
                 }
             }
         },
+        "/api/v1/desktop/upgrade": {
+            "post": {
+                "description": "Download, verify, and stage the latest desktop bundle, then relaunch the app. Desktop builds only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "desktop"
+                ],
+                "summary": "Upgrade the desktop bundle",
+                "parameters": [
+                    {
+                        "description": "Upgrade options (force re-download even when up to date)",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_desktop.upgradeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_desktop.upgradeResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/desktop/upgrade/status": {
+            "get": {
+                "description": "Return the current desktop bundle upgrade state (idle/downloading/verifying/staging/swapping/relaunching/failed). Desktop builds only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "desktop"
+                ],
+                "summary": "Get desktop upgrade status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_updater.Status"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/events": {
             "get": {
                 "description": "Get a paginated list of structured events with composable type, severity, source, and date range filters",
@@ -6894,6 +6983,41 @@
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_updater.State": {
+            "type": "string",
+            "enum": [
+                "idle",
+                "downloading",
+                "verifying",
+                "staging",
+                "swapping",
+                "relaunching",
+                "failed"
+            ],
+            "x-enum-varnames": [
+                "StateIdle",
+                "StateDownloading",
+                "StateVerifying",
+                "StateStaging",
+                "StateSwapping",
+                "StateRelaunching",
+                "StateFailed"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_updater.Status": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_updater.State"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_actress.actressRequest": {
             "type": "object",
             "properties": {
@@ -6992,6 +7116,25 @@
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "internal_api_desktop.upgradeRequest": {
+            "type": "object",
+            "properties": {
+                "force": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_api_desktop.upgradeResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },

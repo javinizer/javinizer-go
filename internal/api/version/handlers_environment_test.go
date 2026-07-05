@@ -32,10 +32,10 @@ func TestVersionStatus_InstallEnvironment(t *testing.T) {
 			wantInstrSub: "docker pull",
 		},
 		{
-			name:         "desktop surfaces releases link",
+			name:         "desktop surfaces in-app update button",
 			env:          system.EnvironmentDesktop,
 			wantEnv:      "desktop",
-			wantInstrSub: "releases",
+			wantInstrSub: "Update & restart",
 		},
 		{
 			name:         "cli surfaces javinizer upgrade",

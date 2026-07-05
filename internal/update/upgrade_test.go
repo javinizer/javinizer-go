@@ -246,7 +246,7 @@ func TestUpgrade_DockerUpToDateNoHandoff(t *testing.T) {
 }
 
 // newAssetServer serves a release asset plus its checksums.txt from a fake
-// release download tree over TLS. downloadTo enforces HTTPS, so test servers
+// release download tree over TLS. DownloadTo enforces HTTPS, so test servers
 // must be TLS; server.Client() returns a client that trusts the test cert.
 func newAssetServer(t *testing.T, assetBytes []byte, checksums string) *httptest.Server {
 	t.Helper()
@@ -562,7 +562,7 @@ func TestUpgrade_PreRelease_AllowsPrereleaseUpgrade(t *testing.T) {
 }
 
 func TestDownloadTo_RefusesNonHTTPS(t *testing.T) {
-	// downloadTo must refuse a plain-HTTP URL outright: a checksum fetched over
+	// DownloadTo must refuse a plain-HTTP URL outright: a checksum fetched over
 	// the same insecure channel as the binary authenticates nothing.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("data"))
@@ -570,7 +570,7 @@ func TestDownloadTo_RefusesNonHTTPS(t *testing.T) {
 	defer server.Close()
 
 	var buf bytes.Buffer
-	err := downloadTo(context.Background(), server.Client(), server.URL+"/asset", &buf, 1024)
+	err := DownloadTo(context.Background(), server.Client(), server.URL+"/asset", &buf, 1024)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "non-HTTPS")
 	assert.Empty(t, buf.Bytes())
@@ -590,7 +590,7 @@ func TestDownloadTo_RefusesHTTPRedirect(t *testing.T) {
 	defer server.Close()
 
 	var buf bytes.Buffer
-	err := downloadTo(context.Background(), server.Client(), server.URL+"/asset", &buf, 1024)
+	err := DownloadTo(context.Background(), server.Client(), server.URL+"/asset", &buf, 1024)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "non-HTTPS redirect")
 	assert.Empty(t, buf.Bytes())
@@ -605,7 +605,7 @@ func TestDownloadTo_ErrorsWhenExceedingSizeCap(t *testing.T) {
 	defer server.Close()
 
 	var buf bytes.Buffer
-	err := downloadTo(context.Background(), server.Client(), server.URL, &buf, 50)
+	err := DownloadTo(context.Background(), server.Client(), server.URL, &buf, 50)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exceeds maximum size")
 }
@@ -618,7 +618,7 @@ func TestDownloadTo_HTTPStatusError(t *testing.T) {
 	defer server.Close()
 
 	var buf bytes.Buffer
-	err := downloadTo(context.Background(), server.Client(), server.URL, &buf, 1024)
+	err := DownloadTo(context.Background(), server.Client(), server.URL, &buf, 1024)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 500")
 }
@@ -630,7 +630,7 @@ func TestDownloadTo_RequestError(t *testing.T) {
 	server.Close()
 
 	var buf bytes.Buffer
-	err := downloadTo(context.Background(), server.Client(), server.URL, &buf, 1024)
+	err := DownloadTo(context.Background(), server.Client(), server.URL, &buf, 1024)
 	require.Error(t, err)
 }
 
@@ -653,13 +653,13 @@ func TestDownloadTo_ChainsBaseCheckRedirect(t *testing.T) {
 		return nil
 	}
 	var buf bytes.Buffer
-	require.NoError(t, downloadTo(context.Background(), c, server.URL+"/asset", &buf, 1024))
+	require.NoError(t, DownloadTo(context.Background(), c, server.URL+"/asset", &buf, 1024))
 	assert.True(t, called, "base CheckRedirect must be chained after the HTTPS check")
 	assert.Equal(t, "ok", buf.String())
 }
 
 func TestDownloadTo_StopsAfterTenRedirects(t *testing.T) {
-	// An HTTPS redirect loop must be bounded; downloadTo refuses to follow past
+	// An HTTPS redirect loop must be bounded; DownloadTo refuses to follow past
 	// 10 redirects rather than looping forever.
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, r.URL.Path, http.StatusFound)
@@ -667,7 +667,7 @@ func TestDownloadTo_StopsAfterTenRedirects(t *testing.T) {
 	defer server.Close()
 
 	var buf bytes.Buffer
-	err := downloadTo(context.Background(), server.Client(), server.URL+"/loop", &buf, 1024)
+	err := DownloadTo(context.Background(), server.Client(), server.URL+"/loop", &buf, 1024)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stopped after 10 redirects")
 }
@@ -697,7 +697,7 @@ func TestResolveExePath_UsesOsExecutableWhenEmpty(t *testing.T) {
 }
 
 func TestVerifyFileSHA256_OpenError(t *testing.T) {
-	err := verifyFileSHA256(filepath.Join(t.TempDir(), "missing"), "abc")
+	err := VerifyFileSHA256(filepath.Join(t.TempDir(), "missing"), "abc")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "open downloaded asset")
 }

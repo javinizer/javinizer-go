@@ -132,6 +132,11 @@ func (s *ServerInstance) BaseURL() string { return s.baseURL }
 // Done is closed when the server has stopped.
 func (s *ServerInstance) Done() <-chan struct{} { return s.done }
 
+// Deps returns the API dependencies so the desktop bootstrap can wire
+// build-specific services (e.g. the bundle updater) into CoreDeps. Returns
+// nil after Shutdown has released them.
+func (s *ServerInstance) Deps() *apicore.APIDeps { return s.deps }
+
 // Shutdown gracefully stops the HTTP server, drains in-flight requests, and
 // releases API runtime + database resources. Safe to call multiple times;
 // the first call performs the work and subsequent calls are no-ops returning

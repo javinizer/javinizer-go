@@ -27,6 +27,11 @@
 
 	let popoverOpen = $state(false);
 
+	// Desktop self-upgrade state. While true the popover shows a "Restarting…"
+	// spinner and all interaction is disabled; the old window closes and a new
+	// one opens (redirector self-heals the webview), so we just hold this state.
+	let upgrading = $state(false);
+
 	// Force a fresh check (POST /api/v1/version/check hits GitHub with the
 	// server-side rate limit/cache). Invalidates the status query on success so
 	// the indicator updates immediately.
@@ -54,6 +59,7 @@
 	}));
 
 	function togglePopover() {
+		if (upgrading) return;
 		popoverOpen = !popoverOpen;
 	}
 
@@ -62,6 +68,7 @@
 	}
 
 	function handleClickOutside(event: MouseEvent) {
+		if (upgrading) return;
 		const target = event.target as HTMLElement;
 		if (!target.closest('[data-update-indicator]')) {
 			closePopover();
@@ -71,6 +78,26 @@
 	function handleCheckNow(event: MouseEvent) {
 		event.stopPropagation();
 		checkMutation.mutate();
+	}
+
+	async function handleUpgrade(event: MouseEvent) {
+		event.stopPropagation();
+		if (upgrading) return;
+		upgrading = true;
+		try {
+			const response = await apiClient.upgradeDesktop({ force: false });
+			if (response.status === 'up-to-date') {
+				upgrading = false;
+				toastStore.info('Already up to date');
+				return;
+			}
+			// On 200 'relaunching' the relaunch is already underway: hold the
+			// "Restarting…" state while the old window closes and the new one opens.
+		} catch (error) {
+			upgrading = false;
+			const message = error instanceof Error ? error.message : 'Desktop upgrade failed';
+			toastStore.error(`Update failed: ${message}`);
+		}
 	}
 
 	const checking = $derived(checkMutation.isPending);
@@ -94,7 +121,7 @@
 	});
 </script>
 
-<svelte:window onclick={handleClickOutside} onkeydown={(e) => { if (e.key === 'Escape' && popoverOpen) popoverOpen = false; }} />
+<svelte:window onclick={handleClickOutside} onkeydown={(e) => { if (e.key === 'Escape' && popoverOpen && !upgrading) popoverOpen = false; }} />
 
 {#if showIndicator}
 	<div class="relative" data-update-indicator>
@@ -171,20 +198,33 @@
 				{/if}
 
 				<div class="mt-3 flex items-center gap-2">
-					<a
-						href={releaseUrl}
-						target="_blank"
-						rel="noopener noreferrer"
-						onclick={closePopover}
-						class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all duration-150 bg-primary text-primary-foreground hover:opacity-90 hover:translate-x-0.5"
-					>
-						<ExternalLink class="h-3.5 w-3.5" />
-						View release
-					</a>
+					{#if status?.install_environment === 'desktop'}
+						<button
+							type="button"
+							onclick={handleUpgrade}
+							disabled={upgrading || checking}
+							aria-label="Update and restart"
+							class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all duration-150 bg-primary text-primary-foreground hover:opacity-90 hover:translate-x-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0"
+						>
+							<RefreshCw class="h-3.5 w-3.5 {upgrading ? 'animate-spin' : ''}" />
+							{upgrading ? 'Restarting…' : 'Update & restart'}
+						</button>
+					{:else}
+						<a
+							href={releaseUrl}
+							target="_blank"
+							rel="noopener noreferrer"
+							onclick={closePopover}
+							class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all duration-150 bg-primary text-primary-foreground hover:opacity-90 hover:translate-x-0.5"
+						>
+							<ExternalLink class="h-3.5 w-3.5" />
+							View release
+						</a>
+					{/if}
 					<button
 						type="button"
 						onclick={handleCheckNow}
-						disabled={checking}
+						disabled={checking || upgrading}
 						class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all duration-150 hover:bg-accent hover:translate-x-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0"
 					>
 						<RefreshCw class="h-3.5 w-3.5 {checking ? 'animate-spin' : ''}" />
