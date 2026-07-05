@@ -11,6 +11,28 @@ import (
 	"syscall"
 )
 
+// osExecutable is a package-level seam over os.Executable so tests can inject
+// a failing or synthetic executable path without monkeypatching the stdlib.
+var osExecutable = os.Executable
+
+// evalSymlinks is a package-level seam over filepath.EvalSymlinks so tests can
+// inject a failure to cover the resolveAppImageTarget error branch.
+var evalSymlinks = filepath.EvalSymlinks
+
+// osCreateTemp is a package-level seam over os.CreateTemp so tests can inject
+// a non-permission error to cover CanSwap's CreateTemp error branch.
+var osCreateTemp = os.CreateTemp
+
+// newSwapHelperCmd builds the detached sh helper command for
+// SwapAndRelaunch. It is a package-level seam so tests can inject a failing
+// exec (e.g. a nonexistent interpreter) to cover the cmd.Start error branch
+// without spawning a real helper that outlives the test.
+var newSwapHelperCmd = func(ctx context.Context, script string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "sh", "-c", script) //nolint:gosec // script is generated from shellQuote-escaped paths derived from os.Executable/APPIMAGE, not user input
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return cmd
+}
+
 // linuxSwapper implements Swapper for a type-2 AppImage desktop build. The
 // AppImage runtime exports APPIMAGE (the real bundle path) in both FUSE and
 // extract-and-run modes; that env var is the canonical swap target because
@@ -27,7 +49,7 @@ func NewLinuxSwapper() Swapper {
 // otherwise the symlink-resolved running executable (dev/test direct-binary
 // runs). It validates the result exists and is executable.
 func (s *linuxSwapper) Target() (string, error) {
-	exePath, err := os.Executable()
+	exePath, err := osExecutable()
 	if err != nil {
 		return "", fmt.Errorf("resolve AppImage target: locate executable: %w", err)
 	}
@@ -51,7 +73,7 @@ func (s *linuxSwapper) CanSwap() error {
 		return err
 	}
 	dir := filepath.Dir(target)
-	probe, err := os.CreateTemp(dir, ".javinizer-probe-*.tmp")
+	probe, err := osCreateTemp(dir, ".javinizer-probe-*.tmp")
 	if err != nil {
 		if os.IsPermission(err) {
 			return fmt.Errorf("no write permission to %s: move the AppImage to a user-writable dir (~/Applications, ~/.local/bin, or ~/Downloads), or re-run via pkexec for a system path such as /opt", dir)
@@ -81,15 +103,14 @@ func (s *linuxSwapper) Stage(ctx context.Context, downloadedPath, assetName stri
 // and (5) relaunches it via nohup. It returns immediately after spawning; the
 // helper runs independently in its own session and outlives this process.
 //
-// The success path (cmd.Start + cmd.Process.Release, lines ~97-107) is
-// intentionally NOT covered by tests: exercising it requires actually
-// spawning `sh -c` with a script that performs `mv -f staged target` and a
-// nohup relaunch, which mutates the AppImage on disk and leaves a detached
-// process running — unsafe in CI. The ctx.Err() guard (line ~88) is covered
-// by TestLinuxSwapper_SwapAndRelaunch_CancelledContext. A Target() failure
-// between the guard and the spawn is not reachable in CI: os.Executable()
-// resolves to the test binary, and the APPIMAGE fallback in resolveAppImageTarget
-// always succeeds when the running executable exists.
+// The ctx.Err() guard is covered by
+// TestLinuxSwapper_SwapAndRelaunch_CancelledContext. The success spawn path
+// (cmd.Start + cmd.Process.Release) is covered by
+// TestLinuxSwapper_SwapAndRelaunch_SpawnSuccess, which uses a dead oldPID,
+// a nonexistent staged path, and a throwaway target so the helper cannot
+// mutate anything outside a temp dir. The cmd.Start error branch is covered
+// by TestLinuxSwapper_SwapAndRelaunch_StartError via the newSwapHelperCmd
+// seam pointing at a nonexistent interpreter.
 //
 // exec.CommandContext (with context.Background, not the request ctx) is
 // intentional: the helper must survive the request context being cancelled
@@ -104,8 +125,7 @@ func (s *linuxSwapper) SwapAndRelaunch(ctx context.Context, stagedPath string, o
 	}
 	_, preserveExtract := os.LookupEnv("APPIMAGE_EXTRACT_AND_RUN")
 
-	cmd := exec.CommandContext(context.Background(), "sh", "-c", renderLinuxHelperScript(oldPID, target, stagedPath, preserveExtract)) //nolint:gosec // script is generated from shellQuote-escaped paths derived from os.Executable/APPIMAGE, not user input
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd := newSwapHelperCmd(context.Background(), renderLinuxHelperScript(oldPID, target, stagedPath, preserveExtract))
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil

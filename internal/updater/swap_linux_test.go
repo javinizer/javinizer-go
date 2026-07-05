@@ -4,9 +4,12 @@ package updater
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -229,5 +232,188 @@ func TestLinuxSwapper_SwapAndRelaunch_SpawnSuccess(t *testing.T) {
 	}
 	if info.Mode().Perm()&0o111 == 0 {
 		t.Errorf("target lost executable bit; perm=%o", info.Mode().Perm())
+	}
+}
+
+// TestLinuxSwapper_Target_ExecutableError covers the osExecutable() error
+// branch of Target (the seam injects a failure, avoiding any real
+// os.Executable behavior). Mirrors darwin's withExecutableFuncErr helper.
+func TestLinuxSwapper_Target_ExecutableError(t *testing.T) {
+	orig := osExecutable
+	osExecutable = func() (string, error) {
+		return "", errors.New("osExecutable seam failed")
+	}
+	t.Cleanup(func() { osExecutable = orig })
+
+	s := &linuxSwapper{}
+	if _, err := s.Target(); err == nil {
+		t.Fatal("expected Target to fail when osExecutable errors")
+	}
+}
+
+// TestLinuxSwapper_Target_ResolveSymlinkError covers the resolveAppImageTarget
+// error branch of Target by injecting an evalSymlinks seam that always fails.
+// APPIMAGE is unset so the fallback path runs and the seam error surfaces.
+func TestLinuxSwapper_Target_ResolveSymlinkError(t *testing.T) {
+	t.Setenv("APPIMAGE", "")
+	orig := evalSymlinks
+	evalSymlinks = func(string) (string, error) {
+		return "", errors.New("evalSymlinks seam failed")
+	}
+	t.Cleanup(func() { evalSymlinks = orig })
+
+	s := &linuxSwapper{}
+	if _, err := s.Target(); err == nil {
+		t.Fatal("expected Target to fail when evalSymlinks errors")
+	}
+}
+
+// TestLinuxSwapper_Target_NotExecutableAfterFallback covers the
+// "target not executable" branch of Target after the APPIMAGE fallback
+// resolves to a non-executable file. evalSymlinks is injected to return a
+// non-executable file we control, so the final fileExistsAndExecutable check
+// fails without relying on the test binary's real path.
+func TestLinuxSwapper_Target_NotExecutableAfterFallback(t *testing.T) {
+	t.Setenv("APPIMAGE", "")
+	dir := t.TempDir()
+	nonExec := filepath.Join(dir, "not-executable")
+	if err := os.WriteFile(nonExec, []byte("no exec bit"), 0o600); err != nil {
+		t.Fatalf("write non-exec file: %v", err)
+	}
+	orig := evalSymlinks
+	evalSymlinks = func(string) (string, error) { return nonExec, nil }
+	t.Cleanup(func() { evalSymlinks = orig })
+
+	s := &linuxSwapper{}
+	if _, err := s.Target(); err == nil {
+		t.Fatal("expected Target to fail when fallback target is not executable")
+	}
+}
+
+// TestLinuxSwapper_CanSwap_TargetError covers the CanSwap early-return branch
+// that propagates a Target() failure (osExecutable err) before the probe runs.
+func TestLinuxSwapper_CanSwap_TargetError(t *testing.T) {
+	orig := osExecutable
+	osExecutable = func() (string, error) {
+		return "", errors.New("osExecutable seam failed")
+	}
+	t.Cleanup(func() { osExecutable = orig })
+
+	s := &linuxSwapper{}
+	if err := s.CanSwap(); err == nil {
+		t.Fatal("expected CanSwap to fail when Target fails")
+	}
+}
+
+// TestLinuxSwapper_CanSwap_CreateTempNonPermissionError covers the CanSwap
+// CreateTemp error branch that is NOT a permission error (the generic
+// "write-test AppImage dir" wrap). The osCreateTemp seam injects a non-
+// permission error so the permission-hint branch is skipped.
+func TestLinuxSwapper_CanSwap_CreateTempNonPermissionError(t *testing.T) {
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "Javinizer.AppImage")
+	if err := os.WriteFile(bundle, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	t.Setenv("APPIMAGE", bundle)
+
+	orig := osCreateTemp
+	osCreateTemp = func(string, string) (*os.File, error) {
+		return nil, errors.New("CreateTemp seam failed: ENOSPC")
+	}
+	t.Cleanup(func() { osCreateTemp = orig })
+
+	s := &linuxSwapper{}
+	err := s.CanSwap()
+	if err == nil {
+		t.Fatal("expected CanSwap to fail when CreateTemp errors")
+	}
+	// Must NOT include the permission-hint wording (that's the other branch).
+	if strings.Contains(err.Error(), "no write permission") {
+		t.Fatalf("CreateTemp non-permission error must not surface the permission hint: %v", err)
+	}
+}
+
+// TestLinuxSwapper_CanSwap_CreateTempPermissionError covers the CanSwap
+// permission branch (os.IsPermission) by injecting an osCreateTemp seam that
+// returns syscall.EACCES, the exact errno a real read-only dir would yield.
+// This exercises the permission-hint return path deterministically, even
+// under root (CI containers) where real file permission checks are bypassed
+// by CAP_DAC_OVERRIDE. The companion TestLinuxSwapper_CanSwap_ReadOnlyDir
+// proves the branch against a real read-only filesystem as a non-root user
+// (verifiable via `docker run -u 1000:1000 ...`).
+func TestLinuxSwapper_CanSwap_CreateTempPermissionError(t *testing.T) {
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "Javinizer.AppImage")
+	if err := os.WriteFile(bundle, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	t.Setenv("APPIMAGE", bundle)
+
+	orig := osCreateTemp
+	osCreateTemp = func(string, string) (*os.File, error) {
+		return nil, syscall.EACCES
+	}
+	t.Cleanup(func() { osCreateTemp = orig })
+
+	s := &linuxSwapper{}
+	err := s.CanSwap()
+	if err == nil {
+		t.Fatal("expected CanSwap to fail with a permission error")
+	}
+	if !strings.Contains(err.Error(), "no write permission") {
+		t.Fatalf("expected permission hint in error, got: %v", err)
+	}
+}
+
+// TestLinuxSwapper_Stage_ChmodError covers the os.Chmod error branch of Stage
+// by pointing at a nonexistent downloaded path so Chmod fails with ENOENT.
+func TestLinuxSwapper_Stage_ChmodError(t *testing.T) {
+	s := &linuxSwapper{}
+	missing := filepath.Join(t.TempDir(), "no-such-staged-AppImage")
+	if _, err := s.Stage(context.Background(), missing, "x.AppImage"); err == nil {
+		t.Fatal("expected Stage to fail when Chmod errors on a missing file")
+	}
+}
+
+// TestLinuxSwapper_SwapAndRelaunch_TargetError covers the Target() failure
+// branch of SwapAndRelaunch that runs after the ctx.Err() guard. The
+// osExecutable seam injects a failure so Target errors before the helper is
+// spawned (no real process is started).
+func TestLinuxSwapper_SwapAndRelaunch_TargetError(t *testing.T) {
+	orig := osExecutable
+	osExecutable = func() (string, error) {
+		return "", errors.New("osExecutable seam failed")
+	}
+	t.Cleanup(func() { osExecutable = orig })
+
+	s := &linuxSwapper{}
+	if err := s.SwapAndRelaunch(context.Background(), "/tmp/staged", 1); err == nil {
+		t.Fatal("expected SwapAndRelaunch to fail when Target errors")
+	}
+}
+
+// TestLinuxSwapper_SwapAndRelaunch_StartError covers the cmd.Start failure
+// branch by injecting a newSwapHelperCmd seam that returns a command pointing
+// at a nonexistent interpreter, so Start fails with ENOENT. Mirrors the
+// darwin StartError test. No real helper is spawned.
+func TestLinuxSwapper_SwapAndRelaunch_StartError(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "Javinizer.AppImage")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	t.Setenv("APPIMAGE", target)
+
+	orig := newSwapHelperCmd
+	newSwapHelperCmd = func(ctx context.Context, script string) *exec.Cmd {
+		// Nonexistent interpreter path -> Start fails with ENOENT.
+		return exec.CommandContext(ctx, "/this/interpreter/does/not/exist", "-c", script)
+	}
+	t.Cleanup(func() { newSwapHelperCmd = orig })
+
+	s := &linuxSwapper{}
+	if err := s.SwapAndRelaunch(context.Background(), "/tmp/staged", 1); err == nil {
+		t.Fatal("expected cmd.Start error to be returned")
 	}
 }

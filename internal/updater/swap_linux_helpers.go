@@ -5,7 +5,6 @@ package updater
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -41,7 +40,7 @@ func resolveAppImageTarget(envAppImage, exePath string) (string, error) {
 	if envAppImage != "" && fileExistsAndExecutable(envAppImage) {
 		return envAppImage, nil
 	}
-	resolved, err := filepath.EvalSymlinks(exePath)
+	resolved, err := evalSymlinks(exePath)
 	if err != nil {
 		return "", fmt.Errorf("resolve AppImage target: APPIMAGE=%q not usable and executable path %q did not resolve: %w", envAppImage, exePath, err)
 	}
