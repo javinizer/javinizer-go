@@ -200,6 +200,13 @@ func TestUpgrade_Handler(t *testing.T) {
 	}
 }
 
+func TestUpgrade_InvalidBodyReturns400(t *testing.T) {
+	deps := newDesktopDeps(&stubUpdater{status: updater.Status{State: updater.StateIdle}})
+	rec := performUpgradeRequest(t, deps, "{not valid json")
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid request body")
+}
+
 func extractStub(deps commandutil.CoreDepsReader) (*stubUpdater, bool) {
 	sd, ok := deps.(*stubDeps)
 	if !ok {

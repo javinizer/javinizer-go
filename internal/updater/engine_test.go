@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -548,5 +549,32 @@ func TestEngine_NewEngineDefaultsChecker(t *testing.T) {
 	e := NewEngine(sw, "v1.0.0")
 	if e.checker == nil {
 		t.Fatal("NewEngine should default a checker when none is injected")
+	}
+}
+
+func TestEngine_CreateTargetDirFailure(t *testing.T) {
+	// Point the swapper at a path whose parent cannot be created: nest the
+	// target under a read-only dir so MkdirAll fails with permission denied.
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permission checks")
+	}
+	readOnly := t.TempDir()
+	if err := os.Chmod(readOnly, 0o500); err != nil {
+		t.Fatalf("chmod read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readOnly, 0o755) })
+
+	target := filepath.Join(readOnly, "nested", "fake-bundle")
+	sw := &mockSwapper{target: target}
+	asset := []byte("bytes")
+	e, srv := newTestEngine(t, sw, "v1.0.0", "v9.9.9", asset, "")
+	defer srv.Close()
+
+	_, err := e.Upgrade(context.Background(), UpgradeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "create target dir") {
+		t.Fatalf("err = %v, want create target dir", err)
+	}
+	if got := e.Status().State; got != StateFailed {
+		t.Fatalf("Status = %q, want %q", got, StateFailed)
 	}
 }
