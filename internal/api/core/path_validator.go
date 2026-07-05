@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/api/apperrors"
@@ -363,8 +364,12 @@ func (v *PathValidator) IsUNCAllowed(dir string) bool {
 // error. Because a mount point is an admin-created filesystem mount (not a
 // user-controllable symlink), the cleaned absolute path is a safe canonical form,
 // so canonicalizePath falls back to filepath.Clean(absPath) whenever Stat confirms
-// the path genuinely exists. Broken symlinks and symlink loops still fail Stat,
-// so they are NOT rescued by the fallback and remain ErrPathUnresolvable.
+// the path genuinely exists. This fallback is gated on runtime.GOOS == "windows"
+// because NTFS mount points are a Windows-only concern; on other platforms an
+// unresolvable path is not an admin-controlled mount, so the original
+// ErrPathUnresolvable behavior is preserved to avoid bypassing canonicalization.
+// Broken symlinks and symlink loops still fail Stat, so they are NOT rescued by
+// the fallback and remain ErrPathUnresolvable.
 //
 // Known limitation: evalSymlinksFunc (filepath.EvalSymlinks by default) operates on
 // the host OS filesystem and cannot be routed through the injected v.fs
@@ -386,9 +391,14 @@ func (v *PathValidator) canonicalizePath(absPath string) (string, error) {
 		// symlink, so the cleaned absolute path is a safe canonical form. Only
 		// accept the fallback when the path genuinely exists and is
 		// accessible — a Stat failure (broken symlink, symlink loop,
-		// permission denied) still surfaces ErrPathUnresolvable.
-		if _, statErr := v.fs.Stat(absPath); statErr == nil {
-			return filepath.Clean(absPath), nil
+		// permission denied) still surfaces ErrPathUnresolvable. The fallback
+		// is Windows-only: NTFS mount points are a Windows concern, and on
+		// other platforms an unresolvable path should not bypass
+		// canonicalization, so the original ErrPathUnresolvable is returned.
+		if runtime.GOOS == "windows" {
+			if _, statErr := v.fs.Stat(absPath); statErr == nil {
+				return filepath.Clean(absPath), nil
+			}
 		}
 		return "", apperrors.NewPathError(apperrors.ErrPathUnresolvable, absPath)
 	}
@@ -420,8 +430,13 @@ func (v *PathValidator) canonicalizePath(absPath string) (string, error) {
 				// Same Stat-fallback as the top-level branch: an existing
 				// parent whose only problem is an unresolvable reparse point
 				// (e.g. NTFS mount point) is accepted as its cleaned path.
-				if _, parentStatErr := v.fs.Stat(current); parentStatErr == nil {
-					resolvedParent = filepath.Clean(current)
+				// Windows-only — see the top-level branch for rationale.
+				if runtime.GOOS == "windows" {
+					if _, parentStatErr := v.fs.Stat(current); parentStatErr == nil {
+						resolvedParent = filepath.Clean(current)
+					} else {
+						return "", apperrors.NewPathError(apperrors.ErrPathUnresolvable, current)
+					}
 				} else {
 					return "", apperrors.NewPathError(apperrors.ErrPathUnresolvable, current)
 				}
