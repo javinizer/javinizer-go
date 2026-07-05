@@ -113,6 +113,19 @@ func newTestServer(t *testing.T, asset []byte, checksumOverride string) *httptes
 	}))
 }
 
+// newFailingServer serves 404 for the named resource (checksums.txt or the
+// asset) to exercise download error branches. Other paths succeed.
+func newFailingServer(t *testing.T, failSuffix string) *httptest.Server {
+	t.Helper()
+	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, failSuffix) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+}
+
 // newTestEngine wires an Engine against the TLS test server + stub checker.
 func newTestEngine(t *testing.T, sw Swapper, current string, latest string, asset []byte, checksumOverride string) (*Engine, *httptest.Server) {
 	t.Helper()
@@ -474,5 +487,66 @@ func TestEngine_PreReleaseOption(t *testing.T) {
 	}
 	if !chk.pre {
 		t.Fatal("SetPreRelease(true) should be called when PreRelease option is set")
+	}
+}
+
+func TestEngine_DownloadChecksumsFailure(t *testing.T) {
+	dir := t.TempDir()
+	sw := &mockSwapper{target: filepath.Join(dir, "fake-bundle")}
+	srv := newFailingServer(t, "checksums.txt")
+	defer srv.Close()
+	e := NewEngine(sw, "v1.0.0",
+		WithChecker(&stubChecker{version: "v9.9.9"}),
+		WithHTTPClient(srv.Client()),
+		WithDownloadBase(srv.URL),
+	)
+
+	_, err := e.Upgrade(context.Background(), UpgradeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "download checksums") {
+		t.Fatalf("err = %v, want download checksums", err)
+	}
+	if got := e.Status().State; got != StateFailed {
+		t.Fatalf("Status = %q, want %q", got, StateFailed)
+	}
+}
+
+func TestEngine_DownloadAssetFailure(t *testing.T) {
+	dir := t.TempDir()
+	sw := &mockSwapper{target: filepath.Join(dir, "fake-bundle")}
+	assetName, err := BundleAssetName(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		t.Fatalf("no bundle asset for test host: %v", err)
+	}
+	// Serve valid checksums but 404 for the asset download.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
+			_, _ = w.Write([]byte("0000000000000000000000000000000000000000000000000000000000000000  " + assetName + "\n"))
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+	e := NewEngine(sw, "v1.0.0",
+		WithChecker(&stubChecker{version: "v9.9.9"}),
+		WithHTTPClient(srv.Client()),
+		WithDownloadBase(srv.URL),
+	)
+
+	_, err = e.Upgrade(context.Background(), UpgradeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "download asset") {
+		t.Fatalf("err = %v, want download asset", err)
+	}
+	if got := e.Status().State; got != StateFailed {
+		t.Fatalf("Status = %q, want %q", got, StateFailed)
+	}
+}
+
+func TestEngine_NewEngineDefaultsChecker(t *testing.T) {
+	// When no WithChecker option is passed, NewEngine wires a real GitHub
+	// checker (the default path). Covers the e.checker == nil branch.
+	sw := &mockSwapper{target: "/tmp/fake-bundle"}
+	e := NewEngine(sw, "v1.0.0")
+	if e.checker == nil {
+		t.Fatal("NewEngine should default a checker when none is injected")
 	}
 }
