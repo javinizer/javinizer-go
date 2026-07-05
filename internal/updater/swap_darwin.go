@@ -21,6 +21,26 @@ import (
 // without monkeypatching os.Executable globally.
 var executableFunc = os.Executable
 
+// newSwapHelperCmd builds the detached sh helper command for SwapAndRelaunch.
+// It is a package-level seam so tests can inject a failing exec (e.g. a
+// nonexistent interpreter) to cover the cmd.Start error branch without
+// spawning a real helper that outlives the test.
+var newSwapHelperCmd = func(ctx context.Context, script string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "sh", "-c", script) //nolint:gosec // script is generated from shellQuote-escaped paths derived from os.Executable, not user input
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
+}
+
+// closeZipEntry closes a just-written zip entry file. It is a package-level
+// seam (mirroring closeTempFile in engine.go) so tests can inject a failing
+// close to cover the defensive out.Close() error branch in extractZipRegular.
+var closeZipEntry = func(f *os.File) error { return f.Close() }
+
+// chmodZipEntry applies the entry's mode to the extracted file. It is a
+// package-level seam so tests can inject a failing chmod to cover the
+// defensive os.Chmod error branch in extractZipRegular.
+var chmodZipEntry = os.Chmod
+
 // macAppBundleName is the bundle directory produced by unzipping the macOS
 // release asset (CI runs `ditto -c -k --keepParent Javinizer.app`).
 const macAppBundleName = "Javinizer.app"
@@ -109,8 +129,7 @@ func (s *darwinSwapper) SwapAndRelaunch(ctx context.Context, stagedPath string, 
 		return err
 	}
 	script := darwinSwapScript(app, stagedPath, oldPID)
-	cmd := exec.CommandContext(context.Background(), "sh", "-c", script) //nolint:gosec // script is generated from shellQuote-escaped paths derived from os.Executable, not user input
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd := newSwapHelperCmd(context.Background(), script)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start swap helper: %w", err)
 	}
@@ -221,10 +240,10 @@ func extractZipRegular(f *zip.File, name string, mode os.FileMode) error {
 		_ = out.Close()
 		return fmt.Errorf("write %s: %w", name, err)
 	}
-	if err := out.Close(); err != nil {
+	if err := closeZipEntry(out); err != nil {
 		return fmt.Errorf("close %s: %w", name, err)
 	}
-	if err := os.Chmod(name, mode.Perm()); err != nil {
+	if err := chmodZipEntry(name, mode.Perm()); err != nil {
 		return fmt.Errorf("chmod %s: %w", name, err)
 	}
 	return nil

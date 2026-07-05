@@ -5,7 +5,9 @@ package updater
 import (
 	"archive/zip"
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -406,5 +408,623 @@ func TestIsWithinDir(t *testing.T) {
 		if got := isWithinDir(c.path, c.dir); got != c.want {
 			t.Errorf("isWithinDir(%q,%q) = %v, want %v", c.path, c.dir, got, c.want)
 		}
+	}
+}
+
+// --- Coverage-targeted tests for the remaining swap_darwin.go error paths ---
+
+// withExecutableFuncErr injects a failing executableFunc seam for the duration
+// of t. Covers the Target() error branch (executableFunc err) without relying
+// on os.Executable actually failing.
+func withExecutableFuncErr(t *testing.T) {
+	t.Helper()
+	prev := executableFunc
+	executableFunc = func() (string, error) {
+		return "", fmt.Errorf("synthetic os.Executable failure")
+	}
+	t.Cleanup(func() { executableFunc = prev })
+}
+
+func TestDarwinSwapper_Target_ExecutableError(t *testing.T) {
+	withExecutableFuncErr(t)
+	if _, err := NewDarwinSwapper().Target(); err == nil {
+		t.Fatal("expected Target to fail when executableFunc errors")
+	}
+}
+
+// TestDarwinSwapper_CanSwap_TargetError covers the CanSwap error branch that
+// propagates a Target() failure (executableFunc err) before unix.Access runs.
+func TestDarwinSwapper_CanSwap_TargetError(t *testing.T) {
+	withExecutableFuncErr(t)
+	if err := NewDarwinSwapper().CanSwap(); err == nil {
+		t.Fatal("expected CanSwap to fail when Target fails")
+	}
+}
+
+// TestDarwinSwapper_Stage_TargetError covers the Stage error branch that
+// propagates a Target() failure (executableFunc err) before staging runs.
+func TestDarwinSwapper_Stage_TargetError(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := buildBundleZip(t, dir)
+	withExecutableFuncErr(t)
+	if _, err := NewDarwinSwapper().Stage(context.Background(), zipPath, "x.zip"); err == nil {
+		t.Fatal("expected Stage to fail when Target fails")
+	}
+}
+
+// TestDarwinSwapper_Stage_MkdirTempFailure covers the os.MkdirTemp failure
+// branch by making the target's parent directory read-only so staging temp
+// creation under it fails. Root bypasses UNIX perms, so skip under root.
+func TestDarwinSwapper_Stage_MkdirTempFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses permission checks")
+	}
+	parent := t.TempDir()
+	readonly := filepath.Join(parent, "apps")
+	exe := buildFakeApp(t, readonly)
+	// Make parent read-only so MkdirTemp under it fails.
+	if err := os.Chmod(readonly, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readonly, 0o755) })
+	withExecutableFunc(t, exe)
+	zipPath := filepath.Join(parent, "asset.zip")
+	if err := os.WriteFile(zipPath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewDarwinSwapper().Stage(context.Background(), zipPath, "x.zip")
+	if err == nil {
+		t.Fatal("expected Stage to fail when MkdirTemp fails")
+	}
+}
+
+// TestDarwinSwapper_Stage_StagedMissing covers the staged-missing branch: a
+// valid zip that does NOT contain Javinizer.app extracts fine but the post-
+// extraction Stat fails the bundle-name check.
+func TestDarwinSwapper_Stage_StagedMissing(t *testing.T) {
+	dir := t.TempDir()
+	exe := buildFakeApp(t, dir)
+	withExecutableFunc(t, exe)
+	// Build a zip with a different top-level entry name.
+	zipPath := filepath.Join(dir, "wrong.zip")
+	w, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(w)
+	hdr := &zip.FileHeader{Name: "OtherApp/", Method: zip.Deflate}
+	hdr.SetMode(0o755 | os.ModeDir)
+	if _, err := zw.CreateHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	_, err = NewDarwinSwapper().Stage(context.Background(), zipPath, "x.zip")
+	if err == nil {
+		t.Fatal("expected Stage to fail when Javinizer.app missing after unzip")
+	}
+}
+
+// TestDarwinSwapper_SwapAndRelaunch_StartError covers the cmd.Start failure
+// branch by injecting a newSwapHelperCmd seam that returns a command pointing
+// at a nonexistent interpreter, so Start fails with ENOENT.
+func TestDarwinSwapper_SwapAndRelaunch_StartError(t *testing.T) {
+	dir := t.TempDir()
+	exe := buildFakeApp(t, dir)
+	withExecutableFunc(t, exe)
+	orig := newSwapHelperCmd
+	newSwapHelperCmd = func(ctx context.Context, script string) *exec.Cmd {
+		// Nonexistent interpreter path -> Start fails with ENOENT.
+		return exec.CommandContext(ctx, "/this/interpreter/does/not/exist", "-c", script)
+	}
+	t.Cleanup(func() { newSwapHelperCmd = orig })
+	if err := NewDarwinSwapper().SwapAndRelaunch(context.Background(), "/tmp/staged", 4242); err == nil {
+		t.Fatal("expected cmd.Start error to be returned")
+	}
+}
+
+// --- unzipTo / extractZip error-path coverage ---
+
+// writeZip builds a zip at path with the given entries and returns its path.
+type zipEntry struct {
+	name string
+	data string
+	mode os.FileMode
+}
+
+func writeZip(t *testing.T, path string, entries []zipEntry) {
+	t.Helper()
+	w, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	zw := zip.NewWriter(w)
+	for _, e := range entries {
+		hdr := &zip.FileHeader{Name: e.name, Method: zip.Deflate}
+		hdr.SetMode(e.mode)
+		fw, err := zw.CreateHeader(hdr)
+		if err != nil {
+			t.Fatalf("create %s: %v", e.name, err)
+		}
+		if e.data != "" {
+			if _, err := fw.Write([]byte(e.data)); err != nil {
+				t.Fatalf("write %s: %v", e.name, err)
+			}
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestExtractZipFile_EscapeDestDir covers the isWithinDir guard: a zip entry
+// whose name contains ".." resolves outside destDir and is rejected.
+func TestExtractZipFile_EscapeDestDir(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "slip.zip")
+	writeZip(t, zipPath, []zipEntry{
+		{name: "../escape.txt", data: "evil", mode: 0o644},
+	})
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected error for zip entry escaping dest dir")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "escape.txt")); err == nil {
+		t.Fatal("escape file must not be created outside dest dir")
+	}
+}
+
+// TestUnzipTo_OpenReaderFailure covers zip.OpenReader failing on a path that
+// does not exist.
+func TestUnzipTo_OpenReaderFailure(t *testing.T) {
+	dest := t.TempDir()
+	if err := unzipTo(filepath.Join(dest, "nope.zip"), dest); err == nil {
+		t.Fatal("expected error opening nonexistent zip")
+	}
+}
+
+// TestUnzipTo_ExtractFailure propagates an extractZipFile error (escape guard)
+// through the unzipTo loop's return-err branch (line 185-187).
+func TestUnzipTo_ExtractFailure(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "slip.zip")
+	writeZip(t, zipPath, []zipEntry{
+		{name: "../escape.txt", data: "evil", mode: 0o644},
+	})
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected unzipTo to surface extractZipFile error")
+	}
+}
+
+// TestExtractZipFile_DirMkdirAllFailure covers the directory-entry MkdirAll
+// failure branch by making destDir's parent read-only so MkdirAll on a nested
+// entry fails. Root bypasses perms, so skip under root.
+func TestExtractZipFile_DirMkdirAllFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses permission checks")
+	}
+	parent := t.TempDir()
+	readonly := filepath.Join(parent, "ro")
+	if err := os.MkdirAll(readonly, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(readonly, "out")
+	// Build zip with a nested directory entry; MkdirAll under read-only dest fails.
+	zipPath := filepath.Join(parent, "dirs.zip")
+	writeZip(t, zipPath, []zipEntry{
+		{name: "a/b/c/", data: "", mode: 0o755 | os.ModeDir},
+	})
+	if err := os.Chmod(readonly, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readonly, 0o755) })
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected MkdirAll failure for directory entry under read-only parent")
+	}
+}
+
+// TestExtractZipRegular_MkdirAllFailure covers extractZipRegular's MkdirAll
+// (filepath.Dir(name)) failure under a read-only parent. Skip under root.
+func TestExtractZipRegular_MkdirAllFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses permission checks")
+	}
+	parent := t.TempDir()
+	readonly := filepath.Join(parent, "ro")
+	if err := os.MkdirAll(readonly, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(readonly, "out")
+	zipPath := filepath.Join(parent, "reg.zip")
+	writeZip(t, zipPath, []zipEntry{
+		{name: "sub/file.txt", data: "x", mode: 0o644},
+	})
+	if err := os.Chmod(readonly, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readonly, 0o755) })
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected MkdirAll failure for regular entry under read-only parent")
+	}
+}
+
+// TestExtractZipRegular_OpenFileFailure covers os.OpenFile failure on a
+// regular entry by pre-creating a directory at the entry's target path, so
+// O_CREATE|O_WRONLY on a path occupied by a directory fails (EISDIR).
+func TestExtractZipRegular_OpenFileFailure(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-create a directory where the regular file would land; OpenFile with
+	// O_WRONLY|O_CREATE|O_TRUNC on an existing directory fails with EISDIR.
+	if err := os.MkdirAll(filepath.Join(dest, "file.txt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(dir, "reg.zip")
+	writeZip(t, zipPath, []zipEntry{
+		{name: "file.txt", data: "x", mode: 0o644},
+	})
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected OpenFile failure when target path is a directory")
+	}
+}
+
+// TestExtractZipRegular_IOCopyFailure covers the io.Copy error branch by
+// crafting a Deflate entry with a corrupted compressed body so the flate
+// reader returns a decompression error mid-copy.
+func TestExtractZipRegular_IOCopyFailure(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "corrupt.zip")
+	w, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(w)
+	hdr := &zip.FileHeader{Name: "big.txt", Method: zip.Deflate}
+	hdr.SetMode(0o644)
+	fw, err := zw.CreateHeader(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("hello world payload")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt the compressed payload bytes (after the local file header).
+	data, err := os.ReadFile(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 35; i < len(data)-22 && i < 45; i++ {
+		data[i] = 0xFF
+	}
+	if err := os.WriteFile(zipPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected io.Copy decompression error to be surfaced")
+	}
+}
+
+// corruptLocalHeader writes a zip with one entry then flips a byte in the
+// local file header so the entry opens (OpenReader reads the central
+// directory) but f.Open fails reading the local header (zip: not a valid zip
+// file). Used to cover the f.Open error branches in extractZipRegular and
+// extractZipSymlink.
+func corruptLocalHeader(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Local file header starts at offset 0 with 'PK\x03\x04'; corrupt the
+	// 3rd signature byte so findBodyOffset rejects the local header.
+	data[2] = 0x00
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestExtractZipRegular_CloseFailure covers the defensive out.Close()
+// error branch (line 233-235) by injecting a closeZipEntry seam that always
+// fails. The default close on a just-flushed regular file in a temp dir does
+// not error, so the seam is the cleanest deterministic trigger (mirrors
+// closeTempFile in engine.go).
+func TestExtractZipRegular_CloseFailure(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "ok.zip")
+	writeZip(t, zipPath, []zipEntry{
+		{name: "file.txt", data: "hello", mode: 0o644},
+	})
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := closeZipEntry
+	closeZipEntry = func(f *os.File) error {
+		_ = f.Close()
+		return fmt.Errorf("synthetic close failure")
+	}
+	t.Cleanup(func() { closeZipEntry = orig })
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected close error to be surfaced")
+	}
+}
+
+// TestExtractZipRegular_ChmodFailure covers the defensive os.Chmod error
+// branch (line 236-238) by injecting a chmodZipEntry seam that always fails.
+// chmod on a just-created file in a writable temp dir does not error, so the
+// seam is the cleanest deterministic trigger.
+func TestExtractZipRegular_ChmodFailure(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "ok.zip")
+	writeZip(t, zipPath, []zipEntry{
+		{name: "file.txt", data: "hello", mode: 0o644},
+	})
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := chmodZipEntry
+	chmodZipEntry = func(name string, mode os.FileMode) error {
+		return fmt.Errorf("synthetic chmod failure")
+	}
+	t.Cleanup(func() { chmodZipEntry = orig })
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected chmod error to be surfaced")
+	}
+}
+
+// TestExtractZipRegular_OpenEntryFailure covers the f.Open error branch
+// (line 220-223) by corrupting the local file header so the entry cannot be
+// opened, while the central directory (read by OpenReader) is still intact.
+func TestExtractZipRegular_OpenEntryFailure(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "badhdr.zip")
+	writeZip(t, zipPath, []zipEntry{
+		{name: "file.txt", data: "hello", mode: 0o644},
+	})
+	corruptLocalHeader(t, zipPath)
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected f.Open error for corrupted local header")
+	}
+}
+
+// TestExtractZipSymlink_OpenEntryFailure covers the f.Open error branch in
+// extractZipSymlink (line 243-245) via a corrupted local header.
+func TestExtractZipSymlink_OpenEntryFailure(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "symlink-bad.zip")
+	w, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(w)
+	hdr := &zip.FileHeader{Name: "link", Method: zip.Deflate}
+	hdr.SetMode(0o777 | os.ModeSymlink)
+	fw, err := zw.CreateHeader(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("target.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	corruptLocalHeader(t, zipPath)
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected f.Open error for symlink with corrupted local header")
+	}
+}
+
+// TestExtractZipSymlink_ReadAllFailure covers the io.ReadAll error branch
+// (line 249-251) by corrupting the compressed body of a Deflate symlink entry
+// so the flate reader returns a decompression error mid-read.
+func TestExtractZipSymlink_ReadAllFailure(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "sym-corrupt.zip")
+	w, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(w)
+	hdr := &zip.FileHeader{Name: "link", Method: zip.Deflate}
+	hdr.SetMode(0o777 | os.ModeSymlink)
+	fw, err := zw.CreateHeader(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("a-longish-symlink-target-path")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	data, err := os.ReadFile(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 35; i < len(data)-22 && i < 45; i++ {
+		data[i] = 0xFF
+	}
+	if err := os.WriteFile(zipPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected io.ReadAll decompression error for symlink entry")
+	}
+}
+
+// TestNewSwapHelperCmd_Default covers the default (non-injected) body of the
+// newSwapHelperCmd seam by invoking it directly. The command is not started,
+// so no real helper is spawned; we only assert it builds a non-nil Cmd with
+// the configured SysProcAttr.
+func TestNewSwapHelperCmd_Default(t *testing.T) {
+	cmd := newSwapHelperCmd(context.Background(), "true")
+	if cmd == nil {
+		t.Fatal("newSwapHelperCmd returned nil")
+	}
+	if cmd.Path == "" {
+		t.Fatal("cmd.Path empty")
+	}
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr not set on default cmd")
+	}
+}
+
+// TestDarwinSwapper_SwapAndRelaunch_HappyPath covers the cmd.Start success
+// branch (line 126 `return nil`) by injecting a newSwapHelperCmd seam that
+// runs a trivial, immediately-exiting command (`true`). The detached helper
+// exits before the test ends, leaving no lingering process.
+func TestDarwinSwapper_SwapAndRelaunch_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	exe := buildFakeApp(t, dir)
+	withExecutableFunc(t, exe)
+	orig := newSwapHelperCmd
+	newSwapHelperCmd = func(ctx context.Context, script string) *exec.Cmd {
+		return exec.CommandContext(ctx, "true")
+	}
+	t.Cleanup(func() { newSwapHelperCmd = orig })
+	if err := NewDarwinSwapper().SwapAndRelaunch(context.Background(), "/tmp/staged", 4242); err != nil {
+		t.Fatalf("expected success on cmd.Start, got %v", err)
+	}
+}
+
+// TestExtractZipSymlink_MkdirAllFailure covers the symlink branch's MkdirAll
+// (filepath.Dir(name)) failure under a read-only parent. Skip under root.
+func TestExtractZipSymlink_MkdirAllFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses permission checks")
+	}
+	parent := t.TempDir()
+	readonly := filepath.Join(parent, "ro")
+	if err := os.MkdirAll(readonly, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(readonly, "out")
+	zipPath := filepath.Join(parent, "sym.zip")
+	w, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(w)
+	hdr := &zip.FileHeader{Name: "sub/link", Method: zip.Deflate}
+	hdr.SetMode(0o777 | os.ModeSymlink)
+	fw, err := zw.CreateHeader(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("target.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := os.Chmod(readonly, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readonly, 0o755) })
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected MkdirAll failure for symlink entry under read-only parent")
+	}
+}
+
+// TestExtractZipSymlink_SymlinkFailure covers os.Symlink failure by making the
+// symlink entry's name collide with an existing directory (Symlink over a
+// dir fails with EEXIST/EISDIR on darwin). The os.Remove(name) in the function
+// only removes a file/symlink, not a non-empty dir, so Symlink fails.
+func TestExtractZipSymlink_SymlinkFailure(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "sym.zip")
+	w, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(w)
+	hdr := &zip.FileHeader{Name: "link", Method: zip.Deflate}
+	hdr.SetMode(0o777 | os.ModeSymlink)
+	fw, err := zw.CreateHeader(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("target.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-create a non-empty directory at the symlink target path; os.Remove
+	// fails on a non-empty dir, then os.Symlink fails because the path exists.
+	linkPath := filepath.Join(dest, "link")
+	if err := os.MkdirAll(linkPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(linkPath, "blocker"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := unzipTo(zipPath, dest); err == nil {
+		t.Fatal("expected os.Symlink failure when target path is a non-empty dir")
+	}
+}
+
+// TestIsWithinDir_RelError covers the filepath.Rel error branch (line 257-259).
+// filepath.Rel returns an error when path and dir are on different volumes on
+// darwin (e.g. /Volumes/A vs /Volumes/B), which is unreachable from a single
+// temp dir. We instead call isWithinDir with an empty dir to force a Rel
+// error indirectly — but filepath.Rel("", "/a") does not error. The Rel-error
+// branch is therefore defensive: archive/zip always joins destDir with f.Name,
+// so path is always under a cleanable prefix of dir; Rel only errors on
+// cross-volume inputs, which a single destDir cannot produce. This test pins
+// the happy-path contract (no panic) for the documented-unreachable branch.
+func TestIsWithinDir_NoPanicOnDegenerate(t *testing.T) {
+	// Empty dir + absolute path: filepath.Rel returns a non-error relative.
+	_ = isWithinDir("/a/b", "")
+	// Cross-volume-style inputs that DO error: Rel can error when one path is
+	// absolute and the other is relative — exercise to confirm false is returned
+	// (not a panic) on the Rel-error path.
+	if got := isWithinDir("rel", "/abs"); got != false {
+		t.Errorf("isWithinDir(rel, abs) = %v, want false", got)
 	}
 }
