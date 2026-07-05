@@ -3,6 +3,7 @@ package system
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -234,3 +235,59 @@ func TestUpdateSecurityConfig_ValidateAndApplyError(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Failed to save configuration",
 		"should surface the persistError message from mapConfigErrorToHTTP")
 }
+
+// TestUpdateSecurityConfig_BodyReadError covers the io.ReadAll error branch in
+// updateSecurityConfig. A request body whose Read returns an error drives the
+// handler into the "Invalid security configuration format" 400 path before the
+// raw-JSON key check runs. The default httptest request body never fails Read,
+// so we inject a failing io.ReadCloser directly.
+func TestUpdateSecurityConfig_BodyReadError(t *testing.T) {
+	initial := config.DefaultConfig(nil, nil)
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	coreDeps := createTestDeps(t, initial, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
+
+	router := gin.New()
+	router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+	req := httptest.NewRequest(http.MethodPut, "/config/security", failingBody{})
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "Invalid security configuration format")
+}
+
+// TestUpdateSecurityConfig_TypeMismatch covers the second json.Unmarshal error
+// branch — the one that decodes into SecurityUpdateRequest after the raw-map
+// key-presence check already passed. A body that is a valid JSON object
+// containing all four required keys but with a value of the wrong type (a
+// string where []string is expected) clears the key check, then fails the
+// typed unmarshal, exercising the 400 "Invalid security configuration format"
+// path that the InvalidJSON and MissingField tests do not reach.
+func TestUpdateSecurityConfig_TypeMismatch(t *testing.T) {
+	initial := config.DefaultConfig(nil, nil)
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	coreDeps := createTestDeps(t, initial, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
+
+	router := gin.New()
+	router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+	payload := `{"allowed_directories":"not-an-array","denied_directories":[],"allow_unc":false,"allowed_unc_servers":[]}`
+	req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "Invalid security configuration format")
+}
+
+// failingBody is an io.ReadCloser whose Read always returns an error, used to
+// exercise the io.ReadAll failure branch of updateSecurityConfig.
+type failingBody struct{}
+
+func (failingBody) Read(p []byte) (int, error) { return 0, errors.New("synthetic read failure") }
+func (failingBody) Close() error               { return nil }
