@@ -152,23 +152,24 @@ func isAppBundle(path string) bool {
 func darwinSwapScript(app, staged string, oldPID int) string {
 	appOld := app + ".old"
 	return strings.Join([]string{
-		fmt.Sprintf("i=0; while kill -0 %d 2>/dev/null; do i=$((i+1)); [ \"$i\" -ge %d ] && exit 0; sleep 0.2; done", oldPID, swapWaitMaxIters),
+		fmt.Sprintf("i=0; while kill -0 %d 2>/dev/null; do i=$((i+1)); if [ \"$i\" -ge %d ]; then echo 'javinizer: timed out waiting for process exit' >&2; exit 1; fi; sleep 0.2; done", oldPID, swapWaitMaxIters),
 		"rm -rf " + shellQuote(appOld) + " 2>/dev/null || true",
-		"mv " + shellQuote(app) + " " + shellQuote(appOld),
-		"if mv " + shellQuote(staged) + " " + shellQuote(app) + "; then",
-		"  xattr -cr " + shellQuote(app),
-		"  open -n " + shellQuote(app),
-		"  rm -rf " + shellQuote(appOld) + " 2>/dev/null || true",
-		"  rmdir " + shellQuote(filepath.Dir(staged)) + " 2>/dev/null || true",
+		"if mv " + shellQuote(app) + " " + shellQuote(appOld) + "; then",
+		"  if mv " + shellQuote(staged) + " " + shellQuote(app) + "; then",
+		"    xattr -cr " + shellQuote(app),
+		"    open -n " + shellQuote(app),
+		"    rm -rf " + shellQuote(appOld) + " 2>/dev/null || true",
+		"    rmdir " + shellQuote(filepath.Dir(staged)) + " 2>/dev/null || true",
+		"  else",
+		"    rm -rf " + shellQuote(app) + " 2>/dev/null || true",
+		"    mv " + shellQuote(appOld) + " " + shellQuote(app),
+		"    echo 'javinizer: swap failed; restored previous bundle' >&2",
+		"  fi",
 		"else",
-		"  rm -rf " + shellQuote(app) + " 2>/dev/null || true",
-		"  mv " + shellQuote(appOld) + " " + shellQuote(app),
-		"  echo 'javinizer: swap failed; restored previous bundle' >&2",
+		"  echo 'javinizer: could not move current bundle aside; aborting swap' >&2",
 		"fi",
 	}, "\n")
 }
-
-const swapWaitMaxIters = 150
 
 // unzipTo extracts the zip at zipPath into destDir, preserving modes and
 // symlinks (the latter matter for signed .app bundles with Frameworks). The

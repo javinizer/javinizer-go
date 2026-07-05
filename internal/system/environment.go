@@ -114,8 +114,9 @@ func UpgradeInstructions(env Environment) string {
 			"  docker pull " + dockerImageRef + ":latest\n" +
 			"  # docker compose users: docker compose pull && docker compose up -d"
 	case EnvironmentDesktop:
-		return "Desktop app: click \"Update & restart\" in the app, or download the new bundle " +
-			"from https://github.com/javinizer/javinizer-go/releases and replace your existing app."
+		return "Desktop app: click \"Update & restart\" in the app, or quit the app first, " +
+			"then download the new bundle from https://github.com/javinizer/javinizer-go/releases " +
+			"and replace your existing app."
 	default:
 		return "Run `javinizer upgrade` to update. " +
 			"If installed via Homebrew or Scoop, use `brew upgrade javinizer` or `scoop update javinizer` instead."

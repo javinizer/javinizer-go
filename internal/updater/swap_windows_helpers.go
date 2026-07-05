@@ -71,6 +71,7 @@ func renderWindowsBatScript(pid int, exePath, newPath string) string {
 	b.WriteString("start \"\" \"%EXE%\"\r\n")
 	b.WriteString("del /f /q \"%EXE%.old\" 2>nul\r\n")
 	b.WriteString(":cleanup\r\n")
+	b.WriteString("if exist \"%NEW%\" del /f /q \"%NEW%\" 2>nul\r\n")
 	b.WriteString("(goto) 2>nul & del \"%~f0\"\r\n")
 	return b.String()
 }

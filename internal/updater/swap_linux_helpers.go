@@ -19,7 +19,7 @@ func renderLinuxHelperScript(oldPID int, targetPath, stagedPath string, preserve
 	var b strings.Builder
 	fmt.Fprintf(&b, "i=0\nwhile kill -0 %d 2>/dev/null; do\n", oldPID)
 	b.WriteString("  i=$((i+1))\n")
-	b.WriteString("  if [ \"$i\" -ge 150 ]; then echo 'javinizer: timed out waiting for process exit' >&2; exit 1; fi\n")
+	fmt.Fprintf(&b, "  if [ \"$i\" -ge %d ]; then echo 'javinizer: timed out waiting for process exit' >&2; exit 1; fi\n", swapWaitMaxIters)
 	b.WriteString("  sleep 0.2\n")
 	b.WriteString("done\n")
 	fmt.Fprintf(&b, "mv -f %s %s\n", shellQuote(stagedPath), shellQuote(targetPath))

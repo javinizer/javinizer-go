@@ -1189,7 +1189,7 @@ export interface DesktopUpgradeRequest {
 }
 
 export interface DesktopUpgradeResponse {
-	status: string;
+	status: 'up-to-date' | 'relaunching';
 	version?: string;
 }
 

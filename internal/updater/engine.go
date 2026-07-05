@@ -232,10 +232,8 @@ func (e *Engine) Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeResu
 	}
 
 	chk := e.checker
-	if opts.PreRelease {
-		if pc, ok := chk.(update.PreReleaseChecker); ok {
-			pc.SetPreRelease(true)
-		}
+	if pc, ok := chk.(update.PreReleaseChecker); ok {
+		pc.SetPreRelease(opts.PreRelease)
 	}
 
 	e.setState(StateDownloading, "")
