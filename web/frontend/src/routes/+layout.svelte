@@ -98,6 +98,7 @@
 			loginPassword = '';
 			await refreshAuthStatus();
 			if (authAuthenticated) {
+				setupNeedsDirs = true;
 				try {
 					const fresh = await apiClient.getConfig();
 					const sec = fresh?.api?.security;
@@ -107,15 +108,17 @@
 						allowed_unc_servers: [...(sec?.allowed_unc_servers ?? [])],
 					};
 					setupDirs = [...(sec?.allowed_directories ?? [])];
-				} catch {
+				} catch (error) {
 					setupSecurityDefaults = {
 						denied_directories: [],
 						allow_unc: false,
 						allowed_unc_servers: [],
 					};
 					setupDirs = [];
+					authError = error instanceof Error
+						? `Failed to load current security settings: ${error.message}. You can still save allowed directories below.`
+						: 'Failed to load current security settings. You can still save allowed directories below.';
 				}
-				setupNeedsDirs = true;
 			}
 		} catch (error) {
 			authError = error instanceof Error ? error.message : 'Failed to initialize authentication';

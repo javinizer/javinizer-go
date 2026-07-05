@@ -52,11 +52,15 @@ if (!Element.prototype.animate) {
 }
 
 function uninitializedStatus() {
-	return { initialized: false, authenticated: false, username: null } as unknown as Awaited<ReturnType<typeof apiClient.getAuthStatus>>;
+	return { initialized: false, authenticated: false, username: null } as unknown as Awaited<
+		ReturnType<typeof apiClient.getAuthStatus>
+	>;
 }
 
 function authenticatedStatus() {
-	return { initialized: true, authenticated: true, username: 'admin' } as unknown as Awaited<ReturnType<typeof apiClient.getAuthStatus>>;
+	return { initialized: true, authenticated: true, username: 'admin' } as unknown as Awaited<
+		ReturnType<typeof apiClient.getAuthStatus>
+	>;
 }
 
 function freshConfig(allowed: string[] = []) {
@@ -108,7 +112,9 @@ describe('first-run setup allowed directories step', () => {
 		apiClient.getAuthStatus
 			.mockResolvedValueOnce(uninitializedStatus())
 			.mockResolvedValueOnce(authenticatedStatus());
-		apiClient.setupAuth.mockResolvedValue(authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>);
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
 		apiClient.getConfig.mockResolvedValue(freshConfig());
 		apiClient.updateSecurityConfig.mockResolvedValue(securityResponse());
 
@@ -135,7 +141,9 @@ describe('first-run setup allowed directories step', () => {
 		apiClient.getAuthStatus
 			.mockResolvedValueOnce(uninitializedStatus())
 			.mockResolvedValueOnce(authenticatedStatus());
-		apiClient.setupAuth.mockResolvedValue(authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>);
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
 		apiClient.getConfig.mockResolvedValue(freshConfig());
 		apiClient.updateSecurityConfig.mockResolvedValue(securityResponse(['/mnt/videos']));
 
@@ -152,15 +160,19 @@ describe('first-run setup allowed directories step', () => {
 
 		await waitFor(() => expect(container.textContent).toContain('Add Allowed Directories'));
 
-		const dirInput = container.querySelector('input[placeholder*="Add a directory"]') as HTMLInputElement;
+		const dirInput = container.querySelector(
+			'input[placeholder*="Add a directory"]',
+		) as HTMLInputElement;
 		expect(dirInput).toBeTruthy();
 		await fireEvent.input(dirInput, { target: { value: '/mnt/videos' } });
-		const addBtn = container.querySelector('button[title="Add allowed directory"]') as HTMLButtonElement;
+		const addBtn = container.querySelector(
+			'button[title="Add allowed directory"]',
+		) as HTMLButtonElement;
 		await fireEvent.click(addBtn);
 		await tick();
 
-		const save = Array.from(container.querySelectorAll('button')).find(
-			(b) => b.textContent?.includes('Save & Continue'),
+		const save = Array.from(container.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Save & Continue'),
 		) as HTMLButtonElement;
 		expect(save).toBeTruthy();
 		await fireEvent.click(save);
@@ -181,7 +193,9 @@ describe('first-run setup allowed directories step', () => {
 		apiClient.getAuthStatus
 			.mockResolvedValueOnce(uninitializedStatus())
 			.mockResolvedValueOnce(authenticatedStatus());
-		apiClient.setupAuth.mockResolvedValue(authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>);
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
 		apiClient.getConfig.mockResolvedValue({
 			api: {
 				security: {
@@ -192,11 +206,13 @@ describe('first-run setup allowed directories step', () => {
 				},
 			},
 		} as unknown as Awaited<ReturnType<typeof apiClient.getConfig>>);
-		apiClient.updateSecurityConfig.mockResolvedValue(securityResponse(['/mnt/videos'], {
-			denied_directories: ['/sensitive'],
-			allow_unc: true,
-			allowed_unc_servers: ['\\\\srv\\share'],
-		}));
+		apiClient.updateSecurityConfig.mockResolvedValue(
+			securityResponse(['/mnt/videos'], {
+				denied_directories: ['/sensitive'],
+				allow_unc: true,
+				allowed_unc_servers: ['\\\\srv\\share'],
+			}),
+		);
 
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('First-Time Setup'));
@@ -211,13 +227,17 @@ describe('first-run setup allowed directories step', () => {
 
 		await waitFor(() => expect(container.textContent).toContain('Add Allowed Directories'));
 
-		const dirInput = container.querySelector('input[placeholder*="Add a directory"]') as HTMLInputElement;
+		const dirInput = container.querySelector(
+			'input[placeholder*="Add a directory"]',
+		) as HTMLInputElement;
 		await fireEvent.input(dirInput, { target: { value: '/mnt/videos' } });
-		await fireEvent.click(container.querySelector('button[title="Add allowed directory"]') as HTMLButtonElement);
+		await fireEvent.click(
+			container.querySelector('button[title="Add allowed directory"]') as HTMLButtonElement,
+		);
 		await tick();
 
-		const save = Array.from(container.querySelectorAll('button')).find(
-			(b) => b.textContent?.includes('Save & Continue'),
+		const save = Array.from(container.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Save & Continue'),
 		) as HTMLButtonElement;
 		await fireEvent.click(save);
 
@@ -236,7 +256,9 @@ describe('first-run setup allowed directories step', () => {
 		apiClient.getAuthStatus
 			.mockResolvedValueOnce(uninitializedStatus())
 			.mockResolvedValueOnce(authenticatedStatus());
-		apiClient.setupAuth.mockResolvedValue(authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>);
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
 		apiClient.getConfig.mockResolvedValue(freshConfig());
 
 		const { container } = render(Layout);
@@ -252,17 +274,46 @@ describe('first-run setup allowed directories step', () => {
 
 		await waitFor(() => expect(container.textContent).toContain('Add Allowed Directories'));
 
-		const skipBtn = Array.from(container.querySelectorAll('button')).find(
-			(b) => b.textContent?.includes('Skip for now'),
+		const skipBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Skip for now'),
 		) as HTMLButtonElement;
 		expect(skipBtn).toBeTruthy();
 		await fireEvent.click(skipBtn);
 
-		await waitFor(() => expect(vi.mocked(toastStore.info)).toHaveBeenCalledWith(
-			expect.stringContaining('Settings → Security'),
-			expect.any(Number),
-		));
+		await waitFor(() =>
+			expect(vi.mocked(toastStore.info)).toHaveBeenCalledWith(
+				expect.stringContaining('Settings → Security'),
+				expect.any(Number),
+			),
+		);
 		await waitFor(() => expect(apiClient.updateSecurityConfig).not.toHaveBeenCalled());
 		expect(vi.mocked(toastStore.info)).toHaveBeenCalled();
+	});
+
+	it('surfaces a visible error when config loading fails but keeps the dirs gate stable', async () => {
+		apiClient.getAuthStatus
+			.mockResolvedValueOnce(uninitializedStatus())
+			.mockResolvedValueOnce(authenticatedStatus());
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
+		apiClient.getConfig.mockRejectedValue(new Error('network down'));
+
+		const { container } = render(Layout);
+		await waitFor(() => expect(container.textContent).toContain('First-Time Setup'));
+
+		const username = container.querySelector('#setup-username') as HTMLInputElement;
+		const password = container.querySelector('#setup-password') as HTMLInputElement;
+		const confirm = container.querySelector('#setup-password-confirm') as HTMLInputElement;
+		await fireEvent.input(username, { target: { value: 'admin' } });
+		await fireEvent.input(password, { target: { value: 'password123' } });
+		await fireEvent.input(confirm, { target: { value: 'password123' } });
+		await fireEvent.submit(username.closest('form') as HTMLFormElement);
+
+		await waitFor(() => expect(container.textContent).toContain('Add Allowed Directories'));
+		expect(container.textContent).toContain('Failed to load current security settings');
+		expect(container.textContent).toContain('network down');
+		expect(apiClient.getConfig).toHaveBeenCalledTimes(1);
+		expect(apiClient.updateSecurityConfig).not.toHaveBeenCalled();
 	});
 });
