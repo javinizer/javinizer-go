@@ -3,7 +3,6 @@ package core
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/api/apperrors"
@@ -395,10 +394,8 @@ func (v *PathValidator) canonicalizePath(absPath string) (string, error) {
 		// is Windows-only: NTFS mount points are a Windows concern, and on
 		// other platforms an unresolvable path should not bypass
 		// canonicalization, so the original ErrPathUnresolvable is returned.
-		if runtime.GOOS == "windows" {
-			if _, statErr := v.fs.Stat(absPath); statErr == nil {
-				return filepath.Clean(absPath), nil
-			}
+		if resolved, ok := resolveReparseFallback(absPath, v.fs); ok {
+			return resolved, nil
 		}
 		return "", apperrors.NewPathError(apperrors.ErrPathUnresolvable, absPath)
 	}
@@ -431,15 +428,11 @@ func (v *PathValidator) canonicalizePath(absPath string) (string, error) {
 				// parent whose only problem is an unresolvable reparse point
 				// (e.g. NTFS mount point) is accepted as its cleaned path.
 				// Windows-only — see the top-level branch for rationale.
-				if runtime.GOOS == "windows" {
-					if _, parentStatErr := v.fs.Stat(current); parentStatErr == nil {
-						resolvedParent = filepath.Clean(current)
-					} else {
-						return "", apperrors.NewPathError(apperrors.ErrPathUnresolvable, current)
-					}
-				} else {
+				rp, ok := resolveReparseParentFallback(current, v.fs)
+				if !ok {
 					return "", apperrors.NewPathError(apperrors.ErrPathUnresolvable, current)
 				}
+				resolvedParent = rp
 			}
 			for i := len(missingSegments) - 1; i >= 0; i-- {
 				resolvedParent = filepath.Join(resolvedParent, missingSegments[i])
