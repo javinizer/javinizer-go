@@ -6,6 +6,8 @@ import type {
 	TranslationModelsResponse,
 	DeepLUsageRequest,
 	DeepLUsageResponse,
+	SecurityUpdateRequest,
+	SecurityUpdateResponse,
 } from '../types';
 import { BaseClient } from './common';
 
@@ -34,6 +36,13 @@ export class ConfigClient extends BaseClient {
 	async getDeepLUsage(request: DeepLUsageRequest): Promise<DeepLUsageResponse> {
 		return this.request<DeepLUsageResponse>('/api/v1/translation/deepl/usage', {
 			method: 'POST',
+			body: JSON.stringify(request),
+		});
+	}
+
+	async updateSecurityConfig(request: SecurityUpdateRequest): Promise<SecurityUpdateResponse> {
+		return this.request<SecurityUpdateResponse>('/api/v1/config/security', {
+			method: 'PUT',
 			body: JSON.stringify(request),
 		});
 	}

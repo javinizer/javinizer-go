@@ -9,6 +9,7 @@ import (
 func RegisterRoutes(protected *gin.RouterGroup, rt *core.APIRuntime) {
 	protected.GET("/config", getConfig(rt.Deps()))
 	protected.PUT("/config", updateConfig(rt))
+	protected.PUT("/config/security", updateSecurityConfig(rt))
 	protected.GET("/scrapers", getAvailableScrapers(rt))
 	protected.POST("/proxy/test", testProxy(rt))
 	protected.POST("/translation/models", getTranslationModels(rt.Deps()))

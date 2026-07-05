@@ -2788,6 +2788,23 @@ definitions:
       start_time:
         type: string
     type: object
+  internal_api_system.SecurityUpdateRequest:
+    properties:
+      allow_unc:
+        type: boolean
+      allowed_directories:
+        items:
+          type: string
+        type: array
+      allowed_unc_servers:
+        items:
+          type: string
+        type: array
+      denied_directories:
+        items:
+          type: string
+        type: array
+    type: object
   internal_api_system.UpdateConfigRequest:
     properties:
       api:
@@ -2820,6 +2837,11 @@ definitions:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig'
       webui:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.webUIConfig'
+    type: object
+  internal_api_system.securityResponse:
+    properties:
+      security:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SecurityConfig'
     type: object
   internal_api_token.createTokenRequest:
     properties:
@@ -4039,6 +4061,38 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update configuration
+      tags:
+      - system
+  /api/v1/config/security:
+    put:
+      consumes:
+      - application/json
+      description: Update the operator-editable api.security block (allowed_directories,
+        denied_directories, allow_unc, allowed_unc_servers) and hot-reload the server.
+        Other security fields are preserved. Requires an authenticated operator session.
+      parameters:
+      - description: Security block fields to persist
+        in: body
+        name: security
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_system.SecurityUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Persisted security block after reload
+          schema:
+            $ref: '#/definitions/internal_api_system.securityResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Update security settings
       tags:
       - system
   /api/v1/desktop/upgrade:

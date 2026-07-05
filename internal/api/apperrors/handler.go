@@ -42,5 +42,5 @@ func logOperatorGuidance(c *gin.Context, err *PathError) {
 	if err.Path != "" {
 		pathInfo = fmt.Sprintf(" (path: %s)", err.Path)
 	}
-	logging.Infof("Path validation error: %s%s", err.OperatorMessage, pathInfo)
+	logging.Infof("Path validation error: %s%s", operatorMessageFor(err, requestContext(c)), pathInfo)
 }

@@ -89,6 +89,7 @@ func TestNewServer(t *testing.T) {
 		"/api/v1/actresses/merge/preview",
 		"/api/v1/actresses/merge",
 		"/api/v1/config",
+		"/api/v1/config/security",
 		"/api/v1/scrapers",
 		"/api/v1/proxy/test",
 		"/api/v1/scan",
@@ -262,6 +263,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"POST /api/v1/words/replacements/import",
 		"PUT /api/v1/actresses/:id",
 		"PUT /api/v1/config",
+		"PUT /api/v1/config/security",
 		"PUT /api/v1/genres/replacements",
 		"PUT /api/v1/words/replacements",
 	}

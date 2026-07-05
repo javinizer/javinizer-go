@@ -719,6 +719,17 @@ export interface SecurityConfig {
 	force_secure_cookies: boolean;
 }
 
+export interface SecurityUpdateRequest {
+	allowed_directories: string[];
+	denied_directories: string[];
+	allow_unc: boolean;
+	allowed_unc_servers: string[];
+}
+
+export interface SecurityUpdateResponse {
+	security: SecurityConfig;
+}
+
 export interface APIConfig {
 	security: SecurityConfig;
 }

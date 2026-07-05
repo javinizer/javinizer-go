@@ -8,6 +8,7 @@
 	import MetadataPriority from '$lib/components/priority/MetadataPriority.svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import ServerSettingsSection from '$lib/components/settings/sections/ServerSettingsSection.svelte';
+	import SecuritySettingsSection from '$lib/components/settings/sections/SecuritySettingsSection.svelte';
 	import ScraperSettingsSection from '$lib/components/settings/sections/ScraperSettingsSection.svelte';
 	import FileOperationsSettingsSection from '$lib/components/settings/sections/FileOperationsSettingsSection.svelte';
 	import OutputSettingsSection from '$lib/components/settings/sections/OutputSettingsSection.svelte';
@@ -121,6 +122,8 @@
 			</Card>
 		{:else if settings.settingsConfig}
 			<ServerSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
+
+		<SecuritySettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 
 			<SettingsSection title="Scraper Defaults" description="Default settings applied to all scrapers unless overridden per-scraper" defaultExpanded={false}>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-4">

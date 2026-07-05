@@ -345,6 +345,9 @@ class APIClient {
 	async getDeepLUsage(request: Parameters<ConfigClient['getDeepLUsage']>[0]) {
 		return this.config.getDeepLUsage(request);
 	}
+	async updateSecurityConfig(request: Parameters<ConfigClient['updateSecurityConfig']>[0]) {
+		return this.config.updateSecurityConfig(request);
+	}
 }
 
 export const apiClient = new APIClient();

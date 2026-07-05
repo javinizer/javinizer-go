@@ -122,6 +122,7 @@ func registerAPIV1Routes(router *gin.Engine, rt *core.APIRuntime) {
 
 	protected := v1.Group("")
 	protected.Use(auth.RequireTokenOrSession(deps))
+	protected.Use(middleware.InstallEnvironmentInjector(deps.CoreDeps))
 
 	var rateLimiter *middleware.IPRateLimiter
 	apiCfg := rt.GetAPIConfig()

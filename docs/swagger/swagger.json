@@ -1673,6 +1673,52 @@
                 }
             }
         },
+        "/api/v1/config/security": {
+            "put": {
+                "description": "Update the operator-editable api.security block (allowed_directories, denied_directories, allow_unc, allowed_unc_servers) and hot-reload the server. Other security fields are preserved. Requires an authenticated operator session.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Update security settings",
+                "parameters": [
+                    {
+                        "description": "Security block fields to persist",
+                        "name": "security",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_system.SecurityUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Persisted security block after reload",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_system.securityResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/desktop/upgrade": {
             "post": {
                 "description": "Download, verify, and stage the latest desktop bundle, then relaunch the app. Desktop builds only.",
@@ -7364,6 +7410,32 @@
                 }
             }
         },
+        "internal_api_system.SecurityUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "allow_unc": {
+                    "type": "boolean"
+                },
+                "allowed_directories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "allowed_unc_servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "denied_directories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_api_system.UpdateConfigRequest": {
             "type": "object",
             "properties": {
@@ -7411,6 +7483,14 @@
                 },
                 "webui": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.webUIConfig"
+                }
+            }
+        },
+        "internal_api_system.securityResponse": {
+            "type": "object",
+            "properties": {
+                "security": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.SecurityConfig"
                 }
             }
         },
