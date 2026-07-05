@@ -48,13 +48,10 @@ func appImageArch(goarch string) (string, bool) {
 // currentBundleAsset returns the asset name for the running build, or an error
 // if this platform has no published desktop bundle (e.g. windows-arm64).
 //
-// The error branch is intentionally NOT covered by tests: it only fires on a
-// host OS/arch with no published desktop bundle (windows/arm64, freebsd/*).
-// CI runs the test suite on darwin/amd64+arm64, linux/amd64+arm64, and
-// windows/amd64 — all of which have a published bundle — so currentBundleAsset
-// always succeeds there. BundleAssetName itself is covered for the error
-// branches by TestBundleAssetName, but the currentBundleAsset() wrapper is
-// only reached via Upgrade(), which cannot be made to fail at this step in CI.
-func currentBundleAsset() (string, error) {
+// It is a package-level var (not a plain func) so tests can inject an error
+// to cover Upgrade()'s error branch without running on an unsupported OS/arch
+// — mirroring the executableFunc seam in swap_darwin.go. The default closes
+// over runtime.GOOS/GOARCH, which always resolve to a supported bundle in CI.
+var currentBundleAsset = func() (string, error) {
 	return BundleAssetName(runtime.GOOS, runtime.GOARCH)
 }

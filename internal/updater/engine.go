@@ -133,6 +133,19 @@ func WithRelauncher(r Relauncher) Option {
 	return func(e *Engine) { e.relauncher = r }
 }
 
+var (
+	// syncTempFile flushes the downloaded temp file. It is a package-level
+	// seam so tests can inject a Sync failure to cover the engine's flush
+	// error branch without a custom filesystem (real host fs does not fail
+	// fsync under CI conditions). The default is (*os.File).Sync.
+	syncTempFile = func(f *os.File) error { return f.Sync() }
+
+	// closeTempFile closes the downloaded temp file. It is a package-level
+	// seam so tests can inject a Close failure to cover the engine's close
+	// error branch. The default is (*os.File).Close.
+	closeTempFile = func(f *os.File) error { return f.Close() }
+)
+
 const (
 	// defaultDownloadBase is the host serving release assets (github.com). The
 	// API base (api.github.com) lives inside the checker.
@@ -310,19 +323,13 @@ func (e *Engine) Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeResu
 		e.fail("download asset: " + err.Error())
 		return nil, fmt.Errorf("download asset: %w", err)
 	}
-	if err := tmp.Sync(); err != nil {
-		// The Sync/Close error branches below are intentionally not covered by
-		// tests: triggering them requires a custom/injected filesystem (e.g.
-		// a filled tmpfs or an injected *os.File wrapper) since the temp file
-		// is created and written on the host's real fs, which does not fail
-		// Sync/Close under normal conditions. Refactoring Engine to accept an
-		// injectable fs abstraction is out of scope for a coverage-only change.
-		_ = tmp.Close()
+	if err := syncTempFile(tmp); err != nil {
+		_ = closeTempFile(tmp)
 		_ = os.Remove(tmpPath)
 		e.fail("flush asset: " + err.Error())
 		return nil, fmt.Errorf("flush asset: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
+	if err := closeTempFile(tmp); err != nil {
 		_ = os.Remove(tmpPath)
 		e.fail("close asset: " + err.Error())
 		return nil, fmt.Errorf("close asset: %w", err)

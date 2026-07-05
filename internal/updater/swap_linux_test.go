@@ -5,6 +5,7 @@ package updater
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -157,5 +158,76 @@ func TestLinuxSwapper_SwapAndRelaunch_CancelledContext(t *testing.T) {
 	s := &linuxSwapper{}
 	if err := s.SwapAndRelaunch(ctx, bundle, 1); err == nil {
 		t.Fatal("SwapAndRelaunch with cancelled context should fail")
+	}
+}
+
+func TestLinuxSwapper_SwapAndRelaunch_SpawnSuccess(t *testing.T) {
+	// Cover the cmd.Start() SUCCESS path of SwapAndRelaunch (the lines that
+	// spawn the detached helper and release its process), without performing
+	// a real bundle swap or leaving a relaunched app running.
+	//
+	// Safety analysis of renderLinuxHelperScript under this test's inputs:
+	//   1. wait loop: oldPID is a child process we started and already reaped,
+	//      so `kill -0 <oldPID>` fails on the first iteration and the loop
+	//      exits immediately (no waiting).
+	//   2. `mv -f <staged> <target>`: staged is a NONEXISTENT path, so mv
+	//      fails with ENOENT and leaves <target> untouched. The script has
+	//      no `set -e`, so it continues past the failed mv.
+	//   3. `chmod +x <target>`: target is our dummy bundle in t.TempDir();
+	//      making it executable is harmless.
+	//   4. `nohup <target> &`: target is a `#!/bin/sh\nexit 0` script, so the
+	//      relaunch exits immediately and leaves no background process.
+	// Net effect: the helper spawns, immediately exits its wait loop, fails
+	// the mv harmlessly, and the relaunch is a no-op. The real bundle is
+	// never touched (APPIMAGE points at our dummy, not the test binary).
+	dir := t.TempDir()
+	target := filepath.Join(dir, "Javinizer.AppImage")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0o600); err != nil {
+		t.Fatalf("write dummy target: %v", err)
+	}
+	if err := os.Chmod(target, 0o755); err != nil {
+		t.Fatalf("chmod dummy target: %v", err)
+	}
+	t.Setenv("APPIMAGE", target)
+
+	// Spawn and reap a throwaway child to obtain a PID that is guaranteed
+	// dead before the helper examines it, so the helper's wait loop is a
+	// no-op. Using os.Getpid() would risk the helper waiting on the test
+	// process itself; PID 1 may be alive in some containers.
+	deadPID := func(t *testing.T) int {
+		t.Helper()
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("pipe: %v", err)
+		}
+		cmd := exec.Command("sh", "-c", "exit 0")
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start throwaway child: %v", err)
+		}
+		pid := cmd.Process.Pid
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("wait throwaway child: %v", err)
+		}
+		_ = r.Close()
+		_ = w.Close()
+		return pid
+	}(t)
+
+	// staged is intentionally nonexistent: mv -f fails harmlessly and the
+	// target is left untouched.
+	staged := filepath.Join(dir, "no-such-staged-AppImage")
+
+	s := &linuxSwapper{}
+	if err := s.SwapAndRelaunch(context.Background(), staged, deadPID); err != nil {
+		t.Fatalf("SwapAndRelaunch success path: %v", err)
+	}
+
+	// The target file must still exist and be untouched (mv failed).
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("target disappeared after spawn: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("target lost executable bit; perm=%o", info.Mode().Perm())
 	}
 }

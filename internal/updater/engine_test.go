@@ -618,3 +618,85 @@ func TestEngine_CreateTempFailure(t *testing.T) {
 		t.Fatal("SwapAndRelaunch should not be invoked on CreateTemp failure")
 	}
 }
+
+func TestEngine_CurrentBundleAssetError(t *testing.T) {
+	// Cover the currentBundleAsset() error branch in Upgrade by injecting a
+	// failing seam (the default closes over runtime.GOOS/GOARCH, which always
+	// resolves to a supported bundle in CI, so the branch is unreachable
+	// without injection). The seam mirrors executableFunc in swap_darwin.go.
+	dir := t.TempDir()
+	sw := &mockSwapper{target: filepath.Join(dir, "fake-bundle")}
+	asset := []byte("bytes")
+	e, srv := newTestEngine(t, sw, "v1.0.0", "v9.9.9", asset, "")
+	defer srv.Close()
+
+	orig := currentBundleAsset
+	currentBundleAsset = func() (string, error) {
+		return "", fmt.Errorf("no desktop bundle asset for plan9/386")
+	}
+	t.Cleanup(func() { currentBundleAsset = orig })
+
+	_, err := e.Upgrade(context.Background(), UpgradeOptions{Force: true})
+	if err == nil || !strings.Contains(err.Error(), "no desktop bundle asset") {
+		t.Fatalf("err = %v, want no desktop bundle asset", err)
+	}
+	if got := e.Status().State; got != StateFailed {
+		t.Fatalf("Status = %q, want %q", got, StateFailed)
+	}
+	if sw.swapInvoked() {
+		t.Fatal("SwapAndRelaunch should not be invoked on asset-resolution failure")
+	}
+}
+
+func TestEngine_SyncTempFileFailure(t *testing.T) {
+	// Cover the syncTempFile (tmp.Sync) error branch: the download succeeds,
+	// but flushing the temp file fails. The seam injects the failure; the
+	// real host fs does not fail fsync under CI conditions, so without the
+	// seam this branch is unreachable.
+	dir := t.TempDir()
+	sw := &mockSwapper{target: filepath.Join(dir, "fake-bundle")}
+	asset := []byte("bytes")
+	e, srv := newTestEngine(t, sw, "v1.0.0", "v9.9.9", asset, "")
+	defer srv.Close()
+
+	orig := syncTempFile
+	syncTempFile = func(f *os.File) error { return fmt.Errorf("fsync failed: disk full") }
+	t.Cleanup(func() { syncTempFile = orig })
+
+	_, err := e.Upgrade(context.Background(), UpgradeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "flush asset") {
+		t.Fatalf("err = %v, want flush asset", err)
+	}
+	if got := e.Status().State; got != StateFailed {
+		t.Fatalf("Status = %q, want %q", got, StateFailed)
+	}
+	if sw.swapInvoked() {
+		t.Fatal("SwapAndRelaunch should not be invoked on Sync failure")
+	}
+}
+
+func TestEngine_CloseTempFileFailure(t *testing.T) {
+	// Cover the closeTempFile (tmp.Close) error branch: the download and Sync
+	// succeed, but closing the temp file fails. The seam injects the failure;
+	// (*os.File).Close does not fail on a healthy host fs in CI.
+	dir := t.TempDir()
+	sw := &mockSwapper{target: filepath.Join(dir, "fake-bundle")}
+	asset := []byte("bytes")
+	e, srv := newTestEngine(t, sw, "v1.0.0", "v9.9.9", asset, "")
+	defer srv.Close()
+
+	orig := closeTempFile
+	closeTempFile = func(f *os.File) error { return fmt.Errorf("close failed: bad fd") }
+	t.Cleanup(func() { closeTempFile = orig })
+
+	_, err := e.Upgrade(context.Background(), UpgradeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "close asset") {
+		t.Fatalf("err = %v, want close asset", err)
+	}
+	if got := e.Status().State; got != StateFailed {
+		t.Fatalf("Status = %q, want %q", got, StateFailed)
+	}
+	if sw.swapInvoked() {
+		t.Fatal("SwapAndRelaunch should not be invoked on Close failure")
+	}
+}
