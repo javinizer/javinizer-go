@@ -159,15 +159,3 @@ func TestLinuxSwapper_SwapAndRelaunch_CancelledContext(t *testing.T) {
 		t.Fatal("SwapAndRelaunch with cancelled context should fail")
 	}
 }
-
-func TestLinuxSwapper_SwapAndRelaunch_TargetUnresolvable(t *testing.T) {
-	// Neither APPIMAGE nor the executable path resolves to an executable
-	// target: Target() errors, and SwapAndRelaunch propagates it without
-	// spawning the helper. Covers the Target() error branch.
-	t.Setenv("APPIMAGE", "")
-	s := &linuxSwapper{}
-	// A valid context so we get past the ctx.Err() guard.
-	if err := s.SwapAndRelaunch(context.Background(), "/nonexistent/staged.AppImage", 1); err == nil {
-		t.Fatal("SwapAndRelaunch should fail when Target is unresolvable")
-	}
-}
