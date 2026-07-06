@@ -43,6 +43,20 @@ func withDesktopBuild(t *testing.T, on bool) {
 	t.Cleanup(func() { desktop.BuildDesktop = orig })
 }
 
+// withIsolatedUserDataDir points all platform user-config env vars at a fresh
+// temp dir so desktop.UserDataDir() returns an isolated, writable path on
+// every platform (Linux: XDG_CONFIG_HOME, macOS: HOME, Windows: APPDATA).
+// Without this, tests on CI share the runner's real config dir and collide
+// (e.g. one test's crash.log file blocks another's os.Mkdir of the same path).
+func withIsolatedUserDataDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("APPDATA", dir)
+	return dir
+}
+
 // withArgs swaps os.Args for the test and restores it on cleanup.
 func withArgs(t *testing.T, args ...string) {
 	t.Helper()
@@ -116,19 +130,20 @@ func (e *stringError) Error() string { return e.s }
 
 func TestWriteCrashLog_CLIWritesStderrOnly(t *testing.T) {
 	withDesktopBuild(t, false)
-	// No crash.log should be written in CLI mode.
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	withIsolatedUserDataDir(t)
 	writeCrashLog("cli error")
-	// The desktop data dir is created lazily; in CLI mode writeCrashLog
-	// returns before touching it, so no Javinizer dir should exist.
-	_, err := os.Stat(filepath.Join(tmp, "Library", "Application Support", "Javinizer", "crash.log"))
+	// In CLI mode writeCrashLog writes only to stderr and returns before
+	// touching UserDataDir, so no crash.log should exist anywhere under the
+	// isolated data dir.
+	dir, err := desktop.UserDataDir()
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(dir, "crash.log"))
 	assert.True(t, os.IsNotExist(err), "CLI mode must not write crash.log")
 }
 
 func TestWriteCrashLog_DesktopAppendsTimestampedEntry(t *testing.T) {
 	withDesktopBuild(t, true)
-	t.Setenv("HOME", t.TempDir())
+	withIsolatedUserDataDir(t)
 
 	writeCrashLog("desktop boom")
 
@@ -147,7 +162,7 @@ func TestWriteCrashLog_DesktopAppendsTimestampedEntry(t *testing.T) {
 // not truncated, so a history of pre-GUI crashes is preserved.
 func TestWriteCrashLog_DesktopAppendsAcrossCalls(t *testing.T) {
 	withDesktopBuild(t, true)
-	t.Setenv("HOME", t.TempDir())
+	withIsolatedUserDataDir(t)
 
 	writeCrashLog("first")
 	writeCrashLog("second")
@@ -166,11 +181,14 @@ func TestWriteCrashLog_DesktopAppendsAcrossCalls(t *testing.T) {
 // attempted (no panic).
 func TestWriteCrashLog_DesktopUserDataDirErrorSkipsFile(t *testing.T) {
 	withDesktopBuild(t, true)
-	// An unset/unwritable HOME makes os.UserHomeDir fail on this platform;
-	// point HOME at a path inside a file (not a dir) so MkdirAll fails.
+	// Point every platform's user-config env var at a path that is a FILE,
+	// not a directory, so desktop.UserDataDir's MkdirAll fails. (Setting only
+	// HOME is insufficient: Linux uses XDG_CONFIG_HOME, Windows uses APPDATA.)
 	filePath := filepath.Join(t.TempDir(), "not-a-dir")
 	require.NoError(t, os.WriteFile(filePath, []byte("x"), 0o600))
 	t.Setenv("HOME", filePath)
+	t.Setenv("XDG_CONFIG_HOME", filePath)
+	t.Setenv("APPDATA", filePath)
 
 	writeCrashLog("no dir") // must not panic
 }
@@ -180,7 +198,7 @@ func TestWriteCrashLog_DesktopUserDataDirErrorSkipsFile(t *testing.T) {
 // directory). stderr still receives the message; no panic.
 func TestWriteCrashLog_DesktopOpenFileErrorSkipsWrite(t *testing.T) {
 	withDesktopBuild(t, true)
-	t.Setenv("HOME", t.TempDir())
+	withIsolatedUserDataDir(t)
 
 	// Pre-create crash.log as a DIRECTORY so OpenFile(O_WRONLY) fails.
 	dir, err := desktop.UserDataDir()

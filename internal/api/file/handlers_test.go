@@ -472,6 +472,18 @@ func TestBrowseDirectory(t *testing.T) {
 	}
 }
 
+// homeOutsideAllowlist returns a real directory outside the test's temp
+// allowlist on every platform: the user home dir (falling back to TempDir if
+// unset). Used by the browse allowlist tests so they run on Windows, where
+// /etc and /tmp don't exist.
+func homeOutsideAllowlist(t *testing.T) string {
+	t.Helper()
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home
+	}
+	return os.TempDir()
+}
+
 func TestBrowseDirectory_AllowlistNotEnforced(t *testing.T) {
 	// Security model: browse never enforces the allowlist. The allowlist is a
 	// safety guard for file OPERATIONS (scan/organize), not a restriction on
@@ -494,8 +506,10 @@ func TestBrowseDirectory_AllowlistNotEnforced(t *testing.T) {
 		skipProc bool
 	}{
 		// Paths outside the allowlist but real and not denied → listed (200).
-		{"etc outside allowlist", "/etc", true, false},
-		{"tmp outside allowlist", "/tmp", true, false},
+		// /etc and /tmp are Unix-only; use TempDir/UserHomeDir so the cases
+		// run on Windows too (where those paths don't exist).
+		{"temp root outside allowlist", os.TempDir(), true, false},
+		{"home outside allowlist", homeOutsideAllowlist(t), true, false},
 		{"traversal resolves to parent", filepath.Join(tempDir, ".."), true, false},
 		// Denylist (built-in /dev) → rejected even without the allowlist.
 		{"dev is denied by denylist", "/dev", false, false},
