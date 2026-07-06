@@ -170,7 +170,7 @@
 			aria-label="Browse for a directory"
 			tabindex="-1"
 			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => e.stopPropagation()}
+			onkeydown={(e) => { if (e.key !== 'Escape') e.stopPropagation(); }}
 		>
 			<div class="flex items-center justify-between border-b p-4">
 				<div>
