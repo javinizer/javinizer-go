@@ -31,12 +31,26 @@ func browseDirectory(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		if req.Path == "" {
-			req.Path, _ = os.Getwd()
+			// Default to the user's home — the most likely place for a videos
+			// folder — rather than the process CWD (which for the desktop app is
+			// wherever it launched from, often System32).
+			if home, err := os.UserHomeDir(); err == nil && home != "" {
+				req.Path = home
+			}
+			if req.Path == "" {
+				req.Path, _ = os.Getwd()
+			}
 		}
 
 		apiCfg := rt.GetAPIConfig()
 
-		dirFile, validPath, err := core.ValidateAndOpenPath(req.Path, apiCfg.SecurityConfig())
+		// Browse never enforces the allowlist: the allowlist is a safety guard
+		// for file operations (scan/organize), not a restriction on listing
+		// directories to configure it. Enforcing it here would be a catch-22
+		// (you can't browse to add the first allowed directory, or to add a
+		// directory on another drive like D:\). The denylist (/proc, /sys, /dev
+		// + config) still applies.
+		dirFile, validPath, err := core.ValidateAndOpenBrowsePath(req.Path, apiCfg.SecurityConfig())
 		if err != nil {
 			apperrors.WriteAPIError(c, err)
 			return

@@ -36,6 +36,9 @@ func autocompletePath(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		apiCfg := rt.GetAPIConfig()
+		// Autocomplete never enforces the allowlist (see browse.go): the allowlist
+		// is a safety guard for file operations, not for path completion. The
+		// denylist still applies.
 		basePath, fragment, err := resolveAutocompleteBasePath(req.Path, apiCfg.SecurityConfig())
 		if err != nil {
 			apperrors.WriteAPIError(c, err)
@@ -111,7 +114,9 @@ func resolveAutocompleteBasePath(userPath string, cfg *core.SecurityNarrowConfig
 		}
 	}
 
-	validBasePath, err := core.ValidateScanPath(basePath, cfg)
+	// Autocomplete never enforces the allowlist (see browse.go): the allowlist
+	// is a safety guard for file operations, not for path completion.
+	validBasePath, err := core.ValidateBrowsePath(basePath, cfg)
 	if err != nil {
 		return "", "", err
 	}

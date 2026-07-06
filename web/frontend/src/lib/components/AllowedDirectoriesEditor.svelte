@@ -31,8 +31,6 @@
 	let browserPath = $state('');
 	let browserInitialPath = $state('');
 
-	let canBrowse = $derived(whitelistPaths.length > 0);
-
 	function addDir(e?: Event) {
 		e?.preventDefault();
 		const path = newDir.trim();
@@ -60,7 +58,10 @@
 	}
 
 	function openBrowser() {
-		browserInitialPath = newDir.trim() || whitelistPaths[0] || '/';
+		// Start at the typed path, else the first allowed dir, else the user's
+		// home (~) — a useful default when the allowlist is empty (first-time
+		// setup) rather than '/' which buries videos folders several levels deep.
+		browserInitialPath = newDir.trim() || whitelistPaths[0] || '~';
 		browserPath = browserInitialPath;
 		showBrowser = true;
 	}
@@ -131,21 +132,19 @@
 			class="flex-1"
 			onnavigate={() => addDir()}
 		/>
-		{#if canBrowse}
-			<Button
-				variant="outline"
-				size="sm"
-				type="button"
-				onclick={openBrowser}
-				title="Browse for a directory"
-				aria-label="Browse for a directory"
-			>
-				{#snippet children()}
-					<FolderOpen class="h-4 w-4" />
-					<span class="hidden sm:inline">Browse</span>
-				{/snippet}
-			</Button>
-		{/if}
+		<Button
+			variant="outline"
+			size="sm"
+			type="button"
+			onclick={openBrowser}
+			title="Browse for a directory"
+			aria-label="Browse for a directory"
+		>
+			{#snippet children()}
+				<FolderOpen class="h-4 w-4" />
+				<span class="hidden sm:inline">Browse</span>
+			{/snippet}
+		</Button>
 		<Button
 			variant="outline"
 			size="sm"

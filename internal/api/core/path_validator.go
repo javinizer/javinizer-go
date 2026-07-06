@@ -40,6 +40,17 @@ type PathValidator struct {
 	// Windows UNC settings
 	allowUNC          bool
 	allowedUNCServers []string
+
+	// enforceAllowlist gates the allowlist checks (step 1 empty-allowlist gate
+	// and step 11 isAllowed). It is true for file-operation validators (scan,
+	// organize, movie compare) where the allowlist is a safety guard, and false
+	// for the browse/autocomplete validator, which lists directories so the
+	// admin can configure the allowlist — restricting listing to the allowlist
+	// would be a catch-22 (you can't browse to add the first directory). The
+	// denylist (built-in /proc, /sys, /dev + config) always applies, and all
+	// other validation (home expansion, cleaning, reserved names, UNC,
+	// canonicalize, exists + type) runs unchanged regardless of this flag.
+	enforceAllowlist bool
 }
 
 // NewPathValidator creates a PathValidator with the given filesystem and access lists.
@@ -47,9 +58,10 @@ type PathValidator struct {
 // An empty allow list denies all access (secure by default).
 func NewPathValidator(fs afero.Fs, allow, deny []string) *PathValidator {
 	return &PathValidator{
-		fs:    fs,
-		allow: allow,
-		deny:  deny,
+		fs:               fs,
+		allow:            allow,
+		deny:             deny,
+		enforceAllowlist: true,
 	}
 }
 
@@ -61,6 +73,24 @@ func NewPathValidatorWithUNC(fs afero.Fs, allow, deny []string, allowUNC bool, a
 		deny:              deny,
 		allowUNC:          allowUNC,
 		allowedUNCServers: allowedUNCServers,
+		enforceAllowlist:  true,
+	}
+}
+
+// NewPathValidatorBrowse creates a PathValidator for directory listing
+// (browse/autocomplete): the allowlist is not enforced, so any directory can
+// be listed. The denylist still applies. The allowlist is a safety guard for
+// file operations (scan/organize), not a restriction on browsing to
+// configure it — enforcing it on browse would be a catch-22 (you can't browse
+// to add the first allowed directory, or to add a directory on another drive).
+func NewPathValidatorBrowse(fs afero.Fs, deny []string, allowUNC bool, allowedUNCServers []string) *PathValidator {
+	return &PathValidator{
+		fs:                fs,
+		allow:             nil,
+		deny:              deny,
+		allowUNC:          allowUNC,
+		allowedUNCServers: allowedUNCServers,
+		enforceAllowlist:  false,
 	}
 }
 
@@ -86,19 +116,24 @@ const (
 
 // validate runs the shared pipeline and then checks the path type.
 func (v *PathValidator) validate(userPath string, target validateTarget) (string, error) {
-	// Step 1: Allowlist gate — deny by default when empty
-	if len(v.allow) == 0 {
-		return "", apperrors.ErrAllowedDirsEmpty
-	}
-	hasValidEntry := false
-	for _, dir := range v.allow {
-		if strings.TrimSpace(dir) != "" {
-			hasValidEntry = true
-			break
+	// Step 1: Allowlist gate — deny by default when empty. Skipped for the
+	// browse validator (enforceAllowlist=false), where the whole point is
+	// listing directories to configure the allowlist. The denylist (step 12)
+	// still applies.
+	if v.enforceAllowlist {
+		if len(v.allow) == 0 {
+			return "", apperrors.ErrAllowedDirsEmpty
 		}
-	}
-	if !hasValidEntry {
-		return "", apperrors.ErrAllowedDirsEmpty
+		hasValidEntry := false
+		for _, dir := range v.allow {
+			if strings.TrimSpace(dir) != "" {
+				hasValidEntry = true
+				break
+			}
+		}
+		if !hasValidEntry {
+			return "", apperrors.ErrAllowedDirsEmpty
+		}
 	}
 
 	// Step 2: Expand home directory
@@ -154,8 +189,8 @@ func (v *PathValidator) validate(userPath string, target validateTarget) (string
 	// Step 10: Windows — normalize path for platform comparison
 	canonicalPath = normalizePathForPlatform(canonicalPath)
 
-	// Step 11: Allowlist check
-	if !v.isAllowed(canonicalPath) {
+	// Step 11: Allowlist check. Skipped for the browse validator (see Step 1).
+	if v.enforceAllowlist && !v.isAllowed(canonicalPath) {
 		return "", apperrors.NewPathError(apperrors.ErrPathOutsideAllowed, canonicalPath)
 	}
 

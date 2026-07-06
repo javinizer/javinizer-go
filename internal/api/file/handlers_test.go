@@ -409,12 +409,12 @@ func TestBrowseDirectory(t *testing.T) {
 			expectedStatus: 400,
 		},
 		{
-			name: "browse with empty path defaults to cwd",
+			name: "browse with empty path defaults to home",
 			setupFiles: func(_ *testing.T, tempDir string) string {
 				return ""
 			},
 			requestBody:    contracts.BrowseRequest{Path: ""},
-			expectedStatus: 403,
+			expectedStatus: 200,
 		},
 		{
 			name: "invalid JSON",
@@ -472,36 +472,40 @@ func TestBrowseDirectory(t *testing.T) {
 	}
 }
 
-func TestBrowseDirectory_PathTraversalPrevention(t *testing.T) {
-	// CRITICAL: Create temp directory and configure allowlist
-	// DefaultConfig(nil, nil) has empty AllowedDirectories, which allows traversal to parent directories
-	// This test must verify that paths outside the allowlist are rejected
+func TestBrowseDirectory_AllowlistNotEnforced(t *testing.T) {
+	// Security model: browse never enforces the allowlist. The allowlist is a
+	// safety guard for file OPERATIONS (scan/organize), not a restriction on
+	// browsing to configure it. Paths outside the allowlist return 200 (the
+	// directory is listed). The denylist (/proc, /sys, /dev + config) still
+	// applies, and non-existent paths still error.
 	tempDir := t.TempDir()
 
 	cfg := config.DefaultConfig(nil, nil)
-	cfg.API.Security.AllowedDirectories = []string{tempDir} // Only allow tempDir
+	cfg.API.Security.AllowedDirectories = []string{tempDir} // allowlist covers only tempDir
 
 	deps := newTestDepsFromConfig(cfg)
 	router := gin.New()
 	router.POST("/browse", browseDirectory(testkit.GetTestRuntime(deps)))
 
-	maliciousPaths := []string{
-		// Relative traversal attempts (from tempDir context)
-		filepath.Join(tempDir, "../../../etc"),                           // Try to escape to /etc
-		filepath.Join(tempDir, "..\\..\\..\\windows"),                    // Windows-style escape
-		filepath.Join(tempDir, "..", "..", ".."),                         // Multiple parent dirs
-		filepath.Join(tempDir, "..", filepath.Base(tempDir), "..", ".."), // Navigate back then escape
-
-		// Absolute paths outside allowlist
-		"/etc",        // Unix system directory
-		"/tmp",        // Different directory
-		"C:\\Windows", // Windows system directory
-		"/Users",      // Common parent directory
+	cases := []struct {
+		name     string
+		path     string
+		wantOK   bool // true = expect 200, false = expect non-200 (denied/missing)
+		skipProc bool
+	}{
+		// Paths outside the allowlist but real and not denied → listed (200).
+		{"etc outside allowlist", "/etc", true, false},
+		{"tmp outside allowlist", "/tmp", true, false},
+		{"traversal resolves to parent", filepath.Join(tempDir, ".."), true, false},
+		// Denylist (built-in /dev) → rejected even without the allowlist.
+		{"dev is denied by denylist", "/dev", false, false},
+		// Non-existent path → error (not 200).
+		{"non-existent path errors", filepath.Join(tempDir, "no-such-dir"), false, false},
 	}
 
-	for _, maliciousPath := range maliciousPaths {
-		t.Run("PathTraversal:"+maliciousPath, func(t *testing.T) {
-			reqBody := contracts.BrowseRequest{Path: maliciousPath}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reqBody := contracts.BrowseRequest{Path: tc.path}
 			body, err := json.Marshal(reqBody)
 			require.NoError(t, err)
 
@@ -511,25 +515,13 @@ func TestBrowseDirectory_PathTraversalPrevention(t *testing.T) {
 
 			router.ServeHTTP(w, req)
 
-			// Path traversal should be explicitly denied with 403 or 400, not just "not 500"
-			// This prevents regression where handler returns 200 with sensitive data
-			assert.True(t, w.Code == 403 || w.Code == 400,
-				"Expected 403 (Forbidden) or 400 (Bad Request) for path traversal attempt, got %d", w.Code)
-
-			// Verify error response contains appropriate message
-			var response contracts.ErrorResponse
-			err = json.Unmarshal(w.Body.Bytes(), &response)
-			require.NoError(t, err, "Response should be valid JSON error")
-			assert.NotEmpty(t, response.Error, "Error message should be present")
-
-			// Accept various security-related error messages (access denied, path not exist, etc.)
-			errorLower := strings.ToLower(response.Error)
-			hasSecurityError := strings.Contains(errorLower, "access denied") ||
-				strings.Contains(errorLower, "path does not exist") ||
-				strings.Contains(errorLower, "forbidden") ||
-				strings.Contains(errorLower, "not allowed")
-			assert.True(t, hasSecurityError,
-				"Error message should indicate security rejection for path: %s, got: %s", maliciousPath, response.Error)
+			if tc.wantOK {
+				assert.Equal(t, 200, w.Code,
+					"browse must not enforce the allowlist (path outside allowlist should still list); body=%s", w.Body.String())
+			} else {
+				assert.NotEqual(t, 200, w.Code,
+					"denylist/non-existent paths must not be listed; got %d for %q", w.Code, tc.path)
+			}
 		})
 	}
 }
@@ -642,8 +634,17 @@ func TestAutocompletePath(t *testing.T) {
 	})
 }
 
-func TestAutocompletePath_PathTraversalPrevention(t *testing.T) {
+func TestAutocompletePath_PathTraversalResolved(t *testing.T) {
+	// Under the security model, browse/autocomplete never enforce the allowlist
+	// (the allowlist is a safety guard for file OPERATIONS like scan/organize,
+	// not a restriction on browsing to configure it). Path traversal (..) is
+	// still canonicalized — so there is no hidden traversal — but it is not
+	// rejected; it resolves to the canonical parent. Allowlist enforcement lives
+	// at scan (see scan.go).
 	tempDir := t.TempDir()
+	parentDir := filepath.Dir(tempDir)
+	canonicalParent, err := filepath.EvalSymlinks(parentDir)
+	require.NoError(t, err)
 
 	cfg := config.DefaultConfig(nil, nil)
 	cfg.API.Security.AllowedDirectories = []string{tempDir}
@@ -664,11 +665,14 @@ func TestAutocompletePath_PathTraversalPrevention(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 
-	assert.True(t, w.Code == 400 || w.Code == 403, "expected security rejection, got %d", w.Code)
-
-	var response contracts.ErrorResponse
+	// Browse does not reject traversal — it resolves it. The base path is the
+	// canonical parent (.. resolved), not the raw traversal string.
+	require.Equal(t, 200, w.Code, w.Body.String())
+	var response contracts.PathAutocompleteResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	assert.NotEmpty(t, response.Error)
+	assert.Equal(t, canonicalParent, response.BasePath,
+		".. must be canonicalized to the resolved parent, not left as a raw traversal")
+	assert.Equal(t, "etc", filepath.Base(reqBody.Path))
 }
 
 func TestScanDirectory_LargeDirectory(t *testing.T) {

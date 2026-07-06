@@ -44,6 +44,25 @@ func validateScanPath(userPath string, cfg *SecurityNarrowConfig) (string, error
 	return v.ValidateDir(userPath)
 }
 
+// validateBrowsePath mirrors validateScanPath but runs the browse validator,
+// which skips the allowlist gate. Used by the browse and autocomplete endpoints
+// so an admin can list directories to configure the allowlist — the bootstrap
+// operation that the (possibly empty or '.'-only) allowlist would otherwise
+// block. The allowlist is a safety guard for file operations (scan/organize),
+// not a restriction on browsing. The denylist still applies.
+func validateBrowsePath(userPath string, cfg *SecurityNarrowConfig) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("validateBrowsePath: security config is required")
+	}
+	v := NewPathValidatorBrowse(
+		afero.NewOsFs(),
+		cfg.DeniedDirectories,
+		cfg.AllowUNC,
+		cfg.AllowedUNCServers,
+	)
+	return v.ValidateDir(userPath)
+}
+
 // getDeniedDirectories returns a list of system directories that should never be scanned
 func getDeniedDirectories() []string {
 	return []string{
@@ -64,6 +83,15 @@ func ValidateScanPath(userPath string, cfg *SecurityNarrowConfig) (string, error
 	return validateScanPath(userPath, cfg)
 }
 
+// ValidateBrowsePath is the browse variant of ValidateScanPath: it skips the
+// allowlist gate so the browse/autocomplete endpoints can list directories
+// outside the allowlist (used to configure the allowlist/denylist). The
+// allowlist is enforced only at file-operation time (scan/organize). The
+// denylist still applies.
+func ValidateBrowsePath(userPath string, cfg *SecurityNarrowConfig) (string, error) {
+	return validateBrowsePath(userPath, cfg)
+}
+
 // ValidateAndOpenPath validates a user-provided path and returns an open *os.File
 // to the validated directory, along with its canonical path.
 //
@@ -81,7 +109,25 @@ func ValidateScanPath(userPath string, cfg *SecurityNarrowConfig) (string, error
 //	defer f.Close()
 //	// Use f.ReadDir() or path (file remains open, preventing swap)
 func ValidateAndOpenPath(userPath string, cfg *SecurityNarrowConfig) (*os.File, string, error) {
-	canonicalPath, err := validateScanPath(userPath, cfg)
+	return validateAndOpenPath(userPath, cfg, false)
+}
+
+// ValidateAndOpenBrowsePath is the browse variant of ValidateAndOpenPath: it
+// skips the allowlist gate so the browse endpoint can list directories outside
+// the allowlist (used to configure the allowlist). The allowlist is enforced
+// only at file-operation time (scan/organize). The denylist still applies.
+func ValidateAndOpenBrowsePath(userPath string, cfg *SecurityNarrowConfig) (*os.File, string, error) {
+	return validateAndOpenPath(userPath, cfg, true)
+}
+
+func validateAndOpenPath(userPath string, cfg *SecurityNarrowConfig, browse bool) (*os.File, string, error) {
+	var canonicalPath string
+	var err error
+	if browse {
+		canonicalPath, err = validateBrowsePath(userPath, cfg)
+	} else {
+		canonicalPath, err = validateScanPath(userPath, cfg)
+	}
 	if err != nil {
 		return nil, "", err
 	}
