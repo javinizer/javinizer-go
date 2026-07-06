@@ -460,7 +460,7 @@ build-app-darwin: web-build
 		-output bin/javinizer-app-darwin-universal
 	rm -f bin/javinizer-app-darwin-amd64 bin/javinizer-app-darwin-arm64
 	./scripts/package-app-darwin.sh bin/javinizer-app-darwin-universal \
-		bin/Javinizer.app $(VERSION)
+		bin/Javinizer.app $(VERSION) internal/desktop/icons/javinizer.icns
 	@echo "macOS desktop app built: bin/Javinizer.app"
 
 # NOTE: Wails v2 Windows builds require CGO (go-webview2). This target must
