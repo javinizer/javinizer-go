@@ -69,6 +69,14 @@ func initDesktopDefault() {
 // it is a no-op (cleanup_unix.go).
 
 func init() {
+	// Disable cobra's Windows "mousetrap": when a GUI app is launched by
+	// double-clicking in Explorer, cobra shows a "This is a command line tool.
+	// You need to open cmd.exe and run it from there." dialog and exits without
+	// running the command. The desktop build is a real GUI app (Wails window),
+	// so the mousetrap must be disabled for double-click launches to work.
+	if desktop.IsDesktopBuild() {
+		cobra.MousetrapHelpText = ""
+	}
 	// Customize version template
 	rootCmd.SetVersionTemplate(version.Info() + "\n")
 
