@@ -6,6 +6,12 @@ import { toastStore } from '$lib/stores/toast';
 // Build WebSocket URL dynamically from browser location
 // This works for both local dev (localhost:8080) and Docker (any host)
 // Converts http -> ws and https -> wss automatically
+function isDesktopApp(): boolean {
+	if (!browser) return false;
+	if (location.protocol === 'wails:') return true;
+	return location.hostname === 'wails.localhost';
+}
+
 function getWebSocketURL(): string {
 	if (!browser) {
 		// During SSR, return a placeholder (won't be used)
@@ -17,6 +23,7 @@ function getWebSocketURL(): string {
 
 interface WebSocketState {
 	connected: boolean;
+	skipped: boolean;
 	messages: ProgressMessage[];
 	messagesByFile: Record<string, Record<string, ProgressMessage>>; // Latest message per file per job (job_id -> file_path -> message)
 	error?: string;
@@ -25,6 +32,7 @@ interface WebSocketState {
 function createWebSocketStore() {
 	const { subscribe, set, update } = writable<WebSocketState>({
 		connected: false,
+		skipped: false,
 		messages: [],
 		messagesByFile: {},
 	});
@@ -40,6 +48,11 @@ function createWebSocketStore() {
 			return;
 		}
 
+		if (isDesktopApp()) {
+			console.info('WebSocket: skipping connection in desktop app (Wails asset server does not proxy WS upgrades)');
+			update((state) => ({ ...state, skipped: true, error: undefined }));
+			return;
+		}
 		shouldReconnect = true;
 
 		if (reconnectTimeout) {
@@ -131,7 +144,7 @@ function createWebSocketStore() {
 			ws = null;
 		}
 
-		set({ connected: false, messages: [], messagesByFile: {} });
+		set({ connected: false, skipped: false, messages: [], messagesByFile: {} });
 	}
 
 	function clearMessages() {

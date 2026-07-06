@@ -3619,6 +3619,10 @@ const docTemplate = `{
                     "type": "boolean",
                     "example": true
                 },
+                "session_id": {
+                    "type": "string",
+                    "example": ""
+                },
                 "username": {
                     "type": "string",
                     "example": "admin"

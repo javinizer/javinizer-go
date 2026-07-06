@@ -183,3 +183,128 @@ func TestNewReverseProxyHandler_InvalidTargetReturns502(t *testing.T) {
 		t.Errorf("status = %d, want %d (invalid target must fail closed)", w.Code, http.StatusBadGateway)
 	}
 }
+
+func TestRewriteSessionCookies_StripsSecureAndDomain(t *testing.T) {
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Add("Set-Cookie", (&http.Cookie{
+		Name:   "javinizer_session",
+		Value:  "abc123",
+		Secure: true,
+		Domain: "example.com",
+	}).String())
+
+	if err := rewriteSessionCookies(resp); err != nil {
+		t.Fatalf("rewriteSessionCookies returned error: %v", err)
+	}
+
+	cookies := resp.Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected 1 cookie, got %d", len(cookies))
+	}
+	c := cookies[0]
+	if c.Secure {
+		t.Errorf("Secure attribute not stripped")
+	}
+	if c.Domain != "" {
+		t.Errorf("Domain attribute not stripped: got %q", c.Domain)
+	}
+	if c.Value != "abc123" {
+		t.Errorf("cookie value changed: got %q, want %q", c.Value, "abc123")
+	}
+	raw := resp.Header.Get("Set-Cookie")
+	if strings.Contains(raw, "Secure") {
+		t.Errorf("rewritten Set-Cookie still contains Secure: %q", raw)
+	}
+	if strings.Contains(raw, "Domain") {
+		t.Errorf("rewritten Set-Cookie still contains Domain: %q", raw)
+	}
+}
+
+func TestRewriteSessionCookies_NoOpWithoutCookies(t *testing.T) {
+	resp := &http.Response{Header: http.Header{}}
+
+	if err := rewriteSessionCookies(resp); err != nil {
+		t.Fatalf("rewriteSessionCookies returned error: %v", err)
+	}
+
+	if len(resp.Cookies()) != 0 {
+		t.Errorf("expected no cookies after no-op rewrite, got %d", len(resp.Cookies()))
+	}
+	if got := resp.Header.Get("Set-Cookie"); got != "" {
+		t.Errorf("Set-Cookie header should be absent after no-op, got %q", got)
+	}
+}
+
+func TestRewriteSessionCookies_HandlesMultipleCookies(t *testing.T) {
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Add("Set-Cookie", (&http.Cookie{
+		Name:   "javinizer_session",
+		Value:  "sid1",
+		Secure: true,
+		Domain: "example.com",
+	}).String())
+	resp.Header.Add("Set-Cookie", (&http.Cookie{
+		Name:   "prefs",
+		Value:  "dark",
+		Secure: true,
+		Domain: "api.example.com",
+	}).String())
+
+	if err := rewriteSessionCookies(resp); err != nil {
+		t.Fatalf("rewriteSessionCookies returned error: %v", err)
+	}
+
+	cookies := resp.Cookies()
+	if len(cookies) != 2 {
+		t.Fatalf("expected 2 cookies, got %d", len(cookies))
+	}
+	for _, c := range cookies {
+		if c.Secure {
+			t.Errorf("cookie %q: Secure attribute not stripped", c.Name)
+		}
+		if c.Domain != "" {
+			t.Errorf("cookie %q: Domain attribute not stripped: %q", c.Name, c.Domain)
+		}
+	}
+	if got := len(resp.Header.Values("Set-Cookie")); got != 2 {
+		t.Errorf("expected 2 Set-Cookie headers after rewrite, got %d", got)
+	}
+}
+
+func TestNewReverseProxyHandler_RewritesSessionCookiesFromBackend(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:   "javinizer_session",
+			Value:  "proxied-sid",
+			Secure: true,
+			Domain: "example.com",
+		})
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	h := newReverseProxyHandler(backend.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	req.Host = "wails.localhost"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	cookies := w.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected 1 Set-Cookie in proxied response, got %d", len(cookies))
+	}
+	c := cookies[0]
+	if c.Secure {
+		t.Errorf("proxy did not strip Secure from backend Set-Cookie")
+	}
+	if c.Domain != "" {
+		t.Errorf("proxy did not strip Domain from backend Set-Cookie: got %q", c.Domain)
+	}
+	if c.Value != "proxied-sid" {
+		t.Errorf("cookie value changed: got %q, want %q", c.Value, "proxied-sid")
+	}
+}
