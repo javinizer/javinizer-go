@@ -513,6 +513,7 @@ export interface AuthStatusResponse {
 	initialized: boolean;
 	authenticated: boolean;
 	username?: string;
+	session_id?: string;
 }
 
 export interface AuthCredentialsRequest {

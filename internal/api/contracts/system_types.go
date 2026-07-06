@@ -16,6 +16,7 @@ type AuthStatusResponse struct {
 	Initialized   bool   `json:"initialized" example:"true"`
 	Authenticated bool   `json:"authenticated" example:"false"`
 	Username      string `json:"username,omitempty" example:"admin"`
+	SessionID     string `json:"session_id,omitempty" example:""`
 }
 
 // AuthCredentialsRequest represents username/password login/setup payload.

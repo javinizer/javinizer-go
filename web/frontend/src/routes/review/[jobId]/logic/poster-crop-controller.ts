@@ -1,4 +1,11 @@
 import type { FileResult, Movie } from '$lib/api/types';
+import { BaseClient } from '$lib/api/clients/common';
+
+function sessionParam(): string {
+	const sid = BaseClient.getSessionID();
+	return sid ? `?session=${encodeURIComponent(sid)}` : '';
+}
+
 import {
 	clamp,
 	getDefaultPosterCropBox,
@@ -111,7 +118,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		const currentMovie = deps.getCurrentMovie();
 		if (currentMovie && deps.getCropSourceURL().includes('-full.jpg')) {
 			const posterMovieId = deps.getCurrentResult()?.movie_id ?? currentMovie.id;
-			const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg`;
+			const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg${sessionParam()}`;
 			deps.setCropSourceURL(`${fallbackURL}?v=${now()}`);
 			return;
 		}
@@ -132,10 +139,10 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			currentResult?.movie &&
 			currentMovie.poster_url !== currentResult.movie.poster_url
 		) {
-			sourceURL = `/api/v1/temp/image?url=${encodeURIComponent(currentMovie.poster_url)}`;
+			sourceURL = `/api/v1/temp/image?url=${encodeURIComponent(currentMovie.poster_url)}${sessionParam().replace('?', '&')}`;
 		} else {
 			const posterMovieId = currentResult?.movie_id ?? currentMovie.id;
-			const fullPosterURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}-full.jpg`;
+			const fullPosterURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}-full.jpg${sessionParam()}`;
 			sourceURL = fullPosterURL;
 		}
 		deps.setCropSourceURL(`${sourceURL}?v=${now()}`);

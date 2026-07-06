@@ -12,6 +12,7 @@
 	import AllowedDirectoriesEditor from '$lib/components/AllowedDirectoriesEditor.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
+	import { BaseClient } from '$lib/api/clients/common';
 	import { websocketStore } from '$lib/stores/websocket';
 	import { toastStore } from '$lib/stores/toast';
 	import { getBackgroundJobState, reopenModal, dismiss, closeModal } from '$lib/stores/background-job.svelte';
@@ -89,12 +90,13 @@
 
 		authSubmitting = true;
 		try {
-			await apiClient.setupAuth({
+			const setupResult = await apiClient.setupAuth({
 				username: setupUsername,
 				password: setupPassword
 			});
 			setupPassword = '';
 			setupPasswordConfirm = '';
+			if (setupResult?.session_id) { BaseClient.setSessionID(setupResult.session_id); }
 			loginPassword = '';
 			await refreshAuthStatus();
 			if (authAuthenticated) {
@@ -162,12 +164,13 @@
 		authError = null;
 		authSubmitting = true;
 		try {
-			await apiClient.loginAuth({
+			const loginResult = await apiClient.loginAuth({
 				username: loginUsername,
 				password: loginPassword,
 				remember_me: loginRememberMe
 			});
 			loginPassword = '';
+			if (loginResult?.session_id) { BaseClient.setSessionID(loginResult.session_id); }
 			await refreshAuthStatus();
 		} catch (error) {
 			authError = error instanceof Error ? error.message : 'Failed to login';
@@ -183,6 +186,7 @@
 		} catch (error) {
 			authError = error instanceof Error ? error.message : 'Failed to logout';
 		} finally {
+			BaseClient.setSessionID(null);
 			authAuthenticated = false;
 			authUsername = '';
 			loginPassword = '';

@@ -46,8 +46,8 @@ func getAuthStatus(rt *core.APIRuntime) gin.HandlerFunc {
 			Authenticated: false,
 		}
 
-		sessionID, err := c.Cookie(sessionCookieName)
-		if err == nil && strings.TrimSpace(sessionID) != "" {
+		sessionID := sessionIDFromRequest(c)
+		if sessionID != "" {
 			username, authErr := deps.Auth.AuthenticateSession(sessionID)
 			if authErr == nil {
 				resp.Authenticated = true
@@ -138,6 +138,7 @@ func setupAuth(rt *core.APIRuntime) gin.HandlerFunc {
 		c.JSON(http.StatusOK, contracts.AuthStatusResponse{
 			Initialized:   true,
 			Authenticated: true,
+			SessionID:     sessionID,
 			Username:      strings.TrimSpace(req.Username),
 		})
 	}
@@ -197,6 +198,7 @@ func loginAuth(rt *core.APIRuntime) gin.HandlerFunc {
 		c.JSON(http.StatusOK, contracts.AuthStatusResponse{
 			Initialized:   true,
 			Authenticated: true,
+			SessionID:     sessionID,
 			Username:      strings.TrimSpace(req.Username),
 		})
 	}
@@ -218,8 +220,8 @@ func logoutAuth(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		deps := rt.Deps()
 		if deps != nil && deps.Auth != nil {
-			sessionID, err := c.Cookie(sessionCookieName)
-			if err == nil && strings.TrimSpace(sessionID) != "" {
+			sessionID := sessionIDFromRequest(c)
+			if sessionID != "" {
 				deps.Auth.Logout(sessionID)
 			}
 		}

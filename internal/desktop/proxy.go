@@ -42,5 +42,29 @@ func newReverseProxyHandler(target string) http.Handler {
 			// Route by the API server's host so gin sees the expected Host.
 			req.Out.Host = parsed.Host
 		},
+		ModifyResponse: rewriteSessionCookies,
 	}
+}
+
+// rewriteSessionCookies rewrites Set-Cookie headers from the API server so the
+// browser stores them against the webview's origin. The API server may set
+// Secure (when X-Forwarded-Proto is https) and a Domain attribute that targets
+// 127.0.0.1:PORT; neither applies to the Wails internal origin the webview
+// loads from, so WKWebView drops the cookie and the session is lost. Stripping
+// Secure and Domain makes the cookie default to the proxy's host (the webview
+// origin) so it is stored and sent on subsequent same-origin requests.
+//
+//nolint:unused // referenced only by newReverseProxyHandler, which is //go:build desktop
+func rewriteSessionCookies(resp *http.Response) error {
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
+		return nil
+	}
+	resp.Header.Del("Set-Cookie")
+	for _, c := range cookies {
+		c.Secure = false
+		c.Domain = ""
+		resp.Header.Add("Set-Cookie", c.String())
+	}
+	return nil
 }

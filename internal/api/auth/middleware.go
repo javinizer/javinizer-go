@@ -15,6 +15,24 @@ import (
 
 const sessionCookieName = "javinizer_session"
 
+// sessionIDFromRequest reads the session ID from the cookie, falling back to
+// the X-Session-ID header and then the ?session= query parameter. macOS
+// WKWebView does not reliably store Set-Cookie responses from the Wails
+// asset server's custom URL scheme handler, so the desktop app sends the
+// session ID via a header (and <img> tags append it as a query param) instead.
+func sessionIDFromRequest(c *gin.Context) string {
+	if sid, err := c.Cookie(sessionCookieName); err == nil && strings.TrimSpace(sid) != "" {
+		return sid
+	}
+	if sid := c.GetHeader("X-Session-ID"); strings.TrimSpace(sid) != "" {
+		return sid
+	}
+	if sid := c.Query("session"); strings.TrimSpace(sid) != "" {
+		return sid
+	}
+	return ""
+}
+
 // authDisabler is an optional capability of AuthProvider implementations that
 // explicitly bypasses authentication. Only the test-only testkit.NoOpAuth
 // implements it; the production *AuthManager does not, so this path is
@@ -72,8 +90,8 @@ func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		sessionID, err := c.Cookie(sessionCookieName)
-		if err != nil || strings.TrimSpace(sessionID) == "" {
+		sessionID := sessionIDFromRequest(c)
+		if sessionID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 				Error: "authentication required",
 			})
@@ -147,8 +165,8 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		sessionID, err := c.Cookie(sessionCookieName)
-		if err != nil || strings.TrimSpace(sessionID) == "" {
+		sessionID := sessionIDFromRequest(c)
+		if sessionID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 				Error: "authentication required",
 			})

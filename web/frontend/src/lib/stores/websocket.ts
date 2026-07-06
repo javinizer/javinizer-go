@@ -6,6 +6,12 @@ import { toastStore } from '$lib/stores/toast';
 // Build WebSocket URL dynamically from browser location
 // This works for both local dev (localhost:8080) and Docker (any host)
 // Converts http -> ws and https -> wss automatically
+function isDesktopApp(): boolean {
+	if (!browser) return false;
+	if (location.protocol === 'wails:') return true;
+	return location.hostname === 'wails.localhost';
+}
+
 function getWebSocketURL(): string {
 	if (!browser) {
 		// During SSR, return a placeholder (won't be used)
@@ -40,6 +46,11 @@ function createWebSocketStore() {
 			return;
 		}
 
+		if (isDesktopApp()) {
+			console.info('WebSocket: skipping connection in desktop app (Wails asset server does not proxy WS upgrades)');
+			update((state) => ({ ...state, connected: true }));
+			return;
+		}
 		shouldReconnect = true;
 
 		if (reconnectTimeout) {

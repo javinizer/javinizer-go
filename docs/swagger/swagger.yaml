@@ -147,6 +147,9 @@ definitions:
       initialized:
         example: true
         type: boolean
+      session_id:
+        example: ""
+        type: string
       username:
         example: admin
         type: string

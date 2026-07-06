@@ -10,6 +10,28 @@ import type {
 export class BaseClient {
 	protected baseURL: string;
 
+	private static sessionID: string | null = null;
+
+	static setSessionID(id: string | null) {
+		if (id) {
+			BaseClient.sessionID = id;
+			localStorage.setItem('javinizer_session', id);
+		} else {
+			BaseClient.sessionID = null;
+			localStorage.removeItem('javinizer_session');
+		}
+	}
+
+	static getSessionID(): string | null {
+		if (BaseClient.sessionID) return BaseClient.sessionID;
+		const stored = localStorage.getItem('javinizer_session');
+		if (stored) {
+			BaseClient.sessionID = stored;
+			return stored;
+		}
+		return null;
+	}
+
 	constructor(baseURL: string) {
 		this.baseURL = baseURL;
 	}
@@ -17,10 +39,11 @@ export class BaseClient {
 	public async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
 		const url = `${this.baseURL}${endpoint}`;
 		const response = await fetch(url, {
-			credentials: 'include',
+			credentials: 'same-origin',
 			...options,
 			headers: {
 				'Content-Type': 'application/json',
+				...(BaseClient.getSessionID() ? { 'X-Session-ID': BaseClient.getSessionID()! } : {}),
 				...options?.headers,
 			},
 		});
@@ -91,7 +114,9 @@ export class SystemClient extends BaseClient {
 	}
 
 	getPreviewImageURL(imageURL: string): string {
-		return `${this.baseURL}/api/v1/temp/image?url=${encodeURIComponent(imageURL)}`;
+		const session = BaseClient.getSessionID();
+		const sessionParam = session ? `&session=${encodeURIComponent(session)}` : '';
+		return `${this.baseURL}/api/v1/temp/image?url=${encodeURIComponent(imageURL)}${sessionParam}`;
 	}
 
 	async getCurrentWorkingDirectory(): Promise<{ path: string }> {
