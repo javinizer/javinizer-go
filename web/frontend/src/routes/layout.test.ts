@@ -189,6 +189,49 @@ describe('first-run setup allowed directories step', () => {
 		await waitFor(() => expect(vi.mocked(toastStore.success)).toHaveBeenCalled());
 	});
 
+	it('commits a typed directory on Enter without clicking the add button', async () => {
+		apiClient.getAuthStatus
+			.mockResolvedValueOnce(uninitializedStatus())
+			.mockResolvedValueOnce(authenticatedStatus());
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
+		apiClient.getConfig.mockResolvedValue(freshConfig());
+		apiClient.updateSecurityConfig.mockResolvedValue(securityResponse(['/mnt/videos']));
+
+		const { container } = render(Layout);
+		await waitFor(() => expect(container.textContent).toContain('First-Time Setup'));
+
+		const username = container.querySelector('#setup-username') as HTMLInputElement;
+		const password = container.querySelector('#setup-password') as HTMLInputElement;
+		const confirm = container.querySelector('#setup-password-confirm') as HTMLInputElement;
+		await fireEvent.input(username, { target: { value: 'admin' } });
+		await fireEvent.input(password, { target: { value: 'password123' } });
+		await fireEvent.input(confirm, { target: { value: 'password123' } });
+		await fireEvent.submit(username.closest('form') as HTMLFormElement);
+
+		await waitFor(() => expect(container.textContent).toContain('Add Allowed Directories'));
+
+		const dirInput = container.querySelector(
+			'input[placeholder*="Add a directory"]',
+		) as HTMLInputElement;
+		expect(dirInput).toBeTruthy();
+		await fireEvent.input(dirInput, { target: { value: '/mnt/videos' } });
+		await fireEvent.keyDown(dirInput, { key: 'Enter' });
+		await tick();
+
+		const save = Array.from(container.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Save & Continue'),
+		) as HTMLButtonElement;
+		await fireEvent.click(save);
+
+		await waitFor(() =>
+			expect(apiClient.updateSecurityConfig).toHaveBeenCalledWith(
+				expect.objectContaining({ allowed_directories: ['/mnt/videos'] }),
+			),
+		);
+	});
+
 	it('sends all four security fields including current defaults', async () => {
 		apiClient.getAuthStatus
 			.mockResolvedValueOnce(uninitializedStatus())

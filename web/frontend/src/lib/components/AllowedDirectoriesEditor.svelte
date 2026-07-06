@@ -81,6 +81,7 @@
 			{placeholder}
 			{whitelistPaths}
 			class="flex-1"
+			onnavigate={() => addDir()}
 		/>
 		<Button variant="outline" size="sm" onclick={addDir} disabled={!newDir.trim()} title="Add allowed directory">
 			{#snippet children()}
