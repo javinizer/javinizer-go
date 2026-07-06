@@ -359,10 +359,17 @@
 {:else if setupNeedsDirs}
 	<div class="min-h-screen bg-background flex items-center justify-center px-4 py-10">
 		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm space-y-4">
-			<div class="space-y-1">
-				<h1 class="text-2xl font-bold">Add Allowed Directories</h1>
+			<div class="space-y-2">
+				<div class="flex items-center gap-3">
+					<div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+						<FolderCheck class="h-5 w-5" />
+					</div>
+					<h1 class="text-2xl font-bold leading-tight">Add Allowed Directories</h1>
+				</div>
 				<p class="text-sm text-muted-foreground">
 					Add the folders you want to scan for videos; you can change this later in Settings → Security.
+				</p>
+				<p class="text-xs text-muted-foreground">
 					With no allowed directories configured, all file operations are blocked.
 				</p>
 			</div>

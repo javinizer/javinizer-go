@@ -33,6 +33,7 @@
 	let isEditing = $state(false);
 	let pathSuggestions = $state<PathAutocompleteSuggestion[]>([]);
 	let activeSuggestionIndex = $state(-1);
+	let userNavigatedSuggestions = $state(false);
 	let autocompleteLoading = $state(false);
 	let autocompleteDebounceId: ReturnType<typeof setTimeout> | null = null;
 	let autocompleteRequestToken = 0;
@@ -68,6 +69,7 @@
 		autocompleteRequestToken += 1;
 		pathSuggestions = [];
 		activeSuggestionIndex = -1;
+		userNavigatedSuggestions = false;
 		autocompleteLoading = false;
 	}
 
@@ -92,7 +94,7 @@
 			if (requestToken !== autocompleteRequestToken || !isEditing) return;
 
 			pathSuggestions = response.suggestions;
-			activeSuggestionIndex = response.suggestions.length > 0 ? 0 : -1;
+			activeSuggestionIndex = -1;
 		} catch {
 			if (requestToken !== autocompleteRequestToken) return;
 			pathSuggestions = [];
@@ -107,14 +109,21 @@
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'ArrowDown' && displayedSuggestions.length > 0) {
 			e.preventDefault();
+			userNavigatedSuggestions = true;
 			activeSuggestionIndex =
 				activeSuggestionIndex >= displayedSuggestions.length - 1 ? 0 : activeSuggestionIndex + 1;
 		} else if (e.key === 'ArrowUp' && displayedSuggestions.length > 0) {
 			e.preventDefault();
+			userNavigatedSuggestions = true;
 			activeSuggestionIndex =
 				activeSuggestionIndex <= 0 ? displayedSuggestions.length - 1 : activeSuggestionIndex - 1;
 		} else if (e.key === 'Enter') {
-			if (showSuggestions && activeSuggestionIndex >= 0 && displayedSuggestions[activeSuggestionIndex]) {
+			if (
+				userNavigatedSuggestions &&
+				showSuggestions &&
+				activeSuggestionIndex >= 0 &&
+				displayedSuggestions[activeSuggestionIndex]
+			) {
 				e.preventDefault();
 				selectSuggestion(displayedSuggestions[activeSuggestionIndex]);
 				return;
@@ -130,6 +139,8 @@
 	}
 
 	function handleInput() {
+		userNavigatedSuggestions = false;
+		activeSuggestionIndex = -1;
 		onchange?.(value);
 		const inputPath = value.trim();
 
@@ -176,6 +187,9 @@
 
 	{#if showSuggestions}
 		<div class="absolute z-20 mt-2 w-full rounded-lg border bg-background shadow-lg overflow-hidden">
+			<div class="px-3 py-1.5 text-xs text-muted-foreground border-b border-border/60 bg-muted/30">
+				Type a path, or use ↑↓ to pick a suggestion
+			</div>
 			<div class="max-h-64 overflow-y-auto py-1">
 				{#each displayedSuggestions as suggestion, index (suggestion.path)}
 					<button
