@@ -5,6 +5,42 @@ import type {
 	AuthStatusResponse,
 	VersionStatusResponse,
 } from '../types';
+import { browser } from '$app/environment';
+
+const sessionStorageKey = 'javinizer_session';
+
+function isDesktopApp(): boolean {
+	if (!browser) return false;
+	if (location.protocol === 'wails:') return true;
+	return location.hostname === 'wails.localhost';
+}
+
+function readStoredSession(): string | null {
+	if (!browser) return null;
+	try {
+		return localStorage.getItem(sessionStorageKey);
+	} catch {
+		return null;
+	}
+}
+
+function writeStoredSession(id: string): void {
+	if (!browser) return;
+	try {
+		localStorage.setItem(sessionStorageKey, id);
+	} catch {
+		// localStorage may be unavailable in private mode or sandboxed frames
+	}
+}
+
+function clearStoredSession(): void {
+	if (!browser) return;
+	try {
+		localStorage.removeItem(sessionStorageKey);
+	} catch {
+		// ignore
+	}
+}
 
 // Base client provides the shared request method that all sub-clients use.
 export class BaseClient {
@@ -15,16 +51,16 @@ export class BaseClient {
 	static setSessionID(id: string | null) {
 		if (id) {
 			BaseClient.sessionID = id;
-			localStorage.setItem('javinizer_session', id);
+			writeStoredSession(id);
 		} else {
 			BaseClient.sessionID = null;
-			localStorage.removeItem('javinizer_session');
+			clearStoredSession();
 		}
 	}
 
 	static getSessionID(): string | null {
 		if (BaseClient.sessionID) return BaseClient.sessionID;
-		const stored = localStorage.getItem('javinizer_session');
+		const stored = readStoredSession();
 		if (stored) {
 			BaseClient.sessionID = stored;
 			return stored;
@@ -114,9 +150,10 @@ export class SystemClient extends BaseClient {
 	}
 
 	getPreviewImageURL(imageURL: string): string {
+		const url = `${this.baseURL}/api/v1/temp/image?url=${encodeURIComponent(imageURL)}`;
+		if (!isDesktopApp()) return url;
 		const session = BaseClient.getSessionID();
-		const sessionParam = session ? `&session=${encodeURIComponent(session)}` : '';
-		return `${this.baseURL}/api/v1/temp/image?url=${encodeURIComponent(imageURL)}${sessionParam}`;
+		return session ? `${url}&session=${encodeURIComponent(session)}` : url;
 	}
 
 	async getCurrentWorkingDirectory(): Promise<{ path: string }> {

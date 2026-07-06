@@ -23,6 +23,7 @@ function getWebSocketURL(): string {
 
 interface WebSocketState {
 	connected: boolean;
+	skipped: boolean;
 	messages: ProgressMessage[];
 	messagesByFile: Record<string, Record<string, ProgressMessage>>; // Latest message per file per job (job_id -> file_path -> message)
 	error?: string;
@@ -31,6 +32,7 @@ interface WebSocketState {
 function createWebSocketStore() {
 	const { subscribe, set, update } = writable<WebSocketState>({
 		connected: false,
+		skipped: false,
 		messages: [],
 		messagesByFile: {},
 	});
@@ -48,7 +50,7 @@ function createWebSocketStore() {
 
 		if (isDesktopApp()) {
 			console.info('WebSocket: skipping connection in desktop app (Wails asset server does not proxy WS upgrades)');
-			update((state) => ({ ...state, connected: true }));
+			update((state) => ({ ...state, skipped: true, error: undefined }));
 			return;
 		}
 		shouldReconnect = true;
@@ -142,7 +144,7 @@ function createWebSocketStore() {
 			ws = null;
 		}
 
-		set({ connected: false, messages: [], messagesByFile: {} });
+		set({ connected: false, skipped: false, messages: [], messagesByFile: {} });
 	}
 
 	function clearMessages() {

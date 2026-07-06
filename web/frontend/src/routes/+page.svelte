@@ -308,7 +308,7 @@
 			{
 				label: 'WebSocket Stream',
 				ok: wsState.connected,
-				hint: wsState.connected ? 'Real-time updates enabled' : 'No live progress feed',
+				hint: wsState.skipped ? 'Real-time stream unavailable in desktop app' : wsState.connected ? 'Real-time updates enabled' : 'No live progress feed',
 				actionLabel: 'Browse Jobs',
 				action: () => goto('/browse')
 			},
@@ -426,7 +426,7 @@
 
 					<div class="mt-4 pt-4 border-t text-xs text-muted-foreground flex items-center justify-between">
 						<span>Active jobs: {activeJobCount}</span>
-						<span>{wsState.connected ? 'WS connected' : 'WS disconnected'}</span>
+						<span>{wsState.connected ? 'WS connected' : wsState.skipped ? 'WS n/a (desktop)' : 'WS disconnected'}</span>
 					</div>
 				</Card>
 			</div>
