@@ -7,28 +7,29 @@ import (
 	"syscall"
 )
 
+// AttachConsole is not exposed by the stdlib syscall package, so bind it
+// manually from kernel32. GetStdHandle + the STD_* constants are stdlib.
 var (
 	kernel32          = syscall.NewLazyDLL("kernel32.dll")
 	procAttachConsole = kernel32.NewProc("AttachConsole")
-	procGetStdHandle  = kernel32.NewProc("GetStdHandle")
 )
 
-const (
-	attachParentProcess = ^uintptr(0)
-	stdOutputHandle     = ^uintptr(10)
-	stdErrorHandle      = ^uintptr(11)
-	invalidHandleValue  = ^uintptr(0)
-)
+// attachParentProcess is the special handle value passed to AttachConsole to
+// attach to the console of the process that launched us (e.g. cmd.exe). It is
+// (DWORD)-1; the stdlib does not name it.
+const attachParentProcess = ^uintptr(0)
 
-func attachParentConsole() {
+// attachParentConsole is a var (not a func) so tests can assert the
+// desktop-build branch in run() takes it; on Windows it does the real work.
+var attachParentConsole = func() {
 	r, _, _ := procAttachConsole.Call(attachParentProcess)
 	if r == 0 {
 		return
 	}
-	if out, _, _ := procGetStdHandle.Call(stdOutputHandle); out != 0 && out != invalidHandleValue {
-		os.Stdout = os.NewFile(out, "stdout")
+	if h, err := syscall.GetStdHandle(syscall.STD_OUTPUT_HANDLE); err == nil && h != 0 && h != syscall.InvalidHandle {
+		os.Stdout = os.NewFile(uintptr(h), "stdout")
 	}
-	if err, _, _ := procGetStdHandle.Call(stdErrorHandle); err != 0 && err != invalidHandleValue {
-		os.Stderr = os.NewFile(err, "stderr")
+	if h, err := syscall.GetStdHandle(syscall.STD_ERROR_HANDLE); err == nil && h != 0 && h != syscall.InvalidHandle {
+		os.Stderr = os.NewFile(uintptr(h), "stderr")
 	}
 }

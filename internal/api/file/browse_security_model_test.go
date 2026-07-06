@@ -143,3 +143,27 @@ func TestBrowse_StillEnforcesDenylist(t *testing.T) {
 	assert.NotEqual(t, http.StatusOK, w.Code,
 		"denylist must still block /proc even without the allowlist")
 }
+
+// TestBrowse_EmptyPathFallsBackToGetwd covers the os.Getwd() fallback in the
+// empty-path branch: when os.UserHomeDir() is unavailable (HOME unset), the
+// handler must fall back to the process working directory rather than fail.
+func TestBrowse_EmptyPathFallsBackToGetwd(t *testing.T) {
+	router, _ := newBrowseTestRouter(t, nil)
+
+	// Force os.UserHomeDir() to fail so the Getwd fallback is taken. On Unix
+	// an empty HOME makes UserHomeDir return ("", error); on Windows the same
+	// applies via USERPROFILE. t.Setenv restores them after the test.
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+
+	body, _ := json.Marshal(contracts.BrowseRequest{Path: ""})
+	req := httptest.NewRequest("POST", "/browse", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// The test process's CWD is a real, non-denied directory, so the Getwd
+	// fallback must resolve it and return a listing (200), not an error.
+	assert.Equal(t, http.StatusOK, w.Code,
+		"empty path with no home dir must fall back to Getwd and succeed")
+}

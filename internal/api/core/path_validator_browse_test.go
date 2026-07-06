@@ -58,6 +58,22 @@ func TestPathValidator_BrowseRejectsNonExistent(t *testing.T) {
 	}
 }
 
+// TestValidateBrowsePath_NilConfigErrors covers the nil-config guard: a nil
+// security config must produce an explicit error rather than dereferencing it.
+func TestValidateBrowsePath_NilConfigErrors(t *testing.T) {
+	if _, err := ValidateBrowsePath(t.TempDir(), nil); err == nil {
+		t.Fatal("ValidateBrowsePath with nil config must return an error")
+	}
+}
+
+// TestValidateAndOpenBrowsePath_NilConfigErrors covers the nil-config guard on
+// the TOCTOU-safe browse variant too.
+func TestValidateAndOpenBrowsePath_NilConfigErrors(t *testing.T) {
+	if _, _, err := ValidateAndOpenBrowsePath(t.TempDir(), nil); err == nil {
+		t.Fatal("ValidateAndOpenBrowsePath with nil config must return an error")
+	}
+}
+
 // TestValidateAndOpenBrowsePath_OpenHandle verifies the TOCTOU-safe picker
 // variant returns an open file handle the caller must close.
 func TestValidateAndOpenBrowsePath_OpenHandle(t *testing.T) {

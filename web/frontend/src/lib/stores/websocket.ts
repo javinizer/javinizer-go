@@ -162,6 +162,11 @@ function createWebSocketStore() {
 			// at /desktop/runtime.
 			resolveDesktopWSUrl()
 				.then((base) => {
+					// Re-check after the async gap: disconnect() may have run while
+					// the fetch was in flight (e.g. component unmount), in which
+					// case opening a socket now would leak a connection nothing
+					// can close. Also guards against overlapping connect() calls.
+					if (!shouldReconnect) return;
 					if (!base) {
 						update((state) => ({ ...state, error: 'WebSocket URL unavailable' }));
 						scheduleReconnect();
@@ -169,7 +174,9 @@ function createWebSocketStore() {
 					}
 					openSocket(withSessionParam(base));
 				})
-				.catch(() => scheduleReconnect());
+				.catch(() => {
+					if (shouldReconnect) scheduleReconnect();
+				});
 			return;
 		}
 

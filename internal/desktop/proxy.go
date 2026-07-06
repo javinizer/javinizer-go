@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 )
 
 // newReverseProxyHandler forwards every request from the Wails internal
@@ -46,7 +45,12 @@ func newReverseProxyHandler(target string) http.Handler {
 		},
 		ModifyResponse: rewriteSessionCookies,
 	}
-	wsURL := strings.Replace(target, "http://127.0.0.1", "ws://localhost", 1) + "/ws/progress"
+	// Derive the WS URL from the parsed target so it stays consistent with
+	// the proxy destination and doesn't depend on target's exact string
+	// prefix. The webview connects directly (the Wails AssetServer 501s WS
+	// upgrades); localhost (not 127.0.0.1) so the upgrader's CheckOrigin and
+	// the browser's same-origin policy are happy.
+	wsURL := (&url.URL{Scheme: "ws", Host: "localhost:" + parsed.Port(), Path: "/ws/progress"}).String()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/desktop/runtime" {
 			w.Header().Set("Content-Type", "application/json")

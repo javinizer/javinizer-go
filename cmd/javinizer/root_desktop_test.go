@@ -163,3 +163,41 @@ func TestPersistentPreRun_DesktopBuildCustomConfigSkipsPortableEnv(t *testing.T)
 	assert.Empty(t, os.Getenv("JAVINIZER_DB"), "custom --config must skip SetupPortableEnv (no JAVINIZER_DB injection)")
 	assert.Empty(t, os.Getenv("JAVINIZER_LOG_DIR"), "custom --config must skip SetupPortableEnv (no JAVINIZER_LOG_DIR injection)")
 }
+
+// TestDisableMousetrapForDesktopBuild_CLIBuildNoOp verifies that in a CLI
+// build (BuildDesktop="0"), disableMousetrapForDesktopBuild leaves
+// cobra.MousetrapHelpText untouched — the mousetrap only applies to the
+// desktop (GUI) build.
+func TestDisableMousetrapForDesktopBuild_CLIBuildNoOp(t *testing.T) {
+	origBuild := desktop.BuildDesktop
+	origMousetrap := cobra.MousetrapHelpText
+	desktop.BuildDesktop = "0"
+	defer func() {
+		desktop.BuildDesktop = origBuild
+		cobra.MousetrapHelpText = origMousetrap
+	}()
+
+	cobra.MousetrapHelpText = "preset non-empty value"
+	disableMousetrapForDesktopBuild()
+	assert.Equal(t, "preset non-empty value", cobra.MousetrapHelpText,
+		"CLI build must not clear the mousetrap help text")
+}
+
+// TestDisableMousetrapForDesktopBuild_DesktopBuildClears verifies that in a
+// desktop build (BuildDesktop="1"), disableMousetrapForDesktopBuild clears
+// cobra.MousetrapHelpText so double-click launches open the GUI instead of
+// showing cobra's "this is a command line tool" dialog.
+func TestDisableMousetrapForDesktopBuild_DesktopBuildClears(t *testing.T) {
+	origBuild := desktop.BuildDesktop
+	origMousetrap := cobra.MousetrapHelpText
+	desktop.BuildDesktop = "1"
+	defer func() {
+		desktop.BuildDesktop = origBuild
+		cobra.MousetrapHelpText = origMousetrap
+	}()
+
+	cobra.MousetrapHelpText = "This is a command line tool..."
+	disableMousetrapForDesktopBuild()
+	assert.Empty(t, cobra.MousetrapHelpText,
+		"desktop build must clear the mousetrap help text for double-click launches")
+}
