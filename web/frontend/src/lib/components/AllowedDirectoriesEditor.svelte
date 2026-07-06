@@ -6,7 +6,7 @@
 	import FileBrowser from '$lib/components/FileBrowser.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { toastStore } from '$lib/stores/toast';
-	import { FolderPlus, Trash2, Star, Folder, FolderOpen, X } from 'lucide-svelte';
+	import { FolderPlus, Trash2, Star, Folder, FolderOpen, X, Info } from 'lucide-svelte';
 
 	interface Props {
 		directories: string[];
@@ -43,6 +43,16 @@
 		}
 		directories = [...directories, path];
 		newDir = '';
+	}
+
+	function displayPath(dir: string): string {
+		if (dir === '.') return 'current directory (.)';
+		return dir;
+	}
+
+	function pathTooltip(dir: string): string {
+		if (dir === '.') return '"." means the current working directory (where the app was launched from). Add an absolute path like /Users/you/Videos for a stable, explicit location.';
+		return dir;
 	}
 
 	function removeDir(index: number) {
@@ -93,7 +103,12 @@
 					{:else}
 						<Folder class="h-4 w-4 shrink-0 text-muted-foreground" />
 					{/if}
-					<span class="min-w-0 flex-1 truncate font-mono text-sm" title={dir}>{dir}</span>
+					<span class="min-w-0 flex-1 truncate font-mono text-sm" title={pathTooltip(dir)}>{displayPath(dir)}</span>
+					{#if dir === '.'}
+						<span class="shrink-0 text-muted-foreground" title={pathTooltip(dir)} aria-label="What does dot mean?">
+							<Info class="h-3.5 w-3.5" />
+						</span>
+					{/if}
 					<button
 						type="button"
 						class="shrink-0 text-muted-foreground opacity-60 transition-colors hover:text-destructive group-hover:opacity-100"

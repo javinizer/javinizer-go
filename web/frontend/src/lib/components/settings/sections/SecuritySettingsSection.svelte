@@ -5,10 +5,9 @@
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
-	import PathInput from '$lib/components/PathInput.svelte';
 	import AllowedDirectoriesEditor from '$lib/components/AllowedDirectoriesEditor.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import { FolderPlus, Trash2, Save, Folder } from 'lucide-svelte';
+	import { FolderPlus, Trash2, Save } from 'lucide-svelte';
 	import type { Config, SettingsConfig, SecurityUpdateRequest } from '$lib/api/types';
 
 	interface Props {
@@ -54,7 +53,6 @@
 		}
 	});
 
-	let newDeniedDir = $state('');
 	let newUncServer = $state('');
 
 	let dirty = $derived(
@@ -73,21 +71,6 @@
 		if (a.length !== b.length) return false;
 		for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
 		return true;
-	}
-
-	function addDeniedDir() {
-		const path = newDeniedDir.trim();
-		if (!path) return;
-		if (draft.denied_directories.includes(path)) {
-			toastStore.error('Directory already in the denied list', 3000);
-			return;
-		}
-		draft.denied_directories = [...draft.denied_directories, path];
-		newDeniedDir = '';
-	}
-
-	function removeDeniedDir(index: number) {
-		draft.denied_directories = draft.denied_directories.filter((_, i) => i !== index);
 	}
 
 	function addUncServer() {
@@ -161,39 +144,13 @@
 			Paths here are always blocked, even if they fall under an allowed directory. Built-in system directories (/proc, /sys, /dev) are always denied.
 		</p>
 
-		{#if draft.denied_directories.length > 0}
-			<ul class="space-y-2 mb-3">
-				{#each draft.denied_directories as dir, index (dir + '-' + index)}
-					<li class="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
-						<Folder class="h-4 w-4 text-muted-foreground shrink-0" />
-						<span class="flex-1 min-w-0 truncate font-mono text-sm">{dir}</span>
-						<button
-							type="button"
-							class="text-muted-foreground hover:text-destructive transition-colors shrink-0"
-							title="Remove directory"
-							aria-label="Remove denied directory {dir}"
-							onclick={() => removeDeniedDir(index)}
-						>
-							<Trash2 class="h-4 w-4" />
-						</button>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-
-		<div class="flex items-start gap-2">
-			<PathInput
-				bind:value={newDeniedDir}
-				placeholder="Add a directory to deny (e.g. /sensitive)"
-				whitelistPaths={draft.allowed_directories}
-				class="flex-1"
-			/>
-			<Button variant="outline" size="sm" onclick={addDeniedDir} disabled={!newDeniedDir.trim()} title="Add denied directory">
-				{#snippet children()}
-					<FolderPlus class="h-4 w-4" />
-				{/snippet}
-			</Button>
-		</div>
+		<AllowedDirectoriesEditor
+			bind:directories={draft.denied_directories}
+			whitelistPaths={draft.allowed_directories}
+			showDefaultBadge={false}
+			placeholder="Add a directory to deny (e.g. /sensitive)"
+			emptyHint="No denied directories. Add one below to block specific paths even within allowed directories."
+		/>
 	</SettingsSubsection>
 
 	<SettingsSubsection title="UNC / Network Paths (Windows)">
