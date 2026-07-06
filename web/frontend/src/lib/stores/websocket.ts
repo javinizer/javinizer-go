@@ -2,23 +2,38 @@ import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
 import type { ProgressMessage } from '$lib/api/types';
 import { toastStore } from '$lib/stores/toast';
+import { BaseClient } from '$lib/api/clients/common';
 
-// Build WebSocket URL dynamically from browser location
-// This works for both local dev (localhost:8080) and Docker (any host)
-// Converts http -> ws and https -> wss automatically
+// Build WebSocket URL dynamically from browser location.
+// In the browser (dev server / Docker), the SPA and API are same-origin, so
+// the WS URL is derived from location.origin. In the desktop app the Wails
+// AssetServer returns 501 for WS upgrades, so the frontend cannot use a
+// same-origin WS URL through the reverse proxy; instead it fetches the direct
+// WS URL (ws://localhost:PORT/ws/progress) from GET /desktop/runtime, which
+// the desktop reverse proxy serves without forwarding.
+
 function isDesktopApp(): boolean {
 	if (!browser) return false;
 	if (location.protocol === 'wails:') return true;
 	return location.hostname === 'wails.localhost';
 }
 
-function getWebSocketURL(): string {
-	if (!browser) {
-		// During SSR, return a placeholder (won't be used)
-		return 'ws://localhost:8080/ws/progress';
-	}
-	// Replace http/https with ws/wss and append the WebSocket path
+function sameOriginWebSocketURL(): string {
+	// Replace http/https with ws/wss and append the WebSocket path.
 	return location.origin.replace(/^http/, 'ws') + '/ws/progress';
+}
+
+// Append the session ID as a query parameter. The browser cannot set custom
+// headers (e.g. X-Session-ID) on a WebSocket, and in the desktop app the
+// session cookie is stored against the webview origin — not 127.0.0.1:PORT —
+// so it is not sent on a direct WS connection. The auth middleware falls back
+// to the ?session= query parameter, which is how the desktop app authenticates
+// the WS upgrade.
+function withSessionParam(base: string): string {
+	const sid = BaseClient.getSessionID();
+	if (!sid) return base;
+	const sep = base.includes('?') ? '&' : '?';
+	return `${base}${sep}session=${encodeURIComponent(sid)}`;
 }
 
 interface WebSocketState {
@@ -41,31 +56,35 @@ function createWebSocketStore() {
 	let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 	let shouldReconnect = false;
 	let lastErrorToastTime = 0;
+	// Cached direct WS URL for the desktop app. The port is fixed for the
+	// app's lifetime, so fetch once and reuse across reconnects.
+	let desktopWSUrl: string | null = null;
 
-	function connect() {
-		if (!browser) {
-			console.warn('WebSocket connection attempted during SSR, skipping');
-			return;
+	async function resolveDesktopWSUrl(): Promise<string | null> {
+		if (desktopWSUrl) return desktopWSUrl;
+		try {
+			const resp = await fetch('/desktop/runtime');
+			if (!resp.ok) return null;
+			const data = (await resp.json()) as { ws_url?: string };
+			if (typeof data.ws_url === 'string' && data.ws_url.length > 0) {
+				desktopWSUrl = data.ws_url;
+				return desktopWSUrl;
+			}
+		} catch {
+			// fall through to caller's error handling
 		}
+		return null;
+	}
 
-		if (isDesktopApp()) {
-			console.info('WebSocket: skipping connection in desktop app (Wails asset server does not proxy WS upgrades)');
-			update((state) => ({ ...state, skipped: true, error: undefined }));
-			return;
-		}
-		shouldReconnect = true;
-
-		if (reconnectTimeout) {
-			clearTimeout(reconnectTimeout);
+	function scheduleReconnect() {
+		if (!shouldReconnect || reconnectTimeout) return;
+		reconnectTimeout = setTimeout(() => {
 			reconnectTimeout = null;
-		}
+			connect();
+		}, 3000);
+	}
 
-		if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-			return;
-		}
-
-		const wsUrl = getWebSocketURL();
-
+	function openSocket(wsUrl: string) {
 		try {
 			ws = new WebSocket(wsUrl);
 
@@ -76,19 +95,10 @@ function createWebSocketStore() {
 			ws.onclose = () => {
 				update((state) => ({ ...state, connected: false }));
 				ws = null;
-
-				if (!shouldReconnect) {
-					return;
-				}
-
-				// Attempt to reconnect after 3 seconds
-				reconnectTimeout = setTimeout(() => {
-					connect();
-				}, 3000);
+				scheduleReconnect();
 			};
 
-			ws.onerror = (error) => {
-				console.error('WebSocket error:', error);
+			ws.onerror = () => {
 				const now = Date.now();
 				if (now - lastErrorToastTime > 10000) {
 					toastStore.error('WebSocket connection error');
@@ -124,7 +134,46 @@ function createWebSocketStore() {
 			console.error('Failed to create WebSocket:', error);
 			toastStore.error('Failed to connect to server');
 			update((state) => ({ ...state, error: 'Failed to create WebSocket connection' }));
+			scheduleReconnect();
 		}
+	}
+
+	function connect() {
+		if (!browser) {
+			console.warn('WebSocket connection attempted during SSR, skipping');
+			return;
+		}
+
+		shouldReconnect = true;
+
+		if (reconnectTimeout) {
+			clearTimeout(reconnectTimeout);
+			reconnectTimeout = null;
+		}
+
+		if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+			return;
+		}
+
+		if (isDesktopApp()) {
+			// The Wails AssetServer returns 501 for WS upgrades, so connect
+			// directly to the embedded API server's WS endpoint. The URL (with
+			// the random localhost port) is served by the desktop reverse proxy
+			// at /desktop/runtime.
+			resolveDesktopWSUrl()
+				.then((base) => {
+					if (!base) {
+						update((state) => ({ ...state, error: 'WebSocket URL unavailable' }));
+						scheduleReconnect();
+						return;
+					}
+					openSocket(withSessionParam(base));
+				})
+				.catch(() => scheduleReconnect());
+			return;
+		}
+
+		openSocket(withSessionParam(sameOriginWebSocketURL()));
 	}
 
 	function disconnect() {

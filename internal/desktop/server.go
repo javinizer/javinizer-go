@@ -88,6 +88,13 @@ func StartServer(ctx context.Context, configFile string) (*ServerInstance, error
 	deps.CoreDeps.SetInstallEnvironment(system.EnvironmentDesktop)
 
 	router := apiserver.NewServer(rt)
+
+	// The desktop webview connects to /ws/progress directly at 127.0.0.1:PORT
+	// (the Wails AssetServer returns 501 for WS upgrades, so the reverse proxy
+	// cannot carry them). That connection is cross-origin, so override the
+	// upgrader to accept the desktop webview origins. See ws_origin.go.
+	rt.EnsureRuntime().SetWebSocketUpgrader(desktopWSUpgrader())
+
 	apiserver.LogServerInfo(cfg)
 
 	srv := &http.Server{

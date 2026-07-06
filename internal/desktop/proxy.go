@@ -1,9 +1,11 @@
 package desktop
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 )
 
 // newReverseProxyHandler forwards every request from the Wails internal
@@ -20,10 +22,10 @@ import (
 // WebSocket upgrades are NOT proxied: the Wails AssetServer answers any
 // "Upgrade: websocket" request with 501 Not Implemented in its own ServeHTTP
 // (pkg/assetserver/assetserver.go) before this handler — or any Middleware —
-// is invoked. Real-time progress via /ws/progress is therefore a known desktop
-// limitation; the REST API and SPA load normally. Restoring WS would require
-// either a Wails-level fix or the frontend connecting directly to
-// 127.0.0.1:PORT.
+// is invoked. Instead, the frontend fetches GET /desktop/runtime (handled
+// below) to learn the WS URL, then connects directly to
+// ws://localhost:PORT/ws/progress?session=SID. See ws_origin.go for the
+// upgrader override that accepts the cross-origin webview.
 //
 //nolint:unused // referenced only by app.go, which is //go:build desktop
 func newReverseProxyHandler(target string) http.Handler {
@@ -35,7 +37,7 @@ func newReverseProxyHandler(target string) http.Handler {
 			http.Error(w, "desktop: invalid proxy target", http.StatusBadGateway)
 		})
 	}
-	return &httputil.ReverseProxy{
+	proxy := &httputil.ReverseProxy{
 		Rewrite: func(req *httputil.ProxyRequest) {
 			req.SetURL(parsed)
 			req.SetXForwarded()
@@ -44,6 +46,15 @@ func newReverseProxyHandler(target string) http.Handler {
 		},
 		ModifyResponse: rewriteSessionCookies,
 	}
+	wsURL := strings.Replace(target, "http://127.0.0.1", "ws://localhost", 1) + "/ws/progress"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/desktop/runtime" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"ws_url": wsURL})
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	})
 }
 
 // rewriteSessionCookies rewrites Set-Cookie headers from the API server so the
