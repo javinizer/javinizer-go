@@ -51,7 +51,7 @@ func Run(opts Options) error {
 		MinWidth:                 900,
 		MinHeight:                600,
 		BackgroundColour:         options.NewRGB(245, 245, 247),
-		AssetServer:              &assetserver.Options{Handler: newRedirectorHandler(srv.BaseURL())},
+		AssetServer:              &assetserver.Options{Handler: newReverseProxyHandler(srv.BaseURL())},
 		LogLevel:                 logger.INFO,
 		LogLevelProduction:       logger.WARNING,
 		EnableDefaultContextMenu: true,
@@ -79,5 +79,5 @@ func Run(opts Options) error {
 	})
 }
 
-// redirectorHTML and newRedirectorHandler live in redirector.go (no build tag)
-// so they can be unit-tested in normal CI without the wails dependency.
+// newReverseProxyHandler lives in proxy.go (no build tag) so it can be
+// unit-tested in normal CI without the wails dependency.
