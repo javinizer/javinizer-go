@@ -1223,9 +1223,27 @@ jobs:
           fi
 
           url="https://github.com/${REPO}/releases/tag/${TAG}"
-          # Fetch the rendered release notes body (falls back to empty).
-          body="$(gh api "repos/${REPO}/releases/tags/${TAG}" --jq '.body // "" 2>/dev/null' || true)"
-          body_preview="$(printf '%s' "${body}" | head -c 3800)"
+
+          # Fetch the published release so we can mirror its body, author,
+          # and publish timestamp in the Discord embed.
+          release_json="$(gh api "repos/${REPO}/releases/tags/${TAG}" 2>/dev/null || echo '{}')"
+          body="$(printf '%s' "${release_json}" | jq -r '.body // "")"
+          author_login="$(printf '%s' "${release_json}" | jq -r '.author.login // "")"
+          author_avatar="$(printf '%s' "${release_json}" | jq -r '.author.avatar_url // "")"
+          published_at="$(printf '%s' "${release_json}" | jq -r '.published_at // (now | todate)')"
+
+          # Truncate the release notes so the embed stays compact. Discord
+          # caps the description at 4096 chars, but a full changelog makes
+          # the card unwieldy; show the first 500 chars and link out for the
+          # rest.
+          body_excerpt="$(printf '%s' "${body}" | head -c 500)"
+          if [ "$(printf '%s' "${body}" | wc -c)" -gt 500 ]; then
+            body_preview="${body_excerpt}
+
+… *[read full release notes](${url})*"
+          else
+            body_preview="${body_excerpt}"
+          fi
           title="${NAME:-${TAG}}"
           title="$(printf '%s' "${title}" | head -c 250)"
 
@@ -1237,6 +1255,12 @@ jobs:
             type_label="Release"
           fi
 
+          # GitHub renders a per-repo Open Graph social card (repo name,
+          # description, stars). Using it as the embed thumbnail gives the
+          # bot post a rich preview comparable to Discord's auto link embed.
+          thumbnail="https://opengraph.githubassets.com/1/${REPO}"
+          repo_url="https://github.com/${REPO}"
+
           payload="$(jq -n \
             --arg title "${title}" \
             --arg tag "${TAG}" \
@@ -1245,15 +1269,30 @@ jobs:
             --arg color "${color}" \
             --arg body "${body_preview}" \
             --arg repo "${REPO}" \
+            --arg repo_url "${repo_url}" \
+            --arg thumbnail "${thumbnail}" \
+            --arg author "${author_login}" \
+            --arg author_avatar "${author_avatar}" \
+            --arg published_at "${published_at}" \
+            --argjson has_body "$([ -n "${body_preview}" ] && echo true || echo false)" \
+            --argjson has_author "$([ -n "${author_login}" ] && echo true || echo false)" \
             '{
               content: ("New " + $type + " published: [" + $tag + "](" + $url + ")"),
               embeds: [{
                 title: $title,
                 url: $url,
                 color: ($color | tonumber),
-                description: $body,
+                description: (if $has_body then $body else "*(no release notes)*" end),
+                thumbnail: { url: $thumbnail },
+                fields: [
+                  { name: "Version", value: ("`" + $tag + "`"), inline: true },
+                  { name: "Type", value: $type, inline: true },
+                  { name: "Repository", value: ("[" + $repo + "](" + $repo_url + ")"), inline: true },
+                  { name: "Download", value: ("[Release assets](" + $url + ")"), inline: true }
+                ],
+                author: (if $has_author then { name: $author, url: ("https://github.com/" + $author), icon_url: $author_avatar } else null end),
                 footer: { text: $repo },
-                timestamp: (now | todate)
+                timestamp: $published_at
               }]
             }')"
 
