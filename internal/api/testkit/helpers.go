@@ -167,6 +167,16 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.A
 		t.Fatalf("Failed to create test database: %v", err)
 	}
 
+	// Register DB close immediately so it runs even if a later step fails
+	// (e.g. RunMigrationsOnStartup) and calls t.Fatalf before the runtime
+	// cleanup below is registered. LIFO ordering: this runs AFTER the runtime
+	// shutdown cleanup (registered later), so the hub is stopped first.
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Logf("Warning: failed to close test database: %v", err)
+		}
+	})
+
 	if err := db.RunMigrationsOnStartup(context.Background()); err != nil {
 		t.Fatalf("Failed to migrate test database: %v", err)
 	}
@@ -208,16 +218,14 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.A
 	// Register cleanup AFTER all goroutine-spawning setup so the WebSocket hub
 	// is shut down BEFORE the DB is closed. t.Cleanup is LIFO and t.TempDir()
 	// registered its auto-RemoveAll first (above), so this runs before the dir
-	// removal. Without the hub shutdown, the hub goroutine outlives db.Close(),
-	// races the temp-dir RemoveAll, and the resulting leftover poisons the
-	// shared parent temp dir for subsequent tests (cascade "directory not
-	// empty" / "process cannot access the file" flakes on Windows + Linux).
+	// removal; the db.Close() cleanup registered above runs after this (LIFO),
+	// so the hub is stopped first. Without the hub shutdown, the hub goroutine
+	// outlives db.Close(), races the temp-dir RemoveAll, and the resulting
+	// leftover poisons the shared parent temp dir for subsequent tests (cascade
+	// "directory not empty" / "process cannot access the file" flakes).
 	t.Cleanup(func() {
 		if rtState != nil {
 			rtState.Shutdown()
-		}
-		if err := db.Close(); err != nil {
-			t.Logf("Warning: failed to close test database: %v", err)
 		}
 		runtimeMap.Delete(deps)
 	})
