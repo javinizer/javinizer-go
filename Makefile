@@ -4,7 +4,7 @@
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: build-app-darwin build-app-windows build-app-linux build-app-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
-.PHONY: docker-build docker-build-no-cache docker-run docker-stop docker-clean docker-push docker-test docker-logs docker-help
+.PHONY: docker-build docker-build-no-cache docker-run docker-stop docker-restart docker-clean docker-push docker-test docker-logs docker-help
 .PHONY: docker-compose-up docker-compose-down docker-compose-restart docker-compose-logs docker-compose-build
 
 # Default target - show help
@@ -624,16 +624,43 @@ docker-build-no-cache:
 	@echo "Docker image built successfully!"
 	@docker images $(DOCKER_IMAGE)
 
+# Run Docker container (detached mode).
+# Mirrors docker-compose.yml's canonical env (host port, trusted CIDRs for
+# /auth/setup from the Docker bridge gateway, data + media mounts). Override via:
+#   make docker-run HOST_PORT=9090 MEDIA_DIR=./test-videos
+# The setup CIDR is needed because the container sees the host as the Docker
+# bridge gateway (172.x), not 127.0.0.1, so the /auth/setup localhost guard
+# would reject the first-run setup screen without it.
+# Port on the host to publish the container's 8080. 8080 is too common (collides
+# with many dev tools); 8765 is distinctive. Override: make docker-run HOST_PORT=9090
+# Matches docker-compose.yml's HOST_PORT env var so `make` and `compose` agree.
+HOST_PORT ?= 8765
+# Host directory mounted at /media (input files, writable so organize works).
+# Override: make docker-run MEDIA_DIR=./test-videos
+MEDIA_DIR ?= $(PWD)/media
+# Host directory for persistent app state (db, config, logs, temp). Defaults
+# to ./data, matching docker-compose.yml's ./data:/javinizer volume convention.
+# Already covered by .gitignore's /data/ entry. Does NOT collide with the
+# `javinizer` binary (the binary is a file at the repo root; data/ is a dir).
+# Override: make docker-run DATA_DIR=./my-data
+DATA_DIR ?= $(PWD)/data
+
 # Run Docker container (detached mode)
 docker-run:
-	@echo "Starting Docker container $(DOCKER_CONTAINER_NAME)..."
+	@echo "Starting Docker container $(DOCKER_CONTAINER_NAME) on port $(HOST_PORT)..."
+	-docker stop $(DOCKER_CONTAINER_NAME) 2>/dev/null || true
+	-docker rm $(DOCKER_CONTAINER_NAME) 2>/dev/null || true
+	@mkdir -p $(DATA_DIR)
+	$(eval ABS_MEDIA_DIR := $(abspath $(MEDIA_DIR)))
+	@if [ ! -d "$(ABS_MEDIA_DIR)" ]; then echo "warning: MEDIA_DIR '$(MEDIA_DIR)' does not exist or is not a directory — container will start but /media will be empty"; fi
 	docker run -d \
 		--name $(DOCKER_CONTAINER_NAME) \
-		-p 8080:8080 \
-		-v $(PWD)/javinizer:/javinizer \
-		-v $(PWD)/data:/data \
+		-p $(HOST_PORT):8080 \
+		-e JAVINIZER_SETUP_TRUSTED_CIDRS=172.16.0.0/12 \
+		-v $(DATA_DIR):/javinizer \
+		-v $(ABS_MEDIA_DIR):/media \
 		$(DOCKER_FULL_IMAGE)
-	@echo "Container started! Access at http://localhost:8080"
+	@echo "Container started! Access at http://localhost:$(HOST_PORT)"
 	@echo "Logs: docker logs -f $(DOCKER_CONTAINER_NAME)"
 
 # Stop and remove Docker container
@@ -642,6 +669,9 @@ docker-stop:
 	-docker stop $(DOCKER_CONTAINER_NAME)
 	-docker rm $(DOCKER_CONTAINER_NAME)
 	@echo "Container stopped and removed"
+
+# Restart Docker container (stop + run)
+docker-restart: docker-stop docker-run
 
 # View container logs
 docker-logs:
@@ -678,7 +708,7 @@ docker-push:
 docker-compose-up:
 	@echo "Starting services with docker-compose..."
 	docker-compose up -d
-	@echo "Services started! Access at http://localhost:8080"
+	@echo "Services started! Access at http://localhost:$(HOST_PORT)"
 
 # Stop services
 docker-compose-down:
@@ -708,7 +738,8 @@ docker-help:
 	@echo "  make docker-build-no-cache     - Build without cache (clean build)"
 	@echo ""
 	@echo "Run:"
-	@echo "  make docker-run                - Run container (detached, port 8080)"
+	@echo "  make docker-run                - Run container (detached, host port 8765)"
+	@echo "  make docker-run HOST_PORT=9090 MEDIA_DIR=./test-videos  - Custom port + media mount"
 	@echo "  make docker-stop               - Stop and remove container"
 	@echo "  make docker-logs               - View container logs"
 	@echo "  make docker-test               - Validate Docker image version metadata"

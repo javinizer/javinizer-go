@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
+	import { onDestroy } from 'svelte';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { ArrowUpCircle, RefreshCw, ChevronDown, Container, Monitor, Terminal } from 'lucide-svelte';
+	import { ArrowUpCircle, RefreshCw, ChevronDown, Container, Monitor, Terminal, Copy, Check } from 'lucide-svelte';
 	import { createVersionStatusQuery } from '$lib/query/queries';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
@@ -78,6 +79,29 @@
 
 	const checking = $derived(checkMutation.isPending);
 
+	// Copy-to-clipboard for the upgrade instructions: docker/CLI users get a
+	// multi-line command they can paste into a terminal. Shows a check-mark
+	// confirmation for ~1.5s then reverts to the copy icon.
+	let copiedInstructions = $state(false);
+	let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+	onDestroy(() => {
+		if (copyResetTimer) clearTimeout(copyResetTimer);
+	});
+	async function handleCopyInstructions(event: MouseEvent) {
+		event.stopPropagation();
+		const text = status?.upgrade_instructions;
+		if (!text) return;
+		try {
+			await navigator.clipboard.writeText(text);
+			copiedInstructions = true;
+			if (copyResetTimer) clearTimeout(copyResetTimer);
+			copyResetTimer = setTimeout(() => (copiedInstructions = false), 1500);
+		} catch {
+			// clipboard unavailable (non-secure context) — silently no-op; the
+			// user can still select the command text manually.
+		}
+	}
+
 	// Environment label + icon for the "running in" badge. The backend classifies
 	// docker/desktop/cli so the notification can tell a Docker user to `docker pull`
 	// (an in-app self-upgrade is impossible for a read-only image) instead of
@@ -119,7 +143,7 @@
 
 		{#if popoverOpen}
 			<div
-				class="absolute right-0 top-full mt-1 w-72 rounded-lg border bg-card p-3 shadow-lg z-50"
+				class="absolute right-0 top-full mt-1 w-80 rounded-lg border bg-card p-3 shadow-lg z-50"
 				in:fly={{ y: -4, duration: 120, easing: cubicOut }}
 				role="dialog"
 				aria-label="Update details"
@@ -134,45 +158,71 @@
 								Update available
 							{/if}
 						</p>
-						<p class="mt-1 text-xs text-muted-foreground break-all">
-							<span class="font-medium text-foreground">{status?.latest}</span>
-							<span class="mx-1">·</span>
-							current <span class="font-medium text-foreground">{status?.current}</span>
+						<p class="mt-1 text-xs text-muted-foreground">
+							<span class="font-mono text-foreground/80">{status?.current}</span>
+							<span class="mx-1.5 text-muted-foreground/60">→</span>
+							<span class="font-mono font-medium text-primary">{status?.latest}</span>
 						</p>
-						{#if status?.prerelease}
-							<span
-								class="inline-block mt-2 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300"
-							>
-								prerelease
-							</span>
-						{/if}
-						{#if status?.install_environment}
-							{@const Badge = envBadge.icon}
-							<span
-								class="inline-flex items-center gap-1 mt-2 px-1.5 py-0.5 rounded text-[10px] font-medium {envBadge.tone}"
-								title={envBadge.label}
-							>
-								<Badge class="h-3 w-3" />
-							{envBadge.label}
-							</span>
+						{#if status?.prerelease || status?.install_environment}
+							<div class="mt-2 flex flex-wrap items-center gap-1.5">
+								{#if status?.prerelease}
+									<span
+										class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300"
+									>
+										prerelease
+									</span>
+								{/if}
+								{#if status?.install_environment}
+									{@const Badge = envBadge.icon}
+									<span
+										class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium {envBadge.tone}"
+										title={envBadge.label}
+									>
+										<Badge class="h-3 w-3" />
+										{envBadge.label}
+									</span>
+								{/if}
+							</div>
 						{/if}
 					</div>
 				</div>
 
-				{#if status?.upgrade_instructions && status?.install_environment !== 'desktop'}
-					<!-- Backend-provided, environment-specific guidance: docker users see
-					`docker pull`, CLI users see `javinizer upgrade`. Rendered verbatim
-					(pre-wrap) so the indented commands stay readable. Desktop is
-					excluded here: the "Update & restart" button below IS the
-					self-upgrade, so a text block restating "click the button" (plus a
-					long GitHub-download fallback) is redundant and noisy. The API
-					still returns desktop guidance for the CLI `javinizer upgrade`
-					handoff path (internal/update/upgrade.go), which has no button to
-					defer to. -->
-					<pre
-						class="mt-2 px-2 py-1.5 rounded text-[11px] leading-relaxed whitespace-pre-wrap break-all bg-muted text-muted-foreground border border-border"
-					>{status.upgrade_instructions}</pre
+				{#if status?.upgrade_instructions && status?.install_environment !== 'desktop' && status?.install_environment !== 'docker'}
+					<!-- Backend-provided, environment-specific guidance: CLI users see
+					`javinizer upgrade`. Rendered verbatim (pre-wrap) so the indented
+					commands stay readable. Desktop is excluded here: the "Update &
+					restart" button below IS the self-upgrade, so a text block restating
+					"click the button" (plus a long GitHub-download fallback) is
+					redundant and noisy. Docker is excluded too: a user who ran
+					`docker run` already knows to `docker pull` — the "View release"
+					button covers the changelog. The API still returns guidance for
+					the CLI `javinizer upgrade` handoff path
+					(internal/update/upgrade.go), which has no button to defer to. -->
+					<div
+						class="mt-2 rounded-md bg-muted/60 border border-border overflow-hidden max-w-full"
 					>
+						<div class="flex items-center justify-between px-2 py-1 border-b border-border bg-muted">
+							<span class="font-mono text-[10px] text-muted-foreground select-none">sh</span>
+							<button
+								type="button"
+								onclick={handleCopyInstructions}
+								title="Copy command"
+								class="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+							>
+								{#if copiedInstructions}
+									<Check class="h-3 w-3 text-emerald-500" />
+									<span class="text-emerald-500">Copied</span>
+								{:else}
+									<Copy class="h-3 w-3" />
+									<span>Copy</span>
+								{/if}
+							</button>
+						</div>
+						<pre
+							class="block w-full max-w-full px-2.5 py-1.5 text-[11px] leading-relaxed font-mono whitespace-pre overflow-x-auto text-muted-foreground"
+						>{status.upgrade_instructions}</pre
+						>
+					</div>
 				{/if}
 
 				<div class="mt-3 flex items-center gap-2">

@@ -140,7 +140,11 @@ describe('UpdateIndicator', () => {
 		});
 	});
 
-	it('shows docker pull guidance when running in Docker', async () => {
+	it('hides the upgrade-instructions command block for Docker users (they know to docker pull)', async () => {
+		// Product decision: a Docker user who ran `docker run` already knows to
+		// `docker pull` — the command block is noise. The "View release" button
+		// covers the changelog. The environment badge still labels the install
+		// type so the user knows why no self-upgrade button is offered.
 		const { container } = renderWithClient(
 			makeStatus({
 				install_environment: 'docker',
@@ -158,11 +162,11 @@ describe('UpdateIndicator', () => {
 		await fireEvent.click(button!);
 
 		await waitFor(() => {
-			// Environment badge labels the install type so the user knows why the
-			// guidance differs from a normal self-upgrade.
+			// Environment badge still labels the install type.
 			expect(container.textContent).toContain('Running in Docker');
-			// The backend-provided instructions surface the copy-pasteable command.
-			expect(container.textContent).toContain('docker pull ghcr.io/javinizer/javinizer-go');
+			// The command block must NOT render for Docker users.
+			expect(container.textContent).not.toContain('docker pull ghcr.io/javinizer/javinizer-go');
+			expect(container.textContent).not.toContain('Pull the latest image');
 		});
 	});
 

@@ -157,4 +157,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Run API server (will be passed to entrypoint)
-CMD ["javinizer", "api"]
+CMD ["javinizer", "web"]

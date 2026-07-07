@@ -41,7 +41,7 @@ cp .env.example .env
 docker compose up -d
 
 # 4. Access the web UI
-open http://localhost:8080
+open http://localhost:8765
 ```
 
 To build the image locally instead of pulling the pre-built one, see [Building the Image](#building-the-image).
@@ -140,8 +140,8 @@ Javinizer uses a `.env` file to configure Docker Compose variables. This makes i
    # Required: Set your JAV library path
    MEDIA_PATH=/Users/you/JAV
 
-   # Optional: Change port if 8080 is in use
-   HOST_PORT=8080
+   # Optional: Change port if 8765 is in use
+   HOST_PORT=8765
 
    # Optional: Set your timezone
    TZ=America/New_York
@@ -161,7 +161,7 @@ Javinizer uses a `.env` file to configure Docker Compose variables. This makes i
 | `USER_ID` | Legacy alias for `PUID` | 1000 | Optional |
 | `GROUP_ID` | Legacy alias for `PGID` | 1000 | Optional |
 | `MEDIA_PATH` | Path to your JAV library on host | `/path/to/your/jav-library` | Yes |
-| `HOST_PORT` | Port to expose on host | 8080 | No |
+| `HOST_PORT` | Port to expose on host | 8765 | No |
 | `TZ` | Timezone (IANA format) | UTC | No |
 | `UMASK` | File creation mask (e.g. `002`, `022`); overrides `config.yaml` | `002` | No |
 | `LOG_LEVEL` | Log verbosity (`debug`, `info`, `warn`, `error`); overrides `config.yaml` | `info` | No |
@@ -349,7 +349,7 @@ docker compose logs
 ```
 
 Common issues:
-- **Port 8080 in use**: Set `HOST_PORT=9090` in `.env` file
+- **Port 8765 in use**: Set `HOST_PORT=9090` in `.env` file
 - **Permission denied**: Ensure the `./data` directory is writable and check `PUID`/`PGID` (or legacy `USER_ID`/`GROUP_ID`) in `.env`
 - **Volume mount failed**: Check that `MEDIA_PATH` in `.env` points to an existing directory
 
@@ -357,7 +357,7 @@ Common issues:
 
 The health check endpoint is `/health`. Test manually:
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:8765/health
 ```
 
 ### Database Locked
@@ -697,7 +697,7 @@ If a deployment encounters issues, you can revert to a previous version:
    docker compose exec javinizer javinizer --version
    
    # Verify web UI is accessible
-   curl http://localhost:8080/health
+   curl http://localhost:8765/health
    ```
 
 ### Standalone Binary Rollback
@@ -805,7 +805,7 @@ Monitoring capabilities may be added in future releases. Track progress on GitHu
 
 - [Configuration Guide](./02-configuration.md) - Detailed configuration options
 - [CLI Usage](./03-cli-reference.md) - Command-line interface reference
-- [API Documentation](http://localhost:8080/docs) - REST API reference (when running)
+- [API Documentation](http://localhost:8765/docs) - REST API reference (when running)
 
 ---
 

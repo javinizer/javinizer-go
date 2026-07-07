@@ -20,7 +20,7 @@ services:
       - .env
 
     ports:
-      - "${HOST_PORT:-8080}:8080"
+      - "${HOST_PORT:-8765}:8080"
 
     volumes:
       # Application state (config, database, logs, cache)
@@ -82,7 +82,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${HOST_PORT:-8080}:8080"
+      - "${HOST_PORT:-8765}:8080"
     volumes:
       - ./data:/javinizer
       - ${MEDIA_PATH:-/path/to/your/jav-library}:/media
@@ -90,7 +90,7 @@ services:
       - ./web/frontend:/app/web/frontend
     environment:
       - JAVINIZER_DEV_MODE=${JAVINIZER_DEV_MODE:-true}
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:8080}
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:${HOST_PORT:-8765}}
       - JAVINIZER_HOME=/javinizer
       - JAVINIZER_CONFIG=/javinizer/config.yaml
       - JAVINIZER_DB=/javinizer/javinizer.db

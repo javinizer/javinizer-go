@@ -233,7 +233,7 @@ cp .env.example .env
 docker compose up -d
 
 # 4. Access the web UI
-open http://localhost:8080
+open http://localhost:8765
 ```
 
 Essential `.env` values:
@@ -242,7 +242,7 @@ Essential `.env` values:
 |----------|---------|
 | `MEDIA_PATH` | Absolute host path to your JAV library (mounted at `/media` in the container) |
 | `PUID` / `PGID` | Match your host user (`id -u` / `id -g`) to avoid volume permission issues |
-| `HOST_PORT` | Host port for the web UI/API (default `8080`) |
+| `HOST_PORT` | Host port for the web UI/API (default `8765`) |
 | `TZ` | Container timezone, e.g. `America/New_York` (default `UTC`) |
 
 State (config, database, logs) persists in the `./data` volume; your media library is mounted read-write at `/media` for organize operations. To build the image locally instead of pulling, uncomment the `build:` block in `docker-compose.yml` (and comment out `image:`).
@@ -323,7 +323,7 @@ Start the API/Web server:
 javinizer web
 ```
 
-Then open [http://localhost:8080](http://localhost:8080) and create your default username/password.
+Then open [http://localhost:8765](http://localhost:8765) and create your default username/password.
 
 Notes:
 - Credentials are stored in `auth.credentials.json` next to your `config.yaml`.
@@ -603,9 +603,9 @@ Now that you have the basics working, explore these topics:
 
 ## Common Setup Issues
 
-### Port 8080 Already in Use
+### Port 8765 Already in Use
 
-**Problem**: Default API server port (8080) conflicts with another service.
+**Problem**: Default API server port (8765) conflicts with another service.
 
 **Solution**:
 ```bash
