@@ -1242,8 +1242,8 @@ jobs:
           body_len="$(printf '%s' "${body}" | jq -rR 'length')"
           if [ "${body_len}" -gt 500 ]; then
             body_preview="${body_excerpt}
-
-… *[read full release notes](${url})*"
+            
+            … *[read full release notes](${url})*"
           else
             body_preview="${body_excerpt}"
           fi
