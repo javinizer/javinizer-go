@@ -655,10 +655,10 @@ docker-run:
 	@if [ ! -d "$(ABS_MEDIA_DIR)" ]; then echo "warning: MEDIA_DIR '$(MEDIA_DIR)' does not exist or is not a directory — container will start but /media will be empty"; fi
 	docker run -d \
 		--name $(DOCKER_CONTAINER_NAME) \
-		-p $(HOST_PORT):8080 \
+		-p "$(HOST_PORT):8080" \
 		-e JAVINIZER_SETUP_TRUSTED_CIDRS=172.16.0.0/12 \
-		-v $(DATA_DIR):/javinizer \
-		-v $(ABS_MEDIA_DIR):/media \
+		-v "$(DATA_DIR):/javinizer" \
+		-v "$(ABS_MEDIA_DIR):/media" \
 		$(DOCKER_FULL_IMAGE)
 	@echo "Container started! Access at http://localhost:$(HOST_PORT)"
 	@echo "Logs: docker logs -f $(DOCKER_CONTAINER_NAME)"

@@ -97,8 +97,9 @@
 			if (copyResetTimer) clearTimeout(copyResetTimer);
 			copyResetTimer = setTimeout(() => (copiedInstructions = false), 1500);
 		} catch {
-			// clipboard unavailable (non-secure context) — silently no-op; the
-			// user can still select the command text manually.
+			// clipboard unavailable (non-secure context) — surface it so the user
+			// knows to select the command text manually instead.
+			toastStore.error('Could not copy to clipboard — select the command text manually');
 		}
 	}
 
