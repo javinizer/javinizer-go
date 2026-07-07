@@ -1234,10 +1234,13 @@ jobs:
 
           # Truncate the release notes so the embed stays compact. Discord
           # caps the description at 4096 chars, but a full changelog makes
-          # the card unwieldy; show the first 500 chars and link out for the
-          # rest.
-          body_excerpt="$(printf '%s' "${body}" | head -c 500)"
-          if [ "$(printf '%s' "${body}" | wc -c)" -gt 500 ]; then
+          # the card unwieldy; show the first 500 characters and link out for
+          # the rest. jq's slice (.[0:500]) operates on Unicode codepoints, so
+          # multibyte UTF-8 sequences are never split mid-character (head -c
+          # would truncate by byte and could emit invalid UTF-8).
+          body_excerpt="$(printf '%s' "${body}" | jq -rR '.[0:500]')"
+          body_len="$(printf '%s' "${body}" | jq -rR 'length')"
+          if [ "${body_len}" -gt 500 ]; then
             body_preview="${body_excerpt}
 
 … *[read full release notes](${url})*"
