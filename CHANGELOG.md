@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.1] - 2026-07-07
+
+### Added
+
+- Desktop app one-liner installers
+
+### Fixed
+
+- Poster preview rendering across desktop, r18dev, and web subcommand
+- Group Update & restart with Check for Updates action
+- Docker `make docker-run` now works end-to-end (CMD api→web, writable media, trusted CIDRs, quoted paths)
+- WebSocket hub goroutine shut down before DB close in CreateTestDeps (Windows/Linux temp-dir cleanup flake)
+- Docker entrypoint chown non-fatal on read-only mounts
+- Update popover redesign: version flow, copy-to-clipboard command block, docker instructions hidden
+- Discord release notification embed enriched (thumbnail, author, fields, truncated release notes)
+- Docker Quick Start admin setup unblocked, migrated to docker compose v2
+
+### Changed
+
+- Docker host port default 8080 → 8765 (less collision-prone)
+- Bump quic-go v0.57.0 → v0.59.1 (GO-2026-5676)
+- Lead README Quick Start with desktop one-liner, demote CLI to alternative
+- Fix cli-release.yml YAML syntax error in Discord notify job
+
 ## [v1.1.0] - 2026-07-07
 
 ### Added
