@@ -159,7 +159,12 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.A
 	dbPath := filepath.Join(tmpDir, "test.db")
 	dbCfg := &database.Config{
 		Type: "sqlite",
-		DSN:  dbPath + "?_journal_mode=WAL&_busy_timeout=10000",
+		// _journal_mode=DELETE (not WAL) avoids the -wal/-shm sidecar files
+		// that Windows holds open briefly after Close(), causing flaky
+		// t.TempDir() RemoveAll cleanup ("The process cannot access the file
+		// because it is being used by another process"). WAL's concurrency
+		// benefits are irrelevant for single-process test DBs.
+		DSN: dbPath + "?_journal_mode=DELETE&_busy_timeout=10000",
 	}
 
 	db, err := database.New(dbCfg)
@@ -167,6 +172,9 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.A
 		t.Fatalf("Failed to create test database: %v", err)
 	}
 
+	// Close the DB before t.TempDir()'s auto-RemoveAll cleanup runs. LIFO
+	// ordering means this runs first, but be explicit: closing before the
+	// dir removal is what actually releases the SQLite file handle on Windows.
 	t.Cleanup(func() {
 		if err := db.Close(); err != nil {
 			t.Logf("Warning: failed to close test database: %v", err)
