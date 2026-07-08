@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -76,6 +78,20 @@ func NewWordProcessor(cfg *MetadataConfig, repo wordLookup) *wordProcessor {
 }
 
 // Apply replaces occurrences of known words in the input text.
+//
+// Two matching strategies, dispatched by whether the pattern contains the
+// censor character '*':
+//
+//   - Patterns WITH '*' (censored-word tokens, e.g. "F***"): matched as a whole
+//     token using replaceTokenBounded. The match must be bounded on both sides
+//     by string start/end or a char that is neither a letter nor '*'. This
+//     prevents a short censored token from matching as a substring inside a
+//     longer, unlisted censored token — e.g. "F***" no longer fires inside
+//     "F****d" (which would yield "Fuck*d"). Issue #106.
+//   - Patterns WITHOUT '*' (e.g. the "[Recommended For Smartphones] " prefix
+//     strip): matched as a plain substring via strings.ReplaceAll, preserving
+//     the original behavior for patterns that are genuinely meant to match
+//     as substrings.
 func (wp *wordProcessor) Apply(text string) string {
 	if wp == nil || wp.cfg == nil || !wp.cfg.WordReplacement.Enabled {
 		return text
@@ -95,12 +111,86 @@ func (wp *wordProcessor) Apply(text string) string {
 
 	result := text
 	for _, p := range sorted {
-		if strings.Contains(result, p.orig) {
+		if strings.ContainsRune(p.orig, '*') {
+			result = replaceTokenBounded(result, p.orig, p.repl)
+		} else if strings.Contains(result, p.orig) {
 			result = strings.ReplaceAll(result, p.orig, p.repl)
 		}
 	}
 
 	return result
+}
+
+// replaceTokenBounded replaces every non-overlapping occurrence of orig in text
+// with repl, but only when the match is bounded on both sides by string
+// start/end or a character that is neither a Unicode letter nor '*'. This is
+// the "whole censored token" rule: '*' is the censor character, so a run like
+// "F***" is a complete censored word only if the char after it is not a letter
+// (which would extend the word) and not '*' (which would mean it's actually a
+// longer censored token, e.g. "F****d").
+//
+// The boundary chars are INSPECTED but not consumed, so two censored tokens
+// separated by a single space ("F*** S***e") both match — the space serves as
+// the trailing boundary for the first and the leading boundary for the second.
+func replaceTokenBounded(text, orig, repl string) string {
+	if orig == "" {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	i := 0
+	for {
+		idx := strings.Index(text[i:], orig)
+		if idx < 0 {
+			b.WriteString(text[i:])
+			break
+		}
+		start := i + idx
+		end := start + len(orig)
+		if start > 0 && !isCensorBoundary(boundaryRuneBefore(text, start)) {
+			b.WriteString(text[i:end])
+			i = end
+			continue
+		}
+		if end < len(text) && !isCensorBoundary(boundaryRuneAfter(text, end)) {
+			b.WriteString(text[i:end])
+			i = end
+			continue
+		}
+		b.WriteString(text[i:start])
+		b.WriteString(repl)
+		i = end
+	}
+	return b.String()
+}
+
+// isCensorBoundary reports whether r may act as a boundary for a censored-word
+// token: any char that is NOT a Unicode letter and NOT '*'. Digits, spaces,
+// punctuation, and symbols all qualify; letters and '*' extend the token.
+func isCensorBoundary(r rune) bool {
+	return r != '*' && !unicode.IsLetter(r)
+}
+
+// boundaryRuneBefore decodes the full rune immediately preceding byte index
+// `start` in `text` (UTF-8 aware). Returns -1 if start is at the beginning.
+// Used so multibyte adjacent chars (e.g. Japanese) are classified by their
+// actual rune, not a single lead/continuation byte.
+func boundaryRuneBefore(text string, start int) rune {
+	if start <= 0 || start > len(text) {
+		return -1
+	}
+	r, _ := utf8.DecodeLastRuneInString(text[:start])
+	return r
+}
+
+// boundaryRuneAfter decodes the full rune starting at byte index `end` in
+// `text` (UTF-8 aware). Returns -1 if end is at the end of the string.
+func boundaryRuneAfter(text string, end int) rune {
+	if end < 0 || end >= len(text) {
+		return -1
+	}
+	r, _ := utf8.DecodeRuneInString(text[end:])
+	return r
 }
 
 // ApplyToMovie applies word replacements to all text fields of a Movie.
