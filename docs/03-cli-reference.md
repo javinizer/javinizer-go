@@ -776,7 +776,7 @@ Scrapers:
   - Caribbeancom: false
   - DLGetchu: false
   - FC2: false
-  - Javstash: false
+  - JAVStash: false
 
 Output:
   - Folder format: <ID> [<STUDIO>] - <TITLE> (<YEAR>)

@@ -21,7 +21,7 @@ const (
 	defaultBaseURL = "https://javstash.org/graphql"
 )
 
-// scraper implements the JavStash scraper.
+// scraper implements the JAVStash scraper.
 type scraper struct {
 	client      *resty.Client
 	enabled     bool
@@ -88,7 +88,7 @@ type urlEntry struct {
 	URL string `json:"url"`
 }
 
-// newScraper creates a new JavStash scraper.
+// newScraper creates a new JAVStash scraper.
 func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
 	apiKey := strings.TrimSpace(settings.APIKey)
 
@@ -117,7 +117,7 @@ func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfi
 	}
 
 	if settings.RateLimit > 0 {
-		logging.Infof("Javstash: Rate limiting enabled with %dms delay between requests", settings.RateLimit)
+		logging.Infof("JAVStash: Rate limiting enabled with %dms delay between requests", settings.RateLimit)
 	}
 
 	return s
@@ -161,11 +161,11 @@ func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 			return parts[i], nil
 		}
 	}
-	return "", fmt.Errorf("failed to extract ID from JavStash URL")
+	return "", fmt.Errorf("failed to extract ID from JAVStash URL")
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
-	return nil, models.NewScraperNotFoundError("Javstash", "JavStash is a GraphQL-based API and does not support direct URL scraping. Use ID-based search instead.")
+	return nil, models.NewScraperNotFoundError("JAVStash", "JAVStash is a GraphQL-based API and does not support direct URL scraping. Use ID-based search instead.")
 }
 
 func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
@@ -234,12 +234,12 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	}
 
 	if resp.StatusCode() == http.StatusUnauthorized {
-		return nil, models.NewScraperNotFoundError("Javstash", "invalid API key")
+		return nil, models.NewScraperNotFoundError("JAVStash", "invalid API key")
 	}
 
 	if resp.StatusCode() != http.StatusOK {
-		return nil, models.NewScraperStatusError("Javstash", resp.StatusCode(),
-			fmt.Sprintf("Javstash returned status %d", resp.StatusCode()))
+		return nil, models.NewScraperStatusError("JAVStash", resp.StatusCode(),
+			fmt.Sprintf("JAVStash returned status %d", resp.StatusCode()))
 	}
 
 	var graphQLResp graphQLResponse
@@ -249,13 +249,13 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	if len(graphQLResp.Errors) > 0 {
 		if strings.Contains(graphQLResp.Errors[0].Message, "Not authorized") {
-			return nil, models.NewScraperNotFoundError("Javstash", "API key required for search")
+			return nil, models.NewScraperNotFoundError("JAVStash", "API key required for search")
 		}
 		return nil, fmt.Errorf("javstash: GraphQL error: %s", graphQLResp.Errors[0].Message)
 	}
 
 	if len(graphQLResp.Data.SearchScene) == 0 {
-		return nil, models.NewScraperNotFoundError("Javstash", fmt.Sprintf("no results for %s", id))
+		return nil, models.NewScraperNotFoundError("JAVStash", fmt.Sprintf("no results for %s", id))
 	}
 
 	return s.parseScene(&graphQLResp.Data.SearchScene[0], searchTerm)

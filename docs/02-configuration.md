@@ -1080,7 +1080,7 @@ These variables are specific to Docker deployments and container orchestration:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `JAVSTASH_API_KEY` | Optional* | - | Javstash scraper API key (required if using javstash scraper) |
+| `JAVSTASH_API_KEY` | Optional* | - | JAVStash scraper API key (required if using javstash scraper) |
 | `CHROME_BIN` | Optional | - | Path to Chrome/Chromium binary (auto-detected if empty) |
 | `CHROME_PATH` | Optional | - | Alternative path to Chrome/Chromium binary |
 
@@ -1180,7 +1180,7 @@ The following settings will cause the application to fail on startup if misconfi
 |---------|------------------|---------------|
 | Config file parsing | Invalid YAML syntax | `Failed to load config: <error>` |
 | Config version | Newer version than supported | `config version X is newer than supported version Y; please update Javinizer` |
-| Javstash scraper | Enabled without API key | `javstash: api_key is required (set in config)` (or set the `JAVSTASH_API_KEY` env var) |
+| JAVStash scraper | Enabled without API key | `javstash: api_key is required (set in config)` (or set the `JAVSTASH_API_KEY` env var) |
 | Scrapers proxy | `enabled: true` without `default_profile` | `scrapers.proxy.default_profile is required when scrapers.proxy.enabled is true` |
 | Scrapers proxy | `default_profile` / per-scraper `profile` references an unknown profile | `scrapers.proxy.default_profile references unknown profile "X"` |
 

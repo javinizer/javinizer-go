@@ -75,6 +75,17 @@ describe('FieldRow', () => {
 		expect(custom.container.textContent).toContain('Tokyo-Hot');
 	});
 
+	// Regression guard for issue #105: mgstage (and fc2/javstash) fell through
+	// the scraper-name table and rendered as the raw config key. A field whose
+	// priority resolves to mgstage must show the proper "MGStage" label.
+	it('renders the MGStage label for the mgstage config key', () => {
+		const { container } = render(FieldRow, {
+			props: make_props({ status: 'custom', priority: ['mgstage'] }),
+		});
+		expect(container.textContent).toContain('MGStage');
+		expect(container.textContent).not.toContain('mgstage');
+	});
+
 	it('renders the inherited global chain as a defensive fallback for a custom + empty (legacy []) field', () => {
 		// A present-empty [] is LEGACY and folds to inherit on read — so this
 		// custom+empty branch should rarely fire; when it does, the row falls

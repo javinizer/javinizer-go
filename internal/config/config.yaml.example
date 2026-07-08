@@ -225,79 +225,30 @@ scrapers:
         base_url: "https://javstash.org/graphql"
         language: en # en | ja
 metadata:
+    # Per-field priorities default to inherit `scrapers.priority` (empty []).
+    # A non-empty list here locks the field to those scrapers exclusively with
+    # NO fallback to the global list — so it would ignore scrapers the user
+    # later enables (issue #105). Leave fields empty to inherit; set a list only
+    # to customize a specific field's scraper order.
     priority:
-        actress:
-            - dmm
-            - r18dev
-            - libredmm
-        original_title:
-            - dmm
-            - r18dev
-            - libredmm
-        cover_url:
-            - dmm
-            - r18dev
-            - libredmm
-        description:
-            - dmm
-            - r18dev
-            - libredmm
-        director:
-            - dmm
-            - r18dev
-            - libredmm
-        genre:
-            - dmm
-            - r18dev
-            - libredmm
-        id:
-            - dmm
-            - r18dev
-            - libredmm
-        content_id:
-            - dmm
-            - r18dev
-            - libredmm
-        label:
-            - dmm
-            - r18dev
-            - libredmm
-        maker:
-            - dmm
-            - r18dev
-            - libredmm
-        poster_url:
-            - r18dev
-            - libredmm
-            - dmm
-        rating:
-            - dmm
-            - r18dev
-            - libredmm
-        release_date:
-            - dmm
-            - r18dev
-            - libredmm
-        runtime:
-            - dmm
-            - r18dev
-            - libredmm
-        series:
-            - dmm
-            - r18dev
-            - libredmm
-        screenshot_url:
-            - dmm
-            - r18dev
-            - libredmm
-        title:
-            - dmm
-            - r18dev
-            - libredmm
-        trailer_url:
-            - dmm
-            - r18dev
-            - libredmm
+        actress: []
+        content_id: []
+        cover_url: []
+        description: []
+        director: []
+        genre: []
+        id: []
+        label: []
+        maker: []
+        original_title: []
+        poster_url: []
+        rating: []
+        release_date: []
+        runtime: []
+        screenshot_url: []
+        series: []
+        title: []
+        trailer_url: []
     # Actress image database (SQLite-backed)
     actress_database:
         enabled: true

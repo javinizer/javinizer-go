@@ -5,16 +5,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
-// Register registers the Javstash scraper with the given registrar.
+// Register registers the JAVStash scraper with the given registrar.
 func Register(reg scraperutil.ScraperRegistrar) {
 	reg.Register(scraperutil.ScraperRegistration{
 		Name:        "javstash",
-		Description: "Javstash",
+		Description: "JAVStash",
 		Options: []models.ScraperOption{
 			{
 				Key:         "api_key",
 				Label:       "API Key",
-				Description: "API key for Javstash.org authentication",
+				Description: "API key for JAVStash.org authentication",
 				Type:        "password",
 				Default:     "",
 			},

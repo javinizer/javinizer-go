@@ -2,6 +2,7 @@
 	import { SquarePen, RotateCcw } from 'lucide-svelte';
 	import Button from '../ui/Button.svelte';
 	import type { FieldStatus } from './priority';
+	import { formatScraperName } from './scraperNames';
 
 	interface Props {
 		fieldName: string;
@@ -15,22 +16,6 @@
 
 	let { fieldName, fieldLabel, priority, globalPriority, status, onEdit, onReset }: Props =
 		$props();
-
-	// Helper to format scraper names
-	function formatScraperName(name: string): string {
-		if (name === 'dmm') return 'DMM/Fanza';
-		if (name === 'libredmm') return 'LibreDMM (Fanza, MGStage, SOD, FC2)';
-		if (name === 'r18dev') return 'R18.dev';
-		if (name === 'javlibrary') return 'JavLibrary';
-		if (name === 'javdb') return 'JavDB';
-		if (name === 'javbus') return 'JavBus';
-		if (name === 'jav321') return 'Jav321';
-		if (name === 'tokyohot') return 'Tokyo-Hot';
-		if (name === 'aventertainment') return 'AV Entertainment';
-		if (name === 'dlgetchu') return 'DLGetchu';
-		if (name === 'caribbeancom') return 'Caribbeancom';
-		return name.charAt(0).toUpperCase() + name.slice(1);
-	}
 
 	// Per-status visual language.
 	// inherited (green): no override, uses the global priority list.

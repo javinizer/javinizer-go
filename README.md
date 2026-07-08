@@ -467,7 +467,7 @@ Docker deployments support environment-variable overrides. Defaults shown are fo
 | `TRANSLATION_PROVIDER` | `openai`, `deepl`, `google`, or `anthropic` |
 | `TRANSLATION_SOURCE_LANGUAGE` / `TRANSLATION_TARGET_LANGUAGE` | e.g. `ja` → `en` |
 | `OPENAI_API_KEY` / `DEEPL_API_KEY` / `GOOGLE_TRANSLATE_API_KEY` / `ANTHROPIC_API_KEY` | Provider keys |
-| `JAVSTASH_API_KEY` | JavStash GraphQL API key (get from javstash.org) |
+| `JAVSTASH_API_KEY` | JAVStash GraphQL API key (get from javstash.org) |
 
 ### Development
 

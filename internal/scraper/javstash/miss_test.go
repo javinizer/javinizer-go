@@ -269,7 +269,7 @@ func TestScraper_GetURL_WhitespaceOnly(t *testing.T) {
 func TestScraper_ResolveDownloadProxyForHost(t *testing.T) {
 	s := &scraper{rateLimiter: ratelimit.NewLimiter(0)}
 	_, _, ok := s.ResolveDownloadProxyForHost("any-host.com")
-	assert.False(t, ok, "JavStash should not claim any hosts")
+	assert.False(t, ok, "JAVStash should not claim any hosts")
 }
 
 // --- Config method ---
