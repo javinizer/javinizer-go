@@ -133,7 +133,7 @@ func (wp *wordProcessor) Apply(text string) string {
 // separated by a single space ("F*** S***e") both match — the space serves as
 // the trailing boundary for the first and the leading boundary for the second.
 func replaceTokenBounded(text, orig, repl string) string {
-	if orig == "" {
+	if orig == "" || !strings.Contains(text, orig) {
 		return text
 	}
 	var b strings.Builder

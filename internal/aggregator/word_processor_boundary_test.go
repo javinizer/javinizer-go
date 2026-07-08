@@ -64,6 +64,23 @@ func TestApplyWordReplacement_CensoredTokenMatchesStandalone(t *testing.T) {
 	assert.Equal(t, "Force", wp.Apply("F***e"))
 }
 
+// TestApplyWordReplacement_CensoredTokenNoMatchReturnsUnchanged confirms the
+// no-match fast path: when the censored pattern is absent from the text, the
+// text is returned unchanged (and without avoidable allocation via the builder).
+func TestApplyWordReplacement_CensoredTokenNoMatchReturnsUnchanged(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			WordReplacement: config.WordReplacementConfig{Enabled: true},
+		},
+	}
+	wp := newWordProcessorWithCache(MetadataConfigFromApp(&cfg.Metadata), nil, map[string]string{
+		"F***": "Fuck",
+	})
+
+	assert.Equal(t, "nothing here", wp.Apply("nothing here"))
+	assert.Equal(t, "", wp.Apply(""))
+}
+
 // TestApplyWordReplacement_CensoredTokenAdjacentTokens ensures the boundary
 // check (which inspects chars without consuming them) doesn't starve an
 // immediately-following token of its leading boundary. Two censored tokens
