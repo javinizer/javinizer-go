@@ -229,10 +229,11 @@ func (v *PathValidator) validate(userPath string, target validateTarget) (string
 // isFilesystemRoot reports whether path is a filesystem root:
 // "/" on Unix or a Windows drive root like "C:\\" / "C:/".
 func isFilesystemRoot(path string) bool {
-	if path == "/" || path == string(filepath.Separator) {
+	normalized := normalizeWindowsPath(path)
+	if normalized == "/" || normalized == string(filepath.Separator) {
 		return true
 	}
-	if len(path) == 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
+	if len(normalized) == 3 && normalized[1] == ':' && (normalized[2] == '\\' || normalized[2] == '/') {
 		return true
 	}
 	return false

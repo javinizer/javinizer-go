@@ -205,7 +205,7 @@ func TestValidateDir_DotWithSubpathOutsideCWD(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestEffectiveAllowedBase_AbsError(t *testing.T) {
+func TestEffectiveAllowedBase_CanonicalizeError(t *testing.T) {
 	v := NewPathValidator(afero.NewOsFs(), []string{"/tmp"}, nil)
 
 	origEval := evalSymlinksFunc
