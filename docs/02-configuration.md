@@ -113,7 +113,7 @@ scrapers:
     default_profile: "main"   # Profile used by default when proxy is enabled
     profiles:
       main:
-        url: ""           # Examples: "http://proxy.example.com:8765", "socks5://localhost:1080"
+        url: ""           # Examples: "http://proxy.example.com:8080", "socks5://localhost:1080"
         username: ""      # Optional authentication
         password: ""      # Optional authentication
       backup:
@@ -1061,7 +1061,6 @@ Environment variables override configuration file settings and are particularly 
 | `JAVINIZER_DATA_DIR` | Optional | - | Override data directory (reserved for future use) |
 | `LOG_LEVEL` | Optional | `info` | Override log level (`debug`, `info`, `warn`, `error`) |
 | `UMASK` | Optional | `002` | Override file creation mask (e.g., `002` for `rwxrwxr-x`) |
-| `PORT` | Optional | `8765` | Override API server port |
 
 ### Docker Deployment Variables
 

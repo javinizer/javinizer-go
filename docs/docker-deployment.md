@@ -290,7 +290,7 @@ scrapers:
     default_profile: "main"
     profiles:
       main:
-        url: "http://proxy.example.com:8765"
+        url: "http://proxy.example.com:8080"
         # username: ""   # Optional authentication
         # password: ""   # Optional authentication
 

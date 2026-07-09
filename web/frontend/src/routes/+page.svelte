@@ -334,7 +334,10 @@
 
 	async function openDocs() {
 		if (browser) {
-			window.open(`${location.protocol}//${location.hostname}:8765/docs`, '_blank', 'noopener,noreferrer');
+			// Same-origin docs: in dev the Vite proxy serves /docs, in prod the
+			// backend serves them. Deriving from location avoids hardcoding a port
+			// that breaks users on non-default server ports.
+			window.open(`${location.origin}/docs`, '_blank', 'noopener,noreferrer');
 			return;
 		}
 		await goto('/docs');

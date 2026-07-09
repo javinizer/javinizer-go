@@ -289,7 +289,7 @@ curl -X POST http://localhost:8765/api/v1/proxy/test \
     "mode": "direct",
     "proxy": {
       "enabled": true,
-      "url": "http://proxy.example.com:8765"
+      "url": "http://proxy.example.com:8080"
     }
   }'
 ```
