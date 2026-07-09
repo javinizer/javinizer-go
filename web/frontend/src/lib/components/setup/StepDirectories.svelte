@@ -6,12 +6,10 @@
 		dirs = $bindable(),
 		error = null as string | null,
 		submitting = false,
-		onSkip,
 	}: {
 		dirs: string[];
 		error?: string | null;
 		submitting?: boolean;
-		onSkip?: () => void;
 	} = $props();
 </script>
 

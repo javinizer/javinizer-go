@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount } from 'svelte';
 	import { cubicOut, quintOut } from 'svelte/easing';
 	import { scale } from 'svelte/transition';
 	import { apiClient } from '$lib/api/client';
@@ -98,6 +98,7 @@
 			availableScrapers = await apiClient.getScrapers();
 			selectedScrapers = availableScrapers.filter((s) => s.enabled).map((s) => s.name);
 		} catch {
+			error = 'Could not load available scrapers. You can configure them later in Settings → Scrapers.';
 			toastStore.error('Could not load available scrapers', 4000);
 		} finally {
 			scrapersLoading = false;
@@ -171,6 +172,7 @@
 
 	function handleDirectoriesSkip() {
 		error = null;
+		dirs = [];
 		gotoStep(2);
 	}
 
@@ -265,14 +267,7 @@
 	});
 </script>
 
-<svelte:head>
-	<link rel="preconnect" href="https://fonts.googleapis.com" />
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-	<link
-		href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&display=swap"
-		rel="stylesheet"
-	/>
-</svelte:head>
+
 
 <div class="wizard-shell">
 	<!-- Brand / stepper rail -->
@@ -324,7 +319,7 @@
 	<main class="content-pane">
 		<div class="content-frame">
 			<div class="content-stage"
-				style="height: {stageHeight !== null ? `${stageHeight}px` : 'auto'}; transition: {heightReady ? `height ${TRANSITION_MS}ms cubic-out` : 'none'};">
+				style="height: {stageHeight !== null ? `${stageHeight}px` : 'auto'}; transition: {heightReady ? `height ${TRANSITION_MS}ms cubic-bezier(0.33, 1, 0.68, 1)` : 'none'};">
 				{#key `${stepIndex}-${credentialsRegistered}`}
 					<div
 						class="content-card stage-card"
@@ -341,7 +336,7 @@
 						{:else if stepIndex === 0}
 							<StepCredentials bind:credentials {error} {submitting} />
 						{:else if stepIndex === 1}
-							<StepDirectories bind:dirs {error} {submitting} onSkip={handleDirectoriesSkip} />
+							<StepDirectories bind:dirs {error} {submitting} />
 						{:else}
 							<StepScrapers
 								bind:selected={selectedScrapers}
@@ -463,7 +458,7 @@
 	}
 
 	.brand-word {
-		font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+		font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 		font-weight: 700;
 		font-size: 1.85rem;
 		letter-spacing: -0.02em;
@@ -497,7 +492,7 @@
 		width: 100%;
 		background: linear-gradient(180deg, hsl(217 91% 65%), hsl(265 85% 62%));
 		border-radius: 9999px;
-		transition: height 360ms cubic-out;
+		transition: height 360ms cubic-bezier(0.33, 1, 0.68, 1);
 	}
 
 	.stepper-row {
@@ -506,7 +501,7 @@
 		align-items: flex-start;
 		gap: 0.85rem;
 		opacity: 0.5;
-		transition: opacity 220ms cubic-out;
+		transition: opacity 220ms cubic-bezier(0.33, 1, 0.68, 1);
 	}
 
 	.stepper-row.active {
@@ -529,7 +524,7 @@
 		border: 1.5px solid hsl(210 40% 98% / 0.18);
 		font-weight: 600;
 		font-size: 0.85rem;
-		transition: all 240ms cubic-out;
+		transition: all 240ms cubic-bezier(0.33, 1, 0.68, 1);
 		z-index: 1;
 	}
 

@@ -21,14 +21,7 @@
 	);
 </script>
 
-<svelte:head>
-	<link rel="preconnect" href="https://fonts.googleapis.com" />
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-	<link
-		href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap"
-		rel="stylesheet"
-	/>
-</svelte:head>
+
 
 <div class="success">
 	<!-- Emblem -->
@@ -149,7 +142,7 @@
 			radial-gradient(circle at 50% 50%, hsl(152 76% 42% / 0.32) 0%, transparent 62%),
 			conic-gradient(from 0deg, hsl(152 76% 45% / 0.18), transparent 25%, hsl(217 91% 60% / 0.16), transparent 60%, hsl(152 76% 45% / 0.18));
 		filter: blur(6px);
-		animation: burst 900ms cubic-out both;
+		animation: burst 900ms cubic-bezier(0.33, 1, 0.68, 1) both;
 	}
 
 	@keyframes burst {
@@ -186,7 +179,7 @@
 		stroke: hsl(152 71% 42%);
 		stroke-dasharray: 100;
 		stroke-dashoffset: 100;
-		animation: draw-check 360ms cubic-out 720ms forwards;
+		animation: draw-check 360ms cubic-bezier(0.33, 1, 0.68, 1) 720ms forwards;
 		filter: drop-shadow(0 1px 2px hsl(152 71% 45% / 0.4));
 	}
 
@@ -205,7 +198,7 @@
 		background: hsl(152 71% 96%);
 		border: 1px solid hsl(152 71% 80%);
 		box-shadow: inset 0 0 0 3px hsl(0 0% 100% / 0.6);
-		animation: core-in 420ms cubic-out 560ms both;
+		animation: core-in 420ms cubic-bezier(0.33, 1, 0.68, 1) 560ms both;
 	}
 
 	@keyframes core-in {
@@ -228,7 +221,7 @@
 	}
 
 	.kicker {
-		font-family: 'Space Mono', ui-monospace, monospace;
+		font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Menlo', monospace;
 		font-size: 0.68rem;
 		font-weight: 700;
 		letter-spacing: 0.22em;
@@ -237,7 +230,7 @@
 	}
 
 	.title {
-		font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+		font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 		font-size: 1.7rem;
 		font-weight: 700;
 		letter-spacing: -0.025em;
@@ -277,7 +270,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.35rem;
-		font-family: 'Space Mono', ui-monospace, monospace;
+		font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Menlo', monospace;
 		font-size: 0.66rem;
 		font-weight: 700;
 		letter-spacing: 0.1em;
@@ -286,7 +279,7 @@
 	}
 
 	.receipt-no {
-		font-family: 'Space Mono', ui-monospace, monospace;
+		font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Menlo', monospace;
 		font-size: 0.62rem;
 		color: hsl(var(--muted-foreground));
 		opacity: 0.8;
@@ -321,7 +314,7 @@
 	}
 
 	.mono {
-		font-family: 'Space Mono', ui-monospace, monospace;
+		font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Menlo', monospace;
 		font-weight: 700;
 		letter-spacing: -0.01em;
 	}
@@ -338,7 +331,7 @@
 		border-radius: 9999px;
 		background: hsl(var(--foreground));
 		opacity: 1;
-		animation: dot-in 220ms cubic-out both;
+		animation: dot-in 220ms cubic-bezier(0.33, 1, 0.68, 1) both;
 	}
 
 	@keyframes dot-in {
@@ -351,7 +344,7 @@
 		align-items: center;
 		gap: 0.4rem;
 		color: hsl(var(--muted-foreground));
-		font-family: 'Space Mono', ui-monospace, monospace;
+		font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Menlo', monospace;
 		font-size: 0.78rem;
 		font-weight: 700;
 	}
@@ -388,7 +381,7 @@
 
 	.receipt-foot {
 		padding: 0.6rem 0 0.9rem;
-		font-family: 'Space Mono', ui-monospace, monospace;
+		font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Menlo', monospace;
 		font-size: 0.6rem;
 		letter-spacing: 0.05em;
 		color: hsl(var(--muted-foreground));

@@ -389,6 +389,9 @@ describe('first-run setup wizard', () => {
 		localStorage.setItem('javinizer_session', 'old-session-id');
 		expect(localStorage.getItem('javinizer_test_stale')).toBe('stale');
 
+		document.cookie = 'javinizer_test=stale; path=/';
+		expect(document.cookie).toContain('javinizer_test');
+
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
 
@@ -396,6 +399,7 @@ describe('first-run setup wizard', () => {
 		expect(localStorage.getItem('javinizer_input_path')).toBeNull();
 		expect(localStorage.getItem('javinizer_session')).toBeNull();
 		expect(localStorage.length).toBe(0);
+		expect(document.cookie).not.toContain('javinizer_test');
 	});
 
 	it('does not clear localStorage when the app is already initialized', async () => {

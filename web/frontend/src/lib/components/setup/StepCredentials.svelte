@@ -84,7 +84,7 @@
 				type="button"
 				class="field-eye"
 				onclick={() => (showPassword = !showPassword)}
-				tabindex="-1"
+				tabindex="0"
 				aria-label={showPassword ? 'Hide password' : 'Show password'}
 			>
 				{#if showPassword}<EyeOff class="h-4 w-4" />{:else}<Eye class="h-4 w-4" />{/if}
@@ -116,7 +116,7 @@
 				type="button"
 				class="field-eye"
 				onclick={() => (showConfirm = !showConfirm)}
-				tabindex="-1"
+				tabindex="0"
 				aria-label={showConfirm ? 'Hide password' : 'Show password'}
 			>
 				{#if showConfirm}<EyeOff class="h-4 w-4" />{:else}<Eye class="h-4 w-4" />{/if}
@@ -270,7 +270,7 @@
 		display: block;
 		height: 100%;
 		border-radius: 9999px;
-		transition: width 240ms cubic-out, background 240ms;
+		transition: width 240ms cubic-bezier(0.33, 1, 0.68, 1), background 240ms;
 		background: hsl(var(--destructive));
 	}
 
