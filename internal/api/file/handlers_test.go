@@ -3,6 +3,8 @@ package file
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -367,6 +369,27 @@ func TestGetCurrentWorkingDirectory(t *testing.T) {
 		var response map[string]string
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		assert.Equal(t, "", response["path"])
+	})
+
+	t.Run("returns 500 when working directory cannot be resolved", func(t *testing.T) {
+		origGetwd := osGetwd
+		t.Cleanup(func() { osGetwd = origGetwd })
+
+		osGetwd = func() (string, error) { return "", errors.New("getwd: no such directory") }
+
+		cfg := config.DefaultConfig(nil, nil)
+		cfg.API.Security.AllowedDirectories = []string{}
+
+		deps := newTestDepsFromConfig(cfg)
+		router := gin.New()
+		router.GET("/cwd", getCurrentWorkingDirectory(testkit.GetTestRuntime(deps)))
+
+		req := httptest.NewRequest("GET", "/cwd", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
 
