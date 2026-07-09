@@ -44,27 +44,47 @@
 		allow_unc: false,
 		allowed_unc_servers: [],
 	});
+	// baseline tracks the last saved/loaded security state so `dirty` stays
+	// accurate even while the sync effect (below) mirrors draft edits into the
+	// shared config object. Populated by the rehydrate $effect on mount.
+	let baseline = $state<SecurityDraft>({
+		allowed_directories: [],
+		denied_directories: [],
+		allow_unc: false,
+		allowed_unc_servers: [],
+	});
 
 	$effect(() => {
 		const cfg = hydratedConfig ?? config;
 		if (cfg !== lastConfigRef) {
 			lastConfigRef = cfg;
-			draft = snapshot(cfg);
+			const snap = snapshot(cfg);
+			draft = snap;
+			baseline = snap;
 		}
+	});
+
+	// Mirror draft edits into the parent config object so the top-level
+	// "Save Changes" button (which PUTs the whole config) persists security
+	// edits too. Without this, only the narrow "Save Security" endpoint would
+	// see the draft, and a whole-config save would clobber the directories the
+	// user just added with the stale value still held in settings.config.
+	$effect(() => {
+		const sec = config?.api?.security;
+		if (!sec) return;
+		sec.allowed_directories = [...draft.allowed_directories];
+		sec.denied_directories = [...draft.denied_directories];
+		sec.allow_unc = draft.allow_unc;
+		sec.allowed_unc_servers = [...draft.allowed_unc_servers];
 	});
 
 	let newUncServer = $state('');
 
 	let dirty = $derived(
-		(() => {
-			const sec = (hydratedConfig ?? config)?.api?.security;
-			return (
-				!arrayEqual(draft.allowed_directories, sec?.allowed_directories ?? []) ||
-				!arrayEqual(draft.denied_directories, sec?.denied_directories ?? []) ||
-				draft.allow_unc !== (sec?.allow_unc ?? false) ||
-				!arrayEqual(draft.allowed_unc_servers, sec?.allowed_unc_servers ?? [])
-			);
-		})(),
+		!arrayEqual(draft.allowed_directories, baseline.allowed_directories) ||
+			!arrayEqual(draft.denied_directories, baseline.denied_directories) ||
+			draft.allow_unc !== baseline.allow_unc ||
+			!arrayEqual(draft.allowed_unc_servers, baseline.allowed_unc_servers),
 	);
 
 	function arrayEqual(a: string[], b: string[]): boolean {
@@ -93,12 +113,14 @@
 			return apiClient.updateSecurityConfig(req);
 		},
 		onSuccess: (data) => {
-			draft = {
+			const saved: SecurityDraft = {
 				allowed_directories: [...(data.security.allowed_directories ?? [])],
 				denied_directories: [...(data.security.denied_directories ?? [])],
 				allow_unc: data.security.allow_unc,
 				allowed_unc_servers: [...(data.security.allowed_unc_servers ?? [])],
 			};
+			draft = saved;
+			baseline = saved;
 			toastStore.success('Security settings saved and reloaded', 4000);
 			void queryClient.invalidateQueries({ queryKey: ['config'] }).then(async () => {
 				const fresh = await queryClient.fetchQuery<Config>({
