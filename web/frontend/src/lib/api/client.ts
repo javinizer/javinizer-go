@@ -272,6 +272,30 @@ class APIClient {
 	) {
 		return this.replacements.importGenreReplacements(request);
 	}
+	async listIgnoredGenres() {
+		return this.replacements.listIgnoredGenres();
+	}
+	async addIgnoredGenre(request: Parameters<ReplacementClient['addIgnoredGenre']>[0]) {
+		return this.replacements.addIgnoredGenre(request);
+	}
+	async replaceIgnoredGenres(request: Parameters<ReplacementClient['replaceIgnoredGenres']>[0]) {
+		return this.replacements.replaceIgnoredGenres(request);
+	}
+	async deleteIgnoredGenre(genre: string) {
+		return this.replacements.deleteIgnoredGenre(genre);
+	}
+	async listFavoriteGenres() {
+		return this.replacements.listFavoriteGenres();
+	}
+	async addFavoriteGenre(request: Parameters<ReplacementClient['addFavoriteGenre']>[0]) {
+		return this.replacements.addFavoriteGenre(request);
+	}
+	async replaceFavoriteGenres(request: Parameters<ReplacementClient['replaceFavoriteGenres']>[0]) {
+		return this.replacements.replaceFavoriteGenres(request);
+	}
+	async deleteFavoriteGenre(genre: string) {
+		return this.replacements.deleteFavoriteGenre(genre);
+	}
 	async listWordReplacements(params?: Parameters<ReplacementClient['listWordReplacements']>[0]) {
 		return this.replacements.listWordReplacements(params);
 	}

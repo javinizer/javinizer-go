@@ -15,6 +15,18 @@ type invalidateCaches func()
 func RegisterRoutes(protected *gin.RouterGroup, deps GenreDeps, invalidate invalidateCaches) {
 	protected.GET("/genres", listGenres(deps))
 
+	ignored := protected.Group("/genres/ignored")
+	ignored.GET("", listIgnoredGenres(deps))
+	ignored.POST("", addIgnoredGenre(deps))
+	ignored.PUT("", replaceIgnoredGenres(deps))
+	ignored.DELETE("", deleteIgnoredGenre(deps))
+
+	favorites := protected.Group("/genres/favorites")
+	favorites.GET("", listFavoriteGenres(deps))
+	favorites.POST("", addFavoriteGenre(deps))
+	favorites.PUT("", replaceFavoriteGenres(deps))
+	favorites.DELETE("", deleteFavoriteGenre(deps))
+
 	replacements := protected.Group("/genres/replacements")
 	replacements.GET("", listGenreReplacements(deps))
 	replacements.POST("", createGenreReplacement(deps, invalidate))

@@ -136,6 +136,7 @@ func registerAPIV1Routes(router *gin.Engine, rt *core.APIRuntime) {
 
 	actressDeps := actress.NewActressDeps(deps.Repos.ContentRepos, deps.Repos.TranslationRepos)
 	genreDeps := genre.NewGenreDeps(deps.Repos.ReplacementRepos, deps.Repos.TranslationRepos)
+	genreDeps.ConfigStore = genre.NewRuntimeGenreConfigStore(rt, deps.ConfigFile)
 	genreInvalidateCaches := core.InvalidateWorkflowCachesOnRuntime(rt)
 	// History handlers call the repository directly — no intermediate service needed.
 	jobsDeps := jobs.NewJobDeps(deps.Repos.JobRepo, deps.Repos.BatchFileOpRepo, deps.JobStore, deps.Reverter, deps.EventEmitter, apiCfg.AllowRevert)

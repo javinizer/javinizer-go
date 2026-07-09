@@ -22,6 +22,7 @@ import (
 type GenreDeps struct {
 	database.ReplacementRepos
 	database.TranslationRepos
+	ConfigStore GenreConfigStore
 }
 
 // NewGenreDeps creates a GenreDeps from domain-oriented sub-structs.
@@ -32,6 +33,7 @@ func NewGenreDeps(
 	return GenreDeps{
 		ReplacementRepos: replacement,
 		TranslationRepos: translation,
+		ConfigStore:      noopGenreConfigStore{},
 	}
 }
 

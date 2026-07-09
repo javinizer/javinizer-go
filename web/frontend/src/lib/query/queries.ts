@@ -57,6 +57,22 @@ export function createGenreReplacementsQuery(opts?: { limit?: number }) {
 	}));
 }
 
+export function createIgnoredGenresQuery() {
+	return createQuery(() => ({
+		queryKey: ['genre-ignored'],
+		queryFn: () => apiClient.listIgnoredGenres(),
+		staleTime: 30_000,
+	}));
+}
+
+export function createFavoriteGenresQuery() {
+	return createQuery(() => ({
+		queryKey: ['genre-favorites'],
+		queryFn: () => apiClient.listFavoriteGenres(),
+		staleTime: 30_000,
+	}));
+}
+
 export function createWordReplacementsQuery(opts?: { limit?: number }) {
 	return createQuery(() => ({
 		queryKey: ['word-replacements'],
