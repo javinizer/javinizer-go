@@ -89,6 +89,9 @@ class APIClient {
 	getPreviewImageURL(imageURL: string) {
 		return this.system.getPreviewImageURL(imageURL);
 	}
+	withSessionParam(url: string) {
+		return this.system.withSessionParam(url);
+	}
 	async getCurrentWorkingDirectory() {
 		return this.system.getCurrentWorkingDirectory();
 	}

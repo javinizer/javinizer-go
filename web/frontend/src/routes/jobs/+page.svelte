@@ -243,7 +243,7 @@
 		const results = Object.values(job.results || {});
 		for (const r of results) {
 			if (r.movie?.cropped_poster_url) {
-				return r.movie.cropped_poster_url;
+				return apiClient.withSessionParam(r.movie.cropped_poster_url);
 			}
 			if (r.movie?.poster_url) {
 				return apiClient.getPreviewImageURL(r.movie.poster_url);
