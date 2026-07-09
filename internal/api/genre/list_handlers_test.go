@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,7 @@ import (
 )
 
 type fakeGenreConfigStore struct {
+	mu        sync.Mutex
 	ignored   []string
 	favorites []string
 	err       error
@@ -56,6 +58,70 @@ func (f *fakeGenreConfigStore) SetFavoriteGenres(_ context.Context, genres []str
 	}
 	f.favorites = append([]string(nil), genres...)
 	return nil
+}
+
+func (f *fakeGenreConfigStore) AddIgnoreGenre(_ context.Context, genre string) ([]string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	if containsString(f.ignored, genre) {
+		return cloneStrings(f.ignored), false, nil
+	}
+	if f.setErr != nil {
+		return nil, false, f.setErr
+	}
+	f.ignored = append(cloneStrings(f.ignored), genre)
+	return cloneStrings(f.ignored), true, nil
+}
+
+func (f *fakeGenreConfigStore) RemoveIgnoreGenre(_ context.Context, genre string) ([]string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	if !containsString(f.ignored, genre) {
+		return cloneStrings(f.ignored), false, nil
+	}
+	if f.setErr != nil {
+		return nil, false, f.setErr
+	}
+	f.ignored = removeString(f.ignored, genre)
+	return cloneStrings(f.ignored), true, nil
+}
+
+func (f *fakeGenreConfigStore) AddFavoriteGenre(_ context.Context, genre string) ([]string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	if containsString(f.favorites, genre) {
+		return cloneStrings(f.favorites), false, nil
+	}
+	if f.setErr != nil {
+		return nil, false, f.setErr
+	}
+	f.favorites = append(cloneStrings(f.favorites), genre)
+	return cloneStrings(f.favorites), true, nil
+}
+
+func (f *fakeGenreConfigStore) RemoveFavoriteGenre(_ context.Context, genre string) ([]string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	if !containsString(f.favorites, genre) {
+		return cloneStrings(f.favorites), false, nil
+	}
+	if f.setErr != nil {
+		return nil, false, f.setErr
+	}
+	f.favorites = removeString(f.favorites, genre)
+	return cloneStrings(f.favorites), true, nil
 }
 
 func newListTestDeps(store GenreConfigStore) GenreDeps {

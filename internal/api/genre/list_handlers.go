@@ -113,21 +113,16 @@ func addIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "genre is required"})
 			return
 		}
-		current, err := deps.ConfigStore.GetIgnoreGenres(c.Request.Context())
+		result, changed, err := deps.ConfigStore.AddIgnoreGenre(c.Request.Context(), genre)
 		if err != nil {
 			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-		if containsString(current, genre) {
-			c.JSON(http.StatusOK, ignoredGenresResponse{IgnoredGenres: current, Count: len(current)})
-			return
+		status := http.StatusCreated
+		if !changed {
+			status = http.StatusOK
 		}
-		updated := append(current, genre)
-		if err := deps.ConfigStore.SetIgnoreGenres(c.Request.Context(), updated); err != nil {
-			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
-			return
-		}
-		c.JSON(http.StatusCreated, ignoredGenresResponse{IgnoredGenres: updated, Count: len(updated)})
+		c.JSON(status, ignoredGenresResponse{IgnoredGenres: result, Count: len(result)})
 	}
 }
 
@@ -154,21 +149,16 @@ func deleteIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "genre query parameter is required"})
 			return
 		}
-		current, err := deps.ConfigStore.GetIgnoreGenres(c.Request.Context())
+		result, changed, err := deps.ConfigStore.RemoveIgnoreGenre(c.Request.Context(), genre)
 		if err != nil {
 			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-		if !containsString(current, genre) {
+		if !changed {
 			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "genre is not in the ignore list"})
 			return
 		}
-		updated := removeString(current, genre)
-		if err := deps.ConfigStore.SetIgnoreGenres(c.Request.Context(), updated); err != nil {
-			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, ignoredGenresResponse{IgnoredGenres: updated, Count: len(updated)})
+		c.JSON(http.StatusOK, ignoredGenresResponse{IgnoredGenres: result, Count: len(result)})
 	}
 }
 
@@ -257,21 +247,16 @@ func addFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "genre is required"})
 			return
 		}
-		current, err := deps.ConfigStore.GetFavoriteGenres(c.Request.Context())
+		result, changed, err := deps.ConfigStore.AddFavoriteGenre(c.Request.Context(), genre)
 		if err != nil {
 			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-		if containsString(current, genre) {
-			c.JSON(http.StatusOK, favoriteGenresResponse{Favorites: current, Count: len(current)})
-			return
+		status := http.StatusCreated
+		if !changed {
+			status = http.StatusOK
 		}
-		updated := append(current, genre)
-		if err := deps.ConfigStore.SetFavoriteGenres(c.Request.Context(), updated); err != nil {
-			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
-			return
-		}
-		c.JSON(http.StatusCreated, favoriteGenresResponse{Favorites: updated, Count: len(updated)})
+		c.JSON(status, favoriteGenresResponse{Favorites: result, Count: len(result)})
 	}
 }
 
@@ -298,21 +283,16 @@ func deleteFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "genre query parameter is required"})
 			return
 		}
-		current, err := deps.ConfigStore.GetFavoriteGenres(c.Request.Context())
+		result, changed, err := deps.ConfigStore.RemoveFavoriteGenre(c.Request.Context(), genre)
 		if err != nil {
 			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-		if !containsString(current, genre) {
+		if !changed {
 			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "genre is not in the favorites list"})
 			return
 		}
-		updated := removeString(current, genre)
-		if err := deps.ConfigStore.SetFavoriteGenres(c.Request.Context(), updated); err != nil {
-			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, favoriteGenresResponse{Favorites: updated, Count: len(updated)})
+		c.JSON(http.StatusOK, favoriteGenresResponse{Favorites: result, Count: len(result)})
 	}
 }
 

@@ -25,6 +25,11 @@ type GenreConfigStore interface {
 	SetIgnoreGenres(ctx context.Context, genres []string) error
 	GetFavoriteGenres(ctx context.Context) ([]string, error)
 	SetFavoriteGenres(ctx context.Context, genres []string) error
+
+	AddIgnoreGenre(ctx context.Context, genre string) (result []string, changed bool, err error)
+	RemoveIgnoreGenre(ctx context.Context, genre string) (result []string, changed bool, err error)
+	AddFavoriteGenre(ctx context.Context, genre string) (result []string, changed bool, err error)
+	RemoveFavoriteGenre(ctx context.Context, genre string) (result []string, changed bool, err error)
 }
 
 // noopGenreConfigStore returns empty lists and no-ops writes. Used when no
@@ -43,6 +48,18 @@ func (noopGenreConfigStore) GetFavoriteGenres(context.Context) ([]string, error)
 }
 func (noopGenreConfigStore) SetFavoriteGenres(context.Context, []string) error {
 	return ErrGenreConfigStoreNotConfigured
+}
+func (noopGenreConfigStore) AddIgnoreGenre(context.Context, string) ([]string, bool, error) {
+	return nil, false, ErrGenreConfigStoreNotConfigured
+}
+func (noopGenreConfigStore) RemoveIgnoreGenre(context.Context, string) ([]string, bool, error) {
+	return nil, false, ErrGenreConfigStoreNotConfigured
+}
+func (noopGenreConfigStore) AddFavoriteGenre(context.Context, string) ([]string, bool, error) {
+	return nil, false, ErrGenreConfigStoreNotConfigured
+}
+func (noopGenreConfigStore) RemoveFavoriteGenre(context.Context, string) ([]string, bool, error) {
+	return nil, false, ErrGenreConfigStoreNotConfigured
 }
 
 // RuntimeGenreConfigStore is the production GenreConfigStore. It persists
@@ -105,6 +122,81 @@ func (s *RuntimeGenreConfigStore) SetFavoriteGenres(ctx context.Context, genres 
 	return s.persist(func(cfg *config.Config) {
 		cfg.WebUI.Favorites.Genre = genres
 	})
+}
+
+// AddIgnoreGenre atomically appends genre to ignore_genres under ConfigUpdateMu
+// so concurrent POST requests cannot lose updates. It returns the resulting
+// list and changed=true when the genre was newly added; changed=false means the
+// genre was already present (idempotent). The read-modify-write happens inside
+// persist, which clones, mutates, saves, and publishes while holding the lock.
+func (s *RuntimeGenreConfigStore) AddIgnoreGenre(_ context.Context, genre string) ([]string, bool, error) {
+	var result []string
+	var changed bool
+	err := s.persist(func(cfg *config.Config) {
+		current := cfg.Metadata.IgnoreGenres
+		if containsString(current, genre) {
+			result = cloneStrings(current)
+			return
+		}
+		result = append(cloneStrings(current), genre)
+		changed = true
+		cfg.Metadata.IgnoreGenres = result
+	})
+	return result, changed, err
+}
+
+// RemoveIgnoreGenre atomically removes genre from ignore_genres under
+// ConfigUpdateMu. changed=false means the genre was not present.
+func (s *RuntimeGenreConfigStore) RemoveIgnoreGenre(_ context.Context, genre string) ([]string, bool, error) {
+	var result []string
+	var changed bool
+	err := s.persist(func(cfg *config.Config) {
+		current := cfg.Metadata.IgnoreGenres
+		if !containsString(current, genre) {
+			result = cloneStrings(current)
+			return
+		}
+		result = removeString(current, genre)
+		changed = true
+		cfg.Metadata.IgnoreGenres = result
+	})
+	return result, changed, err
+}
+
+// AddFavoriteGenre atomically appends genre to the favorites list under
+// ConfigUpdateMu. changed=false means the genre was already a favorite.
+func (s *RuntimeGenreConfigStore) AddFavoriteGenre(_ context.Context, genre string) ([]string, bool, error) {
+	var result []string
+	var changed bool
+	err := s.persist(func(cfg *config.Config) {
+		current := cfg.WebUI.Favorites.Genre
+		if containsString(current, genre) {
+			result = cloneStrings(current)
+			return
+		}
+		result = append(cloneStrings(current), genre)
+		changed = true
+		cfg.WebUI.Favorites.Genre = result
+	})
+	return result, changed, err
+}
+
+// RemoveFavoriteGenre atomically removes genre from the favorites list under
+// ConfigUpdateMu. changed=false means the genre was not a favorite.
+func (s *RuntimeGenreConfigStore) RemoveFavoriteGenre(_ context.Context, genre string) ([]string, bool, error) {
+	var result []string
+	var changed bool
+	err := s.persist(func(cfg *config.Config) {
+		current := cfg.WebUI.Favorites.Genre
+		if !containsString(current, genre) {
+			result = cloneStrings(current)
+			return
+		}
+		result = removeString(current, genre)
+		changed = true
+		cfg.WebUI.Favorites.Genre = result
+	})
+	return result, changed, err
 }
 
 // persist clones the live config, applies mutate, writes the YAML file, and
