@@ -322,7 +322,8 @@ func CleanupServerHub(t *testing.T, rt *core.APIRuntime) {
 
 // waitForFileRelease waits until the SQLite DB file and its WAL/SHM sidecars
 // can be removed, which on Windows may lag behind db.Close() because the OS
-// holds file handles open briefly. It polls with a bounded backoff up to ~2s.
+// holds file handles open briefly. It polls at a fixed 20ms interval (capped to
+// the remaining deadline) for up to ~2s.
 // On Unix this is effectively a no-op (files are deletable while open) but it
 // runs unconditionally to keep the code path uniform.
 //
@@ -372,16 +373,17 @@ func dbFileReleased(dbPath string) bool {
 	return true
 }
 
-// allSidecarsRemoved reports whether all listed sidecar files are absent
-// (already deleted or never created). It removes any that still exist; the
-// -wal/-shm files are safe to delete because SQLite recreates them on next
-// access, and t.TempDir()'s RemoveAll would delete them anyway.
+// allSidecarsRemoved attempts to remove each sidecar file, returning true only
+// when all are gone (already absent or successfully removed here). It ignores
+// only os.IsNotExist errors; any other remove error (e.g. a transient Windows
+// sharing violation) is treated as "still locked" so waitForFileRelease keeps
+// polling rather than returning early and reintroducing the RemoveAll flake.
+// The -wal/-shm files are safe to delete because SQLite recreates them on
+// next access, and t.TempDir()'s RemoveAll would delete them anyway.
 func allSidecarsRemoved(sidecars []string) bool {
 	for _, p := range sidecars {
-		if _, err := os.Stat(p); err == nil {
-			if err := os.Remove(p); err != nil {
-				return false
-			}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return false
 		}
 	}
 	return true
