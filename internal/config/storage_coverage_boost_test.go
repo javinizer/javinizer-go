@@ -171,44 +171,57 @@ func TestAcquireConfigFileLock_Contention(t *testing.T) {
 
 	unlock1, err := acquireConfigFileLock(path)
 	require.NoError(t, err)
+	t.Cleanup(unlock1)
 
+	acquiring := make(chan struct{})
 	gotLock := make(chan struct{})
-	timeout := make(chan struct{})
+	acquireErr := make(chan error, 1)
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
+		close(acquiring)
 		unlock2, err2 := acquireConfigFileLock(path)
-		if err2 == nil {
-			close(gotLock)
-			unlock2()
-		} else {
-			close(timeout)
+		if err2 != nil {
+			acquireErr <- err2
+			return
 		}
+		close(gotLock)
+		unlock2()
 	}()
 
-	// Give the goroutine a moment to hit the lock contention path.
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-acquiring:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second goroutine never started acquiring the lock")
+	}
 
-	// The second goroutine should NOT have the lock yet.
+	// Give the second goroutine time to reach the contended acquire path
+	// (acquireConfigFileLock polls every configLockWaitInterval). Without this
+	// bounded wait the default branch below could fire before the goroutine
+	// has started blocking, letting the test pass without exercising the
+	// contention path. Tied to the impl's poll interval, not an arbitrary sleep.
+	time.Sleep(2 * configLockWaitInterval)
+
 	select {
 	case <-gotLock:
 		t.Fatal("second goroutine acquired lock while first holds it")
-	case <-timeout:
-		t.Fatal("second goroutine failed to acquire lock (unexpected)")
+	case err := <-acquireErr:
+		t.Fatalf("second goroutine failed under contention: %v", err)
 	default:
-		// Expected: second goroutine is still waiting.
 	}
 
-	// Release the first lock; second goroutine should now acquire it.
 	unlock1()
 
 	select {
 	case <-gotLock:
-		// Success: second goroutine acquired lock after first released.
+	case err := <-acquireErr:
+		t.Fatalf("second goroutine failed to acquire after release: %v", err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("second goroutine did not acquire lock after first released")
-	case <-timeout:
-		t.Fatal("second goroutine failed to acquire lock after first released")
 	}
+
+	<-done
 }
 
 func TestAcquireConfigFileLock_StaleLockReaped(t *testing.T) {
