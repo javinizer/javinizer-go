@@ -200,7 +200,6 @@ it('toasts an error when the save fails', async () => {
 	await waitFor(() => expect(errorSpy).toHaveBeenCalled());
 	expect(mockUpdateSecurityConfig).toHaveBeenCalledTimes(1);
 });
-});
 
 it('rehydrates the draft from the fresh config query after a successful save', async () => {
 	mockUpdateSecurityConfig.mockResolvedValue({
@@ -260,4 +259,6 @@ it('propagates draft edits into the shared config so the top-level Save Changes 
 	await waitFor(() =>
 		expect(config.api.security.allowed_directories).toEqual(['/mnt/videos']),
 	);
+});
+
 });
