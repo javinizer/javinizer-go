@@ -45,7 +45,11 @@ func TestIsFilesystemRoot(t *testing.T) {
 	)
 
 	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
+		name := tt.path
+		if name == "" {
+			name = "empty"
+		}
+		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tt.want, isFilesystemRoot(tt.path))
 		})
 	}
