@@ -125,7 +125,7 @@ describe('types.ts has no unnecessary any', () => {
 	});
 
 	it('new config sub-interfaces exist and are properly typed', () => {
-		const server: ServerConfig = { host: 'localhost', port: 8080 };
+		const server: ServerConfig = { host: 'localhost', port: 8765 };
 		const profile: ProxyProfile = { url: 'http://proxy:8080', username: 'user', password: 'pass' };
 		const proxy: ProxyConfig = { enabled: true, profile: 'main', profiles: { main: profile } };
 		const fs: FlareSolverrConfig = {

@@ -105,9 +105,9 @@ export class BaseClient {
 // In the desktop app (Wails webview) the SPA loads from wails://wails.localhost
 // and must use same-origin relative URLs so requests route through the embedded
 // reverse proxy to the API server on its random localhost port. A dev .env may
-// bake VITE_API_URL=http://localhost:8080 into the bundle; that would make the
+// bake VITE_API_URL=http://localhost:8765 into the bundle; that would make the
 // SPA fetch cross-origin (and to the wrong port — the desktop binary's config
-// binds a random high port, not 8080), which WKWebView blocks with
+// binds a random high port, not 8765), which WKWebView blocks with
 // "Load failed". Force same-origin in the desktop context regardless of the
 // baked-in env value.
 //
@@ -115,7 +115,7 @@ export class BaseClient {
 // with VITE_API_URL baked in would otherwise pin the API client to a fixed
 // host:port that won't match the server's actual bind address — e.g. running
 // the desktop binary's `web` subcommand (which reads the portable config's
-// random port) against a bundle baked with :8080 produces "Failed to fetch".
+// random port) against a bundle baked with :8765 produces "Failed to fetch".
 export function getAPIBaseURL(): string {
 	if (isDesktopApp()) return '';
 	if (import.meta.env.DEV && import.meta.env.VITE_API_URL) {

@@ -4,7 +4,7 @@ The Javinizer REST API provides programmatic access to all metadata scraping, fi
 
 ## Overview
 
-- **Base URL**: `http://localhost:8080/api/v1`
+- **Base URL**: `http://localhost:8765/api/v1`
 - **Content Type**: `application/json`
 - **Authentication**: Built-in single-user session authentication
 - **WebSocket**: Real-time progress updates at `/ws/progress`
@@ -15,7 +15,7 @@ The Javinizer REST API provides programmatic access to all metadata scraping, fi
 
 **Using Docker (recommended):**
 ```bash
-docker run --rm -p 8080:8080 \
+docker run --rm -p 8765:8765 \
   -v "$(pwd)/data:/javinizer" \
   -v "/path/to/media:/media" \
   ghcr.io/javinizer/javinizer-go:latest
@@ -30,14 +30,14 @@ javinizer web
 ```bash
 javinizer web --port 9000
 ```
-Or set `server.port` in `config.yaml` (default `8080`).
+Or set `server.port` in `config.yaml` (default `8765`).
 
 ### Interactive API Documentation
 
 The API server provides two interactive documentation interfaces:
 
-- **Scalar UI**: [http://localhost:8080/docs](http://localhost:8080/docs) - Modern, user-friendly API explorer
-- **Swagger UI**: [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html) - Traditional OpenAPI spec viewer
+- **Scalar UI**: [http://localhost:8765/docs](http://localhost:8765/docs) - Modern, user-friendly API explorer
+- **Swagger UI**: [http://localhost:8765/swagger/index.html](http://localhost:8765/swagger/index.html) - Traditional OpenAPI spec viewer
 
 These interfaces provide:
 - Complete request/response schemas
@@ -50,13 +50,13 @@ These interfaces provide:
 On first startup, protected API routes return `503` until credentials are configured.
 
 1. Start server: `javinizer web`
-2. Open Web UI at `http://localhost:8080/`
+2. Open Web UI at `http://localhost:8765/`
 3. Create default username/password in the setup screen
 4. Session cookie is issued automatically after setup
 
 **CLI setup example (cookie jar):**
 ```bash
-curl -X POST http://localhost:8080/api/v1/auth/setup \
+curl -X POST http://localhost:8765/api/v1/auth/setup \
   -H "Content-Type: application/json" \
   -c cookies.txt \
   -d '{"username":"admin","password":"password123"}'
@@ -83,14 +83,14 @@ Scrape, retrieve, and manage movie metadata.
 
 **Example - Scrape movie:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/scrape \
+curl -X POST http://localhost:8765/api/v1/scrape \
   -H "Content-Type: application/json" \
   -d '{"id": "IPX-535"}'
 ```
 
 **Example - List movies:**
 ```bash
-curl http://localhost:8080/api/v1/movies
+curl http://localhost:8765/api/v1/movies
 ```
 
 ### Actresses
@@ -112,19 +112,19 @@ Manage actress database with images and metadata.
 
 **Example - Search actresses:**
 ```bash
-curl "http://localhost:8080/api/v1/actresses/search?q=Sakura"
+curl "http://localhost:8765/api/v1/actresses/search?q=Sakura"
 ```
 
 **Example - Merge preview:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/actresses/merge/preview \
+curl -X POST http://localhost:8765/api/v1/actresses/merge/preview \
   -H "Content-Type: application/json" \
   -d '{"target_id": 12, "source_id": 34}'
 ```
 
 **Example - Apply merge:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/actresses/merge \
+curl -X POST http://localhost:8765/api/v1/actresses/merge \
   -H "Content-Type: application/json" \
   -d '{
     "target_id": 12,
@@ -143,14 +143,14 @@ curl -X POST http://localhost:8080/api/v1/actresses/merge \
 
 **Example - Export actresses:**
 ```bash
-curl -b cookies.txt http://localhost:8080/api/v1/actresses/export -o actresses.json
+curl -b cookies.txt http://localhost:8765/api/v1/actresses/export -o actresses.json
 ```
 
 `GET /api/v1/actresses/export` streams the entire actress table as a JSON array with `Content-Type: application/json`. Rows are emitted in chunks of 1000 so large libraries (100k+ actresses) do not need to fit in memory. The output is a plain JSON array of actress objects, suitable for backup or migration.
 
 **Example - Import actresses:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/actresses/import \
+curl -X POST http://localhost:8765/api/v1/actresses/import \
   -H "Content-Type: application/json" \
   -d '{
     "actresses": [
@@ -196,20 +196,20 @@ Batch scraping workflow with job tracking and WebSocket progress updates.
 
 **Example - Start batch scrape:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/batch/scrape \
+curl -X POST http://localhost:8765/api/v1/batch/scrape \
   -H "Content-Type: application/json" \
   -d '{"directory": "/media/unsorted"}'
 ```
 
 **Example - Get batch job status:**
 ```bash
-curl http://localhost:8080/api/v1/batch/abc-123-def
+curl http://localhost:8765/api/v1/batch/abc-123-def
 ```
 
 **`manual_inputs` (PR #68):** `POST /api/v1/batch/scrape` accepts a `manual_inputs` object keyed by file path. Each value is either a JAV ID (scrapes as that ID, bypassing the matcher) or a URL (scrapes with URL-compatible scrapers). This powers the web UI's Manual Scrape flow.
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/batch/scrape \
+curl -X POST http://localhost:8765/api/v1/batch/scrape \
   -H "Content-Type: application/json" \
   -d '{
     "files": ["/media/unsorted/vid1.mp4", "/media/unsorted/vid2.mp4"],
@@ -250,7 +250,7 @@ Browse filesystem, scan directories, and preview organization results.
 
 **Example - Scan directory:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/scan \
+curl -X POST http://localhost:8765/api/v1/scan \
   -H "Content-Type: application/json" \
   -d '{"path": "/media"}'
 ```
@@ -278,18 +278,18 @@ Configuration, proxy testing, and scraper management.
 
 **Example - Get configuration:**
 ```bash
-curl -b cookies.txt http://localhost:8080/api/v1/config
+curl -b cookies.txt http://localhost:8765/api/v1/config
 ```
 
 **Example - Test proxy:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/proxy/test \
+curl -X POST http://localhost:8765/api/v1/proxy/test \
   -H "Content-Type: application/json" \
   -d '{
     "mode": "direct",
     "proxy": {
       "enabled": true,
-      "url": "http://proxy.example.com:8080"
+      "url": "http://proxy.example.com:8765"
     }
   }'
 ```
@@ -307,7 +307,7 @@ Track and rollback file organization operations.
 
 **Example - List history:**
 ```bash
-curl http://localhost:8080/api/v1/history
+curl http://localhost:8765/api/v1/history
 ```
 
 ### Resources
@@ -322,7 +322,7 @@ Serve temporary and persistent image files.
 
 **Example - Get temp poster:**
 ```bash
-curl http://localhost:8080/api/v1/temp/posters/abc-123/IPX-535-poster.jpg -o poster.jpg
+curl http://localhost:8765/api/v1/temp/posters/abc-123/IPX-535-poster.jpg -o poster.jpg
 ```
 
 **Note:** Temp posters are preserved in `data/temp/posters/{jobID}/` when organization fails, allowing retry without re-scraping.
@@ -385,7 +385,7 @@ An authenticated session cookie is required.
 
 **Connect to WebSocket:**
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws/progress');
+const ws = new WebSocket('ws://localhost:8765/ws/progress');
 
 ws.onmessage = (event) => {
   const update = JSON.parse(event.data);
@@ -479,8 +479,8 @@ Standard error format:
 
 For full request/response schemas, examples, and interactive testing, visit:
 
-- **Scalar UI**: [http://localhost:8080/docs](http://localhost:8080/docs) - Recommended for exploration
-- **Swagger UI**: [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html) - Full OpenAPI spec
+- **Scalar UI**: [http://localhost:8765/docs](http://localhost:8765/docs) - Recommended for exploration
+- **Swagger UI**: [http://localhost:8765/swagger/index.html](http://localhost:8765/swagger/index.html) - Full OpenAPI spec
 
 These interfaces provide complete documentation including:
 - Request body schemas

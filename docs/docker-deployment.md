@@ -277,7 +277,7 @@ Edit `./data/config.yaml` on the host:
 ```yaml
 server:
   host: "0.0.0.0"
-  port: 8080
+  port: 8765
 
 scrapers:
   priority: ["r18dev", "dmm"]
@@ -290,7 +290,7 @@ scrapers:
     default_profile: "main"
     profiles:
       main:
-        url: "http://proxy.example.com:8080"
+        url: "http://proxy.example.com:8765"
         # username: ""   # Optional authentication
         # password: ""   # Optional authentication
 
@@ -319,7 +319,7 @@ Or edit `docker-compose.yml` directly:
 
 ```yaml
 ports:
-  - "9090:8080"  # Access at http://localhost:9090
+  - "9090:8765"  # Access at http://localhost:9090
 ```
 
 ---
@@ -477,13 +477,13 @@ PUID=$(id -u) PGID=$(id -g) docker compose up -d
 
 ### Network Security
 
-The default configuration binds to `0.0.0.0:8080` (all interfaces). For production:
+The default configuration binds to `0.0.0.0:8765` (all interfaces). For production:
 
 1. **Use a reverse proxy** (nginx, Caddy) with HTTPS
 2. **Restrict binding** to localhost:
    ```yaml
    ports:
-     - "127.0.0.1:8080:8080"
+     - "127.0.0.1:8765:8765"
    ```
 3. **Complete first-run authentication setup** in Web UI (built-in single-user auth)
 
@@ -513,7 +513,7 @@ services:
     restart: unless-stopped
 
     ports:
-      - "127.0.0.1:8080:8080"  # Localhost only
+      - "127.0.0.1:8765:8765"  # Localhost only
 
     volumes:
       - ./data:/javinizer

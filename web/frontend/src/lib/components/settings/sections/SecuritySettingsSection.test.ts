@@ -39,7 +39,7 @@ if (!Element.prototype.animate) {
 
 function makeConfig(overrides: Partial<SettingsConfig['api']['security']> = {}): SettingsConfig {
 	return {
-		server: { host: '0.0.0.0', port: 8080 },
+		server: { host: '0.0.0.0', port: 8765 },
 		api: {
 			security: {
 				allowed_directories: [],

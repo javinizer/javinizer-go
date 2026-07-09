@@ -17,7 +17,7 @@
  * shared +layout onMount calls) so no real backend is required.
  *
  * webServer spawns Vite (no backend). The regular vite.config.ts is fine:
- * its /api proxy to :8080 is never reached because page.route intercepts
+ * its /api proxy to :8765 is never reached because page.route intercepts
  * /api requests in the browser before Vite's proxy sees them.
  *
  * Run with:

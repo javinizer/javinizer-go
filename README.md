@@ -39,7 +39,7 @@ chmod +x javinizer
 ./javinizer web
 ```
 
-Open **http://localhost:8080**, create your admin login on first startup, and start scraping.
+Open **http://localhost:8765**, create your admin login on first startup, and start scraping.
 
 - On macOS, swap the asset for `javinizer-darwin-universal`; on Windows, download `javinizer-windows-amd64.exe` and run `.\javinizer.exe web`.
 - Prefer [Docker](#docker), a [one-shot installer](#one-shot-install-linux--macos--windows), [Homebrew](#homebrew-macos--linux), a [binary](#prebuilt-binaries-manual-download), or [build from source](#build-from-source) for other setups.
@@ -58,7 +58,7 @@ curl -o ./data/config.yaml \
 docker run --rm \
   -e JAVINIZER_SETUP_TRUSTED_CIDRS=172.16.0.0/12 \
   --user "$(id -u):$(id -g)" \
-  -p 8080:8080 \
+  -p 8765:8765 \
   -v "$(pwd)/data:/javinizer" \
   -v "/path/to/your/media:/media" \
   ghcr.io/javinizer/javinizer-go:latest
@@ -256,7 +256,7 @@ Rename-Item javinizer-windows-amd64.exe javinizer.exe
 To run `javinizer` from anywhere, add its folder to your `PATH` (System Properties → Environment Variables → Path → New), or copy `javinizer.exe` into a folder that's already on your `PATH`.
 
 ```powershell
-# Start the web UI, then open http://localhost:8080
+# Start the web UI, then open http://localhost:8765
 .\javinizer.exe init
 .\javinizer.exe web
 ```
@@ -306,7 +306,7 @@ make build
 
 ```bash
 javinizer init          # creates a default config.yaml + database
-javinizer web           # starts the server at http://localhost:8080
+javinizer web           # starts the server at http://localhost:8765
 # Custom port/host:
 javinizer web --host 0.0.0.0 --port 8081
 ```
@@ -379,7 +379,7 @@ See the [CLI Reference](./docs/03-cli-reference.md) for every command and flag.
 
 ## Web UI
 
-Available in Docker and in the binary (embedded), at `http://localhost:8080`.
+Available in Docker and in the binary (embedded), at `http://localhost:8765`.
 
 | Page | What you do there |
 |---|---|
@@ -392,7 +392,7 @@ Available in Docker and in the binary (embedded), at `http://localhost:8080`.
 | **History** | View and roll back organization operations. |
 | **Settings** | Configure scrapers, output templates, and proxy settings. |
 
-**API docs** are served alongside the UI: [Scalar UI](http://localhost:8080/docs) and [Swagger UI](http://localhost:8080/swagger/index.html). See the [API Reference](./docs/07-api-reference.md) for endpoint documentation.
+**API docs** are served alongside the UI: [Scalar UI](http://localhost:8765/docs) and [Swagger UI](http://localhost:8765/swagger/index.html). See the [API Reference](./docs/07-api-reference.md) for endpoint documentation.
 
 ### Web development
 
@@ -404,7 +404,7 @@ make build && javinizer web
 **Dev mode (hot reload):**
 ```bash
 javinizer web        # terminal 1: backend
-make web-dev         # terminal 2: frontend at http://localhost:5174 (proxies API to :8080)
+make web-dev         # terminal 2: frontend at http://localhost:5174 (proxies API to :8765)
 ```
 
 See `web/frontend/README.md` for more.
@@ -480,7 +480,7 @@ Docker deployments support environment-variable overrides. Defaults shown are fo
 docker run --rm \
   -e LOG_LEVEL=debug -e TZ=Asia/Tokyo \
   -e JAVINIZER_SETUP_TRUSTED_CIDRS=172.16.0.0/12 \
-  -p 9000:8080 \
+  -p 9000:8765 \
   -v "$(pwd)/data:/javinizer" -v "/media/jav:/media" \
   ghcr.io/javinizer/javinizer-go:latest
 ```

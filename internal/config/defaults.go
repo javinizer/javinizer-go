@@ -28,7 +28,7 @@ func getFirstScraperPriorityStatic() string {
 func defaultServerConfig() ServerConfig {
 	return ServerConfig{
 		Host: "localhost",
-		Port: 8080,
+		Port: 8765,
 	}
 }
 
@@ -41,9 +41,9 @@ func defaultAPIConfig() APIConfig {
 			MaxFilesPerScan:    10000,
 			ScanTimeoutSeconds: 30,
 			AllowedOrigins: []string{
-				"http://localhost:8080",
+				"http://localhost:8765",
 				"http://localhost:5173",
-				"http://127.0.0.1:8080",
+				"http://127.0.0.1:8765",
 				"http://127.0.0.1:5173",
 			},
 			RateLimit: RateLimitConfig{

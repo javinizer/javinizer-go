@@ -291,7 +291,7 @@ check-swagger:
 # Alias for backward compatibility
 docs: swagger
 	@echo "✅ Documentation up-to-date"
-	@echo "View at: http://localhost:8080/docs"
+	@echo "View at: http://localhost:8765/docs"
 
 # Generate mocks from interfaces using mockery v3
 # Pinned to v3.7.1 for reproducible output (regen drift otherwise).
@@ -631,8 +631,9 @@ docker-build-no-cache:
 # The setup CIDR is needed because the container sees the host as the Docker
 # bridge gateway (172.x), not 127.0.0.1, so the /auth/setup localhost guard
 # would reject the first-run setup screen without it.
-# Port on the host to publish the container's 8080. 8080 is too common (collides
-# with many dev tools); 8765 is distinctive. Override: make docker-run HOST_PORT=9090
+# Port on the host to publish the container's 8765. 8765 is distinctive
+# (8080 is too common and collides with many dev tools).
+# Override: make docker-run HOST_PORT=9090
 # Matches docker-compose.yml's HOST_PORT env var so `make` and `compose` agree.
 HOST_PORT ?= 8765
 # Host directory mounted at /media (input files, writable so organize works).
@@ -655,7 +656,7 @@ docker-run:
 	@if [ ! -d "$(ABS_MEDIA_DIR)" ]; then echo "warning: MEDIA_DIR '$(MEDIA_DIR)' does not exist or is not a directory — container will start but /media will be empty"; fi
 	docker run -d \
 		--name $(DOCKER_CONTAINER_NAME) \
-		-p "$(HOST_PORT):8080" \
+		-p "$(HOST_PORT):8765" \
 		-e JAVINIZER_SETUP_TRUSTED_CIDRS=172.16.0.0/12 \
 		-v "$(DATA_DIR):/javinizer" \
 		-v "$(ABS_MEDIA_DIR):/media" \

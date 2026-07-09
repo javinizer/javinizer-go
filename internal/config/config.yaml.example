@@ -15,7 +15,7 @@ config_version: 3
 
 server:
     host: localhost
-    port: 8080
+    port: 8765
 api:
     security:
         # CORS allowed origins for API and WebSocket connections
@@ -23,9 +23,9 @@ api:
         # - Empty array [] means same-origin only
         # - Add frontend origins if using a separate web server (e.g., "http://localhost:5173" for Vite dev server)
         allowed_origins:
-            - http://localhost:8080
+            - http://localhost:8765
             - http://localhost:5173
-            - http://127.0.0.1:8080
+            - http://127.0.0.1:8765
             - http://127.0.0.1:5173
 
         # Allowed directories for API file operations (organize, preview, etc.)

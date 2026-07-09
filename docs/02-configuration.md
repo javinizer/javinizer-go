@@ -37,7 +37,7 @@ Configure the REST API server:
 ```yaml
 server:
   host: localhost  # Bind address
-  port: 8080       # Listen port
+  port: 8765       # Listen port
 ```
 
 ### API Security Settings
@@ -113,7 +113,7 @@ scrapers:
     default_profile: "main"   # Profile used by default when proxy is enabled
     profiles:
       main:
-        url: ""           # Examples: "http://proxy.example.com:8080", "socks5://localhost:1080"
+        url: ""           # Examples: "http://proxy.example.com:8765", "socks5://localhost:1080"
         username: ""      # Optional authentication
         password: ""      # Optional authentication
       backup:
@@ -1038,7 +1038,7 @@ services:
   javinizer:
     image: ghcr.io/javinizer/javinizer-go:latest
     ports:
-      - "8080:8080"
+      - "8765:8765"
     volumes:
       - ./config:/config
       - /media/videos:/data/videos:ro
@@ -1061,7 +1061,7 @@ Environment variables override configuration file settings and are particularly 
 | `JAVINIZER_DATA_DIR` | Optional | - | Override data directory (reserved for future use) |
 | `LOG_LEVEL` | Optional | `info` | Override log level (`debug`, `info`, `warn`, `error`) |
 | `UMASK` | Optional | `002` | Override file creation mask (e.g., `002` for `rwxrwxr-x`) |
-| `PORT` | Optional | `8080` | Override API server port |
+| `PORT` | Optional | `8765` | Override API server port |
 
 ### Docker Deployment Variables
 
@@ -1072,7 +1072,7 @@ These variables are specific to Docker deployments and container orchestration:
 | `PUID` | Optional | `1000` | User ID for file ownership in container |
 | `PGID` | Optional | `1000` | Group ID for file ownership in container |
 | `TZ` | Optional | `UTC` | Container timezone (IANA format: `America/New_York`) |
-| `HOST_PORT` | Optional | `8080` | Host port to expose Javinizer web UI |
+| `HOST_PORT` | Optional | `8765` | Host port to expose Javinizer web UI |
 | `FLARESOLVERR_HOST_PORT` | Optional | `8191` | Host port to expose FlareSolverr API |
 | `MEDIA_PATH` | Recommended | - | Absolute path to media library on host system |
 
@@ -1152,7 +1152,7 @@ PUID=1000
 PGID=1000
 
 # Ports
-HOST_PORT=8080
+HOST_PORT=8765
 FLARESOLVERR_HOST_PORT=8191
 
 # Timezone
@@ -1212,7 +1212,7 @@ When no configuration file exists:
 2. **Database**: SQLite database created at `data/javinizer.db`
 3. **Logs**: Output to `stdout` and `data/logs/javinizer.log`
 4. **Scrapers**: All scrapers available with default settings
-5. **Server**: Binds to `localhost:8080`
+5. **Server**: Binds to `localhost:8765`
 6. **Security**: Empty allowed directories denies all API file access (secure by default). Configure `api.security.allowed_directories` to enable access.
 
 ### Minimal Configuration Required
@@ -1238,7 +1238,7 @@ Javinizer provides sensible defaults for all configuration options. These defaul
 ```yaml
 server:
   host: localhost
-  port: 8080
+  port: 8765
 
 api:
   security:
@@ -1251,9 +1251,9 @@ api:
     trusted_proxies: []
     force_secure_cookies: false
     allowed_origins:
-      - "http://localhost:8080"
+      - "http://localhost:8765"
       - "http://localhost:5173"
-      - "http://127.0.0.1:8080"
+      - "http://127.0.0.1:8765"
       - "http://127.0.0.1:5173"
 ```
 
@@ -1548,7 +1548,7 @@ Docker deployments use `.env` files for per-environment settings:
 ```bash
 LOG_LEVEL=debug
 JAVINIZER_DEV_MODE=true
-VITE_API_URL=http://localhost:8080
+VITE_API_URL=http://localhost:8765
 ```
 
 **Production (`.env.prod`):**

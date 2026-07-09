@@ -759,7 +759,7 @@ javinizer info
 === Javinizer Configuration ===
 Config file: configs/config.yaml
 Database: data/javinizer.db (sqlite)
-Server: localhost:8080
+Server: localhost:8765
 
 Scrapers:
   Priority: [r18dev libredmm dmm javlibrary javdb javbus jav321 mgstage tokyohot aventertainment caribbeancom dlgetchu fc2 javstash]
@@ -1046,7 +1046,7 @@ javinizer web [flags]
 **Examples:**
 
 ```bash
-# Start with defaults (localhost:8080)
+# Start with defaults (localhost:8765)
 javinizer web
 
 # Custom host and port
@@ -1056,28 +1056,28 @@ javinizer web --host 0.0.0.0 --port 9000
 javinizer web --verbose
 ```
 
-Once running, the interactive Web UI is available at `http://localhost:8080/`. See the [API Reference](./07-api-reference.md) for the full list of REST endpoints, request/response schemas, and the Scalar/Swagger docs at `/docs` and `/swagger/index.html`.
+Once running, the interactive Web UI is available at `http://localhost:8765/`. See the [API Reference](./07-api-reference.md) for the full list of REST endpoints, request/response schemas, and the Scalar/Swagger docs at `/docs` and `/swagger/index.html`.
 
 **Quick example API usage:**
 
 ```bash
 # Health check
-curl http://localhost:8080/health
+curl http://localhost:8765/health
 
 # First-run setup (stores a session cookie for authenticated requests)
-curl -X POST http://localhost:8080/api/v1/auth/setup \
+curl -X POST http://localhost:8765/api/v1/auth/setup \
   -H "Content-Type: application/json" \
   -c cookies.txt \
   -d '{"username":"admin","password":"password123"}'
 
 # Scrape a movie
-curl -X POST http://localhost:8080/api/v1/scrape \
+curl -X POST http://localhost:8765/api/v1/scrape \
   -b cookies.txt \
   -H "Content-Type: application/json" \
   -d '{"id": "IPX-535"}'
 
 # Get a cached movie by JAV ID
-curl -b cookies.txt http://localhost:8080/api/v1/movies/IPX-535
+curl -b cookies.txt http://localhost:8765/api/v1/movies/IPX-535
 ```
 
 ---
