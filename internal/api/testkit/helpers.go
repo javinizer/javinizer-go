@@ -339,9 +339,17 @@ func CleanupServerHub(t *testing.T, rt *core.APIRuntime) {
 // sidecars are probed directly with os.Remove (SQLite recreates them as
 // needed, so removing them is safe and matches the exact RemoveAll failure
 // mode on those files).
+var (
+	// waitForFileReleaseDeadline is the maximum time waitForFileRelease polls
+	// before giving up. Overridable in tests to keep the suite fast.
+	waitForFileReleaseDeadline = 2 * time.Second
+	// waitForFileReleasePollInterval is the sleep between polls.
+	waitForFileReleasePollInterval = 20 * time.Millisecond
+)
+
 func waitForFileRelease(t *testing.T, dbPath string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(waitForFileReleaseDeadline)
 	sidecars := []string{dbPath + "-wal", dbPath + "-shm"}
 	for time.Now().Before(deadline) {
 		if dbFileReleased(dbPath) && allSidecarsRemoved(sidecars) {
@@ -352,13 +360,13 @@ func waitForFileRelease(t *testing.T, dbPath string) {
 		if remaining <= 0 {
 			break
 		}
-		sleep := 20 * time.Millisecond
+		sleep := waitForFileReleasePollInterval
 		if sleep > remaining {
 			sleep = remaining
 		}
 		time.Sleep(sleep)
 	}
-	t.Logf("waitForFileRelease: DB file still locked after 2s; teardown RemoveAll may fail on Windows")
+	t.Logf("waitForFileRelease: DB file still locked after %s; teardown RemoveAll may fail on Windows", waitForFileReleaseDeadline)
 }
 
 // dbFileReleased reports whether the main DB file is removable on Windows by

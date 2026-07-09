@@ -175,6 +175,74 @@ func TestAllSidecarsRemoved_ReturnsFalseWhenRemoveFails(t *testing.T) {
 	assert.False(t, allSidecarsRemoved([]string{dir}), "expected false when a sidecar cannot be removed")
 }
 
+func TestWaitForFileRelease_PollsWhenLockedThenReleases(t *testing.T) {
+	// Cover the polling loop body (sleep, remaining check, the cap branch)
+	// without waiting the real 2s: shorten the deadline and make dbFileReleased
+	// report not-released for the first two polls via the rename seam, then
+	// release. This exercises the sleep/remaining/poll paths deterministically.
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	require.NoError(t, os.WriteFile(dbPath, []byte("x"), 0o644))
+
+	origDeadline := waitForFileReleaseDeadline
+	origPoll := waitForFileReleasePollInterval
+	origRename := renameFunc
+	t.Cleanup(func() {
+		waitForFileReleaseDeadline = origDeadline
+		waitForFileReleasePollInterval = origPoll
+		renameFunc = origRename
+	})
+	waitForFileReleaseDeadline = 100 * time.Millisecond
+	waitForFileReleasePollInterval = 5 * time.Millisecond
+
+	calls := 0
+	renameFunc = func(oldpath, newpath string) error {
+		calls++
+		if calls <= 2 {
+			return os.ErrPermission // locked for the first two polls
+		}
+		return origRename(oldpath, newpath) // release on the third
+	}
+
+	start := time.Now()
+	waitForFileRelease(t, dbPath)
+	elapsed := time.Since(start)
+
+	assert.GreaterOrEqual(t, calls, 3, "should have polled at least 3 times (2 locked + 1 released)")
+	assert.Less(t, elapsed, 500*time.Millisecond, "should return shortly after release, took %v", elapsed)
+}
+
+func TestWaitForFileRelease_LogsOnTimeoutWhenNeverReleased(t *testing.T) {
+	// Cover the timeout/log path: dbFileReleased never returns true, so the
+	// loop runs until the deadline and the final t.Logf fires. Shorten the
+	// deadline so the test stays fast.
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	require.NoError(t, os.WriteFile(dbPath, []byte("x"), 0o644))
+
+	origDeadline := waitForFileReleaseDeadline
+	origPoll := waitForFileReleasePollInterval
+	origRename := renameFunc
+	t.Cleanup(func() {
+		waitForFileReleaseDeadline = origDeadline
+		waitForFileReleasePollInterval = origPoll
+		renameFunc = origRename
+	})
+	waitForFileReleaseDeadline = 40 * time.Millisecond
+	waitForFileReleasePollInterval = 10 * time.Millisecond
+
+	renameFunc = func(string, string) error { return os.ErrPermission } // always locked
+
+	start := time.Now()
+	waitForFileRelease(t, dbPath)
+	elapsed := time.Since(start)
+
+	// Should have polled past the deadline (covers the sleep + remaining cap
+	// branches) and then logged. Allow a small buffer over the deadline.
+	assert.GreaterOrEqual(t, elapsed, 40*time.Millisecond, "should have polled until the deadline, took %v", elapsed)
+	assert.Less(t, elapsed, 500*time.Millisecond, "should not run far past the deadline, took %v", elapsed)
+}
+
 func TestWaitForFileRelease_ReturnsImmediatelyWhenFileReleased(t *testing.T) {
 	// Happy path: the DB file is immediately renameable, so waitForFileRelease
 	// should return without waiting for the deadline. This keeps the test fast
