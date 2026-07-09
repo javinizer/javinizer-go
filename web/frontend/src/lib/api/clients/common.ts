@@ -167,9 +167,21 @@ export class SystemClient extends BaseClient {
 
 	getPreviewImageURL(imageURL: string): string {
 		const url = `${this.baseURL}/api/v1/temp/image?url=${encodeURIComponent(imageURL)}`;
+		return this.withSessionParam(url);
+	}
+
+	// withSessionParam appends ?session= to /api/v1/ URLs for the desktop app,
+	// where WKWebView does not persist the session cookie against the direct
+	// backend origin and <img>/WebSocket can't set the X-Session-ID header. In
+	// the browser (dev proxy or same-origin prod), the session cookie
+	// authenticates these requests natively, so this is a no-op there.
+	withSessionParam(url: string): string {
 		if (!isDesktopApp()) return url;
+		if (!url.includes('/api/v1/')) return url;
 		const session = BaseClient.getSessionID();
-		return session ? `${url}&session=${encodeURIComponent(session)}` : url;
+		if (!session) return url;
+		const sep = url.includes('?') ? '&' : '?';
+		return `${url}${sep}session=${encodeURIComponent(session)}`;
 	}
 
 	async getCurrentWorkingDirectory(): Promise<{ path: string }> {
