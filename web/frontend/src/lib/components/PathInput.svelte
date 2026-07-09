@@ -117,8 +117,14 @@
 			pathSuggestions = [];
 			activeIndex = -1;
 			const msg = e instanceof Error ? e.message : '';
-			if (scope === 'operation' && (msg.includes('allowed directories') || msg.includes('403'))) {
-				autocompleteError = 'No allowed directories configured — add one in Settings → Security.';
+			if (scope === 'operation' && (msg.includes('403') || msg.includes('allowed directories'))) {
+				if (msg.includes('no allowed directories configured')) {
+					autocompleteError = 'No allowed directories configured — add one in Settings → Security.';
+				} else if (msg.includes('outside allowed directories') || msg.includes('path outside')) {
+					autocompleteError = 'This path is outside your allowed directories. Add it in Settings → Security.';
+				} else {
+					autocompleteError = null;
+				}
 			} else {
 				autocompleteError = null;
 			}
@@ -129,7 +135,8 @@
 
 	function withTrailingSep(p: string): string {
 		if (p === '' || p.endsWith(SEP) || p.endsWith('\\')) return p;
-		return p + SEP;
+		const sep = p.includes('\\') && !p.includes(SEP) ? '\\' : SEP;
+		return p + sep;
 	}
 
 	function selectSuggestion(suggestion: PathAutocompleteSuggestion) {
@@ -141,6 +148,7 @@
 		userNavigated = false;
 		pathSuggestions = [];
 		activeIndex = -1;
+		autocompleteRequestToken += 1;
 		if (inputEl) {
 			inputEl.focus();
 			const end = value.length;

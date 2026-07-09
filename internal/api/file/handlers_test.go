@@ -484,7 +484,7 @@ func homeOutsideAllowlist(t *testing.T) string {
 	return os.TempDir()
 }
 
-func TestBrowseDirectory_AllowlistNotEnforced(t *testing.T) {
+func TestBrowseDirectory_ConfigureScope_AllowlistNotEnforced(t *testing.T) {
 	// Configure scope: browse never enforces the allowlist. The allowlist is a
 	// safety guard for file OPERATIONS (scan/organize), not a restriction on
 	// browsing to configure it. Paths outside the allowlist return 200 (the

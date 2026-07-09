@@ -40,8 +40,8 @@ func TestResolveAutocompleteBasePath_WhitespaceOnlyPath(t *testing.T) {
 }
 
 func TestResolveAutocompleteBasePath_WithSecurityConfig(t *testing.T) {
-	// Path with nil security config will panic on ValidateScanPath,
-	// so we provide an empty config
+	// Path with nil security config causes ValidateScanPath to return an error
+	// (not panic), so we provide an empty config
 	cfg := &core.SecurityNarrowConfig{}
 	basePath, fragment, err := resolveAutocompleteBasePath("/home/use", cfg, "")
 	if err != nil {

@@ -132,12 +132,11 @@ func TestBrowse_OperationScope_RejectsPathOutsideAllowlist(t *testing.T) {
 }
 
 func TestBrowse_OperationScope_AllowsPathInsideAllowlist(t *testing.T) {
-	router, dir := newBrowseTestRouter(t, []string{})
-	_ = router
+	_, dir := newBrowseTestRouter(t, []string{})
 	allowedDir := filepath.Join(dir, "videos")
-	router2, _ := newBrowseTestRouter(t, []string{allowedDir})
+	router, _ := newBrowseTestRouter(t, []string{allowedDir})
 
-	w := doBrowse(t, router2, allowedDir, "")
+	w := doBrowse(t, router, allowedDir, "")
 	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 	var resp contracts.BrowseResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
