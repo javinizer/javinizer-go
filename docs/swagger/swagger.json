@@ -18,7 +18,7 @@
         },
         "version": "1.0"
     },
-    "host": "localhost:8080",
+    "host": "localhost:8765",
     "basePath": "/",
     "paths": {
         "/api/v1/actresses": {
