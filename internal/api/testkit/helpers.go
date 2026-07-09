@@ -364,6 +364,11 @@ func waitForFileRelease(t *testing.T, dbPath string) {
 // dbFileReleased reports whether the main DB file is removable on Windows by
 // attempting a rename to a sibling path and back. os.Rename fails with a
 // sharing violation on Windows if any process still holds the file open.
+// renameFunc is the os.Rename seam, overridable in tests to simulate restore
+// failures that are otherwise impossible to trigger deterministically
+// single-threaded (the rename-back happens inside dbFileReleased).
+var renameFunc = os.Rename
+
 func dbFileReleased(dbPath string) bool {
 	// An absent DB file has nothing to unlock — treat it as released so
 	// waitForFileRelease returns immediately instead of spinning to the deadline.
@@ -371,13 +376,13 @@ func dbFileReleased(dbPath string) bool {
 		return true
 	}
 	probe := dbPath + ".release-probe"
-	if err := os.Rename(dbPath, probe); err != nil {
+	if err := renameFunc(dbPath, probe); err != nil {
 		return false
 	}
 	// Restore the file to its original path. If this fails the DB is stranded
 	// at the probe path, so report not-released so the caller keeps polling
 	// (and eventually logs) rather than masking the restore failure.
-	if err := os.Rename(probe, dbPath); err != nil {
+	if err := renameFunc(probe, dbPath); err != nil {
 		// Best-effort cleanup of the stranded probe so the next poll is clean.
 		_ = os.Remove(probe)
 		return false

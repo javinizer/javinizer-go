@@ -3,7 +3,6 @@ package testkit
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -32,25 +31,49 @@ func TestDbFileReleased_ReturnsTrueWhenFileRenameable(t *testing.T) {
 	assert.NoError(t, err, "DB file should still exist after the rename round-trip")
 }
 
-func TestDbFileReleased_ReturnsFalseWhenHeldOpenOnWindows(t *testing.T) {
-	// On Windows, an open file handle blocks Rename. Hold the file open and
-	// assert dbFileReleased reports false. On Unix, files are renameable while
-	// open, so this test asserts the opposite baseline (true) and is skipped
-	// when the platform allows it — it exists to document the Windows behaviour
-	// the helper exists for, not to fail on Unix.
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows-only: open file blocks rename on Windows; Unix allows rename-while-open")
+func TestDbFileReleased_ReturnsFalseWhenRenameFails(t *testing.T) {
+	// A read-only parent directory blocks the rename of dbPath to the probe,
+	// so dbFileReleased reports not-released (the caller keeps polling). This
+	// covers the rename-failure branch on platforms that enforce write perms
+	// on the parent for rename. Skip where the OS/root allows it regardless.
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory write-permission checks")
 	}
-
 	tmp := t.TempDir()
-	dbPath := filepath.Join(tmp, "held.db")
+	roDir := filepath.Join(tmp, "ro")
+	require.NoError(t, os.Mkdir(roDir, 0o755)) // writable first so we can place the file
+	dbPath := filepath.Join(roDir, "test.db")
+	require.NoError(t, os.WriteFile(dbPath, []byte("x"), 0o644))
+	require.NoError(t, os.Chmod(roDir, 0o555)) // now read-only: rename cannot create the probe
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o755) })
+
+	assert.False(t, dbFileReleased(dbPath), "expected false when rename is blocked by a read-only parent")
+}
+
+func TestDbFileReleased_ReturnsFalseWhenRestoreFails(t *testing.T) {
+	// The rename-back (restore) inside dbFileReleased is impossible to fail
+	// deterministically in a single-threaded test without a seam: both renames
+	// happen inside the function and nothing can obstruct the restore between
+	// them. Inject a renameFunc whose second call (the restore) fails, so the
+	// restore-failure branch — clean up the stranded probe + report not-released
+	// — is exercised rather than left as an uncovered defensive guard.
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
 	require.NoError(t, os.WriteFile(dbPath, []byte("x"), 0o644))
 
-	f, err := os.OpenFile(dbPath, os.O_RDWR, 0)
-	require.NoError(t, err)
-	defer f.Close()
+	origRename := renameFunc
+	t.Cleanup(func() { renameFunc = origRename })
+	call := 0
+	renameFunc = func(oldpath, newpath string) error {
+		call++
+		if call == 1 {
+			return origRename(oldpath, newpath) // probe rename succeeds
+		}
+		return os.ErrPermission // restore fails
+	}
 
-	assert.False(t, dbFileReleased(dbPath), "expected dbFileReleased=false while the file is held open on Windows")
+	assert.False(t, dbFileReleased(dbPath), "expected false when the rename-back restore fails")
+	assert.NoFileExists(t, dbPath+".release-probe", "stranded probe should be cleaned up after restore failure")
 }
 
 func TestAllSidecarsRemoved_ReturnsTrueWhenAllAbsent(t *testing.T) {
