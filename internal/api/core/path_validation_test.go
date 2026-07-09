@@ -76,9 +76,9 @@ func TestValidateScanPath(t *testing.T) {
 		},
 		{
 			name:      "nonexistent path",
-			inputPath: "/nonexistent/path/12345",
+			inputPath: filepath.Join(tempDir, "nonexistent/path/12345"),
 			securityCfg: &SecurityNarrowConfig{
-				AllowedDirectories: []string{"/"},
+				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
 			},
 			expectedError: true,
@@ -117,7 +117,7 @@ func TestValidateScanPath_SystemDirectories(t *testing.T) {
 	}
 
 	securityCfg := &SecurityNarrowConfig{
-		AllowedDirectories: []string{"/"},
+		AllowedDirectories: []string{"/proc", "/sys", "/dev"},
 		DeniedDirectories:  []string{},
 	}
 
@@ -195,10 +195,10 @@ func TestValidateScanPath_EdgeCases(t *testing.T) {
 		errorContains string
 	}{
 		{
-			name:      "empty path defaults to current directory",
-			inputPath: "",
+			name:      "valid temp directory",
+			inputPath: tempDir,
 			securityCfg: &SecurityNarrowConfig{
-				AllowedDirectories: []string{"/"},
+				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
 			},
 			expectedError: false,
@@ -214,9 +214,9 @@ func TestValidateScanPath_EdgeCases(t *testing.T) {
 		},
 		{
 			name:      "path with ./ prefix",
-			inputPath: "./",
+			inputPath: filepath.Join(tempDir, "."),
 			securityCfg: &SecurityNarrowConfig{
-				AllowedDirectories: []string{"/"},
+				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
 			},
 			expectedError: false,
@@ -863,7 +863,7 @@ func TestIsDirAllowed_BuiltInDenied(t *testing.T) {
 				t.Skip("System directory doesn't exist on this platform")
 			}
 
-			allow := []string{"/"}
+			allow := []string{"/proc", "/sys", "/dev"}
 			deny := []string{}
 
 			result := isDirAllowed(tt.dir, allow, deny)
@@ -973,7 +973,7 @@ func TestValidateScanPath_TypedErrors(t *testing.T) {
 			name:      "pseudo-filesystem (/proc) returns ErrPathInDenylist even with allowlist",
 			inputPath: "/proc",
 			securityCfg: &SecurityNarrowConfig{
-				AllowedDirectories: []string{"/"},
+				AllowedDirectories: []string{"/proc"},
 			},
 			expectedErr: apperrors.ErrPathInDenylist,
 			skipIf:      "darwin windows",
@@ -1088,7 +1088,7 @@ func TestValidateScanPath_MinimalDenylistOnly(t *testing.T) {
 	}
 
 	securityCfg := &SecurityNarrowConfig{
-		AllowedDirectories: []string{"/"},
+		AllowedDirectories: []string{"/proc", "/sys", "/dev"},
 	}
 
 	for _, tt := range tests {
@@ -1230,7 +1230,7 @@ func TestValidateScanPath_DenylistPrefix(t *testing.T) {
 
 	t.Run("/dev/null IS blocked (within /dev)", func(t *testing.T) {
 		securityCfgAll := &SecurityNarrowConfig{
-			AllowedDirectories: []string{"/"},
+			AllowedDirectories: []string{"/dev"},
 			DeniedDirectories:  []string{},
 		}
 		if _, err := os.Stat("/dev/null"); os.IsNotExist(err) {
@@ -1244,7 +1244,7 @@ func TestValidateScanPath_DenylistPrefix(t *testing.T) {
 
 	t.Run("/sys/kernel IS blocked (within /sys)", func(t *testing.T) {
 		securityCfgAll := &SecurityNarrowConfig{
-			AllowedDirectories: []string{"/"},
+			AllowedDirectories: []string{"/sys"},
 			DeniedDirectories:  []string{},
 		}
 		if _, err := os.Stat("/sys/kernel"); os.IsNotExist(err) {
@@ -1718,7 +1718,7 @@ func TestValidateAndOpenPath_SystemDirectory(t *testing.T) {
 	}
 
 	securityCfg := &SecurityNarrowConfig{
-		AllowedDirectories: []string{"/"},
+		AllowedDirectories: []string{"/proc"},
 		DeniedDirectories:  []string{},
 	}
 

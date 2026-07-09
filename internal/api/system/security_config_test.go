@@ -285,6 +285,68 @@ func TestUpdateSecurityConfig_TypeMismatch(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Invalid security configuration format")
 }
 
+// TestUpdateSecurityConfig_RejectsRootResolvingAllowedDirectory verifies
+// that the PUT handler rejects an allowed_directories entry that resolves to a
+// filesystem root (e.g. "/") with 400, and does NOT persist the rejected
+// payload. A valid entry (a temp directory) is included as a control variant
+// to guard against the validation being too aggressive.
+func TestUpdateSecurityConfig_RejectsRootResolvingAllowedDirectory(t *testing.T) {
+	validDir := t.TempDir()
+
+	for _, tc := range []struct {
+		name               string
+		allowedDirectories []string
+		wantStatus         int
+		wantBodyContains   string
+		wantPersisted      []string
+	}{
+		{
+			name:               "explicit root rejected",
+			allowedDirectories: []string{"/"},
+			wantStatus:         http.StatusBadRequest,
+			wantBodyContains:   "resolves to filesystem root",
+			wantPersisted:      []string{"/keep"},
+		},
+		{
+			name:               "valid directory accepted",
+			allowedDirectories: []string{validDir},
+			wantStatus:         http.StatusOK,
+			wantBodyContains:   "",
+			wantPersisted:      []string{validDir},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			initial := config.DefaultConfig(nil, nil)
+			initial.API.Security.AllowedDirectories = []string{"/keep"}
+
+			tempConfigFile := t.TempDir() + "/config.yaml"
+			coreDeps := createTestDeps(t, initial, tempConfigFile)
+			deps := systemDepsFromCore(coreDeps)
+
+			router := gin.New()
+			router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+			body, err := json.Marshal(SecurityUpdateRequest{
+				AllowedDirectories: tc.allowedDirectories,
+			})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, tc.wantStatus, w.Code, "body: %s", w.Body.String())
+			if tc.wantBodyContains != "" {
+				assert.Contains(t, w.Body.String(), tc.wantBodyContains)
+			}
+
+			saved := deps.CoreDeps.GetConfig()
+			assert.Equal(t, tc.wantPersisted, saved.API.Security.AllowedDirectories)
+		})
+	}
+}
+
 // failingBody is an io.ReadCloser whose Read always returns an error, used to
 // exercise the io.ReadAll failure branch of updateSecurityConfig.
 type failingBody struct{}

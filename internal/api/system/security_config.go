@@ -2,8 +2,10 @@ package system
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 
@@ -70,6 +72,19 @@ func updateSecurityConfig(rt *core.APIRuntime) gin.HandlerFunc {
 		if err := json.Unmarshal(body, &req); err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format"})
 			return
+		}
+
+		for _, dir := range req.AllowedDirectories {
+			expanded := core.ExpandHomeDir(dir)
+			abs, err := filepath.Abs(expanded)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q could not be resolved to an absolute path", dir)})
+				return
+			}
+			if core.IsFilesystemRoot(abs) {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q resolves to filesystem root; choose a specific folder", dir)})
+				return
+			}
 		}
 
 		rt.GetRuntime().ConfigUpdateMu.Lock()

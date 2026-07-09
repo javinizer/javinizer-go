@@ -126,7 +126,11 @@ func (v *PathValidator) validate(userPath string, target validateTarget) (string
 		}
 		hasValidEntry := false
 		for _, dir := range v.allow {
-			if strings.TrimSpace(dir) != "" {
+			if strings.TrimSpace(dir) == "" {
+				continue
+			}
+			_, usable := v.effectiveAllowedBase(dir)
+			if usable {
 				hasValidEntry = true
 				break
 			}
@@ -222,20 +226,48 @@ func (v *PathValidator) validate(userPath string, target validateTarget) (string
 	return canonicalPath, nil
 }
 
+// isFilesystemRoot reports whether path is a filesystem root:
+// "/" on Unix or a Windows drive root like "C:\\" / "C:/".
+func isFilesystemRoot(path string) bool {
+	if path == "/" || path == string(filepath.Separator) {
+		return true
+	}
+	if len(path) == 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
+		return true
+	}
+	return false
+}
+
+// effectiveAllowedBase resolves a raw allowlist entry to its canonical
+// absolute form. Returns usable=false when the entry is blank or resolves to
+// a filesystem root (e.g. "." under CWD "/", or an explicit "/" or "C:\\").
+// Root-resolving entries are treated as unusable so they fail closed
+// (deny-by-default) rather than granting access to the entire filesystem.
+func (v *PathValidator) effectiveAllowedBase(rawBase string) (canonicalBase string, usable bool) {
+	if strings.TrimSpace(rawBase) == "" {
+		return "", false
+	}
+	expandedBase := expandHomeDir(rawBase)
+	absBase, err := filepath.Abs(expandedBase)
+	if err != nil {
+		return "", false
+	}
+	absBase = normalizePathForPlatform(absBase)
+	canonicalBase, err = v.canonicalizePath(absBase)
+	if err != nil {
+		return "", false
+	}
+	if isFilesystemRoot(canonicalBase) {
+		return "", false
+	}
+	return canonicalBase, true
+}
+
 // isAllowed checks if the canonical path falls within at least one allowed directory.
 func (v *PathValidator) isAllowed(canonicalPath string) bool {
 	for _, baseDir := range v.allow {
-		if strings.TrimSpace(baseDir) == "" {
-			continue
-		}
-		expandedBase := expandHomeDir(baseDir)
-		absBase, err := filepath.Abs(expandedBase)
-		if err != nil {
-			continue
-		}
-		absBase = normalizePathForPlatform(absBase)
-		canonicalBase, err := v.canonicalizePath(absBase)
-		if err != nil {
+		canonicalBase, usable := v.effectiveAllowedBase(baseDir)
+		if !usable {
 			continue
 		}
 		if isPathWithinCanonical(canonicalPath, canonicalBase) {
@@ -337,12 +369,17 @@ func (v *PathValidator) IsDirAllowed(dir string) bool {
 	}
 
 	// Deny by default when no allow list or allow list contains only blank strings
+	// or entries that resolve to a filesystem root.
 	if len(v.allow) == 0 {
 		return false
 	}
 	hasValidEntry := false
 	for _, dir := range v.allow {
-		if strings.TrimSpace(dir) != "" {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		_, usable := v.effectiveAllowedBase(dir)
+		if usable {
 			hasValidEntry = true
 			break
 		}
@@ -353,19 +390,12 @@ func (v *PathValidator) IsDirAllowed(dir string) bool {
 
 	// Allowlist check
 	for _, allowed := range v.allow {
-		if strings.TrimSpace(allowed) == "" {
+		canonicalBase, usable := v.effectiveAllowedBase(allowed)
+		if !usable {
 			continue
 		}
-		expandedAllowed := expandHomeDir(allowed)
-		cleanAllowed := filepath.Clean(expandedAllowed)
-		if absAllowed, err := filepath.Abs(cleanAllowed); err == nil {
-			realAllowed, err := v.canonicalizePath(absAllowed)
-			if err != nil {
-				continue
-			}
-			if isPathWithinCanonical(resolved, realAllowed) {
-				return true
-			}
+		if isPathWithinCanonical(resolved, canonicalBase) {
+			return true
 		}
 	}
 
@@ -514,4 +544,11 @@ func isPathWithinCanonical(path, base string) bool {
 // packages that need the unified path-within check.
 func IsPathWithin(path, base string) bool {
 	return isPathWithinCanonical(path, base)
+}
+
+// IsFilesystemRoot is the exported version of isFilesystemRoot for use by
+// packages that need to validate allowlist entries (e.g. the security config
+// PUT handler rejecting root-resolving entries).
+func IsFilesystemRoot(path string) bool {
+	return isFilesystemRoot(path)
 }
