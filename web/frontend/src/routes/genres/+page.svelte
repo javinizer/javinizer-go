@@ -129,6 +129,7 @@
 		onSuccess: () => {
 			newIgnored = '';
 			void queryClient.invalidateQueries({ queryKey: ['genre-ignored'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || 'Failed to ignore genre', 4000);
@@ -139,6 +140,7 @@
 		mutationFn: (genre: string) => apiClient.deleteIgnoredGenre(genre),
 		onSuccess: () => {
 			void queryClient.invalidateQueries({ queryKey: ['genre-ignored'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || 'Failed to remove ignored genre', 4000);
@@ -150,6 +152,7 @@
 		onSuccess: () => {
 			newFavorite = '';
 			void queryClient.invalidateQueries({ queryKey: ['genre-favorites'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || 'Failed to add favorite', 4000);
@@ -160,6 +163,7 @@
 		mutationFn: (genre: string) => apiClient.deleteFavoriteGenre(genre),
 		onSuccess: () => {
 			void queryClient.invalidateQueries({ queryKey: ['genre-favorites'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || 'Failed to remove favorite', 4000);
@@ -172,6 +176,7 @@
 			bulkFavorites = '';
 			toastStore.success(`Saved ${res.count} favorite genre(s)`, 3000);
 			void queryClient.invalidateQueries({ queryKey: ['genre-favorites'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || 'Failed to save favorites', 4000);
