@@ -348,6 +348,7 @@ func DefaultConfig(priorities []string, defaults map[string]*models.ScraperSetti
 		// so no migration is required.
 		WebUI: webUIConfig{
 			DefaultReviewView: "grid-poster",
+			Favorites:         FavoritesConfig{Genre: []string{}},
 		},
 	}
 }

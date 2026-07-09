@@ -26,6 +26,7 @@ func (c *Config) Clone() *Config {
 
 	// Deep-copy Metadata slice and map fields
 	cp.Metadata.IgnoreGenres = cloneStringSlice(c.Metadata.IgnoreGenres)
+	cp.WebUI.Favorites.Genre = cloneStringSlice(c.WebUI.Favorites.Genre)
 	cp.Metadata.RequiredFields = cloneStringSlice(c.Metadata.RequiredFields)
 	cp.Metadata.Priority.Priority = cloneStringSlice(c.Metadata.Priority.Priority)
 	cp.Metadata.Priority.Fields = deepCopyFieldsMap(c.Metadata.Priority.Fields)

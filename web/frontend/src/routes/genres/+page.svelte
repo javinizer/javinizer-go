@@ -5,10 +5,10 @@
 	import { apiClient } from '$lib/api/client';
 	import type { GenreReplacement, GenreReplacementUpdateRequest, ImportResponse } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
-	import { Trash2, Plus, Loader2, Search, X, Check, Pencil, ArrowDownUp, ChevronsDownUp, ArrowLeft, Tags, Download, Upload } from 'lucide-svelte';
+	import { Trash2, Plus, Loader2, Search, X, Check, Pencil, ArrowDownUp, ChevronsDownUp, ArrowLeft, Tags, Download, Upload, Ban, Star } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
-	import { createGenreReplacementsQuery } from '$lib/query/queries';
+	import { createGenreReplacementsQuery, createIgnoredGenresQuery, createFavoriteGenresQuery } from '$lib/query/queries';
 
 	const queryClient = useQueryClient();
 
@@ -42,6 +42,19 @@
 	let editingId = $state<number | null>(null);
 	let editOriginal = $state('');
 	let editReplacement = $state('');
+
+	const ignoredQuery = createIgnoredGenresQuery();
+	let ignoredGenres = $derived<string[]>(ignoredQuery.data?.ignored_genres ?? []);
+	let ignoredLoading = $derived(ignoredQuery.isPending);
+	let ignoredError = $derived<string | null>(ignoredQuery.error?.message ?? null);
+	let newIgnored = $state('');
+
+	const favoritesQuery = createFavoriteGenresQuery();
+	let favoriteGenres = $derived<string[]>(favoritesQuery.data?.favorites ?? []);
+	let favoritesLoading = $derived(favoritesQuery.isPending);
+	let favoritesError = $derived<string | null>(favoritesQuery.error?.message ?? null);
+	let newFavorite = $state('');
+	let bulkFavorites = $state('');
 
 	const addMutation = createMutation(() => ({
 		mutationFn: ({ original, replacement }: { original: string; replacement: string }) =>
@@ -111,6 +124,65 @@
 		}
 	}));
 
+	const addIgnoredMutation = createMutation(() => ({
+		mutationFn: (genre: string) => apiClient.addIgnoredGenre({ genre }),
+		onSuccess: () => {
+			newIgnored = '';
+			void queryClient.invalidateQueries({ queryKey: ['genre-ignored'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to ignore genre', 4000);
+		}
+	}));
+
+	const deleteIgnoredMutation = createMutation(() => ({
+		mutationFn: (genre: string) => apiClient.deleteIgnoredGenre(genre),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: ['genre-ignored'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to remove ignored genre', 4000);
+		}
+	}));
+
+	const addFavoriteMutation = createMutation(() => ({
+		mutationFn: (genre: string) => apiClient.addFavoriteGenre({ genre }),
+		onSuccess: () => {
+			newFavorite = '';
+			void queryClient.invalidateQueries({ queryKey: ['genre-favorites'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to add favorite', 4000);
+		}
+	}));
+
+	const deleteFavoriteMutation = createMutation(() => ({
+		mutationFn: (genre: string) => apiClient.deleteFavoriteGenre(genre),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: ['genre-favorites'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to remove favorite', 4000);
+		}
+	}));
+
+	const replaceFavoritesMutation = createMutation(() => ({
+		mutationFn: (genres: string[]) => apiClient.replaceFavoriteGenres({ genres }),
+		onSuccess: (res) => {
+			bulkFavorites = '';
+			toastStore.success(`Saved ${res.count} favorite genre(s)`, 3000);
+			void queryClient.invalidateQueries({ queryKey: ['genre-favorites'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to save favorites', 4000);
+		}
+	}));
+
 	function handleAdd() {
 		const original = newOriginal.trim();
 		const replacement = newReplacement.trim();
@@ -171,6 +243,58 @@
 		}
 	}
 
+	function handleAddIgnored() {
+		const genre = newIgnored.trim();
+		if (!genre) {
+			toastStore.error('Enter a genre to ignore', 3000);
+			return;
+		}
+		addIgnoredMutation.mutate(genre);
+	}
+
+	function handleAddFavorite() {
+		const genre = newFavorite.trim();
+		if (!genre) {
+			toastStore.error('Enter a genre to favorite', 3000);
+			return;
+		}
+		addFavoriteMutation.mutate(genre);
+	}
+
+	function parseBulkGenres(input: string): string[] {
+		return input
+			.split(/[\n,]+/)
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0);
+	}
+
+	function handleBulkAddFavorites() {
+		const added = parseBulkGenres(bulkFavorites);
+		if (added.length === 0) {
+			toastStore.error('Enter one or more genres to add', 3000);
+			return;
+		}
+		const merged: string[] = [];
+		for (const g of [...favoriteGenres, ...added]) {
+			if (!merged.includes(g)) merged.push(g);
+		}
+		replaceFavoritesMutation.mutate(merged);
+	}
+
+	function handleAddIgnoredKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			handleAddIgnored();
+		}
+	}
+
+	function handleAddFavoriteKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			handleAddFavorite();
+		}
+	}
+
 	function handleExport() {
 		exportMutation.mutate();
 	}
@@ -226,10 +350,10 @@
 				<div>
 					<div class="flex items-center gap-2">
 						<Tags class="h-6 w-6 text-primary" />
-						<h1 class="text-3xl font-bold">Genre Replacements</h1>
+						<h1 class="text-3xl font-bold">Genres</h1>
 					</div>
 					<p class="text-muted-foreground mt-1">
-						Manage genre name replacements applied during scraping
+						Manage ignored genres, favorites, and genre name replacements
 					</p>
 				</div>
 			</div>
@@ -268,6 +392,156 @@
 					Import
 				</Button>
 			</div>
+		</div>
+
+		<div in:fly|local={{ y: 8, duration: 180, delay: 40 }}>
+			<Card class="p-5">
+				<div class="flex items-center gap-2 mb-1">
+					<Ban class="h-4 w-4 text-primary" />
+					<h2 class="text-lg font-semibold">Ignored Genres</h2>
+					<span class="text-xs text-muted-foreground">{ignoredGenres.length} excluded</span>
+				</div>
+				<p class="text-xs text-muted-foreground mb-3">
+					Genres in this list are excluded from scraping/processing. Takes effect on the next scrape.
+				</p>
+				{#if ignoredError}
+					<p class="text-sm text-destructive mb-2">Failed to load: {ignoredError}</p>
+				{:else if ignoredLoading}
+					<div class="flex items-center gap-2 text-sm text-muted-foreground">
+						<Loader2 class="h-4 w-4 animate-spin" /> Loading...
+					</div>
+				{:else}
+					<div class="flex flex-wrap gap-2 mb-3">
+						{#if ignoredGenres.length === 0}
+							<span class="text-sm text-muted-foreground">No ignored genres. Add one below.</span>
+						{:else}
+							{#each ignoredGenres as genre (genre)}
+								<span class="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 py-1 pl-3 pr-1 text-sm">
+									{genre}
+									<button
+										type="button"
+										class="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+										title="Stop ignoring"
+										onclick={() => deleteIgnoredMutation.mutate(genre)}
+										disabled={deleteIgnoredMutation.isPending}
+									>
+										<X class="h-3.5 w-3.5" />
+									</button>
+								</span>
+							{/each}
+						{/if}
+					</div>
+					<div class="flex items-center gap-2">
+						<input
+							type="text"
+							bind:value={newIgnored}
+							placeholder="Genre to ignore..."
+							onkeydown={handleAddIgnoredKeydown}
+							class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+						/>
+						<Button
+							type="button"
+							size="sm"
+							onclick={handleAddIgnored}
+							disabled={addIgnoredMutation.isPending || !newIgnored.trim()}
+						>
+							{#if addIgnoredMutation.isPending}
+								<Loader2 class="h-4 w-4 animate-spin mr-1" />
+							{:else}
+								<Plus class="h-4 w-4 mr-1" />
+							{/if}
+							Ignore
+						</Button>
+					</div>
+				{/if}
+			</Card>
+		</div>
+
+		<div in:fly|local={{ y: 8, duration: 180, delay: 80 }}>
+			<Card class="p-5">
+				<div class="flex items-center gap-2 mb-1">
+					<Star class="h-4 w-4 text-primary" />
+					<h2 class="text-lg font-semibold">Favorite Genres</h2>
+					<span class="text-xs text-muted-foreground">{favoriteGenres.length} saved</span>
+				</div>
+				<p class="text-xs text-muted-foreground mb-3">
+					Save a curated set of favorite genres here for later use. Favorites are a saved list you can reference when organizing your collection.
+				</p>
+				{#if favoritesError}
+					<p class="text-sm text-destructive mb-2">Failed to load: {favoritesError}</p>
+				{:else if favoritesLoading}
+					<div class="flex items-center gap-2 text-sm text-muted-foreground">
+						<Loader2 class="h-4 w-4 animate-spin" /> Loading...
+					</div>
+				{:else}
+					<div class="flex flex-wrap gap-2 mb-3">
+						{#if favoriteGenres.length === 0}
+							<span class="text-sm text-muted-foreground">No favorites yet. Add one below or paste several at once.</span>
+						{:else}
+							{#each favoriteGenres as genre (genre)}
+								<span class="inline-flex items-center gap-1 rounded-full border border-border bg-primary/10 py-1 pl-3 pr-1 text-sm">
+									{genre}
+									<button
+										type="button"
+										class="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+										title="Remove favorite"
+										onclick={() => deleteFavoriteMutation.mutate(genre)}
+										disabled={deleteFavoriteMutation.isPending}
+									>
+										<X class="h-3.5 w-3.5" />
+									</button>
+								</span>
+							{/each}
+						{/if}
+					</div>
+					<div class="flex items-center gap-2 mb-3">
+						<input
+							type="text"
+							bind:value={newFavorite}
+							placeholder="Favorite genre..."
+							onkeydown={handleAddFavoriteKeydown}
+							class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+						/>
+						<Button
+							type="button"
+							size="sm"
+							onclick={handleAddFavorite}
+							disabled={addFavoriteMutation.isPending || !newFavorite.trim()}
+						>
+							{#if addFavoriteMutation.isPending}
+								<Loader2 class="h-4 w-4 animate-spin mr-1" />
+							{:else}
+								<Plus class="h-4 w-4 mr-1" />
+							{/if}
+							Add
+						</Button>
+					</div>
+					<div class="rounded-md border border-border/60 bg-muted/20 p-3">
+						<p class="text-xs font-medium text-muted-foreground mb-2">Bulk add &amp; save</p>
+						<textarea
+							bind:value={bulkFavorites}
+							placeholder="Paste genres separated by commas or new lines..."
+							rows="2"
+							class="w-full rounded border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+						></textarea>
+						<div class="flex justify-end mt-2">
+							<Button
+								type="button"
+								size="sm"
+								onclick={handleBulkAddFavorites}
+								disabled={replaceFavoritesMutation.isPending || !bulkFavorites.trim()}
+							>
+								{#if replaceFavoritesMutation.isPending}
+									<Loader2 class="h-4 w-4 animate-spin mr-1" />
+								{:else}
+									<Check class="h-4 w-4 mr-1" />
+								{/if}
+								Save Favorites
+							</Button>
+						</div>
+					</div>
+				{/if}
+			</Card>
 		</div>
 
 		{#if error}

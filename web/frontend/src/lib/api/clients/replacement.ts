@@ -3,6 +3,10 @@ import type {
 	GenreReplacementListResponse,
 	GenreReplacementCreateRequest,
 	GenreReplacementUpdateRequest,
+	IgnoredGenresResponse,
+	FavoriteGenresResponse,
+	GenreListUpdateRequest,
+	GenreAddRequest,
 	WordReplacement,
 	WordReplacementListResponse,
 	WordReplacementCreateRequest,
@@ -57,6 +61,60 @@ export class ReplacementClient extends BaseClient {
 			method: 'POST',
 			body: JSON.stringify(request),
 		});
+	}
+
+	// --- Ignore genres (config-backed) ---
+
+	async listIgnoredGenres(): Promise<IgnoredGenresResponse> {
+		return this.request<IgnoredGenresResponse>('/api/v1/genres/ignored');
+	}
+
+	async addIgnoredGenre(request: GenreAddRequest): Promise<IgnoredGenresResponse> {
+		return this.request<IgnoredGenresResponse>('/api/v1/genres/ignored', {
+			method: 'POST',
+			body: JSON.stringify(request),
+		});
+	}
+
+	async replaceIgnoredGenres(request: GenreListUpdateRequest): Promise<IgnoredGenresResponse> {
+		return this.request<IgnoredGenresResponse>('/api/v1/genres/ignored', {
+			method: 'PUT',
+			body: JSON.stringify(request),
+		});
+	}
+
+	async deleteIgnoredGenre(genre: string): Promise<IgnoredGenresResponse> {
+		return this.request<IgnoredGenresResponse>(
+			`/api/v1/genres/ignored?genre=${encodeURIComponent(genre)}`,
+			{ method: 'DELETE' }
+		);
+	}
+
+	// --- Favorite genres (config-backed) ---
+
+	async listFavoriteGenres(): Promise<FavoriteGenresResponse> {
+		return this.request<FavoriteGenresResponse>('/api/v1/genres/favorites');
+	}
+
+	async addFavoriteGenre(request: GenreAddRequest): Promise<FavoriteGenresResponse> {
+		return this.request<FavoriteGenresResponse>('/api/v1/genres/favorites', {
+			method: 'POST',
+			body: JSON.stringify(request),
+		});
+	}
+
+	async replaceFavoriteGenres(request: GenreListUpdateRequest): Promise<FavoriteGenresResponse> {
+		return this.request<FavoriteGenresResponse>('/api/v1/genres/favorites', {
+			method: 'PUT',
+			body: JSON.stringify(request),
+		});
+	}
+
+	async deleteFavoriteGenre(genre: string): Promise<FavoriteGenresResponse> {
+		return this.request<FavoriteGenresResponse>(
+			`/api/v1/genres/favorites?genre=${encodeURIComponent(genre)}`,
+			{ method: 'DELETE' }
+		);
 	}
 
 	// --- Word replacements ---

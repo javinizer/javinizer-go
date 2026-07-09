@@ -94,7 +94,14 @@ func ValidateScraperBaseURL(path, raw string, allowedHosts []string) error {
 }
 
 type webUIConfig struct {
-	DefaultReviewView string `yaml:"default_review_view" json:"default_review_view"`
+	DefaultReviewView string          `yaml:"default_review_view" json:"default_review_view"`
+	Favorites         FavoritesConfig `yaml:"favorites" json:"favorites"`
+}
+
+// FavoritesConfig holds user-curated quick-apply lists surfaced in the web UI.
+// Genre favorites back the "quick apply" workflow on the Genres page.
+type FavoritesConfig struct {
+	Genre []string `yaml:"genre" json:"genre"`
 }
 
 // Config represents the application configuration

@@ -352,6 +352,24 @@ export interface GenreReplacementUpdateRequest {
 	replacement: string;
 }
 
+export interface IgnoredGenresResponse {
+	ignored_genres: string[];
+	count: number;
+}
+
+export interface FavoriteGenresResponse {
+	favorites: string[];
+	count: number;
+}
+
+export interface GenreListUpdateRequest {
+	genres: string[];
+}
+
+export interface GenreAddRequest {
+	genre: string;
+}
+
 export interface WordReplacement {
 	id: number;
 	original: string;
@@ -951,8 +969,13 @@ export interface MediaInfoConfig {
 	cli_timeout: number;
 }
 
+export interface FavoritesConfig {
+	genre?: string[];
+}
+
 export interface WebUIConfig {
 	default_review_view?: string;
+	favorites?: FavoritesConfig;
 }
 
 export interface ScrapersConfig {

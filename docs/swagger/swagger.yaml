@@ -1458,6 +1458,13 @@ definitions:
         - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.DeepLMode'
         description: free or pro
     type: object
+  github_com_javinizer_javinizer-go_internal_config.FavoritesConfig:
+    properties:
+      genre:
+        items:
+          type: string
+        type: array
+    type: object
   github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig:
     properties:
       auto_add:
@@ -2044,6 +2051,8 @@ definitions:
     properties:
       default_review_view:
         type: string
+      favorites:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.FavoritesConfig'
     type: object
   github_com_javinizer_javinizer-go_internal_models.Actress:
     properties:
@@ -2685,6 +2694,20 @@ definitions:
       total:
         type: integer
     type: object
+  internal_api_genre.favoriteGenresResponse:
+    properties:
+      count:
+        type: integer
+      favorites:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_genre.genreAddRequest:
+    properties:
+      genre:
+        type: string
+    type: object
   internal_api_genre.genreListResponse:
     properties:
       count:
@@ -2692,6 +2715,13 @@ definitions:
       genres:
         items:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre'
+        type: array
+    type: object
+  internal_api_genre.genreListUpdateRequest:
+    properties:
+      genres:
+        items:
+          type: string
         type: array
     type: object
   internal_api_genre.genreReplacementCreateRequest:
@@ -2715,6 +2745,15 @@ definitions:
         type: array
       total:
         type: integer
+    type: object
+  internal_api_genre.ignoredGenresResponse:
+    properties:
+      count:
+        type: integer
+      ignored_genres:
+        items:
+          type: string
+        type: array
     type: object
   internal_api_history.DeleteHistoryBulkResponse:
     properties:
@@ -4280,6 +4319,261 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List genres
+      tags:
+      - genres
+  /api/v1/genres/favorites:
+    delete:
+      description: Remove a single genre from the favorites list by name
+      parameters:
+      - description: Genre name to remove from favorites
+        in: query
+        name: genre
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_genre.favoriteGenresResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Remove favorite genre
+      tags:
+      - genres
+    get:
+      description: Get the user's favorite genres (quick-apply list) configured on
+        the Genres page
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_genre.favoriteGenresResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: List favorite genres
+      tags:
+      - genres
+    post:
+      consumes:
+      - application/json
+      description: Add a single genre to the favorites list. Idempotent — adding an
+        existing favorite returns 200.
+      parameters:
+      - description: Genre to favorite
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_genre.genreAddRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Already favorited
+          schema:
+            $ref: '#/definitions/internal_api_genre.favoriteGenresResponse'
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_api_genre.favoriteGenresResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Add favorite genre
+      tags:
+      - genres
+    put:
+      consumes:
+      - application/json
+      description: Replace the entire favorite genres list in one bulk save (the Save/Apply
+        affordance on the Genres page)
+      parameters:
+      - description: Full list of favorite genres
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_genre.genreListUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_genre.favoriteGenresResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Replace favorite genres
+      tags:
+      - genres
+  /api/v1/genres/ignored:
+    delete:
+      description: Remove a single genre from the ignore_genres list by name
+      parameters:
+      - description: Genre name to remove from the ignore list
+        in: query
+        name: genre
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_genre.ignoredGenresResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Remove ignored genre
+      tags:
+      - genres
+    get:
+      description: Get the configured ignore_genres list (genres excluded from scraping/processing)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_genre.ignoredGenresResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: List ignored genres
+      tags:
+      - genres
+    post:
+      consumes:
+      - application/json
+      description: Add a single genre to the ignore_genres list. Idempotent — adding
+        an existing genre returns 200.
+      parameters:
+      - description: Genre to ignore
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_genre.genreAddRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Already ignored
+          schema:
+            $ref: '#/definitions/internal_api_genre.ignoredGenresResponse'
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_api_genre.ignoredGenresResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Add ignored genre
+      tags:
+      - genres
+    put:
+      consumes:
+      - application/json
+      description: Replace the entire ignore_genres list in one bulk save. Use for
+        the Save/Apply affordance on the Genres page.
+      parameters:
+      - description: Full list of ignored genres
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_genre.genreListUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_genre.ignoredGenresResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Replace ignored genres
       tags:
       - genres
   /api/v1/genres/replacements:

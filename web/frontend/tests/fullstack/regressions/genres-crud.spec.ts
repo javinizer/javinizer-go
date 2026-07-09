@@ -22,7 +22,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { BACKEND_BASE, loginAgainstRealBackend } from '../helpers';
 
 const TEST_PREFIX = 'E2E-GENRE-';
-const HEADING = 'Genre Replacements';
+const HEADING = 'Genres';
 
 interface GenreReplacement {
 	id: number;
@@ -65,9 +65,11 @@ async function cleanupTestReplacements(api: APIRequestContext): Promise<void> {
 
 async function navigateToGenres(page: Page): Promise<void> {
 	await page.goto('/genres');
-	// Wait for the query to resolve + the table to render (the heading is
-	// always present; the "Add" card renders after the query settles).
-	await expect(page.getByRole('heading', { name: HEADING })).toBeVisible({ timeout: 15_000 });
+	// The Genres page now has multiple sections (ignored, favorites,
+	// replacements) under a single "Genres" h1. Wait for the page heading
+	// (exact match avoids the section h2s) + the replacements "Add" card
+	// input, which renders after the genre-replacements query settles.
+	await expect(page.getByRole('heading', { name: HEADING, exact: true })).toBeVisible({ timeout: 15_000 });
 	await expect(page.getByPlaceholder('e.g., HD')).toBeVisible({ timeout: 10_000 });
 }
 
@@ -109,9 +111,16 @@ test.describe('/genres: real CRUD UI against the e2emock backend', () => {
 		// ── 1. Add a replacement via the UI ──────────────────────────────
 		const original = `${TEST_PREFIX}CRUD-${Date.now()}`;
 		const replacement = 'First Replacement';
-		await page.getByPlaceholder('e.g., HD').fill(original);
-		await page.getByPlaceholder('e.g., High Definition').fill(replacement);
-		await page.getByRole('button', { name: /^Add$/ }).click();
+		// The page now has multiple "Add" buttons (ignored, favorites,
+		// replacements). Scope to the replacements add-rule card, which is
+		// the only card containing the "Add a new genre replacement rule"
+		// paragraph.
+		const addRuleCard = page
+			.getByText('Add a new genre replacement rule')
+			.locator('xpath=ancestor::div[contains(@class,"card")][1]');
+		await addRuleCard.getByPlaceholder('e.g., HD').fill(original);
+		await addRuleCard.getByPlaceholder('e.g., High Definition').fill(replacement);
+		await addRuleCard.getByRole('button', { name: /^Add$/ }).click();
 
 		// The addMutation invalidates the query → the new row renders.
 		await expect(page.getByText(original, { exact: true })).toBeVisible({ timeout: 10_000 });
