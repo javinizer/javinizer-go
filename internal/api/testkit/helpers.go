@@ -357,9 +357,6 @@ func waitForFileRelease(t *testing.T, dbPath string) {
 		}
 		// Sleep with a cap so a long step can't overshoot the deadline.
 		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			break
-		}
 		sleep := waitForFileReleasePollInterval
 		if sleep > remaining {
 			sleep = remaining

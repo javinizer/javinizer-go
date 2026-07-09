@@ -228,8 +228,8 @@ func TestWaitForFileRelease_LogsOnTimeoutWhenNeverReleased(t *testing.T) {
 		waitForFileReleasePollInterval = origPoll
 		renameFunc = origRename
 	})
-	waitForFileReleaseDeadline = 40 * time.Millisecond
-	waitForFileReleasePollInterval = 10 * time.Millisecond
+	waitForFileReleaseDeadline = 30 * time.Millisecond
+	waitForFileReleasePollInterval = 50 * time.Millisecond // > deadline so the cap branch (sleep > remaining) is hit on entry
 
 	renameFunc = func(string, string) error { return os.ErrPermission } // always locked
 
@@ -239,7 +239,7 @@ func TestWaitForFileRelease_LogsOnTimeoutWhenNeverReleased(t *testing.T) {
 
 	// Should have polled past the deadline (covers the sleep + remaining cap
 	// branches) and then logged. Allow a small buffer over the deadline.
-	assert.GreaterOrEqual(t, elapsed, 40*time.Millisecond, "should have polled until the deadline, took %v", elapsed)
+	assert.GreaterOrEqual(t, elapsed, 30*time.Millisecond, "should have polled until the deadline, took %v", elapsed)
 	assert.Less(t, elapsed, 500*time.Millisecond, "should not run far past the deadline, took %v", elapsed)
 }
 
