@@ -234,7 +234,7 @@ func TestGetCurrentWorkingDirectory_Miss_WithAllowedDirs(t *testing.T) {
 // --- resolveAutocompleteBasePath: empty path ---
 
 func TestResolveAutocompleteBasePath_Miss_EmptyPath(t *testing.T) {
-	_, _, err := resolveAutocompleteBasePath("", nil)
+	_, _, err := resolveAutocompleteBasePath("", nil, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "path is required")
 }

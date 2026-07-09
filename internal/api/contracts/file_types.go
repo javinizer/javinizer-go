@@ -30,7 +30,8 @@ type FileInfo struct {
 
 // BrowseRequest represents a browse request
 type BrowseRequest struct {
-	Path string `json:"path" example:"/path/to/directory"`
+	Path  string `json:"path" example:"/path/to/directory"`
+	Scope string `json:"scope,omitempty" example:"configure"`
 }
 
 // BrowseResponse represents browse results
@@ -44,6 +45,7 @@ type BrowseResponse struct {
 type PathAutocompleteRequest struct {
 	Path  string `json:"path" binding:"required" example:"/path/to/vid"`
 	Limit int    `json:"limit,omitempty" example:"10"`
+	Scope string `json:"scope,omitempty" example:"configure"`
 }
 
 // PathAutocompleteSuggestion represents a single autocomplete suggestion.

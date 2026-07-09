@@ -24,6 +24,7 @@ export interface ScanResponse {
 
 export interface BrowseRequest {
 	path: string;
+	scope?: 'operation' | 'configure';
 }
 
 export interface BrowseResponse {
@@ -35,6 +36,7 @@ export interface BrowseResponse {
 export interface PathAutocompleteRequest {
 	path: string;
 	limit?: number;
+	scope?: 'operation' | 'configure';
 }
 
 export interface PathAutocompleteSuggestion {

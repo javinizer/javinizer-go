@@ -131,6 +131,7 @@
 			{whitelistPaths}
 			class="h-9"
 			onnavigate={() => addDir()}
+			scope="configure"
 		/>
 		<Button
 			variant="outline"
@@ -208,6 +209,7 @@
 					multiSelect={false}
 					folderOnly={true}
 					{whitelistPaths}
+					scope="configure"
 				/>
 			</div>
 

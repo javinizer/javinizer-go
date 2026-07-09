@@ -37,6 +37,7 @@
 		selectedFolders?: string[];
 		triggerScan?: number;
 		whitelistPaths?: string[];
+		scope?: 'operation' | 'configure';
 	}
 
 	let {
@@ -50,7 +51,8 @@
 		recursiveScan = $bindable(false),
 		selectedFolders: selectedFolders = $bindable([]),
 		triggerScan = 0,
-		whitelistPaths = []
+		whitelistPaths = [],
+		scope = 'operation',
 	}: Props = $props();
 
 	let currentPath = $state('');
@@ -193,7 +195,7 @@
 		selectedFolders = [];
 		anchorFolderPath = null;
 		try {
-			const response: BrowseResponse = await apiClient.browse({ path: path || '/' });
+			const response: BrowseResponse = await apiClient.browse({ path: path || '/', scope });
 			currentPath = response.current_path;
 			parentPath = response.parent_path || '';
 			pathInputValue = response.current_path; // Sync path input
@@ -202,7 +204,12 @@
 			items = response.items;
 			currentPage = 1;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to browse directory';
+			const msg = e instanceof Error ? e.message : 'Failed to browse directory';
+			if (scope === 'operation' && (msg.includes('allowed directories') || msg.includes('403'))) {
+				error = 'This path is outside your allowed directories. Add it in Settings → Security.';
+			} else {
+				error = msg;
+			}
 		} finally {
 			loading = false;
 		}
@@ -411,6 +418,7 @@
 				{loading}
 				whitelistPaths={whitelistPaths}
 				drillOnSelect={true}
+				{scope}
 			/>
 		</div>
 	</div>

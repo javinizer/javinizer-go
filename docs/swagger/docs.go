@@ -3967,6 +3967,10 @@ const docTemplate = `{
                 "path": {
                     "type": "string",
                     "example": "/path/to/directory"
+                },
+                "scope": {
+                    "type": "string",
+                    "example": "configure"
                 }
             }
         },
@@ -4877,6 +4881,10 @@ const docTemplate = `{
                 "path": {
                     "type": "string",
                     "example": "/path/to/vid"
+                },
+                "scope": {
+                    "type": "string",
+                    "example": "configure"
                 }
             }
         },

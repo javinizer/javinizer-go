@@ -16,6 +16,7 @@
 		loading?: boolean;
 		escapeValue?: string;
 		drillOnSelect?: boolean;
+		scope?: 'operation' | 'configure';
 		class?: string;
 	}
 
@@ -30,6 +31,7 @@
 		loading = false,
 		escapeValue,
 		drillOnSelect = false,
+		scope = 'operation',
 		class: className = ''
 	}: Props = $props();
 
@@ -44,6 +46,7 @@
 	let autocompleteDebounceId: ReturnType<typeof setTimeout> | null = null;
 	let autocompleteRequestToken = 0;
 	let inputEl = $state<HTMLInputElement | null>(null);
+	let autocompleteError = $state<string | null>(null);
 
 	let whitelistSuggestions = $derived.by(() => {
 		if (whitelistPaths.length === 0) return [];
@@ -83,6 +86,7 @@
 		activeIndex = -1;
 		userNavigated = false;
 		autocompleteLoading = false;
+		autocompleteError = null;
 	}
 
 	function clampActive() {
@@ -101,15 +105,23 @@
 		try {
 			const response = await apiClient.autocompletePath({
 				path: inputPath,
-				limit: pathAutocompleteLimit
+				limit: pathAutocompleteLimit,
+				scope
 			});
 			if (requestToken !== autocompleteRequestToken || !focused) return;
 			pathSuggestions = response.suggestions;
 			activeIndex = -1;
-		} catch {
+			autocompleteError = null;
+		} catch (e) {
 			if (requestToken !== autocompleteRequestToken) return;
 			pathSuggestions = [];
 			activeIndex = -1;
+			const msg = e instanceof Error ? e.message : '';
+			if (scope === 'operation' && (msg.includes('allowed directories') || msg.includes('403'))) {
+				autocompleteError = 'No allowed directories configured — add one in Settings → Security.';
+			} else {
+				autocompleteError = null;
+			}
 		} finally {
 			if (requestToken === autocompleteRequestToken) autocompleteLoading = false;
 		}
@@ -288,6 +300,9 @@
 				<span class="ml-auto">esc to dismiss</span>
 			</div>
 		</div>
+	{/if}
+	{#if autocompleteError}
+		<p class="mt-1 text-xs text-muted-foreground">{autocompleteError}</p>
 	{/if}
 </div>
 

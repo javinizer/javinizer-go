@@ -395,6 +395,9 @@ definitions:
       path:
         example: /path/to/directory
         type: string
+      scope:
+        example: configure
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BrowseResponse:
     properties:
@@ -1032,6 +1035,9 @@ definitions:
         type: integer
       path:
         example: /path/to/vid
+        type: string
+      scope:
+        example: configure
         type: string
     required:
     - path

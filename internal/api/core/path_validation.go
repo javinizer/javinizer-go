@@ -84,10 +84,10 @@ func ValidateScanPath(userPath string, cfg *SecurityNarrowConfig) (string, error
 }
 
 // ValidateBrowsePath is the browse variant of ValidateScanPath: it skips the
-// allowlist gate so the browse/autocomplete endpoints can list directories
-// outside the allowlist (used to configure the allowlist/denylist). The
-// allowlist is enforced only at file-operation time (scan/organize). The
-// denylist still applies.
+// allowlist gate so the configure-scope browse/autocomplete endpoints can list
+// directories outside the allowlist (used to configure the allowlist/denylist).
+// Operational browse/autocomplete use ValidateScanPath instead. The denylist
+// always applies.
 func ValidateBrowsePath(userPath string, cfg *SecurityNarrowConfig) (string, error) {
 	return validateBrowsePath(userPath, cfg)
 }
@@ -113,9 +113,10 @@ func ValidateAndOpenPath(userPath string, cfg *SecurityNarrowConfig) (*os.File, 
 }
 
 // ValidateAndOpenBrowsePath is the browse variant of ValidateAndOpenPath: it
-// skips the allowlist gate so the browse endpoint can list directories outside
-// the allowlist (used to configure the allowlist). The allowlist is enforced
-// only at file-operation time (scan/organize). The denylist still applies.
+// skips the allowlist gate so the configure-scope browse endpoint can list
+// directories outside the allowlist (used to configure the allowlist).
+// Operational browse uses ValidateAndOpenPath instead. The denylist always
+// applies.
 func ValidateAndOpenBrowsePath(userPath string, cfg *SecurityNarrowConfig) (*os.File, string, error) {
 	return validateAndOpenPath(userPath, cfg, true)
 }

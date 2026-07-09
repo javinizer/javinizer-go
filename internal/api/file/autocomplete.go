@@ -36,10 +36,9 @@ func autocompletePath(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		apiCfg := rt.GetAPIConfig()
-		// Autocomplete never enforces the allowlist (see browse.go): the allowlist
-		// is a safety guard for file operations, not for path completion. The
-		// denylist still applies.
-		basePath, fragment, err := resolveAutocompleteBasePath(req.Path, apiCfg.SecurityConfig())
+		// Scope selects the validator: "configure" skips the allowlist (bootstrap);
+		// the default (operation) enforces it. The denylist always applies.
+		basePath, fragment, err := resolveAutocompleteBasePath(req.Path, apiCfg.SecurityConfig(), req.Scope)
 		if err != nil {
 			apperrors.WriteAPIError(c, err)
 			return
@@ -90,7 +89,7 @@ func autocompletePath(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
-func resolveAutocompleteBasePath(userPath string, cfg *core.SecurityNarrowConfig) (string, string, error) {
+func resolveAutocompleteBasePath(userPath string, cfg *core.SecurityNarrowConfig, scope string) (string, string, error) {
 	trimmedPath := strings.TrimSpace(userPath)
 	if trimmedPath == "" {
 		return "", "", fmt.Errorf("path is required")
@@ -114,9 +113,12 @@ func resolveAutocompleteBasePath(userPath string, cfg *core.SecurityNarrowConfig
 		}
 	}
 
-	// Autocomplete never enforces the allowlist (see browse.go): the allowlist
-	// is a safety guard for file operations, not for path completion.
-	validBasePath, err := core.ValidateBrowsePath(basePath, cfg)
+	var validBasePath string
+	if scope == "configure" {
+		validBasePath, err = core.ValidateBrowsePath(basePath, cfg)
+	} else {
+		validBasePath, err = core.ValidateScanPath(basePath, cfg)
+	}
 	if err != nil {
 		return "", "", err
 	}

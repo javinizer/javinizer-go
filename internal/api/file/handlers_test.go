@@ -485,7 +485,7 @@ func homeOutsideAllowlist(t *testing.T) string {
 }
 
 func TestBrowseDirectory_AllowlistNotEnforced(t *testing.T) {
-	// Security model: browse never enforces the allowlist. The allowlist is a
+	// Configure scope: browse never enforces the allowlist. The allowlist is a
 	// safety guard for file OPERATIONS (scan/organize), not a restriction on
 	// browsing to configure it. Paths outside the allowlist return 200 (the
 	// directory is listed). The denylist (/proc, /sys, /dev + config) still
@@ -519,7 +519,7 @@ func TestBrowseDirectory_AllowlistNotEnforced(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reqBody := contracts.BrowseRequest{Path: tc.path}
+			reqBody := contracts.BrowseRequest{Path: tc.path, Scope: "configure"}
 			body, err := json.Marshal(reqBody)
 			require.NoError(t, err)
 
@@ -668,7 +668,8 @@ func TestAutocompletePath_PathTraversalResolved(t *testing.T) {
 	router.POST("/browse/autocomplete", autocompletePath(testkit.GetTestRuntime(deps)))
 
 	reqBody := contracts.PathAutocompleteRequest{
-		Path: filepath.Join(tempDir, "..", "etc"),
+		Path:  filepath.Join(tempDir, "..", "etc"),
+		Scope: "configure",
 	}
 	body, err := json.Marshal(reqBody)
 	require.NoError(t, err)
