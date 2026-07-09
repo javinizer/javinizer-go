@@ -365,11 +365,23 @@ func waitForFileRelease(t *testing.T, dbPath string) {
 // attempting a rename to a sibling path and back. os.Rename fails with a
 // sharing violation on Windows if any process still holds the file open.
 func dbFileReleased(dbPath string) bool {
+	// An absent DB file has nothing to unlock — treat it as released so
+	// waitForFileRelease returns immediately instead of spinning to the deadline.
+	if _, err := os.Stat(dbPath); err != nil && os.IsNotExist(err) {
+		return true
+	}
 	probe := dbPath + ".release-probe"
 	if err := os.Rename(dbPath, probe); err != nil {
 		return false
 	}
-	_ = os.Rename(probe, dbPath)
+	// Restore the file to its original path. If this fails the DB is stranded
+	// at the probe path, so report not-released so the caller keeps polling
+	// (and eventually logs) rather than masking the restore failure.
+	if err := os.Rename(probe, dbPath); err != nil {
+		// Best-effort cleanup of the stranded probe so the next poll is clean.
+		_ = os.Remove(probe)
+		return false
+	}
 	return true
 }
 

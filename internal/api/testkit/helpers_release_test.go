@@ -12,10 +12,12 @@ import (
 )
 
 func TestDbFileReleased_ReturnsTrueWhenFileAbsent(t *testing.T) {
-	// No file exists at this path → Rename fails → not released.
+	// No file exists at this path → there is nothing to unlock, so
+	// dbFileReleased reports released so waitForFileRelease can return
+	// immediately instead of spinning until the deadline.
 	tmp := t.TempDir()
 	absent := filepath.Join(tmp, "does-not-exist.db")
-	assert.False(t, dbFileReleased(absent), "expected dbFileReleased=false when the DB file is absent")
+	assert.True(t, dbFileReleased(absent), "expected dbFileReleased=true when the DB file is absent")
 }
 
 func TestDbFileReleased_ReturnsTrueWhenFileRenameable(t *testing.T) {
@@ -107,12 +109,9 @@ func TestWaitForFileRelease_ReturnsImmediatelyWhenFileReleased(t *testing.T) {
 
 func TestWaitForFileRelease_HandlesAbsentDbFile(t *testing.T) {
 	// When the DB file doesn't exist at all (e.g. db.Open failed before the
-	// file was created), waitForFileRelease should still terminate cleanly
-	// rather than spinning until the deadline — dbFileReleased returns false
-	// for an absent file, so this exercises the polling-then-log path. Keep the
-	// wait short to avoid a 2s test: assert it completes within a bound that
-	// is well under the 2s deadline only when the deadline can't be shortened.
-	// We can't shorten the internal deadline, so accept up to ~2.1s here.
+	// file was created), dbFileReleased reports released (nothing to unlock),
+	// so waitForFileRelease should return immediately rather than spinning to
+	// the 2s deadline.
 	tmp := t.TempDir()
 	absent := filepath.Join(tmp, "never-created.db")
 
@@ -120,5 +119,5 @@ func TestWaitForFileRelease_HandlesAbsentDbFile(t *testing.T) {
 	waitForFileRelease(t, absent)
 	elapsed := time.Since(start)
 
-	assert.Less(t, elapsed, 2200*time.Millisecond, "should not run far past the 2s deadline, took %v", elapsed)
+	assert.Less(t, elapsed, 500*time.Millisecond, "should return immediately when the DB file is absent, took %v", elapsed)
 }
