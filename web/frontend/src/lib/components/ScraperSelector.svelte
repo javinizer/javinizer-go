@@ -28,7 +28,7 @@
 			.filter((s): s is Scraper => s !== undefined)
 	);
 
-	// Get unselected enabled scrapers
+	// Get unselected scrapers (includes disabled when showAll is true)
 	const unselectedScrapers = $derived(
 		scrapers.filter((s) => (showAll || s.enabled) && !selected.includes(s.name))
 	);
