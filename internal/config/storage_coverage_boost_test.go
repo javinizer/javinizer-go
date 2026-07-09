@@ -171,6 +171,7 @@ func TestAcquireConfigFileLock_Contention(t *testing.T) {
 
 	unlock1, err := acquireConfigFileLock(path)
 	require.NoError(t, err)
+	t.Cleanup(unlock1)
 
 	acquiring := make(chan struct{})
 	gotLock := make(chan struct{})
