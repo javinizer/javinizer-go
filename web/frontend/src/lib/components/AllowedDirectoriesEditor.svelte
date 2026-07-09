@@ -124,12 +124,12 @@
 		</ul>
 	{/if}
 
-	<form onsubmit={addDir} class="flex items-start gap-2">
+	<form onsubmit={addDir} class="flex items-center gap-2">
 		<PathInput
 			bind:value={newDir}
 			{placeholder}
 			{whitelistPaths}
-			class="flex-1"
+			class="h-9"
 			onnavigate={() => addDir()}
 		/>
 		<Button
