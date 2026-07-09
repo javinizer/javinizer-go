@@ -60,7 +60,7 @@
 			lastConfigRef = cfg;
 			const snap = snapshot(cfg);
 			draft = snap;
-			baseline = snap;
+			baseline = snapshot(cfg);
 		}
 	});
 
@@ -120,7 +120,12 @@
 				allowed_unc_servers: [...(data.security.allowed_unc_servers ?? [])],
 			};
 			draft = saved;
-			baseline = saved;
+			baseline = {
+				allowed_directories: [...saved.allowed_directories],
+				denied_directories: [...saved.denied_directories],
+				allow_unc: saved.allow_unc,
+				allowed_unc_servers: [...saved.allowed_unc_servers],
+			};
 			toastStore.success('Security settings saved and reloaded', 4000);
 			void queryClient.invalidateQueries({ queryKey: ['config'] }).then(async () => {
 				const fresh = await queryClient.fetchQuery<Config>({
