@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -75,6 +76,9 @@ func updateSecurityConfig(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		for _, dir := range req.AllowedDirectories {
+			if strings.TrimSpace(dir) == "" {
+				continue
+			}
 			expanded := core.ExpandHomeDir(dir)
 			abs, err := filepath.Abs(expanded)
 			if err != nil {

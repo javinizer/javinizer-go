@@ -25,26 +25,24 @@ func TestIsFilesystemRoot(t *testing.T) {
 		{"/proc", false},
 	}
 
-	if runtime.GOOS != "windows" {
-		tests = append(tests,
-			struct {
-				path string
-				want bool
-			}{"C:\\", true},
-			struct {
-				path string
-				want bool
-			}{"C:/", true},
-			struct {
-				path string
-				want bool
-			}{"D:\\", true},
-			struct {
-				path string
-				want bool
-			}{"D:/", true},
-		)
-	}
+	tests = append(tests,
+		struct {
+			path string
+			want bool
+		}{"C:\\", true},
+		struct {
+			path string
+			want bool
+		}{"C:/", true},
+		struct {
+			path string
+			want bool
+		}{"D:\\", true},
+		struct {
+			path string
+			want bool
+		}{"D:/", true},
+	)
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {

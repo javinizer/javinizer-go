@@ -347,6 +347,38 @@ func TestUpdateSecurityConfig_RejectsRootResolvingAllowedDirectory(t *testing.T)
 	}
 }
 
+// TestUpdateSecurityConfig_EmptyEntriesSkipped verifies that empty/whitespace
+// allowed_directories entries are skipped (not rejected) during PUT validation,
+// matching the runtime validator which treats empty entries as unusable.
+func TestUpdateSecurityConfig_EmptyEntriesSkipped(t *testing.T) {
+	validDir := t.TempDir()
+
+	initial := config.DefaultConfig(nil, nil)
+	initial.API.Security.AllowedDirectories = []string{"/keep"}
+
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	coreDeps := createTestDeps(t, initial, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
+
+	router := gin.New()
+	router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+	body, err := json.Marshal(SecurityUpdateRequest{
+		AllowedDirectories: []string{"", "  ", validDir},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	saved := deps.CoreDeps.GetConfig()
+	assert.Equal(t, []string{"", "  ", validDir}, saved.API.Security.AllowedDirectories)
+}
+
 // failingBody is an io.ReadCloser whose Read always returns an error, used to
 // exercise the io.ReadAll failure branch of updateSecurityConfig.
 type failingBody struct{}
