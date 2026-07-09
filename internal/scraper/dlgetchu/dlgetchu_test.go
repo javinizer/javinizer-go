@@ -436,7 +436,7 @@ func TestScraper_GetURL(t *testing.T) {
 func TestScraper_GetURLNumeric(t *testing.T) {
 	// Live-network test: hits dl.getchu.com. Opt-in only via
 	// JAVINIZER_RUN_LIVE_API_TESTS=1 so it never runs in CI or default
-	// `go test ./...`. Mirrors the r18dev/javlibrary live-test convention.
+	// `go test ./...`. Mirrors the r18dev live-test convention.
 	if testing.Short() {
 		t.Skip("skipping network-dependent test")
 	}
