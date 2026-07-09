@@ -177,7 +177,7 @@
 			}, 120);
 		}}
 		{placeholder}
-		class="w-full px-3 py-1.5 pr-9 border rounded-md bg-background outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm {className}"
+		class="w-full px-3 py-1.5 pr-9 border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm {className}"
 	/>
 	{#if autocompleteLoading}
 		<div class="absolute inset-y-0 right-3 flex items-center text-muted-foreground">
