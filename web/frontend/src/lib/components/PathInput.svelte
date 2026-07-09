@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { apiClient } from '$lib/api/client';
 	import type { PathAutocompleteSuggestion } from '$lib/api/types';
-	import { Folder, ArrowRight, LoaderCircle } from 'lucide-svelte';
+	import { Folder, ChevronRight, LoaderCircle, CornerDownLeft, ArrowUp, ArrowDown } from 'lucide-svelte';
 	import Button from './ui/Button.svelte';
+	import { portalToBody } from '$lib/actions/portal';
 
 	interface Props {
 		value?: string;
@@ -14,6 +15,7 @@
 		navigateDisabled?: boolean;
 		loading?: boolean;
 		escapeValue?: string;
+		drillOnSelect?: boolean;
 		class?: string;
 	}
 
@@ -27,18 +29,21 @@
 		navigateDisabled = false,
 		loading = false,
 		escapeValue,
+		drillOnSelect = false,
 		class: className = ''
 	}: Props = $props();
 
-	let isEditing = $state(false);
+	const pathAutocompleteLimit = 8;
+	const SEP = '/';
+
+	let focused = $state(false);
 	let pathSuggestions = $state<PathAutocompleteSuggestion[]>([]);
-	let activeSuggestionIndex = $state(-1);
-	let userNavigatedSuggestions = $state(false);
+	let activeIndex = $state(-1);
+	let userNavigated = $state(false);
 	let autocompleteLoading = $state(false);
 	let autocompleteDebounceId: ReturnType<typeof setTimeout> | null = null;
 	let autocompleteRequestToken = 0;
-
-	const pathAutocompleteLimit = 8;
+	let inputEl = $state<HTMLInputElement | null>(null);
 
 	let whitelistSuggestions = $derived.by(() => {
 		if (whitelistPaths.length === 0) return [];
@@ -51,7 +56,7 @@
 
 	let displayedSuggestions = $derived.by(() => {
 		if (pathSuggestions.length > 0) return pathSuggestions;
-		if (!isEditing) return [];
+		if (!focused) return [];
 		const input = value.trim().toLowerCase();
 		if (input === '' && whitelistSuggestions.length > 0) return whitelistSuggestions;
 		if (input !== '' && whitelistSuggestions.length > 0) {
@@ -63,84 +68,109 @@
 		return [];
 	});
 
-	let showSuggestions = $derived(displayedSuggestions.length > 0 && isEditing);
+	let showSuggestions = $derived(focused && displayedSuggestions.length > 0);
+
+	function currentFragment(): string {
+		const trimmed = value.trim();
+		const idx = Math.max(trimmed.lastIndexOf(SEP), trimmed.lastIndexOf('\\'));
+		if (idx === -1) return trimmed;
+		return trimmed.slice(idx + 1);
+	}
 
 	function clearSuggestions() {
 		autocompleteRequestToken += 1;
 		pathSuggestions = [];
-		activeSuggestionIndex = -1;
-		userNavigatedSuggestions = false;
+		activeIndex = -1;
+		userNavigated = false;
 		autocompleteLoading = false;
 	}
 
-	function selectSuggestion(suggestion: PathAutocompleteSuggestion) {
-		value = suggestion.path;
-		isEditing = false;
-		clearSuggestions();
-		onchange?.(suggestion.path);
-		onnavigate?.(suggestion.path);
+	function clampActive() {
+		const n = displayedSuggestions.length;
+		if (n === 0) {
+			activeIndex = -1;
+			return;
+		}
+		if (activeIndex < 0) activeIndex = 0;
+		if (activeIndex >= n) activeIndex = n - 1;
 	}
 
 	async function fetchSuggestions(inputPath: string) {
 		const requestToken = ++autocompleteRequestToken;
 		autocompleteLoading = true;
-
 		try {
 			const response = await apiClient.autocompletePath({
 				path: inputPath,
 				limit: pathAutocompleteLimit
 			});
-
-			if (requestToken !== autocompleteRequestToken || !isEditing) return;
-
+			if (requestToken !== autocompleteRequestToken || !focused) return;
 			pathSuggestions = response.suggestions;
-			activeSuggestionIndex = -1;
+			activeIndex = -1;
 		} catch {
 			if (requestToken !== autocompleteRequestToken) return;
 			pathSuggestions = [];
-			activeSuggestionIndex = -1;
+			activeIndex = -1;
 		} finally {
-			if (requestToken === autocompleteRequestToken) {
-				autocompleteLoading = false;
-			}
+			if (requestToken === autocompleteRequestToken) autocompleteLoading = false;
+		}
+	}
+
+	function withTrailingSep(p: string): string {
+		if (p === '' || p.endsWith(SEP) || p.endsWith('\\')) return p;
+		return p + SEP;
+	}
+
+	function selectSuggestion(suggestion: PathAutocompleteSuggestion) {
+		const drill = drillOnSelect;
+		const next = drill ? withTrailingSep(suggestion.path) : suggestion.path;
+		value = next;
+		onchange?.(next);
+		onnavigate?.(next);
+		userNavigated = false;
+		pathSuggestions = [];
+		activeIndex = -1;
+		if (inputEl) {
+			inputEl.focus();
+			const end = value.length;
+			requestAnimationFrame(() => {
+				inputEl?.setSelectionRange(end, end);
+			});
+		}
+		if (drill) {
+			void fetchSuggestions(next);
 		}
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'ArrowDown' && displayedSuggestions.length > 0) {
+		const n = displayedSuggestions.length;
+		if (e.key === 'ArrowDown' && n > 0) {
 			e.preventDefault();
-			userNavigatedSuggestions = true;
-			activeSuggestionIndex =
-				activeSuggestionIndex >= displayedSuggestions.length - 1 ? 0 : activeSuggestionIndex + 1;
-		} else if (e.key === 'ArrowUp' && displayedSuggestions.length > 0) {
+			userNavigated = true;
+			activeIndex = activeIndex >= n - 1 ? 0 : activeIndex + 1;
+		} else if (e.key === 'ArrowUp' && n > 0) {
 			e.preventDefault();
-			userNavigatedSuggestions = true;
-			activeSuggestionIndex =
-				activeSuggestionIndex <= 0 ? displayedSuggestions.length - 1 : activeSuggestionIndex - 1;
+			userNavigated = true;
+			activeIndex = activeIndex <= 0 ? n - 1 : activeIndex - 1;
+		} else if (e.key === 'Tab' && n > 0 && userNavigated && activeIndex >= 0) {
+			e.preventDefault();
+			selectSuggestion(displayedSuggestions[activeIndex]);
 		} else if (e.key === 'Enter') {
-			if (
-				userNavigatedSuggestions &&
-				showSuggestions &&
-				activeSuggestionIndex >= 0 &&
-				displayedSuggestions[activeSuggestionIndex]
-			) {
+			if (userNavigated && showSuggestions && activeIndex >= 0 && displayedSuggestions[activeIndex]) {
 				e.preventDefault();
-				selectSuggestion(displayedSuggestions[activeSuggestionIndex]);
+				selectSuggestion(displayedSuggestions[activeIndex]);
 				return;
 			}
 			onnavigate?.(value.trim());
 		} else if (e.key === 'Escape') {
-			if (escapeValue !== undefined) {
-				value = escapeValue;
-			}
-			isEditing = false;
+			if (escapeValue !== undefined) value = escapeValue;
+			focused = false;
 			clearSuggestions();
 		}
 	}
 
 	function handleInput() {
-		userNavigatedSuggestions = false;
-		activeSuggestionIndex = -1;
+		userNavigated = false;
+		activeIndex = -1;
 		onchange?.(value);
 		const inputPath = value.trim();
 
@@ -149,65 +179,113 @@
 			autocompleteDebounceId = null;
 		}
 
-		if (!isEditing || !inputPath) {
+		if (!focused || !inputPath) {
 			clearSuggestions();
 			return;
 		}
 
 		autocompleteDebounceId = setTimeout(() => {
 			void fetchSuggestions(inputPath);
-		}, 160);
+		}, 120);
 	}
 
 	function handleFocus() {
-		isEditing = true;
+		focused = true;
 	}
+
+	function handleBlur() {
+		setTimeout(() => {
+			focused = false;
+			clearSuggestions();
+		}, 120);
+	}
+
+	$effect(() => {
+		void displayedSuggestions;
+		clampActive();
+	});
+
+	let popoverStyle = $state('');
+
+	function repositionPopover() {
+		if (!inputEl) return;
+		const r = inputEl.getBoundingClientRect();
+		popoverStyle = `position:fixed;top:${Math.round(r.bottom + 4)}px;left:${Math.round(r.left)}px;width:${Math.round(r.width)}px;z-index:50;`;
+	}
+
+	$effect(() => {
+		if (!showSuggestions) return;
+		repositionPopover();
+		const onScrollResize = () => repositionPopover();
+		window.addEventListener('scroll', onScrollResize, true);
+		window.addEventListener('resize', onScrollResize);
+		const id = requestAnimationFrame(repositionPopover);
+		return () => {
+			window.removeEventListener('scroll', onScrollResize, true);
+			window.removeEventListener('resize', onScrollResize);
+			cancelAnimationFrame(id);
+		};
+	});
 </script>
 
 <div class="relative flex-1">
 	<input
+		bind:this={inputEl}
 		type="text"
 		bind:value
 		onkeydown={handleKeydown}
 		oninput={handleInput}
 		onfocus={handleFocus}
-		onblur={() => {
-			setTimeout(() => {
-				isEditing = false;
-			}, 120);
-		}}
+		onblur={handleBlur}
 		{placeholder}
-		class="w-full px-3 py-1.5 pr-9 border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm {className}"
+		autocomplete="off"
+		spellcheck="false"
+		class="ac-input w-full px-3 py-1.5 pr-9 border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm {className}"
 	/>
+
 	{#if autocompleteLoading}
-		<div class="absolute inset-y-0 right-3 flex items-center text-muted-foreground">
+		<div class="ac-spinner absolute inset-y-0 right-3 flex items-center text-muted-foreground">
 			<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
 		</div>
 	{/if}
 
 	{#if showSuggestions}
-		<div class="absolute z-20 mt-2 w-full rounded-lg border bg-background shadow-lg overflow-hidden">
-			<div class="px-3 py-1.5 text-xs text-muted-foreground border-b border-border/60 bg-muted/30">
-				Type a path, or use ↑↓ to pick a suggestion
+		<div use:portalToBody style={popoverStyle} class="ac-popover rounded-lg border border-border bg-popover text-popover-foreground shadow-xl shadow-black/10 overflow-hidden">
+			<div class="ac-head flex items-center justify-between px-3 py-1.5 border-b border-border/60 bg-muted/40">
+				<span class="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">Folders</span>
+				<span class="text-[0.65rem] tabular-nums text-muted-foreground/70">{displayedSuggestions.length}</span>
 			</div>
-			<div class="max-h-64 overflow-y-auto py-1">
+			<div class="max-h-72 overflow-y-auto py-0.5">
 				{#each displayedSuggestions as suggestion, index (suggestion.path)}
+					{@const frag = currentFragment().toLowerCase()}
+					{@const matched = frag !== '' && suggestion.name.toLowerCase().startsWith(frag)}
+					{@const rest = matched ? suggestion.name.slice(frag.length) : ''}
 					<button
 						type="button"
 						onmousedown={(event) => {
 							event.preventDefault();
 							selectSuggestion(suggestion);
 						}}
-						class="w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors
-							{index === activeSuggestionIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'}"
+						class="ac-row group w-full flex items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors
+							{index === activeIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}"
 					>
-						<Folder class="h-4 w-4 text-blue-500 shrink-0" />
-						<div class="min-w-0 flex-1">
-							<div class="truncate font-medium">{suggestion.name}</div>
-							<div class="truncate text-xs text-muted-foreground font-mono">{suggestion.path}</div>
+						<Folder class="h-4 w-4 shrink-0 {index === activeIndex ? 'text-primary' : 'text-blue-500/80'}" />
+						<div class="min-w-0 flex-1 flex items-baseline gap-1">
+							{#if matched}
+								<span class="ac-match font-semibold truncate">{suggestion.name.slice(0, frag.length)}</span><span class="truncate font-medium opacity-90">{rest}</span>
+							{:else}
+								<span class="truncate font-medium">{suggestion.name}</span>
+							{/if}
 						</div>
+						<span class="ac-path hidden sm:block truncate text-[0.7rem] text-muted-foreground font-mono max-w-[40%]">{suggestion.path}</span>
+						<ChevronRight class="h-3.5 w-3.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground" />
 					</button>
 				{/each}
+			</div>
+			<div class="ac-foot hidden sm:flex items-center gap-3 px-3 py-1.5 border-t border-border/60 bg-muted/30 text-[0.65rem] text-muted-foreground/80">
+				<span class="flex items-center gap-1"><ArrowUp class="h-3 w-3" /><ArrowDown class="h-3 w-3" /> navigate</span>
+				<span class="flex items-center gap-1"><CornerDownLeft class="h-3 w-3" /> select</span>
+				<span class="ml-auto">esc to dismiss</span>
 			</div>
 		</div>
 	{/if}
@@ -216,7 +294,25 @@
 {#if showNavigateButton}
 	<Button variant="outline" size="sm" onclick={() => onnavigate?.(value.trim())} disabled={!value.trim() || navigateDisabled || loading} title="Navigate to path">
 		{#snippet children()}
-			<ArrowRight class="h-4 w-4" />
+			<CornerDownLeft class="h-4 w-4" />
 		{/snippet}
 	</Button>
 {/if}
+
+<style>
+	.ac-popover {
+		animation: ac-pop 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
+		transform-origin: top center;
+	}
+	@keyframes ac-pop {
+		from { transform: translateY(-4px) scaleY(0.98); }
+		to { transform: translateY(0) scaleY(1); }
+	}
+	.ac-row {
+		animation: ac-row-in 100ms cubic-bezier(0.16, 1, 0.3, 1) both;
+	}
+	@keyframes ac-row-in {
+		from { opacity: 0; transform: translateX(-2px); }
+		to { opacity: 1; transform: translateX(0); }
+	}
+</style>

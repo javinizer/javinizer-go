@@ -410,6 +410,7 @@
 				navigateDisabled={!pathInputValue.trim() || loading}
 				{loading}
 				whitelistPaths={whitelistPaths}
+				drillOnSelect={true}
 			/>
 		</div>
 	</div>
