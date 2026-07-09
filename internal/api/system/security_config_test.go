@@ -385,3 +385,35 @@ type failingBody struct{}
 
 func (failingBody) Read(p []byte) (int, error) { return 0, errors.New("synthetic read failure") }
 func (failingBody) Close() error               { return nil }
+
+func TestUpdateSecurityConfig_AbsErrorRejected(t *testing.T) {
+	initial := config.DefaultConfig(nil, nil)
+	initial.API.Security.AllowedDirectories = []string{"/keep"}
+
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	coreDeps := createTestDeps(t, initial, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
+
+	router := gin.New()
+	router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+	origAbs := filepathAbs
+	t.Cleanup(func() { filepathAbs = origAbs })
+	filepathAbs = func(string) (string, error) { return "", errors.New("abs: synthetic failure") }
+
+	body, err := json.Marshal(SecurityUpdateRequest{
+		AllowedDirectories: []string{"/valid/path"},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "could not be resolved to an absolute path")
+
+	saved := deps.CoreDeps.GetConfig()
+	assert.Equal(t, []string{"/keep"}, saved.API.Security.AllowedDirectories)
+}

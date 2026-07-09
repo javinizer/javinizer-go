@@ -237,3 +237,15 @@ func TestIsFilesystemRoot_Exported(t *testing.T) {
 	assert.False(t, IsFilesystemRoot("/home"))
 	assert.False(t, IsFilesystemRoot(""))
 }
+
+func TestEffectiveAllowedBase_FilepathAbsError(t *testing.T) {
+	v := NewPathValidator(afero.NewOsFs(), []string{"/tmp"}, nil)
+
+	origAbs := filepathAbs
+	t.Cleanup(func() { filepathAbs = origAbs })
+
+	filepathAbs = func(string) (string, error) { return "", assert.AnError }
+
+	_, usable := v.effectiveAllowedBase("/tmp")
+	assert.False(t, usable, "filepath.Abs error should make entry unusable")
+}

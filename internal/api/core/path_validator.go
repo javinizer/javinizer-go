@@ -17,6 +17,8 @@ import (
 // internal/updater/swap_darwin.go.
 var evalSymlinksFunc = filepath.EvalSymlinks
 
+var filepathAbs = filepath.Abs
+
 // PathValidator provides a unified, testable path validation pipeline.
 // It consolidates the allowlist/denylist/symlink-resolution logic previously
 // duplicated across batch/paths.go, core/path_validation.go, and
@@ -249,7 +251,7 @@ func (v *PathValidator) effectiveAllowedBase(rawBase string) (canonicalBase stri
 		return "", false
 	}
 	expandedBase := expandHomeDir(rawBase)
-	absBase, err := filepath.Abs(expandedBase)
+	absBase, err := filepathAbs(expandedBase)
 	if err != nil {
 		return "", false
 	}
