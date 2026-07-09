@@ -239,6 +239,7 @@
 				credentials.confirm.length >= 8
 			);
 		}
+		if (isLastStep && scrapersLoading) return false;
 		return true;
 	});
 
