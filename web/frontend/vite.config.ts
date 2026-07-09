@@ -35,6 +35,16 @@ export default defineConfig({
 				target: 'http://localhost:8765',
 				changeOrigin: true,
 			},
+			// Proxy API docs (Scalar + Swagger UI) so openDocs() in dev reaches the
+			// Go backend instead of 404ing on the Vite server.
+			'/docs': {
+				target: 'http://localhost:8765',
+				changeOrigin: true,
+			},
+			'/swagger': {
+				target: 'http://localhost:8765',
+				changeOrigin: true,
+			},
 		},
 	},
 });
