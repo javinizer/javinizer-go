@@ -198,6 +198,26 @@ func TestBrowse_EmptyPath_ConfigureScopeFallsBackToHome(t *testing.T) {
 		"empty path with no home dir must fall back to Getwd and succeed in configure scope")
 }
 
+func TestBrowse_EmptyPath_ConfigureScopeUsesHomeDir(t *testing.T) {
+	homeDir := t.TempDir()
+	router, _ := newBrowseTestRouter(t, nil)
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	w := doBrowse(t, router, "", "configure")
+	assert.Equal(t, http.StatusOK, w.Code,
+		"empty path with a valid home dir must default to home and succeed in configure scope")
+
+	var resp contracts.BrowseResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	resolvedHome, err := filepath.EvalSymlinks(homeDir)
+	require.NoError(t, err)
+	resolvedCurrent, err := filepath.EvalSymlinks(resp.CurrentPath)
+	require.NoError(t, err)
+	assert.Equal(t, resolvedHome, resolvedCurrent)
+}
+
 func TestBrowse_EmptyPath_OperationScopeRejectsWhenAllowlistEmpty(t *testing.T) {
 	router, _ := newBrowseTestRouter(t, nil)
 

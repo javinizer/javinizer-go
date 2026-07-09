@@ -45,6 +45,7 @@
 	let autocompleteLoading = $state(false);
 	let autocompleteDebounceId: ReturnType<typeof setTimeout> | null = null;
 	let autocompleteRequestToken = 0;
+	let blurTimeoutId: ReturnType<typeof setTimeout> | null = null;
 	let inputEl = $state<HTMLInputElement | null>(null);
 	let autocompleteError = $state<string | null>(null);
 
@@ -149,6 +150,14 @@
 		pathSuggestions = [];
 		activeIndex = -1;
 		autocompleteRequestToken += 1;
+		if (autocompleteDebounceId) {
+			clearTimeout(autocompleteDebounceId);
+			autocompleteDebounceId = null;
+		}
+		if (blurTimeoutId) {
+			clearTimeout(blurTimeoutId);
+			blurTimeoutId = null;
+		}
 		if (inputEl) {
 			inputEl.focus();
 			const end = value.length;
@@ -211,12 +220,17 @@
 
 	function handleFocus() {
 		focused = true;
+		if (blurTimeoutId) {
+			clearTimeout(blurTimeoutId);
+			blurTimeoutId = null;
+		}
 	}
 
 	function handleBlur() {
-		setTimeout(() => {
+		blurTimeoutId = setTimeout(() => {
 			focused = false;
 			clearSuggestions();
+			blurTimeoutId = null;
 		}, 120);
 	}
 
