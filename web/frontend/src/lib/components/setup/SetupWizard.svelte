@@ -193,18 +193,17 @@
 				allowed_unc_servers: [...(sec?.allowed_unc_servers ?? [])],
 			});
 
-			const config = await apiClient.getConfig();
-			const sc = (config.scrapers ?? {}) as Record<string, unknown>;
+			const sc = (fresh.scrapers ?? {}) as Record<string, unknown>;
 			if (availableScrapers.length > 0) {
 				sc.priority = [...selectedScrapers];
 				for (const scraper of availableScrapers) {
 					if (!sc[scraper.name]) sc[scraper.name] = {};
 					(sc[scraper.name] as Record<string, unknown>).enabled = selectedScrapers.includes(scraper.name);
 				}
-				config.scrapers = sc as typeof config.scrapers;
+				fresh.scrapers = sc as typeof fresh.scrapers;
 				await apiClient.request('/api/v1/config', {
 					method: 'PUT',
-					body: JSON.stringify(config),
+					body: JSON.stringify(fresh),
 				});
 			}
 			toastStore.success('Setup complete. Welcome to Javinizer.', 4000);

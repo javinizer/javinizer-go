@@ -98,7 +98,7 @@ function scrapersResponse() {
 	] as unknown as Awaited<ReturnType<typeof apiClient.getScrapers>>;
 }
 
-function findButton(container: HTMLElement, text: string): HTMLButtonElement {
+function findButton(container: HTMLElement, text: string): HTMLButtonElement | undefined {
 	return Array.from(container.querySelectorAll('button')).find((b) =>
 		b.textContent?.includes(text),
 	) as HTMLButtonElement;
@@ -124,12 +124,12 @@ async function fillCredentials(container: HTMLElement) {
 // (acknowledges and advances).
 async function proceedToDirectories(container: HTMLElement) {
 	await fillCredentials(container);
-	await fireEvent.click(findButton(container, 'Continue'));
+	await fireEvent.click(findButton(container, 'Continue')!);
 	await waitFor(() => expect(apiClient.setupAuth).toHaveBeenCalledTimes(1));
 	await waitFor(() =>
 		expect(container.textContent).toContain('Your admin account is secured'),
 	);
-	await fireEvent.click(findButton(container, 'Continue to library setup'));
+	await fireEvent.click(findButton(container, 'Continue to library setup')!);
 	await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
 }
 
@@ -203,7 +203,7 @@ describe('first-run setup wizard', () => {
 		);
 		await tick();
 
-		await fireEvent.click(findButton(container, 'Continue'));
+		await fireEvent.click(findButton(container, 'Continue')!);
 
 		await waitFor(() => expect(container.textContent).toContain('Choose your metadata sources'));
 		// staged — nothing committed yet
@@ -239,12 +239,12 @@ describe('first-run setup wizard', () => {
 		);
 		await tick();
 
-		await fireEvent.click(findButton(container, 'Continue'));
+		await fireEvent.click(findButton(container, 'Continue')!);
 
 		await waitFor(() => expect(container.textContent).toContain('Choose your metadata sources'));
 		await waitFor(() => expect(apiClient.getScrapers).toHaveBeenCalledTimes(1));
 
-		await fireEvent.click(findButton(container, 'Finish Setup'));
+		await fireEvent.click(findButton(container, 'Finish Setup')!);
 
 		await waitFor(() => expect(apiClient.updateSecurityConfig).toHaveBeenCalledTimes(1));
 		expect(apiClient.updateSecurityConfig).toHaveBeenCalledWith(
@@ -284,9 +284,9 @@ describe('first-run setup wizard', () => {
 		await fireEvent.keyDown(dirInput, { key: 'Enter' });
 		await tick();
 
-		await fireEvent.click(findButton(container, 'Continue'));
+		await fireEvent.click(findButton(container, 'Continue')!);
 		await waitFor(() => expect(container.textContent).toContain('Choose your metadata sources'));
-		await fireEvent.click(findButton(container, 'Finish Setup'));
+		await fireEvent.click(findButton(container, 'Finish Setup')!);
 
 		await waitFor(() => expect(apiClient.updateSecurityConfig).toHaveBeenCalledTimes(1));
 		expect(apiClient.updateSecurityConfig).toHaveBeenCalledWith(
@@ -303,7 +303,7 @@ describe('first-run setup wizard', () => {
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
 		await proceedToDirectories(container);
 
-		await fireEvent.click(findButton(container, 'Skip for now'));
+		await fireEvent.click(findButton(container, 'Skip for now')!);
 
 		await waitFor(() => expect(container.textContent).toContain('Choose your metadata sources'));
 		expect(apiClient.updateSecurityConfig).not.toHaveBeenCalled();
@@ -317,12 +317,12 @@ describe('first-run setup wizard', () => {
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
 		await proceedToDirectories(container);
-		await fireEvent.click(findButton(container, 'Continue'));
+		await fireEvent.click(findButton(container, 'Continue')!);
 
 		await waitFor(() => expect(container.textContent).toContain('Choose your metadata sources'));
 		const back = findButton(container, 'Back');
 		expect(back).toBeTruthy();
-		await fireEvent.click(back);
+		await fireEvent.click(back!);
 
 		await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
 	});
@@ -357,10 +357,10 @@ describe('first-run setup wizard', () => {
 			expect(container.textContent).toContain('/home/test/Videos'),
 		);
 
-		await fireEvent.click(findButton(container, 'Continue'));
+		await fireEvent.click(findButton(container, 'Continue')!);
 		await waitFor(() => expect(container.textContent).toContain('Choose your metadata sources'));
 		await waitFor(() => expect(apiClient.getScrapers).toHaveBeenCalledTimes(1));
-		await fireEvent.click(findButton(container, 'Finish Setup'));
+		await fireEvent.click(findButton(container, 'Finish Setup')!);
 
 		await waitFor(() => expect(apiClient.updateSecurityConfig).toHaveBeenCalledTimes(1));
 		expect(apiClient.updateSecurityConfig).toHaveBeenCalledWith(
