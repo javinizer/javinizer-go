@@ -200,6 +200,110 @@ JAVINIZER_CONFIG=configs/config.yaml JAVINIZER_DB=data/javinizer.db \
   bin/Javinizer.app/Contents/MacOS/Javinizer
 ```
 
+## Migrating from CLI to Desktop
+
+The desktop app uses a **portable user-data directory** for config, database,
+logs, and temp files — independent of the current working directory. This is
+the key difference from the CLI, which stores everything relative to CWD
+(`configs/config.yaml`, `data/javinizer.db`, `data/logs/`, `data/temp/`).
+
+### Data directory locations
+
+| What | CLI (relative to CWD) | Desktop (portable) |
+|------|----------------------|--------------------|
+| Config | `configs/config.yaml` | `%APPDATA%\Javinizer\config.yaml` |
+| Database | `data/javinizer.db` | `%APPDATA%\Javinizer\data\javinizer.db` |
+| Logs | `data/logs/` | `%APPDATA%\Javinizer\data\logs\` |
+| Temp | `data/temp/` | `%APPDATA%\Javinizer\data\temp\` |
+
+The portable paths resolve as:
+
+- **Windows**: `%APPDATA%\Javinizer\` (typically `C:\Users\<username>\AppData\Roaming\Javinizer\`)
+- **macOS**: `~/Library/Application Support/Javinizer/`
+- **Linux**: `$XDG_CONFIG_HOME/Javinizer/` or `~/.config/Javinizer/`
+
+### Migration steps (Windows)
+
+1. **Install the desktop app** — download the `.exe` or installer from the
+   [releases page](https://github.com/javinizer/javinizer-go/releases), or:
+   ```powershell
+   scoop bucket add javinizer https://github.com/javinizer/scoop-javinizer
+   scoop install javinizer-app
+   ```
+
+2. **Copy your config**:
+   ```powershell
+   # Create the data directory if it doesn't exist
+   mkdir "%APPDATA%\Javinizer" -Force
+   # Copy your CLI config
+   copy configs\config.yaml "%APPDATA%\Javinizer\config.yaml"
+   ```
+
+3. **Copy your database** (optional — preserves job history, scraped metadata,
+   genre replacements, actress records):
+   ```powershell
+   mkdir "%APPDATA%\Javinizer\data" -Force
+   copy data\javinizer.db "%APPDATA%\Javinizer\data\javinizer.db"
+   ```
+
+4. **Update `allowed_directories`** — the desktop app launches from
+   Explorer/Finder, so its process CWD is `/` (not your video folder). If your
+   CLI config has `allowed_directories: ["."]` (the old default), change it to
+   an absolute path:
+   ```yaml
+   # Before (CLI — "." resolved to your CWD)
+   allowed_directories:
+     - .
+
+   # After (Desktop — use absolute paths)
+   allowed_directories:
+     - C:\Users\<username>\Videos
+     - D:\Media
+   ```
+   A `.` entry under CWD `/` is now treated as **unusable** (deny-by-default)
+   — see [allowed_directories](./02-configuration.md#allowed_directories) for
+   details.
+
+5. **Launch the desktop app** — double-click `Javinizer.exe` or run from Start
+   Menu. It will read `%APPDATA%\Javinizer\config.yaml` automatically.
+
+### Using CLI subcommands with the desktop binary
+
+The desktop binary supports all CLI subcommands. The portable paths apply
+automatically (as long as you don't pass `--config`):
+
+```powershell
+# The desktop binary uses %APPDATA%\Javinizer\config.yaml automatically
+Javinizer.exe scrape IPX-123
+Javinizer.exe sort C:\Users\<username>\Videos
+Javinizer.exe web   # starts the API server on localhost:8765
+```
+
+If you pass `--config <path>`, the portable env injection is **skipped** —
+you own the data layout and the DB/log/temp paths come from your config file
+(or `JAVINIZER_DB` / `JAVINIZER_LOG_DIR` env vars if set).
+
+### Migration steps (macOS / Linux)
+
+The same steps apply — adjust the paths:
+
+```bash
+# macOS
+mkdir -p ~/Library/Application\ Support/Javinizer
+cp configs/config.yaml ~/Library/Application\ Support/Javinizer/config.yaml
+mkdir -p ~/Library/Application\ Support/Javinizer/data
+cp data/javinizer.db ~/Library/Application\ Support/Javinizer/data/javinizer.db
+
+# Linux
+mkdir -p ~/.config/Javinizer
+cp configs/config.yaml ~/.config/Javinizer/config.yaml
+mkdir -p ~/.config/Javinizer/data
+cp data/javinizer.db ~/.config/Javinizer/data/javinizer.db
+```
+
+Update `allowed_directories` to absolute paths (e.g. `~/Videos`,
+`/media/nas/movies`) for the same reason as Windows.
+
 ## The app is unsigned
 
 The `.app` / `.exe` produced by `make build-app-*` is **not code-signed or
