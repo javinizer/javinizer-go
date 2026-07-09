@@ -85,6 +85,7 @@
 				class="field-eye"
 				onclick={() => (showPassword = !showPassword)}
 				tabindex="0"
+				disabled={submitting}
 				aria-label={showPassword ? 'Hide password' : 'Show password'}
 			>
 				{#if showPassword}<EyeOff class="h-4 w-4" />{:else}<Eye class="h-4 w-4" />{/if}
@@ -117,6 +118,7 @@
 				class="field-eye"
 				onclick={() => (showConfirm = !showConfirm)}
 				tabindex="0"
+				disabled={submitting}
 				aria-label={showConfirm ? 'Hide password' : 'Show password'}
 			>
 				{#if showConfirm}<EyeOff class="h-4 w-4" />{:else}<Eye class="h-4 w-4" />{/if}

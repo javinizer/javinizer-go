@@ -155,7 +155,7 @@
 		</div>
 	</div>
 {:else if !authInitialized}
-	<SetupWizard onComplete={() => { void refreshAuthStatus(); syncWebSocketAuthState(); }} />
+	<SetupWizard onComplete={() => { void refreshAuthStatus(); }} />
 {:else if !authAuthenticated}
 	<div class="min-h-screen bg-background flex items-center justify-center px-4 py-10">
 		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm space-y-4">
