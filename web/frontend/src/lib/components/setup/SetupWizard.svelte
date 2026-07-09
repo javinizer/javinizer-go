@@ -193,6 +193,9 @@
 				allowed_unc_servers: [...(sec?.allowed_unc_servers ?? [])],
 			});
 
+			if (fresh.api?.security) {
+				fresh.api.security.allowed_directories = dirs;
+			}
 			const sc = (fresh.scrapers ?? {}) as Record<string, unknown>;
 			if (availableScrapers.length > 0) {
 				sc.priority = [...selectedScrapers];
