@@ -120,7 +120,7 @@
 		dirsPrefilled = true;
 		try {
 			const { path } = await apiClient.getCurrentWorkingDirectory();
-			if (path && dirs.length === 0) dirs = [path];
+			if (path && dirs.length === 0 && stepIndex <= 1) dirs = [path];
 		} catch {
 			// Non-fatal: the user can still type/browse a directory manually.
 		}
