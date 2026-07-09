@@ -87,7 +87,11 @@ func updateSecurityConfig(rt *core.APIRuntime) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q could not be resolved to an absolute path", dir)})
 				return
 			}
-			if core.IsFilesystemRoot(abs) {
+			resolved, err := filepath.EvalSymlinks(abs)
+			if err != nil {
+				resolved = abs
+			}
+			if core.IsFilesystemRoot(resolved) {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q resolves to filesystem root; choose a specific folder", dir)})
 				return
 			}

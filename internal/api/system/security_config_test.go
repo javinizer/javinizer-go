@@ -417,3 +417,35 @@ func TestUpdateSecurityConfig_AbsErrorRejected(t *testing.T) {
 	saved := deps.CoreDeps.GetConfig()
 	assert.Equal(t, []string{"/keep"}, saved.API.Security.AllowedDirectories)
 }
+
+func TestUpdateSecurityConfig_SymlinkToRootRejected(t *testing.T) {
+	rootSymlink := t.TempDir() + "/rootlink"
+	require.NoError(t, os.Symlink("/", rootSymlink))
+	t.Cleanup(func() { _ = os.Remove(rootSymlink) })
+
+	initial := config.DefaultConfig(nil, nil)
+	initial.API.Security.AllowedDirectories = []string{"/keep"}
+
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	coreDeps := createTestDeps(t, initial, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
+
+	router := gin.New()
+	router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+	body, err := json.Marshal(SecurityUpdateRequest{
+		AllowedDirectories: []string{rootSymlink},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "resolves to filesystem root")
+
+	saved := deps.CoreDeps.GetConfig()
+	assert.Equal(t, []string{"/keep"}, saved.API.Security.AllowedDirectories)
+}
