@@ -3,6 +3,7 @@ package testkit
 import (
 	"context"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -175,6 +176,14 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.A
 		if err := db.Close(); err != nil {
 			t.Logf("Warning: failed to close test database: %v", err)
 		}
+		// On Windows, SQLite's file handles (and WAL sidecar files) may not be
+		// released the instant db.Close() returns. database/sql closes pooled
+		// connections, but the OS can hold the file open briefly, causing the
+		// subsequent t.TempDir() RemoveAll to fail with "The process cannot access
+		// the file because it is being used by another process." Wait for the DB
+		// file to become removable (or timeout) so the LIFO RemoveAll cleanup
+		// registered by t.TempDir() (which runs after this) succeeds.
+		waitForFileRelease(t, dbPath)
 	})
 
 	if err := db.RunMigrationsOnStartup(context.Background()); err != nil {
@@ -309,4 +318,28 @@ func CleanupServerHub(t *testing.T, rt *core.APIRuntime) {
 		rtState.Shutdown()
 	}
 	time.Sleep(100 * time.Millisecond)
+}
+
+// waitForFileRelease waits until the SQLite DB file (and its WAL/SHM sidecars)
+// can be removed, which on Windows may lag behind db.Close() because the OS
+// holds file handles open briefly. It polls with an exponential-ish backoff
+// up to ~2s. On Unix this is effectively a no-op (files are deletable while
+// open), but it runs unconditionally to keep the code path uniform.
+//
+// This directly addresses the Windows CI flake where t.TempDir()'s auto-
+// RemoveAll failed with "The process cannot access the file because it is
+// being used by another process" on test.db during teardown of batch tests
+// that exercise the apply phase (which opens pooled SQLite connections).
+func waitForFileRelease(t *testing.T, dbPath string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for delay := 10 * time.Millisecond; time.Now().Before(deadline); delay *= 2 {
+		// Try to open the file exclusively; if it succeeds, handles are released.
+		f, err := os.OpenFile(dbPath, os.O_RDWR, 0)
+		if err == nil {
+			_ = f.Close()
+			return
+		}
+		time.Sleep(delay)
+	}
 }
