@@ -12,6 +12,7 @@ vi.mock('$lib/api/client', () => ({
 		getConfig: vi.fn(),
 		updateSecurityConfig: vi.fn(),
 		getScrapers: vi.fn(),
+		getCurrentWorkingDirectory: vi.fn(),
 		request: vi.fn(),
 	},
 }));
@@ -51,6 +52,16 @@ if (!Element.prototype.animate) {
 		queueMicrotask(() => anim.onfinish?.());
 		return anim as unknown as Animation;
 	};
+}
+
+// jsdom has no ResizeObserver; the wizard's stage-height measurement effect
+// uses one, so polyfill it to avoid uncaught exceptions during render.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+	globalThis.ResizeObserver = class {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+	} as unknown as typeof ResizeObserver;
 }
 
 function uninitializedStatus() {
@@ -107,12 +118,29 @@ async function fillCredentials(container: HTMLElement) {
 	return { username, password, confirm };
 }
 
+// Register the admin account and dismiss the credentials-confirmation
+// interstitial, landing on the directories step. Registration is now a
+// two-click flow: Continue (creates the account) → Continue to library setup
+// (acknowledges and advances).
+async function proceedToDirectories(container: HTMLElement) {
+	await fillCredentials(container);
+	await fireEvent.click(findButton(container, 'Continue'));
+	await waitFor(() => expect(apiClient.setupAuth).toHaveBeenCalledTimes(1));
+	await waitFor(() =>
+		expect(container.textContent).toContain('Your admin account is secured'),
+	);
+	await fireEvent.click(findButton(container, 'Continue to library setup'));
+	await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
+}
+
 beforeEach(() => {
 	vi.clearAllMocks();
+	localStorage.clear();
 	apiClient.getAuthStatus.mockReset();
 	apiClient.getAuthStatus.mockResolvedValue(uninitializedStatus());
 	apiClient.getScrapers.mockResolvedValue(scrapersResponse());
 	apiClient.getConfig.mockResolvedValue(freshConfig());
+	apiClient.getCurrentWorkingDirectory.mockResolvedValue({ path: '' });
 	apiClient.updateSecurityConfig.mockResolvedValue({ security: { allowed_directories: [] } } as unknown as Awaited<ReturnType<typeof apiClient.updateSecurityConfig>>);
 	apiClient.request.mockResolvedValue({ message: 'ok' });
 	toastStore.clear();
@@ -122,6 +150,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	localStorage.clear();
 });
 
 describe('first-run setup wizard', () => {
@@ -139,12 +168,7 @@ describe('first-run setup wizard', () => {
 
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
-		await fillCredentials(container);
-
-		await fireEvent.click(findButton(container, 'Continue'));
-
-		await waitFor(() => expect(apiClient.setupAuth).toHaveBeenCalledTimes(1));
-		await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
+		await proceedToDirectories(container);
 		// directories/scrapers are staged — no config/security calls yet at step 1
 		expect(apiClient.getConfig).not.toHaveBeenCalled();
 		expect(apiClient.updateSecurityConfig).not.toHaveBeenCalled();
@@ -157,10 +181,7 @@ describe('first-run setup wizard', () => {
 
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
-		await fillCredentials(container);
-		await fireEvent.click(findButton(container, 'Continue'));
-
-		await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
+		await proceedToDirectories(container);
 		expect(findButton(container, 'Back')).toBeUndefined();
 	});
 
@@ -171,10 +192,7 @@ describe('first-run setup wizard', () => {
 
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
-		await fillCredentials(container);
-		await fireEvent.click(findButton(container, 'Continue'));
-
-		await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
+		await proceedToDirectories(container);
 
 		const dirInput = container.querySelector(
 			'input[placeholder*="Add a directory"]',
@@ -210,10 +228,7 @@ describe('first-run setup wizard', () => {
 
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
-		await fillCredentials(container);
-		await fireEvent.click(findButton(container, 'Continue'));
-
-		await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
+		await proceedToDirectories(container);
 
 		const dirInput = container.querySelector(
 			'input[placeholder*="Add a directory"]',
@@ -260,10 +275,7 @@ describe('first-run setup wizard', () => {
 
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
-		await fillCredentials(container);
-		await fireEvent.click(findButton(container, 'Continue'));
-
-		await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
+		await proceedToDirectories(container);
 
 		const dirInput = container.querySelector(
 			'input[placeholder*="Add a directory"]',
@@ -289,10 +301,7 @@ describe('first-run setup wizard', () => {
 
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
-		await fillCredentials(container);
-		await fireEvent.click(findButton(container, 'Continue'));
-
-		await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
+		await proceedToDirectories(container);
 
 		await fireEvent.click(findButton(container, 'Skip for now'));
 
@@ -307,10 +316,7 @@ describe('first-run setup wizard', () => {
 
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
-		await fillCredentials(container);
-		await fireEvent.click(findButton(container, 'Continue'));
-
-		await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
+		await proceedToDirectories(container);
 		await fireEvent.click(findButton(container, 'Continue'));
 
 		await waitFor(() => expect(container.textContent).toContain('Choose your metadata sources'));
@@ -319,5 +325,86 @@ describe('first-run setup wizard', () => {
 		await fireEvent.click(back);
 
 		await waitFor(() => expect(container.textContent).toContain('Point Javinizer at your library'));
+	});
+
+	it('pre-fills the directories list with a sensible default path after registration', async () => {
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
+		apiClient.getCurrentWorkingDirectory.mockResolvedValue({ path: '/home/test/Videos' });
+
+		const { container } = render(Layout);
+		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
+		await proceedToDirectories(container);
+
+		await waitFor(() =>
+			expect(container.textContent).toContain('/home/test/Videos'),
+		);
+		// The pre-filled path is staged as the default (first) allowed directory.
+		expect(apiClient.getCurrentWorkingDirectory).toHaveBeenCalledTimes(1);
+	});
+
+	it('commits the pre-filled default directory on Finish', async () => {
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
+		apiClient.getCurrentWorkingDirectory.mockResolvedValue({ path: '/home/test/Videos' });
+
+		const { container } = render(Layout);
+		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
+		await proceedToDirectories(container);
+		await waitFor(() =>
+			expect(container.textContent).toContain('/home/test/Videos'),
+		);
+
+		await fireEvent.click(findButton(container, 'Continue'));
+		await waitFor(() => expect(container.textContent).toContain('Choose your metadata sources'));
+		await waitFor(() => expect(apiClient.getScrapers).toHaveBeenCalledTimes(1));
+		await fireEvent.click(findButton(container, 'Finish Setup'));
+
+		await waitFor(() => expect(apiClient.updateSecurityConfig).toHaveBeenCalledTimes(1));
+		expect(apiClient.updateSecurityConfig).toHaveBeenCalledWith(
+			expect.objectContaining({ allowed_directories: ['/home/test/Videos'] }),
+		);
+	});
+
+	it('leaves the directories list empty when /cwd returns an empty path', async () => {
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
+		apiClient.getCurrentWorkingDirectory.mockResolvedValue({ path: '' });
+
+		const { container } = render(Layout);
+		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
+		await proceedToDirectories(container);
+
+		await waitFor(() => expect(apiClient.getCurrentWorkingDirectory).toHaveBeenCalledTimes(1));
+		expect(container.textContent).toContain('No directories added yet');
+		expect(container.textContent).not.toContain('/home');
+	});
+
+	it('clears all localStorage and cookies when the wizard is shown (first-run)', async () => {
+		localStorage.setItem('javinizer_test_stale', 'stale');
+		localStorage.setItem('javinizer_input_path', '/old/path');
+		localStorage.setItem('javinizer_session', 'old-session-id');
+		expect(localStorage.getItem('javinizer_test_stale')).toBe('stale');
+
+		const { container } = render(Layout);
+		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
+
+		expect(localStorage.getItem('javinizer_test_stale')).toBeNull();
+		expect(localStorage.getItem('javinizer_input_path')).toBeNull();
+		expect(localStorage.getItem('javinizer_session')).toBeNull();
+		expect(localStorage.length).toBe(0);
+	});
+
+	it('does not clear localStorage when the app is already initialized', async () => {
+		apiClient.getAuthStatus.mockResolvedValue({ initialized: true, authenticated: false, username: null } as unknown as Awaited<ReturnType<typeof apiClient.getAuthStatus>>);
+		localStorage.setItem('javinizer_test_keep', 'keep');
+
+		const { container } = render(Layout);
+		await waitFor(() => expect(container.textContent).toContain('Login Required'));
+
+		expect(localStorage.getItem('javinizer_test_keep')).toBe('keep');
 	});
 });

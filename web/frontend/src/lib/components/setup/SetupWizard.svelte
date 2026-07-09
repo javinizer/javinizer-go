@@ -9,6 +9,7 @@
 	import { websocketStore } from '$lib/stores/websocket';
 	import Button from '$lib/components/ui/Button.svelte';
 	import StepCredentials from './StepCredentials.svelte';
+	import StepCredentialsSuccess from './StepCredentialsSuccess.svelte';
 	import StepDirectories from './StepDirectories.svelte';
 	import StepScrapers from './StepScrapers.svelte';
 	import type { Scraper } from '$lib/api/types';
@@ -41,6 +42,16 @@
 	let error = $state<string | null>(null);
 
 	let credentials = $state({ username: '', password: '', confirm: '' });
+
+	// Credentials confirmation interstitial. After the admin account is created
+	// we pause on an explicit acknowledgement screen instead of auto-advancing,
+	// so the user is clearly notified their credentials were registered.
+	let credentialsRegistered = $state(false);
+	let registeredUsername = $state('');
+	let registeredAt = $state(new Date());
+	let sessionActive = $state(false);
+
+	let inCredentialsSuccess = $derived(stepIndex === 0 && credentialsRegistered);
 
 	let dirs = $state<string[]>([]);
 
@@ -93,9 +104,30 @@
 		}
 	}
 
+	// Pre-fill the directories list with a sensible absolute default path so
+	// the user lands on the library step with something to work from instead
+	// of an empty list. /api/v1/cwd returns the first allowed directory if any
+	// are configured, otherwise the process working directory — or, when that
+	// is a root path (desktop app launched from Finder/Explorer, where CWD is
+	// "/" or the bundle dir), an empty string. Only pre-fill once.
+	let dirsPrefilled = $state(false);
+	async function prefillDefaultDir() {
+		if (dirsPrefilled || dirs.length > 0) return;
+		dirsPrefilled = true;
+		try {
+			const { path } = await apiClient.getCurrentWorkingDirectory();
+			if (path && dirs.length === 0) dirs = [path];
+		} catch {
+			// Non-fatal: the user can still type/browse a directory manually.
+		}
+	}
+
 	// Step 1: create the admin account (required to obtain a session for the
 	// protected scraper/config endpoints). This is the only commit before the
 	// final Finish — credentials are irreversible, so Back is hidden afterwards.
+	// Instead of auto-advancing, we reveal a confirmation interstitial so the
+	// user is explicitly notified their credentials were registered; they then
+	// press Continue to proceed to the library folders step.
 	async function handleCredentialsNext() {
 		error = null;
 		if (credentials.password !== credentials.confirm) {
@@ -108,17 +140,26 @@
 				username: credentials.username,
 				password: credentials.password,
 			});
+			registeredUsername = credentials.username;
+			registeredAt = new Date();
+			sessionActive = Boolean(result?.session_id);
 			credentials.password = '';
 			credentials.confirm = '';
 			if (result?.session_id) BaseClient.setSessionID(result.session_id);
 			syncWebSocketAuth();
-			gotoStep(1);
-			toastStore.success('Admin account created', 3000);
+			credentialsRegistered = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to create admin account';
 		} finally {
 			submitting = false;
 		}
+	}
+
+	// Advance from the credentials confirmation interstitial to the directories
+	// step. Only reachable after the account has been successfully registered.
+	function handleCredentialsContinue() {
+		gotoStep(1);
+		toastStore.success('Admin account created', 3000);
 	}
 
 	// Step 2: directories are staged locally; nothing is committed until Finish
@@ -173,12 +214,14 @@
 	}
 
 	function handleNext() {
-		if (stepIndex === 0) void handleCredentialsNext();
+		if (inCredentialsSuccess) void handleCredentialsContinue();
+		else if (stepIndex === 0) void handleCredentialsNext();
 		else if (stepIndex === 1) void handleDirectoriesNext();
 		else void handleScrapersFinish();
 	}
 
 	let canProceed = $derived.by(() => {
+		if (inCredentialsSuccess) return true;
 		if (submitting) return false;
 		if (stepIndex === 0) {
 			return (
@@ -191,7 +234,9 @@
 	});
 
 	let nextLabel = $derived(
-		submitting
+		inCredentialsSuccess
+			? 'Continue to library setup'
+			: submitting
 			? stepIndex === 0
 				? 'Creating…'
 				: isLastStep
@@ -211,6 +256,12 @@
 	// run once the credentials step is complete.
 	$effect(() => {
 		if (stepIndex === 2) void fetchScrapers();
+	});
+
+	// Pre-fill the directories step with a sensible default absolute path as
+	// soon as an authenticated session exists (created in step 1).
+	$effect(() => {
+		if (credentialsRegistered) void prefillDefaultDir();
 	});
 </script>
 
@@ -274,14 +325,20 @@
 		<div class="content-frame">
 			<div class="content-stage"
 				style="height: {stageHeight !== null ? `${stageHeight}px` : 'auto'}; transition: {heightReady ? `height ${TRANSITION_MS}ms cubic-out` : 'none'};">
-				{#key stepIndex}
+				{#key `${stepIndex}-${credentialsRegistered}`}
 					<div
 						class="content-card stage-card"
 						bind:this={stageEl}
 						in:scale|local={{ start: 1.03, duration: TRANSITION_MS, easing: cubicOut }}
 						out:scale|local={{ start: 0.985, duration: TRANSITION_MS, easing: cubicOut }}
 					>
-						{#if stepIndex === 0}
+						{#if stepIndex === 0 && credentialsRegistered}
+							<StepCredentialsSuccess
+								username={registeredUsername}
+								{sessionActive}
+								registeredAt={registeredAt}
+							/>
+						{:else if stepIndex === 0}
 							<StepCredentials bind:credentials {error} {submitting} />
 						{:else if stepIndex === 1}
 							<StepDirectories bind:dirs {error} {submitting} onSkip={handleDirectoriesSkip} />
@@ -320,6 +377,8 @@
 						{#snippet children()}
 							{#if submitting}
 								<Loader2 class="h-4 w-4 animate-spin" />
+							{:else if inCredentialsSuccess}
+								<ArrowRight class="h-4 w-4" />
 							{:else if isLastStep}
 								<Check class="h-4 w-4" />
 							{:else}

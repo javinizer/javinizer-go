@@ -16,6 +16,7 @@
 	import { getQueryClient } from '$lib/query/client';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import SetupWizard from '$lib/components/setup/SetupWizard.svelte';
+	import { clearClientStorage } from '$lib/utils/storage';
 	import '../app.css';
 
 	let { children } = $props();
@@ -33,6 +34,7 @@
 	let loginUsername = $state('');
 	let loginPassword = $state('');
 	let loginRememberMe = $state(true);
+	let clientStorageCleared = false;
 
 	function syncWebSocketAuthState() {
 		if (authAuthenticated) {
@@ -49,6 +51,10 @@
 			const status = await apiClient.getAuthStatus();
 			authUnavailable = false;
 			authInitialized = status.initialized;
+			if (!status.initialized && !clientStorageCleared) {
+				clearClientStorage();
+				clientStorageCleared = true;
+			}
 			authAuthenticated = status.authenticated;
 			authUsername = status.username ?? '';
 			if (!loginUsername && authUsername) {

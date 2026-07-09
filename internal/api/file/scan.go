@@ -3,6 +3,7 @@ package file
 import (
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/apperrors"
@@ -10,6 +11,12 @@ import (
 	"github.com/javinizer/javinizer-go/internal/workflow"
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+)
+
+// osGetwd is a seam over os.Getwd so the root-CWD branch in defaultPath can
+// be exercised without actually chdir-ing the test process into "/".
+var (
+	osGetwd = os.Getwd
 )
 
 // scanDirectory godoc
@@ -105,22 +112,48 @@ func scanDirectory(rt *core.APIRuntime) gin.HandlerFunc {
 
 func getCurrentWorkingDirectory(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var defaultPath string
-
-		apiCfg := rt.GetAPIConfig()
-		scanCfg := apiCfg.ScannerConfig()
-
-		if len(scanCfg.AllowedDirectories) > 0 {
-			defaultPath = scanCfg.AllowedDirectories[0]
-		} else {
-			cwd, err := os.Getwd()
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
-				return
-			}
-			defaultPath = cwd
+		path, err := defaultPath(rt)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			return
 		}
-
-		c.JSON(http.StatusOK, gin.H{"path": defaultPath})
+		c.JSON(http.StatusOK, gin.H{"path": path})
 	}
+}
+
+// defaultPath resolves a sensible absolute default path for the UI to
+// pre-fill browse/scan inputs with. It prefers the first configured allowed
+// directory; otherwise it uses the process working directory. When the CWD
+// is root-like ("/" or a Windows drive root) — as it is for the desktop app
+// launched from Finder/Explorer — it returns an empty string so the UI does
+// not pre-fill a useless "/".
+func defaultPath(rt *core.APIRuntime) (string, error) {
+	apiCfg := rt.GetAPIConfig()
+	scanCfg := apiCfg.ScannerConfig()
+
+	if len(scanCfg.AllowedDirectories) > 0 {
+		return scanCfg.AllowedDirectories[0], nil
+	}
+
+	cwd, err := osGetwd()
+	if err != nil {
+		return "", err
+	}
+	if isRootPath(cwd) {
+		return "", nil
+	}
+	return cwd, nil
+}
+
+// isRootPath reports whether path is a filesystem root ("/" on Unix, "C:\"
+// style drive roots on Windows). Such paths are useless as a library default.
+func isRootPath(path string) bool {
+	if path == "/" || path == string(filepath.Separator) {
+		return true
+	}
+	// Windows drive root, e.g. "C:\"
+	if len(path) == 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
+		return true
+	}
+	return false
 }

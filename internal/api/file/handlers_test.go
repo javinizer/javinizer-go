@@ -340,6 +340,34 @@ func TestGetCurrentWorkingDirectory(t *testing.T) {
 		// Should return first allowed directory
 		assert.Equal(t, "/media", response["path"])
 	})
+
+	t.Run("returns empty path when working directory is root", func(t *testing.T) {
+		// The desktop app launched from Finder/Explorer runs with CWD="/" (or
+		// a Windows drive root). Such a path is useless as a library default, so
+		// the endpoint returns an empty string rather than pre-filling "/".
+		origGetwd := osGetwd
+		t.Cleanup(func() { osGetwd = origGetwd })
+
+		osGetwd = func() (string, error) { return "/", nil }
+
+		cfg := config.DefaultConfig(nil, nil)
+		cfg.API.Security.AllowedDirectories = []string{}
+
+		deps := newTestDepsFromConfig(cfg)
+		router := gin.New()
+		router.GET("/cwd", getCurrentWorkingDirectory(testkit.GetTestRuntime(deps)))
+
+		req := httptest.NewRequest("GET", "/cwd", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, 200, w.Code)
+
+		var response map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		assert.Equal(t, "", response["path"])
+	})
 }
 
 func TestBrowseDirectory(t *testing.T) {
