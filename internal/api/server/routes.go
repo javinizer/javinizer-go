@@ -86,7 +86,7 @@ func registerCORSMiddleware(router *gin.Engine, rt *core.APIRuntime) {
 		}
 
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		allowedHeaders := []string{"Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"}
+		allowedHeaders := []string{"Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "X-Session-ID"}
 		c.Writer.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 
 		if c.Request.Method == "OPTIONS" {
