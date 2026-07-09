@@ -334,7 +334,7 @@
 
 	async function openDocs() {
 		if (browser) {
-			window.open(`${location.protocol}//${location.hostname}:8080/docs`, '_blank', 'noopener,noreferrer');
+			window.open(`${location.protocol}//${location.hostname}:8765/docs`, '_blank', 'noopener,noreferrer');
 			return;
 		}
 		await goto('/docs');

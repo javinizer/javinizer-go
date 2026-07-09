@@ -129,7 +129,7 @@
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-2" for="server-port">Port</label>
-				<input id="server-port" type="number" bind:value={config.server.port} class={inputClass} placeholder="8080" />
+				<input id="server-port" type="number" bind:value={config.server.port} class={inputClass} placeholder="8765" />
 			</div>
 		</div>
 		<div>

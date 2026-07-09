@@ -33,7 +33,7 @@ scrapers:
 	require.NoError(t, err)
 
 	assert.Equal(t, CurrentConfigVersion, cfg.ConfigVersion)
-	assert.Equal(t, 8080, cfg.Server.Port)                                            // Reset to default port
+	assert.Equal(t, 8765, cfg.Server.Port)                                            // Reset to default port
 	assert.Equal(t, DefaultConfig(nil, nil).Scrapers.Priority, cfg.Scrapers.Priority) // Reset to default priorities
 
 	saved, err := os.ReadFile(cfgPath)

@@ -123,7 +123,7 @@ test.describe('Desktop upgrade CTA + notification (install_environment=desktop)'
 			r.fulfill({
 				status: 200,
 				json: {
-					server: { host: 'localhost', port: 8080 },
+					server: { host: 'localhost', port: 8765 },
 					system: {
 						version_check_enabled: true,
 						version_check_interval_hours: 24,

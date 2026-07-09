@@ -137,7 +137,7 @@ ENV JAVINIZER_HOME=/javinizer \
     JAVINIZER_TEMP_DIR=/javinizer/temp \
     JAVINIZER_INIT_SERVER_HOST=0.0.0.0 \
     JAVINIZER_INIT_ALLOWED_DIRECTORIES=/media \
-    JAVINIZER_INIT_ALLOWED_ORIGINS="http://localhost:8080,http://localhost:5173,http://127.0.0.1:8080,http://127.0.0.1:5173" \
+    JAVINIZER_INIT_ALLOWED_ORIGINS="http://localhost:8765,http://localhost:5173,http://127.0.0.1:8765,http://127.0.0.1:5173" \
     JAVINIZER_IMAGE_DEFAULT_UID=${USER_ID} \
     JAVINIZER_IMAGE_DEFAULT_GID=${GROUP_ID} \
     CHROME_BIN=/usr/bin/chromium-browser \
@@ -147,11 +147,11 @@ ENV JAVINIZER_HOME=/javinizer \
     PATH="/usr/local/bin:${PATH}"
 
 # Expose API/web port
-EXPOSE 8080
+EXPOSE 8765
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget --no-verbose --tries=1 --method=GET -O /dev/null http://localhost:8080/health || exit 1
+    CMD wget --no-verbose --tries=1 --method=GET -O /dev/null http://localhost:8765/health || exit 1
 
 # Entrypoint script to initialize config
 ENTRYPOINT ["docker-entrypoint.sh"]
