@@ -2,8 +2,11 @@ package system
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,6 +14,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 )
+
+var filepathAbs = filepath.Abs
 
 // SecurityUpdateRequest carries the operator-editable subset of the api.security
 // block. The frontend Security settings section PUTs this narrow payload (rather
@@ -70,6 +75,26 @@ func updateSecurityConfig(rt *core.APIRuntime) gin.HandlerFunc {
 		if err := json.Unmarshal(body, &req); err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format"})
 			return
+		}
+
+		for _, dir := range req.AllowedDirectories {
+			if strings.TrimSpace(dir) == "" {
+				continue
+			}
+			expanded := core.ExpandHomeDir(dir)
+			abs, err := filepathAbs(expanded)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q could not be resolved to an absolute path", dir)})
+				return
+			}
+			resolved, err := filepath.EvalSymlinks(abs)
+			if err != nil {
+				resolved = abs
+			}
+			if core.IsFilesystemRoot(resolved) {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q resolves to filesystem root; choose a specific folder", dir)})
+				return
+			}
 		}
 
 		rt.GetRuntime().ConfigUpdateMu.Lock()

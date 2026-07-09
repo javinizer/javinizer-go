@@ -285,9 +285,167 @@ func TestUpdateSecurityConfig_TypeMismatch(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Invalid security configuration format")
 }
 
+// TestUpdateSecurityConfig_RejectsRootResolvingAllowedDirectory verifies
+// that the PUT handler rejects an allowed_directories entry that resolves to a
+// filesystem root (e.g. "/") with 400, and does NOT persist the rejected
+// payload. A valid entry (a temp directory) is included as a control variant
+// to guard against the validation being too aggressive.
+func TestUpdateSecurityConfig_RejectsRootResolvingAllowedDirectory(t *testing.T) {
+	validDir := t.TempDir()
+
+	for _, tc := range []struct {
+		name               string
+		allowedDirectories []string
+		wantStatus         int
+		wantBodyContains   string
+		wantPersisted      []string
+	}{
+		{
+			name:               "explicit root rejected",
+			allowedDirectories: []string{"/"},
+			wantStatus:         http.StatusBadRequest,
+			wantBodyContains:   "resolves to filesystem root",
+			wantPersisted:      []string{"/keep"},
+		},
+		{
+			name:               "valid directory accepted",
+			allowedDirectories: []string{validDir},
+			wantStatus:         http.StatusOK,
+			wantBodyContains:   "",
+			wantPersisted:      []string{validDir},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			initial := config.DefaultConfig(nil, nil)
+			initial.API.Security.AllowedDirectories = []string{"/keep"}
+
+			tempConfigFile := t.TempDir() + "/config.yaml"
+			coreDeps := createTestDeps(t, initial, tempConfigFile)
+			deps := systemDepsFromCore(coreDeps)
+
+			router := gin.New()
+			router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+			body, err := json.Marshal(SecurityUpdateRequest{
+				AllowedDirectories: tc.allowedDirectories,
+			})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, tc.wantStatus, w.Code, "body: %s", w.Body.String())
+			if tc.wantBodyContains != "" {
+				assert.Contains(t, w.Body.String(), tc.wantBodyContains)
+			}
+
+			saved := deps.CoreDeps.GetConfig()
+			assert.Equal(t, tc.wantPersisted, saved.API.Security.AllowedDirectories)
+		})
+	}
+}
+
+// TestUpdateSecurityConfig_EmptyEntriesSkipped verifies that empty/whitespace
+// allowed_directories entries are skipped (not rejected) during PUT validation,
+// matching the runtime validator which treats empty entries as unusable.
+func TestUpdateSecurityConfig_EmptyEntriesSkipped(t *testing.T) {
+	validDir := t.TempDir()
+
+	initial := config.DefaultConfig(nil, nil)
+	initial.API.Security.AllowedDirectories = []string{"/keep"}
+
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	coreDeps := createTestDeps(t, initial, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
+
+	router := gin.New()
+	router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+	body, err := json.Marshal(SecurityUpdateRequest{
+		AllowedDirectories: []string{"", "  ", validDir},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	saved := deps.CoreDeps.GetConfig()
+	assert.Equal(t, []string{"", "  ", validDir}, saved.API.Security.AllowedDirectories)
+}
+
 // failingBody is an io.ReadCloser whose Read always returns an error, used to
 // exercise the io.ReadAll failure branch of updateSecurityConfig.
 type failingBody struct{}
 
 func (failingBody) Read(p []byte) (int, error) { return 0, errors.New("synthetic read failure") }
 func (failingBody) Close() error               { return nil }
+
+func TestUpdateSecurityConfig_AbsErrorRejected(t *testing.T) {
+	initial := config.DefaultConfig(nil, nil)
+	initial.API.Security.AllowedDirectories = []string{"/keep"}
+
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	coreDeps := createTestDeps(t, initial, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
+
+	router := gin.New()
+	router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+	origAbs := filepathAbs
+	t.Cleanup(func() { filepathAbs = origAbs })
+	filepathAbs = func(string) (string, error) { return "", errors.New("abs: synthetic failure") }
+
+	body, err := json.Marshal(SecurityUpdateRequest{
+		AllowedDirectories: []string{"/valid/path"},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "could not be resolved to an absolute path")
+
+	saved := deps.CoreDeps.GetConfig()
+	assert.Equal(t, []string{"/keep"}, saved.API.Security.AllowedDirectories)
+}
+
+func TestUpdateSecurityConfig_SymlinkToRootRejected(t *testing.T) {
+	rootSymlink := t.TempDir() + "/rootlink"
+	require.NoError(t, os.Symlink("/", rootSymlink))
+	t.Cleanup(func() { _ = os.Remove(rootSymlink) })
+
+	initial := config.DefaultConfig(nil, nil)
+	initial.API.Security.AllowedDirectories = []string{"/keep"}
+
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	coreDeps := createTestDeps(t, initial, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
+
+	router := gin.New()
+	router.PUT("/config/security", updateSecurityConfig(testkit.GetTestRuntime(deps)))
+
+	body, err := json.Marshal(SecurityUpdateRequest{
+		AllowedDirectories: []string{rootSymlink},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPut, "/config/security", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "resolves to filesystem root")
+
+	saved := deps.CoreDeps.GetConfig()
+	assert.Equal(t, []string{"/keep"}, saved.API.Security.AllowedDirectories)
+}

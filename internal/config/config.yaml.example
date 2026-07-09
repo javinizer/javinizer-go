@@ -31,10 +31,9 @@ api:
             - http://127.0.0.1:5174
 
         # Allowed directories for API file operations (organize, preview, etc.)
-        # Default is current working directory. For Docker, use /media
-        # Add your media library paths here
-        allowed_directories:
-            - .
+        # Empty list = deny-by-default until you choose a specific folder.
+        # Example entries: ~/Videos, /media, /mnt/nas/movies
+        allowed_directories: []
 
         # Explicitly deny specific directories (optional)
         denied_directories: []
