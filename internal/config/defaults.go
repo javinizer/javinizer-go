@@ -43,8 +43,10 @@ func defaultAPIConfig() APIConfig {
 			AllowedOrigins: []string{
 				"http://localhost:8765",
 				"http://localhost:5173",
+				"http://localhost:5174",
 				"http://127.0.0.1:8765",
 				"http://127.0.0.1:5173",
+				"http://127.0.0.1:5174",
 			},
 			RateLimit: RateLimitConfig{
 				RequestsPerMinute: 60,

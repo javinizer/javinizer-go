@@ -25,8 +25,10 @@ api:
         allowed_origins:
             - http://localhost:8765
             - http://localhost:5173
+            - http://localhost:5174
             - http://127.0.0.1:8765
             - http://127.0.0.1:5173
+            - http://127.0.0.1:5174
 
         # Allowed directories for API file operations (organize, preview, etc.)
         # Default is current working directory. For Docker, use /media

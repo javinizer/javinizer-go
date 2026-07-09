@@ -738,6 +738,7 @@ If a deployment encounters issues, you can revert to a previous version:
 - Major version jumps may require database migration
 - Always backup `./data/` directory before rollback
 - Check release notes for breaking changes
+- **Port change (v1.2+)**: The default server port changed from 8080 → 8765. If you have a persisted `config.yaml` in `./data/` from an older release, it still contains `port: 8080` and the container will bind 8080 (not 8765). Update the port mapping in `docker-compose.yml` to match, or edit `./data/config.yaml` to set `port: 8765` and restart.
 
 ### Rollback Decision Matrix
 

@@ -57,6 +57,7 @@ api:
     scan_timeout_seconds: 30
     allowed_origins:
       - "http://localhost:5173"
+      - "http://localhost:5174"
     # Windows-specific UNC path settings
     allow_unc: false
     allowed_unc_servers: []
@@ -1252,8 +1253,10 @@ api:
     allowed_origins:
       - "http://localhost:8765"
       - "http://localhost:5173"
+      - "http://localhost:5174"
       - "http://127.0.0.1:8765"
       - "http://127.0.0.1:5173"
+      - "http://127.0.0.1:5174"
 ```
 
 ### Scraper Defaults
