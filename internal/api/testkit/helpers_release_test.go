@@ -35,10 +35,9 @@ func TestDbFileReleased_ReturnsFalseWhenRenameFails(t *testing.T) {
 	// A read-only parent directory blocks the rename of dbPath to the probe,
 	// so dbFileReleased reports not-released (the caller keeps polling). This
 	// covers the rename-failure branch on platforms that enforce write perms
-	// on the parent for rename. Skip where the OS/root allows it regardless.
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses directory write-permission checks")
-	}
+	// on the parent for rename. Some platforms (root, or filesystems that
+	// ignore directory mode) allow the rename anyway — skip then so the test
+	// stays portable (os.Geteuid is Unix-only and doesn't compile on Windows).
 	tmp := t.TempDir()
 	roDir := filepath.Join(tmp, "ro")
 	require.NoError(t, os.Mkdir(roDir, 0o755)) // writable first so we can place the file
@@ -46,6 +45,15 @@ func TestDbFileReleased_ReturnsFalseWhenRenameFails(t *testing.T) {
 	require.NoError(t, os.WriteFile(dbPath, []byte("x"), 0o644))
 	require.NoError(t, os.Chmod(roDir, 0o555)) // now read-only: rename cannot create the probe
 	t.Cleanup(func() { _ = os.Chmod(roDir, 0o755) })
+
+	// If the rename succeeds anyway (root / permissive fs), the branch this
+	// test targets is unreachable here — skip rather than assert a false
+	// negative. dbFileReleased is still exercised on the happy path elsewhere.
+	probe := dbPath + ".release-probe"
+	if err := os.Rename(dbPath, probe); err == nil {
+		require.NoError(t, os.Rename(probe, dbPath)) // undo
+		t.Skip("rename succeeds under read-only parent on this platform/root; rename-fail branch not reachable here")
+	}
 
 	assert.False(t, dbFileReleased(dbPath), "expected false when rename is blocked by a read-only parent")
 }
@@ -74,6 +82,36 @@ func TestDbFileReleased_ReturnsFalseWhenRestoreFails(t *testing.T) {
 
 	assert.False(t, dbFileReleased(dbPath), "expected false when the rename-back restore fails")
 	assert.NoFileExists(t, dbPath+".release-probe", "stranded probe should be cleaned up after restore failure")
+}
+
+func TestDbFileReleased_CleansUpStrandedProbeFromPriorRestoreFailure(t *testing.T) {
+	// If a prior dbFileReleased call's restore failed AND os.Remove(probe)
+	// also failed, the probe file is stranded. The next poll must clean it up
+	// before the absent-DB fast path returns true — otherwise waitForFileRelease
+	// could return while a locked probe lingers and trip the RemoveAll this
+	// helper exists to protect. Cover the stranded-probe cleanup branch.
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	probe := dbPath + ".release-probe"
+	require.NoError(t, os.WriteFile(probe, []byte("stranded"), 0o644))
+	// dbPath itself is absent; the stranded probe must be removed first.
+
+	assert.True(t, dbFileReleased(dbPath), "expected true once the stranded probe is cleaned up and the DB is absent")
+	assert.NoFileExists(t, probe, "stranded probe should be removed")
+}
+
+func TestDbFileReleased_ReturnsFalseWhenStrandedProbeCannotBeRemoved(t *testing.T) {
+	// If the stranded probe cannot be removed (e.g. it's a non-empty dir),
+	// dbFileReleased must report not-released so the caller keeps polling
+	// rather than returning true while the probe lingers.
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	probe := dbPath + ".release-probe"
+	require.NoError(t, os.Mkdir(probe, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(probe, "contents"), []byte("x"), 0o644))
+	t.Cleanup(func() { _ = os.RemoveAll(probe) })
+
+	assert.False(t, dbFileReleased(dbPath), "expected false when the stranded probe cannot be removed")
 }
 
 func TestAllSidecarsRemoved_ReturnsTrueWhenAllAbsent(t *testing.T) {

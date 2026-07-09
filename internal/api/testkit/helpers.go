@@ -370,12 +370,21 @@ func waitForFileRelease(t *testing.T, dbPath string) {
 var renameFunc = os.Rename
 
 func dbFileReleased(dbPath string) bool {
+	// A stranded probe from a prior restore-failure means the DB is still
+	// locked: clean it up before deciding, otherwise the absent-DB fast path
+	// below would return true while the probe file lingers and trips the
+	// RemoveAll this helper exists to protect.
+	probe := dbPath + ".release-probe"
+	if _, err := os.Stat(probe); err == nil {
+		if err := os.Remove(probe); err != nil {
+			return false // still locked — keep polling
+		}
+	}
 	// An absent DB file has nothing to unlock — treat it as released so
 	// waitForFileRelease returns immediately instead of spinning to the deadline.
 	if _, err := os.Stat(dbPath); err != nil && os.IsNotExist(err) {
 		return true
 	}
-	probe := dbPath + ".release-probe"
 	if err := renameFunc(dbPath, probe); err != nil {
 		return false
 	}
