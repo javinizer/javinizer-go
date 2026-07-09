@@ -58,8 +58,23 @@ func (s *RuntimeGenreConfigStore) current() *config.Config {
 	return s.rt.Deps().CoreDeps.GetConfig()
 }
 
+// requireRuntime guards getters against a nil runtime/runtime-state, mirroring
+// persist() so failures surface as errors instead of panics.
+func (s *RuntimeGenreConfigStore) requireRuntime() error {
+	if s.rt == nil {
+		return fmt.Errorf("genre config store: runtime is not initialized")
+	}
+	if s.rt.GetRuntime() == nil {
+		return fmt.Errorf("genre config store: runtime state is not initialized")
+	}
+	return nil
+}
+
 // GetIgnoreGenres returns the current ignore_genres list from the live config.
 func (s *RuntimeGenreConfigStore) GetIgnoreGenres(_ context.Context) ([]string, error) {
+	if err := s.requireRuntime(); err != nil {
+		return nil, err
+	}
 	return cloneStrings(s.current().Metadata.IgnoreGenres), nil
 }
 
@@ -72,6 +87,9 @@ func (s *RuntimeGenreConfigStore) SetIgnoreGenres(ctx context.Context, genres []
 
 // GetFavoriteGenres returns the current favorite genres list from the live config.
 func (s *RuntimeGenreConfigStore) GetFavoriteGenres(_ context.Context) ([]string, error) {
+	if err := s.requireRuntime(); err != nil {
+		return nil, err
+	}
 	return cloneStrings(s.current().WebUI.Favorites.Genre), nil
 }
 
@@ -89,13 +107,10 @@ func (s *RuntimeGenreConfigStore) SetFavoriteGenres(ctx context.Context, genres 
 // a config that diverges from the file. ConfigUpdateMu serializes this against
 // full-config PUT saves.
 func (s *RuntimeGenreConfigStore) persist(mutate func(*config.Config)) error {
-	if s.rt == nil {
-		return fmt.Errorf("genre config store: runtime is not initialized")
+	if err := s.requireRuntime(); err != nil {
+		return err
 	}
 	rs := s.rt.GetRuntime()
-	if rs == nil {
-		return fmt.Errorf("genre config store: runtime state is not initialized")
-	}
 	rs.ConfigUpdateMu.Lock()
 	defer rs.ConfigUpdateMu.Unlock()
 

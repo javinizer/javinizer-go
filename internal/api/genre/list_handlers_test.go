@@ -19,6 +19,7 @@ type fakeGenreConfigStore struct {
 	ignored   []string
 	favorites []string
 	err       error
+	setErr    error
 }
 
 func (f *fakeGenreConfigStore) GetIgnoreGenres(context.Context) ([]string, error) {
@@ -29,6 +30,9 @@ func (f *fakeGenreConfigStore) GetIgnoreGenres(context.Context) ([]string, error
 }
 
 func (f *fakeGenreConfigStore) SetIgnoreGenres(_ context.Context, genres []string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
 	if f.err != nil {
 		return f.err
 	}
@@ -44,6 +48,9 @@ func (f *fakeGenreConfigStore) GetFavoriteGenres(context.Context) ([]string, err
 }
 
 func (f *fakeGenreConfigStore) SetFavoriteGenres(_ context.Context, genres []string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
 	if f.err != nil {
 		return f.err
 	}

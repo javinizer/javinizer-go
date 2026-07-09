@@ -34,6 +34,7 @@ type genreAddRequest struct {
 // @Produce json
 // @Success 200 {object} ignoredGenresResponse
 // @Failure 500 {object} contracts.ErrorResponse
+// @Failure 503 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/ignored [get]
 func listIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -60,6 +61,7 @@ func listIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 // @Success 200 {object} ignoredGenresResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse
+// @Failure 503 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/ignored [put]
 func replaceIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -92,6 +94,7 @@ func replaceIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 // @Success 200 {object} ignoredGenresResponse "Already ignored"
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse
+// @Failure 503 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/ignored [post]
 func addIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -137,6 +140,7 @@ func addIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse
+// @Failure 503 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/ignored [delete]
 func deleteIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -174,6 +178,7 @@ func deleteIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 // @Produce json
 // @Success 200 {object} favoriteGenresResponse
 // @Failure 500 {object} contracts.ErrorResponse
+// @Failure 503 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/favorites [get]
 func listFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -200,6 +205,7 @@ func listFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 // @Success 200 {object} favoriteGenresResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse
+// @Failure 503 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/favorites [put]
 func replaceFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -232,6 +238,7 @@ func replaceFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 // @Success 200 {object} favoriteGenresResponse "Already favorited"
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse
+// @Failure 503 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/favorites [post]
 func addFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -277,6 +284,7 @@ func addFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse
+// @Failure 503 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/favorites [delete]
 func deleteFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {

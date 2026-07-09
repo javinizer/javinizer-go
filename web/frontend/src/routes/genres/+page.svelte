@@ -460,7 +460,7 @@
 					<span class="text-xs text-muted-foreground">{favoriteGenres.length} saved</span>
 				</div>
 				<p class="text-xs text-muted-foreground mb-3">
-					Save a curated set of genres here, then apply them in bulk to a movie's genre set from the movie detail view (quick-apply).
+					Save a curated set of favorite genres here for later use. Favorites are a saved list you can reference when organizing your collection.
 				</p>
 				{#if favoritesError}
 					<p class="text-sm text-destructive mb-2">Failed to load: {favoritesError}</p>
@@ -531,7 +531,7 @@
 								{:else}
 									<Check class="h-4 w-4 mr-1" />
 								{/if}
-								Save &amp; Apply
+								Save Favorites
 							</Button>
 						</div>
 					</div>
