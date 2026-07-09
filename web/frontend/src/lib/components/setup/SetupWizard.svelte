@@ -195,16 +195,18 @@
 
 			const config = await apiClient.getConfig();
 			const sc = (config.scrapers ?? {}) as Record<string, unknown>;
-			sc.priority = [...selectedScrapers];
-			for (const scraper of availableScrapers) {
-				if (!sc[scraper.name]) sc[scraper.name] = {};
-				(sc[scraper.name] as Record<string, unknown>).enabled = selectedScrapers.includes(scraper.name);
+			if (availableScrapers.length > 0) {
+				sc.priority = [...selectedScrapers];
+				for (const scraper of availableScrapers) {
+					if (!sc[scraper.name]) sc[scraper.name] = {};
+					(sc[scraper.name] as Record<string, unknown>).enabled = selectedScrapers.includes(scraper.name);
+				}
+				config.scrapers = sc as typeof config.scrapers;
+				await apiClient.request('/api/v1/config', {
+					method: 'PUT',
+					body: JSON.stringify(config),
+				});
 			}
-			config.scrapers = sc as typeof config.scrapers;
-			await apiClient.request('/api/v1/config', {
-				method: 'PUT',
-				body: JSON.stringify(config),
-			});
 			toastStore.success('Setup complete. Welcome to Javinizer.', 4000);
 			onComplete();
 		} catch (e) {

@@ -17,7 +17,6 @@
 		submitting?: boolean;
 	} = $props();
 
-	let wizardScrapers = $derived(scrapers.map((s) => ({ ...s, enabled: true })));
 	let hasScrapers = $derived(scrapers.length > 0);
 	let selectedCount = $derived(selected.length);
 </script>
@@ -47,7 +46,7 @@
 	</div>
 {:else}
 	<div class="selector-wrap" class:disabled={submitting}>
-		<ScraperSelector scrapers={wizardScrapers} bind:selected={selected} disabled={submitting} />
+		<ScraperSelector scrapers={scrapers} bind:selected={selected} disabled={submitting} showAll={true} />
 	</div>
 
 	<div class="summary">

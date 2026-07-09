@@ -1008,3 +1008,13 @@ func TestScanDirectory_FilterFlag(t *testing.T) {
 		assert.Equal(t, 2, response.Count, "Lowercase filter should match uppercase directories/files")
 	})
 }
+
+func TestIsRootPath(t *testing.T) {
+	assert.True(t, isRootPath("/"), "Unix root should be a root path")
+	assert.True(t, isRootPath("C:\\"), "Windows drive root C:\\ should be a root path")
+	assert.True(t, isRootPath("C:/"), "Windows drive root C:/ should be a root path")
+	assert.True(t, isRootPath("D:\\"), "Windows drive root D:\\ should be a root path")
+	assert.False(t, isRootPath("/home"), "Non-root path should not be a root path")
+	assert.False(t, isRootPath(""), "Empty string should not be a root path")
+	assert.False(t, isRootPath("."), "Relative dot should not be a root path")
+}

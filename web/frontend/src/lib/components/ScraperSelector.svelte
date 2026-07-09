@@ -6,10 +6,11 @@
 	import { GripVertical, ChevronUp, ChevronDown, X } from 'lucide-svelte';
 	import { fade, fly } from 'svelte/transition';
 
-	let { scrapers = [], selected = $bindable([]), disabled = false }: {
+	let { scrapers = [], selected = $bindable([]), disabled = false, showAll = false }: {
 		scrapers?: Scraper[];
 		selected?: string[];
 		disabled?: boolean;
+		showAll?: boolean;
 	} = $props();
 
 	let draggedIndex = $state<number | null>(null);
@@ -29,7 +30,7 @@
 
 	// Get unselected enabled scrapers
 	const unselectedScrapers = $derived(
-		scrapers.filter((s) => s.enabled && !selected.includes(s.name))
+		scrapers.filter((s) => (showAll || s.enabled) && !selected.includes(s.name))
 	);
 
 	function addScraper(name: string) {
@@ -65,7 +66,7 @@
 	}
 
 	function selectAll() {
-		selected = scrapers.filter((s) => s.enabled).map((s) => s.name);
+		selected = scrapers.filter((s) => showAll || s.enabled).map((s) => s.name);
 	}
 
 	function selectNone() {
