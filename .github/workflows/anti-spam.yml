@@ -35,7 +35,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check for spam attachments / patch drops
-        uses: actions/github-script@60a0d8308c434a1e126febd7568c7e5c8c1f8664 # v7
+        uses: actions/github-script@v7
         with:
           script: |
             const payload = context.payload;
