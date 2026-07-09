@@ -2,11 +2,18 @@ package genre
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 )
+
+// ErrGenreConfigStoreNotConfigured is returned when no runtime/config backs
+// the store (noop store writes, or RuntimeGenreConfigStore before runtime
+// init). Handlers map it to HTTP 503 to distinguish "not configured" from a
+// genuine internal error (500).
+var ErrGenreConfigStoreNotConfigured = errors.New("genre config store is not configured")
 
 // GenreConfigStore provides read/write access to the config-backed genre lists
 // managed from the Genres page: ignore_genres (excluded from scraping) and
@@ -29,13 +36,13 @@ func (noopGenreConfigStore) GetIgnoreGenres(context.Context) ([]string, error) {
 	return []string{}, nil
 }
 func (noopGenreConfigStore) SetIgnoreGenres(context.Context, []string) error {
-	return fmt.Errorf("genre config store is not configured")
+	return ErrGenreConfigStoreNotConfigured
 }
 func (noopGenreConfigStore) GetFavoriteGenres(context.Context) ([]string, error) {
 	return []string{}, nil
 }
 func (noopGenreConfigStore) SetFavoriteGenres(context.Context, []string) error {
-	return fmt.Errorf("genre config store is not configured")
+	return ErrGenreConfigStoreNotConfigured
 }
 
 // RuntimeGenreConfigStore is the production GenreConfigStore. It persists
@@ -62,10 +69,10 @@ func (s *RuntimeGenreConfigStore) current() *config.Config {
 // persist() so failures surface as errors instead of panics.
 func (s *RuntimeGenreConfigStore) requireRuntime() error {
 	if s.rt == nil {
-		return fmt.Errorf("genre config store: runtime is not initialized")
+		return fmt.Errorf("%w: runtime is not initialized", ErrGenreConfigStoreNotConfigured)
 	}
 	if s.rt.GetRuntime() == nil {
-		return fmt.Errorf("genre config store: runtime state is not initialized")
+		return fmt.Errorf("%w: runtime state is not initialized", ErrGenreConfigStoreNotConfigured)
 	}
 	return nil
 }

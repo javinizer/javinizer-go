@@ -1,6 +1,7 @@
 package genre
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -44,7 +45,7 @@ func listIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 		}
 		genres, err := deps.ConfigStore.GetIgnoreGenres(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, ignoredGenresResponse{IgnoredGenres: genres, Count: len(genres)})
@@ -76,7 +77,7 @@ func replaceIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 		}
 		genres := normalizeGenreList(req.Genres)
 		if err := deps.ConfigStore.SetIgnoreGenres(c.Request.Context(), genres); err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, ignoredGenresResponse{IgnoredGenres: genres, Count: len(genres)})
@@ -114,7 +115,7 @@ func addIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 		}
 		current, err := deps.ConfigStore.GetIgnoreGenres(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if containsString(current, genre) {
@@ -123,7 +124,7 @@ func addIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 		}
 		updated := append(current, genre)
 		if err := deps.ConfigStore.SetIgnoreGenres(c.Request.Context(), updated); err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusCreated, ignoredGenresResponse{IgnoredGenres: updated, Count: len(updated)})
@@ -155,7 +156,7 @@ func deleteIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 		}
 		current, err := deps.ConfigStore.GetIgnoreGenres(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if !containsString(current, genre) {
@@ -164,7 +165,7 @@ func deleteIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 		}
 		updated := removeString(current, genre)
 		if err := deps.ConfigStore.SetIgnoreGenres(c.Request.Context(), updated); err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, ignoredGenresResponse{IgnoredGenres: updated, Count: len(updated)})
@@ -188,7 +189,7 @@ func listFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 		}
 		genres, err := deps.ConfigStore.GetFavoriteGenres(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, favoriteGenresResponse{Favorites: genres, Count: len(genres)})
@@ -220,7 +221,7 @@ func replaceFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 		}
 		genres := normalizeGenreList(req.Genres)
 		if err := deps.ConfigStore.SetFavoriteGenres(c.Request.Context(), genres); err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, favoriteGenresResponse{Favorites: genres, Count: len(genres)})
@@ -258,7 +259,7 @@ func addFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 		}
 		current, err := deps.ConfigStore.GetFavoriteGenres(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if containsString(current, genre) {
@@ -267,7 +268,7 @@ func addFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 		}
 		updated := append(current, genre)
 		if err := deps.ConfigStore.SetFavoriteGenres(c.Request.Context(), updated); err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusCreated, favoriteGenresResponse{Favorites: updated, Count: len(updated)})
@@ -299,7 +300,7 @@ func deleteFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 		}
 		current, err := deps.ConfigStore.GetFavoriteGenres(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if !containsString(current, genre) {
@@ -308,7 +309,7 @@ func deleteFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 		}
 		updated := removeString(current, genre)
 		if err := deps.ConfigStore.SetFavoriteGenres(c.Request.Context(), updated); err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			c.JSON(storeErrorStatus(err), contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, favoriteGenresResponse{Favorites: updated, Count: len(updated)})
@@ -346,4 +347,15 @@ func removeString(s []string, v string) []string {
 		}
 	}
 	return out
+}
+
+// storeErrorStatus maps a ConfigStore error to the appropriate HTTP status.
+// A not-configured store (noop store writes, or a RuntimeGenreConfigStore
+// whose runtime is not initialized) is a 503, consistent with the explicit
+// nil-store guard and the swagger annotations; all other errors are 500.
+func storeErrorStatus(err error) int {
+	if errors.Is(err, ErrGenreConfigStoreNotConfigured) {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
 }

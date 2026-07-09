@@ -160,3 +160,29 @@ func TestFavorites_Delete_SetStoreError(t *testing.T) {
 	w := doJSON(router, "DELETE", "/genres/favorites?genre=VR", nil)
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 }
+
+// noop store writes return ErrGenreConfigStoreNotConfigured, which handlers
+// must map to 503 (not 500), matching the explicit nil-store guard + swagger.
+func TestNoopStore_IgnoredAddReturns503(t *testing.T) {
+	router := setupListRouter(newListTestDeps(noopGenreConfigStore{}))
+	w := doJSON(router, "POST", "/genres/ignored", genreAddRequest{Genre: "VR"})
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestNoopStore_IgnoredReplaceReturns503(t *testing.T) {
+	router := setupListRouter(newListTestDeps(noopGenreConfigStore{}))
+	w := doJSON(router, "PUT", "/genres/ignored", genreListUpdateRequest{Genres: []string{"VR"}})
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestNoopStore_FavoritesAddReturns503(t *testing.T) {
+	router := setupListRouter(newListTestDeps(noopGenreConfigStore{}))
+	w := doJSON(router, "POST", "/genres/favorites", genreAddRequest{Genre: "VR"})
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestNoopStore_FavoritesReplaceReturns503(t *testing.T) {
+	router := setupListRouter(newListTestDeps(noopGenreConfigStore{}))
+	w := doJSON(router, "PUT", "/genres/favorites", genreListUpdateRequest{Genres: []string{"VR"}})
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
