@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -94,9 +95,14 @@ func TestScraper_GetURL_IDValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// These tests are marked as slow since they make real HTTP requests
+			// Live-network test: hits aventertainments.com. Opt-in only via
+			// JAVINIZER_RUN_LIVE_API_TESTS=1 so it never runs in CI or default
+			// `go test ./...`. Mirrors the r18dev/javlibrary live-test convention.
 			if testing.Short() {
 				t.Skip("skipping HTTP-dependent test")
+			}
+			if os.Getenv("JAVINIZER_RUN_LIVE_API_TESTS") != "1" {
+				t.Skip("set JAVINIZER_RUN_LIVE_API_TESTS=1 to run live-network aventertainment tests")
 			}
 			_, err := scraper.GetURL(context.Background(), tt.id)
 			if tt.expectedErr {
