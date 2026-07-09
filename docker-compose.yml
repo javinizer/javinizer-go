@@ -20,6 +20,8 @@ services:
       - .env
 
     ports:
+      # Container-side port: defaults to 8765. Set CONTAINER_PORT=8080 in .env
+      # if upgrading from a release that persisted server.port=8080 in config.yaml.
       - "${HOST_PORT:-8765}:${CONTAINER_PORT:-8765}"
 
     volumes:
@@ -82,6 +84,8 @@ services:
     env_file:
       - .env
     ports:
+      # Container-side port: defaults to 8765. Set CONTAINER_PORT=8080 in .env
+      # if upgrading from a release that persisted server.port=8080 in config.yaml.
       - "${HOST_PORT:-8765}:${CONTAINER_PORT:-8765}"
     volumes:
       - ./data:/javinizer

@@ -2,7 +2,8 @@
  * Vite config for full-stack E2E tests.
  *
  * Identical to vite.config.ts (the production dev config) except it points
- * the /api + /ws + /health proxy at port 18080 instead of 8765 — the port
+ * the /api + /ws + /health proxy at port 18080 instead of 8765 (the default
+ * for the regular `javinizer web` dev server) — 18080 is the port
  * cmd/javinizer-e2e binds by default. Keeps the e2e backend isolated from
  * any developer's running `javinizer web` dev instance on 8765.
  *

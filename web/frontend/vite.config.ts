@@ -20,7 +20,7 @@ export default defineConfig({
 			// WS upgrader validates Origin via isSameOrigin (scheme+host+port of
 			// the Origin header vs the request Host). With changeOrigin:true the
 			// Host is rewritten to the backend port (8765) while the browser Origin
-			// stays on the Vite port (5173) → port mismatch → 403, so the browser
+			// stays on the Vite port (5174, where make web-dev runs) → port mismatch → 403, so the browser
 			// could never open /ws/progress in dev. changeOrigin:false preserves the
 			// browser's original Host so Origin and Host match → same-origin allowed.
 			// Cookie auth is unaffected (the session cookie is scoped to the Vite
