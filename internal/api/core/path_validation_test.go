@@ -1798,3 +1798,17 @@ func TestIsUNCPath_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateScanPath_EmptyPathResolvesToCWD(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+
+	cfg := &SecurityNarrowConfig{
+		AllowedDirectories: []string{"."},
+		DeniedDirectories:  []string{},
+	}
+
+	result, err := ValidateScanPath("", cfg)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, result, "empty path should resolve to CWD")
+}
