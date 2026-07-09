@@ -20,7 +20,7 @@ services:
       - .env
 
     ports:
-      - "${HOST_PORT:-8765}:8765"
+      - "${HOST_PORT:-8765}:${CONTAINER_PORT:-8765}"
 
     volumes:
       # Application state (config, database, logs, cache)
@@ -64,7 +64,7 @@ services:
       - JAVINIZER_SETUP_TRUSTED_CIDRS=${JAVINIZER_SETUP_TRUSTED_CIDRS:-172.16.0.0/12}
 
     healthcheck:
-      test: ["CMD", "wget", "--method=GET", "-O", "/dev/null", "-q", "http://localhost:8765/health"]
+      test: ["CMD", "wget", "--method=GET", "-O", "/dev/null", "-q", "http://localhost:${CONTAINER_PORT:-8765}/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -82,7 +82,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${HOST_PORT:-8765}:8765"
+      - "${HOST_PORT:-8765}:${CONTAINER_PORT:-8765}"
     volumes:
       - ./data:/javinizer
       - ${MEDIA_PATH:-/path/to/your/jav-library}:/media
