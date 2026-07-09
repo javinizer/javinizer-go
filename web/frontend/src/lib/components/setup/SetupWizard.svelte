@@ -274,7 +274,7 @@
 
 <div class="wizard-shell">
 	<!-- Brand / stepper rail -->
-	<aside class="brand-rail" aria-hidden="true">
+	<aside class="brand-rail">
 		<div class="brand-glow brand-glow-a"></div>
 		<div class="brand-glow brand-glow-b"></div>
 		<div class="brand-grid"></div>

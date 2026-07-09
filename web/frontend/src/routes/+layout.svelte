@@ -53,6 +53,7 @@
 			authInitialized = status.initialized;
 			if (!status.initialized && !clientStorageCleared) {
 				clearClientStorage();
+				BaseClient.setSessionID(null);
 				clientStorageCleared = true;
 			}
 			authAuthenticated = status.authenticated;
