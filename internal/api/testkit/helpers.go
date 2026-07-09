@@ -379,6 +379,11 @@ func dbFileReleased(dbPath string) bool {
 		if err := os.Remove(probe); err != nil {
 			return false // still locked — keep polling
 		}
+	} else if !os.IsNotExist(err) {
+		// A non-IsNotExist stat error (permission/IO) means we can't determine
+		// whether a stranded probe exists — treat as not-released so polling
+		// continues rather than risk returning true while the probe lingers.
+		return false
 	}
 	// An absent DB file has nothing to unlock — treat it as released so
 	// waitForFileRelease returns immediately instead of spinning to the deadline.

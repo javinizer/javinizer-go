@@ -114,6 +114,28 @@ func TestDbFileReleased_ReturnsFalseWhenStrandedProbeCannotBeRemoved(t *testing.
 	assert.False(t, dbFileReleased(dbPath), "expected false when the stranded probe cannot be removed")
 }
 
+func TestDbFileReleased_ReturnsFalseWhenProbeStatErrors(t *testing.T) {
+	// If os.Stat(probe) returns a non-IsNotExist error (e.g. EACCES when the
+	// parent dir lacks execute permission), dbFileReleased must report
+	// not-released so polling continues rather than falling through to the
+	// absent-DB fast path and returning true while the probe may linger.
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	probe := dbPath + ".release-probe"
+	require.NoError(t, os.WriteFile(probe, []byte("x"), 0o644))
+	// Make the parent dir non-executable so stat of the probe returns EACCES.
+	require.NoError(t, os.Chmod(tmp, 0o600))
+	t.Cleanup(func() { _ = os.Chmod(tmp, 0o755) })
+
+	// If the platform (e.g. root) still allows stat despite the missing x bit,
+	// the branch this test targets is unreachable — skip rather than fail.
+	if _, err := os.Stat(probe); err == nil {
+		t.Skip("stat succeeds despite non-executable parent on this platform/root")
+	}
+
+	assert.False(t, dbFileReleased(dbPath), "expected false when the probe stat returns a non-IsNotExist error")
+}
+
 func TestAllSidecarsRemoved_ReturnsTrueWhenAllAbsent(t *testing.T) {
 	tmp := t.TempDir()
 	// No sidecar files exist → all considered removed.
