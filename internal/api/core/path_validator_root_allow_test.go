@@ -56,10 +56,7 @@ func TestEffectiveAllowedBase_RootResolvingDotUnderRootCWD(t *testing.T) {
 		t.Skip("Unix-specific CWD test")
 	}
 
-	origWd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
-
-	require.NoError(t, os.Chdir("/"))
+	t.Chdir("/")
 
 	v := NewPathValidator(afero.NewOsFs(), []string{"."}, nil)
 
@@ -92,9 +89,7 @@ func TestValidateDir_DotUnderRootCWD_DeniesByDefault(t *testing.T) {
 		t.Skip("Unix-specific CWD test")
 	}
 
-	origWd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
-	require.NoError(t, os.Chdir("/"))
+	t.Chdir("/")
 
 	outsideDir := t.TempDir()
 
@@ -120,9 +115,7 @@ func TestValidateDir_MixedRootAndValid_AllowsValidOnly(t *testing.T) {
 		t.Skip("Unix-specific CWD test")
 	}
 
-	origWd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
-	require.NoError(t, os.Chdir("/"))
+	t.Chdir("/")
 
 	validDir := t.TempDir()
 	outsideDir := t.TempDir()
@@ -154,9 +147,7 @@ func TestIsDirAllowed_DotUnderRootCWD_ReturnsFalse(t *testing.T) {
 		t.Skip("Unix-specific CWD test")
 	}
 
-	origWd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
-	require.NoError(t, os.Chdir("/"))
+	t.Chdir("/")
 
 	outsideDir := t.TempDir()
 	v := NewPathValidator(afero.NewOsFs(), []string{"."}, nil)
@@ -187,9 +178,7 @@ func TestIsDirAllowed_MixedRootAndValid(t *testing.T) {
 		t.Skip("Unix-specific CWD test")
 	}
 
-	origWd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
-	require.NoError(t, os.Chdir("/"))
+	t.Chdir("/")
 
 	validDir := t.TempDir()
 	outsideDir := t.TempDir()
@@ -214,4 +203,33 @@ func TestValidateDir_DotWithSubpathOutsideCWD(t *testing.T) {
 	require.NoError(t, os.Mkdir(subDir, 0755))
 	_, err := v.ValidateDir(subDir)
 	assert.NoError(t, err)
+}
+
+func TestEffectiveAllowedBase_AbsError(t *testing.T) {
+	v := NewPathValidator(afero.NewOsFs(), []string{"/tmp"}, nil)
+
+	origEval := evalSymlinksFunc
+	t.Cleanup(func() { evalSymlinksFunc = origEval })
+
+	evalSymlinksFunc = func(string) (string, error) {
+		return "", assert.AnError
+	}
+
+	_, usable := v.effectiveAllowedBase("/tmp")
+	assert.False(t, usable, "canonicalizePath error should make entry unusable")
+}
+
+func TestIsFilesystemRoot_NotRoot(t *testing.T) {
+	assert.False(t, isFilesystemRoot("/home"))
+	assert.False(t, isFilesystemRoot("/tmp/test"))
+	assert.False(t, isFilesystemRoot(""))
+	assert.False(t, isFilesystemRoot("."))
+	assert.False(t, isFilesystemRoot("relative/path"))
+}
+
+func TestIsFilesystemRoot_Exported(t *testing.T) {
+	assert.True(t, IsFilesystemRoot("/"))
+	assert.True(t, IsFilesystemRoot("C:\\"))
+	assert.False(t, IsFilesystemRoot("/home"))
+	assert.False(t, IsFilesystemRoot(""))
 }
