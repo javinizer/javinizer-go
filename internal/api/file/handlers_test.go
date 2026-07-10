@@ -1064,3 +1064,18 @@ func TestIsHomeDirectory_HomeDirUnresolvable(t *testing.T) {
 
 	assert.True(t, isHomeDirectory("/any/path"), "should return true (fail-closed) when home dir can't be resolved")
 }
+
+func TestIsHomeDirectory_SymlinkAlias(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		t.Skip("could not resolve home dir")
+	}
+
+	linkDir := t.TempDir()
+	homeLink := filepath.Join(linkDir, "home_link")
+	require.NoError(t, os.Symlink(home, homeLink))
+	t.Cleanup(func() { _ = os.Remove(homeLink) })
+
+	assert.True(t, isHomeDirectory(homeLink),
+		"symlink to home dir should be detected as home after canonicalization")
+}

@@ -412,3 +412,21 @@ describe('first-run setup wizard', () => {
 		expect(localStorage.getItem('javinizer_test_keep')).toBe('keep');
 	});
 });
+
+	it('creates the admin account when submitting the credentials form', async () => {
+		apiClient.setupAuth.mockResolvedValue(
+			authenticatedStatus() as unknown as Awaited<ReturnType<typeof apiClient.setupAuth>>,
+		);
+
+		const { container } = render(Layout);
+		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
+		await fillCredentials(container);
+
+		const form = container.querySelector('#credentials-form') as HTMLFormElement;
+		await fireEvent.submit(form);
+
+		await waitFor(() => expect(apiClient.setupAuth).toHaveBeenCalledTimes(1));
+		await waitFor(() =>
+			expect(container.textContent).toContain('Your admin account is secured'),
+		);
+	});
