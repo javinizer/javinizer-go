@@ -17,10 +17,7 @@
 		ArrowLeft,
 		ArrowRight,
 		Check,
-		FolderCheck,
 		Loader2,
-		ShieldCheck,
-		Sparkles,
 	} from 'lucide-svelte';
 
 	interface Props {
@@ -31,10 +28,10 @@
 
 	type StepId = 'credentials' | 'directories' | 'scrapers';
 
-	const steps: { id: StepId; index: number; label: string; hint: string; icon: typeof ShieldCheck }[] = [
-		{ id: 'credentials', index: 0, label: 'Admin Account', hint: 'Secure your server', icon: ShieldCheck },
-		{ id: 'directories', index: 1, label: 'Library Folders', hint: 'Where your media lives', icon: FolderCheck },
-		{ id: 'scrapers', index: 2, label: 'Scrapers', hint: 'Metadata sources', icon: Sparkles },
+	const steps: { id: StepId; label: string; hint: string }[] = [
+		{ id: 'credentials', label: 'Admin Account', hint: 'Secure your server' },
+		{ id: 'directories', label: 'Library Folders', hint: 'Where your media lives' },
+		{ id: 'scrapers', label: 'Scrapers', hint: 'Metadata sources' },
 	];
 
 	let stepIndex = $state(0);
@@ -81,7 +78,6 @@
 		return () => ro.disconnect();
 	});
 
-	let currentStep = $derived(steps[stepIndex]);
 	let isLastStep = $derived(stepIndex === steps.length - 1);
 
 	function gotoStep(index: number) {
@@ -254,7 +250,9 @@
 					: 'Saving…'
 			: isLastStep
 				? 'Finish Setup'
-				: 'Continue',
+				: stepIndex === 0
+					? 'Create admin account'
+					: 'Continue',
 	);
 
 	onMount(() => {
@@ -301,7 +299,7 @@
 					></div>
 				</div>
 				{#each steps as step, i (step.id)}
-					<div class="stepper-row" class:active={stepIndex === i} class:done={stepIndex > i}>
+					<div class="stepper-row" class:active={stepIndex === i} class:done={stepIndex > i} aria-current={stepIndex === i ? 'step' : undefined}>
 						<div class="stepper-node">
 							{#if stepIndex > i}
 								<Check class="stepper-check" />
@@ -342,7 +340,7 @@
 								registeredAt={registeredAt}
 							/>
 						{:else if stepIndex === 0}
-							<StepCredentials bind:credentials {error} {submitting} />
+							<StepCredentials bind:credentials {error} {submitting} onSubmit={handleNext} />
 						{:else if stepIndex === 1}
 							<StepDirectories bind:dirs {error} {submitting} />
 						{:else}

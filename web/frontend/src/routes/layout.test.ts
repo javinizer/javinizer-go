@@ -120,11 +120,11 @@ async function fillCredentials(container: HTMLElement) {
 
 // Register the admin account and dismiss the credentials-confirmation
 // interstitial, landing on the directories step. Registration is now a
-// two-click flow: Continue (creates the account) → Continue to library setup
+// two-click flow: Create admin account → Continue to library setup
 // (acknowledges and advances).
 async function proceedToDirectories(container: HTMLElement) {
 	await fillCredentials(container);
-	await fireEvent.click(findButton(container, 'Continue')!);
+	await fireEvent.click(findButton(container, 'Create admin account')!);
 	await waitFor(() => expect(apiClient.setupAuth).toHaveBeenCalledTimes(1));
 	await waitFor(() =>
 		expect(container.textContent).toContain('Your admin account is secured'),
@@ -158,7 +158,7 @@ describe('first-run setup wizard', () => {
 		const { container } = render(Layout);
 		await waitFor(() => expect(container.textContent).toContain('Create your admin account'));
 		expect(container.textContent).toContain('Admin Account');
-		expect(findButton(container, 'Continue')).toBeTruthy();
+		expect(findButton(container, 'Create admin account')).toBeTruthy();
 	});
 
 	it('creates the admin account and advances to the directories step', async () => {

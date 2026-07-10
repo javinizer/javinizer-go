@@ -11,10 +11,12 @@
 		credentials = $bindable(),
 		error = null as string | null,
 		submitting = false,
+		onSubmit,
 	}: {
 		credentials: Credentials;
 		error?: string | null;
 		submitting?: boolean;
+		onSubmit?: () => void;
 	} = $props();
 
 	let showPassword = $state(false);
@@ -45,7 +47,7 @@
 	</p>
 </div>
 
-<form class="step-body" onsubmit={(e) => e.preventDefault()}>
+<form class="step-body" onsubmit={(e) => { e.preventDefault(); onSubmit?.(); }}>
 	{#if error}
 		<div class="alert" role="alert">{error}</div>
 	{/if}
