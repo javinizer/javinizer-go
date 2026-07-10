@@ -1018,3 +1018,49 @@ func TestIsRootPath(t *testing.T) {
 	assert.False(t, isRootPath(""), "Empty string should not be a root path")
 	assert.False(t, isRootPath("."), "Relative dot should not be a root path")
 }
+
+func TestIsHomeDirectory(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		assert.True(t, isHomeDirectory(home), "user's home dir should be detected as home")
+	}
+	assert.False(t, isHomeDirectory("/tmp"), "/tmp should not be home")
+	assert.False(t, isHomeDirectory("/"), "root should not be home")
+	assert.False(t, isHomeDirectory(""), "empty should not be home")
+}
+
+func TestGetCurrentWorkingDirectory_HomeCWDReturnsEmpty(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		t.Skip("could not resolve home dir")
+	}
+
+	origGetwd := osGetwd
+	t.Cleanup(func() { osGetwd = origGetwd })
+	osGetwd = func() (string, error) { return home, nil }
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.API.Security.AllowedDirectories = []string{}
+
+	deps := newTestDepsFromConfig(cfg)
+	router := gin.New()
+	router.GET("/cwd", getCurrentWorkingDirectory(testkit.GetTestRuntime(deps)))
+
+	req := httptest.NewRequest("GET", "/cwd", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "", response["path"], "home dir as CWD should return empty (not safe to prefill)")
+}
+
+func TestIsHomeDirectory_HomeDirUnresolvable(t *testing.T) {
+	origHomeDir := osUserHomeDir
+	t.Cleanup(func() { osUserHomeDir = origHomeDir })
+	osUserHomeDir = func() (string, error) { return "", errors.New("home: unresolvable") }
+
+	assert.False(t, isHomeDirectory("/any/path"), "should return false when home dir can't be resolved")
+}

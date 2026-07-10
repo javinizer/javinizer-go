@@ -16,7 +16,8 @@ import (
 // osGetwd is a seam over os.Getwd so the root-CWD branch in defaultPath can
 // be exercised without actually chdir-ing the test process into "/".
 var (
-	osGetwd = os.Getwd
+	osGetwd       = os.Getwd
+	osUserHomeDir = os.UserHomeDir
 )
 
 // scanDirectory godoc
@@ -142,6 +143,9 @@ func defaultPath(rt *core.APIRuntime) (string, error) {
 	if isRootPath(cwd) {
 		return "", nil
 	}
+	if isHomeDirectory(cwd) {
+		return "", nil
+	}
 	return cwd, nil
 }
 
@@ -151,9 +155,19 @@ func isRootPath(path string) bool {
 	if path == "/" || path == string(filepath.Separator) {
 		return true
 	}
-	// Windows drive root, e.g. "C:\"
 	if len(path) == 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
 		return true
 	}
 	return false
+}
+
+// isHomeDirectory reports whether path equals the user's home directory.
+// Prefilling the home directory grants file-operation scope over the entire
+// profile, so it is treated as unusable (same fail-closed behavior as root).
+func isHomeDirectory(path string) bool {
+	home, err := osUserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	return path == home
 }
