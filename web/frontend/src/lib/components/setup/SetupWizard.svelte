@@ -55,6 +55,7 @@
 	let availableScrapers = $state<Scraper[]>([]);
 	let selectedScrapers = $state<string[]>([]);
 	let scrapersLoading = $state(false);
+	let scrapersFetched = $state(false);
 
 	let stageEl = $state<HTMLElement | null>(null);
 	let stageHeight = $state<number | null>(null);
@@ -91,7 +92,7 @@
 	}
 
 	async function fetchScrapers() {
-		if (availableScrapers.length > 0 || scrapersLoading) return;
+		if (scrapersFetched || scrapersLoading) return;
 		scrapersLoading = true;
 		try {
 			availableScrapers = await apiClient.getScrapers();
@@ -101,6 +102,7 @@
 			toastStore.error('Could not load available scrapers', 4000);
 		} finally {
 			scrapersLoading = false;
+			scrapersFetched = true;
 		}
 	}
 
