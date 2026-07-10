@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -125,18 +124,16 @@ func runDownload(ctx context.Context, w io.Writer, configFile string, updateOnly
 		fmt.Fprintf(w, "Current version: %s\n", currentSourceURL)
 	}
 
-	lastProgress := time.Now()
-	progress := func(bytes int64) {
-		// Throttle progress output to once per second.
-		if time.Since(lastProgress) < time.Second {
-			return
+	var bar *progressBar
+	progress := func(bytes, total int64) {
+		if bar != nil {
+			bar.update(bytes, total)
 		}
-		lastProgress = time.Now()
-		fmt.Fprintf(w, "  downloaded %.1f MB\n", float64(bytes)/1024/1024)
 	}
 
 	res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 		fmt.Fprintf(w, "Importing dump (source: %s, date: %s)...\n", d.FinalURL, d.SourceDate)
+		bar = newProgressBar(w, 0)
 		impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
 			SourceURL:  d.FinalURL,
 			SourceDate: d.SourceDate,
@@ -144,10 +141,14 @@ func runDownload(ctx context.Context, w io.Writer, configFile string, updateOnly
 		if err != nil {
 			return err
 		}
+		bar.finish()
 		fmt.Fprintf(w, "Imported %d videos into %s\n", impRes.Rows, impRes.Path)
 		return nil
 	})
 	if err != nil {
+		if bar != nil {
+			bar.finish()
+		}
 		return fmt.Errorf("dump download failed: %w", err)
 	}
 	if res.Unchanged {

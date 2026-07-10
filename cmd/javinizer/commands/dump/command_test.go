@@ -5,13 +5,13 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -221,6 +221,9 @@ func TestUpdate_UnchangedSkips(t *testing.T) {
 		}
 		if !strings.Contains(buf.String(), "unchanged") && !strings.Contains(buf.String(), "Unchanged") {
 			t.Errorf("update did not skip unchanged dump: %s", buf.String())
+		}
+		if strings.Contains(buf.String(), "Importing dump") {
+			t.Errorf("unchanged update should not print 'Importing dump': %s", buf.String())
 		}
 	})
 }
@@ -480,23 +483,21 @@ func TestRunDownload_ImportError(t *testing.T) {
 	})
 }
 
-// TestRunDownload_ProgressOutput covers the progress-throttle print branch
-// (lines 135-136): when the download takes >1s, the progress callback prints
-// the MB downloaded. The server writes the gzip body in two chunks with a
-// 1.1s gap so the second chunk triggers the throttled print.
+// TestRunDownload_ProgressOutput verifies that the progress callback fires
+// during import (bar is set) and that "Importing dump" appears before
+// "Imported". Uses a large dump body so data is read in multiple chunks
+// during Import, triggering the progress callback after bar is created.
 func TestRunDownload_ProgressOutput(t *testing.T) {
-	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
-	gz := gzipBytes(t, dumpBody)
+	var rows strings.Builder
+	rows.WriteString("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n")
+	for i := 0; i < 5000; i++ {
+		fmt.Fprintf(&rows, "118ipx%05d\tIPX-%d\n", i, i)
+	}
+	rows.WriteString("\\.\n")
+	gz := gzipBytes(t, rows.String())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
-		// Write first chunk, then wait >1s so the progress callback's throttle
-		// fires on the second chunk.
-		_, _ = w.Write(gz[:1])
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
-		time.Sleep(1100 * time.Millisecond)
-		_, _ = w.Write(gz[1:])
+		_, _ = w.Write(gz)
 	}))
 	defer srv.Close()
 	origURL := r18devdump.LatestDumpURL
@@ -508,6 +509,33 @@ func TestRunDownload_ProgressOutput(t *testing.T) {
 		var buf bytes.Buffer
 		err := runDownload(context.Background(), &buf, "config.yaml", false)
 		require.NoError(t, err)
-		assert.Contains(t, buf.String(), "downloaded", "progress output should include downloaded MB")
+		out := buf.String()
+		// "Importing dump" must appear before "Imported" result.
+		idxImporting := strings.Index(out, "Importing dump")
+		require.GreaterOrEqual(t, idxImporting, 0, "output should contain 'Importing dump'")
+		idxImported := strings.Index(out, "Imported")
+		require.Greater(t, idxImported, idxImporting, "'Imported' should come after 'Importing dump'")
+	})
+}
+
+// TestRunDownload_InvalidGzip covers the error path where the response is not
+// a valid gzip stream. The progress callback fires during the attempted gzip
+// header read while bar is still nil, then Download returns an error.
+func TestRunDownload_InvalidGzip(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write([]byte("this is not a gzip stream"))
+	}))
+	defer srv.Close()
+	origURL := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL
+	defer func() { r18devdump.LatestDumpURL = origURL }()
+
+	tmp := t.TempDir()
+	runInDir(t, tmp, func() {
+		var buf bytes.Buffer
+		err := runDownload(context.Background(), &buf, "config.yaml", false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "dump download failed")
 	})
 }

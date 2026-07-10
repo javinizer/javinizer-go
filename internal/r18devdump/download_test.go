@@ -120,8 +120,10 @@ func TestDownload_ProgressReported(t *testing.T) {
 	defer setLatestDumpURL(orig)
 
 	var lastProgress int64
-	res, err := Download(context.Background(), srv.Client(), "", func(n int64) {
+	var lastTotal int64
+	res, err := Download(context.Background(), srv.Client(), "", func(n, total int64) {
 		lastProgress = n
+		lastTotal = total
 	}, func(r io.Reader, d DownloadResult) error {
 		_, _ = io.Copy(io.Discard, r)
 		return nil
@@ -134,6 +136,49 @@ func TestDownload_ProgressReported(t *testing.T) {
 	}
 	if lastProgress <= 0 {
 		t.Errorf("progress callback never reported bytes, last = %d", lastProgress)
+	}
+	if lastProgress != res.Bytes {
+		t.Errorf("last progress %d != res.Bytes %d", lastProgress, res.Bytes)
+	}
+	if lastTotal != res.Bytes {
+		t.Errorf("last total %d != res.Bytes %d (expected Content-Length to equal transferred bytes)", lastTotal, res.Bytes)
+	}
+}
+
+func TestDownload_ProgressReported_ChunkedUnknownTotal(t *testing.T) {
+	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	gz := gzipped(t, dumpBody)
+
+	// Chunked transfer: flush before the body so Go omits Content-Length,
+	// making resp.ContentLength == -1 (unknown). The download layer must
+	// normalize this to 0 in the progress callback.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		_, _ = w.Write(gz)
+	}))
+	defer srv.Close()
+	orig := LatestDumpURL
+	setLatestDumpURL(srv.URL)
+	defer setLatestDumpURL(orig)
+
+	var lastTotal int64 = -1
+	res, err := Download(context.Background(), srv.Client(), "", func(n, total int64) {
+		lastTotal = total
+	}, func(r io.Reader, d DownloadResult) error {
+		_, _ = io.Copy(io.Discard, r)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if res.Bytes <= 0 {
+		t.Errorf("Bytes = %d, want > 0", res.Bytes)
+	}
+	if lastTotal != 0 {
+		t.Errorf("expected total=0 for chunked (unknown-length) response, got %d", lastTotal)
 	}
 }
 

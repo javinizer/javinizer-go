@@ -47,9 +47,10 @@ type DownloadResult struct {
 // `javinizer dump update` no-op when the dump hasn't changed.
 //
 // progress, if non-nil, receives cumulative compressed byte counts during the
-// transfer.
+// transfer. totalBytes is the response Content-Length when known (0 if
+// unknown, e.g. chunked/streamed responses).
 func Download(ctx context.Context, client *http.Client, currentSourceURL string,
-	progress func(compressedBytes int64), importFn func(io.Reader, DownloadResult) error) (DownloadResult, error) {
+	progress func(compressedBytes, totalBytes int64), importFn func(io.Reader, DownloadResult) error) (DownloadResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, DumpURLOverride(), nil)
 	if err != nil {
 		return DownloadResult{}, fmt.Errorf("build request: %w", err)
@@ -79,7 +80,11 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 
 	body := io.Reader(resp.Body)
 	if progress != nil {
-		body = &countingReader{r: resp.Body, report: progress}
+		total := resp.ContentLength
+		if total < 0 {
+			total = 0
+		}
+		body = &countingReader{r: resp.Body, total: total, report: progress}
 	}
 
 	gz, err := gzip.NewReader(body)
@@ -119,14 +124,15 @@ func extractSourceDate(rawURL string) string {
 type countingReader struct {
 	r      io.Reader
 	n      int64
-	report func(int64)
+	total  int64
+	report func(n, total int64)
 }
 
 func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n += int64(n)
 	if c.report != nil && n > 0 {
-		c.report(c.n)
+		c.report(c.n, c.total)
 	}
 	return n, err
 }
