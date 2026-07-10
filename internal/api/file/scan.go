@@ -167,7 +167,15 @@ func isRootPath(path string) bool {
 func isHomeDirectory(path string) bool {
 	home, err := osUserHomeDir()
 	if err != nil || home == "" {
-		return false
+		return true
 	}
-	return path == home
+	resolvedHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		resolvedHome = home
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		resolvedPath = path
+	}
+	return resolvedPath == resolvedHome
 }

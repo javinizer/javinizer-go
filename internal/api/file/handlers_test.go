@@ -1062,5 +1062,5 @@ func TestIsHomeDirectory_HomeDirUnresolvable(t *testing.T) {
 	t.Cleanup(func() { osUserHomeDir = origHomeDir })
 	osUserHomeDir = func() (string, error) { return "", errors.New("home: unresolvable") }
 
-	assert.False(t, isHomeDirectory("/any/path"), "should return false when home dir can't be resolved")
+	assert.True(t, isHomeDirectory("/any/path"), "should return true (fail-closed) when home dir can't be resolved")
 }

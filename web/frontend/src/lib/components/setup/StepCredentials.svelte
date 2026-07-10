@@ -47,7 +47,7 @@
 	</p>
 </div>
 
-<form class="step-body" onsubmit={(e) => { e.preventDefault(); onSubmit?.(); }}>
+<form id="credentials-form" class="step-body" onsubmit={(e) => { e.preventDefault(); onSubmit?.(); }}>
 	{#if error}
 		<div class="alert" role="alert">{error}</div>
 	{/if}
@@ -131,6 +131,8 @@
 		{/if}
 	</label>
 </form>
+
+<button type="submit" form="credentials-form" class="sr-only" aria-hidden="true" tabindex="-1"></button>
 
 <style>
 	.step-head {
