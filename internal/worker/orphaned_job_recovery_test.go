@@ -175,8 +175,8 @@ func TestRecoverOrphanedJobs_PersistsRecoveredStatus(t *testing.T) {
 
 func TestRecoverOrphanedJobs_IntegrationWithLoadFromDatabase(t *testing.T) {
 	runningJob := &models.Job{
-		ID:        "loadtest-0001",
-		Status:    models.JobStatusRunning,
+		ID:         "loadtest-0001",
+		Status:     models.JobStatusRunning,
 		TotalFiles: 1,
 		Completed:  0,
 		Failed:     0,
@@ -186,8 +186,8 @@ func TestRecoverOrphanedJobs_IntegrationWithLoadFromDatabase(t *testing.T) {
 		StartedAt:  time.Now().Add(-1 * time.Hour),
 	}
 	pendingJob := &models.Job{
-		ID:        "loadtest-0002",
-		Status:    models.JobStatusPending,
+		ID:         "loadtest-0002",
+		Status:     models.JobStatusPending,
 		TotalFiles: 1,
 		Completed:  0,
 		Failed:     0,
@@ -197,8 +197,8 @@ func TestRecoverOrphanedJobs_IntegrationWithLoadFromDatabase(t *testing.T) {
 		StartedAt:  time.Now().Add(-30 * time.Minute),
 	}
 	completedJob := &models.Job{
-		ID:        "loadtest-0003",
-		Status:    models.JobStatusCompleted,
+		ID:         "loadtest-0003",
+		Status:     models.JobStatusCompleted,
 		TotalFiles: 1,
 		Completed:  1,
 		Failed:     0,
