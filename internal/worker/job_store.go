@@ -176,6 +176,35 @@ func (s *JobStore) loadFromDatabase() {
 			s.jobs[batchJob.ID] = batchJob
 		}
 	}
+
+	s.recoverOrphanedJobs()
+}
+
+// recoverOrphanedJobs marks jobs stuck in 'running' or 'pending' status as
+// 'failed' on startup. When the server restarts after a crash or kill, these
+// jobs have no live worker goroutine — they are orphaned zombies that can
+// neither be cancelled (no worker to process the context cancellation) nor
+// deleted (DeleteJob refuses running jobs). Marking them failed restores
+// normal Cancel/Delete functionality and gives the user a clear signal.
+func (s *JobStore) recoverOrphanedJobs() {
+	recovered := 0
+	for id, job := range s.jobs {
+		job.lifecycle.mu.Lock()
+		status := job.lifecycle.Status
+		if status != models.JobStatusRunning && status != models.JobStatusPending {
+			job.lifecycle.mu.Unlock()
+			continue
+		}
+		job.lifecycle.mu.Unlock()
+
+		job.lifecycle.MarkFailed()
+		s.persistence.PersistJob(job)
+		recovered++
+		logging.Warnf("Recovered orphaned job %s (was %s, marked failed)", id, status)
+	}
+	if recovered > 0 {
+		logging.Warnf("Recovered %d orphaned job(s) on startup", recovered)
+	}
 }
 
 // jobAdapters holds pre-built adapter components for a BatchJob.
