@@ -329,3 +329,28 @@ func TestRegisterNoRouteHandler_DebugLogging(t *testing.T) {
 	})
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
+
+// TestRegisterStaticWebRoutes_JavinizerPNG verifies the javinizer.png static
+// route is registered when the asset is present in the embedded FS.
+func TestRegisterStaticWebRoutes_JavinizerPNG(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	assets := loadWebUIAssets()
+	if !assets.uiAvailable {
+		t.Skip("Web UI assets not available in test build")
+	}
+
+	router := gin.New()
+	registerStaticWebRoutes(router, assets)
+
+	// Verify the javinizer.png route was registered
+	routes := router.Routes()
+	found := false
+	for _, r := range routes {
+		if r.Path == "/javinizer.png" && r.Method == "GET" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "GET /javinizer.png route should be registered when the asset exists")
+}

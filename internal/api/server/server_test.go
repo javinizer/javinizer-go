@@ -283,6 +283,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"HEAD /_app/*filepath": {},
 		"GET /robots.txt":      {},
 		"GET /favicon.ico":     {},
+		"GET /javinizer.png":   {},
 	}
 
 	expectedSet := make(map[string]struct{}, len(expected))
