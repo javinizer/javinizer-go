@@ -16,7 +16,10 @@
 	let { movie, onEdit, selected = false }: Props = $props();
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
-	let japaneseNames = $derived(configQuery.data?.output?.actress_language_ja ?? false);
+	let japaneseNames = $derived(
+		(configQuery.data?.output?.actress_language_ja ?? false) ||
+		(configQuery.data?.metadata?.nfo?.actress_language_ja ?? false)
+	);
 </script>
 
 <Card class="overflow-hidden {selected ? 'ring-2 ring-primary' : ''}">

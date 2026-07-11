@@ -26,7 +26,10 @@
 	let { movie, onUpdate, onPersistEdits, actressSources, showFieldSources = false, savingEdits = false, organizing = false }: Props = $props();
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
-	let japaneseNames = $derived(configQuery.data?.output?.actress_language_ja ?? false);
+	let japaneseNames = $derived(
+		(configQuery.data?.output?.actress_language_ja ?? false) ||
+		(configQuery.data?.metadata?.nfo?.actress_language_ja ?? false)
+	);
 
 	let actresses = $state<Actress[]>([]);
 	let showEditModal = $state(false);
