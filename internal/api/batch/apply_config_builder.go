@@ -66,7 +66,7 @@ func resolveOrganizeApplyConfig(
 			MoveFiles:   !req.CopyOnly,
 			LinkMode:    resolved.LinkMode,
 			ForceUpdate: true,
-			Skip:        effectiveMode != operationmode.OperationModeOrganize,
+			Skip:        !effectiveMode.RequiresOrganize(),
 		},
 		workflow.MergeOptions{
 			ForceOverwrite: true,

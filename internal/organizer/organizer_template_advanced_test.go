@@ -83,7 +83,7 @@ func TestOrganizerTemplate_LongTitles(t *testing.T) {
 				MovieID: "IPX-123",
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			// Extract folder name from path
@@ -216,7 +216,7 @@ func TestOrganizerTemplate_CustomFunctions(t *testing.T) {
 				MovieID: movie.ID,
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			folderName := filepath.Base(plan.TargetDir)
@@ -292,7 +292,7 @@ func TestOrganizerTemplate_MultipleActresses(t *testing.T) {
 				MovieID: "TEST-001",
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			folderName := filepath.Base(plan.TargetDir)
@@ -369,7 +369,7 @@ func TestOrganizerTemplate_FilenameTemplates(t *testing.T) {
 				MovieID: movie.ID,
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.expectedFile, plan.TargetFile,
@@ -409,7 +409,7 @@ func TestOrganizerTemplate_PathLengthValidation(t *testing.T) {
 		MovieID: "IPX-123",
 	}
 
-	plan, err := org.plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false, "")
 	require.NoError(t, err)
 
 	// Path should be truncated to fit within limit
@@ -487,7 +487,7 @@ func TestOrganizerTemplate_EdgeCases(t *testing.T) {
 				MovieID: movie.ID,
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 
 			if tt.shouldError {
 				assert.Error(t, err, tt.description)
@@ -528,7 +528,7 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 			MovieID: "IPX-123",
 		}
 
-		plan, err := org.plan(match, movie, "/movies", false)
+		plan, err := org.plan(match, movie, "/movies", false, "")
 		require.NoError(t, err)
 
 		folderName := filepath.Base(plan.TargetDir)
@@ -559,7 +559,7 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 			MovieID: "IPX-123",
 		}
 
-		plan, err := org.plan(match, movie, "/movies", false)
+		plan, err := org.plan(match, movie, "/movies", false, "")
 		require.NoError(t, err)
 
 		folderName := filepath.Base(plan.TargetDir)
@@ -590,7 +590,7 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 			MovieID: "IPX-123",
 		}
 
-		plan, err := org.plan(match, movie, "/movies", false)
+		plan, err := org.plan(match, movie, "/movies", false, "")
 		require.NoError(t, err)
 
 		assert.Equal(t, "IPX-123 - This is an extremely long... (2024).mp4", plan.TargetFile,

@@ -265,13 +265,14 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd, progress scra
 // stepOrganize executes the organize step: move/link files to destination.
 func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *applyPipelineState, steps *stepCompletion) error {
 	organizeCmd := organizer.OrganizeCmd{
-		Match:       cmd.Match,
-		Movie:       state.movie,
-		DestDir:     cmd.DestPath,
-		ForceUpdate: cmd.Organize.ForceUpdate,
-		MoveFiles:   cmd.Organize.MoveFiles,
-		LinkMode:    cmd.Organize.LinkMode,
-		DryRun:      cmd.DryRun,
+		Match:         cmd.Match,
+		Movie:         state.movie,
+		DestDir:       cmd.DestPath,
+		ForceUpdate:   cmd.Organize.ForceUpdate,
+		MoveFiles:     cmd.Organize.MoveFiles,
+		LinkMode:      cmd.Organize.LinkMode,
+		DryRun:        cmd.DryRun,
+		OperationMode: cmd.OperationMode,
 	}
 	var organizeErr error
 	state.organizeResult, organizeErr = o.organizer.Organize(ctx, organizeCmd)

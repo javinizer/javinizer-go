@@ -49,7 +49,7 @@ func TestOrganizerWithAfero_MoveFile(t *testing.T) {
 	}
 
 	// Plan and execute
-	plan, err := org.plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false, "")
 	require.NoError(t, err)
 
 	result, err := org.execute(plan)
@@ -100,7 +100,7 @@ func TestOrganizerWithAfero_MoveWithDirectoryCreation(t *testing.T) {
 		MovieID: "IPX-123",
 	}
 
-	plan, err := org.plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false, "")
 	require.NoError(t, err)
 
 	result, err := org.execute(plan)
@@ -197,7 +197,7 @@ func TestOrganizerWithAfero_MoveCollision(t *testing.T) {
 	}
 
 	// Plan without forceUpdate
-	plan, err := org.plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false, "")
 	require.NoError(t, err)
 
 	// Should detect conflict
@@ -242,7 +242,7 @@ func TestOrganizerWithAfero_ComplexTemplate(t *testing.T) {
 		MovieID: "IPX-123",
 	}
 
-	plan, err := org.plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false, "")
 	require.NoError(t, err)
 
 	// Expected: "IPX-123 [IdeaPocket] - Test Movie (2023)"
@@ -392,7 +392,7 @@ func TestOrganizerWithAfero_PathLengthTruncation(t *testing.T) {
 	}
 
 	// Plan should handle path length by truncating
-	plan, err := org.plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false, "")
 
 	// Either plan succeeds with truncation, or returns error
 	if err != nil {
@@ -427,7 +427,7 @@ func TestOrganizerWithAfero_RenameFileDisabled(t *testing.T) {
 		MovieID: "IPX-123",
 	}
 
-	plan, err := org.plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false, "")
 	require.NoError(t, err)
 
 	// File name should be preserved
@@ -461,7 +461,7 @@ func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
 			MovieID: "ABF-345",
 		}
 
-		plan, err := org.plan(match, movie, "/dest", false)
+		plan, err := org.plan(match, movie, "/dest", false, "")
 		require.NoError(t, err)
 
 		assert.Equal(t, "ABF-345.mkv", plan.TargetFile)
@@ -487,7 +487,7 @@ func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
 			MovieID: "ABF-345",
 		}
 
-		plan, err := org.plan(match, movie, "/dest", false)
+		plan, err := org.plan(match, movie, "/dest", false, "")
 		require.NoError(t, err)
 
 		assert.Equal(t, "ABF-345 - - -.mkv", plan.TargetFile)
@@ -513,7 +513,7 @@ func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
 			MovieID: "ABF-345",
 		}
 
-		plan, err := org.plan(match, movie, "/dest", false)
+		plan, err := org.plan(match, movie, "/dest", false, "")
 		require.NoError(t, err)
 
 		assert.Equal(t, "ABF-345.mkv", plan.TargetFile)
@@ -539,7 +539,7 @@ func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
 			MovieID: "",
 		}
 
-		plan, err := org.plan(match, movie, "/dest", false)
+		plan, err := org.plan(match, movie, "/dest", false, "")
 		require.NoError(t, err)
 
 		assert.Equal(t, "file.mkv", plan.TargetFile,

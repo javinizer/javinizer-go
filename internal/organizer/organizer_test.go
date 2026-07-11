@@ -45,7 +45,7 @@ func TestOrganizer_Plan(t *testing.T) {
 		MovieID: "IPX-535",
 	}
 
-	plan, err := org.plan(match, movie, "/dest", false)
+	plan, err := org.plan(match, movie, "/dest", false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestOrganizer_Execute_ActualMove(t *testing.T) {
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestOrganizer_Execute_Conflict(t *testing.T) {
 		MovieID: "IPX-535",
 	}
 
-	plan, err := org.plan(match, movie, tmpDir, false)
+	plan, err := org.plan(match, movie, tmpDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestOrganizer_Execute_Conflict(t *testing.T) {
 	}
 
 	// Recreate plan to detect conflict
-	plan, err = org.plan(match, movie, tmpDir, false)
+	plan, err = org.plan(match, movie, tmpDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestOrganizer_Organize_HardLink(t *testing.T) {
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestOrganizer_Organize_SoftLink(t *testing.T) {
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestOrganizer_Organize_LinkModeNone_Copy(t *testing.T) {
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -926,7 +926,7 @@ func TestOrganizer_Plan_WithSubfolderFormat(t *testing.T) {
 		MovieID: "IPX-535",
 	}
 
-	plan, err := org.plan(match, movie, tmpDir, false)
+	plan, err := org.plan(match, movie, tmpDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1138,7 +1138,7 @@ func TestOrganizer_Plan_InPlaceMode_DedicatedFolder(t *testing.T) {
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1193,7 +1193,7 @@ func TestOrganizer_Plan_InPlaceMode_BothFieldsReplacedByOperationMode(t *testing
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1239,7 +1239,7 @@ func TestOrganizer_Plan_BothConfigsFalse_NoFolderChanges(t *testing.T) {
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1282,7 +1282,7 @@ func TestOrganizer_Plan_NoOpHasEmptyConflicts(t *testing.T) {
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1331,7 +1331,7 @@ func TestOrganizer_Plan_TruncationPreservesInPlaceSkip(t *testing.T) {
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1393,7 +1393,7 @@ func TestOrganizer_Plan_TruncationPreservesMixedIdSkip(t *testing.T) {
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}

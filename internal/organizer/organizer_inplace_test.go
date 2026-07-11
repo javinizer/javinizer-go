@@ -132,7 +132,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 				Title: "Beautiful Day",
 			}
 
-			plan, err := o.plan(match, movie, tt.destDir, false)
+			plan, err := o.plan(match, movie, tt.destDir, false, "")
 			if err != nil {
 				t.Fatalf("Plan failed: %v", err)
 			}
@@ -208,7 +208,7 @@ func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 			Path:    filepath.Join(sourceDir, "IPX-535.mp4"), Name: "IPX-535.mp4", Extension: ".mp4",
 		}
 
-		plan, err := o.plan(match, movie, destDir, false)
+		plan, err := o.plan(match, movie, destDir, false, "")
 		if err != nil {
 			t.Fatalf("Plan failed: %v", err)
 		}
@@ -239,7 +239,7 @@ func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 			Path:    filepath.Join(sourceDir, "IPX-535.mp4"), Name: "IPX-535.mp4", Extension: ".mp4",
 		}
 
-		plan, err := o.plan(match, movie, destDir, false)
+		plan, err := o.plan(match, movie, destDir, false, "")
 		if err != nil {
 			t.Fatalf("Plan failed: %v", err)
 		}
@@ -276,7 +276,7 @@ func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 			Path:    filepath.Join(sourceDir, "IPX-535.mp4"), Name: "IPX-535.mp4", Extension: ".mp4",
 		}
 
-		plan, err := o.plan(match, movie, destDir, false)
+		plan, err := o.plan(match, movie, destDir, false, "")
 		if err != nil {
 			t.Fatalf("Plan failed: %v", err)
 		}
@@ -335,7 +335,7 @@ func TestExecute_InPlaceRename(t *testing.T) {
 	}
 
 	// Plan the organization
-	plan, err := o.plan(match, movie, tmpDir, false)
+	plan, err := o.plan(match, movie, tmpDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 	}
 
 	// Plan for first part (should trigger in-place rename)
-	plan1, err := o.plan(matches[0], movie, tmpDir, false)
+	plan1, err := o.plan(matches[0], movie, tmpDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed for part1: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 
 	// Plan for part 2 - it should only rename the file (not the directory again)
 	// Use forceUpdate=true to allow renaming the file even though directory already exists
-	plan2, err := o.plan(matches[1], movie, tmpDir, true)
+	plan2, err := o.plan(matches[1], movie, tmpDir, true, "")
 	if err != nil {
 		t.Fatalf("Plan failed for part2: %v", err)
 	}
@@ -563,7 +563,7 @@ func TestExecute_InPlaceWithSubtitles(t *testing.T) {
 	}
 
 	// Plan and execute
-	plan, err := o.plan(match, movie, tmpDir, false)
+	plan, err := o.plan(match, movie, tmpDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -730,7 +730,7 @@ func TestPlan_InPlaceTruncation_UsesSourceParent(t *testing.T) {
 	untruncatedFolderName := "IPX-535 - " + movie.Title
 	untruncatedPath := filepath.Join(sourceParent, untruncatedFolderName, "IPX-535.mp4")
 
-	plan, err := o.plan(match, movie, destDir, false)
+	plan, err := o.plan(match, movie, destDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -814,7 +814,7 @@ func TestExecute_CaseOnlyDirectoryRename(t *testing.T) {
 		Title: "Beautiful Day",
 	}
 
-	plan, err := o.plan(match, movie, tmpDir, false)
+	plan, err := o.plan(match, movie, tmpDir, false, "")
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}

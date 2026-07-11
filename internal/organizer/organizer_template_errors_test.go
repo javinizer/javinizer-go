@@ -93,7 +93,7 @@ func TestOrganizerTemplate_ErrorHandling(t *testing.T) {
 				MovieID: "IPX-123",
 			}
 
-			plan, planErr := org.plan(match, movie.Build(), "/movies", false)
+			plan, planErr := org.plan(match, movie.Build(), "/movies", false, "")
 
 			if tt.expectError {
 				assert.Error(t, planErr, tt.description)
@@ -145,7 +145,7 @@ func TestOrganizerTemplate_NilContext(t *testing.T) {
 		}
 	}()
 
-	_, _ = org.plan(match, nil, "/movies", false)
+	_, _ = org.plan(match, nil, "/movies", false, "")
 }
 
 // TestOrganizerTemplate_ConditionalErrors tests conditional template edge cases
@@ -219,7 +219,7 @@ func TestOrganizerTemplate_ConditionalErrors(t *testing.T) {
 				MovieID: "IPX-123",
 			}
 
-			plan, planErr := org.plan(match, movie.Build(), "/movies", false)
+			plan, planErr := org.plan(match, movie.Build(), "/movies", false, "")
 
 			if tt.shouldWork {
 				assert.NoError(t, planErr, tt.description)
