@@ -331,7 +331,8 @@ func TestRegisterNoRouteHandler_DebugLogging(t *testing.T) {
 }
 
 // TestRegisterStaticWebRoutes_JavinizerPNG verifies the javinizer.png static
-// route is registered when the asset is present in the embedded FS.
+// route is registered and serves the file when the asset is present in the
+// embedded FS.
 func TestRegisterStaticWebRoutes_JavinizerPNG(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -343,14 +344,10 @@ func TestRegisterStaticWebRoutes_JavinizerPNG(t *testing.T) {
 	router := gin.New()
 	registerStaticWebRoutes(router, assets)
 
-	// Verify the javinizer.png route was registered
-	routes := router.Routes()
-	found := false
-	for _, r := range routes {
-		if r.Path == "/javinizer.png" && r.Method == "GET" {
-			found = true
-			break
-		}
-	}
-	assert.True(t, found, "GET /javinizer.png route should be registered when the asset exists")
+	// Verify the javinizer.png route serves the file (exercises the closure)
+	req := httptest.NewRequest(http.MethodGet, "/javinizer.png", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "GET /javinizer.png should serve the file")
+	assert.NotEmpty(t, w.Body.Bytes(), "response body should contain the PNG data")
 }
