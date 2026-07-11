@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConstructAwsimgsrcPosterURL(t *testing.T) {
@@ -488,6 +491,39 @@ func TestConstructAwsimgsrcURL_HostValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestConstructAwsimgsrcURL_UnparseableURL covers the url.Parse error
+// branch (lines 102-104): a cover URL containing a raw control character is
+// rejected by url.Parse, so constructAwsimgsrcURL must return "".
+func TestConstructAwsimgsrcURL_UnparseableURL(t *testing.T) {
+	// \x7f (DEL) in the host is rejected by url.Parse with
+	// "invalid control character in URL".
+	result := constructAwsimgsrcURL("https://exa\x7fmple.com/image.jpg", "pl.jpg")
+	assert.Equal(t, "", result, "unparseable URL should return empty string")
+}
+
+// TestConstructAwsimgsrcURL_AwsimgsrcUnknownSuffix covers the default branch
+// of swapDMMCoverSuffix (lines 151-152): an already-awsimgsrc URL whose
+// filename ends in a suffix other than pl.jpg/ps.jpg (here jp.jpg) must be
+// returned unchanged.
+func TestConstructAwsimgsrcURL_AwsimgsrcUnknownSuffix(t *testing.T) {
+	coverURL := "https://awsimgsrc.dmm.com/dig/digital/video/sone00560/sone00560jp.jpg"
+	// swapDMMCoverSuffix hits the default case since the URL ends in jp.jpg,
+	// not pl.jpg or ps.jpg; the URL is returned unchanged.
+	result := constructAwsimgsrcURL(coverURL, "pl.jpg")
+	assert.Equal(t, coverURL, result)
+}
+
+// TestGetImageDimensions_NewRequestError covers the http.NewRequest error
+// branch (lines 165-167): a URL containing a raw space is rejected by
+// http.NewRequest ("invalid character in host name"), which fails before
+// client.Do is ever called.
+func TestGetImageDimensions_NewRequestError(t *testing.T) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	_, _, err := GetImageDimensions("https://exa mple.com/image.jpg", client)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create request")
 }
 
 type roundTripperFunc func(req *http.Request) (*http.Response, error)
