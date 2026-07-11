@@ -927,8 +927,9 @@ func TestPayloadToResult_CoverURLFallback(t *testing.T) {
 
 	result := payloadToResult(payload, "https://www.libredmm.com/movies/ABP-880.json", "ABP-880", client)
 	require.NotNil(t, result)
-	assert.Equal(t, coverURL, result.CoverURL)
-	assert.Equal(t, coverURL, result.PosterURL)
+	expectedCoverURL := "https://awsimgsrc.dmm.com/dig/digital/video/118abp880/118abp880pl.jpg"
+	assert.Equal(t, expectedCoverURL, result.CoverURL)
+	assert.Equal(t, expectedCoverURL, result.PosterURL)
 }
 
 // TestStripJSONSuffix tests JSON suffix stripping

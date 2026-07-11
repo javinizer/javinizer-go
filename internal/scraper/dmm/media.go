@@ -23,12 +23,13 @@ func (s *scraper) extractCoverURL(doc *goquery.Document, isNewSite bool, content
 		html, _ := doc.Html()
 		matches := coverPsRegex.FindStringSubmatch(html)
 		if len(matches) > 1 {
-			return imageutil.UpgradeCoverResolution(imageutil.NormalizeDMMScreenshotURL(matches[1]))
+			return imageutil.UpgradeDMMCoverCDN(imageutil.UpgradeCoverResolution(imageutil.NormalizeDMMScreenshotURL(matches[1])))
 		}
 		return ""
 	}
 	coverURL = imageutil.NormalizeDMMScreenshotURL(coverURL)
 	coverURL = imageutil.UpgradeCoverResolution(coverURL)
+	coverURL = imageutil.UpgradeDMMCoverCDN(coverURL)
 	return coverURL
 }
 

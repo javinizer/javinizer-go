@@ -394,7 +394,7 @@ func TestExtractMetadataFromJSONLD(t *testing.T) {
 			expectedKeys: []string{"title", "cover_url", "screenshots"},
 			checkValues: map[string]interface{}{
 				"title":     "Normalized Movie",
-				"cover_url": "https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535pl.jpg",
+				"cover_url": "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
 			},
 		},
 	}

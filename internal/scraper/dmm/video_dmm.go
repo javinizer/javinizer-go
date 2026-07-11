@@ -48,18 +48,7 @@ func (s *scraper) extractCoverURLNewSite(doc *goquery.Document, contentID string
 	coverURL, exists := doc.Find(`meta[property="og:image"]`).Attr("content")
 	logging.Debugf("DMM Streaming: og:image exists=%v, value=%s", exists, coverURL)
 	if exists && coverURL != "" {
-		// Normalize consistently with the background-image path: fix
-		// protocol-relative "//pics.dmm.co.jp/..." URLs (og:image and <img>
-		// fallbacks can return these without a scheme), remap the CDN host, and
-		// strip the query. Using the shared helper keeps all cover-URL sources
-		// normalized the same way instead of only the background-image path.
-		coverURL = imageutil.NormalizeDMMScreenshotURL(coverURL)
-		// Replace 'ps.jpg' with 'pl.jpg' for larger image
-		coverURL = strings.Replace(coverURL, "ps.jpg", "pl.jpg", 1)
-		// Remove query parameters
-		if idx := strings.Index(coverURL, "?"); idx != -1 {
-			coverURL = coverURL[:idx]
-		}
+		coverURL = imageutil.UpgradeDMMCoverCDN(imageutil.UpgradeCoverResolution(imageutil.NormalizeDMMScreenshotURL(coverURL)))
 		logging.Debugf("DMM Streaming: Final cover URL from og:image: %s", coverURL)
 		return coverURL
 	}
@@ -87,16 +76,7 @@ func (s *scraper) extractCoverURLNewSite(doc *goquery.Document, contentID string
 	})
 
 	if bgImageURL != "" {
-		// Normalize the URL
-		coverURL = imageutil.NormalizeDMMScreenshotURL(bgImageURL)
-		// For amateur videos, keep jp.jpg suffix (pl.jpg doesn't exist for amateur videos)
-		// For regular videos, convert to pl.jpg for larger image
-		if !strings.Contains(coverURL, "/amateur/") {
-			// Replace 'jp.jpg' with 'pl.jpg' for larger image (non-amateur videos)
-			coverURL = strings.Replace(coverURL, "jp.jpg", "pl.jpg", 1)
-			// Also handle standard 'ps.jpg' -> 'pl.jpg' conversion
-			coverURL = strings.Replace(coverURL, "ps.jpg", "pl.jpg", 1)
-		}
+		coverURL = imageutil.UpgradeDMMCoverCDN(imageutil.UpgradeCoverResolution(imageutil.NormalizeDMMScreenshotURL(bgImageURL)))
 		logging.Debugf("DMM Streaming: Final cover URL from background-image: %s", coverURL)
 		return coverURL
 	}
@@ -106,11 +86,7 @@ func (s *scraper) extractCoverURLNewSite(doc *goquery.Document, contentID string
 	coverURL, _ = doc.Find(`img[src*="pl.jpg"]`).First().Attr("src")
 	logging.Debugf("DMM Streaming: img[src*='pl.jpg'] found: %s", coverURL)
 	if coverURL != "" {
-		// Convert to regular pics.dmm.co.jp URL and remove query parameters
-		coverURL = strings.Replace(coverURL, "awsimgsrc.dmm.co.jp/pics_dig", "pics.dmm.co.jp", 1)
-		if idx := strings.Index(coverURL, "?"); idx != -1 {
-			coverURL = coverURL[:idx]
-		}
+		coverURL = imageutil.UpgradeDMMCoverCDN(imageutil.UpgradeCoverResolution(imageutil.NormalizeDMMScreenshotURL(coverURL)))
 		logging.Debugf("DMM Streaming: Final cover URL from img tag: %s", coverURL)
 		return coverURL
 	}
@@ -131,10 +107,8 @@ func (s *scraper) extractCoverURLNewSite(doc *goquery.Document, contentID string
 	// Note: Amateur videos use 'jp.jpg' suffix, not 'pl.jpg' (pl.jpg doesn't exist for amateur videos)
 	// DMM serves cover assets on lowercase paths, so normalize to lowercase
 	if contentID != "" {
-		// Normalize to lowercase to match DMM's URL structure
 		normalizedID := strings.ToLower(contentID)
-		// Try amateur video pattern (amateur videos use jp.jpg, not pl.jpg)
-		coverURL = "https://pics.dmm.co.jp/digital/amateur/" + normalizedID + "/" + normalizedID + "jp.jpg"
+		coverURL = imageutil.UpgradeDMMCoverCDN(imageutil.UpgradeCoverResolution("https://pics.dmm.co.jp/digital/amateur/" + normalizedID + "/" + normalizedID + "jp.jpg"))
 		logging.Debugf("DMM Streaming: Constructed amateur cover URL from content ID '%s': %s", contentID, coverURL)
 		return coverURL
 	}

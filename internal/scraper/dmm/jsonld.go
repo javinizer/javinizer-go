@@ -163,7 +163,7 @@ func extractMetadataFromJSONLD(doc *goquery.Document) map[string]any {
 		if len(images) > 0 {
 			// First image is usually the cover
 			// Images already normalized by getImagesFromJSONLD -> imageutil.NormalizeDMMScreenshotURL
-			metadata["cover_url"] = imageutil.UpgradeCoverResolution(images[0])
+			metadata["cover_url"] = imageutil.UpgradeDMMCoverCDN(imageutil.UpgradeCoverResolution(images[0]))
 
 			// Rest are screenshots (skip first which is cover)
 			if len(images) > 1 {

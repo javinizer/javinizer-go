@@ -34,7 +34,7 @@ func TestGetOptimalPosterURL_ConstructURLFails(t *testing.T) {
 
 func TestGetOptimalPosterURL_AwsimgsrcDirect(t *testing.T) {
 	// Test with an already-awsimgsrc URL
-	coverURL := "https://awsimgsrc.dmm.com/dig/video/ipx00535/ipx00535pl.jpg"
+	coverURL := "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg"
 
 	// Create a small test image for the server to serve
 	img := image.NewRGBA(image.Rect(0, 0, 1000, 1500))
@@ -51,7 +51,7 @@ func TestGetOptimalPosterURL_AwsimgsrcDirect(t *testing.T) {
 	defer server.Close()
 
 	// Override the URL to point to our test server
-	testURL := server.URL + "/dig/video/ipx00535/ipx00535ps.jpg"
+	testURL := server.URL + "/dig/digital/video/ipx00535/ipx00535ps.jpg"
 	posterURL, shouldCrop := GetOptimalPosterURL(coverURL, server.Client())
 	// The URL construction changes pl.jpg -> ps.jpg for awsimgsrc
 	// Since it can't reach the real server, it falls back
@@ -84,24 +84,26 @@ func TestGetOptimalPosterURL_DigitalVideoPattern(t *testing.T) {
 }
 
 func TestGetOptimalPosterURL_NilClient(t *testing.T) {
-	// Test with nil client - should use default client and fall back
-	coverURL := "https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg"
+	// Test with nil client - should use default client. Use a content ID that
+	// does not exist on the CDN so the poster fetch reliably fails and the
+	// function falls back to cropping the cover (deterministic, no network
+	// dependency on a live title).
+	coverURL := "https://pics.dmm.co.jp/digital/video/zznonexistenttest999/zznonexistenttest999pl.jpg"
 	posterURL, shouldCrop := GetOptimalPosterURL(coverURL, nil)
-	// Can't reach real server, falls back to cover (shouldCrop=true to crop the cover).
 	assert.True(t, shouldCrop)
-	_ = posterURL
+	assert.Equal(t, coverURL, posterURL)
 }
 
 // --- constructAwsimgsrcPosterURL tests ---
 
 func TestConstructAwsimgsrcPosterURL_DigitalVideo(t *testing.T) {
 	result := constructAwsimgsrcPosterURL("https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg")
-	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/video/sone00860/sone00860ps.jpg", result)
+	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/digital/video/sone00860/sone00860ps.jpg", result)
 }
 
 func TestConstructAwsimgsrcPosterURL_DigitalAmateur(t *testing.T) {
 	result := constructAwsimgsrcPosterURL("https://pics.dmm.co.jp/digital/amateur/siro00860/siro00860pl.jpg")
-	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/amateur/siro00860/siro00860ps.jpg", result)
+	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/digital/amateur/siro00860/siro00860ps.jpg", result)
 }
 
 func TestConstructAwsimgsrcPosterURL_MonoMovie(t *testing.T) {
@@ -110,8 +112,8 @@ func TestConstructAwsimgsrcPosterURL_MonoMovie(t *testing.T) {
 }
 
 func TestConstructAwsimgsrcPosterURL_AlreadyAwsimgsrc(t *testing.T) {
-	result := constructAwsimgsrcPosterURL("https://awsimgsrc.dmm.com/dig/video/sone00860/sone00860pl.jpg")
-	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/video/sone00860/sone00860ps.jpg", result)
+	result := constructAwsimgsrcPosterURL("https://awsimgsrc.dmm.com/dig/digital/video/sone00860/sone00860pl.jpg")
+	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/digital/video/sone00860/sone00860ps.jpg", result)
 }
 
 func TestConstructAwsimgsrcPosterURL_Empty(t *testing.T) {
@@ -125,9 +127,10 @@ func TestConstructAwsimgsrcPosterURL_NoMatch(t *testing.T) {
 }
 
 func TestConstructAwsimgsrcPosterURL_UnknownPath(t *testing.T) {
-	// Unknown path pattern - should try the simpler format
+	// Unknown path pattern on pics.dmm.co.jp returns empty (only recognized
+	// digital/video, digital/amateur, mono/movie paths are rewritable).
 	result := constructAwsimgsrcPosterURL("https://pics.dmm.co.jp/other/video/sone00860/sone00860pl.jpg")
-	assert.Contains(t, result, "dig/video/sone00860/sone00860ps.jpg")
+	assert.Equal(t, "", result)
 }
 
 // --- CropPosterWithBounds error cases ---

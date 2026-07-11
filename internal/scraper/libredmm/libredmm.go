@@ -487,6 +487,7 @@ func payloadToResult(payload *moviePayload, sourceURL, fallbackID string, client
 
 	result.CoverURL = imageutil.NormalizeDMMScreenshotURL(scraperutil.ResolveURL(sourceURL, payload.CoverImageURL))
 	result.CoverURL = imageutil.UpgradeCoverResolution(result.CoverURL)
+	result.CoverURL = imageutil.UpgradeDMMCoverCDN(result.CoverURL)
 	if result.CoverURL != "" {
 		posterURL, shouldCrop := imageutil.GetOptimalPosterURL(result.CoverURL, client)
 		result.ShouldCropPoster = shouldCrop

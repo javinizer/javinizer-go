@@ -20,7 +20,7 @@ func TestConstructAwsimgsrcPosterURL(t *testing.T) {
 		{
 			name:        "digital video format",
 			coverURL:    "https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg",
-			expectedURL: "https://awsimgsrc.dmm.com/dig/video/sone00860/sone00860ps.jpg",
+			expectedURL: "https://awsimgsrc.dmm.com/dig/digital/video/sone00860/sone00860ps.jpg",
 		},
 		{
 			name:        "mono movie format",
@@ -29,8 +29,8 @@ func TestConstructAwsimgsrcPosterURL(t *testing.T) {
 		},
 		{
 			name:        "awsimgsrc already - pl.jpg",
-			coverURL:    "https://awsimgsrc.dmm.com/dig/video/ipx00535/ipx00535pl.jpg",
-			expectedURL: "https://awsimgsrc.dmm.com/dig/video/ipx00535/ipx00535ps.jpg",
+			coverURL:    "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
+			expectedURL: "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535ps.jpg",
 		},
 		{
 			name:        "awsimgsrc mono format - pl.jpg",
@@ -50,7 +50,7 @@ func TestConstructAwsimgsrcPosterURL(t *testing.T) {
 		{
 			name:        "digital amateur format",
 			coverURL:    "https://pics.dmm.co.jp/digital/amateur/oreco183/oreco183pl.jpg",
-			expectedURL: "https://awsimgsrc.dmm.com/dig/amateur/oreco183/oreco183ps.jpg",
+			expectedURL: "https://awsimgsrc.dmm.com/dig/digital/amateur/oreco183/oreco183ps.jpg",
 		},
 		{
 			name:        "awsimgsrc.dmm.co.jp domain",
@@ -152,41 +152,32 @@ func TestGetOptimalPosterURL_WithHTTPServer(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		coverURL        string
 		posterImageData []byte
 		posterStatus    int
-		expectedPoster  string // "awsimgsrc" or "cover"
 		expectedCrop    bool
 	}{
 		{
 			name:            "high quality poster - use awsimgsrc",
-			coverURL:        "https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg",
 			posterImageData: highQualityImage,
 			posterStatus:    http.StatusOK,
-			expectedPoster:  "cover",
-			expectedCrop:    true, // test server isn't on awsimgsrc.dmm.com, so the constructed ps.jpg URL 404s and the cover is returned for cropping
+			expectedCrop:    false, // meets MinPoster dimensions: return ps.jpg directly
 		},
 		{
 			name:            "low quality poster - fallback to cover",
-			coverURL:        "https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg",
 			posterImageData: lowQualityImage,
 			posterStatus:    http.StatusOK,
-			expectedPoster:  "cover",
-			expectedCrop:    true, // no high-quality portrait: caller must crop the cover
+			expectedCrop:    true, // too small: caller must crop the cover
 		},
 		{
 			name:            "poster not found - fallback to cover",
-			coverURL:        "https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg",
 			posterImageData: nil,
 			posterStatus:    http.StatusNotFound,
-			expectedPoster:  "cover",
 			expectedCrop:    true, // no high-quality portrait: caller must crop the cover
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if tt.posterStatus != http.StatusOK {
 					w.WriteHeader(tt.posterStatus)
@@ -198,34 +189,28 @@ func TestGetOptimalPosterURL_WithHTTPServer(t *testing.T) {
 			}))
 			defer server.Close()
 
-			// Override the cover URL to point to our test server
-			// The function will construct an awsimgsrc URL, but we need to test the dimension checking logic
-			// So we'll test with a URL that already points to awsimgsrc (our test server)
-			testCoverURL := server.URL + "/digital/video/sone00860/sone00860pl.jpg"
-
-			client := &http.Client{Timeout: 5 * time.Second}
+			// Use a real awsimgsrc.dmm.com cover URL (so constructAwsimgsrcURL
+			// takes the already-awsimgsrc branch and produces a ps.jpg URL on
+			// the same host), but intercept HTTP requests via a custom transport
+			// that routes awsimgsrc.dmm.com to our local test server. This lets
+			// us exercise the dimension-checking logic without hitting the real
+			// CDN.
+			testCoverURL := "https://awsimgsrc.dmm.com/dig/digital/video/sone00860/sone00860pl.jpg"
+			client := &http.Client{
+				Timeout: 5 * time.Second,
+				Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+					req.URL.Scheme = server.URL[:strings.Index(server.URL, ":")]
+					req.URL.Host = server.URL[strings.Index(server.URL, ":")+3:]
+					return http.DefaultTransport.RoundTrip(req)
+				}),
+			}
 			posterURL, shouldCrop := GetOptimalPosterURL(testCoverURL, client)
 
 			if shouldCrop != tt.expectedCrop {
-				t.Errorf("shouldCrop = %v, want %v", shouldCrop, tt.expectedCrop)
-			}
-
-			// Since GetOptimalPosterURL tries to fetch from awsimgsrc.dmm.com (which won't work in tests),
-			// it will fall back to coverURL. This is expected behavior.
-			// In a real scenario, this would work, but for testing we verify the fallback logic.
-			if tt.expectedPoster == "cover" {
-				if !contains(posterURL, testCoverURL) && posterURL != testCoverURL {
-					// It's okay if it constructed an awsimgsrc URL but that would fail,
-					// so it falls back to cover
-					t.Logf("Poster URL fallback behavior verified")
-				}
+				t.Errorf("shouldCrop = %v, want %v (posterURL=%s)", shouldCrop, tt.expectedCrop, posterURL)
 			}
 		})
 	}
-}
-
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
 }
 
 func TestGetImageDimensions(t *testing.T) {
@@ -379,9 +364,9 @@ func TestConstructAwsimgsrcPosterURL_UnknownPattern(t *testing.T) {
 		expectedURL string
 	}{
 		{
-			name:        "unknown path with valid ID pattern",
+			name:        "unknown path with valid ID pattern returns empty",
 			coverURL:    "https://pics.dmm.co.jp/some/other/path/abc123/abc123pl.jpg",
-			expectedURL: "https://awsimgsrc.dmm.com/dig/video/abc123/abc123ps.jpg",
+			expectedURL: "",
 		},
 		{
 			name:        "URL with different extension",
@@ -391,7 +376,7 @@ func TestConstructAwsimgsrcPosterURL_UnknownPattern(t *testing.T) {
 		{
 			name:        "URL without ID repetition - uses last ID",
 			coverURL:    "https://pics.dmm.co.jp/digital/video/sone00860/differentidpl.jpg",
-			expectedURL: "https://awsimgsrc.dmm.com/dig/video/differentid/differentidps.jpg",
+			expectedURL: "https://awsimgsrc.dmm.com/dig/digital/video/differentid/differentidps.jpg",
 		},
 	}
 
@@ -413,18 +398,18 @@ func TestNormalizeThenConstructPosterURL(t *testing.T) {
 	}{
 		{
 			name:        "awsimgsrc CDN rewritten then poster constructed",
-			rawCoverURL: "https://awsimgsrc.dmm.co.jp/pics_dig/video/sone00860/sone00860pl.jpg",
-			expectedURL: "https://awsimgsrc.dmm.com/dig/video/sone00860/sone00860ps.jpg",
+			rawCoverURL: "https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/sone00860/sone00860pl.jpg",
+			expectedURL: "https://awsimgsrc.dmm.com/dig/digital/video/sone00860/sone00860ps.jpg",
 		},
 		{
 			name:        "digital video cover produces correct poster",
 			rawCoverURL: "https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg",
-			expectedURL: "https://awsimgsrc.dmm.com/dig/video/sone00860/sone00860ps.jpg",
+			expectedURL: "https://awsimgsrc.dmm.com/dig/digital/video/sone00860/sone00860ps.jpg",
 		},
 		{
 			name:        "digital amateur cover produces correct poster",
 			rawCoverURL: "https://pics.dmm.co.jp/digital/amateur/oreco183/oreco183pl.jpg",
-			expectedURL: "https://awsimgsrc.dmm.com/dig/amateur/oreco183/oreco183ps.jpg",
+			expectedURL: "https://awsimgsrc.dmm.com/dig/digital/amateur/oreco183/oreco183ps.jpg",
 		},
 	}
 
@@ -438,4 +423,75 @@ func TestNormalizeThenConstructPosterURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestConstructAwsimgsrcURL_HostValidation verifies the blocker fix: only
+// pics.dmm.co.jp (or already-awsimgsrc) URLs are rewritten. Non-DMM URLs
+// that happen to match the path pattern must be left alone (return "").
+func TestConstructAwsimgsrcURL_HostValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		coverURL    string
+		suffix      string
+		expectedURL string
+	}{
+		{
+			name:        "non-DMM host with digital video path returns empty",
+			coverURL:    "https://example.com/digital/video/foo/foopl.jpg",
+			suffix:      "pl.jpg",
+			expectedURL: "",
+		},
+		{
+			name:        "non-DMM host with matching pattern returns empty",
+			coverURL:    "https://evil.com/awsimgsrc.dmm.com/dig/video/foo/foopl.jpg",
+			suffix:      "ps.jpg",
+			expectedURL: "",
+		},
+		{
+			name:        "already-awsimgsrc host suffix swap",
+			coverURL:    "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
+			suffix:      "ps.jpg",
+			expectedURL: "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535ps.jpg",
+		},
+		{
+			name:        "already-awsimgsrc ps.jpg to pl.jpg",
+			coverURL:    "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535ps.jpg",
+			suffix:      "pl.jpg",
+			expectedURL: "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
+		},
+		{
+			name:        "awsimgsrc.dmm.co.jp host recognized",
+			coverURL:    "https://awsimgsrc.dmm.co.jp/pics_dig/video/sone00860/sone00860pl.jpg",
+			suffix:      "ps.jpg",
+			expectedURL: "https://awsimgsrc.dmm.co.jp/pics_dig/video/sone00860/sone00860ps.jpg",
+		},
+		{
+			name:        "pics host unknown path returns empty",
+			coverURL:    "https://pics.dmm.co.jp/unknown/segment/foo/foopl.jpg",
+			suffix:      "ps.jpg",
+			expectedURL: "",
+		},
+		{
+			name:        "pics host no pl.jpg suffix returns empty",
+			coverURL:    "https://pics.dmm.co.jp/digital/video/foo/foops.jpg",
+			suffix:      "pl.jpg",
+			expectedURL: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := constructAwsimgsrcURL(tt.coverURL, tt.suffix)
+			if result != tt.expectedURL {
+				t.Errorf("constructAwsimgsrcURL(%q, %q) = %q, want %q",
+					tt.coverURL, tt.suffix, result, tt.expectedURL)
+			}
+		})
+	}
+}
+
+type roundTripperFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

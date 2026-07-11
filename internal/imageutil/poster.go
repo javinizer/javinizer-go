@@ -7,6 +7,7 @@ import (
 	_ "image/png"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -67,54 +68,89 @@ func GetOptimalPosterURL(coverURL string, client *http.Client) (posterURL string
 }
 
 // constructAwsimgsrcPosterURL converts a cover URL to an awsimgsrc poster URL
+// (ps.jpg). It is a thin wrapper around constructAwsimgsrcURL.
+//
 // Example: https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg
 //
-//	-> https://awsimgsrc.dmm.com/dig/video/sone00860/sone00860ps.jpg
+//	-> https://awsimgsrc.dmm.com/dig/digital/video/sone00860/sone00860ps.jpg
 //
 // Example: https://pics.dmm.co.jp/mono/movie/adult/118abw001/118abw001pl.jpg
 //
 //	-> https://awsimgsrc.dmm.com/dig/mono/movie/118abw001/118abw001ps.jpg
 func constructAwsimgsrcPosterURL(coverURL string) string {
+	return constructAwsimgsrcURL(coverURL, "ps.jpg")
+}
+
+// constructAwsimgsrcURL converts a pics.dmm.co.jp (or already-awsimgsrc)
+// cover URL to its awsimgsrc.dmm.com equivalent using the requested filename
+// suffix (e.g. "ps.jpg" for posters, "pl.jpg" for high-res covers). Returns
+// "" if coverURL does not match a known DMM cover pattern.
+//
+// Path mapping (verified against the live CDN):
+//   - digital/video/{id}/{id}pl.jpg    -> dig/digital/video/{id}/{id}{suffix}
+//   - digital/amateur/{id}/{id}pl.jpg  -> dig/digital/amateur/{id}/{id}{suffix}
+//   - mono/movie/adult/{id}/{id}pl.jpg -> dig/mono/movie/{id}/{id}{suffix}
+//
+// When the input is already on awsimgsrc.dmm.com / awsimgsrc.dmm.co.jp, only
+// the filename suffix is swapped.
+func constructAwsimgsrcURL(coverURL, suffix string) string {
 	if coverURL == "" {
 		return ""
 	}
 
-	// Pattern 1: digital/video/[id]/[id]pl.jpg -> dig/video/[id]/[id]ps.jpg
-	// Pattern 2: mono/movie/adult/[id]/[id]pl.jpg -> dig/mono/movie/[id]/[id]ps.jpg
-	// Pattern 3: awsimgsrc already - just replace pl.jpg with ps.jpg
-
-	// If it's already awsimgsrc, just replace pl.jpg with ps.jpg
-	if strings.Contains(coverURL, "awsimgsrc.dmm.com") || strings.Contains(coverURL, "awsimgsrc.dmm.co.jp") {
-		return strings.Replace(coverURL, "pl.jpg", "ps.jpg", 1)
+	u, err := url.Parse(coverURL)
+	if err != nil {
+		return ""
 	}
 
-	// Extract the content ID from the URL
-	// Pattern: .../[id]/[id]pl.jpg
+	if isAwsimgsrcHost(u.Hostname()) {
+		return swapDMMCoverSuffix(coverURL, suffix)
+	}
+
+	if u.Hostname() != picsDMMHost {
+		return ""
+	}
+
 	re := regexp.MustCompile(`/([\w\d]+)/([\w\d]+)pl\.jpg$`)
 	matches := re.FindStringSubmatch(coverURL)
 	if len(matches) < 3 {
 		return ""
 	}
 
-	contentID := matches[2] // The ID part (e.g., sone00860, 118abw001)
+	contentID := matches[2]
 
-	// Determine the path structure
 	var awsimgsrcPath string
-	if strings.Contains(coverURL, "/digital/video/") {
-		// Digital video pattern: dig/video/[id]/[id]ps.jpg
-		awsimgsrcPath = fmt.Sprintf("dig/video/%s/%sps.jpg", contentID, contentID)
-	} else if strings.Contains(coverURL, "/digital/amateur/") {
-		// Amateur pattern: dig/amateur/[id]/[id]ps.jpg
-		awsimgsrcPath = fmt.Sprintf("dig/amateur/%s/%sps.jpg", contentID, contentID)
-	} else if strings.Contains(coverURL, "/mono/movie/") {
-		// Mono movie pattern: dig/mono/movie/[id]/[id]ps.jpg
-		awsimgsrcPath = fmt.Sprintf("dig/mono/movie/%s/%sps.jpg", contentID, contentID)
-	} else {
-		// Unknown pattern, try the simpler format
-		awsimgsrcPath = fmt.Sprintf("dig/video/%s/%sps.jpg", contentID, contentID)
+	switch {
+	case strings.Contains(coverURL, "/digital/video/"):
+		awsimgsrcPath = fmt.Sprintf("dig/digital/video/%s/%s%s", contentID, contentID, suffix)
+	case strings.Contains(coverURL, "/digital/amateur/"):
+		awsimgsrcPath = fmt.Sprintf("dig/digital/amateur/%s/%s%s", contentID, contentID, suffix)
+	case strings.Contains(coverURL, "/mono/movie/"):
+		awsimgsrcPath = fmt.Sprintf("dig/mono/movie/%s/%s%s", contentID, contentID, suffix)
+	default:
+		return ""
 	}
 
 	return fmt.Sprintf("https://awsimgsrc.dmm.com/%s", awsimgsrcPath)
+}
+
+func isAwsimgsrcHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "awsimgsrc.dmm.com" || host == "awsimgsrc.dmm.co.jp"
+}
+
+// swapDMMCoverSuffix replaces the trailing cover/poster suffix of a DMM
+// image URL with the requested suffix. Recognized source suffixes are
+// pl.jpg and ps.jpg; URLs ending in anything else are returned unchanged.
+func swapDMMCoverSuffix(url, suffix string) string {
+	switch {
+	case strings.HasSuffix(url, "pl.jpg"):
+		return url[:len(url)-len("pl.jpg")] + suffix
+	case strings.HasSuffix(url, "ps.jpg"):
+		return url[:len(url)-len("ps.jpg")] + suffix
+	default:
+		return url
+	}
 }
 
 // GetImageDimensions fetches an image and returns its dimensions

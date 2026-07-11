@@ -74,13 +74,13 @@ func TestExtractCoverURLNewSite(t *testing.T) {
 	}{
 		{
 			name:     "from og:image",
-			html:     `<html><head><meta property="og:image" content="https://awsimgsrc.dmm.co.jp/pics_dig/video/ipx00535/ipx00535ps.jpg"></head><body></body></html>`,
-			expected: "https://pics.dmm.co.jp/video/ipx00535/ipx00535pl.jpg",
+			html:     `<html><head><meta property="og:image" content="https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/ipx00535/ipx00535ps.jpg"></head><body></body></html>`,
+			expected: "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
 		},
 		{
 			name:     "from og:image with query params",
-			html:     `<html><head><meta property="og:image" content="https://awsimgsrc.dmm.co.jp/pics_dig/video/ipx00535/ipx00535ps.jpg?size=large"></head><body></body></html>`,
-			expected: "https://pics.dmm.co.jp/video/ipx00535/ipx00535pl.jpg",
+			html:     `<html><head><meta property="og:image" content="https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/ipx00535/ipx00535ps.jpg?size=large"></head><body></body></html>`,
+			expected: "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
 		},
 		{
 			name:     "from CSS background-image with protocol-relative URL (amateur video keeps jp.jpg)",
@@ -108,19 +108,19 @@ func TestExtractCoverURLNewSite(t *testing.T) {
 			expected: "https://pics.dmm.co.jp/digital/amateur/oreco183/oreco183jp.jpg",
 		},
 		{
-			name:     "from CSS background-image with regular video (converts jp.jpg to pl.jpg)",
+			name:     "from CSS background-image with regular video (converts jp.jpg to pl.jpg + awsimgsrc CDN)",
 			html:     `<html><body><div style="background-image: url(//pics.dmm.co.jp/digital/video/ipx00535/ipx00535jp.jpg);"></div></body></html>`,
-			expected: "https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535pl.jpg",
+			expected: "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
 		},
 		{
 			name:     "from img tag",
-			html:     `<html><head></head><body><img src="https://awsimgsrc.dmm.co.jp/pics_dig/video/ipx00535/ipx00535pl.jpg?v=1" /></body></html>`,
-			expected: "https://pics.dmm.co.jp/video/ipx00535/ipx00535pl.jpg",
+			html:     `<html><head></head><body><img src="https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/ipx00535/ipx00535pl.jpg?v=1" /></body></html>`,
+			expected: "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
 		},
 		{
 			name:     "from img tag with awsimgsrc.dmm.com domain and query params",
-			html:     `<html><head></head><body><img src="https://awsimgsrc.dmm.com/dig/video/ipx00535/ipx00535pl.jpg?v=1" /></body></html>`,
-			expected: "https://awsimgsrc.dmm.com/dig/video/ipx00535/ipx00535pl.jpg",
+			html:     `<html><head></head><body><img src="https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg?v=1" /></body></html>`,
+			expected: "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
 		},
 		{
 			name:      "fallback to constructed URL from content ID (amateur video uses jp.jpg)",

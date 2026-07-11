@@ -143,7 +143,7 @@ func TestGetURLAndSearch_SuccessWithCachedContentID(t *testing.T) {
 	assert.Equal(t, "Director Name", result.Director)
 	assert.Equal(t, "Maker Name", result.Maker)
 	assert.Equal(t, "Label Name", result.Label)
-	assert.Equal(t, "https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535pl.jpg", result.CoverURL)
+	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg", result.CoverURL)
 	assert.Len(t, result.ScreenshotURL, 2)
 	assert.Len(t, result.Genres, 2)
 	assert.Len(t, result.Actresses, 1)

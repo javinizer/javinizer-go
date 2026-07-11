@@ -333,6 +333,7 @@ func (s *scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 
 	result.CoverURL = imageutil.NormalizeDMMScreenshotURL(extractCoverURL(doc, sourceURL))
 	result.CoverURL = imageutil.UpgradeCoverResolution(result.CoverURL)
+	result.CoverURL = imageutil.UpgradeDMMCoverCDN(result.CoverURL)
 	posterURL, shouldCrop := imageutil.GetOptimalPosterURL(result.CoverURL, s.client.GetClient())
 	result.ShouldCropPoster = shouldCrop
 	if shouldCrop {

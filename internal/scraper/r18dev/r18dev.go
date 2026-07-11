@@ -590,6 +590,8 @@ func resolveMediaURLs(ctx context.Context, s *scraper, data *r18Response, result
 	if coverImageURL != "" {
 		coverImageURL = imageutil.NormalizeDMMScreenshotURL(coverImageURL)
 		coverImageURL = imageutil.UpgradeCoverResolution(coverImageURL)
+		// Keep coverImageURL on pics.dmm.co.jp for now — DiscoverScreenshots
+		// (below) requires it. UpgradeDMMCoverCDN is applied after discovery.
 		result.CoverURL = coverImageURL
 
 		posterURL, shouldCrop := imageutil.GetOptimalPosterURL(coverImageURL, s.client.GetClient())
@@ -644,6 +646,19 @@ func resolveMediaURLs(ctx context.Context, s *scraper, data *r18Response, result
 			logging.Debugf("r18dev: Discovered %d screenshots via cover URL probing for %s", len(discovered), result.ID)
 			result.ScreenshotURL = discovered
 		}
+	}
+
+	// Upgrade cover (and any cover-derived poster) to the high-res awsimgsrc
+	// CDN. Applied after DiscoverScreenshots, which requires the pics.dmm.co.jp
+	// host. If the poster was set to the cover for cropping (shouldCrop=true
+	// and resolveAwsimgsrcPoster found nothing), upgrade it too so the crop uses
+	// the high-res source.
+	if result.CoverURL != "" {
+		upgradedCover := imageutil.UpgradeDMMCoverCDN(result.CoverURL)
+		if result.PosterURL == result.CoverURL {
+			result.PosterURL = upgradedCover
+		}
+		result.CoverURL = upgradedCover
 	}
 
 	// Parse trailer - try top-level sample_url first (newer API), then nested Sample (older API)

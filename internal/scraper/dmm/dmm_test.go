@@ -467,7 +467,7 @@ func TestParseHTML_OldSite(t *testing.T) {
 	assert.Len(t, result.Actresses, 2)
 	// Actresses may be in either order
 	// assert.Equal(t, "Test Actress", result.Actresses[0].JapaneseName)
-	assert.Equal(t, "https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535pl.jpg", result.CoverURL)
+	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg", result.CoverURL)
 	assert.Len(t, result.ScreenshotURL, 2)
 }
 
@@ -1188,22 +1188,22 @@ func TestExtractCoverURL_EdgeCases(t *testing.T) {
 			name:        "Digital video cover",
 			html:        `<img src="https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535ps.jpg" />`,
 			isNewSite:   false,
-			expected:    "https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535pl.jpg",
-			description: "Should replace ps.jpg with pl.jpg for larger image",
+			expected:    "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg",
+			description: "Should replace ps.jpg with pl.jpg and upgrade to awsimgsrc CDN",
 		},
 		{
 			name:        "Physical DVD cover",
 			html:        `<img src="https://pics.dmm.co.jp/mono/movie/adult/abp420/abp420ps.jpg" />`,
 			isNewSite:   false,
-			expected:    "https://pics.dmm.co.jp/mono/movie/adult/abp420/abp420pl.jpg",
-			description: "Should replace ps.jpg with pl.jpg for DVD",
+			expected:    "https://awsimgsrc.dmm.com/dig/mono/movie/abp420/abp420pl.jpg",
+			description: "Should replace ps.jpg with pl.jpg and upgrade to awsimgsrc CDN for DVD",
 		},
 		{
 			name:        "Amateur cover",
 			html:        `<img src="https://pics.dmm.co.jp/digital/amateur/xyz123/xyz123ps.jpg" />`,
 			isNewSite:   false,
-			expected:    "https://pics.dmm.co.jp/digital/amateur/xyz123/xyz123pl.jpg",
-			description: "Should handle amateur category covers",
+			expected:    "https://awsimgsrc.dmm.com/dig/digital/amateur/xyz123/xyz123pl.jpg",
+			description: "Should handle amateur category covers and upgrade to awsimgsrc CDN",
 		},
 		{
 			name:        "No cover image",

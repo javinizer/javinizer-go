@@ -271,3 +271,54 @@ func TestUpgradeCoverResolution(t *testing.T) {
 		})
 	}
 }
+
+func TestUpgradeDMMCoverCDN(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+	}{
+		{
+			name:     "pics digital video pl.jpg upgraded to awsimgsrc",
+			url:      "https://pics.dmm.co.jp/digital/video/sone00560/sone00560pl.jpg",
+			expected: "https://awsimgsrc.dmm.com/dig/digital/video/sone00560/sone00560pl.jpg",
+		},
+		{
+			name:     "pics mono movie pl.jpg upgraded to awsimgsrc",
+			url:      "https://pics.dmm.co.jp/mono/movie/adult/118abw001/118abw001pl.jpg",
+			expected: "https://awsimgsrc.dmm.com/dig/mono/movie/118abw001/118abw001pl.jpg",
+		},
+		{
+			name:     "pics amateur pl.jpg upgraded to awsimgsrc",
+			url:      "https://pics.dmm.co.jp/digital/amateur/oreco183/oreco183pl.jpg",
+			expected: "https://awsimgsrc.dmm.com/dig/digital/amateur/oreco183/oreco183pl.jpg",
+		},
+		{
+			name:     "already awsimgsrc pl.jpg unchanged (idempotent)",
+			url:      "https://awsimgsrc.dmm.com/dig/digital/video/sone00560/sone00560pl.jpg",
+			expected: "https://awsimgsrc.dmm.com/dig/digital/video/sone00560/sone00560pl.jpg",
+		},
+		{
+			name:     "non-DMM URL unchanged",
+			url:      "https://example.com/digital/video/foo/foopl.jpg",
+			expected: "https://example.com/digital/video/foo/foopl.jpg",
+		},
+		{
+			name:     "pics amateur jp.jpg unchanged (no pl.jpg suffix)",
+			url:      "https://pics.dmm.co.jp/digital/amateur/oreco183/oreco183jp.jpg",
+			expected: "https://pics.dmm.co.jp/digital/amateur/oreco183/oreco183jp.jpg",
+		},
+		{
+			name:     "empty string unchanged",
+			url:      "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := UpgradeDMMCoverCDN(tt.url)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

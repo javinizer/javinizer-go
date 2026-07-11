@@ -192,6 +192,13 @@ func TestScraper_Search_Success(t *testing.T) {
 	// Override base URL for testing (we need to modify the client to use test server)
 	// For now, we'll test the parsing logic separately since we can't easily override the URL
 
+	// Disable network for the poster dimension probe so the poster falls back to
+	// the cover deterministically (the awsimgsrc poster URL is otherwise fetched
+	// against the real CDN, making the assertion network-dependent).
+	scraper.client.GetClient().Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("network disabled")
+	})
+
 	// Test parseResponse directly instead
 	var data r18Response
 	err := json.Unmarshal(loadTestData(t, "ipx535_full_response.json"), &data)
@@ -246,9 +253,11 @@ func TestScraper_Search_Success(t *testing.T) {
 	assert.Equal(t, "桜 もも", actress.JapaneseName)
 	assert.Contains(t, actress.ThumbURL, "sakura_momo.jpg")
 
-	// Verify cover/poster URLs
-	assert.Equal(t, "https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535pl.jpg", result.PosterURL)
-	assert.Equal(t, "https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535pl.jpg", result.CoverURL)
+	// Verify cover/poster URLs (cover upgraded to awsimgsrc CDN; poster falls back
+	// to the cover because the dimension probe is network-disabled).
+	expectedCoverURL := "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg"
+	assert.Equal(t, expectedCoverURL, result.PosterURL)
+	assert.Equal(t, expectedCoverURL, result.CoverURL)
 
 	// Verify screenshots
 	require.Len(t, result.ScreenshotURL, 2)
@@ -2163,4 +2172,11 @@ func TestSearch_AP288_BlankDVDID(t *testing.T) {
 	require.NotNil(t, result)
 	assert.Equal(t, "AP-288", result.ID)
 	assert.Equal(t, "1ap00288", result.ContentID)
+}
+
+// roundTripperFunc is a test helper for HTTP round tripper.
+type roundTripperFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

@@ -214,6 +214,7 @@ func (s *scraper) resolveDumpMediaURLs(d *models.DumpMovie, result *models.Scrap
 	if coverURL != "" {
 		coverURL = imageutil.NormalizeDMMScreenshotURL(coverURL)
 		coverURL = imageutil.UpgradeCoverResolution(coverURL)
+		coverURL = imageutil.UpgradeDMMCoverCDN(coverURL)
 		result.CoverURL = coverURL
 	}
 

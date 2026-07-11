@@ -411,6 +411,7 @@ func (s *scraper) parseDetailPage(html string, id string, sourceURL string, lang
 	// Media URLs
 	result.CoverURL = imageutil.NormalizeDMMScreenshotURL(s.extractCoverURL(html))
 	result.CoverURL = imageutil.UpgradeCoverResolution(result.CoverURL)
+	result.CoverURL = imageutil.UpgradeDMMCoverCDN(result.CoverURL)
 
 	rawScreenshots := s.extractScreenshotURLs(html)
 	normalizedScreenshots := make([]string, 0, len(rawScreenshots))
