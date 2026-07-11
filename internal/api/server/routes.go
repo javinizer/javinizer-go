@@ -185,6 +185,10 @@ func registerStaticWebRoutes(router *gin.Engine, assets webUIAssets) {
 		router.GET("/favicon.ico", func(c *gin.Context) { c.FileFromFS("favicon.ico", assets.staticFS) })
 	}
 
+	if _, err := fs.Stat(assets.distFS, "javinizer.png"); err == nil {
+		router.GET("/javinizer.png", func(c *gin.Context) { c.FileFromFS("javinizer.png", assets.staticFS) })
+	}
+
 	if _, err := fs.Stat(assets.distFS, "robots.txt"); err == nil {
 		router.GET("/robots.txt", func(c *gin.Context) { c.FileFromFS("robots.txt", assets.staticFS) })
 	}
