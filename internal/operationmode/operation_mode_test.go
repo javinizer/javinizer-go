@@ -175,3 +175,25 @@ func TestOperationMode_Constants(t *testing.T) {
 		})
 	}
 }
+
+func TestOperationMode_RequiresOrganize(t *testing.T) {
+	testCases := []struct {
+		name string
+		mode OperationMode
+		want bool
+	}{
+		{name: "organize", mode: OperationModeOrganize, want: true},
+		{name: "in-place", mode: OperationModeInPlace, want: true},
+		{name: "in-place-norenamefolder", mode: OperationModeInPlaceNoRenameFolder, want: true},
+		{name: "metadata-artwork", mode: OperationModeMetadataArtwork, want: false},
+		{name: "preview", mode: OperationModePreview, want: false},
+		{name: "empty (default)", mode: "", want: false},
+		{name: "unknown", mode: OperationMode("bogus"), want: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.mode.RequiresOrganize())
+		})
+	}
+}
