@@ -151,6 +151,7 @@ func (b *testBuffer) Bytes() []byte {
 func TestGetOptimalPosterURL_WithHTTPServer(t *testing.T) {
 	// Create test images with different dimensions
 	highQualityImage := createTestJPEG(t, 1000, 1500) // Meets requirements
+	mihdImage := createTestJPEG(t, 714, 972)          // Real MIHD-001 poster size
 	lowQualityImage := createTestJPEG(t, 500, 700)    // Too small
 
 	tests := []struct {
@@ -164,6 +165,12 @@ func TestGetOptimalPosterURL_WithHTTPServer(t *testing.T) {
 			posterImageData: highQualityImage,
 			posterStatus:    http.StatusOK,
 			expectedCrop:    false, // meets MinPoster dimensions: return ps.jpg directly
+		},
+		{
+			name:            "real DMM poster below old threshold (MIHD-001 714x972)",
+			posterImageData: mihdImage,
+			posterStatus:    http.StatusOK,
+			expectedCrop:    false, // real poster art preferred over cropping the landscape cover
 		},
 		{
 			name:            "low quality poster - fallback to cover",

@@ -16,11 +16,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
-// MinPosterWidth and MinPosterHeight are the minimum pixel dimensions for a high-quality portrait poster.
+// MinPosterWidth and MinPosterHeight are the minimum pixel dimensions for a
+// usable portrait poster. Real DMM awsimgsrc posters (ps.jpg) range from
+// ~714x972 (e.g. MIHD-001) up to ~1032x1469, so the floor is set below the
+// smallest observed real poster with margin. Placeholders / thumbnails served
+// for missing titles are well under this (and usually 404 anyway), so they are
+// still rejected in favor of cropping the high-res cover.
 const (
-	MinPosterWidth = 800
+	MinPosterWidth = 600
 
-	MinPosterHeight = 1000
+	MinPosterHeight = 800
 
 	maxDimensionReadBytes = 256 * 1024
 )
