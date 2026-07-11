@@ -72,7 +72,7 @@ func TestPlan_AppendsPartSuffix(t *testing.T) {
 				Path:        "/src/IPX-535.mp4", Name: "IPX-535.mp4", Extension: ".mp4",
 			}
 
-			plan, err := o.plan(match, movie, "/dest", false)
+			plan, err := o.plan(match, movie, "/dest", false, "")
 			if err != nil {
 				t.Fatalf("Plan failed: %v", err)
 			}

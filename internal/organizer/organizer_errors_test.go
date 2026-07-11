@@ -42,7 +42,7 @@ func TestOrganizer_Copy_ErrorPaths(t *testing.T) {
 			MovieID: "IPX-535",
 		}
 
-		plan, err := org.plan(match, movie, tmpDir, false)
+		plan, err := org.plan(match, movie, tmpDir, false, "")
 		require.NoError(t, err)
 
 		// Create conflicting target file
@@ -50,7 +50,7 @@ func TestOrganizer_Copy_ErrorPaths(t *testing.T) {
 		require.NoError(t, os.WriteFile(plan.TargetPath, []byte("existing"), 0644))
 
 		// Re-plan to detect conflict
-		plan, err = org.plan(match, movie, tmpDir, false)
+		plan, err = org.plan(match, movie, tmpDir, false, "")
 		require.NoError(t, err)
 		assert.NotEmpty(t, plan.Conflicts)
 
@@ -288,7 +288,7 @@ func TestOrganizer_Execute_PermissionErrors(t *testing.T) {
 		}
 
 		// Try to plan (this should work)
-		plan, err := org.plan(match, movie, readonlyDir, false)
+		plan, err := org.plan(match, movie, readonlyDir, false, "")
 		require.NoError(t, err)
 
 		// Try to execute (this should fail due to permissions)
@@ -323,7 +323,7 @@ func TestOrganizer_Execute_PermissionErrors(t *testing.T) {
 		}
 
 		destDir := filepath.Join(tmpDir, "normal-dest")
-		plan, err := org.plan(match, movie, destDir, false)
+		plan, err := org.plan(match, movie, destDir, false, "")
 		require.NoError(t, err)
 
 		// Try to execute move operation
@@ -441,7 +441,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MovieID: "IPX-535",
 		}
 
-		plan, err := org.plan(match, movie, tmpDir, false)
+		plan, err := org.plan(match, movie, tmpDir, false, "")
 		require.NoError(t, err)
 		assert.NotNil(t, plan)
 		// Should include studio subfolder in path
@@ -466,7 +466,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MovieID: "IPX-535",
 		}
 
-		plan, err := org.plan(match, movie, tmpDir, false)
+		plan, err := org.plan(match, movie, tmpDir, false, "")
 		// Should fail path length validation
 		assert.Error(t, err)
 		assert.Nil(t, plan)
@@ -490,7 +490,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MovieID: "IPX-535",
 		}
 
-		plan, err := org.plan(match, movie, tmpDir, false)
+		plan, err := org.plan(match, movie, tmpDir, false, "")
 		require.NoError(t, err)
 
 		// The folder name should have truncated title
@@ -520,7 +520,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			PartSuffix:  "-cd1",
 		}
 
-		plan, err := org.plan(match, movie, tmpDir, false)
+		plan, err := org.plan(match, movie, tmpDir, false, "")
 		require.NoError(t, err)
 
 		// Part suffix should be included in filename
@@ -544,7 +544,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MovieID: "IPX-535",
 		}
 
-		plan, err := org.plan(match, movie, tmpDir, false)
+		plan, err := org.plan(match, movie, tmpDir, false, "")
 		require.NoError(t, err)
 
 		// Should include subfolder hierarchy
@@ -568,7 +568,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MovieID: "IPX-535",
 		}
 
-		plan, err := org.plan(match, movie, tmpDir, false)
+		plan, err := org.plan(match, movie, tmpDir, false, "")
 		require.NoError(t, err)
 
 		// Should keep original filename
@@ -595,7 +595,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 		}
 
 		// First plan
-		plan, err := org.plan(match, movie, tmpDir, false)
+		plan, err := org.plan(match, movie, tmpDir, false, "")
 		require.NoError(t, err)
 
 		// Create conflicting target
@@ -603,12 +603,12 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 		require.NoError(t, os.WriteFile(plan.TargetPath, []byte("existing"), 0644))
 
 		// Plan without force update - should detect conflict
-		plan, err = org.plan(match, movie, tmpDir, false)
+		plan, err = org.plan(match, movie, tmpDir, false, "")
 		require.NoError(t, err)
 		assert.NotEmpty(t, plan.Conflicts)
 
 		// Plan with force update - should ignore conflict
-		plan, err = org.plan(match, movie, tmpDir, true)
+		plan, err = org.plan(match, movie, tmpDir, true, "")
 		require.NoError(t, err)
 		assert.Empty(t, plan.Conflicts)
 	})

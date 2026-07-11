@@ -71,7 +71,7 @@ func TestResolveStrategy_UsesOperationModeExclusively(t *testing.T) {
 				MovieID: "TEST-001",
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectedType, plan.strategy,
 				"resolveStrategy() should select %v for OperationMode=%q", tc.expectedType, tc.operationMode)
@@ -104,7 +104,7 @@ func TestResolveStrategy_DefaultsToOrganizeWhenEmpty(t *testing.T) {
 		MovieID: "TEST-001",
 	}
 
-	plan, err := org.plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false, "")
 	require.NoError(t, err)
 	assert.Equal(t, strategyOrganize, plan.strategy,
 		"resolveStrategy() should default to OrganizeStrategy when OperationMode is empty via GetOperationMode()")

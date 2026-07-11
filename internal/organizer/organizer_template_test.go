@@ -87,7 +87,7 @@ func TestOrganizerTemplate_SimplePatterns(t *testing.T) {
 				MovieID: "IPX-123",
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)
@@ -180,7 +180,7 @@ func TestOrganizerTemplate_ComplexPatterns(t *testing.T) {
 				MovieID: movie.ID,
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)
@@ -265,7 +265,7 @@ func TestOrganizerTemplate_ConditionalLogic(t *testing.T) {
 				MovieID: movie.ID,
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)
@@ -349,7 +349,7 @@ func TestOrganizerTemplate_MissingFields(t *testing.T) {
 				MovieID: movie.ID,
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)
@@ -449,7 +449,7 @@ func TestOrganizerTemplate_SpecialCharacters(t *testing.T) {
 				MovieID: "IPX-123",
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedSanitized)
@@ -531,7 +531,7 @@ func TestOrganizerTemplate_UnicodeHandling(t *testing.T) {
 				MovieID: "IPX-123",
 			}
 
-			plan, err := org.plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false, "")
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)

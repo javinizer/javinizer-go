@@ -196,6 +196,12 @@ type OrganizeCmd struct {
 	MoveFiles   bool     // true = move files, false = copy/link
 	LinkMode    LinkMode // Only relevant when MoveFiles=false
 	DryRun      bool
+	// OperationMode overrides the organizer config's mode for this command.
+	// When non-empty, plan() resolves the strategy from this mode instead of
+	// o.config.OperationMode, so a per-request override (e.g. the API's
+	// OperationModeOverride) reaches ResolveStrategy even when the organizer
+	// config still carries the global default. Empty = use config mode.
+	OperationMode operationmode.OperationMode
 }
 
 // OrganizerInterface is the single-method seam for file organization.
@@ -328,8 +334,21 @@ func (o *Organizer) strategyFromType(st strategyType) OperationStrategy {
 	}
 }
 
-func (o *Organizer) plan(match models.FileMatchInfo, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
-	return o.resolveStrategy().Plan(match, movie, destDir, forceUpdate)
+func (o *Organizer) plan(match models.FileMatchInfo, movie *models.Movie, destDir string, forceUpdate bool, modeOverride operationmode.OperationMode) (*OrganizePlan, error) {
+	strategy := o.resolveStrategy()
+	// Honor a per-command mode override so a per-request selection (e.g. the
+	// API's OperationModeOverride) reaches ResolveStrategy instead of being
+	// shadowed by the global mode baked into o.config at factory time.
+	// Shallow-copy the config with the override mode so the resolved strategy
+	// and its Plan() see the requested mode (e.g. in-place strategies branch
+	// on config.OperationMode). Skip the copy when the override is empty or
+	// matches the config — the common no-override path stays unchanged.
+	if modeOverride != "" && modeOverride != o.config.OperationMode {
+		overrideCfg := *o.config
+		overrideCfg.OperationMode = modeOverride
+		strategy = ResolveStrategy(o.fs, &overrideCfg, o.matcher, o.templateEngine)
+	}
+	return strategy.Plan(match, movie, destDir, forceUpdate)
 }
 
 // execute executes an organization plan
@@ -452,7 +471,7 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	default:
 	}
 
-	plan, err := o.plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate)
+	plan, err := o.plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
 	if err != nil {
 		return nil, err
 	}

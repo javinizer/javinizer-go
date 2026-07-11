@@ -163,8 +163,18 @@ func buildApplyCmd(
 	if destPath == "" {
 		destPath = inputs.Destination
 	}
-	if destPath == "" && cfg.OrganizeOptions.Skip {
-		destPath = sourceDir
+	// In-place modes (organize runs but no destination is required) must fall
+	// back to the source dir so downstream steps (download/NFO) resolve a real
+	// directory. The previous gate on cfg.OrganizeOptions.Skip is stale: the
+	// skip-gate fix (!RequiresOrganize()) means in-place modes now run organize
+	// with Skip=false, so an empty destination would otherwise stay empty.
+	// Gate on the effective override mode requiring organize instead of Skip.
+	if destPath == "" {
+		if mode := cfg.OperationModeOverride; mode != "" && mode.RequiresOrganize() {
+			destPath = sourceDir
+		} else if cfg.OrganizeOptions.Skip {
+			destPath = sourceDir
+		}
 	}
 
 	applyCmd := workflow.ApplyCmd{
@@ -177,6 +187,7 @@ func buildApplyCmd(
 		Download:            cfg.Download,
 		DisplayTitleSrc:     movie,
 		DownloadExtrafanart: cfg.DownloadExtrafanart,
+		OperationMode:       cfg.OperationModeOverride,
 	}
 
 	applyCmd.GenerateNFO = cfg.GenerateNFO && inputs.NFOEnabled
