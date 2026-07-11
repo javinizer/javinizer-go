@@ -53,7 +53,7 @@ jobs:
             echo ".github/scripts/sync_codex_ok_labels.py is not available on the default branch yet; skipping bootstrap run"
             exit 0
           fi
-          python3 .github/scripts/sync_codex_ok_labels.py --repo "$REPO" --pr "$PR_NUMBER" --apply --tolerate-write-permission-errors
+          python3 .github/scripts/sync_codex_ok_labels.py --repo "$REPO" --pr "$PR_NUMBER" --apply --no-approve-workflow-runs --tolerate-write-permission-errors
 
   sync-after-ci:
     name: Sync Codex labels after CI
@@ -83,4 +83,4 @@ jobs:
             echo ".github/scripts/sync_codex_ok_labels.py is not available on the default branch yet; skipping bootstrap run"
             exit 0
           fi
-          python3 .github/scripts/sync_codex_ok_labels.py --repo "$REPO" --all-open --apply --tolerate-write-permission-errors --tolerate-read-errors
+          python3 .github/scripts/sync_codex_ok_labels.py --repo "$REPO" --all-open --apply --no-approve-workflow-runs --tolerate-write-permission-errors --tolerate-read-errors
