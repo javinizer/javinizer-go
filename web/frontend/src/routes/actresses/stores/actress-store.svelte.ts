@@ -224,14 +224,14 @@ export function createActressStore() {
 		};
 	}
 
-	function getDisplayName(actress: Actress, firstNameOrder: boolean = false): string {
+	function getDisplayName(actress: Actress, firstNameOrder: boolean): string {
 		return formatActressName(actress, firstNameOrder);
 	}
 
-	function getActressLabelByID(id: number): string {
+	function getActressLabelByID(id: number, firstNameOrder: boolean): string {
 		const actress = actresses.find((item) => item.id === id);
 		if (!actress) return `Actress #${id}`;
-		return `#${id} - ${getDisplayName(actress)}`;
+		return `#${id} - ${getDisplayName(actress, firstNameOrder)}`;
 	}
 
 	function isSelected(actress: Actress): boolean {
@@ -306,9 +306,9 @@ export function createActressStore() {
 		saveActressMutation.mutate(toPayload());
 	}
 
-	async function removeActress(actress: Actress) {
+	async function removeActress(actress: Actress, firstNameOrder: boolean) {
 		if (!actress.id) return;
-		const name = getDisplayName(actress);
+		const name = getDisplayName(actress, firstNameOrder);
 		if (
 			!(await confirmDialog('Delete Actress', `Delete actress "${name}"?`, {
 				confirmLabel: 'Delete',

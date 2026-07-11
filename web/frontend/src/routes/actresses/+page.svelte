@@ -207,7 +207,7 @@
 									isSelected={store.isSelected}
 									onToggleSelection={store.toggleSelection}
 									onStartEdit={store.startEdit}
-									onRemoveActress={store.removeActress}
+									onRemoveActress={(actress) => store.removeActress(actress, firstNameOrder)}
 									deletePending={store.deleteActressMutation.isPending}
 								/>
 							{:else if store.viewMode === 'compact'}
@@ -218,7 +218,7 @@
 									isSelected={store.isSelected}
 									onToggleSelection={store.toggleSelection}
 									onStartEdit={store.startEdit}
-									onRemoveActress={store.removeActress}
+									onRemoveActress={(actress) => store.removeActress(actress, firstNameOrder)}
 									deletePending={store.deleteActressMutation.isPending}
 								/>
 							{:else}
@@ -229,7 +229,7 @@
 									isSelected={store.isSelected}
 									onToggleSelection={store.toggleSelection}
 									onStartEdit={store.startEdit}
-									onRemoveActress={store.removeActress}
+									onRemoveActress={(actress) => store.removeActress(actress, firstNameOrder)}
 									deletePending={store.deleteActressMutation.isPending}
 								/>
 							{/if}
@@ -261,7 +261,7 @@
 	mergePreviewFetching={store.mergePreviewQuery.isFetching}
 	mergeSummary={store.mergeSummary}
 	mergePending={store.mergeActressMutation.isPending}
-	getActressLabelByID={store.getActressLabelByID}
+	getActressLabelByID={(id) => store.getActressLabelByID(id, firstNameOrder)}
 	onCloseMergeModal={store.closeMergeModal}
 	onResetMergeQueueAndPreview={store.resetMergeQueueAndPreview}
 	onApplyCurrentMerge={store.applyCurrentMerge}
