@@ -4,12 +4,24 @@ export interface ActressName {
 	japanese_name?: string;
 }
 
+export interface FormatActressNameOptions {
+	firstNameOrder?: boolean;
+	japaneseNames?: boolean;
+}
+
 export function formatActressName<T extends ActressName>(
 	actress: T,
-	firstNameOrder: boolean
+	opts?: FormatActressNameOptions
 ): string {
+	const firstNameOrder = opts?.firstNameOrder ?? false;
+	const japaneseNames = opts?.japaneseNames ?? false;
+
 	const first = actress.first_name ?? '';
 	const last = actress.last_name ?? '';
+
+	if (japaneseNames && actress.japanese_name) {
+		return actress.japanese_name;
+	}
 
 	if (first === '' && last === '') {
 		if (actress.japanese_name) {

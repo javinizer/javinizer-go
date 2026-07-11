@@ -35,7 +35,7 @@
 			get: (r) =>
 				r.actresses
 					?.filter((a) => (a.first_name ?? '') !== '' || (a.last_name ?? '') !== '' || (a.japanese_name ?? '') !== '')
-					.map((a) => formatActressName(a, firstNameOrder))
+					.map((a) => formatActressName(a, { firstNameOrder, japaneseNames }))
 					.join(', ') ?? ''
 		},
 		{ key: 'genres', label: 'Genres', kind: 'list', get: (r) => r.genres?.filter(Boolean).join(', ') ?? '' },
@@ -55,6 +55,7 @@
 
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
+	let japaneseNames = $derived(configQuery.data?.output?.actress_language_ja ?? false);
 
 	interface Props {
 		show: boolean;

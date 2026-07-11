@@ -16,6 +16,7 @@
 	let { movie, onEdit, selected = false }: Props = $props();
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
+	let japaneseNames = $derived(configQuery.data?.output?.actress_language_ja ?? false);
 </script>
 
 <Card class="overflow-hidden {selected ? 'ring-2 ring-primary' : ''}">
@@ -106,7 +107,7 @@
 				<div class="flex flex-wrap gap-1">
 					{#each movie.actresses.slice(0, 3) as actress}
 						<span class="px-2 py-1 bg-primary/10 text-primary rounded-md text-xs">
-							{formatActressName(actress, firstNameOrder)}
+							{formatActressName(actress, { firstNameOrder, japaneseNames })}
 						</span>
 					{/each}
 					{#if movie.actresses.length > 3}

@@ -26,6 +26,7 @@
 	let { movie, onUpdate, onPersistEdits, actressSources, showFieldSources = false, savingEdits = false, organizing = false }: Props = $props();
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
+	let japaneseNames = $derived(configQuery.data?.output?.actress_language_ja ?? false);
 
 	let actresses = $state<Actress[]>([]);
 	let showEditModal = $state(false);
@@ -187,7 +188,7 @@
 
 	// Helper to get full name
 	function getFullName(actress: Actress): string {
-		return formatActressName(actress, firstNameOrder);
+		return formatActressName(actress, { firstNameOrder, japaneseNames });
 	}
 
 	function notifyParent() {

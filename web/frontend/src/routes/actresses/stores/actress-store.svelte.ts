@@ -224,14 +224,14 @@ export function createActressStore() {
 		};
 	}
 
-	function getDisplayName(actress: Actress, firstNameOrder: boolean): string {
-		return formatActressName(actress, firstNameOrder);
+	function getDisplayName(actress: Actress, firstNameOrder: boolean, japaneseNames: boolean): string {
+		return formatActressName(actress, { firstNameOrder, japaneseNames });
 	}
 
-	function getActressLabelByID(id: number, firstNameOrder: boolean): string {
+	function getActressLabelByID(id: number, firstNameOrder: boolean, japaneseNames: boolean): string {
 		const actress = actresses.find((item) => item.id === id);
 		if (!actress) return `Actress #${id}`;
-		return `#${id} - ${getDisplayName(actress, firstNameOrder)}`;
+		return `#${id} - ${getDisplayName(actress, firstNameOrder, japaneseNames)}`;
 	}
 
 	function isSelected(actress: Actress): boolean {
@@ -306,9 +306,9 @@ export function createActressStore() {
 		saveActressMutation.mutate(toPayload());
 	}
 
-	async function removeActress(actress: Actress, firstNameOrder: boolean) {
+	async function removeActress(actress: Actress, firstNameOrder: boolean, japaneseNames: boolean) {
 		if (!actress.id) return;
-		const name = getDisplayName(actress, firstNameOrder);
+		const name = getDisplayName(actress, firstNameOrder, japaneseNames);
 		if (
 			!(await confirmDialog('Delete Actress', `Delete actress "${name}"?`, {
 				confirmLabel: 'Delete',

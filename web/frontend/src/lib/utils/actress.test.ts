@@ -71,7 +71,7 @@ describe('formatActressName', () => {
 
 	for (const tc of cases) {
 		it(tc.name, () => {
-			expect(formatActressName(makeActress(tc.actress), tc.firstNameOrder)).toBe(tc.want);
+			expect(formatActressName(makeActress(tc.actress), { firstNameOrder: tc.firstNameOrder })).toBe(tc.want);
 		});
 	}
 
@@ -83,6 +83,45 @@ describe('formatActressName', () => {
 			japanese_name: '',
 			thumb_url: 'http://example.com/x.jpg'
 		};
-		expect(formatActressName(actress, true)).toBe('Sara Aoyama');
+		expect(formatActressName(actress, { firstNameOrder: true })).toBe('Sara Aoyama');
+	});
+
+	// japaneseNames flag — mirrors backend models.FormatActressName JapaneseNames
+	// branch (internal/models/actress_format.go:27-29): when true and a
+	// japanese_name is present it takes precedence over first/last ordering.
+	it('japaneseNames=true prefers japanese_name over romanized', () => {
+		const actress = makeActress({ first_name: 'Sara', last_name: 'Aoyama', japanese_name: '青山 sarah' });
+		expect(formatActressName(actress, { firstNameOrder: true, japaneseNames: true })).toBe('青山 sarah');
+		expect(formatActressName(actress, { firstNameOrder: false, japaneseNames: true })).toBe('青山 sarah');
+	});
+
+	it('japaneseNames=true with only romanized falls back to romanized (order still applies)', () => {
+		expect(
+			formatActressName(makeActress({ first_name: 'Sara', last_name: 'Aoyama' }), {
+				firstNameOrder: true,
+				japaneseNames: true
+			})
+		).toBe('Sara Aoyama');
+		expect(
+			formatActressName(makeActress({ first_name: 'Sara', last_name: 'Aoyama' }), {
+				firstNameOrder: false,
+				japaneseNames: true
+			})
+		).toBe('Aoyama Sara');
+	});
+
+	it('japaneseNames=false with both names returns romanized (unaffected)', () => {
+		const actress = makeActress({ first_name: 'Sara', last_name: 'Aoyama', japanese_name: '青山 sarah' });
+		expect(formatActressName(actress, { firstNameOrder: true, japaneseNames: false })).toBe('Sara Aoyama');
+		expect(formatActressName(actress, { firstNameOrder: false, japaneseNames: false })).toBe('Aoyama Sara');
+	});
+
+	it('japaneseNames=true with only japanese_name returns japanese_name', () => {
+		expect(
+			formatActressName(makeActress({ first_name: '', last_name: '', japanese_name: '青山 sarah' }), {
+				firstNameOrder: false,
+				japaneseNames: true
+			})
+		).toBe('青山 sarah');
 	});
 });
