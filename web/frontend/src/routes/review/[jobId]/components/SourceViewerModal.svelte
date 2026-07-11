@@ -6,8 +6,6 @@
 	import type { ScraperResult } from '$lib/api/types';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
-	import { formatActressName } from '$lib/utils/actress';
-	import { createConfigQuery } from '$lib/query/queries';
 
 	interface FieldDef {
 		key: string;
@@ -34,8 +32,8 @@
 			kind: 'list',
 			get: (r) =>
 				r.actresses
-					?.filter((a) => (a.first_name ?? '') !== '' || (a.last_name ?? '') !== '' || (a.japanese_name ?? '') !== '')
-					.map((a) => formatActressName(a, firstNameOrder))
+					?.map((a) => [a.first_name, a.last_name].filter(Boolean).join(' '))
+					.filter(Boolean)
 					.join(', ') ?? ''
 		},
 		{ key: 'genres', label: 'Genres', kind: 'list', get: (r) => r.genres?.filter(Boolean).join(', ') ?? '' },
@@ -52,9 +50,6 @@
 					: ''
 		}
 	];
-
-	const configQuery = createConfigQuery();
-	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
 
 	interface Props {
 		show: boolean;
