@@ -59,6 +59,21 @@ func ParseOperationMode(raw string) (OperationMode, error) {
 	}
 }
 
+// RequiresOrganize reports whether the mode performs file operations
+// (move/copy/link/rename) and so needs the organize step to run.
+// in-place and in-place-norenamefolder rename the file in place and MUST run
+// organize; metadata-artwork does no file ops and preview is non-mutating.
+func (m OperationMode) RequiresOrganize() bool {
+	switch m {
+	case OperationModeOrganize, OperationModeInPlace, OperationModeInPlaceNoRenameFolder:
+		return true
+	case OperationModeMetadataArtwork, OperationModePreview:
+		return false
+	default:
+		return false
+	}
+}
+
 // IsValid reports whether the OperationMode is a known value.
 func (m OperationMode) IsValid() bool {
 	switch m {
