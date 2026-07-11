@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Movie } from '$lib/api/types';
 	import { formatDuration } from '$lib/utils';
+	import { formatActressName } from '$lib/utils/actress';
+	import { createConfigQuery } from '$lib/query/queries';
 	import { Calendar, Clock, Star, Film } from 'lucide-svelte';
 	import Card from './ui/Card.svelte';
 	import Button from './ui/Button.svelte';
@@ -12,6 +14,8 @@
 	}
 
 	let { movie, onEdit, selected = false }: Props = $props();
+	const configQuery = createConfigQuery();
+	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
 </script>
 
 <Card class="overflow-hidden {selected ? 'ring-2 ring-primary' : ''}">
@@ -102,7 +106,7 @@
 				<div class="flex flex-wrap gap-1">
 					{#each movie.actresses.slice(0, 3) as actress}
 						<span class="px-2 py-1 bg-primary/10 text-primary rounded-md text-xs">
-							{actress.japanese_name || `${actress.first_name || ''} ${actress.last_name || ''}`.trim() || 'Unknown'}
+							{formatActressName(actress, firstNameOrder)}
 						</span>
 					{/each}
 					{#if movie.actresses.length > 3}

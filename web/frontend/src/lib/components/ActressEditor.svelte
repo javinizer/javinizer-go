@@ -7,6 +7,8 @@
 	import { portalToBody } from '$lib/actions/portal';
 	import { apiClient } from '$lib/api/client';
 	import type { Movie, Actress, ActressAliasGroup } from '$lib/api/types';
+	import { formatActressName } from '$lib/utils/actress';
+	import { createConfigQuery } from '$lib/query/queries';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 	import { Plus, SquarePen, Trash2, X, Save, Search } from 'lucide-svelte';
@@ -22,6 +24,8 @@
 	}
 
 	let { movie, onUpdate, onPersistEdits, actressSources, showFieldSources = false, savingEdits = false, organizing = false }: Props = $props();
+	const configQuery = createConfigQuery();
+	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
 
 	let actresses = $state<Actress[]>([]);
 	let showEditModal = $state(false);
@@ -183,13 +187,7 @@
 
 	// Helper to get full name
 	function getFullName(actress: Actress): string {
-		if (actress.last_name && actress.first_name) {
-			return `${actress.last_name} ${actress.first_name}`;
-		}
-		if (actress.first_name) {
-			return actress.first_name;
-		}
-		return actress.japanese_name || 'Unknown';
+		return formatActressName(actress, firstNameOrder);
 	}
 
 	function notifyParent() {

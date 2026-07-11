@@ -932,6 +932,7 @@ export interface OutputConfig {
 	actress_delimiter: string;
 	max_title_length: number;
 	max_path_length: number;
+	first_name_order?: boolean;
 	max_poster_height: number;
 	move_subtitles: boolean;
 	subtitle_extensions: string[];

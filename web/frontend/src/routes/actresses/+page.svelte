@@ -16,9 +16,12 @@
 	import ActressTableView from './components/ActressTableView.svelte';
 	import ActressMergeModal from './components/ActressMergeModal.svelte';
 	import ActressPagination from './components/ActressPagination.svelte';
+	import { createConfigQuery } from '$lib/query/queries';
 
 	const store = createActressStore();
 	const queryClient = useQueryClient();
+	const configQuery = createConfigQuery();
+	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
 	let importFile = $state<HTMLInputElement | null>(null);
 
 	const exportMutation = createMutation(() => ({
@@ -200,7 +203,7 @@
 									actresses={store.actresses}
 									selectedIds={store.selectedIds}
 									itemDelay={store.itemDelay}
-									getDisplayName={store.getDisplayName}
+									getDisplayName={(actress) => store.getDisplayName(actress, firstNameOrder)}
 									isSelected={store.isSelected}
 									onToggleSelection={store.toggleSelection}
 									onStartEdit={store.startEdit}
@@ -211,7 +214,7 @@
 								<ActressCompactView
 									actresses={store.actresses}
 									itemDelay={store.itemDelay}
-									getDisplayName={store.getDisplayName}
+									getDisplayName={(actress) => store.getDisplayName(actress, firstNameOrder)}
 									isSelected={store.isSelected}
 									onToggleSelection={store.toggleSelection}
 									onStartEdit={store.startEdit}
@@ -222,7 +225,7 @@
 								<ActressTableView
 									actresses={store.actresses}
 									itemDelay={store.itemDelay}
-									getDisplayName={store.getDisplayName}
+									getDisplayName={(actress) => store.getDisplayName(actress, firstNameOrder)}
 									isSelected={store.isSelected}
 									onToggleSelection={store.toggleSelection}
 									onStartEdit={store.startEdit}

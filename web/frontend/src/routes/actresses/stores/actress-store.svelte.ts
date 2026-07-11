@@ -4,6 +4,7 @@ import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-qu
 import { apiClient } from '$lib/api/client';
 import { toastStore } from '$lib/stores/toast';
 import type { Actress, ActressUpsertRequest, ActressMergeResolution } from '$lib/api/types';
+import { formatActressName } from '$lib/utils/actress';
 
 export type ActressForm = {
 	dmm_id: string;
@@ -223,12 +224,8 @@ export function createActressStore() {
 		};
 	}
 
-	function getDisplayName(actress: Actress): string {
-		if (actress.last_name && actress.first_name)
-			return `${actress.last_name} ${actress.first_name}`;
-		if (actress.first_name) return actress.first_name;
-		if (actress.japanese_name) return actress.japanese_name;
-		return 'Unnamed';
+	function getDisplayName(actress: Actress, firstNameOrder: boolean = false): string {
+		return formatActressName(actress, firstNameOrder);
 	}
 
 	function getActressLabelByID(id: number): string {
