@@ -3,7 +3,6 @@
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import { QueryClientProvider } from '@tanstack/svelte-query';
-	import favicon from '$lib/assets/favicon.svg';
 	import Navigation from '$lib/components/Navigation.svelte';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
 	import DialogContainer from '$lib/components/ui/DialogContainer.svelte';
@@ -120,7 +119,6 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href={favicon} />
 </svelte:head>
 
 {#if authLoading}
