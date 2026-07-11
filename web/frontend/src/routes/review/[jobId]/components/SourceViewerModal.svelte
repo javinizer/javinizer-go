@@ -34,8 +34,8 @@
 			kind: 'list',
 			get: (r) =>
 				r.actresses
-					?.map((a) => formatActressName(a, firstNameOrder))
-					.filter((n) => n !== '' && n !== 'Unknown')
+					?.filter((a) => (a.first_name ?? '') !== '' || (a.last_name ?? '') !== '' || (a.japanese_name ?? '') !== '')
+					.map((a) => formatActressName(a, firstNameOrder))
 					.join(', ') ?? ''
 		},
 		{ key: 'genres', label: 'Genres', kind: 'list', get: (r) => r.genres?.filter(Boolean).join(', ') ?? '' },
