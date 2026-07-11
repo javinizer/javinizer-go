@@ -66,7 +66,7 @@ func TestOrganizer_Plan_OperationModeOverride_PicksOverrideStrategy(t *testing.T
 	assert.Equal(t, filepath.ToSlash(sourceDir), filepath.ToSlash(plan.TargetDir),
 		"target dir must be the source dir (rename in place), not a generated folder under /dest")
 	assert.Equal(t, "ABC-123.mp4", plan.TargetFile)
-	assert.Equal(t, filepath.Join(sourceDir, "ABC-123.mp4"), filepath.ToSlash(plan.TargetPath))
+	assert.Equal(t, filepath.ToSlash(filepath.Join(sourceDir, "ABC-123.mp4")), filepath.ToSlash(plan.TargetPath))
 	assert.Equal(t, "in-place-norenamefolder mode - file rename only", plan.SkipInPlaceReason)
 }
 
@@ -107,7 +107,7 @@ func TestOrganizer_Organize_OperationModeOverride_RenamesInPlace(t *testing.T) {
 
 	// In-place rename: original file is gone, renamed file lives in sourceDir.
 	assert.True(t, result.Moved)
-	assert.Equal(t, filepath.Join(sourceDir, "ABC-123.mp4"), filepath.ToSlash(result.NewPath))
+	assert.Equal(t, filepath.ToSlash(filepath.Join(sourceDir, "ABC-123.mp4")), filepath.ToSlash(result.NewPath))
 
 	oldExists, _ := afero.Exists(fs, sourceFile)
 	assert.False(t, oldExists, "source file should be renamed away")
