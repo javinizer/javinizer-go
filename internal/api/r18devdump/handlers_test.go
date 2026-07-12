@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -572,7 +571,6 @@ func TestDumpHandler_ConcurrentAccess(t *testing.T) {
 }
 
 // Ensure unused imports don't cause issues.
-var _ io.Reader = nil
 
 // --- Coverage for remaining branches ---
 
@@ -640,25 +638,6 @@ func TestStartDownload_ImportError(t *testing.T) {
 }
 
 // --- Coverage for reloadDump error path ---
-
-func TestReloadDump_ReloadConfigError(t *testing.T) {
-	// Create a handler where ReloadConfig will fail because CoreDeps is nil.
-	// newTestHandler sets CoreDeps to &commandutil.CoreDeps{}, so we need
-	// a runtime with CoreDeps=nil to trigger the panic-guarded error path.
-	// Instead, we'll test the nil-config path: ReloadConfig checks cfg==nil.
-	deps := &core.APIDeps{CoreDeps: &commandutil.CoreDeps{}}
-	rt := core.NewAPIRuntime(deps)
-	// Don't call SetConfig — GetConfig will panic. Instead, set a config that
-	// will cause ReloadConfig to fail at cfg.Scrapers.Finalize.
-	cfg := &config.Config{}
-	rt.SetConfig(cfg)
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{}}
-
-	// ReloadConfig with empty config succeeds (no scrapers to finalize).
-	// To make it fail, we need a config with an invalid scraper setup.
-	// Since that's complex, test the success path instead — it's already covered.
-	_ = h
-}
 
 // --- Coverage for search non-ErrDumpMiss error paths ---
 
