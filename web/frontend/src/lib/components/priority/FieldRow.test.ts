@@ -86,18 +86,18 @@ describe('FieldRow', () => {
 		expect(container.textContent).not.toContain('mgstage');
 	});
 
-	it('renders the inherited global chain as a defensive fallback for a custom + empty (legacy []) field', () => {
-		// A present-empty [] is LEGACY and folds to inherit on read — so this
-		// custom+empty branch should rarely fire; when it does, the row falls
-		// back to showing the global chain rather than "No scrapers" text.
+	it('shows a disabled-scrapers warning for a custom + empty (all disabled) field', () => {
+		// When all scrapers in a custom override are disabled, the filtered
+		// priority is empty. The row should show a warning that the field
+		// will be empty, NOT the global chain (which would be misleading).
 		const { container } = render(FieldRow, {
 			props: make_props({ status: 'custom', priority: [], globalPriority: ['r18dev', 'dmm'] }),
 		});
 
 		expect(container.textContent).toContain('Custom');
-		// Fallback shows the global chain (not "No scrapers" text).
-		expect(container.textContent).toContain('R18.dev');
-		expect(container.textContent).not.toContain('No scrapers');
+		expect(container.textContent).toContain('All scrapers disabled');
+		// Should NOT show the global chain — that would be misleading.
+		expect(container.textContent).not.toContain('R18.dev');
 		// Custom rows offer a reset action.
 		expect(container.querySelector('[aria-label="Reset to global priority"]')).toBeTruthy();
 	});

@@ -70,17 +70,10 @@
 				     user sees their suppression intent reflected. -->
 				<span class="italic">Suppressed (no scrapers consulted)</span>
 			{:else if status === 'custom' && priority.length === 0}
-				<!-- Defensive fallback: a present-empty [] override is LEGACY and folds
-				     to inherit on read (matched in getGlobalPriority), so this branch
-				     should rarely fire. Treat as inherited: show the global chain. -->
-				{#each globalPriority as scraper, index}
-					<span class="inline-flex items-center">
-						{formatScraperName(scraper)}
-						{#if index < globalPriority.length - 1}
-							<span class="mx-1 text-muted-foreground/50">→</span>
-						{/if}
-					</span>
-				{/each}
+				<!-- All scrapers in this custom override are disabled/unqueryable.
+				     The field will be empty at runtime — don't show the global
+				     chain as that would be misleading. Show a warning instead. -->
+				<span class="italic text-destructive">All scrapers disabled — field will be empty</span>
 			{:else}
 				{#each priority as scraper, index}
 					<span class="inline-flex items-center">
