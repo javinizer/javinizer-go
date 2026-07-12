@@ -309,7 +309,9 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "a dump download is already in progress"})
 		return
 	}
-	h.mu.Unlock()
+	// Keep the lock held for the entire clear operation so a concurrent
+	// download/update can't start while we're deleting the dump file.
+	defer h.mu.Unlock()
 
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	path := resolveDumpPath(cfg)

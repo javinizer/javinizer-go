@@ -46,6 +46,9 @@
 	async function download(updateOnly = false) {
 		downloading = true;
 		downloadError = '';
+		// Reset WS progress state so stale messages from a previous run don't
+		// make pollDownloadProgress think the new run is already terminal.
+		wsState.messages = [];
 		try {
 			await api.r18dev.downloadDump(updateOnly);
 			// The download runs in a background goroutine after 202 is returned.
