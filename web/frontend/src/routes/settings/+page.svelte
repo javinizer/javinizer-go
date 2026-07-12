@@ -13,6 +13,7 @@
 	import FileOperationsSettingsSection from '$lib/components/settings/sections/FileOperationsSettingsSection.svelte';
 	import OutputSettingsSection from '$lib/components/settings/sections/OutputSettingsSection.svelte';
 	import DatabaseSettingsSection from '$lib/components/settings/sections/DatabaseSettingsSection.svelte';
+	import R18DevDumpSection from '$lib/components/settings/sections/R18DevDumpSection.svelte';
 	import TranslationSettingsSection from '$lib/components/settings/sections/TranslationSettingsSection.svelte';
 	import NfoSettingsSection from '$lib/components/settings/sections/NfoSettingsSection.svelte';
 	import ProxySettingsSection from '$lib/components/settings/sections/ProxySettingsSection.svelte';
@@ -230,6 +231,7 @@
 			<FileOperationsSettingsSection config={settings.settingsConfig} />
 			<OutputSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 			<DatabaseSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
+			<R18DevDumpSection />
 			<ApiTokensSection onTokenDisplay={handleTokenDisplay} />
 			<SettingsSection title="Genre Replacements" description="Manage genre name replacements applied during scraping" defaultExpanded={false}>
 				<div class="space-y-4">

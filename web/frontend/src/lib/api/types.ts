@@ -1289,3 +1289,20 @@ export interface BatchExcludeResponse {
 	failed: BatchExcludeFailed[];
 	job: BatchJobResponse;
 }
+
+export interface DumpStatus {
+	present: boolean;
+	row_count?: number;
+	source_url?: string;
+	source_date?: string;
+	imported_at?: string;
+	path: string;
+	size_bytes?: number;
+	enabled: boolean;
+}
+
+export interface DumpSearchResult {
+	query: string;
+	content_id: string | null;
+	dvd_id: string | null;
+}

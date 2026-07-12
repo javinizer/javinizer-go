@@ -132,6 +132,10 @@ func TestNewServer(t *testing.T) {
 		"/api/v1/tokens",
 		"/api/v1/tokens/:id",
 		"/api/v1/tokens/:id/regenerate",
+		"/api/v1/r18dev/dump/status",
+		"/api/v1/r18dev/dump/search",
+		"/api/v1/r18dev/dump/download",
+		"/api/v1/r18dev/dump/update",
 	}
 
 	for _, route := range expectedRoutes {
@@ -221,6 +225,8 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"GET /api/v1/temp/image",
 		"GET /api/v1/temp/posters/:jobId/:filename",
 		"GET /api/v1/tokens",
+		"GET /api/v1/r18dev/dump/status",
+		"GET /api/v1/r18dev/dump/search",
 		"GET /api/v1/version",
 		"GET /docs",
 		"GET /docs/openapi.json",
@@ -266,6 +272,8 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"POST /api/v1/tokens/:id/regenerate",
 		"POST /api/v1/translation/deepl/usage",
 		"POST /api/v1/translation/models",
+		"POST /api/v1/r18dev/dump/download",
+		"POST /api/v1/r18dev/dump/update",
 		"POST /api/v1/version/check",
 		"POST /api/v1/words/replacements",
 		"POST /api/v1/words/replacements/import",

@@ -3245,6 +3245,143 @@
                 }
             }
         },
+        "/api/v1/r18dev/dump/download": {
+            "post": {
+                "description": "Start a full download of the r18.dev database dump and build the local lookup database. Progress is streamed via WebSocket. Returns 409 if a download is already running.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "r18dev"
+                ],
+                "summary": "Download the r18.dev dump",
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/r18dev/dump/search": {
+            "get": {
+                "description": "Look up a dvd_id or content_id in the local r18.dev dump. Tries dvd_id first, then content_id.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "r18dev"
+                ],
+                "summary": "Search the r18.dev dump",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "dvd_id or content_id to look up",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_r18devdump.searchResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/r18dev/dump/status": {
+            "get": {
+                "description": "Check whether the local r18.dev dump sidecar is present and return its stats (rows, source date, size).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "r18dev"
+                ],
+                "summary": "Get r18.dev dump status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_r18devdump.dumpStatusResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/r18dev/dump/update": {
+            "post": {
+                "description": "Re-download the dump only if a newer version is available. Progress is streamed via WebSocket. Returns 409 if a download is already running.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "r18dev"
+                ],
+                "summary": "Update the r18.dev dump",
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/scan": {
             "post": {
                 "description": "Scan a directory for video files and match JAV IDs",
@@ -7838,6 +7975,49 @@
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_api_r18devdump.dumpStatusResponse": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "imported_at": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "present": {
+                    "type": "boolean"
+                },
+                "row_count": {
+                    "type": "integer"
+                },
+                "size_bytes": {
+                    "type": "integer"
+                },
+                "source_date": {
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_r18devdump.searchResponse": {
+            "type": "object",
+            "properties": {
+                "content_id": {
+                    "type": "string"
+                },
+                "dvd_id": {
+                    "type": "string"
+                },
+                "query": {
+                    "type": "string"
                 }
             }
         },

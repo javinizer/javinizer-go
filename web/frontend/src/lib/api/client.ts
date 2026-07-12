@@ -5,6 +5,7 @@ import { ActressClient } from './clients/actress';
 import { ReplacementClient } from './clients/replacement';
 import { HistoryClient, JobsClient, EventsClient } from './clients/history';
 import { ConfigClient } from './clients/config';
+import { R18DevClient } from './clients/r18dev';
 
 /**
  * APIClient composes domain-scoped sub-clients for all API endpoints.
@@ -40,6 +41,7 @@ class APIClient {
 	readonly organizedJobs: JobsClient;
 	readonly events: EventsClient;
 	readonly config: ConfigClient;
+	readonly r18dev: R18DevClient;
 
 	constructor(baseURL?: string) {
 		const url = baseURL ?? getAPIBaseURL();
@@ -57,6 +59,7 @@ class APIClient {
 		this.organizedJobs = new JobsClient(url);
 		this.events = new EventsClient(url);
 		this.config = new ConfigClient(url);
+		this.r18dev = new R18DevClient(url);
 	}
 
 	// Shared request method — delegates to BaseClient

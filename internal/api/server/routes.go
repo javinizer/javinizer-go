@@ -24,6 +24,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/jobs"
 	"github.com/javinizer/javinizer-go/internal/api/middleware"
 	"github.com/javinizer/javinizer-go/internal/api/movie"
+	"github.com/javinizer/javinizer-go/internal/api/r18devdump"
 	"github.com/javinizer/javinizer-go/internal/api/realtime"
 	"github.com/javinizer/javinizer-go/internal/api/system"
 	"github.com/javinizer/javinizer-go/internal/api/temp"
@@ -168,6 +169,7 @@ func registerAPIV1Routes(router *gin.Engine, rt *core.APIRuntime) {
 	events.RegisterRoutes(protected, deps.Repos.EventRepo)
 	temp.RegisterRoutes(protected, rt)
 	token.RegisterRoutes(protected, writeProtected, tokenSvc)
+	r18devdump.RegisterRoutes(protected, rt)
 }
 
 func registerStaticWebRoutes(router *gin.Engine, assets webUIAssets) {
