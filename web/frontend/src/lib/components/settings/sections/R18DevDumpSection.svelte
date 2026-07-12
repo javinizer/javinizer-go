@@ -103,10 +103,14 @@
 					polling = false;
 					return;
 				}
-				// Fallback for updates: if the dump was already present, detect
-				// completion by a changed imported_at timestamp (the backend
-				// updates it when the import finishes) OR a changed source_date
-				// (the backend updates it even when the dump is unchanged).
+			// Fallback for updates: if the dump was already present, detect
+				// completion by a changed imported_at timestamp OR a changed
+				// source_date (the backend updates it on successful import).
+				// If neither changed (unchanged update), check if the WS
+				// terminal frame was received — now the backend sends 'done'
+				// AFTER clearing running, so /status returns present:true,
+				// running:false. We can detect this by checking if status
+				// shows present AND the WS says done.
 				if (wasPresent && s.imported_at && s.imported_at !== prevImportedAt) {
 					downloading = false;
 					polling = false;
@@ -116,6 +120,16 @@
 					downloading = false;
 					polling = false;
 					return;
+				}
+				// Last-resort fallback for unchanged updates: if the WS
+				// terminal frame says 'done', the update completed.
+				if (wasPresent && downloadProgress) {
+					const wsStatus = downloadProgress.message || downloadProgress.status;
+					if (wsStatus === 'done') {
+						downloading = false;
+						polling = false;
+						return;
+					}
 				}
 			} catch {
 				// Auth error or network error — keep polling.
