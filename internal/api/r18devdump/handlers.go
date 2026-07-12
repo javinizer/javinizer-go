@@ -191,6 +191,11 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		})
 		if err != nil {
 			logging.Warnf("r18dev dump download failed: %v", err)
+			// Clean up any partial/empty dump file left by a failed import so
+			// the scraper doesn't try to use a broken dump on the next scrape.
+			for _, p := range []string{path, path + "-wal", path + "-shm", path + ".tmp", path + ".tmp-wal", path + ".tmp-shm"} {
+				_ = os.Remove(p)
+			}
 			h.broadcastProgress("error", 0, 0)
 			return
 		}
