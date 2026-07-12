@@ -1071,3 +1071,40 @@ func TestClearDump_RestoresHandleOnDeleteError(t *testing.T) {
 		assert.True(t, reloadCalled, "reloadDump should be called to restore handle when delete fails")
 	}
 }
+
+func TestGetStatus_DumpImportInProgress(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	// Simulate an in-progress import.
+	h.mu.Lock()
+	h.running = true
+	h.mu.Unlock()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/r18dev/dump/status", nil)
+
+	h.getStatus(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp dumpStatusResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.False(t, resp.Present, "should not open dump file while import is running")
+}
+
+func TestSearch_DumpImportInProgress(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	// Simulate an in-progress import.
+	h.mu.Lock()
+	h.running = true
+	h.mu.Unlock()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/r18dev/dump/search?q=ABF-030", nil)
+
+	h.search(c)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}

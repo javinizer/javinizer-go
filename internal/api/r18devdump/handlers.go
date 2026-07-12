@@ -71,6 +71,17 @@ func (h *dumpHandler) getStatus(c *gin.Context) {
 		Enabled: cfg.Metadata.R18DevDump.Enabled,
 	}
 
+	// Don't open the dump file while an import is in progress — on Windows,
+	// the open handle can block the import's os.Rename. Return the last
+	// known status instead.
+	h.mu.Lock()
+	running := h.running
+	h.mu.Unlock()
+	if running {
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
 	store, err := r18devdump.Open(path)
 	if err != nil {
 		// Not present or unreadable — return present:false, not an error.
@@ -287,6 +298,16 @@ func (h *dumpHandler) search(c *gin.Context) {
 
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	path := resolveDumpPath(cfg)
+
+	// Don't open the dump file while an import is in progress — on Windows,
+	// the open handle can block the import's os.Rename.
+	h.mu.Lock()
+	running := h.running
+	h.mu.Unlock()
+	if running {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "dump import in progress"})
+		return
+	}
 
 	store, err := r18devdump.Open(path)
 	if err != nil {
