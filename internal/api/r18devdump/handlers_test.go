@@ -387,6 +387,7 @@ func TestStartDownload_UpdateOnly_Unchanged(t *testing.T) {
 
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
 
 	// Pre-create a dump with the matching source URL so update-only skips.
 	buildTestDump(t, dumpPath, "118ipx00535", "IPX-535")
@@ -424,6 +425,7 @@ func TestStartDownload_DownloadError(t *testing.T) {
 
 	h, _, hub := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
@@ -615,6 +617,7 @@ func TestStartDownload_ImportError(t *testing.T) {
 
 	h, _, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
