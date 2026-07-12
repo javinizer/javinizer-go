@@ -178,11 +178,16 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			h.broadcastProgress("importing", 0, 0)
-			// Close the active dump handle before importing so the SQLite file
-			// can be replaced (Windows blocks rename over open files).
-			if old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil); old != nil {
-				_ = old.Close()
-			}
+			// Import writes to path+".tmp" and only renames to path on success,
+			// so the existing dump file is safe during import. We do NOT close
+			// the old dump handle here — the scraper registry still needs it
+			// for lookups during the multi-minute import. The handle will be
+			// swapped by reloadDump after import succeeds.
+			//
+			// On Windows, Import's rename may fail if the old SQLite handle
+			// is open. To handle this, Import uses a .tmp path and renames
+			// only on success. If the rename fails due to the open handle,
+			// the import returns an error and the old dump is preserved.
 			impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
 				SourceURL:  d.FinalURL,
 				SourceDate: d.SourceDate,
@@ -191,6 +196,11 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				return err
 			}
 			_ = impRes
+			// Now that the import succeeded and the new file is in place,
+			// close the old dump handle so reloadDump can open the new one.
+			if old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil); old != nil {
+				_ = old.Close()
+			}
 			h.broadcastProgress("done", 0, 0)
 			return nil
 		})

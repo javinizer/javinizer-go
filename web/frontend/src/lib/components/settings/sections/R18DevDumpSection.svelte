@@ -69,10 +69,10 @@
 
 	async function pollDownloadProgress() {
 		polling = true;
-		// Record whether the dump was present before the download started.
-		// If the dump was absent and becomes present, treat it as complete —
-		// this is the fallback for when the WebSocket terminal frame is missed.
+		// Record the pre-download state to detect completion as a fallback
+		// for when the WebSocket terminal frame is missed.
 		const wasPresent = status?.present ?? false;
+		const prevImportedAt = status?.imported_at ?? '';
 		const maxAttempts = 200;
 		for (let i = 0; i < maxAttempts; i++) {
 			if (!polling) return; // stopped by component unmount
@@ -98,6 +98,14 @@
 				// Fallback: if the dump was absent before and is now present,
 				// the download completed (WS frame may have been missed).
 				if (!wasPresent && s.present) {
+					downloading = false;
+					polling = false;
+					return;
+				}
+				// Fallback for updates: if the dump was already present, detect
+				// completion by a changed imported_at timestamp (the backend
+				// updates it when the import finishes).
+				if (wasPresent && s.imported_at && s.imported_at !== prevImportedAt) {
 					downloading = false;
 					polling = false;
 					return;
