@@ -361,9 +361,19 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 		}
 	}
 
-	// Step 2: Try content-ID variations. This tries the known DMM prefixes for
-	// the series in canonical order, so it resolves to the canonical product
-	// even when the dvd_id= endpoint returned a mislabeled duplicate.
+	// Step 2: Try content-ID variations. This tries the known DMM prefixes
+	// for the series in canonical order, so it resolves to the canonical
+	// product even when the dvd_id= endpoint returned a mislabeled duplicate.
+	//
+	// Known limitation: for multi-prefix series where multiple prefixes produce
+	// 200 responses with the same series+number (e.g. "ap" with prefixes ["", "1"]),
+	// variationCoreMatches accepts the first 200 that core-matches. The prefix
+	// table order determines which prefix wins. This is the same tradeoff as
+	// ABF-030 (prefixes ["118", "436"]): the canonical order ensures the correct
+	// product is found first. If the table order is wrong for a series, the
+	// wrong prefix's 200 could be accepted. The fuzzy content_id from Step 1
+	// is NOT tried first because it may itself be a non-canonical prefix
+	// (e.g. 436abf00030 for ABF-030) that core-matches but is a different product.
 	contentIDURL, err := s.resolveByContentIDVariations(ctx, id)
 	if err == nil && contentIDURL != "" {
 		logging.Debugf("R18: Resolved via content-id variations: %s", contentIDURL)
@@ -371,10 +381,9 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 	}
 
 	// Step 3: Fall back to the fuzzy dvd_id result (null dvd_id) if variation
-	// lookup found nothing. Unknown series still generate common-prefix
-	// variations ("" and "1"), so this fallback only fires when those generated
-	// forms also miss — e.g. a series whose real content_id uses an uncommon
-	// prefix that the dvd_id= endpoint surfaced via its fuzzy match.
+	// lookup found nothing. This handles series whose real content_id uses an
+	// uncommon prefix not in the prefix lookup table — the dvd_id= endpoint
+	// surfaced it via its fuzzy match.
 	if fuzzyContentIDURL != "" && ctx.Err() == nil {
 		logging.Debugf("R18: Falling back to fuzzy dvd_id content-id: %s", fuzzyContentIDURL)
 		return fuzzyContentIDURL, true
