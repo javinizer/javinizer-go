@@ -338,8 +338,15 @@ func (c *Config) Validate() error {
 	if err := ValidateConfig(c); err != nil {
 		return err
 	}
-	c.Warnings = ValidatePriorityOverrides(c)
+	c.RecomputeWarnings()
 	return nil
+}
+
+// RecomputeWarnings updates Config.Warnings based on the current scraper
+// override state. Call after Validate (initial pass) and after Finalize
+// (which populates scraper defaults). Safe to call multiple times.
+func (c *Config) RecomputeWarnings() {
+	c.Warnings = ValidatePriorityOverrides(c)
 }
 
 // ValidateConfig validates a Config without mutating it.

@@ -68,6 +68,7 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	if err := cfg.Scrapers.Finalize(reg); err != nil {
 		return fmt.Errorf("failed to finalize scraper config: %w", err)
 	}
+	cfg.RecomputeWarnings()
 
 	r18DumpLookup, r18DumpCloser, dumpErr := commandutil.OpenR18DevDumpLookup(cfg)
 	if dumpErr != nil {

@@ -189,6 +189,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 			}
 			return nil, fmt.Errorf("failed to finalize scraper config: %w", err)
 		}
+		cfg.RecomputeWarnings()
 
 		r18DumpLookup, r18DumpCloser, dumpErr := OpenR18DevDumpLookup(cfg)
 		if dumpErr != nil {

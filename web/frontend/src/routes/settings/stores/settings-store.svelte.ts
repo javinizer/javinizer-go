@@ -287,7 +287,14 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 			toastStore.success('Configuration saved successfully', 4000);
 			void queryClient.invalidateQueries({ queryKey: ['config'] }).then(() => {
 				const updated = queryClient.getQueryData<Config>(['config']);
-				if (updated) applyConfigData(updated);
+				if (updated && config) {
+					// Only update warnings — don't replace the entire config
+					// object, as the user may have started editing other fields
+					// while the save refetch was in flight.
+					config.warnings = updated.warnings;
+				} else if (updated) {
+					applyConfigData(updated);
+				}
 			});
 		},
 		onError: (err: Error) => {
