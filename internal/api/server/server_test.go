@@ -136,6 +136,7 @@ func TestNewServer(t *testing.T) {
 		"/api/v1/r18dev/dump/search",
 		"/api/v1/r18dev/dump/download",
 		"/api/v1/r18dev/dump/update",
+		"/api/v1/r18dev/dump",
 	}
 
 	for _, route := range expectedRoutes {
@@ -274,6 +275,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"POST /api/v1/translation/models",
 		"POST /api/v1/r18dev/dump/download",
 		"POST /api/v1/r18dev/dump/update",
+		"DELETE /api/v1/r18dev/dump",
 		"POST /api/v1/version/check",
 		"POST /api/v1/words/replacements",
 		"POST /api/v1/words/replacements/import",

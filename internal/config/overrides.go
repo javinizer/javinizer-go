@@ -36,6 +36,11 @@ func ApplyEnvironmentOverrides(cfg *Config, envLookup ...func(key string) string
 		cfg.Database.DSN = envDB
 	}
 
+	// JAVINIZER_R18DEV_DUMP_PATH - Override r18.dev dump sidecar path
+	if envDump := lookup("JAVINIZER_R18DEV_DUMP_PATH"); envDump != "" {
+		cfg.Metadata.R18DevDump.Path = envDump
+	}
+
 	// JAVINIZER_LOG_DIR - Override log output directory
 	if envLogDir := lookup("JAVINIZER_LOG_DIR"); envLogDir != "" {
 		outputs := strings.Split(cfg.Logging.Output, ",")

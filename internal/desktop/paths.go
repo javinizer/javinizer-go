@@ -93,5 +93,11 @@ func SetupPortableEnv() error {
 	if os.Getenv("JAVINIZER_DATA_DIR") == "" {
 		_ = os.Setenv("JAVINIZER_DATA_DIR", dataDir)
 	}
+	// The r18.dev dump sidecar (data/r18dev/r18dev_dump.db) is a relative
+	// path in the default config. In the desktop app CWD is unwritable, so
+	// override it to an absolute path under the portable data dir.
+	if os.Getenv("JAVINIZER_R18DEV_DUMP_PATH") == "" {
+		_ = os.Setenv("JAVINIZER_R18DEV_DUMP_PATH", filepath.Join(dataDir, "r18dev", "r18dev_dump.db"))
+	}
 	return nil
 }

@@ -772,3 +772,76 @@ func TestSearch_ContentIDLookupError(t *testing.T) {
 	// Both lookups fail with non-miss errors → 404.
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
+
+// --- clearDump tests ---
+
+func TestClearDump_NotPresent(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/r18dev/dump", nil)
+
+	h.clearDump(c)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestClearDump_Success(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/r18dev/dump", nil)
+
+	h.clearDump(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Verify the dump file was deleted.
+	_, err := os.Stat(dumpPath)
+	assert.True(t, os.IsNotExist(err), "dump file should be deleted")
+}
+
+func TestClearDump_DownloadInProgress(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+
+	// Simulate an in-progress download.
+	h.mu.Lock()
+	h.running = true
+	h.done = make(chan struct{})
+	h.mu.Unlock()
+	defer close(h.done)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/r18dev/dump", nil)
+
+	h.clearDump(c)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+
+	// Verify the dump file was NOT deleted.
+	_, err := os.Stat(dumpPath)
+	assert.NoError(t, err, "dump file should still exist when download is in progress")
+}
+
+func TestClearDump_ReloadFails(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+	// Make reload fail so the warning path is exercised.
+	h.reloadFn = func(_ *config.Config) error { return fmt.Errorf("simulated reload failure") }
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/r18dev/dump", nil)
+
+	h.clearDump(c)
+
+	// Should still return 200 (the dump was cleared, only the hot-swap failed).
+	require.Equal(t, http.StatusOK, w.Code)
+	_, err := os.Stat(dumpPath)
+	assert.True(t, os.IsNotExist(err), "dump file should be deleted even if reload fails")
+}

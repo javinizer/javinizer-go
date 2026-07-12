@@ -1,12 +1,14 @@
 package r18devdump
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -130,17 +132,15 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		return
 	}
 	h.running = true
+	h.done = make(chan struct{})
 	h.mu.Unlock()
-
-	defer func() {
-		h.mu.Lock()
-		h.running = false
-		h.mu.Unlock()
-	}()
 
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	path := resolveDumpPath(cfg)
-	ctx := c.Request.Context()
+	// Use a detached context with a generous timeout so the download goroutine
+	// survives the HTTP response being sent (202). The request context is
+	// cancelled when the handler returns, which would abort the download.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 
 	// For update-only, check the current source URL so the download skips if
 	// the version is unchanged.
@@ -164,12 +164,17 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	// client disconnects.
 	client := h.httpClient
 	if client == nil {
-		client = &http.Client{}
+		client = &http.Client{Timeout: 10 * time.Minute}
 	}
 
-	h.done = make(chan struct{})
 	go func() {
+		defer cancel()
 		defer close(h.done)
+		defer func() {
+			h.mu.Lock()
+			h.running = false
+			h.mu.Unlock()
+		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			h.broadcastProgress("importing", 0, 0)
 			impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
@@ -268,6 +273,46 @@ func (h *dumpHandler) search(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusNotFound, gin.H{"error": "not found in dump"})
+}
+
+// clearDump godoc
+// @Summary Clear the r18.dev dump
+// @Description Delete the local r18.dev dump sidecar database. After clearing, the scraper falls back to HTTP content_id resolution until the dump is re-downloaded.
+// @Tags r18dev
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string
+// @Router /api/v1/r18dev/dump [delete]
+func (h *dumpHandler) clearDump(c *gin.Context) {
+	h.mu.Lock()
+	if h.running {
+		h.mu.Unlock()
+		c.JSON(http.StatusConflict, gin.H{"error": "a dump download is already in progress"})
+		return
+	}
+	h.mu.Unlock()
+
+	cfg := h.rt.Deps().CoreDeps.GetConfig()
+	path := resolveDumpPath(cfg)
+
+	if _, err := os.Stat(path); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "dump not present"})
+		return
+	}
+
+	// Remove the dump DB and its WAL/SHM sidecars.
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		_ = os.Remove(p)
+	}
+
+	// Hot-swap: reload config so the scraper registry drops the old dump handle.
+	if reloadErr := h.reloadDump(path); reloadErr != nil {
+		logging.Warnf("r18dev dump cleared but hot-swap failed: %v", reloadErr)
+	}
+
+	logging.Infof("r18dev dump cleared: %s", path)
+	c.JSON(http.StatusOK, gin.H{"message": "dump cleared"})
 }
 
 // broadcastProgress sends a dump progress message over the WebSocket hub so

@@ -3247,6 +3247,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/r18dev/dump": {
+            "delete": {
+                "description": "Delete the local r18.dev dump sidecar database. After clearing, the scraper falls back to HTTP content_id resolution until the dump is re-downloaded.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "r18dev"
+                ],
+                "summary": "Clear the r18.dev dump",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/r18dev/dump/download": {
             "post": {
                 "description": "Start a full download of the r18.dev database dump and build the local lookup database. Progress is streamed via WebSocket. Returns 409 if a download is already running.",

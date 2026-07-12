@@ -5212,6 +5212,34 @@ paths:
       summary: Test proxy connectivity
       tags:
       - system
+  /api/v1/r18dev/dump:
+    delete:
+      description: Delete the local r18.dev dump sidecar database. After clearing,
+        the scraper falls back to HTTP content_id resolution until the dump is re-downloaded.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Clear the r18.dev dump
+      tags:
+      - r18dev
   /api/v1/r18dev/dump/download:
     post:
       consumes:

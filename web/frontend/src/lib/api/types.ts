@@ -915,6 +915,12 @@ export interface MetadataConfig {
 	required_fields?: string[];
 	nfo?: NFOConfig;
 	completeness?: CompletenessConfig;
+	r18dev_dump?: R18DevDumpConfig;
+}
+
+export interface R18DevDumpConfig {
+	enabled: boolean;
+	path: string;
 }
 
 export interface MatchingConfig {

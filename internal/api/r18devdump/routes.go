@@ -14,5 +14,6 @@ func RegisterRoutes(protected *gin.RouterGroup, rt *core.APIRuntime) {
 	protected.GET("/r18dev/dump/status", dump.getStatus)
 	protected.POST("/r18dev/dump/download", dump.startDownload)
 	protected.POST("/r18dev/dump/update", dump.startUpdate)
+	protected.DELETE("/r18dev/dump", dump.clearDump)
 	protected.GET("/r18dev/dump/search", dump.search)
 }
