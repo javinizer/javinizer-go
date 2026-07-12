@@ -1083,7 +1083,7 @@ def decide_pr(
     else:
         reason_parts.append("clean Codex review matches current head")
 
-    if unresolved_finding_urls:
+    if unresolved_finding_urls and review_state != "clean":
         wants_ok_label = False
         wants_needs_work_label = True
         reason_parts.append(f"unresolved Codex review threads: {len(unresolved_finding_urls)}")
@@ -1111,7 +1111,6 @@ def decide_pr(
     approve_workflow_run_ids: tuple[int, ...] = ()
     if (
         review_state == "clean"
-        and not unresolved_finding_urls
         and merge_state not in UNMERGEABLE_STATES | {"CONFLICTING"}
         and merge_state != "UNKNOWN"
     ):
