@@ -178,29 +178,31 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			h.broadcastProgress("importing", 0, 0)
-			// Import writes to path+".tmp" and only renames to path on success,
-			// so the existing dump file is safe during import. We do NOT close
-			// the old dump handle here — the scraper registry still needs it
-			// for lookups during the multi-minute import. The handle will be
-			// swapped by reloadDump after import succeeds.
+			// Close the old dump handle before Import runs. On Windows, Import's
+			// final os.Rename(tmp, path) would fail if the old SQLite handle is
+			// still open (Windows blocks rename over open files). On Unix this
+			// is a no-op (files are renameable while open).
 			//
-			// On Windows, Import's rename may fail if the old SQLite handle
-			// is open. To handle this, Import uses a .tmp path and renames
-			// only on success. If the rename fails due to the open handle,
-			// the import returns an error and the old dump is preserved.
+			// During the import (which can take minutes), the scraper falls
+			// back to HTTP. This is acceptable — the import is replacing the
+			// dump, and the old dump would be stale soon anyway.
+			if old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil); old != nil {
+				_ = old.Close()
+			}
 			impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
 				SourceURL:  d.FinalURL,
 				SourceDate: d.SourceDate,
 			})
 			if err != nil {
+				// Import failed — restore the old dump handle so the scraper
+				// can keep using the existing dump. The old file is intact
+				// (Import writes to .tmp and only renames on success).
+				if reloadErr := h.reloadDump(path); reloadErr != nil {
+					logging.Warnf("r18dev dump: failed to restore handle after import error: %v", reloadErr)
+				}
 				return err
 			}
 			_ = impRes
-			// Now that the import succeeded and the new file is in place,
-			// close the old dump handle so reloadDump can open the new one.
-			if old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil); old != nil {
-				_ = old.Close()
-			}
 			h.broadcastProgress("done", 0, 0)
 			return nil
 		})

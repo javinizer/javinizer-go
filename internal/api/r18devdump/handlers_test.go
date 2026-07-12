@@ -305,7 +305,7 @@ func TestRegisterRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("/api/v1")
-	RegisterRoutes(protected, rt)
+	RegisterRoutes(protected, protected, rt)
 
 	routes := router.Routes()
 	pathSet := make(map[string]bool)

@@ -169,7 +169,7 @@ func registerAPIV1Routes(router *gin.Engine, rt *core.APIRuntime) {
 	events.RegisterRoutes(protected, deps.Repos.EventRepo)
 	temp.RegisterRoutes(protected, rt)
 	token.RegisterRoutes(protected, writeProtected, tokenSvc)
-	r18devdump.RegisterRoutes(protected, rt)
+	r18devdump.RegisterRoutes(protected, writeProtected, rt)
 }
 
 func registerStaticWebRoutes(router *gin.Engine, assets webUIAssets) {
