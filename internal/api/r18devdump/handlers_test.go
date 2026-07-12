@@ -373,6 +373,7 @@ func TestStartDownload_FullDownload(t *testing.T) {
 		_, err := os.Stat(dumpPath)
 		return err == nil
 	}, 10*time.Second, 100*time.Millisecond, "dump DB should be created by the download goroutine")
+	<-h.done
 
 	// Verify the hub was used (broadcastProgress was called).
 	_ = hub
@@ -409,7 +410,7 @@ func TestStartDownload_UpdateOnly_Unchanged(t *testing.T) {
 
 	// The update should detect the version is unchanged and not re-import.
 	// Give the goroutine time to run.
-	time.Sleep(2 * time.Second)
+	<-h.done
 }
 
 func TestStartDownload_DownloadError(t *testing.T) {
@@ -435,7 +436,7 @@ func TestStartDownload_DownloadError(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code)
 
 	// Wait for the goroutine to process the error.
-	time.Sleep(2 * time.Second)
+	<-h.done
 	_ = hub
 }
 
@@ -541,6 +542,7 @@ func TestStartDownload_FlagResetAfterCompletion(t *testing.T) {
 		defer h.mu.Unlock()
 		return !h.running
 	}, 10*time.Second, 100*time.Millisecond, "running flag should be reset after download completes")
+	<-h.done
 }
 
 // --- Thread safety smoke test ---
@@ -595,6 +597,7 @@ func TestStartDownload_NilHTTPClient(t *testing.T) {
 		_, err := os.Stat(dumpPath)
 		return err == nil
 	}, 10*time.Second, 100*time.Millisecond, "dump DB should be created")
+	<-h.done
 }
 
 func TestStartDownload_ImportError(t *testing.T) {
@@ -628,7 +631,7 @@ func TestStartDownload_ImportError(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code)
 
 	// Wait for the goroutine to process the import error.
-	time.Sleep(2 * time.Second)
+	<-h.done
 }
 
 // --- Coverage for reloadDump error path ---
@@ -725,7 +728,7 @@ func TestStartDownload_ReloadFails(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code)
 
 	// Wait for the goroutine to complete (download + reload).
-	time.Sleep(2 * time.Second)
+	<-h.done
 }
 
 // --- Coverage for search content_id lookup error ---

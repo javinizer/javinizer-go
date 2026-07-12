@@ -32,6 +32,7 @@ type dumpHandler struct {
 	running    bool
 	httpClient *http.Client
 	reloadFn   func(cfg *config.Config) error
+	done       chan struct{} // closed when the download goroutine finishes
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
@@ -166,7 +167,9 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		client = &http.Client{}
 	}
 
+	h.done = make(chan struct{})
 	go func() {
+		defer close(h.done)
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			h.broadcastProgress("importing", 0, 0)
 			impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
