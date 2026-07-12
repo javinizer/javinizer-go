@@ -291,7 +291,19 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 	// index here — fall straight through to HTTP resolution. ResolveURL is only
 	// called from Search, so it never runs before searchFromDump.
 
-	// Step 1: Try to lookup content_id using dvd_id with multiple ID variations
+	// Step 1: Try to lookup content_id using dvd_id with multiple ID variations.
+	// Only an EXACT dvd_id match is trusted immediately. When the dvd_id= endpoint
+	// returns a movie whose dvd_id field is null (r18.dev fell back to a fuzzy
+	// content_id match), record it as a last-resort candidate and defer to
+	// resolveByContentIDVariations below.
+	//
+	// This is necessary because r18.dev sometimes has multiple content_ids that
+	// all claim the same dvd_id (a data-quality bug on their side). The dvd_id=
+	// endpoint may return any of them. resolveByContentIDVariations tries the
+	// known DMM prefixes for the series in canonical order (e.g. "118" before
+	// "436" for the "abf" series), so it picks the canonical product rather
+	// than a mislabeled one. See ABF-030: dvd_id=abf030 returns the mislabeled
+	// 436abf00030 compilation, but the real movie is 118abf030.
 	idVariations := []string{
 		normalizeIDWithoutStripping(id),
 		normalizeID(id),
@@ -307,7 +319,12 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 		}
 	}
 
+	var fuzzyContentIDURL string
 	for _, idVariation := range uniqueVariations {
+		if err := ctx.Err(); err != nil {
+			logging.Debugf("R18: Context cancelled during dvd_id lookup for %s", id)
+			break
+		}
 		dvdIDURL := fmt.Sprintf("%s/videos/vod/movies/detail/-/dvd_id=%s/json", baseURL, idVariation)
 		logging.Debugf("R18: Trying dvd_id lookup: %s (%s)", idVariation, dvdIDURL)
 
@@ -320,18 +337,23 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 		if resp.StatusCode() == 200 {
 			contentType := resp.Header().Get("Content-Type")
 			if !strings.Contains(contentType, "text/html") {
-				var lookupData struct {
-					ContentID string `json:"content_id"`
-					DVDID     string `json:"dvd_id"`
-				}
+				var lookupData contentIDLookupResponse
 				if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
-					returnedDVDID := strings.ToLower(strings.ReplaceAll(lookupData.DVDID, "-", ""))
-					if returnedDVDID == idVariation || (returnedDVDID == "" && contentIDCoreMatch(lookupData.ContentID, idVariation)) {
+					returnedDVDID := normalizeDVDID(lookupData.DVDID)
+					if returnedDVDID == idVariation {
+						// Exact dvd_id match — trust it immediately.
 						contentID := lookupData.ContentID
 						logging.Debugf("R18: ✓ Resolved %s (tried: %s) to content-id: %s", id, idVariation, contentID)
 						return fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID), true
 					}
-					logging.Debugf("R18: dvd_id lookup returned mismatched content-id %s for %s, skipping", lookupData.ContentID, idVariation)
+					// Fuzzy match: null dvd_id, but the content_id core-matches the
+					// query. Record it as a fallback but keep trying variations —
+					// the content-id variation lookup below prefers canonical
+					// prefixes and avoids mislabeled duplicate dvd_id entries.
+					if returnedDVDID == "" && fuzzyContentIDURL == "" && contentIDCoreMatch(lookupData.ContentID, idVariation) {
+						fuzzyContentIDURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, lookupData.ContentID)
+						logging.Debugf("R18: Recorded fuzzy content-id %s for %s (null dvd_id); deferring to variation lookup", lookupData.ContentID, idVariation)
+					}
 				}
 			}
 		} else {
@@ -339,14 +361,23 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 		}
 	}
 
-	// Step 2: Try content-ID variations
+	// Step 2: Try content-ID variations. This tries the known DMM prefixes for
+	// the series in canonical order, so it resolves to the canonical product
+	// even when the dvd_id= endpoint returned a mislabeled duplicate.
 	contentIDURL, err := s.resolveByContentIDVariations(ctx, id)
-	if err != nil {
-		return "", false
-	}
-	if contentIDURL != "" {
+	if err == nil && contentIDURL != "" {
 		logging.Debugf("R18: Resolved via content-id variations: %s", contentIDURL)
 		return contentIDURL, true
+	}
+
+	// Step 3: Fall back to the fuzzy dvd_id result (null dvd_id) if variation
+	// lookup found nothing. Unknown series still generate common-prefix
+	// variations ("" and "1"), so this fallback only fires when those generated
+	// forms also miss — e.g. a series whose real content_id uses an uncommon
+	// prefix that the dvd_id= endpoint surfaced via its fuzzy match.
+	if fuzzyContentIDURL != "" && ctx.Err() == nil {
+		logging.Debugf("R18: Falling back to fuzzy dvd_id content-id: %s", fuzzyContentIDURL)
+		return fuzzyContentIDURL, true
 	}
 
 	return "", false
@@ -743,6 +774,39 @@ func contentIDCoreMatch(contentID, expectedDVDID string) bool {
 	return cNum == eNum
 }
 
+// contentIDLookupResponse is the minimal response shape used for dvd_id and
+// combined= endpoint lookups during content-id resolution.
+type contentIDLookupResponse struct {
+	ContentID string `json:"content_id"`
+	DVDID     string `json:"dvd_id"`
+}
+
+// normalizeDVDID lowercases a dvd_id and removes hyphens, matching the
+// normalized form used for comparison against normalized query variations.
+func normalizeDVDID(dvdID string) string {
+	return strings.ToLower(strings.ReplaceAll(dvdID, "-", ""))
+}
+
+// variationCoreMatches parses a combined= response body and reports whether the
+// returned movie core-matches the requested id (same series + number). It
+// accepts on either an exact normalized dvd_id match or a content_id
+// core-match, so a 200 response for a different movie (e.g. a mislabeled
+// duplicate under the same prefix slot) is rejected and the next variation is
+// tried. A body that fails to parse or carries neither field is treated as a
+// non-match so the caller falls through to the fuzzy fallback.
+func variationCoreMatches(body []byte, normalizedQuery string) bool {
+	var data contentIDLookupResponse
+	if err := json.Unmarshal(body, &data); err != nil {
+		return false
+	}
+	if data.DVDID != "" {
+		if normalizeDVDID(data.DVDID) == normalizedQuery {
+			return true
+		}
+	}
+	return contentIDCoreMatch(data.ContentID, normalizedQuery)
+}
+
 // stripDMMPrefix removes DMM content ID prefix (leading digits)
 // Example: "4sone860" -> "sone860", "118abw001" -> "abw001", "sone-860" -> "sone-860" (unchanged)
 func stripDMMPrefix(id string) string {
@@ -762,20 +826,33 @@ func stripDMMPrefix(id string) string {
 // resolveByContentIDVariations tries multiple content-id format variations when dvd_id lookup fails.
 // Some titles (digital-only releases) have null dvd_id, so the dvd_id endpoint returns 404.
 // We construct content_id variations (with DMM prefix, zero-padded) and try the combined endpoint.
+//
+// Each 200 response is validated: the returned content_id or dvd_id must core-match the
+// requested id (same series + number) before the variation is accepted. This guards against
+// r18.dev returning a 200 for a different movie that happens to share a prefix slot, so the
+// result does not depend solely on global prefix-table ordering.
 func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (string, error) {
 	variations := generateContentIDVariations(id)
 	if len(variations) == 0 {
 		return "", nil
 	}
 
+	normalizedDVDID := normalizeIDWithoutStripping(id)
+
 	logging.Debugf("R18: dvd_id lookup failed, trying %d content-id variation(s) for %s", len(variations), id)
 
+	notFound, failed, invalid := 0, 0, 0
 	for _, variation := range variations {
+		if err := ctx.Err(); err != nil {
+			logging.Debugf("R18: Context cancelled during content-id variation lookup for %s", id)
+			break
+		}
 		u := fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, variation)
 		logging.Debugf("R18: Trying content-id variation: %s (%s)", variation, u)
 
 		resp, err := s.doRequestWithRetryCtx(ctx, u)
 		if err != nil {
+			failed++
 			logging.Debugf("R18: Failed content-id variation %s: %v", variation, err)
 			continue
 		}
@@ -783,12 +860,27 @@ func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (
 		if resp.StatusCode() == 200 {
 			contentType := resp.Header().Get("Content-Type")
 			if !strings.Contains(contentType, "text/html") {
-				logging.Debugf("R18: ✓ Content-id variation %s resolved for %s", variation, id)
-				return u, nil
+				if variationCoreMatches(resp.Body(), normalizedDVDID) {
+					logging.Debugf("R18: ✓ Content-id variation %s resolved for %s", variation, id)
+					return u, nil
+				}
+				logging.Debugf("R18: Content-id variation %s returned 200 but did not core-match %s; skipping", variation, normalizedDVDID)
+			} else {
+				logging.Debugf("R18: Content-id variation %s returned HTML 200; skipping", variation)
 			}
+			invalid++
+			continue
+		}
+		if resp.StatusCode() == 404 {
+			notFound++
+		} else {
+			failed++
 		}
 		logging.Debugf("R18: Content-id variation %s returned status %d", variation, resp.StatusCode())
 	}
+
+	logging.Debugf("R18: No content-id variation matched for %s (%d not-found, %d invalid response, %d request/status failures)",
+		id, notFound, invalid, failed)
 
 	return "", nil
 }
