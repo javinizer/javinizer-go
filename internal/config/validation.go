@@ -3,10 +3,75 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
+
+// ConfigWarning represents a non-blocking validation warning about a
+// potentially misconfigured setting. Warnings are surfaced via the API
+// and WebUI but do not block config loading or scraping.
+type ConfigWarning struct {
+	Field    string   `json:"field"`
+	Scrapers []string `json:"scrapers"`
+	Message  string   `json:"message"`
+}
+
+// ValidatePriorityOverrides checks per-field metadata priority overrides
+// and returns warnings when an override points exclusively at scrapers
+// that are all disabled. A warning is generated only when ALL known
+// scrapers in the override are disabled (if at least one is enabled, the
+// field can still get data). Unknown scrapers (not in Overrides) are
+// skipped — they may be registered later. The __skip__ sentinel and
+// empty [] overrides are also skipped (intentional suppression / inherit
+// global). Results are sorted by field name for deterministic ordering.
+func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
+	if cfg == nil || cfg.Metadata.Priority.Fields == nil {
+		return nil
+	}
+
+	var fields []string
+	for field := range cfg.Metadata.Priority.Fields {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	var warnings []ConfigWarning
+	for _, field := range fields {
+		Scrapers := cfg.Metadata.Priority.Fields[field]
+		if len(Scrapers) == 0 {
+			continue
+		}
+		// Skip exact __skip__ sentinel.
+		if len(Scrapers) == 1 && Scrapers[0] == "__skip__" {
+			continue
+		}
+
+		var disabled []string
+		hasEnabled := false
+		for _, name := range Scrapers {
+			settings, ok := cfg.Scrapers.Overrides[name]
+			if !ok || settings == nil {
+				continue
+			}
+			if settings.Enabled {
+				hasEnabled = true
+			} else {
+				disabled = append(disabled, name)
+			}
+		}
+
+		if !hasEnabled && len(disabled) > 0 {
+			warnings = append(warnings, ConfigWarning{
+				Field:    field,
+				Scrapers: disabled,
+				Message:  fmt.Sprintf("metadata.priority.%s is set to [%s] but all listed scrapers are disabled — this field will be empty", field, strings.Join(Scrapers, ", ")),
+			})
+		}
+	}
+	return warnings
+}
 
 // validateHTTPBaseURL validates that a URL has an http or https scheme and a host.
 func validateHTTPBaseURL(path, raw string) error {

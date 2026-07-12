@@ -285,7 +285,10 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 			deps.clearTestResults();
 			updateProxyConfigBaseline();
 			toastStore.success('Configuration saved successfully', 4000);
-			void queryClient.invalidateQueries({ queryKey: ['config'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] }).then(() => {
+				const updated = queryClient.getQueryData<Config>(['config']);
+				if (updated) applyConfigData(updated);
+			});
 		},
 		onError: (err: Error) => {
 			error = err.message;

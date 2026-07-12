@@ -1432,6 +1432,17 @@ definitions:
         description: e.g., claude-sonnet-4-20250514
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_config.ConfigWarning:
+    properties:
+      field:
+        type: string
+      message:
+        type: string
+      scrapers:
+        items:
+          type: string
+        type: array
+    type: object
   github_com_javinizer_javinizer-go_internal_config.DatabaseConfig:
     properties:
       dsn:
@@ -2883,6 +2894,10 @@ definitions:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ServerConfig'
       system:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig'
+      warnings:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ConfigWarning'
+        type: array
       webui:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.webUIConfig'
     type: object

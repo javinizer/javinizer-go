@@ -70,6 +70,18 @@ func (c *Config) Clone() *Config {
 		}
 	}
 
+	// Deep-copy Warnings (including nested Scrapers slices)
+	if len(c.Warnings) > 0 {
+		cp.Warnings = make([]ConfigWarning, len(c.Warnings))
+		for i, w := range c.Warnings {
+			cp.Warnings[i] = w
+			if len(w.Scrapers) > 0 {
+				cp.Warnings[i].Scrapers = make([]string, len(w.Scrapers))
+				copy(cp.Warnings[i].Scrapers, w.Scrapers)
+			}
+		}
+	}
+
 	return &cp
 }
 

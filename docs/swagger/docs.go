@@ -5835,6 +5835,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_config.ConfigWarning": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "scrapers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_config.DatabaseConfig": {
             "type": "object",
             "properties": {
@@ -7933,6 +7950,12 @@ const docTemplate = `{
                 },
                 "system": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ConfigWarning"
+                    }
                 },
                 "webui": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.webUIConfig"

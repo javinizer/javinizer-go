@@ -115,6 +115,23 @@
 			</div>
 		{/if}
 
+		{#if settings.settingsConfig?.warnings && settings.settingsConfig.warnings.length > 0}
+			<div class="bg-amber-500/10 border-2 border-amber-500/50 text-amber-600 dark:text-amber-400 px-4 py-3 rounded-lg">
+				<div class="flex items-start gap-2 mb-2">
+					<CircleAlert class="h-5 w-5 mt-0.5 shrink-0" />
+					<div>
+						<p class="font-semibold">Configuration Warning</p>
+						<p class="text-sm">The following metadata priority overrides point exclusively at disabled scrapers:</p>
+					</div>
+				</div>
+				<ul class="text-sm ml-7 space-y-1">
+					{#each settings.settingsConfig.warnings as warning}
+						<li>• {warning.message}</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
+
 		{#if settings.loading}
 			<Card class="p-8 text-center">
 				<RefreshCw class="h-8 w-8 animate-spin mx-auto mb-2" />

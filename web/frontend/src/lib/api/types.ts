@@ -1021,6 +1021,12 @@ export interface LoggingConfig {
 	compress?: boolean;
 }
 
+export interface ConfigWarning {
+	field: string;
+	scrapers: string[];
+	message: string;
+}
+
 export interface Config {
 	config_version?: number;
 	server?: ServerConfig;
@@ -1035,6 +1041,7 @@ export interface Config {
 	performance?: PerformanceConfig;
 	mediainfo?: MediaInfoConfig;
 	webui?: WebUIConfig;
+	warnings?: ConfigWarning[];
 }
 
 export interface SettingsConfig {
@@ -1051,6 +1058,7 @@ export interface SettingsConfig {
 	performance: PerformanceConfig;
 	mediainfo: MediaInfoConfig;
 	webui: WebUIConfig;
+	warnings?: ConfigWarning[];
 }
 
 // History types

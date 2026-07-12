@@ -119,6 +119,7 @@ type Config struct {
 	Performance   PerformanceConfig `yaml:"performance" json:"performance"`
 	MediaInfo     mediaInfoConfig   `yaml:"mediainfo" json:"mediainfo"`
 	WebUI         webUIConfig       `yaml:"webui" json:"webui"`
+	Warnings      []ConfigWarning   `yaml:"-" json:"warnings,omitempty"`
 }
 
 // ServerConfig holds API server configuration
@@ -333,10 +334,12 @@ type mediaInfoConfig struct {
 // Validate checks configuration values for validity.
 // Structural/field-level checks run first, then cross-field validators in sequence.
 func (c *Config) Validate() error {
-	// Always normalize to pick up any changes from YAML load that haven't been applied yet.
-	// Normalize is idempotent and preserves existing Overrides values.
 	c.Scrapers.Normalize()
-	return ValidateConfig(c)
+	if err := ValidateConfig(c); err != nil {
+		return err
+	}
+	c.Warnings = ValidatePriorityOverrides(c)
+	return nil
 }
 
 // ValidateConfig validates a Config without mutating it.
