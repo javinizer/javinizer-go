@@ -208,3 +208,40 @@ func TestValidate_SetsWarningsOnOriginal(t *testing.T) {
 	require.Len(t, cfg.Warnings, 1, "Validate should set Warnings on the original config")
 	assert.Equal(t, "content_id", cfg.Warnings[0].Field)
 }
+
+func TestValidatePriorityOverrides_EnabledButNotInPriority(t *testing.T) {
+	cfg := newConfigWithOverrides(map[string]*scraperconfig.ScraperSettings{
+		"dmm":    scraperSettings(true),
+		"r18dev": scraperSettings(true),
+	})
+	cfg.Scrapers.Priority = []string{"r18dev"} // DMM not in priority
+	cfg.Metadata.Priority.Fields["content_id"] = []string{"dmm"}
+
+	warnings := ValidatePriorityOverrides(cfg)
+	require.Len(t, warnings, 1, "enabled scraper not in priority list should warn")
+	assert.Equal(t, "content_id", warnings[0].Field)
+	assert.Contains(t, warnings[0].Scrapers, "dmm")
+}
+
+func TestValidatePriorityOverrides_EnabledAndInPriority(t *testing.T) {
+	cfg := newConfigWithOverrides(map[string]*scraperconfig.ScraperSettings{
+		"dmm":    scraperSettings(true),
+		"r18dev": scraperSettings(true),
+	})
+	cfg.Scrapers.Priority = []string{"dmm", "r18dev"}
+	cfg.Metadata.Priority.Fields["content_id"] = []string{"dmm"}
+
+	warnings := ValidatePriorityOverrides(cfg)
+	assert.Empty(t, warnings, "enabled scraper in priority list should not warn")
+}
+
+func TestValidatePriorityOverrides_EmptyPriorityList(t *testing.T) {
+	cfg := newConfigWithOverrides(map[string]*scraperconfig.ScraperSettings{
+		"dmm": scraperSettings(true),
+	})
+	cfg.Scrapers.Priority = []string{} // empty = all scrapers in priority
+	cfg.Metadata.Priority.Fields["content_id"] = []string{"dmm"}
+
+	warnings := ValidatePriorityOverrides(cfg)
+	assert.Empty(t, warnings, "empty priority list means all scrapers are queryable")
+}

@@ -49,20 +49,20 @@ func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
 		}
 
 		var disabled []string
-		hasEnabled := false
+		hasQueryable := false
 		for _, name := range scrapers {
 			settings, ok := cfg.Scrapers.Overrides[name]
 			if !ok || settings == nil {
 				continue
 			}
-			if settings.Enabled {
-				hasEnabled = true
+			if settings.Enabled && scraperInPriority(cfg.Scrapers.Priority, name) {
+				hasQueryable = true
 			} else {
 				disabled = append(disabled, name)
 			}
 		}
 
-		if !hasEnabled && len(disabled) > 0 {
+		if !hasQueryable && len(disabled) > 0 {
 			warnings = append(warnings, ConfigWarning{
 				Field:    field,
 				Scrapers: disabled,
@@ -330,4 +330,19 @@ func validateTranslationProviderInternal(c *Config) error {
 	}
 
 	return nil
+}
+
+// scraperInPriority checks if a scraper name is in the scraper priority list.
+// If the priority list is empty, all scrapers are considered in priority
+// (the default order is applied by the registry at runtime).
+func scraperInPriority(priority []string, name string) bool {
+	if len(priority) == 0 {
+		return true
+	}
+	for _, p := range priority {
+		if p == name {
+			return true
+		}
+	}
+	return false
 }
