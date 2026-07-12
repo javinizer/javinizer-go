@@ -234,16 +234,16 @@ The portable paths resolve as:
 2. **Copy your config**:
    ```powershell
    # Create the data directory if it doesn't exist
-   mkdir "%APPDATA%\Javinizer" -Force
+   mkdir "$env:APPDATA\Javinizer" -Force
    # Copy your CLI config
-   copy configs\config.yaml "%APPDATA%\Javinizer\config.yaml"
+   copy configs\config.yaml "$env:APPDATA\Javinizer\config.yaml"
    ```
 
 3. **Copy your database** (optional — preserves job history, scraped metadata,
    genre replacements, actress records):
    ```powershell
-   mkdir "%APPDATA%\Javinizer\data" -Force
-   copy data\javinizer.db "%APPDATA%\Javinizer\data\javinizer.db"
+   mkdir "$env:APPDATA\Javinizer\data" -Force
+   copy data\javinizer.db "$env:APPDATA\Javinizer\data\javinizer.db"
    ```
 
 4. **Update `allowed_directories`** — the desktop app launches from
