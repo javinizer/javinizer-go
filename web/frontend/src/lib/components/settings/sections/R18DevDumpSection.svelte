@@ -73,6 +73,7 @@
 		// for when the WebSocket terminal frame is missed.
 		const wasPresent = status?.present ?? false;
 		const prevImportedAt = status?.imported_at ?? '';
+		const prevSourceDate = status?.source_date ?? '';
 		const maxAttempts = 200;
 		for (let i = 0; i < maxAttempts; i++) {
 			if (!polling) return; // stopped by component unmount
@@ -104,8 +105,14 @@
 				}
 				// Fallback for updates: if the dump was already present, detect
 				// completion by a changed imported_at timestamp (the backend
-				// updates it when the import finishes).
+				// updates it when the import finishes) OR a changed source_date
+				// (the backend updates it even when the dump is unchanged).
 				if (wasPresent && s.imported_at && s.imported_at !== prevImportedAt) {
+					downloading = false;
+					polling = false;
+					return;
+				}
+				if (wasPresent && s.source_date && s.source_date !== prevSourceDate) {
 					downloading = false;
 					polling = false;
 					return;

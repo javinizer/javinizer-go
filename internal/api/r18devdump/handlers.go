@@ -186,7 +186,13 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			// During the import (which can take minutes), the scraper falls
 			// back to HTTP. This is acceptable — the import is replacing the
 			// dump, and the old dump would be stale soon anyway.
-			if old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil); old != nil {
+			//
+			// The closer swap is protected by h.mu to prevent racing with
+			// a concurrent config reload (which also swaps the closer).
+			h.mu.Lock()
+			old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil)
+			h.mu.Unlock()
+			if old != nil {
 				_ = old.Close()
 			}
 			impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
