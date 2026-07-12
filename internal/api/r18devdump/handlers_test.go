@@ -994,3 +994,77 @@ func TestStartDownload_RestoresHandleOnFailure(t *testing.T) {
 
 	assert.True(t, reloadCalled, "reloadDump should be called after failed download to restore handle")
 }
+
+func TestStartUpdate_UnchangedReloadsDump(t *testing.T) {
+	srv := newDumpTestServer(t)
+	defer srv.Close()
+
+	h, dumpPath, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
+
+	// Pre-create a dump with the matching source URL so update-only reports unchanged.
+	buildTestDump(t, dumpPath, "118ipx00535", "IPX-535")
+	db, err := openRawDB(dumpPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT OR REPLACE INTO dump_meta (key, value) VALUES (?, ?)`,
+		"source_url", srv.URL+"/dumps/r18dotdev_dump_2026-04-28.sql.gz")
+	require.NoError(t, err)
+	_ = db.Close()
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/latest"
+
+	// Track if reload was called on the unchanged path.
+	// Return error to exercise the warning log path.
+	reloadCalled := false
+	h.reloadFn = func(_ *config.Config) error {
+		reloadCalled = true
+		return fmt.Errorf("simulated reload failure")
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/update", nil)
+
+	h.startUpdate(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	<-h.done
+	r18devdump.LatestDumpURL = orig
+
+	assert.True(t, reloadCalled, "reloadDump should be called even when dump is unchanged")
+}
+
+func TestClearDump_RestoresHandleOnDeleteError(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+
+	// Simulate an existing open dump handle.
+	closer := &fakeCloser{}
+	h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(closer)
+
+	// Track if reload was called to restore the handle.
+	// Return error to exercise the warning log path.
+	reloadCalled := false
+	h.reloadFn = func(_ *config.Config) error {
+		reloadCalled = true
+		return fmt.Errorf("simulated restore failure")
+	}
+
+	// Make the dump directory read-only so os.Remove fails.
+	dir := filepath.Dir(dumpPath)
+	_ = os.Chmod(dir, 0o500)
+	defer func() { _ = os.Chmod(dir, 0o755) }()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/r18dev/dump", nil)
+
+	h.clearDump(c)
+
+	// On macOS this may succeed (root bypass) — either 200 or 500 is acceptable.
+	if w.Code == http.StatusInternalServerError {
+		assert.True(t, reloadCalled, "reloadDump should be called to restore handle when delete fails")
+	}
+}

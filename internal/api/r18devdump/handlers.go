@@ -213,6 +213,12 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		}
 		if res.Unchanged {
 			logging.Infof("r18dev dump unchanged (%s), no update needed", res.SourceDate)
+			// Reload even when unchanged — the dump file may have been created
+			// externally or a previous hot-swap may have failed. This lets the
+			// API activate an already-present dump without a server restart.
+			if reloadErr := h.reloadDump(path); reloadErr != nil {
+				logging.Warnf("r18dev dump unchanged but hot-swap failed: %v", reloadErr)
+			}
 			h.broadcastProgress("done", 0, 0)
 			return
 		}
@@ -337,6 +343,12 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 	}
 	if removeErr != nil {
 		logging.Warnf("r18dev dump clear: failed to delete %s: %v", path, removeErr)
+		// Restore the dump handle since the file still exists and the
+		// closer was closed above. Without this, the scraper registry
+		// points at a closed store and falls back to HTTP unnecessarily.
+		if reloadErr := h.reloadDump(path); reloadErr != nil {
+			logging.Warnf("r18dev dump clear: failed to restore handle after delete error: %v", reloadErr)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete dump file: %v", removeErr)})
 		return
 	}
