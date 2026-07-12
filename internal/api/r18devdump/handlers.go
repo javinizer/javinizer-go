@@ -178,6 +178,11 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			h.broadcastProgress("importing", 0, 0)
+			// Close the active dump handle before importing so the SQLite file
+			// can be replaced (Windows blocks rename over open files).
+			if old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil); old != nil {
+				_ = old.Close()
+			}
 			impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
 				SourceURL:  d.FinalURL,
 				SourceDate: d.SourceDate,
@@ -191,10 +196,17 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		})
 		if err != nil {
 			logging.Warnf("r18dev dump download failed: %v", err)
-			// Clean up any partial/empty dump file left by a failed import so
-			// the scraper doesn't try to use a broken dump on the next scrape.
-			for _, p := range []string{path, path + "-wal", path + "-shm", path + ".tmp", path + ".tmp-wal", path + ".tmp-shm"} {
+			// Clean up only temp files — the existing dump (if any) is still
+			// valid and should be preserved so the scraper can keep using it.
+			// Import writes to path+".tmp" and only renames on success, so a
+			// failed import leaves the original dump intact.
+			for _, p := range []string{path + ".tmp", path + ".tmp-wal", path + ".tmp-shm"} {
 				_ = os.Remove(p)
+			}
+			// Re-open the dump handle if we closed it above (restore the
+			// previous dump so the scraper can keep using it).
+			if reloadErr := h.reloadDump(path); reloadErr != nil {
+				logging.Warnf("r18dev dump: failed to restore handle after failed download: %v", reloadErr)
 			}
 			h.broadcastProgress("error", 0, 0)
 			return
@@ -307,9 +319,24 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 		return
 	}
 
-	// Remove the dump DB and its WAL/SHM sidecars.
+	// Close the active dump handle before deleting so the SQLite file can
+	// be removed on Windows (which blocks deletion of open files).
+	if old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil); old != nil {
+		_ = old.Close()
+	}
+
+	// Remove the dump DB and its WAL/SHM sidecars. Report failure if the
+	// main DB file can't be deleted (sidecar failures are non-fatal).
+	var removeErr error
 	for _, p := range []string{path, path + "-wal", path + "-shm"} {
-		_ = os.Remove(p)
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) && p == path {
+			removeErr = err
+		}
+	}
+	if removeErr != nil {
+		logging.Warnf("r18dev dump clear: failed to delete %s: %v", path, removeErr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete dump file: %v", removeErr)})
+		return
 	}
 
 	// Hot-swap: reload config so the scraper registry drops the old dump handle.

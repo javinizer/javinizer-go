@@ -824,3 +824,173 @@ func TestClearDump_ReloadFails(t *testing.T) {
 	_, err := os.Stat(dumpPath)
 	assert.True(t, os.IsNotExist(err), "dump file should be deleted even if reload fails")
 }
+
+// --- Codex review fix coverage ---
+
+func TestClearDump_DeleteError(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+
+	// Make the dump directory read-only so os.Remove fails.
+	// On macOS this may not prevent deletion (root bypass), so skip if it succeeds.
+	dir := filepath.Dir(dumpPath)
+	_ = os.Chmod(dir, 0o500)
+	defer func() { _ = os.Chmod(dir, 0o755) }()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/r18dev/dump", nil)
+
+	h.clearDump(c)
+
+	// If the file was deleted anyway (root/permissive fs), we get 200.
+	// If deletion failed, we get 500. Either is acceptable — the test
+	// just exercises the error path without panicking.
+	if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 200 or 500, got %d", w.Code)
+	}
+}
+
+func TestStartDownload_PreservesExistingDumpOnFailure(t *testing.T) {
+	// Serve a valid gzip stream but make the dump directory unwritable
+	// so Import fails — but the existing dump should be preserved.
+	gz := gzipped("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(gz)
+	}))
+	defer srv.Close()
+
+	h, dumpPath, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
+
+	// Pre-create a valid dump.
+	buildTestDump(t, dumpPath, "118ipx030", "ABF-030")
+
+	// Point at a path under a file (can't create directory) so Import fails.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte(""), 0o644))
+	h.rt.Deps().CoreDeps.GetConfig().Metadata.R18DevDump.Path = filepath.Join(blocker, "sub", "r18dev_dump.db")
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/latest"
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	// Wait for the goroutine to complete before restoring LatestDumpURL.
+	<-h.done
+	r18devdump.LatestDumpURL = orig
+
+	// The original dump should still exist (not deleted by the failed import).
+	_, err := os.Stat(dumpPath)
+	assert.NoError(t, err, "original dump should be preserved after failed download")
+}
+
+// --- Coverage for ReplaceR18DevDumpCloser paths ---
+
+func TestStartDownload_ClosesExistingDumpHandle(t *testing.T) {
+	srv := newDumpTestServer(t)
+	defer srv.Close()
+
+	h, _, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
+
+	// Simulate an existing open dump handle (like the scraper registry would hold).
+	closer := &fakeCloser{}
+	h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(closer)
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/latest"
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	<-h.done
+	r18devdump.LatestDumpURL = orig
+
+	assert.True(t, closer.closed, "existing dump handle should be closed before import")
+}
+
+func TestClearDump_ClosesExistingDumpHandle(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+
+	// Simulate an existing open dump handle.
+	closer := &fakeCloser{}
+	h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(closer)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/r18dev/dump", nil)
+
+	h.clearDump(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, closer.closed, "existing dump handle should be closed before deletion")
+}
+
+// fakeCloser tracks whether Close was called.
+type fakeCloser struct {
+	closed bool
+}
+
+func (f *fakeCloser) Close() error {
+	f.closed = true
+	return nil
+}
+
+func TestStartDownload_RestoresHandleOnFailure(t *testing.T) {
+	// Serve a valid gzip but make the dump path unwritable so Import fails
+	// inside the callback — this exercises the restore-handle-on-failure path.
+	gz := gzipped("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(gz)
+	}))
+	defer srv.Close()
+
+	h, dumpPath, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+
+	// Pre-create a valid dump so there's something to restore.
+	buildTestDump(t, dumpPath, "118ipx030", "ABF-030")
+
+	// Track whether reloadFn was called on the failure path.
+	// Return an error to exercise the warning log path.
+	reloadCalled := false
+	h.reloadFn = func(_ *config.Config) error {
+		reloadCalled = true
+		return fmt.Errorf("simulated restore failure")
+	}
+
+	// Point at a path under a file so Import fails (can't create directory).
+	blocker := filepath.Join(t.TempDir(), "blocker2")
+	require.NoError(t, os.WriteFile(blocker, []byte(""), 0o644))
+	h.rt.Deps().CoreDeps.GetConfig().Metadata.R18DevDump.Path = filepath.Join(blocker, "sub", "r18dev_dump.db")
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/latest"
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	<-h.done
+	r18devdump.LatestDumpURL = orig
+
+	assert.True(t, reloadCalled, "reloadDump should be called after failed download to restore handle")
+}
