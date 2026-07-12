@@ -354,6 +354,9 @@ func TestStartDownload_FullDownload(t *testing.T) {
 
 	h, dumpPath, hub := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
+	// Use a no-op reload to avoid opening a SQLite handle to the temp dump
+	// path (which Windows can't clean up). Reload is tested separately.
+	h.reloadFn = func(_ *config.Config) error { return nil }
 
 	// Override LatestDumpURL to point at the test server.
 	orig := r18devdump.LatestDumpURL
@@ -523,6 +526,7 @@ func TestStartDownload_FlagResetAfterCompletion(t *testing.T) {
 
 	h, _, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
@@ -578,6 +582,7 @@ func TestStartDownload_NilHTTPClient(t *testing.T) {
 
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = nil // force the nil-check fallback path
+	h.reloadFn = func(_ *config.Config) error { return nil }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
