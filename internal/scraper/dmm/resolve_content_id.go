@@ -40,7 +40,13 @@ func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, e
 	contentID := normalizeContentID(id)
 	searchQuery := strings.ToLower(strings.ReplaceAll(id, "-", ""))
 	cleanSearchID := normalizedContentIDWithoutPadding(contentID)
-	matchIDs := uniqueNonEmptyStrings([]string{searchQuery, cleanSearchID, contentID})
+	// Also include the prefix-stripped search query. When the input is a raw
+	// content_id (e.g. "118abf030"), extractContentIDCandidates cleans the URL
+	// cid with cleanPrefixRegex → "abf030", but searchQuery is "118abf030"
+	// (prefix intact) and cleanSearchID is "abf30" (over-stripped zeros).
+	// Without the prefix-stripped form, the cleaned URL cid doesn't match.
+	strippedSearchQuery := cleanPrefixRegex.ReplaceAllString(searchQuery, "$1")
+	matchIDs := uniqueNonEmptyStrings([]string{searchQuery, strippedSearchQuery, cleanSearchID, contentID})
 	searchQueries := buildResolveContentIDSearchQueries(id, contentID)
 
 	logging.Debugf("DMM: Searching for matches to searchQuery=%s, cleanSearchID=%s or contentID=%s", searchQuery, cleanSearchID, contentID)
