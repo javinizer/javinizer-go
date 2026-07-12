@@ -218,25 +218,24 @@ func (s *scraper) resolveDumpMediaURLs(d *models.DumpMovie, result *models.Scrap
 		result.CoverURL = coverURL
 	}
 
-	// Poster: the dump's jacket_thumb_url is the "ps" (small/poster) variant.
-	// Resolved independently of the cover so a row with only a thumb still
-	// gets a poster. Falls back to the cover URL when no thumb is available.
+	// Poster: the dump's jacket_thumb_url is a low-res "ps" thumbnail on
+	// pics.dmm.co.jp. The HTTP path probes the awsimgsrc poster dimensions and
+	// falls back to cropping the high-res cover when the poster is too small or
+	// missing (common for mono/movie titles — e.g. ABF-030's awsimgsrc ps.jpg
+	// is a 147×200 placeholder). The dump path is zero-HTTP so it can't probe;
+	// using the raw pics.dmm.co.jp thumb gives a 13KB low-quality poster.
 	//
-	// The online path (r18dev.go) probes the awsimgsrc poster dimensions via
-	// GetOptimalPosterURL and sets ShouldCropPoster accordingly; the dump path
-	// is zero-HTTP so it can't probe. The ps.jpg thumb is conventionally a
-	// portrait poster, so shouldCrop stays false when a thumb is present.
-	// When the thumb is missing and we fall back to the landscape cover,
-	// ShouldCropPoster must be true so the frontend right-crops the cover
-	// into a portrait (otherwise it letterboxes the full cover — see the
-	// matching logic in r18dev.go's shouldCrop branch).
-	posterURL := r18devdump.NormalizeDumpURL(d.JacketThumbURL)
-	if posterURL != "" {
-		posterURL = imageutil.NormalizeDMMScreenshotURL(posterURL)
-		result.PosterURL = posterURL
-	} else if coverURL != "" {
+	// Instead, prefer the high-res cover (already upgraded to awsimgsrc CDN)
+	// with ShouldCropPoster=true, matching the HTTP path's fallback. Only use
+	// the thumb directly when no cover is available (a rare row with only a
+	// thumbnail), and in that case upgrade it to awsimgsrc CDN too.
+	if coverURL != "" {
 		result.PosterURL = coverURL
 		result.ShouldCropPoster = true
+	} else if posterURL := r18devdump.NormalizeDumpURL(d.JacketThumbURL); posterURL != "" {
+		posterURL = imageutil.NormalizeDMMScreenshotURL(posterURL)
+		posterURL = imageutil.UpgradeDMMCoverCDN(posterURL)
+		result.PosterURL = posterURL
 	}
 
 	// Screenshots: expand the dump's gallery range into individual URLs.
