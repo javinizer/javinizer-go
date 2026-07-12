@@ -492,6 +492,59 @@ func TestSearch_ContextCanceled_StopsFurtherProbes(t *testing.T) {
 	assert.Empty(t, combinedHits, "no combined= variation should be requested after cancellation")
 }
 
+// TestResolveURL_PreCancelledContext_BreaksDVDidLoop covers the ctx.Err()
+// check at the top of the dvd_id= loop (ResolveURL line 324). Search itself
+// checks ctx.Err() before calling ResolveURL, so going through Search can
+// never reach this check with a cancelled context. Calling ResolveURL
+// directly bypasses Search's gate and exercises the defense-in-depth break.
+func TestResolveURL_PreCancelledContext_BreaksDVDidLoop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not make any HTTP request when context is pre-cancelled")
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s := newR18TestScraper(server, true, "en")
+	resolver := &r18ContentIDResolver{scraper: s}
+	url, ok := resolver.ResolveURL(ctx, "ABF-030")
+	assert.False(t, ok, "should not resolve when context is pre-cancelled")
+	assert.Empty(t, url)
+}
+
+// TestResolveURL_FuzzyFallbackSkipped_WhenContextCancelled covers the
+// ctx.Err()==nil gate on the fuzzy fallback (ResolveURL line 378). The dvd_id=
+// handler cancels the context AND returns a null-dvd_id fuzzy match, so
+// fuzzyContentIDURL is set but ctx is cancelled — the fallback must be
+// skipped (returns "", false), not used.
+func TestResolveURL_FuzzyFallbackSkipped_WhenContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+
+		switch {
+		case strings.Contains(path, "dvd_id=abf030"):
+			cancel()
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content_id":"436abf00030","dvd_id":null}`))
+			return
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	s := newR18TestScraper(server, true, "en")
+	resolver := &r18ContentIDResolver{scraper: s}
+	url, ok := resolver.ResolveURL(ctx, "ABF-030")
+	assert.False(t, ok, "should not resolve when context is cancelled before fallback")
+	assert.Empty(t, url)
+}
+
 // TestSearch_VariationHTML200_ContinuesToNext verifies that a variation
 // returning a 200 with Content-Type: text/html is treated as invalid and
 // skipped, so the resolver continues to a later variation that returns valid
