@@ -48,7 +48,7 @@ func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
 			continue
 		}
 
-		var disabled []string
+		var unqueryable []string
 		hasQueryable := false
 		for _, name := range scrapers {
 			settings, ok := cfg.Scrapers.Overrides[name]
@@ -58,15 +58,24 @@ func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
 			if settings.Enabled && scraperInPriority(cfg.Scrapers.Priority, name) {
 				hasQueryable = true
 			} else {
-				disabled = append(disabled, name)
+				unqueryable = append(unqueryable, name)
 			}
 		}
 
-		if !hasQueryable && len(disabled) > 0 {
+		if !hasQueryable && len(unqueryable) > 0 {
+			var reasons []string
+			for _, name := range unqueryable {
+				settings := cfg.Scrapers.Overrides[name]
+				if settings != nil && !settings.Enabled {
+					reasons = append(reasons, fmt.Sprintf("%s is disabled", name))
+				} else {
+					reasons = append(reasons, fmt.Sprintf("%s is not in scrapers.priority", name))
+				}
+			}
 			warnings = append(warnings, ConfigWarning{
 				Field:    field,
-				Scrapers: disabled,
-				Message:  fmt.Sprintf("metadata.priority.%s is set to [%s] but all known listed scrapers are disabled — this field will be empty", field, strings.Join(scrapers, ", ")),
+				Scrapers: unqueryable,
+				Message:  fmt.Sprintf("metadata.priority.%s is set to [%s] but all listed scrapers are unqueryable (%s) — this field will be empty", field, strings.Join(scrapers, ", "), strings.Join(reasons, ", ")),
 			})
 		}
 	}

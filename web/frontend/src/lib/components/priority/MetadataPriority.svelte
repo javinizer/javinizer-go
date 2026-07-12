@@ -145,14 +145,6 @@
 	// formatScraperName lives in ./scraperNames.ts (shared with FieldRow).
 
 	// Get list of enabled scrapers
-	function getEnabledScrapers(): string[] {
-		const allScrapers = getGlobalPriority(config);
-		return allScrapers.filter((scraperName) => {
-			const scraperCfg = config?.scrapers?.[scraperName];
-			return (scraperCfg as ScraperSettings)?.enabled !== false;
-		});
-	}
-
 	// Filter priority list to only include enabled scrapers
 	function filterEnabledScrapers(priority: string[]): string[] {
 		return priority.filter((scraperName) => {
