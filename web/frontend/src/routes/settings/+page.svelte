@@ -231,7 +231,7 @@
 			<FileOperationsSettingsSection config={settings.settingsConfig} />
 			<OutputSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 			<DatabaseSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
-			<R18DevDumpSection />
+			<R18DevDumpSection onConfigChange={(enabled) => { if (settings.settingsConfig) { const meta = settings.settingsConfig.metadata || (settings.settingsConfig as any).metadata || {}; meta.r18dev_dump = { enabled, path: meta.r18dev_dump?.path ?? '' }; (settings.settingsConfig as any).metadata = meta; } }} />
 			<ApiTokensSection onTokenDisplay={handleTokenDisplay} />
 			<SettingsSection title="Genre Replacements" description="Manage genre name replacements applied during scraping" defaultExpanded={false}>
 				<div class="space-y-4">

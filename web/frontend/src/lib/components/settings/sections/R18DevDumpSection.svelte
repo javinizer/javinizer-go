@@ -5,6 +5,11 @@
 	import type { DumpStatus } from '$lib/api/types';
 	import { Download, RefreshCw, Search, CheckCircle, AlertCircle, Database, Trash2 } from 'lucide-svelte';
 
+	interface Props {
+		onConfigChange?: (enabled: boolean) => void;
+	}
+	let { onConfigChange }: Props = $props();
+
 	let status: DumpStatus | null = $state(null);
 	let loading = $state(false);
 	let downloading = $state(false);
@@ -64,10 +69,10 @@
 
 	async function pollDownloadProgress() {
 		polling = true;
-		// Poll every 3 seconds for up to 10 minutes (dump is ~250MB).
-		// Use the WebSocket terminal state (done/error) as the primary signal,
-		// not dump presence — presence is already true when updating an existing
-		// dump, so it would immediately stop showing progress.
+		// Record whether the dump was present before the download started.
+		// If the dump was absent and becomes present, treat it as complete —
+		// this is the fallback for when the WebSocket terminal frame is missed.
+		const wasPresent = status?.present ?? false;
 		const maxAttempts = 200;
 		for (let i = 0; i < maxAttempts; i++) {
 			if (!polling) return; // stopped by component unmount
@@ -77,7 +82,7 @@
 			if (downloadProgress) {
 				const wsStatus = downloadProgress.message || downloadProgress.status;
 				if (wsStatus === 'done' || wsStatus === 'error') {
-					await fetchStatus(); // Refresh to get the final state
+					await fetchStatus();
 					downloading = false;
 					polling = false;
 					if (wsStatus === 'error') {
@@ -90,6 +95,13 @@
 			try {
 				const s = await api.r18dev.getDumpStatus();
 				status = s;
+				// Fallback: if the dump was absent before and is now present,
+				// the download completed (WS frame may have been missed).
+				if (!wasPresent && s.present) {
+					downloading = false;
+					polling = false;
+					return;
+				}
 			} catch {
 				// Auth error or network error — keep polling.
 			}
@@ -128,6 +140,7 @@
 
 	async function toggleDumpEnabled() {
 		dumpEnabled = !dumpEnabled;
+		onConfigChange?.(dumpEnabled);
 		try {
 			const cfg = await api.config.getConfig();
 			const meta = (cfg as any).metadata || {};
@@ -140,6 +153,7 @@
 		} catch (e) {
 			// Revert on error
 			dumpEnabled = !dumpEnabled;
+			onConfigChange?.(dumpEnabled);
 			downloadError = e instanceof Error ? e.message : 'Failed to update config';
 		}
 	}
