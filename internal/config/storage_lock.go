@@ -15,21 +15,69 @@ const (
 	configLockWaitInterval = 50 * time.Millisecond
 	configLockTimeout      = 10 * time.Second
 	configLockStaleAge     = 2 * time.Minute
+
+	lockRetryAttempts = 3
+	lockRetryBackoff  = 100 * time.Millisecond
+)
+
+var (
+	osRemoveFunc   = os.Remove
+	osReadFileFunc = os.ReadFile
+
+	lockRetryEnabled = runtime.GOOS == "windows"
 )
 
 func makeConfigLockToken() string {
 	return fmt.Sprintf("pid=%d,time=%d", os.Getpid(), time.Now().UnixNano())
 }
 
+func removeWithRetry(path string) error {
+	if !lockRetryEnabled {
+		return osRemoveFunc(path)
+	}
+	var lastErr error
+	for attempt := 0; attempt < lockRetryAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(lockRetryBackoff * time.Duration(attempt))
+		}
+		lastErr = osRemoveFunc(path)
+		if lastErr == nil || os.IsNotExist(lastErr) {
+			return lastErr
+		}
+	}
+	return lastErr
+}
+
+func readFileWithRetry(path string) ([]byte, error) {
+	if !lockRetryEnabled {
+		return osReadFileFunc(path)
+	}
+	var lastErr error
+	for attempt := 0; attempt < lockRetryAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(lockRetryBackoff * time.Duration(attempt))
+		}
+		data, err := osReadFileFunc(path)
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		if os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
 func releaseConfigFileLock(lockPath string, token string) {
-	currentToken, err := os.ReadFile(lockPath)
+	currentToken, err := readFileWithRetry(lockPath)
 	if err != nil {
 		return
 	}
 	if string(currentToken) != token {
 		return
 	}
-	_ = os.Remove(lockPath)
+	_ = removeWithRetry(lockPath)
 }
 
 func parseConfigLockMetadata(content string) (pid int, createdUnixNano int64, ok bool) {
