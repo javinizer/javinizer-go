@@ -38,7 +38,7 @@ type dumpHandler struct {
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{Timeout: 10 * time.Minute}}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}}
 	h.reloadFn = func(cfg *config.Config) error { return h.rt.ReloadConfig(cfg) }
 	return h
 }
@@ -164,7 +164,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	// client disconnects.
 	client := h.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Minute}
+		client = &http.Client{}
 	}
 
 	done := h.done

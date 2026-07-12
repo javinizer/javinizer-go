@@ -62,19 +62,31 @@
 	async function pollDownloadProgress() {
 		polling = true;
 		// Poll every 3 seconds for up to 10 minutes (dump is ~250MB).
+		// Use the WebSocket terminal state (done/error) as the primary signal,
+		// not dump presence — presence is already true when updating an existing
+		// dump, so it would immediately stop showing progress.
 		const maxAttempts = 200;
 		for (let i = 0; i < maxAttempts; i++) {
 			if (!polling) return; // stopped by component unmount
 			await new Promise((r) => setTimeout(r, 3000));
 			if (!polling) return;
+			// Check WebSocket terminal state first.
+			if (downloadProgress) {
+				const wsStatus = downloadProgress.message || downloadProgress.status;
+				if (wsStatus === 'done' || wsStatus === 'error') {
+					await fetchStatus(); // Refresh to get the final state
+					downloading = false;
+					polling = false;
+					if (wsStatus === 'error') {
+						downloadError = 'Download failed. Check logs for details.';
+					}
+					return;
+				}
+			}
+			// Also refresh status for UI updates (progress bar, etc).
 			try {
 				const s = await api.r18dev.getDumpStatus();
 				status = s;
-				if (s.present) {
-					downloading = false;
-					polling = false;
-					return;
-				}
 			} catch {
 				// Auth error or network error — keep polling.
 			}
