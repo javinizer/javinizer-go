@@ -27,13 +27,17 @@ const (
 // download/update operations. The dump download streams ~250MB over several
 // minutes, so only one may run at a time.
 type dumpHandler struct {
-	rt      *core.APIRuntime
-	mu      sync.Mutex
-	running bool
+	rt         *core.APIRuntime
+	mu         sync.Mutex
+	running    bool
+	httpClient *http.Client
+	reloadFn   func(cfg *config.Config) error
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
-	return &dumpHandler{rt: rt}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}}
+	h.reloadFn = func(cfg *config.Config) error { return h.rt.ReloadConfig(cfg) }
+	return h
 }
 
 // dumpStatusResponse is the JSON shape returned by GET /status.
@@ -157,8 +161,13 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	// Run the download in a background goroutine. The HTTP response is already
 	// sent as 202. The context from the request keeps it cancellable if the
 	// client disconnects.
+	client := h.httpClient
+	if client == nil {
+		client = &http.Client{}
+	}
+
 	go func() {
-		res, err := r18devdump.Download(ctx, &http.Client{}, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
+		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			h.broadcastProgress("importing", 0, 0)
 			impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
 				SourceURL:  d.FinalURL,
@@ -195,10 +204,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 // registry rebuilds with the new dump lookup wired in.
 func (h *dumpHandler) reloadDump(path string) error {
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
-	// ReloadConfig reopens the dump via OpenR18DevDumpLookup and rebuilds the
-	// scraper registry atomically. This is the same path the config hot-reload
-	// uses, so it's safe to call from a request goroutine.
-	if err := h.rt.ReloadConfig(cfg); err != nil {
+	if err := h.reloadFn(cfg); err != nil {
 		return fmt.Errorf("reload config after dump download: %w", err)
 	}
 	logging.Infof("r18dev dump hot-swapped: %s", path)
@@ -265,7 +271,11 @@ func (h *dumpHandler) search(c *gin.Context) {
 // the WebUI can render a progress bar. Non-blocking — if no WS clients are
 // connected, the message is silently dropped.
 func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64) {
-	hub := h.rt.GetRuntime().WebSocketHub()
+	rt := h.rt.GetRuntime()
+	if rt == nil {
+		return
+	}
+	hub := rt.WebSocketHub()
 	if hub == nil {
 		return
 	}
@@ -283,9 +293,7 @@ func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64) {
 		msg.Status = ws.ProgressStatusError
 		msg.Error = "dump download failed"
 	}
-	if err := hub.BroadcastProgress(msg); err != nil {
-		logging.Debugf("r18dev dump: failed to broadcast progress: %v", err)
-	}
+	_ = hub.BroadcastProgress(msg)
 }
 
 func progressPercent(bytes, total int64) float64 {
