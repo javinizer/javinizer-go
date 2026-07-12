@@ -3,7 +3,6 @@ package config
 import (
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -209,6 +208,3 @@ func TestValidate_SetsWarningsOnOriginal(t *testing.T) {
 	require.Len(t, cfg.Warnings, 1, "Validate should set Warnings on the original config")
 	assert.Equal(t, "content_id", cfg.Warnings[0].Field)
 }
-
-// Ensure models import is used (for future test expansion)
-var _ models.ScraperSettings = models.ScraperSettings{}

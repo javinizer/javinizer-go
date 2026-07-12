@@ -39,18 +39,18 @@ func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
 
 	var warnings []ConfigWarning
 	for _, field := range fields {
-		Scrapers := cfg.Metadata.Priority.Fields[field]
-		if len(Scrapers) == 0 {
+		scrapers := cfg.Metadata.Priority.Fields[field]
+		if len(scrapers) == 0 {
 			continue
 		}
 		// Skip exact __skip__ sentinel.
-		if len(Scrapers) == 1 && Scrapers[0] == "__skip__" {
+		if len(scrapers) == 1 && scrapers[0] == "__skip__" {
 			continue
 		}
 
 		var disabled []string
 		hasEnabled := false
-		for _, name := range Scrapers {
+		for _, name := range scrapers {
 			settings, ok := cfg.Scrapers.Overrides[name]
 			if !ok || settings == nil {
 				continue
@@ -66,7 +66,7 @@ func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
 			warnings = append(warnings, ConfigWarning{
 				Field:    field,
 				Scrapers: disabled,
-				Message:  fmt.Sprintf("metadata.priority.%s is set to [%s] but all listed scrapers are disabled — this field will be empty", field, strings.Join(Scrapers, ", ")),
+				Message:  fmt.Sprintf("metadata.priority.%s is set to [%s] but all known listed scrapers are disabled — this field will be empty", field, strings.Join(scrapers, ", ")),
 			})
 		}
 	}
