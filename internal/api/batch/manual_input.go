@@ -63,15 +63,19 @@ func resolveManualInputOverride(
 			continue
 		}
 		trimmed := strings.TrimSpace(input)
-		redacted := scrape.RedactURLQuery(trimmed)
 		if movieInputs[fmi.MovieID] == nil {
 			movieInputs[fmi.MovieID] = make(map[string]bool)
 		}
-		movieInputs[fmi.MovieID][redacted] = true
+		// Use the raw (unredacted) input for ambiguity detection so URLs
+		// whose movie ID lives in the query string (?v=IPX-111 vs
+		// ?v=IPX-222) are correctly seen as distinct inputs. The redacted
+		// value is still used for the grouping key (FileMatchInfo.MovieID)
+		// in the override loop below.
+		movieInputs[fmi.MovieID][trimmed] = true
 		if existing, ok := movieInput[fmi.MovieID]; !ok || input < existing {
 			movieInput[fmi.MovieID] = input
 		}
-		inputCounts[inputKey{fmi.MovieID, redacted}]++
+		inputCounts[inputKey{fmi.MovieID, trimmed}]++
 	}
 
 	// Seed the result with every explicit input (submitters keep their own).
@@ -120,12 +124,9 @@ func resolveManualInputOverride(
 		// buildScrapeCmd does the same for cmd.MovieID. RawInputOverride
 		// (the result map) stays raw so the scraper sees the real URL.
 		redacted := scrape.RedactURLQuery(trimmed)
-		// A file loses multipart metadata only if its manual input is unique
-		// within the matcher group (count == 1) AND the group is ambiguous
-		// (more than one distinct input) — i.e. it's being split off as a
-		// standalone movie. Files sharing an input with at least one sibling
-		// keep their part metadata for organize/NFO templates.
-		count := inputCounts[inputKey{fmi.MovieID, redacted}]
+		// Use the raw input for split detection (matches inputCounts keying)
+		// so query-based URLs (?v=IPX-111 vs ?v=IPX-222) count as distinct.
+		count := inputCounts[inputKey{fmi.MovieID, trimmed}]
 		isSplit := count <= 1 && len(movieInputs[fmi.MovieID]) > 1
 		fmi.MovieID = redacted
 		if isSplit {

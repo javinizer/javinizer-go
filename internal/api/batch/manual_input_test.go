@@ -339,10 +339,11 @@ func TestResolveManualInputOverride_CoversDefensiveGuards(t *testing.T) {
 }
 
 func TestResolveManualInputOverride_NormalizesURLKeysForAmbiguity(t *testing.T) {
-	// Two files in the same matcher group given the same URL except for
-	// query credentials. After redaction they collapse to the same input,
-	// so the group is NOT ambiguous — the sibling should be propagated
-	// and multipart metadata preserved.
+	// Two files in the same matcher group given URLs that share a path but
+	// differ in query token. With raw-input keying the inputs are distinct,
+	// so the group IS ambiguous: each file has a unique input and both lose
+	// multipart metadata. The grouping key (MovieID) is still the redacted
+	// URL, so no token leaks.
 	submitted := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
 	manualInputs := map[string]string{
 		"/d/ABC-001-pt1.mp4": "https://example.com/video?token=secret1",
@@ -356,22 +357,45 @@ func TestResolveManualInputOverride_NormalizesURLKeysForAmbiguity(t *testing.T) 
 
 	resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
 
-	// Both redact to the same URL, so the group is NOT ambiguous
-	assert.True(t, fileMatchInfo["/d/ABC-001-pt1.mp4"].IsMultiPart, "pt1 keeps multipart (same redacted URL as pt2)")
-	assert.True(t, fileMatchInfo["/d/ABC-001-pt2.mp4"].IsMultiPart, "pt2 keeps multipart (same redacted URL as pt1)")
+	// Distinct raw inputs → ambiguous group → both files lose multipart metadata.
+	assert.False(t, fileMatchInfo["/d/ABC-001-pt1.mp4"].IsMultiPart, "pt1 loses multipart (distinct raw URL from pt2)")
+	assert.False(t, fileMatchInfo["/d/ABC-001-pt2.mp4"].IsMultiPart, "pt2 loses multipart (distinct raw URL from pt1)")
 	assert.Equal(t, "https://example.com/video", fileMatchInfo["/d/ABC-001-pt1.mp4"].MovieID, "pt1 MovieID is redacted URL")
 	assert.Equal(t, "https://example.com/video", fileMatchInfo["/d/ABC-001-pt2.mp4"].MovieID, "pt2 MovieID is redacted URL")
-	assert.Equal(t, 1, fileMatchInfo["/d/ABC-001-pt1.mp4"].PartNumber, "pt1 PartNumber preserved")
-	assert.Equal(t, 2, fileMatchInfo["/d/ABC-001-pt2.mp4"].PartNumber, "pt2 PartNumber preserved")
+	assert.Equal(t, 0, fileMatchInfo["/d/ABC-001-pt1.mp4"].PartNumber, "pt1 PartNumber reset (split)")
+	assert.Equal(t, 0, fileMatchInfo["/d/ABC-001-pt2.mp4"].PartNumber, "pt2 PartNumber reset (split)")
+}
+
+func TestResolveManualInputOverride_QueryBasedURLsSplitCorrectly(t *testing.T) {
+	// Two files in the same matcher group use manual URLs whose movie ID
+	// lives in the query string. Redaction would collapse them to the same
+	// URL, but they are distinct inputs and should split.
+	submitted := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
+	manualInputs := map[string]string{
+		"/d/ABC-001-pt1.mp4": "https://www.javlibrary.com/vl_searchbyid.php?keyword=IPX-111",
+		"/d/ABC-001-pt2.mp4": "https://www.javlibrary.com/vl_searchbyid.php?keyword=IPX-222",
+	}
+	fileMatchInfo := map[string]models.FileMatchInfo{
+		"/d/ABC-001-pt1.mp4": fmiFor("/d/ABC-001-pt1.mp4", "ABC-001", 1),
+		"/d/ABC-001-pt2.mp4": fmiFor("/d/ABC-001-pt2.mp4", "ABC-001", 2),
+	}
+	allFiles := submitted
+
+	resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+
+	// Both redact to the same URL, but the raw inputs are distinct, so the
+	// group IS ambiguous and both files should lose multipart metadata.
+	assert.False(t, fileMatchInfo["/d/ABC-001-pt1.mp4"].IsMultiPart, "pt1 loses multipart (distinct raw URL from pt2)")
+	assert.False(t, fileMatchInfo["/d/ABC-001-pt2.mp4"].IsMultiPart, "pt2 loses multipart (distinct raw URL from pt1)")
 }
 
 func TestResolveManualInputOverride_DeterministicURLPropagation(t *testing.T) {
-	// Two submitted files in the same matcher group use manual URLs that
-	// redact to the same key but differ in query token. A discovered sibling
-	// should get a deterministic raw URL (lexicographically smallest).
+	// Two submitted files in the same matcher group share the same manual URL,
+	// so the group is non-ambiguous. A discovered sibling should deterministically
+	// receive that shared raw URL regardless of map iteration order.
 	submitted := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
 	manualInputs := map[string]string{
-		"/d/ABC-001-pt1.mp4": "https://example.com/video?token=zzzz",
+		"/d/ABC-001-pt1.mp4": "https://example.com/video?token=aaaa",
 		"/d/ABC-001-pt2.mp4": "https://example.com/video?token=aaaa",
 	}
 	fileMatchInfo := map[string]models.FileMatchInfo{
@@ -385,8 +409,8 @@ func TestResolveManualInputOverride_DeterministicURLPropagation(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		fmiCopy := copyFMI(fileMatchInfo)
 		result := resolveManualInputOverride(submitted, manualInputs, fmiCopy, allFiles)
-		// The sibling should always get the lexicographically smallest raw URL
+		// The sibling should always receive the shared raw URL
 		assert.Equal(t, "https://example.com/video?token=aaaa", result["/d/ABC-001-pt3.mp4"],
-			"sibling gets the lexicographically smallest raw URL (deterministic)")
+			"sibling gets the shared raw URL (deterministic)")
 	}
 }
