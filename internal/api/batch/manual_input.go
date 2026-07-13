@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scrape"
 )
 
 // resolveManualInputOverride produces the final per-file RawInputOverride map by
@@ -97,10 +98,22 @@ func resolveManualInputOverride(
 		if !ok {
 			continue
 		}
-		fmi.MovieID = trimmed
-		fmi.IsMultiPart = false
-		fmi.PartNumber = 0
-		fmi.PartSuffix = ""
+		// Redact URL query params before using as the grouping key —
+		// buildScrapeCmd does the same for cmd.MovieID. RawInputOverride
+		// (the result map) stays raw so the scraper sees the real URL.
+		redacted := scrape.RedactURLQuery(trimmed)
+		isSplit := redacted != fmi.MovieID
+		fmi.MovieID = redacted
+		if isSplit {
+			// Manual input differs from the matcher MovieID — the user is
+			// splitting matcher-grouped files. Clear multipart metadata so
+			// they render as independent movies.
+			fmi.IsMultiPart = false
+			fmi.PartNumber = 0
+			fmi.PartSuffix = ""
+		}
+		// When the manual input matches the matcher MovieID (genuine multi-part
+		// corrected to the same ID), preserve IsMultiPart/PartNumber/PartSuffix.
 		fileMatchInfo[path] = fmi
 	}
 
