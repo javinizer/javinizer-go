@@ -49,7 +49,16 @@ func newTestHandler(t *testing.T) (*dumpHandler, string) {
 	rt := core.NewAPIRuntime(deps)
 	rt.SetConfig(cfg)
 
-	return &dumpHandler{rt: rt, httpClient: &http.Client{}, reloadFn: func(cfg *config.Config) error { return rt.ReloadConfig(cfg) }}, dumpPath
+	return &dumpHandler{
+		rt:         rt,
+		httpClient: &http.Client{},
+		reloadFn: func(cfg *config.Config, lockHeld bool) error {
+			if lockHeld {
+				return rt.ReloadConfigLocked(cfg)
+			}
+			return rt.ReloadConfig(cfg)
+		},
+	}, dumpPath
 }
 
 // newTestHandlerWithHub creates a dumpHandler with a real WebSocket hub so
@@ -292,8 +301,12 @@ func TestNewDumpHandler(t *testing.T) {
 	assert.NotNil(t, h.httpClient)
 	require.NotNil(t, h.reloadFn)
 	// Exercise the reloadFn closure to cover the closure body.
-	err := h.reloadFn(cfg)
+	err := h.reloadFn(cfg, false)
 	_ = err // may or may not error depending on registry setup
+	unlock := rt.LockReload()
+	err = h.reloadFn(cfg, true)
+	unlock()
+	_ = err
 }
 
 func TestRegisterRoutes(t *testing.T) {
@@ -355,7 +368,7 @@ func TestStartDownload_FullDownload(t *testing.T) {
 	h.httpClient = srv.Client()
 	// Use a no-op reload to avoid opening a SQLite handle to the temp dump
 	// path (which Windows can't clean up). Reload is tested separately.
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	// Override LatestDumpURL to point at the test server.
 	orig := r18devdump.LatestDumpURL
@@ -387,7 +400,7 @@ func TestStartDownload_UpdateOnly_Unchanged(t *testing.T) {
 
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	// Pre-create a dump with the matching source URL so update-only skips.
 	buildTestDump(t, dumpPath, "118ipx00535", "IPX-535")
@@ -425,7 +438,7 @@ func TestStartDownload_DownloadError(t *testing.T) {
 
 	h, _, hub := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
@@ -474,10 +487,27 @@ func TestReloadDump_Success(t *testing.T) {
 	cfg := &config.Config{}
 	rt := core.NewAPIRuntime(deps)
 	rt.SetConfig(cfg)
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, reloadFn: func(cfg *config.Config) error { return rt.ReloadConfig(cfg) }}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, reloadFn: func(cfg *config.Config, lockHeld bool) error {
+		if lockHeld {
+			return rt.ReloadConfigLocked(cfg)
+		}
+		return rt.ReloadConfig(cfg)
+	}}
 
 	err := h.reloadDump("/some/path")
 	require.NoError(t, err)
+}
+
+func TestReloadDumpLocked_Success(t *testing.T) {
+	h, _ := newTestHandler(t)
+	lockHeld := false
+	h.reloadFn = func(_ *config.Config, gotLockHeld bool) error {
+		lockHeld = gotLockHeld
+		return nil
+	}
+
+	require.NoError(t, h.reloadDumpLocked("/some/path"))
+	assert.True(t, lockHeld)
 }
 
 // --- fileSize coverage ---
@@ -527,7 +557,7 @@ func TestStartDownload_FlagResetAfterCompletion(t *testing.T) {
 
 	h, _, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
@@ -582,7 +612,7 @@ func TestStartDownload_NilHTTPClient(t *testing.T) {
 
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = nil // force the nil-check fallback path
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
@@ -617,7 +647,7 @@ func TestStartDownload_ImportError(t *testing.T) {
 
 	h, _, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
@@ -687,7 +717,7 @@ func TestBroadcastProgress_HubNil(t *testing.T) {
 
 func TestReloadDump_ReloadError(t *testing.T) {
 	h, _ := newTestHandler(t)
-	h.reloadFn = func(_ *config.Config) error { return fmt.Errorf("simulated reload failure") }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return fmt.Errorf("simulated reload failure") }
 
 	err := h.reloadDump("/some/path")
 	require.Error(t, err)
@@ -701,7 +731,7 @@ func TestStartDownload_ReloadFails(t *testing.T) {
 	h, _, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
 	// Make reload fail so the download goroutine logs a warning but doesn't crash.
-	h.reloadFn = func(_ *config.Config) error { return fmt.Errorf("simulated reload failure") }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return fmt.Errorf("simulated reload failure") }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
@@ -814,7 +844,7 @@ func TestClearDump_ReloadFails(t *testing.T) {
 	h, dumpPath := newTestHandler(t)
 	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
 	// Make reload fail so the warning path is exercised.
-	h.reloadFn = func(_ *config.Config) error { return fmt.Errorf("simulated reload failure") }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return fmt.Errorf("simulated reload failure") }
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -866,7 +896,7 @@ func TestStartDownload_PreservesExistingDumpOnFailure(t *testing.T) {
 
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	// Pre-create a valid dump.
 	buildTestDump(t, dumpPath, "118ipx030", "ABF-030")
@@ -903,7 +933,7 @@ func TestStartDownload_ClosesExistingDumpHandle(t *testing.T) {
 
 	h, _, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	// Simulate an existing open dump handle (like the scraper registry would hold).
 	closer := &fakeCloser{}
@@ -972,7 +1002,7 @@ func TestStartDownload_RestoresHandleOnFailure(t *testing.T) {
 	// Track whether reloadFn was called on the failure path.
 	// Return an error to exercise the warning log path.
 	reloadCalled := false
-	h.reloadFn = func(_ *config.Config) error {
+	h.reloadFn = func(_ *config.Config, _ bool) error {
 		reloadCalled = true
 		return fmt.Errorf("simulated restore failure")
 	}
@@ -1004,7 +1034,7 @@ func TestStartUpdate_UnchangedReloadsDump(t *testing.T) {
 
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	// Pre-create a dump with the matching source URL so update-only reports unchanged.
 	buildTestDump(t, dumpPath, "118ipx00535", "IPX-535")
@@ -1021,7 +1051,7 @@ func TestStartUpdate_UnchangedReloadsDump(t *testing.T) {
 	// Track if reload was called on the unchanged path.
 	// Return error to exercise the warning log path.
 	reloadCalled := false
-	h.reloadFn = func(_ *config.Config) error {
+	h.reloadFn = func(_ *config.Config, _ bool) error {
 		reloadCalled = true
 		return fmt.Errorf("simulated reload failure")
 	}
@@ -1050,7 +1080,7 @@ func TestClearDump_RestoresHandleOnDeleteError(t *testing.T) {
 	// Track if reload was called to restore the handle.
 	// Return error to exercise the warning log path.
 	reloadCalled := false
-	h.reloadFn = func(_ *config.Config) error {
+	h.reloadFn = func(_ *config.Config, _ bool) error {
 		reloadCalled = true
 		return fmt.Errorf("simulated restore failure")
 	}
@@ -1131,6 +1161,57 @@ func TestSearch_DumpImportInProgress(t *testing.T) {
 
 // TestStartDownload_ImportDoesNotHoldReloadLock proves the import stream does
 // not hold reloadMu. Import takes it only at the final swap boundary.
+func TestStartDownload_RegistryPublishHoldsReloadLock(t *testing.T) {
+	srv := newDumpTestServer(t)
+	defer srv.Close()
+
+	h, dumpPath, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+	publishStarted := make(chan bool, 1)
+	publish := make(chan struct{})
+	h.reloadFn = func(_ *config.Config, lockHeld bool) error {
+		publishStarted <- lockHeld
+		<-publish
+		return nil
+	}
+	closer := &fakeCloser{}
+	h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(closer)
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/latest"
+	defer func() { r18devdump.LatestDumpURL = orig }()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	require.True(t, <-publishStarted)
+	assert.True(t, closer.closed)
+	_, err := os.Stat(dumpPath)
+	require.NoError(t, err)
+
+	snapshotDone := make(chan struct{})
+	go func() {
+		_ = h.rt.GetAPIConfig()
+		close(snapshotDone)
+	}()
+	select {
+	case <-snapshotDone:
+		t.Fatal("runtime snapshot must wait until the new registry is published")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(publish)
+	<-h.done
+	select {
+	case <-snapshotDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime snapshot should resume after registry publication")
+	}
+}
+
 func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 	importStarted := make(chan struct{})
 	proceed := make(chan struct{})
@@ -1158,7 +1239,12 @@ func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 	h.httpClient = srv.Client()
 	// Use the real ReloadConfig so the concurrent reload shares reloadMu with
 	// the final swap lock (the no-op reloadFn used by other tests would not).
-	h.reloadFn = func(cfg *config.Config) error { return h.rt.ReloadConfig(cfg) }
+	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
+		if lockHeld {
+			return h.rt.ReloadConfigLocked(cfg)
+		}
+		return h.rt.ReloadConfig(cfg)
+	}
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/dumps/r18dotdev_dump_2026-04-28.sql.gz"
@@ -1277,7 +1363,7 @@ func TestStartDownload_LastErrorSetOnFailure(t *testing.T) {
 
 	h, _, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/latest"
@@ -1317,7 +1403,7 @@ func TestStartDownload_LastErrorClearedOnSuccess(t *testing.T) {
 
 	h, _, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	// Seed a stale error from a hypothetical previous failed run.
 	h.mu.Lock()
@@ -1363,7 +1449,7 @@ func TestStartDownload_LastErrorSetOnImportFailure(t *testing.T) {
 
 	h, _, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	h.reloadFn = func(_ *config.Config) error { return nil }
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	blocker := filepath.Join(t.TempDir(), "blocker")
 	require.NoError(t, os.WriteFile(blocker, []byte(""), 0o644))

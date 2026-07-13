@@ -203,8 +203,19 @@ function createWebSocketStore() {
 		set({ connected: false, skipped: false, messages: [], messagesByFile: {} });
 	}
 
-	function clearMessages() {
-		update((state) => ({ ...state, messages: [], messagesByFile: {} }));
+	function clearMessages(jobID?: string) {
+		update((state) => {
+			if (!jobID) {
+				return { ...state, messages: [], messagesByFile: {} };
+			}
+			const messagesByFile = { ...state.messagesByFile };
+			delete messagesByFile[jobID];
+			return {
+				...state,
+				messages: state.messages.filter((message) => message.job_id !== jobID),
+				messagesByFile,
+			};
+		});
 	}
 
 	return {

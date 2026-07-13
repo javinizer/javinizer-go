@@ -7,6 +7,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -54,23 +55,53 @@ func (r *APIRuntime) ReplaceReloadable(cfg *config.Config, registry *scraperutil
 // to construct aggregator or matcher directly — the workflow factory creates them
 // from config on each request.
 func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
+	reg := scraperutil.NewScraperRegistry()
+	scraper.RegisterAll(reg)
+	if err := r.prepareReload(cfg, reg); err != nil {
+		return err
+	}
+	r.reloadMu.Lock()
+	err := r.reloadConfigLocked(cfg, reg)
+	r.reloadMu.Unlock()
+	if err == nil {
+		if r.reloadPauseAfterRegistry != nil {
+			r.reloadPauseAfterRegistry()
+		}
+		if r.reloadPauseAfterAPICfg != nil {
+			r.reloadPauseAfterAPICfg()
+		}
+	}
+	return err
+}
+
+// ReloadConfigLocked reloads config while the caller holds reloadMu.
+func (r *APIRuntime) ReloadConfigLocked(cfg *config.Config) error {
+	reg := scraperutil.NewScraperRegistry()
+	scraper.RegisterAll(reg)
+	if err := r.prepareReload(cfg, reg); err != nil {
+		return err
+	}
+	return r.reloadConfigLocked(cfg, reg)
+}
+
+func (r *APIRuntime) prepareReload(cfg *config.Config, resolver models.ScraperConfigResolverInterface) error {
 	if cfg == nil {
 		return fmt.Errorf("ReloadConfig: config is nil")
 	}
 	if r.deps.CoreDeps == nil {
 		return fmt.Errorf("ReloadConfig: CoreDeps is not initialized")
 	}
-	reg := scraperutil.NewScraperRegistry()
-	scraper.RegisterAll(reg)
 
 	// Must finalize before reading Overrides — populates defaults for
 	// unconfigured scrapers and builds the validateFns dispatch.
-	if err := cfg.Scrapers.Finalize(reg); err != nil {
+	if err := cfg.Scrapers.Finalize(resolver); err != nil {
 		return fmt.Errorf("failed to finalize scraper config: %w", err)
 	}
 	cfg.RecomputeWarnings()
+	return nil
+}
 
-	r.reloadMu.Lock()
+func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.ScraperRegistry) error {
 	r18DumpLookup, r18DumpCloser, dumpErr := commandutil.OpenR18DevDumpLookup(cfg)
 	if dumpErr != nil {
 		// Surface a broken dump setup (permission denied, corrupt file) instead
@@ -80,7 +111,6 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	}
 	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
 	if err != nil {
-		r.reloadMu.Unlock()
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()
 		}
@@ -98,18 +128,8 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	old := r.deps.CoreDeps.ReplaceR18DevDumpCloser(r18DumpCloser)
 	r.deps.CoreDeps.ReplaceReloadable(cfg, newRegistry)
 	r.invalidateFactoriesLocked(cfg)
-	r.reloadMu.Unlock()
 	if old != nil {
 		_ = old.Close()
-	}
-
-	// Test seams fire after the atomic publish so readers observe a consistent
-	// snapshot; nil in production.
-	if r.reloadPauseAfterRegistry != nil {
-		r.reloadPauseAfterRegistry()
-	}
-	if r.reloadPauseAfterAPICfg != nil {
-		r.reloadPauseAfterAPICfg()
 	}
 
 	return nil

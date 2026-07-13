@@ -34,13 +34,18 @@ type dumpHandler struct {
 	running    bool
 	lastError  string // last download outcome; non-empty when the most recent run failed
 	httpClient *http.Client
-	reloadFn   func(cfg *config.Config) error
+	reloadFn   func(cfg *config.Config, lockHeld bool) error
 	done       chan struct{} // closed when the download goroutine finishes
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
 	h := &dumpHandler{rt: rt, httpClient: &http.Client{}}
-	h.reloadFn = func(cfg *config.Config) error { return h.rt.ReloadConfig(cfg) }
+	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
+		if lockHeld {
+			return h.rt.ReloadConfigLocked(cfg)
+		}
+		return h.rt.ReloadConfig(cfg)
+	}
 	return h
 }
 
@@ -221,11 +226,13 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 					return nil
 				},
 				AfterSwap: func() {
-					unlockReload()
+					defer unlockReload()
 					unlockReload = nil
+					if reloadErr := h.reloadDumpLocked(path); reloadErr != nil {
+						logging.Warnf("r18dev dump downloaded but hot-swap failed: %v", reloadErr)
+					}
 				},
 			})
-			_ = unlockReload
 			_ = impRes
 			if importErr != nil {
 				// Import failed — restore the old dump handle so the scraper
@@ -267,11 +274,6 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			succeeded = true
 			return
 		}
-		// Hot-swap: reload the scraper registry so it picks up the new dump
-		// without a server restart.
-		if reloadErr := h.reloadDump(path); reloadErr != nil {
-			logging.Warnf("r18dev dump downloaded but hot-swap failed: %v", reloadErr)
-		}
 		succeeded = true
 	}()
 
@@ -281,8 +283,16 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 // reloadDump reopens the dump store and triggers a config reload so the scraper
 // registry rebuilds with the new dump lookup wired in.
 func (h *dumpHandler) reloadDump(path string) error {
+	return h.reloadDumpWith(path, false)
+}
+
+func (h *dumpHandler) reloadDumpLocked(path string) error {
+	return h.reloadDumpWith(path, true)
+}
+
+func (h *dumpHandler) reloadDumpWith(path string, lockHeld bool) error {
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
-	if err := h.reloadFn(cfg); err != nil {
+	if err := h.reloadFn(cfg, lockHeld); err != nil {
 		return fmt.Errorf("reload config after dump download: %w", err)
 	}
 	logging.Infof("r18dev dump hot-swapped: %s", path)

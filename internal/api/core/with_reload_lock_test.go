@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -95,6 +96,25 @@ func TestAPIRuntime_WithReloadLock_SerializesReload(t *testing.T) {
 		t.Fatal("Snapshot did not complete after WithReloadLock released")
 	}
 	assert.True(t, reloadStarted.Load())
+}
+
+func TestAPIRuntime_ReloadConfigLocked(t *testing.T) {
+	cfg := newHotReloadRaceConfig("host", 1, 10)
+	rt := newHotReloadRaceRuntime(t, cfg)
+	unlock := rt.LockReload()
+
+	require.NoError(t, rt.ReloadConfigLocked(cfg))
+	assert.EqualError(t, rt.ReloadConfigLocked(nil), "ReloadConfig: config is nil")
+
+	unlock()
+}
+
+func TestAPIRuntime_PrepareReloadRejectsNilResolver(t *testing.T) {
+	rt := newHotReloadRaceRuntime(t, newHotReloadRaceConfig("host", 1, 10))
+
+	err := rt.prepareReload(&config.Config{}, nil)
+
+	assert.EqualError(t, err, "failed to finalize scraper config: scrapers: Finalize called with nil resolver")
 }
 
 func TestAPIRuntime_LockReload_SerializesSnapshot(t *testing.T) {
