@@ -41,6 +41,14 @@
 		try {
 			status = await api.r18dev.getDumpStatus();
 			dumpEnabled = status.enabled;
+			// Resume tracking an in-flight job: if the settings page was opened
+			// or refreshed while a dump download/update is already running on the
+			// backend, enter the progress/polling state so the UI follows the job
+			// instead of showing stale Download/Clear controls.
+			if (status.running && !downloading && !polling) {
+				downloading = true;
+				pollDownloadProgress();
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to fetch dump status';
 		} finally {
@@ -72,10 +80,15 @@
 		const wasPresent = status?.present ?? false;
 		const prevImportedAt = status?.imported_at ?? '';
 		const prevSourceDate = status?.source_date ?? '';
-		const maxAttempts = 200;
-		for (let i = 0; i < maxAttempts; i++) {
+		// The backend download context may run for up to 30 minutes on slow
+		// connections or slow imports. Poll for the full server-side window
+		// instead of stopping after a fixed iteration count, and rely on the
+		// `running` flag (and WS terminal frames) to determine completion.
+		const pollIntervalMs = 3000;
+		const deadline = Date.now() + 30 * 60 * 1000;
+		while (Date.now() < deadline) {
 			if (!polling) return; // stopped by component unmount
-			await new Promise((r) => setTimeout(r, 3000));
+			await new Promise((r) => setTimeout(r, pollIntervalMs));
 			if (!polling) return;
 			// Check WebSocket terminal state first.
 			if (downloadProgress) {
