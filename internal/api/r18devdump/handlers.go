@@ -182,14 +182,16 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	go func() {
 		defer cancel()
 		defer close(done)
+		var succeeded bool
 		defer func() {
 			h.mu.Lock()
 			h.running = false
 			h.mu.Unlock()
-			// Broadcast done AFTER running is cleared so /status returns
-			// the final state (present:true, running:false) instead of
-			// the in-progress state.
-			h.broadcastProgress("done", 0, 0)
+			// Only broadcast 'done' if the download succeeded.
+			// If it failed, the error path already broadcast 'error'.
+			if succeeded {
+				h.broadcastProgress("done", 0, 0)
+			}
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			h.broadcastProgress("importing", 0, 0)
@@ -251,8 +253,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			if reloadErr := h.reloadDump(path); reloadErr != nil {
 				logging.Warnf("r18dev dump unchanged but hot-swap failed: %v", reloadErr)
 			}
-			// Broadcast done AFTER reloadDump and after running is cleared
-			// (by the defer) so /status returns the final state.
+			succeeded = true
 			return
 		}
 		// Hot-swap: reload the scraper registry so it picks up the new dump
@@ -260,7 +261,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		if reloadErr := h.reloadDump(path); reloadErr != nil {
 			logging.Warnf("r18dev dump downloaded but hot-swap failed: %v", reloadErr)
 		}
-		// Broadcast done after reloadDump so /status reflects the new dump.
+		succeeded = true
 	}()
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "download started", "update_only": updateOnly})
