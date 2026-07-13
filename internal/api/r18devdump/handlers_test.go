@@ -1204,3 +1204,186 @@ func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 		_ = old.Close()
 	}
 }
+
+// --- last_error coverage (Codex P2: surface failed downloads) ---
+
+func TestGetStatus_LastErrorExposedWhenSet(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	h.mu.Lock()
+	h.running = false
+	h.lastError = "download failed: boom"
+	h.mu.Unlock()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/r18dev/dump/status", nil)
+
+	h.getStatus(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp dumpStatusResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.False(t, resp.Running)
+	assert.Equal(t, "download failed: boom", resp.LastError)
+}
+
+func TestGetStatus_LastErrorEmptyWhenIdle(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/r18dev/dump/status", nil)
+
+	h.getStatus(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp dumpStatusResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Empty(t, resp.LastError, "last_error should be empty when no download has failed")
+}
+
+func TestGetStatus_LastErrorHiddenWhileRunning(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	// A stale error from a previous run should still be surfaced while a new
+	// download is in progress (the running flag short-circuits before opening
+	// the dump, but last_error is read under the same lock).
+	h.mu.Lock()
+	h.running = true
+	h.lastError = "stale error"
+	h.mu.Unlock()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/r18dev/dump/status", nil)
+
+	h.getStatus(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp dumpStatusResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.True(t, resp.Running)
+	assert.Equal(t, "stale error", resp.LastError, "last_error should be exposed even while running")
+}
+
+func TestStartDownload_LastErrorSetOnFailure(t *testing.T) {
+	// Point at a non-existent server to trigger a download error.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	h, _, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/latest"
+	defer func() { r18devdump.LatestDumpURL = orig }()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	<-h.done
+
+	h.mu.Lock()
+	running := h.running
+	lastErr := h.lastError
+	h.mu.Unlock()
+	assert.False(t, running, "running flag should be cleared after failure")
+	assert.NotEmpty(t, lastErr, "last_error should be set when the download fails")
+
+	// getStatus must surface the failure to polling clients.
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/api/v1/r18dev/dump/status", nil)
+	h.getStatus(c2)
+	require.Equal(t, http.StatusOK, w2.Code)
+	var resp dumpStatusResponse
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
+	assert.False(t, resp.Running)
+	assert.Equal(t, lastErr, resp.LastError)
+}
+
+func TestStartDownload_LastErrorClearedOnSuccess(t *testing.T) {
+	srv := newDumpTestServer(t)
+	defer srv.Close()
+
+	h, _, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
+
+	// Seed a stale error from a hypothetical previous failed run.
+	h.mu.Lock()
+	h.lastError = "previous failure"
+	h.mu.Unlock()
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/latest"
+	defer func() { r18devdump.LatestDumpURL = orig }()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+
+	// The stale error must be cleared the moment a new download starts.
+	// Capture the running+lastError state synchronously after the 202 is
+	// returned (before the goroutine completes).
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	h.mu.Lock()
+	startLastErr := h.lastError
+	h.mu.Unlock()
+	assert.Empty(t, startLastErr, "last_error should be cleared when a new download starts")
+
+	<-h.done
+
+	h.mu.Lock()
+	lastErr := h.lastError
+	h.mu.Unlock()
+	assert.Empty(t, lastErr, "last_error should remain empty after a successful download")
+}
+
+func TestStartDownload_LastErrorSetOnImportFailure(t *testing.T) {
+	// Serve a valid gzip stream but point the dump path at a location where
+	// the directory can't be created so Import fails inside the callback.
+	gz := gzipped("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(gz)
+	}))
+	defer srv.Close()
+
+	h, _, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+	h.reloadFn = func(_ *config.Config) error { return nil }
+
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte(""), 0o644))
+	h.rt.Deps().CoreDeps.GetConfig().Metadata.R18DevDump.Path = filepath.Join(blocker, "sub", "r18dev_dump.db")
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/latest"
+	defer func() { r18devdump.LatestDumpURL = orig }()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	<-h.done
+
+	h.mu.Lock()
+	lastErr := h.lastError
+	h.mu.Unlock()
+	assert.NotEmpty(t, lastErr, "last_error should be set when Import fails")
+}

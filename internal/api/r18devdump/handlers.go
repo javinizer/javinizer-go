@@ -32,6 +32,7 @@ type dumpHandler struct {
 	rt         *core.APIRuntime
 	mu         sync.Mutex
 	running    bool
+	lastError  string // last download outcome; non-empty when the most recent run failed
 	httpClient *http.Client
 	reloadFn   func(cfg *config.Config) error
 	done       chan struct{} // closed when the download goroutine finishes
@@ -47,6 +48,7 @@ func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
 type dumpStatusResponse struct {
 	Present    bool   `json:"present"`
 	Running    bool   `json:"running"`
+	LastError  string `json:"last_error,omitempty"`
 	RowCount   int64  `json:"row_count,omitempty"`
 	SourceURL  string `json:"source_url,omitempty"`
 	SourceDate string `json:"source_date,omitempty"`
@@ -77,8 +79,10 @@ func (h *dumpHandler) getStatus(c *gin.Context) {
 	// known status instead.
 	h.mu.Lock()
 	running := h.running
+	lastErr := h.lastError
 	h.mu.Unlock()
 	resp.Running = running
+	resp.LastError = lastErr
 	if running {
 		c.JSON(http.StatusOK, resp)
 		return
@@ -145,6 +149,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		return
 	}
 	h.running = true
+	h.lastError = ""
 	h.done = make(chan struct{})
 	h.mu.Unlock()
 
@@ -185,9 +190,15 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		defer cancel()
 		defer close(done)
 		var succeeded bool
+		var failErr error
 		defer func() {
 			h.mu.Lock()
 			h.running = false
+			if !succeeded {
+				h.lastError = failErr.Error()
+			} else {
+				h.lastError = ""
+			}
 			h.mu.Unlock()
 			// Only broadcast 'done' if the download succeeded.
 			// If it failed, the error path already broadcast 'error'.
@@ -229,6 +240,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		})
 		if err != nil {
 			logging.Warnf("r18dev dump download failed: %v", err)
+			failErr = err
 			// Clean up only temp files — the existing dump (if any) is still
 			// valid and should be preserved so the scraper can keep using it.
 			// Import writes to path+".tmp" and only renames on success, so a

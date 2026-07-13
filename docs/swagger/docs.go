@@ -8030,6 +8030,9 @@ const docTemplate = `{
                 "imported_at": {
                     "type": "string"
                 },
+                "last_error": {
+                    "type": "string"
+                },
                 "path": {
                     "type": "string"
                 },

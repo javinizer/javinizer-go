@@ -104,11 +104,17 @@
 					return;
 				}
 				// Fallback for unchanged updates and missed WS 'done' frames:
-				// the backend exposes a `running` flag. Once the job is no
-				// longer running, treat the download as complete — this covers
-				// the unchanged case where neither imported_at nor source_date
+				// the backend exposes a `running` flag and a `last_error` field.
+				// Once the job is no longer running, distinguish success from
+				// failure: a non-empty last_error means the download failed;
+				// an empty/absent last_error means it succeeded (the goroutine
+				// always sets last_error on completion). This covers the
+				// unchanged case where neither imported_at nor source_date
 				// changes and the WebSocket terminal frame was missed.
 				if (!s.running) {
+					if (s.last_error) {
+						downloadError = s.last_error;
+					}
 					downloading = false;
 					polling = false;
 					return;
