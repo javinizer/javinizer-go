@@ -68,7 +68,9 @@ func resolveManualInputOverride(
 			movieInputs[fmi.MovieID] = make(map[string]bool)
 		}
 		movieInputs[fmi.MovieID][redacted] = true
-		movieInput[fmi.MovieID] = input
+		if existing, ok := movieInput[fmi.MovieID]; !ok || input < existing {
+			movieInput[fmi.MovieID] = input
+		}
 		inputCounts[inputKey{fmi.MovieID, redacted}]++
 	}
 

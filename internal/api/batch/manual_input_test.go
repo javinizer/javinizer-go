@@ -364,3 +364,29 @@ func TestResolveManualInputOverride_NormalizesURLKeysForAmbiguity(t *testing.T) 
 	assert.Equal(t, 1, fileMatchInfo["/d/ABC-001-pt1.mp4"].PartNumber, "pt1 PartNumber preserved")
 	assert.Equal(t, 2, fileMatchInfo["/d/ABC-001-pt2.mp4"].PartNumber, "pt2 PartNumber preserved")
 }
+
+func TestResolveManualInputOverride_DeterministicURLPropagation(t *testing.T) {
+	// Two submitted files in the same matcher group use manual URLs that
+	// redact to the same key but differ in query token. A discovered sibling
+	// should get a deterministic raw URL (lexicographically smallest).
+	submitted := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
+	manualInputs := map[string]string{
+		"/d/ABC-001-pt1.mp4": "https://example.com/video?token=zzzz",
+		"/d/ABC-001-pt2.mp4": "https://example.com/video?token=aaaa",
+	}
+	fileMatchInfo := map[string]models.FileMatchInfo{
+		"/d/ABC-001-pt1.mp4": fmiFor("/d/ABC-001-pt1.mp4", "ABC-001", 1),
+		"/d/ABC-001-pt2.mp4": fmiFor("/d/ABC-001-pt2.mp4", "ABC-001", 2),
+		"/d/ABC-001-pt3.mp4": fmiFor("/d/ABC-001-pt3.mp4", "ABC-001", 3),
+	}
+	allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4", "/d/ABC-001-pt3.mp4"}
+
+	// Run multiple times to verify determinism (map iteration order varies)
+	for i := 0; i < 50; i++ {
+		fmiCopy := copyFMI(fileMatchInfo)
+		result := resolveManualInputOverride(submitted, manualInputs, fmiCopy, allFiles)
+		// The sibling should always get the lexicographically smallest raw URL
+		assert.Equal(t, "https://example.com/video?token=aaaa", result["/d/ABC-001-pt3.mp4"],
+			"sibling gets the lexicographically smallest raw URL (deterministic)")
+	}
+}
