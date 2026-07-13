@@ -205,7 +205,9 @@
 				const status = job.status?.toLowerCase();
 				if (status && JOB_SUCCESS_STATUSES.has(status)) {
 					stopCompletionPoll();
-					clearSelection();
+					if ((job.failed ?? 0) === 0) {
+						clearSelection();
+					}
 					clearPendingJob();
 				} else if (isTerminalStatus(status)) {
 					// failed / cancelled — keep selection so the user can retry

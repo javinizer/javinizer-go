@@ -31,15 +31,16 @@ const (
 // download/update operations. The dump download streams ~250MB over several
 // minutes, so only one may run at a time.
 type dumpHandler struct {
-	rt         *core.APIRuntime
-	mu         sync.Mutex
-	dumpMu     sync.RWMutex
-	running    bool
-	lastError  string // last download outcome; non-empty when the most recent run failed
-	httpClient *http.Client
-	reloadFn   func(cfg *config.Config, lockHeld bool) error
-	removeFn   func(string) error
-	done       chan struct{} // closed when the download goroutine finishes
+	rt                  *core.APIRuntime
+	mu                  sync.Mutex
+	dumpMu              sync.RWMutex
+	running             bool
+	lastError           string // last download outcome; non-empty when the most recent run failed
+	httpClient          *http.Client
+	reloadFn            func(cfg *config.Config, lockHeld bool) error
+	removeFn            func(string) error
+	broadcastProgressFn func(phase string, bytes, total int64)
+	done                chan struct{} // closed when the download goroutine finishes
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
@@ -486,6 +487,10 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 // the WebUI can render a progress bar. Non-blocking — if no WS clients are
 // connected, the message is silently dropped.
 func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64) {
+	if h.broadcastProgressFn != nil {
+		h.broadcastProgressFn(phase, bytes, total)
+		return
+	}
 	rt := h.rt.GetRuntime()
 	if rt == nil {
 		return
@@ -550,6 +555,11 @@ func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struc
 	case <-streamConsumed:
 	case <-importDone:
 		return
+	}
+	select {
+	case <-importDone:
+		return
+	default:
 	}
 	h.broadcastProgress("importing", 0, 0)
 	ticker := time.NewTicker(importHeartbeatInterval)

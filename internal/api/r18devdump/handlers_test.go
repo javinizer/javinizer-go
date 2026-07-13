@@ -479,6 +479,21 @@ func TestBroadcastProgress_WithHub(t *testing.T) {
 	h.broadcastProgress("error", 0, 0)
 }
 
+func TestBroadcastProgress_WithFn(t *testing.T) {
+	h, _, _ := newTestHandlerWithHub(t)
+
+	var calls []string
+	h.broadcastProgressFn = func(phase string, bytes, total int64) {
+		calls = append(calls, phase)
+	}
+	h.broadcastProgress("downloading", 50, 100)
+	h.broadcastProgress("importing", 0, 0)
+	h.broadcastProgress("done", 0, 0)
+	h.broadcastProgress("error", 0, 0)
+
+	assert.Equal(t, []string{"downloading", "importing", "done", "error"}, calls)
+}
+
 func TestRunImportHeartbeat_TickerFires(t *testing.T) {
 	h, _, _ := newTestHandlerWithHub(t)
 
@@ -511,6 +526,33 @@ func TestRunImportHeartbeat_ImportDoneFirst(t *testing.T) {
 
 	// Should return immediately without broadcasting.
 	h.runImportHeartbeat(streamConsumed, importDone)
+}
+
+func TestRunImportHeartbeat_BothClosedBeforeSchedule(t *testing.T) {
+	h, _, _ := newTestHandlerWithHub(t)
+
+	var mu sync.Mutex
+	var broadcasts []string
+	h.broadcastProgressFn = func(phase string, bytes, total int64) {
+		mu.Lock()
+		defer mu.Unlock()
+		broadcasts = append(broadcasts, phase)
+	}
+
+	// When both channels are closed before the goroutine starts, the initial
+	// select may pick either case. Loop many times so the streamConsumed path
+	// (which then hits the non-blocking re-check) is exercised deterministically.
+	for i := 0; i < 100; i++ {
+		streamConsumed := make(chan struct{})
+		importDone := make(chan struct{})
+		close(streamConsumed)
+		close(importDone)
+		h.runImportHeartbeat(streamConsumed, importDone)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Empty(t, broadcasts, "no importing frame should be broadcast when importDone is already closed")
 }
 
 // --- reloadDump coverage ---
