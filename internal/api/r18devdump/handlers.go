@@ -197,34 +197,25 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			h.broadcastProgress("importing", 0, 0)
-			// Close the old dump handle under reloadMu to prevent a concurrent
-			// config hot-reload from reopening the old SQLite file. The lock is held
-			// only for the closer swap — Import writes to a .tmp file and does not
-			// need reloadMu. Holding reloadMu for the whole multi-minute import
-			// would block scans, batch operations, and config saves that depend on
-			// rt.Snapshot()/GetAPIConfig(). Lock order reloadMu -> CoreDeps.mu is
-			// consistent with ReloadConfig (hot_reload.go). reloadDump is called
-			// OUTSIDE this callback because it calls ReloadConfig, which acquires
-			// reloadMu and would self-deadlock if invoked from inside fn.
-			var old io.Closer
-			importErr := h.rt.WithReloadLock(func() error {
-				old = h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil)
-				return nil
+			var unlockReload func()
+			impRes, importErr := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
+				SourceURL:  d.FinalURL,
+				SourceDate: d.SourceDate,
+				BeforeSwap: func() error {
+					unlockReload = h.rt.LockReload()
+					old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil)
+					if old != nil {
+						_ = old.Close()
+					}
+					return nil
+				},
+				AfterSwap: func() {
+					unlockReload()
+					unlockReload = nil
+				},
 			})
-			if old != nil {
-				_ = old.Close()
-			}
-			if importErr == nil {
-				impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
-					SourceURL:  d.FinalURL,
-					SourceDate: d.SourceDate,
-				})
-				if err != nil {
-					importErr = err
-				} else {
-					_ = impRes
-				}
-			}
+			_ = unlockReload
+			_ = impRes
 			if importErr != nil {
 				// Import failed — restore the old dump handle so the scraper
 				// can keep using the existing dump. The old file is intact

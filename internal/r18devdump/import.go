@@ -15,8 +15,10 @@ import (
 
 // ImportOptions carries provenance metadata stored alongside the imported rows.
 type ImportOptions struct {
-	SourceURL  string // final redirected URL of the dump
-	SourceDate string // date extracted from the dump filename, if any
+	SourceURL  string
+	SourceDate string
+	BeforeSwap func() error
+	AfterSwap  func()
 }
 
 // ImportResult describes a completed import.
@@ -318,6 +320,14 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		return ImportResult{}, fmt.Errorf("close temp dump db: %w", err)
 	}
 	closed = true
+	if opts.BeforeSwap != nil {
+		if err := opts.BeforeSwap(); err != nil {
+			return ImportResult{}, fmt.Errorf("prepare dump swap: %w", err)
+		}
+	}
+	if opts.AfterSwap != nil {
+		defer opts.AfterSwap()
+	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return ImportResult{}, fmt.Errorf("rename tmp db: %w", err)
 	}

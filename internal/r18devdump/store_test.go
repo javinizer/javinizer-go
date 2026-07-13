@@ -789,6 +789,44 @@ func TestImport_RenameError(t *testing.T) {
 	assert.Contains(t, err.Error(), "rename tmp db")
 }
 
+func TestImport_BeforeSwap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "r18dev_dump.db")
+	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	called := false
+
+	afterCalled := false
+	_, err := Import(context.Background(), strings.NewReader(dump), path, ImportOptions{
+		BeforeSwap: func() error {
+			called = true
+			_, statErr := os.Stat(path + ".tmp")
+			return statErr
+		},
+		AfterSwap: func() { afterCalled = true },
+	})
+
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.True(t, afterCalled)
+	_, err = os.Stat(path)
+	require.NoError(t, err)
+}
+
+func TestImport_BeforeSwapError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "r18dev_dump.db")
+	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	want := errors.New("swap blocked")
+
+	_, err := Import(context.Background(), strings.NewReader(dump), path, ImportOptions{
+		BeforeSwap: func() error { return want },
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, want)
+	assert.Contains(t, err.Error(), "prepare dump swap")
+	_, statErr := os.Stat(path + ".tmp")
+	assert.True(t, os.IsNotExist(statErr))
+}
+
 // insertManyRows inserts n rows into the given table using a transaction for
 // speed. Each row is identified by a numeric suffix. Used by the rows.Err()
 // tests to create enough rows that context cancellation fires mid-iteration.

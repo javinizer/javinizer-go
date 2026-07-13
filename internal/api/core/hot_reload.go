@@ -70,6 +70,7 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	}
 	cfg.RecomputeWarnings()
 
+	r.reloadMu.Lock()
 	r18DumpLookup, r18DumpCloser, dumpErr := commandutil.OpenR18DevDumpLookup(cfg)
 	if dumpErr != nil {
 		// Surface a broken dump setup (permission denied, corrupt file) instead
@@ -79,15 +80,16 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	}
 	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
 	if err != nil {
+		r.reloadMu.Unlock()
+		if r18DumpCloser != nil {
+			_ = r18DumpCloser.Close()
+		}
 		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
 	// Atomic publication (issue #44): swap the dump closer, publish cfg+registry,
 	// rebuild the APIConfig snapshot, and invalidate the cached factories all
 	// under one reloadMu.Lock so concurrent readers cannot observe a mix of
-	// old/new state across the three holders. The slow registry construction
-	// above stays outside the lock; only pointer swaps and cheap invalidations
-	// are inside. Lock order is reloadMu → CoreDeps.mu.
-	r.reloadMu.Lock()
+	// old/new state across the three holders. Lock order is reloadMu → CoreDeps.mu.
 	// Swap the reloadables BEFORE retiring the old dump handle. Closing the
 	// old closer first would leave a window where the still-active scraper
 	// registry references a closed SQLite connection and dump-backed searches

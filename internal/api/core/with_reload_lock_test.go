@@ -96,3 +96,27 @@ func TestAPIRuntime_WithReloadLock_SerializesReload(t *testing.T) {
 	}
 	assert.True(t, reloadStarted.Load())
 }
+
+func TestAPIRuntime_LockReload_SerializesSnapshot(t *testing.T) {
+	rt := newHotReloadRaceRuntime(t, newHotReloadRaceConfig("host", 1, 10))
+	unlock := rt.LockReload()
+
+	snapDone := make(chan struct{})
+	go func() {
+		_ = rt.Snapshot()
+		close(snapDone)
+	}()
+
+	select {
+	case <-snapDone:
+		t.Fatal("Snapshot should block while LockReload holds reloadMu")
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	unlock()
+	select {
+	case <-snapDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Snapshot did not complete after LockReload released")
+	}
+}

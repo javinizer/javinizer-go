@@ -1127,13 +1127,10 @@ func TestSearch_DumpImportInProgress(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
-// --- WithReloadLock serialization coverage (Codex P2 fix) ---
+// --- Reload serialization coverage (Codex P2 fix) ---
 
-// TestStartDownload_ImportDoesNotHoldReloadLock proves the import callback
-// now runs Import WITHOUT holding APIRuntime.WithReloadLock (reloadMu write).
-// Only the closer swap is serialized; the multi-minute Import stream must not
-// block a concurrent ReloadConfig (PUT /api/v1/config path) that depends on
-// reloadMu. This is the Codex P2 fix that narrowed the lock scope.
+// TestStartDownload_ImportDoesNotHoldReloadLock proves the import stream does
+// not hold reloadMu. Import takes it only at the final swap boundary.
 func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 	importStarted := make(chan struct{})
 	proceed := make(chan struct{})
@@ -1159,8 +1156,8 @@ func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
-	// Use the REAL ReloadConfig so the concurrent reload shares reloadMu with
-	// WithReloadLock (the no-op reloadFn used by other tests would not).
+	// Use the real ReloadConfig so the concurrent reload shares reloadMu with
+	// the final swap lock (the no-op reloadFn used by other tests would not).
 	h.reloadFn = func(cfg *config.Config) error { return h.rt.ReloadConfig(cfg) }
 
 	orig := r18devdump.LatestDumpURL
@@ -1175,8 +1172,7 @@ func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code)
 
 	<-importStarted
-	// The .tmp DB is created by Import outside WithReloadLock, so its existence
-	// proves Import is running but NOT holding reloadMu.
+	// The .tmp DB is created before the final swap lock is acquired.
 	tmpPath := dumpPath + ".tmp"
 	require.Eventually(t, func() bool {
 		_, err := os.Stat(tmpPath)
@@ -1185,10 +1181,7 @@ func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 	// Let Import enter the read loop and block on the slow stream.
 	time.Sleep(150 * time.Millisecond)
 
-	// A concurrent config reload must NOT block while the import streams —
-	// reloadMu is only held for the brief closer swap. With an empty config
-	// ReloadConfig completes in milliseconds when uncontended, so completing
-	// within 2s proves the import no longer holds the lock.
+	// A concurrent config reload must not block while the import streams.
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	reloadDone := make(chan error, 1)
 	go func() { reloadDone <- h.rt.ReloadConfig(cfg) }()
