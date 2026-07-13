@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/r18devdump"
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 	_ "github.com/mattn/go-sqlite3"
@@ -508,6 +509,28 @@ func TestReloadDumpLocked_Success(t *testing.T) {
 
 	require.NoError(t, h.reloadDumpLocked("/some/path"))
 	assert.True(t, lockHeld)
+}
+
+func TestReloadDump_ClonesLiveConfig(t *testing.T) {
+	h, _ := newTestHandler(t)
+	live := h.rt.Deps().CoreDeps.GetConfig()
+	live.Scrapers.Overrides = map[string]*models.ScraperSettings{
+		"r18dev": {Enabled: true},
+	}
+	live.Warnings = []config.ConfigWarning{{Scrapers: []string{"r18dev"}}}
+
+	h.reloadFn = func(cfg *config.Config, _ bool) error {
+		require.NotSame(t, live, cfg)
+		cfg.Scrapers.Overrides["r18dev"].Enabled = false
+		cfg.Scrapers.Overrides["other"] = &models.ScraperSettings{}
+		cfg.Warnings[0].Scrapers[0] = "other"
+		return nil
+	}
+
+	require.NoError(t, h.reloadDump("/some/path"))
+	assert.True(t, live.Scrapers.Overrides["r18dev"].Enabled)
+	assert.NotContains(t, live.Scrapers.Overrides, "other")
+	assert.Equal(t, []string{"r18dev"}, live.Warnings[0].Scrapers)
 }
 
 // --- fileSize coverage ---

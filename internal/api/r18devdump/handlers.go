@@ -298,7 +298,7 @@ func (h *dumpHandler) reloadDumpLocked(path string) error {
 }
 
 func (h *dumpHandler) reloadDumpWith(path string, lockHeld bool) error {
-	cfg := h.rt.Deps().CoreDeps.GetConfig()
+	cfg := h.rt.Deps().CoreDeps.GetConfig().Clone()
 	if err := h.reloadFn(cfg, lockHeld); err != nil {
 		return fmt.Errorf("reload config after dump download: %w", err)
 	}
