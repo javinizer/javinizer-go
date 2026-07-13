@@ -21,6 +21,8 @@ import (
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 )
 
+var importHeartbeatInterval = 1500 * time.Millisecond
+
 const (
 	dumpJobID = "r18dev-dump-download"
 )
@@ -29,15 +31,16 @@ const (
 // download/update operations. The dump download streams ~250MB over several
 // minutes, so only one may run at a time.
 type dumpHandler struct {
-	rt         *core.APIRuntime
-	mu         sync.Mutex
-	dumpMu     sync.RWMutex
-	running    bool
-	lastError  string // last download outcome; non-empty when the most recent run failed
-	httpClient *http.Client
-	reloadFn   func(cfg *config.Config, lockHeld bool) error
-	removeFn   func(string) error
-	done       chan struct{} // closed when the download goroutine finishes
+	rt                  *core.APIRuntime
+	mu                  sync.Mutex
+	dumpMu              sync.RWMutex
+	running             bool
+	lastError           string // last download outcome; non-empty when the most recent run failed
+	httpClient          *http.Client
+	reloadFn            func(cfg *config.Config, lockHeld bool) error
+	removeFn            func(string) error
+	broadcastProgressFn func(phase string, bytes, total int64)
+	done                chan struct{} // closed when the download goroutine finishes
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
@@ -184,7 +187,21 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		h.dumpMu.RUnlock()
 	}
 
+	var (
+		progressMu     sync.Mutex
+		lastProgressAt time.Time
+		progressSeen   bool
+	)
 	progress := func(bytes, total int64) {
+		progressMu.Lock()
+		now := time.Now()
+		if progressSeen && now.Sub(lastProgressAt) < 500*time.Millisecond {
+			progressMu.Unlock()
+			return
+		}
+		progressSeen = true
+		lastProgressAt = now
+		progressMu.Unlock()
 		h.broadcastProgress("downloading", bytes, total)
 	}
 
@@ -218,7 +235,20 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			}
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
-			h.broadcastProgress("importing", 0, 0)
+			// The download streams the response body through gzip into Import,
+			// so the download progress callback and the SQL import run
+			// concurrently: Import pulls compressed bytes through the
+			// countingReader, which fires "downloading" frames. To keep the
+			// progress bar phase monotonic (downloading -> importing -> done)
+			// and avoid bouncing between the two visual states, the import
+			// heartbeat must only start AFTER the decompressed stream has been
+			// fully consumed (io.EOF), never while download progress is still
+			// being reported.
+			importDone := make(chan struct{})
+			streamConsumed := make(chan struct{})
+			go h.runImportHeartbeat(streamConsumed, importDone)
+			defer close(importDone)
+			r = &eofDetectReader{r: r, onEOF: sync.OnceFunc(func() { close(streamConsumed) })}
 			var unlockReload func()
 			impRes, importErr := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
 				SourceURL:  d.FinalURL,
@@ -457,6 +487,10 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 // the WebUI can render a progress bar. Non-blocking — if no WS clients are
 // connected, the message is silently dropped.
 func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64) {
+	if h.broadcastProgressFn != nil {
+		h.broadcastProgressFn(phase, bytes, total)
+		return
+	}
 	rt := h.rt.GetRuntime()
 	if rt == nil {
 		return
@@ -484,13 +518,60 @@ func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64) {
 
 func progressPercent(bytes, total int64) float64 {
 	if total <= 0 {
-		return 0
+		return -1
 	}
 	pct := float64(bytes) / float64(total) * 100
 	if pct > 100 {
 		return 100
 	}
 	return pct
+}
+
+// eofDetectReader wraps an io.Reader and invokes onEOF (exactly once) when the
+// underlying reader returns io.EOF. It is used to detect when the dump
+// download stream has been fully consumed by the SQL importer so the
+// "importing" heartbeat can begin without overlapping "downloading" progress
+// frames (which would cause the UI progress bar to bounce between phases).
+type eofDetectReader struct {
+	r     io.Reader
+	onEOF func()
+	once  sync.Once
+}
+
+func (e *eofDetectReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err == io.EOF {
+		e.once.Do(e.onEOF)
+	}
+	return n, err
+}
+
+// runImportHeartbeat broadcasts periodic "importing" progress frames while the
+// SQL import runs. It waits until streamConsumed is closed (the download
+// stream hit EOF) before starting, so "importing" frames never overlap with
+// "downloading" frames. It exits when importDone is closed.
+func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struct{}) {
+	select {
+	case <-streamConsumed:
+	case <-importDone:
+		return
+	}
+	select {
+	case <-importDone:
+		return
+	default:
+	}
+	h.broadcastProgress("importing", 0, 0)
+	ticker := time.NewTicker(importHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			h.broadcastProgress("importing", 0, 0)
+		case <-importDone:
+			return
+		}
+	}
 }
 
 // resolveDumpPath returns the configured dump sidecar path, applying the

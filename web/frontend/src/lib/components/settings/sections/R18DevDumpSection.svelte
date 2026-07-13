@@ -235,6 +235,15 @@
 		return msg;
 	}
 
+	let isIndeterminate = $derived(
+		!downloadProgress ||
+		downloadProgress.progress <= 0 ||
+		(downloadProgress.message !== 'downloading'),
+	);
+	let barWidth = $derived(
+		isIndeterminate ? 0 : (downloadProgress?.progress ?? 0),
+	);
+
 	$effect(() => {
 		fetchStatus();
 		return () => { polling = false; };
@@ -317,15 +326,14 @@
 							<RefreshCw class="h-4 w-4 animate-spin"></RefreshCw>
 							{progressPhase()}
 						</div>
-						{#if downloadProgress && downloadProgress.progress > 0}
-							<div class="w-full bg-muted rounded-full h-2 overflow-hidden">
-								<div class="bg-primary h-full transition-all duration-300" style="width: {downloadProgress.progress}%"></div>
-							</div>
+						<div class="w-full bg-muted rounded-full h-2 overflow-hidden">
+							<div
+								class="bg-primary h-full rounded-full transition-[width] duration-300 ease-out {isIndeterminate ? 'r18dev-progress-indeterminate' : ''}"
+								style={isIndeterminate ? '' : `width: ${barWidth}%`}
+							></div>
+						</div>
+						{#if !isIndeterminate && downloadProgress}
 							<div class="text-xs text-muted-foreground text-right">{Math.round(downloadProgress.progress)}%</div>
-						{:else}
-							<div class="w-full bg-muted rounded-full h-2 overflow-hidden">
-								<div class="bg-muted-foreground/30 h-full animate-pulse" style="width: 30%"></div>
-							</div>
 						{/if}
 					</div>
 				{:else}
@@ -379,15 +387,14 @@
 							<RefreshCw class="h-4 w-4 animate-spin"></RefreshCw>
 							{progressPhase()}
 						</div>
-						{#if downloadProgress && downloadProgress.progress > 0}
-							<div class="w-full bg-muted rounded-full h-2 overflow-hidden">
-								<div class="bg-primary h-full transition-all duration-300" style="width: {downloadProgress.progress}%"></div>
-							</div>
+						<div class="w-full bg-muted rounded-full h-2 overflow-hidden">
+							<div
+								class="bg-primary h-full rounded-full transition-[width] duration-300 ease-out {isIndeterminate ? 'r18dev-progress-indeterminate' : ''}"
+								style={isIndeterminate ? '' : `width: ${barWidth}%`}
+							></div>
+						</div>
+						{#if !isIndeterminate && downloadProgress}
 							<div class="text-xs text-muted-foreground text-right">{Math.round(downloadProgress.progress)}%</div>
-						{:else}
-							<div class="w-full bg-muted rounded-full h-2 overflow-hidden">
-								<div class="bg-muted-foreground/30 h-full animate-pulse" style="width: 30%"></div>
-							</div>
 						{/if}
 					</div>
 				{:else}
@@ -475,3 +482,16 @@
 		</div>
 	{/if}
 </SettingsSection>
+
+<style>
+	.r18dev-progress-indeterminate {
+		position: relative;
+		width: 40%;
+		animation: r18dev-indeterminate-slide 1.4s ease-in-out infinite;
+	}
+
+	@keyframes r18dev-indeterminate-slide {
+		0% { transform: translateX(-100%); }
+		100% { transform: translateX(250%); }
+	}
+</style>

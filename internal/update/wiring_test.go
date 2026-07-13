@@ -134,17 +134,27 @@ func TestService_StartBackgroundCheck_StubStopsOnCancel(t *testing.T) {
 	svc, chk := newStubService(t, true)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	svc.StartBackgroundCheck(ctx, 20*time.Millisecond)
+	// A longer interval widens the gap between ticks so a tick is less likely
+	// to be in-flight exactly when cancel() runs.
+	svc.StartBackgroundCheck(ctx, 50*time.Millisecond)
 
-	require.Eventually(t, func() bool { return chk.callsCount() >= 2 }, time.Second, 10*time.Millisecond,
+	require.Eventually(t, func() bool { return chk.callsCount() >= 2 }, 2*time.Second, 10*time.Millisecond,
 		"ticker must fire before cancellation")
 
-	callsBeforeCancel := chk.callsCount()
 	cancel()
 
-	// Wait several tick periods; no new calls must arrive after cancellation.
-	time.Sleep(120 * time.Millisecond)
-	assert.Equal(t, callsBeforeCancel, chk.callsCount(),
+	// A tick that was already in-flight when cancel() was called may finish
+	// before the goroutine observes ctx.Done() and exits, so it can bump the
+	// call count once after cancellation. Wait long enough for any in-flight
+	// check to complete and the goroutine to wind down, then record the count
+	// and assert no further calls arrive. The generous stabilization window
+	// keeps the test stable on slow Windows runners with unpredictable
+	// scheduling latency.
+	time.Sleep(150 * time.Millisecond)
+	callsAfterCancel := chk.callsCount()
+
+	time.Sleep(300 * time.Millisecond)
+	assert.Equal(t, callsAfterCancel, chk.callsCount(),
 		"no further checks after context cancel")
 }
 

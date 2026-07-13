@@ -479,6 +479,82 @@ func TestBroadcastProgress_WithHub(t *testing.T) {
 	h.broadcastProgress("error", 0, 0)
 }
 
+func TestBroadcastProgress_WithFn(t *testing.T) {
+	h, _, _ := newTestHandlerWithHub(t)
+
+	var calls []string
+	h.broadcastProgressFn = func(phase string, bytes, total int64) {
+		calls = append(calls, phase)
+	}
+	h.broadcastProgress("downloading", 50, 100)
+	h.broadcastProgress("importing", 0, 0)
+	h.broadcastProgress("done", 0, 0)
+	h.broadcastProgress("error", 0, 0)
+
+	assert.Equal(t, []string{"downloading", "importing", "done", "error"}, calls)
+}
+
+func TestRunImportHeartbeat_TickerFires(t *testing.T) {
+	h, _, _ := newTestHandlerWithHub(t)
+
+	orig := importHeartbeatInterval
+	importHeartbeatInterval = 1 * time.Millisecond
+
+	streamConsumed := make(chan struct{})
+	importDone := make(chan struct{})
+	close(streamConsumed) // simulate download stream EOF
+
+	exited := make(chan struct{})
+	go func() {
+		h.runImportHeartbeat(streamConsumed, importDone)
+		close(exited)
+	}()
+
+	// Let the ticker fire several times so the <-ticker.C branch executes.
+	time.Sleep(20 * time.Millisecond)
+	close(importDone)
+	<-exited // wait for the goroutine to exit before restoring the interval
+	importHeartbeatInterval = orig
+}
+
+func TestRunImportHeartbeat_ImportDoneFirst(t *testing.T) {
+	h, _, _ := newTestHandlerWithHub(t)
+
+	streamConsumed := make(chan struct{})
+	importDone := make(chan struct{})
+	close(importDone) // import finishes before stream is consumed
+
+	// Should return immediately without broadcasting.
+	h.runImportHeartbeat(streamConsumed, importDone)
+}
+
+func TestRunImportHeartbeat_BothClosedBeforeSchedule(t *testing.T) {
+	h, _, _ := newTestHandlerWithHub(t)
+
+	var mu sync.Mutex
+	var broadcasts []string
+	h.broadcastProgressFn = func(phase string, bytes, total int64) {
+		mu.Lock()
+		defer mu.Unlock()
+		broadcasts = append(broadcasts, phase)
+	}
+
+	// When both channels are closed before the goroutine starts, the initial
+	// select may pick either case. Loop many times so the streamConsumed path
+	// (which then hits the non-blocking re-check) is exercised deterministically.
+	for i := 0; i < 100; i++ {
+		streamConsumed := make(chan struct{})
+		importDone := make(chan struct{})
+		close(streamConsumed)
+		close(importDone)
+		h.runImportHeartbeat(streamConsumed, importDone)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Empty(t, broadcasts, "no importing frame should be broadcast when importDone is already closed")
+}
+
 // --- reloadDump coverage ---
 
 func TestReloadDump_Success(t *testing.T) {
@@ -566,7 +642,7 @@ func TestResolveDumpPath_Configured(t *testing.T) {
 }
 
 func TestProgressPercent(t *testing.T) {
-	assert.Equal(t, float64(0), progressPercent(0, 0))
+	assert.Equal(t, float64(-1), progressPercent(0, 0))
 	assert.Equal(t, float64(0), progressPercent(0, 100))
 	assert.Equal(t, float64(50), progressPercent(50, 100))
 	assert.Equal(t, float64(100), progressPercent(100, 100))

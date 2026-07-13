@@ -21,6 +21,7 @@
 	} from '$lib/stores/pending-scrape.svelte';
 	import { clearManualInputs } from '$lib/stores/manual-inputs-session';
 	import { createConfigQuery, createScrapersQuery } from '$lib/query/queries';
+	import { isTerminalStatus } from '$lib/utils/job-progress';
 	import { Play, FolderOutput, FolderOpen, FileEdit, FileText, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X, Scan } from 'lucide-svelte';
 	import type { Scraper, FileInfo, Config } from '$lib/api/types';
 	import type { OperationMode } from '$lib/api/types';
@@ -172,6 +173,93 @@
 		clearPendingScrape();
 		clearManualInputs();
 	}
+
+	// Track the batch job started from this browse page so we can clear the
+	// file selection once the job reaches a terminal SUCCESS state. Persisted to
+	// sessionStorage so a remount (e.g. user navigated away before completion)
+	// can re-check the job and clear stale selection.
+	const STORAGE_KEY_PENDING_JOB = 'javinizer_browse_pending_job';
+	const JOB_SUCCESS_STATUSES = new Set(['completed', 'organized', 'reverted']);
+	let pendingJobId: string | null = $state(null);
+	let launchedFiles: string[] | null = $state(null);
+	let completionPoll: ReturnType<typeof setInterval> | null = null;
+
+	function stopCompletionPoll() {
+		if (completionPoll) {
+			clearInterval(completionPoll);
+			completionPoll = null;
+		}
+	}
+
+	function sameSelection(a: string[], b: string[]): boolean {
+		if (a.length !== b.length) return false;
+		const setB = new Set(b);
+		return a.every((f) => setB.has(f));
+	}
+
+	function clearPendingJob() {
+		pendingJobId = null;
+		launchedFiles = null;
+		try {
+			sessionStorage.removeItem(STORAGE_KEY_PENDING_JOB);
+		} catch {}
+	}
+
+	async function pollJobCompletion(jobId: string) {
+		stopCompletionPoll();
+		const tick = async () => {
+			try {
+				const job = await apiClient.getBatchJob(jobId);
+				const status = job.status?.toLowerCase();
+				if (status && JOB_SUCCESS_STATUSES.has(status)) {
+					stopCompletionPoll();
+					if ((job.failed ?? 0) === 0 && launchedFiles && sameSelection(launchedFiles, selectedFiles)) {
+						clearSelection();
+					}
+					clearPendingJob();
+				} else if (isTerminalStatus(status)) {
+					// failed / cancelled — keep selection so the user can retry
+					stopCompletionPoll();
+					clearPendingJob();
+				}
+			} catch {
+				// transient network error — keep polling
+			}
+		};
+		void tick();
+		completionPoll = setInterval(() => { void tick(); }, 2000);
+	}
+
+	// On mount, if a pending job was recorded (e.g. user navigated away before
+	// completion), resume polling so a since-completed job clears the selection.
+	$effect(() => {
+		if (typeof sessionStorage === 'undefined') return;
+		let saved: string | null = null;
+		try {
+			saved = sessionStorage.getItem(STORAGE_KEY_PENDING_JOB);
+		} catch {}
+		if (saved && !pendingJobId) {
+			try {
+				const parsed = JSON.parse(saved) as { jobId: string; launchedFiles?: string[] };
+				pendingJobId = parsed.jobId;
+				if (Array.isArray(parsed.launchedFiles)) {
+					launchedFiles = parsed.launchedFiles;
+				}
+			} catch {
+				// Legacy format — just a job ID string
+				pendingJobId = saved;
+			}
+			if (pendingJobId) {
+				pollJobCompletion(pendingJobId);
+			}
+		}
+	});
+
+	// Stop polling when the component unmounts (sessionStorage marker is kept so
+	// a remount can finish the check).
+	$effect(() => {
+		return () => stopCompletionPoll();
+	});
 
 	function getSettingsOperationMode(): OperationMode {
 		if (config) {
@@ -378,6 +466,15 @@
 				operation_mode: effectiveOperationMode,
 			});
 			startJob(response.job_id);
+			launchedFiles = [...selectedFiles];
+			pendingJobId = response.job_id;
+			try {
+				sessionStorage.setItem(
+				STORAGE_KEY_PENDING_JOB,
+				JSON.stringify({ jobId: response.job_id, launchedFiles }),
+			);
+			} catch {}
+			pollJobCompletion(response.job_id);
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
 
 			const modeText = isUpdateMode ? 'Updating metadata' : 'Batch scraping';
