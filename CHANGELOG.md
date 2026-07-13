@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.2.2] - 2026-07-13
+
+### Added
+
+- Expose r18.dev dump management via API + WebUI (#136)
+- Validate disabled-scraper priority overrides (#138)
+
+### Fixed
+
+- Manual inputs override multi-part grouping key so files with different manual IDs split into separate movies (#143, closes #142)
+- Seamless progress bar with monotonic phase transitions + clear file selection after batch scrape completion (#141)
+- Retry lock release on Windows to handle AV/sharing violations (#137, #140)
+- Resolve ABF-030 misresolution via content-id variations (#135)
+- Use high-res cover as poster in r18dev dump path (#134)
+- Use javinizer icon for favicon instead of generic J logo (#130)
+- Lower MinPoster threshold to accept real DMM posters (#132)
+
+### Changed
+
+- Codex label sync tracks latest review, not unresolved threads (#139)
+- Block npx/npm drive-by suggestions from sleeper accounts
+- Disable auto-triggering @codex review from label sync
+- Grant pull-requests: write for codex label sync
+- Use PowerShell syntax for APPDATA in migration snippets (#133)
+- Cover missing readFileWithRetry not-exist path
+
 ## [v1.2.1] - 2026-07-11
 
 ### Added
