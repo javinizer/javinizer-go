@@ -239,8 +239,19 @@
 			saved = sessionStorage.getItem(STORAGE_KEY_PENDING_JOB);
 		} catch {}
 		if (saved && !pendingJobId) {
-			pendingJobId = saved;
-			pollJobCompletion(saved);
+			try {
+				const parsed = JSON.parse(saved) as { jobId: string; launchedFiles?: string[] };
+				pendingJobId = parsed.jobId;
+				if (Array.isArray(parsed.launchedFiles)) {
+					launchedFiles = parsed.launchedFiles;
+				}
+			} catch {
+				// Legacy format — just a job ID string
+				pendingJobId = saved;
+			}
+			if (pendingJobId) {
+				pollJobCompletion(pendingJobId);
+			}
 		}
 	});
 
@@ -458,7 +469,10 @@
 			launchedFiles = [...selectedFiles];
 			pendingJobId = response.job_id;
 			try {
-				sessionStorage.setItem(STORAGE_KEY_PENDING_JOB, response.job_id);
+				sessionStorage.setItem(
+				STORAGE_KEY_PENDING_JOB,
+				JSON.stringify({ jobId: response.job_id, launchedFiles }),
+			);
 			} catch {}
 			pollJobCompletion(response.job_id);
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
