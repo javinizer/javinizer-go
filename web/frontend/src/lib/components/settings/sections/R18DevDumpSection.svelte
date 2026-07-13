@@ -193,6 +193,7 @@
 				method: 'PUT',
 				body: JSON.stringify(cfg),
 			});
+			await fetchStatus();
 		} catch (e) {
 			// Revert on error
 			dumpEnabled = !dumpEnabled;
