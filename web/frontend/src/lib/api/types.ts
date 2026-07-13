@@ -1298,6 +1298,7 @@ export interface BatchExcludeResponse {
 
 export interface DumpStatus {
 	present: boolean;
+	running: boolean;
 	row_count?: number;
 	source_url?: string;
 	source_date?: string;

@@ -103,6 +103,16 @@
 					polling = false;
 					return;
 				}
+				// Fallback for unchanged updates and missed WS 'done' frames:
+				// the backend exposes a `running` flag. Once the job is no
+				// longer running, treat the download as complete — this covers
+				// the unchanged case where neither imported_at nor source_date
+				// changes and the WebSocket terminal frame was missed.
+				if (!s.running) {
+					downloading = false;
+					polling = false;
+					return;
+				}
 			// Fallback for updates: if the dump was already present, detect
 				// completion by a changed imported_at timestamp OR a changed
 				// source_date (the backend updates it on successful import).

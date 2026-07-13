@@ -8039,6 +8039,9 @@ const docTemplate = `{
                 "row_count": {
                     "type": "integer"
                 },
+                "running": {
+                    "type": "boolean"
+                },
                 "size_bytes": {
                     "type": "integer"
                 },
