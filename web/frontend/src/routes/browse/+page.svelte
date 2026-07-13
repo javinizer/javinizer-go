@@ -181,6 +181,7 @@
 	const STORAGE_KEY_PENDING_JOB = 'javinizer_browse_pending_job';
 	const JOB_SUCCESS_STATUSES = new Set(['completed', 'organized', 'reverted']);
 	let pendingJobId: string | null = $state(null);
+	let launchedFiles: string[] | null = $state(null);
 	let completionPoll: ReturnType<typeof setInterval> | null = null;
 
 	function stopCompletionPoll() {
@@ -190,8 +191,15 @@
 		}
 	}
 
+	function sameSelection(a: string[], b: string[]): boolean {
+		if (a.length !== b.length) return false;
+		const setB = new Set(b);
+		return a.every((f) => setB.has(f));
+	}
+
 	function clearPendingJob() {
 		pendingJobId = null;
+		launchedFiles = null;
 		try {
 			sessionStorage.removeItem(STORAGE_KEY_PENDING_JOB);
 		} catch {}
@@ -205,7 +213,7 @@
 				const status = job.status?.toLowerCase();
 				if (status && JOB_SUCCESS_STATUSES.has(status)) {
 					stopCompletionPoll();
-					if ((job.failed ?? 0) === 0) {
+					if ((job.failed ?? 0) === 0 && launchedFiles && sameSelection(launchedFiles, selectedFiles)) {
 						clearSelection();
 					}
 					clearPendingJob();
@@ -447,6 +455,7 @@
 				operation_mode: effectiveOperationMode,
 			});
 			startJob(response.job_id);
+			launchedFiles = [...selectedFiles];
 			pendingJobId = response.job_id;
 			try {
 				sessionStorage.setItem(STORAGE_KEY_PENDING_JOB, response.job_id);
