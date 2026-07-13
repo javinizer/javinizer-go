@@ -566,7 +566,7 @@ func TestResolveDumpPath_Configured(t *testing.T) {
 }
 
 func TestProgressPercent(t *testing.T) {
-	assert.Equal(t, float64(0), progressPercent(0, 0))
+	assert.Equal(t, float64(-1), progressPercent(0, 0))
 	assert.Equal(t, float64(0), progressPercent(0, 100))
 	assert.Equal(t, float64(50), progressPercent(50, 100))
 	assert.Equal(t, float64(100), progressPercent(100, 100))
