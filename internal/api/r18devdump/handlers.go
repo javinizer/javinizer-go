@@ -31,6 +31,7 @@ const (
 type dumpHandler struct {
 	rt         *core.APIRuntime
 	mu         sync.Mutex
+	dumpMu     sync.RWMutex
 	running    bool
 	lastError  string // last download outcome; non-empty when the most recent run failed
 	httpClient *http.Client
@@ -93,6 +94,8 @@ func (h *dumpHandler) getStatus(c *gin.Context) {
 		return
 	}
 
+	h.dumpMu.RLock()
+	defer h.dumpMu.RUnlock()
 	store, err := r18devdump.Open(path)
 	if err != nil {
 		// Not present or unreadable — return present:false, not an error.
@@ -169,6 +172,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	// the version is unchanged.
 	var currentSourceURL string
 	if updateOnly {
+		h.dumpMu.RLock()
 		if store, err := r18devdump.Open(path); err == nil {
 			stats, err := store.Stats(ctx)
 			_ = store.Close()
@@ -176,6 +180,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				currentSourceURL = stats.SourceURL
 			}
 		}
+		h.dumpMu.RUnlock()
 	}
 
 	progress := func(bytes, total int64) {
@@ -218,6 +223,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				SourceURL:  d.FinalURL,
 				SourceDate: d.SourceDate,
 				BeforeSwap: func() error {
+					h.dumpMu.Lock()
 					unlockReload = h.rt.LockReload()
 					old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil)
 					if old != nil {
@@ -226,6 +232,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 					return nil
 				},
 				AfterSwap: func() {
+					defer h.dumpMu.Unlock()
 					defer unlockReload()
 					unlockReload = nil
 					if reloadErr := h.reloadDumpLocked(path); reloadErr != nil {
@@ -336,6 +343,8 @@ func (h *dumpHandler) search(c *gin.Context) {
 		return
 	}
 
+	h.dumpMu.RLock()
+	defer h.dumpMu.RUnlock()
 	store, err := r18devdump.Open(path)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "dump not downloaded"})
@@ -375,6 +384,8 @@ func (h *dumpHandler) search(c *gin.Context) {
 // @Failure 409 {object} map[string]string
 // @Router /api/v1/r18dev/dump [delete]
 func (h *dumpHandler) clearDump(c *gin.Context) {
+	h.dumpMu.Lock()
+	defer h.dumpMu.Unlock()
 	h.mu.Lock()
 	if h.running {
 		h.mu.Unlock()
@@ -395,6 +406,8 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 
 	// Close the active dump handle before deleting so the SQLite file can
 	// be removed on Windows (which blocks deletion of open files).
+	unlockReload := h.rt.LockReload()
+	defer unlockReload()
 	if old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil); old != nil {
 		_ = old.Close()
 	}
@@ -412,7 +425,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 		// Restore the dump handle since the file still exists and the
 		// closer was closed above. Without this, the scraper registry
 		// points at a closed store and falls back to HTTP unnecessarily.
-		if reloadErr := h.reloadDump(path); reloadErr != nil {
+		if reloadErr := h.reloadDumpLocked(path); reloadErr != nil {
 			logging.Warnf("r18dev dump clear: failed to restore handle after delete error: %v", reloadErr)
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete dump file: %v", removeErr)})
@@ -420,7 +433,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 	}
 
 	// Hot-swap: reload config so the scraper registry drops the old dump handle.
-	if reloadErr := h.reloadDump(path); reloadErr != nil {
+	if reloadErr := h.reloadDumpLocked(path); reloadErr != nil {
 		logging.Warnf("r18dev dump cleared but hot-swap failed: %v", reloadErr)
 	}
 

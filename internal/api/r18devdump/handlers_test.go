@@ -802,6 +802,11 @@ func TestClearDump_NotPresent(t *testing.T) {
 func TestClearDump_Success(t *testing.T) {
 	h, dumpPath := newTestHandler(t)
 	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+	lockHeld := false
+	h.reloadFn = func(_ *config.Config, gotLockHeld bool) error {
+		lockHeld = gotLockHeld
+		return nil
+	}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -810,6 +815,7 @@ func TestClearDump_Success(t *testing.T) {
 	h.clearDump(c)
 
 	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, lockHeld)
 
 	// Verify the dump file was deleted.
 	_, err := os.Stat(dumpPath)
@@ -862,13 +868,9 @@ func TestClearDump_ReloadFails(t *testing.T) {
 
 func TestClearDump_DeleteError(t *testing.T) {
 	h, dumpPath := newTestHandler(t)
-	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
-
-	// Make the dump directory read-only so os.Remove fails.
-	// On macOS this may not prevent deletion (root bypass), so skip if it succeeds.
-	dir := filepath.Dir(dumpPath)
-	_ = os.Chmod(dir, 0o500)
-	defer func() { _ = os.Chmod(dir, 0o755) }()
+	require.NoError(t, os.Mkdir(dumpPath, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dumpPath, "keep"), []byte("test"), 0o644))
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -876,12 +878,7 @@ func TestClearDump_DeleteError(t *testing.T) {
 
 	h.clearDump(c)
 
-	// If the file was deleted anyway (root/permissive fs), we get 200.
-	// If deletion failed, we get 500. Either is acceptable — the test
-	// just exercises the error path without panicking.
-	if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 200 or 500, got %d", w.Code)
-	}
+	require.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
 func TestStartDownload_PreservesExistingDumpOnFailure(t *testing.T) {
@@ -1071,24 +1068,18 @@ func TestStartUpdate_UnchangedReloadsDump(t *testing.T) {
 
 func TestClearDump_RestoresHandleOnDeleteError(t *testing.T) {
 	h, dumpPath := newTestHandler(t)
-	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+	require.NoError(t, os.Mkdir(dumpPath, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dumpPath, "keep"), []byte("test"), 0o644))
 
-	// Simulate an existing open dump handle.
 	closer := &fakeCloser{}
 	h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(closer)
 
-	// Track if reload was called to restore the handle.
-	// Return error to exercise the warning log path.
 	reloadCalled := false
-	h.reloadFn = func(_ *config.Config, _ bool) error {
+	h.reloadFn = func(_ *config.Config, lockHeld bool) error {
 		reloadCalled = true
+		assert.True(t, lockHeld)
 		return fmt.Errorf("simulated restore failure")
 	}
-
-	// Make the dump directory read-only so os.Remove fails.
-	dir := filepath.Dir(dumpPath)
-	_ = os.Chmod(dir, 0o500)
-	defer func() { _ = os.Chmod(dir, 0o755) }()
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1096,10 +1087,8 @@ func TestClearDump_RestoresHandleOnDeleteError(t *testing.T) {
 
 	h.clearDump(c)
 
-	// On macOS this may succeed (root bypass) — either 200 or 500 is acceptable.
-	if w.Code == http.StatusInternalServerError {
-		assert.True(t, reloadCalled, "reloadDump should be called to restore handle when delete fails")
-	}
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.True(t, reloadCalled, "reloadDump should be called to restore handle when delete fails")
 }
 
 func TestGetStatus_DumpImportInProgress(t *testing.T) {
@@ -1155,6 +1144,121 @@ func TestSearch_DumpImportInProgress(t *testing.T) {
 	h.search(c)
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestGetStatus_WaitsForDumpMutation(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+
+	h.dumpMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			h.dumpMu.Unlock()
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/r18dev/dump/status", nil)
+	done := make(chan struct{})
+	go func() {
+		h.getStatus(c)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("status opened the dump during a dump mutation")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	h.dumpMu.Unlock()
+	locked = false
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("status did not resume after the dump mutation")
+	}
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestSearch_WaitsForDumpMutation(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+
+	h.dumpMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			h.dumpMu.Unlock()
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/r18dev/dump/search?q=ABF-030", nil)
+	done := make(chan struct{})
+	go func() {
+		h.search(c)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("search opened the dump during a dump mutation")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	h.dumpMu.Unlock()
+	locked = false
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("search did not resume after the dump mutation")
+	}
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestClearDump_WaitsForInFlightReader(t *testing.T) {
+	h, dumpPath := newTestHandler(t)
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+
+	h.dumpMu.RLock()
+	locked := true
+	defer func() {
+		if locked {
+			h.dumpMu.RUnlock()
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/r18dev/dump", nil)
+	done := make(chan struct{})
+	go func() {
+		h.clearDump(c)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("clear completed while a dump reader was active")
+	case <-time.After(100 * time.Millisecond):
+	}
+	_, err := os.Stat(dumpPath)
+	require.NoError(t, err)
+
+	h.dumpMu.RUnlock()
+	locked = false
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("clear did not resume after the dump reader finished")
+	}
+	require.Equal(t, http.StatusOK, w.Code)
+	_, err = os.Stat(dumpPath)
+	assert.True(t, os.IsNotExist(err))
 }
 
 // --- Reload serialization coverage (Codex P2 fix) ---
