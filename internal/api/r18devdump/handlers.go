@@ -36,11 +36,12 @@ type dumpHandler struct {
 	lastError  string // last download outcome; non-empty when the most recent run failed
 	httpClient *http.Client
 	reloadFn   func(cfg *config.Config, lockHeld bool) error
+	removeFn   func(string) error
 	done       chan struct{} // closed when the download goroutine finishes
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{}}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, removeFn: os.Remove}
 	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
 		if lockHeld {
 			return h.rt.ReloadConfigLocked(cfg)
@@ -404,6 +405,17 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 		return
 	}
 
+	store, err := r18devdump.Open(path)
+	if err == nil {
+		_, err = store.Stats(c.Request.Context())
+		_ = store.Close()
+	}
+	if err != nil {
+		logging.Warnf("r18dev dump clear: refusing to delete invalid dump database %s: %v", path, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is not a valid r18.dev dump database"})
+		return
+	}
+
 	// Close the active dump handle before deleting so the SQLite file can
 	// be removed on Windows (which blocks deletion of open files).
 	unlockReload := h.rt.LockReload()
@@ -416,7 +428,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 	// main DB file can't be deleted (sidecar failures are non-fatal).
 	var removeErr error
 	for _, p := range []string{path, path + "-wal", path + "-shm"} {
-		if err := os.Remove(p); err != nil && !os.IsNotExist(err) && p == path {
+		if err := h.removeFn(p); err != nil && !os.IsNotExist(err) && p == path {
 			removeErr = err
 		}
 	}

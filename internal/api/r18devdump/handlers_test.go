@@ -59,6 +59,7 @@ func newTestHandler(t *testing.T) (*dumpHandler, string) {
 			}
 			return rt.ReloadConfig(cfg)
 		},
+		removeFn: os.Remove,
 	}, dumpPath
 }
 
@@ -822,6 +823,61 @@ func TestClearDump_NotPresent(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
+func TestClearDump_RejectsInvalidDatabase(t *testing.T) {
+	testCases := []struct {
+		name  string
+		setup func(t *testing.T, path string)
+	}{
+		{
+			name: "not SQLite",
+			setup: func(t *testing.T, path string) {
+				require.NoError(t, os.WriteFile(path, []byte("not a database"), 0o600))
+			},
+		},
+		{
+			name: "missing dump schema",
+			setup: func(t *testing.T, path string) {
+				db, err := openRawDB(path)
+				require.NoError(t, err)
+				_, err = db.Exec(`CREATE TABLE unrelated (id INTEGER PRIMARY KEY)`)
+				require.NoError(t, err)
+				require.NoError(t, db.Close())
+			},
+		},
+		{
+			name: "missing dump metadata",
+			setup: func(t *testing.T, path string) {
+				db, err := openRawDB(path)
+				require.NoError(t, err)
+				_, err = db.Exec(`CREATE TABLE videos (content_id TEXT PRIMARY KEY)`)
+				require.NoError(t, err)
+				require.NoError(t, db.Close())
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, dumpPath := newTestHandler(t)
+			tc.setup(t, dumpPath)
+			closer := &fakeCloser{}
+			h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(closer)
+
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/r18dev/dump", nil)
+
+			h.clearDump(c)
+
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			assert.JSONEq(t, `{"error":"file is not a valid r18.dev dump database"}`, w.Body.String())
+			_, err := os.Stat(dumpPath)
+			assert.NoError(t, err, "invalid target must not be deleted")
+			assert.False(t, closer.closed, "active dump handle must remain unchanged")
+		})
+	}
+}
+
 func TestClearDump_Success(t *testing.T) {
 	h, dumpPath := newTestHandler(t)
 	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
@@ -891,9 +947,14 @@ func TestClearDump_ReloadFails(t *testing.T) {
 
 func TestClearDump_DeleteError(t *testing.T) {
 	h, dumpPath := newTestHandler(t)
-	require.NoError(t, os.Mkdir(dumpPath, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dumpPath, "keep"), []byte("test"), 0o644))
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
 	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
+	h.removeFn = func(path string) error {
+		if path == dumpPath {
+			return fmt.Errorf("simulated delete failure")
+		}
+		return os.Remove(path)
+	}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1091,8 +1152,13 @@ func TestStartUpdate_UnchangedReloadsDump(t *testing.T) {
 
 func TestClearDump_RestoresHandleOnDeleteError(t *testing.T) {
 	h, dumpPath := newTestHandler(t)
-	require.NoError(t, os.Mkdir(dumpPath, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dumpPath, "keep"), []byte("test"), 0o644))
+	buildTestDump(t, dumpPath, "118abf030", "ABF-030")
+	h.removeFn = func(path string) error {
+		if path == dumpPath {
+			return fmt.Errorf("simulated delete failure")
+		}
+		return os.Remove(path)
+	}
 
 	closer := &fakeCloser{}
 	h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(closer)
