@@ -1,10 +1,9 @@
 package batch
 
 import (
-	"fmt"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scrape"
 )
 
 // resolveManualInputOverride produces the final per-file RawInputOverride map by
@@ -13,20 +12,23 @@ import (
 // submittedFiles) keep their own input and are never overwritten by
 // propagation: propagation targets only files that were discovered by sibling
 // discovery, not files the caller submitted (backend F1). Two submitted files
-// sharing a matcher MovieID with conflicting manual inputs are rejected
-// (backend F2): otherwise map-iteration order would decide which input a
-// shared sibling receives, making the scrape non-deterministic.
+// sharing a matcher MovieID with conflicting manual inputs are NOT rejected
+// (backend F2): the user is explicitly splitting matcher-grouped files into
+// separate movies. Instead, the conflicting MovieID is marked ambiguous so
+// sibling propagation is skipped (we can't know which input to propagate).
 //
 // fileMatchInfo is the metadata returned by discoverSiblingPartsWithMetadata;
-// allFiles is its expanded file list (submitted + discovered).
+// allFiles is its expanded file list (submitted + discovered). The function
+// also overrides fileMatchInfo entries so files with explicit manual inputs
+// are grouped by the user's ID, not the matcher's.
 func resolveManualInputOverride(
 	submittedFiles []string,
 	manualInputs map[string]string,
 	fileMatchInfo map[string]models.FileMatchInfo,
 	allFiles []string,
-) (map[string]string, error) {
+) map[string]string {
 	if len(manualInputs) == 0 {
-		return manualInputs, nil
+		return manualInputs
 	}
 
 	submitted := make(map[string]bool, len(submittedFiles))
@@ -35,7 +37,11 @@ func resolveManualInputOverride(
 	}
 
 	// Map each submitter's manual input to the matcher MovieID of its file.
+	// Conflicting inputs for the same matcher MovieID are not rejected — the
+	// user is explicitly splitting matcher-grouped files — but the MovieID is
+	// marked ambiguous so sibling propagation is skipped.
 	movieInput := make(map[string]string)
+	ambiguousMovies := make(map[string]bool)
 	for path, input := range manualInputs {
 		if !submitted[path] {
 			continue
@@ -45,7 +51,8 @@ func resolveManualInputOverride(
 			continue
 		}
 		if existing, dup := movieInput[fmi.MovieID]; dup && existing != input {
-			return nil, fmt.Errorf("conflicting manual inputs for movie %q: %q vs %q", fmi.MovieID, scrape.RedactURLQuery(existing), scrape.RedactURLQuery(input))
+			ambiguousMovies[fmi.MovieID] = true
+			continue
 		}
 		movieInput[fmi.MovieID] = input
 	}
@@ -69,10 +76,33 @@ func resolveManualInputOverride(
 		if !ok || fmi.MovieID == "" {
 			continue
 		}
+		if ambiguousMovies[fmi.MovieID] {
+			continue
+		}
 		if input, ok := movieInput[fmi.MovieID]; ok {
 			result[path] = input
 		}
 	}
 
-	return result, nil
+	// Override matcher-derived metadata so files with explicit manual inputs
+	// are grouped by the user's ID, not the matcher's. Files with different
+	// manual inputs naturally split into separate movies; files with the same
+	// manual input stay grouped (correct for genuine multi-part).
+	for path, input := range result {
+		trimmed := strings.TrimSpace(input)
+		if trimmed == "" {
+			continue
+		}
+		fmi, ok := fileMatchInfo[path]
+		if !ok {
+			continue
+		}
+		fmi.MovieID = trimmed
+		fmi.IsMultiPart = false
+		fmi.PartNumber = 0
+		fmi.PartSuffix = ""
+		fileMatchInfo[path] = fmi
+	}
+
+	return result
 }

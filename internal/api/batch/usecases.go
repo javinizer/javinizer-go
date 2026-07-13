@@ -163,12 +163,10 @@ func StartScrapeUseCase(
 	}
 
 	// Resolve manual inputs: propagate each submitter's input to discovered
-	// siblings sharing the matcher MovieID, and reject conflicting inputs across
-	// co-parts of the same movie (handler maps the error to 400).
-	propagatedManualInputs, err := resolveManualInputOverride(input.Files, input.ManualInputs, fileMatchInfoMap, allFiles)
-	if err != nil {
-		return nil, err
-	}
+	// siblings sharing the matcher MovieID. Files with explicit manual inputs
+	// override the matcher-derived grouping key so they split into separate
+	// movies in the UI queue.
+	propagatedManualInputs := resolveManualInputOverride(input.Files, input.ManualInputs, fileMatchInfoMap, allFiles)
 
 	resolved, err := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
 		OperationMode:  input.OperationMode,

@@ -9,29 +9,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func copyFMI(m map[string]models.FileMatchInfo) map[string]models.FileMatchInfo {
+	out := make(map[string]models.FileMatchInfo, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 // TestResolveManualInputOverride_ConcurrentReadSafety asserts the manual-input
 // override resolution is safe under the race detector when many goroutines
-// resolve the same shared inputs concurrently. resolveManualInputOverride is
-// the propagation step on the batch scrape path (usecases.go); it reads
-// submittedFiles, manualInputs, and fileMatchInfo and builds a fresh override
-// map. Inputs are read-only across the call, so concurrent callers must not
-// race on the shared maps/slices and must each observe identical, deterministic
-// results. The discovered-sibling propagation case (the new manual-input path)
-// is included so the race detector exercises the full build path, not just the
+// resolve equivalent inputs concurrently. resolveManualInputOverride mutates
+// fileMatchInfo in place (Layer 1: override the grouping key), so each
+// goroutine resolves against its own copy of fileMatchInfo — the production
+// caller invokes it once per scrape, never concurrently on a shared map.
+// The result map is per-call, and manualInputs is read-only across the call,
+// so concurrent callers each observe identical, deterministic results. The
+// discovered-sibling propagation case (the new manual-input path) is included
+// so the race detector exercises the full build path, not just the
 // early-return shortcuts.
 func TestResolveManualInputOverride_ConcurrentReadSafety(t *testing.T) {
 	t.Parallel()
 
 	submitted := []string{"/d/ABC-001-pt1.mp4"}
 	manualInputs := map[string]string{"/d/ABC-001-pt1.mp4": "IPX-999"}
-	fileMatchInfo := map[string]models.FileMatchInfo{
+	baseFMI := map[string]models.FileMatchInfo{
 		"/d/ABC-001-pt1.mp4": fmiFor("/d/ABC-001-pt1.mp4", "ABC-001", 1),
 		"/d/ABC-001-pt2.mp4": fmiFor("/d/ABC-001-pt2.mp4", "ABC-001", 2),
 	}
 	allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
 
-	want, err := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
-	require.NoError(t, err)
+	want := resolveManualInputOverride(submitted, manualInputs, copyFMI(baseFMI), allFiles)
 	require.Equal(t, "IPX-999", want["/d/ABC-001-pt1.mp4"])
 	require.Equal(t, "IPX-999", want["/d/ABC-001-pt2.mp4"], "precondition: discovered sibling inherits submitter input")
 
@@ -42,11 +50,7 @@ func TestResolveManualInputOverride_ConcurrentReadSafety(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
-				got, gerr := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
-				if gerr != nil {
-					t.Errorf("concurrent resolve failed: %v", gerr)
-					return
-				}
+				got := resolveManualInputOverride(submitted, manualInputs, copyFMI(baseFMI), allFiles)
 				if !mapsEqual(got, want) {
 					t.Errorf("concurrent resolve diverged: got %v want %v", got, want)
 					return
@@ -99,27 +103,26 @@ func TestValidateAndSanitizeManualInputs_ConcurrentReadSafety(t *testing.T) {
 }
 
 // TestResolveManualInputOverride_ConcurrentSharedInputs_NoMutation asserts that
-// concurrent resolution never mutates the shared input maps/slices: a caller
-// must treat its inputs as read-only. This guards the contract the usecase
-// relies on (the same manualInputs/fileMatchInfo feed into the job's
-// FileMatchInfo and RawInputOverride) — if a concurrent resolver mutated them,
-// a later caller or the scrape phase would observe corrupted data.
+// concurrent resolution never mutates the shared read-only input map
+// manualInputs: a caller must treat manualInputs as read-only. fileMatchInfo
+// is now an in/out parameter (Layer 1 overrides its grouping key), so each
+// goroutine resolves against its own copy and the production caller invokes
+// the resolver once per scrape, never concurrently on a shared map. This
+// guards the contract the usecase relies on (the same manualInputs feed into
+// the job's RawInputOverride) — if a concurrent resolver mutated it, a later
+// caller or the scrape phase would observe corrupted data.
 func TestResolveManualInputOverride_ConcurrentSharedInputs_NoMutation(t *testing.T) {
 	t.Parallel()
 
 	submitted := []string{"/d/ABC-001-pt1.mp4"}
 	manualInputs := map[string]string{"/d/ABC-001-pt1.mp4": "IPX-999"}
-	fileMatchInfo := map[string]models.FileMatchInfo{
+	baseFMI := map[string]models.FileMatchInfo{
 		"/d/ABC-001-pt1.mp4": fmiFor("/d/ABC-001-pt1.mp4", "ABC-001", 1),
 		"/d/ABC-001-pt2.mp4": fmiFor("/d/ABC-001-pt2.mp4", "ABC-001", 2),
 	}
 	allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
 
 	manualSnapshot := map[string]string{"/d/ABC-001-pt1.mp4": "IPX-999"}
-	fmiSnapshot := map[string]models.FileMatchInfo{
-		"/d/ABC-001-pt1.mp4": fmiFor("/d/ABC-001-pt1.mp4", "ABC-001", 1),
-		"/d/ABC-001-pt2.mp4": fmiFor("/d/ABC-001-pt2.mp4", "ABC-001", 2),
-	}
 
 	const goroutines = 32
 	var wg sync.WaitGroup
@@ -128,14 +131,13 @@ func TestResolveManualInputOverride_ConcurrentSharedInputs_NoMutation(t *testing
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
-				_, _ = resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+				_ = resolveManualInputOverride(submitted, manualInputs, copyFMI(baseFMI), allFiles)
 			}
 		}()
 	}
 	wg.Wait()
 
 	assert.Equal(t, manualSnapshot, manualInputs, "shared manualInputs must not be mutated by concurrent resolvers")
-	assert.Equal(t, fmiSnapshot, fileMatchInfo, "shared fileMatchInfo must not be mutated by concurrent resolvers")
 }
 
 func mapsEqual(a, b map[string]string) bool {
