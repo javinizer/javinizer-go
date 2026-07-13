@@ -1192,4 +1192,12 @@ func TestStartDownload_ImportHoldsReloadLock(t *testing.T) {
 		t.Fatal("ReloadConfig did not complete after import released reloadMu")
 	}
 	<-h.done
+
+	// The real reloadFn (ReloadConfig) opened a live SQLite handle to the dump
+	// file during the success-path reloadDump. Close it so Windows can remove
+	// the TempDir during cleanup — otherwise RemoveAll fails with a sharing
+	// violation on r18dev_dump.db.
+	if old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil); old != nil {
+		_ = old.Close()
+	}
 }
