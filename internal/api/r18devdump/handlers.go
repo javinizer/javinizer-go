@@ -195,37 +195,40 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			h.broadcastProgress("importing", 0, 0)
-			// Close the old dump handle before Import runs. On Windows, Import's
-			// final os.Rename(tmp, path) would fail if the old SQLite handle is
-			// still open (Windows blocks rename over open files). On Unix this
-			// is a no-op (files are renameable while open).
-			//
-			// During the import (which can take minutes), the scraper falls
-			// back to HTTP. This is acceptable — the import is replacing the
-			// dump, and the old dump would be stale soon anyway.
-			//
-			// The closer swap is protected by h.mu to prevent racing with
-			// a concurrent config reload (which also swaps the closer).
-			h.mu.Lock()
-			old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil)
-			h.mu.Unlock()
-			if old != nil {
-				_ = old.Close()
-			}
-			impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
-				SourceURL:  d.FinalURL,
-				SourceDate: d.SourceDate,
+			// Close the old dump handle and run Import under reloadMu (write) so a
+			// concurrent config hot-reload cannot swap the dump closer between the
+			// close and Import's os.Rename. PUT /api/v1/config -> ReloadConfig
+			// publishes the new dump closer under reloadMu; holding reloadMu here
+			// blocks that swap for the whole close/import window. On Windows that
+			// race otherwise reopens the old SQLite file and makes Import's rename
+			// fail with a sharing violation. Lock order reloadMu -> CoreDeps.mu is
+			// consistent with ReloadConfig (hot_reload.go). reloadDump is called
+			// OUTSIDE this callback because it calls ReloadConfig, which acquires
+			// reloadMu and would self-deadlock if invoked from inside fn.
+			importErr := h.rt.WithReloadLock(func() error {
+				old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil)
+				if old != nil {
+					_ = old.Close()
+				}
+				impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
+					SourceURL:  d.FinalURL,
+					SourceDate: d.SourceDate,
+				})
+				if err != nil {
+					return err
+				}
+				_ = impRes
+				return nil
 			})
-			if err != nil {
+			if importErr != nil {
 				// Import failed — restore the old dump handle so the scraper
 				// can keep using the existing dump. The old file is intact
 				// (Import writes to .tmp and only renames on success).
 				if reloadErr := h.reloadDump(path); reloadErr != nil {
 					logging.Warnf("r18dev dump: failed to restore handle after import error: %v", reloadErr)
 				}
-				return err
+				return importErr
 			}
-			_ = impRes
 			return nil
 		})
 		if err != nil {

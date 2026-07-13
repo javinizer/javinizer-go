@@ -1108,3 +1108,88 @@ func TestSearch_DumpImportInProgress(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
+
+// --- WithReloadLock serialization coverage (Codex P2 fix) ---
+
+// TestStartDownload_ImportHoldsReloadLock proves the import callback now runs
+// the closer swap + Import under APIRuntime.WithReloadLock (reloadMu write).
+// While the import is blocked reading from a slow dump stream, a concurrent
+// ReloadConfig (PUT /api/v1/config path) must block on reloadMu instead of
+// racing the closer swap / Import rename — the Windows sharing-violation race
+// the Codex findings flagged.
+func TestStartDownload_ImportHoldsReloadLock(t *testing.T) {
+	importStarted := make(chan struct{})
+	proceed := make(chan struct{})
+
+	// Serve a gzip stream in two parts: part 1 (COPY header + one row, no
+	// terminator) is sent immediately and flushed; part 2 (the "\." terminator)
+	// is sent only after `proceed` is closed. Import's bufio.Scanner emits the
+	// part-1 lines then blocks on the next Scan(), holding reloadMu the whole
+	// time.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		gw := gzip.NewWriter(w)
+		_, _ = gw.Write([]byte("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n"))
+		_ = gw.Flush()
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		close(importStarted)
+		<-proceed
+		_, _ = gw.Write([]byte("\\.\n"))
+		_ = gw.Close()
+	}))
+	defer srv.Close()
+
+	h, dumpPath, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+	// Use the REAL ReloadConfig so the concurrent reload shares reloadMu with
+	// WithReloadLock (the no-op reloadFn used by other tests would not).
+	h.reloadFn = func(cfg *config.Config) error { return h.rt.ReloadConfig(cfg) }
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/dumps/r18dotdev_dump_2026-04-28.sql.gz"
+	defer func() { r18devdump.LatestDumpURL = orig }()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	<-importStarted
+	// The .tmp DB is created by Import inside WithReloadLock, so its existence
+	// proves we are holding reloadMu.
+	tmpPath := dumpPath + ".tmp"
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(tmpPath)
+		return err == nil
+	}, 3*time.Second, 50*time.Millisecond, "Import should create the tmp DB under WithReloadLock")
+	// Let Import enter the read loop and block on the slow stream.
+	time.Sleep(150 * time.Millisecond)
+
+	// A concurrent config reload must block on reloadMu while the import holds
+	// it. With an empty config ReloadConfig completes in milliseconds when
+	// uncontended, so a 300ms window reliably detects contention.
+	cfg := h.rt.Deps().CoreDeps.GetConfig()
+	reloadDone := make(chan error, 1)
+	go func() { reloadDone <- h.rt.ReloadConfig(cfg) }()
+	select {
+	case err := <-reloadDone:
+		t.Fatalf("ReloadConfig must block while import holds reloadMu; completed with %v", err)
+	case <-time.After(300 * time.Millisecond):
+		// expected: still blocked
+	}
+
+	// Release the import stream so WithReloadLock drops reloadMu; the queued
+	// reload must then complete.
+	close(proceed)
+	select {
+	case err := <-reloadDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ReloadConfig did not complete after import released reloadMu")
+	}
+	<-h.done
+}
