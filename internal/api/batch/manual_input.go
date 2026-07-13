@@ -102,18 +102,17 @@ func resolveManualInputOverride(
 		// buildScrapeCmd does the same for cmd.MovieID. RawInputOverride
 		// (the result map) stays raw so the scraper sees the real URL.
 		redacted := scrape.RedactURLQuery(trimmed)
-		isSplit := redacted != fmi.MovieID
+		// Only clear multipart metadata when the matcher group was actually
+		// split by conflicting manual inputs (ambiguousMovies). A genuine
+		// multi-part corrected to a new shared ID preserves part metadata
+		// so organizer/NFO templates still get <PART> suffixes.
+		isSplit := ambiguousMovies[fmi.MovieID]
 		fmi.MovieID = redacted
 		if isSplit {
-			// Manual input differs from the matcher MovieID — the user is
-			// splitting matcher-grouped files. Clear multipart metadata so
-			// they render as independent movies.
 			fmi.IsMultiPart = false
 			fmi.PartNumber = 0
 			fmi.PartSuffix = ""
 		}
-		// When the manual input matches the matcher MovieID (genuine multi-part
-		// corrected to the same ID), preserve IsMultiPart/PartNumber/PartSuffix.
 		fileMatchInfo[path] = fmi
 	}
 

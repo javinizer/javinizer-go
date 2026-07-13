@@ -150,6 +150,30 @@ func TestResolveManualInputOverride_PreservesMultipartForSameManualID(t *testing
 	assert.Equal(t, 2, fileMatchInfo["/d/ABC-001-pt2.mp4"].PartNumber, "PartNumber preserved for genuine multi-part")
 }
 
+func TestResolveManualInputOverride_PreservesMultipartForPropagatedSibling(t *testing.T) {
+	// Matcher groups pt1+pt2 under ABC-001. User submits only pt1 with
+	// manual input IPX-999. Propagation gives pt2 the same input.
+	// Both parts should keep multipart metadata (not a split — same input).
+	submitted := []string{"/d/ABC-001-pt1.mp4"}
+	manualInputs := map[string]string{"/d/ABC-001-pt1.mp4": "IPX-999"}
+	fileMatchInfo := map[string]models.FileMatchInfo{
+		"/d/ABC-001-pt1.mp4": fmiFor("/d/ABC-001-pt1.mp4", "ABC-001", 1),
+		"/d/ABC-001-pt2.mp4": fmiFor("/d/ABC-001-pt2.mp4", "ABC-001", 2),
+	}
+	allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
+
+	result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+
+	assert.Equal(t, "IPX-999", result["/d/ABC-001-pt1.mp4"], "submitter keeps its input")
+	assert.Equal(t, "IPX-999", result["/d/ABC-001-pt2.mp4"], "sibling inherits the propagated input")
+	assert.Equal(t, "IPX-999", fileMatchInfo["/d/ABC-001-pt1.mp4"].MovieID, "MovieID overridden")
+	assert.Equal(t, "IPX-999", fileMatchInfo["/d/ABC-001-pt2.mp4"].MovieID, "MovieID overridden")
+	assert.True(t, fileMatchInfo["/d/ABC-001-pt1.mp4"].IsMultiPart, "multipart preserved for non-ambiguous group")
+	assert.True(t, fileMatchInfo["/d/ABC-001-pt2.mp4"].IsMultiPart, "multipart preserved for propagated sibling")
+	assert.Equal(t, 1, fileMatchInfo["/d/ABC-001-pt1.mp4"].PartNumber, "PartNumber preserved")
+	assert.Equal(t, 2, fileMatchInfo["/d/ABC-001-pt2.mp4"].PartNumber, "PartNumber preserved")
+}
+
 func TestResolveManualInputOverride_RedactsURLInMovieID(t *testing.T) {
 	submitted := []string{"/d/video.mp4"}
 	rawURL := "https://example.com/video?token=secret"
@@ -167,8 +191,10 @@ func TestResolveManualInputOverride_RedactsURLInMovieID(t *testing.T) {
 	assert.NotContains(t, fileMatchInfo["/d/video.mp4"].MovieID, "token=secret", "MovieID grouping key has query token redacted")
 	assert.NotContains(t, fileMatchInfo["/d/video.mp4"].MovieID, "secret", "MovieID grouping key does not leak the token value")
 	assert.Equal(t, "https://example.com/video", fileMatchInfo["/d/video.mp4"].MovieID, "MovieID is the redacted URL (scheme+host+path only)")
-	// The matcher MovieID differs from the redacted manual input, so this is a split.
-	assert.False(t, fileMatchInfo["/d/video.mp4"].IsMultiPart, "IsMultiPart cleared for a split (manual ID differs from matcher ID)")
+	// Single file with a single manual input is NOT ambiguous, so multipart
+	// metadata is preserved even though the redacted manual ID differs from the
+	// matcher ID (a genuine single-part correction, not a split).
+	assert.True(t, fileMatchInfo["/d/video.mp4"].IsMultiPart, "IsMultiPart preserved for non-ambiguous single-file manual input")
 }
 
 func TestResolveManualInputOverride_CoversDefensiveGuards(t *testing.T) {
