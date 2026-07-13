@@ -21,6 +21,8 @@ import (
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 )
 
+var importHeartbeatInterval = 1500 * time.Millisecond
+
 const (
 	dumpJobID = "r18dev-dump-download"
 )
@@ -243,24 +245,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			// being reported.
 			importDone := make(chan struct{})
 			streamConsumed := make(chan struct{})
-			go func() {
-				select {
-				case <-streamConsumed:
-				case <-importDone:
-					return
-				}
-				h.broadcastProgress("importing", 0, 0)
-				ticker := time.NewTicker(1500 * time.Millisecond)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-ticker.C:
-						h.broadcastProgress("importing", 0, 0)
-					case <-importDone:
-						return
-					}
-				}
-			}()
+			go h.runImportHeartbeat(streamConsumed, importDone)
 			defer close(importDone)
 			r = &eofDetectReader{r: r, onEOF: sync.OnceFunc(func() { close(streamConsumed) })}
 			var unlockReload func()
@@ -554,6 +539,29 @@ func (e *eofDetectReader) Read(p []byte) (int, error) {
 		e.once.Do(e.onEOF)
 	}
 	return n, err
+}
+
+// runImportHeartbeat broadcasts periodic "importing" progress frames while the
+// SQL import runs. It waits until streamConsumed is closed (the download
+// stream hit EOF) before starting, so "importing" frames never overlap with
+// "downloading" frames. It exits when importDone is closed.
+func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struct{}) {
+	select {
+	case <-streamConsumed:
+	case <-importDone:
+		return
+	}
+	h.broadcastProgress("importing", 0, 0)
+	ticker := time.NewTicker(importHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			h.broadcastProgress("importing", 0, 0)
+		case <-importDone:
+			return
+		}
+	}
 }
 
 // resolveDumpPath returns the configured dump sidecar path, applying the

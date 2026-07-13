@@ -479,6 +479,40 @@ func TestBroadcastProgress_WithHub(t *testing.T) {
 	h.broadcastProgress("error", 0, 0)
 }
 
+func TestRunImportHeartbeat_TickerFires(t *testing.T) {
+	h, _, _ := newTestHandlerWithHub(t)
+
+	orig := importHeartbeatInterval
+	importHeartbeatInterval = 1 * time.Millisecond
+
+	streamConsumed := make(chan struct{})
+	importDone := make(chan struct{})
+	close(streamConsumed) // simulate download stream EOF
+
+	exited := make(chan struct{})
+	go func() {
+		h.runImportHeartbeat(streamConsumed, importDone)
+		close(exited)
+	}()
+
+	// Let the ticker fire several times so the <-ticker.C branch executes.
+	time.Sleep(20 * time.Millisecond)
+	close(importDone)
+	<-exited // wait for the goroutine to exit before restoring the interval
+	importHeartbeatInterval = orig
+}
+
+func TestRunImportHeartbeat_ImportDoneFirst(t *testing.T) {
+	h, _, _ := newTestHandlerWithHub(t)
+
+	streamConsumed := make(chan struct{})
+	importDone := make(chan struct{})
+	close(importDone) // import finishes before stream is consumed
+
+	// Should return immediately without broadcasting.
+	h.runImportHeartbeat(streamConsumed, importDone)
+}
+
 // --- reloadDump coverage ---
 
 func TestReloadDump_Success(t *testing.T) {
