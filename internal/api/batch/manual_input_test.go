@@ -174,6 +174,35 @@ func TestResolveManualInputOverride_PreservesMultipartForPropagatedSibling(t *te
 	assert.Equal(t, 2, fileMatchInfo["/d/ABC-001-pt2.mp4"].PartNumber, "PartNumber preserved")
 }
 
+func TestResolveManualInputOverride_PreservesMultipartForSameIDSubsetInAmbiguousGroup(t *testing.T) {
+	// pt1 and pt2 both set to IPX-111; pt3 set to IPX-222.
+	// pt1/pt2 share the same input → keep multipart metadata.
+	// pt3 is unique → loses multipart metadata.
+	submitted := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4", "/d/ABC-001-pt3.mp4"}
+	manualInputs := map[string]string{
+		"/d/ABC-001-pt1.mp4": "IPX-111",
+		"/d/ABC-001-pt2.mp4": "IPX-111",
+		"/d/ABC-001-pt3.mp4": "IPX-222",
+	}
+	fileMatchInfo := map[string]models.FileMatchInfo{
+		"/d/ABC-001-pt1.mp4": fmiFor("/d/ABC-001-pt1.mp4", "ABC-001", 1),
+		"/d/ABC-001-pt2.mp4": fmiFor("/d/ABC-001-pt2.mp4", "ABC-001", 2),
+		"/d/ABC-001-pt3.mp4": fmiFor("/d/ABC-001-pt3.mp4", "ABC-001", 3),
+	}
+	allFiles := submitted
+
+	resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+
+	assert.True(t, fileMatchInfo["/d/ABC-001-pt1.mp4"].IsMultiPart, "pt1 keeps multipart (shares IPX-111 with pt2)")
+	assert.True(t, fileMatchInfo["/d/ABC-001-pt2.mp4"].IsMultiPart, "pt2 keeps multipart (shares IPX-111 with pt1)")
+	assert.False(t, fileMatchInfo["/d/ABC-001-pt3.mp4"].IsMultiPart, "pt3 loses multipart (unique IPX-222)")
+	assert.Equal(t, 1, fileMatchInfo["/d/ABC-001-pt1.mp4"].PartNumber, "pt1 PartNumber preserved")
+	assert.Equal(t, 2, fileMatchInfo["/d/ABC-001-pt2.mp4"].PartNumber, "pt2 PartNumber preserved")
+	assert.Equal(t, "IPX-111", fileMatchInfo["/d/ABC-001-pt1.mp4"].MovieID, "pt1 MovieID overridden")
+	assert.Equal(t, "IPX-111", fileMatchInfo["/d/ABC-001-pt2.mp4"].MovieID, "pt2 MovieID overridden")
+	assert.Equal(t, "IPX-222", fileMatchInfo["/d/ABC-001-pt3.mp4"].MovieID, "pt3 MovieID overridden")
+}
+
 func TestResolveManualInputOverride_RedactsURLInMovieID(t *testing.T) {
 	submitted := []string{"/d/video.mp4"}
 	rawURL := "https://example.com/video?token=secret"

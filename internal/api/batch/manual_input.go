@@ -7,6 +7,13 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scrape"
 )
 
+// inputKey identifies a (matcher MovieID, manual input) pair so we can count
+// how many submitted files share each manual input within a matcher group.
+type inputKey struct {
+	movieID string
+	input   string
+}
+
 // resolveManualInputOverride produces the final per-file RawInputOverride map by
 // propagating each submitted file's manual input to newly-discovered sibling
 // files that share the same matcher MovieID. Co-submitted files (present in
@@ -37,12 +44,16 @@ func resolveManualInputOverride(
 		submitted[f] = true
 	}
 
-	// Map each submitter's manual input to the matcher MovieID of its file.
-	// Conflicting inputs for the same matcher MovieID are not rejected — the
-	// user is explicitly splitting matcher-grouped files — but the MovieID is
-	// marked ambiguous so sibling propagation is skipped.
+	// Map each submitter's manual input to the matcher MovieID of its file and
+	// track distinct manual inputs + per-input counts per matcher MovieID.
+	// A matcher group is ambiguous (being split) when it has more than one
+	// distinct manual input. Within an ambiguous group, only files whose input
+	// is unique (no sibling shares it) lose multipart metadata; files sharing
+	// an input keep their part metadata so organize/NFO templates still group
+	// them as a genuine multi-part under the shared ID.
 	movieInput := make(map[string]string)
-	ambiguousMovies := make(map[string]bool)
+	movieInputs := make(map[string]map[string]bool)
+	inputCounts := make(map[inputKey]int)
 	for path, input := range manualInputs {
 		if !submitted[path] {
 			continue
@@ -51,11 +62,13 @@ func resolveManualInputOverride(
 		if !ok || fmi.MovieID == "" {
 			continue
 		}
-		if existing, dup := movieInput[fmi.MovieID]; dup && existing != input {
-			ambiguousMovies[fmi.MovieID] = true
-			continue
+		trimmed := strings.TrimSpace(input)
+		if movieInputs[fmi.MovieID] == nil {
+			movieInputs[fmi.MovieID] = make(map[string]bool)
 		}
+		movieInputs[fmi.MovieID][trimmed] = true
 		movieInput[fmi.MovieID] = input
+		inputCounts[inputKey{fmi.MovieID, trimmed}]++
 	}
 
 	// Seed the result with every explicit input (submitters keep their own).
@@ -77,7 +90,9 @@ func resolveManualInputOverride(
 		if !ok || fmi.MovieID == "" {
 			continue
 		}
-		if ambiguousMovies[fmi.MovieID] {
+		// Skip propagation for ambiguous groups (more than one distinct input) —
+		// we can't know which input to propagate.
+		if inputs := movieInputs[fmi.MovieID]; len(inputs) > 1 {
 			continue
 		}
 		if input, ok := movieInput[fmi.MovieID]; ok {
@@ -102,11 +117,13 @@ func resolveManualInputOverride(
 		// buildScrapeCmd does the same for cmd.MovieID. RawInputOverride
 		// (the result map) stays raw so the scraper sees the real URL.
 		redacted := scrape.RedactURLQuery(trimmed)
-		// Only clear multipart metadata when the matcher group was actually
-		// split by conflicting manual inputs (ambiguousMovies). A genuine
-		// multi-part corrected to a new shared ID preserves part metadata
-		// so organizer/NFO templates still get <PART> suffixes.
-		isSplit := ambiguousMovies[fmi.MovieID]
+		// A file loses multipart metadata only if its manual input is unique
+		// within the matcher group (count == 1) AND the group is ambiguous
+		// (more than one distinct input) — i.e. it's being split off as a
+		// standalone movie. Files sharing an input with at least one sibling
+		// keep their part metadata for organize/NFO templates.
+		count := inputCounts[inputKey{fmi.MovieID, trimmed}]
+		isSplit := count <= 1 && len(movieInputs[fmi.MovieID]) > 1
 		fmi.MovieID = redacted
 		if isSplit {
 			fmi.IsMultiPart = false
