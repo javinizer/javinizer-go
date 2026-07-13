@@ -23,7 +23,8 @@ func TestResolveManualInputOverride_AllowsConflictingInputsForSameMovieID(t *tes
 	}
 	allFiles := submitted
 
-	result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	result := resolved.overrides
 
 	assert.Equal(t, "IPX-111", result["/d/ABC-001-pt1.mp4"], "each submitted file keeps its own manual input")
 	assert.Equal(t, "IPX-222", result["/d/ABC-001-pt2.mp4"], "each submitted file keeps its own manual input")
@@ -42,7 +43,8 @@ func TestResolveManualInputOverride_DoesNotOverwriteCoSubmittedSibling(t *testin
 	}
 	allFiles := submitted
 
-	result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	result := resolved.overrides
 
 	assert.Equal(t, "IPX-999", result["/d/ABC-001-pt1.mp4"], "submitter keeps its own input")
 	_, has := result["/d/ABC-001-pt2.mp4"]
@@ -58,7 +60,8 @@ func TestResolveManualInputOverride_PropagatesToDiscoveredSibling(t *testing.T) 
 	}
 	allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
 
-	result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	result := resolved.overrides
 
 	assert.Equal(t, "IPX-999", result["/d/ABC-001-pt1.mp4"], "submitter keeps its own input")
 	assert.Equal(t, "IPX-999", result["/d/ABC-001-pt2.mp4"], "discovered sibling inherits the submitter's input (same matcher MovieID)")
@@ -73,7 +76,8 @@ func TestResolveManualInputOverride_MixedBatchManualAndAuto(t *testing.T) {
 	}
 	allFiles := submitted
 
-	result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	result := resolved.overrides
 
 	assert.Len(t, result, 1, "only the manually-input row gets an override; the auto row stays auto (no map entry)")
 	assert.Equal(t, "ABC-123", result["/a/SSIS-001.mp4"], "manual row scrapes as its explicit input")
@@ -118,7 +122,8 @@ func TestResolveManualInputOverride_AmbiguousMovieSkipsPropagation(t *testing.T)
 	}
 	allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4", "/d/ABC-001-pt3.mp4"}
 
-	result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	result := resolved.overrides
 
 	assert.Equal(t, "IPX-111", result["/d/ABC-001-pt1.mp4"], "submitted file keeps its own input")
 	assert.Equal(t, "IPX-222", result["/d/ABC-001-pt2.mp4"], "submitted file keeps its own input")
@@ -138,7 +143,8 @@ func TestResolveManualInputOverride_PreservesMultipartForSameManualID(t *testing
 	}
 	allFiles := submitted
 
-	result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	result := resolved.overrides
 
 	assert.Equal(t, "ABC-001", result["/d/ABC-001-pt1.mp4"], "manual input preserved in result map")
 	assert.Equal(t, "ABC-001", result["/d/ABC-001-pt2.mp4"], "manual input preserved in result map")
@@ -162,7 +168,8 @@ func TestResolveManualInputOverride_PreservesMultipartForPropagatedSibling(t *te
 	}
 	allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
 
-	result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	result := resolved.overrides
 
 	assert.Equal(t, "IPX-999", result["/d/ABC-001-pt1.mp4"], "submitter keeps its input")
 	assert.Equal(t, "IPX-999", result["/d/ABC-001-pt2.mp4"], "sibling inherits the propagated input")
@@ -214,7 +221,8 @@ func TestResolveManualInputOverride_RedactsURLInMovieID(t *testing.T) {
 	}
 	allFiles := submitted
 
-	result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+	result := resolved.overrides
 
 	assert.Equal(t, rawURL, result["/d/video.mp4"], "RawInputOverride (result map) keeps the raw URL for the scraper")
 	assert.NotContains(t, fileMatchInfo["/d/video.mp4"].MovieID, "token=secret", "MovieID grouping key has query token redacted")
@@ -244,7 +252,8 @@ func TestResolveManualInputOverride_CoversDefensiveGuards(t *testing.T) {
 		}
 		allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/unsubmitted.mp4"}
 
-		result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		result := resolved.overrides
 
 		assert.Equal(t, "IPX-999", result["/d/ABC-001-pt1.mp4"])
 		// The unsubmitted file's input (IPX-888) was seeded into result and is
@@ -260,7 +269,8 @@ func TestResolveManualInputOverride_CoversDefensiveGuards(t *testing.T) {
 		fileMatchInfo := map[string]models.FileMatchInfo{} // no entry for missing.mp4
 		allFiles := submitted
 
-		result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		result := resolved.overrides
 
 		assert.Equal(t, "IPX-999", result["/d/missing.mp4"], "input still seeded into result even without fileMatchInfo")
 		// fileMatchInfo should now have the override applied (the override loop
@@ -280,7 +290,8 @@ func TestResolveManualInputOverride_CoversDefensiveGuards(t *testing.T) {
 		}
 		allFiles := submitted
 
-		result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		result := resolved.overrides
 
 		assert.Equal(t, "IPX-999", result["/d/empty-id.mp4"])
 	})
@@ -299,7 +310,8 @@ func TestResolveManualInputOverride_CoversDefensiveGuards(t *testing.T) {
 		}
 		allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
 
-		result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		result := resolved.overrides
 
 		assert.Equal(t, "IPX-888", result["/d/ABC-001-pt2.mp4"], "explicit input preserved, not overwritten by propagation")
 	})
@@ -315,7 +327,8 @@ func TestResolveManualInputOverride_CoversDefensiveGuards(t *testing.T) {
 		}
 		allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
 
-		result := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+		result := resolved.overrides
 
 		_, hasSibling := result["/d/ABC-001-pt2.mp4"]
 		assert.False(t, hasSibling, "sibling with no fileMatchInfo is not propagated")
@@ -408,9 +421,32 @@ func TestResolveManualInputOverride_DeterministicURLPropagation(t *testing.T) {
 	// Run multiple times to verify determinism (map iteration order varies)
 	for i := 0; i < 50; i++ {
 		fmiCopy := copyFMI(fileMatchInfo)
-		result := resolveManualInputOverride(submitted, manualInputs, fmiCopy, allFiles)
+		resolved := resolveManualInputOverride(submitted, manualInputs, fmiCopy, allFiles)
+		result := resolved.overrides
 		// The sibling should always receive the shared raw URL
 		assert.Equal(t, "https://example.com/video?token=aaaa", result["/d/ABC-001-pt3.mp4"],
 			"sibling gets the shared raw URL (deterministic)")
 	}
+}
+
+func TestResolveManualInputOverride_ExcludesAmbiguousSiblingFromAllFiles(t *testing.T) {
+	// pt1→IPX-111, pt2→IPX-222 (ambiguous), pt3 is auto-discovered.
+	// pt3 should be excluded from allFiles since the group is ambiguous.
+	submitted := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
+	manualInputs := map[string]string{
+		"/d/ABC-001-pt1.mp4": "IPX-111",
+		"/d/ABC-001-pt2.mp4": "IPX-222",
+	}
+	fileMatchInfo := map[string]models.FileMatchInfo{
+		"/d/ABC-001-pt1.mp4": fmiFor("/d/ABC-001-pt1.mp4", "ABC-001", 1),
+		"/d/ABC-001-pt2.mp4": fmiFor("/d/ABC-001-pt2.mp4", "ABC-001", 2),
+		"/d/ABC-001-pt3.mp4": fmiFor("/d/ABC-001-pt3.mp4", "ABC-001", 3),
+	}
+	allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4", "/d/ABC-001-pt3.mp4"}
+
+	resolved := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+
+	assert.Contains(t, resolved.allFiles, "/d/ABC-001-pt1.mp4", "submitted pt1 included")
+	assert.Contains(t, resolved.allFiles, "/d/ABC-001-pt2.mp4", "submitted pt2 included")
+	assert.NotContains(t, resolved.allFiles, "/d/ABC-001-pt3.mp4", "discovered pt3 excluded from ambiguous group")
 }

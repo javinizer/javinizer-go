@@ -166,7 +166,9 @@ func StartScrapeUseCase(
 	// siblings sharing the matcher MovieID. Files with explicit manual inputs
 	// override the matcher-derived grouping key so they split into separate
 	// movies in the UI queue.
-	propagatedManualInputs := resolveManualInputOverride(input.Files, input.ManualInputs, fileMatchInfoMap, allFiles)
+	resolvedManualInput := resolveManualInputOverride(input.Files, input.ManualInputs, fileMatchInfoMap, allFiles)
+	propagatedManualInputs := resolvedManualInput.overrides
+	allFiles = resolvedManualInput.allFiles
 
 	resolved, err := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
 		OperationMode:  input.OperationMode,

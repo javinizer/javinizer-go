@@ -24,19 +24,26 @@ type inputKey struct {
 // (backend F2): the user is explicitly splitting matcher-grouped files into
 // separate movies. Instead, the conflicting MovieID is marked ambiguous so
 // sibling propagation is skipped (we can't know which input to propagate).
+// Discovered siblings from ambiguous groups are also excluded from the
+// returned allFiles so they aren't scraped under the stale matcher ID.
 //
 // fileMatchInfo is the metadata returned by discoverSiblingPartsWithMetadata;
 // allFiles is its expanded file list (submitted + discovered). The function
 // also overrides fileMatchInfo entries so files with explicit manual inputs
 // are grouped by the user's ID, not the matcher's.
+type manualInputResult struct {
+	overrides map[string]string
+	allFiles  []string
+}
+
 func resolveManualInputOverride(
 	submittedFiles []string,
 	manualInputs map[string]string,
 	fileMatchInfo map[string]models.FileMatchInfo,
 	allFiles []string,
-) map[string]string {
+) manualInputResult {
 	if len(manualInputs) == 0 {
-		return manualInputs
+		return manualInputResult{overrides: manualInputs, allFiles: allFiles}
 	}
 
 	submitted := make(map[string]bool, len(submittedFiles))
@@ -84,24 +91,30 @@ func resolveManualInputOverride(
 		result[k] = v
 	}
 
-	// Propagate to discovered siblings (!submitted) sharing a MovieID. Co-submitted
-	// files are skipped so a part the caller submitted is never clobbered.
+	// Build a filtered allFiles that excludes discovered siblings from ambiguous
+	// groups — they shouldn't be scraped under the stale matcher ID when the
+	// user is explicitly splitting the group. Submitted files and files with
+	// explicit manual inputs are always kept.
+	filteredFiles := make([]string, 0, len(allFiles))
 	for _, path := range allFiles {
 		if submitted[path] {
+			filteredFiles = append(filteredFiles, path)
 			continue
 		}
 		if _, has := result[path]; has {
+			filteredFiles = append(filteredFiles, path)
 			continue
 		}
 		fmi, ok := fileMatchInfo[path]
 		if !ok || fmi.MovieID == "" {
+			filteredFiles = append(filteredFiles, path)
 			continue
 		}
-		// Skip propagation for ambiguous groups (more than one distinct input) —
-		// we can't know which input to propagate.
+		// Skip — don't include discovered siblings from ambiguous groups
 		if inputs := movieInputs[fmi.MovieID]; len(inputs) > 1 {
 			continue
 		}
+		filteredFiles = append(filteredFiles, path)
 		if input, ok := movieInput[fmi.MovieID]; ok {
 			result[path] = input
 		}
@@ -137,5 +150,8 @@ func resolveManualInputOverride(
 		fileMatchInfo[path] = fmi
 	}
 
-	return result
+	return manualInputResult{
+		overrides: result,
+		allFiles:  filteredFiles,
+	}
 }

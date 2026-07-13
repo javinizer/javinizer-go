@@ -39,7 +39,8 @@ func TestResolveManualInputOverride_ConcurrentReadSafety(t *testing.T) {
 	}
 	allFiles := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
 
-	want := resolveManualInputOverride(submitted, manualInputs, copyFMI(baseFMI), allFiles)
+	wantResolved := resolveManualInputOverride(submitted, manualInputs, copyFMI(baseFMI), allFiles)
+	want := wantResolved.overrides
 	require.Equal(t, "IPX-999", want["/d/ABC-001-pt1.mp4"])
 	require.Equal(t, "IPX-999", want["/d/ABC-001-pt2.mp4"], "precondition: discovered sibling inherits submitter input")
 
@@ -50,7 +51,8 @@ func TestResolveManualInputOverride_ConcurrentReadSafety(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
-				got := resolveManualInputOverride(submitted, manualInputs, copyFMI(baseFMI), allFiles)
+				gotResolved := resolveManualInputOverride(submitted, manualInputs, copyFMI(baseFMI), allFiles)
+				got := gotResolved.overrides
 				if !mapsEqual(got, want) {
 					t.Errorf("concurrent resolve diverged: got %v want %v", got, want)
 					return
