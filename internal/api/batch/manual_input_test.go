@@ -337,3 +337,30 @@ func TestResolveManualInputOverride_CoversDefensiveGuards(t *testing.T) {
 		assert.True(t, fileMatchInfo["/d/ABC-001-pt1.mp4"].IsMultiPart, "multipart metadata preserved for whitespace-only input")
 	})
 }
+
+func TestResolveManualInputOverride_NormalizesURLKeysForAmbiguity(t *testing.T) {
+	// Two files in the same matcher group given the same URL except for
+	// query credentials. After redaction they collapse to the same input,
+	// so the group is NOT ambiguous — the sibling should be propagated
+	// and multipart metadata preserved.
+	submitted := []string{"/d/ABC-001-pt1.mp4", "/d/ABC-001-pt2.mp4"}
+	manualInputs := map[string]string{
+		"/d/ABC-001-pt1.mp4": "https://example.com/video?token=secret1",
+		"/d/ABC-001-pt2.mp4": "https://example.com/video?token=secret2",
+	}
+	fileMatchInfo := map[string]models.FileMatchInfo{
+		"/d/ABC-001-pt1.mp4": fmiFor("/d/ABC-001-pt1.mp4", "ABC-001", 1),
+		"/d/ABC-001-pt2.mp4": fmiFor("/d/ABC-001-pt2.mp4", "ABC-001", 2),
+	}
+	allFiles := submitted
+
+	resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+
+	// Both redact to the same URL, so the group is NOT ambiguous
+	assert.True(t, fileMatchInfo["/d/ABC-001-pt1.mp4"].IsMultiPart, "pt1 keeps multipart (same redacted URL as pt2)")
+	assert.True(t, fileMatchInfo["/d/ABC-001-pt2.mp4"].IsMultiPart, "pt2 keeps multipart (same redacted URL as pt1)")
+	assert.Equal(t, "https://example.com/video", fileMatchInfo["/d/ABC-001-pt1.mp4"].MovieID, "pt1 MovieID is redacted URL")
+	assert.Equal(t, "https://example.com/video", fileMatchInfo["/d/ABC-001-pt2.mp4"].MovieID, "pt2 MovieID is redacted URL")
+	assert.Equal(t, 1, fileMatchInfo["/d/ABC-001-pt1.mp4"].PartNumber, "pt1 PartNumber preserved")
+	assert.Equal(t, 2, fileMatchInfo["/d/ABC-001-pt2.mp4"].PartNumber, "pt2 PartNumber preserved")
+}

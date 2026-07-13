@@ -63,12 +63,13 @@ func resolveManualInputOverride(
 			continue
 		}
 		trimmed := strings.TrimSpace(input)
+		redacted := scrape.RedactURLQuery(trimmed)
 		if movieInputs[fmi.MovieID] == nil {
 			movieInputs[fmi.MovieID] = make(map[string]bool)
 		}
-		movieInputs[fmi.MovieID][trimmed] = true
+		movieInputs[fmi.MovieID][redacted] = true
 		movieInput[fmi.MovieID] = input
-		inputCounts[inputKey{fmi.MovieID, trimmed}]++
+		inputCounts[inputKey{fmi.MovieID, redacted}]++
 	}
 
 	// Seed the result with every explicit input (submitters keep their own).
@@ -122,7 +123,7 @@ func resolveManualInputOverride(
 		// (more than one distinct input) — i.e. it's being split off as a
 		// standalone movie. Files sharing an input with at least one sibling
 		// keep their part metadata for organize/NFO templates.
-		count := inputCounts[inputKey{fmi.MovieID, trimmed}]
+		count := inputCounts[inputKey{fmi.MovieID, redacted}]
 		isSplit := count <= 1 && len(movieInputs[fmi.MovieID]) > 1
 		fmi.MovieID = redacted
 		if isSplit {
