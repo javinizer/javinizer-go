@@ -220,6 +220,10 @@ jobs:
     - name: Install frontend dependencies
       run: npm ci --prefix web/frontend
 
+    - name: Generate Paraglide messages
+      run: npx @inlang/paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide
+      working-directory: web/frontend
+
     - name: Run frontend tests
       run: npm run test --prefix web/frontend
 

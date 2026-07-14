@@ -7,7 +7,7 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
-		"prepare": "svelte-kit sync || echo ''",
+		"prepare": "svelte-kit sync || echo '' && npx @inlang/paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run",
