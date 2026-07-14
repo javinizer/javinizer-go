@@ -23,7 +23,7 @@
 		},
 	};
 
-	const ALL_FIELDS: { key: string; label: string }[] = [
+	const ALL_FIELDS = $derived([
 		{ key: 'title', label: m.field_title() },
 		{ key: 'poster_url', label: m.field_poster() },
 		{ key: 'cover_url', label: m.field_cover() },
@@ -41,7 +41,7 @@
 		{ key: 'rating_score', label: m.field_rating() },
 		{ key: 'original_title', label: m.field_original_title() },
 		{ key: 'translations', label: m.field_translations() },
-	];
+	]);
 
 	function ensureCompletenessConfig() {
 		if (!config.metadata.completeness) {
@@ -100,11 +100,11 @@
 		return config.metadata.completeness?.tiers[tierKey]?.fields?.length ?? 0;
 	}
 
-	const TIER_CONFIG: { key: 'essential' | 'important' | 'nice_to_have'; title: string }[] = [
+	const TIER_CONFIG = $derived<{ key: 'essential' | 'important' | 'nice_to_have'; title: string }[]>([
 		{ key: 'essential', title: m.settings_completeness_tier_essential() },
 		{ key: 'important', title: m.settings_completeness_tier_important() },
 		{ key: 'nice_to_have', title: m.settings_completeness_tier_nice_to_have() },
-	];
+	]);
 </script>
 
 <SettingsSection title={m.settings_completeness_title()} description={m.settings_completeness_desc()} defaultExpanded={false}>
