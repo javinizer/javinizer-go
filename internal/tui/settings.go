@@ -36,7 +36,7 @@ type settingRow struct {
 // locales that ship a catalog should appear here; "auto" resolves the OS
 // locale preference list at localizer construction time.
 func supportedLanguages() []string {
-	return []string{"auto", "en"}
+	return []string{"auto", "en", "ja", "zh-Hans", "zh-Hant"}
 }
 
 // languageDisplayName returns the self-name shown in the selector. Explicit
@@ -48,6 +48,12 @@ func (s *settingsView) languageDisplayName(lang string) string {
 		return s.loc("TUISettingsLanguageAuto")
 	case "en":
 		return "English"
+	case "ja":
+		return "日本語"
+	case "zh-hans":
+		return "简体中文"
+	case "zh-hant":
+		return "繁體中文"
 	default:
 		return lang
 	}

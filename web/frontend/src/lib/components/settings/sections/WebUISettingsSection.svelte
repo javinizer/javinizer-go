@@ -2,7 +2,7 @@
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import type { SettingsConfig } from '$lib/api/types';
 	import * as m from '$lib/paraglide/messages';
-	import { SUPPORTED_LOCALES, selectLocale } from '$lib/i18n/locale';
+	import { SUPPORTED_LOCALES, selectLocale, LOCALE_STORAGE_KEY, resolveBrowserLocale, applyLocale } from '$lib/i18n/locale';
 
 	interface Props {
 		config: SettingsConfig;
@@ -32,10 +32,13 @@
 
 	async function handleLanguageChange(value: string) {
 		setSelectedLanguage(value);
-		// Apply immediately so the change is visible without a full reload of
-		// unrelated scraper components. An explicit supported tag switches the
-		// locale; 'auto' defers to the browser preference on next bootstrap.
-		await selectLocale(value === 'auto' ? 'en' : value);
+		if (value === 'auto') {
+			localStorage.removeItem(LOCALE_STORAGE_KEY);
+			const browserLocale = resolveBrowserLocale();
+			await applyLocale(browserLocale);
+		} else {
+			await selectLocale(value);
+		}
 	}
 </script>
 

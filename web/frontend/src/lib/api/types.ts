@@ -526,6 +526,8 @@ export interface ActressMergeResponse {
 
 export interface ErrorResponse {
 	error: string;
+	code?: string;
+	params?: Record<string, unknown> | null;
 	errors?: string[];
 }
 

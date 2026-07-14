@@ -18,6 +18,8 @@
 	import { clearClientStorage } from '$lib/utils/storage';
 	import * as m from '$lib/paraglide/messages';
 	import { bootstrapLocale } from '$lib/i18n/locale';
+	import { translateErrorCode } from '$lib/i18n/api-messages';
+	import { ApiError } from '$lib/api/clients/common';
 	import LocaleReconciler from '$lib/components/LocaleReconciler.svelte';
 	import '../app.css';
 
@@ -37,6 +39,13 @@
 	let loginPassword = $state('');
 	let loginRememberMe = $state(true);
 	let clientStorageCleared = false;
+
+	function localizeApiError(error: unknown, fallback: string): string {
+		if (error instanceof ApiError && error.code) {
+			return translateErrorCode(error.code, error.params ?? null, error.message || fallback);
+		}
+		return error instanceof Error ? error.message : fallback;
+	}
 
 	function syncWebSocketAuthState() {
 		if (authAuthenticated) {
@@ -67,7 +76,7 @@
 			authUnavailable = true;
 			authAuthenticated = false;
 			authUsername = '';
-			authError = error instanceof Error ? error.message : m.auth_failed_status();
+			authError = localizeApiError(error, m.auth_failed_status());
 		} finally {
 			authLoading = false;
 			syncWebSocketAuthState();
@@ -88,7 +97,7 @@
 			if (loginResult?.session_id) { BaseClient.setSessionID(loginResult.session_id); }
 			await refreshAuthStatus();
 		} catch (error) {
-			authError = error instanceof Error ? error.message : m.auth_failed_login();
+			authError = localizeApiError(error, m.auth_failed_login());
 		} finally {
 			authSubmitting = false;
 		}
@@ -99,7 +108,7 @@
 		try {
 			await apiClient.logoutAuth();
 		} catch (error) {
-			authError = error instanceof Error ? error.message : m.auth_failed_logout();
+			authError = localizeApiError(error, m.auth_failed_logout());
 		} finally {
 			BaseClient.setSessionID(null);
 			authAuthenticated = false;

@@ -625,12 +625,18 @@ func TestSettingsManager_LanguageChoice(t *testing.T) {
 	sm.setLanguage("en")
 	next, changed, desc := sm.cycleLanguage(1)
 	assert.True(t, changed)
-	assert.Equal(t, "auto", next, "Cycling forward past en wraps to auto")
-	assert.Contains(t, desc, "auto")
+	assert.Equal(t, "ja", next, "Cycling forward from en goes to ja")
+	assert.Contains(t, desc, "ja")
 
+	sm.setLanguage("zh-Hant")
+	wrapped, changedWrap, _ := sm.cycleLanguage(1)
+	assert.True(t, changedWrap)
+	assert.Equal(t, "auto", wrapped, "Cycling forward past zh-Hant wraps to auto")
+
+	sm.setLanguage("auto")
 	prev, changed2, _ := sm.cycleLanguage(-1)
 	assert.True(t, changed2)
-	assert.Equal(t, "en", prev, "Cycling backward from auto wraps to en")
+	assert.Equal(t, "zh-Hant", prev, "Cycling backward from auto wraps to zh-Hant")
 }
 
 func TestSettingsManager_ToggleUntouchedByLanguage(t *testing.T) {
