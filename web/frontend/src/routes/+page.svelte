@@ -28,6 +28,7 @@
 	import type { HealthResponse, HistoryRecord, HistoryStats, ProgressMessage } from '$lib/api/types';
 	import * as m from '$lib/paraglide/messages';
 	import { formatDateTime } from '$lib/i18n/format';
+	import { translateProgressMessage } from '$lib/i18n/api-messages';
 
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
 	const STORAGE_KEY_OUTPUT = 'javinizer_output_path';
@@ -398,7 +399,7 @@
 								<Activity class="h-4 w-4 text-primary" />
 								<span class="font-medium">{m.home_job_label({ id: latestActivity.job_id.slice(0, 8) })}</span>
 							</div>
-							<p class="text-sm text-muted-foreground line-clamp-2">{latestActivity.message}</p>
+							<p class="text-sm text-muted-foreground line-clamp-2">{latestActivity.message_code ? translateProgressMessage(latestActivity.message_code, latestActivity.message_args ?? null, latestActivity.message) : latestActivity.message}</p>
 							<div class="h-2 rounded-full bg-muted overflow-hidden">
 								<div class="h-full bg-primary transition-all duration-300" style="width: {latestActivityProgressPercent}%"></div>
 							</div>

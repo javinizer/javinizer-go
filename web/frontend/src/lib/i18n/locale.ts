@@ -25,6 +25,18 @@ export const SUPPORTED_LOCALES: SupportedLocale[] = [
 	{ tag: 'zh-Hant', selfName: '繁體中文', dir: 'ltr' }
 ];
 
+function canonicalizeTag(tag: string): string {
+	const parts = tag.split('-');
+	return parts
+		.map((part, i) => {
+			if (i === 0) return part.toLowerCase();
+			if (part.length === 4) return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+			if (part.length === 2 || part.length === 3) return part.toUpperCase();
+			return part.toLowerCase();
+		})
+		.join('-');
+}
+
 function isSupported(tag: string): boolean {
 	return locales.includes(tag as typeof locales[number]);
 }
@@ -36,7 +48,7 @@ function isSupported(tag: string): boolean {
 // supported locale can be derived.
 export function resolveLocaleTag(raw: string): string | null {
 	if (!raw) return null;
-	const tag = raw.replace(/_/g, '-');
+	const tag = canonicalizeTag(raw.replace(/_/g, '-'));
 	const mapped = mapBrowserLocale(tag);
 	if (isSupported(mapped)) return mapped;
 	const parts = mapped.split('-');
@@ -65,10 +77,11 @@ export function resolveBrowserLocale(): string {
 }
 
 function mapBrowserLocale(tag: string): string {
-	const lower = tag.toLowerCase();
+	const canonical = canonicalizeTag(tag);
+	const lower = canonical.toLowerCase();
 	if (lower === 'zh-cn' || lower === 'zh-sg') return 'zh-Hans';
 	if (lower === 'zh-tw' || lower === 'zh-hk' || lower === 'zh-mo') return 'zh-Hant';
-	return tag;
+	return canonical;
 }
 
 // readCachedLocale returns a valid cached locale mirror or null when
@@ -122,7 +135,7 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 	if (!browser) return getLocale() ?? baseLocale;
 
 	const configured = ui?.language?.trim() ?? '';
-	if (configured === '' || configured.toLowerCase() === 'auto') {
+	if (configured === '' || canonicalizeTag(configured) === 'auto') {
 		localStorage.removeItem(LOCALE_STORAGE_KEY);
 		const browserLocale = resolveBrowserLocale();
 		await applyLocale(browserLocale);
