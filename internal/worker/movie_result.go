@@ -79,7 +79,14 @@ type MovieResult struct {
 // to a MovieResult. This is the canonical conversion — all ScrapeResult→MovieResult
 // paths should use this function to ensure consistent field mapping.
 // Provenance is returned separately.
-func scrapeResultToMovieResult(fmi models.FileMatchInfo, result *scrape.ScrapeResult, meta *workflow.OrchestrationMeta) (*MovieResult, *ProvenanceData) {
+//
+// preserveMovieID controls whether fmi.MovieID (set by the matcher/scanner)
+// is kept as the grouping key. When true, the matcher-derived ID is preserved
+// even if the scraper returns a different content ID — preventing files with
+// different input IDs that resolve to the same scraped ID from being grouped
+// as multi-part siblings. When false (rescrape path, filename fallback),
+// the scraped ID overwrites fmi.MovieID.
+func scrapeResultToMovieResult(fmi models.FileMatchInfo, result *scrape.ScrapeResult, meta *workflow.OrchestrationMeta, preserveMovieID bool) (*MovieResult, *ProvenanceData) {
 	if result == nil {
 		return nil, nil
 	}
@@ -88,7 +95,9 @@ func scrapeResultToMovieResult(fmi models.FileMatchInfo, result *scrape.ScrapeRe
 	if result.Movie != nil {
 		movieID = result.Movie.ID
 	}
-	fmi.MovieID = movieID
+	if !preserveMovieID || fmi.MovieID == "" {
+		fmi.MovieID = movieID
+	}
 	mr := &MovieResult{
 		ResultID:      uuid.New().String(),
 		FileMatchInfo: fmi,
