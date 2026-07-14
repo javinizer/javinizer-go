@@ -20,7 +20,9 @@ export interface SupportedLocale {
 export const SUPPORTED_LOCALES: SupportedLocale[] = [
 	{ tag: 'auto', selfName: 'Automatic (browser)', dir: 'ltr' },
 	{ tag: 'en', selfName: 'English', dir: 'ltr' },
-	{ tag: 'ja', selfName: '日本語', dir: 'ltr' }
+	{ tag: 'ja', selfName: '日本語', dir: 'ltr' },
+	{ tag: 'zh-Hans', selfName: '简体中文', dir: 'ltr' },
+	{ tag: 'zh-Hant', selfName: '繁體中文', dir: 'ltr' }
 ];
 
 function isSupported(tag: string): boolean {
@@ -29,17 +31,27 @@ function isSupported(tag: string): boolean {
 
 // resolveBrowserLocale matches navigator.languages against compiled locales
 // and returns the first supported tag, falling back to the base locale.
+// Browsers send region-based tags (zh-CN, zh-TW); map to script-based tags
+// (zh-Hans, zh-Hant) which are what our catalogs use.
 export function resolveBrowserLocale(): string {
 	if (!browser) return baseLocale;
 	const candidates = navigator.languages ?? [navigator.language];
 	for (const raw of candidates) {
 		if (!raw) continue;
 		const tag = raw.replace(/_/g, '-');
-		if (isSupported(tag)) return tag;
-		const base = tag.split('-')[0];
+		const mapped = mapBrowserLocale(tag);
+		if (isSupported(mapped)) return mapped;
+		const base = mapped.split('-')[0];
 		if (base && isSupported(base)) return base;
 	}
 	return baseLocale;
+}
+
+function mapBrowserLocale(tag: string): string {
+	const lower = tag.toLowerCase();
+	if (lower === 'zh-cn' || lower === 'zh-sg') return 'zh-Hans';
+	if (lower === 'zh-tw' || lower === 'zh-hk' || lower === 'zh-mo') return 'zh-Hant';
+	return tag;
 }
 
 // readCachedLocale returns a valid cached locale mirror or null when

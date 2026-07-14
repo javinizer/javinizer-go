@@ -1,0 +1,715 @@
+{
+  "TUIActressMergeAliasesAdded": {
+    "description": "Number of aliases added during an actress merge",
+    "other": "已添加别名：{{.Count}}"
+  },
+  "TUIActressMergeConflictHint": {
+    "description": "Hint shown when no field conflicts exist in the actress merge preview",
+    "other": "Enter 应用合并 • r 编辑 ID • Esc 取消"
+  },
+  "TUIActressMergeConflictNavHint": {
+    "description": "Navigation hint for the actress merge conflict resolution step",
+    "other": "↑↓ 选择字段 • t/s 选择值 • Space 切换 • Enter 应用 • r 编辑 ID • Esc 取消"
+  },
+  "TUIActressMergeConflictsCount": {
+    "description": "Number of field conflicts detected in an actress merge preview",
+    "other": "冲突：{{.Count}}"
+  },
+  "TUIActressMergeConflictsResolved": {
+    "description": "Number of conflicts resolved during an actress merge",
+    "other": "已解决的冲突：{{.Count}}"
+  },
+  "TUIActressMergeDecisionSource": {
+    "description": "Label for the source side of a merge conflict resolution",
+    "other": "来源"
+  },
+  "TUIActressMergeDecisionTarget": {
+    "description": "Label for the target side of a merge conflict resolution",
+    "other": "目标"
+  },
+  "TUIActressMergeErrInvalidID": {
+    "description": "Validation error when actress merge IDs are not positive",
+    "other": "目标和来源必须为正的女优 ID"
+  },
+  "TUIActressMergeErrSameID": {
+    "description": "Validation error when actress merge target and source IDs are identical",
+    "other": "目标和来源必须为不同的女优 ID"
+  },
+  "TUIActressMergeErrorPrefix": {
+    "description": "Prefix shown before an actress merge error message",
+    "other": "错误："
+  },
+  "TUIActressMergeField": {
+    "description": "Label for a conflict field and its currently selected decision",
+    "other": "字段：{{.Field}}（已选：{{.Decision}}）"
+  },
+  "TUIActressMergeInputHint": {
+    "description": "Navigation hint for the actress merge input step",
+    "other": "Tab/↑↓ 切换字段 • 在来源上按 Enter 加载预览 • Esc 取消"
+  },
+  "TUIActressMergeMerging": {
+    "description": "Header describing which source is being merged into which target",
+    "other": "正在将来源 #{{.Source}} 合并到目标 #{{.Target}}"
+  },
+  "TUIActressMergeNoConflicts": {
+    "description": "Message shown when no field conflicts were found in a merge preview",
+    "other": "未发现字段冲突。将使用默认合并行为。"
+  },
+  "TUIActressMergeNoPreview": {
+    "description": "Message shown when no merge preview has been loaded",
+    "other": "未加载合并预览。"
+  },
+  "TUIActressMergeNoPreviewHint": {
+    "description": "Hint shown when no merge preview has been loaded",
+    "other": "按 r 返回，按 Esc 关闭。"
+  },
+  "TUIActressMergeNoResult": {
+    "description": "Message shown when a merge finished without a result",
+    "other": "合并已完成，但无法获取结果。"
+  },
+  "TUIActressMergeNoResultHint": {
+    "description": "Hint shown when a merge finished without a result",
+    "other": "r 以同一目标新建合并 • Enter/Esc 关闭"
+  },
+  "TUIActressMergePlaceholderSource": {
+    "description": "Placeholder for the actress merge source ID input",
+    "other": "来源女优 ID"
+  },
+  "TUIActressMergePlaceholderTarget": {
+    "description": "Placeholder for the actress merge target ID input",
+    "other": "目标女优 ID"
+  },
+  "TUIActressMergeResultHint": {
+    "description": "Navigation hint for the actress merge result step",
+    "other": "r 以同一目标新建合并 • Enter/Esc 关闭"
+  },
+  "TUIActressMergeResultMerged": {
+    "description": "Summary stating which source actress was merged into which target",
+    "other": "已将女优 #{{.From}} 合并到 #{{.Into}}"
+  },
+  "TUIActressMergeSourceIDLabel": {
+    "description": "Label for the actress merge source ID input field",
+    "other": "来源 ID："
+  },
+  "TUIActressMergeSourceValueLabel": {
+    "description": "Label prefix for the source value of a merge conflict",
+    "other": "来源："
+  },
+  "TUIActressMergeTargetIDLabel": {
+    "description": "Label for the actress merge target ID input field",
+    "other": "目标 ID："
+  },
+  "TUIActressMergeTargetValueLabel": {
+    "description": "Label prefix for the target value of a merge conflict",
+    "other": "目标："
+  },
+  "TUIActressMergeTitle": {
+    "description": "Title of the actress merge modal",
+    "other": "女优合并"
+  },
+  "TUIActressMergeUpdatedMovies": {
+    "description": "Number of movies updated during an actress merge",
+    "other": "已更新的影片：{{.Count}}"
+  },
+  "TUIAllTasksCompletedSuccessfully": {
+    "description": "Log message shown when all processing tasks finish without errors",
+    "other": "所有任务已成功完成"
+  },
+  "TUIAllTasksSubmitted": {
+    "description": "Log message shown when all file tasks have been submitted to the runner",
+    "other": "所有任务已成功提交"
+  },
+  "TUIAppTitle": {
+    "description": "Application title shown in the TUI header",
+    "other": "Javinizer TUI"
+  },
+  "TUIApplySucceeded": {
+    "description": "Worker event message shown when a movie has been applied/organized successfully",
+    "other": "已成功应用 {{.MovieID}}"
+  },
+  "TUIBrowserFileCount": {
+    "description": "Current position and total count of files in the browser",
+    "other": "{{.Current}}/{{.Total}} 个文件"
+  },
+  "TUIBrowserFilesHint": {
+    "description": "Key hint shown next to the browser panel title",
+    "other": "（f:来源 o:输出 m:搜索 M:合并）"
+  },
+  "TUIBrowserFilesTitle": {
+    "description": "Title of the file browser panel",
+    "other": "文件"
+  },
+  "TUIBrowserFrom": {
+    "description": "Label for the source path in the browser",
+    "other": "来源："
+  },
+  "TUIBrowserNoFiles": {
+    "description": "Empty state shown when no files are loaded in the browser",
+    "other": "未找到文件"
+  },
+  "TUIBrowserTitle": {
+    "description": "Title of the file browser panel",
+    "other": "浏览"
+  },
+  "TUIBrowserTo": {
+    "description": "Label for the destination path in the browser",
+    "other": "目标："
+  },
+  "TUICompleted": {
+    "description": "Completion banner shown when processing finishes",
+    "other": "完成"
+  },
+  "TUIConsoleNoOutput": {
+    "description": "Empty state shown in the console panel when no output has been produced yet",
+    "other": "暂无输出…"
+  },
+  "TUIConsoleScrollIndicator": {
+    "description": "Scroll position indicator shown in the console panel when entries overflow",
+    "other": "[{{.Visible}}/{{.Total}}]"
+  },
+  "TUIConsoleTitle": {
+    "description": "Title of the console panel",
+    "other": "控制台"
+  },
+  "TUIDashElapsed": {
+    "description": "Label for the elapsed time on the dashboard",
+    "other": "已用时间"
+  },
+  "TUIDashFailed": {
+    "description": "Label for the failed task count on the dashboard",
+    "other": "失败"
+  },
+  "TUIDashProgress": {
+    "description": "Label for the overall progress on the dashboard",
+    "other": "进度"
+  },
+  "TUIDashRunning": {
+    "description": "Label for the running task count on the dashboard",
+    "other": "运行中"
+  },
+  "TUIDashSuccess": {
+    "description": "Label for the succeeded task count on the dashboard",
+    "other": "成功"
+  },
+  "TUIDashTotal": {
+    "description": "Label for the total task count on the dashboard",
+    "other": "总计"
+  },
+  "TUIDashboardTitle": {
+    "description": "Title of the dashboard view",
+    "other": "仪表板"
+  },
+  "TUIDryRunBadge": {
+    "description": "Badge shown when dry-run mode is active",
+    "other": "预演"
+  },
+  "TUIEmptyBrowser": {
+    "description": "Empty state shown when no files are loaded in the browser",
+    "other": "未找到文件。按 'r' 重新扫描，或按 'm' 进行手动搜索。"
+  },
+  "TUIEmptyTasks": {
+    "description": "Empty state shown when there are no active tasks",
+    "other": "没有进行中的任务"
+  },
+  "TUIEnterFolderPath": {
+    "description": "Placeholder text for the folder path input",
+    "other": "输入文件夹路径…"
+  },
+  "TUIFailed": {
+    "description": "Number of files that failed processing in the completion banner",
+    "one": "{{.Count}} 个失败",
+    "other": "{{.Count}} 个失败"
+  },
+  "TUIFilesFound": {
+    "description": "Number of video files found during a scan",
+    "one": "找到 {{.Count}} 个文件",
+    "other": "找到 {{.Count}} 个文件"
+  },
+  "TUIFilesProcessed": {
+    "description": "Number of files processed in the completion banner",
+    "one": "在 {{.Elapsed}} 内处理了 {{.Count}} 个文件",
+    "other": "在 {{.Elapsed}} 内处理了 {{.Count}} 个文件"
+  },
+  "TUIFolderPickerCurrent": {
+    "description": "Label for the current path in the folder picker",
+    "other": "当前："
+  },
+  "TUIFolderPickerDestTitle": {
+    "description": "Title of the folder picker when selecting an output folder",
+    "other": "选择输出文件夹"
+  },
+  "TUIFolderPickerHint": {
+    "description": "Navigation hint shown at the bottom of the folder picker",
+    "other": "↑↓/jk：导航  Enter：选择文件夹  Space：选择当前  Esc：取消"
+  },
+  "TUIFolderPickerNoFolders": {
+    "description": "Empty state shown when no subfolders are found in the folder picker",
+    "other": "未找到文件夹"
+  },
+  "TUIFolderPickerSourceTitle": {
+    "description": "Title of the folder picker when selecting a source folder",
+    "other": "选择来源文件夹"
+  },
+  "TUIFooterHelp": {
+    "description": "Footer key hint to open help",
+    "other": "帮助"
+  },
+  "TUIFooterQuit": {
+    "description": "Footer key hint to quit the application",
+    "other": "退出"
+  },
+  "TUIFooterSettings": {
+    "description": "Footer key hint to open settings",
+    "other": "设置"
+  },
+  "TUIFooterTab": {
+    "description": "Footer key hint to switch tabs",
+    "other": "标签页"
+  },
+  "TUIHeaderDryRun": {
+    "description": "Dry-run indicator shown in the header bar",
+    "other": "[预演]"
+  },
+  "TUIHelpActionChangeFolder": {
+    "description": "Help text for the change scan folder action",
+    "other": "更改扫描文件夹"
+  },
+  "TUIHelpActionCycleChoice": {
+    "description": "Help text for cycling a choice-row setting such as interface language",
+    "other": "循环切换选项（语言）"
+  },
+  "TUIHelpActionCycleViews": {
+    "description": "Help text for the cycle views action",
+    "other": "循环切换视图"
+  },
+  "TUIHelpActionDeselectAll": {
+    "description": "Help text for the deselect all action",
+    "other": "全部取消选择"
+  },
+  "TUIHelpActionGoBottom": {
+    "description": "Help text for the go to bottom action",
+    "other": "跳到底部"
+  },
+  "TUIHelpActionGoTop": {
+    "description": "Help text for the go to top action",
+    "other": "跳到顶部"
+  },
+  "TUIHelpActionManualSearch": {
+    "description": "Help text for the manual search action",
+    "other": "手动搜索（选择刮削器和 ID/URL）"
+  },
+  "TUIHelpActionMoveDown": {
+    "description": "Help text for the move down action",
+    "other": "向下移动"
+  },
+  "TUIHelpActionMoveUp": {
+    "description": "Help text for the move up action",
+    "other": "向上移动"
+  },
+  "TUIHelpActionPauseResume": {
+    "description": "Help text for the pause/resume action",
+    "other": "暂停/恢复"
+  },
+  "TUIHelpActionQuit": {
+    "description": "Help text for the quit action",
+    "other": "退出"
+  },
+  "TUIHelpActionRefresh": {
+    "description": "Help text for the refresh/rescan action",
+    "other": "刷新/重新扫描当前文件夹"
+  },
+  "TUIHelpActionScrollDown": {
+    "description": "Help text for the scroll down action",
+    "other": "向下滚动"
+  },
+  "TUIHelpActionScrollUp": {
+    "description": "Help text for the scroll up action",
+    "other": "向上滚动"
+  },
+  "TUIHelpActionSelectAll": {
+    "description": "Help text for the select all action",
+    "other": "全选"
+  },
+  "TUIHelpActionStartProcessing": {
+    "description": "Help text for the start processing action",
+    "other": "开始处理"
+  },
+  "TUIHelpActionSwitchViews": {
+    "description": "Help text for the switch views action",
+    "other": "切换视图"
+  },
+  "TUIHelpActionToggleAutoScroll": {
+    "description": "Help text for the toggle auto-scroll action",
+    "other": "切换自动滚动"
+  },
+  "TUIHelpActionToggleHelp": {
+    "description": "Help text for the toggle help action",
+    "other": "切换帮助"
+  },
+  "TUIHelpActionToggleSelection": {
+    "description": "Help text for the toggle selection action",
+    "other": "切换选择（文件或整个文件夹）"
+  },
+  "TUIHelpActionToggleSetting": {
+    "description": "Help text for toggling a boolean settings row",
+    "other": "切换选项"
+  },
+  "TUIHelpBrowserSection": {
+    "description": "Section heading for the browser view keys in help",
+    "other": "浏览视图"
+  },
+  "TUIHelpFoldersNote": {
+    "description": "Note explaining that folder checkboxes select all contained files",
+    "other": "📁 带复选框的文件夹会选择其中所有文件"
+  },
+  "TUIHelpGlobalKeys": {
+    "description": "Section heading for the global keys in help",
+    "other": "全局快捷键"
+  },
+  "TUIHelpLogsSection": {
+    "description": "Section heading for the logs view keys in help",
+    "other": "日志视图"
+  },
+  "TUIHelpSettingsSection": {
+    "description": "Section heading for the settings view keys in help",
+    "other": "设置视图"
+  },
+  "TUIHelpTitle": {
+    "description": "Title of the help view",
+    "other": "帮助"
+  },
+  "TUIHintAutoScroll": {
+    "description": "Footer key hint description for toggling auto-scroll",
+    "other": "自动滚动"
+  },
+  "TUIHintCloseHelp": {
+    "description": "Footer key hint description for closing help",
+    "other": "关闭帮助"
+  },
+  "TUIHintHelp": {
+    "description": "Footer key hint description for opening help",
+    "other": "帮助"
+  },
+  "TUIHintManualSearch": {
+    "description": "Footer key hint description for opening manual search",
+    "other": "手动搜索"
+  },
+  "TUIHintMergeActress": {
+    "description": "Footer key hint description for opening the actress merge modal",
+    "other": "合并女优"
+  },
+  "TUIHintNavigate": {
+    "description": "Footer key hint description for navigating the list",
+    "other": "导航"
+  },
+  "TUIHintOutput": {
+    "description": "Footer key hint description for choosing the output folder",
+    "other": "输出"
+  },
+  "TUIHintProcess": {
+    "description": "Footer key hint description for starting processing",
+    "other": "处理"
+  },
+  "TUIHintQuit": {
+    "description": "Footer key hint description for quitting the application",
+    "other": "退出"
+  },
+  "TUIHintRefresh": {
+    "description": "Footer key hint description for refreshing the file list",
+    "other": "刷新"
+  },
+  "TUIHintScroll": {
+    "description": "Footer key hint description for scrolling logs",
+    "other": "滚动"
+  },
+  "TUIHintSelect": {
+    "description": "Footer key hint description for selecting an item",
+    "other": "选择"
+  },
+  "TUIHintSelectAllNone": {
+    "description": "Footer key hint description for selecting all or none",
+    "other": "全选/全不选"
+  },
+  "TUIHintSource": {
+    "description": "Footer key hint description for choosing the source folder",
+    "other": "来源"
+  },
+  "TUIHintSwitchView": {
+    "description": "Footer key hint description for switching views",
+    "other": "切换视图"
+  },
+  "TUIHintToggle": {
+    "description": "Footer key hint description for toggling a setting",
+    "other": "切换"
+  },
+  "TUIHintTopBottom": {
+    "description": "Footer key hint description for jumping to top or bottom",
+    "other": "顶部/底部"
+  },
+  "TUIInitializing": {
+    "description": "Message shown while the TUI is initializing",
+    "other": "正在初始化…"
+  },
+  "TUILogAlreadyProcessing": {
+    "description": "Log message shown when processing is already running",
+    "other": "处理已在进行中"
+  },
+  "TUILogMoveModeBlocked": {
+    "description": "Log message shown when move mode cannot be enabled due to link mode",
+    "other": "链接模式处于活动状态时无法启用移动模式"
+  },
+  "TUILogNoFilesSelected": {
+    "description": "Log message shown when processing starts with no files selected",
+    "other": "未选择文件。请先使用空格键选择文件。"
+  },
+  "TUILogPathChanged": {
+    "description": "Log message shown when the scan path is changed",
+    "other": "路径已更改为：{{.Path}}"
+  },
+  "TUILogPaused": {
+    "description": "Log message shown when processing is paused",
+    "other": "处理已暂停"
+  },
+  "TUILogProcessingError": {
+    "description": "Log message shown when submitting files for processing fails",
+    "other": "处理错误：{{.Error}}"
+  },
+  "TUILogRefreshing": {
+    "description": "Log message shown when the file list is being refreshed",
+    "other": "正在刷新文件列表…"
+  },
+  "TUILogResumed": {
+    "description": "Log message shown when processing is resumed",
+    "other": "处理已恢复"
+  },
+  "TUILogSomeTasksFailed": {
+    "description": "Log message shown when one or more processing tasks finished with errors",
+    "other": "部分任务失败：{{.Error}}"
+  },
+  "TUILogStartProcessingFailed": {
+    "description": "Log message shown when processing fails to start",
+    "other": "启动处理失败：{{.Error}}"
+  },
+  "TUILogStartingProcessing": {
+    "description": "Log message shown when processing is starting",
+    "other": "已按下 Enter 键，开始处理…"
+  },
+  "TUILogStartingProcessingFiles": {
+    "description": "Log message shown when processing begins for a count of selected files",
+    "one": "正在开始处理 {{.Count}} 个文件…",
+    "other": "正在开始处理 {{.Count}} 个文件…"
+  },
+  "TUILogsEmpty": {
+    "description": "Empty state shown when there are no logs yet",
+    "other": "暂无日志"
+  },
+  "TUILogsTitle": {
+    "description": "Title of the logs view",
+    "other": "日志"
+  },
+  "TUIManualSearchInstructions": {
+    "description": "Instructions shown at the bottom of the manual search modal",
+    "other": "Tab：切换焦点  Space：切换  Enter：搜索  Esc：取消"
+  },
+  "TUIManualSearchPlaceholder": {
+    "description": "Placeholder for the manual search input",
+    "other": "输入 JAV ID 或 URL"
+  },
+  "TUIManualSearchSearchLabel": {
+    "description": "Label for the manual search input",
+    "other": "搜索："
+  },
+  "TUIManualSearchSelectScrapers": {
+    "description": "Label above the scraper list in the manual search modal",
+    "other": "选择刮削器："
+  },
+  "TUIManualSearchTitle": {
+    "description": "Title of the manual search modal",
+    "other": "手动搜索"
+  },
+  "TUIProcessing": {
+    "description": "Label shown next to the spinner while processing",
+    "other": "处理中"
+  },
+  "TUIProcessingComplete": {
+    "description": "Banner shown when processing completes",
+    "other": "处理完成！"
+  },
+  "TUIProcessingHints": {
+    "description": "Navigation hints shown on the completion banner",
+    "other": "  •  按 '1' 或 'b' 返回浏览  •  按 '3' 查看日志  •  按 'd' 关闭"
+  },
+  "TUIProgress": {
+    "description": "Overall progress percentage shown in the header",
+    "other": "进度：{{.Percent}}%"
+  },
+  "TUIScrapeSucceeded": {
+    "description": "Worker event message shown when a movie has been scraped successfully",
+    "other": "已成功刮削 {{.MovieID}}"
+  },
+  "TUISettingChangesHint": {
+    "description": "Footer note on the settings view",
+    "other": "更改将在下次处理时生效"
+  },
+  "TUISettingDownload": {
+    "description": "Name of the Download Media setting",
+    "other": "下载媒体"
+  },
+  "TUISettingDownloadDesc": {
+    "description": "Description of the Download Media setting",
+    "other": "下载封面、截图和预告片"
+  },
+  "TUISettingDryRun": {
+    "description": "Name of the Dry Run setting",
+    "other": "预演"
+  },
+  "TUISettingDryRunDesc": {
+    "description": "Description of the Dry Run setting",
+    "other": "预览模式 — 不进行实际更改"
+  },
+  "TUISettingExtrafanart": {
+    "description": "Name of the Download Extrafanart setting",
+    "other": "下载额外同人图"
+  },
+  "TUISettingExtrafanartDesc": {
+    "description": "Description of the Download Extrafanart setting",
+    "other": "将额外同人图/截图下载到子文件夹"
+  },
+  "TUISettingForceRefresh": {
+    "description": "Name of the Force Refresh setting",
+    "other": "强制刷新"
+  },
+  "TUISettingForceRefreshDesc": {
+    "description": "Description of the Force Refresh setting",
+    "other": "清除数据库缓存并重新刮削元数据"
+  },
+  "TUISettingForceUpdate": {
+    "description": "Name of the Force Update setting",
+    "other": "强制更新"
+  },
+  "TUISettingForceUpdateDesc": {
+    "description": "Description of the Force Update setting",
+    "other": "替换现有文件（图片、NFO）"
+  },
+  "TUISettingLanguage": {
+    "description": "Name of the interface language setting",
+    "other": "语言"
+  },
+  "TUISettingLanguageDesc": {
+    "description": "Description of the interface language setting",
+    "other": "界面显示语言（自动跟随系统语言）"
+  },
+  "TUISettingMoveFiles": {
+    "description": "Name of the Move Files setting",
+    "other": "移动文件"
+  },
+  "TUISettingMoveFilesDesc": {
+    "description": "Description of the Move Files setting",
+    "other": "移动而非复制（默认：复制）"
+  },
+  "TUISettingNFO": {
+    "description": "Name of the Generate NFO setting",
+    "other": "生成 NFO"
+  },
+  "TUISettingNFODesc": {
+    "description": "Description of the Generate NFO setting",
+    "other": "为媒体中心创建 NFO 文件"
+  },
+  "TUISettingOrganize": {
+    "description": "Name of the Organize Files setting",
+    "other": "整理文件"
+  },
+  "TUISettingOrganizeDesc": {
+    "description": "Description of the Organize Files setting",
+    "other": "将文件移动/复制到整理好的结构中"
+  },
+  "TUISettingScrape": {
+    "description": "Name of the Scrape Metadata setting",
+    "other": "刮削元数据"
+  },
+  "TUISettingScrapeDesc": {
+    "description": "Description of the Scrape Metadata setting",
+    "other": "从 JAV 源获取元数据"
+  },
+  "TUISettingUpdateMode": {
+    "description": "Name of the Update Mode setting",
+    "other": "更新模式"
+  },
+  "TUISettingUpdateModeDesc": {
+    "description": "Description of the Update Mode setting",
+    "other": "仅创建/更新元数据，不移动文件"
+  },
+  "TUISettingsChoiceHint": {
+    "description": "Hint shown next to the settings title for choice rows",
+    "other": "（←/→ 或空格更改）"
+  },
+  "TUISettingsLanguageAuto": {
+    "description": "Selector label for the automatic system locale choice",
+    "other": "自动（系统）"
+  },
+  "TUISettingsTitle": {
+    "description": "Heading of the terminal settings view",
+    "other": "设置"
+  },
+  "TUISettingsToggleHint": {
+    "description": "Hint shown next to the settings title",
+    "other": "（空格切换）"
+  },
+  "TUIShuttingDown": {
+    "description": "Message shown while the TUI is shutting down",
+    "other": "正在优雅关闭…"
+  },
+  "TUISortServiceNotInitialized": {
+    "description": "Log message shown when processing starts before the sort service is wired",
+    "other": "排序服务未初始化"
+  },
+  "TUISucceeded": {
+    "description": "Number of files that succeeded processing in the completion banner",
+    "one": "{{.Count}} 个成功",
+    "other": "{{.Count}} 个成功"
+  },
+  "TUITabBrowser": {
+    "description": "Tab label for the browser view",
+    "other": "浏览"
+  },
+  "TUITabDashboard": {
+    "description": "Tab label for the dashboard view",
+    "other": "仪表板"
+  },
+  "TUITabHelp": {
+    "description": "Tab label for the help view",
+    "other": "帮助"
+  },
+  "TUITabLogs": {
+    "description": "Tab label for the logs view",
+    "other": "日志"
+  },
+  "TUITabSettings": {
+    "description": "Tab label for the settings view",
+    "other": "设置"
+  },
+  "TUITaskErr": {
+    "description": "Badge shown for a failed task",
+    "other": "错误"
+  },
+  "TUITaskOK": {
+    "description": "Badge shown for a completed task",
+    "other": "完成"
+  },
+  "TUITaskPending": {
+    "description": "Badge shown for a pending task",
+    "other": "..."
+  },
+  "TUITaskRun": {
+    "description": "Badge shown for a running task",
+    "other": "运行"
+  },
+  "TUITasksTitle": {
+    "description": "Title of the task list panel",
+    "other": "任务"
+  },
+  "TUIWorkers": {
+    "description": "Running and total worker counts shown in the header",
+    "other": "工作线程：{{.Running}}/{{.Total}}"
+  }
+}
