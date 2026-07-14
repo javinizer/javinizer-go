@@ -47,7 +47,7 @@ func TestWriteAPIError_NewPathError(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "does not exist")
-	assert.Contains(t, w.Body.String(), "PATH_NOT_FOUND")
+	assert.Contains(t, w.Body.String(), "PATH_NOT_EXIST")
 }
 
 func TestWriteAPIError_OperatorMessageNotInResponse(t *testing.T) {

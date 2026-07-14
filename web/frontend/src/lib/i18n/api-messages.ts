@@ -17,7 +17,7 @@ const ERROR_CODE_MAP: Record<string, (p: Params) => string> = {
 	AUTH_INVALID_CREDENTIALS: () => m.error_auth_invalid_credentials(),
 	AUTH_UNAUTHORIZED: () => m.error_auth_unauthorized(),
 	AUTH_USER_EXISTS: () => m.error_auth_user_exists(),
-	PATH_NOT_FOUND: (p) => m.error_path_not_found({ path: str(p, 'path') }),
+	PATH_NOT_EXIST: (p) => m.error_path_not_found({ path: str(p, 'path') }),
 	PATH_INVALID: (p) => m.error_path_invalid({ path: str(p, 'path') }),
 	CONFIG_INVALID: (p) => m.error_config_invalid({ field: str(p, 'field') }),
 	JOB_NOT_FOUND: (p) => m.error_job_not_found({ job_id: str(p, 'job_id') })
