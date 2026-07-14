@@ -24,7 +24,7 @@
 	let {
 		value = $bindable(''),
 		onchange,
-		placeholder = m.path_input_placeholder(),
+		placeholder,
 		whitelistPaths = [],
 		showNavigateButton = false,
 		onnavigate,
@@ -35,6 +35,8 @@
 		scope = 'operation',
 		class: className = ''
 	}: Props = $props();
+
+	const effectivePlaceholder = $derived(placeholder ?? m.path_input_placeholder());
 
 	const pathAutocompleteLimit = 8;
 	const SEP = '/';
@@ -272,7 +274,7 @@
 		oninput={handleInput}
 		onfocus={handleFocus}
 		onblur={handleBlur}
-		{placeholder}
+		placeholder={effectivePlaceholder}
 		autocomplete="off"
 		spellcheck="false"
 		class="ac-input w-full px-3 py-1.5 pr-9 border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm {className}"
