@@ -203,6 +203,35 @@
 			// Items will be sorted by sortedAndFilteredItems derived
 			items = response.items;
 			currentPage = 1;
+
+			// Prune "phantom" selections: a file that lived in THIS directory but has
+			// since been moved/renamed/deleted out from under us (e.g. the user ran
+			// Scrape & Organize and moved the movie + its art out, then hit Refresh)
+			// is no longer in the listing. Without this, its path lingers in the
+			// queue with no checkbox in the file list to toggle off, and a later
+			// scrape would error or write art/NFO for a file that's gone. Only
+			// entries that were children of the directory we just listed are
+			// candidates — selections from OTHER folders (recursive scans, other
+			// browsed dirs) are preserved untouched.
+			const currentDir = response.current_path;
+			const presentPaths = new Set(
+				items.filter((i) => !i.is_dir).map((i) => i.path)
+			);
+			const normDir = (d: string): string => d.replace(/[\\/]+$/, '') || d;
+			const isChildOfCurrent = (p: string): boolean => {
+				const parent = p.substring(
+					0,
+					Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+				);
+				return normDir(parent) === normDir(currentDir);
+			};
+			const pruned = externalSelectedFiles.filter(
+				(p) => !isChildOfCurrent(p) || presentPaths.has(p)
+			);
+			if (pruned.length !== externalSelectedFiles.length) {
+				externalSelectedFiles = pruned;
+				onFileSelect?.(externalSelectedFiles);
+			}
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : 'Failed to browse directory';
 			if (scope === 'operation' && (msg.includes('allowed directories') || msg.includes('403'))) {

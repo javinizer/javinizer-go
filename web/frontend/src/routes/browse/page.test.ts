@@ -151,6 +151,18 @@ describe('/browse D4 — sessionStorage hydrate + Manual Scrape checkbox', () =>
 		};
 		sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify(seed));
 
+		// The seeded selections genuinely exist in /library (a real Back
+		// round-trip would list them), so the browse mock reflects that —
+		// otherwise phantom-selection pruning would (correctly) drop them.
+		apiClient.browse.mockResolvedValue({
+			current_path: '/library',
+			parent_path: '',
+			items: [
+				{ name: 'kept-a.mp4', path: '/library/kept-a.mp4', is_dir: false, size: 0, mod_time: '2024-01-01T00:00:00Z' },
+				{ name: 'kept-b.mp4', path: '/library/kept-b.mp4', is_dir: false, size: 0, mod_time: '2024-01-01T00:00:00Z' }
+			]
+		} as never);
+
 		const { findByText, getByText } = renderPage();
 
 		// The hydrate $effect restores selectedFiles, so the "Selected Files"
@@ -182,6 +194,16 @@ describe('/browse D4 — sessionStorage hydrate + Manual Scrape checkbox', () =>
 				manualScrapeMode: false
 			})
 		);
+
+		// The seeded selection genuinely exists in /library, so the browse mock
+		// reflects that (otherwise phantom-selection pruning would drop it).
+		apiClient.browse.mockResolvedValue({
+			current_path: '/library',
+			parent_path: '',
+			items: [
+				{ name: 'pick.mp4', path: '/library/pick.mp4', is_dir: false, size: 0, mod_time: '2024-01-01T00:00:00Z' }
+			]
+		} as never);
 
 		const { findByText, getByLabelText, getByText, getByRole } = renderPage();
 		await findByText('pick.mp4');
@@ -218,5 +240,130 @@ describe('/browse D4 — sessionStorage hydrate + Manual Scrape checkbox', () =>
 		await fireEvent.click(actionBtn);
 		await waitFor(() => expect(pendingSet).toHaveBeenCalledTimes(1));
 		expect(mockGoto).toHaveBeenCalledWith('/manual');
+	});
+});
+
+describe('/browse — phantom selection pruning on refresh', () => {
+	it('drops a selected file that has been moved out of the listed directory after Refresh', async () => {
+		// Initial listing: a.mp4 + b.mp4 both present.
+		apiClient.browse.mockResolvedValueOnce({
+			current_path: '/library',
+			parent_path: '',
+			items: [
+				{ name: 'a.mp4', path: '/library/a.mp4', is_dir: false, size: 0, mod_time: '2024-01-01T00:00:00Z' },
+				{ name: 'b.mp4', path: '/library/b.mp4', is_dir: false, size: 0, mod_time: '2024-01-01T00:00:00Z' }
+			]
+		} as never);
+		// After Refresh: a.mp4 was organized + moved out; only b.mp4 remains.
+		apiClient.browse.mockResolvedValueOnce({
+			current_path: '/library',
+			parent_path: '',
+			items: [
+				{ name: 'b.mp4', path: '/library/b.mp4', is_dir: false, size: 0, mod_time: '2024-01-01T00:00:00Z' }
+			]
+		} as never);
+
+		const { findByText, getByText, getByTitle, queryByText } = renderPage();
+		await findByText('a.mp4');
+
+		// Select a.mp4 (only the file-list row renders it pre-selection).
+		await fireEvent.click(getByText('a.mp4'));
+		await findByText('1 File Selected for Scraping');
+
+		// Refresh the directory — a.mp4 is gone from disk.
+		await fireEvent.click(getByTitle('Refresh'));
+
+		// The phantom selection is pruned. The bottom action bar is the
+		// transition-free signal that selectedFiles is now empty (the
+		// "Selected Files" card itself uses transition:fade, whose outro never
+		// completes under jsdom, so we cannot assert its disappearance).
+		await waitFor(() => {
+			expect(queryByText('No files selected')).toBeTruthy();
+		});
+	});
+
+	it('preserves selections from other directories when refreshing an unrelated folder', async () => {
+		// /library contains only a.mp4; a selection from /elsewhere is unrelated.
+		apiClient.browse.mockResolvedValue({
+			current_path: '/library',
+			parent_path: '',
+			items: [
+				{ name: 'a.mp4', path: '/library/a.mp4', is_dir: false, size: 0, mod_time: '2024-01-01T00:00:00Z' }
+			]
+		} as never);
+
+		sessionStorage.setItem(
+			STORAGE_KEY_SCRAPE_STATE,
+			JSON.stringify({
+				selectedFiles: ['/elsewhere/kept.mp4'],
+				operationMode: 'scrape',
+				operationModeOverride: 'organize',
+				operationModeOverrideTouched: false,
+				forceRefresh: false,
+				showScraperSelector: false,
+				selectedScrapers: [],
+				selectedPreset: undefined,
+				scalarStrategy: 'prefer-nfo',
+				arrayStrategy: 'merge',
+				manualScrapeMode: false
+			})
+		);
+
+		const { findByText, getByTitle, getByText } = renderPage();
+		await findByText('a.mp4');
+
+		// The unrelated selection is restored on hydrate and survives a refresh
+		// of /library (it never lived there). Wait for the refresh browse call
+		// to actually complete before asserting, so the test is not satisfied
+		// trivially by the pre-refresh hydrated DOM.
+		expect(getByText('kept.mp4')).toBeTruthy();
+		await fireEvent.click(getByTitle('Refresh'));
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(2));
+		expect(getByText('kept.mp4')).toBeTruthy();
+		expect(getByText(/1 file selected/)).toBeTruthy();
+	});
+
+	it('does not prune subfolder selections when refreshing the parent directory', async () => {
+		// /library contains only a.mp4; a selection from a SUBFOLDER
+		// (/library/sub/deep.mp4) is NOT a direct child of /library — its
+		// parent is /library/sub — so refreshing /library must preserve it.
+		// This guards against a future naive startsWith(currentDir) rewrite
+		// that would over-prune nested selections from recursive scans.
+		apiClient.browse.mockResolvedValue({
+			current_path: '/library',
+			parent_path: '',
+			items: [
+				{ name: 'a.mp4', path: '/library/a.mp4', is_dir: false, size: 0, mod_time: '2024-01-01T00:00:00Z' }
+			]
+		} as never);
+
+		sessionStorage.setItem(
+			STORAGE_KEY_SCRAPE_STATE,
+			JSON.stringify({
+				selectedFiles: ['/library/sub/deep.mp4'],
+				operationMode: 'scrape',
+				operationModeOverride: 'organize',
+				operationModeOverrideTouched: false,
+				forceRefresh: false,
+				showScraperSelector: false,
+				selectedScrapers: [],
+				selectedPreset: undefined,
+				scalarStrategy: 'prefer-nfo',
+				arrayStrategy: 'merge',
+				manualScrapeMode: false
+			})
+		);
+
+		const { findByText, getByTitle, getByText } = renderPage();
+		await findByText('a.mp4');
+
+		// The subfolder selection is restored on hydrate and survives a refresh
+		// of its parent /library (it is not a direct child, so pruning does
+		// not touch it). Wait for the refresh browse call to complete first.
+		expect(getByText('deep.mp4')).toBeTruthy();
+		await fireEvent.click(getByTitle('Refresh'));
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(2));
+		expect(getByText('deep.mp4')).toBeTruthy();
+		expect(getByText(/1 file selected/)).toBeTruthy();
 	});
 });
