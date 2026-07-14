@@ -277,7 +277,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			Name:      filepath.Base(lookup.FilePath),
 			Extension: filepath.Ext(lookup.FilePath),
 		}
-		movieResult, prov = scrapeResultToMovieResult(fallbackFMI, scrapeResult, meta)
+		movieResult, prov = scrapeResultToMovieResult(fallbackFMI, scrapeResult, meta, false)
 
 		// Honor cancellation before any poster generation/commit work: ScrapeSingle
 		// checks ctx, but once it returns this path would otherwise still generate
