@@ -28,8 +28,10 @@ type AuthCredentialsRequest struct {
 
 // ErrorResponse represents an error response
 type ErrorResponse struct {
-	Error  string   `json:"error" example:"Movie not found"`
-	Errors []string `json:"errors,omitempty"`
+	Code   string         `json:"code,omitempty"` // Stable machine-readable error code (e.g. "JOB_NOT_FOUND") for client-side i18n
+	Error  string         `json:"error" example:"Movie not found"`
+	Errors []string       `json:"errors,omitempty"`
+	Params map[string]any `json:"params,omitempty"` // Structured arguments for translating Code into a localized message
 }
 
 // ProxyTestRequest represents a proxy connectivity test request.

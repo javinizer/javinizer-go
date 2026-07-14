@@ -631,20 +631,22 @@ type ScrapePhaseConfig struct {
 	FileMatchInfo map[string]models.FileMatchInfo // Match metadata per file
 
 	// OnFileScraped is invoked after each file is successfully scraped,
-	// carrying the source file path and a short status message. The API layer
-	// wires this to broadcast a per-file WebSocket ProgressMessage with FilePath
-	// set so the frontend's messagesByFile populates and ProgressModal shows
-	// live per-file scrape status. Mirrors main's realtime.ProgressAdapter
-	// which forwarded per-task scrape updates to the WS hub. Called concurrently
-	// from worker goroutines. Nil = no per-file success reporting.
-	OnFileScraped func(filePath, message string)
+	// carrying the source file path, the resolved movie ID, and a short status
+	// message. The API layer wires this to broadcast a per-file WebSocket
+	// ProgressMessage with FilePath set so the frontend's messagesByFile
+	// populates and ProgressModal shows live per-file scrape status. Mirrors
+	// main's realtime.ProgressAdapter which forwarded per-task scrape updates
+	// to the WS hub. Called concurrently from worker goroutines. Nil = no
+	// per-file success reporting.
+	OnFileScraped func(filePath, movieID, message string)
 
 	// OnFileScrapeFailed is invoked after each file's scrape fails, carrying the
-	// source file path and the error message. The API layer wires this to
-	// broadcast a per-file WebSocket ProgressMessage with FilePath + Error set.
-	// Mirrors main's realtime.ProgressAdapter failure forwarding. Called
-	// concurrently from worker goroutines. Nil = no per-file failure reporting.
-	OnFileScrapeFailed func(filePath, errMsg string)
+	// source file path, the resolved movie ID (may be empty when no ID was
+	// matched), and the error message. The API layer wires this to broadcast a
+	// per-file WebSocket ProgressMessage with FilePath + Error set. Mirrors
+	// main's realtime.ProgressAdapter failure forwarding. Called concurrently
+	// from worker goroutines. Nil = no per-file failure reporting.
+	OnFileScrapeFailed func(filePath, movieID, errMsg string)
 
 	// OnScrapeStepProgress is invoked for each in-flight scrape step update
 	// (e.g. "Querying scrapers...", "Aggregating metadata..."), carrying the

@@ -32,6 +32,10 @@ vi.mock('$lib/stores/theme.svelte', () => ({
 	getThemeStore: () => ({ initTheme: vi.fn(), destroyTheme: vi.fn() }),
 }));
 
+vi.mock('$lib/query/queries', () => ({
+	createConfigQuery: () => ({ data: null }),
+}));
+
 import { toastStore } from '$lib/stores/toast';
 
 const mod = await import('$lib/api/client');

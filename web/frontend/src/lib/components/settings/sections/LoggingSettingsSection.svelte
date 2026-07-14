@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { untrack } from 'svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
@@ -7,9 +8,10 @@
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 	}
 
-	let { config, inputClass }: Props = $props();
+	let { config, inputClass, selectClass }: Props = $props();
 	let logging = $derived(config.logging);
 
 	function coerceToInt(value: string | number): number {
@@ -37,44 +39,44 @@
 	});
 </script>
 
-<SettingsSection title="Logging Settings" description="Configure logging level, format, and output destination" defaultExpanded={false}>
+<SettingsSection title={m.settings_logging_title()} description={m.settings_logging_desc()} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div>
-			<label class="block text-sm font-medium mb-2" for="log-level">Log Level</label>
-			<select id="log-level" bind:value={logging.level} class={inputClass}>
-				<option value="debug">Debug</option>
-				<option value="info">Info</option>
-				<option value="warn">Warning</option>
-				<option value="error">Error</option>
+			<label class="block text-sm font-medium mb-2" for="log-level">{m.settings_logging_level_label()}</label>
+			<select id="log-level" bind:value={logging.level} class={selectClass}>
+				<option value="debug">{m.settings_logging_level_debug()}</option>
+				<option value="info">{m.settings_logging_level_info()}</option>
+				<option value="warn">{m.settings_logging_level_warn()}</option>
+				<option value="error">{m.settings_logging_level_error()}</option>
 			</select>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="log-format">Log Format</label>
-			<select id="log-format" bind:value={logging.format} class={inputClass}>
-				<option value="text">Text</option>
-				<option value="json">JSON</option>
+			<label class="block text-sm font-medium mb-2" for="log-format">{m.settings_logging_format_label()}</label>
+			<select id="log-format" bind:value={logging.format} class={selectClass}>
+				<option value="text">{m.settings_logging_format_text()}</option>
+				<option value="json">{m.settings_logging_format_json()}</option>
 			</select>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="log-output">Log Output</label>
+			<label class="block text-sm font-medium mb-2" for="log-output">{m.settings_logging_output_label()}</label>
 			<input
 				id="log-output"
 				type="text"
 				bind:value={logging.output}
 				class={inputClass}
-				placeholder="stdout or file path"
+				placeholder={m.settings_logging_output_placeholder()}
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Use "stdout" for console, file path, or comma-separated (e.g., "stdout,data/logs/javinizer.log")
+				{m.settings_logging_output_desc()}
 			</p>
 		</div>
 
-		<SettingsSubsection title="Log Rotation" description="Automatically rotate log files when they grow too large">
+		<SettingsSubsection title={m.settings_logging_rotation_subsection()} description={m.settings_logging_rotation_desc()}>
 			<div class="space-y-4">
 				<div>
-					<label class="block text-sm font-medium mb-2" for="log-max-size">Max Size (MB)</label>
+					<label class="block text-sm font-medium mb-2" for="log-max-size">{m.settings_logging_max_size_label()}</label>
 					<input
 						id="log-max-size"
 						type="number"
@@ -85,12 +87,12 @@
 						placeholder="10"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Maximum file size before rotation (0 = disabled)
+						{m.settings_logging_max_size_desc()}
 					</p>
 				</div>
 
 				<div>
-					<label class="block text-sm font-medium mb-2" for="log-max-backups">Max Backups</label>
+					<label class="block text-sm font-medium mb-2" for="log-max-backups">{m.settings_logging_max_backups_label()}</label>
 					<input
 						id="log-max-backups"
 						type="number"
@@ -101,12 +103,12 @@
 						placeholder="5"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Number of old log files to keep (0 = unlimited)
+						{m.settings_logging_max_backups_desc()}
 					</p>
 				</div>
 
 				<div>
-					<label class="block text-sm font-medium mb-2" for="log-max-age">Max Age (days)</label>
+					<label class="block text-sm font-medium mb-2" for="log-max-age">{m.settings_logging_max_age_label()}</label>
 					<input
 						id="log-max-age"
 						type="number"
@@ -117,7 +119,7 @@
 						placeholder="0"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Maximum age in days to keep log files (0 = no limit)
+						{m.settings_logging_max_age_desc()}
 					</p>
 				</div>
 
@@ -128,7 +130,7 @@
 						bind:checked={logging.compress}
 						class="w-4 h-4"
 					/>
-					<label class="text-sm font-medium" for="log-compress">Compress rotated files</label>
+					<label class="text-sm font-medium" for="log-compress">{m.settings_logging_compress_label()}</label>
 				</div>
 			</div>
 		</SettingsSubsection>

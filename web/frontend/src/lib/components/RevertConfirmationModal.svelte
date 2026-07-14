@@ -5,6 +5,7 @@
 	import { AlertTriangle, LoaderCircle } from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		open: boolean;
@@ -68,9 +69,9 @@
 					</div>
 					<h2 id="revert-modal-title" class="text-lg font-semibold">
 						{#if mode === 'batch'}
-							Revert Batch?
+							{m.revert_batch_title()}
 						{:else}
-							Revert Operation?
+							{m.revert_operation_title()}
 						{/if}
 					</h2>
 				</div>
@@ -79,19 +80,19 @@
 				<div class="p-6 space-y-4">
 					<p class="text-sm text-muted-foreground">
 						{#if mode === 'batch'}
-							This will move {fileCount} file{fileCount !== 1 ? 's' : ''} back to their original locations and delete generated NFOs, posters, and fanart. This action cannot be undone.
+							{m.revert_batch_body({ files: m.common_file_count({ count: fileCount }) })}
 						{:else}
-							Move {fileName} back to its original location and delete generated artifacts?
+							{m.revert_operation_body({ fileName })}
 						{/if}
 					</p>
 
 					<!-- Warning box -->
 					<div class="rounded-lg bg-amber-50 dark:bg-amber-900/20 p-3 space-y-1">
-						<p class="text-sm font-medium text-amber-800 dark:text-amber-300">Consequences:</p>
+						<p class="text-sm font-medium text-amber-800 dark:text-amber-300">{m.revert_consequences()}</p>
 						<ul class="text-sm text-amber-700 dark:text-amber-400 list-disc list-inside space-y-0.5">
-							<li>Files will be moved back to their original paths</li>
-							<li>Generated NFOs will be deleted</li>
-							<li>Downloaded posters and fanart will be deleted</li>
+							<li>{m.revert_consequence_files()}</li>
+							<li>{m.revert_consequence_nfos()}</li>
+							<li>{m.revert_consequence_artwork()}</li>
 						</ul>
 					</div>
 				</div>
@@ -103,21 +104,21 @@
 						onclick={handleCancel}
 						disabled={reverting}
 					>
-						Cancel
+						{m.common_cancel()}
 					</Button>
 					<Button
 						variant="destructive"
 						onclick={handleConfirm}
 						disabled={reverting}
-						aria-label={mode === 'batch' ? `Revert ${fileCount} files` : 'Revert file'}
+						aria-label={mode === 'batch' ? m.revert_aria_batch({ count: fileCount }) : m.revert_aria_operation()}
 					>
 						{#if reverting}
 							<LoaderCircle class="h-4 w-4 animate-spin" />
-							Reverting...
+							{m.revert_reverting()}
 						{:else if mode === 'batch'}
-							Revert {fileCount} File{fileCount !== 1 ? 's' : ''}
+							{m.revert_button_batch({ count: fileCount })}
 						{:else}
-							Revert File
+							{m.revert_button_operation()}
 						{/if}
 					</Button>
 				</div>

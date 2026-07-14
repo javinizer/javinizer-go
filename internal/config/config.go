@@ -104,9 +104,21 @@ type FavoritesConfig struct {
 	Genre []string `yaml:"genre" json:"genre"`
 }
 
+// UIConfig holds interface-locale (chrome) preferences shared by the Web UI
+// and TUI. It is deliberately separate from metadata.translation (movie data)
+// and scraper/output language options. See the i18n design doc.
+type UIConfig struct {
+	// Language is the interface locale: "auto" (default, resolve per
+	// environment) or a syntactically valid BCP 47 tag such as "en", "ja",
+	// "zh-Hans", or "pt-BR". Unsupported but valid tags fall back to English
+	// at runtime rather than being rejected here.
+	Language string `yaml:"language" json:"language"`
+}
+
 // Config represents the application configuration
 type Config struct {
 	ConfigVersion int               `yaml:"config_version" json:"config_version"`
+	UI            UIConfig          `yaml:"ui" json:"ui"`
 	Server        ServerConfig      `yaml:"server" json:"server"`
 	API           APIConfig         `yaml:"api" json:"api"`
 	System        SystemConfig      `yaml:"system" json:"system"`
@@ -182,6 +194,7 @@ type SystemConfig struct {
 func (c *Config) MarshalYAML() (interface{}, error) {
 	m := map[string]any{
 		"config_version": c.ConfigVersion,
+		"ui":             c.UI,
 		"server":         c.Server,
 		"api":            c.API,
 		"system":         c.System,
@@ -438,6 +451,12 @@ func ValidateConfig(cfg *Config) error {
 		default:
 			return fmt.Errorf("webui.default_review_view must be one of: detail, grid-poster, grid-cover")
 		}
+	}
+
+	// ui.language: "auto" or a syntactically valid BCP 47 tag. An unsupported
+	// but valid tag must not be rejected — runtimes fall back to English.
+	if err := validateUILanguage(cfg.UI.Language); err != nil {
+		return err
 	}
 
 	// Operation mode feeds workflow construction; a config typo must fail closed

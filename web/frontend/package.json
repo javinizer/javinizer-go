@@ -40,6 +40,8 @@
 		"vitest": "^4.1.2"
 	},
 	"dependencies": {
+		"@inlang/paraglide-js": "2.21.0",
+		"@inlang/plugin-message-format": "4.4.0",
 		"@tanstack/svelte-query": "^6.1.24",
 		"clsx": "^2.1.1",
 		"fast-deep-equal": "^3.1.3",

@@ -73,7 +73,7 @@ func prepareBatchRequest(snap *core.RuntimeSnapshot, c *gin.Context, opts ...pre
 	// Fetch job from store.
 	job, ok := snap.RT().Deps().GetJobStore().GetBatchJob(jobID)
 	if !ok {
-		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found", Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
 		return nil, fmt.Errorf("job not found: %s", jobID)
 	}
 

@@ -8,6 +8,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import { formatActressName } from '$lib/utils/actress';
 	import { createConfigQuery } from '$lib/query/queries';
+	import * as m from '$lib/paraglide/messages';
 
 	interface FieldDef {
 		key: string;
@@ -17,20 +18,20 @@
 	}
 
 	const FIELDS: FieldDef[] = [
-		{ key: 'content_id', label: 'Content ID', kind: 'id', get: (r) => r.content_id ?? '' },
-		{ key: 'title', label: 'Title', kind: 'text', get: (r) => r.title ?? '' },
-		{ key: 'original_title', label: 'Original Title', kind: 'text', get: (r) => r.original_title ?? '' },
-		{ key: 'description', label: 'Description', kind: 'text', get: (r) => r.description ?? '' },
-		{ key: 'maker', label: 'Maker', kind: 'text', get: (r) => r.maker ?? '' },
-		{ key: 'label', label: 'Label', kind: 'text', get: (r) => r.label ?? '' },
-		{ key: 'series', label: 'Series', kind: 'text', get: (r) => r.series ?? '' },
-		{ key: 'director', label: 'Director', kind: 'text', get: (r) => r.director ?? '' },
-		{ key: 'release_date', label: 'Release Date', kind: 'date', get: (r) => r.release_date ?? '' },
-		{ key: 'runtime', label: 'Runtime', kind: 'number', get: (r) => (r.runtime ? `${r.runtime} min` : '') },
-		{ key: 'rating_score', label: 'Rating', kind: 'number', get: (r) => r.rating?.score?.toString() ?? '' },
+		{ key: 'content_id', label: m.review_field_content_id(), kind: 'id', get: (r) => r.content_id ?? '' },
+		{ key: 'title', label: m.review_field_title(), kind: 'text', get: (r) => r.title ?? '' },
+		{ key: 'original_title', label: m.review_field_original_title(), kind: 'text', get: (r) => r.original_title ?? '' },
+		{ key: 'description', label: m.review_field_description(), kind: 'text', get: (r) => r.description ?? '' },
+		{ key: 'maker', label: m.review_field_maker(), kind: 'text', get: (r) => r.maker ?? '' },
+		{ key: 'label', label: m.review_field_label(), kind: 'text', get: (r) => r.label ?? '' },
+		{ key: 'series', label: m.review_field_series(), kind: 'text', get: (r) => r.series ?? '' },
+		{ key: 'director', label: m.review_field_director(), kind: 'text', get: (r) => r.director ?? '' },
+		{ key: 'release_date', label: m.review_field_release_date(), kind: 'date', get: (r) => r.release_date ?? '' },
+		{ key: 'runtime', label: m.review_field_runtime(), kind: 'number', get: (r) => (r.runtime ? m.review_runtime_value({ value: r.runtime }) : '') },
+		{ key: 'rating_score', label: m.review_field_rating(), kind: 'number', get: (r) => r.rating?.score?.toString() ?? '' },
 		{
 			key: 'actresses',
-			label: 'Actresses',
+			label: m.review_field_actresses(),
 			kind: 'list',
 			get: (r) =>
 				r.actresses
@@ -38,17 +39,17 @@
 					.map((a) => formatActressName(a, { firstNameOrder, japaneseNames }))
 					.join(', ') ?? ''
 		},
-		{ key: 'genres', label: 'Genres', kind: 'list', get: (r) => r.genres?.filter(Boolean).join(', ') ?? '' },
-		{ key: 'poster_url', label: 'Poster URL', kind: 'url', get: (r) => r.poster_url ?? '' },
-		{ key: 'cover_url', label: 'Cover URL', kind: 'url', get: (r) => r.cover_url ?? '' },
-		{ key: 'trailer_url', label: 'Trailer URL', kind: 'url', get: (r) => r.trailer_url ?? '' },
+		{ key: 'genres', label: m.review_field_genres(), kind: 'list', get: (r) => r.genres?.filter(Boolean).join(', ') ?? '' },
+		{ key: 'poster_url', label: m.review_field_poster_url(), kind: 'url', get: (r) => r.poster_url ?? '' },
+		{ key: 'cover_url', label: m.review_field_cover_url(), kind: 'url', get: (r) => r.cover_url ?? '' },
+		{ key: 'trailer_url', label: m.review_field_trailer_url(), kind: 'url', get: (r) => r.trailer_url ?? '' },
 		{
 			key: 'screenshot_urls',
-			label: 'Screenshots',
+			label: m.review_field_screenshots(),
 			kind: 'count',
 			get: (r) =>
 				r.screenshot_urls?.length
-					? `${r.screenshot_urls.length} image${r.screenshot_urls.length === 1 ? '' : 's'}`
+					? m.review_image_count({ count: r.screenshot_urls.length })
 					: ''
 		}
 	];
@@ -205,19 +206,19 @@
 						</div>
 						<div class="min-w-0">
 							<h2 id="source-modal-title" class="text-lg font-semibold tracking-tight truncate">
-								Source Merge Resolver
+								{m.review_source_merge_resolver()}
 							</h2>
 							<p class="text-xs text-muted-foreground truncate">
-								Pick which scraper's value wins for each field
+								{m.review_source_resolver_subtitle()}
 								{#if conflictCount > 0}
 									<span class="text-amber-600 dark:text-amber-400 font-medium"
-										>· {conflictCount} with conflicts</span
+										>{m.review_conflicts_count({ count: conflictCount })}</span
 									>
 								{/if}
 							</p>
 						</div>
 					</div>
-					<Button variant="ghost" size="icon" onclick={close} aria-label="Close">
+					<Button variant="ghost" size="icon" onclick={close} aria-label={m.common_close()}>
 						{#snippet children()}
 							<X class="h-4 w-4" />
 						{/snippet}
@@ -227,23 +228,23 @@
 				{#if loading}
 					<div class="flex items-center justify-center py-20 text-muted-foreground">
 						<LoaderCircle class="h-5 w-5 mr-2 animate-spin" />
-						Loading scraper results…
+						{m.review_loading_scraper_results()}
 					</div>
 				{:else if results.length === 0}
 					<div class="text-center py-20 text-muted-foreground">
-						<p class="font-medium">No scraper results in memory</p>
+						<p class="font-medium">{m.review_no_scraper_results()}</p>
 						<p class="text-xs mt-2 max-w-sm mx-auto">
 							Raw results are retained for the review window. Re-scrape to repopulate, or they'll
 							synthesize from the cached movie on next view.
 						</p>
 						<Button variant="outline" size="sm" class="mt-4" onclick={onLoad}>
-							{#snippet children()}Retry load{/snippet}
+							{#snippet children()}{m.review_retry_load()}{/snippet}
 						</Button>
 					</div>
 				{:else}
-					<div class="flex-1 flex min-h-0" role="group" aria-label="Field comparison">
+					<div class="flex-1 flex min-h-0" role="group" aria-label={m.review_field_comparison_aria()}>
 						<!-- Left rail: field list -->
-						<nav class="w-56 shrink-0 border-r overflow-y-auto py-2" aria-label="Fields">
+						<nav class="w-56 shrink-0 border-r overflow-y-auto py-2" aria-label={m.review_fields_aria()}>
 							{#each FIELDS as field (field.key)}
 								{@const st = statusFor(field)}
 								{@const isFocused = focusedKey === field.key}
@@ -301,7 +302,7 @@
 										</div>
 										{#if activeSourceFor(focusedField.key)}
 											<span class="text-xs text-muted-foreground">
-												Active:
+												{m.review_active_label()}
 												<span
 													class="text-green-600 dark:text-green-400 font-medium font-mono"
 													>{activeSourceFor(focusedField.key)}</span
@@ -313,14 +314,14 @@
 									{#if sourceCandidates(focusedField).length === 0}
 										<div class="flex items-center gap-2 py-8 text-sm text-muted-foreground">
 											<Minus class="h-4 w-4" />
-											No source provided a value for this field.
+											{m.review_no_source_for_field()}
 										</div>
 									{:else}
 										{@const candidates = sourceCandidates(focusedField)}
 										<ul
 											class="space-y-2"
 											role="radiogroup"
-											aria-label="{focusedField.label} sources"
+											aria-label={m.review_field_sources_aria({ label: focusedField.label })}
 											aria-busy={pendingField === focusedField.key}
 										>
 											{#each candidates as c (c.source)}
@@ -418,7 +419,7 @@
 																	if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
 																}}
 																>
-																	{expandedSources.has(c.source) ? 'Show less' : 'Show more'}
+																	{expandedSources.has(c.source) ? m.review_show_less() : m.review_show_more()}
 																</button>
 															{/if}
 														</div>
@@ -438,10 +439,10 @@
 					<p class="text-xs text-muted-foreground hidden sm:block">
 						<kbd class="px-1.5 py-0.5 rounded border bg-muted font-mono text-[10px]">↑</kbd>
 						<kbd class="px-1.5 py-0.5 rounded border bg-muted font-mono text-[10px] ml-1">↓</kbd>
-						to navigate fields
+						{m.review_navigate_fields_hint()}
 					</p>
 					<Button variant="outline" onclick={close} class="ml-auto">
-						{#snippet children()}Close{/snippet}
+						{#snippet children()}{m.common_close()}{/snippet}
 					</Button>
 				</div>
 			</Card>

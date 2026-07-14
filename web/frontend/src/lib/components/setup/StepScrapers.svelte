@@ -2,6 +2,7 @@
 	import { Sparkles, Loader2 } from 'lucide-svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
 	import type { Scraper } from '$lib/api/types';
+	import * as m from '$lib/paraglide/messages';
 
 	let {
 		selected = $bindable(),
@@ -23,10 +24,9 @@
 
 <div class="step-head">
 	<div class="step-badge"><Sparkles class="h-5 w-5" /></div>
-	<h1 class="step-title">Choose your metadata sources</h1>
+	<h1 class="step-title">{m.setup_scrapers_title()}</h1>
 	<p class="step-sub">
-		Pick the scrapers Javinizer will query for metadata and arrange them by priority — higher means a
-		source wins when fields conflict. You can fine-tune each scraper's options later in Settings.
+		{m.setup_scrapers_sub()}
 	</p>
 </div>
 
@@ -37,12 +37,12 @@
 {#if loading}
 	<div class="state">
 		<Loader2 class="h-5 w-5 animate-spin" />
-		<span>Loading scrapers…</span>
+		<span>{m.setup_scrapers_loading()}</span>
 	</div>
 {:else if !hasScrapers}
 	<div class="state">
-		<p>No scrapers reported by the API.</p>
-		<p class="state-hint">You can configure scrapers later in Settings → Scrapers.</p>
+		<p>{m.setup_scrapers_none()}</p>
+		<p class="state-hint">{m.setup_scrapers_none_hint()}</p>
 	</div>
 {:else}
 	<div class="selector-wrap" class:disabled={submitting}>
@@ -52,9 +52,9 @@
 	<div class="summary">
 		<span class="summary-dot" data-on={selectedCount > 0}></span>
 		{#if selectedCount === 0}
-			<span>No scrapers selected — scraping will be unavailable until you enable some.</span>
+			<span>{m.setup_scrapers_none_selected()}</span>
 		{:else}
-			<span><strong>{selectedCount}</strong> scraper{selectedCount > 1 ? 's' : ''} selected, ordered by priority.</span>
+			<span>{m.setup_scrapers_selected_count({ count: selectedCount })}</span>
 		{/if}
 	</div>
 {/if}
@@ -130,10 +130,6 @@
 		background: hsl(var(--muted) / 0.5);
 		font-size: 0.82rem;
 		color: hsl(var(--muted-foreground));
-	}
-
-	.summary strong {
-		color: hsl(var(--foreground));
 	}
 
 	.summary-dot {

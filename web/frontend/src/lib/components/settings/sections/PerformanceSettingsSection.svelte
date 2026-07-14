@@ -1,20 +1,22 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import type { SettingsConfig } from '$lib/api/types';
 
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 	}
 
-	let { config, inputClass }: Props = $props();
+	let { config, inputClass, selectClass }: Props = $props();
 </script>
 
-<SettingsSection title="Performance Settings" description="Configure worker pool and performance tuning options" defaultExpanded={false}>
+<SettingsSection title={m.settings_performance_title()} description={m.settings_performance_desc()} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div>
 			<label class="block text-sm font-medium mb-2" for="max-workers">
-				Max Workers (concurrent tasks)
+				{m.settings_performance_max_workers_label()}
 			</label>
 			<input
 				id="max-workers"
@@ -25,12 +27,12 @@
 				max="20"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Higher values = faster but more resource intensive
+				{m.settings_performance_max_workers_desc()}
 			</p>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="worker-timeout">Worker Timeout (seconds)</label>
+			<label class="block text-sm font-medium mb-2" for="worker-timeout">{m.settings_performance_worker_timeout_label()}</label>
 			<input
 				id="worker-timeout"
 				type="number"
@@ -42,7 +44,7 @@
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="buffer-size">Buffer Size</label>
+			<label class="block text-sm font-medium mb-2" for="buffer-size">{m.settings_performance_buffer_size_label()}</label>
 			<input
 				id="buffer-size"
 				type="number"
@@ -52,12 +54,12 @@
 				max="1000"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Channel buffer size for task communication
+				{m.settings_performance_buffer_size_desc()}
 			</p>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="update-interval">UI Update Interval (ms)</label>
+			<label class="block text-sm font-medium mb-2" for="update-interval">{m.settings_performance_update_interval_label()}</label>
 			<input
 				id="update-interval"
 				type="number"
@@ -67,7 +69,7 @@
 				max="1000"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				How often to update the UI (lower = more responsive but more CPU)
+				{m.settings_performance_update_interval_desc()}
 			</p>
 		</div>
 	</div>

@@ -3,6 +3,7 @@
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
 	import { CircleCheckBig, X, CircleAlert, Info, CircleX } from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		id: string;
@@ -86,7 +87,7 @@
 	<button
 		onclick={handleDismiss}
 		class="shrink-0 p-1 hover:bg-white/20 rounded transition-colors"
-		aria-label="Dismiss"
+		aria-label={m.toast_dismiss()}
 	>
 		<X class="h-4 w-4" />
 	</button>

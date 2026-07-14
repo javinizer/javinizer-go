@@ -6,8 +6,25 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/text/language"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 )
+
+// validateUILanguage checks that lang is "auto" or a syntactically valid BCP 47
+// tag. It does NOT reject unsupported-but-valid tags: runtimes resolve an exact
+// supported tag, then a supported base language, then English. Empty is treated
+// as "auto" for backward compatibility with old configs lacking the field.
+func validateUILanguage(lang string) error {
+	lang = strings.TrimSpace(lang)
+	if lang == "" || strings.EqualFold(lang, "auto") {
+		return nil
+	}
+	if _, err := language.Parse(lang); err != nil {
+		return fmt.Errorf("ui.language must be %q or a valid BCP 47 tag (e.g. %q, %q, %q, %q): %w", "auto", "en", "ja", "zh-Hans", "pt-BR", err)
+	}
+	return nil
+}
 
 // ConfigWarning represents a non-blocking validation warning about a
 // potentially misconfigured setting. Warnings are surfaced via the API

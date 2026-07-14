@@ -4,6 +4,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import MovieEditor from '$lib/components/MovieEditor.svelte';
 	import { LoaderCircle, RotateCcw, TableProperties } from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		currentMovie: Movie;
@@ -31,7 +32,7 @@
 <Card class="p-6">
 	<div class="space-y-4">
 		<div class="flex items-center justify-between">
-			<h2 class="text-xl font-semibold">Movie Metadata</h2>
+			<h2 class="text-xl font-semibold">{m.review_movie_metadata()}</h2>
 			<div class="flex items-center gap-3">
 				<label class="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
 					<input
@@ -39,30 +40,30 @@
 						bind:checked={showFieldScraperSources}
 						class="w-3.5 h-3.5 text-primary bg-muted border-input rounded focus:ring-primary focus:ring-2"
 					/>
-					Show scraper per field
+					{m.review_show_scraper_per_field()}
 				</label>
 				<div class="flex gap-2">
 					<Button variant="outline" size="sm" onclick={onOpenSourceViewer}>
 						{#snippet children()}
 							<TableProperties class="h-4 w-4 mr-2" />
-							Sources
+							{m.review_sources()}
 						{/snippet}
 					</Button>
 					<Button variant="outline" size="sm" onclick={onOpenRescrape} disabled={isRescraping}>
 						{#snippet children()}
 							{#if isRescraping}
 								<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
-								Rescraping...
+								{m.review_rescraping()}
 							{:else}
 								<RotateCcw class="h-4 w-4 mr-2" />
-								Rescrape
+								{m.review_rescrape()}
 							{/if}
 						{/snippet}
 					</Button>
 					<Button variant="outline" size="sm" onclick={onResetCurrentMovie}>
 						{#snippet children()}
 							<RotateCcw class="h-4 w-4 mr-2" />
-							Reset to Original
+							{m.review_reset_to_original()}
 						{/snippet}
 					</Button>
 				</div>

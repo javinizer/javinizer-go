@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { apiClient } from '$lib/api/client';
 	import type { GenreReplacement, GenreReplacementUpdateRequest } from '$lib/api/types';
@@ -52,11 +53,11 @@
 		onSuccess: (_data, { original, replacement }) => {
 			newOriginal = '';
 			newReplacement = '';
-			toastStore.success(`Genre replacement "${original}" → "${replacement}" added`, 3000);
+			toastStore.success(m.settings_genre_replacements_added_toast({ original, replacement }), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to add genre replacement', 4000);
+			toastStore.error(err.message || m.settings_genre_replacements_add_failed(), 4000);
 		}
 	}));
 
@@ -64,22 +65,22 @@
 		mutationFn: (req: GenreReplacementUpdateRequest) => apiClient.updateGenreReplacement(req),
 		onSuccess: (_data, { original, replacement }) => {
 			editingId = null;
-			toastStore.success(`Genre replacement updated: "${original}" → "${replacement}"`, 3000);
+			toastStore.success(m.settings_genre_replacements_updated_toast({ original, replacement }), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to update genre replacement', 4000);
+			toastStore.error(err.message || m.settings_genre_replacements_update_failed(), 4000);
 		}
 	}));
 
 		const deleteMutation = createMutation(() => ({
 		mutationFn: (id: number) => apiClient.deleteGenreReplacement(id),
 		onSuccess: () => {
-			toastStore.success('Genre replacement removed', 3000);
+			toastStore.success(m.settings_genre_replacements_removed_toast(), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to delete genre replacement', 4000);
+			toastStore.error(err.message || m.settings_genre_replacements_delete_failed(), 4000);
 		}
 	}));
 
@@ -87,7 +88,7 @@
 		const original = newOriginal.trim();
 		const replacement = newReplacement.trim();
 		if (!original || !replacement) {
-			toastStore.error('Both original and replacement fields are required', 4000);
+			toastStore.error(m.settings_genre_replacements_both_required(), 4000);
 			return;
 		}
 		addMutation.mutate({ original, replacement });
@@ -113,7 +114,7 @@
 		const o = editOriginal.trim();
 		const r = editReplacement.trim();
 		if (!o || !r) {
-			toastStore.error('Both fields are required', 4000);
+			toastStore.error(m.settings_genre_replacements_both_fields_required(), 4000);
 			return;
 		}
 		updateMutation.mutate({ original: o, replacement: r });
@@ -146,18 +147,18 @@
 </script>
 
 <SettingsSection
-	title="Genre Replacements"
-	description="Manage genre name replacements that are applied during scraping"
+	title={m.settings_genre_replacements_title()}
+	description={m.settings_genre_replacements_desc()}
 	defaultExpanded={false}
 >
 	{#if loading}
 		<div class="flex items-center justify-center py-8 text-muted-foreground">
 			<Loader2 class="h-5 w-5 animate-spin mr-2" />
-			Loading...
+			{m.common_loading()}
 		</div>
 	{:else if error}
 		<div class="text-destructive text-sm py-4">
-			Failed to load genre replacements: {error}
+			{m.settings_genre_replacements_load_failed({ error })}
 		</div>
 	{:else}
 		<div class="space-y-4">
@@ -168,7 +169,7 @@
 						<input
 							type="text"
 							bind:value={searchQuery}
-							placeholder="Search genres..."
+							placeholder={m.settings_genre_replacements_search_placeholder()}
 							class="w-full pl-9 pr-8 rounded-md border border-input bg-background py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 						/>
 						{#if searchQuery}
@@ -176,7 +177,7 @@
 								type="button"
 								class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
 								onclick={clearSearch}
-								title="Clear search"
+								title={m.settings_genre_replacements_clear_search()}
 							>
 								<X class="h-3.5 w-3.5" />
 							</button>
@@ -186,35 +187,35 @@
 						type="button"
 						class="inline-flex items-center gap-1 px-2.5 py-2 text-sm border border-input rounded-md bg-background hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
 						onclick={toggleSort}
-						title="Toggle sort order"
+						title={m.settings_genre_replacements_toggle_sort()}
 					>
 						{#if sortDirection === 'asc'}
 							<ArrowDownUp class="h-4 w-4" />
 						{:else}
 							<ChevronsDownUp class="h-4 w-4" />
 						{/if}
-						<span class="text-xs">{sortDirection === 'asc' ? 'A-Z' : 'Z-A'}</span>
+						<span class="text-xs">{sortDirection === 'asc' ? m.settings_genre_replacements_sort_az() : m.settings_genre_replacements_sort_za()}</span>
 					</button>
 				</div>
 			{/if}
 
 			{#if replacements.length === 0}
 				<p class="text-sm text-muted-foreground py-4">
-					No genre replacements configured. Add one below.
+					{m.settings_genre_replacements_empty()}
 				</p>
 			{:else}
 				<div class="relative" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 0.5rem;">
 					<div class="sticky top-0 z-10 bg-card border-b border-border">
 						<div class="grid grid-cols-[1fr_1fr_auto] gap-0 text-sm py-2 px-3 font-medium text-muted-foreground">
-							<div>Original</div>
-							<div>Replacement</div>
+							<div>{m.settings_genre_replacements_col_original()}</div>
+							<div>{m.settings_genre_replacements_col_replacement()}</div>
 							<div class="w-12 text-center"></div>
 						</div>
 					</div>
 					<div class="min-h-0">
 						{#if filteredAndSorted.length === 0 && searchQuery.trim()}
 							<div class="py-8 text-center text-muted-foreground text-sm">
-								No replacements match "{searchQuery}"
+								{m.settings_genre_replacements_no_match({ query: searchQuery })}
 							</div>
 						{:else}
 							{#each filteredAndSorted as rep (rep.id)}
@@ -248,7 +249,7 @@
 													{:else}
 														<Check class="h-3 w-3" />
 													{/if}
-													Save
+													{m.common_save()}
 												</button>
 												<button
 													type="button"
@@ -256,7 +257,7 @@
 													onclick={cancelEdit}
 												>
 													<X class="h-3 w-3" />
-													Cancel
+													{m.common_cancel()}
 												</button>
 											</div>
 										</div>
@@ -272,7 +273,7 @@
 											<button
 												type="button"
 												class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-												title="Edit replacement"
+												title={m.settings_genre_replacements_edit_tooltip()}
 												onclick={() => startEdit(rep)}
 											>
 												<Pencil class="h-4 w-4" />
@@ -280,7 +281,7 @@
 											<button
 												type="button"
 												class="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
-												title="Remove replacement"
+												title={m.settings_genre_replacements_remove_tooltip()}
 												onclick={() => handleDelete(rep.id)}
 											>
 												<Trash2 class="h-4 w-4" />
@@ -294,36 +295,36 @@
 				</div>
 				{#if searchQuery.trim()}
 					<p class="text-xs text-muted-foreground">
-						Showing {filteredAndSorted.length} of {replacements.length} replacements
+						{m.settings_genre_replacements_showing({ shown: filteredAndSorted.length, total: replacements.length })}
 					</p>
 				{:else}
 					<p class="text-xs text-muted-foreground">
-						{replacements.length} replacement{replacements.length !== 1 ? 's' : ''} configured
+						{m.settings_genre_replacements_count({ count: replacements.length })}
 					</p>
 				{/if}
 			{/if}
 
 			<div class="border-t pt-4">
-				<p class="text-xs text-muted-foreground mb-3">Add a new genre replacement rule:</p>
+				<p class="text-xs text-muted-foreground mb-3">{m.settings_genre_replacements_add_new()}</p>
 				<div class="flex items-end gap-2">
 					<div class="flex-1">
-						<label for="genre-original" class="block text-xs font-medium text-muted-foreground mb-1">Original</label>
+						<label for="genre-original" class="block text-xs font-medium text-muted-foreground mb-1">{m.settings_genre_replacements_col_original()}</label>
 						<input
 							id="genre-original"
 							type="text"
 							bind:value={newOriginal}
-							placeholder="e.g., HD"
+							placeholder={m.settings_genre_replacements_original_placeholder()}
 							onkeydown={handleAddKeydown}
 							class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 						/>
 					</div>
 					<div class="flex-1">
-						<label for="genre-replacement" class="block text-xs font-medium text-muted-foreground mb-1">Replacement</label>
+						<label for="genre-replacement" class="block text-xs font-medium text-muted-foreground mb-1">{m.settings_genre_replacements_col_replacement()}</label>
 						<input
 							id="genre-replacement"
 							type="text"
 							bind:value={newReplacement}
-							placeholder="e.g., High Definition"
+							placeholder={m.settings_genre_replacements_replacement_placeholder()}
 							onkeydown={handleAddKeydown}
 							class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 						/>
@@ -339,13 +340,13 @@
 						{:else}
 							<Plus class="h-4 w-4 mr-1" />
 						{/if}
-						Add
+						{m.common_add()}
 					</Button>
 				</div>
 			</div>
 
 			<p class="text-xs text-muted-foreground">
-				Replacements take effect on the next scrape. Existing movies are not retroactively updated.
+				{m.settings_genre_replacements_note()}
 			</p>
 		</div>
 	{/if}

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { generateUUID } from '$lib/utils/uuid';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		label: string;
@@ -64,11 +65,11 @@
 				onclick={toggleTags}
 				class="text-xs text-primary hover:underline mt-2"
 			>
-				{showTags ? 'Hide' : 'Show'} available tags
+				{showTags ? m.form_hide_available_tags() : m.form_show_available_tags()}
 			</button>
 			{#if showTags}
 				<div class="mt-2 p-3 bg-accent/50 rounded-md">
-					<p class="text-xs font-medium text-foreground mb-2">Available Template Tags:</p>
+					<p class="text-xs font-medium text-foreground mb-2">{m.form_available_template_tags()}</p>
 					<div class="flex flex-wrap gap-2">
 						{#each TEMPLATE_TAGS as tag}
 							<code class="text-xs bg-background px-2 py-1 rounded border border-border">{tag}</code>

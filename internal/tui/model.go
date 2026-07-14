@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/organizer"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
 
 // viewMode represents the current view
@@ -34,6 +35,7 @@ const (
 // TUIModelConfig carries the narrow set of config fields the TUI Model reads.
 type TUIModelConfig struct {
 	DownloadExtrafanart bool
+	Language            string
 	MaxWorkers          int
 	MoveFiles           bool
 }
@@ -399,6 +401,11 @@ type Model struct {
 	helpView     *helpView
 
 	configPath string // path to config.yaml for persisting TUI settings
+
+	// localizer provides localized TUI strings. Constructed once in New()
+	// from the resolved ui.language preference. English fallback on any
+	// construction error so startup never blocks on localization.
+	localizer *localization.Localizer
 }
 
 // fileItem represents a file in the browser
@@ -462,11 +469,36 @@ func New(cfg TUIModelConfig) *Model {
 		logState:     newLogState(),
 		startTime:    time.Now(),
 	}
+	m.settingsMgr.setLanguage(cfg.Language)
+
+	// Construct the localizer from the ui.language preference. A non-"auto"
+	// value is the explicit BCP 47 preference. "auto"/empty resolves the OS
+	// locale preference list via DetectOSLocale so a Japanese OS renders
+	// Japanese when a ja catalog exists (and falls back to English otherwise).
+	// Failures never block startup.
+	var prefs []string
+	if pref := strings.TrimSpace(cfg.Language); pref != "" && !strings.EqualFold(pref, "auto") {
+		prefs = []string{pref}
+	} else {
+		prefs = localization.DetectOSLocale()
+	}
+	if loc, err := localization.New(prefs...); err == nil {
+		m.localizer = loc
+	}
+	if m.localizer == nil {
+		if loc, err := localization.New(); err == nil {
+			m.localizer = loc
+		}
+	}
 
 	wireModel(m)
 
 	return m
 }
+
+// Localizer returns the TUI's localizer for translating user-facing strings.
+// Returns nil only if construction failed at startup (English fallback).
+func (m *Model) Localizer() *localization.Localizer { return m.localizer }
 
 // Init initializes the TUI
 func (m *Model) Init() tea.Cmd {
@@ -683,6 +715,84 @@ func (m *Model) saveConfig() {
 // SetUpdateMode sets update mode and pushes the full snapshot to the processor.
 func (m *Model) SetUpdateMode(updateMode bool) {
 	m.settingsMgr.setUpdateMode(updateMode)
+}
+
+// applyLanguageChange persists the new ui.language via config.Update, rebuilds
+// the localizer from the resolved preference list, and propagates the fresh
+// localizer to every component so labels/placeholders re-render in the new
+// locale on the next View() pass. A redraw is implicit because Update callers
+// return a command that Bubble Tea re-renders on. Construction failures never
+// panic: the existing localizer is retained so the TUI keeps working.
+func (m *Model) applyLanguageChange(lang string) tea.Cmd {
+	m.settingsMgr.setLanguage(lang)
+	m.modelCfg.Language = lang
+
+	if m.configPath != "" {
+		if err := config.Update(m.configPath, func(c *config.Config) {
+			c.UI.Language = lang
+		}); err != nil {
+			m.AddLog("error", fmt.Sprintf("Failed to save language setting to config: %v", err))
+		}
+	}
+
+	prefs := resolveLanguagePreferences(lang)
+	if loc, err := localization.New(prefs...); err == nil {
+		m.localizer = loc
+		m.refreshLocalizers()
+	}
+	return nil
+}
+
+// refreshLocalizers pushes the current localizer to every component that holds
+// a reference, including ones not rendered in the active view (e.g. modals).
+// Render methods re-call SetLocalizer each pass, but updating eagerly avoids a
+// stale-pointer window for placeholders captured outside render methods.
+func (m *Model) refreshLocalizers() {
+	if m.localizer == nil {
+		return
+	}
+	if m.header != nil {
+		m.header.SetLocalizer(m.localizer)
+	}
+	if m.browser != nil {
+		m.browser.SetLocalizer(m.localizer)
+	}
+	if m.taskList != nil {
+		m.taskList.SetLocalizer(m.localizer)
+	}
+	if m.dashboard != nil {
+		m.dashboard.SetLocalizer(m.localizer)
+	}
+	if m.logViewer != nil {
+		m.logViewer.SetLocalizer(m.localizer)
+	}
+	if m.settingsView != nil {
+		m.settingsView.SetLocalizer(m.localizer)
+	}
+	if m.helpView != nil {
+		m.helpView.SetLocalizer(m.localizer)
+	}
+}
+
+// applyLanguageCycle cycles the language choice row by delta, logs the change,
+// and rebuilds the localizer via applyLanguageChange when the selection moves.
+func (m *Model) applyLanguageCycle(delta int) tea.Cmd {
+	next, changed, desc := m.settingsMgr.cycleLanguage(delta)
+	if !changed {
+		return nil
+	}
+	m.AddLog("info", desc)
+	return m.applyLanguageChange(next)
+}
+
+// resolveLanguagePreferences mirrors New()'s resolution: an explicit non-auto
+// tag becomes a single-element preference list; "auto"/empty resolves the OS
+// locale preference list so the localizer can fall back through it.
+func resolveLanguagePreferences(lang string) []string {
+	if pref := strings.TrimSpace(lang); pref != "" && !strings.EqualFold(pref, "auto") {
+		return []string{pref}
+	}
+	return localization.DetectOSLocale()
 }
 
 // SetMatchResults sets the match results for files

@@ -217,7 +217,7 @@ func (m *Model) handlePathEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state.EditingPath = false
 		newPath := m.browserState.pathInput.Value()
 		if newPath != "" && newPath != m.browserState.sourcePath {
-			m.AddLog("info", "Path changed to: "+newPath)
+			m.AddLog("info", m.loc("TUILogPathChanged", map[string]any{"Path": newPath}))
 			return m, func() tea.Msg {
 				return rescanMsg{Path: newPath}
 			}
@@ -330,15 +330,15 @@ func (m *Model) handleDeselectAll() (tea.Model, tea.Cmd) {
 // handleStartProcessing begins processing selected files.
 func (m *Model) handleStartProcessing() (tea.Model, tea.Cmd) {
 	if m.browserState.selectedCount() == 0 {
-		m.AddLog("warn", "No files selected. Use space to select files first.")
+		m.AddLog("warn", m.loc("TUILogNoFilesSelected"))
 	} else if m.taskTracker.isProcessing.Load() {
-		m.AddLog("warn", "Processing already in progress")
+		m.AddLog("warn", m.loc("TUILogAlreadyProcessing"))
 	} else {
-		m.AddLog("info", "Enter key pressed, starting processing...")
+		m.AddLog("info", m.loc("TUILogStartingProcessing"))
 		// context.Background() is appropriate: TUI has no request-scoped context.
 		ctx := context.Background()
 		if err := m.StartProcessing(ctx); err != nil {
-			m.AddLog("error", "Failed to start processing: "+err.Error())
+			m.AddLog("error", m.loc("TUILogStartProcessingFailed", map[string]any{"Error": err.Error()}))
 		}
 	}
 	return m, nil
@@ -349,9 +349,9 @@ func (m *Model) handlePauseResume() (tea.Model, tea.Cmd) {
 	if m.taskTracker.isProcessing.Load() {
 		m.state.IsPaused = !m.state.IsPaused
 		if m.state.IsPaused {
-			m.AddLog("info", "Processing paused")
+			m.AddLog("info", m.loc("TUILogPaused"))
 		} else {
-			m.AddLog("info", "Processing resumed")
+			m.AddLog("info", m.loc("TUILogResumed"))
 		}
 	}
 	return m, nil
@@ -360,7 +360,7 @@ func (m *Model) handlePauseResume() (tea.Model, tea.Cmd) {
 // handleBrowserRefresh rescans the current source path.
 func (m *Model) handleBrowserRefresh() (tea.Model, tea.Cmd) {
 	if m.browserState.sourcePath != "" {
-		m.AddLog("info", "Refreshing file list...")
+		m.AddLog("info", m.loc("TUILogRefreshing"))
 		return m, func() tea.Msg {
 			return rescanMsg{Path: m.browserState.sourcePath}
 		}
@@ -413,10 +413,23 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.settingsMgr.moveCursor(1)
 
-	case " ", "space":
+	case "left":
+		if m.settingsMgr.cursor == settingLanguageRow {
+			return m, m.applyLanguageCycle(-1)
+		}
+
+	case "right":
+		if m.settingsMgr.cursor == settingLanguageRow {
+			return m, m.applyLanguageCycle(1)
+		}
+
+	case " ", "space", "enter":
+		if m.settingsMgr.cursor == settingLanguageRow {
+			return m, m.applyLanguageCycle(1)
+		}
 		// Guard: refuse to enable move mode while link mode is active (issue #36)
 		if m.settingsMgr.cursor == 3 && !m.settingsMgr.snapshot.MoveFiles && !m.canEnableMoveMode() {
-			m.AddLog("warn", "Move mode cannot be enabled while link mode is active")
+			m.AddLog("warn", m.loc("TUILogMoveModeBlocked"))
 			return m, nil
 		}
 		desc := m.settingsMgr.toggle()

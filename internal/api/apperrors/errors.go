@@ -12,7 +12,7 @@ const (
 	CodeAllowedDirsEmpty   errorCode = "ALLOWED_DIRS_EMPTY"
 	CodePathOutsideAllowed errorCode = "PATH_OUTSIDE_ALLOWED_DIRS"
 	CodePathInDenylist     errorCode = "PATH_IN_DENYLIST"
-	CodePathNotExist       errorCode = "PATH_NOT_EXIST"
+	CodePathNotExist       errorCode = "PATH_NOT_FOUND"
 	CodePathNotDir         errorCode = "PATH_NOT_DIR"
 	CodePathNotFile        errorCode = "PATH_NOT_FILE"
 	CodePathInvalid        errorCode = "PATH_INVALID"

@@ -2,6 +2,7 @@
 	import { ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let {
 		currentPage,
@@ -23,15 +24,15 @@
 <Card class="p-3">
 	<div class="flex items-center justify-between text-sm">
 		<div class="text-muted-foreground">
-			Page {currentPage} of {totalPages}
+			{m.actresses_page_of({ current: currentPage, total: totalPages })}
 		</div>
 		<div class="flex items-center gap-2">
 			<Button variant="outline" size="sm" onclick={onPrevPage} disabled={!canGoPrev}>
 				<ChevronLeft class="h-4 w-4" />
-				Prev
+				{m.actresses_prev()}
 			</Button>
 			<Button variant="outline" size="sm" onclick={onNextPage} disabled={!canGoNext}>
-				Next
+				{m.actresses_next()}
 				<ChevronRight class="h-4 w-4" />
 			</Button>
 		</div>

@@ -3,6 +3,7 @@
 	import { Check, LoaderCircle, X } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { isTerminalStatus } from '$lib/utils/job-progress';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		progress: { movie_id: string; status: string; error?: string }[];
@@ -58,9 +59,9 @@
 			<div class="flex items-center justify-between px-4 py-3 border-b">
 				<h3 class="text-sm font-semibold">
 					{#if allDone}
-						Rescrape Complete
+						{m.review_rescrape_complete()}
 					{:else}
-						Rescraping...
+						{m.review_rescraping()}
 					{/if}
 				</h3>
 				{#if allDone}
@@ -84,14 +85,14 @@
 						{/if}
 						<span class="truncate font-mono text-xs">{item.movie_id}</span>
 						{#if item.error}
-							<span class="text-xs text-red-500 truncate ml-auto" title={item.error}>failed</span>
+							<span class="text-xs text-red-500 truncate ml-auto" title={item.error}>{m.review_rescrape_failed_label()}</span>
 						{/if}
 					</div>
 				{/each}
 			</div>
 			{#if progress.length > 0}
 				<div class="px-4 py-2 border-t text-xs text-muted-foreground">
-					{succeededCount} succeeded, {failedCount} failed
+					{m.review_rescrape_summary({ succeeded: succeededCount, failed: failedCount })}
 				</div>
 			{/if}
 		</div>

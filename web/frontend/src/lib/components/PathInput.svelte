@@ -4,6 +4,7 @@
 	import { Folder, ChevronRight, LoaderCircle, CornerDownLeft, ArrowUp, ArrowDown } from 'lucide-svelte';
 	import Button from './ui/Button.svelte';
 	import { portalToBody } from '$lib/actions/portal';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		value?: string;
@@ -23,7 +24,7 @@
 	let {
 		value = $bindable(''),
 		onchange,
-		placeholder = 'Enter path (e.g., /path/to/videos)',
+		placeholder = m.path_input_placeholder(),
 		whitelistPaths = [],
 		showNavigateButton = false,
 		onnavigate,
@@ -120,9 +121,9 @@
 			const msg = e instanceof Error ? e.message : '';
 			if (scope === 'operation' && (msg.includes('403') || msg.includes('allowed directories'))) {
 				if (msg.includes('no allowed directories configured')) {
-					autocompleteError = 'No allowed directories configured — add one in Settings → Security.';
+					autocompleteError = m.path_input_no_allowed_dirs();
 				} else if (msg.includes('outside allowed directories') || msg.includes('path outside')) {
-					autocompleteError = 'This path is outside your allowed directories. Add it in Settings → Security.';
+					autocompleteError = m.common_path_outside_allowed();
 				} else {
 					autocompleteError = null;
 				}
@@ -286,7 +287,7 @@
 	{#if showSuggestions}
 		<div use:portalToBody style={popoverStyle} class="ac-popover rounded-lg border border-border bg-popover text-popover-foreground shadow-xl shadow-black/10 overflow-hidden">
 			<div class="ac-head flex items-center justify-between px-3 py-1.5 border-b border-border/60 bg-muted/40">
-				<span class="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">Folders</span>
+				<span class="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">{m.path_input_folders()}</span>
 				<span class="text-[0.65rem] tabular-nums text-muted-foreground/70">{displayedSuggestions.length}</span>
 			</div>
 			<div class="max-h-72 overflow-y-auto py-0.5">
@@ -317,9 +318,9 @@
 				{/each}
 			</div>
 			<div class="ac-foot hidden sm:flex items-center gap-3 px-3 py-1.5 border-t border-border/60 bg-muted/30 text-[0.65rem] text-muted-foreground/80">
-				<span class="flex items-center gap-1"><ArrowUp class="h-3 w-3" /><ArrowDown class="h-3 w-3" /> navigate</span>
-				<span class="flex items-center gap-1"><CornerDownLeft class="h-3 w-3" /> select</span>
-				<span class="ml-auto">esc to dismiss</span>
+				<span class="flex items-center gap-1"><ArrowUp class="h-3 w-3" /><ArrowDown class="h-3 w-3" /> {m.path_input_hint_navigate()}</span>
+				<span class="flex items-center gap-1"><CornerDownLeft class="h-3 w-3" /> {m.path_input_hint_select()}</span>
+				<span class="ml-auto">{m.path_input_hint_dismiss()}</span>
 			</div>
 		</div>
 	{/if}
@@ -329,7 +330,7 @@
 </div>
 
 {#if showNavigateButton}
-	<Button variant="outline" size="sm" onclick={() => onnavigate?.(value.trim())} disabled={!value.trim() || navigateDisabled || loading} title="Navigate to path">
+	<Button variant="outline" size="sm" onclick={() => onnavigate?.(value.trim())} disabled={!value.trim() || navigateDisabled || loading} title={m.path_input_navigate_title()}>
 		{#snippet children()}
 			<CornerDownLeft class="h-4 w-4" />
 		{/snippet}

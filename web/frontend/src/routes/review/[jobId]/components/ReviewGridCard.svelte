@@ -4,6 +4,7 @@
 	import { calculateCompleteness } from '$lib/utils/completeness';
 	import CompletenessDial from '$lib/components/CompletenessDial.svelte';
 	import CompletenessBreakdownTooltip from './CompletenessBreakdownTooltip.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface MovieGroup {
 		movieId: string;
@@ -84,7 +85,7 @@
 	class="group text-left rounded-lg border {selectionMode ? (isBulkSelected ? 'ring-2 ring-blue-500 border-blue-500/50' : 'border-border') : (isSelected ? 'ring-2 ring-primary' : 'border-border')} bg-card overflow-visible cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 {selectionMode ? 'focus-visible:ring-blue-500' : 'focus-visible:ring-primary'}"
 	role={selectionMode ? 'checkbox' : 'button'}
 	tabindex="0"
-	aria-label="{selectionMode ? 'Select' : 'View details for'} {movieGroup.movieId}"
+	aria-label={selectionMode ? m.review_card_aria_select({ id: movieGroup.movieId }) : m.review_card_aria_view({ id: movieGroup.movieId })}
 	aria-checked={selectionMode ? isBulkSelected : undefined}
 	onclick={(e: MouseEvent) => onclick(e)}
 	onkeydown={(e: KeyboardEvent) => {
@@ -117,7 +118,7 @@
 		{#if isEdited}
 			<span class="absolute top-2 left-2 text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/40 text-xs font-medium px-1.5 py-0.5 rounded-full flex items-center gap-1">
 				<CircleAlert class="h-3 w-3" />
-				Modified
+				{m.review_modified()}
 			</span>
 		{/if}
 

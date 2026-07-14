@@ -39,6 +39,7 @@ if (!Element.prototype.animate) {
 
 function makeConfig(overrides: Partial<SettingsConfig['api']['security']> = {}): SettingsConfig {
 	return {
+		ui: { language: 'auto' },
 		server: { host: '0.0.0.0', port: 8765 },
 		api: {
 			security: {
@@ -70,7 +71,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 function renderSection(config: SettingsConfig) {
 	return render(
 		SecuritySettingsSection,
-		{ config, inputClass: 'w-full' },
+		{ config, inputClass: 'w-full', selectClass: 'w-full' },
 		{
 			wrapper: QueryClientWrapper,
 			wrapperProps: { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },

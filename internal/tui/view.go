@@ -11,11 +11,11 @@ import (
 // View renders the TUI
 func (m *Model) View() string {
 	if !m.ready {
-		return "Initializing..."
+		return m.loc("TUIInitializing")
 	}
 
 	if m.quitting {
-		return "Shutting down gracefully...\n"
+		return m.loc("TUIShuttingDown") + "\n"
 	}
 
 	var content string
@@ -23,13 +23,13 @@ func (m *Model) View() string {
 	// Active modal overlays short-circuit rendering before any sub-view access,
 	// so a nil sub-view cannot panic while a modal is showing.
 	if m.manualSearch.showing {
-		return m.manualSearch.View()
+		return m.manualSearch.ViewLocalized(m.localizer)
 	}
 	if m.actressMergeCtl.Showing() {
-		return m.actressMergeCtl.View()
+		return m.actressMergeCtl.modal.ViewLocalized(m.localizer)
 	}
 	if m.folderPickCtl.Showing() {
-		return m.folderPickCtl.View()
+		return m.folderPickCtl.modal.ViewLocalized(m.localizer)
 	}
 
 	// Render current view
@@ -63,24 +63,27 @@ func (m *Model) View() string {
 // renderHeader renders the header bar
 func (m *Model) renderHeader() string {
 	// title bar with dry-run indicator and processing status
-	titleText := "Javinizer TUI"
+	titleText := m.loc("TUIAppTitle")
 	if m.settingsMgr.get().DryRun {
-		titleText += " " + warning("[DRY RUN]")
+		titleText += " " + warning(m.loc("TUIHeaderDryRun"))
 	}
 	if m.taskTracker.isProcessing.Load() {
 		// Add spinning indicator - calculate elapsed time directly for smooth animation
 		spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		elapsed := time.Since(m.startTime)
 		spinner := spinners[int(elapsed.Milliseconds()/100)%len(spinners)]
-		titleText += " " + runningBadge.Render(spinner+" Processing")
+		titleText += " " + runningBadge.Render(spinner+" "+m.loc("TUIProcessing"))
 	}
 	title := headerStyle.Render(titleText)
 
-	workers := fmt.Sprintf("Workers: %d/%d",
-		m.eventSub.Stats().Running,
-		m.modelCfg.MaxWorkers)
+	workers := m.loc("TUIWorkers", map[string]any{
+		"Running": m.eventSub.Stats().Running,
+		"Total":   m.modelCfg.MaxWorkers,
+	})
 
-	progress := fmt.Sprintf("Progress: %.0f%%", m.eventSub.Stats().OverallProgress*100)
+	progress := m.loc("TUIProgress", map[string]any{
+		"Percent": fmt.Sprintf("%.0f", m.eventSub.Stats().OverallProgress*100),
+	})
 
 	success := fmt.Sprintf("%s %d", success("✓"), m.eventSub.Stats().success)
 	failed := ""
@@ -120,10 +123,10 @@ func (m *Model) renderTabs() string {
 		name string
 		key  string
 	}{
-		{viewBrowser, "browser", "1"},
-		{viewDashboard, "dashboard", "2"},
-		{viewLogs, "Logs", "3"},
-		{viewSettings, "Settings", "4"},
+		{viewBrowser, m.loc("TUITabBrowser"), "1"},
+		{viewDashboard, m.loc("TUITabDashboard"), "2"},
+		{viewLogs, m.loc("TUITabLogs"), "3"},
+		{viewSettings, m.loc("TUITabSettings"), "4"},
 	}
 
 	for _, v := range views {
@@ -145,46 +148,46 @@ func (m *Model) renderFooter() string {
 	switch m.viewMgr.currentView() {
 	case viewBrowser:
 		keys = []string{
-			helpKey("f", "source"),
-			helpKey("o", "output"),
-			helpKey("m", "manual search"),
-			helpKey("M", "merge actress"),
-			helpKey("r", "refresh"),
-			helpKey("↑↓/jk", "navigate"),
-			helpKey("space", "select"),
-			helpKey("a/A", "sel all/none"),
-			helpKey("enter", "process"),
-			helpKey("tab", "switch view"),
-			helpKey("?", "help"),
-			helpKey("q", "quit"),
+			helpKey("f", m.loc("TUIHintSource")),
+			helpKey("o", m.loc("TUIHintOutput")),
+			helpKey("m", m.loc("TUIHintManualSearch")),
+			helpKey("M", m.loc("TUIHintMergeActress")),
+			helpKey("r", m.loc("TUIHintRefresh")),
+			helpKey("↑↓/jk", m.loc("TUIHintNavigate")),
+			helpKey("space", m.loc("TUIHintSelect")),
+			helpKey("a/A", m.loc("TUIHintSelectAllNone")),
+			helpKey("enter", m.loc("TUIHintProcess")),
+			helpKey("tab", m.loc("TUIHintSwitchView")),
+			helpKey("?", m.loc("TUIHintHelp")),
+			helpKey("q", m.loc("TUIHintQuit")),
 		}
 	case viewDashboard:
 		keys = []string{
-			helpKey("tab", "switch view"),
-			helpKey("?", "help"),
-			helpKey("q", "quit"),
+			helpKey("tab", m.loc("TUIHintSwitchView")),
+			helpKey("?", m.loc("TUIHintHelp")),
+			helpKey("q", m.loc("TUIHintQuit")),
 		}
 	case viewLogs:
 		keys = []string{
-			helpKey("↑↓/jk", "scroll"),
-			helpKey("g/G", "top/bottom"),
-			helpKey("a", "auto-scroll"),
-			helpKey("tab", "switch view"),
-			helpKey("?", "help"),
-			helpKey("q", "quit"),
+			helpKey("↑↓/jk", m.loc("TUIHintScroll")),
+			helpKey("g/G", m.loc("TUIHintTopBottom")),
+			helpKey("a", m.loc("TUIHintAutoScroll")),
+			helpKey("tab", m.loc("TUIHintSwitchView")),
+			helpKey("?", m.loc("TUIHintHelp")),
+			helpKey("q", m.loc("TUIHintQuit")),
 		}
 	case viewSettings:
 		keys = []string{
-			helpKey("↑↓/jk", "navigate"),
-			helpKey("space", "toggle"),
-			helpKey("tab", "switch view"),
-			helpKey("?", "help"),
-			helpKey("q", "quit"),
+			helpKey("↑↓/jk", m.loc("TUIHintNavigate")),
+			helpKey("space", m.loc("TUIHintToggle")),
+			helpKey("tab", m.loc("TUIHintSwitchView")),
+			helpKey("?", m.loc("TUIHintHelp")),
+			helpKey("q", m.loc("TUIHintQuit")),
 		}
 	case viewHelp:
 		keys = []string{
-			helpKey("?", "close help"),
-			helpKey("q", "quit"),
+			helpKey("?", m.loc("TUIHintCloseHelp")),
+			helpKey("q", m.loc("TUIHintQuit")),
 		}
 	}
 
@@ -215,6 +218,9 @@ func (m *Model) renderBrowserView() string {
 	}
 
 	// Split screen: browser on left, tasks + console on right
+	m.browser.SetLocalizer(m.localizer)
+	m.taskList.SetLocalizer(m.localizer)
+	m.console.SetLocalizer(m.localizer)
 	browserView := m.browser.View()
 	taskView := m.taskList.View()
 	consoleView := m.console.View()
@@ -245,6 +251,7 @@ func (m *Model) renderDashboardView() string {
 		return "tui: dashboard view is unavailable (component not initialized)"
 	}
 
+	m.dashboard.SetLocalizer(m.localizer)
 	content := m.dashboard.View()
 
 	// Add completion banner if processing just finished
@@ -261,6 +268,7 @@ func (m *Model) renderLogsView() string {
 	if m.logViewer == nil {
 		return "tui: logs view is unavailable (component not initialized)"
 	}
+	m.logViewer.SetLocalizer(m.localizer)
 	// Push current log state to the renderer before rendering
 	m.logViewer.SetLogs(m.logState.logs, m.logState.logScroll, m.logState.autoScroll)
 	return m.logViewer.View()
@@ -272,8 +280,9 @@ func (m *Model) renderSettingsView() string {
 		return "tui: settings view is unavailable (component not initialized)"
 	}
 
+	m.settingsView.SetLocalizer(m.localizer)
 	// Update settings state before rendering
-	m.settingsView.UpdateSettings(m.settingsMgr.cursorPos(), m.settingsMgr.get())
+	m.settingsView.UpdateSettings(m.settingsMgr.cursorPos(), m.settingsMgr.get(), m.settingsMgr.languageValue())
 	return m.settingsView.View()
 }
 
@@ -282,6 +291,7 @@ func (m *Model) renderHelpView() string {
 	if m.helpView == nil {
 		return "tui: help view is unavailable (component not initialized)"
 	}
+	m.helpView.SetLocalizer(m.localizer)
 	return m.helpView.View()
 }
 
@@ -291,28 +301,30 @@ func (m *Model) renderCompletionBanner() string {
 
 	// Build summary message
 	var summary strings.Builder
-	summary.WriteString(success("✓ Processing Complete! "))
+	summary.WriteString(success("✓ " + m.loc("TUIProcessingComplete") + " "))
 
 	// Show file count
-	fmt.Fprintf(&summary, "Processed %d files in %v", m.taskTracker.totalFilesCount, elapsed)
+	summary.WriteString(m.localizer.Plural("TUIFilesProcessed", m.taskTracker.totalFilesCount, map[string]any{
+		"Elapsed": elapsed,
+	}))
 
 	// Show success/failed counts
 	if m.eventSub.Stats().success > 0 || m.eventSub.Stats().Failed > 0 {
 		summary.WriteString(" (")
 		if m.eventSub.Stats().success > 0 {
-			summary.WriteString(success(fmt.Sprintf("%d succeeded", m.eventSub.Stats().success)))
+			summary.WriteString(success(m.localizer.Plural("TUISucceeded", m.eventSub.Stats().success)))
 		}
 		if m.eventSub.Stats().Failed > 0 {
 			if m.eventSub.Stats().success > 0 {
 				summary.WriteString(", ")
 			}
-			summary.WriteString(errorStyled(fmt.Sprintf("%d failed", m.eventSub.Stats().Failed)))
+			summary.WriteString(errorStyled(m.localizer.Plural("TUIFailed", m.eventSub.Stats().Failed)))
 		}
 		summary.WriteString(")")
 	}
 
 	// Add navigation hints
-	hints := dimmed("  •  Press '1' or 'b' to return to browser  •  Press '3' for logs  •  Press 'd' to dismiss")
+	hints := dimmed(m.loc("TUIProcessingHints"))
 
 	// Style the banner
 	bannerWidth := m.width - 4
@@ -333,4 +345,14 @@ func (m *Model) renderCompletionBanner() string {
 
 func helpKey(key, desc string) string {
 	return helpKeyStyle.Render(key) + ":" + helpDescStyle.Render(desc)
+}
+
+// loc returns the localized message for id, applying template data when supplied.
+// It is nil-safe so render code cannot panic if the localizer failed to construct
+// at startup; in that case the raw message id is returned as a last resort.
+func (m *Model) loc(id string, template ...map[string]any) string {
+	if m == nil || m.localizer == nil {
+		return id
+	}
+	return m.localizer.Localize(id, template...)
 }

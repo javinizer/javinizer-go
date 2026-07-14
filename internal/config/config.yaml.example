@@ -13,6 +13,13 @@ config_version: 3
 # Example: export JAVINIZER_SETUP_TRUSTED_CIDRS="172.16.0.0/12"
 # This adds the given networks to the default loopback-only allowlist.
 
+# Interface language (i18n) preference shared by the Web UI and TUI.
+# - "auto" (default): Web UI uses browser preference, TUI uses OS locale.
+# - A BCP 47 tag such as "en", "ja", "zh-Hans", or "pt-BR" applies to both.
+# Unsupported but valid tags fall back to English at runtime.
+ui:
+    language: auto
+
 server:
     host: localhost
     port: 8765

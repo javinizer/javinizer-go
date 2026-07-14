@@ -1,4 +1,6 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
+	import { formatDateTime } from '$lib/i18n/format';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
 	import { onDestroy } from 'svelte';
@@ -39,19 +41,19 @@
 			if (data.update_available) {
 				toastStore.info(
 					data.prerelease
-						? `Prerelease ${data.latest} is available (current: ${data.current})`
-						: `Update available: ${data.latest} (current: ${data.current})`
+						? m.update_toast_prerelease({ latest: data.latest, current: data.current })
+						: m.update_toast_available({ latest: data.latest, current: data.current })
 				);
 			} else if (data.source === 'disabled') {
-				toastStore.info('Update checks are disabled in configuration');
+				toastStore.info(m.update_toast_checks_disabled());
 			} else if (data.latest) {
-				toastStore.success(`You're running the latest version (${data.current})`);
+				toastStore.success(m.update_toast_latest({ current: data.current }));
 			} else if (data.error) {
-				toastStore.error(`Update check failed: ${data.error}`);
+				toastStore.error(m.update_toast_check_failed({ error: data.error }));
 			}
 		},
 		onError: (error: Error) => {
-			toastStore.error(`Update check failed: ${error.message}`);
+			toastStore.error(m.update_toast_check_failed({ error: error.message }));
 		},
 	}));
 
@@ -99,7 +101,7 @@
 		} catch {
 			// clipboard unavailable (non-secure context) — surface it so the user
 			// knows to select the command text manually instead.
-			toastStore.error('Could not copy to clipboard — select the command text manually');
+			toastStore.error(m.update_clipboard_failed());
 		}
 	}
 
@@ -110,11 +112,11 @@
 	const envBadge = $derived.by(() => {
 		switch (status?.install_environment) {
 			case 'docker':
-				return { label: 'Running in Docker', icon: Container, tone: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' };
+				return { label: m.update_env_docker(), icon: Container, tone: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' };
 			case 'desktop':
-				return { label: 'Desktop app', icon: Monitor, tone: 'bg-violet-500/15 text-violet-700 dark:text-violet-300' };
+				return { label: m.update_env_desktop(), icon: Monitor, tone: 'bg-violet-500/15 text-violet-700 dark:text-violet-300' };
 			default:
-				return { label: 'CLI install', icon: Terminal, tone: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' };
+				return { label: m.update_env_cli(), icon: Terminal, tone: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' };
 		}
 	});
 </script>
@@ -128,8 +130,8 @@
 			onclick={togglePopover}
 			aria-expanded={popoverOpen}
 			aria-haspopup="true"
-			aria-label="Update available"
-			title={status?.prerelease ? `Prerelease ${status?.latest} available` : `Update ${status?.latest} available`}
+			aria-label={m.update_aria_available()}
+			title={status?.prerelease ? m.update_title_prerelease_available({ version: status?.latest ?? '' }) : m.update_title_update_available({ version: status?.latest ?? '' })}
 			class="relative flex items-center justify-center h-9 w-9 rounded-md transition-all duration-200 hover:bg-accent hover:-translate-y-px text-primary"
 		>
 			<ArrowUpCircle class="h-5 w-5" />
@@ -147,16 +149,16 @@
 				class="absolute right-0 top-full mt-1 w-80 rounded-lg border bg-card p-3 shadow-lg z-50"
 				in:fly={{ y: -4, duration: 120, easing: cubicOut }}
 				role="dialog"
-				aria-label="Update details"
+				aria-label={m.update_aria_details()}
 			>
 				<div class="flex items-start gap-2">
 					<ArrowUpCircle class="h-5 w-5 shrink-0 mt-0.5 text-primary" />
 					<div class="min-w-0 flex-1">
 						<p class="text-sm font-medium">
 							{#if status?.prerelease}
-								Prerelease available
+								{m.update_prerelease_available()}
 							{:else}
-								Update available
+								{m.update_available()}
 							{/if}
 						</p>
 						<p class="mt-1 text-xs text-muted-foreground">
@@ -170,7 +172,7 @@
 									<span
 										class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300"
 									>
-										prerelease
+										{m.update_prerelease_tag()}
 									</span>
 								{/if}
 								{#if status?.install_environment}
@@ -207,15 +209,15 @@
 							<button
 								type="button"
 								onclick={handleCopyInstructions}
-								title="Copy command"
+								title={m.update_copy_command()}
 								class="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
 							>
 								{#if copiedInstructions}
 									<Check class="h-3 w-3 text-emerald-500" />
-									<span class="text-emerald-500">Copied</span>
+									<span class="text-emerald-500">{m.update_copied()}</span>
 								{:else}
 									<Copy class="h-3 w-3" />
-									<span>Copy</span>
+									<span>{m.update_copy()}</span>
 								{/if}
 							</button>
 						</div>
@@ -239,7 +241,7 @@
 						class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all duration-150 hover:bg-accent hover:translate-x-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0"
 					>
 						<RefreshCw class="h-3.5 w-3.5 {checking ? 'animate-spin' : ''}" />
-						{checking ? 'Checking…' : 'Check again'}
+						{checking ? m.update_checking() : m.update_check_again()}
 					</button>
 				</div>
 
@@ -248,7 +250,7 @@
 				{/if}
 				{#if status?.checked_at}
 					<p class="mt-2 text-[11px] text-muted-foreground">
-						Last checked {new Date(status.checked_at).toLocaleString()}
+						{m.update_last_checked({ datetime: formatDateTime(status.checked_at) })}
 					</p>
 				{/if}
 			</div>

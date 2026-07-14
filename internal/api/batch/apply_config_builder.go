@@ -211,10 +211,12 @@ func makeOrganizeCompleteBroadcaster(job worker.BatchJobInterface, isUpdate bool
 			action = "Updated"
 		}
 		sink(stampJobCounts(&websocket.ProgressMessage{
-			JobID:    job.GetID(),
-			Status:   status,
-			Progress: 100,
-			Message:  fmt.Sprintf("%s %d files, %d failed", action, organized, failed),
+			JobID:       job.GetID(),
+			Status:      status,
+			Progress:    100,
+			Message:     fmt.Sprintf("%s %d files, %d failed", action, organized, failed),
+			MessageCode: "BATCH_COMPLETED",
+			MessageArgs: map[string]any{"count": organized},
 		}, job))
 	}
 }
@@ -299,14 +301,20 @@ func makeOrganizeFileFailedBroadcaster(job worker.BatchJobInterface, _ bool, sin
 // so the frontend's messagesByFile populates during scrape and ProgressModal
 // shows live per-file status. Mirrors main's realtime.ProgressAdapter success
 // forwarding. Takes an injected sink so the closure is unit-testable.
-func makeScrapeFileScrapedBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, message string) {
-	return func(filePath, message string) {
+func makeScrapeFileScrapedBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, movieID, message string) {
+	return func(filePath, movieID, message string) {
+		args := map[string]any{}
+		if movieID != "" {
+			args["movie_id"] = movieID
+		}
 		sink(stampJobCounts(&websocket.ProgressMessage{
-			JobID:    job.GetID(),
-			FilePath: filePath,
-			Status:   websocket.ProgressStatusSuccess,
-			Progress: 100,
-			Message:  message,
+			JobID:       job.GetID(),
+			FilePath:    filePath,
+			Status:      websocket.ProgressStatusSuccess,
+			Progress:    100,
+			Message:     message,
+			MessageCode: "SCRAPE_SUCCEEDED",
+			MessageArgs: args,
 		}, job))
 	}
 }
@@ -316,14 +324,20 @@ func makeScrapeFileScrapedBroadcaster(job worker.BatchJobInterface, sink progres
 // failure status, so the frontend's messagesByFile records scrape failures.
 // Mirrors main's realtime.ProgressAdapter failure forwarding. Takes an injected
 // sink so the closure is unit-testable.
-func makeScrapeFileFailedBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, errMsg string) {
-	return func(filePath, errMsg string) {
+func makeScrapeFileFailedBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, movieID, errMsg string) {
+	return func(filePath, movieID, errMsg string) {
+		args := map[string]any{"error": errMsg}
+		if movieID != "" {
+			args["movie_id"] = movieID
+		}
 		sink(stampJobCounts(&websocket.ProgressMessage{
-			JobID:    job.GetID(),
-			FilePath: filePath,
-			Status:   websocket.ProgressStatusError,
-			Progress: 100,
-			Error:    errMsg,
+			JobID:       job.GetID(),
+			FilePath:    filePath,
+			Status:      websocket.ProgressStatusError,
+			Progress:    100,
+			Error:       errMsg,
+			MessageCode: "SCRAPE_FAILED",
+			MessageArgs: args,
 		}, job))
 	}
 }

@@ -307,10 +307,13 @@ func DefaultConfig(priorities []string, defaults map[string]*models.ScraperSetti
 
 	return &Config{
 		ConfigVersion: CurrentConfigVersion,
-		Server:        defaultServerConfig(),
-		API:           defaultAPIConfig(),
-		Scrapers:      defaultScraperConfig(priorities, defaults),
-		Metadata:      defaultMetadataConfig(),
+		UI: UIConfig{
+			Language: "auto",
+		},
+		Server:   defaultServerConfig(),
+		API:      defaultAPIConfig(),
+		Scrapers: defaultScraperConfig(priorities, defaults),
+		Metadata: defaultMetadataConfig(),
 		Matching: MatchingConfig{
 			Extensions:      []string{".mp4", ".mkv", ".avi", ".wmv", ".flv"},
 			MinSizeMB:       0,

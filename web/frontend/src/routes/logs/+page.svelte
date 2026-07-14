@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { onMount } from 'svelte';
 	import { fade, fly, slide } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
@@ -25,6 +26,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
 	import type { EventItem, EventStatsResponse, HealthResponse } from '$lib/api/types';
+	import { formatDateTime, formatDate } from '$lib/i18n/format';
 
 	let containerEl: HTMLElement;
 	let events = $state<EventItem[]>([]);
@@ -54,17 +56,17 @@
 	const releaseVersion = $derived(health?.version ?? 'unknown');
 
 	const typeFilters = [
-		{ key: 'all', label: 'All' },
-		{ key: 'scraper', label: 'Scraper' },
-		{ key: 'organize', label: 'Organize' },
-		{ key: 'system', label: 'System' }
+		{ key: 'all', label: m.logs_severity_all() },
+		{ key: 'scraper', label: m.logs_type_scraper() },
+		{ key: 'organize', label: m.logs_type_organize() },
+		{ key: 'system', label: m.logs_type_system() }
 	];
 
 	const severityConfig: Record<string, { label: string; icon: typeof AlertTriangle; dotClass: string; badgeClass: string }> = {
-		error: { label: 'Error', icon: CircleAlert, dotClass: 'bg-red-500', badgeClass: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300' },
-		warn: { label: 'Warn', icon: AlertTriangle, dotClass: 'bg-amber-500', badgeClass: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' },
-		info: { label: 'Info', icon: Info, dotClass: 'bg-blue-500', badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
-		debug: { label: 'Debug', icon: Bug, dotClass: 'bg-violet-500', badgeClass: 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300' }
+		error: { label: m.logs_severity_error(), icon: CircleAlert, dotClass: 'bg-red-500', badgeClass: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300' },
+		warn: { label: m.logs_severity_warn(), icon: AlertTriangle, dotClass: 'bg-amber-500', badgeClass: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' },
+		info: { label: m.logs_severity_info(), icon: Info, dotClass: 'bg-blue-500', badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
+		debug: { label: m.logs_severity_debug(), icon: Bug, dotClass: 'bg-violet-500', badgeClass: 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300' }
 	};
 
 	function hasActiveFilters(): boolean {
@@ -115,7 +117,7 @@
 			listRenderVersion += 1;
 			hasLoadedOnce = true;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load events';
+			error = e instanceof Error ? e.message : m.logs_load_failed();
 			if (!hasLoadedOnce) { events = []; }
 		} finally {
 			loading = false;
@@ -168,11 +170,10 @@
 	}
 
 	function formatTimestamp(dateStr: string): string {
-		const date = new Date(dateStr);
-		return new Intl.DateTimeFormat('en-US', {
+		return formatDateTime(dateStr, {
 			month: 'short', day: 'numeric',
 			hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-		}).format(date);
+		});
 	}
 
 	function formatRelativeTime(dateStr: string): string {
@@ -184,12 +185,12 @@
 		const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 		const eventDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
 		const calendarDays = Math.round((today.getTime() - eventDay.getTime()) / 86400000);
-		if (diffMins < 1) return 'just now';
-		if (diffMins < 60) return `${diffMins}m ago`;
-		if (diffHours < 24) return `${diffHours}h ago`;
-		if (calendarDays === 1) return 'yesterday';
-		if (calendarDays >= 2 && calendarDays < 7) return `${calendarDays}d ago`;
-		return date.toLocaleDateString();
+		if (diffMins < 1) return m.logs_just_now();
+		if (diffMins < 60) return m.logs_minutes_ago({ count: diffMins });
+		if (diffHours < 24) return m.logs_hours_ago({ count: diffHours });
+		if (calendarDays === 1) return m.logs_yesterday();
+		if (calendarDays >= 2 && calendarDays < 7) return m.logs_days_ago({ count: calendarDays });
+		return formatDate(date);
 	}
 
 	function toRFC3339(datetimeLocal: string): string {
@@ -232,14 +233,14 @@
 	<div class="container mx-auto px-4 py-8 max-w-7xl">
 		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
 			<div>
-				<h1 class="text-2xl font-bold tracking-tight">Logs</h1>
-				<p class="text-muted-foreground text-sm mt-1">Structured event stream for debugging</p>
+				<h1 class="text-2xl font-bold tracking-tight">{m.logs_title()}</h1>
+				<p class="text-muted-foreground text-sm mt-1">{m.logs_subtitle()}</p>
 			</div>
 			<div class="flex items-center gap-2">
 				{#if hasActiveFilters()}
 					<Button variant="outline" size="sm" onclick={clearAllFilters}>
 						<X class="h-4 w-4 mr-1.5" />
-						Clear
+						{m.logs_clear()}
 					</Button>
 				{/if}
 				<Button
@@ -252,11 +253,11 @@
 					{:else}
 						<Pause class="h-4 w-4 mr-1.5" />
 					{/if}
-					{isLiveMode ? 'Live' : 'Paused'}
+					{isLiveMode ? m.logs_live() : m.logs_paused()}
 				</Button>
 				<Button variant="outline" size="sm" onclick={refreshAll} disabled={isRefreshing}>
 					<RefreshCw class="h-4 w-4 mr-1.5 {isRefreshing ? 'animate-spin' : ''}" />
-					Refresh
+					{m.logs_refresh()}
 				</Button>
 			</div>
 		</div>
@@ -281,7 +282,7 @@
 								<Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
 								<input
 									type="text"
-									placeholder="Search messages..."
+									placeholder={m.logs_search_ph()}
 									bind:value={searchText}
 									class="h-9 w-full pl-9 pr-3 rounded-md border border-input bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-transparent"
 								/>
@@ -296,7 +297,7 @@
 										size="sm"
 										onclick={() => setSeverityFilter(sev)}
 									>
-										{sev === 'all' ? 'All' : sev.charAt(0).toUpperCase() + sev.slice(1)}
+										{sev === 'all' ? m.logs_severity_all() : severityConfig[sev].label}
 									</Button>
 								{/each}
 							</div>
@@ -305,7 +306,7 @@
 					<div class="border-t border-border/50"></div>
 
 					<div class="flex items-center gap-3 flex-wrap">
-						<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 w-16 shrink-0">Type</span>
+						<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 w-16 shrink-0">{m.logs_type_label()}</span>
 						<div class="flex flex-wrap gap-1.5">
 							{#each typeFilters as filter}
 								{@const count = filter.key === 'all' ? (stats?.total ?? 0) : (stats?.by_type[filter.key] ?? 0)}
@@ -327,7 +328,7 @@
 					<div class="flex items-center gap-3 flex-wrap">
 						<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 w-16 shrink-0">
 							<Calendar class="h-3.5 w-3.5 inline -mt-0.5" />
-							Date
+							{m.logs_date_label()}
 						</span>
 						<div class="flex items-center gap-2">
 							<input
@@ -353,7 +354,7 @@
 				{#if hasActiveFilters()}
 					<div class="px-4 py-2 border-t border-primary/10 bg-primary/[0.03] flex items-center gap-2 text-xs text-muted-foreground">
 						<Filter class="h-3 w-3" />
-						<span>Showing</span>
+						<span>{m.logs_filter_showing()}</span>
 						{#if activeTypeFilter !== 'all'}
 							<span class="font-medium text-foreground">{activeTypeFilter}</span>
 						{/if}
@@ -362,7 +363,7 @@
 						{/if}
 						{#if startDate || endDate}
 							<span class="font-medium text-foreground">
-								{startDate ? new Date(startDate).toLocaleDateString() : '…'} → {endDate ? new Date(endDate).toLocaleDateString() : '…'}
+								{startDate ? formatDate(startDate) : '…'} → {endDate ? formatDate(endDate) : '…'}
 							</span>
 						{/if}
 						{#if searchText}
@@ -371,9 +372,9 @@
 						{#if chipFilter}
 							<span class="font-medium text-foreground font-mono">{chipFilter.field}={chipFilter.value}</span>
 						{/if}
-						<span>— {hasClientSideFilter() ? `${getDisplayEvents().length} of ${total} loaded` : `${total} result${total !== 1 ? 's' : ''}`}</span>
+						<span>— {hasClientSideFilter() ? m.logs_filter_loaded_of({ shown: getDisplayEvents().length, total }) : m.logs_filter_results({ count: total, total })}</span>
 						{#if hasClientSideFilter()}
-							<span class="text-muted-foreground/60 italic">(local filter)</span>
+							<span class="text-muted-foreground/60 italic">{m.logs_filter_local()}</span>
 						{/if}
 					</div>
 				{/if}
@@ -385,17 +386,17 @@
 			<div class="flex items-center justify-center py-20">
 				<div class="text-center">
 					<Clock class="h-8 w-8 animate-spin mx-auto mb-3 text-muted-foreground" />
-					<p class="text-muted-foreground text-sm">Loading events...</p>
+					<p class="text-muted-foreground text-sm">{m.logs_loading_events()}</p>
 				</div>
 			</div>
 		{:else if getDisplayEvents().length === 0 && !loading}
 			<Card class="p-12 text-center">
 				<Activity class="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
 				<p class="text-muted-foreground mb-4">
-					{hasActiveFilters() ? 'No events match your filters' : 'No events recorded yet'}
+					{hasActiveFilters() ? m.logs_empty_filtered() : m.logs_empty()}
 				</p>
 				<p class="text-muted-foreground text-sm">
-					{hasActiveFilters() ? 'Try adjusting your filters' : 'Events will appear here as the application runs.'}
+					{hasActiveFilters() ? m.logs_empty_hint_filtered() : m.logs_empty_hint()}
 				</p>
 			</Card>
 		{:else}
@@ -462,7 +463,7 @@
 													onclick={(e) => { e.stopPropagation(); setChipFilter('job_id', String(ctx.job_id)); }}
 													class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-500/30 transition-colors cursor-pointer"
 												>
-													job: {String(ctx.job_id).slice(0, 8)}
+													{m.logs_job_prefix()}{String(ctx.job_id).slice(0, 8)}
 												</button>
 											{/if}
 											{#if ctx.movie_id}
@@ -471,7 +472,7 @@
 													onclick={(e) => { e.stopPropagation(); setChipFilter('movie_id', String(ctx.movie_id)); }}
 													class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-500/30 transition-colors cursor-pointer"
 												>
-													movie: {String(ctx.movie_id)}
+													{m.logs_movie_prefix()}{String(ctx.movie_id)}
 												</button>
 											{/if}
 										</div>
@@ -495,7 +496,7 @@
 								<div in:slide={{ duration: 150 }} class="px-4 pb-3 ml-7">
 									<div class="rounded-md border overflow-hidden bg-muted/30">
 										<div class="px-3 py-2 border-b bg-muted/50 flex items-center justify-between">
-											<span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Context</span>
+											<span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{m.logs_context_label()}</span>
 											<span class="text-xs text-muted-foreground tabular-nums">{formatTimestamp(event.created_at)}</span>
 										</div>
 										<div class="p-3 text-sm">
@@ -517,7 +518,7 @@
 													{/if}
 												{/each}
 												{#if Object.keys(ctx).length === 0}
-													<span class="text-muted-foreground/60 col-span-2 italic text-xs">No context data</span>
+													<span class="text-muted-foreground/60 col-span-2 italic text-xs">{m.logs_no_context()}</span>
 												{/if}
 											</div>
 										</div>
@@ -535,7 +536,7 @@
 					{#if loadingMore}
 						<div class="flex items-center gap-2 text-muted-foreground">
 							<Loader2 class="h-4 w-4 animate-spin" />
-							<span class="text-sm">Loading more events...</span>
+							<span class="text-sm">{m.logs_loading_more()}</span>
 						</div>
 					{:else}
 						<div class="h-12"></div>
@@ -547,7 +548,7 @@
 				<div class="py-6 text-center">
 					<div class="inline-flex items-center gap-2 text-xs text-muted-foreground/50">
 						<Clock class="h-3.5 w-3.5" />
-						<span>Showing all {total} event{total !== 1 ? 's' : ''}</span>
+						<span>{m.logs_showing_all({ count: total, total })}</span>
 					</div>
 				</div>
 			{/if}
@@ -555,14 +556,14 @@
 
 		<div class="flex items-center justify-between text-xs text-muted-foreground px-1 mt-6" in:fade={{ duration: 180 }}>
 			<div class="flex items-center gap-2">
-				<span>{total} total</span>
+				<span>{m.logs_total({ total })}</span>
 				<span>·</span>
-				<span class="text-red-500">{stats?.by_severity?.error ?? 0} errors</span>
+				<span class="text-red-500">{m.logs_errors_count({ count: stats?.by_severity?.error ?? 0 })}</span>
 				<span>·</span>
-				<span class="text-amber-500">{stats?.by_severity?.warn ?? 0} warnings</span>
+				<span class="text-amber-500">{m.logs_warnings_count({ count: stats?.by_severity?.warn ?? 0 })}</span>
 			</div>
 			<div>
-				Version: {releaseVersion}
+				{m.logs_version({ version: releaseVersion })}
 			</div>
 		</div>
 	</div>

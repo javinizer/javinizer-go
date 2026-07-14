@@ -2,6 +2,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { ChevronDown, ChevronUp, Image, LayoutGrid, List, LoaderCircle, Play, RefreshCw, Settings2, X, CheckSquare, Square, Trash2, RotateCcw, MousePointerClick, Save } from 'lucide-svelte';
 	import type { CompletenessTier } from '$lib/utils/completeness';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		isUpdateMode: boolean;
@@ -80,20 +81,20 @@
 	let showOptions = $state(false);
 
 	const tierConfig: { tier: CompletenessTier; label: string; dotClass: string }[] = [
-		{ tier: 'incomplete', label: 'Incomplete', dotClass: 'bg-red-500' },
-		{ tier: 'partial', label: 'Partial', dotClass: 'bg-yellow-500' },
-		{ tier: 'complete', label: 'Complete', dotClass: 'bg-green-500' },
+		{ tier: 'incomplete', label: m.review_tier_incomplete(), dotClass: 'bg-red-500' },
+		{ tier: 'partial', label: m.review_tier_partial(), dotClass: 'bg-yellow-500' },
+		{ tier: 'complete', label: m.review_tier_complete(), dotClass: 'bg-green-500' },
 	];
 </script>
 
 <div class="flex items-center justify-between mb-6">
 	<div>
-		<h1 class="text-3xl font-bold">Review & Edit Metadata</h1>
+		<h1 class="text-3xl font-bold">{m.review_title()}</h1>
 		<p class="text-muted-foreground mt-1">
 			{#if isUpdateMode}
-				Metadata and media files have been updated in place. Review and edit as needed.
+				{m.review_subtitle_update()}
 			{:else}
-				Review and edit scraped metadata before organizing files
+				{m.review_subtitle_organize()}
 			{/if}
 		</p>
 	</div>
@@ -107,7 +108,7 @@
 			>
 				{#snippet children()}
 					<List class="h-4 w-4 mr-1" />
-					Detail
+					{m.review_view_detail()}
 				{/snippet}
 			</Button>
 			<Button
@@ -118,7 +119,7 @@
 			>
 				{#snippet children()}
 					<LayoutGrid class="h-4 w-4 mr-1" />
-					Poster
+					{m.review_poster()}
 				{/snippet}
 			</Button>
 			<Button
@@ -129,20 +130,20 @@
 			>
 				{#snippet children()}
 					<Image class="h-4 w-4 mr-1" />
-					Cover
+					{m.review_view_cover()}
 				{/snippet}
 			</Button>
 		</div>
 		<div class="h-8 w-px bg-border"></div>
 		{#if hasEdits}
-			<Button onclick={() => { void Promise.resolve(onSaveAll()).catch(() => {}); }} disabled={savingEdits || organizing} title="Save pending edits to the database">
+			<Button onclick={() => { void Promise.resolve(onSaveAll()).catch(() => {}); }} disabled={savingEdits || organizing} title={m.review_save_changes_title()}>
 				{#snippet children()}
 					{#if savingEdits}
 						<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
 					{:else}
 						<Save class="h-4 w-4 mr-2" />
 					{/if}
-					{savingEdits ? 'Saving...' : `Save changes${editCount > 1 ? ` (${editCount})` : ''}`}
+					{savingEdits ? m.common_saving() : (editCount > 1 ? m.review_save_changes_with_count({ count: editCount }) : m.review_save_changes())}
 				{/snippet}
 			</Button>
 		{/if}
@@ -160,7 +161,7 @@
 					{:else}
 						<RefreshCw class="h-4 w-4 mr-2" />
 					{/if}
-					{organizing ? 'Updating...' : `Update ${movieResultsLength} File${movieResultsLength !== 1 ? 's' : ''}`}
+					{organizing ? m.review_updating() : m.review_update_files_button({ count: movieResultsLength })}
 				{/snippet}
 			</Button>
 		{:else}
@@ -171,7 +172,7 @@
 					{:else}
 						<Play class="h-4 w-4 mr-2" />
 					{/if}
-					{organizing ? 'Organizing...' : `Organize ${movieResultsLength} File${movieResultsLength !== 1 ? 's' : ''}`}
+					{organizing ? m.review_organizing() : m.review_organize_files_button({ count: movieResultsLength })}
 				{/snippet}
 			</Button>
 		{/if}
@@ -188,7 +189,7 @@
 		>
 			{#snippet children()}
 				<MousePointerClick class="h-4 w-4 mr-1" />
-				Select
+				{m.review_select()}
 			{/snippet}
 		</Button>
 		{#if selectionMode}
@@ -200,10 +201,10 @@
 				{#snippet children()}
 					{#if allSelected}
 						<CheckSquare class="h-4 w-4 mr-1" />
-						Deselect All
+						{m.review_deselect_all()}
 					{:else}
 						<Square class="h-4 w-4 mr-1" />
-						Select All
+						{m.review_select_all()}
 					{/if}
 				{/snippet}
 			</Button>
@@ -228,7 +229,7 @@
 		{#if selectedCount > 0}
 			<div class="ml-auto flex items-center gap-3">
 				<span class="text-sm font-medium text-muted-foreground whitespace-nowrap">
-					{selectedCount} selected
+					{m.review_selected_count({ count: selectedCount })}
 				</span>
 				<Button
 					size="sm"
@@ -243,7 +244,7 @@
 						{:else}
 							<Trash2 class="h-4 w-4 mr-1" />
 						{/if}
-						Remove
+						{m.review_remove()}
 					{/snippet}
 				</Button>
 				<Button
@@ -258,7 +259,7 @@
 						{:else}
 							<RotateCcw class="h-4 w-4 mr-1" />
 						{/if}
-						Rescrape
+						{m.review_rescrape()}
 					{/snippet}
 				</Button>
 			</div>
@@ -273,7 +274,7 @@
 			class="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
 		>
 			<Settings2 class="h-4 w-4" />
-			Options
+			{m.review_options()}
 			{#if showOptions}
 				<ChevronUp class="h-3 w-3" />
 			{:else}
@@ -292,8 +293,8 @@
 						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
-						<span class="text-sm font-medium">Force Overwrite</span>
-						<p class="text-xs text-muted-foreground">Ignore existing NFO, use only scraper data</p>
+						<span class="text-sm font-medium">{m.review_force_overwrite()}</span>
+						<p class="text-xs text-muted-foreground">{m.review_force_overwrite_desc()}</p>
 					</div>
 				</label>
 
@@ -306,8 +307,8 @@
 						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
-						<span class="text-sm font-medium">Preserve NFO</span>
-						<p class="text-xs text-muted-foreground">Never overwrite NFO fields, only add missing</p>
+						<span class="text-sm font-medium">{m.review_preserve_nfo()}</span>
+						<p class="text-xs text-muted-foreground">{m.review_preserve_nfo_desc()}</p>
 					</div>
 				</label>
 
@@ -320,8 +321,8 @@
 						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
-						<span class="text-sm font-medium">Skip NFO</span>
-						<p class="text-xs text-muted-foreground">Don't generate NFO metadata files</p>
+						<span class="text-sm font-medium">{m.review_skip_nfo()}</span>
+						<p class="text-xs text-muted-foreground">{m.review_skip_nfo_desc()}</p>
 					</div>
 				</label>
 
@@ -334,8 +335,8 @@
 						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
-						<span class="text-sm font-medium">Skip Download</span>
-						<p class="text-xs text-muted-foreground">Don't download cover, poster, and screenshots</p>
+						<span class="text-sm font-medium">{m.review_skip_download()}</span>
+						<p class="text-xs text-muted-foreground">{m.review_skip_download_desc()}</p>
 					</div>
 				</label>
 			</div>

@@ -6,6 +6,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { Actress } from '$lib/api/types';
+	import * as m from '$lib/paraglide/messages';
 
 	let {
 		actresses,
@@ -38,7 +39,7 @@
 						checked={isSelected(actress)}
 						disabled={!actress.id}
 						onchange={() => onToggleSelection(actress)}
-						aria-label="Select actress for merge"
+						aria-label={m.actresses_select_for_merge_aria()}
 						class="rounded border-input"
 					/>
 					<div class="flex-1 min-w-0">

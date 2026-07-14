@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
@@ -8,9 +9,10 @@
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 	}
 
-	let { config, inputClass }: Props = $props();
+	let { config, inputClass, selectClass }: Props = $props();
 
 	const DEFAULT_COMPLETENESS_CONFIG: CompletenessConfig = {
 		enabled: false,
@@ -22,23 +24,23 @@
 	};
 
 	const ALL_FIELDS: { key: string; label: string }[] = [
-		{ key: 'title', label: 'Title' },
-		{ key: 'poster_url', label: 'Poster' },
-		{ key: 'cover_url', label: 'Cover' },
-		{ key: 'actresses', label: 'Actresses' },
-		{ key: 'genres', label: 'Genres' },
-		{ key: 'description', label: 'Description' },
-		{ key: 'maker', label: 'Maker' },
-		{ key: 'release_date', label: 'Release Date' },
-		{ key: 'director', label: 'Director' },
-		{ key: 'runtime', label: 'Runtime' },
-		{ key: 'trailer_url', label: 'Trailer' },
-		{ key: 'screenshot_urls', label: 'Screenshots' },
-		{ key: 'label', label: 'Label' },
-		{ key: 'series', label: 'Series' },
-		{ key: 'rating_score', label: 'Rating' },
-		{ key: 'original_title', label: 'Original Title' },
-		{ key: 'translations', label: 'Translations' },
+		{ key: 'title', label: m.field_title() },
+		{ key: 'poster_url', label: m.field_poster() },
+		{ key: 'cover_url', label: m.field_cover() },
+		{ key: 'actresses', label: m.field_actresses() },
+		{ key: 'genres', label: m.field_genres() },
+		{ key: 'description', label: m.field_description() },
+		{ key: 'maker', label: m.field_maker() },
+		{ key: 'release_date', label: m.field_release_date() },
+		{ key: 'director', label: m.field_director() },
+		{ key: 'runtime', label: m.field_runtime() },
+		{ key: 'trailer_url', label: m.field_trailer() },
+		{ key: 'screenshot_urls', label: m.field_screenshots() },
+		{ key: 'label', label: m.field_label() },
+		{ key: 'series', label: m.field_series() },
+		{ key: 'rating_score', label: m.field_rating() },
+		{ key: 'original_title', label: m.field_original_title() },
+		{ key: 'translations', label: m.field_translations() },
 	];
 
 	function ensureCompletenessConfig() {
@@ -99,17 +101,17 @@
 	}
 
 	const TIER_CONFIG: { key: 'essential' | 'important' | 'nice_to_have'; title: string }[] = [
-		{ key: 'essential', title: 'Essential Fields' },
-		{ key: 'important', title: 'Important Fields' },
-		{ key: 'nice_to_have', title: 'Nice-to-have Fields' },
+		{ key: 'essential', title: m.settings_completeness_tier_essential() },
+		{ key: 'important', title: m.settings_completeness_tier_important() },
+		{ key: 'nice_to_have', title: m.settings_completeness_tier_nice_to_have() },
 	];
 </script>
 
-<SettingsSection title="Completeness Scoring" description="Configure which metadata fields are essential, important, or nice-to-have for completeness scoring" defaultExpanded={false}>
+<SettingsSection title={m.settings_completeness_title()} description={m.settings_completeness_desc()} defaultExpanded={false}>
 	<div class="space-y-4">
 		<FormToggle
-			label="Custom Completeness Scoring"
-			description="Enable custom field tier assignments and weights for completeness scoring. When disabled, default weights are used."
+			label={m.settings_completeness_enable_label()}
+			description={m.settings_completeness_enable_desc()}
 			checked={config.metadata.completeness?.enabled ?? false}
 			onchange={handleEnableToggle}
 		/>
@@ -118,8 +120,8 @@
 			{#each TIER_CONFIG as tierConfig}
 				<SettingsSubsection title={tierConfig.title}>
 					<FormNumberInput
-						label="Weight"
-						description="Percentage contribution to total score"
+						label={m.settings_completeness_weight_label()}
+						description={m.settings_completeness_weight_desc()}
 						value={config.metadata.completeness?.tiers[tierConfig.key]?.weight ?? 0}
 						min={1}
 						max={100}
@@ -128,7 +130,7 @@
 					/>
 
 					<div class="py-2">
-						<p class="text-sm font-medium mb-2">Fields</p>
+						<p class="text-sm font-medium mb-2">{m.settings_completeness_fields()}</p>
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
 							{#each ALL_FIELDS as field}
 								<label class="flex items-center gap-2 text-sm">
@@ -142,16 +144,16 @@
 								</label>
 							{/each}
 						</div>
-						<p class="text-xs text-muted-foreground mt-2">{getFieldCount(tierConfig.key)} fields assigned</p>
+						<p class="text-xs text-muted-foreground mt-2">{m.settings_completeness_fields_assigned({ count: getFieldCount(tierConfig.key) })}</p>
 					</div>
 				</SettingsSubsection>
 			{/each}
 
 			<div class="pt-4 border-t mt-4">
 				{#if weightSum === 100}
-					<p class="text-sm text-green-600 dark:text-green-400 font-medium">✓ Weights sum to 100%</p>
+					<p class="text-sm text-green-600 dark:text-green-400 font-medium">{m.settings_completeness_weights_ok()}</p>
 				{:else}
-					<p class="text-sm text-yellow-600 dark:text-yellow-400 font-medium">⚠ Weights sum to {weightSum}% (recommended: 100%)</p>
+					<p class="text-sm text-yellow-600 dark:text-yellow-400 font-medium">{m.settings_completeness_weights_warn({ weight: weightSum })}</p>
 				{/if}
 			</div>
 
@@ -161,7 +163,7 @@
 					class="text-sm text-primary hover:underline cursor-pointer"
 					onclick={resetToDefaults}
 				>
-					Reset to defaults
+					{m.settings_completeness_reset()}
 				</button>
 			</div>
 		{/if}

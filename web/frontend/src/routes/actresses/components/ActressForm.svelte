@@ -3,6 +3,7 @@
 	import { Plus, Pencil, Save } from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	type ActressForm = {
 		dmm_id: string;
@@ -42,10 +43,10 @@
 			<h2 class="text-lg font-semibold flex items-center gap-2">
 				{#if editingId}
 					<Pencil class="h-5 w-5 text-primary" />
-					Edit Actress
+					{m.actresses_edit_actress()}
 				{:else}
 					<Plus class="h-5 w-5 text-muted-foreground" />
-					Create Actress
+					{m.actresses_create_actress()}
 				{/if}
 			</h2>
 			<span
@@ -53,13 +54,13 @@
 					editingId ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
 				}`}
 			>
-				{editingId ? 'Edit Mode' : 'Create Mode'}
+				{editingId ? m.actresses_edit_mode() : m.actresses_create_mode()}
 			</span>
 		</div>
 		<p class={`text-sm ${editingId ? 'text-primary/90' : 'text-muted-foreground'}`}>
 			{editingId
-				? 'You are editing an existing actress record.'
-				: 'Fill in details to add a new actress record.'}
+				? m.actresses_editing_existing()
+				: m.actresses_fill_new()}
 		</p>
 
 		{#if formError}
@@ -70,70 +71,70 @@
 
 		<div class="space-y-3">
 			<div>
-				<label class="text-sm font-medium" for="dmm-id">DMM ID</label>
+				<label class="text-sm font-medium" for="dmm-id">{m.actresses_dmm_id()}</label>
 				<input
 					id="dmm-id"
 					type="number"
 					min="0"
 					bind:value={form.dmm_id}
-					placeholder="e.g. 1092662"
+					placeholder={m.actresses_dmm_id_placeholder()}
 					class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 				/>
-				<p class="mt-1 text-xs text-muted-foreground">Optional. Leave blank if unknown.</p>
+				<p class="mt-1 text-xs text-muted-foreground">{m.actresses_dmm_id_hint()}</p>
 			</div>
 
 			<div class="grid grid-cols-2 gap-3">
 				<div>
-					<label class="text-sm font-medium" for="first-name">First Name</label>
+					<label class="text-sm font-medium" for="first-name">{m.actresses_first_name()}</label>
 					<input
 						id="first-name"
 						type="text"
 						bind:value={form.first_name}
-						placeholder="Yui"
+						placeholder={m.actresses_first_name_placeholder()}
 						class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 					/>
 				</div>
 				<div>
-					<label class="text-sm font-medium" for="last-name">Last Name</label>
+					<label class="text-sm font-medium" for="last-name">{m.actresses_last_name()}</label>
 					<input
 						id="last-name"
 						type="text"
 						bind:value={form.last_name}
-						placeholder="Hatano"
+						placeholder={m.actresses_last_name_placeholder()}
 						class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 					/>
 				</div>
 			</div>
 
 			<div>
-				<label class="text-sm font-medium" for="ja-name">Japanese Name</label>
+				<label class="text-sm font-medium" for="ja-name">{m.actresses_japanese_name()}</label>
 				<input
 					id="ja-name"
 					type="text"
 					bind:value={form.japanese_name}
-					placeholder="波多野結衣"
+					placeholder={m.actresses_japanese_name_placeholder()}
 					class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 				/>
 			</div>
 
 			<div>
-				<label class="text-sm font-medium" for="thumb-url">Thumbnail URL</label>
+				<label class="text-sm font-medium" for="thumb-url">{m.actresses_thumb_url()}</label>
 				<input
 					id="thumb-url"
 					type="url"
 					bind:value={form.thumb_url}
-					placeholder="https://example.com/actress.jpg"
+					placeholder={m.actresses_thumb_url_placeholder()}
 					class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 				/>
 			</div>
 
 			<div>
-				<label class="text-sm font-medium" for="aliases">Aliases</label>
+				<label class="text-sm font-medium" for="aliases">{m.actresses_aliases_label()}</label>
 				<input
 					id="aliases"
 					type="text"
 					bind:value={form.aliases}
-					placeholder="Alias1|Alias2"
+					placeholder={m.actresses_aliases_placeholder()}
 					class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 				/>
 			</div>
@@ -142,9 +143,9 @@
 		<div class="flex items-center gap-2 pt-2">
 			<Button onclick={onSave} disabled={isPending}>
 				<Save class="h-4 w-4" />
-				{isPending ? 'Saving...' : editingId ? 'Update' : 'Create'}
+				{isPending ? m.common_saving() : (editingId ? m.actresses_update() : m.actresses_create())}
 			</Button>
-			<Button variant="outline" onclick={onReset} disabled={isPending}>Clear</Button>
+			<Button variant="outline" onclick={onReset} disabled={isPending}>{m.common_clear()}</Button>
 		</div>
 	</Card>
 </div>

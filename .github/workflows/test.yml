@@ -362,6 +362,39 @@ jobs:
           exit 1
         fi
 
+  # Job 7: i18n catalog validation (design doc §10.1). Verifies both the
+  # frontend Paraglide catalog and the TUI go-i18n catalog: JSON parses,
+  # canonical BCP 47 filenames, sorted/duplicate keys, missing + stale keys,
+  # placeholder + plural-selector parity, TUI description/other/one fields,
+  # split-key _one/_other remnants, per-surface coverage, and that the
+  # Paraglide generated output compiles for every locale.
+  i18n-check:
+    name: i18n Catalog Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      with:
+        persist-credentials: false
+
+    - name: Set up Node.js
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: web/frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      run: npm ci --prefix web/frontend
+
+    - name: Install jq
+      run: sudo apt-get update && sudo apt-get install -y jq
+
+    - name: Run i18n catalog validation
+      run: make i18n-check
+
   # Job: Fullstack E2E — real browser → real SvelteKit frontend → real HTTP
   # transport → real Go API server (cmd/javinizer-e2e with the deterministic
   # e2emock scraper substituted at the scraper seam) → real worker pipeline →

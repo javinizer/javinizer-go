@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
 
 // logViewer component — stateless renderer for data. Log entries and scroll state
@@ -17,6 +18,7 @@ type logViewer struct {
 	autoScroll bool
 	width      int
 	height     int
+	localizer  *localization.Localizer
 }
 
 func newLogViewer() *logViewer {
@@ -26,6 +28,17 @@ func newLogViewer() *logViewer {
 func (l *logViewer) SetSize(width, height int) {
 	l.width = width
 	l.height = height
+}
+
+func (l *logViewer) SetLocalizer(loc *localization.Localizer) {
+	l.localizer = loc
+}
+
+func (l *logViewer) loc(id string, template ...map[string]any) string {
+	if l.localizer == nil {
+		return id
+	}
+	return l.localizer.Localize(id, template...)
 }
 
 // SetLogs replaces the log data snapshot used for rendering.
@@ -45,10 +58,10 @@ func (l *logViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (l *logViewer) View() string {
-	view := title("Logs") + "\n\n"
+	view := title(l.loc("TUILogsTitle")) + "\n\n"
 
 	if len(l.logs) == 0 {
-		return view + dimmed("No logs yet")
+		return view + dimmed(l.loc("TUILogsEmpty"))
 	}
 
 	// Show logs around scroll position

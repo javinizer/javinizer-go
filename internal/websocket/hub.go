@@ -23,16 +23,18 @@ import (
 // file. The omitempty keeps the wire compact for older/tests paths that don't
 // stamp them.
 type ProgressMessage struct {
-	JobID      string         `json:"job_id"`
-	FileIndex  int            `json:"file_index"`
-	FilePath   string         `json:"file_path"`
-	Status     ProgressStatus `json:"status"`
-	Progress   float64        `json:"progress"`
-	Message    string         `json:"message"`
-	Error      string         `json:"error,omitempty"`
-	TotalFiles int            `json:"total_files"`
-	Completed  int            `json:"completed"`
-	Failed     int            `json:"failed"`
+	JobID       string         `json:"job_id"`
+	FileIndex   int            `json:"file_index"`
+	FilePath    string         `json:"file_path"`
+	Status      ProgressStatus `json:"status"`
+	Progress    float64        `json:"progress"`
+	Message     string         `json:"message"`
+	MessageCode string         `json:"message_code,omitempty"` // Stable machine-readable progress code (e.g. "SCRAPE_SUCCEEDED") for client-side i18n
+	MessageArgs map[string]any `json:"message_args,omitempty"` // Structured arguments for translating MessageCode into a localized message
+	Error       string         `json:"error,omitempty"`
+	TotalFiles  int            `json:"total_files"`
+	Completed   int            `json:"completed"`
+	Failed      int            `json:"failed"`
 }
 
 // Client represents a websocket client

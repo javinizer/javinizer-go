@@ -4,6 +4,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import { FolderOpen } from 'lucide-svelte';
 	import { pathSeparator } from '$lib/utils/path';
+	import * as m from '$lib/paraglide/messages';
 
 	type OrganizeOperation = 'move' | 'copy' | 'hardlink' | 'softlink';
 
@@ -42,11 +43,11 @@
 
 	function getOperationLabel(mode?: string): string {
 		switch (mode) {
-			case 'in-place': return 'Reorganize in place';
-			case 'in-place-norenamefolder': return 'Rename file only';
-			case 'metadata-artwork': return 'Metadata & Artwork';
-			case 'organize': return 'Organize';
-			default: return 'Organize';
+			case 'in-place': return m.browse_op_reorganize();
+			case 'in-place-norenamefolder': return m.browse_op_rename_only();
+			case 'metadata-artwork': return m.browse_op_metadata_artwork();
+			case 'organize': return m.browse_op_organize();
+			default: return m.browse_op_organize();
 		}
 	}
 
@@ -74,7 +75,7 @@
 		<div class="flex items-center gap-2">
 			<FolderOpen class="h-5 w-5 text-primary" />
 			<h3 class="font-semibold">
-				{needsDestination ? 'Output Destination' : 'File Operations'}
+				{needsDestination ? m.browse_output_destination() : m.browse_file_operations()}
 			</h3>
 		</div>
 
@@ -83,55 +84,55 @@
 				<input
 					type="text"
 					bind:value={destinationPath}
-					placeholder="Enter destination path (e.g., /path/to/output)"
+					placeholder={m.review_destination_placeholder()}
 					class="flex-1 min-w-0 px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 					title={destinationPath}
 				/>
 				<Button onclick={onOpenDestinationBrowser} variant="outline">
 					{#snippet children()}
 						<FolderOpen class="h-4 w-4 mr-2" />
-						Browse
+						{m.browse_browse_button()}
 					{/snippet}
 				</Button>
 			</div>
 
 			{#if previewNeedsDestination && !destinationPath.trim()}
 				<p class="text-xs text-muted-foreground">
-					Set a destination path to see the organization preview.
+					{m.review_set_destination_for_preview()}
 				</p>
 			{/if}
 
 			<div class="space-y-2">
-				<label for="organizeOperation" class="text-sm font-medium">File operation</label>
+				<label for="organizeOperation" class="text-sm font-medium">{m.review_file_operation_label()}</label>
 				<select
 					id="organizeOperation"
 					bind:value={organizeOperation}
 					class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all text-sm"
 				>
-					<option value="move">Move files</option>
-					<option value="copy">Copy files</option>
-					<option value="hardlink">Hard link files</option>
-					<option value="softlink">Soft link files</option>
+					<option value="move">{m.review_op_move()}</option>
+					<option value="copy">{m.review_op_copy()}</option>
+					<option value="hardlink">{m.review_op_hardlink()}</option>
+					<option value="softlink">{m.review_op_softlink()}</option>
 				</select>
 				<p class="text-xs text-muted-foreground">
 					{#if organizeOperation === 'hardlink'}
 						Hard links require source and destination on the same filesystem.
 					{:else if organizeOperation === 'softlink'}
-						Soft links point to the original file path. Windows may require Developer Mode or elevated privileges.
+						{m.review_op_softlink_desc()}
 					{:else if organizeOperation === 'copy'}
-						Copy creates independent destination files and keeps originals unchanged.
+						{m.review_op_copy_desc()}
 					{:else}
-						Move relocates source files into the organized destination.
+						{m.review_op_move_desc()}
 					{/if}
 				</p>
 			</div>
 		{:else}
 			<p class="text-xs text-muted-foreground">
-				{getOperationLabel(opMode)} — files stay in their current location.
+				{m.review_files_stay_in_place({ label: getOperationLabel(opMode) })}
 			</p>
 			{#if isInPlaceImplied}
 				<p class="text-xs text-primary mt-1">
-					Auto-switched from Organize: destination matches source path with no folder/subfolder format.
+					{m.review_auto_switched_organize()}
 				</p>
 			{/if}
 		{/if}
@@ -146,8 +147,8 @@
 					class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 				/>
 				<div class="flex-1">
-					<span class="text-sm font-medium">Skip NFO Generation</span>
-					<p class="text-xs text-muted-foreground">Don't create NFO metadata files</p>
+					<span class="text-sm font-medium">{m.review_skip_nfo_generation()}</span>
+					<p class="text-xs text-muted-foreground">{m.review_skip_nfo_desc()}</p>
 				</div>
 			</label>
 
@@ -160,8 +161,8 @@
 					class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 				/>
 				<div class="flex-1">
-					<span class="text-sm font-medium">Skip Media Download</span>
-					<p class="text-xs text-muted-foreground">Don't download cover, poster, and screenshots</p>
+					<span class="text-sm font-medium">{m.review_skip_media_download()}</span>
+					<p class="text-xs text-muted-foreground">{m.review_skip_media_download_desc()}</p>
 					</div>
 			</label>
 		</div>
@@ -184,7 +185,7 @@
 							class="text-muted-foreground hover:text-primary transition-colors cursor-pointer text-left"
 							style="margin-left: {indentPx + 4}px"
 						>
-							... and {preview!.screenshots!.length - 3} more
+							{m.review_screenshots_more({ count: preview!.screenshots!.length - 3 })}
 						</button>
 					{/if}
 					{#if showAllPreviewScreenshots && preview!.screenshots!.length > 3}
@@ -193,7 +194,7 @@
 							class="text-muted-foreground hover:text-primary transition-colors cursor-pointer text-left"
 							style="margin-left: {indentPx + 4}px"
 						>
-							Show less
+							{m.review_show_less()}
 						</button>
 					{/if}
 				{/if}
@@ -311,7 +312,7 @@
 				{@const allPathParts = [...subfolderParts, preview.folder_name].filter(Boolean)}
 				{@const fileIndent = allPathParts.length * 4}
 				<div class="mt-3 p-3 bg-accent/50 rounded border border-dashed overflow-hidden">
-					<p class="text-xs font-medium mb-2 text-muted-foreground">Preview:</p>
+					<p class="text-xs font-medium mb-2 text-muted-foreground">{m.review_preview_label()}</p>
 					<div class="font-mono text-xs space-y-1 overflow-x-auto">
 						<div class="text-muted-foreground break-all">📁 {destinationPath}{sep}</div>
 						{#each allPathParts as part, index}
@@ -347,7 +348,7 @@
 				</div>
 			{/if}
 		{:else}
-			<p class="text-xs text-muted-foreground">Files will be organized with metadata, artwork, and NFO files in this directory</p>
+			<p class="text-xs text-muted-foreground">{m.review_files_organized_in_dir()}</p>
 		{/if}
 	</div>
 </Card>

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
 
 // newManualSearchModal constructs the manual search modal with the provided deps.
@@ -139,6 +140,19 @@ func (ms *manualSearchModal) executeManualSearch() *manualSearchModal {
 
 // View renders the manual search modal overlay.
 func (ms *manualSearchModal) View() string {
+	return ms.ViewLocalized(nil)
+}
+
+// ViewLocalized renders the manual search modal overlay using the provided
+// localizer for user-facing strings. A nil localizer falls back to the raw
+// English message ids so rendering never panics.
+func (ms *manualSearchModal) ViewLocalized(loc *localization.Localizer) string {
+	l := func(id string, template ...map[string]any) string {
+		if loc == nil {
+			return id
+		}
+		return loc.Localize(id, template...)
+	}
 	modalStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("62")).Padding(1, 2).Width(60).Height(20)
 	msTitleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).MarginBottom(1)
 	scraperList := []string{}
@@ -154,12 +168,13 @@ func (ms *manualSearchModal) View() string {
 		}
 		scraperList = append(scraperList, fmt.Sprintf("%s%s %s", cursor, checkbox, scraperName))
 	}
-	inputLabel := "Search: "
+	searchLabel := l("TUIManualSearchSearchLabel") + " "
 	if ms.focusOnInput {
-		inputLabel = "▸ Search: "
+		searchLabel = "▸ " + searchLabel
 	}
-	instructions := "Tab: Switch Focus  Space: Toggle  Enter: Search  Esc: Cancel"
-	content := strings.Join([]string{msTitleStyle.Render("Manual Search"), "", inputLabel + ms.input.View(), "", "Select Scrapers:", strings.Join(scraperList, "\n"), "", lipgloss.NewStyle().Faint(true).Render(instructions)}, "\n")
+	ms.input.Placeholder = l("TUIManualSearchPlaceholder")
+	instructions := l("TUIManualSearchInstructions")
+	content := strings.Join([]string{msTitleStyle.Render(l("TUIManualSearchTitle")), "", searchLabel + ms.input.View(), "", l("TUIManualSearchSelectScrapers"), strings.Join(scraperList, "\n"), "", lipgloss.NewStyle().Faint(true).Render(instructions)}, "\n")
 	modal := modalStyle.Render(content)
 	return lipgloss.Place(ms.deps.Width(), ms.deps.Height(), lipgloss.Center, lipgloss.Center, modal)
 }

@@ -2,6 +2,8 @@
 	import { fly, scale } from 'svelte/transition';
 	import { cubicOut, quintOut } from 'svelte/easing';
 	import { ShieldCheck, Fingerprint } from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
+	import { formatDate } from '$lib/i18n/format';
 
 	interface Props {
 		username: string;
@@ -12,11 +14,10 @@
 	let { username, sessionActive, registeredAt }: Props = $props();
 
 	let time = $derived(
-		registeredAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+		formatDate(registeredAt, { hour: '2-digit', minute: '2-digit' }),
 	);
 	let date = $derived(
-		registeredAt
-			.toLocaleDateString([], { year: 'numeric', month: 'short', day: '2-digit' })
+		formatDate(registeredAt, { year: 'numeric', month: 'short', day: '2-digit' })
 			.toUpperCase(),
 	);
 </script>
@@ -63,11 +64,10 @@
 
 	<!-- Heading -->
 	<div class="head" in:fly={{ y: 14, duration: 460, delay: 280, easing: cubicOut }}>
-		<span class="kicker">Account Registered</span>
-		<h1 class="title">Your admin account is secured</h1>
+		<span class="kicker">{m.setup_success_kicker()}</span>
+		<h1 class="title">{m.setup_success_title()}</h1>
 		<p class="sub">
-			Credentials have been registered and your session is now active. Keep these
-			details safe — you'll use them to sign in to Javinizer.
+			{m.setup_success_sub()}
 		</p>
 	</div>
 
@@ -76,40 +76,40 @@
 		<div class="receipt-top">
 			<span class="receipt-stamp">
 				<Fingerprint class="h-3.5 w-3.5" />
-				Javinizer · Credential Receipt
+				{m.setup_success_receipt_title()}
 			</span>
 			<span class="receipt-no">№ {username.slice(0, 4).toUpperCase().padEnd(4, '0')}-{registeredAt.getTime().toString().slice(-4)}</span>
 		</div>
 
 		<div class="receipt-rows">
 			<div class="receipt-row">
-				<dt>Username</dt>
+				<dt>{m.setup_success_receipt_username()}</dt>
 				<dd class="mono">{username}</dd>
 			</div>
 			<div class="receipt-row">
-				<dt>Password</dt>
-				<dd class="mono masked" aria-label="password hidden">
+				<dt>{m.setup_success_receipt_password()}</dt>
+				<dd class="mono masked" aria-label={m.setup_success_password_hidden()}>
 					<span class="masked-bullets">
 						{#each [...Array(8).keys()] as i (i)}<span class="dot" style="animation-delay: {600 + i * 60}ms"></span>{/each}
 					</span>
 				</dd>
 			</div>
 			<div class="receipt-row">
-				<dt>Registered</dt>
+				<dt>{m.setup_success_receipt_registered()}</dt>
 				<dd class="mono">{date} · {time}</dd>
 			</div>
 			<div class="receipt-row">
-				<dt>Session</dt>
+				<dt>{m.setup_success_receipt_session()}</dt>
 				<dd class="session">
 					<span class="session-dot" class:active={sessionActive}></span>
-					{sessionActive ? 'Active' : 'Pending'}
+					{sessionActive ? m.setup_success_session_active() : m.setup_success_session_pending()}
 				</dd>
 			</div>
 		</div>
 
 		<div class="receipt-perf"></div>
 		<div class="receipt-foot">
-			<span>Receipt issued locally · no data leaves this server</span>
+			<span>{m.setup_success_receipt_foot()}</span>
 		</div>
 	</dl>
 </div>

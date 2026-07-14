@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
 
 // taskList component — stateless renderer. Data is owned by Model and
@@ -13,10 +14,11 @@ type taskList struct {
 	// Render snapshot — set by Model.SetTasks before each View call.
 	// These fields must NOT be read or mutated outside of SetTasks/View;
 	// the Model is the single source of truth.
-	tasks  map[string]*taskState
-	order  []string
-	width  int
-	height int
+	tasks     map[string]*taskState
+	order     []string
+	width     int
+	height    int
+	localizer *localization.Localizer
 }
 
 func newTaskList() *taskList {
@@ -26,6 +28,18 @@ func newTaskList() *taskList {
 func (t *taskList) SetSize(width, height int) {
 	t.width = width
 	t.height = height
+}
+
+func (t *taskList) SetLocalizer(l *localization.Localizer) {
+	t.localizer = l
+}
+
+//nolint:unparam // variadic for API consistency with other components
+func (t *taskList) loc(id string, template ...map[string]any) string {
+	if t.localizer == nil {
+		return id
+	}
+	return t.localizer.Localize(id, template...)
 }
 
 // SetTasks replaces the task data snapshot used for rendering.
@@ -44,10 +58,10 @@ func (t *taskList) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (t *taskList) View() string {
-	view := title("Tasks") + "\n\n"
+	view := title(t.loc("TUITasksTitle")) + "\n\n"
 
 	if len(t.tasks) == 0 {
-		return view + dimmed("No active tasks")
+		return view + dimmed(t.loc("TUIEmptyTasks"))
 	}
 
 	// Show last N tasks
@@ -69,14 +83,14 @@ func (t *taskList) View() string {
 		status := ""
 		switch task.Step {
 		case taskStepComplete:
-			status = successBadge.Render("OK")
+			status = successBadge.Render(t.loc("TUITaskOK"))
 		case taskStepFailed:
-			status = errorBadge.Render("ERR")
+			status = errorBadge.Render(t.loc("TUITaskErr"))
 		default:
 			if task.Progress > 0 {
-				status = runningBadge.Render("RUN")
+				status = runningBadge.Render(t.loc("TUITaskRun"))
 			} else {
-				status = infoBadge.Render("...")
+				status = infoBadge.Render(t.loc("TUITaskPending"))
 			}
 		}
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
 	import { GripVertical } from 'lucide-svelte';
@@ -109,7 +110,7 @@
 						onclick={() => moveUp(index)}
 						disabled={index === 0}
 						class="px-2 py-1 text-sm rounded hover:bg-accent disabled:opacity-30"
-						aria-label="Move up"
+						aria-label={m.priority_aria_move_up()}
 					>
 						↑
 					</button>
@@ -118,7 +119,7 @@
 						onclick={() => moveDown(index)}
 						disabled={index === items.length - 1}
 						class="px-2 py-1 text-sm rounded hover:bg-accent disabled:opacity-30"
-						aria-label="Move down"
+						aria-label={m.priority_aria_move_down()}
 					>
 						↓
 					</button>
@@ -127,7 +128,7 @@
 							type="button"
 							onclick={() => onRemove(item, index)}
 							class="px-2 py-1 text-sm rounded hover:bg-destructive/15 hover:text-destructive"
-							aria-label="Remove {item}"
+							aria-label={m.priority_aria_remove_item({ item })}
 						>
 							✕
 						</button>

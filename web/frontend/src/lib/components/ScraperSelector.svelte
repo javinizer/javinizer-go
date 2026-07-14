@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
 	import type { Scraper } from '$lib/api/types';
@@ -107,13 +108,13 @@
 
 <div class="border rounded-lg p-4">
 	<div class="flex items-center justify-between mb-4">
-		<h3 class="text-sm font-medium">Select Scrapers & Set Priority</h3>
+		<h3 class="text-sm font-medium">{m.scraper_select_heading()}</h3>
 		<div class="flex gap-2">
 			<Button variant="outline" size="sm" onclick={selectAll} {disabled}>
-				{#snippet children()}All{/snippet}
+				{#snippet children()}{m.scraper_all()}{/snippet}
 			</Button>
 			<Button variant="outline" size="sm" onclick={selectNone} {disabled}>
-				{#snippet children()}None{/snippet}
+				{#snippet children()}{m.scraper_none()}{/snippet}
 			</Button>
 		</div>
 	</div>
@@ -122,7 +123,7 @@
 		<!-- Selected scrapers with priority order -->
 		<div class="mb-4">
 			<div class="text-xs text-muted-foreground mb-2">
-				Priority Order (drag to reorder, higher = more priority)
+				{m.scraper_priority_order_hint()}
 			</div>
 			<div class="space-y-2">
 				{#each selectedScrapers as scraper, index (scraper.name)}
@@ -166,7 +167,7 @@
 								class="p-1 hover:bg-accent rounded transition-colors {disabled || index === 0
 									? 'opacity-30 cursor-not-allowed'
 									: 'cursor-pointer'}"
-								title="Move up"
+								title={m.scraper_move_up()}
 							>
 								<ChevronUp class="h-4 w-4" />
 							</button>
@@ -177,7 +178,7 @@
 								index === selected.length - 1
 									? 'opacity-30 cursor-not-allowed'
 									: 'cursor-pointer'}"
-								title="Move down"
+								title={m.scraper_move_down()}
 							>
 								<ChevronDown class="h-4 w-4" />
 							</button>
@@ -187,7 +188,7 @@
 								class="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded transition-colors {disabled
 									? 'opacity-30 cursor-not-allowed'
 									: 'cursor-pointer'}"
-								title="Remove"
+								title={m.scraper_remove()}
 							>
 								<X class="h-4 w-4" />
 							</button>
@@ -202,7 +203,7 @@
 		<!-- Available scrapers to add -->
 		<div>
 			<div class="text-xs text-muted-foreground mb-2">
-				{selected.length > 0 ? 'Add More Scrapers' : 'Available Scrapers'}
+				{selected.length > 0 ? m.scraper_add_more() : m.scraper_available()}
 			</div>
 			<div class="space-y-1">
 				{#each unselectedScrapers as scraper}
@@ -225,7 +226,7 @@
 
 	{#if selected.length === 0 && unselectedScrapers.length === 0}
 		<div class="text-center py-4 text-sm text-muted-foreground">
-			No scrapers available. Please enable scrapers in settings.
+			{m.scraper_none_available()}
 		</div>
 	{/if}
 </div>

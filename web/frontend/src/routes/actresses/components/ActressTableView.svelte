@@ -5,6 +5,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { Actress } from '$lib/api/types';
+	import * as m from '$lib/paraglide/messages';
 
 	let {
 		actresses,
@@ -32,13 +33,13 @@
 		<table class="w-full text-sm">
 			<thead class="bg-muted/50">
 				<tr class="text-left border-b">
-					<th class="px-3 py-2 font-medium w-10">Sel</th>
-					<th class="px-3 py-2 font-medium">ID</th>
-					<th class="px-3 py-2 font-medium">Name</th>
-					<th class="px-3 py-2 font-medium">Japanese Name</th>
-					<th class="px-3 py-2 font-medium">DMM ID</th>
-					<th class="px-3 py-2 font-medium">Aliases</th>
-					<th class="px-3 py-2 font-medium text-right">Actions</th>
+					<th class="px-3 py-2 font-medium w-10">{m.actresses_col_sel()}</th>
+					<th class="px-3 py-2 font-medium">{m.actresses_col_id()}</th>
+					<th class="px-3 py-2 font-medium">{m.actresses_col_name()}</th>
+					<th class="px-3 py-2 font-medium">{m.actresses_col_japanese_name()}</th>
+					<th class="px-3 py-2 font-medium">{m.actresses_col_dmm_id()}</th>
+					<th class="px-3 py-2 font-medium">{m.actresses_col_aliases()}</th>
+					<th class="px-3 py-2 font-medium text-right">{m.common_actions()}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -50,7 +51,7 @@
 								checked={isSelected(actress)}
 								disabled={!actress.id}
 								onchange={() => onToggleSelection(actress)}
-								aria-label="Select actress for merge"
+								aria-label={m.actresses_select_for_merge_aria()}
 								class="rounded border-input"
 							/>
 						</td>

@@ -12,6 +12,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import ProvenanceBadge from '$lib/components/ProvenanceBadge.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		isOpen: boolean;
@@ -35,8 +36,8 @@
 
 	// Format field value for display
 	function formatValue(value: string | number | boolean | null | undefined): string {
-		if (value === null || value === undefined) return 'Empty';
-		if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+		if (value === null || value === undefined) return m.nfo_value_empty();
+		if (typeof value === 'boolean') return value ? m.nfo_value_yes() : m.nfo_value_no();
 		if (typeof value === 'object') return JSON.stringify(value, null, 2);
 		return String(value);
 	}
@@ -44,8 +45,12 @@
 	// Get stats summary text
 	const statsSummary = $derived(
 		comparison?.merge_stats
-			? `${comparison.merge_stats.from_scraper} fields from scraper, ${comparison.merge_stats.from_nfo} from NFO, ${comparison.merge_stats.conflicts_resolved} conflicts resolved`
-			: 'No merge statistics available'
+			? m.nfo_stats_summary({
+					fromScraper: comparison.merge_stats.from_scraper,
+					fromNfo: comparison.merge_stats.from_nfo,
+					conflicts: comparison.merge_stats.conflicts_resolved
+			})
+			: m.nfo_no_stats()
 	);
 </script>
 
@@ -57,21 +62,21 @@
 			<!-- Header -->
 			<div class="flex items-center justify-between border-b border-border px-6 py-4">
 				<div class="flex items-center gap-3">
-					<h2 class="text-xl font-bold text-foreground">NFO Comparison</h2>
+					<h2 class="text-xl font-bold text-foreground">{m.nfo_title()}</h2>
 					{#if comparison.nfo_exists}
 						<span class="rounded-full bg-green-100 dark:bg-green-900/20 px-3 py-1 text-xs font-medium text-green-800 dark:text-green-300">
-							NFO Found
+							{m.nfo_found_badge()}
 						</span>
 					{:else}
 						<span class="rounded-full bg-yellow-100 dark:bg-yellow-900/20 px-3 py-1 text-xs font-medium text-yellow-800 dark:text-yellow-300">
-							No NFO
+							{m.nfo_no_nfo_badge()}
 						</span>
 					{/if}
 				</div>
 				<button
 					onclick={onClose}
 					class="rounded-full p-1 hover:bg-muted transition-colors"
-					aria-label="Close"
+					aria-label={m.nfo_close_aria()}
 				>
 					<X class="h-5 w-5" />
 				</button>
@@ -82,7 +87,7 @@
 				<div class="bg-blue-50 dark:bg-blue-900/10 border-b border-blue-200 dark:border-blue-800 px-6 py-3">
 					<div class="flex items-center gap-2 text-sm text-blue-900 dark:text-blue-300">
 						<Info class="h-4 w-4" />
-						<span class="font-medium">Merge Summary:</span>
+						<span class="font-medium">{m.nfo_merge_summary()}</span>
 						<span>{statsSummary}</span>
 					</div>
 				</div>
@@ -90,7 +95,7 @@
 
 			<!-- Tabs -->
 			<div class="border-b border-border">
-				<nav class="flex gap-4 px-6" aria-label="Tabs">
+				<nav class="flex gap-4 px-6" aria-label={m.nfo_tabs_aria()}>
 					<button
 						onclick={() => (activeTab = 'differences')}
 						class="border-b-2 px-1 py-3 text-sm font-medium transition-colors {activeTab ===
@@ -98,7 +103,7 @@
 							? 'border-primary text-primary'
 							: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
 					>
-						Differences
+						{m.nfo_tab_differences()}
 						{#if comparison.differences}
 							<span class="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">
 								{comparison.differences.length}
@@ -112,7 +117,7 @@
 							? 'border-primary text-primary'
 							: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
 					>
-						Statistics
+						{m.nfo_tab_statistics()}
 					</button>
 					<button
 						onclick={() => (activeTab = 'raw')}
@@ -121,7 +126,7 @@
 							? 'border-primary text-primary'
 							: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
 					>
-						Raw Data
+						{m.nfo_tab_raw()}
 					</button>
 				</nav>
 			</div>
@@ -154,7 +159,7 @@
 											<!-- NFO Value -->
 											<div class="space-y-1">
 												<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-													<span>NFO</span>
+													<span>{m.nfo_col_nfo()}</span>
 												</div>
 												<div class="rounded bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800 p-3">
 													<code class="text-sm text-foreground break-all">
@@ -171,7 +176,7 @@
 											<!-- Scraped Value -->
 											<div class="space-y-1">
 												<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-													<span>Scraper</span>
+													<span>{m.nfo_col_scraper()}</span>
 												</div>
 												<div class="rounded bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 p-3">
 													<code class="text-sm text-foreground break-all">
@@ -187,7 +192,7 @@
 												<div class="space-y-1">
 													<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
 														<Check class="h-3 w-3" />
-														<span>Merged Result</span>
+														<span>{m.nfo_merged_result()}</span>
 													</div>
 													<div class="rounded bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800 p-3">
 														<code class="text-sm text-foreground break-all">
@@ -214,10 +219,10 @@
 						<div class="text-center py-12">
 							<Check class="h-12 w-12 mx-auto text-green-500 mb-4" />
 							<p class="text-lg font-medium text-foreground mb-2">
-								No Differences Found
+								{m.nfo_no_differences()}
 							</p>
 							<p class="text-sm text-muted-foreground">
-								NFO data and scraped data are identical
+								{m.nfo_no_differences_desc()}
 							</p>
 						</div>
 					{/if}
@@ -229,7 +234,7 @@
 									<div class="text-3xl font-bold text-blue-600 dark:text-blue-400">
 										{comparison.merge_stats.total_fields}
 									</div>
-									<div class="text-sm text-muted-foreground mt-1">Total Fields</div>
+									<div class="text-sm text-muted-foreground mt-1">{m.nfo_stat_total_fields()}</div>
 								</div>
 							</Card>
 
@@ -238,7 +243,7 @@
 									<div class="text-3xl font-bold text-green-600 dark:text-green-400">
 										{comparison.merge_stats.from_scraper}
 									</div>
-									<div class="text-sm text-muted-foreground mt-1">From Scraper</div>
+									<div class="text-sm text-muted-foreground mt-1">{m.nfo_stat_from_scraper()}</div>
 								</div>
 							</Card>
 
@@ -247,7 +252,7 @@
 									<div class="text-3xl font-bold text-teal-600 dark:text-teal-400">
 										{comparison.merge_stats.from_nfo}
 									</div>
-									<div class="text-sm text-muted-foreground mt-1">From NFO</div>
+									<div class="text-sm text-muted-foreground mt-1">{m.nfo_stat_from_nfo()}</div>
 								</div>
 							</Card>
 
@@ -256,7 +261,7 @@
 									<div class="text-3xl font-bold text-purple-600 dark:text-purple-400">
 										{comparison.merge_stats.merged_arrays}
 									</div>
-									<div class="text-sm text-muted-foreground mt-1">Merged Arrays</div>
+									<div class="text-sm text-muted-foreground mt-1">{m.nfo_stat_merged_arrays()}</div>
 								</div>
 							</Card>
 
@@ -265,7 +270,7 @@
 									<div class="text-3xl font-bold text-orange-600 dark:text-orange-400">
 										{comparison.merge_stats.conflicts_resolved}
 									</div>
-									<div class="text-sm text-muted-foreground mt-1">Conflicts Resolved</div>
+									<div class="text-sm text-muted-foreground mt-1">{m.nfo_stat_conflicts()}</div>
 								</div>
 							</Card>
 
@@ -274,7 +279,7 @@
 									<div class="text-3xl font-bold text-muted-foreground">
 										{comparison.merge_stats.empty_fields}
 									</div>
-									<div class="text-sm text-muted-foreground mt-1">Empty Fields</div>
+									<div class="text-sm text-muted-foreground mt-1">{m.nfo_stat_empty()}</div>
 								</div>
 							</Card>
 						</div>
@@ -282,10 +287,10 @@
 						<div class="text-center py-12">
 							<CircleAlert class="h-12 w-12 mx-auto text-muted-foreground mb-4" />
 							<p class="text-lg font-medium text-foreground mb-2">
-								No Statistics Available
+								{m.nfo_no_stats_available()}
 							</p>
 							<p class="text-sm text-muted-foreground">
-								Merge statistics will be available after merging
+								{m.nfo_no_stats_desc()}
 							</p>
 						</div>
 					{/if}
@@ -293,7 +298,7 @@
 					<div class="space-y-4">
 						{#if comparison.nfo_data}
 							<div>
-								<h3 class="text-sm font-medium text-foreground mb-2">NFO Data</h3>
+								<h3 class="text-sm font-medium text-foreground mb-2">{m.nfo_raw_nfo_data()}</h3>
 								<div class="rounded-lg bg-muted/50 p-4 overflow-x-auto">
 									<pre class="text-xs text-foreground"><code>{JSON.stringify(
 										comparison.nfo_data,
@@ -307,7 +312,7 @@
 						{#if comparison.scraped_data}
 							<div>
 								<h3 class="text-sm font-medium text-foreground mb-2">
-									Scraped Data
+									{m.nfo_raw_scraped_data()}
 								</h3>
 								<div class="rounded-lg bg-muted/50 p-4 overflow-x-auto">
 									<pre class="text-xs text-foreground"><code>{JSON.stringify(
@@ -322,7 +327,7 @@
 						{#if comparison.merged_data}
 							<div>
 								<h3 class="text-sm font-medium text-foreground mb-2">
-									Merged Data
+									{m.nfo_raw_merged_data()}
 								</h3>
 								<div class="rounded-lg bg-muted/50 p-4 overflow-x-auto">
 									<pre class="text-xs text-foreground"><code>{JSON.stringify(
@@ -345,9 +350,9 @@
 					{/if}
 				</div>
 				<div class="flex gap-3">
-					<Button variant="secondary" onclick={onClose}>Close</Button>
+					<Button variant="secondary" onclick={onClose}>{m.common_close()}</Button>
 					{#if onApplyMerge && comparison.merged_data}
-						<Button variant="default" onclick={onApplyMerge}>Apply Merge</Button>
+						<Button variant="default" onclick={onApplyMerge}>{m.nfo_apply_merge()}</Button>
 					{/if}
 				</div>
 			</div>

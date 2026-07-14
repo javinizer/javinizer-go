@@ -7,6 +7,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	type ScalarStrategy = '' | 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only' | 'merge-arrays';
 
@@ -64,9 +65,9 @@
 				<div class="p-6 border-b flex items-center justify-between">
 					<h2 class="text-xl font-bold">
 					{#if bulkMovieCount}
-						Rescrape {bulkMovieCount} movie{bulkMovieCount !== 1 ? 's' : ''}
+						{m.review_rescrape_movies_title({ count: bulkMovieCount })}
 					{:else}
-						{manualSearchMode ? 'Manual Search' : `Rescrape ${rescrapeMovieName || rescrapeMovieId}`}
+						{manualSearchMode ? m.review_manual_search_title() : m.review_rescrape_movie_title({ name: rescrapeMovieName || rescrapeMovieId })}
 					{/if}
 				</h2>
 					<Button variant="ghost" size="icon" onclick={close} disabled={rescraping}>
@@ -83,13 +84,13 @@
 							onclick={() => (manualSearchMode = false)}
 							class="flex-1 px-4 py-2 rounded transition-all {!manualSearchMode ? 'bg-card shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}"
 						>
-							Rescrape from File
+							{m.review_rescrape_from_file()}
 						</button>
 						<button
 							onclick={() => (manualSearchMode = true)}
 							class="flex-1 px-4 py-2 rounded transition-all {manualSearchMode ? 'bg-card shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}"
 						>
-							Manual Search
+							{m.review_manual_search_title()}
 						</button>
 					</div>
 					{/if}
@@ -98,23 +99,23 @@
 						<div class="space-y-4">
 							<div>
 								<label for="manual-search-input" class="text-sm font-medium mb-2 block">
-									DVD ID, Content ID, or Direct URL
+									{m.review_search_input_label()}
 								</label>
 								<input
 									id="manual-search-input"
 									type="text"
 									bind:value={manualSearchInput}
-									placeholder="e.g., IPX-123 or https://www.dmm.co.jp/..."
+									placeholder={m.review_search_input_placeholder()}
 									class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 								/>
 								<p class="text-xs text-muted-foreground mt-2">
-									Enter a DVD ID (e.g., IPX-123), content ID (e.g., ipx00535), or a direct URL from DMM or R18.dev
+									{m.review_search_input_hint()}
 								</p>
 							</div>
 
 							<div>
 								<p class="text-sm text-muted-foreground mb-4">
-									Select which scrapers to use. The results will be aggregated according to your configured priorities.
+									{m.review_select_scrapers_aggregate()}
 								</p>
 
 								<ScraperSelector
@@ -139,18 +140,18 @@
 
 					<div class="mt-6 space-y-4">
 						<div>
-							<h3 class="font-semibold mb-2">NFO Merge Strategy</h3>
+							<h3 class="font-semibold mb-2">{m.browse_nfo_merge_strategy()}</h3>
 							<p class="text-sm text-muted-foreground mb-3">
-								Choose how to merge existing NFO data with freshly scraped data. Leave empty to replace all data.
+								{m.review_nfo_merge_strategy_desc()}
 							</p>
 						</div>
 
 						<div class="space-y-2">
 							<div class="flex items-center justify-between">
-								<h4 class="text-sm font-medium">Quick Presets</h4>
+								<h4 class="text-sm font-medium">{m.browse_quick_presets()}</h4>
 								{#if rescrapePreset}
 									<button onclick={() => (rescrapePreset = undefined)} class="text-xs text-primary hover:underline">
-										Clear preset
+										{m.browse_clear_preset()}
 									</button>
 								{/if}
 							</div>
@@ -159,28 +160,28 @@
 									onclick={() => onApplyPreset('conservative')}
 									class="p-3 rounded-lg border-2 text-sm transition-all {rescrapePreset === 'conservative' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 								>
-									<div class="font-medium">🛡️ Conservative</div>
-									<div class="text-xs text-muted-foreground mt-1">Never overwrite existing</div>
+									<div class="font-medium">{m.browse_preset_conservative()}</div>
+									<div class="text-xs text-muted-foreground mt-1">{m.browse_preset_conservative_desc()}</div>
 								</button>
 								<button
 									onclick={() => onApplyPreset('gap-fill')}
 									class="p-3 rounded-lg border-2 text-sm transition-all {rescrapePreset === 'gap-fill' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 								>
-									<div class="font-medium">📝 Gap Fill</div>
-									<div class="text-xs text-muted-foreground mt-1">Fill missing fields only</div>
+									<div class="font-medium">{m.browse_preset_gap_fill()}</div>
+									<div class="text-xs text-muted-foreground mt-1">{m.browse_preset_gap_fill_desc()}</div>
 								</button>
 								<button
 									onclick={() => onApplyPreset('aggressive')}
 									class="p-3 rounded-lg border-2 text-sm transition-all {rescrapePreset === 'aggressive' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 								>
-									<div class="font-medium">⚡ Aggressive</div>
-									<div class="text-xs text-muted-foreground mt-1">Trust scrapers completely</div>
+									<div class="font-medium">{m.browse_preset_aggressive()}</div>
+									<div class="text-xs text-muted-foreground mt-1">{m.browse_preset_aggressive_desc()}</div>
 								</button>
 							</div>
 						</div>
 
 						<div class="space-y-2">
-							<h4 class="text-sm font-medium">Or Choose Individual Strategies</h4>
+							<h4 class="text-sm font-medium">{m.review_or_choose_individual()}</h4>
 							<div class="grid grid-cols-2 gap-2">
 								<button
 									onclick={() => {
@@ -189,8 +190,8 @@
 									}}
 									class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'prefer-nfo' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 								>
-									<div class="font-medium">Prefer NFO</div>
-									<div class="text-xs text-muted-foreground mt-1">Keep existing data</div>
+									<div class="font-medium">{m.browse_prefer_nfo()}</div>
+									<div class="text-xs text-muted-foreground mt-1">{m.review_prefer_nfo_desc()}</div>
 								</button>
 								<button
 									onclick={() => {
@@ -199,8 +200,8 @@
 									}}
 									class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'prefer-scraper' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 								>
-									<div class="font-medium">Prefer Scraped</div>
-									<div class="text-xs text-muted-foreground mt-1">Update with fresh data</div>
+									<div class="font-medium">{m.browse_prefer_scraped()}</div>
+									<div class="text-xs text-muted-foreground mt-1">{m.browse_prefer_scraped_desc()}</div>
 								</button>
 								<button
 									onclick={() => {
@@ -209,8 +210,8 @@
 									}}
 									class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'preserve-existing' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 								>
-									<div class="font-medium">Preserve Existing</div>
-									<div class="text-xs text-muted-foreground mt-1">Never overwrite</div>
+									<div class="font-medium">{m.browse_preserve_existing()}</div>
+									<div class="text-xs text-muted-foreground mt-1">{m.browse_preserve_existing_desc()}</div>
 								</button>
 								<button
 									onclick={() => {
@@ -219,8 +220,8 @@
 									}}
 									class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'fill-missing-only' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 								>
-									<div class="font-medium">Fill Missing Only</div>
-									<div class="text-xs text-muted-foreground mt-1">Safe gap filling</div>
+									<div class="font-medium">{m.browse_fill_missing_only()}</div>
+									<div class="text-xs text-muted-foreground mt-1">{m.browse_fill_missing_only_desc()}</div>
 								</button>
 								<button
 									onclick={() => {
@@ -229,8 +230,8 @@
 									}}
 									class="p-3 rounded-lg border-2 text-sm transition-all col-span-2 {rescrapeScalarStrategy === '' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 								>
-									<div class="font-medium">Replace All</div>
-									<div class="text-xs text-muted-foreground mt-1">Fresh scrape only (ignore existing NFO)</div>
+									<div class="font-medium">{m.review_replace_all()}</div>
+									<div class="text-xs text-muted-foreground mt-1">{m.review_replace_all_desc()}</div>
 								</button>
 							</div>
 						</div>
@@ -239,7 +240,7 @@
 
 				<div class="p-6 border-t flex items-center justify-end gap-3">
 					<Button variant="outline" onclick={close} disabled={rescraping}>
-						{#snippet children()}Cancel{/snippet}
+						{#snippet children()}{m.common_cancel()}{/snippet}
 					</Button>
 					<Button
 						onclick={() => onExecute({ manualSearchMode, manualSearchInput })}
@@ -248,10 +249,10 @@
 						{#snippet children()}
 							{#if rescraping}
 								<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
-								{bulkMovieCount ? `Rescraping ${bulkMovieCount} movies...` : (manualSearchMode ? 'Scraping...' : 'Rescraping...')}
+								{bulkMovieCount ? m.review_rescraping_count_movies({ count: bulkMovieCount }) : (manualSearchMode ? m.review_scraping() : m.review_rescraping())}
 							{:else}
 								<RotateCcw class="h-4 w-4 mr-2" />
-								{bulkMovieCount ? `Rescrape ${bulkMovieCount} movies` : (manualSearchMode ? 'Search' : 'Rescrape')}
+								{bulkMovieCount ? m.review_rescrape_count_movies({ count: bulkMovieCount }) : (manualSearchMode ? m.review_search_button() : m.review_rescrape_button())}
 							{/if}
 						{/snippet}
 					</Button>

@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { apiClient } from '$lib/api/client';
 	import { formatBytes } from '$lib/utils';
+	import { formatDate } from '$lib/i18n/format';
 	import { splitPath, buildPathUp, buildBreadcrumbPath, isRootPath } from '$lib/utils/path';
 	import type { FileInfo, BrowseResponse } from '$lib/api/types';
 	import {
@@ -24,6 +25,7 @@
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 	import PathInput from './PathInput.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		initialPath?: string;
@@ -233,9 +235,9 @@
 				onFileSelect?.(externalSelectedFiles);
 			}
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : 'Failed to browse directory';
+			const msg = e instanceof Error ? e.message : m.filebrowser_browse_failed();
 			if (scope === 'operation' && (msg.includes('allowed directories') || msg.includes('403'))) {
-				error = 'This path is outside your allowed directories. Add it in Settings → Security.';
+				error = m.common_path_outside_allowed();
 			} else {
 				error = msg;
 			}
@@ -396,20 +398,20 @@
 	}
 
 	// Format date for display
-	function formatDate(dateStr: string): string {
+	function formatFileDate(dateStr: string): string {
 		const date = new Date(dateStr);
 		const now = new Date();
 		const diff = now.getTime() - date.getTime();
 		const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
 		if (days === 0) {
-			return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+			return formatDate(date, { hour: '2-digit', minute: '2-digit' });
 		} else if (days === 1) {
-			return 'Yesterday';
+			return m.filebrowser_yesterday();
 		} else if (days < 7) {
-			return date.toLocaleDateString([], { weekday: 'short' });
+			return formatDate(date, { weekday: 'short' });
 		} else {
-			return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+			return formatDate(date, { month: 'short', day: 'numeric', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
 		}
 	}
 </script>
@@ -417,19 +419,19 @@
 <Card class="p-4">
 	<!-- Path Navigation Bar -->
 	<div class="flex items-center gap-2 mb-4 pb-4 border-b">
-		<Button variant="ghost" size="icon" onclick={() => browse('/')} title="Go to root">
+		<Button variant="ghost" size="icon" onclick={() => browse('/')} title={m.filebrowser_go_root()}>
 			{#snippet children()}
 				<House class="h-4 w-4" />
 			{/snippet}
 		</Button>
 
-		<Button variant="ghost" size="icon" onclick={goUp} disabled={!currentPath || isRootPath(currentPath)} title="Go up">
+		<Button variant="ghost" size="icon" onclick={goUp} disabled={!currentPath || isRootPath(currentPath)} title={m.filebrowser_go_up()}>
 			{#snippet children()}
 				<span class="text-lg">↑</span>
 			{/snippet}
 		</Button>
 
-		<Button variant="ghost" size="icon" onclick={() => browse(currentPath)} title="Refresh">
+		<Button variant="ghost" size="icon" onclick={() => browse(currentPath)} title={m.common_refresh()}>
 			{#snippet children()}
 				<RefreshCw class="h-4 w-4" />
 			{/snippet}
@@ -460,14 +462,14 @@
 				<input
 					type="text"
 					bind:value={filterText}
-					placeholder="Filter files and folders..."
+					placeholder={m.filebrowser_filter_placeholder()}
 					class="w-full pl-10 pr-10 py-2 border rounded-md text-sm focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 				/>
 				{#if filterText}
 					<button
 						onclick={clearFilter}
 						class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-						title="Clear filter"
+						title={m.filebrowser_filter_clear()}
 					>
 						<X class="h-4 w-4" />
 					</button>
@@ -475,7 +477,7 @@
 			</div>
 			{#if filterText}
 				<div class="mt-2 text-xs text-muted-foreground">
-					Showing {folderCount} folder{folderCount !== 1 ? 's' : ''} and {fileCount} file{fileCount !== 1 ? 's' : ''} matching "{filterText}"
+					{m.filebrowser_filter_summary({ folders: m.common_folder_count({ count: folderCount }), files: m.common_file_count({ count: fileCount }), filter: filterText })}
 				</div>
 			{/if}
 		</div>
@@ -485,7 +487,7 @@
 	{#if items.length > 0 && !folderOnly}
 		<div class="mb-4 pb-4 border-b flex items-center justify-between gap-4">
 			<div class="flex items-center gap-2">
-				<span class="text-xs text-muted-foreground font-medium">Sort by:</span>
+				<span class="text-xs text-muted-foreground font-medium">{m.filebrowser_sort_by()}</span>
 				<div class="flex items-center gap-1">
 					<button
 						onclick={() => toggleSort('name')}
@@ -493,7 +495,7 @@
 							{sortField === 'name' ? 'bg-primary text-primary-foreground' : 'bg-accent hover:bg-accent/80'}"
 					>
 						<ArrowUpDown class="h-3 w-3" />
-						Name
+						{m.filebrowser_sort_name()}
 						{#if sortField === 'name'}
 							{#if sortDirection === 'asc'}
 								<ArrowUp class="h-3 w-3" />
@@ -508,7 +510,7 @@
 							{sortField === 'mod_time' ? 'bg-primary text-primary-foreground' : 'bg-accent hover:bg-accent/80'}"
 					>
 						<Calendar class="h-3 w-3" />
-						Modified
+						{m.filebrowser_sort_modified()}
 						{#if sortField === 'mod_time'}
 							{#if sortDirection === 'asc'}
 								<ArrowUp class="h-3 w-3" />
@@ -523,7 +525,7 @@
 							{sortField === 'size' ? 'bg-primary text-primary-foreground' : 'bg-accent hover:bg-accent/80'}"
 					>
 						<HardDrive class="h-3 w-3" />
-						Size
+						{m.filebrowser_sort_size()}
 						{#if sortField === 'size'}
 							{#if sortDirection === 'asc'}
 								<ArrowUp class="h-3 w-3" />
@@ -539,14 +541,14 @@
 				<div class="flex items-center justify-between gap-3">
 					<div class="flex items-center gap-3">
 						{#if visibleSelectedCount > 0}
-							<span class="text-xs text-primary font-medium">{visibleSelectedCount} selected</span>
+							<span class="text-xs text-primary font-medium">{m.filebrowser_selected_count({ count: visibleSelectedCount })}</span>
 						{/if}
 					</div>
 					<div class="flex items-center gap-2">
 						<Button variant="outline" size="sm" onclick={selectAll} disabled={selectableFileCount === 0 && folderCount === 0}>
 							{#snippet children()}
 								<CheckSquare class="h-3.5 w-3.5 mr-1.5" />
-								Select All
+								{m.filebrowser_select_all()}
 							{/snippet}
 						</Button>
 						{#if matchedCount > 0}
@@ -558,7 +560,7 @@
 							>
 								{#snippet children()}
 									<CheckCheck class="h-3.5 w-3.5 mr-1.5" />
-									Select Matched
+									{m.filebrowser_select_matched()}
 								{/snippet}
 							</Button>
 						{/if}
@@ -570,7 +572,7 @@
 						>
 							{#snippet children()}
 								<Square class="h-3.5 w-3.5 mr-1.5" />
-								Clear
+								{m.common_clear()}
 							{/snippet}
 						</Button>
 					</div>
@@ -583,7 +585,7 @@
 	{#if items.length > 0 && totalPages > 1}
 		<div class="mb-4 pb-4 border-b flex items-center justify-between gap-4">
 			<span class="text-xs text-muted-foreground">
-				Page {currentPage} of {totalPages} ({sortedAndFilteredItems.length} items)
+				{m.filebrowser_page_of({ current: currentPage, total: totalPages, items: m.filebrowser_items_count({ count: sortedAndFilteredItems.length }) })}
 			</span>
 			<div class="flex items-center gap-2">
 				<Button variant="outline" size="sm" onclick={() => currentPage = 1} disabled={currentPage === 1}>
@@ -610,7 +612,7 @@
 		{#if loading}
 			<div class="text-center py-8 text-muted-foreground">
 				<RefreshCw class="h-8 w-8 animate-spin mx-auto mb-2" />
-				<p>Loading...</p>
+				<p>{m.common_loading()}</p>
 			</div>
 		{:else if error}
 			<div class="text-center py-8 text-destructive">
@@ -618,13 +620,13 @@
 			</div>
 		{:else if items.length === 0}
 			<div class="text-center py-8 text-muted-foreground">
-				<p>Empty directory</p>
+				<p>{m.filebrowser_empty_dir()}</p>
 			</div>
 		{:else if sortedAndFilteredItems.length === 0}
 			<div class="text-center py-8 text-muted-foreground">
-				<p>No files or folders match "{filterText}"</p>
+				<p>{m.filebrowser_no_match({ filter: filterText })}</p>
 				<button onclick={clearFilter} class="text-primary hover:underline text-sm mt-2">
-					Clear filter
+					{m.filebrowser_filter_clear()}
 				</button>
 			</div>
 		{:else}
@@ -651,7 +653,7 @@
 								{item.name}
 							</div>
 							<div class="text-xs text-muted-foreground mt-0.5">
-								{formatDate(item.mod_time)}
+								{formatFileDate(item.mod_time)}
 							</div>
 						</div>
 					</button>
@@ -666,7 +668,7 @@
 								{item.name}
 							</div>
 							<div class="text-xs text-muted-foreground mt-0.5">
-								{formatBytes(item.size)} • {formatDate(item.mod_time)}
+								{formatBytes(item.size)} • {formatFileDate(item.mod_time)}
 								{#if item.movie_id}
 									<span class="ml-2 text-green-600/50 font-medium">• {item.movie_id}</span>
 								{/if}
@@ -695,7 +697,7 @@
 								{item.name}
 							</div>
 							<div class="text-xs text-muted-foreground mt-0.5">
-								{formatBytes(item.size)} • {formatDate(item.mod_time)}
+								{formatBytes(item.size)} • {formatFileDate(item.mod_time)}
 								{#if item.movie_id}
 									<span class="ml-2 text-green-600 font-medium">• {item.movie_id}</span>
 								{/if}
@@ -712,7 +714,7 @@
 								{item.name}
 							</div>
 							<div class="text-xs text-muted-foreground mt-0.5">
-								{formatBytes(item.size)} • {formatDate(item.mod_time)}
+								{formatBytes(item.size)} • {formatFileDate(item.mod_time)}
 							</div>
 						</div>
 					</div>
@@ -723,7 +725,7 @@
 			{#if totalPages > 1}
 				<div class="flex items-center justify-between pt-4 border-t mt-4">
 					<span class="text-xs text-muted-foreground">
-						Page {currentPage} of {totalPages} ({sortedAndFilteredItems.length} items)
+						{m.filebrowser_page_of({ current: currentPage, total: totalPages, items: m.filebrowser_items_count({ count: sortedAndFilteredItems.length }) })}
 					</span>
 					<div class="flex items-center gap-2">
 						<Button variant="outline" size="sm" onclick={() => currentPage = 1} disabled={currentPage === 1}>

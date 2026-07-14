@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { cubicOut } from 'svelte/easing';
 	import { fade, fly } from 'svelte/transition';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
@@ -73,11 +74,11 @@
 		onSuccess: (_data, { original, replacement }) => {
 			newOriginal = '';
 			newReplacement = '';
-			toastStore.success(`Word replacement "${original}" → "${replacement}" added`, 3000);
+			toastStore.success(m.words_added({ original, replacement }), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['word-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to add word replacement', 4000);
+			toastStore.error(err.message || m.words_add_failed(), 4000);
 		}
 	}));
 
@@ -85,22 +86,22 @@
 		mutationFn: (req: WordReplacementUpdateRequest) => apiClient.updateWordReplacement(req),
 		onSuccess: (_data, { original, replacement }) => {
 			editingId = null;
-			toastStore.success(`Word replacement updated: "${original}" → "${replacement}"`, 3000);
+			toastStore.success(m.words_updated({ original, replacement }), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['word-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to update word replacement', 4000);
+			toastStore.error(err.message || m.words_update_failed(), 4000);
 		}
 	}));
 
 		const deleteMutation = createMutation(() => ({
 		mutationFn: (id: number) => apiClient.deleteWordReplacement(id),
 		onSuccess: () => {
-			toastStore.success('Word replacement removed', 3000);
+			toastStore.success(m.words_removed(), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['word-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to delete word replacement', 4000);
+			toastStore.error(err.message || m.words_delete_failed(), 4000);
 		}
 	}));
 
@@ -116,10 +117,10 @@
 			a.click();
 			document.body.removeChild(a);
 			URL.revokeObjectURL(url);
-			toastStore.success(`Exported ${data.length} word replacement(s)`, 3000);
+			toastStore.success(m.words_exported({ count: data.length }), 3000);
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to export word replacements', 4000);
+			toastStore.error(err.message || m.words_export_failed(), 4000);
 		}
 	}));
 
@@ -127,11 +128,11 @@
 		mutationFn: (payload: { replacements: { original: string; replacement: string }[]; includeDefaults: boolean }) =>
 			apiClient.importWordReplacements(payload),
 		onSuccess: (res: ImportResponse) => {
-			toastStore.success(`Import complete — Imported: ${res.imported}, Skipped: ${res.skipped}, Errors: ${res.errors}`, 5000);
+			toastStore.success(m.words_import_complete({ imported: res.imported, skipped: res.skipped, errors: res.errors }), 5000);
 			void queryClient.invalidateQueries({ queryKey: ['word-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to import word replacements', 4000);
+			toastStore.error(err.message || m.words_import_failed(), 4000);
 		}
 	}));
 
@@ -139,7 +140,7 @@
 		const original = newOriginal.trim();
 		const replacement = newReplacement.trim();
 		if (!original || !replacement) {
-			toastStore.error('Both original and replacement fields are required', 4000);
+			toastStore.error(m.words_both_fields_required(), 4000);
 			return;
 		}
 		addMutation.mutate({ original, replacement });
@@ -164,7 +165,7 @@
 	function saveEdit(rep: WordReplacement) {
 		const r = editReplacement.trim();
 		if (!r) {
-			toastStore.error('Both fields are required', 4000);
+			toastStore.error(m.words_both_fields_required_edit(), 4000);
 			return;
 		}
 		updateMutation.mutate({ original: rep.original, replacement: r });
@@ -211,24 +212,24 @@
 		try {
 			const text = await file.text();
 			const parsed: WordReplacement[] = JSON.parse(text);
-			if (!Array.isArray(parsed)) throw new Error('Expected a JSON array');
+			if (!Array.isArray(parsed)) throw new Error(m.words_expected_json_array());
 
 			const replacements = parsed
 				.filter(r => r.original && r.original.trim())
 				.map(r => ({ original: r.original.trim(), replacement: (r.replacement || '').trim() }));
 
 			if (replacements.length === 0) {
-				toastStore.error('No valid replacements in file', 4000);
+				toastStore.error(m.words_no_valid_in_file(), 4000);
 				return;
 			}
 
-			const includeDefaults = confirm('Import default word replacements too? Click OK to include defaults, Cancel to skip them.');
+			const includeDefaults = confirm(m.words_import_defaults_confirm());
 
-			if (!confirm(`Import ${replacements.length} word replacement(s)?`)) return;
+			if (!confirm(m.words_import_confirm({ count: replacements.length }))) return;
 
 			importMutation.mutate({ replacements, includeDefaults });
 		} catch (err) {
-			toastStore.error(`Invalid JSON file: ${err instanceof Error ? err.message : String(err)}`, 4000);
+			toastStore.error(m.words_invalid_json({ error: err instanceof Error ? err.message : String(err) }), 4000);
 		}
 
 		target.value = '';
@@ -252,10 +253,10 @@
 				<div>
 					<div class="flex items-center gap-2">
 						<Type class="h-6 w-6 text-primary" />
-						<h1 class="text-3xl font-bold">Word Replacements</h1>
+						<h1 class="text-3xl font-bold">{m.words_title()}</h1>
 					</div>
 					<p class="text-muted-foreground mt-1">
-						Manage word replacements for uncensoring metadata strings
+						{m.words_subtitle()}
 					</p>
 				</div>
 			</div>
@@ -278,7 +279,7 @@
 					{:else}
 						<Download class="h-4 w-4 mr-1" />
 					{/if}
-					Export
+					{m.words_export()}
 				</Button>
 				<Button
 					variant="outline"
@@ -291,7 +292,7 @@
 					{:else}
 						<Upload class="h-4 w-4 mr-1" />
 					{/if}
-					Import
+					{m.words_import()}
 				</Button>
 			</div>
 		</div>
@@ -299,32 +300,32 @@
 		{#if error}
 			<div in:fly|local={{ y: 8, duration: 180 }}>
 				<Card class="p-4 border-destructive bg-destructive/10 text-destructive">
-					Failed to load word replacements: {error}
+					{m.words_load_failed({ error })}
 				</Card>
 			</div>
 		{:else}
 			<div in:fly|local={{ y: 8, duration: 180, delay: 60 }}>
 				<Card class="p-5">
-					<p class="text-sm font-medium mb-3">Add a new word replacement rule</p>
+					<p class="text-sm font-medium mb-3">{m.words_add_rule_heading()}</p>
 					<div class="flex flex-col sm:flex-row items-start gap-3">
 						<div class="flex-1 w-full sm:w-auto">
-							<label for="word-original" class="block text-xs font-medium text-muted-foreground mb-1">Original</label>
+							<label for="word-original" class="block text-xs font-medium text-muted-foreground mb-1">{m.words_original_label()}</label>
 							<input
 								id="word-original"
 								type="text"
 								bind:value={newOriginal}
-								placeholder="e.g., R**e"
+								placeholder={m.words_original_ph()}
 								onkeydown={handleAddKeydown}
 								class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
 						</div>
 						<div class="flex-1 w-full sm:w-auto">
-							<label for="word-replacement" class="block text-xs font-medium text-muted-foreground mb-1">Replacement</label>
+							<label for="word-replacement" class="block text-xs font-medium text-muted-foreground mb-1">{m.words_replacement_label()}</label>
 							<input
 								id="word-replacement"
 								type="text"
 								bind:value={newReplacement}
-								placeholder="e.g., Rape"
+								placeholder={m.words_replacement_ph()}
 								onkeydown={handleAddKeydown}
 								class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
@@ -341,7 +342,7 @@
 								{:else}
 									<Plus class="h-4 w-4 mr-1" />
 								{/if}
-								Add
+								{m.common_add()}
 							</Button>
 						</div>
 					</div>
@@ -352,11 +353,11 @@
 				{#if loading}
 					<Card class="p-8 text-center text-muted-foreground">
 						<Loader2 class="h-5 w-5 animate-spin mx-auto mb-2" />
-						Loading word replacements...
+						{m.words_loading_replacements()}
 					</Card>
 				{:else if replacements.length === 0}
 					<Card class="p-8 text-center">
-						<p class="text-muted-foreground">No word replacements configured yet. Add one above.</p>
+						<p class="text-muted-foreground">{m.words_none_configured()}</p>
 					</Card>
 				{:else}
 					<div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-3">
@@ -365,7 +366,7 @@
 							<input
 								type="text"
 								bind:value={searchQuery}
-								placeholder="Search by original or replacement..."
+								placeholder={m.words_search_ph()}
 								class="w-full pl-9 pr-8 rounded-md border border-input bg-background py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
 							{#if searchQuery}
@@ -373,7 +374,7 @@
 									type="button"
 									class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
 									onclick={clearSearch}
-									title="Clear search"
+									title={m.words_clear_search()}
 								>
 									<X class="h-3.5 w-3.5" />
 								</button>
@@ -383,7 +384,7 @@
 							type="button"
 							class="inline-flex items-center gap-1 px-2.5 py-2 text-sm border border-input rounded-md bg-background hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
 							onclick={toggleSort}
-							title="Toggle sort order"
+							title={m.words_toggle_sort()}
 						>
 							{#if sortDirection === 'asc'}
 								<ArrowDownUp class="h-4 w-4" />
@@ -398,15 +399,15 @@
 						<div class="relative" style="max-height: 560px; overflow-y: auto;">
 							<div class="sticky top-0 z-10">
 								<div class="grid grid-cols-[1fr_1fr_auto] gap-0 text-sm py-3 px-4 font-medium text-muted-foreground border-b border-border bg-card/95 backdrop-blur">
-									<div>Original</div>
-									<div>Replacement</div>
-									<div class="w-20 text-center">Actions</div>
+									<div>{m.words_col_original()}</div>
+									<div>{m.words_col_replacement()}</div>
+									<div class="w-20 text-center">{m.words_col_actions()}</div>
 								</div>
 							</div>
 							<div class="min-h-0">
 								{#if filteredAndSorted.length === 0 && searchQuery.trim()}
 									<div class="py-12 text-center text-muted-foreground text-sm">
-										No replacements match "{searchQuery}"
+										{m.words_no_match_search({ query: searchQuery })}
 									</div>
 								{:else}
 									{#each filteredAndSorted as rep (rep.id)}
@@ -439,7 +440,7 @@
 															{:else}
 																<Check class="h-3 w-3" />
 															{/if}
-															Save
+															{m.words_save()}
 														</button>
 														<button
 															type="button"
@@ -447,7 +448,7 @@
 															onclick={cancelEdit}
 														>
 															<X class="h-3 w-3" />
-															Cancel
+															{m.common_cancel()}
 														</button>
 													</div>
 												</div>
@@ -463,7 +464,7 @@
 													<button
 														type="button"
 														class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-														title="Edit"
+														title={m.words_edit()}
 														onclick={() => startEdit(rep)}
 													>
 														<Pencil class="h-4 w-4" />
@@ -471,7 +472,7 @@
 													<button
 														type="button"
 														class="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
-														title="Delete"
+														title={m.words_delete()}
 																				onclick={() => handleDelete(rep.id)}
 													>
 														<Trash2 class="h-4 w-4" />
@@ -487,11 +488,11 @@
 
 					{#if searchQuery.trim()}
 						<p class="text-xs text-muted-foreground pt-1">
-							Showing {filteredAndSorted.length} of {replacements.length} replacements
+							{m.words_showing_of({ shown: filteredAndSorted.length, total: replacements.length })}
 						</p>
 					{:else}
 						<p class="text-xs text-muted-foreground pt-1">
-							{replacements.length} replacement{replacements.length !== 1 ? 's' : ''} configured
+							{m.words_replacements_configured({ count: replacements.length })}
 						</p>
 					{/if}
 				{/if}
@@ -499,7 +500,7 @@
 
 			<div class="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
 				<p class="text-xs text-muted-foreground">
-					Replacements take effect on the next scrape. Existing movies are not retroactively updated.
+					{m.words_next_scrape_note()}
 				</p>
 			</div>
 		{/if}

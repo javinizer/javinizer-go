@@ -304,7 +304,7 @@ func TestErrorCode_String(t *testing.T) {
 		{CodeAllowedDirsEmpty, "ALLOWED_DIRS_EMPTY"},
 		{CodePathOutsideAllowed, "PATH_OUTSIDE_ALLOWED_DIRS"},
 		{CodePathInDenylist, "PATH_IN_DENYLIST"},
-		{CodePathNotExist, "PATH_NOT_EXIST"},
+		{CodePathNotExist, "PATH_NOT_FOUND"},
 		{CodePathNotDir, "PATH_NOT_DIR"},
 		{CodePathInvalid, "PATH_INVALID"},
 		{CodePathUnresolvable, "PATH_UNRESOLVABLE"},

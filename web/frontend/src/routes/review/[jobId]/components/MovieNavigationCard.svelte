@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ChevronLeft, ChevronRight, CircleAlert, Trash2 } from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 
@@ -41,14 +42,14 @@
 		>
 			{#snippet children()}
 				<ChevronLeft class="h-4 w-4 mr-2" />
-				Previous
+				{m.review_previous()}
 			{/snippet}
 		</Button>
 
 		<div class="text-center flex-1 mx-4">
-			<p class="font-semibold">Movie {currentMovieIndex + 1} of {movieResultsLength}</p>
+			<p class="font-semibold">{m.review_movie_position({ current: currentMovieIndex + 1, total: movieResultsLength })}</p>
 			<div class="mt-2 flex items-center justify-center gap-2">
-				<label for="movie-page-select" class="text-xs text-muted-foreground">Page</label>
+				<label for="movie-page-select" class="text-xs text-muted-foreground">{m.review_page_label()}</label>
 				<select
 					id="movie-page-select"
 					class="h-8 rounded-md border border-input bg-background px-2 text-sm"
@@ -64,7 +65,7 @@
 			{#if hasChanges}
 				<span class="text-xs text-orange-600 flex items-center gap-1 justify-center mt-1">
 					<CircleAlert class="h-3 w-3" />
-					Modified
+					{m.review_modified()}
 				</span>
 			{/if}
 		</div>
@@ -77,7 +78,7 @@
 			>
 				{#snippet children()}
 					<Trash2 class="h-4 w-4 mr-2" />
-					Remove
+					{m.review_remove()}
 				{/snippet}
 			</Button>
 
@@ -87,7 +88,7 @@
 				disabled={currentMovieIndex === movieResultsLength - 1}
 			>
 				{#snippet children()}
-					Next
+					{m.review_next()}
 					<ChevronRight class="h-4 w-4 ml-2" />
 				{/snippet}
 			</Button>

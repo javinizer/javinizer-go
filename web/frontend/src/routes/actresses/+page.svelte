@@ -16,6 +16,7 @@
 	import ActressTableView from './components/ActressTableView.svelte';
 	import ActressMergeModal from './components/ActressMergeModal.svelte';
 	import ActressPagination from './components/ActressPagination.svelte';
+	import * as m from '$lib/paraglide/messages';
 	import { createConfigQuery } from '$lib/query/queries';
 
 	const store = createActressStore();
@@ -40,10 +41,10 @@
 			a.click();
 			document.body.removeChild(a);
 			URL.revokeObjectURL(url);
-			toastStore.success(`Exported ${data.length} actress(es)`, 3000);
+			toastStore.success(m.actresses_exported({ count: data.length }), 3000);
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to export actresses', 4000);
+			toastStore.error(err.message || m.actresses_export_failed(), 4000);
 		}
 	}));
 
@@ -51,11 +52,11 @@
 		mutationFn: (payload: { actresses: ActressUpsertRequest[] }) =>
 			apiClient.importActresses(payload),
 		onSuccess: (res: ImportResponse) => {
-			toastStore.success(`Import complete — Imported: ${res.imported}, Skipped: ${res.skipped}, Errors: ${res.errors}`, 5000);
+			toastStore.success(m.actresses_import_complete({ imported: res.imported, skipped: res.skipped, errors: res.errors }), 5000);
 			void queryClient.invalidateQueries({ queryKey: ['actresses'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to import actresses', 4000);
+			toastStore.error(err.message || m.actresses_import_failed(), 4000);
 		}
 	}));
 
@@ -75,20 +76,20 @@
 		try {
 			const text = await file.text();
 			const parsed: ActressUpsertRequest[] = JSON.parse(text);
-			if (!Array.isArray(parsed)) throw new Error('Expected a JSON array');
+			if (!Array.isArray(parsed)) throw new Error(m.actresses_expected_json_array());
 
 			const actresses = parsed.filter(a => a.first_name || a.japanese_name);
 
 			if (actresses.length === 0) {
-				toastStore.error('No valid actresses in file', 4000);
+				toastStore.error(m.actresses_no_valid_in_file(), 4000);
 				return;
 			}
 
-			if (!confirm(`Import ${actresses.length} actress(es)?`)) return;
+			if (!confirm(m.actresses_import_confirm({ count: actresses.length }))) return;
 
 			importMutation.mutate({ actresses });
 		} catch (err) {
-			toastStore.error(`Invalid JSON file: ${err instanceof Error ? err.message : String(err)}`, 4000);
+			toastStore.error(m.actresses_invalid_json({ error: err instanceof Error ? err.message : String(err) }), 4000);
 		}
 
 		target.value = '';
@@ -102,8 +103,8 @@
 			in:fly|local={{ y: -10, duration: 240, easing: cubicOut }}
 		>
 			<div>
-				<h1 class="text-3xl font-bold">Actress Database</h1>
-				<p class="text-muted-foreground mt-1">Create, update, and remove actress records stored in the database.</p>
+				<h1 class="text-3xl font-bold">{m.actresses_title()}</h1>
+				<p class="text-muted-foreground mt-1">{m.actresses_subtitle()}</p>
 			</div>
 			<div class="flex items-center gap-2">
 				<input
@@ -124,7 +125,7 @@
 					{:else}
 						<Download class="h-4 w-4 mr-1" />
 					{/if}
-					Export
+					{m.actresses_export()}
 				</Button>
 				<Button
 					variant="outline"
@@ -137,15 +138,15 @@
 					{:else}
 						<Upload class="h-4 w-4 mr-1" />
 					{/if}
-					Import
+					{m.actresses_import()}
 				</Button>
 				<Button variant="outline" onclick={store.refresh}>
 					<RefreshCw class="h-4 w-4 {store.isRefreshing ? 'animate-spin' : ''}" />
-					Refresh
+					{m.common_refresh()}
 				</Button>
 				<Button onclick={store.resetForm}>
 					<Plus class="h-4 w-4" />
-					New Actress
+					{m.actresses_new_actress()}
 				</Button>
 			</div>
 		</div>
@@ -191,12 +192,12 @@
 
 				{#if store.loading}
 					<div in:fade|local={{ duration: 180 }}>
-						<Card class="p-8 text-center text-muted-foreground">Loading actresses...</Card>
+						<Card class="p-8 text-center text-muted-foreground">{m.actresses_loading()}</Card>
 					</div>
 				{:else if store.actresses.length === 0}
 					<div in:fade|local={{ duration: 180 }}>
 						<Card class="p-8 text-center">
-							<p class="text-muted-foreground">No actresses found.</p>
+							<p class="text-muted-foreground">{m.actresses_none_found()}</p>
 						</Card>
 					</div>
 				{:else}

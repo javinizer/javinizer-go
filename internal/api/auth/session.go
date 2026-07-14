@@ -94,19 +94,19 @@ func setupAuth(rt *core.APIRuntime) gin.HandlerFunc {
 			headerSecret := c.GetHeader("X-Setup-Secret")
 			if headerSecret != bootstrapSecret {
 				logging.Warnf("Setup attempt rejected from %s: invalid bootstrap secret", clientIP)
-				c.AbortWithStatusJSON(http.StatusForbidden, contracts.ErrorResponse{Error: "setup requires a bootstrap secret"})
+				c.AbortWithStatusJSON(http.StatusForbidden, contracts.ErrorResponse{Error: "setup requires a bootstrap secret", Code: "AUTH_UNAUTHORIZED"})
 				return
 			}
 		} else {
 			if !isTrustedClient(clientIP, deps.Auth.GetEnv) {
 				logging.Warnf("Setup attempt rejected from %s: remote access without bootstrap secret", clientIP)
-				c.AbortWithStatusJSON(http.StatusForbidden, contracts.ErrorResponse{Error: "setup is only available from localhost or trusted networks"})
+				c.AbortWithStatusJSON(http.StatusForbidden, contracts.ErrorResponse{Error: "setup is only available from localhost or trusted networks", Code: "AUTH_UNAUTHORIZED"})
 				return
 			}
 		}
 
 		if deps.Auth.IsInitialized() {
-			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "authentication is already initialized"})
+			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "authentication is already initialized", Code: "AUTH_USER_EXISTS"})
 			return
 		}
 
@@ -119,9 +119,9 @@ func setupAuth(rt *core.APIRuntime) gin.HandlerFunc {
 		if err := deps.Auth.Setup(req.Username, req.Password); err != nil {
 			switch {
 			case errors.Is(err, ErrAuthAlreadySet):
-				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "authentication is already initialized"})
+				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "authentication is already initialized", Code: "AUTH_USER_EXISTS"})
 			case errors.Is(err, ErrInvalidUsername), errors.Is(err, ErrWeakPassword):
-				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error(), Code: "AUTH_INVALID_CREDENTIALS"})
 			default:
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "failed to initialize authentication"})
 			}
@@ -181,7 +181,7 @@ func loginAuth(rt *core.APIRuntime) gin.HandlerFunc {
 			case errors.Is(err, ErrAuthNotInitialized):
 				c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is not initialized"})
 			case errors.Is(err, ErrInvalidCredentials):
-				c.JSON(http.StatusUnauthorized, contracts.ErrorResponse{Error: "invalid username or password"})
+				c.JSON(http.StatusUnauthorized, contracts.ErrorResponse{Error: "invalid username or password", Code: "AUTH_INVALID_CREDENTIALS"})
 			case errors.Is(err, ErrLoginRateLimited):
 				c.JSON(http.StatusTooManyRequests, contracts.ErrorResponse{Error: "too many login attempts, please try again later"})
 			default:

@@ -6,6 +6,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { Actress } from '$lib/api/types';
+	import * as m from '$lib/paraglide/messages';
 
 	let {
 		actresses,
@@ -47,7 +48,7 @@
 							checked={isSelected(actress)}
 							disabled={!actress.id}
 							onchange={() => onToggleSelection(actress)}
-							aria-label="Select actress for merge"
+							aria-label={m.actresses_select_for_merge_aria()}
 							class="rounded border-input"
 						/>
 					</div>
@@ -80,12 +81,12 @@
 							<p class="text-sm text-muted-foreground truncate">{actress.japanese_name}</p>
 						{/if}
 						{#if actress.aliases}
-							<p class="text-xs text-muted-foreground line-clamp-2 mt-1">Aliases: {actress.aliases}</p>
+							<p class="text-xs text-muted-foreground line-clamp-2 mt-1">{m.actresses_aliases({ aliases: actress.aliases })}</p>
 						{/if}
 						<div class="flex items-center gap-2 mt-3">
 							<Button variant="outline" size="sm" onclick={() => onStartEdit(actress)}>
 								<Pencil class="h-4 w-4" />
-								Edit
+								{m.actresses_edit()}
 							</Button>
 							<Button
 								variant="outline"
@@ -95,7 +96,7 @@
 								class="text-destructive hover:bg-destructive/10"
 							>
 								<Trash2 class="h-4 w-4" />
-								Delete
+								{m.actresses_delete()}
 							</Button>
 						</div>
 					</div>

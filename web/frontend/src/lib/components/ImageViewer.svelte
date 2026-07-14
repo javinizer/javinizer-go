@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { cubicOut } from 'svelte/easing';
 	import { fade, scale } from 'svelte/transition';
 	import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut } from 'lucide-svelte';
@@ -248,7 +249,7 @@
 		<button
 			onclick={close}
 			class="absolute inset-0 bg-black/90 cursor-default"
-			aria-label="Close viewer"
+			aria-label={m.viewer_aria_close()}
 			in:fade|local={{ duration: 140 }}
 			out:fade|local={{ duration: 120 }}
 		></button>
@@ -266,7 +267,7 @@
 			<button
 				onclick={close}
 				class="absolute top-4 right-4 z-10 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors"
-				title="Close (Esc)"
+				title={m.viewer_close_esc()}
 			>
 				<X class="h-6 w-6" />
 			</button>
@@ -288,14 +289,14 @@
 					onclick={zoomOut}
 					disabled={zoom <= 0.5}
 					class="p-1 text-white hover:bg-white/10 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-					title="Zoom Out (-)"
+					title={m.viewer_zoom_out()}
 				>
 					<ZoomOut class="h-5 w-5" />
 				</button>
 				<button
 					onclick={resetZoom}
 					class="px-2 py-1 text-white hover:bg-white/10 rounded text-sm transition-colors"
-					title="Reset Zoom (0)"
+					title={m.viewer_reset_zoom()}
 				>
 					{zoomPercent}%
 				</button>
@@ -303,7 +304,7 @@
 					onclick={zoomIn}
 					disabled={zoom >= 3}
 					class="p-1 text-white hover:bg-white/10 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-					title="Zoom In (+)"
+					title={m.viewer_zoom_in()}
 				>
 					<ZoomIn class="h-5 w-5" />
 				</button>
@@ -314,7 +315,7 @@
 				<button
 					onclick={prevImage}
 					class="absolute left-4 top-1/2 -translate-y-1/2 z-10 p-3 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors cursor-pointer"
-					title="Previous (←)"
+					title={m.viewer_previous()}
 				>
 					<ChevronLeft class="h-8 w-8" />
 				</button>
@@ -325,7 +326,7 @@
 				<button
 					onclick={nextImage}
 					class="absolute right-4 top-1/2 -translate-y-1/2 z-10 p-3 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors cursor-pointer"
-					title="Next (→)"
+					title={m.viewer_next()}
 				>
 					<ChevronRight class="h-8 w-8" />
 				</button>
@@ -352,14 +353,14 @@
 				{#key currentImage}
 					<img
 						src={currentImage}
-						alt={title || `Image ${currentIndex + 1}`}
+						alt={title || m.viewer_image_alt({ index: currentIndex + 1 })}
 						tabindex="0"
 						onclick={handleImageClick}
 						onkeydown={handleImageKeyDown}
 						style="transform: scale({zoom}) translate({panX}px, {panY}px); transition: {isDragging ? 'none' : 'transform 0.1s ease-out'}; user-select: none; cursor: {imageCursor};"
 						class="max-w-full max-h-full object-contain"
 						draggable="false"
-						aria-label={zoom === 1 ? 'Click to zoom in' : 'Click to zoom out or drag to pan'}
+						aria-label={zoom === 1 ? m.viewer_aria_zoom_in() : m.viewer_aria_zoom_out()}
 						in:fade|local={{ duration: 160 }}
 						out:fade|local={{ duration: 120 }}
 					/>

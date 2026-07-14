@@ -1,11 +1,15 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
+)
 
 // header component
 type header struct {
-	width int
-	stats jobStats
+	width     int
+	stats     jobStats
+	localizer *localization.Localizer
 }
 
 func newHeader() *header {
@@ -16,13 +20,21 @@ func (h *header) SetWidth(width int) {
 	h.width = width
 }
 
+func (h *header) SetLocalizer(l *localization.Localizer) {
+	h.localizer = l
+}
+
 func (h *header) UpdateStats(stats jobStats) {
 	h.stats = stats
 }
 
 func (h *header) View() string {
 	// header content is rendered in view.go; this component keeps a minimal fallback.
-	return headerStyle.Render("Javinizer TUI")
+	title := "Javinizer TUI"
+	if h.localizer != nil {
+		title = h.localizer.Localize("TUIAppTitle")
+	}
+	return headerStyle.Render(title)
 }
 
 // Ensure header satisfies tea.Model at compile time.

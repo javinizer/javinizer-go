@@ -1,5 +1,10 @@
 package tui
 
+import (
+	"fmt"
+	"strings"
+)
+
 // settingsManager manages the TUI settings snapshot and cursor.
 // Extracted from Model to localize all settings-related state and mutations.
 // Holds a narrow deps struct for pushing settings to the processingCoordinator
@@ -7,6 +12,7 @@ package tui
 type settingsManager struct {
 	snapshot settingsSnapshot
 	cursor   int
+	language string
 
 	// Narrow deps — set once during construction
 	deps settingsManagerDeps
@@ -33,8 +39,9 @@ func newSettingsManager(deps settingsManagerDeps, extrafanartCfg bool, moveFiles
 			NFOEnabled:          true,
 			MoveFiles:           moveFilesCfg,
 		},
-		cursor: 0,
-		deps:   deps,
+		cursor:   0,
+		language: "auto",
+		deps:     deps,
 	}
 }
 
@@ -48,9 +55,26 @@ func (sm *settingsManager) cursorPos() int {
 	return sm.cursor
 }
 
+// languageValue returns the current ui.language selection ("auto" or an
+// explicit BCP 47 tag). It is a presentation preference, not a processing
+// option, so it is tracked separately from settingsSnapshot.
+func (sm *settingsManager) languageValue() string {
+	return sm.language
+}
+
+// setLanguage records the resolved ui.language preference (e.g. from cfg at
+// startup or after a live change).
+func (sm *settingsManager) setLanguage(lang string) {
+	lang = strings.TrimSpace(lang)
+	if lang == "" || strings.EqualFold(lang, "auto") {
+		lang = "auto"
+	}
+	sm.language = lang
+}
+
 // moveCursor moves the settings cursor up or down, clamped to [0, maxSettings].
 func (sm *settingsManager) moveCursor(delta int) {
-	maxSettings := 9 // 0-9: 10 total settings
+	maxSettings := settingLanguageRow // 0-10: 10 toggles + 1 language choice
 	sm.cursor += delta
 	if sm.cursor < 0 {
 		sm.cursor = 0
@@ -190,4 +214,31 @@ func (sm *settingsManager) apply() {
 	if sm.deps.apply != nil {
 		sm.deps.apply(sm.snapshot)
 	}
+}
+
+// cycleLanguage advances the language choice row by delta (typically ±1) and
+// wraps within the supported locale list. It returns the new language tag, a
+// flag indicating whether the selection actually changed, and a
+// human-readable description for logging. Language is a presentation
+// preference, so the processing snapshot is untouched.
+func (sm *settingsManager) cycleLanguage(delta int) (string, bool, string) {
+	choices := supportedLanguages()
+	idx := 0
+	for i, c := range choices {
+		if strings.EqualFold(c, sm.language) {
+			idx = i
+			break
+		}
+	}
+	n := len(choices)
+	newIdx := (idx + delta) % n
+	if newIdx < 0 {
+		newIdx += n
+	}
+	next := choices[newIdx]
+	if strings.EqualFold(next, sm.language) {
+		return sm.language, false, ""
+	}
+	sm.language = next
+	return next, true, fmt.Sprintf("Interface language set to %s", next)
 }

@@ -17,6 +17,13 @@ func wireModel(m *Model) {
 		addConsoleOutput: m.AddConsoleOutput,
 		browserState:     func() browserState { return m.browserState },
 		setStartTime:     func(t time.Time) { m.startTime = t },
+		loc:              m.loc,
+		plural: func(id string, count interface{}, template ...map[string]any) string {
+			if m.localizer == nil {
+				return id
+			}
+			return m.localizer.Plural(id, count, template...)
+		},
 	})
 	m.browserCtl = newBrowserController(browserControllerDeps{
 		addLog: m.AddLog,
@@ -37,6 +44,7 @@ func wireModel(m *Model) {
 		pushSettings:           m.pushSettingsToSortService,
 		getElapsed:             func() time.Duration { return time.Since(m.startTime) },
 		setStartTime:           func(t time.Time) { m.startTime = t },
+		loc:                    m.loc,
 	})
 
 	// Wire shared state pointers into sub-controllers

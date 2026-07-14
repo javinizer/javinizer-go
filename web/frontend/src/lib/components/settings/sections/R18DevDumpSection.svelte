@@ -1,4 +1,6 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
+	import { formatNumber, formatDateTime } from '$lib/i18n/format';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import { apiClient as api } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
@@ -50,7 +52,7 @@
 				pollDownloadProgress();
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to fetch dump status';
+			error = e instanceof Error ? e.message : m.settings_r18dev_fetch_status_failed();
 		} finally {
 			loading = false;
 		}
@@ -66,7 +68,7 @@
 			// Poll status to show progress until the dump appears or an error occurs.
 			await pollDownloadProgress();
 		} catch (e) {
-			downloadError = e instanceof Error ? e.message : 'Download failed';
+			downloadError = e instanceof Error ? e.message : m.settings_r18dev_download_failed_generic();
 			downloading = false;
 		}
 	}
@@ -98,7 +100,7 @@
 					downloading = false;
 					polling = false;
 					if (wsStatus === 'error') {
-						downloadError = 'Download failed. Check logs for details.';
+						downloadError = m.settings_r18dev_download_failed_msg();
 					}
 					return;
 				}
@@ -173,7 +175,7 @@
 		try {
 			searchResult = await api.r18dev.searchDump(searchQuery.trim());
 		} catch (e) {
-			searchError = e instanceof Error ? e.message : 'Search failed';
+			searchError = e instanceof Error ? e.message : m.settings_r18dev_search_failed();
 		}
 	}
 
@@ -187,7 +189,7 @@
 			await api.r18dev.clearDump();
 			await fetchStatus();
 		} catch (e) {
-			downloadError = e instanceof Error ? e.message : 'Failed to clear dump';
+			downloadError = e instanceof Error ? e.message : m.settings_r18dev_clear_failed();
 		} finally {
 			clearing = false;
 			showClearConfirm = false;
@@ -211,7 +213,7 @@
 			// Revert on error
 			dumpEnabled = !dumpEnabled;
 			onConfigChange?.(dumpEnabled);
-			downloadError = e instanceof Error ? e.message : 'Failed to update config';
+			downloadError = e instanceof Error ? e.message : m.settings_r18dev_update_config_failed();
 		}
 	}
 
@@ -221,17 +223,13 @@
 		return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 	}
 
-	function formatNumber(n: number): string {
-		return n.toLocaleString();
-	}
-
 	function progressPhase(): string {
-		if (!downloadProgress) return downloading ? 'Starting...' : '';
+		if (!downloadProgress) return downloading ? m.settings_r18dev_phase_starting() : '';
 		const msg = downloadProgress.message || downloadProgress.status;
-		if (msg === 'downloading') return 'Downloading...';
-		if (msg === 'importing') return 'Importing into database...';
-		if (msg === 'done') return 'Complete!';
-		if (msg === 'error') return 'Download failed';
+		if (msg === 'downloading') return m.settings_r18dev_phase_downloading();
+		if (msg === 'importing') return m.settings_r18dev_phase_importing();
+		if (msg === 'done') return m.settings_r18dev_phase_complete();
+		if (msg === 'error') return m.settings_r18dev_phase_failed();
 		return msg;
 	}
 
@@ -250,18 +248,19 @@
 	});
 </script>
 
-<SettingsSection title="r18.dev Dump" description="Manage the local r18.dev database dump for offline content_id resolution" defaultExpanded={false}>
+<SettingsSection title={m.settings_r18dev_title()} description={m.settings_r18dev_desc()} defaultExpanded={false}>
 	<!-- Enable/Disable toggle -->
 	<div class="flex items-center justify-between mb-4">
 		<div>
-			<label class="text-sm font-medium" for="dump-enabled">Use r18.dev Dump</label>
-			<p class="text-xs text-muted-foreground mt-1">When enabled, the scraper consults the local dump before falling back to HTTP</p>
+			<label class="text-sm font-medium" for="dump-enabled">{m.settings_r18dev_use_label()}</label>
+			<p class="text-xs text-muted-foreground mt-1">{m.settings_r18dev_use_desc()}</p>
 		</div>
 		<button
 			id="dump-enabled"
 			type="button"
 			role="switch"
 			aria-checked={dumpEnabled}
+			aria-label={m.settings_r18dev_use_label()}
 			class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {dumpEnabled ? 'bg-primary' : 'bg-muted'}"
 			onclick={toggleDumpEnabled}
 		>
@@ -272,7 +271,7 @@
 	{#if loading}
 		<div class="flex items-center gap-2 text-sm text-muted-foreground py-4">
 			<RefreshCw class="h-4 w-4 animate-spin"></RefreshCw>
-			Loading dump status...
+			{m.settings_r18dev_loading()}
 		</div>
 	{:else if error}
 		<div class="flex items-center gap-2 text-sm text-destructive py-4">
@@ -284,32 +283,32 @@
 			<div class="space-y-4">
 				<div class="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
 					<CheckCircle class="h-4 w-4"></CheckCircle>
-					Dump is present and ready
+					{m.settings_r18dev_present()}
 				</div>
 
 				{#if !status.enabled}
 					<div class="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
 						<AlertCircle class="h-4 w-4"></AlertCircle>
-						Dump is downloaded but disabled — the scraper won't use it.
+						{m.settings_r18dev_disabled_warn()}
 					</div>
 				{/if}
 
 				<dl class="grid grid-cols-2 gap-2 text-sm">
 					<div>
-						<dt class="text-muted-foreground">Rows</dt>
+						<dt class="text-muted-foreground">{m.settings_r18dev_rows()}</dt>
 						<dd class="font-medium">{#if status.row_count}{formatNumber(status.row_count)}{:else}—{/if}</dd>
 					</div>
 					<div>
-						<dt class="text-muted-foreground">Size</dt>
+						<dt class="text-muted-foreground">{m.settings_r18dev_size()}</dt>
 						<dd class="font-medium">{#if status.size_bytes}{formatBytes(status.size_bytes)}{:else}—{/if}</dd>
 					</div>
 					<div>
-						<dt class="text-muted-foreground">Source date</dt>
+						<dt class="text-muted-foreground">{m.settings_r18dev_source_date()}</dt>
 						<dd class="font-medium">{status.source_date || '—'}</dd>
 					</div>
 					<div>
-						<dt class="text-muted-foreground">Imported at</dt>
-						<dd class="font-medium">{status.imported_at ? new Date(status.imported_at).toLocaleString() : '—'}</dd>
+						<dt class="text-muted-foreground">{m.settings_r18dev_imported_at()}</dt>
+						<dd class="font-medium">{status.imported_at ? formatDateTime(status.imported_at) : '—'}</dd>
 					</div>
 				</dl>
 
@@ -345,7 +344,7 @@
 							disabled={downloading}
 						>
 							<RefreshCw class="h-4 w-4"></RefreshCw>
-							Check for Updates
+							{m.settings_r18dev_check_updates()}
 						</button>
 						<button
 							type="button"
@@ -353,7 +352,7 @@
 							onclick={fetchStatus}
 						>
 							<RefreshCw class="h-4 w-4"></RefreshCw>
-							Refresh
+							{m.settings_r18dev_refresh()}
 						</button>
 						<button
 							type="button"
@@ -362,7 +361,7 @@
 							disabled={downloading || clearing}
 						>
 							<Trash2 class="h-4 w-4 {clearing ? 'animate-spin' : ''}"></Trash2>
-							{clearing ? 'Clearing...' : 'Clear Dump'}
+							{clearing ? m.settings_r18dev_clearing() : m.settings_r18dev_clear_dump()}
 						</button>
 					</div>
 				{/if}
@@ -371,7 +370,7 @@
 			<div class="space-y-4">
 				<div class="flex items-center gap-2 text-sm text-muted-foreground">
 					<Database class="h-4 w-4"></Database>
-					No dump downloaded. The r18.dev scraper uses HTTP fallback (slower).
+					{m.settings_r18dev_absent()}
 				</div>
 
 				{#if downloadError}
@@ -405,7 +404,7 @@
 						disabled={downloading}
 					>
 						<Download class="h-4 w-4"></Download>
-						Download Dump (~250MB)
+						{m.settings_r18dev_download_dump()}
 					</button>
 				{/if}
 			</div>
@@ -414,12 +413,12 @@
 		{#if status?.present}
 		<!-- Search box for ad-hoc lookups -->
 		<div class="border-t border-border mt-4 pt-4">
-			<h4 class="text-sm font-medium mb-2">Search Dump</h4>
+			<h4 class="text-sm font-medium mb-2">{m.settings_r18dev_search_heading()}</h4>
 			<div class="flex gap-2">
 				<input
 					type="text"
 					bind:value={searchQuery}
-					placeholder="dvd_id or content_id (e.g. ABF-030)"
+					placeholder={m.settings_r18dev_search_placeholder()}
 					class="flex-1 px-3 py-2 text-sm rounded-md border border-input bg-background"
 					onkeydown={(e) => e.key === 'Enter' && search()}
 				/>
@@ -429,19 +428,19 @@
 					onclick={search}
 				>
 					<Search class="h-4 w-4"></Search>
-					Search
+					{m.settings_r18dev_search_button()}
 				</button>
 			</div>
 			{#if searchResult}
 				<div class="mt-2 p-2 rounded-md bg-muted text-sm">
 					{#if searchResult.content_id}
-						<span class="text-muted-foreground">content_id:</span>
+						<span class="text-muted-foreground">{m.settings_r18dev_search_content_id()}</span>
 						<span class="font-mono">{searchResult.content_id}</span>
 					{:else if searchResult.dvd_id}
-						<span class="text-muted-foreground">dvd_id:</span>
+						<span class="text-muted-foreground">{m.settings_r18dev_search_dvd_id()}</span>
 						<span class="font-mono">{searchResult.dvd_id}</span>
 					{:else}
-						<span class="text-muted-foreground">No match found</span>
+						<span class="text-muted-foreground">{m.settings_r18dev_search_no_match()}</span>
 					{/if}
 				</div>
 			{/if}
@@ -451,15 +450,15 @@
 		</div>
 		{/if}
 	{:else}
-		<p class="text-sm text-muted-foreground">Unable to load dump status.</p>
+		<p class="text-sm text-muted-foreground">{m.settings_r18dev_unable_load()}</p>
 	{/if}
 
 	{#if showClearConfirm}
 		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true">
 			<div class="bg-card border border-border rounded-lg p-6 max-w-sm mx-4">
-				<h3 class="text-lg font-semibold mb-2">Clear Dump?</h3>
+				<h3 class="text-lg font-semibold mb-2">{m.settings_r18dev_clear_confirm_title()}</h3>
 				<p class="text-sm text-muted-foreground mb-4">
-					This will delete the local r18.dev dump database. The scraper will fall back to HTTP content_id resolution until you re-download it.
+					{m.settings_r18dev_clear_confirm_desc()}
 				</p>
 				<div class="flex justify-end gap-2">
 					<button
@@ -467,7 +466,7 @@
 						class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent"
 						onclick={() => showClearConfirm = false}
 						disabled={clearing}
-					>Cancel</button>
+					>{m.common_cancel()}</button>
 					<button
 						type="button"
 						class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -475,7 +474,7 @@
 						disabled={clearing}
 					>
 						{#if clearing}<RefreshCw class="h-4 w-4 animate-spin"></RefreshCw>{:else}<Trash2 class="h-4 w-4"></Trash2>{/if}
-						{clearing ? 'Clearing...' : 'Clear Dump'}
+						{clearing ? m.settings_r18dev_clearing() : m.settings_r18dev_clear_dump()}
 					</button>
 				</div>
 			</div>

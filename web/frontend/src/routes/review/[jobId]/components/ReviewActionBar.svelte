@@ -2,6 +2,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import { LoaderCircle, Play, X } from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		isUpdateMode: boolean;
@@ -28,7 +29,7 @@
 			<Button variant="outline" onclick={onCancel} disabled={organizing}>
 				{#snippet children()}
 					<X class="h-4 w-4 mr-2" />
-					Cancel
+					{m.common_cancel()}
 				{/snippet}
 			</Button>
 			<Button onclick={onOrganizeAll} disabled={organizing || !destinationPath.trim()}>
@@ -38,7 +39,7 @@
 					{:else}
 						<Play class="h-4 w-4 mr-2" />
 					{/if}
-					{organizing ? 'Organizing...' : `Organize ${movieResultsLength} File${movieResultsLength !== 1 ? 's' : ''}`}
+					{organizing ? m.review_organizing() : m.review_organize_files_button({ count: movieResultsLength })}
 				{/snippet}
 			</Button>
 		</div>

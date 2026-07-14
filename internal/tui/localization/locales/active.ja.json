@@ -1,0 +1,715 @@
+{
+  "TUIActressMergeAliasesAdded": {
+    "description": "Number of aliases added during an actress merge",
+    "other": "追加された別名: {{.Count}}"
+  },
+  "TUIActressMergeConflictHint": {
+    "description": "Hint shown when no field conflicts exist in the actress merge preview",
+    "other": "Enter でマージ適用 • r で ID 編集 • Esc でキャンセル"
+  },
+  "TUIActressMergeConflictNavHint": {
+    "description": "Navigation hint for the actress merge conflict resolution step",
+    "other": "↑↓ フィールド選択 • t/s 値を選択 • Space 切り替え • Enter 適用 • r ID 編集 • Esc キャンセル"
+  },
+  "TUIActressMergeConflictsCount": {
+    "description": "Number of field conflicts detected in an actress merge preview",
+    "other": "競合: {{.Count}}"
+  },
+  "TUIActressMergeConflictsResolved": {
+    "description": "Number of conflicts resolved during an actress merge",
+    "other": "解決された競合: {{.Count}}"
+  },
+  "TUIActressMergeDecisionSource": {
+    "description": "Label for the source side of a merge conflict resolution",
+    "other": "ソース"
+  },
+  "TUIActressMergeDecisionTarget": {
+    "description": "Label for the target side of a merge conflict resolution",
+    "other": "ターゲット"
+  },
+  "TUIActressMergeErrInvalidID": {
+    "description": "Validation error when actress merge IDs are not positive",
+    "other": "ターゲットとソースには正の女優 ID を指定してください"
+  },
+  "TUIActressMergeErrSameID": {
+    "description": "Validation error when actress merge target and source IDs are identical",
+    "other": "ターゲットとソースは異なる女優 ID にしてください"
+  },
+  "TUIActressMergeErrorPrefix": {
+    "description": "Prefix shown before an actress merge error message",
+    "other": "エラー:"
+  },
+  "TUIActressMergeField": {
+    "description": "Label for a conflict field and its currently selected decision",
+    "other": "フィールド: {{.Field}} (選択中: {{.Decision}})"
+  },
+  "TUIActressMergeInputHint": {
+    "description": "Navigation hint for the actress merge input step",
+    "other": "Tab/↑↓ フィールド切替 • Source 上で Enter でプレビュー読み込み • Esc キャンセル"
+  },
+  "TUIActressMergeMerging": {
+    "description": "Header describing which source is being merged into which target",
+    "other": "ソース #{{.Source}} をターゲット #{{.Target}} にマージ中"
+  },
+  "TUIActressMergeNoConflicts": {
+    "description": "Message shown when no field conflicts were found in a merge preview",
+    "other": "フィールドの競合は見つかりませんでした。デフォルトのマージ動作が使用されます。"
+  },
+  "TUIActressMergeNoPreview": {
+    "description": "Message shown when no merge preview has been loaded",
+    "other": "マージプレビューが読み込まれていません。"
+  },
+  "TUIActressMergeNoPreviewHint": {
+    "description": "Hint shown when no merge preview has been loaded",
+    "other": "r で戻る、Esc で閉じる。"
+  },
+  "TUIActressMergeNoResult": {
+    "description": "Message shown when a merge finished without a result",
+    "other": "マージは完了しましたが、結果を取得できません。"
+  },
+  "TUIActressMergeNoResultHint": {
+    "description": "Hint shown when a merge finished without a result",
+    "other": "r 同じターゲットで新規マージ • Enter/Esc で閉じる"
+  },
+  "TUIActressMergePlaceholderSource": {
+    "description": "Placeholder for the actress merge source ID input",
+    "other": "ソース女優 ID"
+  },
+  "TUIActressMergePlaceholderTarget": {
+    "description": "Placeholder for the actress merge target ID input",
+    "other": "ターゲット女優 ID"
+  },
+  "TUIActressMergeResultHint": {
+    "description": "Navigation hint for the actress merge result step",
+    "other": "r 同じターゲットで新規マージ • Enter/Esc で閉じる"
+  },
+  "TUIActressMergeResultMerged": {
+    "description": "Summary stating which source actress was merged into which target",
+    "other": "女優 #{{.From}} を #{{.Into}} にマージしました"
+  },
+  "TUIActressMergeSourceIDLabel": {
+    "description": "Label for the actress merge source ID input field",
+    "other": "ソース ID:"
+  },
+  "TUIActressMergeSourceValueLabel": {
+    "description": "Label prefix for the source value of a merge conflict",
+    "other": "ソース:"
+  },
+  "TUIActressMergeTargetIDLabel": {
+    "description": "Label for the actress merge target ID input field",
+    "other": "ターゲット ID:"
+  },
+  "TUIActressMergeTargetValueLabel": {
+    "description": "Label prefix for the target value of a merge conflict",
+    "other": "ターゲット:"
+  },
+  "TUIActressMergeTitle": {
+    "description": "Title of the actress merge modal",
+    "other": "女優マージ"
+  },
+  "TUIActressMergeUpdatedMovies": {
+    "description": "Number of movies updated during an actress merge",
+    "other": "更新された動画: {{.Count}}"
+  },
+  "TUIAllTasksCompletedSuccessfully": {
+    "description": "Log message shown when all processing tasks finish without errors",
+    "other": "すべてのタスクが正常に完了しました"
+  },
+  "TUIAllTasksSubmitted": {
+    "description": "Log message shown when all file tasks have been submitted to the runner",
+    "other": "すべてのタスクを送信しました"
+  },
+  "TUIAppTitle": {
+    "description": "Application title shown in the TUI header",
+    "other": "Javinizer TUI"
+  },
+  "TUIApplySucceeded": {
+    "description": "Worker event message shown when a movie has been applied/organized successfully",
+    "other": "{{.MovieID}} の適用に成功しました"
+  },
+  "TUIBrowserFileCount": {
+    "description": "Current position and total count of files in the browser",
+    "other": "{{.Current}}/{{.Total}} ファイル"
+  },
+  "TUIBrowserFilesHint": {
+    "description": "Key hint shown next to the browser panel title",
+    "other": "(f:ソース o:出力 m:検索 M:マージ)"
+  },
+  "TUIBrowserFilesTitle": {
+    "description": "Title of the file browser panel",
+    "other": "ファイル"
+  },
+  "TUIBrowserFrom": {
+    "description": "Label for the source path in the browser",
+    "other": "元:"
+  },
+  "TUIBrowserNoFiles": {
+    "description": "Empty state shown when no files are loaded in the browser",
+    "other": "ファイルが見つかりません"
+  },
+  "TUIBrowserTitle": {
+    "description": "Title of the file browser panel",
+    "other": "ブラウザー"
+  },
+  "TUIBrowserTo": {
+    "description": "Label for the destination path in the browser",
+    "other": "先:"
+  },
+  "TUICompleted": {
+    "description": "Completion banner shown when processing finishes",
+    "other": "完了"
+  },
+  "TUIConsoleNoOutput": {
+    "description": "Empty state shown in the console panel when no output has been produced yet",
+    "other": "出力はまだありません..."
+  },
+  "TUIConsoleScrollIndicator": {
+    "description": "Scroll position indicator shown in the console panel when entries overflow",
+    "other": "[{{.Visible}}/{{.Total}}]"
+  },
+  "TUIConsoleTitle": {
+    "description": "Title of the console panel",
+    "other": "コンソール"
+  },
+  "TUIDashElapsed": {
+    "description": "Label for the elapsed time on the dashboard",
+    "other": "経過時間"
+  },
+  "TUIDashFailed": {
+    "description": "Label for the failed task count on the dashboard",
+    "other": "失敗"
+  },
+  "TUIDashProgress": {
+    "description": "Label for the overall progress on the dashboard",
+    "other": "進捗"
+  },
+  "TUIDashRunning": {
+    "description": "Label for the running task count on the dashboard",
+    "other": "実行中"
+  },
+  "TUIDashSuccess": {
+    "description": "Label for the succeeded task count on the dashboard",
+    "other": "成功"
+  },
+  "TUIDashTotal": {
+    "description": "Label for the total task count on the dashboard",
+    "other": "合計"
+  },
+  "TUIDashboardTitle": {
+    "description": "Title of the dashboard view",
+    "other": "ダッシュボード"
+  },
+  "TUIDryRunBadge": {
+    "description": "Badge shown when dry-run mode is active",
+    "other": "ドライラン"
+  },
+  "TUIEmptyBrowser": {
+    "description": "Empty state shown when no files are loaded in the browser",
+    "other": "ファイルが見つかりません。'r' で再スキャン、'm' で手動検索。"
+  },
+  "TUIEmptyTasks": {
+    "description": "Empty state shown when there are no active tasks",
+    "other": "アクティブなタスクはありません"
+  },
+  "TUIEnterFolderPath": {
+    "description": "Placeholder text for the folder path input",
+    "other": "フォルダーパスを入力..."
+  },
+  "TUIFailed": {
+    "description": "Number of files that failed processing in the completion banner",
+    "one": "{{.Count}} 件失敗",
+    "other": "{{.Count}} 件失敗"
+  },
+  "TUIFilesFound": {
+    "description": "Number of video files found during a scan",
+    "one": "{{.Count}} ファイル見つかりました",
+    "other": "{{.Count}} ファイル見つかりました"
+  },
+  "TUIFilesProcessed": {
+    "description": "Number of files processed in the completion banner",
+    "one": "{{.Count}} ファイルを {{.Elapsed}} で処理しました",
+    "other": "{{.Count}} ファイルを {{.Elapsed}} で処理しました"
+  },
+  "TUIFolderPickerCurrent": {
+    "description": "Label for the current path in the folder picker",
+    "other": "現在:"
+  },
+  "TUIFolderPickerDestTitle": {
+    "description": "Title of the folder picker when selecting an output folder",
+    "other": "出力フォルダーを選択"
+  },
+  "TUIFolderPickerHint": {
+    "description": "Navigation hint shown at the bottom of the folder picker",
+    "other": "↑↓/jk: 移動  Enter: フォルダーを選択  Space: 現在を選択  Esc: キャンセル"
+  },
+  "TUIFolderPickerNoFolders": {
+    "description": "Empty state shown when no subfolders are found in the folder picker",
+    "other": "フォルダーが見つかりません"
+  },
+  "TUIFolderPickerSourceTitle": {
+    "description": "Title of the folder picker when selecting a source folder",
+    "other": "ソースフォルダーを選択"
+  },
+  "TUIFooterHelp": {
+    "description": "Footer key hint to open help",
+    "other": "ヘルプ"
+  },
+  "TUIFooterQuit": {
+    "description": "Footer key hint to quit the application",
+    "other": "終了"
+  },
+  "TUIFooterSettings": {
+    "description": "Footer key hint to open settings",
+    "other": "設定"
+  },
+  "TUIFooterTab": {
+    "description": "Footer key hint to switch tabs",
+    "other": "タブ"
+  },
+  "TUIHeaderDryRun": {
+    "description": "Dry-run indicator shown in the header bar",
+    "other": "[ドライラン]"
+  },
+  "TUIHelpActionChangeFolder": {
+    "description": "Help text for the change scan folder action",
+    "other": "スキャンフォルダーを変更"
+  },
+  "TUIHelpActionCycleChoice": {
+    "description": "Help text for cycling a choice-row setting such as interface language",
+    "other": "選択肢を切替 (言語)"
+  },
+  "TUIHelpActionCycleViews": {
+    "description": "Help text for the cycle views action",
+    "other": "表示を切替"
+  },
+  "TUIHelpActionDeselectAll": {
+    "description": "Help text for the deselect all action",
+    "other": "選択をすべて解除"
+  },
+  "TUIHelpActionGoBottom": {
+    "description": "Help text for the go to bottom action",
+    "other": "末尾へ移動"
+  },
+  "TUIHelpActionGoTop": {
+    "description": "Help text for the go to top action",
+    "other": "先頭へ移動"
+  },
+  "TUIHelpActionManualSearch": {
+    "description": "Help text for the manual search action",
+    "other": "手動検索 (スクレーパー選択 + ID/URL)"
+  },
+  "TUIHelpActionMoveDown": {
+    "description": "Help text for the move down action",
+    "other": "下へ移動"
+  },
+  "TUIHelpActionMoveUp": {
+    "description": "Help text for the move up action",
+    "other": "上へ移動"
+  },
+  "TUIHelpActionPauseResume": {
+    "description": "Help text for the pause/resume action",
+    "other": "一時停止/再開"
+  },
+  "TUIHelpActionQuit": {
+    "description": "Help text for the quit action",
+    "other": "終了"
+  },
+  "TUIHelpActionRefresh": {
+    "description": "Help text for the refresh/rescan action",
+    "other": "現在のフォルダーを更新/再スキャン"
+  },
+  "TUIHelpActionScrollDown": {
+    "description": "Help text for the scroll down action",
+    "other": "下へスクロール"
+  },
+  "TUIHelpActionScrollUp": {
+    "description": "Help text for the scroll up action",
+    "other": "上へスクロール"
+  },
+  "TUIHelpActionSelectAll": {
+    "description": "Help text for the select all action",
+    "other": "すべて選択"
+  },
+  "TUIHelpActionStartProcessing": {
+    "description": "Help text for the start processing action",
+    "other": "処理を開始"
+  },
+  "TUIHelpActionSwitchViews": {
+    "description": "Help text for the switch views action",
+    "other": "表示を切り替え"
+  },
+  "TUIHelpActionToggleAutoScroll": {
+    "description": "Help text for the toggle auto-scroll action",
+    "other": "自動スクロール切替"
+  },
+  "TUIHelpActionToggleHelp": {
+    "description": "Help text for the toggle help action",
+    "other": "ヘルプ切替"
+  },
+  "TUIHelpActionToggleSelection": {
+    "description": "Help text for the toggle selection action",
+    "other": "選択切替 (ファイルまたはフォルダー全体)"
+  },
+  "TUIHelpActionToggleSetting": {
+    "description": "Help text for toggling a boolean settings row",
+    "other": "オプション切替"
+  },
+  "TUIHelpBrowserSection": {
+    "description": "Section heading for the browser view keys in help",
+    "other": "ブラウザー表示"
+  },
+  "TUIHelpFoldersNote": {
+    "description": "Note explaining that folder checkboxes select all contained files",
+    "other": "📁 チェックボックス付きフォルダーは内部の全ファイルを選択します"
+  },
+  "TUIHelpGlobalKeys": {
+    "description": "Section heading for the global keys in help",
+    "other": "グローバルキー"
+  },
+  "TUIHelpLogsSection": {
+    "description": "Section heading for the logs view keys in help",
+    "other": "ログ表示"
+  },
+  "TUIHelpSettingsSection": {
+    "description": "Section heading for the settings view keys in help",
+    "other": "設定表示"
+  },
+  "TUIHelpTitle": {
+    "description": "Title of the help view",
+    "other": "ヘルプ"
+  },
+  "TUIHintAutoScroll": {
+    "description": "Footer key hint description for toggling auto-scroll",
+    "other": "自動スクロール"
+  },
+  "TUIHintCloseHelp": {
+    "description": "Footer key hint description for closing help",
+    "other": "ヘルプを閉じる"
+  },
+  "TUIHintHelp": {
+    "description": "Footer key hint description for opening help",
+    "other": "ヘルプ"
+  },
+  "TUIHintManualSearch": {
+    "description": "Footer key hint description for opening manual search",
+    "other": "手動検索"
+  },
+  "TUIHintMergeActress": {
+    "description": "Footer key hint description for opening the actress merge modal",
+    "other": "女優マージ"
+  },
+  "TUIHintNavigate": {
+    "description": "Footer key hint description for navigating the list",
+    "other": "移動"
+  },
+  "TUIHintOutput": {
+    "description": "Footer key hint description for choosing the output folder",
+    "other": "出力"
+  },
+  "TUIHintProcess": {
+    "description": "Footer key hint description for starting processing",
+    "other": "処理"
+  },
+  "TUIHintQuit": {
+    "description": "Footer key hint description for quitting the application",
+    "other": "終了"
+  },
+  "TUIHintRefresh": {
+    "description": "Footer key hint description for refreshing the file list",
+    "other": "更新"
+  },
+  "TUIHintScroll": {
+    "description": "Footer key hint description for scrolling logs",
+    "other": "スクロール"
+  },
+  "TUIHintSelect": {
+    "description": "Footer key hint description for selecting an item",
+    "other": "選択"
+  },
+  "TUIHintSelectAllNone": {
+    "description": "Footer key hint description for selecting all or none",
+    "other": "全選択/解除"
+  },
+  "TUIHintSource": {
+    "description": "Footer key hint description for choosing the source folder",
+    "other": "ソース"
+  },
+  "TUIHintSwitchView": {
+    "description": "Footer key hint description for switching views",
+    "other": "表示切替"
+  },
+  "TUIHintToggle": {
+    "description": "Footer key hint description for toggling a setting",
+    "other": "切替"
+  },
+  "TUIHintTopBottom": {
+    "description": "Footer key hint description for jumping to top or bottom",
+    "other": "先頭/末尾"
+  },
+  "TUIInitializing": {
+    "description": "Message shown while the TUI is initializing",
+    "other": "初期化中..."
+  },
+  "TUILogAlreadyProcessing": {
+    "description": "Log message shown when processing is already running",
+    "other": "処理は既に進行中です"
+  },
+  "TUILogMoveModeBlocked": {
+    "description": "Log message shown when move mode cannot be enabled due to link mode",
+    "other": "リンクモードがアクティブな間は移動モードを有効化できません"
+  },
+  "TUILogNoFilesSelected": {
+    "description": "Log message shown when processing starts with no files selected",
+    "other": "ファイルが選択されていません。Space でファイルを選択してください。"
+  },
+  "TUILogPathChanged": {
+    "description": "Log message shown when the scan path is changed",
+    "other": "パスを変更しました: {{.Path}}"
+  },
+  "TUILogPaused": {
+    "description": "Log message shown when processing is paused",
+    "other": "処理を一時停止しました"
+  },
+  "TUILogProcessingError": {
+    "description": "Log message shown when submitting files for processing fails",
+    "other": "処理エラー: {{.Error}}"
+  },
+  "TUILogRefreshing": {
+    "description": "Log message shown when the file list is being refreshed",
+    "other": "ファイルリストを更新中..."
+  },
+  "TUILogResumed": {
+    "description": "Log message shown when processing is resumed",
+    "other": "処理を再開しました"
+  },
+  "TUILogSomeTasksFailed": {
+    "description": "Log message shown when one or more processing tasks finished with errors",
+    "other": "一部のタスクが失敗しました: {{.Error}}"
+  },
+  "TUILogStartProcessingFailed": {
+    "description": "Log message shown when processing fails to start",
+    "other": "処理の開始に失敗しました: {{.Error}}"
+  },
+  "TUILogStartingProcessing": {
+    "description": "Log message shown when processing is starting",
+    "other": "Enter キーが押されました、処理を開始しています..."
+  },
+  "TUILogStartingProcessingFiles": {
+    "description": "Log message shown when processing begins for a count of selected files",
+    "one": "{{.Count}} ファイルの処理を開始しています...",
+    "other": "{{.Count}} ファイルの処理を開始しています..."
+  },
+  "TUILogsEmpty": {
+    "description": "Empty state shown when there are no logs yet",
+    "other": "ログはまだありません"
+  },
+  "TUILogsTitle": {
+    "description": "Title of the logs view",
+    "other": "ログ"
+  },
+  "TUIManualSearchInstructions": {
+    "description": "Instructions shown at the bottom of the manual search modal",
+    "other": "Tab: フォーカス切替  Space: 切替  Enter: 検索  Esc: キャンセル"
+  },
+  "TUIManualSearchPlaceholder": {
+    "description": "Placeholder for the manual search input",
+    "other": "JAV ID または URL を入力"
+  },
+  "TUIManualSearchSearchLabel": {
+    "description": "Label for the manual search input",
+    "other": "検索:"
+  },
+  "TUIManualSearchSelectScrapers": {
+    "description": "Label above the scraper list in the manual search modal",
+    "other": "スクレーパーを選択:"
+  },
+  "TUIManualSearchTitle": {
+    "description": "Title of the manual search modal",
+    "other": "手動検索"
+  },
+  "TUIProcessing": {
+    "description": "Label shown next to the spinner while processing",
+    "other": "処理中"
+  },
+  "TUIProcessingComplete": {
+    "description": "Banner shown when processing completes",
+    "other": "処理完了!"
+  },
+  "TUIProcessingHints": {
+    "description": "Navigation hints shown on the completion banner",
+    "other": "  •  '1' または 'b' でブラウザーに戻る  •  '3' でログ  •  'd' で閉じる"
+  },
+  "TUIProgress": {
+    "description": "Overall progress percentage shown in the header",
+    "other": "進捗: {{.Percent}}%"
+  },
+  "TUIScrapeSucceeded": {
+    "description": "Worker event message shown when a movie has been scraped successfully",
+    "other": "{{.MovieID}} のスクレープに成功しました"
+  },
+  "TUISettingChangesHint": {
+    "description": "Footer note on the settings view",
+    "other": "変更は次回処理時から有効になります"
+  },
+  "TUISettingDownload": {
+    "description": "Name of the Download Media setting",
+    "other": "メディアをダウンロード"
+  },
+  "TUISettingDownloadDesc": {
+    "description": "Description of the Download Media setting",
+    "other": "カバー、スクリーンショット、予告編をダウンロード"
+  },
+  "TUISettingDryRun": {
+    "description": "Name of the Dry Run setting",
+    "other": "ドライラン"
+  },
+  "TUISettingDryRunDesc": {
+    "description": "Description of the Dry Run setting",
+    "other": "プレビューモード - 実際の変更を行わない"
+  },
+  "TUISettingExtrafanart": {
+    "description": "Name of the Download Extrafanart setting",
+    "other": "エクストラファンアートをダウンロード"
+  },
+  "TUISettingExtrafanartDesc": {
+    "description": "Description of the Download Extrafanart setting",
+    "other": "extrafanart/スクリーンショットをサブフォルダーへダウンロード"
+  },
+  "TUISettingForceRefresh": {
+    "description": "Name of the Force Refresh setting",
+    "other": "強制リフレッシュ"
+  },
+  "TUISettingForceRefreshDesc": {
+    "description": "Description of the Force Refresh setting",
+    "other": "DB キャッシュをクリアしてメタデータを再スクレープ"
+  },
+  "TUISettingForceUpdate": {
+    "description": "Name of the Force Update setting",
+    "other": "強制更新"
+  },
+  "TUISettingForceUpdateDesc": {
+    "description": "Description of the Force Update setting",
+    "other": "既存ファイル (画像、NFO) を置換"
+  },
+  "TUISettingLanguage": {
+    "description": "Name of the interface language setting",
+    "other": "言語"
+  },
+  "TUISettingLanguageDesc": {
+    "description": "Description of the interface language setting",
+    "other": "インターフェースの表示言語 (auto はシステムロケールに追従)"
+  },
+  "TUISettingMoveFiles": {
+    "description": "Name of the Move Files setting",
+    "other": "ファイルを移動"
+  },
+  "TUISettingMoveFilesDesc": {
+    "description": "Description of the Move Files setting",
+    "other": "コピーの代わりに移動 (デフォルト: コピー)"
+  },
+  "TUISettingNFO": {
+    "description": "Name of the Generate NFO setting",
+    "other": "NFO を生成"
+  },
+  "TUISettingNFODesc": {
+    "description": "Description of the Generate NFO setting",
+    "other": "メディアセンター用に NFO ファイルを作成"
+  },
+  "TUISettingOrganize": {
+    "description": "Name of the Organize Files setting",
+    "other": "ファイルを整理"
+  },
+  "TUISettingOrganizeDesc": {
+    "description": "Description of the Organize Files setting",
+    "other": "ファイルを整理された構造へ移動/コピー"
+  },
+  "TUISettingScrape": {
+    "description": "Name of the Scrape Metadata setting",
+    "other": "メタデータをスクレープ"
+  },
+  "TUISettingScrapeDesc": {
+    "description": "Description of the Scrape Metadata setting",
+    "other": "JAV ソースからメタデータを取得"
+  },
+  "TUISettingUpdateMode": {
+    "description": "Name of the Update Mode setting",
+    "other": "更新モード"
+  },
+  "TUISettingUpdateModeDesc": {
+    "description": "Description of the Update Mode setting",
+    "other": "メタデータの作成/更新のみ、ファイルを移動しない"
+  },
+  "TUISettingsChoiceHint": {
+    "description": "Hint shown next to the settings title for choice rows",
+    "other": "(←/→ または space で変更)"
+  },
+  "TUISettingsLanguageAuto": {
+    "description": "Selector label for the automatic system locale choice",
+    "other": "自動 (システム)"
+  },
+  "TUISettingsTitle": {
+    "description": "Heading of the terminal settings view",
+    "other": "設定"
+  },
+  "TUISettingsToggleHint": {
+    "description": "Hint shown next to the settings title",
+    "other": "(space で切替)"
+  },
+  "TUIShuttingDown": {
+    "description": "Message shown while the TUI is shutting down",
+    "other": "graceful にシャットダウン中..."
+  },
+  "TUISortServiceNotInitialized": {
+    "description": "Log message shown when processing starts before the sort service is wired",
+    "other": "ソートサービスが初期化されていません"
+  },
+  "TUISucceeded": {
+    "description": "Number of files that succeeded processing in the completion banner",
+    "one": "{{.Count}} 件成功",
+    "other": "{{.Count}} 件成功"
+  },
+  "TUITabBrowser": {
+    "description": "Tab label for the browser view",
+    "other": "参照"
+  },
+  "TUITabDashboard": {
+    "description": "Tab label for the dashboard view",
+    "other": "ダッシュボード"
+  },
+  "TUITabHelp": {
+    "description": "Tab label for the help view",
+    "other": "ヘルプ"
+  },
+  "TUITabLogs": {
+    "description": "Tab label for the logs view",
+    "other": "ログ"
+  },
+  "TUITabSettings": {
+    "description": "Tab label for the settings view",
+    "other": "設定"
+  },
+  "TUITaskErr": {
+    "description": "Badge shown for a failed task",
+    "other": "ERR"
+  },
+  "TUITaskOK": {
+    "description": "Badge shown for a completed task",
+    "other": "OK"
+  },
+  "TUITaskPending": {
+    "description": "Badge shown for a pending task",
+    "other": "..."
+  },
+  "TUITaskRun": {
+    "description": "Badge shown for a running task",
+    "other": "実行"
+  },
+  "TUITasksTitle": {
+    "description": "Title of the task list panel",
+    "other": "タスク"
+  },
+  "TUIWorkers": {
+    "description": "Running and total worker counts shown in the header",
+    "other": "ワーカー: {{.Running}}/{{.Total}}"
+  }
+}

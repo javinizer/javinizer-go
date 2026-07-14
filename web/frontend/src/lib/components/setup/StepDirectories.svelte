@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { FolderCheck } from 'lucide-svelte';
 	import AllowedDirectoriesEditor from '$lib/components/AllowedDirectoriesEditor.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let {
 		dirs = $bindable(),
@@ -15,10 +16,9 @@
 
 <div class="step-head">
 	<div class="step-badge"><FolderCheck class="h-5 w-5" /></div>
-	<h1 class="step-title">Point Javinizer at your library</h1>
+	<h1 class="step-title">{m.setup_directories_title()}</h1>
 	<p class="step-sub">
-		Add the folders that hold your video files. Javinizer can only read and write inside these
-		locations — add as many as you need.
+		{m.setup_directories_sub()}
 	</p>
 </div>
 
@@ -30,7 +30,7 @@
 	<AllowedDirectoriesEditor
 		bind:directories={dirs}
 		whitelistPaths={dirs}
-		emptyHint="No directories added yet. Add one below to enable scanning, or skip and add later."
+		emptyHint={m.setup_directories_empty_hint()}
 	/>
 </div>
 

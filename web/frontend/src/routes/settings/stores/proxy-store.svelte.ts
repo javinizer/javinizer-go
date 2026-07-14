@@ -1,3 +1,4 @@
+	import * as m from '$lib/paraglide/messages';
 import { apiClient } from '$lib/api/client';
 import { toastStore } from '$lib/stores/toast';
 import { isTestValid, type TestResult, type ScraperProxyMode } from '$lib/proxy/proxy-logic';
@@ -167,7 +168,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 		const newName = rawNewName.trim();
 		if (!newName || oldName === newName) return;
 		if (config.scrapers.proxy.profiles[newName]) {
-			toastStore.error(`Profile "${newName}" already exists`, 4000);
+			toastStore.error(m.settings_proxy_profile_exists({ name: newName }), 4000);
 			return;
 		}
 
@@ -270,9 +271,9 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 				method: 'PUT',
 				body: JSON.stringify(config),
 			});
-			toastStore.success(`Profile "${profileName}" saved successfully.`, 4000);
+			toastStore.success(m.settings_proxy_profile_saved({ name: profileName }), 4000);
 		} catch (e) {
-			const errMsg = e instanceof Error ? e.message : 'Failed to save profile';
+			const errMsg = e instanceof Error ? e.message : m.settings_proxy_profile_save_failed();
 			deps.setError(errMsg);
 			toastStore.error(errMsg, 5000);
 		} finally {
@@ -284,11 +285,11 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 		const config = deps.getConfig();
 		const profile = config?.scrapers?.proxy?.profiles?.[profileName];
 		if (!profile) {
-			toastStore.error(`Profile "${profileName}" not found`, 5000);
+			toastStore.error(m.settings_proxy_profile_not_found({ name: profileName }), 5000);
 			return;
 		}
 		if (!profile.url?.trim()) {
-			toastStore.error(`Profile "${profileName}" needs a proxy URL before testing`, 5000);
+			toastStore.error(m.settings_proxy_profile_url_required({ name: profileName }), 5000);
 			return;
 		}
 
@@ -352,18 +353,18 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 
 			if (result.success) {
 				toastStore.success(
-					`Profile "${profileName}" test passed (${result.duration_ms}ms): ${result.message}`,
+					m.settings_proxy_profile_test_passed({ name: profileName, duration: result.duration_ms, message: result.message }),
 					7000,
 				);
 			} else {
 				toastStore.error(
-					`Profile "${profileName}" test failed (${result.duration_ms}ms): ${result.message}`,
+					m.settings_proxy_profile_test_failed({ name: profileName, duration: result.duration_ms, message: result.message }),
 					7000,
 				);
 			}
 		} catch (e) {
 			profileTestResults[profileName] = { success: false, timestamp: Date.now() };
-			const msg = e instanceof Error ? e.message : 'Profile proxy test failed';
+			const msg = e instanceof Error ? e.message : m.settings_proxy_profile_test_failed_generic();
 			toastStore.error(msg, 7000);
 		} finally {
 			testingProfile[profileName] = false;
@@ -373,7 +374,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 	async function runProxyTest(mode: 'direct' | 'flaresolverr') {
 		const config = deps.getConfig();
 		if (!config?.scrapers?.proxy) {
-			toastStore.error('Scraper proxy configuration is missing', 5000);
+			toastStore.error(m.settings_proxy_config_missing(), 5000);
 			return;
 		}
 
@@ -381,7 +382,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 
 		if (mode === 'direct') {
 			if (!proxyConfig.enabled) {
-				toastStore.error('Enable scraper proxy before testing', 5000);
+				toastStore.error(m.settings_proxy_enable_before_test(), 5000);
 				return;
 			}
 
@@ -389,7 +390,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 			const defaultProfile = defaultProfileName ? proxyConfig.profiles?.[defaultProfileName] : null;
 
 			if (!defaultProfile?.url?.trim()) {
-				toastStore.error('Set default proxy profile URL before testing', 5000);
+				toastStore.error(m.settings_proxy_set_default_url(), 5000);
 				return;
 			}
 
@@ -419,26 +420,26 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 
 				if (result.success) {
 					toastStore.success(
-						`Proxy test passed (${result.duration_ms}ms): ${result.message}`,
+						m.settings_proxy_test_passed_msg({ duration: result.duration_ms, message: result.message }),
 						7000,
 					);
 				} else {
-					toastStore.error(`Proxy test failed (${result.duration_ms}ms): ${result.message}`, 7000);
+					toastStore.error(m.settings_proxy_test_failed_msg({ duration: result.duration_ms, message: result.message }), 7000);
 				}
 			} catch (e) {
 				globalProxyTestResult = { success: false, timestamp: Date.now() };
-				const msg = e instanceof Error ? e.message : 'Proxy test failed';
+				const msg = e instanceof Error ? e.message : m.settings_proxy_test_failed_generic();
 				toastStore.error(msg, 7000);
 			} finally {
 				testingProxy = false;
 			}
 		} else if (mode === 'flaresolverr') {
 			if (!config.scrapers.flaresolverr?.enabled) {
-				toastStore.error('Enable FlareSolverr before testing', 5000);
+				toastStore.error(m.settings_proxy_enable_flaresolverr_before_test(), 5000);
 				return;
 			}
 			if (!config.scrapers.flaresolverr?.url?.trim()) {
-				toastStore.error('Set FlareSolverr URL before testing', 5000);
+				toastStore.error(m.settings_proxy_set_flaresolverr_url(), 5000);
 				return;
 			}
 
@@ -480,18 +481,18 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 
 				if (result.success) {
 					toastStore.success(
-						`FlareSolverr test passed (${result.duration_ms}ms): ${result.message}`,
+						m.settings_proxy_flaresolverr_test_passed_msg({ duration: result.duration_ms, message: result.message }),
 						7000,
 					);
 				} else {
 					toastStore.error(
-						`FlareSolverr test failed (${result.duration_ms}ms): ${result.message}`,
+						m.settings_proxy_flaresolverr_test_failed_msg({ duration: result.duration_ms, message: result.message }),
 						7000,
 					);
 				}
 			} catch (e) {
 				globalFlareSolverrTestResult = { success: false, timestamp: Date.now() };
-				const msg = e instanceof Error ? e.message : 'FlareSolverr test failed';
+				const msg = e instanceof Error ? e.message : m.settings_proxy_flaresolverr_test_failed_generic();
 				toastStore.error(msg, 7000);
 			} finally {
 				testingFlareSolverr = false;

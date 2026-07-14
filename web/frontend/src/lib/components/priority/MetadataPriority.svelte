@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { cubicOut } from 'svelte/easing';
 	import { fade, fly, slide } from 'svelte/transition';
 	import { X, Info } from 'lucide-svelte';
@@ -119,24 +120,24 @@
 
 	// Metadata field definitions with descriptions (using snake_case keys to match API)
 	const metadataFields = [
-		{ key: 'id', label: 'Movie ID', category: 'Primary', description: 'Primary movie identifier (e.g., IPX-123)' },
-		{ key: 'title', label: 'Title', category: 'Primary', description: 'Movie title in English or romanized form' },
-		{ key: 'original_title', label: 'Original Title', category: 'Primary', description: 'Original Japanese title' },
-		{ key: 'description', label: 'Description', category: 'Primary', description: 'Movie plot summary' },
-		{ key: 'release_date', label: 'Release Date', category: 'Primary', description: 'Official release date' },
-		{ key: 'runtime', label: 'Runtime', category: 'Primary', description: 'Movie duration in minutes' },
-		{ key: 'content_id', label: 'Content ID', category: 'Primary', description: 'Alternative content identifier' },
-		{ key: 'actress', label: 'Actresses', category: 'Metadata', description: 'Cast members and performers' },
-		{ key: 'genre', label: 'Genres', category: 'Metadata', description: 'Movie categories and tags' },
-		{ key: 'director', label: 'Director', category: 'Metadata', description: 'Movie director' },
-		{ key: 'maker', label: 'Studio/Maker', category: 'Metadata', description: 'Production studio' },
-		{ key: 'label', label: 'Label', category: 'Metadata', description: 'Distribution label' },
-		{ key: 'series', label: 'Series', category: 'Metadata', description: 'Series or collection name' },
-		{ key: 'rating', label: 'Rating', category: 'Metadata', description: 'User rating or score' },
-		{ key: 'cover_url', label: 'Cover Image', category: 'Media', description: 'Front cover artwork URL' },
-		{ key: 'poster_url', label: 'Poster Image', category: 'Media', description: 'Poster or fanart URL' },
-		{ key: 'screenshot_url', label: 'Screenshots', category: 'Media', description: 'Scene screenshot URLs' },
-		{ key: 'trailer_url', label: 'Trailer', category: 'Media', description: 'Preview video URL' }
+		{ key: 'id', label: m.priority_field_id_label(), category: m.priority_category_primary(), description: m.priority_field_id_desc() },
+		{ key: 'title', label: m.priority_field_title_label(), category: m.priority_category_primary(), description: m.priority_field_title_desc() },
+		{ key: 'original_title', label: m.priority_field_original_title_label(), category: m.priority_category_primary(), description: m.priority_field_original_title_desc() },
+		{ key: 'description', label: m.priority_field_description_label(), category: m.priority_category_primary(), description: m.priority_field_description_desc() },
+		{ key: 'release_date', label: m.priority_field_release_date_label(), category: m.priority_category_primary(), description: m.priority_field_release_date_desc() },
+		{ key: 'runtime', label: m.priority_field_runtime_label(), category: m.priority_category_primary(), description: m.priority_field_runtime_desc() },
+		{ key: 'content_id', label: m.priority_field_content_id_label(), category: m.priority_category_primary(), description: m.priority_field_content_id_desc() },
+		{ key: 'actress', label: m.priority_field_actress_label(), category: m.priority_category_metadata(), description: m.priority_field_actress_desc() },
+		{ key: 'genre', label: m.priority_field_genre_label(), category: m.priority_category_metadata(), description: m.priority_field_genre_desc() },
+		{ key: 'director', label: m.priority_field_director_label(), category: m.priority_category_metadata(), description: m.priority_field_director_desc() },
+		{ key: 'maker', label: m.priority_field_maker_label(), category: m.priority_category_metadata(), description: m.priority_field_maker_desc() },
+		{ key: 'label', label: m.priority_field_label_label(), category: m.priority_category_metadata(), description: m.priority_field_label_desc() },
+		{ key: 'series', label: m.priority_field_series_label(), category: m.priority_category_metadata(), description: m.priority_field_series_desc() },
+		{ key: 'rating', label: m.priority_field_rating_label(), category: m.priority_category_metadata(), description: m.priority_field_rating_desc() },
+		{ key: 'cover_url', label: m.priority_field_cover_url_label(), category: m.priority_category_media(), description: m.priority_field_cover_url_desc() },
+		{ key: 'poster_url', label: m.priority_field_poster_url_label(), category: m.priority_category_media(), description: m.priority_field_poster_url_desc() },
+		{ key: 'screenshot_url', label: m.priority_field_screenshot_url_label(), category: m.priority_category_media(), description: m.priority_field_screenshot_url_desc() },
+		{ key: 'trailer_url', label: m.priority_field_trailer_url_label(), category: m.priority_category_media(), description: m.priority_field_trailer_url_desc() }
 	];
 
 	// Field priority / override helpers live in ./priority.ts (pure, unit-tested).
@@ -297,8 +298,8 @@
 		const overrideCount = getOverrideCount();
 		if (overrideCount > 0) {
 			if (!(await confirmDialog(
-				'Switch to Simple Mode',
-				`You have ${overrideCount} field override(s). Switching to Simple mode will hide these settings but not delete them. Continue?`
+				m.priority_switch_simple_title(),
+				m.priority_switch_simple_body({ count: overrideCount })
 			))) return;
 		}
 		mode = 'simple';
@@ -336,7 +337,7 @@
 								? 'bg-primary text-primary-foreground'
 								: 'hover:bg-accent'}"
 						>
-							Simple
+							{m.priority_mode_simple()}
 						</button>
 						<button
 							type="button"
@@ -346,7 +347,7 @@
 								? 'bg-primary text-primary-foreground'
 								: 'hover:bg-accent'}"
 						>
-							Advanced
+							{m.priority_mode_advanced()}
 							{#if getOverrideCount() > 0}
 								<span class="ml-1 text-xs">({getOverrideCount()})</span>
 							{/if}
@@ -355,9 +356,9 @@
 				</div>
 				<p class="text-xs text-muted-foreground">
 					{#if mode === 'simple'}
-						Simple: One priority list applies to all metadata fields
+						{m.priority_mode_simple_desc()}
 					{:else}
-						Advanced: Customize priority for individual fields
+						{m.priority_mode_advanced_desc()}
 					{/if}
 				</p>
 			</div>
@@ -370,7 +371,7 @@
 			<button
 				type="button"
 				bind:this={infoButtonEl}
-				aria-label="Priority mode help"
+				aria-label={m.priority_aria_mode_help()}
 				aria-describedby={priorityModeHelpTooltipId}
 				aria-expanded={showInfo}
 				onclick={toggleInfo}
@@ -388,18 +389,15 @@
 			>
 				{#if showInfo}
 					<div transition:fade={{ duration: 150 }} class="space-y-1.5 text-xs">
-						<p class="font-semibold">Metadata priority modes</p>
+						<p class="font-semibold">{m.priority_help_title()}</p>
 						<p>
-							<span class="font-medium">Simple</span> — one priority list applies to every
-							metadata field.
+							{m.priority_help_simple()}
 						</p>
 						<p>
-							<span class="font-medium">Advanced</span> — set a custom scraper order for
-							individual fields.
+							{m.priority_help_advanced()}
 						</p>
 						<p class="text-muted-foreground">
-							Per-field lists are exclusive: only the listed scrapers are consulted
-							— there is no fallback to the global list.
+							{m.priority_help_note()}
 						</p>
 					</div>
 				{/if}
@@ -410,10 +408,10 @@
 		<!-- Global Priority -->
 		<div>
 			<span class="block text-sm font-medium mb-3">
-				Global Scraper Priority
+				{m.priority_global_heading()}
 				{#if mode === 'simple'}
 					<span class="text-xs text-muted-foreground ml-2">
-						(applies to all fields)
+						{m.priority_global_applies_all()}
 					</span>
 				{/if}
 			</span>
@@ -433,10 +431,10 @@
 		{#if mode === 'advanced'}
 			<div class="space-y-4" transition:slide|local={{ duration: 220, easing: cubicOut }}>
 				<div class="flex items-center justify-between">
-					<h3 class="text-sm font-medium">Per-Field Overrides</h3>
+					<h3 class="text-sm font-medium">{m.priority_per_field_heading()}</h3>
 					<label class="flex items-center gap-2 text-sm">
 						<input type="checkbox" bind:checked={showOnlyOverrides} class="rounded" />
-						<span class="text-muted-foreground">Show only overridden</span>
+						<span class="text-muted-foreground">{m.priority_show_only_overridden()}</span>
 					</label>
 				</div>
 
@@ -465,8 +463,8 @@
 
 				{#if showOnlyOverrides && getOverrideCount() === 0}
 					<div class="text-center py-8 text-muted-foreground">
-						<p class="text-sm">No field overrides configured</p>
-						<p class="text-xs mt-1">All fields use the global priority</p>
+						<p class="text-sm">{m.priority_no_overrides()}</p>
+						<p class="text-xs mt-1">{m.priority_no_overrides_hint()}</p>
 					</div>
 				{/if}
 			</div>
@@ -482,13 +480,13 @@
 				<div class="flex items-start justify-between">
 					<div>
 						<h3 class="text-lg font-semibold">
-							Edit Priority: {metadataFields.find((f) => f.key === editingField)?.label}
+							{m.priority_edit_modal_title({ label: metadataFields.find((f) => f.key === editingField)?.label ?? '' })}
 						</h3>
 						<p class="text-sm text-muted-foreground mt-1">
 							{metadataFields.find((f) => f.key === editingField)?.description}
 						</p>
 					</div>
-					<Button variant="ghost" size="icon" onclick={() => (editingField = null)} aria-label="Close editor">
+					<Button variant="ghost" size="icon" onclick={() => (editingField = null)} aria-label={m.priority_close_editor_aria()}>
 						{#snippet children()}
 							<X class="h-4 w-4" />
 						{/snippet}
@@ -519,23 +517,21 @@
 						</DraggableList>
 					{:else}
 						<p class="text-sm text-muted-foreground italic py-4 text-center">
-							No scrapers in this field's list. Save with an empty list to suppress this
-							field (stores the <code class="bg-muted px-1 rounded">"__skip__"</code>
-							sentinel — no scraper is consulted), or add some below.
+							{m.priority_empty_field_hint()}
 						</p>
 					{/if}
 				</div>
 
 				<!-- Shortcuts: add all / remove all -->
 				<div class="flex items-center gap-2 flex-wrap">
-					<Button variant="outline" size="sm" onclick={addAllScrapers} aria-label="Add all scrapers to this field">
+					<Button variant="outline" size="sm" onclick={addAllScrapers} aria-label={m.priority_add_all_aria()}>
 						{#snippet children()}
-							Add all
+							{m.priority_add_all()}
 						{/snippet}
 					</Button>
-					<Button variant="outline" size="sm" onclick={removeAllScrapers} aria-label="Remove all scrapers from this field">
+					<Button variant="outline" size="sm" onclick={removeAllScrapers} aria-label={m.priority_remove_all_aria()}>
 						{#snippet children()}
-							Remove all
+							{m.priority_remove_all()}
 						{/snippet}
 					</Button>
 				</div>
@@ -543,14 +539,14 @@
 				<!-- Available scrapers to add back (those not currently in the list) -->
 				{#if availableScrapersToAdd.length > 0}
 					<div class="space-y-1.5">
-						<p class="text-xs font-medium text-muted-foreground">Available scrapers</p>
+						<p class="text-xs font-medium text-muted-foreground">{m.priority_available_scrapers()}</p>
 						<div class="flex flex-wrap gap-1.5">
 							{#each availableScrapersToAdd as name}
 								<button
 									type="button"
 									onclick={() => addScraperToField(name)}
 									class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border border-dashed border-border hover:border-primary hover:bg-primary/5 transition-colors"
-									aria-label="Add {formatScraperName(name)} to this field"
+									aria-label={m.priority_add_scraper_aria({ name: formatScraperName(name) })}
 								>
 									<span class="text-lg leading-none">+</span>
 									{formatScraperName(name)}
@@ -563,20 +559,10 @@
 				<!-- Info -->
 				<div class="bg-accent/50 rounded-lg p-3 text-xs text-muted-foreground space-y-1">
 					<p>
-						Scrapers are tried top-to-bottom; the first one that returns data for this field is
-						used. Only the scrapers listed here are consulted — there is no fallback to the
-						global list. Remove a scraper with its <span class="font-medium">✕</span> button; add
-						one back from the chips above.
+						{m.priority_info_scrapers_top_to_bottom({ icon: '✕' })}
 					</p>
 					<p>
-						To leave a field empty, remove all scrapers and Save (stores
-						<code class="bg-muted px-1 rounded">series: ["__skip__"]</code> — the
-						skip sentinel, no scraper is consulted), or point it at a scraper that
-						doesn't provide it (e.g.
-						<code class="bg-muted px-1 rounded">series: [tokyohot]</code>). A legacy
-						<code class="bg-muted px-1 rounded">series: []</code> is treated as
-						inherit-global, not suppression — so "Remove all + Save" stores the
-						<code class="bg-muted px-1 rounded">__skip__</code> sentinel instead.
+						{m.priority_info_leave_empty({ skipExample: 'series: ["__skip__"]', tokyohotExample: 'series: [tokyohot]', emptyExample: 'series: []', skipSentinel: '__skip__' })}
 					</p>
 				</div>
 
@@ -584,12 +570,12 @@
 				<div class="flex items-center gap-3 justify-end">
 					<Button variant="outline" onclick={() => (editingField = null)}>
 						{#snippet children()}
-							Cancel
+							{m.common_cancel()}
 						{/snippet}
 					</Button>
 					<Button onclick={saveFieldPriority}>
 						{#snippet children()}
-							Save Priority
+							{m.priority_save()}
 						{/snippet}
 					</Button>
 				</div>

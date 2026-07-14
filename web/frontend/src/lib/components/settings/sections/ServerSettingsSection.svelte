@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { onMount } from 'svelte';
 	import { RefreshCw, ArrowUpCircle } from 'lucide-svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
@@ -10,9 +11,10 @@
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 	}
 
-	let { config, inputClass }: Props = $props();
+	let { config, inputClass, selectClass }: Props = $props();
 
 	let versionStatus = $state<VersionStatusResponse | null>(null);
 	let isCheckingVersion = $state(false);
@@ -30,14 +32,14 @@
 		try {
 			versionStatus = await apiClient.checkVersion();
 			if (versionStatus.error) {
-				toastStore.error(`Version check failed: ${versionStatus.error}`);
+				toastStore.error(m.settings_server_version_check_failed({ error: versionStatus.error }));
 			} else if (versionStatus.update_available) {
-				toastStore.info(`Update available: v${versionStatus.latest}`);
+				toastStore.info(m.settings_server_update_available_toast({ version: versionStatus.latest }));
 			} else {
-				toastStore.success('You are on the latest version');
+				toastStore.success(m.settings_server_latest_version_toast());
 			}
 		} catch (e) {
-			toastStore.error(`Version check failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+			toastStore.error(m.settings_server_version_check_failed({ error: e instanceof Error ? e.message : m.common_unknown_error() }));
 		} finally {
 			isCheckingVersion = false;
 		}
@@ -60,18 +62,18 @@
 	});
 </script>
 
-<SettingsSection title="Server Settings" description="Configure API server host, port, and system paths" defaultExpanded={false}>
+<SettingsSection title={m.settings_server_title()} description={m.settings_server_desc()} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div class="p-3 bg-muted/30 rounded-lg border border-border">
 			<div class="flex items-center justify-between gap-3 flex-wrap">
 				<div class="flex items-center gap-2">
-					<span class="text-sm font-medium">Version</span>
+					<span class="text-sm font-medium">{m.settings_server_version()}</span>
 					{#if versionStatus}
 						<span class="text-sm text-muted-foreground">{versionStatus.current}</span>
 						{#if versionStatus.update_available}
 							<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600">
 								<ArrowUpCircle class="h-3 w-3" />
-								Update available: {versionStatus.latest}
+								{m.settings_server_update_available_badge({ version: versionStatus.latest })}
 							</span>
 						{/if}
 					{:else}
@@ -92,7 +94,7 @@
 						class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-input bg-background text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50 transition-colors"
 					>
 						<RefreshCw class="h-3.5 w-3.5 {isCheckingVersion ? 'animate-spin' : ''}" />
-						{isCheckingVersion ? 'Checking...' : 'Check for Updates'}
+						{isCheckingVersion ? m.settings_server_checking() : m.settings_server_check_button()}
 					</button>
 				</div>
 			</div>
@@ -104,11 +106,11 @@
 						bind:checked={config.system.version_check_enabled}
 						class="w-4 h-4"
 					/>
-					<label class="text-sm font-medium" for="version-check-enabled">Enable automatic version checking</label>
+					<label class="text-sm font-medium" for="version-check-enabled">{m.settings_server_version_check_enable()}</label>
 				</div>
 				{#if config.system.version_check_enabled}
 					<div>
-						<label class="block text-sm font-medium mb-2" for="version-check-interval">Check Interval (hours)</label>
+						<label class="block text-sm font-medium mb-2" for="version-check-interval">{m.settings_server_check_interval_label()}</label>
 						<input
 							id="version-check-interval"
 							type="number"
@@ -124,16 +126,16 @@
 
 		<div class="grid grid-cols-2 gap-4">
 			<div>
-				<label class="block text-sm font-medium mb-2" for="server-host">Host</label>
+				<label class="block text-sm font-medium mb-2" for="server-host">{m.settings_server_host_label()}</label>
 				<input id="server-host" type="text" bind:value={config.server.host} class={inputClass} placeholder="localhost" />
 			</div>
 			<div>
-				<label class="block text-sm font-medium mb-2" for="server-port">Port</label>
+				<label class="block text-sm font-medium mb-2" for="server-port">{m.settings_server_port_label()}</label>
 				<input id="server-port" type="number" bind:value={config.server.port} class={inputClass} placeholder="8765" />
 			</div>
 		</div>
 		<div>
-			<label class="block text-sm font-medium mb-2" for="system-temp-dir">Temporary Directory</label>
+			<label class="block text-sm font-medium mb-2" for="system-temp-dir">{m.settings_server_temp_dir_label()}</label>
 			<input
 				id="system-temp-dir"
 				type="text"
@@ -142,7 +144,7 @@
 				class={inputClass}
 				placeholder="data/temp"
 			/>
-			<p class="text-xs text-muted-foreground mt-1">Base directory for temporary files (default: data/temp). Cannot contain path traversal patterns.</p>
+			<p class="text-xs text-muted-foreground mt-1">{m.settings_server_temp_dir_desc()}</p>
 		</div>
 	</div>
 </SettingsSection>

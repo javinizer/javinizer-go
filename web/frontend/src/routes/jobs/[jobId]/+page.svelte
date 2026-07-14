@@ -1,4 +1,6 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
+	import { formatDateTime } from '$lib/i18n/format';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { fade, fly } from 'svelte/transition';
@@ -49,16 +51,16 @@
 		onSuccess: (result) => {
 			revertModalOpen = false;
 			if (result.failed === 0) {
-				toastStore.success(`Successfully reverted ${result.succeeded} file${result.succeeded !== 1 ? 's' : ''}`);
+				toastStore.success(m.jobs_revert_success({ count: result.succeeded }));
 			} else {
-				toastStore.warning(`Reverted ${result.succeeded} of ${result.total}. ${result.failed} failed.`);
+				toastStore.warning(m.jobs_revert_partial({ succeeded: result.succeeded, total: result.total, failed: result.failed }));
 			}
 			void queryClient.invalidateQueries({ queryKey: ['job', jobId] });
 			void queryClient.invalidateQueries({ queryKey: ['job', jobId, 'operations'] });
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
 		},
 		onError: (err) => {
-			toastStore.error(`Revert failed: ${err.message}`);
+			toastStore.error(m.jobs_revert_failed({ error: err.message }));
 			revertModalOpen = false;
 		},
 		onSettled: () => { revertingMovieIds = new Set(); }
@@ -68,13 +70,13 @@
 		mutationFn: (movieId: string) => apiClient.revertJobOperation(jobId, movieId),
 		onSuccess: (_, movieId) => {
 			revertModalOpen = false;
-			toastStore.success(`Reverted ${movieId}`);
+			toastStore.success(m.jobs_operation_reverted({ movieId }));
 			void queryClient.invalidateQueries({ queryKey: ['job', jobId] });
 			void queryClient.invalidateQueries({ queryKey: ['job', jobId, 'operations'] });
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
 		},
 		onError: (err) => {
-			toastStore.error(`Revert failed: ${err.message}`);
+			toastStore.error(m.jobs_revert_failed({ error: err.message }));
 			revertModalOpen = false;
 		},
 		onSettled: () => { revertingMovieIds = new Set(); }
@@ -119,11 +121,7 @@
 	}
 
 	function formatDate(dateStr: string) {
-		const date = new Date(dateStr);
-		return new Intl.DateTimeFormat('en-US', {
-			dateStyle: 'medium',
-			timeStyle: 'short'
-		}).format(date);
+		return formatDateTime(dateStr);
 	}
 </script>
 
@@ -133,16 +131,16 @@
 		<button
 			onclick={() => goto('/jobs')}
 			class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-			aria-label="Back to jobs"
+			aria-label={m.jobs_back_to_jobs_aria()}
 		>
 			<ArrowLeft class="h-4 w-4" />
-			Back to Jobs
+			{m.jobs_back_to_jobs()}
 		</button>
 
 		{#if loading}
 			<Card class="p-8 text-center">
 				<Clock class="h-8 w-8 animate-spin mx-auto mb-2" />
-				<p class="text-muted-foreground">Loading job details...</p>
+				<p class="text-muted-foreground">{m.jobs_loading_details()}</p>
 			</Card>
 		{:else if error}
 			<Card class="p-4 bg-destructive/10 border-destructive">
@@ -154,10 +152,10 @@
 		{:else if job}
 			<!-- Header -->
 			<div in:fly|local={{ y: 12, duration: 220, easing: quintOut }}>
-				<h1 class="text-2xl font-bold tracking-tight">Job {job.id.slice(0, 8)}</h1>
+				<h1 class="text-2xl font-bold tracking-tight">{m.jobs_detail_title({ id: job.id.slice(0, 8) })}</h1>
 				<div class="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
 					<StatusBadge status={getStatusFromJobStatus(jobStatus)} />
-					<span>{operations.length} file{operations.length !== 1 ? 's' : ''}</span>
+					<span>{m.jobs_file_count_short({ count: operations.length })}</span>
 					{#if job.organized_at}
 						<span>{formatDate(job.organized_at)}</span>
 					{:else if job.started_at}
@@ -169,41 +167,41 @@
 			<!-- Batch Summary Card -->
 			<div in:fly|local={{ y: 10, duration: 240, delay: 50, easing: quintOut }}>
 				<Card class="p-6">
-					<h2 class="text-lg font-semibold mb-4">Batch Summary</h2>
+					<h2 class="text-lg font-semibold mb-4">{m.jobs_batch_summary()}</h2>
 					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
 						<div>
-							<span class="text-muted-foreground">Status:</span>
+							<span class="text-muted-foreground">{m.jobs_summary_status()}</span>
 							<span class="ml-2"><StatusBadge status={getStatusFromJobStatus(jobStatus)} size="sm" /></span>
 						</div>
 						<div>
-							<span class="text-muted-foreground">Total files:</span>
+							<span class="text-muted-foreground">{m.jobs_summary_total_files()}</span>
 							<span class="ml-2 font-medium">{operations.length}</span>
 						</div>
 						{#if job.destination}
 							<div>
-								<span class="text-muted-foreground">Destination:</span>
+								<span class="text-muted-foreground">{m.jobs_summary_destination()}</span>
 								<span class="ml-2 font-mono text-xs">{job.destination}</span>
 							</div>
 						{/if}
 						<div>
-							<span class="text-muted-foreground">Started:</span>
+							<span class="text-muted-foreground">{m.jobs_summary_started()}</span>
 							<span class="ml-2">{formatDate(job.started_at)}</span>
 						</div>
 						{#if job.completed_at}
 							<div>
-								<span class="text-muted-foreground">Completed:</span>
+								<span class="text-muted-foreground">{m.jobs_summary_completed()}</span>
 								<span class="ml-2">{formatDate(job.completed_at)}</span>
 							</div>
 						{/if}
 						{#if job.organized_at}
 							<div>
-								<span class="text-muted-foreground">Organized:</span>
+								<span class="text-muted-foreground">{m.jobs_summary_organized()}</span>
 								<span class="ml-2">{formatDate(job.organized_at)}</span>
 							</div>
 						{/if}
 						{#if job.reverted_at}
 							<div>
-								<span class="text-muted-foreground">Reverted:</span>
+								<span class="text-muted-foreground">{m.jobs_summary_reverted()}</span>
 								<span class="ml-2">{formatDate(job.reverted_at)}</span>
 							</div>
 						{/if}
@@ -218,7 +216,7 @@
 								onclick={openBatchRevertModal}
 							>
 								<Undo2 class="h-4 w-4 mr-1.5" />
-								Revert Batch ({revertEligibleCount} file{revertEligibleCount !== 1 ? 's' : ''})
+								{m.jobs_revert_batch({ count: revertEligibleCount })}
 							</Button>
 						</div>
 					{/if}
@@ -227,11 +225,11 @@
 
 			<!-- File List -->
 			<div class="space-y-3">
-				<h2 class="text-lg font-semibold">Files</h2>
+				<h2 class="text-lg font-semibold">{m.jobs_files()}</h2>
 
 				{#if operations.length === 0}
 					<Card class="p-8 text-center">
-						<p class="text-muted-foreground">No operations recorded for this job</p>
+						<p class="text-muted-foreground">{m.jobs_no_operations()}</p>
 					</Card>
 				{:else}
 					{#each operations as op, index (`${op.id}-${op.revert_status}`)}

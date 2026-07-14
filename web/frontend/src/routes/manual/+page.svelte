@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { useQueryClient } from '@tanstack/svelte-query';
@@ -78,22 +79,22 @@
 	function badgeShort(input: string): string {
 		switch (classifyInput(input)) {
 			case 'manual-id':
-				return 'ID';
+				return m.manual_badge_id();
 			case 'manual-url':
-				return 'URL';
+				return m.manual_badge_url();
 			default:
-				return 'Auto';
+				return m.manual_badge_auto();
 		}
 	}
 
 	function badgeTitle(input: string): string {
 		switch (classifyInput(input)) {
 			case 'manual-id':
-				return 'Manual ID override — scrapes as this ID, bypassing the matcher';
+				return m.manual_badge_id_title();
 			case 'manual-url':
-				return 'Manual URL override — scrapes with URL-compatible scrapers only';
+				return m.manual_badge_url_title();
 			default:
-				return 'Auto — ID derived from the filename via the matcher';
+				return m.manual_badge_auto_title();
 		}
 	}
 
@@ -195,14 +196,14 @@
 			rows = [];
 			clearManualInputs(batchKey);
 		} catch (e) {
-			errorMsg = e instanceof Error ? e.message : 'Failed to start manual scrape';
+			errorMsg = e instanceof Error ? e.message : m.manual_scrape_failed();
 		} finally {
 			submitting = false;
 		}
 	}
 </script>
 
-<svelte:head><title>Manual Scrape</title></svelte:head>
+<svelte:head><title>{m.manual_title()}</title></svelte:head>
 
 {#if snapshot}
 	<div class="container mx-auto px-4 py-8 pb-32">
@@ -210,15 +211,15 @@
 			<!-- Header -->
 			<div class="flex items-start justify-between gap-4">
 				<div>
-					<h1 class="text-3xl font-bold tracking-tight">Manual Scrape</h1>
+					<h1 class="text-3xl font-bold tracking-tight">{m.manual_title()}</h1>
 					<p class="text-muted-foreground mt-1.5">
-						Review each file and override its ID or URL before scraping.
+						{m.manual_desc()}
 					</p>
 				</div>
 				<Button variant="ghost" size="sm" onclick={() => void goto('/browse')}>
 					{#snippet children()}
 						<ArrowLeft class="h-4 w-4" aria-hidden="true" />
-						Back to browse
+						{m.manual_back_to_browse()}
 					{/snippet}
 				</Button>
 			</div>
@@ -228,65 +229,65 @@
 				<div class="flex items-center gap-2 mb-4">
 					<span class="h-2 w-2 rounded-full bg-primary/60"></span>
 					<h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-						Selected Settings
+						{m.manual_selected_settings()}
 					</h2>
 				</div>
 				<dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4">
 					<div>
-						<dt class="text-xs text-muted-foreground">Mode</dt>
+						<dt class="text-xs text-muted-foreground">{m.manual_mode()}</dt>
 						<dd class="mt-0.5">
 							<div class="inline-flex rounded-md border bg-background p-0.5 text-xs">
-								<button type="button" onclick={() => { if (snapshot) snapshot.update = false; }} class="rounded px-2.5 py-1 transition-colors {!snapshot.update ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}">Scrape &amp; Organize</button>
-								<button type="button" onclick={() => { if (snapshot) snapshot.update = true; }} class="rounded px-2.5 py-1 transition-colors {snapshot.update ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}">Update Metadata</button>
+								<button type="button" onclick={() => { if (snapshot) snapshot.update = false; }} class="rounded px-2.5 py-1 transition-colors {!snapshot.update ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}">{m.manual_mode_scrape_organize()}</button>
+								<button type="button" onclick={() => { if (snapshot) snapshot.update = true; }} class="rounded px-2.5 py-1 transition-colors {snapshot.update ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}">{m.manual_mode_update_metadata()}</button>
 							</div>
 						</dd>
 					</div>
 					<div>
-						<dt class="text-xs text-muted-foreground">Operation</dt>
+						<dt class="text-xs text-muted-foreground">{m.manual_operation()}</dt>
 						<dd class="mt-0.5">
 							<select
 								class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 								bind:value={snapshot.effectiveOperationMode}
-								aria-label="Operation mode"
+								aria-label={m.manual_operation_aria()}
 							>
-								<option value="organize">Organize</option>
-								<option value="in-place">In place</option>
-								<option value="in-place-norenamefolder">In place (keep folder)</option>
-								<option value="metadata-artwork">Metadata + artwork</option>
-								<option value="preview">Preview</option>
+								<option value="organize">{m.manual_op_organize()}</option>
+								<option value="in-place">{m.manual_op_in_place()}</option>
+								<option value="in-place-norenamefolder">{m.manual_op_in_place_keep()}</option>
+								<option value="metadata-artwork">{m.manual_op_metadata_artwork()}</option>
+								<option value="preview">{m.manual_op_preview()}</option>
 							</select>
 						</dd>
 					</div>
 					{#if !snapshot.update}
 						<div>
-							<dt class="text-xs text-muted-foreground">Destination</dt>
+							<dt class="text-xs text-muted-foreground">{m.manual_destination()}</dt>
 							<dd class="mt-0.5">
 								<input
 									type="text"
 									bind:value={snapshot.destination}
-									placeholder="(in place)"
+									placeholder={m.manual_destination_placeholder()}
 									class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono"
-									aria-label="Destination path"
+									aria-label={m.manual_destination_aria()}
 								/>
 							</dd>
 						</div>
 					{/if}
 					<div class="sm:col-span-2 lg:col-span-3">
-						<dt class="text-xs text-muted-foreground">Scrapers</dt>
+						<dt class="text-xs text-muted-foreground">{m.manual_scrapers()}</dt>
 						<dd class="mt-0.5">
 							<button
 								type="button"
 								class="group -m-1 cursor-pointer rounded-md p-1 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 								onclick={openScraperModal}
-								aria-label="Edit scraper selection and order"
-								title="Click to change scraper selection and order"
+								aria-label={m.manual_scrapers_edit_aria()}
+								title={m.manual_scrapers_edit_title()}
 							>
 								<div class="flex flex-wrap gap-1.5">
 									{#each (snapshot.showScraperSelector ? snapshot.selectedScrapers : enabledScrapers) as scraper}
 										<span class="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">{scraper}</span>
 									{/each}
 									{#if (snapshot.showScraperSelector ? snapshot.selectedScrapers : enabledScrapers).length === 0}
-										<span class="text-sm font-medium">All enabled</span>
+										<span class="text-sm font-medium">{m.manual_scrapers_all_enabled()}</span>
 									{/if}
 								</div>
 							</button>
@@ -294,46 +295,46 @@
 					</div>
 					{#if snapshot.update}
 						<div>
-							<dt class="text-xs text-muted-foreground">Preset</dt>
+							<dt class="text-xs text-muted-foreground">{m.manual_preset()}</dt>
 							<dd class="mt-0.5">
 								<select
 									class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 									bind:value={snapshot.preset}
-									aria-label="Merge preset"
+									aria-label={m.manual_preset_aria()}
 								>
-									<option value="">None</option>
-									<option value="conservative">Conservative</option>
-									<option value="gap-fill">Gap Fill</option>
-									<option value="aggressive">Aggressive</option>
+									<option value="">{m.manual_preset_none()}</option>
+									<option value="conservative">{m.manual_preset_conservative()}</option>
+									<option value="gap-fill">{m.manual_preset_gap_fill()}</option>
+									<option value="aggressive">{m.manual_preset_aggressive()}</option>
 								</select>
 							</dd>
 						</div>
 						<div>
-							<dt class="text-xs text-muted-foreground">Strategies</dt>
+							<dt class="text-xs text-muted-foreground">{m.manual_strategies()}</dt>
 							<dd class="mt-0.5 space-y-1">
 								<select
 									class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 									bind:value={snapshot.scalarStrategy}
-									aria-label="Scalar strategy"
+									aria-label={m.manual_scalar_strategy_aria()}
 								>
-									<option value="prefer-nfo">Prefer NFO</option>
-									<option value="prefer-scraper">Prefer Scraper</option>
-									<option value="preserve-existing">Preserve Existing</option>
-									<option value="fill-missing-only">Fill Missing Only</option>
+									<option value="prefer-nfo">{m.manual_scalar_prefer_nfo()}</option>
+									<option value="prefer-scraper">{m.manual_scalar_prefer_scraper()}</option>
+									<option value="preserve-existing">{m.manual_scalar_preserve_existing()}</option>
+									<option value="fill-missing-only">{m.manual_scalar_fill_missing()}</option>
 								</select>
 								<select
 									class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 									bind:value={snapshot.arrayStrategy}
-									aria-label="Array strategy"
+									aria-label={m.manual_array_strategy_aria()}
 								>
-									<option value="merge">Merge</option>
-									<option value="replace">Replace</option>
+									<option value="merge">{m.manual_array_merge()}</option>
+									<option value="replace">{m.manual_array_replace()}</option>
 								</select>
 							</dd>
 						</div>
 					{/if}
 					<div>
-						<dt class="text-xs text-muted-foreground">Force refresh</dt>
+						<dt class="text-xs text-muted-foreground">{m.manual_force_refresh()}</dt>
 						<dd class="mt-0.5">
 							<button
 								type="button"
@@ -341,7 +342,7 @@
 								aria-checked={snapshot.force}
 								onclick={() => { if (snapshot) snapshot.force = !snapshot.force; }}
 								class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {snapshot.force ? 'bg-primary' : 'bg-muted'}"
-								aria-label="Force refresh"
+								aria-label={m.manual_force_refresh_aria()}
 							>
 								<span class="inline-block h-4 w-4 transform rounded-full bg-background shadow transition-transform {snapshot.force ? 'translate-x-4' : 'translate-x-0.5'}"></span>
 							</button>
@@ -364,13 +365,13 @@
 				<div class="flex items-center justify-between">
 					<h2 class="flex items-center gap-2 font-semibold">
 						<FileText class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-						<span>Files ({rows.length})</span>
+						<span>{m.manual_files({ count: rows.length })}</span>
 					</h2>
 					{#if overridesCount > 0}
 						<Button variant="ghost" size="sm" onclick={clearAllOverrides}>
 							{#snippet children()}
 								<Eraser class="h-3.5 w-3.5" aria-hidden="true" />
-								Clear all overrides
+								{m.manual_clear_overrides()}
 							{/snippet}
 						</Button>
 					{/if}
@@ -379,7 +380,7 @@
 				{#if rows.length === 0}
 					<Card class="p-8 text-center">
 						<p class="text-sm text-muted-foreground">
-							No files left in this batch. Go back to browse to select again.
+							{m.manual_no_files()}
 						</p>
 					</Card>
 				{:else}
@@ -414,8 +415,8 @@
 										class="w-full min-w-[12rem] flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring/30 lg:w-64 lg:flex-none {overridden
 											? 'border-primary/50'
 											: ''}"
-										placeholder="Auto — type ID or URL to override"
-										aria-label="Manual input for {row.filePath}"
+										placeholder={m.manual_input_placeholder()}
+										aria-label={m.manual_input_aria({ filePath: row.filePath })}
 										bind:value={row.input}
 									/>
 									<span
@@ -436,8 +437,8 @@
 									<button
 										type="button"
 										class="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-										aria-label="Remove {row.filePath} from batch"
-										title="Remove from batch"
+										aria-label={m.manual_remove_aria({ filePath: row.filePath })}
+										title={m.manual_remove_title()}
 										onclick={() => removeRow(i)}
 									>
 										<Trash2 class="h-4 w-4" aria-hidden="true" />
@@ -453,21 +454,19 @@
 			<div class="sticky bottom-0 z-20">
 				<Card class="flex items-center justify-between gap-4 p-3 shadow-lg">
 					<p class="text-sm text-muted-foreground">
-						<span class="font-medium text-foreground">{rows.length}</span>
-						file{rows.length === 1 ? '' : 's'}
+						{m.manual_count_files({ count: rows.length })}
 						{#if overridesCount > 0}
-							· <span class="font-medium text-primary">{overridesCount}</span>
-							override{overridesCount === 1 ? '' : 's'}
+							· {m.manual_count_overrides({ count: overridesCount })}
 						{/if}
 					</p>
 					<Button variant="default" disabled={submitting || rows.length === 0} onclick={submit}>
 						{#snippet children()}
 							{#if submitting}
 								<LoaderCircle class="h-4 w-4 animate-spin" aria-hidden="true" />
-								Starting…
+								{m.manual_starting()}
 							{:else}
 								<Scan class="h-4 w-4" aria-hidden="true" />
-								Start manual scrape
+								{m.manual_start_scrape()}
 							{/if}
 						{/snippet}
 					</Button>
@@ -490,7 +489,7 @@
 			<div class="w-full max-w-lg" in:scale|local={{ start: 0.97, duration: 180, easing: quintOut }} out:scale|local={{ start: 1, opacity: 0.7, duration: 130, easing: quintOut }}>
 				<Card class="w-full flex flex-col max-h-[90vh]">
 					<div class="p-6 border-b flex items-center justify-between">
-						<h2 class="text-xl font-bold">Scrapers</h2>
+						<h2 class="text-xl font-bold">{m.manual_scrapers_modal_title()}</h2>
 						<Button variant="ghost" size="icon" onclick={() => (showScraperModal = false)}>
 							{#snippet children()}
 								<X class="h-4 w-4" />
@@ -499,7 +498,7 @@
 					</div>
 					<div class="flex-1 overflow-auto p-6">
 						<p class="text-sm text-muted-foreground mb-4">
-							Select and reorder the scrapers for this scrape. The results will be aggregated according to this order.
+							{m.manual_scraper_order_desc()}
 						</p>
 						<ScraperSelector
 							scrapers={scrapersQuery.data ?? []}
@@ -509,14 +508,14 @@
 					</div>
 					<div class="p-6 border-t flex items-center justify-between gap-3">
 						<Button variant="ghost" onclick={resetScraperSelection}>
-							{#snippet children()}Reset to all enabled{/snippet}
+							{#snippet children()}{m.manual_reset_all_enabled()}{/snippet}
 						</Button>
 						<div class="flex gap-3">
 							<Button variant="outline" onclick={() => (showScraperModal = false)}>
-								{#snippet children()}Cancel{/snippet}
+								{#snippet children()}{m.common_cancel()}{/snippet}
 							</Button>
 							<Button onclick={applyScraperSelection}>
-								{#snippet children()}Apply{/snippet}
+								{#snippet children()}{m.common_apply()}{/snippet}
 							</Button>
 						</div>
 					</div>

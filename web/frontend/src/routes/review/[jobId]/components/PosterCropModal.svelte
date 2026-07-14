@@ -6,6 +6,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import { computeCropPreview, type PosterCropBox, type PosterCropMetrics } from '../review-utils';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		show: boolean;
@@ -83,8 +84,8 @@
 			<Card class="w-full flex flex-col max-h-[92vh]">
 				<div class="p-4 border-b flex items-center justify-between">
 					<div>
-						<h2 class="text-lg font-semibold">Adjust Poster Crop</h2>
-						<p class="text-xs text-muted-foreground">Drag the fixed crop box to choose the area to keep.</p>
+						<h2 class="text-lg font-semibold">{m.review_adjust_poster_crop()}</h2>
+						<p class="text-xs text-muted-foreground">{m.review_poster_crop_drag_hint()}</p>
 					</div>
 					<Button variant="ghost" size="icon" onclick={onClose} disabled={posterCropSaving}>
 						{#snippet children()}
@@ -97,7 +98,7 @@
 					<div class="relative w-full h-full p-10 bg-black/40 border-y min-h-[280px] flex items-center justify-center overflow-hidden">
 						<img
 							src={cropSourceURL}
-							alt="Poster crop source"
+							alt={m.review_poster_crop_source_alt()}
 							class="block max-w-full max-h-full select-none"
 							draggable="false"
 							onload={onImageLoad}
@@ -108,7 +109,7 @@
 								class="absolute border-2 border-white cursor-move touch-none"
 								style={overlayStyle}
 								onmousedown={onCropMouseDown}
-								aria-label="Poster crop selection"
+								aria-label={m.review_poster_crop_selection_aria()}
 								role="button"
 								tabindex="-1"
 							>
@@ -129,7 +130,7 @@
 					<div class="flex items-center justify-between gap-4 text-xs">
 						<!-- Live output preview -->
 						<div class="flex items-center gap-3 text-muted-foreground">
-							<span>Output:</span>
+							<span>{m.review_output_label()}</span>
 							<code class="px-1.5 py-0.5 rounded bg-muted text-foreground">
 								{preview.outputWidth}×{preview.outputHeight}px
 							</code>
@@ -138,11 +139,11 @@
 							{/if}
 							{#if preview.willResize}
 								<span class="text-amber-500 dark:text-amber-400 font-medium">
-									↓ downscaled from {cropBox?.width}×{cropBox?.height}
+									{m.review_downscaled_from({ width: cropBox?.width ?? 0, height: cropBox?.height ?? 0 })}
 								</span>
 							{:else if cropBox}
 								<span class="text-emerald-500 dark:text-emerald-400 font-medium">
-									✓ source resolution preserved
+									{m.review_source_resolution_preserved()}
 								</span>
 							{/if}
 						</div>
@@ -150,7 +151,7 @@
 						<!-- Max poster height input -->
 						<div class="flex items-center gap-2">
 							<label for="max-poster-height" class="text-muted-foreground whitespace-nowrap">
-								Max poster height (px)
+								{m.review_max_poster_height()}
 							</label>
 							<input
 								id="max-poster-height"
@@ -161,7 +162,7 @@
 								oninput={handleMaxHeightInput}
 							/>
 							<span class="text-muted-foreground">
-								(0 = no cap{configMaxPosterHeight !== 0 ? `, config: ${configMaxPosterHeight}` : ', config: no cap'})
+								{configMaxPosterHeight !== 0 ? m.review_max_poster_height_hint_with_config({ configValue: configMaxPosterHeight }) : m.review_max_poster_height_hint_no_cap()}
 							</span>
 							{#if maxPosterHeight !== null}
 								<button
@@ -169,7 +170,7 @@
 									class="text-xs text-primary hover:underline"
 									onclick={resetToConfigDefault}
 								>
-									Reset to config
+									{m.review_reset_to_config()}
 								</button>
 							{/if}
 						</div>
@@ -177,19 +178,19 @@
 
 					<div class="flex items-center justify-between gap-2">
 						<Button variant="outline" onclick={onReset} disabled={!cropMetrics || posterCropSaving}>
-							{#snippet children()}Reset Position{/snippet}
+							{#snippet children()}{m.review_reset_position()}{/snippet}
 						</Button>
 						<div class="flex items-center gap-2">
 							<Button variant="outline" onclick={onClose} disabled={posterCropSaving}>
-								{#snippet children()}Cancel{/snippet}
+								{#snippet children()}{m.common_cancel()}{/snippet}
 							</Button>
 							<Button onclick={onApply} disabled={!cropBox || !!posterCropLoadError || posterCropSaving}>
 								{#snippet children()}
 									{#if posterCropSaving}
 										<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
-										Applying...
+										{m.review_applying()}
 									{:else}
-										Apply Crop
+										{m.review_apply_crop()}
 									{/if}
 								{/snippet}
 							</Button>

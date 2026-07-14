@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { CircleCheckBig, CircleX, Undo2, LoaderCircle } from 'lucide-svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -72,7 +73,7 @@
 			{#if reverting}
 				<Button variant="outline" size="sm" disabled>
 					<LoaderCircle class="h-4 w-4 animate-spin" />
-					Reverting...
+					{m.history_reverting()}
 				</Button>
 			{:else}
 				<Button
@@ -82,13 +83,13 @@
 					onclick={() => onRevert(operation.movie_id)}
 				>
 					<Undo2 class="h-4 w-4 mr-1" />
-					Revert File
+					{m.history_revert_file()}
 				</Button>
 			{/if}
 		{:else if opState === 'reverted'}
 			<Button variant="ghost" size="sm" disabled>
 				<Undo2 class="h-4 w-4 mr-1" />
-				Reverted ✓
+				{m.history_reverted()}
 			</Button>
 		{/if}
 	</div>
@@ -96,7 +97,7 @@
 	<div class="text-sm space-y-1 ml-6">
 		{#if operation.original_path}
 			<div class="flex items-baseline gap-1" title={operation.original_path}>
-				<span class="text-muted-foreground shrink-0">From:</span>
+				<span class="text-muted-foreground shrink-0">{m.history_from_label()}</span>
 				<span class="font-medium text-foreground">{getFilename(operation.original_path)}</span>
 				{#if getParentDir(operation.original_path)}
 					{#if isLongPath(operation.original_path)}
@@ -105,14 +106,14 @@
 							onclick={() => expandedPaths.from = !expandedPaths.from}
 						>
 							{#if expandedPaths.from}
-								in {getParentDir(operation.original_path)}
+								{m.history_in_dir({ dir: getParentDir(operation.original_path) })}
 							{:else}
-								in {truncateDir(getParentDir(operation.original_path))}
+								{m.history_in_dir({ dir: truncateDir(getParentDir(operation.original_path)) })}
 							{/if}
 						</button>
 					{:else}
 						<span class="text-muted-foreground text-xs">
-							in {getParentDir(operation.original_path)}
+							{m.history_in_dir({ dir: getParentDir(operation.original_path) })}
 						</span>
 					{/if}
 				{/if}
@@ -120,7 +121,7 @@
 		{/if}
 		{#if operation.new_path}
 			<div class="flex items-baseline gap-1" title={operation.new_path}>
-				<span class="text-muted-foreground shrink-0">To:</span>
+				<span class="text-muted-foreground shrink-0">{m.history_to_label()}</span>
 				<span class="font-medium text-foreground">{getFilename(operation.new_path)}</span>
 				{#if getParentDir(operation.new_path)}
 					{#if isLongPath(operation.new_path)}
@@ -129,21 +130,21 @@
 							onclick={() => expandedPaths.to = !expandedPaths.to}
 						>
 							{#if expandedPaths.to}
-								in {getParentDir(operation.new_path)}
+								{m.history_in_dir({ dir: getParentDir(operation.new_path) })}
 							{:else}
-								in {truncateDir(getParentDir(operation.new_path))}
+								{m.history_in_dir({ dir: truncateDir(getParentDir(operation.new_path)) })}
 							{/if}
 						</button>
 					{:else}
 						<span class="text-muted-foreground text-xs">
-							in {getParentDir(operation.new_path)}
+							{m.history_in_dir({ dir: getParentDir(operation.new_path) })}
 						</span>
 					{/if}
 				{/if}
 			</div>
 		{/if}
 		{#if operation.in_place_renamed}
-			<span class="text-xs text-muted-foreground">(in-place rename)</span>
+			<span class="text-xs text-muted-foreground">{m.history_in_place_rename()}</span>
 		{/if}
 	</div>
 </div>

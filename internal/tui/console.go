@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
 
 // console component - shows live output and metadata preview
@@ -14,6 +14,7 @@ type console struct {
 	maxEntries int
 	autoScroll bool
 	scroll     int
+	localizer  *localization.Localizer
 }
 
 func newConsole() *console {
@@ -23,6 +24,21 @@ func newConsole() *console {
 		autoScroll: true,
 		scroll:     0,
 	}
+}
+
+// SetLocalizer wires the localizer used for translating console chrome.
+func (c *console) SetLocalizer(l *localization.Localizer) {
+	c.localizer = l
+}
+
+// loc returns the localized message for id, applying template data when supplied.
+// It is nil-safe so render code cannot panic if the localizer failed to
+// construct at startup; in that case the raw id is returned.
+func (c *console) loc(id string, template ...map[string]any) string {
+	if c.localizer == nil {
+		return id
+	}
+	return c.localizer.Localize(id, template...)
 }
 
 func (c *console) SetSize(width, height int) {
@@ -90,10 +106,10 @@ func (c *console) ToggleAutoScroll() {
 }
 
 func (c *console) View() string {
-	view := title("console") + "\n"
+	view := title(c.loc("TUIConsoleTitle")) + "\n"
 
 	if len(c.entries) == 0 {
-		return view + dimmed("No output yet...")
+		return view + dimmed(c.loc("TUIConsoleNoOutput"))
 	}
 
 	// Calculate visible range
@@ -143,7 +159,7 @@ func (c *console) View() string {
 
 	// Show scroll indicator if not all entries visible
 	if len(c.entries) > visibleHeight {
-		view += dimmed(fmt.Sprintf("[%d/%d]", end, len(c.entries)))
+		view += dimmed(c.loc("TUIConsoleScrollIndicator", map[string]any{"Visible": end, "Total": len(c.entries)}))
 	}
 
 	return view
