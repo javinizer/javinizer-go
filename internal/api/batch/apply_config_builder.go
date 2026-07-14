@@ -216,7 +216,7 @@ func makeOrganizeCompleteBroadcaster(job worker.BatchJobInterface, isUpdate bool
 			Progress:    100,
 			Message:     fmt.Sprintf("%s %d files, %d failed", action, organized, failed),
 			MessageCode: "BATCH_COMPLETED",
-			MessageArgs: map[string]any{"count": organized},
+			MessageArgs: map[string]any{"count": organized, "failed": failed},
 		}, job))
 	}
 }

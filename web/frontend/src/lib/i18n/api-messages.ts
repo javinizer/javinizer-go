@@ -28,7 +28,7 @@ const PROGRESS_CODE_MAP: Record<string, (p: Params) => string> = {
 	SCRAPE_SUCCEEDED: (p) => m.progress_scrape_succeeded({ movie_id: str(p, 'movie_id') }),
 	SCRAPE_FAILED: (p) =>
 		m.progress_scrape_failed({ movie_id: str(p, 'movie_id'), error: str(p, 'error') }),
-	BATCH_COMPLETED: (p) => m.progress_batch_completed({ count: num(p, 'count') })
+	BATCH_COMPLETED: (p) => m.progress_batch_completed({ count: num(p, 'count'), failed: num(p, 'failed') })
 };
 
 export function translateErrorCode(
