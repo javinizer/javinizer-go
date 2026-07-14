@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.2.3] - 2026-07-15
+
+### Fixed
+
+- Preserve matcher MovieID when scraped ID differs, preventing wrong grouping (#146)
+- Check for duplicate DMM ID before actress update
+- Reuse configured port across desktop restarts instead of random
+
+### Changed
+
+- Remove tracked unused.yaml fixture, use temp dirs in tests
+- Ignore node_modules at repo root, not just web/frontend
+
 ## [v1.2.2] - 2026-07-13
 
 ### Added
