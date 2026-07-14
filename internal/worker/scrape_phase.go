@@ -72,9 +72,9 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 			// below) — off the errgroup-gated critical path, so SQLite's
 			// single-writer lock never serializes the per-file scrape workers
 			// (root cause of the 5→1 worker degradation).
-			cmd := buildScrapeCmd(filePath, inputs, cfg)
+			cmd, fromMatcher := buildScrapeCmd(filePath, inputs, cfg)
 			fmi := inputs.FileMatchInfo[filePath]
-			outcome := scrapeFile(egCtx, filePath, fmi, cmd, inputs, cfg)
+			outcome := scrapeFile(egCtx, filePath, fmi, cmd, fromMatcher, inputs, cfg)
 			// Broadcast per-file scrape progress over WebSocket so the frontend's
 			// messagesByFile populates and ProgressModal shows live per-file status.
 			// Mirrors main's realtime.ProgressAdapter which forwarded per-task
@@ -147,10 +147,11 @@ func buildScrapeCmd(
 	filePath string,
 	inputs scrapePhaseInputs,
 	cfg ScrapePhaseConfig,
-) scrape.ScrapeCmd {
+) (scrape.ScrapeCmd, bool) {
 	var movieID string
 	var rawInput string
 	var manualURL bool
+	movieIDFromMatcher := false
 	if raw, ok := cfg.RawInputOverride[filePath]; ok && strings.TrimSpace(raw) != "" {
 		trimmed := strings.TrimSpace(raw)
 		rawInput = trimmed
@@ -177,6 +178,8 @@ func buildScrapeCmd(
 				if ext != "" {
 					movieID = movieID[:len(movieID)-len(ext)]
 				}
+			} else {
+				movieIDFromMatcher = true
 			}
 		}
 	}
@@ -202,7 +205,7 @@ func buildScrapeCmd(
 		// lock. Persistence runs in a dedicated pool off the critical path —
 		// see Run(). Single-scrape callers (CLI/API/rescrape) leave this false.
 		SkipPersist: inputs.MovieRepo != nil,
-	}
+	}, movieIDFromMatcher
 }
 
 // interpretScrapeResult processes the workflow.Scrape result/error into a
@@ -333,6 +336,7 @@ func scrapeFile(
 	filePath string,
 	fmi models.FileMatchInfo,
 	cmd scrape.ScrapeCmd,
+	fromMatcher bool,
 	inputs scrapePhaseInputs,
 	cfg ScrapePhaseConfig,
 ) scrapeFileOutcome {
@@ -341,15 +345,7 @@ func scrapeFile(
 		MovieID:  cmd.MovieID,
 	}
 
-	// The matcher may fail to extract a JAV ID from the filename, leaving
-	// fmi.MovieID empty. cmd.MovieID carries the resolved ID used for the
-	// scrape query (matcher result or file-basename fallback). Propagate it
-	// onto fmi so every MovieResult derived from this scrape (running, failed,
-	// no-result, panic-recovered) exposes a stable label to the batch progress
-	// UI — otherwise the frontend renders `{movie_id || 'Unknown'}` for failed
-	// scrapes. Mirrors main's newFailedFileResult(filePath, query.MovieID, ...)
-	// which relied on resolveScrapeQuery's basename fallback.
-	movieIDFromMatcher := fmi.MovieID != ""
+	movieIDFromMatcher := fromMatcher || fmi.MovieID != ""
 	if fmi.MovieID == "" && cmd.MovieID != "" {
 		fmi.MovieID = cmd.MovieID
 	}
