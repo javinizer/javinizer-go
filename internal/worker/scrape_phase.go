@@ -218,7 +218,6 @@ func interpretScrapeResult(
 	result *scrape.ScrapeResult,
 	meta *workflow.OrchestrationMeta,
 	err error,
-	preserveMovieID bool,
 ) scrapeFileOutcome {
 	outcome := scrapeFileOutcome{
 		FilePath: filePath,
@@ -281,7 +280,7 @@ func interpretScrapeResult(
 		return outcome
 	}
 
-	fileResult, prov := scrapeResultToMovieResult(fmi, result, meta, preserveMovieID)
+	fileResult, prov := scrapeResultToMovieResult(fmi, result, meta)
 	fileResult.StartedAt = startTime
 
 	// Poster generation — moved from the workflow's scrape orchestrator
@@ -349,7 +348,6 @@ func scrapeFile(
 	// UI — otherwise the frontend renders `{movie_id || 'Unknown'}` for failed
 	// scrapes. Mirrors main's newFailedFileResult(filePath, query.MovieID, ...)
 	// which relied on resolveScrapeQuery's basename fallback.
-	movieIDFromMatcher := fmi.MovieID != ""
 	if fmi.MovieID == "" && cmd.MovieID != "" {
 		fmi.MovieID = cmd.MovieID
 	}
@@ -421,7 +419,7 @@ func scrapeFile(
 	result, meta, err := inputs.WF.Scrape(taskCtx, cmd, progressFn)
 
 	// Step 3: Interpret the result.
-	return interpretScrapeResult(filePath, fmi, cmd, startTime, taskCtx, inputs, result, meta, err, movieIDFromMatcher)
+	return interpretScrapeResult(filePath, fmi, cmd, startTime, taskCtx, inputs, result, meta, err)
 }
 
 // trackScrapeResults processes collected scrapeFileOutcomes.
