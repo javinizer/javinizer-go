@@ -311,6 +311,8 @@ export interface ProgressMessage {
 	progress: number;
 	message: string;
 	error?: string;
+	message_code?: string;
+	message_args?: Record<string, unknown>;
 	// Authoritative job-level counts stamped by the backend (see
 	// batch.stampJobCounts) on every emitted message, so frontend consumers can
 	// compute monotonic progress WITHOUT inferring totals from message counts

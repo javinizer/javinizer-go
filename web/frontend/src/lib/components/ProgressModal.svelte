@@ -12,6 +12,7 @@
 	import { createBatchJobPollingQuery, createConfigQuery } from '$lib/query/queries';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import type { BatchJobResponse, FileResult } from '$lib/api/types';
+	import { translateProgressMessage } from '$lib/i18n/api-messages';
 	import { X, CircleCheckBig, CircleX, ChevronDown, ChevronRight } from 'lucide-svelte';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
@@ -187,6 +188,12 @@
 		const parts = path.split(/[\\/]/);
 		return parts[parts.length - 1] || path;
 	}
+
+	function displayProgressMessage(msg: { message: string; message_code?: string; message_args?: Record<string, unknown> }): string {
+		return msg.message_code
+			? translateProgressMessage(msg.message_code, msg.message_args ?? null, msg.message)
+			: msg.message;
+	}
 </script>
 
 <!-- Modal Overlay -->
@@ -259,7 +266,7 @@
 								</div>
 								{#if messagesByFile[result.file_path]}
 									<p class="text-xs text-blue-600 dark:text-blue-400 mt-0.5 truncate">
-										{messagesByFile[result.file_path].message}
+										{displayProgressMessage(messagesByFile[result.file_path])}
 									</p>
 								{/if}
 							</div>
@@ -349,7 +356,7 @@
 				{#if latestMessage && activeFiles.length === 0 && completedFiles.length === 0}
 					<div class="bg-accent/50 rounded-lg p-4">
 						<p class="text-sm font-medium mb-1">{m.progress_latest_update()}</p>
-						<p class="text-sm text-muted-foreground">{latestMessage.message}</p>
+						<p class="text-sm text-muted-foreground">{displayProgressMessage(latestMessage)}</p>
 						{#if latestMessage.file_path}
 							<p class="text-xs text-muted-foreground mt-1">
 								{latestMessage.file_path}

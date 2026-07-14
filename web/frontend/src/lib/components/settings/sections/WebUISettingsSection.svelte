@@ -36,6 +36,7 @@
 			localStorage.removeItem(LOCALE_STORAGE_KEY);
 			const browserLocale = resolveBrowserLocale();
 			await applyLocale(browserLocale);
+			window.location.reload();
 		} else {
 			await selectLocale(value);
 		}

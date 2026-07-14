@@ -29,6 +29,26 @@ function isSupported(tag: string): boolean {
 	return locales.includes(tag as typeof locales[number]);
 }
 
+// resolveLocaleTag canonicalizes/resolve a BCP 47 tag against the compiled
+// locale set. It reuses the browser locale mapping (region -> script) and the
+// script-subtag-stripping logic so a configured variant like `ja-JP` or
+// `zh-Hans-CN` resolves to the supported base/script tag. Returns null when no
+// supported locale can be derived.
+export function resolveLocaleTag(raw: string): string | null {
+	if (!raw) return null;
+	const tag = raw.replace(/_/g, '-');
+	const mapped = mapBrowserLocale(tag);
+	if (isSupported(mapped)) return mapped;
+	const parts = mapped.split('-');
+	if (parts.length >= 3) {
+		const scriptOnly = parts[0] + '-' + parts[1];
+		if (isSupported(scriptOnly)) return scriptOnly;
+	}
+	const base = mapped.split('-')[0];
+	if (base && isSupported(base)) return base;
+	return null;
+}
+
 // resolveBrowserLocale matches navigator.languages against compiled locales
 // and returns the first supported tag, falling back to the base locale.
 // Browsers send region-based tags (zh-CN, zh-TW); map to script-based tags
@@ -38,16 +58,8 @@ export function resolveBrowserLocale(): string {
 	const candidates = navigator.languages ?? [navigator.language];
 	for (const raw of candidates) {
 		if (!raw) continue;
-		const tag = raw.replace(/_/g, '-');
-		const mapped = mapBrowserLocale(tag);
-		if (isSupported(mapped)) return mapped;
-		const parts = mapped.split('-');
-		if (parts.length >= 3) {
-			const scriptOnly = parts[0] + '-' + parts[1];
-			if (isSupported(scriptOnly)) return scriptOnly;
-		}
-		const base = mapped.split('-')[0];
-		if (base && isSupported(base)) return base;
+		const resolved = resolveLocaleTag(raw);
+		if (resolved) return resolved;
 	}
 	return baseLocale;
 }
@@ -117,10 +129,11 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 		return browserLocale;
 	}
 
-	if (isSupported(configured)) {
-		localStorage.setItem(LOCALE_STORAGE_KEY, configured);
-		await applyLocale(configured);
-		return configured;
+	const resolved = resolveLocaleTag(configured);
+	if (resolved) {
+		localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
+		await applyLocale(resolved);
+		return resolved;
 	}
 
 	// Valid but unsupported configured tag: render English, do not cache.
@@ -136,4 +149,5 @@ export async function selectLocale(tag: string): Promise<void> {
 		localStorage.setItem(LOCALE_STORAGE_KEY, tag);
 	}
 	await applyLocale(isSupported(tag) ? tag : baseLocale);
+	window.location.reload();
 }
