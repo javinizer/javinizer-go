@@ -19,18 +19,18 @@
 
 	const themeStore = getThemeStore();
 
-	const navItems = [
+	const navItems = $derived([
 		{ href: '/browse', label: m.nav_scrape(), icon: FolderOpen },
 		{ href: '/jobs', label: m.nav_jobs(), icon: Activity },
 		{ href: '/actresses', label: m.nav_actresses(), icon: Users },
 		{ href: '/genres', label: m.nav_genres(), icon: Tags },
 		{ href: '/words', label: m.nav_words(), icon: Type }
-	];
+	]);
 
-	const subMenuItems = [
+	const subMenuItems = $derived([
 		{ href: '/logs', label: m.nav_logs(), icon: FileText },
 		{ href: '/settings', label: m.nav_settings(), icon: Settings }
-	];
+	]);
 
 	let subMenuOpen = $state(false);
 

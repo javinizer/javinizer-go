@@ -141,13 +141,10 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 	return baseLocale;
 }
 
-// selectLocale persists an explicit choice, applies it, and reloads so stores
-// and non-component modules re-evaluate against the new locale.
 export async function selectLocale(tag: string): Promise<void> {
 	if (!browser) return;
 	if (tag !== 'auto' && isSupported(tag)) {
 		localStorage.setItem(LOCALE_STORAGE_KEY, tag);
 	}
 	await applyLocale(isSupported(tag) ? tag : baseLocale);
-	window.location.reload();
 }
