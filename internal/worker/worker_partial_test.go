@@ -16,7 +16,7 @@ import (
 
 func TestScrapeResultToMovieResult_NilResult_Partial(t *testing.T) {
 	fmi := models.FileMatchInfo{Path: "test.mp4", MovieID: "TEST-001"}
-	mr, prov := scrapeResultToMovieResult(fmi, nil, nil)
+	mr, prov := scrapeResultToMovieResult(fmi, nil, nil, false)
 	assert.Nil(t, mr)
 	assert.Nil(t, prov)
 }
@@ -30,7 +30,7 @@ func TestScrapeResultToMovieResult_WithMeta_Partial(t *testing.T) {
 	}
 	meta := &workflow.OrchestrationMeta{}
 	meta.DisplayTitleApplied = true
-	mr, prov := scrapeResultToMovieResult(fmi, result, meta)
+	mr, prov := scrapeResultToMovieResult(fmi, result, meta, false)
 	require.NotNil(t, mr)
 	assert.Equal(t, "TEST-001", mr.FileMatchInfo.MovieID)
 	assert.True(t, mr.DisplayTitleApplied)
@@ -46,7 +46,7 @@ func TestScrapeResultToMovieResult_WithProvenance_Partial(t *testing.T) {
 		FieldSources:   map[string]string{"title": "dmm"},
 		ActressSources: map[string]string{"actress1": "r18dev"},
 	}
-	mr, prov := scrapeResultToMovieResult(fmi, result, nil)
+	mr, prov := scrapeResultToMovieResult(fmi, result, nil, false)
 	require.NotNil(t, mr)
 	require.NotNil(t, prov)
 	assert.Equal(t, "dmm", prov.FieldSources["title"])
@@ -60,7 +60,7 @@ func TestScrapeResultToMovieResult_WithProvenance_Partial(t *testing.T) {
 func TestScrapeResultToMovieResult_OriginalFileNameFromFMI(t *testing.T) {
 	fmi := models.FileMatchInfo{Path: "/media/IPX-535.mp4", Name: "IPX-535.mp4"}
 	result := &scrape.ScrapeResult{Movie: &models.Movie{ID: "IPX-535"}}
-	mr, _ := scrapeResultToMovieResult(fmi, result, nil)
+	mr, _ := scrapeResultToMovieResult(fmi, result, nil, false)
 	require.NotNil(t, mr)
 	require.NotNil(t, mr.Movie)
 	assert.Equal(t, "IPX-535.mp4", mr.Movie.OriginalFileName)
@@ -69,7 +69,7 @@ func TestScrapeResultToMovieResult_OriginalFileNameFromFMI(t *testing.T) {
 func TestScrapeResultToMovieResult_PreservesExistingOriginalFileName(t *testing.T) {
 	fmi := models.FileMatchInfo{Path: "/media/IPX-535.mp4", Name: "IPX-535.mp4"}
 	result := &scrape.ScrapeResult{Movie: &models.Movie{ID: "IPX-535", OriginalFileName: "custom.mp4"}}
-	mr, _ := scrapeResultToMovieResult(fmi, result, nil)
+	mr, _ := scrapeResultToMovieResult(fmi, result, nil, false)
 	require.NotNil(t, mr)
 	assert.Equal(t, "custom.mp4", mr.Movie.OriginalFileName)
 }
@@ -77,7 +77,7 @@ func TestScrapeResultToMovieResult_PreservesExistingOriginalFileName(t *testing.
 func TestScrapeResultToMovieResult_NoOriginalFileNameWhenFMINameEmpty(t *testing.T) {
 	fmi := models.FileMatchInfo{Path: "test.mp4"} // Name empty
 	result := &scrape.ScrapeResult{Movie: &models.Movie{ID: "TEST-001"}}
-	mr, _ := scrapeResultToMovieResult(fmi, result, nil)
+	mr, _ := scrapeResultToMovieResult(fmi, result, nil, false)
 	require.NotNil(t, mr)
 	assert.Empty(t, mr.Movie.OriginalFileName)
 }
@@ -89,7 +89,7 @@ func TestScrapeResultToMovieResult_NoOriginalFileNameWhenFMINameEmpty(t *testing
 func TestScrapeResultToMovieResult_FilenameTemplateEndToEnd(t *testing.T) {
 	fmi := models.FileMatchInfo{Path: "/media/IPX-535.mp4", Name: "IPX-535.mp4"}
 	result := &scrape.ScrapeResult{Movie: &models.Movie{ID: "IPX-535"}}
-	mr, _ := scrapeResultToMovieResult(fmi, result, nil)
+	mr, _ := scrapeResultToMovieResult(fmi, result, nil, false)
 	require.NotNil(t, mr)
 	require.NotNil(t, mr.Movie)
 

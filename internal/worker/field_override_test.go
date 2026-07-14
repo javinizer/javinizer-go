@@ -170,7 +170,7 @@ func TestScrapeResultToMovieResult_RetainsScraperResults(t *testing.T) {
 			{Source: "dmm", Maker: "DMM"},
 		},
 	}
-	mr, prov := scrapeResultToMovieResult(fmi, result, nil)
+	mr, prov := scrapeResultToMovieResult(fmi, result, nil, false)
 	require.NotNil(t, mr)
 	require.NotNil(t, prov)
 	assert.Len(t, prov.ScraperResults, 2)
@@ -183,7 +183,7 @@ func TestScrapeResultToMovieResult_NoScraperResults(t *testing.T) {
 		Movie:        &models.Movie{ID: "IPX-535"},
 		FieldSources: map[string]string{"maker": "r18dev"},
 	}
-	mr, prov := scrapeResultToMovieResult(fmi, result, nil)
+	mr, prov := scrapeResultToMovieResult(fmi, result, nil, false)
 	require.NotNil(t, mr)
 	require.NotNil(t, prov)
 	assert.Nil(t, prov.ScraperResults)
