@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"path/filepath"
+	"path"
 	"strings"
 
 	goi18n "github.com/nicksnyder/go-i18n/v2/i18n"
@@ -160,5 +160,5 @@ func (l *Localizer) fallbackMessage(messageID string, template ...map[string]any
 // CatalogPath returns the embedded path for a locale's catalog file, e.g.
 // locales/active.en.json. Exposed for diagnostics and tooling.
 func CatalogPath(locale string) string {
-	return filepath.Join("locales", "active."+locale+".json")
+	return path.Join("locales", "active."+locale+".json")
 }

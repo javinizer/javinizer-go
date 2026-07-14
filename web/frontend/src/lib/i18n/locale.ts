@@ -41,6 +41,11 @@ export function resolveBrowserLocale(): string {
 		const tag = raw.replace(/_/g, '-');
 		const mapped = mapBrowserLocale(tag);
 		if (isSupported(mapped)) return mapped;
+		const parts = mapped.split('-');
+		if (parts.length >= 3) {
+			const scriptOnly = parts[0] + '-' + parts[1];
+			if (isSupported(scriptOnly)) return scriptOnly;
+		}
 		const base = mapped.split('-')[0];
 		if (base && isSupported(base)) return base;
 	}

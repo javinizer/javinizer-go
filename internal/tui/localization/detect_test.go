@@ -3,7 +3,10 @@ package localization
 import (
 	"os"
 	"reflect"
+	"runtime"
 	"testing"
+
+	"golang.org/x/text/language"
 )
 
 func TestNormalizeOne(t *testing.T) {
@@ -191,9 +194,10 @@ func TestDetectFromEnv(t *testing.T) {
 
 func TestDetectOSLocale(t *testing.T) {
 	testCases := []struct {
-		name string
-		env  map[string]string
-		want []string
+		name    string
+		env     map[string]string
+		want    []string
+		wantAny bool
 	}{
 		{
 			name: "LANG resolves to BCP 47",
@@ -217,22 +221,22 @@ func TestDetectOSLocale(t *testing.T) {
 			want: []string{"ja", "en-US"},
 		},
 		{
-			name: "C and POSIX fall back to English",
-			env: map[string]string{
-				"LC_ALL": "C",
-				"LANG":   "POSIX",
-			},
-			want: []string{"en"},
+			name:    "C and POSIX fall back to English",
+			env:     map[string]string{"LC_ALL": "C", "LANG": "POSIX"},
+			want:    []string{"en"},
+			wantAny: true,
 		},
 		{
-			name: "empty env falls back to English",
-			env:  map[string]string{},
-			want: []string{"en"},
+			name:    "empty env falls back to English",
+			env:     map[string]string{},
+			want:    []string{"en"},
+			wantAny: true,
 		},
 		{
-			name: "malformed tags dropped to English",
-			env:  map[string]string{"LANG": "!!invalid!!"},
-			want: []string{"en"},
+			name:    "malformed tags dropped to English",
+			env:     map[string]string{"LANG": "!!invalid!!"},
+			want:    []string{"en"},
+			wantAny: true,
 		},
 		{
 			name: "script tag detected",
@@ -252,6 +256,15 @@ func TestDetectOSLocale(t *testing.T) {
 				}
 			}
 			got := DetectOSLocale()
+			if tc.wantAny && runtime.GOOS == "windows" {
+				if len(got) == 0 || got[0] == "" {
+					t.Fatalf("DetectOSLocale = %v, want non-empty OS fallback on Windows", got)
+				}
+				if _, err := language.Parse(got[0]); err != nil {
+					t.Fatalf("DetectOSLocale = %v, first tag %q not valid BCP 47: %v", got, got[0], err)
+				}
+				return
+			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("DetectOSLocale = %v, want %v", got, tc.want)
 			}
@@ -269,6 +282,12 @@ func TestDetectOSLocaleNeverPanics(t *testing.T) {
 	}
 	if got[0] == "" {
 		t.Error("DetectOSLocale returned an empty first tag")
+	}
+	if runtime.GOOS == "windows" {
+		if _, err := language.Parse(got[0]); err != nil {
+			t.Errorf("DetectOSLocale first tag %q not valid BCP 47: %v", got[0], err)
+		}
+		return
 	}
 	if got[0] != "en" {
 		t.Errorf("empty input = %q, want en", got[0])
