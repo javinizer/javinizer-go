@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 )
@@ -263,7 +264,7 @@ func listBatchJobs(rt *core.APIRuntime) gin.HandlerFunc {
 
 // parseAndConvertJobResults handles the three DB persistence formats for job results
 // and converts them into BatchFileResult for API responses. It delegates the actual
-// format detection and parsing to worker.ParseJobResultsJSON, then converts
+// format detection and parsing to jobpersist.ParseResultsJSON, then converts
 // MovieResult → BatchFileResult via movieResultToResponse.
 //
 // fs is used to drop cropped_poster_url values whose temp artifact is missing on
@@ -275,7 +276,7 @@ func parseAndConvertJobResults(job *models.Job, fs afero.Fs) map[string]*contrac
 		return make(map[string]*contracts.BatchFileResult)
 	}
 
-	parsed, err := worker.ParseJobResultsJSON([]byte(job.Results))
+	parsed, err := jobpersist.ParseResultsJSON([]byte(job.Results))
 	if err != nil {
 		logging.Warnf("Failed to parse results for job %s: %v", job.ID, err)
 		return make(map[string]*contracts.BatchFileResult)

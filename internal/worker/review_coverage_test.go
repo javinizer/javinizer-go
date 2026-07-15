@@ -1,77 +1,12 @@
 package worker
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-// TestParseJobResultsJSON_FalsePositiveDomainInTitle verifies that a movie
-// title containing the literal string "domain" (as a nested field value) does
-// NOT trigger envelope format detection. This was the false-positive scenario
-// that the old bytes.Contains(raw, []byte("domain")) approach suffered from.
-func TestParseJobResultsJSON_FalsePositiveDomainInTitle(t *testing.T) {
-	// Old resultstore.MovieResult format with a movie title containing "domain"
-	oldResults := map[string]any{
-		"/videos/ABC-001.mp4": map[string]any{
-			"result_id": "uuid-001",
-			"file_match_info": map[string]any{
-				"path":     "/videos/ABC-001.mp4",
-				"movie_id": "ABC-001",
-			},
-			"revision": 1,
-			"status":   "completed",
-			"movie": map[string]any{
-				"id":    "ABC-001",
-				"title": "Researching domain-specific parsing",
-			},
-			"started_at": "2024-01-01T00:00:00Z",
-		},
-	}
-	resultsJSON, _ := json.Marshal(oldResults)
-
-	parsed, err := ParseJobResultsJSON(resultsJSON)
-	require.NoError(t, err)
-	require.Contains(t, parsed.Results, "/videos/ABC-001.mp4")
-	mr := parsed.Results["/videos/ABC-001.mp4"]
-	require.NotNil(t, mr.Movie)
-	assert.Equal(t, "ABC-001", mr.Movie.ID)
-	assert.Equal(t, "Researching domain-specific parsing", mr.Movie.Title)
-}
-
-// TestParseJobResultsJSON_FalsePositiveDataTypeInTitle verifies that a movie
-// title containing "data_type" as a nested value does not trigger legacy
-// format detection.
-func TestParseJobResultsJSON_FalsePositiveDataTypeInTitle(t *testing.T) {
-	oldResults := map[string]any{
-		"/videos/ABC-002.mp4": map[string]any{
-			"result_id": "uuid-002",
-			"file_match_info": map[string]any{
-				"path":     "/videos/ABC-002.mp4",
-				"movie_id": "ABC-002",
-			},
-			"revision": 1,
-			"status":   "completed",
-			"movie": map[string]any{
-				"id":    "ABC-002",
-				"title": "data_type field analysis",
-			},
-			"started_at": "2024-01-01T00:00:00Z",
-		},
-	}
-	resultsJSON, _ := json.Marshal(oldResults)
-
-	parsed, err := ParseJobResultsJSON(resultsJSON)
-	require.NoError(t, err)
-	require.Contains(t, parsed.Results, "/videos/ABC-002.mp4")
-	mr := parsed.Results["/videos/ABC-002.mp4"]
-	require.NotNil(t, mr.Movie)
-	assert.Equal(t, "ABC-002", mr.Movie.ID)
-}
 
 func TestTrackApplyResults_PanicCountsAsFailed(t *testing.T) {
 	t.Run("panic without Failed flag counts as failure", func(t *testing.T) {
