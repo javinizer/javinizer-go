@@ -21,6 +21,7 @@ type Service struct {
 	enabled    bool
 	stableOnly bool       // honor system.version_check_stable_only: when true, never surface a prerelease as an available update
 	checkMu    sync.Mutex // prevents concurrent background checks
+	bgWg       sync.WaitGroup
 }
 
 // UpdateConfig carries the narrow set of config fields the update service reads.
@@ -127,10 +128,21 @@ func (s *Service) GetStatus(ctx context.Context) (*updateState, error) {
 	// If state is stale and we should check, do it in background
 	if s.store.ShouldCheck() {
 		// Use Background() so the check outlives the request — intentional, not a leak
-		go s.BackgroundCheck(context.Background())
+		s.bgWg.Add(1)
+		go func() {
+			defer s.bgWg.Done()
+			s.BackgroundCheck(context.Background())
+		}()
 	}
 
 	return state, nil
+}
+
+// Wait blocks until any background check goroutine spawned by GetStatus has
+// completed. Call this in tests before relying on t.TempDir cleanup to avoid
+// a "directory not empty" race with a still-running background write.
+func (s *Service) Wait() {
+	s.bgWg.Wait()
 }
 
 // ForceCheck performs an immediate sync check and updates the cache.

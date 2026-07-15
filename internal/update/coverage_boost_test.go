@@ -162,8 +162,9 @@ func TestService_GetStatus_StaleTriggersBg(t *testing.T) {
 	status, err := svc.GetStatus(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, "v0.9.0", status.Version)
-	// Background check triggered — give it a moment
-	time.Sleep(100 * time.Millisecond)
+	// Background check triggered — wait for it to finish so t.TempDir cleanup
+	// does not race with a still-running background write.
+	svc.Wait()
 }
 
 func TestService_IsUpdateAvailable_Cached(t *testing.T) {
