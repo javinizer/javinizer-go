@@ -45,13 +45,16 @@ type Snapshot struct {
 	Update                bool
 }
 
+// MarshalFn is swappable for testing. Defaults to json.Marshal.
+var MarshalFn = json.Marshal
+
 // Encode takes an immutable Snapshot value and produces a *models.Job with all
 // JSON text columns (Files, Results, Excluded, FileMatchInfo) filled by
 // marshaling the corresponding snapshot fields. The Results column uses the
 // JobResultsEnvelope format. Scalar fields (ID, Status, etc.) are copied
 // directly. Returns a non-nil error and nil *models.Job if any marshal fails.
 func Encode(snapshot Snapshot) (*models.Job, error) {
-	filesJSON, err := json.Marshal(snapshot.Files)
+	filesJSON, err := MarshalFn(snapshot.Files)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal files for job %s: %w", snapshot.ID, err)
 	}
@@ -60,17 +63,17 @@ func Encode(snapshot Snapshot) (*models.Job, error) {
 		Domain:     snapshot.Results,
 		Provenance: snapshot.Provenance,
 	}
-	resultsJSON, err := json.Marshal(envelope)
+	resultsJSON, err := MarshalFn(envelope)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal results for job %s: %w", snapshot.ID, err)
 	}
 
-	excludedJSON, err := json.Marshal(snapshot.Excluded)
+	excludedJSON, err := MarshalFn(snapshot.Excluded)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal excluded for job %s: %w", snapshot.ID, err)
 	}
 
-	fileMatchInfoJSON, err := json.Marshal(snapshot.FileMatchInfo)
+	fileMatchInfoJSON, err := MarshalFn(snapshot.FileMatchInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal file match info for job %s: %w", snapshot.ID, err)
 	}

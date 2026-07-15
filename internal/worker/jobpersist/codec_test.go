@@ -2,6 +2,7 @@ package jobpersist
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -199,4 +200,65 @@ func TestDecode_OldFormatWithProvenance(t *testing.T) {
 	prov := parsed.Provenance["file1.mp4"]
 	assert.Equal(t, "dmm", prov.FieldSources["title"])
 	assert.Equal(t, "dmm", prov.ActressSources["Actress A"])
+}
+
+func TestEncode_MarshalFilesError(t *testing.T) {
+	original := MarshalFn
+	MarshalFn = func(v any) ([]byte, error) { return nil, fmt.Errorf("marshal error") }
+	defer func() { MarshalFn = original }()
+
+	_, err := Encode(Snapshot{ID: "test"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal files")
+}
+
+func TestEncode_MarshalResultsError(t *testing.T) {
+	original := MarshalFn
+	callCount := 0
+	MarshalFn = func(v any) ([]byte, error) {
+		callCount++
+		if callCount == 2 {
+			return nil, fmt.Errorf("marshal error")
+		}
+		return json.Marshal(v)
+	}
+	defer func() { MarshalFn = original }()
+
+	_, err := Encode(Snapshot{ID: "test", Results: map[string]*resultstore.MovieResult{}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal results")
+}
+
+func TestEncode_MarshalExcludedError(t *testing.T) {
+	original := MarshalFn
+	callCount := 0
+	MarshalFn = func(v any) ([]byte, error) {
+		callCount++
+		if callCount == 3 {
+			return nil, fmt.Errorf("marshal error")
+		}
+		return json.Marshal(v)
+	}
+	defer func() { MarshalFn = original }()
+
+	_, err := Encode(Snapshot{ID: "test", Excluded: map[string]bool{}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal excluded")
+}
+
+func TestEncode_MarshalFileMatchInfoError(t *testing.T) {
+	original := MarshalFn
+	callCount := 0
+	MarshalFn = func(v any) ([]byte, error) {
+		callCount++
+		if callCount == 4 {
+			return nil, fmt.Errorf("marshal error")
+		}
+		return json.Marshal(v)
+	}
+	defer func() { MarshalFn = original }()
+
+	_, err := Encode(Snapshot{ID: "test", FileMatchInfo: map[string]models.FileMatchInfo{}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal file match info")
 }

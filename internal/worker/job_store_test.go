@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -1469,7 +1470,7 @@ func TestBatchJob_GetStatusSlim(t *testing.T) {
 func TestReconstructBatchJob_InvalidJobID(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	dbJob := &models.Job{
-		ID:         "not-a-valid-job-id-format",
+		ID:         "",
 		Status:     models.JobStatusCompleted,
 		TotalFiles: 1,
 	}
@@ -1487,4 +1488,16 @@ func TestReconstructBatchJob_InvalidOperationMode(t *testing.T) {
 	}
 	job := jq.reconstructBatchJob(dbJob)
 	assert.NotNil(t, job)
+}
+
+func TestSnapshotForPersist_EncodeError(t *testing.T) {
+	original := jobpersist.MarshalFn
+	jobpersist.MarshalFn = func(v any) ([]byte, error) { return nil, fmt.Errorf("marshal error") }
+	defer func() { jobpersist.MarshalFn = original }()
+
+	jq := NewJobStore(nil, nil, nil, "", nil, nil)
+	job := jq.CreateJobBatch([]string{"file1.mp4"})
+	dbJob, ok := snapshotForPersist(job)
+	assert.False(t, ok)
+	assert.Nil(t, dbJob)
 }
