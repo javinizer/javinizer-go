@@ -1,4 +1,4 @@
-package worker
+package jobpersist
 
 import (
 	"testing"
@@ -7,13 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestParseJobResultsJSON_LegacyFormatWithNullEntry verifies that a null entry
+// TestParseResultsJSON_LegacyFormatWithNullEntry verifies that a null entry
 // in a legacy FileResult payload does not cause misrouting to the old
 // resultstore.MovieResult parser. The old code broke on the first successfully-parsed map
 // value; a null unmarshals to a nil map (no error, no data_type key), which
 // would prematurely break and lose legacy "data" decoding.
-func TestParseJobResultsJSON_LegacyFormatWithNullEntry(t *testing.T) {
-	// Legacy format: every entry has "data_type" + "data", but one entry is null.
+func TestParseResultsJSON_LegacyFormatWithNullEntry(t *testing.T) {
 	legacy := `{
 		"/v/ABP-731.mp4": null,
 		"/v/ABP-980.mp4": {
@@ -25,20 +24,18 @@ func TestParseJobResultsJSON_LegacyFormatWithNullEntry(t *testing.T) {
 		}
 	}`
 
-	parsed, err := ParseJobResultsJSON([]byte(legacy))
+	parsed, err := ParseResultsJSON([]byte(legacy))
 	require.NoError(t, err)
 
-	// The null entry should be skipped, and the legacy "data" field should be
-	// decoded into Movie (proving legacy routing, not old-resultstore.MovieResult routing).
 	r, ok := parsed.Results["/v/ABP-980.mp4"]
 	require.True(t, ok, "non-null legacy entry should be present")
 	require.NotNil(t, r.Movie, "legacy 'data' field should be decoded into Movie")
 	assert.Equal(t, "ABP-980", r.Movie.ID)
 }
 
-// TestParseJobResultsJSON_LegacyNilEntryNoPanic verifies that nil legacy
+// TestParseResultsJSON_LegacyNilEntryNoPanic verifies that nil legacy
 // entries don't panic on deref (parseLegacyFileResultFormat guards lfr == nil).
-func TestParseJobResultsJSON_LegacyNilEntryNoPanic(t *testing.T) {
+func TestParseResultsJSON_LegacyNilEntryNoPanic(t *testing.T) {
 	legacy := `{
 		"/v/NULL.mp4": null,
 		"/v/OK.mp4": {
@@ -51,16 +48,16 @@ func TestParseJobResultsJSON_LegacyNilEntryNoPanic(t *testing.T) {
 	}`
 
 	assert.NotPanics(t, func() {
-		parsed, err := ParseJobResultsJSON([]byte(legacy))
+		parsed, err := ParseResultsJSON([]byte(legacy))
 		require.NoError(t, err)
 		_, nullOk := parsed.Results["/v/NULL.mp4"]
 		assert.False(t, nullOk, "null entry should be skipped")
 	})
 }
 
-// TestParseJobResultsJSON_NullEntryInOldFormat verifies null entries in the
+// TestParseResultsJSON_NullEntryInOldFormat verifies null entries in the
 // old resultstore.MovieResult format are also skipped (pre-existing guard).
-func TestParseJobResultsJSON_NullEntryInOldFormat(t *testing.T) {
+func TestParseResultsJSON_NullEntryInOldFormat(t *testing.T) {
 	old := `{
 		"/v/NULL.mp4": null,
 		"/v/OK.mp4": {
@@ -70,7 +67,7 @@ func TestParseJobResultsJSON_NullEntryInOldFormat(t *testing.T) {
 		}
 	}`
 
-	parsed, err := ParseJobResultsJSON([]byte(old))
+	parsed, err := ParseResultsJSON([]byte(old))
 	require.NoError(t, err)
 	_, nullOk := parsed.Results["/v/NULL.mp4"]
 	assert.False(t, nullOk, "null entry should be skipped")
@@ -79,12 +76,10 @@ func TestParseJobResultsJSON_NullEntryInOldFormat(t *testing.T) {
 	assert.Equal(t, "OK", r.Movie.ID)
 }
 
-// TestParseJobResultsJSON_LegacyMixedNullAndRealData verifies a legacy payload
+// TestParseResultsJSON_LegacyMixedNullAndRealData verifies a legacy payload
 // where the null entry comes first in JSON (though map iteration is random).
 // The format detection must scan ALL values for data_type, not just the first.
-func TestParseJobResultsJSON_LegacyMixedNullAndRealData(t *testing.T) {
-	// This payload is unambiguously legacy (has data_type). The null entry
-	// must not cause misrouting.
+func TestParseResultsJSON_LegacyMixedNullAndRealData(t *testing.T) {
 	legacy := `{
 		"/v/A.mp4": null,
 		"/v/B.mp4": null,
@@ -97,7 +92,7 @@ func TestParseJobResultsJSON_LegacyMixedNullAndRealData(t *testing.T) {
 		}
 	}`
 
-	parsed, err := ParseJobResultsJSON([]byte(legacy))
+	parsed, err := ParseResultsJSON([]byte(legacy))
 	require.NoError(t, err)
 	r := parsed.Results["/v/C.mp4"]
 	require.NotNil(t, r)

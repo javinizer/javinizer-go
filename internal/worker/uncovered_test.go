@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -273,40 +272,7 @@ func TestNewConcurrencyConfigUncovered(t *testing.T) {
 }
 
 // --- result_parse.go uncovered ---
-
-func TestParseJobResultsJSON_Empty(t *testing.T) {
-	parsed, err := ParseJobResultsJSON(nil)
-	require.NoError(t, err)
-	assert.Empty(t, parsed.Results)
-}
-
-func TestParseJobResultsJSON_LegacyWithDataUncovered(t *testing.T) {
-	legacyResults := map[string]any{
-		"file1.mp4": map[string]any{
-			"file_path":           "file1.mp4",
-			"movie_id":            "ABC-001",
-			"revision":            1,
-			"status":              "completed",
-			"translation_warning": "partial",
-			"data_type":           "movie",
-			"data":                map[string]any{"id": "ABC-001", "title": "Test"},
-			"started_at":          "2026-01-01T00:00:00Z",
-		},
-	}
-	resultsJSON, _ := json.Marshal(legacyResults)
-
-	parsed, err := ParseJobResultsJSON(resultsJSON)
-	require.NoError(t, err)
-	require.Contains(t, parsed.Results, "file1.mp4")
-	mr := parsed.Results["file1.mp4"]
-	assert.Equal(t, "file1.mp4", mr.FileMatchInfo.Path)
-	assert.Equal(t, "ABC-001", mr.FileMatchInfo.MovieID)
-	assert.Equal(t, uint64(1), mr.Revision)
-	require.NotNil(t, mr.Movie)
-	assert.Equal(t, "ABC-001", mr.Movie.ID)
-	require.NotNil(t, mr.TranslationWarning)
-	assert.Equal(t, "partial", *mr.TranslationWarning)
-}
+// (ParseJobResultsJSON tests moved to internal/worker/jobpersist)
 
 // --- job_lifecycle.go uncovered ---
 

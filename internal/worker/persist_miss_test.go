@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -57,7 +58,7 @@ func TestSnapshotForPersist_AllFieldsPopulated(t *testing.T) {
 	assert.Equal(t, "organize", string(dbJob.OperationModeOverride))
 
 	// Verify results JSON is a valid envelope
-	var envelope JobResultsEnvelope
+	var envelope jobpersist.JobResultsEnvelope
 	err := json.Unmarshal([]byte(dbJob.Results), &envelope)
 	require.NoError(t, err)
 	assert.Contains(t, envelope.Domain, "file1.mp4")
@@ -293,53 +294,6 @@ func TestPersistToDatabase_UpsertError(t *testing.T) {
 
 	persistErr := job.persistError
 	assert.Contains(t, persistErr, "upsert failed", "PersistError should be set on upsert failure")
-}
-
-// --- ParseJobResultsJSON: legacy format with provenance ---
-
-func TestParseJobResultsJSON_LegacyWithProvenance(t *testing.T) {
-	legacyResults := map[string]any{
-		"file1.mp4": map[string]any{
-			"file_path":       "file1.mp4",
-			"movie_id":        "PROV-001",
-			"status":          "completed",
-			"data_type":       "movie",
-			"field_sources":   map[string]string{"title": "r18dev", "maker": "dmm"},
-			"actress_sources": map[string]string{"actress_0": "javdb"},
-			"started_at":      "2026-01-01T00:00:00Z",
-		},
-	}
-	resultsJSON, _ := json.Marshal(legacyResults)
-
-	parsed, err := ParseJobResultsJSON(resultsJSON)
-	require.NoError(t, err)
-	require.Contains(t, parsed.Results, "file1.mp4")
-	mr := parsed.Results["file1.mp4"]
-	assert.Equal(t, "PROV-001", mr.FileMatchInfo.MovieID)
-
-	require.NotNil(t, parsed.Provenance["file1.mp4"])
-	assert.Equal(t, "r18dev", parsed.Provenance["file1.mp4"].FieldSources["title"])
-	assert.Equal(t, "javdb", parsed.Provenance["file1.mp4"].ActressSources["actress_0"])
-}
-
-// --- ParseJobResultsJSON: legacy format no provenance ---
-
-func TestParseJobResultsJSON_LegacyNoProvenance(t *testing.T) {
-	legacyResults := map[string]any{
-		"file1.mp4": map[string]any{
-			"file_path":  "file1.mp4",
-			"movie_id":   "NOPROV-001",
-			"status":     "completed",
-			"data_type":  "movie",
-			"started_at": "2026-01-01T00:00:00Z",
-		},
-	}
-	resultsJSON, _ := json.Marshal(legacyResults)
-
-	parsed, err := ParseJobResultsJSON(resultsJSON)
-	require.NoError(t, err)
-	require.Contains(t, parsed.Results, "file1.mp4")
-	assert.Nil(t, parsed.Provenance["file1.mp4"], "provenance should be nil when FieldSources and ActressSources are nil")
 }
 
 type errorJobRepo struct {

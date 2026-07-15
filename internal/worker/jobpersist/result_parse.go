@@ -1,4 +1,4 @@
-package worker
+package jobpersist
 
 import (
 	"encoding/json"
@@ -10,13 +10,13 @@ import (
 )
 
 // ParsedJobResults holds the parsed results and provenance from a job's
-// persisted Results JSON column. Returned by ParseJobResultsJSON.
+// persisted Results JSON column. Returned by ParseResultsJSON.
 type ParsedJobResults struct {
 	Results    map[string]*resultstore.MovieResult
 	Provenance map[string]*resultstore.ProvenanceData
 }
 
-// ParseJobResultsJSON parses the Results JSON column from the database,
+// ParseResultsJSON parses the Results JSON column from the database,
 // handling all three persistence formats:
 //
 //  1. New envelope format {"domain": ..., "provenance": ...}
@@ -27,7 +27,7 @@ type ParsedJobResults struct {
 // duplicated between reconstructBatchJob and parseAndConvertJobResults.
 // Both callers should use this function and then convert the output to
 // their target type.
-func ParseJobResultsJSON(raw []byte) (*ParsedJobResults, error) {
+func ParseResultsJSON(raw []byte) (*ParsedJobResults, error) {
 	if len(raw) == 0 {
 		return &ParsedJobResults{
 			Results:    make(map[string]*resultstore.MovieResult),

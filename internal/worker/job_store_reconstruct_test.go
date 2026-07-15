@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -300,7 +301,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 	t.Run("result_data_not_movie", func(t *testing.T) {
 		// Simulate a legacy DB record with a non-movie Data field (string instead of Movie).
-		// ParseJobResultsJSON should handle this gracefully — the non-movie Data is ignored.
+		// ParseResultsJSON should handle this gracefully — the non-movie Data is ignored.
 		legacyResults := map[string]any{
 			"/path/file1.mp4": map[string]any{
 				"status":    "completed",
@@ -311,7 +312,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 		}
 		resultsJSON, _ := json.Marshal(legacyResults)
 
-		parsed, err := ParseJobResultsJSON(resultsJSON)
+		parsed, err := jobpersist.ParseResultsJSON(resultsJSON)
 		require.NoError(t, err)
 		require.Contains(t, parsed.Results, "/path/file1.mp4")
 		// Should not panic — the non-movie Data is simply ignored
@@ -334,7 +335,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 		}
 		resultsJSON, _ := json.Marshal(legacyResults)
 
-		parsed, err := ParseJobResultsJSON(resultsJSON)
+		parsed, err := jobpersist.ParseResultsJSON(resultsJSON)
 		require.NoError(t, err)
 		require.Contains(t, parsed.Results, "/path/file1.mp4")
 
@@ -364,7 +365,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 		}
 		resultsJSON, _ := json.Marshal(legacyResults)
 
-		parsed, err := ParseJobResultsJSON(resultsJSON)
+		parsed, err := jobpersist.ParseResultsJSON(resultsJSON)
 		require.NoError(t, err)
 		require.NotNil(t, parsed.Provenance["/path/file1.mp4"])
 		assert.Equal(t, "r18dev", parsed.Provenance["/path/file1.mp4"].FieldSources["title"])

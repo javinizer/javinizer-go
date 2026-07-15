@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 
 	"github.com/spf13/afero"
@@ -1161,7 +1162,7 @@ func TestJobStore_SnapshotForPersist_Success(t *testing.T) {
 	assert.NotEmpty(t, dbJob.FileMatchInfo)
 
 	// Verify Results is valid envelope JSON
-	var envelope JobResultsEnvelope
+	var envelope jobpersist.JobResultsEnvelope
 	err := json.Unmarshal([]byte(dbJob.Results), &envelope)
 	require.NoError(t, err)
 	assert.Contains(t, envelope.Domain, "file1.mp4")
@@ -1171,7 +1172,7 @@ func TestJobStore_ReconstructBatchJob_EnvelopeFormat(t *testing.T) {
 	t.Run("parses envelope format with domain key", func(t *testing.T) {
 		jq := &JobStore{jobs: make(map[models.JobID]*BatchJob)}
 
-		envelope := JobResultsEnvelope{
+		envelope := jobpersist.JobResultsEnvelope{
 			Domain: map[string]*resultstore.MovieResult{
 				"/path/file1.mp4": {
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/file1.mp4", MovieID: "ABC-001"},

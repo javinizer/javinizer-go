@@ -44,7 +44,7 @@ func newResultTrackerFromState(s *resultTrackerState) *ResultTracker {
 }
 
 // NewFromSnapshot constructs a Store pre-populated with ALL fields that
-// reconstructResultTracker sets directly (totalFiles, files, results,
+// reconstructBatchJob sets directly (totalFiles, files, results,
 // provenance, fileMatchInfo, excluded, completed, failed, progress). The
 // movie-ID and result-ID indexes are rebuilt from the provided results.
 func NewFromSnapshot(

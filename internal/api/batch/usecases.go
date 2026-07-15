@@ -92,7 +92,7 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 		// The previous refactor deferred this to GET /batch/{id}?include_data=true,
 		// which broke /jobs page thumbnails (frontend getFirstPoster reads
 		// job.results inline). parseAndConvertJobResults also handles the legacy
-		// "data" JSON field via worker.ParseJobResultsJSON.
+		// "data" JSON field via jobpersist.ParseResultsJSON.
 		results := parseAndConvertJobResults(&job, deps.GetFs())
 
 		response.Jobs = append(response.Jobs, contracts.BatchJobResponse{
