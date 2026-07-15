@@ -7,6 +7,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
 // recoverableOutcome is a minimal interface for panic-recovery mutation.
@@ -23,7 +24,7 @@ type recoveryContext struct {
 	filePath  string
 	fmi       models.FileMatchInfo
 	movie     *models.Movie // optional: prior scrape-phase Movie to preserve on apply panic (mirrors fix in interpretApplyResult's err branch)
-	updater   ResultUpdater
+	updater   resultstore.ResultUpdater
 	broadcast func(panicErr string) // optional: send a JobEvent on panic (apply phase uses this)
 	startTime time.Time             // optional: included in MovieResult if non-zero
 }
@@ -49,7 +50,7 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 			logging.Errorf("Worker panic %s: %v", rc.filePath, panicErr)
 
 			now := time.Now()
-			mr := &MovieResult{
+			mr := &resultstore.MovieResult{
 				FileMatchInfo: rc.fmi,
 				Status:        models.JobStatusFailed,
 				Error:         panicErr.Error(),

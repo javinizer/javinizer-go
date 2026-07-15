@@ -11,7 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -63,7 +63,7 @@ func TestRebase_PreviewUsesResultID(t *testing.T) {
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
 
 	// Create a result with a known ResultID
-	result := &worker.MovieResult{
+	result := &resultstore.MovieResult{
 		ResultID:      "stable-result-uuid-001",
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
@@ -115,7 +115,7 @@ func TestRebase_PreviewResultIDNotFound(t *testing.T) {
 
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-	result := &worker.MovieResult{
+	result := &resultstore.MovieResult{
 		ResultID:      "real-result-id",
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
@@ -150,7 +150,7 @@ func TestRebase_JobResponseIncludesFiles(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/videos/ABCD-123.mp4", "/videos/EFGH-456.mp4"})
-	result := &worker.MovieResult{
+	result := &resultstore.MovieResult{
 		ResultID:      "r1",
 		FileMatchInfo: models.FileMatchInfo{Path: "/videos/ABCD-123.mp4", MovieID: "ABCD-123"},
 		Status:        models.JobStatusCompleted,
@@ -185,7 +185,7 @@ func TestRebase_ResultIDPopulatedInResponse(t *testing.T) {
 	job := deps.JobStore.CreateJobBatch([]string{"/videos/ABCD-123.mp4"})
 
 	// Simulate a result with an empty ResultID (legacy entry)
-	result := &worker.MovieResult{
+	result := &resultstore.MovieResult{
 		ResultID:      "", // Empty — simulates legacy persisted result
 		FileMatchInfo: models.FileMatchInfo{Path: "/videos/ABCD-123.mp4", MovieID: "ABCD-123"},
 		Status:        models.JobStatusCompleted,

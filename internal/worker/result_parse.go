@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
 // ParsedJobResults holds the parsed results and provenance from a job's
 // persisted Results JSON column. Returned by ParseJobResultsJSON.
 type ParsedJobResults struct {
-	Results    map[string]*MovieResult
-	Provenance map[string]*ProvenanceData
+	Results    map[string]*resultstore.MovieResult
+	Provenance map[string]*resultstore.ProvenanceData
 }
 
 // ParseJobResultsJSON parses the Results JSON column from the database,
@@ -29,8 +30,8 @@ type ParsedJobResults struct {
 func ParseJobResultsJSON(raw []byte) (*ParsedJobResults, error) {
 	if len(raw) == 0 {
 		return &ParsedJobResults{
-			Results:    make(map[string]*MovieResult),
-			Provenance: make(map[string]*ProvenanceData),
+			Results:    make(map[string]*resultstore.MovieResult),
+			Provenance: make(map[string]*resultstore.ProvenanceData),
 		}, nil
 	}
 
@@ -78,10 +79,10 @@ func parseEnvelopeFormat(raw []byte) (*ParsedJobResults, error) {
 		return nil, fmt.Errorf("envelope format: %w", err)
 	}
 	if envelope.Domain == nil {
-		envelope.Domain = make(map[string]*MovieResult)
+		envelope.Domain = make(map[string]*resultstore.MovieResult)
 	}
 	if envelope.Provenance == nil {
-		envelope.Provenance = make(map[string]*ProvenanceData)
+		envelope.Provenance = make(map[string]*resultstore.ProvenanceData)
 	}
 	return &ParsedJobResults{Results: envelope.Domain, Provenance: envelope.Provenance}, nil
 }
@@ -112,14 +113,14 @@ func parseLegacyFileResultFormat(raw []byte) (*ParsedJobResults, error) {
 		return nil, fmt.Errorf("legacy format: %w", err)
 	}
 
-	results := make(map[string]*MovieResult, len(legacyResults))
-	provenance := make(map[string]*ProvenanceData, len(legacyResults))
+	results := make(map[string]*resultstore.MovieResult, len(legacyResults))
+	provenance := make(map[string]*resultstore.ProvenanceData, len(legacyResults))
 
 	for filePath, lfr := range legacyResults {
 		if lfr == nil {
 			continue
 		}
-		mr := &MovieResult{
+		mr := &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{
 				Path:        lfr.FilePath,
 				MovieID:     lfr.MovieID,
@@ -147,7 +148,7 @@ func parseLegacyFileResultFormat(raw []byte) (*ParsedJobResults, error) {
 		}
 		results[filePath] = mr
 		if lfr.FieldSources != nil || lfr.ActressSources != nil {
-			provenance[filePath] = &ProvenanceData{
+			provenance[filePath] = &resultstore.ProvenanceData{
 				FieldSources:   lfr.FieldSources,
 				ActressSources: lfr.ActressSources,
 			}
@@ -182,14 +183,14 @@ func parseOldMovieResultFormat(raw []byte) (*ParsedJobResults, error) {
 		return nil, fmt.Errorf("old movie result format: %w", err)
 	}
 
-	results := make(map[string]*MovieResult, len(oldResults))
-	provenance := make(map[string]*ProvenanceData, len(oldResults))
+	results := make(map[string]*resultstore.MovieResult, len(oldResults))
+	provenance := make(map[string]*resultstore.ProvenanceData, len(oldResults))
 
 	for k, v := range oldResults {
 		if v == nil {
 			continue
 		}
-		mr := &MovieResult{
+		mr := &resultstore.MovieResult{
 			ResultID:      v.ResultID,
 			FileMatchInfo: v.FileMatchInfo,
 			Movie:         v.Movie,
@@ -208,7 +209,7 @@ func parseOldMovieResultFormat(raw []byte) (*ParsedJobResults, error) {
 		}
 		results[k] = mr
 		if v.FieldSources != nil || v.ActressSources != nil {
-			provenance[k] = &ProvenanceData{
+			provenance[k] = &resultstore.ProvenanceData{
 				FieldSources:   v.FieldSources,
 				ActressSources: v.ActressSources,
 			}

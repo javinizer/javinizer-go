@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,19 +35,19 @@ func TestBatchExcludeIntegration(t *testing.T) {
 					"/path/to/ABC-123.mp4",
 					"/path/to/SSIS-001.mp4",
 				})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Movie 1"},
 					StartedAt:     time.Now(),
 				})
-				setJobResult(job, "/path/to/ABC-123.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/ABC-123.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABC-123.mp4", MovieID: "ABC-123"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABC-123", Title: "Movie 2"},
 					StartedAt:     time.Now(),
 				})
-				setJobResult(job, "/path/to/SSIS-001.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/SSIS-001.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/SSIS-001.mp4", MovieID: "SSIS-001"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "SSIS-001", Title: "Movie 3"},
@@ -73,19 +74,19 @@ func TestBatchExcludeIntegration(t *testing.T) {
 					"/path/to/IPX-535-CD2.mp4",
 					"/path/to/ABC-123.mp4",
 				})
-				setJobResult(job, "/path/to/IPX-535-CD1.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535-CD1.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535-CD1.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Multi-Part Movie"},
 					StartedAt:     time.Now(),
 				})
-				setJobResult(job, "/path/to/IPX-535-CD2.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535-CD2.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535-CD2.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Multi-Part Movie"},
 					StartedAt:     time.Now(),
 				})
-				setJobResult(job, "/path/to/ABC-123.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/ABC-123.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABC-123.mp4", MovieID: "ABC-123"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABC-123", Title: "Other Movie"},
@@ -109,13 +110,13 @@ func TestBatchExcludeIntegration(t *testing.T) {
 			name: "exclude all movies in job triggers MarkCancelled",
 			setupJob: func(jq worker.JobStoreInterface) string {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4", "/path/to/ABC-123.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test 1"},
 					StartedAt:     time.Now(),
 				})
-				setJobResult(job, "/path/to/ABC-123.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/ABC-123.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABC-123.mp4", MovieID: "ABC-123"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABC-123", Title: "Test 2"},
@@ -136,7 +137,7 @@ func TestBatchExcludeIntegration(t *testing.T) {
 			name: "exclude with some not-found and some found returns partial success",
 			setupJob: func(jq worker.JobStoreInterface) string {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -162,7 +163,7 @@ func TestBatchExcludeIntegration(t *testing.T) {
 			name: "exclude by resultID when Movie.ID differs from MovieID",
 			setupJob: func(jq worker.JobStoreInterface) string {
 				job := jq.CreateJobBatch([]string{"/path/to/ABP-071.mp4"})
-				setJobResult(job, "/path/to/ABP-071.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/ABP-071.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABP-071.mp4", MovieID: "ABP-071"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABP-071DOD", Title: "Resolved Movie"},
@@ -181,7 +182,7 @@ func TestBatchExcludeIntegration(t *testing.T) {
 			name: "exclude all not-found movies returns empty excluded with failed list",
 			setupJob: func(jq worker.JobStoreInterface) string {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},

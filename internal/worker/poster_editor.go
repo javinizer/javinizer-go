@@ -7,6 +7,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
 // PosterEditor handles poster-related mutations on job results.
@@ -22,15 +23,16 @@ import (
 // any caller using PosterEditor automatically gets DB persistence without
 // risking a split between in-memory and persistent state.
 type PosterEditor struct {
-	lookup    MovieLookup
-	updater   ResultUpdater
+	lookup    resultstore.ResultReadFacade
+	updater   resultstore.ResultUpdater
 	movieRepo database.MovieRepositoryInterface // optional: when set, poster updates are persisted to DB
 }
 
-// NewPosterEditor creates a PosterEditor with the given lookup and updater.
-// If movieRepo is non-nil, UpdatePosterFromURL will also persist the poster
-// change to the database (best-effort: DB failures are logged, not returned).
-func NewPosterEditor(lookup MovieLookup, updater ResultUpdater, movieRepo database.MovieRepositoryInterface) *PosterEditor {
+// NewPosterEditor creates a PosterEditor backed by a ResultReadFacade (for
+// lookups) and a ResultUpdater (for atomic mutations). If movieRepo is
+// non-nil, UpdatePosterFromURL will also persist the poster change to the
+// database (best-effort: DB failures are logged, not returned).
+func NewPosterEditor(lookup resultstore.ResultReadFacade, updater resultstore.ResultUpdater, movieRepo database.MovieRepositoryInterface) *PosterEditor {
 	return &PosterEditor{lookup: lookup, updater: updater, movieRepo: movieRepo}
 }
 
@@ -38,7 +40,7 @@ func NewPosterEditor(lookup MovieLookup, updater ResultUpdater, movieRepo databa
 func (pe *PosterEditor) UpdatePosterCrop(movieID string, croppedURL string) error {
 	filePaths := pe.lookup.FindFilePathsForMovieID(movieID)
 	for _, filePath := range filePaths {
-		err := pe.updater.AtomicUpdateFileResult(filePath, func(current *MovieResult) (*MovieResult, error) {
+		err := pe.updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			if current.Movie == nil {
 				return current, nil // skip files with nil Movie
 			}
@@ -63,7 +65,7 @@ func (pe *PosterEditor) UpdatePosterCrop(movieID string, croppedURL string) erro
 func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string, posterURL string, croppedURL string) error {
 	filePaths := pe.lookup.FindFilePathsForMovieID(movieID)
 	for _, filePath := range filePaths {
-		err := pe.updater.AtomicUpdateFileResult(filePath, func(current *MovieResult) (*MovieResult, error) {
+		err := pe.updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			if current.Movie == nil {
 				return current, nil // skip files with nil Movie
 			}

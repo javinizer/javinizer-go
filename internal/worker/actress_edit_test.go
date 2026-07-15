@@ -6,6 +6,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +42,7 @@ func TestUpdateMovie_ActressRenamesByID(t *testing.T) {
 
 		jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Actresses: []models.Actress{curated}},
@@ -72,7 +73,7 @@ func TestUpdateMovie_ActressRenamesByID(t *testing.T) {
 
 		jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Actresses: []models.Actress{curated}},
@@ -100,7 +101,7 @@ func TestUpdateMovie_ActressRenamesByID(t *testing.T) {
 		// must not rename (no DB persistence).
 		jq := NewJobStore(nil, nil, nil, "", nil, nil, WithActressRepo(repos.ActressRepo))
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Actresses: []models.Actress{curated}},
@@ -125,7 +126,7 @@ func TestUpdateMovie_ActressRenamesByID(t *testing.T) {
 
 		jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001"},

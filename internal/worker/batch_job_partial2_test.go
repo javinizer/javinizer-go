@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,24 +23,24 @@ func TestBatchJob_FindFileForMovieID_PartNumberSorting_Partial2(t *testing.T) {
 	})
 
 	// Set results with different part numbers
-	job.SetResultDirect("file_cd1.mp4", &MovieResult{
+	job.SetResultDirect("file_cd1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file_cd1.mp4", MovieID: "SORT-001", PartNumber: 1, PartSuffix: "cd1"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "SORT-001"},
 	})
-	job.SetResultDirect("file_cd2.mp4", &MovieResult{
+	job.SetResultDirect("file_cd2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file_cd2.mp4", MovieID: "SORT-001", PartNumber: 2, PartSuffix: "cd2"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "SORT-001"},
 	})
-	job.SetResultDirect("file_cd3.mp4", &MovieResult{
+	job.SetResultDirect("file_cd3.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file_cd3.mp4", MovieID: "SORT-001", PartNumber: 0, PartSuffix: "cd3"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "SORT-001"},
 	})
 
 	// FindFileForMovieID should sort and return the correct file
-	result, err := job.resultIndex.FindFileForMovieID("SORT-001")
+	result, err := job.results.FindFileForMovieID("SORT-001")
 	require.NoError(t, err)
 	// PartNumber 0 should sort after PartNumber 1
 	// PartNumber 1 should be first
@@ -55,19 +56,19 @@ func TestBatchJob_FindFileForMovieID_PartNumber0ComesLast_Partial2(t *testing.T)
 	})
 
 	// One file with PartNumber 0 (should come after PartNumber > 0)
-	job.SetResultDirect("file_a.mp4", &MovieResult{
+	job.SetResultDirect("file_a.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file_a.mp4", MovieID: "P0-001", PartNumber: 0},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "P0-001"},
 	})
 	// Another file with PartNumber 2
-	job.SetResultDirect("file_b.mp4", &MovieResult{
+	job.SetResultDirect("file_b.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file_b.mp4", MovieID: "P0-001", PartNumber: 2},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "P0-001"},
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("P0-001")
+	result, err := job.results.FindFileForMovieID("P0-001")
 	require.NoError(t, err)
 	// Just verify that sorting works and returns a valid file
 	assert.Contains(t, []string{"file_a.mp4", "file_b.mp4"}, result.FilePath)
@@ -82,18 +83,18 @@ func TestBatchJob_FindFileForMovieID_SuffixOrderDifference_Partial2(t *testing.T
 	})
 
 	// Same PartNumber, different suffixes
-	job.SetResultDirect("file_a.mp4", &MovieResult{
+	job.SetResultDirect("file_a.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file_a.mp4", MovieID: "SUF-001", PartNumber: 1, PartSuffix: "cd2"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "SUF-001"},
 	})
-	job.SetResultDirect("file_b.mp4", &MovieResult{
+	job.SetResultDirect("file_b.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file_b.mp4", MovieID: "SUF-001", PartNumber: 1, PartSuffix: "cd1"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "SUF-001"},
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("SUF-001")
+	result, err := job.results.FindFileForMovieID("SUF-001")
 	require.NoError(t, err)
 	// Just verify that sorting works and returns a valid file
 	assert.Contains(t, []string{"file_a.mp4", "file_b.mp4"}, result.FilePath)
@@ -109,13 +110,13 @@ func TestBatchJob_FindMovieResultForMovieID_NilResult_Partial2(t *testing.T) {
 		},
 	})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NIL-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         nil,
 	})
 
-	_, err := job.resultIndex.FindMovieResultForMovieID("NIL-001")
+	_, err := job.results.FindMovieResultForMovieID("NIL-001")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no movie result found")
 }
@@ -130,14 +131,14 @@ func TestBatchJob_FindFileForRescrape_NilMovieUsesFileMatchInfoMovieID_Partial2(
 		},
 	})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "FMI-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         nil,
 	})
 
 	cmd := RescrapeCmd{FilePath: "file1.mp4", MovieID: "FMI-001"}
-	result, err := job.resultIndex.FindFileForMovieID(cmd.MovieID)
+	result, err := job.results.FindFileForMovieID(cmd.MovieID)
 	require.NoError(t, err)
 	assert.Equal(t, "file1.mp4", result.FilePath)
 	assert.Equal(t, "FMI-001", result.OldMovieID)
@@ -203,7 +204,7 @@ func TestBatchJob_StartApply_OperationModeOverride_Partial2(t *testing.T) {
 	})
 
 	// Set up a completed scrape result
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "APPLY-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "APPLY-001"},
@@ -235,7 +236,7 @@ func TestBatchJob_StartApply_EmptyOperationModeOverride_Partial2(t *testing.T) {
 		},
 	})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "APPLY-002"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "APPLY-002"},
@@ -266,7 +267,7 @@ func TestBatchJob_StartApply_UpdateFlag_Partial2(t *testing.T) {
 		},
 	})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "UPD-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "UPD-001"},
@@ -300,7 +301,7 @@ func TestBatchJob_Run_NoCompletedResults_Partial2(t *testing.T) {
 	})
 
 	// Set a failed result - no completed results
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "FAIL-001"},
 		Status:        models.JobStatusFailed,
 		Movie:         nil,
@@ -341,13 +342,13 @@ func TestBatchJob_FindFileForMovieID_SingleFile_Partial2(t *testing.T) {
 		},
 	})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "SINGLE-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "SINGLE-001"},
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("SINGLE-001")
+	result, err := job.results.FindFileForMovieID("SINGLE-001")
 	require.NoError(t, err)
 	assert.Equal(t, "file1.mp4", result.FilePath)
 	assert.Equal(t, "SINGLE-001", result.OldMovieID)
@@ -363,14 +364,14 @@ func TestBatchJob_FindFileForMovieID_NotFound_Partial2(t *testing.T) {
 		},
 	})
 
-	_, err := job.resultIndex.FindFileForMovieID("NOTFOUND-001")
+	_, err := job.results.FindFileForMovieID("NOTFOUND-001")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
 
 // --- findFileForRescrape: result with Movie.ID set ---
 
-// FindFileForMovieID moved from BatchJob to ResultTracker.
+// FindFileForMovieID moved from BatchJob to resultstore.ResultTracker.
 // Pre-resolved FilePath handling moved to RescrapePhase.Rescrape.
 func TestResultTracker_FindFileForMovieID_WithMovieID_Partial2(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"}, &JobConfig{
@@ -380,13 +381,13 @@ func TestResultTracker_FindFileForMovieID_WithMovieID_Partial2(t *testing.T) {
 		},
 	})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "WMI-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "WMI-001"},
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("WMI-001")
+	result, err := job.results.FindFileForMovieID("WMI-001")
 	require.NoError(t, err)
 	assert.Equal(t, "file1.mp4", result.FilePath)
 	assert.Equal(t, "WMI-001", result.OldMovieID)
@@ -402,7 +403,7 @@ func TestBatchJob_StartApply_DestinationSet_Partial2(t *testing.T) {
 		},
 	})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "DEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "DEST-001"},
@@ -434,7 +435,7 @@ func TestBatchJob_StartApply_TempDirSet_Partial2(t *testing.T) {
 		},
 	})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "TEMP-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEMP-001"},

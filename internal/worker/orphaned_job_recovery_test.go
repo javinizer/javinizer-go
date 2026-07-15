@@ -54,7 +54,7 @@ func TestRecoverOrphanedJobs_TerminalJobsUntouched(t *testing.T) {
 	require.NotNil(t, job)
 
 	originalCompletedAt := time.Now()
-	originalProgress := 42.0
+	originalProgress := 100.0
 
 	terminalStatuses := []models.JobStatus{
 		models.JobStatusCompleted,
@@ -70,9 +70,7 @@ func TestRecoverOrphanedJobs_TerminalJobsUntouched(t *testing.T) {
 		job.lifecycle.CompletedAt = &originalCompletedAt
 		job.lifecycle.mu.Unlock()
 
-		job.results.mu.Lock()
-		job.results.Progress = originalProgress
-		job.results.mu.Unlock()
+		job.results.ForceCompleteProgress()
 
 		store.recoverOrphanedJobs()
 

@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -136,7 +137,7 @@ func TestProcessUpdateMode_NoCompletedResults(t *testing.T) {
 	cfg := config.DefaultConfig(nil, nil)
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobStore.CreateJobBatch([]string{"/tmp/fail.mp4"})
-	setJobResult(job, "/tmp/fail.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/fail.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/fail.mp4"},
 		Status:        models.JobStatusFailed,
 		Error:         "scrape failed",
@@ -175,7 +176,7 @@ func TestProcessUpdateMode_SuccessfulResults(t *testing.T) {
 		Title:  "Test Movie IPX-123",
 		Poster: models.PosterState{CoverURL: "https://example.com/cover.jpg"},
 	}
-	setJobResult(job, "/tmp/test.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/test.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/test.mp4"},
 		Status:        models.JobStatusCompleted,
 		Movie:         movie,
@@ -204,14 +205,14 @@ func TestProcessUpdateMode_MixedResults(t *testing.T) {
 		Title:  "Test Movie IPX-123",
 		Poster: models.PosterState{CoverURL: "https://example.com/cover.jpg"},
 	}
-	setJobResult(job, "/tmp/success.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/success.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/success.mp4"},
 		Status:        models.JobStatusCompleted,
 		Movie:         movie,
 	})
 
 	// Second file failed
-	setJobResult(job, "/tmp/fail.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/fail.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/fail.mp4"},
 		Status:        models.JobStatusFailed,
 		Error:         "scrape failed",

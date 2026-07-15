@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -25,13 +26,13 @@ func TestJobStore_CreateGetDeleteList(t *testing.T) {
 		// Verify job creation
 		assert.NotEmpty(t, job.ID)
 		assert.Equal(t, models.JobStatusPending, job.lifecycle.Status)
-		assert.Equal(t, 3, job.results.TotalFiles)
-		assert.Equal(t, files, job.results.Files)
-		assert.NotNil(t, job.results.Results)
-		assert.Empty(t, job.results.Results)
-		assert.Equal(t, 0, job.results.Completed)
-		assert.Equal(t, 0, job.results.Failed)
-		assert.Equal(t, 0.0, job.results.Progress)
+		assert.Equal(t, 3, job.prog().TotalFiles)
+		assert.Equal(t, files, job.snap().Files)
+		assert.NotNil(t, job.snap().Results)
+		assert.Empty(t, job.snap().Results)
+		assert.Equal(t, 0, job.prog().Completed)
+		assert.Equal(t, 0, job.prog().Failed)
+		assert.Equal(t, 0.0, job.prog().Progress)
 		assert.False(t, job.StartedAt.IsZero())
 		assert.Nil(t, job.lifecycle.CompletedAt)
 
@@ -39,7 +40,7 @@ func TestJobStore_CreateGetDeleteList(t *testing.T) {
 		retrieved, ok := jq.GetJob(job.ID.String())
 		require.True(t, ok, "Job should exist")
 		assert.Equal(t, job.ID, retrieved.ID)
-		assert.Equal(t, job.results.TotalFiles, retrieved.TotalFiles)
+		assert.Equal(t, job.prog().TotalFiles, retrieved.TotalFiles)
 	})
 
 	t.Run("Get non-existent job", func(t *testing.T) {
@@ -106,8 +107,8 @@ func TestJobStore_CreateGetDeleteList(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{})
 
-		assert.Equal(t, 0, job.results.TotalFiles)
-		assert.Empty(t, job.results.Files)
+		assert.Equal(t, 0, job.prog().TotalFiles)
+		assert.Empty(t, job.snap().Files)
 	})
 }
 
@@ -118,7 +119,7 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 		job := jq.CreateJobBatch(files)
 
 		now := time.Now()
-		result := &MovieResult{
+		result := &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "IPX-123"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
@@ -128,13 +129,13 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 		job.results.UpdateFileResult("file1.mp4", result)
 
 		// Verify result is stored
-		assert.Len(t, job.results.Results, 1)
-		assert.Equal(t, result, job.results.Results["file1.mp4"])
+		assert.Len(t, job.snap().Results, 1)
+		assert.Equal(t, result, job.snap().Results["file1.mp4"])
 
 		// Verify counters
-		assert.Equal(t, 1, job.results.Completed)
-		assert.Equal(t, 0, job.results.Failed)
-		assert.InDelta(t, 33.33, job.results.Progress, 0.1) // 1/3 * 100
+		assert.Equal(t, 1, job.prog().Completed)
+		assert.Equal(t, 0, job.prog().Failed)
+		assert.InDelta(t, 33.33, job.prog().Progress, 0.1) // 1/3 * 100
 	})
 
 	t.Run("Update multiple file results with mixed status", func(t *testing.T) {
@@ -145,45 +146,45 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 		now := time.Now()
 
 		// Complete first file
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		assert.Equal(t, 1, job.results.Completed)
-		assert.Equal(t, 0, job.results.Failed)
-		assert.Equal(t, 25.0, job.results.Progress)
+		assert.Equal(t, 1, job.prog().Completed)
+		assert.Equal(t, 0, job.prog().Failed)
+		assert.Equal(t, 25.0, job.prog().Progress)
 
 		// Complete second file
-		job.results.UpdateFileResult("file2.mkv", &MovieResult{
+		job.results.UpdateFileResult("file2.mkv", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file2.mkv"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		assert.Equal(t, 2, job.results.Completed)
-		assert.Equal(t, 0, job.results.Failed)
-		assert.Equal(t, 50.0, job.results.Progress)
+		assert.Equal(t, 2, job.prog().Completed)
+		assert.Equal(t, 0, job.prog().Failed)
+		assert.Equal(t, 50.0, job.prog().Progress)
 
 		// Fail third file
-		job.results.UpdateFileResult("file3.avi", &MovieResult{
+		job.results.UpdateFileResult("file3.avi", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file3.avi"},
 			Status:        models.JobStatusFailed,
 			Error:         "scraper error",
 			StartedAt:     now,
 		})
-		assert.Equal(t, 2, job.results.Completed)
-		assert.Equal(t, 1, job.results.Failed)
-		assert.Equal(t, 75.0, job.results.Progress) // (2+1)/4 * 100
+		assert.Equal(t, 2, job.prog().Completed)
+		assert.Equal(t, 1, job.prog().Failed)
+		assert.Equal(t, 75.0, job.prog().Progress) // (2+1)/4 * 100
 
 		// Complete fourth file
-		job.results.UpdateFileResult("file4.mp4", &MovieResult{
+		job.results.UpdateFileResult("file4.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file4.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		assert.Equal(t, 3, job.results.Completed)
-		assert.Equal(t, 1, job.results.Failed)
-		assert.Equal(t, 100.0, job.results.Progress)
+		assert.Equal(t, 3, job.prog().Completed)
+		assert.Equal(t, 1, job.prog().Failed)
+		assert.Equal(t, 100.0, job.prog().Progress)
 	})
 
 	t.Run("Update same file result multiple times", func(t *testing.T) {
@@ -194,27 +195,27 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 		now := time.Now()
 
 		// Initially running
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 			Status:        models.JobStatusRunning,
 			StartedAt:     now,
 		})
-		assert.Equal(t, 0, job.results.Completed)
-		assert.Equal(t, 0, job.results.Failed)
-		assert.Equal(t, 0.0, job.results.Progress)
+		assert.Equal(t, 0, job.prog().Completed)
+		assert.Equal(t, 0, job.prog().Failed)
+		assert.Equal(t, 0.0, job.prog().Progress)
 
 		// Then completed
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "IPX-123"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		assert.Equal(t, 1, job.results.Completed)
-		assert.Equal(t, 0, job.results.Failed)
-		assert.Equal(t, 100.0, job.results.Progress)
+		assert.Equal(t, 1, job.prog().Completed)
+		assert.Equal(t, 0, job.prog().Failed)
+		assert.Equal(t, 100.0, job.prog().Progress)
 
 		// Verify only one result exists
-		assert.Len(t, job.results.Results, 1)
+		assert.Len(t, job.snap().Results, 1)
 	})
 
 	t.Run("Progress calculation with pending files", func(t *testing.T) {
@@ -225,16 +226,16 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 		now := time.Now()
 
 		// Only update 1 out of 3 files
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
 
 		// Progress should be 33.33% (1/3), not 100%
-		assert.InDelta(t, 33.33, job.results.Progress, 0.1)
-		assert.Equal(t, 1, job.results.Completed)
-		assert.Equal(t, 2, job.results.TotalFiles-job.results.Completed-job.results.Failed) // 2 pending
+		assert.InDelta(t, 33.33, job.prog().Progress, 0.1)
+		assert.Equal(t, 1, job.prog().Completed)
+		assert.Equal(t, 2, job.prog().TotalFiles-job.prog().Completed-job.prog().Failed) // 2 pending
 	})
 }
 
@@ -265,7 +266,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 		afterCompletion := time.Now()
 
 		assert.Equal(t, models.JobStatusCompleted, job.lifecycle.Status)
-		assert.Equal(t, 100.0, job.results.Progress)
+		assert.Equal(t, 100.0, job.prog().Progress)
 		require.NotNil(t, job.lifecycle.CompletedAt)
 		assert.True(t, job.lifecycle.CompletedAt.After(beforeCompletion) || job.lifecycle.CompletedAt.Equal(beforeCompletion))
 		assert.True(t, job.lifecycle.CompletedAt.Before(afterCompletion) || job.lifecycle.CompletedAt.Equal(afterCompletion))
@@ -333,12 +334,12 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 
 		// Process files
 		now := time.Now()
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		job.results.UpdateFileResult("file2.mkv", &MovieResult{
+		job.results.UpdateFileResult("file2.mkv", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file2.mkv"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
@@ -348,7 +349,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 		job.lifecycle.MarkCompleted()
 		assert.Equal(t, models.JobStatusCompleted, job.lifecycle.Status)
 		assert.NotNil(t, job.lifecycle.CompletedAt)
-		assert.Equal(t, 100.0, job.results.Progress)
+		assert.Equal(t, 100.0, job.prog().Progress)
 	})
 
 	t.Run("Revert workflow: organized -> reverted", func(t *testing.T) {
@@ -381,7 +382,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 		job.controller.markStarted(models.JobStatusPending)
 
 		now := time.Now()
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
@@ -392,11 +393,11 @@ func TestBatchJob_GetStatus(t *testing.T) {
 		// Verify all fields are copied
 		assert.Equal(t, job.ID, status.ID)
 		assert.Equal(t, job.lifecycle.Status, status.Status)
-		assert.Equal(t, job.results.TotalFiles, status.TotalFiles)
-		assert.Equal(t, job.results.Completed, status.Completed)
-		assert.Equal(t, job.results.Failed, status.Failed)
-		assert.Equal(t, job.results.Files, status.Files)
-		assert.Equal(t, job.results.Progress, status.Progress)
+		assert.Equal(t, job.prog().TotalFiles, status.TotalFiles)
+		assert.Equal(t, job.prog().Completed, status.Completed)
+		assert.Equal(t, job.prog().Failed, status.Failed)
+		assert.Equal(t, job.snap().Files, status.Files)
+		assert.Equal(t, job.prog().Progress, status.Progress)
 		assert.Equal(t, job.StartedAt, status.StartedAt)
 		assert.Len(t, status.Results, 1)
 	})
@@ -407,7 +408,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 		job := jq.CreateJobBatch(files)
 
 		now := time.Now()
-		result1 := &MovieResult{
+		result1 := &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "IPX-123"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
@@ -417,30 +418,30 @@ func TestBatchJob_GetStatus(t *testing.T) {
 		// Get status copy
 		status := job.GetStatus()
 
-		// Verify MovieResult objects are NOT shared (deep copy)
+		// Verify resultstore.MovieResult objects are NOT shared (deep copy)
 		// MovieResults should be independent to prevent concurrent mutations
-		assert.NotSame(t, job.results.Results["file1.mp4"], status.Results["file1.mp4"],
-			"MovieResult pointers should be different (deep copy)")
+		assert.NotSame(t, job.snap().Results["file1.mp4"], status.Results["file1.mp4"],
+			"resultstore.MovieResult pointers should be different (deep copy)")
 
 		// Verify fields are equal but independent
-		assert.Equal(t, job.results.Results["file1.mp4"].FileMatchInfo.MovieID, status.Results["file1.mp4"].FileMatchInfo.MovieID,
-			"MovieResult fields should be equal")
+		assert.Equal(t, job.snap().Results["file1.mp4"].FileMatchInfo.MovieID, status.Results["file1.mp4"].FileMatchInfo.MovieID,
+			"resultstore.MovieResult fields should be equal")
 
-		// Modifying a MovieResult in the copy should NOT affect original
+		// Modifying a resultstore.MovieResult in the copy should NOT affect original
 		status.Results["file1.mp4"].FileMatchInfo.MovieID = "MODIFIED-999"
-		assert.Equal(t, "IPX-123", job.results.Results["file1.mp4"].FileMatchInfo.MovieID,
-			"Original MovieResult should remain unchanged (deep copy)")
+		assert.Equal(t, "IPX-123", job.snap().Results["file1.mp4"].FileMatchInfo.MovieID,
+			"Original resultstore.MovieResult should remain unchanged (deep copy)")
 		assert.Equal(t, "MODIFIED-999", status.Results["file1.mp4"].FileMatchInfo.MovieID,
-			"Copy MovieResult should be modified")
+			"Copy resultstore.MovieResult should be modified")
 
 		// Adding new entries to the copy's map doesn't affect original
-		status.Results["file2.mkv"] = &MovieResult{
+		status.Results["file2.mkv"] = &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file2.mkv"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		}
 		assert.Len(t, status.Results, 2, "Copy should have 2 results")
-		assert.Len(t, job.results.Results, 1, "Original should still have 1 result (map is independent)")
+		assert.Len(t, job.snap().Results, 1, "Original should still have 1 result (map is independent)")
 	})
 
 	t.Run("Copies CompletedAt correctly when nil", func(t *testing.T) {
@@ -487,7 +488,7 @@ func TestConcurrent_GetStatusAndUpdateFileResult(t *testing.T) {
 
 	now := time.Now()
 	// Initialize with a file result
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "IPX-100"},
 		Status:        models.JobStatusRunning,
 		StartedAt:     now,
@@ -498,12 +499,12 @@ func TestConcurrent_GetStatusAndUpdateFileResult(t *testing.T) {
 	go func() {
 		for i := 0; i < 1000; i++ {
 			// Rapidly update multiple file results
-			job.results.UpdateFileResult("file1.mp4", &MovieResult{
+			job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 				FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "IPX-" + fmt.Sprintf("%d", i)},
 				Status:        models.JobStatusRunning,
 				StartedAt:     now,
 			})
-			job.results.UpdateFileResult("file2.mkv", &MovieResult{
+			job.results.UpdateFileResult("file2.mkv", &resultstore.MovieResult{
 				FileMatchInfo: models.FileMatchInfo{Path: "file2.mkv", MovieID: "IPX-" + fmt.Sprintf("%d", i+1000)},
 				Status:        models.JobStatusCompleted,
 				StartedAt:     now,
@@ -531,7 +532,7 @@ func TestConcurrent_GetStatusAndUpdateFileResult(t *testing.T) {
 }
 
 // TestConcurrent_DirectMapAccessIsUnsafe demonstrates the race condition
-// This test would fail with -race if we directly accessed job.results.Results without GetStatus()
+// This test would fail with -race if we directly accessed job.snap().Results without GetStatus()
 // Run with: go test -race -run TestConcurrent_DirectMapAccessIsUnsafe
 func TestConcurrent_DirectMapAccessIsUnsafe(t *testing.T) {
 	t.Skip("This test demonstrates unsafe pattern - skip to avoid race detector failures")
@@ -540,7 +541,7 @@ func TestConcurrent_DirectMapAccessIsUnsafe(t *testing.T) {
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 	now := time.Now()
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "IPX-1"},
 		Status:        models.JobStatusRunning,
 		StartedAt:     now,
@@ -549,7 +550,7 @@ func TestConcurrent_DirectMapAccessIsUnsafe(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 1000; i++ {
-			job.results.UpdateFileResult("file1.mp4", &MovieResult{
+			job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 				FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: fmt.Sprintf("IPX-%d", i)},
 				Status:        models.JobStatusRunning,
 				StartedAt:     now,
@@ -561,7 +562,7 @@ func TestConcurrent_DirectMapAccessIsUnsafe(t *testing.T) {
 	// UNSAFE: Direct map access without GetStatus() - WOULD FAIL WITH -race
 	for i := 0; i < 1000; i++ {
 		// This would cause: fatal error: concurrent map iteration and map write
-		for filePath := range job.results.Results {
+		for filePath := range job.snap().Results {
 			_ = filePath
 		}
 	}
@@ -575,10 +576,10 @@ func TestBatchJob_PointerFieldIndependence(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
-	// Create MovieResult with pointer fields
+	// Create resultstore.MovieResult with pointer fields
 	originalTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	originalError := "poster download failed"
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "IPX-100"},
 		Status:        models.JobStatusCompleted,
 		StartedAt:     time.Now(),
@@ -703,7 +704,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 		now := time.Now()
-		initial := &MovieResult{
+		initial := &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "IPX-100"},
 			Status:        models.JobStatusRunning,
 			StartedAt:     now,
@@ -711,7 +712,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 		job.results.UpdateFileResult("file1.mp4", initial)
 
 		// Atomic update function
-		err := job.results.AtomicUpdateFileResult("file1.mp4", func(current *MovieResult) (*MovieResult, error) {
+		err := job.results.AtomicUpdateFileResult("file1.mp4", func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			// Create updated result
 			updated := *current
 			updated.FileMatchInfo.MovieID = "IPX-200"
@@ -720,8 +721,8 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 		})
 
 		assert.NoError(t, err)
-		assert.Equal(t, "IPX-200", job.results.Results["file1.mp4"].FileMatchInfo.MovieID)
-		assert.Equal(t, models.JobStatusCompleted, job.results.Results["file1.mp4"].Status)
+		assert.Equal(t, "IPX-200", job.snap().Results["file1.mp4"].FileMatchInfo.MovieID)
+		assert.Equal(t, models.JobStatusCompleted, job.snap().Results["file1.mp4"].Status)
 	})
 
 	t.Run("atomic update with error", func(t *testing.T) {
@@ -729,7 +730,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 		now := time.Now()
-		initial := &MovieResult{
+		initial := &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "IPX-100"},
 			Status:        models.JobStatusRunning,
 			StartedAt:     now,
@@ -737,14 +738,14 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 		job.results.UpdateFileResult("file1.mp4", initial)
 
 		// Atomic update that returns error
-		err := job.results.AtomicUpdateFileResult("file1.mp4", func(current *MovieResult) (*MovieResult, error) {
+		err := job.results.AtomicUpdateFileResult("file1.mp4", func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			return nil, fmt.Errorf("update failed")
 		})
 
 		assert.Error(t, err)
 		assert.Equal(t, "update failed", err.Error())
 		// Original should be unchanged
-		assert.Equal(t, "IPX-100", job.results.Results["file1.mp4"].FileMatchInfo.MovieID)
+		assert.Equal(t, "IPX-100", job.snap().Results["file1.mp4"].FileMatchInfo.MovieID)
 	})
 
 	t.Run("atomic update on non-existent file", func(t *testing.T) {
@@ -752,7 +753,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 		// Try to update without initial result
-		err := job.results.AtomicUpdateFileResult("file1.mp4", func(current *MovieResult) (*MovieResult, error) {
+		err := job.results.AtomicUpdateFileResult("file1.mp4", func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			updated := *current
 			updated.FileMatchInfo.MovieID = "IPX-999"
 			return &updated, nil
@@ -805,40 +806,40 @@ func TestBatchJob_GetProgress(t *testing.T) {
 		job := jq.CreateJobBatch(files)
 
 		// Initial progress
-		progress := job.results.Progress
+		progress := job.prog().Progress
 		assert.Equal(t, 0.0, progress)
 
 		// Complete one file
 		now := time.Now()
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		progress = job.results.Progress
+		progress = job.prog().Progress
 		assert.Equal(t, 25.0, progress)
 
 		// Complete two more files
-		job.results.UpdateFileResult("file2.mkv", &MovieResult{
+		job.results.UpdateFileResult("file2.mkv", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file2.mkv"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		job.results.UpdateFileResult("file3.avi", &MovieResult{
+		job.results.UpdateFileResult("file3.avi", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file3.avi"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		progress = job.results.Progress
+		progress = job.prog().Progress
 		assert.Equal(t, 75.0, progress)
 
 		// Complete last file
-		job.results.UpdateFileResult("file4.mp4", &MovieResult{
+		job.results.UpdateFileResult("file4.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file4.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		progress = job.results.Progress
+		progress = job.prog().Progress
 		assert.Equal(t, 100.0, progress)
 	})
 }
@@ -854,9 +855,9 @@ func TestBatchJob_ExcludeFile(t *testing.T) {
 		excludeFile(job, "file1.mp4")
 
 		// Verify exclusion
-		assert.True(t, job.results.Excluded["file1.mp4"])
-		assert.False(t, job.results.Excluded["file2.mkv"])
-		assert.False(t, job.results.Excluded["file3.avi"])
+		assert.True(t, job.snap().Excluded["file1.mp4"])
+		assert.False(t, job.snap().Excluded["file2.mkv"])
+		assert.False(t, job.snap().Excluded["file3.avi"])
 	})
 
 	t.Run("exclude multiple files", func(t *testing.T) {
@@ -869,9 +870,9 @@ func TestBatchJob_ExcludeFile(t *testing.T) {
 		excludeFile(job, "file3.avi")
 
 		// Verify exclusions
-		assert.True(t, job.results.Excluded["file1.mp4"])
-		assert.False(t, job.results.Excluded["file2.mkv"])
-		assert.True(t, job.results.Excluded["file3.avi"])
+		assert.True(t, job.snap().Excluded["file1.mp4"])
+		assert.False(t, job.snap().Excluded["file2.mkv"])
+		assert.True(t, job.snap().Excluded["file3.avi"])
 	})
 
 	t.Run("exclude same file multiple times", func(t *testing.T) {
@@ -883,7 +884,7 @@ func TestBatchJob_ExcludeFile(t *testing.T) {
 		excludeFile(job, "file1.mp4")
 		excludeFile(job, "file1.mp4")
 
-		assert.True(t, job.results.Excluded["file1.mp4"])
+		assert.True(t, job.snap().Excluded["file1.mp4"])
 	})
 
 }
@@ -896,8 +897,8 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 		job := jq.CreateJobBatch(files)
 
 		// Files should not be excluded initially
-		assert.False(t, job.results.Excluded["file1.mp4"])
-		assert.False(t, job.results.Excluded["file2.mkv"])
+		assert.False(t, job.snap().Excluded["file1.mp4"])
+		assert.False(t, job.snap().Excluded["file2.mkv"])
 	})
 
 	t.Run("check excluded file", func(t *testing.T) {
@@ -907,8 +908,8 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 
 		excludeFile(job, "file1.mp4")
 
-		assert.True(t, job.results.Excluded["file1.mp4"])
-		assert.False(t, job.results.Excluded["file2.mkv"])
+		assert.True(t, job.snap().Excluded["file1.mp4"])
+		assert.False(t, job.snap().Excluded["file2.mkv"])
 	})
 
 	t.Run("check non-existent file", func(t *testing.T) {
@@ -917,7 +918,7 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 		job := jq.CreateJobBatch(files)
 
 		// Non-existent file should not be excluded
-		assert.False(t, job.results.Excluded["non-existent.mp4"])
+		assert.False(t, job.snap().Excluded["non-existent.mp4"])
 	})
 }
 
@@ -1037,13 +1038,7 @@ func TestJobStore_PersistToDatabase_SetsPersistError(t *testing.T) {
 				Status: models.JobStatusPending,
 				done:   make(chan struct{}),
 			},
-			results: newResultTrackerFromState(&resultTrackerState{
-				TotalFiles:    1,
-				Files:         []string{"file1.mp4"},
-				Results:       make(map[string]*MovieResult),
-				Excluded:      make(map[string]bool),
-				FileMatchInfo: make(map[string]models.FileMatchInfo),
-			}),
+			results: resultstore.NewFromSnapshot(1, []string{"file1.mp4"}, make(map[string]*resultstore.MovieResult), nil, make(map[string]models.FileMatchInfo), make(map[string]bool), 0, 0, 0),
 		}
 		job.controller = newJobController(job)
 		jq.mu.Lock()
@@ -1068,13 +1063,7 @@ func TestJobStore_PersistToDatabase_SetsPersistError(t *testing.T) {
 				Status: models.JobStatusRunning,
 				done:   make(chan struct{}),
 			},
-			results: newResultTrackerFromState(&resultTrackerState{
-				TotalFiles:    1,
-				Files:         []string{"file1.mp4"},
-				Results:       make(map[string]*MovieResult),
-				Excluded:      make(map[string]bool),
-				FileMatchInfo: make(map[string]models.FileMatchInfo),
-			}),
+			results: resultstore.NewFromSnapshot(1, []string{"file1.mp4"}, make(map[string]*resultstore.MovieResult), nil, make(map[string]models.FileMatchInfo), make(map[string]bool), 0, 0, 0),
 		}
 		job.controller = newJobController(job)
 		jq.mu.Lock()
@@ -1099,13 +1088,7 @@ func TestJobStore_PersistToDatabase_SetsPersistError(t *testing.T) {
 				Status: models.JobStatusRunning,
 				done:   make(chan struct{}),
 			},
-			results: newResultTrackerFromState(&resultTrackerState{
-				TotalFiles:    1,
-				Files:         []string{"file1.mp4"},
-				Results:       make(map[string]*MovieResult),
-				Excluded:      make(map[string]bool),
-				FileMatchInfo: make(map[string]models.FileMatchInfo),
-			}),
+			results: resultstore.NewFromSnapshot(1, []string{"file1.mp4"}, make(map[string]*resultstore.MovieResult), nil, make(map[string]models.FileMatchInfo), make(map[string]bool), 0, 0, 0),
 		}
 		job.controller = newJobController(job)
 		jq.mu.Lock()
@@ -1125,8 +1108,11 @@ func TestJobStore_PersistToDatabase_SetsPersistError(t *testing.T) {
 // transition the job state during persistence. Before the simultaneous 3-lock
 // fix, a concurrent MarkCompleted could set lifecycle.Status="completed" while
 // results still showed partial progress (Progress<100), producing an
-// inconsistent DB row. With the fix, all 3 sub-managers are read under
-// simultaneous RLocks, so the snapshot is always from a single point in time.
+// inconsistent DB row. The snapshot is not taken under simultaneous locks —
+// Store.SnapshotForStatus() acquires its own read lock independently. The test
+// verifies the weaker invariant that Status=completed implies Progress=100
+// (enforced by MarkCompleted via ForceCompleteProgress), not true
+// cross-manager atomicity.
 func TestJobStore_PersistToDatabase_AtomicSnapshot(t *testing.T) {
 	t.Run("no Status=completed with Progress<100 in persisted snapshots", func(t *testing.T) {
 		// Create a job with 5 files, 3 completed, 2 pending.
@@ -1137,16 +1123,7 @@ func TestJobStore_PersistToDatabase_AtomicSnapshot(t *testing.T) {
 				Status: models.JobStatusRunning,
 				done:   make(chan struct{}),
 			},
-			results: newResultTrackerFromState(&resultTrackerState{
-				TotalFiles:    5,
-				Completed:     3,
-				Failed:        0,
-				Progress:      60.0,
-				Files:         []string{"f1.mp4", "f2.mp4", "f3.mp4", "f4.mp4", "f5.mp4"},
-				Results:       make(map[string]*MovieResult),
-				Excluded:      make(map[string]bool),
-				FileMatchInfo: make(map[string]models.FileMatchInfo),
-			}),
+			results: resultstore.NewFromSnapshot(5, []string{"f1.mp4", "f2.mp4", "f3.mp4", "f4.mp4", "f5.mp4"}, make(map[string]*resultstore.MovieResult), nil, make(map[string]models.FileMatchInfo), make(map[string]bool), 3, 0, 60.0),
 		}
 		job.controller = newJobController(job)
 		// use consolidated attachLifecycleCallback
@@ -1154,19 +1131,19 @@ func TestJobStore_PersistToDatabase_AtomicSnapshot(t *testing.T) {
 		// Populate 3 completed + 2 pending results
 		for i := 1; i <= 3; i++ {
 			key := fmt.Sprintf("f%d.mp4", i)
-			job.results.Results[key] = &MovieResult{
+			job.results.ReplaceResultRaw(key, &resultstore.MovieResult{
 				FileMatchInfo: models.FileMatchInfo{Path: key, MovieID: fmt.Sprintf("ID-%d", i)},
 				Status:        models.JobStatusCompleted,
 				StartedAt:     time.Now(),
-			}
+			})
 		}
 		for i := 4; i <= 5; i++ {
 			key := fmt.Sprintf("f%d.mp4", i)
-			job.results.Results[key] = &MovieResult{
+			job.results.ReplaceResultRaw(key, &resultstore.MovieResult{
 				FileMatchInfo: models.FileMatchInfo{Path: key},
 				Status:        models.JobStatusPending,
 				StartedAt:     time.Now(),
-			}
+			})
 		}
 
 		// Capture all persisted DB rows via mock Upsert.
@@ -1281,26 +1258,26 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mkv", "file3.avi"})
 
-		assert.Equal(t, 0, job.results.Completed)
-		assert.Equal(t, 0, job.results.Failed)
-		assert.Equal(t, 3, job.results.TotalFiles)
+		assert.Equal(t, 0, job.prog().Completed)
+		assert.Equal(t, 0, job.prog().Failed)
+		assert.Equal(t, 3, job.prog().TotalFiles)
 
 		now := time.Now()
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     now,
 		})
-		job.results.UpdateFileResult("file2.mkv", &MovieResult{
+		job.results.UpdateFileResult("file2.mkv", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file2.mkv"},
 			Status:        models.JobStatusFailed,
 			Error:         "test error",
 			StartedAt:     now,
 		})
 
-		assert.Equal(t, 1, job.results.Completed)
-		assert.Equal(t, 1, job.results.Failed)
-		assert.Equal(t, 3, job.results.TotalFiles)
+		assert.Equal(t, 1, job.prog().Completed)
+		assert.Equal(t, 1, job.prog().Failed)
+		assert.Equal(t, 3, job.prog().TotalFiles)
 	})
 
 	t.Run("concurrent access without race", func(t *testing.T) {
@@ -1319,9 +1296,9 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 				_ = job.GetOperationModeOverride()
 				_ = job.GetDestination()
 				_ = job.results.GetFiles()
-				_ = job.results.Completed
-				_ = job.results.Failed
-				_ = job.results.TotalFiles
+				_ = job.prog().Completed
+				_ = job.prog().Failed
+				_ = job.prog().TotalFiles
 			}
 		}()
 
@@ -1329,9 +1306,9 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 			_ = job.GetOperationModeOverride()
 			_ = job.GetDestination()
 			_ = job.results.GetFiles()
-			_ = job.results.Completed
-			_ = job.results.Failed
-			_ = job.results.TotalFiles
+			_ = job.prog().Completed
+			_ = job.prog().Failed
+			_ = job.prog().TotalFiles
 		}
 
 		<-done
@@ -1342,7 +1319,7 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 		info := models.FileMatchInfo{MovieID: "ABC-123", IsMultiPart: true, PartNumber: 1}
-		job.results.FileMatchInfo["file1.mp4"] = info
+		job.results.SetFileMatchInfo("file1.mp4", info)
 
 		retrieved, ok := job.results.GetFileMatchInfo("file1.mp4")
 		assert.True(t, ok)
@@ -1361,7 +1338,7 @@ func TestBatchJob_GetStatusSlim(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mkv"})
 
 		now := time.Now()
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-123"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-123", Title: "Test Movie"},
@@ -1383,7 +1360,7 @@ func TestBatchJob_GetStatusSlim(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 		now := time.Now()
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-123"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-123", Title: "Test Movie"},
@@ -1403,7 +1380,7 @@ func TestBatchJob_GetStatusSlim(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 		now := time.Now()
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-123"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-123", Title: "Test Movie"},
@@ -1426,7 +1403,7 @@ func TestBatchJob_GetStatusSlim(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 		warning := "Translation failed: rate limited"
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     time.Now(),
@@ -1454,7 +1431,7 @@ func TestBatchJob_GetStatusSlim(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 		warning := "Translation failed: empty result"
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 			Status:        models.JobStatusCompleted,
 			StartedAt:     time.Now(),
@@ -1527,7 +1504,7 @@ func TestGetStatusSlim_NilResultEntry(t *testing.T) {
 	t.Skip("GetStatusSlim removed")
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.Results["file1.mp4"] = nil
+	job.results.ReplaceResultRaw("file1.mp4", nil)
 
 	slim := job.GetStatus()
 	assert.NotNil(t, slim)
@@ -1539,11 +1516,11 @@ func TestGetStatusSlim_ProvenanceData(t *testing.T) {
 	t.Skip("GetStatusSlim removed")
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.Results["file1.mp4"] = &MovieResult{
+	job.results.ReplaceResultRaw("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 		Status:        models.JobStatusCompleted,
-	}
-	job.results.SetProvenance("file1.mp4", &ProvenanceData{
+	})
+	job.results.SetProvenance("file1.mp4", &resultstore.ProvenanceData{
 		FieldSources: map[string]string{
 			"title": "r18dev",
 		},
@@ -1581,7 +1558,7 @@ func TestAtomicUpdateFileResult_NotFound(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
-	err := job.results.AtomicUpdateFileResult("nonexistent.mp4", func(fr *MovieResult) (*MovieResult, error) {
+	err := job.results.AtomicUpdateFileResult("nonexistent.mp4", func(fr *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		return fr, nil
 	})
 	assert.Error(t, err)
@@ -1591,9 +1568,9 @@ func TestAtomicUpdateFileResult_NotFound(t *testing.T) {
 func TestAtomicUpdateFileResult_NilResult(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.Results["file1.mp4"] = nil
+	job.results.ReplaceResultRaw("file1.mp4", nil)
 
-	err := job.results.AtomicUpdateFileResult("file1.mp4", func(fr *MovieResult) (*MovieResult, error) {
+	err := job.results.AtomicUpdateFileResult("file1.mp4", func(fr *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		return fr, nil
 	})
 	assert.Error(t, err)
@@ -1602,12 +1579,12 @@ func TestAtomicUpdateFileResult_NilResult(t *testing.T) {
 func TestAtomicUpdateFileResult_UpdateFnError(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.Results["file1.mp4"] = &MovieResult{
+	job.results.ReplaceResultRaw("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 		Status:        models.JobStatusPending,
-	}
+	})
 
-	err := job.results.AtomicUpdateFileResult("file1.mp4", func(fr *MovieResult) (*MovieResult, error) {
+	err := job.results.AtomicUpdateFileResult("file1.mp4", func(fr *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		return nil, fmt.Errorf("update rejected")
 	})
 	assert.Error(t, err)
@@ -1617,16 +1594,16 @@ func TestAtomicUpdateFileResult_UpdateFnError(t *testing.T) {
 func TestAtomicUpdateFileResult_StatusTransition(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.Results["file1.mp4"] = &MovieResult{
+	job.results.ReplaceResultRaw("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 		Status:        models.JobStatusPending,
-	}
+	})
 
-	err := job.results.AtomicUpdateFileResult("file1.mp4", func(fr *MovieResult) (*MovieResult, error) {
+	err := job.results.AtomicUpdateFileResult("file1.mp4", func(fr *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		fr.Status = models.JobStatusCompleted
 		return fr, nil
 	})
 	require.NoError(t, err)
-	assert.Equal(t, 1, job.results.Completed)
-	assert.Equal(t, 0, job.results.Failed)
+	assert.Equal(t, 1, job.prog().Completed)
+	assert.Equal(t, 0, job.prog().Failed)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -482,7 +483,7 @@ func TestBatchJob_GetProvenance(t *testing.T) {
 
 	t.Run("returns cloned provenance", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		prov := &ProvenanceData{
+		prov := &resultstore.ProvenanceData{
 			FieldSources:   map[string]string{"title": "r18dev"},
 			ActressSources: map[string]string{"actress_0": "dmm"},
 		}
@@ -531,7 +532,7 @@ func TestBatchJob_SetJobStatus(t *testing.T) {
 
 func TestBatchJob_GetResultsMap(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 	})
@@ -544,7 +545,7 @@ func TestBatchJob_GetResultsMap(t *testing.T) {
 func TestBatchJob_SetFileMatchInfo(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
 	info := models.FileMatchInfo{MovieID: "ABC-123", IsMultiPart: true, PartNumber: 1}
-	job.results.setFileMatchInfo(map[string]models.FileMatchInfo{"file1.mp4": info})
+	job.results.SetFileMatchInfoMap(map[string]models.FileMatchInfo{"file1.mp4": info})
 
 	retrieved, ok := job.results.GetFileMatchInfo("file1.mp4")
 	assert.True(t, ok)
@@ -563,15 +564,15 @@ func TestBatchJob_SetDeleted(t *testing.T) {
 
 func TestBatchJob_SetFileResultRevision(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 		Status:        models.JobStatusCompleted,
 	})
 
-	assert.Equal(t, uint64(1), job.results.Results["file1.mp4"].Revision)
+	assert.Equal(t, uint64(1), job.snap().Results["file1.mp4"].Revision)
 	err := job.results.SetFileResultRevision("file1.mp4", 42)
 	assert.NoError(t, err)
-	assert.Equal(t, uint64(42), job.results.Results["file1.mp4"].Revision)
+	assert.Equal(t, uint64(42), job.snap().Results["file1.mp4"].Revision)
 }
 
 func TestBatchJob_SetFileResultRevision_ReturnsErrorOnMissing(t *testing.T) {
@@ -599,7 +600,7 @@ func TestBatchJob_TemplateEngine(t *testing.T) {
 
 func TestBatchJob_GetResults(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 	})
@@ -683,7 +684,7 @@ func TestBatchJob_CloseEventBroadcaster(t *testing.T) {
 func TestBatchJob_UpdateMovie(t *testing.T) {
 	t.Run("updates movie for existing result", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "OLD-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "OLD-001", Title: "Old Title"},
@@ -702,32 +703,32 @@ func TestBatchJob_UpdateMovie(t *testing.T) {
 func TestBatchJob_FindMovieResultForMovieID(t *testing.T) {
 	t.Run("returns movie result for existing movieID", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Title: "Test Movie"},
 		})
 
-		result, err := job.resultIndex.FindMovieResultForMovieID("ABC-001")
+		result, err := job.results.FindMovieResultForMovieID("ABC-001")
 		require.NoError(t, err)
 		assert.Equal(t, "ABC-001", result.Movie.ID)
 	})
 
 	t.Run("returns error for nonexistent movieID", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		_, err := job.resultIndex.FindMovieResultForMovieID("NONEXISTENT-001")
+		_, err := job.results.FindMovieResultForMovieID("NONEXISTENT-001")
 		assert.Error(t, err)
 	})
 
 	t.Run("case-insensitive lookup", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001"},
 		})
 
-		result, err := job.resultIndex.FindMovieResultForMovieID("abc-001")
+		result, err := job.results.FindMovieResultForMovieID("abc-001")
 		require.NoError(t, err)
 		assert.Equal(t, "ABC-001", result.Movie.ID)
 	})
@@ -736,24 +737,24 @@ func TestBatchJob_FindMovieResultForMovieID(t *testing.T) {
 func TestBatchJob_GetMovieResultsForMovieID(t *testing.T) {
 	t.Run("returns results for multipart movie", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4", "file2.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001"},
 		})
-		job.SetResultDirect("file2.mp4", &MovieResult{
+		job.SetResultDirect("file2.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001"},
 		})
 
-		results := job.resultIndex.GetMovieResultsForMovieID("ABC-001")
+		results := job.results.GetMovieResultsForMovieID("ABC-001")
 		assert.Len(t, results, 2)
 	})
 
 	t.Run("returns empty for nonexistent movieID", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		results := job.resultIndex.GetMovieResultsForMovieID("NONEXISTENT-001")
+		results := job.results.GetMovieResultsForMovieID("NONEXISTENT-001")
 		assert.Empty(t, results)
 	})
 }
@@ -761,19 +762,19 @@ func TestBatchJob_GetMovieResultsForMovieID(t *testing.T) {
 func TestBatchJob_GetFileMatchInfosForMovieID(t *testing.T) {
 	t.Run("returns infos for existing movieID", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001", IsMultiPart: true},
 			Status:        models.JobStatusCompleted,
 		})
 
-		infos := job.resultIndex.GetFileMatchInfosForMovieID("ABC-001")
+		infos := job.results.GetFileMatchInfosForMovieID("ABC-001")
 		assert.Len(t, infos, 1)
 		assert.True(t, infos[0].IsMultiPart)
 	})
 
 	t.Run("returns empty for nonexistent movieID", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		infos := job.resultIndex.GetFileMatchInfosForMovieID("NONEXISTENT-001")
+		infos := job.results.GetFileMatchInfosForMovieID("NONEXISTENT-001")
 		assert.Empty(t, infos)
 	})
 }
@@ -783,14 +784,14 @@ func TestBatchJob_GetFileMatchInfosForMovieID(t *testing.T) {
 func TestResultTracker_FindFileForMovieID(t *testing.T) {
 	t.Run("finds file by movie ID", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Revision:      3,
 			Movie:         &models.Movie{ID: "ABC-001"},
 		})
 
-		result, err := job.resultIndex.FindFileForMovieID("ABC-001")
+		result, err := job.results.FindFileForMovieID("ABC-001")
 		require.NoError(t, err)
 		assert.Equal(t, "file1.mp4", result.FilePath)
 		assert.Equal(t, uint64(3), result.CapturedRevision)
@@ -799,7 +800,7 @@ func TestResultTracker_FindFileForMovieID(t *testing.T) {
 
 	t.Run("returns error for missing movie ID", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		_, err := job.resultIndex.FindFileForMovieID("NONEXISTENT-001")
+		_, err := job.results.FindFileForMovieID("NONEXISTENT-001")
 		assert.Error(t, err)
 	})
 }
@@ -913,7 +914,7 @@ func TestResultTracker_UpdateMovie(t *testing.T) {
 	t.Run("updates movie and movieID", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "OLD-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "OLD-001"},
@@ -923,7 +924,7 @@ func TestResultTracker_UpdateMovie(t *testing.T) {
 		err := job.results.UpdateMovie("file1.mp4", newMovie)
 		require.NoError(t, err)
 
-		result := job.results.Results["file1.mp4"]
+		result := job.snap().Results["file1.mp4"]
 		assert.Equal(t, "NEW-001", result.Movie.ID)
 		assert.Equal(t, "NEW-001", result.FileMatchInfo.MovieID)
 	})
@@ -933,135 +934,64 @@ func TestResultTracker_GetResults(t *testing.T) {
 	t.Run("returns value copies not pointers", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 		})
 
 		results := job.results.GetResults()
 		assert.Len(t, results, 1)
-		// GetResults returns []MovieResult (value), not []*MovieResult
+		// GetResults returns []resultstore.MovieResult (value), not []*resultstore.MovieResult
 		assert.Equal(t, "ABC-001", results[0].FileMatchInfo.MovieID)
 	})
 
-	t.Run("skips nil results", func(t *testing.T) {
-		rt := newResultTrackerFromState(&resultTrackerState{
-			Results: map[string]*MovieResult{
-				"file1.mp4": {Status: models.JobStatusCompleted},
-				"file2.mp4": nil,
-			},
-		})
-		results := rt.GetResults()
-		assert.Len(t, results, 1)
-	})
+	// "skips nil results" subtest moved to resultstore package (uses internal state).
 }
 
-func TestResultTracker_setFileMatchInfo(t *testing.T) {
-	t.Run("merges file match info", func(t *testing.T) {
-		rt := newResultTrackerFromState(&resultTrackerState{
-			FileMatchInfo: map[string]models.FileMatchInfo{
-				"file1.mp4": {MovieID: "OLD-001"},
-			},
-		})
-
-		rt.setFileMatchInfo(map[string]models.FileMatchInfo{
-			"file2.mp4": {MovieID: "NEW-002"},
-			"file1.mp4": {MovieID: "UPDATED-001"},
-		})
-
-		assert.Equal(t, "UPDATED-001", rt.FileMatchInfo["file1.mp4"].MovieID)
-		assert.Equal(t, "NEW-002", rt.FileMatchInfo["file2.mp4"].MovieID)
-	})
-}
-
-func TestResultTracker_recalculateProgress(t *testing.T) {
-	t.Run("counts completed and failed from results", func(t *testing.T) {
-		rt := newResultTrackerFromState(&resultTrackerState{
-			TotalFiles: 3,
-			Results: map[string]*MovieResult{
-				"f1": {Status: models.JobStatusCompleted},
-				"f2": {Status: models.JobStatusFailed},
-				"f3": {Status: models.JobStatusRunning},
-			},
-		})
-		rt.recalculateProgress()
-		assert.Equal(t, 1, rt.Completed)
-		assert.Equal(t, 1, rt.Failed)
-		assert.InDelta(t, 66.67, rt.Progress, 0.1) // (1+1)/3 * 100
-	})
-
-	t.Run("sets 100% when TotalFiles is 0", func(t *testing.T) {
-		rt := newResultTrackerFromState(&resultTrackerState{TotalFiles: 0})
-		rt.recalculateProgress()
-		assert.Equal(t, 100.0, rt.Progress)
-	})
-}
-
-func TestResultTracker_recalculateProgress_SkipsExcluded(t *testing.T) {
-	// BUG-1 regression: stateRecalculateProgress must skip excluded files.
-	// Without the fix, recalculate would re-count excluded results by Status,
-	// causing Completed/Failed counters to be over-counted.
-	t.Run("skips excluded files when recounting", func(t *testing.T) {
-		rt := newResultTrackerFromState(&resultTrackerState{
-			TotalFiles: 5,
-			Excluded:   map[string]bool{"f2": true, "f5": true},
-			Results: map[string]*MovieResult{
-				"f1": {Status: models.JobStatusCompleted},
-				"f2": {Status: models.JobStatusCompleted}, // excluded
-				"f3": {Status: models.JobStatusFailed},
-				"f4": {Status: models.JobStatusCompleted},
-				"f5": {Status: models.JobStatusFailed}, // excluded
-			},
-		})
-		rt.recalculateProgress()
-		assert.Equal(t, 2, rt.Completed, "Completed should exclude excluded files")
-		assert.Equal(t, 1, rt.Failed, "Failed should exclude excluded files")
-		// Excluded files are removed from the denominator too: 3 active files
-		// (f1,f3,f4) all resolved → (2 completed + 1 failed) / 3 active * 100 = 100%.
-		// Using TotalFiles (5) here would falsely report 60% with everything done.
-		assert.InDelta(t, 100.0, rt.Progress, 0.1)
-	})
-}
+// TestResultTracker_setFileMatchInfo, TestResultTracker_recalculateProgress,
+// TestResultTracker_recalculateProgress_SkipsExcluded, and TestResultTracker_cloneResults
+// moved to the resultstore package (they construct resultTrackerState directly
+// and assert on internal state fields).
 
 func TestResultTracker_MarkExcluded(t *testing.T) {
 	t.Run("decrements counters when excluding completed result", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			Status: models.JobStatusCompleted,
 		})
-		assert.Equal(t, 1, job.results.Completed)
+		assert.Equal(t, 1, job.prog().Completed)
 
 		job.results.MarkExcluded("file1.mp4")
-		assert.Equal(t, 0, job.results.Completed, "Completed should be decremented when excluding a completed result")
-		assert.True(t, job.results.Excluded["file1.mp4"])
+		assert.Equal(t, 0, job.prog().Completed, "Completed should be decremented when excluding a completed result")
+		assert.True(t, job.snap().Excluded["file1.mp4"])
 	})
 
 	t.Run("decrements counters when excluding failed result", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			Status: models.JobStatusFailed,
 		})
-		assert.Equal(t, 1, job.results.Failed)
+		assert.Equal(t, 1, job.prog().Failed)
 
 		job.results.MarkExcluded("file1.mp4")
-		assert.Equal(t, 0, job.results.Failed, "Failed should be decremented when excluding a failed result")
+		assert.Equal(t, 0, job.prog().Failed, "Failed should be decremented when excluding a failed result")
 	})
 
 	t.Run("sets Running status to Cancelled when excluding (BUG-1)", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			Status: models.JobStatusRunning,
 		})
-		assert.Equal(t, 0, job.results.Completed)
-		assert.Equal(t, 0, job.results.Failed)
+		assert.Equal(t, 0, job.prog().Completed)
+		assert.Equal(t, 0, job.prog().Failed)
 
 		job.results.MarkExcluded("file1.mp4")
-		assert.True(t, job.results.Excluded["file1.mp4"])
+		assert.True(t, job.snap().Excluded["file1.mp4"])
 		// After exclusion, the result status must be Cancelled, not still Running
-		assert.Equal(t, models.JobStatusCancelled, job.results.Results["file1.mp4"].Status,
+		assert.Equal(t, models.JobStatusCancelled, job.snap().Results["file1.mp4"].Status,
 			"BUG-1: excluded Running file must have status set to Cancelled, not left as Running")
 
 		// Verify snapshot also reports Cancelled, not Running
@@ -1073,27 +1003,18 @@ func TestResultTracker_MarkExcluded(t *testing.T) {
 	t.Run("does not double-decrement on second exclude", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			Status: models.JobStatusCompleted,
 		})
 
 		job.results.MarkExcluded("file1.mp4")
 		job.results.MarkExcluded("file1.mp4") // second call
-		assert.Equal(t, 0, job.results.Completed, "should not double-decrement")
+		assert.Equal(t, 0, job.prog().Completed, "should not double-decrement")
 	})
 }
 
 func TestResultTracker_cloneResults(t *testing.T) {
-	t.Run("returns deep-copied results map", func(t *testing.T) {
-		rt := newResultTrackerFromState(&resultTrackerState{
-			Results: map[string]*MovieResult{
-				"f1": {Status: models.JobStatusCompleted, FileMatchInfo: models.FileMatchInfo{MovieID: "ABC-001"}},
-			},
-		})
-		cloned := rt.SnapshotData().Results
-		assert.Len(t, cloned, 1)
-		assert.NotSame(t, rt.Results["f1"], cloned["f1"])
-	})
+	// Moved to resultstore package (constructs resultTrackerState directly).
 }
 
 // ---------------------------------------------------------------------------
@@ -1103,41 +1024,41 @@ func TestResultTracker_cloneResults(t *testing.T) {
 func TestBatchJob_GetRevision(t *testing.T) {
 	t.Run("returns revision for existing result", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			Status: models.JobStatusCompleted,
 		})
-		assert.Equal(t, uint64(1), job.resultIndex.GetRevision("file1.mp4"))
+		assert.Equal(t, uint64(1), job.results.GetRevision("file1.mp4"))
 	})
 
 	t.Run("returns 0 for nonexistent result", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		assert.Equal(t, uint64(0), job.resultIndex.GetRevision("nonexistent.mp4"))
+		assert.Equal(t, uint64(0), job.results.GetRevision("nonexistent.mp4"))
 	})
 }
 
 func TestBatchJob_GetCurrentMovieID(t *testing.T) {
 	t.Run("returns Movie.ID when available", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "FMI-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "MOVIE-001"},
 		})
-		assert.Equal(t, "MOVIE-001", job.resultIndex.GetCurrentMovieID("file1.mp4"))
+		assert.Equal(t, "MOVIE-001", job.results.GetCurrentMovieID("file1.mp4"))
 	})
 
 	t.Run("falls back to FileMatchInfo.MovieID when Movie is nil", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "FMI-001"},
 			Status:        models.JobStatusCompleted,
 		})
-		assert.Equal(t, "FMI-001", job.resultIndex.GetCurrentMovieID("file1.mp4"))
+		assert.Equal(t, "FMI-001", job.results.GetCurrentMovieID("file1.mp4"))
 	})
 
 	t.Run("returns empty string for nonexistent result", func(t *testing.T) {
 		job := newBatchJob([]string{"file1.mp4"})
-		assert.Equal(t, "", job.resultIndex.GetCurrentMovieID("nonexistent.mp4"))
+		assert.Equal(t, "", job.results.GetCurrentMovieID("nonexistent.mp4"))
 	})
 }
 
@@ -1216,7 +1137,7 @@ func TestJobStore_SnapshotForPersist_DeletedJob(t *testing.T) {
 func TestJobStore_SnapshotForPersist_Success(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 	})
@@ -1251,14 +1172,14 @@ func TestJobStore_ReconstructBatchJob_EnvelopeFormat(t *testing.T) {
 		jq := &JobStore{jobs: make(map[models.JobID]*BatchJob)}
 
 		envelope := JobResultsEnvelope{
-			Domain: map[string]*MovieResult{
+			Domain: map[string]*resultstore.MovieResult{
 				"/path/file1.mp4": {
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/file1.mp4", MovieID: "ABC-001"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABC-001"},
 				},
 			},
-			Provenance: map[string]*ProvenanceData{
+			Provenance: map[string]*resultstore.ProvenanceData{
 				"/path/file1.mp4": {FieldSources: map[string]string{"title": "r18dev"}},
 			},
 		}
@@ -1272,11 +1193,11 @@ func TestJobStore_ReconstructBatchJob_EnvelopeFormat(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		require.NotNil(t, result)
-		assert.Contains(t, result.results.Results, "/path/file1.mp4")
-		assert.Equal(t, "ABC-001", result.results.Results["/path/file1.mp4"].FileMatchInfo.MovieID)
+		assert.Contains(t, result.snap().Results, "/path/file1.mp4")
+		assert.Equal(t, "ABC-001", result.snap().Results["/path/file1.mp4"].FileMatchInfo.MovieID)
 
 		// Provenance should be loaded
-		assert.NotNil(t, result.results.Provenance["/path/file1.mp4"])
+		assert.NotNil(t, result.snap().Provenance["/path/file1.mp4"])
 	})
 }
 
@@ -1292,7 +1213,7 @@ func TestJobStore_ReconstructBatchJob_InvalidExcludedJSON(t *testing.T) {
 	result := jq.reconstructBatchJob(dbJob)
 	assert.NotNil(t, result)
 	// Should not panic, excluded should be empty map
-	assert.Empty(t, result.results.Excluded)
+	assert.Empty(t, result.snap().Excluded)
 }
 
 func TestJobStore_ReconstructBatchJob_InvalidFileMatchInfoJSON(t *testing.T) {
@@ -1306,7 +1227,7 @@ func TestJobStore_ReconstructBatchJob_InvalidFileMatchInfoJSON(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	assert.NotNil(t, result)
-	assert.Empty(t, result.results.FileMatchInfo)
+	assert.Empty(t, result.snap().FileMatchInfo)
 }
 
 func TestJobStore_PersistJobByID_NotFound(t *testing.T) {
@@ -1387,18 +1308,18 @@ func TestUpdateFileResult_SkipsExcluded(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4", "file3.mp4"})
 
 		// file1 completes normally
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{Status: models.JobStatusCompleted})
-		assert.Equal(t, 1, job.results.Completed)
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{Status: models.JobStatusCompleted})
+		assert.Equal(t, 1, job.prog().Completed)
 
 		// file2 is Running, then gets excluded
-		job.results.UpdateFileResult("file2.mp4", &MovieResult{Status: models.JobStatusRunning})
+		job.results.UpdateFileResult("file2.mp4", &resultstore.MovieResult{Status: models.JobStatusRunning})
 		job.results.MarkExcluded("file2.mp4")
-		assert.Equal(t, 1, job.results.Completed, "MarkExcluded should not change Completed (Running is not counted)")
-		assert.True(t, job.results.Excluded["file2.mp4"])
+		assert.Equal(t, 1, job.prog().Completed, "MarkExcluded should not change Completed (Running is not counted)")
+		assert.True(t, job.snap().Excluded["file2.mp4"])
 
 		// BUG-4 scenario: scrape goroutine completes file2 after exclusion
-		job.results.UpdateFileResult("file2.mp4", &MovieResult{Status: models.JobStatusCompleted})
-		assert.Equal(t, 1, job.results.Completed, "UpdateFileResult must NOT increment Completed for excluded file")
+		job.results.UpdateFileResult("file2.mp4", &resultstore.MovieResult{Status: models.JobStatusCompleted})
+		assert.Equal(t, 1, job.prog().Completed, "UpdateFileResult must NOT increment Completed for excluded file")
 	})
 
 	t.Run("UpdateFileResult does not increment Failed for excluded file", func(t *testing.T) {
@@ -1406,12 +1327,12 @@ func TestUpdateFileResult_SkipsExcluded(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
 
 		// file2 is Running, then gets excluded
-		job.results.UpdateFileResult("file2.mp4", &MovieResult{Status: models.JobStatusRunning})
+		job.results.UpdateFileResult("file2.mp4", &resultstore.MovieResult{Status: models.JobStatusRunning})
 		job.results.MarkExcluded("file2.mp4")
 
 		// scrape goroutine reports failure after exclusion
-		job.results.UpdateFileResult("file2.mp4", &MovieResult{Status: models.JobStatusFailed})
-		assert.Equal(t, 0, job.results.Failed, "UpdateFileResult must NOT increment Failed for excluded file")
+		job.results.UpdateFileResult("file2.mp4", &resultstore.MovieResult{Status: models.JobStatusFailed})
+		assert.Equal(t, 0, job.prog().Failed, "UpdateFileResult must NOT increment Failed for excluded file")
 	})
 
 	t.Run("AtomicUpdateFileResult does not change counters for excluded file", func(t *testing.T) {
@@ -1419,23 +1340,23 @@ func TestUpdateFileResult_SkipsExcluded(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
 
 		// file1 completes normally
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{Status: models.JobStatusCompleted})
-		assert.Equal(t, 1, job.results.Completed)
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{Status: models.JobStatusCompleted})
+		assert.Equal(t, 1, job.prog().Completed)
 
 		// file2 completes then gets excluded (counter goes back down)
-		job.results.UpdateFileResult("file2.mp4", &MovieResult{Status: models.JobStatusCompleted})
-		assert.Equal(t, 2, job.results.Completed)
+		job.results.UpdateFileResult("file2.mp4", &resultstore.MovieResult{Status: models.JobStatusCompleted})
+		assert.Equal(t, 2, job.prog().Completed)
 		job.results.MarkExcluded("file2.mp4")
-		assert.Equal(t, 1, job.results.Completed)
+		assert.Equal(t, 1, job.prog().Completed)
 
 		// AtomicUpdateFileResult on excluded file must not change counters
-		err := job.results.AtomicUpdateFileResult("file2.mp4", func(r *MovieResult) (*MovieResult, error) {
+		err := job.results.AtomicUpdateFileResult("file2.mp4", func(r *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			r.Status = models.JobStatusFailed
 			return r, nil
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, 1, job.results.Completed, "AtomicUpdateFileResult must NOT change Completed for excluded file")
-		assert.Equal(t, 0, job.results.Failed, "AtomicUpdateFileResult must NOT increment Failed for excluded file")
+		assert.Equal(t, 1, job.prog().Completed, "AtomicUpdateFileResult must NOT change Completed for excluded file")
+		assert.Equal(t, 0, job.prog().Failed, "AtomicUpdateFileResult must NOT increment Failed for excluded file")
 	})
 }
 
@@ -1453,7 +1374,7 @@ func TestResultTracker_ConcurrentMarkExcluded(t *testing.T) {
 
 	// Set all results as completed
 	for _, f := range files {
-		job.results.UpdateFileResult(f, &MovieResult{
+		job.results.UpdateFileResult(f, &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: f},
 			Status:        models.JobStatusCompleted,
 		})
@@ -1472,7 +1393,7 @@ func TestResultTracker_ConcurrentMarkExcluded(t *testing.T) {
 
 	// All files should be excluded
 	for _, f := range files {
-		assert.True(t, job.results.Excluded[f], "file %s should be excluded", f)
+		assert.True(t, job.snap().Excluded[f], "file %s should be excluded", f)
 	}
 }
 
@@ -1500,31 +1421,31 @@ func TestMarkExcluded_RecalculateProgress_NoInconsistency(t *testing.T) {
 	job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4", "file3.mp4"})
 
 	// All 3 files complete → Completed=3, Progress=100%
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{Status: models.JobStatusCompleted})
-	job.results.UpdateFileResult("file2.mp4", &MovieResult{Status: models.JobStatusCompleted})
-	job.results.UpdateFileResult("file3.mp4", &MovieResult{Status: models.JobStatusCompleted})
-	assert.Equal(t, 3, job.results.Completed)
-	assert.InDelta(t, 100.0, job.results.Progress, 0.01)
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{Status: models.JobStatusCompleted})
+	job.results.UpdateFileResult("file2.mp4", &resultstore.MovieResult{Status: models.JobStatusCompleted})
+	job.results.UpdateFileResult("file3.mp4", &resultstore.MovieResult{Status: models.JobStatusCompleted})
+	assert.Equal(t, 3, job.prog().Completed)
+	assert.InDelta(t, 100.0, job.prog().Progress, 0.01)
 
 	// Exclude file2 → Completed=2, Progress=66.7%
 	job.results.MarkExcluded("file2.mp4")
-	assert.Equal(t, 2, job.results.Completed, "MarkExcluded should decrement Completed")
-	assert.True(t, job.results.Excluded["file2.mp4"])
+	assert.Equal(t, 2, job.prog().Completed, "MarkExcluded should decrement Completed")
+	assert.True(t, job.snap().Excluded["file2.mp4"])
 
 	// Recalculate progress (simulates CommitResult or recalculateProgress call)
-	job.results.recalculateProgress()
-	assert.Equal(t, 2, job.results.Completed, "stateRecalculateProgress must NOT re-count excluded files")
-	assert.Equal(t, 0, job.results.Failed, "stateRecalculateProgress must NOT count excluded files as failed")
+	job.results.RecalculateProgress()
+	assert.Equal(t, 2, job.prog().Completed, "stateRecalculateProgress must NOT re-count excluded files")
+	assert.Equal(t, 0, job.prog().Failed, "stateRecalculateProgress must NOT count excluded files as failed")
 	// Excluded files drop out of the denominator: 2 active files, both completed → 100%.
 	expectedProgress := float64(2+0) / float64(3-1) * 100
-	assert.InDelta(t, expectedProgress, job.results.Progress, 0.01, "Progress must reflect only non-excluded results")
+	assert.InDelta(t, expectedProgress, job.prog().Progress, 0.01, "Progress must reflect only non-excluded results")
 
 	// CommitResult on another file triggers stateRecalculateProgress internally
-	err := job.results.CommitResult("file3.mp4", &MovieResult{
+	err := job.results.CommitResult("file3.mp4", &resultstore.MovieResult{
 		Status:   models.JobStatusFailed,
 		Revision: 2,
 	}, 1)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, job.results.Completed, "after CommitResult changing file3 to failed, Completed should be 1 (file1 only)")
-	assert.Equal(t, 1, job.results.Failed, "Failed should be 1 (file3), not counting excluded file2")
+	assert.Equal(t, 1, job.prog().Completed, "after CommitResult changing file3 to failed, Completed should be 1 (file1 only)")
+	assert.Equal(t, 1, job.prog().Failed, "Failed should be 1 (file3), not counting excluded file2")
 }

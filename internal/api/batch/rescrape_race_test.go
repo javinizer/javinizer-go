@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,7 +46,7 @@ func TestRescrapeBatchMovie_MultiPartPosterCleanup_DataNilSibling(t *testing.T) 
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-001-A.mp4", "/tmp/IPX-001-B.mp4"})
 
 	// First file has valid Data
-	setJobResult(job, "/tmp/IPX-001-A.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/IPX-001-A.mp4", &resultstore.MovieResult{
 		ResultID:      "IPX-001-A",
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-001-A.mp4", MovieID: "IPX-001"},
 		Status:        models.JobStatusCompleted,
@@ -54,7 +55,7 @@ func TestRescrapeBatchMovie_MultiPartPosterCleanup_DataNilSibling(t *testing.T) 
 
 	// Second file has nil Data (simulating incomplete scrape or error state)
 	// but still has valid MovieID field
-	setJobResult(job, "/tmp/IPX-001-B.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/IPX-001-B.mp4", &resultstore.MovieResult{
 		ResultID:      "IPX-001-B",
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-001-B.mp4", MovieID: "IPX-001"},
 		Status:        models.JobStatusCompleted,
@@ -84,8 +85,8 @@ func TestRescrapeBatchMovie_MultiPartPosterCleanup_DataNilSibling(t *testing.T) 
 	require.Len(t, status.Results, 2, "Both files should still exist")
 
 	// Find the file that was rescraped (now has IPX-002)
-	var rescrapedFile *worker.MovieResult
-	var siblingFile *worker.MovieResult
+	var rescrapedFile *resultstore.MovieResult
+	var siblingFile *resultstore.MovieResult
 	for _, result := range status.Results {
 		if result.FileMatchInfo.MovieID == "IPX-002" {
 			rescrapedFile = result
@@ -122,7 +123,7 @@ func TestRescrapeBatchMovie_JobLifecycleRace(t *testing.T) {
 
 	t.Run("rejects rescrape when job is running", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-101.mp4"})
-		setJobResult(job, "/tmp/IPX-101.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-101.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-101.mp4", MovieID: "IPX-101"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-101"},
@@ -148,7 +149,7 @@ func TestRescrapeBatchMovie_JobLifecycleRace(t *testing.T) {
 
 	t.Run("rejects rescrape when job is organized", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-102.mp4"})
-		setJobResult(job, "/tmp/IPX-102.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-102.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-102.mp4", MovieID: "IPX-102"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-102"},
@@ -174,7 +175,7 @@ func TestRescrapeBatchMovie_JobLifecycleRace(t *testing.T) {
 
 	t.Run("allows rescrape when job is completed", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-103.mp4"})
-		setJobResult(job, "/tmp/IPX-103.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-103.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-103.mp4", MovieID: "IPX-103"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-103", Title: "Old Title"},
@@ -199,7 +200,7 @@ func TestRescrapeBatchMovie_JobLifecycleRace(t *testing.T) {
 
 	t.Run("rejects rescrape when job is failed", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-104.mp4"})
-		setJobResult(job, "/tmp/IPX-104.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-104.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-104.mp4", MovieID: "IPX-104"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-104"},
@@ -225,7 +226,7 @@ func TestRescrapeBatchMovie_JobLifecycleRace(t *testing.T) {
 
 	t.Run("rejects rescrape when job is cancelled", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-105.mp4"})
-		setJobResult(job, "/tmp/IPX-105.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-105.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-105.mp4", MovieID: "IPX-105"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-105"},
@@ -251,7 +252,7 @@ func TestRescrapeBatchMovie_JobLifecycleRace(t *testing.T) {
 
 	t.Run("returns 410 Gone for deleted job even if cancelled", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-106.mp4"})
-		setJobResult(job, "/tmp/IPX-106.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-106.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-106.mp4", MovieID: "IPX-106"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-106"},
@@ -281,7 +282,7 @@ func TestRescrapeBatchMovie_JobLifecycleRace(t *testing.T) {
 
 	t.Run("returns 410 Gone for deleted job even if organized", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-107.mp4"})
-		setJobResult(job, "/tmp/IPX-107.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-107.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-107.mp4", MovieID: "IPX-107"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-107"},
@@ -327,7 +328,7 @@ func TestRescrapeBatchMovie_CASRevisionConflict(t *testing.T) {
 
 	// Create job with a file
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-200-A.mp4"})
-	setJobResult(job, "/tmp/IPX-200-A.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/IPX-200-A.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-200-A.mp4", MovieID: "IPX-200"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-200"},
@@ -375,7 +376,7 @@ func TestRescrapeBatchMovie_ConcurrentRescrapeDetected(t *testing.T) {
 
 	// Create job
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-300.mp4"})
-	setJobResult(job, "/tmp/IPX-300.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/IPX-300.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-300.mp4", MovieID: "IPX-300"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-300"},
@@ -459,7 +460,7 @@ func TestRescrapeBatchMovie_ConcurrentJobStateMutation(t *testing.T) {
 
 	// Create job with single file
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-300.mp4"})
-	setJobResult(job, "/tmp/IPX-300.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/IPX-300.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-300.mp4", MovieID: "IPX-300"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-300", Title: "Original"},
@@ -524,7 +525,7 @@ func TestRescrapeBatchMovie_IDNormalization_CaseInsensitiveFS(t *testing.T) {
 	deps.CoreDeps.GetRegistry().RegisterInstance(&noPosterStubScraper{})
 
 	job := createJobWithWF(deps, cfg, []string{"/tmp/ipx-400.mp4"})
-	setJobResult(job, "/tmp/ipx-400.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/ipx-400.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ipx-400.mp4", MovieID: "ipx-400"}, // lowercase
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ipx-400", Title: "Original"},
@@ -574,7 +575,7 @@ func TestRescrapeBatchMovie_ScraperCompatibility_Validation(t *testing.T) {
 	deps.CoreDeps.GetRegistry().RegisterInstance(&noPosterStubScraper{})
 
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-500.mp4"})
-	setJobResult(job, "/tmp/IPX-500.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/IPX-500.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-500.mp4", MovieID: "IPX-500"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-500"},
@@ -616,7 +617,7 @@ func TestRescrapeBatchMovie_MalformedInput_Handling(t *testing.T) {
 
 	t.Run("sanitizes zero-width spaces", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-600.mp4"})
-		setJobResult(job, "/tmp/IPX-600.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-600.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-600.mp4", MovieID: "IPX-600"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-600"},
@@ -640,7 +641,7 @@ func TestRescrapeBatchMovie_MalformedInput_Handling(t *testing.T) {
 
 	t.Run("rejects empty input after trimming", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-601.mp4"})
-		setJobResult(job, "/tmp/IPX-601.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-601.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-601.mp4", MovieID: "IPX-601"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-601"},
@@ -675,7 +676,7 @@ func TestRescrapeBatchMovie_PosterCleanup(t *testing.T) {
 
 	// Create job with single file
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-900.mp4"})
-	setJobResult(job, "/tmp/IPX-900.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/IPX-900.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-900.mp4", MovieID: "IPX-900"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-900", Title: "Original"},
@@ -737,7 +738,7 @@ func TestRescrapeBatchMovie_OverlappingRescrape_CaseInsensitiveFS(t *testing.T) 
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-800.mp4"})
 
 	// Initial state: movie with lowercase ID
-	setJobResult(job, "/tmp/IPX-800.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/IPX-800.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-800.mp4", MovieID: "ipx-800"}, // lowercase
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ipx-800", Title: "Original"},
@@ -795,7 +796,7 @@ func TestRescrapeBatchMovie_ConcurrentOverwriteCleanup(t *testing.T) {
 
 	// Create job with single file having MovieID "ABC-001"
 	job := createJobWithWF(deps, cfg, []string{"/tmp/test-video.mp4"})
-	setJobResult(job, "/tmp/test-video.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/test-video.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/test-video.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ABC-001", Title: "Original Movie"},
@@ -997,7 +998,7 @@ func TestRescrapeBatchMovie_ConcurrentOverwriteResolvesToOriginal(t *testing.T) 
 
 	// Create job with single file having MovieID "ABC-001"
 	job := createJobWithWF(deps, cfg, []string{"/tmp/test-video.mp4"})
-	setJobResult(job, "/tmp/test-video.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/test-video.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/test-video.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ABC-001", Title: "Original Movie"},
@@ -1120,7 +1121,7 @@ func TestRescrapeBatchMovie_SequentialStaleOverwriteSucceeds(t *testing.T) {
 
 	// Create job with single file having MovieID "ABC-001"
 	job := createJobWithWF(deps, cfg, []string{"/tmp/test-video.mp4"})
-	setJobResult(job, "/tmp/test-video.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/test-video.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/test-video.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ABC-001", Title: "Original Movie"},
@@ -1246,7 +1247,7 @@ func TestRescrapeBatchMovie_UpdateMode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-700.mp4"})
-			setJobResult(job, "/tmp/IPX-700.mp4", &worker.MovieResult{
+			setJobResult(job, "/tmp/IPX-700.mp4", &resultstore.MovieResult{
 				FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-700.mp4", MovieID: "IPX-700"},
 				Status:        models.JobStatusCompleted,
 				Movie:         &models.Movie{ID: "IPX-700"},

@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,19 +35,19 @@ func TestBatchRescrapeIntegration(t *testing.T) {
 					"/path/to/ABC-123.mp4",
 					"/path/to/SSIS-001.mp4",
 				})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Movie 1"},
 					StartedAt:     time.Now(),
 				})
-				setJobResult(job, "/path/to/ABC-123.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/ABC-123.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABC-123.mp4", MovieID: "ABC-123"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABC-123", Title: "Movie 2"},
 					StartedAt:     time.Now(),
 				})
-				setJobResult(job, "/path/to/SSIS-001.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/SSIS-001.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/SSIS-001.mp4", MovieID: "SSIS-001"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "SSIS-001", Title: "Movie 3"},
@@ -76,7 +77,7 @@ func TestBatchRescrapeIntegration(t *testing.T) {
 			name: "bulk rescrape with conservative preset",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -99,7 +100,7 @@ func TestBatchRescrapeIntegration(t *testing.T) {
 			name: "bulk rescrape with gap-fill preset",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -121,7 +122,7 @@ func TestBatchRescrapeIntegration(t *testing.T) {
 			name: "bulk rescrape with aggressive preset",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -143,7 +144,7 @@ func TestBatchRescrapeIntegration(t *testing.T) {
 			name: "bulk rescrape with invalid preset passed to seam",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -162,7 +163,7 @@ func TestBatchRescrapeIntegration(t *testing.T) {
 			name: "bulk rescrape with scalar and array strategies",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -185,7 +186,7 @@ func TestBatchRescrapeIntegration(t *testing.T) {
 			name: "bulk rescrape with force flag",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -207,7 +208,7 @@ func TestBatchRescrapeIntegration(t *testing.T) {
 			name: "bulk rescrape succeeded plus failed equals total",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},

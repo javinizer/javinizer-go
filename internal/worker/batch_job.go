@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
 )
@@ -100,11 +101,10 @@ type jobConfig struct {
 // StartApply, Rescrape, Wait, markStarted) or JobRunner (Run, SetRunOptions).
 // BatchJob exposes only read accessors and attachLifecycleCallback().
 type BatchJob struct {
-	ID          models.JobID     `json:"id"`
-	mu          sync.RWMutex     `json:"-"`
-	lifecycle   *JobLifecycle    `json:"-"` // Lifecycle state: status, timestamps, Done channel
-	results     *ResultTracker   `json:"-"` // Result state: Results map, progress counters, files
-	resultIndex ResultReadFacade `json:"-"` // Same pointer as results — provides lookup-oriented surface (MovieLookup, FileFinder, ResultMapAccessor)
+	ID        models.JobID      `json:"id"`
+	mu        sync.RWMutex      `json:"-"`
+	lifecycle *JobLifecycle     `json:"-"` // Lifecycle state: status, timestamps, Done channel
+	results   resultstore.Store `json:"-"` // Result state: Results map, progress counters, files (sole result-state seam)
 
 	// Retained on BatchJob (not mutex-protected state groups)
 	StartedAt time.Time `json:"started_at"`
@@ -149,7 +149,7 @@ func newBatchJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 			Status: models.JobStatusPending,
 			done:   make(chan struct{}),
 		},
-		results:             NewResultTracker(len(files), files),
+		results:             resultstore.New(len(files), files),
 		StartedAt:           time.Now(),
 		batchJobEventSource: newBatchJobEventSource(),
 		rescrapePhase:       NewRescrapePhase(),
@@ -226,21 +226,16 @@ func (job *BatchJob) getAdapters() *jobAdapters {
 
 func (job *BatchJob) attachLifecycleCallback() {
 	job.lifecycle.markCompletedFn = func() {
-		// Must hold results.mu while reading/writing results state.
-		// Lock ordering: lifecycle.mu -> results.mu (same as old MarkCompleted).
-		job.results.mu.Lock()
-		job.results.recalculateProgress()
-		if job.results.Progress < 100 {
-			job.results.Progress = 100
-		}
-		job.results.mu.Unlock()
+		// ForceCompleteProgress recalculates progress and, if below 100%, sets it
+		// to 100%. The cross-boundary recalculation that previously reached
+		// directly into results.mu is now mediated by the Store interface.
+		job.results.ForceCompleteProgress()
 	}
-	job.results.goneChecker = func() bool {
+	job.results.SetGoneChecker(func() bool {
 		job.lifecycle.mu.RLock()
 		defer job.lifecycle.mu.RUnlock()
 		return job.lifecycle.deleted || isJobTransitioned(job.lifecycle.Status)
-	}
-	job.resultIndex = job.results // *ResultTracker satisfies ResultReadFacade
+	})
 }
 
 // batchJobSnapshot is a consistent point-in-time view of all BatchJob state.
@@ -250,26 +245,32 @@ func (job *BatchJob) attachLifecycleCallback() {
 type batchJobSnapshot struct {
 	batchJobBase
 
-	results     map[string]*MovieResult
-	provenance  map[string]*ProvenanceData
+	results     map[string]*resultstore.MovieResult
+	provenance  map[string]*resultstore.ProvenanceData
 	resultIndex map[string]string // ResultID → FilePath
 }
 
-// snapshotFull acquires lifecycle.mu → results.mu → job.mu before reading any
-// fields, then copies a consistent point-in-time view of all job state.
-// uses StatusSnapshot() and SnapshotForStatus() instead of
-// reaching into sub-manager internals.
+// snapshotFull reads result state via Store.SnapshotForStatus() (self-locking)
+// and job/lifecycle state under their own locks.
+//
+// ATOMICITY TRADE-OFF: the previous implementation acquired lifecycle.mu,
+// results.mu, and job.mu simultaneously so the three state groups were read
+// atomically. Store.SnapshotForStatus() acquires the results lock internally,
+// so the results lock is released before job.mu is acquired here. This
+// weakens the cross-manager atomicity guarantee previously protected by
+// TestJobStore_PersistToDatabase_AtomicSnapshot: a concurrent mutation
+// between the results snapshot and the job/lifecycle snapshot can now be
+// observed. The spec does NOT claim equivalence; the accepted inconsistency
+// window is documented and tested.
 func (job *BatchJob) snapshotFull() batchJobSnapshot {
 	job.lifecycle.mu.RLock()
-	job.results.mu.RLock()
-	job.mu.RLock()
-
-	defer job.mu.RUnlock()
-	defer job.results.mu.RUnlock()
-	defer job.lifecycle.mu.RUnlock()
-
 	lcSnap := job.lifecycle.statusSnapshotLocked()
-	resultSnap, progressSnap := job.results.snapshotForStatusLocked()
+	job.lifecycle.mu.RUnlock()
+
+	resultSnap, progressSnap := job.results.SnapshotForStatus()
+
+	job.mu.RLock()
+	defer job.mu.RUnlock()
 
 	return batchJobSnapshot{
 		batchJobBase: batchJobBase{
@@ -350,21 +351,20 @@ func (job *BatchJob) GetDestination() string {
 // For external packages (tests, CLI) that need direct sub-manager access,
 // use the Results() and Lifecycle() accessors.
 
-// Results returns the job's ResultTracker for read-only access to result
-// state via the ResultMapAccessor interface. Per N-6: callers that need
-// write access should obtain a ResultUpdater through the adapter layer
-// (EditableJob, BatchJobInterface) rather than reaching through Results().
-// Tests that need direct write access can use ResultsWriter().
-func (job *BatchJob) Results() ResultMapAccessor {
+// Results returns the job's result Store for access to result state.
+// Per N-6: callers that need write access should obtain a ResultUpdater through
+// the adapter layer (EditableJob, BatchJobInterface) rather than reaching through
+// Results(). Tests that need direct write access can use ResultsWriter().
+func (job *BatchJob) Results() resultstore.Store {
 	return job.results
 }
 
-// ResultsWriter returns the job's ResultTracker for direct write access.
+// ResultsWriter returns the job's result Store for direct write access.
 // Per N-6: this is package-internal — external callers should use narrow
 // interfaces (ResultUpdater, ResultReadFacade) or the adapter layer
 // (EditableJob, BatchJobInterface) instead of reaching through ResultsWriter().
 // Exported for test access only; production code should prefer ResultUpdater.
-func (job *BatchJob) ResultsWriter() *ResultTracker {
+func (job *BatchJob) ResultsWriter() resultstore.Store {
 	return job.results
 }
 

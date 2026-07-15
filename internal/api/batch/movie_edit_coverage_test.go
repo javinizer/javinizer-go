@@ -12,7 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
@@ -39,7 +39,7 @@ func TestUpdateBatchMovie_SuccessWithDBUpsert(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-	setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Original"},
@@ -192,7 +192,7 @@ func TestUpdateBatchMoviePosterFromURL_InvalidURLFormat(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-	setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -216,7 +216,7 @@ func TestUpdateBatchMoviePosterFromURL_LocalhostBlockedBySSRF(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-	setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -280,13 +280,13 @@ func TestUpdateBatchMovie_MultiPartFileUpdate(t *testing.T) {
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535-CD1.mp4", "/path/to/IPX-535-CD2.mp4"})
 	movie := &models.Movie{ID: "IPX-535", Title: "Original"}
-	setJobResult(job, "/path/to/IPX-535-CD1.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535-CD1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535-CD1.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         movie,
 		StartedAt:     time.Now(),
 	})
-	setJobResult(job, "/path/to/IPX-535-CD2.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535-CD2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535-CD2.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         movie,

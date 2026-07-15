@@ -130,3 +130,6 @@ graphify-out/
 
 # pi subagent async-run artifacts (scratch, never committed)
 .pi-subagents/
+
+# OpenSpec
+openspec/

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -99,7 +100,7 @@ func TestReconstructBatchJob_PersistFn(t *testing.T) {
 	}
 	filesJSON, _ := json.Marshal([]string{"/path/file1.mp4"})
 	dbJob.Files = string(filesJSON)
-	resultsJSON, _ := json.Marshal(map[string]*MovieResult{
+	resultsJSON, _ := json.Marshal(map[string]*resultstore.MovieResult{
 		"/path/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
@@ -158,7 +159,7 @@ func TestReconstructBatchJob_PersistJobByIDPersistsResults(t *testing.T) {
 	}
 	filesJSON, _ := json.Marshal([]string{"/path/file1.mp4"})
 	dbJob.Files = string(filesJSON)
-	resultsJSON, _ := json.Marshal(map[string]*MovieResult{
+	resultsJSON, _ := json.Marshal(map[string]*resultstore.MovieResult{
 		"/path/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,

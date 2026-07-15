@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,15 +41,15 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 		assert.NotNil(t, result)
 		assert.Equal(t, models.JobID("test-job-123"), result.ID)
 		assert.Equal(t, models.JobStatusCompleted, result.lifecycle.Status)
-		assert.Equal(t, 10, result.results.TotalFiles)
-		assert.Equal(t, 8, result.results.Completed)
-		assert.Equal(t, 2, result.results.Failed)
-		assert.Equal(t, float64(80), result.results.Progress)
+		assert.Equal(t, 10, result.prog().TotalFiles)
+		assert.Equal(t, 8, result.prog().Completed)
+		assert.Equal(t, 2, result.prog().Failed)
+		assert.Equal(t, float64(80), result.prog().Progress)
 		assert.Equal(t, "/dest/path", result.cfg.destination)
 		assert.Equal(t, "/tmp/test", result.cfg.tempDir)
-		assert.NotNil(t, result.results.Results)
-		assert.NotNil(t, result.results.Excluded)
-		assert.NotNil(t, result.results.FileMatchInfo)
+		assert.NotNil(t, result.snap().Results)
+		assert.NotNil(t, result.snap().Excluded)
+		assert.NotNil(t, result.snap().FileMatchInfo)
 		assert.NotNil(t, result.lifecycle.done)
 	})
 
@@ -67,14 +68,14 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		assert.NotNil(t, result)
-		assert.Equal(t, 2, len(result.results.Files))
-		assert.Equal(t, "/path/file1.mp4", result.results.Files[0])
+		assert.Equal(t, 2, len(result.snap().Files))
+		assert.Equal(t, "/path/file1.mp4", result.snap().Files[0])
 	})
 
 	t.Run("parse_results_json", func(t *testing.T) {
 		jq := &JobStore{jobs: make(map[models.JobID]*BatchJob)}
 
-		results := map[string]*MovieResult{
+		results := map[string]*resultstore.MovieResult{
 			"/path/file1.mp4": {
 				Status:        models.JobStatusCompleted,
 				FileMatchInfo: models.FileMatchInfo{MovieID: "ABC-123"},
@@ -92,8 +93,8 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		assert.NotNil(t, result)
-		assert.Equal(t, 1, len(result.results.Results))
-		assert.Equal(t, models.JobStatusCompleted, result.results.Results["/path/file1.mp4"].Status)
+		assert.Equal(t, 1, len(result.snap().Results))
+		assert.Equal(t, models.JobStatusCompleted, result.snap().Results["/path/file1.mp4"].Status)
 	})
 
 	t.Run("parse_excluded_json", func(t *testing.T) {
@@ -113,7 +114,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		assert.NotNil(t, result)
-		assert.True(t, result.results.Excluded["/path/file1.mp4"])
+		assert.True(t, result.snap().Excluded["/path/file1.mp4"])
 	})
 
 	t.Run("parse_file_match_info_json", func(t *testing.T) {
@@ -137,7 +138,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		assert.NotNil(t, result)
-		assert.Equal(t, "ABC-123", result.results.FileMatchInfo["/path/file1.mp4"].MovieID)
+		assert.Equal(t, "ABC-123", result.snap().FileMatchInfo["/path/file1.mp4"].MovieID)
 	})
 
 	t.Run("close_done_channel_for_terminal_states", func(t *testing.T) {
@@ -194,7 +195,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 		posterPath := filepath.Join(posterDir, "ABC-123.jpg")
 		require.NoError(t, os.WriteFile(posterPath, []byte("fake poster"), 0644))
 
-		results := map[string]*MovieResult{
+		results := map[string]*resultstore.MovieResult{
 			"/path/file1.mp4": {
 				Status:        "completed",
 				FileMatchInfo: models.FileMatchInfo{MovieID: "ABC-123"},
@@ -212,7 +213,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		assert.NotNil(t, result)
-		movie := result.results.Results["/path/file1.mp4"].Movie
+		movie := result.snap().Results["/path/file1.mp4"].Movie
 		assert.Equal(t, "temp://ABC-123", movie.Poster.CroppedPosterURL, "Poster URL should not be cleared when file exists")
 	})
 
@@ -221,7 +222,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		tempDir := t.TempDir()
 
-		results := map[string]*MovieResult{
+		results := map[string]*resultstore.MovieResult{
 			"/path/file1.mp4": {
 				Status:        "completed",
 				FileMatchInfo: models.FileMatchInfo{MovieID: "ABC-123"},
@@ -239,7 +240,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		assert.NotNil(t, result)
-		movie := result.results.Results["/path/file1.mp4"].Movie
+		movie := result.snap().Results["/path/file1.mp4"].Movie
 		assert.Equal(t, "", movie.Poster.CroppedPosterURL, "Poster URL should be cleared when file is missing")
 	})
 
@@ -254,7 +255,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		assert.NotNil(t, result)
-		assert.Equal(t, 0, len(result.results.Files), "Files should be empty on parse error")
+		assert.Equal(t, 0, len(result.snap().Files), "Files should be empty on parse error")
 	})
 
 	t.Run("invalid_results_json", func(t *testing.T) {
@@ -268,7 +269,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		assert.NotNil(t, result)
-		assert.Equal(t, 0, len(result.results.Results), "Results should be empty on parse error")
+		assert.Equal(t, 0, len(result.snap().Results), "Results should be empty on parse error")
 	})
 
 	t.Run("nil_result_data", func(t *testing.T) {
@@ -276,7 +277,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		tempDir := t.TempDir()
 
-		results := map[string]*MovieResult{
+		results := map[string]*resultstore.MovieResult{
 			"/path/file1.mp4": {
 				Status:        "completed",
 				FileMatchInfo: models.FileMatchInfo{MovieID: "ABC-123"},
@@ -373,7 +374,7 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 	t.Run("new_format_preferred_over_legacy", func(t *testing.T) {
 		jq := &JobStore{jobs: make(map[models.JobID]*BatchJob)}
 
-		newResults := map[string]*MovieResult{
+		newResults := map[string]*resultstore.MovieResult{
 			"/path/file1.mp4": {
 				FileMatchInfo: models.FileMatchInfo{Path: "/path/file1.mp4", MovieID: "ABC-123"},
 				Status:        models.JobStatusCompleted,
@@ -394,9 +395,9 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 
 		result := jq.reconstructBatchJob(dbJob)
 		require.NotNil(t, result)
-		require.Contains(t, result.results.Results, "/path/file1.mp4")
+		require.Contains(t, result.snap().Results, "/path/file1.mp4")
 
-		mr := result.results.Results["/path/file1.mp4"]
+		mr := result.snap().Results["/path/file1.mp4"]
 		require.NotNil(t, mr.Movie)
 		assert.Equal(t, "New Format Movie", mr.Movie.Title)
 	})

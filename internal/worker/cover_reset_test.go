@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +14,7 @@ func TestUpdateMovie_BackupCoverOriginal(t *testing.T) {
 	t.Run("snapshots existing cover when cover changes", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{CoverURL: "original-cover.jpg"}},
@@ -35,7 +36,7 @@ func TestUpdateMovie_BackupCoverOriginal(t *testing.T) {
 	t.Run("does not snapshot when cover unchanged", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{CoverURL: "cover.jpg"}},
@@ -57,7 +58,7 @@ func TestUpdateMovie_BackupCoverOriginal(t *testing.T) {
 	t.Run("carries forward existing original across subsequent edits", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{CoverURL: "original-cover.jpg"}},
@@ -86,7 +87,7 @@ func TestUpdateMovie_BackupCoverOriginal(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 		// Simulate a restart: the persisted movie already carries an original.
-		job.results.UpdateFileResult("file1.mp4", &MovieResult{
+		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie: &models.Movie{ID: "ABC-001", Poster: models.PosterState{

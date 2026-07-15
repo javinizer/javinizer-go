@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,7 +14,7 @@ import (
 func TestClearMissingTempPosters_ClearsStaleURL(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	// No file created at /tmp/posters/job-1/ABP-731.jpg → URL must be cleared.
-	results := map[string]*MovieResult{
+	results := map[string]*resultstore.MovieResult{
 		"/v/ABP-731.mp4": {
 			Movie: &models.Movie{
 				ID: "ABP-731",
@@ -41,7 +42,7 @@ func TestClearMissingTempPosters_PreservesURLWhenFileExists(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, posterPath, []byte("x"), 0o644))
 
 	cropped := "/api/v1/temp/posters/job-1/ABP-731.jpg?v=1"
-	results := map[string]*MovieResult{
+	results := map[string]*resultstore.MovieResult{
 		"/v/ABP-731.mp4": {
 			Movie: &models.Movie{
 				ID: "ABP-731",
@@ -61,7 +62,7 @@ func TestClearMissingTempPosters_PreservesURLWhenFileExists(t *testing.T) {
 func TestClearMissingTempPosters_NoOpWhenTempDirEmpty(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cropped := "/api/v1/temp/posters/job-1/ABP-731.jpg?v=1"
-	results := map[string]*MovieResult{
+	results := map[string]*resultstore.MovieResult{
 		"/v/ABP-731.mp4": {
 			Movie: &models.Movie{
 				ID: "ABP-731",
@@ -80,7 +81,7 @@ func TestClearMissingTempPosters_NoOpWhenTempDirEmpty(t *testing.T) {
 
 func TestClearMissingTempPosters_SkipsEmptyCroppedURL(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	results := map[string]*MovieResult{
+	results := map[string]*resultstore.MovieResult{
 		"/v/ABP-731.mp4": {
 			Movie: &models.Movie{
 				ID:     "ABP-731",
@@ -102,7 +103,7 @@ func TestClearMissingTempPosters_DirExistsButFileMissing(t *testing.T) {
 	// Only ABP-731's poster exists; ABP-980's is missing.
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(posterDir, "ABP-731.jpg"), []byte("x"), 0o644))
 
-	results := map[string]*MovieResult{
+	results := map[string]*resultstore.MovieResult{
 		"/v/ABP-731.mp4": {Movie: &models.Movie{ID: "ABP-731", Poster: models.PosterState{
 			CroppedPosterURL: "/api/v1/temp/posters/job-1/ABP-731.jpg?v=1",
 		}}},

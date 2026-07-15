@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,25 +79,25 @@ func TestUpdateBatchMoviePosterFromURL_V5_JobNotFound(t *testing.T) {
 }
 
 func TestResolvePosterID_V5_InvalidMovieID(t *testing.T) {
-	lookup := worker.NewResultTracker(0, nil)
+	lookup := resultstore.New(0, nil)
 	_, err := resolvePosterID(lookup, "")
 	assert.Error(t, err)
 }
 
 func TestResolvePosterID_V5_PathTraversal(t *testing.T) {
-	lookup := worker.NewResultTracker(0, nil)
+	lookup := resultstore.New(0, nil)
 	_, err := resolvePosterID(lookup, "../etc/passwd")
 	assert.Error(t, err)
 }
 
 func TestResolvePosterID_V5_DotMovieID(t *testing.T) {
-	lookup := worker.NewResultTracker(0, nil)
+	lookup := resultstore.New(0, nil)
 	_, err := resolvePosterID(lookup, ".")
 	assert.Error(t, err)
 }
 
 func TestResolvePosterID_V5_ValidMovieID(t *testing.T) {
-	lookup := worker.NewResultTracker(0, nil)
+	lookup := resultstore.New(0, nil)
 	id, err := resolvePosterID(lookup, "ABC-123")
 	require.NoError(t, err)
 	assert.Equal(t, "ABC-123", id)

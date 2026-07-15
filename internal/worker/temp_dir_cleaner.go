@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/poster"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 )
 
@@ -155,13 +156,13 @@ func (c *TempDirCleaner) CleanJobTempDir(id string) {
 // as present — acceptable because the poster generator always writes regular
 // files; the only behavioral difference from the prior per-file os.IsNotExist
 // check is that theoretical symlink edge case, which does not occur in practice.
-func ClearMissingTempPosters(fs afero.Fs, tempDir, jobID string, results map[string]*MovieResult) {
+func ClearMissingTempPosters(fs afero.Fs, tempDir, jobID string, results map[string]*resultstore.MovieResult) {
 	if tempDir == "" {
 		return
 	}
 	// Collect only results with a cropped URL to check — avoids a ReadDir when
 	// nothing needs checking (e.g. jobs whose movies never had a cropped poster).
-	toCheck := make([]*MovieResult, 0, len(results))
+	toCheck := make([]*resultstore.MovieResult, 0, len(results))
 	for _, result := range results {
 		if result != nil && result.Movie != nil && result.Movie.Poster.CroppedPosterURL != "" {
 			toCheck = append(toCheck, result)

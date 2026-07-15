@@ -11,7 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -99,7 +99,7 @@ func TestGetBatchJob_FullPathWithIncludeData(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/FUL-001.mp4"})
-	setJobResult(job, "/path/to/FUL-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/FUL-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/FUL-001.mp4", MovieID: "FUL-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "FUL-001", Title: "Full Test"},
@@ -151,7 +151,7 @@ func TestGetBatchJob_SlimPath(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/SLM-001.mp4"})
-	setJobResult(job, "/path/to/SLM-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/SLM-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/SLM-001.mp4", MovieID: "SLM-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "SLM-001", Title: "Slim Test"},
@@ -219,7 +219,7 @@ func TestListBatchJobs_WithExcludedData(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/IPX-010.mp4"})
-	setJobResult(job, "/path/IPX-010.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/IPX-010.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/IPX-010.mp4", MovieID: "IPX-010"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-010"},
@@ -250,7 +250,7 @@ func TestListBatchJobs_WithOpAndRevertCounts(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/OPC-001.mp4"})
-	setJobResult(job, "/path/to/OPC-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/OPC-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/OPC-001.mp4", MovieID: "OPC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "OPC-001", Title: "Count Test"},

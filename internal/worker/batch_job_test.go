@@ -8,15 +8,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// movieIDForResult extracts the primary movieID for a MovieResult.
+// movieIDForResult extracts the primary movieID for a resultstore.MovieResult.
 // Prefers result.Movie.ID when available, falls back to FileMatchInfo.MovieID.
 // Returns ("", false) if neither is set.
-func movieIDForResult(r *MovieResult) (string, bool) {
+func movieIDForResult(r *resultstore.MovieResult) (string, bool) {
 	if r == nil {
 		return "", false
 	}
@@ -31,13 +32,14 @@ func movieIDForResult(r *MovieResult) (string, bool) {
 
 // SetResultDirect sets a file result directly in the results map and rebuilds
 // the movieID index. Use this in test helpers instead of directly assigning
-// to job.results.Results, which bypasses index maintenance.
-func (job *BatchJob) SetResultDirect(filePath string, result *MovieResult) {
-	job.results.mu.Lock()
-	defer job.results.mu.Unlock()
-
-	job.results.Results[filePath] = result
-	job.results.rebuildMovieIDIndexLocked()
+// to job.snap().Results, which bypasses index maintenance.
+// Per the result-store extraction: delegates to Store.ReplaceResultRaw, which
+// directly replaces the result and performs a FULL rebuild of both the
+// movieIDIndex and resultIDIndex without recalculating progress counters or
+// incrementing revisions. It does NOT clone the input (stores the caller's
+// pointer directly), matching the previous direct-assignment behavior.
+func (job *BatchJob) SetResultDirect(filePath string, result *resultstore.MovieResult) {
+	job.results.ReplaceResultRaw(filePath, result)
 }
 
 func TestNewBatchJobDeps(t *testing.T) {
@@ -106,26 +108,25 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 	t.Run("active job with matching revision returns success and updates Results", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "OLD-001"},
 			Status:        models.JobStatusCompleted,
 			Revision:      1,
 			Movie:         &models.Movie{ID: "OLD-001"},
 		})
-		job.results.Completed = 1
-		job.results.Progress = 100
+		job.results.RecalculateProgress()
 
-		newResult := &MovieResult{
+		newResult := &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "NEW-001"},
 		}
 
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "OLD-001")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "OLD-001")
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
-		assert.Equal(t, uint64(2), job.results.Results["file1.mp4"].Revision)
-		assert.Equal(t, "NEW-001", job.results.Results["file1.mp4"].FileMatchInfo.MovieID)
+		assert.Equal(t, uint64(2), job.snap().Results["file1.mp4"].Revision)
+		assert.Equal(t, "NEW-001", job.snap().Results["file1.mp4"].FileMatchInfo.MovieID)
 	})
 
 	t.Run("deleted job returns IsGone", func(t *testing.T) {
@@ -133,8 +134,8 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 		job.lifecycle.deleted = true
 
-		newResult := &MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "")
+		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "")
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusGone, outcome.Status)
 	})
@@ -144,8 +145,8 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 		job.lifecycle.Status = models.JobStatusRunning
 
-		newResult := &MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "")
+		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "")
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusGone, outcome.Status)
 	})
@@ -153,14 +154,14 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 	t.Run("mismatched revision returns Conflict", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "OLD-001"},
 			Status:        models.JobStatusCompleted,
 			Revision:      5,
 		})
 
-		newResult := &MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 3, "NEW-001", "")
+		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 3, "NEW-001", "")
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusConflict, outcome.Status)
 	})
@@ -168,34 +169,34 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 	t.Run("applies multipart metadata from models.FileMatchInfo", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.results.FileMatchInfo["file1.mp4"] = models.FileMatchInfo{
+		job.results.SetFileMatchInfo("file1.mp4", models.FileMatchInfo{
 			MovieID:     "ABC-001",
 			IsMultiPart: true,
 			PartNumber:  2,
 			PartSuffix:  "CD2",
-		}
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		})
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Revision:      1,
 		})
 
-		newResult := &MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-001"}}
-		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001")
+		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-001"}}
+		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001")
 		require.NoError(t, err)
-		assert.Equal(t, uint64(2), job.results.Results["file1.mp4"].Revision)
+		assert.Equal(t, uint64(2), job.snap().Results["file1.mp4"].Revision)
 	})
 
 	t.Run("skips poster cleanup when another result still uses old movie ID", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "SHARED-001"},
 			Status:        models.JobStatusCompleted,
 			Revision:      1,
 			Movie:         &models.Movie{ID: "SHARED-001"},
 		})
-		job.SetResultDirect("file2.mp4", &MovieResult{
+		job.SetResultDirect("file2.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4", MovieID: "SHARED-001"},
 			Status:        models.JobStatusCompleted,
 			Revision:      1,
@@ -203,8 +204,8 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		})
 		job.ID = "test-job-456"
 
-		newResult := &MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "NEW-001"}}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "SHARED-001")
+		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "NEW-001"}}
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "SHARED-001")
 		require.NoError(t, err)
 		assert.NotContains(t, outcome.OrphanedMovieIDs, "SHARED-001")
 	})
@@ -212,20 +213,18 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 	t.Run("recalculates progress after update", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Revision:      1,
 		})
-		job.results.Completed = 1
-		job.results.Failed = 0
-		job.results.Progress = 50.0
+		job.results.RecalculateProgress()
 
-		newResult := &MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-001"}}
-		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001")
+		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-001"}}
+		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001")
 		require.NoError(t, err)
-		assert.Equal(t, 1, job.results.Completed)
-		assert.Equal(t, 50.0, job.results.Progress)
+		assert.Equal(t, 1, job.prog().Completed)
+		assert.Equal(t, 50.0, job.prog().Progress)
 	})
 }
 
@@ -290,7 +289,7 @@ func TestBatchJob_GetMovieResult(t *testing.T) {
 	t.Run("returns deep-copied result for existing filePath", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.SetResultDirect("file1.mp4", &MovieResult{
+		job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Revision:      3,
@@ -301,10 +300,10 @@ func TestBatchJob_GetMovieResult(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "ABC-001", result.FileMatchInfo.MovieID)
 		assert.Equal(t, uint64(3), result.Revision)
-		assert.NotSame(t, job.results.Results["file1.mp4"], result, "should return a deep copy")
+		assert.NotSame(t, job.snap().Results["file1.mp4"], result, "should return a deep copy")
 
 		result.FileMatchInfo.MovieID = "MODIFIED"
-		assert.Equal(t, "ABC-001", job.results.Results["file1.mp4"].FileMatchInfo.MovieID, "mutation of copy should not affect original")
+		assert.Equal(t, "ABC-001", job.snap().Results["file1.mp4"].FileMatchInfo.MovieID, "mutation of copy should not affect original")
 	})
 
 	t.Run("returns error for non-existent filePath", func(t *testing.T) {
@@ -380,7 +379,7 @@ func TestBuildApplyInputs(t *testing.T) {
 		},
 	})
 	job.cfg.destination = "/output"
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001"},
@@ -412,7 +411,7 @@ func TestBuildRescrapeInputs(t *testing.T) {
 
 	assert.Equal(t, job.ID, inputs.JobID)
 	assert.Equal(t, wf, inputs.WF)
-	assert.Equal(t, job.resultIndex, inputs.ResultMap)
+	assert.Equal(t, job.results, inputs.ResultMap)
 	assert.Equal(t, job.lifecycle, inputs.Lifecycle)
 }
 
@@ -575,7 +574,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 	t.Run("backs up original poster values on first crop", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
-		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", CroppedPosterURL: "original-crop.jpg", ShouldCropPoster: true}},
@@ -584,7 +583,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg")
 		require.NoError(t, err)
 
-		result := job.results.Results["/tmp/ABC-001.mp4"]
+		result := job.snap().Results["/tmp/ABC-001.mp4"]
 		assert.Equal(t, "original.jpg", result.Movie.Poster.OriginalPosterURL)
 		assert.Equal(t, "original-crop.jpg", result.Movie.Poster.OriginalCroppedPosterURL)
 		require.NotNil(t, result.Movie.Poster.OriginalShouldCropPoster)
@@ -596,7 +595,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 	t.Run("does not overwrite backup on second crop", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
-		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", ShouldCropPoster: true}},
@@ -607,7 +606,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 		err = job.posterEditor.UpdatePosterCrop("ABC-001", "crop2.jpg")
 		require.NoError(t, err)
 
-		result := job.results.Results["/tmp/ABC-001.mp4"]
+		result := job.snap().Results["/tmp/ABC-001.mp4"]
 		assert.Equal(t, "original.jpg", result.Movie.Poster.OriginalPosterURL, "backup should remain from first crop")
 		assert.Equal(t, "crop2.jpg", result.Movie.Poster.CroppedPosterURL)
 	})
@@ -615,11 +614,11 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 	t.Run("updates all file parts for multipart movie", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001-cd1.mp4", "/tmp/ABC-001-cd2.mp4"})
-		job.SetResultDirect("/tmp/ABC-001-cd1.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001-cd1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001-cd1.mp4", MovieID: "ABC-001"},
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg"}},
 		})
-		job.SetResultDirect("/tmp/ABC-001-cd2.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001-cd2.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001-cd2.mp4", MovieID: "ABC-001"},
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg"}},
 		})
@@ -627,14 +626,14 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg")
 		require.NoError(t, err)
 
-		assert.Equal(t, "new-crop.jpg", job.results.Results["/tmp/ABC-001-cd1.mp4"].Movie.Poster.CroppedPosterURL)
-		assert.Equal(t, "new-crop.jpg", job.results.Results["/tmp/ABC-001-cd2.mp4"].Movie.Poster.CroppedPosterURL)
+		assert.Equal(t, "new-crop.jpg", job.snap().Results["/tmp/ABC-001-cd1.mp4"].Movie.Poster.CroppedPosterURL)
+		assert.Equal(t, "new-crop.jpg", job.snap().Results["/tmp/ABC-001-cd2.mp4"].Movie.Poster.CroppedPosterURL)
 	})
 
 	t.Run("skips nil movie without error", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
-		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
 			Movie:         nil,
 		})
@@ -646,7 +645,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 	t.Run("preserves original ShouldCropPoster value despite subsequent false assignment", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
-		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg", ShouldCropPoster: true}},
 		})
@@ -654,7 +653,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg")
 		require.NoError(t, err)
 
-		result := job.results.Results["/tmp/ABC-001.mp4"]
+		result := job.snap().Results["/tmp/ABC-001.mp4"]
 		assert.False(t, result.Movie.Poster.ShouldCropPoster, "ShouldCropPoster should be false after crop")
 		require.NotNil(t, result.Movie.Poster.OriginalShouldCropPoster, "OriginalShouldCropPoster should be set")
 		assert.True(t, *result.Movie.Poster.OriginalShouldCropPoster, "OriginalShouldCropPoster should preserve pre-mutation value (true), not post-mutation (false)")
@@ -665,7 +664,7 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 	t.Run("backs up and updates poster URL and cropped URL", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
-		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "old-poster.jpg", CroppedPosterURL: "old-crop.jpg", ShouldCropPoster: true}},
@@ -674,7 +673,7 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 		err := job.posterEditor.UpdatePosterFromURL(context.TODO(), "ABC-001", "new-poster.jpg", "new-crop.jpg")
 		require.NoError(t, err)
 
-		result := job.results.Results["/tmp/ABC-001.mp4"]
+		result := job.snap().Results["/tmp/ABC-001.mp4"]
 		assert.Equal(t, "old-poster.jpg", result.Movie.Poster.OriginalPosterURL)
 		assert.Equal(t, "new-poster.jpg", result.Movie.Poster.PosterURL)
 		assert.Equal(t, "new-crop.jpg", result.Movie.Poster.CroppedPosterURL)
@@ -686,7 +685,7 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 	t.Run("does not overwrite backup on second update", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
-		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", ShouldCropPoster: true}},
 		})
@@ -696,7 +695,7 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 		err = job.posterEditor.UpdatePosterFromURL(context.TODO(), "ABC-001", "poster2.jpg", "crop2.jpg")
 		require.NoError(t, err)
 
-		result := job.results.Results["/tmp/ABC-001.mp4"]
+		result := job.snap().Results["/tmp/ABC-001.mp4"]
 		assert.Equal(t, "original.jpg", result.Movie.Poster.OriginalPosterURL, "backup should remain from first update")
 		assert.Equal(t, "poster2.jpg", result.Movie.Poster.PosterURL)
 	})
@@ -704,11 +703,11 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 	t.Run("updates all file parts for multipart movie", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001-cd1.mp4", "/tmp/ABC-001-cd2.mp4"})
-		job.SetResultDirect("/tmp/ABC-001-cd1.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001-cd1.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001-cd1.mp4", MovieID: "ABC-001"},
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg"}},
 		})
-		job.SetResultDirect("/tmp/ABC-001-cd2.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001-cd2.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001-cd2.mp4", MovieID: "ABC-001"},
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg"}},
 		})
@@ -716,14 +715,14 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 		err := job.posterEditor.UpdatePosterFromURL(context.TODO(), "ABC-001", "new-poster.jpg", "new-crop.jpg")
 		require.NoError(t, err)
 
-		assert.Equal(t, "new-poster.jpg", job.results.Results["/tmp/ABC-001-cd1.mp4"].Movie.Poster.PosterURL)
-		assert.Equal(t, "new-poster.jpg", job.results.Results["/tmp/ABC-001-cd2.mp4"].Movie.Poster.PosterURL)
+		assert.Equal(t, "new-poster.jpg", job.snap().Results["/tmp/ABC-001-cd1.mp4"].Movie.Poster.PosterURL)
+		assert.Equal(t, "new-poster.jpg", job.snap().Results["/tmp/ABC-001-cd2.mp4"].Movie.Poster.PosterURL)
 	})
 
 	t.Run("skips nil movie without error", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
-		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
+		job.SetResultDirect("/tmp/ABC-001.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
 			Movie:         nil,
 		})

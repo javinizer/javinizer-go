@@ -16,7 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -56,7 +56,7 @@ func TestUpdateBatchMoviePosterFromURL_SuccessWithRealServer(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-	setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -171,7 +171,7 @@ func TestPreviewOrganize_PreviewDirAllowed(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-	setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -218,7 +218,7 @@ func TestPreviewOrganize_DeniedDirectory(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-	setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -297,7 +297,7 @@ func TestPreviewOrganize_NilMovieData(t *testing.T) {
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
 	// Set result with nil Movie
-	setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         nil,

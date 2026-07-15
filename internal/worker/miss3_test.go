@@ -9,6 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -189,7 +190,7 @@ func TestBatchJobFactory_BuildJobConfig_DefaultWF(t *testing.T) {
 func TestStandaloneJob_GetMovieResult(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "GMR-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "GMR-001"},
@@ -214,7 +215,7 @@ func TestStandaloneJob_Subscribe(t *testing.T) {
 func TestStandaloneJob_UpdateMovie(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "OLD-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "OLD-001"},
@@ -232,7 +233,7 @@ func TestStandaloneJob_UpdateMovie(t *testing.T) {
 func TestStandaloneJob_ExcludeFile(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "EXC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "EXC-001"},
@@ -242,13 +243,13 @@ func TestStandaloneJob_ExcludeFile(t *testing.T) {
 	require.True(t, ok)
 	ej.ExcludeFile("file1.mp4")
 
-	assert.True(t, job.results.Excluded["file1.mp4"])
+	assert.True(t, job.snap().Excluded["file1.mp4"])
 }
 
 func TestStandaloneJob_ExcludeFile_TriggersCancel(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "EXC-002"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "EXC-002"},
@@ -265,7 +266,7 @@ func TestStandaloneJob_ExcludeFile_TriggersCancel(t *testing.T) {
 func TestStandaloneJob_UpdatePosterCrop(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie: &models.Movie{
 			ID: "UPC-001",
@@ -289,7 +290,7 @@ func TestStandaloneJob_UpdatePosterCrop(t *testing.T) {
 func TestStandaloneJob_UpdatePosterFromURL(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie: &models.Movie{
 			ID: "UPU-001",
@@ -590,91 +591,6 @@ func TestJobController_SetBatchCfg(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ResultTracker: Updater(), ReadStore()
-// (result_tracker.go lines 56, 62 — 0% coverage)
-// ---------------------------------------------------------------------------
-
-func TestResultTracker_Updater(t *testing.T) {
-	rt := NewResultTracker(2, []string{"f1.mp4", "f2.mp4"})
-	updater := rt.Updater()
-	require.NotNil(t, updater)
-	assert.Same(t, rt.resultUpdater, updater)
-}
-
-func TestResultTracker_ReadStore(t *testing.T) {
-	rt := NewResultTracker(2, []string{"f1.mp4", "f2.mp4"})
-	rs := rt.ReadStore()
-	require.NotNil(t, rs)
-	assert.Same(t, rt.resultReadStore, rs)
-}
-
-// ---------------------------------------------------------------------------
-// resultReadStore: CloneResults(), SnapshotForStatus()
-// (result_read_store.go lines 135, 302 — 0% coverage)
-// ---------------------------------------------------------------------------
-
-func TestResultReadStore_CloneResults(t *testing.T) {
-	rt := NewResultTracker(1, []string{"f1.mp4"})
-	rt.UpdateFileResult("f1.mp4", &MovieResult{
-		FileMatchInfo: models.FileMatchInfo{Path: "f1.mp4", MovieID: "CR-001"},
-		Status:        models.JobStatusCompleted,
-		Movie:         &models.Movie{ID: "CR-001"},
-	})
-
-	cloned := rt.CloneResults()
-	assert.Len(t, cloned, 1)
-	assert.NotSame(t, rt.Results["f1.mp4"], cloned["f1.mp4"])
-
-	cloned["f1.mp4"].Movie.ID = "MODIFIED"
-	assert.Equal(t, "CR-001", rt.Results["f1.mp4"].Movie.ID, "mutation of clone should not affect original")
-}
-
-func TestResultReadStore_CloneResults_NilEntries(t *testing.T) {
-	rt := newResultTrackerFromState(&resultTrackerState{
-		Results: map[string]*MovieResult{
-			"f1": {Status: models.JobStatusCompleted},
-			"f2": nil,
-		},
-	})
-	cloned := rt.CloneResults()
-	assert.Len(t, cloned, 1, "nil entries should be skipped")
-	_, hasF1 := cloned["f1"]
-	assert.True(t, hasF1)
-}
-
-func TestResultReadStore_SnapshotForStatus(t *testing.T) {
-	rt := NewResultTracker(2, []string{"f1.mp4", "f2.mp4"})
-	rt.UpdateFileResult("f1.mp4", &MovieResult{
-		FileMatchInfo: models.FileMatchInfo{Path: "f1.mp4", MovieID: "SFS-001"},
-		Status:        models.JobStatusCompleted,
-		Movie:         &models.Movie{ID: "SFS-001"},
-	})
-
-	resultSnap, progressSnap := rt.SnapshotForStatus()
-	assert.Len(t, resultSnap.Results, 1)
-	assert.Equal(t, 2, progressSnap.TotalFiles)
-	assert.Equal(t, 1, progressSnap.Completed)
-	assert.Greater(t, progressSnap.Progress, 0.0)
-}
-
-// ---------------------------------------------------------------------------
-// resultUpdater: SetFileMatchInfo
-// (result_updater.go line 147 — 0% coverage)
-// ---------------------------------------------------------------------------
-
-func TestResultUpdater_SetFileMatchInfo(t *testing.T) {
-	rt := NewResultTracker(1, []string{"f1.mp4"})
-	info := models.FileMatchInfo{MovieID: "SFMI-001", IsMultiPart: true, PartNumber: 2}
-	rt.SetFileMatchInfo("f1.mp4", info)
-
-	retrieved, ok := rt.GetFileMatchInfo("f1.mp4")
-	assert.True(t, ok)
-	assert.Equal(t, "SFMI-001", retrieved.MovieID)
-	assert.True(t, retrieved.IsMultiPart)
-	assert.Equal(t, 2, retrieved.PartNumber)
-}
-
-// ---------------------------------------------------------------------------
 // scrape_phase: trackScrapeResults (0% coverage — no-op seam)
 // ---------------------------------------------------------------------------
 
@@ -692,8 +608,8 @@ func TestTrackScrapeResults(t *testing.T) {
 func TestRescrapePhase_Rescrape_NoFilePath(t *testing.T) {
 	phase := NewRescrapePhase()
 	inputs := rescrapePhaseInputs{
-		ResultMap: NewResultTracker(0, nil),
-		Finder:    NewResultTracker(0, nil),
+		ResultMap: resultstore.New(0, nil),
+		Finder:    resultstore.New(0, nil),
 	}
 
 	cmd := RescrapeCmd{MovieID: "NFP-001"}
@@ -703,7 +619,7 @@ func TestRescrapePhase_Rescrape_NoFilePath(t *testing.T) {
 
 func TestRescrapePhase_Rescrape_WithManualSearchURL(t *testing.T) {
 	phase := NewRescrapePhase()
-	rt := NewResultTracker(1, []string{"f1.mp4"})
+	rt := resultstore.New(1, []string{"f1.mp4"})
 	inputs := rescrapePhaseInputs{
 		ResultMap: rt,
 		Finder:    rt,
@@ -722,7 +638,7 @@ func TestRescrapePhase_Rescrape_WithManualSearchURL(t *testing.T) {
 
 func TestRescrapePhase_Rescrape_WithManualSearchNonURL(t *testing.T) {
 	phase := NewRescrapePhase()
-	rt := NewResultTracker(1, []string{"f1.mp4"})
+	rt := resultstore.New(1, []string{"f1.mp4"})
 	inputs := rescrapePhaseInputs{
 		ResultMap: rt,
 		Finder:    rt,
@@ -741,7 +657,7 @@ func TestRescrapePhase_Rescrape_WithManualSearchNonURL(t *testing.T) {
 
 func TestRescrapePhase_Rescrape_SelectedScrapers(t *testing.T) {
 	phase := NewRescrapePhase()
-	rt := NewResultTracker(1, []string{"f1.mp4"})
+	rt := resultstore.New(1, []string{"f1.mp4"})
 	inputs := rescrapePhaseInputs{
 		ResultMap: rt,
 		Finder:    rt,
@@ -760,10 +676,10 @@ func TestRescrapePhase_Rescrape_SelectedScrapers(t *testing.T) {
 
 func TestReplaceRescrapeResult_WithProvenance(t *testing.T) {
 	outcome := &RescrapeResult{Status: models.RescrapeStatusSuccess}
-	movieResult := &MovieResult{
+	movieResult := &resultstore.MovieResult{
 		Movie: &models.Movie{ID: "PRR-001", Title: "Test"},
 	}
-	prov := &ProvenanceData{
+	prov := &resultstore.ProvenanceData{
 		FieldSources:   map[string]string{"title": "r18dev"},
 		ActressSources: map[string]string{"actress_0": "dmm"},
 	}
@@ -778,7 +694,7 @@ func TestReplaceRescrapeResult_WithProvenance(t *testing.T) {
 
 func TestReplaceRescrapeResult_WithoutProvenance(t *testing.T) {
 	outcome := &RescrapeResult{Status: models.RescrapeStatusSuccess}
-	movieResult := &MovieResult{
+	movieResult := &resultstore.MovieResult{
 		Movie: &models.Movie{ID: "PRR-002", Title: "Test No Prov"},
 	}
 
@@ -789,97 +705,6 @@ func TestReplaceRescrapeResult_WithoutProvenance(t *testing.T) {
 	assert.Nil(t, outcome.FieldSources)
 	assert.Nil(t, outcome.ActressSources)
 }
-
-// ---------------------------------------------------------------------------
-// result_tracker_state: stateUpdateProgressFromCounters with TotalFiles=0
-// stateLookupFilePathForResultIDLocked with nil resultIDIndex
-// (result_tracker_state.go — low coverage)
-// ---------------------------------------------------------------------------
-
-func TestStateUpdateProgressFromCounters_ZeroTotal(t *testing.T) {
-	s := &resultTrackerState{TotalFiles: 0, Completed: 0, Failed: 0}
-	stateUpdateProgressFromCounters(s)
-	assert.Equal(t, 100.0, s.Progress)
-}
-
-func TestStateUpdateProgressFromCounters_NonZeroTotal(t *testing.T) {
-	s := &resultTrackerState{TotalFiles: 10, Completed: 3, Failed: 2}
-	stateUpdateProgressFromCounters(s)
-	assert.InDelta(t, 50.0, s.Progress, 0.1)
-}
-
-func TestStateLookupFilePathForResultIDLocked_NilIndex(t *testing.T) {
-	s := &resultTrackerState{resultIDIndex: nil}
-	fp, ok := stateLookupFilePathForResultIDLocked(s, "some-id")
-	assert.False(t, ok)
-	assert.Empty(t, fp)
-}
-
-func TestStateLookupFilePathForResultIDLocked_Found(t *testing.T) {
-	s := &resultTrackerState{
-		resultIDIndex: map[string]string{"result-1": "file1.mp4"},
-	}
-	fp, ok := stateLookupFilePathForResultIDLocked(s, "result-1")
-	assert.True(t, ok)
-	assert.Equal(t, "file1.mp4", fp)
-}
-
-// ---------------------------------------------------------------------------
-// resultReadStore: IsGone without goneChecker
-// (result_read_store.go:45 — 66.7% coverage)
-// ---------------------------------------------------------------------------
-
-func TestResultReadStore_IsGone_NoChecker(t *testing.T) {
-	rt := NewResultTracker(0, nil)
-	assert.False(t, rt.IsGone())
-}
-
-func TestResultReadStore_IsGone_WithChecker(t *testing.T) {
-	rt := NewResultTracker(0, nil)
-	rt.goneChecker = func() bool { return true }
-	assert.True(t, rt.IsGone())
-}
-
-// ---------------------------------------------------------------------------
-// resultReadStore: GetFileResultByResultID
-// (result_read_store.go:284 — 62.5% coverage)
-// ---------------------------------------------------------------------------
-
-func TestResultReadStore_GetFileResultByResultID_Found(t *testing.T) {
-	rt := NewResultTracker(1, []string{"f1.mp4"})
-	rt.UpdateFileResult("f1.mp4", &MovieResult{
-		FileMatchInfo: models.FileMatchInfo{Path: "f1.mp4", MovieID: "GFR-001"},
-		Status:        models.JobStatusCompleted,
-		Movie:         &models.Movie{ID: "GFR-001"},
-	})
-
-	var resultID string
-	for _, r := range rt.Results {
-		if r != nil && r.ResultID != "" {
-			resultID = r.ResultID
-			break
-		}
-	}
-	if resultID == "" {
-		t.Skip("ResultID not set by UpdateFileResult")
-	}
-
-	mr, filePath, ok := rt.GetFileResultByResultID(resultID)
-	require.True(t, ok)
-	assert.Equal(t, "f1.mp4", filePath)
-	assert.Equal(t, "f1.mp4", mr.FileMatchInfo.Path)
-}
-
-func TestResultReadStore_GetFileResultByResultID_NotFound(t *testing.T) {
-	rt := NewResultTracker(0, nil)
-	_, _, ok := rt.GetFileResultByResultID("nonexistent-id")
-	assert.False(t, ok)
-}
-
-// ---------------------------------------------------------------------------
-// TempDirCleaner: CleanJobTempDir, StartStaleTempCleanup
-// (temp_dir_cleaner.go — low coverage)
-// ---------------------------------------------------------------------------
 
 func TestTempDirCleaner_CleanJobTempDir_InvalidJobID(t *testing.T) {
 	cleaner := NewTempDirCleaner(nil, "/tmp", nil)

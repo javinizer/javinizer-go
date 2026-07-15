@@ -9,6 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,9 +46,9 @@ func (s *stubRescrapeWorkflow) ScanAndMatch(_ context.Context, _ workflow.ScanAn
 	return nil, nil
 }
 
-// stubResultMap implements ResultMapAccessor for testing CompleteRescrape.
+// stubResultMap implements resultstore.ResultMapAccessor for testing CompleteRescrape.
 type stubResultMap struct {
-	results   map[string]*MovieResult
+	results   map[string]*resultstore.MovieResult
 	matchInfo map[string]models.FileMatchInfo
 	gone      bool
 	commitErr error
@@ -55,9 +56,11 @@ type stubResultMap struct {
 	committed []string // tracks CommitResult calls
 }
 
+var _ resultstore.ResultMapAccessor = (*stubResultMap)(nil)
+
 func newStubResultMap() *stubResultMap {
 	return &stubResultMap{
-		results:   make(map[string]*MovieResult),
+		results:   make(map[string]*resultstore.MovieResult),
 		matchInfo: make(map[string]models.FileMatchInfo),
 	}
 }
@@ -90,7 +93,7 @@ func (s *stubResultMap) GetRevision(filePath string) uint64 {
 	return 0
 }
 
-func (s *stubResultMap) CommitResult(filePath string, result *MovieResult, expectedRevision uint64) error {
+func (s *stubResultMap) CommitResult(filePath string, result *resultstore.MovieResult, expectedRevision uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.commitErr != nil {
@@ -133,7 +136,7 @@ func (s *stubResultMap) getCommitted() []string {
 	return append([]string{}, s.committed...)
 }
 
-func (s *stubResultMap) GetMovieResult(filePath string) (*MovieResult, error) {
+func (s *stubResultMap) GetMovieResult(filePath string) (*resultstore.MovieResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.results[filePath]
@@ -153,8 +156,8 @@ func (s *stubResultMap) CloneFileMatchInfo() map[string]models.FileMatchInfo {
 	return clone
 }
 
-func (s *stubResultMap) SnapshotData() ResultSnapshot {
-	return ResultSnapshot{}
+func (s *stubResultMap) SnapshotData() resultstore.ResultSnapshot {
+	return resultstore.ResultSnapshot{}
 }
 
 func (s *stubResultMap) IsAllExcluded() bool { return false }
@@ -213,7 +216,7 @@ func TestRescrapePhase_Rescrape_FailedStatusPropagatesVerboseError(t *testing.T)
 			Message: verboseMsg,
 		},
 	}
-	rt := NewResultTracker(1, []string{"f1.mp4"})
+	rt := resultstore.New(1, []string{"f1.mp4"})
 	inputs := rescrapePhaseInputs{
 		WF:        wf,
 		ResultMap: rt,
@@ -236,7 +239,7 @@ func TestRescrapePhase_Rescrape_FailedStatusPropagatesVerboseError(t *testing.T)
 func TestRescrapePhase_Rescrape_BackfillsNameAndExtensionOnMapMiss(t *testing.T) {
 	// Regression: rescrape_phase.go previously constructed a partial
 	// `models.FileMatchInfo{Path: lookup.FilePath}` for the post-rescrape
-	// MovieResult — missing Name + Extension. CompleteRescrape.CommitResult
+	// resultstore.MovieResult — missing Name + Extension. CompleteRescrape.CommitResult
 	// restores from the tracker when the tracker has an entry, but on a
 	// tracker map-miss (nil map or path-normalization mismatch) the partial
 	// struct persisted, leaving the subsequent organize preview with empty
@@ -247,11 +250,11 @@ func TestRescrapePhase_Rescrape_BackfillsNameAndExtensionOnMapMiss(t *testing.T)
 	wf := &stubRescrapeWorkflow{
 		scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "ABF-346"}},
 	}
-	rt := NewResultTracker(1, []string{"f1.mp4"})
+	rt := resultstore.New(1, []string{"f1.mp4"})
 	// Empty tracker — file is registered so CommitResult runs, but the
 	// FileMatchInfo map has no entry for this path. CommitResult's restore
 	// guard `if info, ok := ru.FileMatchInfo[filePath]; ok` returns false,
-	// so the partial fmi persists into the stored MovieResult.
+	// so the partial fmi persists into the stored resultstore.MovieResult.
 	inputs := rescrapePhaseInputs{
 		WF:        wf,
 		ResultMap: rt,
@@ -268,7 +271,7 @@ func TestRescrapePhase_Rescrape_BackfillsNameAndExtensionOnMapMiss(t *testing.T)
 
 	// Tracker's FileMatchInfo map misses this path (map-miss scenario). The
 	// fallback fmi from the rescrape phase is what persists into the stored
-	// MovieResult. Read it back via Results and verify Name + Extension were
+	// resultstore.MovieResult. Read it back via Results and verify Name + Extension were
 	// backfilled (i.e. the fallback wasn't just {Path: lookup.FilePath}).
 	results := rt.GetMovieResultsForMovieID("ABF-346")
 	require.NotEmpty(t, results)
@@ -293,7 +296,7 @@ func TestRescrapePhase_ScrapeSingle_NilWorkflow(t *testing.T) {
 
 func TestRescrapePhase_CompleteRescrape_Success(t *testing.T) {
 	rm := newStubResultMap()
-	rm.results["/source/IPX-777.mp4"] = &MovieResult{
+	rm.results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Revision:      1,
@@ -303,7 +306,7 @@ func TestRescrapePhase_CompleteRescrape_Success(t *testing.T) {
 	inputs := makeRescrapeInputs(nil)
 	inputs.ResultMap = rm
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-778"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-778"},
@@ -322,7 +325,7 @@ func TestRescrapePhase_CompleteRescrape_Success(t *testing.T) {
 
 func TestRescrapePhase_CompleteRescrape_Conflict(t *testing.T) {
 	rm := newStubResultMap()
-	rm.results["/source/IPX-777.mp4"] = &MovieResult{
+	rm.results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Revision:      5, // Revision is 5, but we'll pass 1 as capturedRevision
@@ -332,7 +335,7 @@ func TestRescrapePhase_CompleteRescrape_Conflict(t *testing.T) {
 	inputs := makeRescrapeInputs(nil)
 	inputs.ResultMap = rm
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-778"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-778"},
@@ -352,7 +355,7 @@ func TestRescrapePhase_CompleteRescrape_JobGone(t *testing.T) {
 	inputs := makeRescrapeInputs(nil)
 	inputs.ResultMap = rm
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-778"},
 		Status:        models.JobStatusCompleted,
 	}
@@ -366,7 +369,7 @@ func TestRescrapePhase_CompleteRescrape_JobGone(t *testing.T) {
 
 func TestRescrapePhase_CompleteRescrape_MultipartMetadata(t *testing.T) {
 	rm := newStubResultMap()
-	rm.results["/source/IPX-777-pt1.mp4"] = &MovieResult{
+	rm.results["/source/IPX-777-pt1.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777-pt1.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Revision:      1,
@@ -382,7 +385,7 @@ func TestRescrapePhase_CompleteRescrape_MultipartMetadata(t *testing.T) {
 	inputs := makeRescrapeInputs(nil)
 	inputs.ResultMap = rm
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777-pt1.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
@@ -403,7 +406,7 @@ func TestRescrapePhase_CompleteRescrape_MultipartMetadata(t *testing.T) {
 
 func TestRescrapePhase_CompleteRescrape_SameMovieID(t *testing.T) {
 	rm := newStubResultMap()
-	rm.results["/source/IPX-777.mp4"] = &MovieResult{
+	rm.results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Revision:      1,
@@ -413,7 +416,7 @@ func TestRescrapePhase_CompleteRescrape_SameMovieID(t *testing.T) {
 	inputs := makeRescrapeInputs(nil)
 	inputs.ResultMap = rm
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"}, // Same movie ID
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
@@ -428,7 +431,7 @@ func TestRescrapePhase_CompleteRescrape_SameMovieID(t *testing.T) {
 
 func TestRescrapePhase_CompleteRescrape_CommitResultError(t *testing.T) {
 	rm := newStubResultMap()
-	rm.results["/source/IPX-777.mp4"] = &MovieResult{
+	rm.results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Revision:      1,
@@ -439,7 +442,7 @@ func TestRescrapePhase_CompleteRescrape_CommitResultError(t *testing.T) {
 	inputs := makeRescrapeInputs(nil)
 	inputs.ResultMap = rm
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-778"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-778"},
@@ -465,7 +468,7 @@ func TestRescrapePhase_Rescrape_MergeEnabledNoExistingEstablishesBaseline(t *tes
 	wf := &stubRescrapeWorkflow{
 		scrapeResult: &scrape.ScrapeResult{Movie: movie},
 	}
-	rt := NewResultTracker(1, []string{"f1.mp4"})
+	rt := resultstore.New(1, []string{"f1.mp4"})
 	inputs := rescrapePhaseInputs{
 		WF:        wf,
 		ResultMap: rt,

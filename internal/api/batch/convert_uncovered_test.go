@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,14 +19,14 @@ func TestMovieResultToResponse_NilInput(t *testing.T) {
 
 func TestMovieResultToResponse_WithProvenance(t *testing.T) {
 	now := time.Now()
-	mr := &worker.MovieResult{
+	mr := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/test/movie.mp4"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001"},
 		StartedAt:     now,
 		EndedAt:       &now,
 	}
-	prov := &worker.ProvenanceData{
+	prov := &resultstore.ProvenanceData{
 		FieldSources:   map[string]string{"title": "r18dev"},
 		ActressSources: map[string]string{"actress1": "dmm"},
 	}
@@ -39,7 +40,7 @@ func TestMovieResultToResponse_WithProvenance(t *testing.T) {
 }
 
 func TestMovieResultToResponse_WithoutProvenance(t *testing.T) {
-	mr := &worker.MovieResult{
+	mr := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/test/movie.mp4"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-002"},
@@ -59,13 +60,13 @@ func TestMovieResultToSlimResponse_NilInput(t *testing.T) {
 
 func TestMovieResultToSlimResponse_WithProvenance(t *testing.T) {
 	now := time.Now()
-	mr := &worker.MovieResult{
+	mr := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/test/movie.mp4"},
 		Status:        models.JobStatusCompleted,
 		StartedAt:     now,
 		EndedAt:       &now,
 	}
-	prov := &worker.ProvenanceData{
+	prov := &resultstore.ProvenanceData{
 		FieldSources:   map[string]string{"title": "r18dev"},
 		ActressSources: map[string]string{"actress1": "dmm"},
 	}
@@ -175,7 +176,7 @@ func TestBuildBatchJobResponse_NilProvenance(t *testing.T) {
 }
 
 func TestMovieResultToResponse_WithError(t *testing.T) {
-	mr := &worker.MovieResult{
+	mr := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/test/fail.mp4"},
 		Status:        models.JobStatusFailed,
 		Error:         "scrape failed: timeout",
@@ -190,7 +191,7 @@ func TestMovieResultToResponse_WithError(t *testing.T) {
 }
 
 func TestMovieResultToSlimResponse_WithoutProvenance(t *testing.T) {
-	mr := &worker.MovieResult{
+	mr := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/test/movie.mp4"},
 		Status:        models.JobStatusCompleted,
 		StartedAt:     time.Now(),

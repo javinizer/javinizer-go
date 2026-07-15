@@ -9,7 +9,7 @@ import (
 
 // TestParseJobResultsJSON_LegacyFormatWithNullEntry verifies that a null entry
 // in a legacy FileResult payload does not cause misrouting to the old
-// MovieResult parser. The old code broke on the first successfully-parsed map
+// resultstore.MovieResult parser. The old code broke on the first successfully-parsed map
 // value; a null unmarshals to a nil map (no error, no data_type key), which
 // would prematurely break and lose legacy "data" decoding.
 func TestParseJobResultsJSON_LegacyFormatWithNullEntry(t *testing.T) {
@@ -29,7 +29,7 @@ func TestParseJobResultsJSON_LegacyFormatWithNullEntry(t *testing.T) {
 	require.NoError(t, err)
 
 	// The null entry should be skipped, and the legacy "data" field should be
-	// decoded into Movie (proving legacy routing, not old-MovieResult routing).
+	// decoded into Movie (proving legacy routing, not old-resultstore.MovieResult routing).
 	r, ok := parsed.Results["/v/ABP-980.mp4"]
 	require.True(t, ok, "non-null legacy entry should be present")
 	require.NotNil(t, r.Movie, "legacy 'data' field should be decoded into Movie")
@@ -59,7 +59,7 @@ func TestParseJobResultsJSON_LegacyNilEntryNoPanic(t *testing.T) {
 }
 
 // TestParseJobResultsJSON_NullEntryInOldFormat verifies null entries in the
-// old MovieResult format are also skipped (pre-existing guard).
+// old resultstore.MovieResult format are also skipped (pre-existing guard).
 func TestParseJobResultsJSON_NullEntryInOldFormat(t *testing.T) {
 	old := `{
 		"/v/NULL.mp4": null,

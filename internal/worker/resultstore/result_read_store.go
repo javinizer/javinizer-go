@@ -1,4 +1,4 @@
-package worker
+package resultstore
 
 import (
 	"fmt"
@@ -41,9 +41,15 @@ type resultReadStore struct {
 // --- ResultMapAccessor read methods ---
 
 // IsGone returns true if the job is deleted or transitioned to a terminal state.
+// The goneChecker callback is read under RLock and invoked after releasing the lock
+// to avoid holding results.mu while the callback may acquire lifecycle.mu
+// (lock ordering: lifecycle.mu -> results.mu must not be reversed).
 func (rr *resultReadStore) IsGone() bool {
-	if rr.goneChecker != nil {
-		return rr.goneChecker()
+	rr.mu.RLock()
+	fn := rr.goneChecker
+	rr.mu.RUnlock()
+	if fn != nil {
+		return fn()
 	}
 	return false
 }
@@ -316,12 +322,6 @@ func (rr *resultReadStore) progressSnapshotLocked() ProgressSnapshot {
 		Failed:     rr.Failed,
 		Progress:   rr.Progress,
 	}
-}
-
-// snapshotForStatusLocked returns both result data and progress counters.
-// The caller MUST be holding rr.mu when calling this method.
-func (rr *resultReadStore) snapshotForStatusLocked() (ResultSnapshot, ProgressSnapshot) {
-	return rr.snapshotDataLocked(), rr.progressSnapshotLocked()
 }
 
 // SnapshotData returns a point-in-time clone of all result data.

@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
 // TestMovieResultToBatchFileResultDriftGuard ensures that every exported field
-// on worker.MovieResult is either mapped in movieResultToResponse or explicitly
+// on resultstore.MovieResult is either mapped in movieResultToResponse or explicitly
 // documented as intentionally unmapped. If a new field is added to MovieResult,
 // this test will fail until the developer either:
 //
@@ -20,7 +20,7 @@ import (
 // This prevents the contracts types from silently drifting away from the source
 // type when fields are added to MovieResult.
 func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
-	mrType := reflect.TypeOf(worker.MovieResult{})
+	mrType := reflect.TypeOf(resultstore.MovieResult{})
 	bfrType := reflect.TypeOf(contracts.BatchFileResult{})
 	bfrSlimType := reflect.TypeOf(contracts.BatchFileResultSlim{})
 
@@ -43,8 +43,8 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 	// Fields on BatchFileResult that come from ProvenanceData (injected via the
 	// prov parameter), not from MovieResult directly.
 	provenanceFields := map[string]string{
-		"FieldSources":   "from worker.ProvenanceData, not MovieResult",
-		"ActressSources": "from worker.ProvenanceData, not MovieResult",
+		"FieldSources":   "from resultstore.ProvenanceData, not MovieResult",
+		"ActressSources": "from resultstore.ProvenanceData, not MovieResult",
 		"FilePath":       "flattened from MovieResult.FileMatchInfo.Path",
 		"MovieID":        "flattened from MovieResult.FileMatchInfo.MovieID",
 		"IsMultiPart":    "flattened from MovieResult.FileMatchInfo.IsMultiPart",

@@ -14,7 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -97,7 +97,7 @@ func TestRescrapeBatchMovie_FactoryUnavailable_503(t *testing.T) {
 
 	deps := createTestDeps(t, badRegexConfig(), "")
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-	result := &worker.MovieResult{
+	result := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Original Title"},

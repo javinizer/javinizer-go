@@ -21,6 +21,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -233,7 +234,7 @@ func TestUpdateBatchMovie(t *testing.T) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
 
 				// Simulate a completed scrape with movie data
-				result := &worker.MovieResult{
+				result := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Original Title"},
@@ -269,7 +270,7 @@ func TestUpdateBatchMovie(t *testing.T) {
 			name: "movie not found in job",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/path/to/ABC-123.mp4"})
-				result := &worker.MovieResult{
+				result := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABC-123.mp4", MovieID: "ABC-123"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABC-123"},
@@ -350,7 +351,7 @@ func TestUpdateBatchMoviePosterCrop(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-	setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Test Movie"},
@@ -593,7 +594,7 @@ func TestPreviewOrganize(t *testing.T) {
 			name: "preview successfully",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				result := &worker.MovieResult{
+				result := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie: &models.Movie{
@@ -642,7 +643,7 @@ func TestPreviewOrganize(t *testing.T) {
 			name: "preview invalid link mode falls back to default",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/path/to/file.mp4"})
-				result := &worker.MovieResult{
+				result := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -662,7 +663,7 @@ func TestPreviewOrganize(t *testing.T) {
 			name: "preview with resolved content ID (ABP-071 → ABP-071DOD)",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/path/to/ABP-071.mp4"})
-				result := &worker.MovieResult{
+				result := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABP-071.mp4", MovieID: "ABP-071"}, // Original matched ID from filename
 					Status:        models.JobStatusCompleted,
 					Movie: &models.Movie{
@@ -689,7 +690,7 @@ func TestPreviewOrganize(t *testing.T) {
 			name: "preview with movie override uses provided movie instead of stored data",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				result := &worker.MovieResult{
+				result := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie: &models.Movie{
@@ -726,7 +727,7 @@ func TestPreviewOrganize(t *testing.T) {
 				}
 
 				// Add pt2 first (simulates random map iteration order)
-				result2 := &worker.MovieResult{
+				result2 := &resultstore.MovieResult{
 					ResultID:      "STSK-074-pt2",
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/STSK-074-pt2.mp4", MovieID: "STSK-074", IsMultiPart: true, PartNumber: 2, PartSuffix: "-pt2"},
 					Status:        models.JobStatusCompleted,
@@ -736,7 +737,7 @@ func TestPreviewOrganize(t *testing.T) {
 				setJobResult(job, "/path/to/STSK-074-pt2.mp4", result2)
 
 				// Add pt1 second
-				result1 := &worker.MovieResult{
+				result1 := &resultstore.MovieResult{
 					ResultID:      "STSK-074-pt1",
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/STSK-074-pt1.mp4", MovieID: "STSK-074", IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"},
 					Status:        models.JobStatusCompleted,
@@ -991,7 +992,7 @@ func TestRescrapeBatchMovie(t *testing.T) {
 			name: "rescrape with selected scrapers - scraping fails with mock",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/test/IPX-535.mp4"})
-				setJobResult(job, "/test/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/test/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 				})
@@ -1007,7 +1008,7 @@ func TestRescrapeBatchMovie(t *testing.T) {
 			name: "rescrape with manual search - scraping fails with mock",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/test/ABC-123.mp4"})
-				setJobResult(job, "/test/ABC-123.mp4", &worker.MovieResult{
+				setJobResult(job, "/test/ABC-123.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{MovieID: "ABC-123"},
 					Status:        models.JobStatusCompleted,
 				})
@@ -1023,7 +1024,7 @@ func TestRescrapeBatchMovie(t *testing.T) {
 			name: "rescrape with valid preset",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/test/TEST-001.mp4"})
-				setJobResult(job, "/test/TEST-001.mp4", &worker.MovieResult{
+				setJobResult(job, "/test/TEST-001.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{MovieID: "TEST-001"},
 					Status:        models.JobStatusCompleted,
 				})
@@ -1039,7 +1040,7 @@ func TestRescrapeBatchMovie(t *testing.T) {
 			name: "invalid preset name rejected at API boundary",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/test/TEST-002.mp4"})
-				setJobResult(job, "/test/TEST-002.mp4", &worker.MovieResult{
+				setJobResult(job, "/test/TEST-002.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{MovieID: "TEST-002"},
 					Status:        models.JobStatusCompleted,
 				})
@@ -1082,7 +1083,7 @@ func TestRescrapeBatchMovie(t *testing.T) {
 			name: "result not found in job",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/test/file.mp4"})
-				setJobResult(job, "/test/file.mp4", &worker.MovieResult{
+				setJobResult(job, "/test/file.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{MovieID: "DIFFERENT-ID"},
 					Status:        models.JobStatusCompleted,
 				})
@@ -1097,7 +1098,7 @@ func TestRescrapeBatchMovie(t *testing.T) {
 			name: "rescrape with DMM URL - extracts content ID and auto-selects dmm scraper",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/test/kitaike429.mp4"})
-				setJobResult(job, "/test/kitaike429.mp4", &worker.MovieResult{
+				setJobResult(job, "/test/kitaike429.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{MovieID: "KITAIKE-429"},
 					Status:        models.JobStatusCompleted,
 				})
@@ -1168,7 +1169,7 @@ func TestExcludeBatchMovie(t *testing.T) {
 			name: "exclude existing movie by MovieID",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test Movie"},
@@ -1182,7 +1183,7 @@ func TestExcludeBatchMovie(t *testing.T) {
 			name: "exclude existing movie by resultID when Movie.ID differs from MovieID",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/path/to/ABP-071.mp4"})
-				setJobResult(job, "/path/to/ABP-071.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/ABP-071.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABP-071.mp4", MovieID: "ABP-071"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABP-071DOD", Title: "Test Movie"}, // Movie.ID differs from MovieID
@@ -1200,13 +1201,13 @@ func TestExcludeBatchMovie(t *testing.T) {
 					"/path/to/IPX-535-CD2.mp4",
 				})
 				// Both parts have same MovieID
-				setJobResult(job, "/path/to/IPX-535-CD1.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535-CD1.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535-CD1.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535"},
 					StartedAt:     time.Now(),
 				})
-				setJobResult(job, "/path/to/IPX-535-CD2.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535-CD2.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535-CD2.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535"},
@@ -1227,7 +1228,7 @@ func TestExcludeBatchMovie(t *testing.T) {
 			name: "movie not found in job",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/path/to/ABC-123.mp4"})
-				setJobResult(job, "/path/to/ABC-123.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/ABC-123.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABC-123.mp4", MovieID: "ABC-123"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABC-123"},
@@ -1270,13 +1271,13 @@ func TestBatchExcludeMovies(t *testing.T) {
 			name: "exclude multiple movies at once",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4", "/path/to/ABC-123.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test Movie 1"},
 					StartedAt:     time.Now(),
 				})
-				setJobResult(job, "/path/to/ABC-123.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/ABC-123.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABC-123.mp4", MovieID: "ABC-123"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABC-123", Title: "Test Movie 2"},
@@ -1297,7 +1298,7 @@ func TestBatchExcludeMovies(t *testing.T) {
 			name: "exclude mix of existing and non-existing movies",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test Movie"},
@@ -1317,7 +1318,7 @@ func TestBatchExcludeMovies(t *testing.T) {
 			name: "exclude already-excluded movie is idempotent",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test Movie"},
@@ -1344,7 +1345,7 @@ func TestBatchExcludeMovies(t *testing.T) {
 			name: "empty movie_ids returns 400",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test Movie"},
@@ -1531,7 +1532,7 @@ func TestOrganizeJobRetryWorkflow(t *testing.T) {
 			setupJob: func(jq worker.JobStoreInterface, cfg *config.Config) *worker.BatchJob {
 				job := jq.CreateJobBatch([]string{"/test/file.mp4"})
 				movie := &models.Movie{ID: "TEST-001", Title: "Test Movie"}
-				result := &worker.MovieResult{
+				result := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/test/file.mp4", MovieID: "TEST-001"},
 					Status:        models.JobStatusCompleted,
 					Movie:         movie,
@@ -1558,7 +1559,7 @@ func TestOrganizeJobRetryWorkflow(t *testing.T) {
 			setupJob: func(jq worker.JobStoreInterface, cfg *config.Config) *worker.BatchJob {
 				job := jq.CreateJobBatch([]string{"/test/file.mp4"})
 				movie := &models.Movie{ID: "TEST-002", Title: "Test Movie"}
-				result := &worker.MovieResult{
+				result := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/test/file.mp4", MovieID: "TEST-002"},
 					Status:        models.JobStatusCompleted,
 					Movie:         movie,
@@ -1586,7 +1587,7 @@ func TestOrganizeJobRetryWorkflow(t *testing.T) {
 			setupJob: func(jq worker.JobStoreInterface, cfg *config.Config) *worker.BatchJob {
 				job := jq.CreateJobBatch([]string{"/test/file1.mp4", "/test/file2.mp4"})
 				movie1 := &models.Movie{ID: "TEST-003", Title: "Test Movie 1"}
-				result1 := &worker.MovieResult{
+				result1 := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/test/file1.mp4", MovieID: "TEST-003"},
 					Status:        models.JobStatusCompleted,
 					Movie:         movie1,
@@ -1595,7 +1596,7 @@ func TestOrganizeJobRetryWorkflow(t *testing.T) {
 				setJobResult(job, "/test/file1.mp4", result1)
 
 				// File 2 failed during scraping - won't be organized
-				result2 := &worker.MovieResult{
+				result2 := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/test/file2.mp4", MovieID: "TEST-004"},
 					Status:        models.JobStatusFailed,
 					Error:         "Scraping failed",
@@ -1624,7 +1625,7 @@ func TestOrganizeJobRetryWorkflow(t *testing.T) {
 				job := jq.CreateJobBatch([]string{"/test/file1.mp4", "/test/file2.mp4"})
 
 				// Both files failed during scraping - nothing to organize
-				result1 := &worker.MovieResult{
+				result1 := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/test/file1.mp4"},
 					Status:        models.JobStatusFailed,
 					Error:         "Scraping failed",
@@ -1632,7 +1633,7 @@ func TestOrganizeJobRetryWorkflow(t *testing.T) {
 				}
 				setJobResult(job, "/test/file1.mp4", result1)
 
-				result2 := &worker.MovieResult{
+				result2 := &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/test/file2.mp4"},
 					Status:        models.JobStatusFailed,
 					Error:         "Scraping failed",
@@ -1790,7 +1791,7 @@ func TestJobStateMachineTransitions(t *testing.T) {
 
 		job := deps.JobStore.CreateJobBatch([]string{"/test/file.mp4"})
 		movie := &models.Movie{ID: "TEST-001", Title: "Test"}
-		result := &worker.MovieResult{
+		result := &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/test/file.mp4", MovieID: "TEST-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         movie,

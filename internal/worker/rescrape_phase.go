@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -19,7 +20,7 @@ import (
 // commit + cleanup). ScrapeSingle and CompleteRescrape remain for backward compat.
 type RescrapePhase interface {
 	ScrapeSingle(ctx context.Context, inputs rescrapePhaseInputs, filePath string, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error)
-	CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error)
+	CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error)
 	// Rescrape performs the full rescrape lifecycle: file lookup, scrape, poster generation,
 	// result commit, and cleanup.
 	Rescrape(ctx context.Context, inputs rescrapePhaseInputs, cmd RescrapeCmd) (*RescrapeResult, error)
@@ -63,7 +64,7 @@ func (p *rescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePhaseIn
 	return result, meta, scrapeErr
 }
 
-func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 	if inputs.ResultMap.IsGone() {
 		return &RescrapeResult{Status: models.RescrapeStatusGone}, nil
 	}
@@ -128,14 +129,14 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 // enabling automatic rollback on failure via withRescrapeStatus.
 type rescrapeLifecycle struct {
 	inputs rescrapePhaseInputs
-	lookup *FileLookupResult
+	lookup *resultstore.FileLookupResult
 }
 
 // withRescrapeStatus executes fn within a rescrape status-transition wrapper.
 // If fn returns an error, or the outcome is Gone/Conflict/Failed, poster
 // cleanup is performed automatically (rollback). On success, orphaned poster
 // paths are cleaned up instead.
-func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *MovieResult, error)) (*RescrapeResult, error) {
+func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resultstore.MovieResult, error)) (*RescrapeResult, error) {
 	outcome, movieResult, err := fn()
 	cleanupMovie := func() *models.Movie {
 		if movieResult != nil {
@@ -166,7 +167,7 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *Movie
 // replaceRescrapeResult attaches provenance metadata and file path to the
 // rescrape outcome. Separated from the status-transition logic so that
 // withRescrapeStatus stays focused on cleanup/rollback.
-func replaceRescrapeResult(outcome *RescrapeResult, filePath string, movieResult *MovieResult, prov *ProvenanceData) {
+func replaceRescrapeResult(outcome *RescrapeResult, filePath string, movieResult *resultstore.MovieResult, prov *resultstore.ProvenanceData) {
 	if prov != nil {
 		outcome.Movie = movieResult.Movie
 		outcome.FieldSources = prov.FieldSources
@@ -209,7 +210,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	}
 
 	// File lookup
-	var lookup *FileLookupResult
+	var lookup *resultstore.FileLookupResult
 	if cmd.FilePath != "" {
 		var capturedRevision uint64
 		var oldMovieID string
@@ -220,7 +221,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 				oldMovieID = currentMovieID
 			}
 		}
-		lookup = &FileLookupResult{
+		lookup = &resultstore.FileLookupResult{
 			FilePath:         cmd.FilePath,
 			OldMovieID:       oldMovieID,
 			CapturedRevision: capturedRevision,
@@ -233,12 +234,12 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		}
 	}
 
-	var prov *ProvenanceData
-	var movieResult *MovieResult
+	var prov *resultstore.ProvenanceData
+	var movieResult *resultstore.MovieResult
 
 	lc := rescrapeLifecycle{inputs: inputs, lookup: lookup}
 
-	outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *MovieResult, error) {
+	outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
 		// Scrape
 		scrapeResult, meta, scrapeErr := p.ScrapeSingle(ctx, inputs, lookup.FilePath, scrapeCmd)
 		if scrapeErr != nil {

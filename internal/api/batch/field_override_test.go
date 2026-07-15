@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,14 +26,14 @@ func setupOverrideJob(t *testing.T) (*core.APIDeps, *worker.BatchJob, string) {
 	filePath := "/path/to/IPX-535.mp4"
 	job := deps.JobStore.CreateJobBatch([]string{filePath})
 	resultID := "IPX-535"
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		ResultID:      resultID,
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", ContentID: "IPX-535", Title: "Aggregated", Maker: "AggregatedMaker"},
 		StartedAt:     time.Now(),
 	})
-	job.ResultsWriter().SetProvenance(filePath, &worker.ProvenanceData{
+	job.ResultsWriter().SetProvenance(filePath, &resultstore.ProvenanceData{
 		FieldSources: map[string]string{"maker": "r18dev"},
 		ScraperResults: []*models.ScraperResult{
 			{Source: "r18dev", Maker: "R18Maker", Title: "R18Title"},
@@ -87,7 +88,7 @@ func TestGetBatchMovieSources_EmptyProvenance(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 	filePath := "/path/to/ABC-123.mp4"
 	job := deps.JobStore.CreateJobBatch([]string{filePath})
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		ResultID:      "ABC-123",
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "ABC-123"},
 		Status:        models.JobStatusCompleted,

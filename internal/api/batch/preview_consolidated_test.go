@@ -12,7 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -196,7 +196,7 @@ func TestPreviewOrganize_InPlaceModeAllowedDir(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -299,7 +299,7 @@ func TestPreviewOrganize_Miss2_MovieFromResults(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "From Results"},
@@ -349,13 +349,13 @@ func TestPreviewOrganize_Miss2_MultipartSort(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001-1.mp4", "/path/to/TEST-001-2.mp4"})
-	setJobResult(job, "/path/to/TEST-001-1.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001-1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001-1.mp4", MovieID: "TEST-001", PartNumber: 1},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test Part 1"},
 		StartedAt:     time.Now(),
 	})
-	setJobResult(job, "/path/to/TEST-001-2.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001-2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001-2.mp4", MovieID: "TEST-001", PartNumber: 2},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test Part 2"},
@@ -405,7 +405,7 @@ func TestPreviewOrganize_Miss2_NilMovieFromResultsNoOverride(t *testing.T) {
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/TEST-001.mp4"})
 	// Set a result with Movie nil — this should trigger the "movieData == nil" 404 path
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         nil,
@@ -577,7 +577,7 @@ func TestPreviewOrganize_MovieOverrideInRequest(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Original Title"},

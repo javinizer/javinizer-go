@@ -11,7 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -25,7 +25,7 @@ func TestGetBatchJob_IncludesCompletedAndEndedAt(t *testing.T) {
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-700.mp4"})
 	started := time.Now().UTC().Add(-2 * time.Minute)
 	ended := time.Now().UTC()
-	setJobResult(job, "/path/to/IPX-700.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-700.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-700.mp4", MovieID: "IPX-700"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-700", Title: "Done"},
@@ -161,7 +161,7 @@ func TestListBatchJobs_WithCompletedJob(t *testing.T) {
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-700.mp4"})
 	started := time.Now().UTC().Add(-2 * time.Minute)
 	ended := time.Now().UTC()
-	setJobResult(job, "/path/to/IPX-700.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-700.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-700.mp4", MovieID: "IPX-700"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-700", Title: "Done"},
@@ -230,7 +230,7 @@ func TestGetBatchJobFull_Success(t *testing.T) {
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-800.mp4"})
 	started := time.Now().UTC().Add(-1 * time.Minute)
 	ended := time.Now().UTC()
-	setJobResult(job, "/path/to/IPX-800.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-800.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-800.mp4", MovieID: "IPX-800"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-800", Title: "Full Test"},
@@ -280,7 +280,7 @@ func TestGetBatchJobFull_MultiPart(t *testing.T) {
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-900-1.mp4", "/path/to/IPX-900-2.mp4"})
 	started := time.Now().UTC()
-	setJobResult(job, "/path/to/IPX-900-1.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-900-1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-900-1.mp4", MovieID: "IPX-900", IsMultiPart: true, PartNumber: 1, PartSuffix: "A"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-900", Title: "Multi Part"},
@@ -314,7 +314,7 @@ func TestListBatchJobs_WithResults(t *testing.T) {
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-950.mp4"})
 	started := time.Now().UTC().Add(-1 * time.Minute)
 	ended := time.Now().UTC()
-	setJobResult(job, "/path/to/IPX-950.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-950.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-950.mp4", MovieID: "IPX-950"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-950", Title: "List Test"},
@@ -358,7 +358,7 @@ func TestListBatchJobs_IncludesPosterURLForThumbnails(t *testing.T) {
 	croppedURL := "/api/v1/temp/posters/job-thumb/IPX-THUMB.jpg?v=999"
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-THUMB.mp4"})
-	setJobResult(job, "/path/to/IPX-THUMB.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-THUMB.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-THUMB.mp4", MovieID: "IPX-THUMB"},
 		Status:        models.JobStatusCompleted,
 		StartedAt:     time.Now(),

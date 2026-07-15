@@ -11,7 +11,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,7 +63,7 @@ func TestProcessUpdateMode_PerFileLegacyNFOAndHistoryFailures(t *testing.T) {
 	}))
 	defer mediaServer.Close()
 
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-321"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -102,7 +102,7 @@ func TestProcessUpdateMode_MetadataFallbackFilename(t *testing.T) {
 	require.NoError(t, os.WriteFile(filePath, []byte("video"), 0o644))
 
 	job := deps.JobStore.CreateJobBatch([]string{filePath})
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: ""},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -135,7 +135,7 @@ func TestProcessUpdateMode_InvalidConditionalTemplateFallsBackToMovieID(t *testi
 	require.NoError(t, os.WriteFile(filePath, []byte("video"), 0o644))
 
 	job := deps.JobStore.CreateJobBatch([]string{filePath})
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-654"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{

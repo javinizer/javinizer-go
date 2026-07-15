@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,7 @@ import (
 // UpdatePosterFromURL persists the poster change via FindByID + Upsert.
 func TestUpdatePosterFromURL_DBSuccess(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie: &models.Movie{
 			ID: "ABC-001",
@@ -32,7 +33,7 @@ func TestUpdatePosterFromURL_DBSuccess(t *testing.T) {
 	})
 
 	movieRepo := mocks.NewMockMovieRepositoryInterface(t)
-	job.posterEditor = NewPosterEditor(job.resultIndex, job.results, movieRepo)
+	job.posterEditor = NewPosterEditor(job.results, job.results, movieRepo)
 
 	existingMovie := &models.Movie{
 		ID: "ABC-001",
@@ -62,7 +63,7 @@ func TestUpdatePosterFromURL_DBSuccess(t *testing.T) {
 // are logged but do not propagate to the caller (best-effort semantics).
 func TestUpdatePosterFromURL_DBUpsertError(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie: &models.Movie{
 			ID: "ABC-002",
@@ -77,7 +78,7 @@ func TestUpdatePosterFromURL_DBUpsertError(t *testing.T) {
 	})
 
 	movieRepo := mocks.NewMockMovieRepositoryInterface(t)
-	job.posterEditor = NewPosterEditor(job.resultIndex, job.results, movieRepo)
+	job.posterEditor = NewPosterEditor(job.results, job.results, movieRepo)
 
 	existingMovie := &models.Movie{
 		ID: "ABC-002",
@@ -103,7 +104,7 @@ func TestUpdatePosterFromURL_DBUpsertError(t *testing.T) {
 // are logged but do not propagate to the caller (best-effort semantics).
 func TestUpdatePosterFromURL_DBFindByIDError(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie: &models.Movie{
 			ID: "ABC-003",
@@ -118,7 +119,7 @@ func TestUpdatePosterFromURL_DBFindByIDError(t *testing.T) {
 	})
 
 	movieRepo := mocks.NewMockMovieRepositoryInterface(t)
-	job.posterEditor = NewPosterEditor(job.resultIndex, job.results, movieRepo)
+	job.posterEditor = NewPosterEditor(job.results, job.results, movieRepo)
 
 	movieRepo.EXPECT().FindByID(context.TODO(), "ABC-003").Return(nil, errors.New("not found"))
 
@@ -136,7 +137,7 @@ func TestUpdatePosterFromURL_DBFindByIDError(t *testing.T) {
 // returns nil without error, Upsert is not called (movie not in DB).
 func TestUpdatePosterFromURL_DBFindByIDReturnsNil(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie: &models.Movie{
 			ID: "ABC-004",
@@ -151,7 +152,7 @@ func TestUpdatePosterFromURL_DBFindByIDReturnsNil(t *testing.T) {
 	})
 
 	movieRepo := mocks.NewMockMovieRepositoryInterface(t)
-	job.posterEditor = NewPosterEditor(job.resultIndex, job.results, movieRepo)
+	job.posterEditor = NewPosterEditor(job.results, job.results, movieRepo)
 
 	// FindByID returns nil movie, no error — Upsert should NOT be called
 	movieRepo.EXPECT().FindByID(context.TODO(), "ABC-004").Return(nil, nil)
@@ -168,7 +169,7 @@ func TestUpdatePosterFromURL_DBFindByIDReturnsNil(t *testing.T) {
 // is nil, the DB persistence code path is entirely skipped.
 func TestUpdatePosterFromURL_NilMovieRepoSkipsDB(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie: &models.Movie{
 			ID: "ABC-005",

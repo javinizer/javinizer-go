@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -47,7 +48,7 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 	c.job.mu.RUnlock()
 
 	if cfg.FileMatchInfo != nil {
-		c.job.results.setFileMatchInfo(cfg.FileMatchInfo)
+		c.job.results.SetFileMatchInfoMap(cfg.FileMatchInfo)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -154,7 +155,7 @@ func (c *jobController) Rescrape(ctx context.Context, cmd RescrapeCmd) (*Rescrap
 	// crosses the phase/results boundary.
 	if outcome.Status == models.RescrapeStatusSuccess && outcome.FilePath != "" &&
 		(outcome.FieldSources != nil || outcome.ActressSources != nil || outcome.ScraperResults != nil) {
-		c.job.results.SetProvenance(outcome.FilePath, &ProvenanceData{
+		c.job.results.SetProvenance(outcome.FilePath, &resultstore.ProvenanceData{
 			FieldSources:   outcome.FieldSources,
 			ActressSources: outcome.ActressSources,
 			ScraperResults: outcome.ScraperResults,
@@ -234,7 +235,7 @@ func (c *jobController) setDepsFromConfig(cfg *JobConfig) {
 	}
 	if cfg.MovieRepo != nil {
 		c.job.deps.MovieRepo = cfg.MovieRepo
-		c.job.posterEditor = NewPosterEditor(c.job.resultIndex, c.job.results, cfg.MovieRepo)
+		c.job.posterEditor = NewPosterEditor(c.job.results, c.job.results, cfg.MovieRepo)
 	}
 	if cfg.ActressRepo != nil {
 		c.job.deps.ActressRepo = cfg.ActressRepo
@@ -337,11 +338,10 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 		Concurrency: newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, defaultMaxWorkers, defaultWorkerTimeout),
 		WF:          wf,
 		PosterGen:   pg,
-		ResultMap:   c.job.resultIndex,
+		ResultMap:   c.job.results,
 		Lifecycle:   c.job.lifecycle,
 		persister:   persistFunc(pfn),
-		Lookup:      c.job.resultIndex,
-		Finder:      c.job.resultIndex,
+		Finder:      c.job.results,
 		Fs:          c.job.fs,
 		TempDir:     tempDir,
 		FsCaseCache: c.job.fsCaseCache,

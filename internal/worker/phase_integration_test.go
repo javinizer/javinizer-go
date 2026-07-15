@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -93,7 +94,7 @@ func (w *integrationApplyWF) getApplyCalled() int {
 
 // TestIntegration_ScrapePhase_ThroughBatchJob verifies that BatchJob.StartScrape
 // correctly constructs scrapePhaseInputs and that the scrape phase runs end-to-end,
-// updating results back on the BatchJob via the ResultUpdater callback.
+// updating results back on the BatchJob via the resultstore.ResultUpdater callback.
 func TestIntegration_ScrapePhase_ThroughBatchJob(t *testing.T) {
 	wf := &integrationScrapeWF{
 		scrapeResult: &scrape.ScrapeResult{
@@ -115,7 +116,7 @@ func TestIntegration_ScrapePhase_ThroughBatchJob(t *testing.T) {
 	err = job.Controller().Wait()
 	require.NoError(t, err, "Wait should not return an error for successful scrape")
 
-	// Verify the result was written back to the BatchJob via ResultUpdater
+	// Verify the result was written back to the BatchJob via resultstore.ResultUpdater
 	result, err := job.results.GetMovieResult("/source/INT-001.mp4")
 	require.NoError(t, err, "Should find result for scraped file")
 	assert.Equal(t, "INT-001", result.FileMatchInfo.MovieID, "MovieID should match scraped result")
@@ -130,7 +131,7 @@ func TestIntegration_ScrapePhase_ThroughBatchJob(t *testing.T) {
 
 // TestIntegration_ApplyPhase_ThroughBatchJob verifies that BatchJob.StartApply
 // correctly constructs applyPhaseInputs and that the apply phase runs end-to-end,
-// updating results back on the BatchJob via the ResultUpdater callback.
+// updating results back on the BatchJob via the resultstore.ResultUpdater callback.
 func TestIntegration_ApplyPhase_ThroughBatchJob(t *testing.T) {
 	wf := &integrationApplyWF{
 		applyResult: &workflow.ApplyResult{
@@ -146,7 +147,7 @@ func TestIntegration_ApplyPhase_ThroughBatchJob(t *testing.T) {
 	})
 
 	// Pre-populate results as if scrape completed
-	job.results.UpdateFileResult("/source/INT-002.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/INT-002.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-002.mp4", MovieID: "INT-002"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-002", Title: "Test Movie"},
@@ -198,7 +199,7 @@ func TestIntegration_RescrapePhase_ThroughBatchJob(t *testing.T) {
 	})
 
 	// Pre-populate results as if scrape completed
-	job.results.UpdateFileResult("/source/INT-003.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/INT-003.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-003.mp4", MovieID: "INT-003"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-003"},
@@ -210,18 +211,18 @@ func TestIntegration_RescrapePhase_ThroughBatchJob(t *testing.T) {
 	capturedRevision := currentResult.Revision
 
 	// ScrapeSingle should return a result
-	scrapeResult, _, err := job.rescrapePhase.ScrapeSingle(context.Background(), rescrapePhaseInputs{JobID: job.ID, WF: job.deps.WF, ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "/source/INT-003.mp4", scrape.ScrapeCmd{MovieID: "INT-003"})
+	scrapeResult, _, err := job.rescrapePhase.ScrapeSingle(context.Background(), rescrapePhaseInputs{JobID: job.ID, WF: job.deps.WF, ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-003.mp4", scrape.ScrapeCmd{MovieID: "INT-003"})
 	require.NoError(t, err, "ScrapeSingle should not return an error")
 	require.NotNil(t, scrapeResult, "ScrapeSingle should return a result")
 	assert.Equal(t, "INT-003", scrapeResult.Movie.ID)
 
 	// CompleteRescrape should commit the new result
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-003.mp4", MovieID: "INT-003"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-003"},
 	}
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "/source/INT-003.mp4", newResult, capturedRevision, "INT-003", "INT-003")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-003.mp4", newResult, capturedRevision, "INT-003", "INT-003")
 	require.NoError(t, err, "CompleteRescrape should not return an error")
 	require.NotNil(t, outcome)
 	assert.Equal(t, models.RescrapeStatusSuccess, outcome.Status, "Status should be success")
@@ -240,16 +241,16 @@ func TestIntegration_RescrapePhase_ThroughBatchJob(t *testing.T) {
 func TestIntegration_CallbackInterfaces_Satisfied(t *testing.T) {
 	// These assertions mirror the compile-time checks in phase_interfaces.go.
 	// They verify the interface satisfaction at runtime for clarity.
-	var _ ResultUpdater = (*ResultTracker)(nil)
+	var _ resultstore.ResultUpdater = (*resultstore.ResultTracker)(nil)
 	var _ PhaseLifecycle = (*JobLifecycle)(nil)
-	var _ ResultMapAccessor = (*ResultTracker)(nil)
+	var _ resultstore.ResultMapAccessor = (*resultstore.ResultTracker)(nil)
 
 	// Verify that BatchJob methods used by the phases exist and are callable
 	job := newBatchJob(nil)
 
-	// ResultUpdater methods (moved to ResultTracker)
-	assert.NotNil(t, job.results.UpdateFileResult, "ResultTracker should have UpdateFileResult")
-	assert.NotNil(t, job.results.AtomicUpdateFileResult, "ResultTracker should have AtomicUpdateFileResult")
+	// resultstore.ResultUpdater methods (moved to resultstore.ResultTracker)
+	assert.NotNil(t, job.results.UpdateFileResult, "resultstore.ResultTracker should have UpdateFileResult")
+	assert.NotNil(t, job.results.AtomicUpdateFileResult, "resultstore.ResultTracker should have AtomicUpdateFileResult")
 
 	// PhaseLifecycle methods (moved to JobLifecycle)
 	assert.NotNil(t, job.lifecycle.MarkCompleted, "JobLifecycle should have MarkCompleted")
@@ -257,13 +258,13 @@ func TestIntegration_CallbackInterfaces_Satisfied(t *testing.T) {
 	assert.NotNil(t, job.lifecycle.MarkCancelled, "JobLifecycle should have MarkCancelled")
 	assert.NotNil(t, job.lifecycle.MarkOrganized, "JobLifecycle should have MarkOrganized")
 
-	// ResultMapAccessor methods
-	assert.NotNil(t, job.resultIndex.IsGone, "ResultTracker should have IsGone")
+	// resultstore.ResultMapAccessor methods
+	assert.NotNil(t, job.results.IsGone, "resultstore.ResultTracker should have IsGone")
 	assert.NotNil(t, job.results.GetFileMatchInfo, "BatchJob should have GetFileMatchInfo")
-	assert.NotNil(t, job.resultIndex.GetCurrentMovieID, "ResultTracker should have GetCurrentMovieID")
-	assert.NotNil(t, job.resultIndex.GetRevision, "ResultTracker should have GetRevision")
-	assert.NotNil(t, job.resultIndex.CommitResult, "ResultTracker should have CommitResult")
-	assert.NotNil(t, job.resultIndex.OtherResultUsesMovieID, "ResultTracker should have OtherResultUsesMovieID")
+	assert.NotNil(t, job.results.GetCurrentMovieID, "resultstore.ResultTracker should have GetCurrentMovieID")
+	assert.NotNil(t, job.results.GetRevision, "resultstore.ResultTracker should have GetRevision")
+	assert.NotNil(t, job.results.CommitResult, "resultstore.ResultTracker should have CommitResult")
+	assert.NotNil(t, job.results.OtherResultUsesMovieID, "resultstore.ResultTracker should have OtherResultUsesMovieID")
 }
 
 // TestIntegration_ScrapePhase_WFOverride_ThroughBatchJob verifies that
@@ -326,7 +327,7 @@ func TestIntegration_ApplyPhase_WFOverride_ThroughBatchJob(t *testing.T) {
 	})
 
 	// Pre-populate results
-	job.results.UpdateFileResult("/source/INT-002.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/INT-002.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-002.mp4", MovieID: "INT-002"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-002"},
@@ -365,7 +366,7 @@ func TestIntegration_ApplyPhase_NilWF_OverrideSucceeds(t *testing.T) {
 	job := newBatchJob([]string{"/source/test.mp4"}) // No JobConfig
 
 	// Pre-populate results (required for apply phase to have work)
-	job.results.UpdateFileResult("/source/test.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/test.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/test.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001"},
@@ -459,7 +460,7 @@ func TestIntegration_CompleteRescrape_Conflict(t *testing.T) {
 	})
 
 	// Pre-populate with a result at revision 1
-	job.results.UpdateFileResult("/source/INT-004.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/INT-004.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-004.mp4", MovieID: "INT-004"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-004"},
@@ -470,20 +471,20 @@ func TestIntegration_CompleteRescrape_Conflict(t *testing.T) {
 	capturedRevision := result.Revision // Should be 1
 
 	// Simulate a concurrent modification that increments the revision
-	job.results.UpdateFileResult("/source/INT-004.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/INT-004.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-004.mp4", MovieID: "INT-004"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-004"},
 	})
 	// Now revision is 2, but we captured 1
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-004.mp4", MovieID: "INT-005"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-005"},
 	}
 
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "/source/INT-004.mp4", newResult, capturedRevision, "INT-005", "INT-004")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-004.mp4", newResult, capturedRevision, "INT-005", "INT-004")
 	// Conflict should be detected — the revision no longer matches
 	require.NoError(t, err) // CompleteRescrape returns conflict in outcome, not as error
 	require.NotNil(t, outcome)
@@ -538,7 +539,7 @@ func TestIntegration_ScrapePhase_NilWF_SetWorkflowSucceeds(t *testing.T) {
 func TestIntegration_RescrapePhase_NilWF_Error(t *testing.T) {
 	job := newBatchJob([]string{"/source/test.mp4"}) // No JobConfig
 
-	_, _, err := job.rescrapePhase.ScrapeSingle(context.Background(), rescrapePhaseInputs{JobID: job.ID, WF: job.deps.WF, ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "/source/test.mp4", scrape.ScrapeCmd{MovieID: "TEST"})
+	_, _, err := job.rescrapePhase.ScrapeSingle(context.Background(), rescrapePhaseInputs{JobID: job.ID, WF: job.deps.WF, ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/test.mp4", scrape.ScrapeCmd{MovieID: "TEST"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "workflow not configured")
 }
@@ -554,7 +555,7 @@ func TestIntegration_OrphanDetection(t *testing.T) {
 	})
 
 	// Pre-populate with a result
-	job.results.UpdateFileResult("/source/INT-005.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/INT-005.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-005.mp4", MovieID: "INT-005"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-005"},
@@ -563,13 +564,13 @@ func TestIntegration_OrphanDetection(t *testing.T) {
 	result, _ := job.results.GetMovieResult("/source/INT-005.mp4")
 	capturedRevision := result.Revision
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-005.mp4", MovieID: "INT-006"}, // Different movie ID
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-006"},
 	}
 
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "/source/INT-005.mp4", newResult, capturedRevision, "INT-006", "INT-005")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-005.mp4", newResult, capturedRevision, "INT-006", "INT-005")
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	assert.Contains(t, outcome.OrphanedMovieIDs, "INT-005", "Old movie ID should be orphaned when no other result uses it")
@@ -586,12 +587,12 @@ func TestIntegration_NoOrphanWhenSharedMovieID(t *testing.T) {
 	})
 
 	// Pre-populate with two results sharing the same movie ID
-	job.results.UpdateFileResult("/source/INT-007A.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/INT-007A.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-007A.mp4", MovieID: "INT-007"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-007"},
 	})
-	job.results.UpdateFileResult("/source/INT-007B.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/INT-007B.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-007B.mp4", MovieID: "INT-007"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-007"},
@@ -601,13 +602,13 @@ func TestIntegration_NoOrphanWhenSharedMovieID(t *testing.T) {
 	result, _ := job.results.GetMovieResult("/source/INT-007A.mp4")
 	capturedRevision := result.Revision
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-007A.mp4", MovieID: "INT-008"}, // Changed movie ID
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-008"},
 	}
 
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "/source/INT-007A.mp4", newResult, capturedRevision, "INT-008", "INT-007")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-007A.mp4", newResult, capturedRevision, "INT-008", "INT-007")
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	// INT-007 should NOT be orphaned because INT-007B still uses it
@@ -625,30 +626,30 @@ func TestIntegration_MultipartMetadata_AppliedOnRescrape(t *testing.T) {
 	})
 
 	// Pre-populate with models.FileMatchInfo
-	job.results.UpdateFileResult("/source/INT-009-pt1.mp4", &MovieResult{
+	job.results.UpdateFileResult("/source/INT-009-pt1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-009-pt1.mp4", MovieID: "INT-009"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-009"},
 	})
 	job.mu.Lock()
-	job.results.FileMatchInfo["/source/INT-009-pt1.mp4"] = models.FileMatchInfo{
+	job.results.SetFileMatchInfo("/source/INT-009-pt1.mp4", models.FileMatchInfo{
 		MovieID:     "INT-009",
 		IsMultiPart: true,
 		PartNumber:  1,
 		PartSuffix:  "pt1",
-	}
+	})
 	job.mu.Unlock()
 
 	result, _ := job.results.GetMovieResult("/source/INT-009-pt1.mp4")
 	capturedRevision := result.Revision
 
-	newResult := &MovieResult{
+	newResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/INT-009-pt1.mp4", MovieID: "INT-009"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-009"},
 	}
 
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "/source/INT-009-pt1.mp4", newResult, capturedRevision, "INT-009", "INT-009")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-009-pt1.mp4", newResult, capturedRevision, "INT-009", "INT-009")
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	assert.Empty(t, outcome.OrphanedMovieIDs)
@@ -662,6 +663,6 @@ func TestIntegration_MultipartMetadata_AppliedOnRescrape(t *testing.T) {
 }
 
 // Compile-time assertions for integration test stubs
-var _ ResultUpdater = (*ResultTracker)(nil)
+var _ resultstore.ResultUpdater = (*resultstore.ResultTracker)(nil)
 var _ PhaseLifecycle = (*JobLifecycle)(nil)
-var _ ResultMapAccessor = (*ResultTracker)(nil)
+var _ resultstore.ResultMapAccessor = (*resultstore.ResultTracker)(nil)

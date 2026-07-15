@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -652,7 +653,7 @@ func TestBatchJobResultConsistency(t *testing.T) {
 			time.Sleep(time.Duration(index%10) * time.Millisecond)
 
 			// Update result
-			result := &worker.MovieResult{
+			result := &resultstore.MovieResult{
 				FileMatchInfo: models.FileMatchInfo{Path: files[index], MovieID: fmt.Sprintf("TEST-%03d", index)},
 				Status:        models.JobStatusCompleted,
 				Movie:         &models.Movie{ID: fmt.Sprintf("TEST-%03d", index)},

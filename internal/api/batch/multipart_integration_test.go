@@ -18,7 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,7 +70,7 @@ func TestMultipartPreviewEndToEnd(t *testing.T) {
 	}
 
 	// Simulate what RunBatchScrapeOnce does - add pt1 first
-	result1 := &worker.MovieResult{
+	result1 := &resultstore.MovieResult{
 		ResultID:      "STSK-074-pt1",
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/STSK-074-pt1.mp4", MovieID: "STSK-074", IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"},
 		Status:        models.JobStatusCompleted,
@@ -79,7 +79,7 @@ func TestMultipartPreviewEndToEnd(t *testing.T) {
 	}
 	setJobResult(job, "/path/to/STSK-074-pt1.mp4", result1)
 
-	result2 := &worker.MovieResult{
+	result2 := &resultstore.MovieResult{
 		ResultID:      "STSK-074-pt2",
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/STSK-074-pt2.mp4", MovieID: "STSK-074", IsMultiPart: true, PartNumber: 2, PartSuffix: "-pt2"},
 		Status:        models.JobStatusCompleted,
@@ -236,7 +236,7 @@ func TestMultipartPreviewLetterPatternDiscoveryFlow(t *testing.T) {
 			now := time.Now()
 			fmi := fileMatchInfo[filePath]
 			fmi.MovieID = result.Movie.ID
-			setJobResult(job, filePath, &worker.MovieResult{
+			setJobResult(job, filePath, &resultstore.MovieResult{
 				ResultID:      fmt.Sprintf("CEMD-349-pt%d", i+1),
 				FileMatchInfo: fmi,
 				Status:        models.JobStatusCompleted,
@@ -245,7 +245,7 @@ func TestMultipartPreviewLetterPatternDiscoveryFlow(t *testing.T) {
 				EndedAt:       &now,
 			})
 			if result.FieldSources != nil {
-				job.ResultsWriter().SetProvenance(filePath, &worker.ProvenanceData{
+				job.ResultsWriter().SetProvenance(filePath, &resultstore.ProvenanceData{
 					FieldSources: result.FieldSources,
 				})
 			}
@@ -334,7 +334,7 @@ func TestMultipartPreviewLetterPatternFiles(t *testing.T) {
 	}
 
 	// Simulate discovery phase results with IsMultiPart=true for letter patterns
-	result1 := &worker.MovieResult{
+	result1 := &resultstore.MovieResult{
 		ResultID:      "CEMD-349-pt1",
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/cemd-349-a.mp4", MovieID: "CEMD-349", IsMultiPart: true, PartNumber: 1, PartSuffix: "-A", Extension: ".mp4"},
 		Status:        models.JobStatusCompleted,
@@ -343,7 +343,7 @@ func TestMultipartPreviewLetterPatternFiles(t *testing.T) {
 	}
 	setJobResult(job, "/path/to/cemd-349-a.mp4", result1)
 
-	result2 := &worker.MovieResult{
+	result2 := &resultstore.MovieResult{
 		ResultID:      "CEMD-349-pt2",
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/cemd-349-b.mp4", MovieID: "CEMD-349", IsMultiPart: true, PartNumber: 2, PartSuffix: "-B", Extension: ".mp4"},
 		Status:        models.JobStatusCompleted,
@@ -434,7 +434,7 @@ func TestMultipartPreviewSingleFile(t *testing.T) {
 		Title: "Multipart Test Movie",
 	}
 
-	result := &worker.MovieResult{
+	result := &resultstore.MovieResult{
 		ResultID:      "STSK-074-pt1",
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/STSK-074-pt1.mp4", MovieID: "STSK-074", IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"},
 		Status:        models.JobStatusCompleted,

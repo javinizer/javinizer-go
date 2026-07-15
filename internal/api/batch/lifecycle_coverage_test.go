@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -27,7 +28,7 @@ func TestListBatchJobs_PersistedWithOpCounts(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/IPX-535.mp4"})
-	setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -104,7 +105,7 @@ func TestListBatchJobs_ResultsParsedInPersistedJob(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-800.mp4"})
-	setJobResult(job, "/path/to/IPX-800.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/IPX-800.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-800.mp4", MovieID: "IPX-800"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-800", Title: "Results Test"},
@@ -241,18 +242,18 @@ type stubControlledJob struct {
 	status         *worker.BatchJobStatus // optional; nil by default preserves prior behavior
 }
 
-func (s *stubControlledJob) GetID() string                                      { return "stub-job" }
-func (s *stubControlledJob) GetJobStatus() models.JobStatus                     { return models.JobStatusCompleted }
-func (s *stubControlledJob) GetStatus() *worker.BatchJobStatus                  { return s.status }
-func (s *stubControlledJob) GetMovieResult(string) (*worker.MovieResult, error) { return nil, nil }
-func (s *stubControlledJob) Subscribe() worker.JobEventSubscriber               { return nil }
-func (s *stubControlledJob) FindFilePathsForMovieID(string) []string            { return nil }
-func (s *stubControlledJob) FindMovieResultForMovieID(string) (*worker.MovieResult, error) {
+func (s *stubControlledJob) GetID() string                                           { return "stub-job" }
+func (s *stubControlledJob) GetJobStatus() models.JobStatus                          { return models.JobStatusCompleted }
+func (s *stubControlledJob) GetStatus() *worker.BatchJobStatus                       { return s.status }
+func (s *stubControlledJob) GetMovieResult(string) (*resultstore.MovieResult, error) { return nil, nil }
+func (s *stubControlledJob) Subscribe() worker.JobEventSubscriber                    { return nil }
+func (s *stubControlledJob) FindFilePathsForMovieID(string) []string                 { return nil }
+func (s *stubControlledJob) FindMovieResultForMovieID(string) (*resultstore.MovieResult, error) {
 	return nil, nil
 }
-func (s *stubControlledJob) GetMovieResultsForMovieID(string) []*worker.MovieResult    { return nil }
-func (s *stubControlledJob) GetFileMatchInfosForMovieID(string) []models.FileMatchInfo { return nil }
-func (s *stubControlledJob) GetFileResultByResultID(string) (*worker.MovieResult, string, bool) {
+func (s *stubControlledJob) GetMovieResultsForMovieID(string) []*resultstore.MovieResult { return nil }
+func (s *stubControlledJob) GetFileMatchInfosForMovieID(string) []models.FileMatchInfo   { return nil }
+func (s *stubControlledJob) GetFileResultByResultID(string) (*resultstore.MovieResult, string, bool) {
 	return nil, "", false
 }
 func (s *stubControlledJob) StartScrape(context.Context, []string, worker.ScrapePhaseConfig) error {
@@ -271,7 +272,7 @@ func (s *stubControlledJob) SetBatchCfg(worker.BatchJobConfig)                  
 func (s *stubControlledJob) SetJobStatus(models.JobStatus)                              {}
 func (s *stubControlledJob) SetOperationModeOverride(operationmode.OperationMode) error { return nil }
 func (s *stubControlledJob) SetPersistError(string)                                     {}
-func (s *stubControlledJob) GetResults() []worker.MovieResult                           { return nil }
+func (s *stubControlledJob) GetResults() []resultstore.MovieResult                      { return nil }
 
 // JobEditor methods (required by BatchJobInterface)
 func (s *stubControlledJob) UpdateMovie(context.Context, string, *models.Movie) error { return nil }
@@ -280,7 +281,7 @@ func (s *stubControlledJob) UpdatePosterCrop(string, string) error              
 func (s *stubControlledJob) UpdatePosterFromURL(context.Context, string, string, string) error {
 	return nil
 }
-func (s *stubControlledJob) ApplyFieldOverride(context.Context, string, string, string) (*worker.MovieResult, *worker.ProvenanceData, error) {
+func (s *stubControlledJob) ApplyFieldOverride(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 	return nil, nil, nil
 }
-func (s *stubControlledJob) GetProvenance(string) *worker.ProvenanceData { return nil }
+func (s *stubControlledJob) GetProvenance(string) *resultstore.ProvenanceData { return nil }

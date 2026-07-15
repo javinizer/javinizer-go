@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,7 +39,7 @@ func TestBuildApplyCmd_InPlaceModeOverride_FallsBackToSourceDir(t *testing.T) {
 	const filePath = "/source/folder/IPX-777.mp4"
 	sourceDir := filepath.Dir(filePath)
 	movie := &models.Movie{ID: "IPX-777", Title: "Test Movie"}
-	fileResult := &MovieResult{
+	fileResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         movie,
@@ -71,7 +72,7 @@ func TestBuildApplyCmd_InPlaceModeOverride_SkipBranchStillHonored(t *testing.T) 
 	const filePath = "/source/folder/IPX-777.mp4"
 	sourceDir := filepath.Dir(filePath)
 	movie := &models.Movie{ID: "IPX-777"}
-	fileResult := &MovieResult{
+	fileResult := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         movie,

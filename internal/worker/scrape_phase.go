@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -235,7 +236,7 @@ func interpretScrapeResult(
 		if errors.Is(err, context.Canceled) {
 			fileStatus = models.JobStatusCancelled
 		}
-		inputs.Updater.UpdateFileResult(filePath, &MovieResult{
+		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
 			FileMatchInfo: fmi,
 			Status:        fileStatus,
 			Error:         err.Error(),
@@ -264,7 +265,7 @@ func interpretScrapeResult(
 		if result != nil && strings.TrimSpace(result.Message) != "" {
 			errorMsg = result.Message
 		}
-		inputs.Updater.UpdateFileResult(filePath, &MovieResult{
+		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
 			FileMatchInfo: fmi,
 			Status:        models.JobStatusFailed,
 			Error:         errorMsg,
@@ -393,7 +394,7 @@ func scrapeFile(
 	}
 	defer withFileRecovery(rc, &outcome)()
 
-	inputs.Updater.UpdateFileResult(filePath, &MovieResult{
+	inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
 		FileMatchInfo: fmi,
 		Status:        models.JobStatusRunning,
 		StartedAt:     startTime,
@@ -503,7 +504,7 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	saved, err := inputs.MovieRepo.UpsertWithTranslations(ctx, cloned, genreTrans, actressTrans)
 	if err != nil {
 		logging.Warnf("[scrape-phase] Failed to persist %s: %v", o.MovieID, err)
-		_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *MovieResult) (*MovieResult, error) {
+		_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			current.Status = models.JobStatusFailed
 			current.Error = fmt.Sprintf("persist failed: %v", err)
 			return current, nil
@@ -530,7 +531,7 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	// Refresh the in-memory movie with the DB-saved version (DB-assigned IDs,
 	// normalized associations) and flip Persisted. AtomicUpdateFileResult clones
 	// under lock, so no shared-pointer mutation leaks to readers.
-	_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *MovieResult) (*MovieResult, error) {
+	_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		current.Persisted = true
 		if saved != nil {
 			current.Movie = saved.Clone()

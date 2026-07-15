@@ -10,6 +10,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,7 +19,7 @@ import (
 // mockRescrapePhase implements RescrapePhase for controlled testing of BatchJob.Rescrape.
 type mockRescrapePhase struct {
 	scrapeSingleFn     func(ctx context.Context, inputs rescrapePhaseInputs, filePath string, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error)
-	completeRescrapeFn func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error)
+	completeRescrapeFn func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error)
 	rescrapeFn         func(ctx context.Context, inputs rescrapePhaseInputs, cmd RescrapeCmd) (*RescrapeResult, error)
 }
 
@@ -29,7 +30,7 @@ func (m *mockRescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePha
 	return nil, nil, nil
 }
 
-func (m *mockRescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+func (m *mockRescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 	if m.completeRescrapeFn != nil {
 		return m.completeRescrapeFn(inputs, filePath, result, capturedRevision, movieID, oldMovieID)
 	}
@@ -97,16 +98,13 @@ func (m *mockRescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseIn
 // The caller explicitly provides wf — pass &stubRescrapeWF{} for freshly-created jobs,
 // or nil for reconstructed jobs (job.deps.WF == nil). This makes the WF state explicit
 // and prevents accidentally forgetting to clear job.deps.WF for reconstructed scenarios.
-func newJobWithRescrapeMock(results map[string]*MovieResult, fileMatchInfo map[string]models.FileMatchInfo, wf workflow.WorkflowInterface) (*BatchJob, *mockRescrapePhase) {
+func newJobWithRescrapeMock(results map[string]*resultstore.MovieResult, fileMatchInfo map[string]models.FileMatchInfo, wf workflow.WorkflowInterface) (*BatchJob, *mockRescrapePhase) {
 	jq := NewJobStore(nil, nil, nil, os.TempDir(), nil, nil)
 	job := jq.CreateJobBatch([]string{})
-	job.results.Results = results
-	if fileMatchInfo != nil {
-		job.results.FileMatchInfo = fileMatchInfo
-	}
+	job.results.LoadResultsRaw(results, fileMatchInfo)
 
 	// Rebuild movieID index after bulk-setting results directly.
-	job.results.rebuildMovieIDIndexLocked()
+	job.results.RebuildIndexes()
 
 	if wf != nil {
 		job.mu.Lock()
@@ -121,7 +119,7 @@ func newJobWithRescrapeMock(results map[string]*MovieResult, fileMatchInfo map[s
 }
 
 func TestBatchJob_FindFileForMovieID_Found(t *testing.T) {
-	job, _ := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, _ := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      3,
@@ -130,7 +128,7 @@ func TestBatchJob_FindFileForMovieID_Found(t *testing.T) {
 		},
 	}, nil, nil)
 
-	result, err := job.resultIndex.FindFileForMovieID("ABC-001")
+	result, err := job.results.FindFileForMovieID("ABC-001")
 	require.NoError(t, err)
 	assert.Equal(t, "/path/to/file1.mp4", result.FilePath)
 	assert.Equal(t, "ABC-001", result.OldMovieID)
@@ -138,14 +136,14 @@ func TestBatchJob_FindFileForMovieID_Found(t *testing.T) {
 }
 
 func TestBatchJob_FindFileForMovieID_NotFound(t *testing.T) {
-	job, _ := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, _ := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Status:        models.JobStatusCompleted,
 		},
 	}, nil, nil)
 
-	result, err := job.resultIndex.FindFileForMovieID("XYZ-999")
+	result, err := job.results.FindFileForMovieID("XYZ-999")
 	assert.Nil(t, result)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
@@ -153,7 +151,7 @@ func TestBatchJob_FindFileForMovieID_NotFound(t *testing.T) {
 
 func TestBatchJob_FindFileForMovieID_MultipartSorting(t *testing.T) {
 	job, _ := newJobWithRescrapeMock(
-		map[string]*MovieResult{
+		map[string]*resultstore.MovieResult{
 			"/path/partC.mp4": {
 				FileMatchInfo: models.FileMatchInfo{Path: "/path/partC.mp4", MovieID: "ABC-001"},
 				Revision:      1,
@@ -181,14 +179,14 @@ func TestBatchJob_FindFileForMovieID_MultipartSorting(t *testing.T) {
 		nil,
 	)
 
-	result, err := job.resultIndex.FindFileForMovieID("ABC-001")
+	result, err := job.results.FindFileForMovieID("ABC-001")
 	require.NoError(t, err)
 	// Should select the file with the lowest PartNumber (partA)
 	assert.Equal(t, "/path/partA.mp4", result.FilePath)
 }
 
 func TestBatchJob_Rescrape_Success(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -207,7 +205,7 @@ func TestBatchJob_Rescrape_Success(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return &RescrapeResult{OrphanedMovieIDs: nil, Status: models.RescrapeStatusSuccess}, nil
 	}
 
@@ -223,7 +221,7 @@ func TestBatchJob_Rescrape_Success(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_ScrapeFailed(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -245,7 +243,7 @@ func TestBatchJob_Rescrape_ScrapeFailed(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_ScrapeStatusFailed(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -269,7 +267,7 @@ func TestBatchJob_Rescrape_ScrapeStatusFailed(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_ScrapeNilResult(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -291,7 +289,7 @@ func TestBatchJob_Rescrape_ScrapeNilResult(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_Gone(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -307,7 +305,7 @@ func TestBatchJob_Rescrape_Gone(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return &RescrapeResult{Status: models.RescrapeStatusGone}, nil
 	}
 
@@ -320,7 +318,7 @@ func TestBatchJob_Rescrape_Gone(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_Conflict(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -336,7 +334,7 @@ func TestBatchJob_Rescrape_Conflict(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return &RescrapeResult{Status: models.RescrapeStatusConflict}, nil
 	}
 
@@ -349,7 +347,7 @@ func TestBatchJob_Rescrape_Conflict(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_CompleteRescrapeError(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -365,7 +363,7 @@ func TestBatchJob_Rescrape_CompleteRescrapeError(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return nil, fmt.Errorf("database connection lost")
 	}
 
@@ -379,7 +377,7 @@ func TestBatchJob_Rescrape_CompleteRescrapeError(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_MovieIDNotFoundInResults(t *testing.T) {
-	job, _ := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, _ := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -397,7 +395,7 @@ func TestBatchJob_Rescrape_MovieIDNotFoundInResults(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_WithManualSearchInput(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -416,7 +414,7 @@ func TestBatchJob_Rescrape_WithManualSearchInput(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return &RescrapeResult{Status: models.RescrapeStatusSuccess}, nil
 	}
 
@@ -431,7 +429,7 @@ func TestBatchJob_Rescrape_WithManualSearchInput(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_WithURLManualSearchInput(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -450,7 +448,7 @@ func TestBatchJob_Rescrape_WithURLManualSearchInput(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return &RescrapeResult{Status: models.RescrapeStatusSuccess}, nil
 	}
 
@@ -465,7 +463,7 @@ func TestBatchJob_Rescrape_WithURLManualSearchInput(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_WithForceRefresh(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -484,7 +482,7 @@ func TestBatchJob_Rescrape_WithForceRefresh(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return &RescrapeResult{Status: models.RescrapeStatusSuccess}, nil
 	}
 
@@ -498,7 +496,7 @@ func TestBatchJob_Rescrape_WithForceRefresh(t *testing.T) {
 }
 
 func TestBatchJob_Rescrape_WithSelectedScrapers(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -517,7 +515,7 @@ func TestBatchJob_Rescrape_WithSelectedScrapers(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return &RescrapeResult{Status: models.RescrapeStatusSuccess}, nil
 	}
 
@@ -555,7 +553,7 @@ func (s *stubRescrapeWF) ScanAndMatch(_ context.Context, _ workflow.ScanAndMatch
 // on a reconstructed job (job.deps.WF == nil) before Rescrape. Per DEEP-6: WF is
 // set on job.deps via SetWorkflow, not as a RescrapeCmd override.
 func TestBatchJob_Rescrape_ReconstructedWithWF(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -574,7 +572,7 @@ func TestBatchJob_Rescrape_ReconstructedWithWF(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return &RescrapeResult{Status: models.RescrapeStatusSuccess}, nil
 	}
 
@@ -592,7 +590,7 @@ func TestBatchJob_Rescrape_ReconstructedWithWF(t *testing.T) {
 // when a reconstructed job (job.deps.WF == nil) calls Rescrape without providing
 // RescrapeCmd.WF. No panic, just a graceful "workflow not configured" result.
 func TestBatchJob_Rescrape_ReconstructedWithoutWF(t *testing.T) {
-	job, _ := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, _ := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -615,7 +613,7 @@ func TestBatchJob_Rescrape_ReconstructedWithoutWF(t *testing.T) {
 // the old TestBatchJob_Rescrape_WFOverrideTakesPrecedence which tested RescrapeCmd.WF
 // override (now removed). SetWorkflow is the new mechanism for WF injection.
 func TestBatchJob_Rescrape_SetWorkflowUpdatesDeps(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -634,7 +632,7 @@ func TestBatchJob_Rescrape_SetWorkflowUpdatesDeps(t *testing.T) {
 		}, nil, nil
 	}
 
-	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+	mockPhase.completeRescrapeFn = func(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
 		return &RescrapeResult{Status: models.RescrapeStatusSuccess}, nil
 	}
 
@@ -656,7 +654,7 @@ func TestBatchJob_Rescrape_SetWorkflowUpdatesDeps(t *testing.T) {
 // (the ControlledJob interface method) still works with job.deps.WF on freshly-created
 // jobs — backward compatibility after the scrapeSingleWithWF refactor.
 func TestBatchJob_ScrapeSingle_BackwardCompatibility(t *testing.T) {
-	job, mockPhase := newJobWithRescrapeMock(map[string]*MovieResult{
+	job, mockPhase := newJobWithRescrapeMock(map[string]*resultstore.MovieResult{
 		"/path/to/file1.mp4": {
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file1.mp4", MovieID: "ABC-001"},
 			Revision:      1,
@@ -682,7 +680,7 @@ func TestBatchJob_ScrapeSingle_BackwardCompatibility(t *testing.T) {
 	}
 
 	// ScrapeSingle reads job.deps.WF directly — no override
-	result, _, err := job.rescrapePhase.ScrapeSingle(context.Background(), rescrapePhaseInputs{JobID: job.ID, WF: job.deps.WF, ResultMap: job.resultIndex, Lifecycle: job.lifecycle}, "/path/to/file1.mp4", scrape.ScrapeCmd{MovieID: "ABC-001"})
+	result, _, err := job.rescrapePhase.ScrapeSingle(context.Background(), rescrapePhaseInputs{JobID: job.ID, WF: job.deps.WF, ResultMap: job.results, Lifecycle: job.lifecycle}, "/path/to/file1.mp4", scrape.ScrapeCmd{MovieID: "ABC-001"})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "ABC-001", result.Movie.ID)

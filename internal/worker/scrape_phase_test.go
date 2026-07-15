@@ -9,6 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,28 +42,30 @@ func (s *stubBroadcaster) isClosed() bool {
 }
 
 type stubUpdater struct {
-	results    map[string]*MovieResult
-	provenance map[string]*ProvenanceData
+	results    map[string]*resultstore.MovieResult
+	provenance map[string]*resultstore.ProvenanceData
 	mu         sync.Mutex
 }
 
+var _ resultstore.ResultUpdater = (*stubUpdater)(nil)
+
 func newStubUpdater() *stubUpdater {
-	return &stubUpdater{results: make(map[string]*MovieResult), provenance: make(map[string]*ProvenanceData)}
+	return &stubUpdater{results: make(map[string]*resultstore.MovieResult), provenance: make(map[string]*resultstore.ProvenanceData)}
 }
 
-func (s *stubUpdater) UpdateFileResult(fp string, r *MovieResult) {
+func (s *stubUpdater) UpdateFileResult(fp string, r *resultstore.MovieResult) {
 	s.mu.Lock()
 	s.results[fp] = r
 	s.mu.Unlock()
 }
 
-func (s *stubUpdater) SetProvenance(fp string, prov *ProvenanceData) {
+func (s *stubUpdater) SetProvenance(fp string, prov *resultstore.ProvenanceData) {
 	s.mu.Lock()
 	s.provenance[fp] = prov
 	s.mu.Unlock()
 }
 
-func (s *stubUpdater) AtomicUpdateFileResult(fp string, fn func(*MovieResult) (*MovieResult, error)) error {
+func (s *stubUpdater) AtomicUpdateFileResult(fp string, fn func(*resultstore.MovieResult) (*resultstore.MovieResult, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current := s.results[fp]
@@ -78,7 +81,7 @@ func (s *stubUpdater) AtomicUpdateFileResult(fp string, fn func(*MovieResult) (*
 }
 
 func (s *stubUpdater) UpdateMovie(fp string, movie *models.Movie) error {
-	return s.AtomicUpdateFileResult(fp, func(current *MovieResult) (*MovieResult, error) {
+	return s.AtomicUpdateFileResult(fp, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		current.Movie = movie
 		return current, nil
 	})
@@ -86,7 +89,7 @@ func (s *stubUpdater) UpdateMovie(fp string, movie *models.Movie) error {
 
 func (s *stubUpdater) MarkExcluded(fp string) {}
 
-func (s *stubUpdater) getResult(fp string) *MovieResult {
+func (s *stubUpdater) getResult(fp string) *resultstore.MovieResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.results[fp]

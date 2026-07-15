@@ -13,7 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,7 +82,7 @@ func TestOrganizeJob_OperationMode(t *testing.T) {
 			deps := createTestDeps(t, cfg, "")
 
 			job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-			result := &worker.MovieResult{
+			result := &resultstore.MovieResult{
 				FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 				Status:        models.JobStatusCompleted,
 				Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -181,7 +181,7 @@ func TestPreviewOrganize_OperationMode(t *testing.T) {
 			deps := createTestDeps(t, cfg, "")
 
 			job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-			result := &worker.MovieResult{
+			result := &resultstore.MovieResult{
 				FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 				Status:        models.JobStatusCompleted,
 				Movie:         &models.Movie{ID: "TEST-001", Title: "Test Movie"},
@@ -235,7 +235,7 @@ func TestPreviewOrganize_InvalidOperationMode(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	result := &worker.MovieResult{
+	result := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test Movie"},
