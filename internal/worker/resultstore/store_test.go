@@ -222,3 +222,28 @@ func TestStore_ConcurrentSetGoneCheckerAndIsGone(t *testing.T) {
 
 	<-done
 }
+
+func TestStore_NewFromSnapshot_NilMaps(t *testing.T) {
+	store := NewFromSnapshot(3, []string{"a.mp4", "b.mp4", "c.mp4"}, nil, nil, nil, nil, 1, 0, 33.3)
+	snap, prog := store.SnapshotForStatus()
+	assert.Equal(t, 3, prog.TotalFiles)
+	assert.Equal(t, 1, prog.Completed)
+	assert.Equal(t, 33.3, prog.Progress)
+	assert.NotNil(t, snap.Results)
+	assert.NotNil(t, snap.Provenance)
+	assert.NotNil(t, snap.FileMatchInfo)
+	assert.NotNil(t, snap.Excluded)
+}
+
+func TestStore_LoadResultsRaw_NilMaps(t *testing.T) {
+	store := New(2, []string{"a.mp4", "b.mp4"})
+	store.LoadResultsRaw(nil, nil)
+	snap := store.SnapshotData()
+	assert.NotNil(t, snap.Results)
+	assert.NotNil(t, snap.FileMatchInfo)
+	// Verify maps are writable (don't panic)
+	store.ReplaceResultRaw("a.mp4", &MovieResult{ResultID: "test-id", Status: models.JobStatusCompleted})
+	result, err := store.GetMovieResult("a.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "test-id", result.ResultID)
+}
