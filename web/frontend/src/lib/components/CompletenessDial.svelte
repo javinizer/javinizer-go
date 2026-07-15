@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import type { CompletenessTier } from '$lib/utils/completeness';
 
 	interface Props {
@@ -23,7 +24,7 @@
 	const dashOffset = $derived(circumference * (1 - score / 100));
 </script>
 
-<div class="flex-shrink-0" style="width: {size}px; height: {size}px;" role="img" aria-label={`${score}% complete`} aria-describedby={ariaDescribedby}>
+<div class="flex-shrink-0" style="width: {size}px; height: {size}px;" role="img" aria-label={m.completeness_aria_complete({ score })} aria-describedby={ariaDescribedby}>
 	<svg viewBox="0 0 36 36" width={size} height={size}>
 		<circle
 			cx="18"

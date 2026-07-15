@@ -70,19 +70,58 @@ func NewSortService(
 // translateEvents reads worker.JobEvents from the worker channel,
 // converts them to TUI-local SortEvents, and forwards them.
 // Stops when the input channel is closed.
+//
+// For the structured progress events the TUI displays verbatim (scrape and
+// apply success), a Code + Args pair is attached so the TUI can localize the
+// message. Failure/cancellation events keep Code empty and fall back to the
+// raw English Message, because their error text is dynamic and embedded by
+// the worker package.
 func translateEvents(src <-chan worker.JobEvent, dst chan<- SortEvent) {
 	for evt := range src {
-		dst <- SortEvent{
+		phase := sortEventPhaseFromWorker(evt.Phase)
+		step := sortEventStepFromWorker(evt.Step)
+		se := SortEvent{
 			JobID:     string(evt.JobID),
 			MovieID:   evt.MovieID,
-			Phase:     sortEventPhaseFromWorker(evt.Phase),
-			Step:      sortEventStepFromWorker(evt.Step),
+			Phase:     phase,
+			Step:      step,
 			Progress:  evt.Progress,
 			Message:   evt.Message,
 			Timestamp: evt.Timestamp,
+			Code:      sortEventCode(phase, step),
+			Args:      sortEventArgs(phase, step, evt.MovieID),
 		}
+		dst <- se
 	}
 	close(dst)
+}
+
+// sortEventCode maps known structured progress events to TUI message IDs.
+// Returns "" for events whose message is dynamic (failures, cancellations) so
+// the TUI falls back to the raw English Message.
+func sortEventCode(phase SortEventPhase, step SortEventStep) string {
+	if step != sortStepComplete {
+		return ""
+	}
+	if phase == SortEventPhaseScrape {
+		return "TUIScrapeSucceeded"
+	}
+	if phase == SortEventPhaseApply {
+		return "TUIApplySucceeded"
+	}
+	return ""
+}
+
+// sortEventArgs builds the template arguments for a known event code. Returns
+// nil when there is no structured code, preserving the raw Message fallback.
+func sortEventArgs(phase SortEventPhase, step SortEventStep, movieID string) map[string]any {
+	if step != sortStepComplete {
+		return nil
+	}
+	if phase == SortEventPhaseScrape || phase == SortEventPhaseApply {
+		return map[string]any{"MovieID": movieID}
+	}
+	return nil
 }
 
 func sortEventPhaseFromWorker(p worker.JobEventPhase) SortEventPhase {

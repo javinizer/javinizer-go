@@ -45,6 +45,7 @@ import equal from 'fast-deep-equal';
 import { calculateCompleteness, type CompletenessTier } from '$lib/utils/completeness';
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
+import * as m from '$lib/paraglide/messages';
 
 interface MovieGroup {
 	movieId: string;
@@ -550,9 +551,9 @@ export function createReviewState(pageStore: Page) {
 		if (selectedMovieIds.size === 0) return;
 		const count = selectedMovieIds.size;
 		const confirmed = await confirmDialog(
-			'Exclude Movies',
-			`Exclude ${count} movie${count !== 1 ? 's' : ''} from this job?`,
-			{ confirmLabel: 'Exclude', variant: 'danger' },
+			m.review_exclude_movies_title(),
+			m.review_exclude_movies_confirm({ count }),
+			{ confirmLabel: m.review_exclude_label(), variant: 'danger' },
 		);
 		if (!confirmed) return;
 		mutations.bulkExcludeMutation.mutate({
@@ -568,7 +569,7 @@ export function createReviewState(pageStore: Page) {
 			try {
 				availableScrapers = await apiClient.getScrapers();
 			} catch {
-				toastStore.error('Failed to load scrapers');
+				toastStore.error(m.review_failed_to_load_scrapers());
 				return;
 			}
 		}
@@ -587,7 +588,7 @@ export function createReviewState(pageStore: Page) {
 		if (bulkRescrapeMovieIds.length === 0) return;
 		const selectedScrapers = rescrapeSelectedScrapers;
 		if (selectedScrapers.length === 0) {
-			toastStore.error('Please select at least one scraper');
+			toastStore.error(m.review_select_at_least_one_scraper());
 			return;
 		}
 
@@ -618,7 +619,7 @@ export function createReviewState(pageStore: Page) {
 			void queryClient.invalidateQueries({ queryKey: ['batch-job', jobId] });
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			toastStore.error(`Bulk rescrape failed: ${errorMessage}`);
+			toastStore.error(m.review_bulk_rescrape_failed({ error: errorMessage }));
 		} finally {
 			bulkRescraping = false;
 		}
@@ -719,8 +720,8 @@ export function createReviewState(pageStore: Page) {
 		if (!currentMovie || !currentResult) return;
 
 		const confirmed = await confirmDialog(
-			'Set as Poster',
-			'Use this screenshot as the poster? This will replace the current poster image.',
+			m.review_set_as_poster_title(),
+			m.review_set_as_poster_confirm(),
 		);
 
 		if (!confirmed) return;
@@ -733,8 +734,8 @@ export function createReviewState(pageStore: Page) {
 		if (!currentMovie || !currentResult) return;
 
 		const confirmed = await confirmDialog(
-			'Set as Cover/Fanart',
-			'Use this screenshot as the cover/fanart? This will replace the current cover image.',
+			m.review_set_as_cover_title(),
+			m.review_set_as_cover_confirm(),
 		);
 
 		if (!confirmed) return;
@@ -966,7 +967,7 @@ export function createReviewState(pageStore: Page) {
 		rescrapeTargetResult = null;
 		const group = movieGroups.find((g) => g.movieId === movieId);
 		if (!group) {
-			toastStore.error('Unable to open rescrape: movie not found');
+			toastStore.error(m.review_unable_to_open_rescrape());
 			return;
 		}
 		await rescrapeController.openRescrapeModal(group.primaryResult.result_id);
@@ -978,7 +979,7 @@ export function createReviewState(pageStore: Page) {
 			try {
 				availableScrapers = await apiClient.getScrapers();
 			} catch {
-				toastStore.error('Failed to load scrapers');
+				toastStore.error(m.review_failed_to_load_scrapers());
 				return;
 			}
 		}

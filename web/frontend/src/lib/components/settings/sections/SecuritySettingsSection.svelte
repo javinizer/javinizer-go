@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
@@ -13,9 +14,10 @@
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 	}
 
-	let { config, inputClass }: Props = $props();
+	let { config, inputClass, selectClass }: Props = $props();
 
 	const queryClient = useQueryClient();
 
@@ -97,7 +99,7 @@
 		const server = newUncServer.trim();
 		if (!server) return;
 		if (draft.allowed_unc_servers.includes(server)) {
-			toastStore.error('Server already in the allow list', 3000);
+			toastStore.error(m.settings_security_unc_already_list(), 3000);
 			return;
 		}
 		draft.allowed_unc_servers = [...draft.allowed_unc_servers, server];
@@ -126,7 +128,7 @@
 				allow_unc: saved.allow_unc,
 				allowed_unc_servers: [...saved.allowed_unc_servers],
 			};
-			toastStore.success('Security settings saved and reloaded', 4000);
+			toastStore.success(m.settings_security_saved_toast(), 4000);
 			void queryClient.invalidateQueries({ queryKey: ['config'] }).then(async () => {
 				const fresh = await queryClient.fetchQuery<Config>({
 					queryKey: ['config'],
@@ -136,7 +138,7 @@
 			});
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to save security settings', 5000);
+			toastStore.error(err.message || m.settings_security_save_failed(), 5000);
 		},
 	}));
 
@@ -151,13 +153,13 @@
 </script>
 
 <SettingsSection
-	title="Security / Allowed Directories"
-	description="Control which directories Javinizer can scan and write to. The first allowed directory is the default scan path. Changes are saved and hot-reloaded immediately."
+	title={m.settings_security_title()}
+	description={m.settings_security_desc()}
 	defaultExpanded={false}
 >
-	<SettingsSubsection title="Allowed Directories">
+	<SettingsSubsection title={m.settings_security_allowed_subsection()}>
 		<p class="text-xs text-muted-foreground mb-3">
-			Javinizer will only scan and operate inside these directories. With no allowed directories configured, all file operations are blocked.
+			{m.settings_security_allowed_desc()}
 		</p>
 
 		<AllowedDirectoriesEditor
@@ -166,32 +168,32 @@
 		/>
 	</SettingsSubsection>
 
-	<SettingsSubsection title="Denied Directories">
+	<SettingsSubsection title={m.settings_security_denied_subsection()}>
 		<p class="text-xs text-muted-foreground mb-3">
-			Paths here are always blocked, even if they fall under an allowed directory. Built-in system directories (/proc, /sys, /dev) are always denied.
+			{m.settings_security_denied_desc()}
 		</p>
 
 		<AllowedDirectoriesEditor
 			bind:directories={draft.denied_directories}
 			whitelistPaths={draft.allowed_directories}
 			showDefaultBadge={false}
-			placeholder="Add a directory to deny (e.g. /sensitive)"
+			placeholder={m.settings_security_deny_placeholder()}
 			emptyHint="No denied directories. Add one below to block specific paths even within allowed directories."
 		/>
 	</SettingsSubsection>
 
-	<SettingsSubsection title="UNC / Network Paths (Windows)">
+	<SettingsSubsection title={m.settings_security_unc_subsection()}>
 		<FormToggle
 			id="security-allow-unc"
-			label="Allow UNC paths"
-			description="Permit \\\\server\\share paths. UNC paths can leak NTLM credentials; enable only with trusted servers."
+			label={m.settings_security_allow_unc_label()}
+			description={m.settings_security_allow_unc_desc()}
 			checked={draft.allow_unc}
 			onchange={(val) => { draft.allow_unc = val; }}
 		/>
 
 		{#if draft.allow_unc}
 			<div class="mt-3">
-				<label class="block text-sm font-medium mb-2" for="security-unc-servers">Allowed UNC servers</label>
+				<label class="block text-sm font-medium mb-2" for="security-unc-servers">{m.settings_security_unc_servers_label()}</label>
 				{#if draft.allowed_unc_servers.length > 0}
 					<ul class="space-y-2 mb-3">
 						{#each draft.allowed_unc_servers as server, index (server + '-' + index)}
@@ -200,8 +202,8 @@
 								<button
 									type="button"
 									class="text-muted-foreground hover:text-destructive transition-colors shrink-0"
-									title="Remove server"
-									aria-label="Remove UNC server {server}"
+									title={m.settings_security_remove_server_tooltip()}
+									aria-label={m.settings_security_remove_unc_aria({ server })}
 									onclick={() => removeUncServer(index)}
 								>
 									<Trash2 class="h-4 w-4" />
@@ -219,7 +221,7 @@
 						placeholder="\\server\share"
 						class="{inputClass} flex-1 font-mono text-sm"
 					/>
-					<Button variant="outline" size="sm" onclick={addUncServer} disabled={!newUncServer.trim()} title="Add UNC server">
+					<Button variant="outline" size="sm" onclick={addUncServer} disabled={!newUncServer.trim()} title={m.settings_security_add_unc_tooltip()}>
 						{#snippet children()}
 							<FolderPlus class="h-4 w-4" />
 						{/snippet}
@@ -233,7 +235,7 @@
 		<Button onclick={handleSave} disabled={!dirty || saveMutation.isPending}>
 			{#snippet children()}
 				<Save class="h-4 w-4 mr-2" />
-				{saveMutation.isPending ? 'Saving...' : 'Save Security'}
+				{saveMutation.isPending ? m.common_saving() : m.settings_security_save_button()}
 			{/snippet}
 		</Button>
 	</div>

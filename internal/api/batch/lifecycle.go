@@ -111,7 +111,7 @@ func getBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 func getBatchJobFull(deps *core.APIDeps, c *gin.Context, jobID string) {
 	job, ok := deps.GetJobStore().GetJob(jobID)
 	if !ok {
-		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found", Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
 		return
 	}
 
@@ -124,7 +124,7 @@ func getBatchJobFull(deps *core.APIDeps, c *gin.Context, jobID string) {
 func getBatchJobSlim(deps *core.APIDeps, c *gin.Context, jobID string) {
 	status, ok := deps.GetJobStore().GetJob(jobID)
 	if !ok {
-		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found", Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
 		return
 	}
 
@@ -202,7 +202,7 @@ func deleteBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 
 		if err := deps.GetJobStore().DeleteJob(jobID); err != nil {
 			if strings.Contains(err.Error(), "not found") {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error(), Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
 				return
 			}
 			if strings.Contains(err.Error(), "cannot delete running job") {

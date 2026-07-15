@@ -67,7 +67,7 @@ func updateConfig(rt *core.APIRuntime) gin.HandlerFunc {
 		// Parse incoming config
 		var req UpdateConfigRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid configuration format"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid configuration format", Code: "CONFIG_INVALID"})
 			return
 		}
 
@@ -75,7 +75,7 @@ func updateConfig(rt *core.APIRuntime) gin.HandlerFunc {
 		err := svc.ValidateAndApply(oldCfg, &req.Config, req.ProxyVerificationTokens)
 		if err != nil {
 			status, msg := mapConfigErrorToHTTP(err)
-			c.JSON(status, contracts.ErrorResponse{Error: msg})
+			c.JSON(status, configErrorResponse(status, msg))
 			return
 		}
 
@@ -132,6 +132,19 @@ func reloadComponents(rt *core.APIRuntime, deps *core.APIDeps, newCfg *config.Co
 
 func validateTranslationSaveConfig(cfg *config.Config) error {
 	return config.ValidateTranslationProvider(cfg)
+}
+
+// configErrorResponse maps a config-update HTTP status + message to a
+// contracts.ErrorResponse, stamping the stable CONFIG_INVALID code on
+// client-side validation failures (HTTP 400). Server-side persist/reload
+// failures keep the English detail only — they are not user-actionable
+// validation errors and are addressed in a later migration tier.
+func configErrorResponse(status int, msg string) contracts.ErrorResponse {
+	resp := contracts.ErrorResponse{Error: msg}
+	if status == http.StatusBadRequest {
+		resp.Code = "CONFIG_INVALID"
+	}
+	return resp
 }
 
 // validateProxySaveConfig validates that proxy settings were tested before saving

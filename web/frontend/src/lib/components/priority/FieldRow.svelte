@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { SquarePen, RotateCcw } from 'lucide-svelte';
 	import Button from '../ui/Button.svelte';
 	import type { FieldStatus } from './priority';
@@ -29,19 +30,19 @@
 		inherited: {
 			dot: 'bg-green-500',
 			badge: 'text-green-600',
-			label: 'Inherited',
+		label: m.priority_status_inherited(),
 			row: 'bg-background'
 		},
 		skipped: {
 			dot: 'bg-slate-500',
 			badge: 'text-slate-600',
-			label: 'Skipped',
+		label: m.priority_status_skipped(),
 			row: 'bg-red-50/50 border-red-200 dark:bg-red-950/20 dark:border-red-900'
 		},
 		custom: {
 			dot: 'bg-orange-500',
 			badge: 'text-orange-600',
-			label: 'Custom',
+		label: m.priority_status_custom(),
 			row: 'bg-orange-50/50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-900'
 		}
 	};
@@ -55,7 +56,7 @@
 	<div
 		class="w-2 h-2 rounded-full shrink-0 {a.dot}"
 		role="img"
-		aria-label="{a.label} priority"
+		aria-label={m.priority_aria_status({ label: a.label })}
 	></div>
 
 	<!-- Field Name -->
@@ -68,12 +69,12 @@
 				<!-- Suppressed via ["__skip__"]: the field is deliberately left empty
 				     (no scrapers consulted). Distinguished from custom/orange so the
 				     user sees their suppression intent reflected. -->
-				<span class="italic">Suppressed (no scrapers consulted)</span>
+				<span class="italic">{m.priority_suppressed()}</span>
 			{:else if status === 'custom' && priority.length === 0}
 				<!-- All scrapers in this custom override are disabled/unqueryable.
 				     The field will be empty at runtime — don't show the global
 				     chain as that would be misleading. Show a warning instead. -->
-				<span class="italic text-destructive">All scrapers disabled — field will be empty</span>
+				<span class="italic text-destructive">{m.priority_all_disabled()}</span>
 			{:else}
 				{#each priority as scraper, index}
 					<span class="inline-flex items-center">
@@ -100,8 +101,8 @@
 				size="icon"
 				onclick={onReset}
 				class="h-8 w-8"
-				aria-label="Reset to global priority"
-				title="Reset to global"
+				aria-label={m.priority_reset_to_global_aria()}
+				title={m.priority_reset_to_global_title()}
 			>
 				{#snippet children()}
 					<RotateCcw class="h-4 w-4" />
@@ -113,8 +114,8 @@
 			size="icon"
 			onclick={onEdit}
 			class="h-8 w-8"
-			aria-label="Edit priority"
-			title="Edit priority"
+			aria-label={m.priority_edit_aria()}
+			title={m.priority_edit_title()}
 		>
 			{#snippet children()}
 				<SquarePen class="h-4 w-4" />

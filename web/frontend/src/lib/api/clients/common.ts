@@ -42,6 +42,21 @@ function clearStoredSession(): void {
 	}
 }
 
+// ApiError carries the structured ErrorResponse fields (code/params) so callers
+// can translate known error codes via translateErrorCode before showing the
+// message. It extends Error so existing `instanceof Error` checks keep working.
+export class ApiError extends Error {
+	code?: string;
+	params?: Record<string, unknown> | null;
+
+	constructor(message: string, code?: string, params?: Record<string, unknown> | null) {
+		super(message);
+		this.name = 'ApiError';
+		this.code = code;
+		this.params = params;
+	}
+}
+
 // Base client provides the shared request method that all sub-clients use.
 export class BaseClient {
 	protected baseURL: string;
@@ -88,7 +103,7 @@ export class BaseClient {
 			const error: ErrorResponse = await response.json().catch(() => ({
 				error: `HTTP ${response.status}: ${response.statusText}`,
 			}));
-			throw new Error(error.error || 'API request failed');
+			throw new ApiError(error.error || 'API request failed', error.code, error.params);
 		}
 
 		const text = await response.text();

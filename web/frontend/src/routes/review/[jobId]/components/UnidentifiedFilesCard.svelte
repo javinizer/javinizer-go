@@ -3,6 +3,7 @@
 	import type { FileResult } from '$lib/api/types';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		failedResults: FileResult[];
@@ -21,7 +22,7 @@
 		<div class="flex items-center gap-2 mb-3">
 			<AlertTriangle class="h-4 w-4 text-warning shrink-0" />
 			<p class="text-sm font-medium">
-				Unidentified Files ({failedResults.length})
+				{m.review_unidentified_files({ count: failedResults.length })}
 			</p>
 		</div>
 		<div class="space-y-2">
@@ -45,7 +46,7 @@
 					>
 						{#snippet children()}
 							<Search class="h-3 w-3 mr-1" />
-							Search manually
+							{m.review_search_manually()}
 						{/snippet}
 					</Button>
 				</div>

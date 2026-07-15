@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
 
 // newActressMergeModal constructs the actress merge modal with the provided deps.
@@ -408,6 +409,30 @@ func (am *actressMergeModal) updateResultStep(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 // View renders the actress merge modal overlay.
 func (am *actressMergeModal) View() string {
+	return am.ViewLocalized(nil)
+}
+
+// ViewLocalized renders the actress merge modal using the provided localizer.
+// A nil localizer falls back to the raw English message ids.
+func (am *actressMergeModal) ViewLocalized(loc *localization.Localizer) string {
+	l := func(id string, template ...map[string]any) string {
+		if loc == nil {
+			return id
+		}
+		return loc.Localize(id, template...)
+	}
+	decisionLabel := func(decision string) string {
+		switch decision {
+		case "target":
+			return l("TUIActressMergeDecisionTarget")
+		case "source":
+			return l("TUIActressMergeDecisionSource")
+		default:
+			return decision
+		}
+	}
+	am.targetInput.Placeholder = l("TUIActressMergePlaceholderTarget")
+	am.sourceInput.Placeholder = l("TUIActressMergePlaceholderSource")
 	width := am.deps.Width()
 	height := am.deps.Height()
 	modalWidth := 78
@@ -428,28 +453,31 @@ func (am *actressMergeModal) View() string {
 	amTitleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).MarginBottom(1)
 	amErrorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	muted := lipgloss.NewStyle().Faint(true)
-	lines := []string{amTitleStyle.Render("Actress Merge")}
+	lines := []string{amTitleStyle.Render(l("TUIActressMergeTitle"))}
 	if am.err != "" {
-		lines = append(lines, amErrorStyle.Render("Error: "+am.err), "")
+		lines = append(lines, amErrorStyle.Render(l("TUIActressMergeErrorPrefix")+" "+am.err), "")
 	}
 	switch am.step {
 	case actressMergeStepInput:
-		targetLabel := "  Target ID: "
-		sourceLabel := "  Source ID: "
+		targetLabel := "  " + l("TUIActressMergeTargetIDLabel") + " "
+		sourceLabel := "  " + l("TUIActressMergeSourceIDLabel") + " "
 		if am.focus == 0 {
-			targetLabel = "▸ Target ID: "
+			targetLabel = "▸ " + l("TUIActressMergeTargetIDLabel") + " "
 		} else {
-			sourceLabel = "▸ Source ID: "
+			sourceLabel = "▸ " + l("TUIActressMergeSourceIDLabel") + " "
 		}
-		lines = append(lines, targetLabel+am.targetInput.View(), sourceLabel+am.sourceInput.View(), "", muted.Render("Tab/↑↓ switch field • Enter on Source loads preview • Esc cancel"))
+		lines = append(lines, targetLabel+am.targetInput.View(), sourceLabel+am.sourceInput.View(), "", muted.Render(l("TUIActressMergeInputHint")))
 	case actressMergeStepConflict:
 		if am.preview == nil {
-			lines = append(lines, "No merge preview loaded.", "", muted.Render("Press r to go back or Esc to close."))
+			lines = append(lines, l("TUIActressMergeNoPreview"), "", muted.Render(l("TUIActressMergeNoPreviewHint")))
 			break
 		}
-		lines = append(lines, fmt.Sprintf("Merging source #%d into target #%d", am.preview.Source.ID, am.preview.Target.ID), fmt.Sprintf("Conflicts: %d", len(am.preview.Conflicts)), "")
+		lines = append(lines,
+			l("TUIActressMergeMerging", map[string]any{"Source": am.preview.Source.ID, "Target": am.preview.Target.ID}),
+			l("TUIActressMergeConflictsCount", map[string]any{"Count": len(am.preview.Conflicts)}),
+			"")
 		if len(am.preview.Conflicts) == 0 {
-			lines = append(lines, "No field conflicts found. Default merge behavior will be used.", "", muted.Render("Enter apply merge • r edit IDs • Esc cancel"))
+			lines = append(lines, l("TUIActressMergeNoConflicts"), "", muted.Render(l("TUIActressMergeConflictHint")))
 			break
 		}
 		for i, conflict := range am.preview.Conflicts {
@@ -461,22 +489,27 @@ func (am *actressMergeModal) View() string {
 			if decision == "" {
 				decision = conflict.DefaultResolution
 			}
-			lines = append(lines, fmt.Sprintf("%s%s [%s]", cursor, conflict.Field, decision))
+			lines = append(lines, fmt.Sprintf("%s%s [%s]", cursor, conflict.Field, decisionLabel(decision)))
 		}
 		if conflict := am.currentConflict(); conflict != nil {
 			decision := am.resolutions[conflict.Field]
 			if decision == "" {
 				decision = conflict.DefaultResolution
 			}
-			lines = append(lines, "", fmt.Sprintf("Field: %s (selected: %s)", conflict.Field, decision), "  target: "+formatConflictValue(conflict.TargetValue), "  source: "+formatConflictValue(conflict.SourceValue))
+			lines = append(lines, "", l("TUIActressMergeField", map[string]any{"Field": conflict.Field, "Decision": decisionLabel(decision)}), "  "+l("TUIActressMergeTargetValueLabel")+" "+formatConflictValue(conflict.TargetValue), "  "+l("TUIActressMergeSourceValueLabel")+" "+formatConflictValue(conflict.SourceValue))
 		}
-		lines = append(lines, "", muted.Render("↑↓ choose field • t/s select value • Space toggle • Enter apply • r edit IDs • Esc cancel"))
+		lines = append(lines, "", muted.Render(l("TUIActressMergeConflictNavHint")))
 	case actressMergeStepResult:
 		if am.result == nil {
-			lines = append(lines, "Merge finished, but no result is available.", "", muted.Render("r new merge • Esc close"))
+			lines = append(lines, l("TUIActressMergeNoResult"), "", muted.Render(l("TUIActressMergeNoResultHint")))
 			break
 		}
-		lines = append(lines, fmt.Sprintf("Merged actress #%d into #%d", am.result.MergedFromID, am.result.MergedActress.ID), fmt.Sprintf("Updated movies: %d", am.result.UpdatedMovies), fmt.Sprintf("Conflicts resolved: %d", am.result.ConflictsResolved), fmt.Sprintf("Aliases added: %d", am.result.AliasesAdded), "", muted.Render("r new merge with same target • Enter/Esc close"))
+		lines = append(lines,
+			l("TUIActressMergeResultMerged", map[string]any{"From": am.result.MergedFromID, "Into": am.result.MergedActress.ID}),
+			l("TUIActressMergeUpdatedMovies", map[string]any{"Count": am.result.UpdatedMovies}),
+			l("TUIActressMergeConflictsResolved", map[string]any{"Count": am.result.ConflictsResolved}),
+			l("TUIActressMergeAliasesAdded", map[string]any{"Count": am.result.AliasesAdded}),
+			"", muted.Render(l("TUIActressMergeResultHint")))
 	}
 	content := strings.Join(lines, "\n")
 	modal := amModalStyle.Render(content)

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
+	import { formatDate as formatDateL } from '$lib/i18n/format';
 	import { goto } from '$app/navigation';
 	import { fade, fly } from 'svelte/transition';
 	import { page } from '$app/stores';
@@ -83,14 +85,14 @@
 		onSuccess: (result) => {
 			revertModalOpen = false;
 			if (result.failed === 0) {
-				toastStore.success(`Successfully reverted ${result.succeeded} file${result.succeeded !== 1 ? 's' : ''}`);
+				toastStore.success(m.jobs_revert_success({ count: result.succeeded }));
 			} else {
-				toastStore.warning(`Reverted ${result.succeeded} of ${result.total}. ${result.failed} failed.`);
+				toastStore.warning(m.jobs_revert_partial({ succeeded: result.succeeded, total: result.total, failed: result.failed }));
 			}
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
 		},
 		onError: (err) => {
-			toastStore.error(`Revert failed: ${err.message}`);
+			toastStore.error(m.jobs_revert_failed({ error: err.message }));
 			revertModalOpen = false;
 		}
 	}));
@@ -133,7 +135,7 @@
 		const clearableJobs = jobs.filter(job => job.status.toLowerCase() !== 'running');
 		if (clearableJobs.length === 0) return;
 
-		if (!(await confirmDialog('Clear Jobs', `Clear all non-running jobs? This will remove ${clearableJobs.length} job(s).`, { variant: 'danger', confirmLabel: 'Clear All' }))) return;
+		if (!(await confirmDialog(m.jobs_clear_confirm_title(), m.jobs_clear_confirm_desc({ count: clearableJobs.length }), { variant: 'danger', confirmLabel: m.jobs_clear_all() }))) return;
 
 		isClearing = true;
 		let failedCount = 0;
@@ -148,7 +150,7 @@
 			}
 
 			if (failedCount > 0) {
-				toastStore.error(`Failed to clear ${failedCount} job(s). Some jobs may still be removed.`);
+				toastStore.error(m.jobs_clear_failed({ count: failedCount }));
 			}
 
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
@@ -159,15 +161,15 @@
 
 	async function cleanHistory() {
 		if (!olderThanDays || !Number.isFinite(olderThanDays) || olderThanDays < 1) {
-			toastStore.error('Please enter a valid number of days');
+			toastStore.error(m.jobs_valid_days());
 			return;
 		}
 		isCleaningHistory = true;
 		try {
 			const result = await apiClient.deleteHistoryBulk({ older_than_days: olderThanDays });
-			toastStore.success(`Deleted ${result.deleted} history record${result.deleted !== 1 ? 's' : ''} older than ${olderThanDays} day${olderThanDays !== 1 ? 's' : ''}`);
+			toastStore.success(m.jobs_history_deleted({ deleted: result.deleted, days: olderThanDays }));
 		} catch (e) {
-			toastStore.error(`Failed to clean history: ${e instanceof Error ? e.message : 'Unknown error'}`);
+			toastStore.error(m.jobs_history_clean_failed({ error: e instanceof Error ? e.message : m.common_unknown_error() }));
 		} finally {
 			isCleaningHistory = false;
 		}
@@ -175,15 +177,15 @@
 
 	async function cleanEvents() {
 		if (!olderThanDays || !Number.isFinite(olderThanDays) || olderThanDays < 1) {
-			toastStore.error('Please enter a valid number of days');
+			toastStore.error(m.jobs_valid_days());
 			return;
 		}
 		isCleaningEvents = true;
 		try {
 			const result = await apiClient.deleteEvents({ older_than_days: olderThanDays });
-			toastStore.success(`Deleted ${result.deleted} event${result.deleted !== 1 ? 's' : ''} older than ${olderThanDays} day${olderThanDays !== 1 ? 's' : ''}`);
+			toastStore.success(m.jobs_events_deleted({ deleted: result.deleted, days: olderThanDays }));
 		} catch (e) {
-			toastStore.error(`Failed to clean events: ${e instanceof Error ? e.message : 'Unknown error'}`);
+			toastStore.error(m.jobs_events_clean_failed({ error: e instanceof Error ? e.message : m.common_unknown_error() }));
 		} finally {
 			isCleaningEvents = false;
 		}
@@ -212,28 +214,28 @@
 		const diffHours = Math.floor(diffMs / 3600000);
 		const diffDays = Math.floor(diffMs / 86400000);
 
-		if (diffMins < 1) return 'Just now';
-		if (diffMins < 60) return `${diffMins}m ago`;
-		if (diffHours < 24) return `${diffHours}h ago`;
-		if (diffDays < 7) return `${diffDays}d ago`;
-		return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' }).format(date);
+		if (diffMins < 1) return m.jobs_just_now();
+		if (diffMins < 60) return m.jobs_minutes_ago({ count: diffMins });
+		if (diffHours < 24) return m.jobs_hours_ago({ count: diffHours });
+		if (diffDays < 7) return m.jobs_days_ago({ count: diffDays });
+		return formatDateL(date, { dateStyle: 'medium' });
 	}
 
 	function getStatusConfig(status: string): { icon: typeof Clock; color: string; bg: string; label: string } {
 		const s = status.toLowerCase();
 		switch (s) {
 			case 'running':
-				return { icon: Clock, color: 'text-blue-500', bg: 'bg-blue-500/10', label: 'Running' };
+				return { icon: Clock, color: 'text-blue-500', bg: 'bg-blue-500/10', label: m.jobs_status_running() };
 			case 'completed':
-				return { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', label: 'Ready' };
+				return { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', label: m.jobs_status_ready() };
 			case 'failed':
-				return { icon: AlertTriangle, color: 'text-red-500', bg: 'bg-red-500/10', label: 'Failed' };
+				return { icon: AlertTriangle, color: 'text-red-500', bg: 'bg-red-500/10', label: m.jobs_status_failed() };
 			case 'organized':
-				return { icon: CheckCircle2, color: 'text-purple-500', bg: 'bg-purple-500/10', label: 'Organized' };
+				return { icon: CheckCircle2, color: 'text-purple-500', bg: 'bg-purple-500/10', label: m.jobs_status_organized() };
 			case 'cancelled':
-				return { icon: CircleX, color: 'text-gray-400', bg: 'bg-gray-500/10', label: 'Cancelled' };
+				return { icon: CircleX, color: 'text-gray-400', bg: 'bg-gray-500/10', label: m.jobs_status_cancelled() };
 			case 'reverted':
-				return { icon: Undo2, color: 'text-yellow-500', bg: 'bg-yellow-500/10', label: 'Reverted' };
+				return { icon: Undo2, color: 'text-yellow-500', bg: 'bg-yellow-500/10', label: m.jobs_status_reverted() };
 			default:
 				return { icon: Clock, color: 'text-gray-400', bg: 'bg-gray-500/10', label: status };
 		}
@@ -254,13 +256,13 @@
 
 	function getFileNames(job: BatchJobResponse): string {
 		const files = job.files || Object.keys(job.results || {});
-		if (files.length === 0) return 'No files';
+		if (files.length === 0) return m.jobs_no_files();
 		if (files.length === 1) {
 			const name = files[0].split('/').pop() || files[0];
 			return name.length > 40 ? name.slice(0, 37) + '...' : name;
 		}
 		const first = files[0].split('/').pop() || files[0];
-		return `${first} +${files.length - 1} more`;
+		return m.jobs_file_count_more({ first, count: files.length - 1 });
 	}
 </script>
 
@@ -268,34 +270,34 @@
 	<div class="container mx-auto px-4 py-8 max-w-7xl">
 		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
 			<div>
-				<h1 class="text-2xl font-bold tracking-tight">Jobs</h1>
-				<p class="text-muted-foreground text-sm mt-1">Manage your batch jobs and organize history</p>
+				<h1 class="text-2xl font-bold tracking-tight">{m.jobs_title()}</h1>
+				<p class="text-muted-foreground text-sm mt-1">{m.jobs_desc()}</p>
 			</div>
 			<div class="flex items-center gap-2">
 				<Button variant="outline" size="sm" onclick={() => queryClient.invalidateQueries({ queryKey: ['batch-jobs'] })} disabled={isRefreshing || isClearing}>
 					<RefreshCw class="h-4 w-4 mr-1.5 {isRefreshing ? 'animate-spin' : ''}" />
-					Refresh
+					{m.jobs_refresh()}
 				</Button>
 				<Button
 					variant="destructive"
 					size="sm"
 					onclick={clearAllJobs}
 					disabled={isClearing || jobs.length === 0 || jobs.every(j => j.status.toLowerCase() === 'running')}
-					title="Clear all completed, failed, cancelled jobs"
+					title={m.jobs_clear_all_tooltip()}
 				>
 					<Trash2 class="h-4 w-4 mr-1.5 {isClearing ? 'animate-pulse' : ''}" />
-					{isClearing ? 'Clearing...' : 'Clear All'}
+					{isClearing ? m.jobs_clearing() : m.jobs_clear_all()}
 				</Button>
 				<Button size="sm" onclick={() => goto('/browse')}>
 					<FolderOpen class="h-4 w-4 mr-1.5" />
-					New Scrape
+					{m.jobs_new_scrape()}
 				</Button>
 			</div>
 		</div>
 
 		<div class="flex items-center gap-2 mb-6 p-3 bg-card border border-border rounded-lg">
 			<Timer class="h-4 w-4 text-muted-foreground flex-shrink-0" />
-			<label class="text-sm text-muted-foreground whitespace-nowrap" for="older-than-days">Older than</label>
+			<label class="text-sm text-muted-foreground whitespace-nowrap" for="older-than-days">{m.jobs_older_than()}</label>
 			<input
 				id="older-than-days"
 				type="number"
@@ -303,7 +305,7 @@
 				min="1"
 				class="w-20 h-8 rounded-md border border-input bg-background px-2 text-sm"
 			/>
-			<span class="text-sm text-muted-foreground">days</span>
+			<span class="text-sm text-muted-foreground">{m.jobs_days()}</span>
 			<div class="flex items-center gap-2 ml-2">
 								<Button
 					variant="destructive"
@@ -311,7 +313,7 @@
 					onclick={cleanHistory}
 					disabled={isCleaningHistory || isCleaningEvents || olderThanDays < 1}
 				>
-					{isCleaningHistory ? 'Cleaning...' : 'Clean History'}
+					{isCleaningHistory ? m.jobs_cleaning() : m.jobs_clean_history()}
 				</Button>
 				<Button
 					variant="destructive"
@@ -319,7 +321,7 @@
 					onclick={cleanEvents}
 					disabled={isCleaningHistory || isCleaningEvents || olderThanDays < 1}
 				>
-					{isCleaningEvents ? 'Cleaning...' : 'Clean Events'}
+					{isCleaningEvents ? m.jobs_cleaning() : m.jobs_clean_events()}
 				</Button>
 			</div>
 		</div>
@@ -344,7 +346,7 @@
 						size="sm"
 						onclick={() => setFilter(filter)}
 					>
-						{filter === 'all' ? 'All' : getStatusConfig(filter).label}
+						{filter === 'all' ? m.jobs_filter_all() : getStatusConfig(filter).label}
 						<span class="ml-1.5 text-xs opacity-70">({count})</span>
 					</Button>
 				{/each}
@@ -355,21 +357,21 @@
 			<div class="flex items-center justify-center py-20">
 				<div class="text-center">
 					<Clock class="h-8 w-8 animate-spin mx-auto mb-3 text-muted-foreground" />
-					<p class="text-muted-foreground text-sm">Loading jobs...</p>
+					<p class="text-muted-foreground text-sm">{m.jobs_loading()}</p>
 				</div>
 			</div>
 		{:else if jobs.length === 0}
 			<Card class="p-12 text-center">
 				<Activity class="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-				<p class="text-muted-foreground mb-4">No batch jobs yet</p>
+				<p class="text-muted-foreground mb-4">{m.jobs_empty()}</p>
 				<Button onclick={() => goto('/browse')}>
 					<ArrowRight class="h-4 w-4 mr-1.5" />
-					Start Your First Scrape
+					{m.jobs_start_first_scrape()}
 				</Button>
 			</Card>
 		{:else if filteredJobs.length === 0}
 			<Card class="p-8 text-center">
-				<p class="text-muted-foreground">No jobs match this filter</p>
+				<p class="text-muted-foreground">{m.jobs_no_match()}</p>
 			</Card>
 		{:else}
 			<div class="space-y-3" in:fade={{ duration: 150 }}>
@@ -413,12 +415,12 @@
 											{getFileNames(job)}
 										</p>
 										<div class="flex items-center gap-4 text-xs text-muted-foreground">
-											<span>{job.total_files} file{job.total_files !== 1 ? 's' : ''}</span>
+											<span>{m.jobs_file_count({ count: job.total_files })}</span>
 											{#if job.completed > 0}
-												<span class="text-green-600">{job.completed} done</span>
+												<span class="text-green-600">{m.jobs_done({ count: job.completed })}</span>
 											{/if}
 											{#if job.failed > 0}
-												<span class="text-red-500">{job.failed} failed</span>
+												<span class="text-red-500">{m.jobs_failed_count({ count: job.failed })}</span>
 											{/if}
 											<span>{formatDate(job.started_at)}</span>
 										</div>
@@ -438,31 +440,31 @@
 									<div class="flex items-center gap-1.5 flex-shrink-0">
 										{#if job.status.toLowerCase() === 'running'}
 											<Button variant="destructive" size="sm" onclick={() => cancelJobMutation.mutate(job.id)} disabled={cancelJobMutation.isPending}>
-												Cancel
+													{m.jobs_cancel()}
 											</Button>
 											<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
 												<Eye class="h-4 w-4 mr-1" />
-												View
+													{m.jobs_view()}
 											</Button>
 										{:else if job.status.toLowerCase() === 'completed'}
 											{#if job.completed > 0}
 												<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
-													Review & Organize
+														{m.jobs_review_organize()}
 												</Button>
 											{/if}
 											{#if job.failed > 0}
-												<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title="View failed files in review">
+												<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title={m.jobs_view_failed_tooltip()}>
 													<Eye class="h-4 w-4 mr-1" />
-													{job.completed > 0 ? 'Review Failed' : 'View Failed'}
+													{job.completed > 0 ? m.jobs_review_failed() : m.jobs_view_failed()}
 												</Button>
 											{/if}
-											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
+											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title={m.jobs_dismiss()}>
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{:else if job.status.toLowerCase() === 'organized'}
 											<Button variant="secondary" size="sm" onclick={() => goto(`/jobs/${job.id}`)}>
 												<ArrowRight class="h-4 w-4 mr-1" />
-												View Details
+													{m.jobs_view_details()}
 											</Button>
 											{#if config?.output?.allow_revert}
 											<Button
@@ -471,22 +473,22 @@
 												onclick={() => openRevertModal(job.id, getRevertableCount(job))}
 											>
 												<Undo2 class="h-4 w-4 mr-1" />
-												Revert
+													{m.jobs_revert()}
 											</Button>
 											{/if}
-											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
+											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title={m.jobs_dismiss()}>
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{:else if job.status.toLowerCase() === 'failed'}
-											<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title="View failed files in review">
+											<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title={m.jobs_view_failed_tooltip()}>
 												<Eye class="h-4 w-4 mr-1" />
-												{job.completed > 0 ? 'Review' : 'View Failed'}
+												{job.completed > 0 ? m.jobs_review() : m.jobs_view_failed()}
 											</Button>
-											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
+											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title={m.jobs_dismiss()}>
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{:else}
-											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
+											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title={m.jobs_dismiss()}>
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{/if}
@@ -500,7 +502,7 @@
 			{#if totalPages > 1}
 				<div class="flex items-center justify-between mt-4 px-1">
 					<p class="text-sm text-muted-foreground">
-						Showing {(currentPage - 1) * pageSize + 1}&ndash;{Math.min(currentPage * pageSize, filteredJobs.length)} of {filteredJobs.length}
+						{m.jobs_showing({ start: (currentPage - 1) * pageSize + 1, end: Math.min(currentPage * pageSize, filteredJobs.length), total: filteredJobs.length })}
 					</p>
 					<div class="flex items-center gap-1">
 						<Button variant="outline" size="sm" onclick={() => currentPage--} disabled={currentPage <= 1}>

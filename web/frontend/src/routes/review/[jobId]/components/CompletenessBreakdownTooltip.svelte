@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { FieldCategory } from '$lib/utils/completeness';
 	import { fade } from 'svelte/transition';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		breakdown: FieldCategory[];
@@ -25,7 +26,7 @@
 		<div transition:fade={{ duration: 150 }}>
 			<div class="space-y-1.5">
 				<div>
-					<p class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-0.5">Essential</p>
+					<p class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-0.5">{m.review_completeness_essential()}</p>
 					<div class="space-y-0.5">
 						{#each essential as cat}
 							<div class="flex items-center gap-1.5 text-xs">
@@ -40,7 +41,7 @@
 					</div>
 				</div>
 				<div>
-					<p class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-0.5">Important</p>
+					<p class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-0.5">{m.review_completeness_important()}</p>
 					<div class="space-y-0.5">
 						{#each important as cat}
 							<div class="flex items-center gap-1.5 text-xs">
@@ -55,7 +56,7 @@
 					</div>
 				</div>
 				<div>
-					<p class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-0.5">Nice-to-have</p>
+					<p class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-0.5">{m.review_completeness_nice_to_have()}</p>
 					<div class="space-y-0.5">
 						{#each niceToHave as cat}
 							<div class="flex items-center gap-1.5 text-xs">

@@ -4,6 +4,7 @@
 	import { portalToBody } from '$lib/actions/portal';
 	import FileBrowser from '$lib/components/FileBrowser.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		show: boolean;
@@ -44,9 +45,9 @@
 		>
 			<div class="p-6 border-b flex items-center justify-between">
 				<div>
-					<h2 class="text-xl font-bold">Select Destination Folder</h2>
+					<h2 class="text-xl font-bold">{m.review_select_destination_folder()}</h2>
 					<p class="text-sm text-muted-foreground mt-1">
-						Navigate to and select the folder where files will be organized
+						{m.common_select_folder_desc()}
 					</p>
 				</div>
 				<button onclick={onCancel} class="text-muted-foreground hover:text-foreground transition-colors">
@@ -66,7 +67,7 @@
 
 			<div class="p-6 border-t space-y-3">
 				<div class="flex items-center gap-2">
-					<span class="text-sm font-medium text-muted-foreground">Selected Path:</span>
+					<span class="text-sm font-medium text-muted-foreground">{m.browse_selected_path()}</span>
 					<code
 						class="flex-1 px-3 py-1.5 bg-accent rounded text-sm font-mono text-foreground overflow-x-auto"
 					>
@@ -75,10 +76,10 @@
 				</div>
 				<div class="flex items-center justify-end gap-2">
 					<Button variant="outline" onclick={onCancel}>
-						{#snippet children()}Cancel{/snippet}
+						{#snippet children()}{m.common_cancel()}{/snippet}
 					</Button>
 					<Button onclick={onConfirm}>
-						{#snippet children()}Use This Folder{/snippet}
+						{#snippet children()}{m.browse_use_this_folder()}{/snippet}
 					</Button>
 				</div>
 			</div>

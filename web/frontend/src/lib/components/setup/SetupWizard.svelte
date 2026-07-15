@@ -19,6 +19,7 @@
 		Check,
 		Loader2,
 	} from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		onComplete: () => void;
@@ -29,9 +30,9 @@
 	type StepId = 'credentials' | 'directories' | 'scrapers';
 
 	const steps: { id: StepId; label: string; hint: string }[] = [
-		{ id: 'credentials', label: 'Admin Account', hint: 'Secure your server' },
-		{ id: 'directories', label: 'Library Folders', hint: 'Where your media lives' },
-		{ id: 'scrapers', label: 'Scrapers', hint: 'Metadata sources' },
+		{ id: 'credentials', label: m.setup_step_credentials_label(), hint: m.setup_step_credentials_hint() },
+		{ id: 'directories', label: m.setup_step_directories_label(), hint: m.setup_step_directories_hint() },
+		{ id: 'scrapers', label: m.setup_step_scrapers_label(), hint: m.setup_step_scrapers_hint() },
 	];
 
 	let stepIndex = $state(0);
@@ -98,8 +99,8 @@
 			availableScrapers = await apiClient.getScrapers();
 			selectedScrapers = availableScrapers.filter((s) => s.enabled).map((s) => s.name);
 		} catch {
-			error = 'Could not load available scrapers. You can configure them later in Settings → Scrapers.';
-			toastStore.error('Could not load available scrapers', 4000);
+			error = m.setup_err_load_scrapers();
+			toastStore.error(m.setup_err_load_scrapers_short(), 4000);
 		} finally {
 			scrapersLoading = false;
 			scrapersFetched = true;
@@ -133,7 +134,7 @@
 	async function handleCredentialsNext() {
 		error = null;
 		if (credentials.password !== credentials.confirm) {
-			error = 'Passwords do not match';
+			error = m.setup_err_passwords_mismatch();
 			return;
 		}
 		submitting = true;
@@ -151,7 +152,7 @@
 			syncWebSocketAuth();
 			credentialsRegistered = true;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to create admin account';
+			error = e instanceof Error ? e.message : m.setup_err_create_admin();
 		} finally {
 			submitting = false;
 		}
@@ -161,7 +162,7 @@
 	// step. Only reachable after the account has been successfully registered.
 	function handleCredentialsContinue() {
 		gotoStep(1);
-		toastStore.success('Admin account created', 3000);
+		toastStore.success(m.setup_toast_admin_created(), 3000);
 	}
 
 	// Step 2: directories are staged locally; nothing is committed until Finish
@@ -207,10 +208,10 @@
 					body: JSON.stringify(fresh),
 				});
 			}
-			toastStore.success('Setup complete. Welcome to Javinizer.', 4000);
+			toastStore.success(m.setup_toast_complete(), 4000);
 			onComplete();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to save setup configuration';
+			error = e instanceof Error ? e.message : m.setup_err_save_config();
 		} finally {
 			submitting = false;
 		}
@@ -243,18 +244,18 @@
 
 	let nextLabel = $derived(
 		inCredentialsSuccess
-			? 'Continue to library setup'
+			? m.setup_next_continue_library()
 			: submitting
 			? stepIndex === 0
-				? 'Creating…'
+				? m.setup_creating()
 				: isLastStep
-					? 'Finishing…'
-					: 'Saving…'
+					? m.setup_finishing()
+					: m.setup_saving()
 			: isLastStep
-				? 'Finish Setup'
+				? m.setup_next_finish()
 				: stepIndex === 0
-					? 'Create admin account'
-					: 'Continue',
+					? m.setup_next_create_admin()
+					: m.setup_next_continue(),
 	);
 
 	onMount(() => {
@@ -293,7 +294,7 @@
 			</div>
 			<div class="brand-word">Javinizer</div>
 
-			<nav class="stepper" aria-label="Setup progress">
+			<nav class="stepper" aria-label={m.setup_stepper_aria()}>
 				<div class="stepper-track" aria-hidden="true">
 					<div
 						class="stepper-track-fill"
@@ -318,7 +319,7 @@
 			</nav>
 
 			<div class="brand-foot">
-				<div class="brand-foot-row"><span class="brand-dot"></span> Step {stepIndex + 1} of {steps.length}</div>
+				<div class="brand-foot-row"><span class="brand-dot"></span> {m.setup_step_of({ current: stepIndex + 1, total: steps.length })}</div>
 			</div>
 		</div>
 	</aside>
@@ -363,7 +364,7 @@
 					<Button variant="ghost" onclick={handleBack} disabled={submitting}>
 						{#snippet children()}
 							<ArrowLeft class="h-4 w-4" />
-							Back
+						{m.setup_back()}
 						{/snippet}
 					</Button>
 				{:else}
@@ -373,7 +374,7 @@
 				<div class="nav-right">
 					{#if stepIndex === 1}
 						<Button variant="ghost" onclick={handleDirectoriesSkip} disabled={submitting}>
-							{#snippet children()}Skip for now{/snippet}
+							{#snippet children()}{m.setup_skip_for_now()}{/snippet}
 						</Button>
 					{/if}
 					<Button onclick={handleNext} disabled={!canProceed}>

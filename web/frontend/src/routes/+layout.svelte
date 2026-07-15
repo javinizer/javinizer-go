@@ -16,6 +16,11 @@
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import SetupWizard from '$lib/components/setup/SetupWizard.svelte';
 	import { clearClientStorage } from '$lib/utils/storage';
+	import * as m from '$lib/paraglide/messages';
+	import { bootstrapLocale } from '$lib/i18n/locale';
+	import { translateErrorCode } from '$lib/i18n/api-messages';
+	import { ApiError } from '$lib/api/clients/common';
+	import LocaleReconciler from '$lib/components/LocaleReconciler.svelte';
 	import '../app.css';
 
 	let { children } = $props();
@@ -34,6 +39,13 @@
 	let loginPassword = $state('');
 	let loginRememberMe = $state(true);
 	let clientStorageCleared = false;
+
+	function localizeApiError(error: unknown, fallback: string): string {
+		if (error instanceof ApiError && error.code) {
+			return translateErrorCode(error.code, error.params ?? null, error.message || fallback);
+		}
+		return error instanceof Error ? error.message : fallback;
+	}
 
 	function syncWebSocketAuthState() {
 		if (authAuthenticated) {
@@ -64,7 +76,7 @@
 			authUnavailable = true;
 			authAuthenticated = false;
 			authUsername = '';
-			authError = error instanceof Error ? error.message : 'Failed to load authentication status';
+			authError = localizeApiError(error, m.auth_failed_status());
 		} finally {
 			authLoading = false;
 			syncWebSocketAuthState();
@@ -85,7 +97,7 @@
 			if (loginResult?.session_id) { BaseClient.setSessionID(loginResult.session_id); }
 			await refreshAuthStatus();
 		} catch (error) {
-			authError = error instanceof Error ? error.message : 'Failed to login';
+			authError = localizeApiError(error, m.auth_failed_login());
 		} finally {
 			authSubmitting = false;
 		}
@@ -96,7 +108,7 @@
 		try {
 			await apiClient.logoutAuth();
 		} catch (error) {
-			authError = error instanceof Error ? error.message : 'Failed to logout';
+			authError = localizeApiError(error, m.auth_failed_logout());
 		} finally {
 			BaseClient.setSessionID(null);
 			authAuthenticated = false;
@@ -109,8 +121,17 @@
 
 	onMount(() => {
 		getThemeStore().initTheme();
+		// Bootstrap the interface locale before rendering the auth UI so the
+		// login/setup screens are localized. Reconciliation with the configured
+		// ui.language happens after the config loads (see configQuery effect).
+		void bootstrapLocale();
 		refreshAuthStatus();
 	});
+
+	// Reconcile the interface locale with the configured ui.language once the
+	// config is available (post-auth). The reconcile logic lives in
+	// LocaleReconciler.svelte, rendered inside <QueryClientProvider> so the
+	// createConfigQuery call has access to the QueryClient context.
 
 	onDestroy(() => {
 		getThemeStore().destroyTheme();
@@ -124,16 +145,16 @@
 {#if authLoading}
 	<div class="min-h-screen bg-background flex items-center justify-center px-4">
 		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm text-center">
-			<p class="text-lg font-semibold">Checking authentication...</p>
+			<p class="text-lg font-semibold">{m.auth_checking()}</p>
 		</div>
 	</div>
 {:else if authUnavailable}
 	<div class="min-h-screen bg-background flex items-center justify-center px-4 py-10">
 		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm space-y-4">
 			<div class="space-y-1">
-				<h1 class="text-2xl font-bold">Authentication Service Unavailable</h1>
+				<h1 class="text-2xl font-bold">{m.auth_service_unavailable()}</h1>
 				<p class="text-sm text-muted-foreground">
-					The app could not reach the authentication endpoint. Check server status and retry.
+					{m.auth_service_unavailable_desc()}
 				</p>
 			</div>
 
@@ -148,7 +169,7 @@
 				onclick={() => refreshAuthStatus()}
 				class="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
 			>
-				Retry
+				{m.auth_retry()}
 			</button>
 		</div>
 	</div>
@@ -158,9 +179,9 @@
 	<div class="min-h-screen bg-background flex items-center justify-center px-4 py-10">
 		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm space-y-4">
 			<div class="space-y-1">
-				<h1 class="text-2xl font-bold">Login Required</h1>
+				<h1 class="text-2xl font-bold">{m.auth_login_required()}</h1>
 				<p class="text-sm text-muted-foreground">
-					Sign in with your configured username and password.
+					{m.auth_login_required_desc()}
 				</p>
 			</div>
 
@@ -172,7 +193,7 @@
 
 			<form class="space-y-3" onsubmit={handleLoginSubmit}>
 				<div class="space-y-1">
-					<label class="text-sm font-medium" for="login-username">Username</label>
+					<label class="text-sm font-medium" for="login-username">{m.auth_username()}</label>
 					<input
 						id="login-username"
 						class="w-full rounded-md border bg-background px-3 py-2 text-sm"
@@ -183,7 +204,7 @@
 					/>
 				</div>
 				<div class="space-y-1">
-					<label class="text-sm font-medium" for="login-password">Password</label>
+					<label class="text-sm font-medium" for="login-password">{m.auth_password()}</label>
 					<input
 						id="login-password"
 						class="w-full rounded-md border bg-background px-3 py-2 text-sm"
@@ -200,9 +221,9 @@
 						bind:checked={loginRememberMe}
 					/>
 					<span class="space-y-0.5">
-						<span class="block font-medium text-foreground">Remember me</span>
+						<span class="block font-medium text-foreground">{m.auth_remember_me()}</span>
 						<span class="block text-xs text-muted-foreground">
-							Keep this browser signed in across browser and server restarts for the normal session lifetime.
+							{m.auth_remember_me_desc()}
 						</span>
 					</span>
 				</label>
@@ -211,7 +232,7 @@
 					disabled={authSubmitting}
 					class="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
 				>
-					{authSubmitting ? 'Signing in...' : 'Sign In'}
+					{authSubmitting ? m.auth_signing_in() : m.auth_sign_in()}
 				</button>
 			</form>
 		</div>
@@ -219,6 +240,7 @@
 {:else}
 	{#if browser}
 		<QueryClientProvider client={getQueryClient()}>
+			<LocaleReconciler getAuthenticated={() => authAuthenticated} />
 			<div class="min-h-screen bg-background">
 				<Navigation authenticated={authAuthenticated} username={authUsername} onLogout={handleLogout} />
 				<main class="route-container">

@@ -94,6 +94,7 @@ func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 		if sessionID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 				Error: "authentication required",
+				Code:  "AUTH_UNAUTHORIZED",
 			})
 			return
 		}
@@ -109,6 +110,7 @@ func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 			clearSessionCookie(c, securityConfig(rt))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 				Error: "authentication required",
+				Code:  "AUTH_UNAUTHORIZED",
 			})
 			return
 		}
@@ -141,6 +143,7 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 			if !strings.HasPrefix(rawToken, token.TokenPrefix) {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 					Error: "invalid or revoked token",
+					Code:  "AUTH_UNAUTHORIZED",
 				})
 				return
 			}
@@ -150,6 +153,7 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 			if err != nil {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 					Error: "invalid or revoked token",
+					Code:  "AUTH_UNAUTHORIZED",
 				})
 				return
 			}
@@ -169,6 +173,7 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 		if sessionID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 				Error: "authentication required",
+				Code:  "AUTH_UNAUTHORIZED",
 			})
 			return
 		}
@@ -184,6 +189,7 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 			clearSessionCookie(c, securityConfig(rt))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 				Error: "authentication required",
+				Code:  "AUTH_UNAUTHORIZED",
 			})
 			return
 		}

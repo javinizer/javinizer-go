@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { untrack } from 'svelte';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { flip } from 'svelte/animate';
@@ -349,17 +350,18 @@
 				}
 				if (allMatched.length > 0) {
 					selectedFiles = [...new Set([...selectedFiles, ...allMatched])];
-					const failedInfo = failedFolders.length > 0 ? ` (${failedFolders.length} folder${failedFolders.length !== 1 ? 's' : ''} failed)` : '';
 					toastStore.success(
-						`Added ${allMatched.length} JAV file${allMatched.length !== 1 ? 's' : ''} from ${fulfilledCount} folder${fulfilledCount !== 1 ? 's' : ''}${failedInfo}`,
+						failedFolders.length > 0
+							? m.browse_added_files_folders({ fileCount: allMatched.length, folderCount: fulfilledCount, failed: failedFolders.length })
+							: m.browse_added_files_folders_no_failed({ fileCount: allMatched.length, folderCount: fulfilledCount }),
 						3000
 					);
 				} else if (failedFolders.length === selectedFolders.length) {
-					toastStore.error(`All ${failedFolders.length} folder scan${failedFolders.length !== 1 ? 's' : ''} failed`, 5000);
+					toastStore.error(m.browse_scan_failed_all({ count: failedFolders.length }), 5000);
 				} else if (failedFolders.length > 0) {
-					toastStore.warning(`No JAV files found in ${fulfilledCount} folder${fulfilledCount !== 1 ? 's' : ''}; ${failedFolders.length} folder${failedFolders.length !== 1 ? 's' : ''} failed`, 5000);
+					toastStore.warning(m.browse_no_files_folders(), 5000);
 				} else {
-					toastStore.warning(`No JAV files found in selected folders`, 5000);
+					toastStore.warning(m.browse_no_files_folders(), 5000);
 				}
 			} else {
 				const response = await apiClient.scan({
@@ -383,26 +385,31 @@
 
 				if (matchedFiles.length > 0) {
 					selectedFiles = [...new Set([...selectedFiles, ...matchedFiles])];
-					const scanType = recursive ? 'recursive' : 'current folder';
-					const filterInfo = recursive && filter ? ` matching "${filter}"` : '';
+					const scanType = recursive ? m.browse_scan_type_recursive() : m.browse_scan_type_current();
 					toastStore.success(
-						`Added ${matchedFiles.length} JAV file${matchedFiles.length !== 1 ? 's' : ''}${filterInfo} (${scanType})`,
+						recursive && filter
+							? m.browse_added_files_filtered({ fileCount: matchedFiles.length, filter, scanType })
+							: m.browse_added_files_single_folder({ fileCount: matchedFiles.length, scanType }),
 						3000
 					);
 				} else {
 					if (!recursive) {
 						const totalMatched = response.files.filter((f) => f.matched && !f.is_dir).length;
 						if (totalMatched > 0) {
-							toastStore.warning(`No JAV files match current filter (${totalMatched} found in folder)`, 5000);
+							toastStore.warning(m.browse_no_files_filter_match({ count: totalMatched }), 5000);
 							return;
 						}
 					}
-					const filterInfo = recursive && filter ? ` matching "${filter}"` : '';
-					toastStore.warning(`No JAV files found${filterInfo}${recursive ? ' in any subfolder' : ''}`, 5000);
+					toastStore.warning(
+						recursive
+							? (filter ? m.browse_no_files_recursive({ filter }) : m.browse_no_files_no_filter_subfolder())
+							: (filter ? m.browse_no_files_current({ filter }) : m.browse_no_files_no_filter()),
+						5000
+					);
 				}
 			}
 		} catch (error) {
-			toastStore.error(error instanceof Error ? error.message : 'Failed to scan directory', 5000);
+			toastStore.error(error instanceof Error ? error.message : m.browse_scan_dir_failed(), 5000);
 		} finally {
 			scanning = false;
 		}
@@ -477,14 +484,15 @@
 			pollJobCompletion(response.job_id);
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
 
-			const modeText = isUpdateMode ? 'Updating metadata' : 'Batch scraping';
 			toastStore.success(
-				`${modeText} started for ${selectedFiles.length} file${selectedFiles.length !== 1 ? 's' : ''}`,
+				isUpdateMode
+					? m.browse_updating_started({ count: selectedFiles.length })
+					: m.browse_scraping_started({ count: selectedFiles.length }),
 				5000
 			);
 		} catch (error) {
 			// Show error toast
-			const errorMessage = error instanceof Error ? error.message : 'Failed to start batch operation';
+			const errorMessage = error instanceof Error ? error.message : m.browse_batch_failed_generic();
 			toastStore.error(errorMessage, 7000);
 		} finally {
 			scraping = false;
@@ -526,7 +534,7 @@
 			initialPath = response.path;
 			destinationPath = response.path;
 		} catch (error) {
-			toastStore.error('Failed to get current working directory');
+			toastStore.error(m.browse_get_cwd_failed());
 		}
 	}
 </script>
@@ -536,16 +544,16 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between">
 			<div>
-				<h1 class="text-3xl font-bold">Browse & Scrape</h1>
+				<h1 class="text-3xl font-bold">{m.browse_title()}</h1>
 				<p class="text-muted-foreground mt-1">
-					Select video files and scrape metadata from configured sources
+					{m.browse_subtitle()}
 				</p>
 			</div>
 			<div class="flex gap-2">
 				<Button variant="outline" onclick={resetDirectories}>
 					{#snippet children()}
 						<RotateCcw class="h-4 w-4 mr-2" />
-						Reset Paths
+						{m.browse_reset_paths()}
 					{/snippet}
 				</Button>
 			</div>
@@ -554,7 +562,7 @@
 		<!-- Operation Mode Selection -->
 		<Card class="p-4">
 			<div class="space-y-3">
-				<h3 class="font-semibold">Operation Mode</h3>
+				<h3 class="font-semibold">{m.browse_operation_mode()}</h3>
 				<div class="grid grid-cols-2 gap-3">
 					<button
 						onclick={() => operationMode = 'scrape'}
@@ -562,10 +570,10 @@
 					>
 						<div class="flex items-center gap-2">
 							<Play class="h-5 w-5 {operationMode === 'scrape' ? 'text-primary' : 'text-muted-foreground'}" />
-							<span class="font-medium {operationMode === 'scrape' ? 'text-primary' : ''}">Scrape & Organize</span>
+							<span class="font-medium {operationMode === 'scrape' ? 'text-primary' : ''}">{m.browse_mode_scrape_organize()}</span>
 						</div>
 						<p class="text-xs text-muted-foreground text-left">
-							Scrape metadata and organize files into destination folder with artwork and NFO
+							{m.browse_mode_scrape_desc()}
 						</p>
 					</button>
 
@@ -575,10 +583,10 @@
 					>
 						<div class="flex items-center gap-2">
 							<RefreshCw class="h-5 w-5 {operationMode === 'update' ? 'text-primary' : 'text-muted-foreground'}" />
-							<span class="font-medium {operationMode === 'update' ? 'text-primary' : ''}">Update Metadata</span>
+							<span class="font-medium {operationMode === 'update' ? 'text-primary' : ''}">{m.browse_mode_update_metadata()}</span>
 						</div>
 						<p class="text-xs text-muted-foreground text-left">
-							Update metadata and media files in place, video files remain where they are
+							{m.browse_mode_update_desc()}
 						</p>
 					</button>
 				</div>
@@ -592,20 +600,20 @@
 		<Card class="p-4">
 			<div class="space-y-4">
 				<div>
-					<h3 class="font-semibold">NFO Merge Strategy</h3>
-					<p class="text-sm text-muted-foreground">Choose how to merge existing NFO data with freshly scraped data</p>
+					<h3 class="font-semibold">{m.browse_nfo_merge_strategy()}</h3>
+					<p class="text-sm text-muted-foreground">{m.browse_merge_strategy_desc()}</p>
 				</div>
 
 				<!-- Preset Selection -->
 				<div class="space-y-2">
 					<div class="flex items-center justify-between">
-						<h4 class="text-sm font-medium">Quick Presets</h4>
+						<h4 class="text-sm font-medium">{m.browse_quick_presets()}</h4>
 						{#if selectedPreset}
 							<button
 								onclick={() => { selectedPreset = undefined; }}
 								class="text-xs text-primary hover:underline"
 							>
-								Clear preset
+								{m.browse_clear_preset()}
 							</button>
 						{/if}
 					</div>
@@ -614,78 +622,78 @@
 							onclick={() => applyPreset('conservative')}
 							class="p-3 rounded-lg border-2 text-sm transition-all {selectedPreset === 'conservative' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
-							<div class="font-medium">🛡️ Conservative</div>
-							<div class="text-xs text-muted-foreground mt-1">Never overwrite existing</div>
+							<div class="font-medium">{m.browse_preset_conservative()}</div>
+							<div class="text-xs text-muted-foreground mt-1">{m.browse_preset_conservative_desc()}</div>
 						</button>
 						<button
 							onclick={() => applyPreset('gap-fill')}
 							class="p-3 rounded-lg border-2 text-sm transition-all {selectedPreset === 'gap-fill' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
-							<div class="font-medium">📝 Gap Fill</div>
-							<div class="text-xs text-muted-foreground mt-1">Fill missing fields only</div>
+							<div class="font-medium">{m.browse_preset_gap_fill()}</div>
+							<div class="text-xs text-muted-foreground mt-1">{m.browse_preset_gap_fill_desc()}</div>
 						</button>
 						<button
 							onclick={() => applyPreset('aggressive')}
 							class="p-3 rounded-lg border-2 text-sm transition-all {selectedPreset === 'aggressive' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
-							<div class="font-medium">⚡ Aggressive</div>
-							<div class="text-xs text-muted-foreground mt-1">Trust scrapers completely</div>
+							<div class="font-medium">{m.browse_preset_aggressive()}</div>
+							<div class="text-xs text-muted-foreground mt-1">{m.browse_preset_aggressive_desc()}</div>
 						</button>
 					</div>
 				</div>
 
 				<!-- Scalar Fields Strategy -->
 				<div class="space-y-2">
-					<h4 class="text-sm font-medium">Scalar Fields (Title, Studio, Label, etc.)</h4>
+					<h4 class="text-sm font-medium">{m.browse_scalar_fields()}</h4>
 					<div class="grid grid-cols-2 gap-2">
 						<button
 							onclick={() => { scalarStrategy = 'prefer-nfo'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'prefer-nfo' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
-							<div class="font-medium">Prefer NFO</div>
-							<div class="text-xs text-muted-foreground mt-1">Keep existing values</div>
+							<div class="font-medium">{m.browse_prefer_nfo()}</div>
+							<div class="text-xs text-muted-foreground mt-1">{m.browse_prefer_nfo_desc()}</div>
 						</button>
 						<button
 							onclick={() => { scalarStrategy = 'prefer-scraper'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'prefer-scraper' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
-							<div class="font-medium">Prefer Scraped</div>
-							<div class="text-xs text-muted-foreground mt-1">Update with fresh data</div>
+							<div class="font-medium">{m.browse_prefer_scraped()}</div>
+							<div class="text-xs text-muted-foreground mt-1">{m.browse_prefer_scraped_desc()}</div>
 						</button>
 						<button
 							onclick={() => { scalarStrategy = 'preserve-existing'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'preserve-existing' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
-							<div class="font-medium">Preserve Existing</div>
-							<div class="text-xs text-muted-foreground mt-1">Never overwrite</div>
+							<div class="font-medium">{m.browse_preserve_existing()}</div>
+							<div class="text-xs text-muted-foreground mt-1">{m.browse_preserve_existing_desc()}</div>
 						</button>
 						<button
 							onclick={() => { scalarStrategy = 'fill-missing-only'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'fill-missing-only' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
-							<div class="font-medium">Fill Missing Only</div>
-							<div class="text-xs text-muted-foreground mt-1">Safe gap filling</div>
+							<div class="font-medium">{m.browse_fill_missing_only()}</div>
+							<div class="text-xs text-muted-foreground mt-1">{m.browse_fill_missing_only_desc()}</div>
 						</button>
 					</div>
 				</div>
 
 				<!-- Array Fields Strategy -->
 				<div class="space-y-2">
-					<h4 class="text-sm font-medium">Array Fields (Actresses, Genres, Screenshots)</h4>
+					<h4 class="text-sm font-medium">{m.browse_array_fields()}</h4>
 					<div class="grid grid-cols-2 gap-2">
 						<button
 							onclick={() => { arrayStrategy = 'merge'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {arrayStrategy === 'merge' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
-							<div class="font-medium">Merge</div>
-							<div class="text-xs text-muted-foreground mt-1">Combine arrays</div>
+							<div class="font-medium">{m.browse_merge()}</div>
+							<div class="text-xs text-muted-foreground mt-1">{m.browse_merge_desc()}</div>
 						</button>
 						<button
 							onclick={() => { arrayStrategy = 'replace'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {arrayStrategy === 'replace' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
-							<div class="font-medium">Replace</div>
-							<div class="text-xs text-muted-foreground mt-1">Use scraped arrays only</div>
+							<div class="font-medium">{m.browse_replace()}</div>
+							<div class="text-xs text-muted-foreground mt-1">{m.browse_replace_desc()}</div>
 						</button>
 					</div>
 				</div>
@@ -699,15 +707,15 @@
 		<Card class="p-4">
 			<div class="space-y-3">
 				<div>
-					<h3 class="font-semibold">File Operations</h3>
-					<p class="text-sm text-muted-foreground">Choose how files are organized during scraping</p>
+					<h3 class="font-semibold">{m.browse_file_operations()}</h3>
+					<p class="text-sm text-muted-foreground">{m.browse_file_operations_desc()}</p>
 				</div>
 				<div class="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4">
 					{#each [
-						{ value: 'organize' as OperationMode, label: 'Organize', desc: 'Move to folder', icon: FolderOutput },
-						{ value: 'in-place' as OperationMode, label: 'Reorganize in place', desc: 'Keep location, rename folder and file', icon: FolderOpen },
-						{ value: 'in-place-norenamefolder' as OperationMode, label: 'Rename file only', desc: 'Rename video file, keep folder', icon: FileEdit },
-						{ value: 'metadata-artwork' as OperationMode, label: 'Metadata & Artwork', desc: 'No file changes', icon: FileText },
+						{ value: 'organize' as OperationMode, label: m.browse_op_organize(), desc: m.browse_op_organize_desc(), icon: FolderOutput },
+						{ value: 'in-place' as OperationMode, label: m.browse_op_reorganize(), desc: m.browse_op_reorganize_desc(), icon: FolderOpen },
+						{ value: 'in-place-norenamefolder' as OperationMode, label: m.browse_op_rename_only(), desc: m.browse_op_rename_only_desc(), icon: FileEdit },
+						{ value: 'metadata-artwork' as OperationMode, label: m.browse_op_metadata_artwork(), desc: m.browse_op_metadata_artwork_desc(), icon: FileText },
 					] as mode}
 						{@const disabled = isInPlaceImplied && (mode.value === 'organize' || mode.value === 'in-place')}
 						<button
@@ -716,7 +724,7 @@
 							class="relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {disabled ? 'border-border opacity-40 cursor-not-allowed' : effectiveOperationMode === mode.value ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
 							{#if !operationModeOverrideTouched && getSettingsOperationMode() === mode.value}
-								<span class="absolute top-1 right-1 text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded">Default</span>
+								<span class="absolute top-1 right-1 text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded">{m.browse_op_default_badge()}</span>
 							{/if}
 							<div class="font-medium">{mode.label}</div>
 							<div class="text-xs text-muted-foreground">{mode.desc}</div>
@@ -725,11 +733,11 @@
 				</div>
 				{#if isInPlaceImplied}
 					<p class="text-xs text-muted-foreground">
-						Output destination matches source path with no folder/subfolder format — Organize and Reorganize in place are unavailable. <button class="underline text-primary" onclick={() => { destinationPath = ''; localStorage.removeItem(STORAGE_KEY_OUTPUT); }}>Change destination</button>
+						{m.browse_in_place_implied_notice()} <button class="underline text-primary" onclick={() => { destinationPath = ''; localStorage.removeItem(STORAGE_KEY_OUTPUT); }}>{m.browse_change_destination()}</button>
 					</p>
 				{:else if operationModeOverrideTouched && effectiveOperationMode !== getSettingsOperationMode()}
 					<p class="text-xs text-primary">
-						Overriding settings for this batch only. <button class="underline" onclick={() => operationModeOverrideTouched = false}>Reset to default</button>
+						{m.browse_overriding_settings()} <button class="underline" onclick={() => operationModeOverrideTouched = false}>{m.browse_reset_to_default()}</button>
 					</p>
 				{/if}
 			</div>
@@ -744,7 +752,7 @@
 				<div class="space-y-3">
 					<div class="flex items-center gap-2">
 						<FolderOutput class="h-5 w-5 text-primary" />
-						<h3 class="font-semibold">Output Destination</h3>
+						<h3 class="font-semibold">{m.browse_output_destination()}</h3>
 					</div>
 					<div class="flex gap-2">
 						<PathInput
@@ -752,22 +760,22 @@
 							onchange={(v) => {
 								localStorage.setItem(STORAGE_KEY_OUTPUT, v);
 							}}
-							placeholder="Enter destination path (e.g., /path/to/output)"
+							placeholder={m.browse_destination_placeholder()}
 							whitelistPaths={config?.api?.security?.allowed_directories ?? []}
 							class="px-3 py-2"
 						/>
 						<Button onclick={openDestinationBrowser}>
 							{#snippet children()}
 								<FolderOpen class="h-4 w-4 mr-2" />
-								Browse
+								{m.browse_browse_button()}
 							{/snippet}
 						</Button>
 					</div>
 					<p class="text-xs text-muted-foreground">
 					{#if isInPlaceImplied}
-						Destination matches source path with no folder format — files will be renamed in place only.
+						{m.browse_dest_in_place_note()}
 					{:else}
-						Scraped files will be organized with metadata, artwork, and NFO files in this directory
+						{m.browse_dest_organize_note()}
 					{/if}
 				</p>
 				</div>
@@ -784,8 +792,7 @@
 						<div class="flex items-center gap-2">
 							<div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
 							<h3 class="font-semibold">
-								{selectedFiles.length} File{selectedFiles.length !== 1 ? 's' : ''} Selected for
-								Scraping
+								{m.browse_selected_for_scraping({ count: selectedFiles.length })}
 							</h3>
 						</div>
 						<Button
@@ -794,7 +801,7 @@
 								onclick={clearSelection}
 						>
 							{#snippet children()}
-								Clear All
+								{m.browse_clear_all()}
 							{/snippet}
 						</Button>
 					</div>
@@ -820,7 +827,7 @@
 											selectedFiles = selectedFiles.filter((f) => f !== filePath);
 										}}
 										class="ml-2 px-2 py-1 text-destructive hover:bg-destructive/10 rounded transition-colors opacity-0 group-hover:opacity-100"
-										title="Remove"
+										title={m.browse_remove_file()}
 									>
 										×
 									</button>
@@ -849,16 +856,16 @@
 
 		<!-- Help Text -->
 		<Card class="p-4 bg-accent/30">
-			<h3 class="font-semibold mb-2">How to use:</h3>
+			<h3 class="font-semibold mb-2">{m.browse_how_to_use()}</h3>
 			<ul class="text-sm text-muted-foreground space-y-1">
-				<li>1. Select operation mode: <strong>Scrape & Organize</strong> (choose move/copy/hard link/soft link during review) or <strong>Update Metadata</strong> (files stay in place)</li>
-				<li>2. Navigate to your video files using the file browser (type a path or click folders)</li>
-				<li>3. Click <strong>Scan</strong> to find JAV files (enable <strong>Recursive</strong> to include subfolders)</li>
-				<li>4. Configure options (force refresh, scraper selection) in the bottom bar as needed</li>
-				<li>5. Click the action button to start the operation</li>
+				<li>{m.browse_howto_1()}</li>
+				<li>{m.browse_howto_2()}</li>
+				<li>{m.browse_howto_3()}</li>
+				<li>{m.browse_howto_4()}</li>
+				<li>{m.browse_howto_5()}</li>
 			</ul>
 			<p class="text-xs text-muted-foreground mt-3 pt-3 border-t border-border/50">
-				<strong>Tip:</strong> Use the filter box to narrow down files, then scan to select only matching results.
+				{m.browse_tip_filter()}
 			</p>
 		</Card>
 	</div>
@@ -871,7 +878,7 @@
 		<div class="border-b bg-accent/20" transition:slide|local={{ duration: 180, easing: quintOut }}>
 			<div class="container mx-auto px-4 py-4 max-w-7xl">
 				<div class="flex items-center justify-between mb-3">
-					<h3 class="text-sm font-semibold">Options</h3>
+					<h3 class="text-sm font-semibold">{m.browse_options()}</h3>
 					<button
 						onclick={() => showOptionsPanel = false}
 						class="text-muted-foreground hover:text-foreground transition-colors"
@@ -889,8 +896,8 @@
 							class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 						/>
 						<div class="flex-1">
-							<span class="text-sm font-medium">Force Refresh</span>
-							<p class="text-xs text-muted-foreground">Clear cache and fetch fresh metadata</p>
+							<span class="text-sm font-medium">{m.browse_force_refresh()}</span>
+							<p class="text-xs text-muted-foreground">{m.browse_force_refresh_desc()}</p>
 						</div>
 					</label>
 
@@ -903,8 +910,8 @@
 							class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 						/>
 						<div class="flex-1">
-							<span class="text-sm font-medium">Manual Scraper Selection</span>
-							<p class="text-xs text-muted-foreground">Choose specific scrapers</p>
+							<span class="text-sm font-medium">{m.browse_manual_scraper_selection()}</span>
+							<p class="text-xs text-muted-foreground">{m.browse_manual_scraper_selection_desc()}</p>
 						</div>
 					</label>
 
@@ -917,8 +924,8 @@
 							class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 						/>
 						<div class="flex-1">
-							<span class="text-sm font-medium">Manual Scrape</span>
-							<p class="text-xs text-muted-foreground">Review &amp; override IDs/URLs per file before scraping</p>
+							<span class="text-sm font-medium">{m.browse_manual_scrape()}</span>
+							<p class="text-xs text-muted-foreground">{m.browse_manual_scrape_desc()}</p>
 						</div>
 					</label>
 
@@ -943,17 +950,17 @@
 					<div class="flex items-center gap-2">
 						<div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
 						<span class="text-sm font-medium">
-							{selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} selected
+							{m.browse_files_selected_count({ count: selectedFiles.length })}
 						</span>
 						<button
 									onclick={clearSelection}
 							class="text-xs text-muted-foreground hover:text-destructive transition-colors"
 						>
-							(clear)
+							{m.browse_clear_selection_link()}
 						</button>
 					</div>
 				{:else}
-					<span class="text-sm text-muted-foreground">No files selected</span>
+					<span class="text-sm text-muted-foreground">{m.browse_no_files_selected()}</span>
 				{/if}
 			</div>
 
@@ -967,14 +974,14 @@
 							bind:checked={recursiveScan}
 							class="h-3.5 w-3.5 rounded border-input text-primary focus:ring-1 focus:ring-primary"
 						/>
-						<span class="text-muted-foreground hidden sm:inline">Recursive</span>
+						<span class="text-muted-foreground hidden sm:inline">{m.browse_recursive()}</span>
 					</label>
 					<Button
 						variant="outline"
 						size="sm"
 						onclick={() => triggerScan++}
 						disabled={scanning}
-						title={recursiveScan ? "Scan all subfolders" : "Scan current folder only"}
+						title={recursiveScan ? m.browse_scan_title_recursive() : m.browse_scan_title_current()}
 					>
 						{#snippet children()}
 							{#if scanning}
@@ -982,7 +989,7 @@
 							{:else}
 								<Scan class="h-3.5 w-3.5 mr-1.5" />
 							{/if}
-							{scanning ? 'Scanning...' : 'Scan'}
+							{scanning ? m.browse_scanning() : m.browse_scan_button()}
 						{/snippet}
 					</Button>
 				</div>
@@ -998,7 +1005,7 @@
 				>
 					{#snippet children()}
 						<Settings class="h-4 w-4 mr-2" />
-						Options
+						{m.browse_options()}
 						{#if showOptionsPanel}
 							<ChevronDown class="h-4 w-4 ml-1" />
 						{:else}
@@ -1011,13 +1018,13 @@
 				{#if manualScrapeMode || forceRefresh || showScraperSelector}
 					<div class="hidden sm:flex items-center gap-1 text-xs">
 						{#if manualScrapeMode}
-							<span class="px-2 py-0.5 bg-primary/10 text-primary rounded">Manual</span>
+							<span class="px-2 py-0.5 bg-primary/10 text-primary rounded">{m.browse_manual_badge()}</span>
 						{/if}
 						{#if forceRefresh}
-							<span class="px-2 py-0.5 bg-primary/10 text-primary rounded">Force</span>
+							<span class="px-2 py-0.5 bg-primary/10 text-primary rounded">{m.browse_force_badge()}</span>
 						{/if}
 						{#if showScraperSelector}
-							<span class="px-2 py-0.5 bg-primary/10 text-primary rounded">{selectedScrapers.length} scrapers</span>
+							<span class="px-2 py-0.5 bg-primary/10 text-primary rounded">{m.browse_scrapers_count({ count: selectedScrapers.length })}</span>
 						{/if}
 					</div>
 				{/if}
@@ -1035,13 +1042,13 @@
 							<Play class="h-4 w-4 mr-2" />
 						{/if}
 						{#if manualScrapeMode && !scraping}
-							Continue to manual review
+							{m.browse_continue_to_manual()}
 						{:else if scraping}
-							Starting...
+							{m.browse_starting()}
 						{:else if operationMode === 'update'}
-							Update {selectedFiles.length} File{selectedFiles.length !== 1 ? 's' : ''}
+							{m.browse_action_update({ count: selectedFiles.length })}
 						{:else}
-							Scrape {selectedFiles.length} File{selectedFiles.length !== 1 ? 's' : ''}
+							{m.browse_action_scrape({ count: selectedFiles.length })}
 						{/if}
 					{/snippet}
 				</Button>
@@ -1057,9 +1064,9 @@
 			<!-- Modal Header -->
 			<div class="p-6 border-b flex items-center justify-between">
 				<div>
-					<h2 class="text-xl font-bold">Select Destination Folder</h2>
+					<h2 class="text-xl font-bold">{m.browse_select_destination()}</h2>
 					<p class="text-sm text-muted-foreground mt-1">
-						Navigate to and select the folder where files will be organized
+						{m.common_select_folder_desc()}
 					</p>
 				</div>
 				<button
@@ -1085,7 +1092,7 @@
 			<!-- Modal Footer -->
 			<div class="p-6 border-t space-y-3">
 				<div class="flex items-center gap-2">
-					<span class="text-sm font-medium text-muted-foreground">Selected Path:</span>
+					<span class="text-sm font-medium text-muted-foreground">{m.browse_selected_path()}</span>
 					<code
 						class="flex-1 px-3 py-1.5 bg-accent rounded text-sm font-mono text-foreground overflow-x-auto"
 					>
@@ -1095,12 +1102,12 @@
 				<div class="flex items-center justify-end gap-2">
 					<Button variant="outline" onclick={cancelDestination}>
 						{#snippet children()}
-							Cancel
+							{m.common_cancel()}
 						{/snippet}
 					</Button>
 					<Button onclick={confirmDestination}>
 						{#snippet children()}
-							Use This Folder
+							{m.browse_use_this_folder()}
 						{/snippet}
 					</Button>
 				</div>

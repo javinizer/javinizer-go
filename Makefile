@@ -1,5 +1,5 @@
 .PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
-.PHONY: coverage coverage-fast coverage-html coverage-check coverage-pkg coverage-patch coverage-patch-check coverage-func ci ci-full config-drift config-sync check-import-guard check-mocks simulate-ci
+.PHONY: coverage coverage-fast coverage-html coverage-check coverage-pkg coverage-patch coverage-patch-check coverage-func ci ci-full config-drift config-sync check-import-guard check-mocks i18n-check simulate-ci
 .PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-frontend test-e2e-field-drop test-e2e-cli test-e2e-live test-coverage
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: build-app-darwin build-app-windows build-app-linux build-app-all
@@ -52,6 +52,7 @@ help:
 	@echo "  make config-drift       - Validate config synchronization (no hardcoded values)"
 	@echo "  make config-sync        - Sync configs/config.yaml.example from the embedded master copy"
 	@echo "  make check-import-guard - Enforce models→config dependency direction"
+	@echo "  make i18n-check         - Validate i18n catalogs (missing keys, placeholders, coverage)"
 	@echo "  make simulate-ci        - Simulate GitHub Actions CI locally"
 	@echo ""
 	@echo "Web Frontend:"
@@ -216,8 +217,12 @@ config-sync:
 check-import-guard:
 	@./scripts/check_import_guard.sh
 
+# Run i18n catalog validation (missing keys, placeholder mismatch, coverage)
+i18n-check:
+	@bash scripts/i18n-check.sh
+
 # Run full CI test suite
-ci: vet lint vuln coverage-check test-race config-drift check-import-guard check-mocks
+ci: vet lint vuln coverage-check test-race config-drift check-import-guard check-mocks i18n-check
 	@echo "All CI checks passed!"
 
 # Run full CI suite including frontend tests

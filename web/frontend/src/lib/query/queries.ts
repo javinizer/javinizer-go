@@ -3,11 +3,12 @@ import { apiClient } from '$lib/api/client';
 import { listTokens } from '$lib/api/tokens';
 import { isTerminalStatus } from '$lib/utils/job-progress';
 
-export function createConfigQuery() {
+export function createConfigQuery(enabled?: () => boolean) {
 	return createQuery(() => ({
 		queryKey: ['config'],
 		queryFn: () => apiClient.getConfig(),
 		staleTime: 30_000,
+		enabled: enabled?.() ?? true
 	}));
 }
 

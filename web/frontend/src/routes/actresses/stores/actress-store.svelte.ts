@@ -5,6 +5,7 @@ import { apiClient } from '$lib/api/client';
 import { toastStore } from '$lib/stores/toast';
 import type { Actress, ActressUpsertRequest, ActressMergeResolution } from '$lib/api/types';
 import { formatActressName } from '$lib/utils/actress';
+import * as m from '$lib/paraglide/messages';
 
 export type ActressForm = {
 	dmm_id: string;
@@ -66,9 +67,9 @@ export function createActressStore() {
 		},
 		onSuccess: () => {
 			if (editingId !== null) {
-				toastStore.success('Actress updated');
+				toastStore.success(m.actresses_actress_updated());
 			} else {
-				toastStore.success('Actress created');
+				toastStore.success(m.actresses_actress_created());
 			}
 			queryClient.invalidateQueries({ queryKey: ['actresses'] });
 			queryClient.invalidateQueries({ queryKey: ['batch-job'] });
@@ -83,7 +84,7 @@ export function createActressStore() {
 	const deleteActressMutation = createMutation(() => ({
 		mutationFn: (id: number) => apiClient.deleteActress(id),
 		onSuccess: (_data, id) => {
-			toastStore.success('Actress deleted');
+			toastStore.success(m.actresses_actress_deleted());
 			selectedIds = selectedIds.filter((sid) => sid !== id);
 			const currentActresses = actressesQuery.data?.actresses ?? [];
 			if (currentActresses.length === 1 && offset > 0) {
@@ -150,7 +151,7 @@ export function createActressStore() {
 				success: mergeSummary.success + 1,
 				messages: [
 					...mergeSummary.messages,
-					`Merged #${result.merged_from_id} into #${variables.target_id}`,
+					m.actresses_merged_into({ source: result.merged_from_id, target: variables.target_id }),
 				],
 			};
 			selectedIds = selectedIds.filter((id) => id !== variables.source_id);
@@ -165,7 +166,7 @@ export function createActressStore() {
 			mergeSummary = {
 				...mergeSummary,
 				failed: mergeSummary.failed + 1,
-				messages: [...mergeSummary.messages, `Failed #${variables.source_id}: ${err.message}`],
+				messages: [...mergeSummary.messages, m.actresses_merge_failed({ source: variables.source_id, error: err.message })],
 			};
 			mergeSourceQueue = mergeSourceQueue.slice(1);
 			queryClient.invalidateQueries({ queryKey: ['actress-merge-preview'] });
@@ -191,12 +192,12 @@ export function createActressStore() {
 			mergeCurrentSourceId !== lastPreviewErrorSourceId
 		) {
 			lastPreviewErrorSourceId = mergeCurrentSourceId;
-			const message = mergePreviewQuery.error?.message ?? 'Failed to preview merge';
+			const message = mergePreviewQuery.error?.message ?? m.actresses_merge_preview_failed();
 			untrack(() => {
 				mergeSummary = {
 					...mergeSummary,
 					failed: mergeSummary.failed + 1,
-					messages: [...mergeSummary.messages, `Skipped #${mergeCurrentSourceId}: ${message}`],
+					messages: [...mergeSummary.messages, m.actresses_merge_skipped_preview_error({ id: mergeCurrentSourceId!, message })],
 				};
 				mergeSourceQueue = mergeSourceQueue.slice(1);
 			});
@@ -230,8 +231,8 @@ export function createActressStore() {
 
 	function getActressLabelByID(id: number, firstNameOrder: boolean, japaneseNames: boolean): string {
 		const actress = actresses.find((item) => item.id === id);
-		if (!actress) return `Actress #${id}`;
-		return `#${id} - ${getDisplayName(actress, firstNameOrder, japaneseNames)}`;
+		if (!actress) return m.actresses_actress_label({ id });
+		return m.actresses_actress_label_full({ id, name: getDisplayName(actress, firstNameOrder, japaneseNames) });
 	}
 
 	function isSelected(actress: Actress): boolean {
@@ -273,10 +274,10 @@ export function createActressStore() {
 	function validateForm(): string | null {
 		const payload = toPayload();
 		if (payload.dmm_id !== undefined && payload.dmm_id < 0) {
-			return 'DMM ID must be greater than or equal to 0';
+			return m.actresses_dmm_id_invalid();
 		}
 		if (!payload.first_name && !payload.japanese_name) {
-			return 'Either First Name or Japanese Name is required';
+			return m.actresses_name_required();
 		}
 		return null;
 	}
@@ -310,8 +311,8 @@ export function createActressStore() {
 		if (!actress.id) return;
 		const name = getDisplayName(actress, firstNameOrder, japaneseNames);
 		if (
-			!(await confirmDialog('Delete Actress', `Delete actress "${name}"?`, {
-				confirmLabel: 'Delete',
+			!(await confirmDialog(m.actresses_delete_title(), m.actresses_delete_confirm({ name }), {
+				confirmLabel: m.actresses_delete_label(),
 				variant: 'danger',
 			}))
 		)
@@ -365,7 +366,7 @@ export function createActressStore() {
 
 	function startMergeSelected() {
 		if (selectedIds.length < 2) {
-			toastStore.warning('Select at least 2 actresses to merge');
+			toastStore.warning(m.actresses_select_at_least_two());
 			return;
 		}
 		mergePrimaryId = selectedIds[0];
@@ -381,7 +382,7 @@ export function createActressStore() {
 	}
 
 	function formatMergeValue(value: unknown): string {
-		if (value === null || value === undefined || value === '') return 'Empty';
+		if (value === null || value === undefined || value === '') return m.actresses_empty_value();
 		return String(value);
 	}
 
@@ -417,7 +418,7 @@ export function createActressStore() {
 		if (!mergeCurrentSourceId || mergeActressMutation.isPending) return;
 		mergeSummary = {
 			...mergeSummary,
-			messages: [...mergeSummary.messages, `Skipped #${mergeCurrentSourceId}`],
+			messages: [...mergeSummary.messages, m.actresses_merge_skipped({ id: mergeCurrentSourceId })],
 		};
 		mergeSourceQueue = mergeSourceQueue.slice(1);
 		advanceMergeQueue();

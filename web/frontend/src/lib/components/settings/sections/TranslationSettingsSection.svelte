@@ -1,4 +1,6 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
+	import { formatDate } from '$lib/i18n/format';
 	import { RefreshCw, ChevronDown, Check } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
@@ -13,6 +15,7 @@
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 		fetchTranslationModels: () => Promise<void>;
 		fetchingTranslationModels: boolean;
 		translationModelOptions: string[];
@@ -20,7 +23,7 @@
 
 	let {
 		config,
-		inputClass,
+		inputClass, selectClass,
 		fetchTranslationModels,
 		fetchingTranslationModels,
 		translationModelOptions
@@ -48,7 +51,7 @@
 	async function fetchDeepLUsage() {
 		const apiKey = config.metadata.translation?.deepl?.api_key ?? '';
 		if (!apiKey.trim()) {
-			deeplUsageError = 'API key is required';
+			deeplUsageError = m.settings_translation_deepl_usage_error_required();
 			return;
 		}
 
@@ -65,18 +68,18 @@
 				api_key: apiKey
 			});
 		} catch (err: unknown) {
-			deeplUsageError = err instanceof Error ? err.message : 'Failed to fetch usage data';
+			deeplUsageError = err instanceof Error ? err.message : m.settings_translation_deepl_fetch_failed();
 		} finally {
 			fetchingDeepLUsage = false;
 		}
 	}
 </script>
 
-<SettingsSection title="Translation Settings" description="Translate aggregated metadata to a target language using configurable providers" defaultExpanded={false}>
-	<SettingsSubsection title="General">
+<SettingsSection title={m.settings_translation_title()} description={m.settings_translation_desc()} defaultExpanded={false}>
+	<SettingsSubsection title={m.settings_translation_general_subsection()}>
 		<FormToggle
-			label="Enable translation"
-			description="Translate metadata after aggregation and before saving to database"
+			label={m.settings_translation_enable_label()}
+			description={m.settings_translation_enable_desc()}
 			checked={config.metadata.translation?.enabled ?? false}
 			onchange={(val) => {
 				if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
@@ -86,24 +89,24 @@
 
 		<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 			<div class="py-4 border-b border-border">
-				<label class="block text-sm font-medium mb-2" for="translation-provider">Provider</label>
-				<select id="translation-provider" bind:value={config.metadata.translation!.provider} class={inputClass}>
-					<option value="openai">OpenAI (ChatGPT)</option>
-					<option value="openai-compatible">OpenAI Compatible LLM (Ollama/vLLM/OpenRouter)</option>
-					<option value="anthropic">Anthropic (Claude)</option>
-					<option value="deepl">DeepL</option>
-					<option value="google">Google Translate</option>
+				<label class="block text-sm font-medium mb-2" for="translation-provider">{m.settings_translation_provider_label()}</label>
+				<select id="translation-provider" bind:value={config.metadata.translation!.provider} class={selectClass}>
+					<option value="openai">{m.settings_translation_provider_openai()}</option>
+					<option value="openai-compatible">{m.settings_translation_provider_openai_compatible()}</option>
+					<option value="anthropic">{m.settings_translation_provider_anthropic()}</option>
+					<option value="deepl">{m.settings_translation_provider_deepl()}</option>
+					<option value="google">{m.settings_translation_provider_google()}</option>
 				</select>
 			</div>
 		</fieldset>
 	</SettingsSubsection>
 
 	{#if config.metadata.translation?.provider === 'openai'}
-		<SettingsSubsection title="OpenAI Provider">
+		<SettingsSubsection title={m.settings_translation_openai_subsection()}>
 			<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 				<FormTextInput
-					label="Base URL"
-					description="OpenAI API base URL"
+					label={m.settings_translation_base_url_label()}
+					description={m.settings_translation_openai_base_url_desc()}
 					value={config.metadata.translation?.openai?.base_url ?? 'https://api.openai.com/v1'}
 					placeholder="https://api.openai.com/v1"
 					onchange={(val) => {
@@ -115,7 +118,7 @@
 
 				<div class="py-4 border-b border-border">
 					<div class="flex items-center justify-between mb-2 gap-2">
-						<label class="block text-sm font-medium" for="translation-openai-model-select">Model</label>
+						<label class="block text-sm font-medium" for="translation-openai-model-select">{m.settings_translation_model_label()}</label>
 						<Button
 							variant="outline"
 							size="sm"
@@ -128,19 +131,19 @@
 						>
 							{#snippet children()}
 								<RefreshCw class={`h-4 w-4 mr-2 ${fetchingTranslationModels ? 'animate-spin' : ''}`} />
-								{fetchingTranslationModels ? 'Fetching...' : 'Fetch Models'}
+								{fetchingTranslationModels ? m.settings_translation_fetching() : m.settings_translation_fetch_models()}
 							{/snippet}
 						</Button>
 					</div>
 
 					{#if translationModelOptions.length > 0}
-						<select id="translation-openai-model-select" bind:value={config.metadata.translation!.openai!.model} class={inputClass}>
+						<select id="translation-openai-model-select" bind:value={config.metadata.translation!.openai!.model} class={selectClass}>
 							{#each translationModelOptions as modelName}
 								<option value={modelName}>{modelName}</option>
 							{/each}
 						</select>
 						<p class="text-xs text-muted-foreground mt-1">
-							Loaded from <code>{config.metadata.translation?.openai?.base_url}</code>. You can still edit manually below.
+							{m.settings_translation_models_loaded({ url: config.metadata.translation?.openai?.base_url ?? '' })}
 						</p>
 					{/if}
 
@@ -156,11 +159,11 @@
 						class="{inputClass} mt-3"
 						placeholder="gpt-4o-mini"
 					/>
-					<p class="text-xs text-muted-foreground mt-1">Manual model override.</p>
+					<p class="text-xs text-muted-foreground mt-1">{m.settings_translation_manual_override()}</p>
 				</div>
 
 				<FormPasswordInput
-					label="API Key"
+					label={m.settings_translation_api_key_label()}
 					description="OpenAI API key"
 					value={config.metadata.translation?.openai?.api_key ?? ''}
 					onchange={(val) => {
@@ -172,11 +175,11 @@
 			</fieldset>
 		</SettingsSubsection>
 	{:else if config.metadata.translation?.provider === 'openai-compatible'}
-		<SettingsSubsection title="OpenAI Compatible LLM Provider">
+		<SettingsSubsection title={m.settings_translation_openai_compatible_subsection()}>
 			<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 				<FormTextInput
-					label="Base URL"
-					description="OpenAI-compatible API base URL (works with Ollama, vLLM, OpenRouter, and compatible services)"
+					label={m.settings_translation_base_url_label()}
+					description={m.settings_translation_openai_compatible_base_url_desc()}
 					value={config.metadata.translation?.['openai_compatible']?.base_url ?? 'http://localhost:11434/v1'}
 					placeholder="http://localhost:11434/v1"
 					onchange={(val) => {
@@ -188,7 +191,7 @@
 
 				<div class="py-4 border-b border-border">
 					<div class="flex items-center justify-between mb-2 gap-2">
-						<label class="block text-sm font-medium" for="translation-openai_compatible-model-select">Model</label>
+						<label class="block text-sm font-medium" for="translation-openai_compatible-model-select">{m.settings_translation_model_label()}</label>
 						<Button
 							variant="outline"
 							size="sm"
@@ -200,19 +203,19 @@
 						>
 							{#snippet children()}
 								<RefreshCw class={`h-4 w-4 mr-2 ${fetchingTranslationModels ? 'animate-spin' : ''}`} />
-								{fetchingTranslationModels ? 'Fetching...' : 'Fetch Models'}
+								{fetchingTranslationModels ? m.settings_translation_fetching() : m.settings_translation_fetch_models()}
 							{/snippet}
 						</Button>
 					</div>
 
 					{#if translationModelOptions.length > 0}
-						<select id="translation-openai_compatible-model-select" bind:value={config.metadata.translation!['openai_compatible']!.model} class={inputClass}>
+						<select id="translation-openai_compatible-model-select" bind:value={config.metadata.translation!['openai_compatible']!.model} class={selectClass}>
 							{#each translationModelOptions as modelName}
 								<option value={modelName}>{modelName}</option>
 							{/each}
 						</select>
 						<p class="text-xs text-muted-foreground mt-1">
-							Loaded from <code>{config.metadata.translation?.['openai_compatible']?.base_url}</code>. You can still edit manually below.
+							{m.settings_translation_models_loaded({ url: config.metadata.translation?.['openai_compatible']?.base_url ?? '' })}
 						</p>
 					{/if}
 
@@ -228,12 +231,12 @@
 						class="{inputClass} mt-3"
 						placeholder="llama3"
 					/>
-					<p class="text-xs text-muted-foreground mt-1">Manual model override.</p>
+					<p class="text-xs text-muted-foreground mt-1">{m.settings_translation_manual_override()}</p>
 				</div>
 
 				<FormPasswordInput
-					label="API Key (Optional)"
-					description="Not required for local endpoints like Ollama"
+					label={m.settings_translation_openai_compatible_api_key_label()}
+					description={m.settings_translation_openai_compatible_api_key_desc()}
 					value={config.metadata.translation?.['openai_compatible']?.api_key ?? ''}
 					onchange={(val) => {
 						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
@@ -243,8 +246,8 @@
 				/>
 
 				<FormToggle
-					label="Enable thinking"
-					description="Automatically maps to backend-specific reasoning controls for supported OpenAI-compatible engines like vLLM, Ollama, and llama.cpp"
+					label={m.settings_translation_enable_thinking_label()}
+					description={m.settings_translation_enable_thinking_desc()}
 					checked={config.metadata.translation?.['openai_compatible']?.enable_thinking ?? false}
 					onchange={(val) => {
 						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
@@ -256,11 +259,11 @@
 			</fieldset>
 		</SettingsSubsection>
 	{:else if config.metadata.translation?.provider === 'anthropic'}
-		<SettingsSubsection title="Anthropic Provider">
+		<SettingsSubsection title={m.settings_translation_anthropic_subsection()}>
 			<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 				<FormTextInput
-					label="Base URL"
-					description="Anthropic API base URL"
+					label={m.settings_translation_base_url_label()}
+					description={m.settings_translation_anthropic_base_url_desc()}
 					value={config.metadata.translation?.anthropic?.base_url ?? 'https://api.anthropic.com'}
 					placeholder="https://api.anthropic.com"
 					onchange={(val) => {
@@ -272,7 +275,7 @@
 
 				<div class="py-4 border-b border-border">
 					<div class="flex items-center justify-between mb-2 gap-2">
-						<label class="block text-sm font-medium" for="translation-anthropic-model-select">Model</label>
+						<label class="block text-sm font-medium" for="translation-anthropic-model-select">{m.settings_translation_model_label()}</label>
 						<Button
 							variant="outline"
 							size="sm"
@@ -285,19 +288,19 @@
 						>
 							{#snippet children()}
 								<RefreshCw class={`h-4 w-4 mr-2 ${fetchingTranslationModels ? 'animate-spin' : ''}`} />
-								{fetchingTranslationModels ? 'Fetching...' : 'Fetch Models'}
+								{fetchingTranslationModels ? m.settings_translation_fetching() : m.settings_translation_fetch_models()}
 							{/snippet}
 						</Button>
 					</div>
 
 					{#if translationModelOptions.length > 0}
-						<select id="translation-anthropic-model-select" bind:value={config.metadata.translation!.anthropic!.model} class={inputClass}>
+						<select id="translation-anthropic-model-select" bind:value={config.metadata.translation!.anthropic!.model} class={selectClass}>
 							{#each translationModelOptions as modelName}
 								<option value={modelName}>{modelName}</option>
 							{/each}
 						</select>
 						<p class="text-xs text-muted-foreground mt-1">
-							Loaded from <code>{config.metadata.translation?.anthropic?.base_url}</code>. You can still edit manually below.
+							{m.settings_translation_models_loaded({ url: config.metadata.translation?.anthropic?.base_url ?? '' })}
 						</p>
 					{/if}
 
@@ -313,12 +316,12 @@
 						class="{inputClass} mt-3"
 						placeholder="claude-sonnet-4-20250514"
 					/>
-					<p class="text-xs text-muted-foreground mt-1">Manual model override.</p>
+					<p class="text-xs text-muted-foreground mt-1">{m.settings_translation_manual_override()}</p>
 				</div>
 
 				<FormPasswordInput
-					label="API Key"
-					description="Anthropic API key from console.anthropic.com"
+					label={m.settings_translation_api_key_label()}
+					description={m.settings_translation_anthropic_api_key_desc()}
 					value={config.metadata.translation?.anthropic?.api_key ?? ''}
 					onchange={(val) => {
 						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
@@ -329,22 +332,22 @@
 			</fieldset>
 		</SettingsSubsection>
 	{:else if config.metadata.translation?.provider === 'deepl'}
-		<SettingsSubsection title="DeepL Provider">
+		<SettingsSubsection title={m.settings_translation_deepl_subsection()}>
 			<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 				<div class="py-4 border-b border-border">
-					<label class="block text-sm font-medium mb-2" for="deepl-mode">Mode</label>
-					<select id="deepl-mode" bind:value={config.metadata.translation!.deepl!.mode} class={inputClass}>
-						<option value="free">Free API</option>
-						<option value="pro">Pro API</option>
+					<label class="block text-sm font-medium mb-2" for="deepl-mode">{m.settings_translation_deepl_mode_label()}</label>
+					<select id="deepl-mode" bind:value={config.metadata.translation!.deepl!.mode} class={selectClass}>
+						<option value="free">{m.settings_translation_deepl_mode_free()}</option>
+						<option value="pro">{m.settings_translation_deepl_mode_pro()}</option>
 					</select>
 					<p class="text-xs text-muted-foreground mt-1">
-						Use <code>free</code> for DeepL API Free plan, or <code>pro</code> for paid DeepL API.
+						{m.settings_translation_deepl_mode_desc()}
 					</p>
 				</div>
 
 				<FormTextInput
-					label="Base URL (optional)"
-					description="Optional DeepL endpoint override (leave blank to use mode defaults)"
+					label={m.settings_translation_deepl_base_url_label()}
+					description={m.settings_translation_deepl_base_url_desc()}
 					value={config.metadata.translation?.deepl?.base_url ?? ''}
 					placeholder="https://api-free.deepl.com"
 					onchange={(val) => {
@@ -355,8 +358,8 @@
 				/>
 
 				<FormPasswordInput
-					label="API Key"
-					description="DeepL API key (required for both free and pro API modes)"
+					label={m.settings_translation_api_key_label()}
+					description={m.settings_translation_deepl_api_key_desc()}
 					value={config.metadata.translation?.deepl?.api_key ?? ''}
 					onchange={(val) => {
 						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
@@ -368,8 +371,8 @@
 				<div class="py-4 border-b border-border">
 					<div class="flex items-center justify-between mb-3">
 						<div>
-							<h4 class="text-sm font-medium">Usage</h4>
-							<p class="text-xs text-muted-foreground">Current billing period character usage</p>
+							<h4 class="text-sm font-medium">{m.settings_translation_deepl_usage_heading()}</h4>
+							<p class="text-xs text-muted-foreground">{m.settings_translation_deepl_usage_desc()}</p>
 						</div>
 						<Button
 							variant="outline"
@@ -382,7 +385,7 @@
 						>
 							{#snippet children()}
 								<RefreshCw class={`h-4 w-4 mr-2 ${fetchingDeepLUsage ? 'animate-spin' : ''}`} />
-								{fetchingDeepLUsage ? 'Fetching...' : 'Refresh'}
+								{fetchingDeepLUsage ? m.settings_translation_fetching() : m.common_refresh()}
 							{/snippet}
 						</Button>
 					</div>
@@ -394,7 +397,7 @@
 					{#if deeplUsage}
 						<div class="space-y-2">
 							<div class="flex items-center justify-between text-sm">
-								<span class="font-medium">Characters used</span>
+								<span class="font-medium">{m.settings_translation_deepl_characters_used()}</span>
 								<span class="text-muted-foreground">
 									{formatNumber(deeplUsage.character_count)} / {formatNumber(deeplUsage.character_limit)}
 								</span>
@@ -406,35 +409,35 @@
 								></div>
 							</div>
 							<div class="flex items-center justify-between text-xs text-muted-foreground">
-								<span>{usagePercentage.toFixed(1)}% used</span>
-								<span>{formatNumber(deeplUsage.character_limit - deeplUsage.character_count)} remaining</span>
+								<span>{m.settings_translation_deepl_percent_used({ percent: usagePercentage.toFixed(1) })}</span>
+								<span>{m.settings_translation_deepl_remaining({ count: formatNumber(deeplUsage.character_limit - deeplUsage.character_count) })}</span>
 							</div>
 							{#if deeplUsage.start_time && deeplUsage.end_time}
 								<p class="text-xs text-muted-foreground">
-									Billing period: {new Date(deeplUsage.start_time).toLocaleDateString()} – {new Date(deeplUsage.end_time).toLocaleDateString()}
+									{m.settings_translation_deepl_billing_period({ start: formatDate(deeplUsage.start_time), end: formatDate(deeplUsage.end_time) })}
 								</p>
 							{/if}
 						</div>
 					{:else if !fetchingDeepLUsage && !deeplUsageError}
-						<p class="text-xs text-muted-foreground">Click Refresh to load usage data</p>
+						<p class="text-xs text-muted-foreground">{m.settings_translation_deepl_click_refresh()}</p>
 					{/if}
 				</div>
 			</fieldset>
 		</SettingsSubsection>
 	{:else if config.metadata.translation?.provider === 'google'}
-		<SettingsSubsection title="Google Provider">
+		<SettingsSubsection title={m.settings_translation_google_subsection()}>
 			<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 				<div class="py-4 border-b border-border">
-					<label class="block text-sm font-medium mb-2" for="google-mode">Mode</label>
-					<select id="google-mode" bind:value={config.metadata.translation!.google!.mode} class={inputClass}>
-						<option value="free">Free (public endpoint)</option>
-						<option value="paid">Paid (Cloud Translation API)</option>
+					<label class="block text-sm font-medium mb-2" for="google-mode">{m.settings_translation_google_mode_label()}</label>
+					<select id="google-mode" bind:value={config.metadata.translation!.google!.mode} class={selectClass}>
+						<option value="free">{m.settings_translation_google_mode_free()}</option>
+						<option value="paid">{m.settings_translation_google_mode_paid()}</option>
 					</select>
 				</div>
 
 				<FormTextInput
-					label="Base URL (optional)"
-					description="Optional Google Translate endpoint override"
+					label={m.settings_translation_deepl_base_url_label()}
+					description={m.settings_translation_google_base_url_desc()}
 					value={config.metadata.translation?.google?.base_url ?? ''}
 					placeholder="https://translation.googleapis.com"
 					onchange={(val) => {
@@ -445,8 +448,8 @@
 				/>
 
 				<FormPasswordInput
-					label="API Key"
-					description="Required only for paid mode"
+					label={m.settings_translation_api_key_label()}
+					description={m.settings_translation_google_api_key_desc()}
 					value={config.metadata.translation?.google?.api_key ?? ''}
 					disabled={config.metadata.translation?.google?.mode !== 'paid'}
 					onchange={(val) => {
@@ -459,12 +462,12 @@
 		</SettingsSubsection>
 	{/if}
 
-	<SettingsSubsection title="Translation Options" isCollapsible={true} isExpanded={advancedExpanded} onToggle={() => advancedExpanded = !advancedExpanded}>
+	<SettingsSubsection title={m.settings_translation_options_subsection()} isCollapsible={true} isExpanded={advancedExpanded} onToggle={() => advancedExpanded = !advancedExpanded}>
 		{#if advancedExpanded}
 			<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 				<FormTextInput
-					label="Source language"
-					description="Source language code (use 'auto' when provider supports auto-detection)"
+					label={m.settings_translation_source_language_label()}
+					description={m.settings_translation_source_language_desc()}
 					value={config.metadata.translation?.source_language ?? 'en'}
 					placeholder="en"
 					onchange={(val) => {
@@ -474,8 +477,8 @@
 				/>
 
 				<FormTextInput
-					label="Target language"
-					description="Target language code for translated metadata"
+					label={m.settings_translation_target_language_label()}
+					description={m.settings_translation_target_language_desc()}
 					value={config.metadata.translation?.target_language ?? 'ja'}
 					placeholder="ja"
 					onchange={(val) => {
@@ -485,12 +488,12 @@
 				/>
 
 				<FormNumberInput
-					label="Timeout"
-					description="Maximum time to wait for translation API calls"
+					label={m.settings_translation_timeout_label()}
+					description={m.settings_translation_timeout_desc()}
 					value={config.metadata.translation?.timeout_seconds ?? 60}
 					min={5}
 					max={300}
-					unit="seconds"
+					unit={m.common_unit_seconds()}
 					onchange={(val) => {
 						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
 						config.metadata.translation!.timeout_seconds = val;
@@ -498,8 +501,8 @@
 				/>
 
 				<FormToggle
-					label="Apply to primary metadata"
-					description="Replace primary movie fields with translated text"
+					label={m.settings_translation_apply_primary_label()}
+					description={m.settings_translation_apply_primary_desc()}
 					checked={config.metadata.translation?.apply_to_primary ?? true}
 					onchange={(val) => {
 						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
@@ -508,8 +511,8 @@
 				/>
 
 				<FormToggle
-					label="Overwrite existing target translation"
-					description="Overwrite target-language translation entries already returned by scrapers"
+					label={m.settings_translation_overwrite_target_label()}
+					description={m.settings_translation_overwrite_target_desc()}
 					checked={config.metadata.translation?.overwrite_existing_target ?? true}
 					onchange={(val) => {
 						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
@@ -518,18 +521,18 @@
 				/>
 
 				<div class="py-4 border-t border-border">
-					<p class="text-sm font-medium mb-3">Fields to translate</p>
+					<p class="text-sm font-medium mb-3">{m.settings_translation_fields_heading()}</p>
 					<div class="grid grid-cols-2 gap-x-6 gap-y-1">
 						{#each [
-							{ key: 'title', label: 'Title' },
-							{ key: 'original_title', label: 'Original title' },
-							{ key: 'description', label: 'Description' },
-							{ key: 'director', label: 'Director' },
-							{ key: 'maker', label: 'Maker' },
-							{ key: 'label', label: 'Label' },
-							{ key: 'series', label: 'Series' },
-							{ key: 'genres', label: 'Genres' },
-							{ key: 'actresses', label: 'Actresses' },
+							{ key: 'title', label: m.field_title() },
+							{ key: 'original_title', label: m.field_original_title_translation() },
+							{ key: 'description', label: m.field_description() },
+							{ key: 'director', label: m.field_director() },
+							{ key: 'maker', label: m.field_maker() },
+							{ key: 'label', label: m.field_label() },
+							{ key: 'series', label: m.field_series() },
+							{ key: 'genres', label: m.field_genres() },
+							{ key: 'actresses', label: m.field_actresses() },
 						] as field}
 							<label class="flex items-center gap-2 py-1.5 cursor-pointer">
 								<div class="relative">

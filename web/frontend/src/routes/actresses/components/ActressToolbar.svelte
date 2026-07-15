@@ -4,6 +4,7 @@
 	import { Search, ArrowUpDown, GitMerge } from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let {
 		queryInput = $bindable(),
@@ -44,7 +45,7 @@
 	<Card class="p-4">
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="flex-1 min-w-55">
-				<label class="sr-only" for="search">Search actresses</label>
+				<label class="sr-only" for="search">{m.actresses_search_label()}</label>
 				<div class="relative">
 					<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 					<input
@@ -54,13 +55,13 @@
 						onkeydown={(event) => {
 							if (event.key === 'Enter') onApplySearch();
 						}}
-						placeholder="Search by English or Japanese name"
+						placeholder={m.actresses_search_placeholder()}
 						class="w-full rounded-md border border-input bg-background pl-9 pr-3 py-2 text-sm"
 					/>
 				</div>
 			</div>
-			<Button onclick={onApplySearch}>Search</Button>
-			<Button variant="outline" onclick={onClearSearch}>Clear</Button>
+			<Button onclick={onApplySearch}>{m.common_search()}</Button>
+			<Button variant="outline" onclick={onClearSearch}>{m.common_clear()}</Button>
 		</div>
 		<div class="mt-3 flex flex-wrap items-center justify-between gap-3">
 			<div class="inline-flex rounded-md border border-input p-1">
@@ -71,7 +72,7 @@
 						viewMode = 'cards';
 					}}
 				>
-					Cards
+					{m.actresses_view_cards()}
 				</Button>
 				<Button
 					size="sm"
@@ -80,7 +81,7 @@
 						viewMode = 'compact';
 					}}
 				>
-					Compact
+					{m.actresses_view_compact()}
 				</Button>
 				<Button
 					size="sm"
@@ -89,45 +90,45 @@
 						viewMode = 'table';
 					}}
 				>
-					Table
+					{m.actresses_view_table()}
 				</Button>
 			</div>
 			<div class="flex items-center gap-2">
 				<select
 					bind:value={sortBy}
 					class="rounded-md border border-input bg-background px-3 py-2 text-sm"
-					aria-label="Sort actresses by"
+					aria-label={m.actresses_sort_aria()}
 				>
-					<option value="name">Sort: Name</option>
-					<option value="japanese_name">Sort: Japanese Name</option>
-					<option value="id">Sort: Database ID</option>
-					<option value="dmm_id">Sort: DMM ID</option>
-					<option value="updated_at">Sort: Updated Time</option>
-					<option value="created_at">Sort: Created Time</option>
+					<option value="name">{m.actresses_sort_name()}</option>
+					<option value="japanese_name">{m.actresses_sort_japanese_name()}</option>
+					<option value="id">{m.actresses_sort_id()}</option>
+					<option value="dmm_id">{m.actresses_sort_dmm_id()}</option>
+					<option value="updated_at">{m.actresses_sort_updated_at()}</option>
+					<option value="created_at">{m.actresses_sort_created_at()}</option>
 				</select>
-				<Button variant="outline" size="sm" onclick={onToggleSortOrder} title="Toggle sort direction">
+				<Button variant="outline" size="sm" onclick={onToggleSortOrder} title={m.actresses_toggle_sort_title()}>
 					<ArrowUpDown class="h-4 w-4" />
-					{sortOrder === 'asc' ? 'Asc' : 'Desc'}
+					{sortOrder === 'asc' ? m.actresses_asc() : m.actresses_desc()}
 				</Button>
 			</div>
 		</div>
 		<div class="mt-3 text-sm text-muted-foreground">
-			Showing {actressesCount} of {total} actress records
+			{m.actresses_showing_count({ shown: actressesCount, total })}
 			{#if activeQuery}
 				for "{activeQuery}"
 			{/if}
 		</div>
 		<div class="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-input bg-muted/20 px-3 py-2">
 			<span class="text-sm">
-				{selectedIds.length} selected
+				{m.actresses_selected_count({ count: selectedIds.length })}
 			</span>
-			<Button variant="outline" size="sm" onclick={onSelectCurrentPage}>Select Page</Button>
+			<Button variant="outline" size="sm" onclick={onSelectCurrentPage}>{m.actresses_select_page()}</Button>
 			<Button variant="outline" size="sm" onclick={onClearSelection} disabled={selectedIds.length === 0}>
-				Clear
+				{m.common_clear()}
 			</Button>
 			<Button size="sm" onclick={onStartMergeSelected} disabled={selectedIds.length < 2}>
 				<GitMerge class="h-4 w-4" />
-				Merge Selected
+				{m.actresses_merge_selected_button()}
 			</Button>
 		</div>
 	</Card>

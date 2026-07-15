@@ -26,6 +26,9 @@
 	import { websocketStore } from '$lib/stores/websocket';
 	import { isTerminalStatus, computeJobProgress } from '$lib/utils/job-progress';
 	import type { HealthResponse, HistoryRecord, HistoryStats, ProgressMessage } from '$lib/api/types';
+	import * as m from '$lib/paraglide/messages';
+	import { formatDateTime } from '$lib/i18n/format';
+	import { translateProgressMessage } from '$lib/i18n/api-messages';
 
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
 	const STORAGE_KEY_OUTPUT = 'javinizer_output_path';
@@ -112,8 +115,8 @@
 			cwdQuery.error
 		].filter(Boolean);
 		if (errors.length === 0) return null;
-		if (errors.length === 6) return 'Unable to load dashboard data.';
-		return `Loaded with ${errors.length} partial error${errors.length > 1 ? 's' : ''}.`;
+		if (errors.length === 6) return m.home_load_failed();
+		return m.home_partial_errors({ count: errors.length });
 	});
 
 	$effect(() => {
@@ -128,7 +131,7 @@
 
 	const wsState = $derived($websocketStore);
 	const recentRunCount = $derived(recentRuns.length);
-	const releaseVersion = $derived(health?.version ?? 'unknown');
+	const releaseVersion = $derived(health?.version ?? m.home_version_unknown());
 
 	const sevenDayMetrics = $derived.by(() => {
 		const now = Date.now();
@@ -260,19 +263,15 @@
 	}
 
 	function formatDate(dateStr: string): string {
-		const date = new Date(dateStr);
-		return new Intl.DateTimeFormat('en-US', {
-			dateStyle: 'medium',
-			timeStyle: 'short'
-		}).format(date);
+		return formatDateTime(dateStr);
 	}
 
 	function operationLabel(operation: string): string {
 		const labels: Record<string, string> = {
-			scrape: 'Scrape',
-			organize: 'Organize',
-			download: 'Download',
-			nfo: 'NFO'
+			scrape: m.home_op_scrape(),
+			organize: m.home_op_organize(),
+			download: m.home_op_download(),
+			nfo: m.home_op_nfo()
 		};
 		return labels[operation] || operation;
 	}
@@ -299,34 +298,34 @@
 	function getHealthChecks() {
 		return [
 			{
-				label: 'API Connectivity',
+				label: m.home_check_api(),
 				ok: health?.status === 'ok',
-				hint: health?.status === 'ok' ? 'Backend reachable' : 'Cannot reach API',
-				actionLabel: 'Retry',
+				hint: health?.status === 'ok' ? m.home_check_api_ok() : m.home_check_api_bad(),
+				actionLabel: m.common_retry(),
 				action: refreshDashboard
 			},
 			{
-				label: 'WebSocket Stream',
+				label: m.home_check_ws(),
 				ok: wsState.connected,
-				hint: wsState.skipped ? 'Real-time stream unavailable in desktop app' : wsState.connected ? 'Real-time updates enabled' : 'No live progress feed',
-				actionLabel: 'Browse Jobs',
+				hint: wsState.skipped ? m.home_check_ws_skipped() : wsState.connected ? m.home_check_ws_ok() : m.home_check_ws_bad(),
+				actionLabel: m.home_check_browse_jobs(),
 				action: () => goto('/browse')
 			},
 			{
-				label: 'Scrapers Configured',
+				label: m.home_check_scrapers(),
 				ok: (health?.scrapers?.length ?? 0) > 0,
 				hint:
 					(health?.scrapers?.length ?? 0) > 0
-						? `${health?.scrapers.length ?? 0} scraper(s) available`
-						: 'No scraper reported by API',
-				actionLabel: 'Open Settings',
+						? m.home_check_scrapers_ok({ count: health?.scrapers?.length ?? 0 })
+						: m.home_check_scrapers_bad(),
+				actionLabel: m.home_check_open_settings(),
 				action: () => goto('/settings')
 			},
 			{
-				label: 'Output Path',
+				label: m.home_check_output(),
 				ok: outputPath.trim().length > 0,
-				hint: outputPath.trim().length > 0 ? 'Destination path is saved' : 'Set an output path',
-				actionLabel: 'Set in Browse',
+				hint: outputPath.trim().length > 0 ? m.home_check_output_ok() : m.home_check_output_bad(),
+				actionLabel: m.home_check_set_browse(),
 				action: () => goto('/browse')
 			}
 		];
@@ -357,28 +356,28 @@
 					<div class="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-2xl"></div>
 					<div class="relative space-y-4">
 						<div>
-							<p class="text-sm font-medium text-primary">Dashboard</p>
-							<h1 class="text-4xl font-bold tracking-tight">Javinizer Control Center</h1>
+							<p class="text-sm font-medium text-primary">{m.home_dashboard()}</p>
+							<h1 class="text-4xl font-bold tracking-tight">{m.home_title()}</h1>
 							<p class="text-muted-foreground mt-2 max-w-2xl">
-								Run scraping workflows, monitor system health, and jump back into recent jobs.
+								{m.home_subtitle()}
 							</p>
 						</div>
 						<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
 							<Button onclick={() => goto('/browse')}>
 								<FolderOpen class="h-4 w-4" />
-								Start Scrape
+								{m.home_start_scrape()}
 							</Button>
 							<Button variant="outline" onclick={() => goto('/history')}>
 								<History class="h-4 w-4" />
-								Recent History
+								{m.home_recent_history()}
 							</Button>
 							<Button variant="outline" onclick={() => goto('/actresses')}>
 								<Users class="h-4 w-4" />
-								Manage Actresses
+								{m.home_manage_actresses()}
 							</Button>
 							<Button variant="outline" onclick={() => goto('/settings')}>
 								<Settings class="h-4 w-4" />
-								Settings
+								{m.nav_settings()}
 							</Button>
 						</div>
 					</div>
@@ -388,8 +387,8 @@
 			<div in:fly|local={{ y: -8, duration: 260, easing: quintOut }}>
 				<Card class="p-5 h-full">
 					<div class="flex items-center justify-between mb-3">
-						<h2 class="text-lg font-semibold">Current Activity</h2>
-						<Button variant="ghost" size="sm" onclick={refreshDashboard} title="Refresh dashboard">
+						<h2 class="text-lg font-semibold">{m.home_current_activity()}</h2>
+						<Button variant="ghost" size="sm" onclick={refreshDashboard} title={m.home_refresh_dashboard()}>
 							<RefreshCw class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" />
 						</Button>
 					</div>
@@ -398,38 +397,38 @@
 						<div class="space-y-2">
 							<div class="flex items-center gap-2 text-sm">
 								<Activity class="h-4 w-4 text-primary" />
-								<span class="font-medium">Job {latestActivity.job_id.slice(0, 8)}</span>
+								<span class="font-medium">{m.home_job_label({ id: latestActivity.job_id.slice(0, 8) })}</span>
 							</div>
-							<p class="text-sm text-muted-foreground line-clamp-2">{latestActivity.message}</p>
+							<p class="text-sm text-muted-foreground line-clamp-2">{latestActivity.message_code ? translateProgressMessage(latestActivity.message_code, latestActivity.message_args ?? null, latestActivity.message) : latestActivity.message}</p>
 							<div class="h-2 rounded-full bg-muted overflow-hidden">
 								<div class="h-full bg-primary transition-all duration-300" style="width: {latestActivityProgressPercent}%"></div>
 							</div>
 							<div class="flex items-center justify-between text-xs text-muted-foreground">
-								<span>Status: {latestActivity.status}</span>
+								<span>{m.home_status({ status: latestActivity.status })}</span>
 								<span>{latestActivityProgressPercent.toFixed(0)}%</span>
 							</div>
 							<div class="flex gap-2 pt-1">
 <Button size="sm" variant="outline" onclick={() => goto('/jobs')}>
-								Open Jobs
+								{m.home_open_jobs()}
 							</Button>
 								<Button size="sm" variant="outline" onclick={() => goto('/history')}>
-									View History
+									{m.home_view_history()}
 								</Button>
 							</div>
 						</div>
 					{:else}
 						<div class="text-sm text-muted-foreground space-y-2">
-							<p>No recent job activity yet.</p>
+							<p>{m.home_no_activity()}</p>
 							<Button size="sm" onclick={() => goto('/browse')}>
 								<ArrowRight class="h-4 w-4" />
-								Go to Browse
+								{m.home_go_browse()}
 							</Button>
 						</div>
 					{/if}
 
 					<div class="mt-4 pt-4 border-t text-xs text-muted-foreground flex items-center justify-between">
-						<span>Active jobs: {activeJobCount}</span>
-						<span>{wsState.connected ? 'WS connected' : wsState.skipped ? 'WS n/a (desktop)' : 'WS disconnected'}</span>
+						<span>{m.home_active_jobs({ count: activeJobCount })}</span>
+						<span>{wsState.connected ? m.home_ws_connected() : wsState.skipped ? m.home_ws_na_desktop() : m.home_ws_disconnected()}</span>
 					</div>
 				</Card>
 			</div>
@@ -450,25 +449,25 @@
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
 			<div in:fly|local={{ y: 8, duration: 200, easing: quintOut }}>
 				<Card class="p-4">
-					<p class="text-sm text-muted-foreground">Total Operations</p>
+					<p class="text-sm text-muted-foreground">{m.home_total_operations()}</p>
 					<p class="text-3xl font-bold mt-1">{stats?.total ?? '-'}</p>
 				</Card>
 			</div>
 			<div in:fly|local={{ y: 8, duration: 220, easing: quintOut }}>
 				<Card class="p-4">
-					<p class="text-sm text-muted-foreground">Success Rate (7d)</p>
+					<p class="text-sm text-muted-foreground">{m.home_success_rate()}</p>
 					<p class="text-3xl font-bold mt-1 text-green-600">{sevenDayMetrics.successRate}%</p>
 				</Card>
 			</div>
 			<div in:fly|local={{ y: 8, duration: 240, easing: quintOut }}>
 				<Card class="p-4">
-					<p class="text-sm text-muted-foreground">Failures (7d)</p>
+					<p class="text-sm text-muted-foreground">{m.home_failures()}</p>
 					<p class="text-3xl font-bold mt-1 text-red-600">{sevenDayMetrics.failed}</p>
 				</Card>
 			</div>
 			<div in:fly|local={{ y: 8, duration: 260, easing: quintOut }}>
 				<Card class="p-4">
-					<p class="text-sm text-muted-foreground">Actresses in DB</p>
+					<p class="text-sm text-muted-foreground">{m.home_actresses_in_db()}</p>
 					<p class="text-3xl font-bold mt-1">{actressTotal ?? '-'}</p>
 				</Card>
 			</div>
@@ -479,14 +478,14 @@
 			<div class="lg:col-span-2" in:scale|local={{ start: 0.98, duration: 200, easing: quintOut }}>
 				<Card class="p-5">
 					<div class="flex items-center justify-between mb-3">
-						<h2 class="text-xl font-semibold">Recent Runs</h2>
-						<div class="text-sm text-muted-foreground">{recentRunCount} recent record(s)</div>
+						<h2 class="text-xl font-semibold">{m.home_recent_runs()}</h2>
+						<div class="text-sm text-muted-foreground">{m.home_recent_records({ count: recentRunCount })}</div>
 					</div>
 
 					{#if loading}
-						<div class="text-sm text-muted-foreground py-10 text-center">Loading recent runs...</div>
+						<div class="text-sm text-muted-foreground py-10 text-center">{m.home_loading_recent()}</div>
 					{:else if recentRuns.length === 0}
-						<div class="text-sm text-muted-foreground py-10 text-center">No operations recorded yet.</div>
+						<div class="text-sm text-muted-foreground py-10 text-center">{m.home_no_operations()}</div>
 					{:else}
 						{#key recentRenderKey}
 							<div class="space-y-2" in:fade|local={{ duration: 150 }}>
@@ -516,7 +515,7 @@
 					<div class="pt-3 mt-3 border-t flex justify-end">
 						<Button variant="outline" onclick={() => goto('/history')}>
 							<History class="h-4 w-4" />
-							Open Full History
+							{m.home_open_full_history()}
 						</Button>
 					</div>
 				</Card>
@@ -524,7 +523,7 @@
 
 			<div class="space-y-4" in:fade|local={{ duration: 200 }}>
 				<Card class="p-5">
-					<h2 class="text-lg font-semibold mb-3">Setup Health</h2>
+					<h2 class="text-lg font-semibold mb-3">{m.home_setup_health()}</h2>
 					<div class="space-y-3">
 						{#each getHealthChecks() as check}
 							<div class="rounded-md border p-3">
@@ -550,29 +549,29 @@
 				</Card>
 
 				<Card class="p-5">
-					<h2 class="text-lg font-semibold mb-3">Path Shortcuts</h2>
+					<h2 class="text-lg font-semibold mb-3">{m.home_path_shortcuts()}</h2>
 					<div class="space-y-2 text-sm">
 						<div class="rounded-md border p-2">
-							<p class="text-xs text-muted-foreground">Working Directory</p>
+							<p class="text-xs text-muted-foreground">{m.home_working_directory()}</p>
 							<p class="font-medium" title={currentWorkingDirectory}>{truncateMiddle(currentWorkingDirectory)}</p>
 						</div>
 						<div class="rounded-md border p-2">
-							<p class="text-xs text-muted-foreground">Input Path</p>
+							<p class="text-xs text-muted-foreground">{m.home_input_path()}</p>
 							<p class="font-medium" title={inputPath}>{truncateMiddle(inputPath)}</p>
 						</div>
 						<div class="rounded-md border p-2">
-							<p class="text-xs text-muted-foreground">Output Path</p>
+							<p class="text-xs text-muted-foreground">{m.home_output_path()}</p>
 							<p class="font-medium" title={outputPath}>{truncateMiddle(outputPath)}</p>
 						</div>
 					</div>
 					<div class="grid grid-cols-2 gap-2 mt-3">
 						<Button size="sm" variant="outline" onclick={() => goto('/browse')}>
 							<Link2 class="h-4 w-4" />
-							Open Browse
+							{m.home_open_browse()}
 						</Button>
 						<Button size="sm" variant="outline" onclick={openDocs}>
 							<BookOpen class="h-4 w-4" />
-							API Docs
+							{m.home_api_docs()}
 						</Button>
 					</div>
 				</Card>
@@ -582,12 +581,12 @@
 		<div class="flex items-center justify-between text-xs text-muted-foreground px-1" in:fade|local={{ duration: 180 }}>
 			<div class="flex items-center gap-2">
 				<Clock3 class="h-3.5 w-3.5" />
-				<span>WebSocket messages: {wsState.messages.length}</span>
+				<span>{m.home_ws_messages({ count: wsState.messages.length })}</span>
 				<span>•</span>
-				<span>Version: {releaseVersion}</span>
+				<span>{m.home_version({ version: releaseVersion })}</span>
 			</div>
 			<div>
-				{refreshing ? 'Refreshing dashboard...' : 'Dashboard ready'}
+				{refreshing ? m.home_refreshing() : m.home_ready()}
 			</div>
 		</div>
 	</div>

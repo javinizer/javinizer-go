@@ -429,6 +429,10 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse:
     properties:
+      code:
+        description: Stable machine-readable error code (e.g. "JOB_NOT_FOUND") for
+          client-side i18n
+        type: string
       error:
         example: Movie not found
         type: string
@@ -436,6 +440,10 @@ definitions:
         items:
           type: string
         type: array
+      params:
+        additionalProperties: {}
+        description: Structured arguments for translating Code into a localized message
+        type: object
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference:
     properties:
@@ -2007,6 +2015,16 @@ definitions:
       title:
         type: boolean
     type: object
+  github_com_javinizer_javinizer-go_internal_config.UIConfig:
+    properties:
+      language:
+        description: |-
+          Language is the interface locale: "auto" (default, resolve per
+          environment) or a syntactically valid BCP 47 tag such as "en", "ja",
+          "zh-Hans", or "pt-BR". Unsupported but valid tags fall back to English
+          at runtime rather than being rejected here.
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig:
     properties:
       enabled:
@@ -2926,6 +2944,8 @@ definitions:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ServerConfig'
       system:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig'
+      ui:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.UIConfig'
       warnings:
         items:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ConfigWarning'

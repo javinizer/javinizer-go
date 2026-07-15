@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { portalToBody } from '$lib/actions/portal';
 	import { apiClient } from '$lib/api/client';
 	import { Save, RefreshCw, CircleAlert, ArrowLeft, X, Tags, Type } from 'lucide-svelte';
@@ -79,7 +80,7 @@
 	<div class="max-w-7xl mx-auto space-y-6">
 		<div class="space-y-4">
 			<div class="flex items-center gap-3">
-				<a href="/browse">
+				<a href="/browse" aria-label={m.settings_back_to_browse_aria()}>
 					<Button variant="ghost" size="icon">
 						{#snippet children()}
 							<ArrowLeft class="h-5 w-5" />
@@ -87,9 +88,9 @@
 					</Button>
 				</a>
 				<div class="flex-1">
-					<h1 class="text-3xl font-bold">Settings</h1>
+					<h1 class="text-3xl font-bold">{m.settings_page_title()}</h1>
 					<p class="text-muted-foreground mt-1">
-						Configure Javinizer scraping and output options
+						{m.settings_page_desc()}
 					</p>
 				</div>
 			</div>
@@ -97,13 +98,13 @@
 				<Button variant="outline" onclick={settings.reloadConfig} disabled={settings.loading || settings.reloading}>
 					{#snippet children()}
 						<RefreshCw class="h-4 w-4 mr-2 {settings.reloading ? 'animate-spin' : ''}" />
-						Reload
+						{m.settings_page_reload()}
 					{/snippet}
 				</Button>
 				<Button onclick={settings.handleSave} disabled={settings.saveConfigMutation.isPending || settings.loading}>
 					{#snippet children()}
 						<Save class="h-4 w-4 mr-2" />
-						{settings.saveConfigMutation.isPending ? 'Saving...' : 'Save Changes'}
+						{settings.saveConfigMutation.isPending ? m.settings_page_saving() : m.common_save_changes()}
 					{/snippet}
 				</Button>
 			</div>
@@ -121,8 +122,8 @@
 				<div class="flex items-start gap-2 mb-2">
 					<CircleAlert class="h-5 w-5 mt-0.5 shrink-0" />
 					<div>
-						<p class="font-semibold">Configuration Warning</p>
-						<p class="text-sm">The following metadata priority overrides point exclusively at disabled scrapers:</p>
+						<p class="font-semibold">{m.settings_page_config_warning()}</p>
+						<p class="text-sm">{m.settings_page_config_warning_desc()}</p>
 					</div>
 				</div>
 				<ul class="text-sm ml-7 space-y-1">
@@ -136,17 +137,17 @@
 		{#if settings.loading}
 			<Card class="p-8 text-center">
 				<RefreshCw class="h-8 w-8 animate-spin mx-auto mb-2" />
-				<p class="text-muted-foreground">Loading configuration...</p>
+				<p class="text-muted-foreground">{m.settings_page_loading_config()}</p>
 			</Card>
 		{:else if settings.settingsConfig}
-			<ServerSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
+			<ServerSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />
 
-		<SecuritySettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
+		<SecuritySettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />
 
-			<SettingsSection title="Scraper Defaults" description="Default settings applied to all scrapers unless overridden per-scraper" defaultExpanded={false}>
+			<SettingsSection title={m.settings_scraper_defaults_title()} description={m.settings_scraper_defaults_desc()} defaultExpanded={false}>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 					<div>
-						<label class="block text-sm font-medium mb-2" for="scrapers-user-agent">Default User-Agent</label>
+						<label class="block text-sm font-medium mb-2" for="scrapers-user-agent">{m.settings_scraper_defaults_user_agent_label()}</label>
 						<input
 							id="scrapers-user-agent"
 							type="text"
@@ -155,10 +156,10 @@
 							class={settings.inputClass}
 							placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 						/>
-						<p class="text-xs text-muted-foreground mt-1">Custom User-Agent for scraper requests (default browser UA if empty)</p>
+						<p class="text-xs text-muted-foreground mt-1">{m.settings_scraper_defaults_user_agent_desc()}</p>
 					</div>
 					<div>
-						<label class="block text-sm font-medium mb-2" for="scrapers-referer">Default Referer</label>
+						<label class="block text-sm font-medium mb-2" for="scrapers-referer">{m.settings_scraper_defaults_referer_label()}</label>
 						<input
 							id="scrapers-referer"
 							type="text"
@@ -167,15 +168,15 @@
 							class={settings.inputClass}
 							placeholder="https://www.dmm.co.jp/"
 						/>
-					<p class="text-xs text-muted-foreground mt-1">Referer header for CDN compatibility (default: https://www.dmm.co.jp/)</p>
+					<p class="text-xs text-muted-foreground mt-1">{m.settings_scraper_defaults_referer_desc()}</p>
 				</div>
 			</div>
 
 			<div class="pt-4 border-t mt-4">
 				<FormToggle
 					id="global-scrape-actress"
-					label="Scrape Actress Information (Global Default)"
-					description="Default setting for actress scraping across all scrapers. Individual scrapers can override this in their settings."
+					label={m.settings_scrape_actress_global_label()}
+					description={m.settings_scrape_actress_global_desc()}
 					checked={settings.config?.scrapers?.scrape_actress ?? true}
 					onchange={(val) => {
 						if (!settings.config) return;
@@ -188,13 +189,13 @@
 
 	<BrowserSettingsSection 
 		config={settings.settingsConfig} 
-		inputClass={settings.inputClass} 
+		inputClass={settings.inputClass} selectClass={settings.selectClass} 
 		onChange={(path, value) => {
 			try {
 			scraper.setNestedValue(settings.config as Record<string, unknown>, path, value);
 				settings.config = JSON.parse(JSON.stringify(settings.config));
 			} catch (err) {
-				toastStore.error(`Failed to update setting: ${err instanceof Error ? err.message : String(err)}`);
+				toastStore.error(m.settings_update_setting_failed_toast({ error: err instanceof Error ? err.message : String(err) }));
 			}
 		}}
 	/>
@@ -202,7 +203,7 @@
 			<ScraperSettingsSection
 				config={settings.settingsConfig}
 				scrapers={scraper.scrapers}
-				inputClass={settings.inputClass}
+				inputClass={settings.inputClass} selectClass={settings.selectClass}
 				scraperHasOptions={scraper.scraperHasOptions}
 				onScraperRowClick={scraper.onScraperRowClick}
 				onScraperRowKeydown={scraper.onScraperRowKeydown}
@@ -222,22 +223,22 @@
 				parseOptionNumber={scraper.parseOptionNumber}
 			/>
 
-			<SettingsSection title="Metadata Priority" description="Configure which scraper to use for each metadata field" defaultExpanded={false}>
+			<SettingsSection title={m.settings_metadata_priority_title()} description={m.settings_metadata_priority_desc()} defaultExpanded={false}>
 				<MetadataPriority config={settings.settingsConfig} onUpdate={(updatedConfig) => { settings.config = updatedConfig; }} />
 			</SettingsSection>
 
-			<CompletenessSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
+			<CompletenessSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />
 
 			<FileOperationsSettingsSection config={settings.settingsConfig} />
-			<OutputSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
-			<DatabaseSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
+			<OutputSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />
+			<DatabaseSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />
 			<R18DevDumpSection onConfigChange={(enabled) => { if (settings.settingsConfig) { const meta = settings.settingsConfig.metadata || (settings.settingsConfig as any).metadata || {}; meta.r18dev_dump = { enabled, path: meta.r18dev_dump?.path ?? '' }; (settings.settingsConfig as any).metadata = meta; } }} />
 			<ApiTokensSection onTokenDisplay={handleTokenDisplay} />
-			<SettingsSection title="Genre Replacements" description="Manage genre name replacements applied during scraping" defaultExpanded={false}>
+			<SettingsSection title={m.settings_genre_replacements_title()} description={m.settings_genre_replacements_inline_desc()} defaultExpanded={false}>
 				<div class="space-y-4">
 					<FormToggle
-						label="Enable genre replacement"
-						description="Normalize genre names using exact-match mappings from the database"
+						label={m.settings_genre_replacement_enable_label()}
+						description={m.settings_genre_replacement_enable_desc()}
 						checked={settings.settingsConfig.metadata.genre_replacement?.enabled ?? false}
 						onchange={(val) => {
 							const cfg = settings.settingsConfig;
@@ -247,8 +248,8 @@
 						}}
 					/>
 					<FormToggle
-						label="Auto-add genres"
-						description="Automatically add new genre replacements to the database with identity mapping"
+						label={m.settings_genre_replacement_auto_add_label()}
+						description={m.settings_genre_replacement_auto_add_desc()}
 						checked={settings.settingsConfig.metadata.genre_replacement?.auto_add ?? false}
 						onchange={(val) => {
 							const cfg = settings.settingsConfig;
@@ -259,13 +260,13 @@
 					/>
 					<div class="flex items-center justify-between pt-2 border-t border-border">
 						<p class="text-sm text-muted-foreground">
-							Manage individual genre replacement rules.
+							{m.settings_genre_replacements_manage_note()}
 						</p>
 						<a href="/genres">
 							<Button variant="outline" size="sm">
 								{#snippet children()}
 									<Tags class="h-4 w-4 mr-1" />
-									Manage Genres
+									{m.settings_manage_genres_button()}
 								{/snippet}
 							</Button>
 						</a>
@@ -273,11 +274,11 @@
 				</div>
 			</SettingsSection>
 
-			<SettingsSection title="Word Replacements" description="Manage word uncensor rules applied during scraping" defaultExpanded={false}>
+			<SettingsSection title={m.settings_word_replacements_title()} description={m.settings_word_replacements_desc()} defaultExpanded={false}>
 				<div class="space-y-4">
 					<FormToggle
-						label="Enable word replacement"
-						description="De-censor and replace words in all text fields (title, description, genres, etc.) using database mappings. Default censored-to-clean pairs (e.g. S******n -> Shotacon) are seeded on startup."
+						label={m.settings_word_replacement_enable_label()}
+						description={m.settings_word_replacement_enable_desc()}
 						checked={settings.settingsConfig.metadata.word_replacement?.enabled ?? false}
 						onchange={(val) => {
 							const cfg = settings.settingsConfig;
@@ -288,13 +289,13 @@
 					/>
 					<div class="flex items-center justify-between pt-2 border-t border-border">
 						<p class="text-sm text-muted-foreground">
-							Manage individual word replacement rules.
+							{m.settings_word_replacements_manage_note()}
 						</p>
 						<a href="/words">
 							<Button variant="outline" size="sm">
 								{#snippet children()}
 									<Type class="h-4 w-4 mr-1" />
-									Manage Words
+									{m.settings_manage_words_button()}
 								{/snippet}
 							</Button>
 						</a>
@@ -304,7 +305,7 @@
 
 			<TranslationSettingsSection
 				config={settings.settingsConfig}
-				inputClass={settings.inputClass}
+				inputClass={settings.inputClass} selectClass={settings.selectClass}
 				fetchTranslationModels={settings.fetchTranslationModels}
 				fetchingTranslationModels={settings.fetchingTranslationModels}
 				translationModelOptions={settings.translationModelOptions}
@@ -312,7 +313,7 @@
 			<NfoSettingsSection config={settings.settingsConfig} />
 			<ProxySettingsSection
 				config={settings.settingsConfig}
-				inputClass={settings.inputClass}
+				inputClass={settings.inputClass} selectClass={settings.selectClass}
 				testingProxy={proxy.testingProxy}
 				testingFlareSolverr={proxy.testingFlareSolverr}
 				testingProfile={proxy.testingProfile}
@@ -335,11 +336,11 @@
 				invalidateGlobalProxyTest={proxy.invalidateGlobalProxyTest}
 				invalidateGlobalFlareSolverrTest={proxy.invalidateGlobalFlareSolverrTest}
 			/>
-			<PerformanceSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
-			<FileMatchingSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
-			<LoggingSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
+			<PerformanceSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />
+			<FileMatchingSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />
+			<LoggingSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />
 			<MediaInfoSettingsSection config={settings.settingsConfig} />
-			<WebUISettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
+			<WebUISettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />
 		{/if}
 	</div>
 </div>

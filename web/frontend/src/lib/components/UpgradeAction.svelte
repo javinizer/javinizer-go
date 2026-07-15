@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { RefreshCw, ExternalLink } from 'lucide-svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
@@ -46,7 +47,7 @@
 			if (response.status === 'up-to-date') {
 				upgrading = false;
 				notify(false);
-				toastStore.info('Already up to date');
+				toastStore.info(m.upgrade_already_up_to_date());
 				return;
 			}
 			// On 200 'relaunching' the relaunch is already underway: hold the
@@ -54,8 +55,8 @@
 		} catch (error) {
 			upgrading = false;
 			notify(false);
-			const message = error instanceof Error ? error.message : 'Desktop upgrade failed';
-			toastStore.error(`Update failed: ${message}`);
+			const message = error instanceof Error ? error.message : m.upgrade_failed();
+			toastStore.error(m.update_failed_prefix({ message }));
 		}
 	}
 
@@ -76,11 +77,11 @@
 		type="button"
 		onclick={handleUpgrade}
 		disabled={upgrading}
-		aria-label="Update and restart"
+		aria-label={m.upgrade_aria_update_restart()}
 		class="flex items-center gap-1.5 {sizeClass} transition-all duration-150 bg-primary text-primary-foreground hover:opacity-90 hover:translate-x-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0"
 	>
 		<RefreshCw class="h-3.5 w-3.5 {upgrading ? 'animate-spin' : ''}" />
-		{upgrading ? 'Restarting…' : 'Update & restart'}
+		{upgrading ? m.upgrade_restarting() : m.upgrade_update_restart()}
 	</button>
 {:else}
 	<a
@@ -91,6 +92,6 @@
 		class="flex items-center gap-1.5 {sizeClass} transition-all duration-150 bg-primary text-primary-foreground hover:opacity-90 hover:translate-x-0.5"
 	>
 		<ExternalLink class="h-3.5 w-3.5" />
-		View release
+		{m.upgrade_view_release()}
 	</a>
 {/if}

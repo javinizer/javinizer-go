@@ -21,6 +21,7 @@ import {
 	type PosterCropMetrics,
 } from '../review-utils';
 import { overlayFieldOverride } from './overlay-field-override';
+import * as m from '$lib/paraglide/messages';
 
 interface ReviewMutationsDeps {
 	getJobId: () => string;
@@ -140,7 +141,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			void invalidateJobQueries();
 		},
 		onError: (err: Error) => {
-			deps.toastError(`Failed to set poster from screenshot: ${err.message}`);
+			deps.toastError(m.review_poster_from_screenshot_failed({ error: err.message }));
 		},
 	}));
 
@@ -167,7 +168,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					break;
 				}
 			}
-			deps.toastSuccess('Movie excluded from organization');
+			deps.toastSuccess(m.review_movie_excluded());
 			void invalidateJobQueries();
 
 			const movieResultsLength = deps.getMovieResultsLength();
@@ -183,7 +184,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			}
 		},
 		onError: (err: Error) => {
-			deps.toastError(`Failed to exclude movie: ${err.message}`);
+			deps.toastError(m.review_exclude_movie_failed({ error: err.message }));
 		},
 	}));
 
@@ -209,14 +210,14 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		onSuccess: async (sent: number) => {
 			if (sent > 0) {
 				await invalidateJobQueries().catch(() => {});
-				deps.toastSuccess('Changes saved to database');
+				deps.toastSuccess(m.review_changes_saved());
 			}
 			deps.clearEditedMovies();
 			deps.clearPosterPreviewOverrides();
 			deps.clearEditStorage();
 		},
 		onError: (err: Error) => {
-			deps.toastError(`Failed to save edits: ${err.message}`);
+			deps.toastError(m.review_save_edits_failed({ error: err.message }));
 		},
 	}));
 
@@ -251,13 +252,13 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				}
 			}
 
-			deps.toastSuccess('Poster crop updated');
+			deps.toastSuccess(m.review_poster_crop_updated());
 			deps.setShowPosterCropModal(false);
 
 			void invalidateJobQueries();
 		},
 		onError: (err: Error) => {
-			deps.toastError(err.message || 'Failed to update poster crop');
+			deps.toastError(err.message || m.review_poster_crop_failed());
 		},
 	}));
 
@@ -279,18 +280,18 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 
 			if (data.failed.length > 0) {
 				deps.toastError(
-					`Failed to exclude ${data.failed.length} movie${data.failed.length !== 1 ? 's' : ''}`,
+					m.review_exclude_failed_count({ count: data.failed.length }),
 				);
 			} else {
 				deps.toastSuccess(
-					`Excluded ${data.excluded.length} movie${data.excluded.length !== 1 ? 's' : ''}`,
+					m.review_excluded_count({ count: data.excluded.length }),
 				);
 			}
 
 			void invalidateJobQueries();
 		},
 		onError: (err: Error) => {
-			deps.toastError(`Failed to exclude movies: ${err.message}`);
+			deps.toastError(m.review_exclude_movies_failed({ error: err.message }));
 		},
 	}));
 
@@ -329,15 +330,15 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			}
 
 			if (data.failed > 0) {
-				deps.toastError(`Failed to rescrape ${data.failed} movie${data.failed !== 1 ? 's' : ''}`);
+				deps.toastError(m.review_rescrape_failed_count({ count: data.failed }));
 			} else {
-				deps.toastSuccess(`Rescraped ${data.succeeded} movie${data.succeeded !== 1 ? 's' : ''}`);
+				deps.toastSuccess(m.review_rescraped_count({ count: data.succeeded }));
 			}
 
 			void invalidateJobQueries();
 		},
 		onError: (err: Error) => {
-			deps.toastError(`Failed to rescrape movies: ${err.message}`);
+			deps.toastError(m.review_rescrape_movies_failed({ error: err.message }));
 		},
 	}));
 
@@ -389,11 +390,11 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					}
 				}
 			}
-			deps.toastSuccess(`Replaced ${field} from ${source}`);
+			deps.toastSuccess(m.review_field_replaced({ field, source }));
 			void invalidateJobQueries();
 		},
 		onError: (err: Error) => {
-			deps.toastError(`Failed to override field: ${err.message}`);
+			deps.toastError(m.review_field_override_failed({ error: err.message }));
 			},
 	}));
 

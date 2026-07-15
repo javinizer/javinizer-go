@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
@@ -8,26 +9,27 @@
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 	}
 
-	let { config, inputClass }: Props = $props();
+	let { config, inputClass, selectClass }: Props = $props();
 </script>
 
-<SettingsSection title="Database Settings" description="Configure database options and behavior" defaultExpanded={false}>
+<SettingsSection title={m.settings_database_title()} description={m.settings_database_desc()} defaultExpanded={false}>
 	<div class="mb-4">
-		<label class="block text-sm font-medium mb-2" for="database-type">Database Type</label>
-		<select id="database-type" bind:value={config.database.type} class={inputClass}>
-			<option value="sqlite">SQLite</option>
-			<option value="postgres">PostgreSQL</option>
-			<option value="mysql">MySQL</option>
+		<label class="block text-sm font-medium mb-2" for="database-type">{m.settings_database_type_label()}</label>
+		<select id="database-type" bind:value={config.database.type} class={selectClass}>
+			<option value="sqlite">{m.settings_database_type_sqlite()}</option>
+			<option value="postgres">{m.settings_database_type_postgres()}</option>
+			<option value="mysql">{m.settings_database_type_mysql()}</option>
 		</select>
 		<p class="text-xs text-muted-foreground mt-1">
-			Database engine to use (SQLite recommended for most users)
+			{m.settings_database_type_desc()}
 		</p>
 	</div>
 
 	<div class="mb-4">
-		<label class="block text-sm font-medium mb-2" for="database-dsn">Database Path (DSN)</label>
+		<label class="block text-sm font-medium mb-2" for="database-dsn">{m.settings_database_dsn_label()}</label>
 		<input
 			id="database-dsn"
 			type="text"
@@ -37,10 +39,10 @@
 		/>
 	</div>
 
-	<SettingsSubsection title="Actress Database">
+	<SettingsSubsection title={m.settings_database_actress_subsection()}>
 		<FormToggle
-			label="Auto-add actresses"
-			description="Automatically add new actresses to the database when encountered"
+			label={m.settings_database_actress_auto_add_label()}
+			description={m.settings_database_actress_auto_add_desc()}
 			checked={config.metadata.actress_database?.auto_add ?? false}
 			onchange={(val) => {
 				if (!config.metadata.actress_database) config.metadata.actress_database = {};
@@ -49,8 +51,8 @@
 		/>
 
 		<FormToggle
-			label="Convert aliases"
-			description="Use actress aliases from the database when generating metadata"
+			label={m.settings_database_actress_convert_alias_label()}
+			description={m.settings_database_actress_convert_alias_desc()}
 			checked={config.metadata.actress_database?.convert_alias ?? false}
 			onchange={(val) => {
 				if (!config.metadata.actress_database) config.metadata.actress_database = {};
@@ -59,10 +61,10 @@
 		/>
 	</SettingsSubsection>
 
-	<SettingsSubsection title="Tag Database">
+	<SettingsSubsection title={m.settings_database_tag_subsection()}>
 		<FormToggle
-			label="Enable tag database"
-			description="Enable per-movie tag lookup from database"
+			label={m.settings_database_tag_enable_label()}
+			description={m.settings_database_tag_enable_desc()}
 			checked={config.metadata.tag_database?.enabled ?? false}
 			onchange={(val) => {
 				if (!config.metadata.tag_database) config.metadata.tag_database = {};
@@ -71,12 +73,12 @@
 		/>
 	</SettingsSubsection>
 
-	<SettingsSubsection title="Advanced Metadata Options">
+	<SettingsSubsection title={m.settings_database_advanced_subsection()}>
 		<FormTextInput
-			label="Ignore genres"
-			description="Comma-separated list of genres to exclude from metadata"
+			label={m.settings_database_ignore_genres_label()}
+			description={m.settings_database_ignore_genres_desc()}
 			value={config.metadata.ignore_genres?.join(', ') ?? ''}
-			placeholder="e.g., Sample, Trailer"
+			placeholder={m.settings_database_ignore_genres_placeholder()}
 			onchange={(val) => {
 				config.metadata.ignore_genres = val
 					.split(',')
@@ -86,10 +88,10 @@
 		/>
 
 		<FormTextInput
-			label="Required fields"
-			description="Comma-separated list of required metadata fields (scraping fails if missing)"
+			label={m.settings_database_required_fields_label()}
+			description={m.settings_database_required_fields_desc()}
 			value={config.metadata.required_fields?.join(', ') ?? ''}
-			placeholder="e.g., title, actress, studio"
+			placeholder={m.settings_database_required_fields_placeholder()}
 			onchange={(val) => {
 				config.metadata.required_fields = val
 					.split(',')

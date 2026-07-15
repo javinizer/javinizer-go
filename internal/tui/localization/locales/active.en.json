@@ -1,0 +1,715 @@
+{
+  "TUIActressMergeAliasesAdded": {
+    "description": "Number of aliases added during an actress merge",
+    "other": "Aliases added: {{.Count}}"
+  },
+  "TUIActressMergeConflictHint": {
+    "description": "Hint shown when no field conflicts exist in the actress merge preview",
+    "other": "Enter apply merge • r edit IDs • Esc cancel"
+  },
+  "TUIActressMergeConflictNavHint": {
+    "description": "Navigation hint for the actress merge conflict resolution step",
+    "other": "↑↓ choose field • t/s select value • Space toggle • Enter apply • r edit IDs • Esc cancel"
+  },
+  "TUIActressMergeConflictsCount": {
+    "description": "Number of field conflicts detected in an actress merge preview",
+    "other": "Conflicts: {{.Count}}"
+  },
+  "TUIActressMergeConflictsResolved": {
+    "description": "Number of conflicts resolved during an actress merge",
+    "other": "Conflicts resolved: {{.Count}}"
+  },
+  "TUIActressMergeDecisionSource": {
+    "description": "Label for the source side of a merge conflict resolution",
+    "other": "source"
+  },
+  "TUIActressMergeDecisionTarget": {
+    "description": "Label for the target side of a merge conflict resolution",
+    "other": "target"
+  },
+  "TUIActressMergeErrInvalidID": {
+    "description": "Validation error when actress merge IDs are not positive",
+    "other": "target and source must be positive actress IDs"
+  },
+  "TUIActressMergeErrSameID": {
+    "description": "Validation error when actress merge target and source IDs are identical",
+    "other": "target and source must be different actress IDs"
+  },
+  "TUIActressMergeErrorPrefix": {
+    "description": "Prefix shown before an actress merge error message",
+    "other": "Error:"
+  },
+  "TUIActressMergeField": {
+    "description": "Label for a conflict field and its currently selected decision",
+    "other": "Field: {{.Field}} (selected: {{.Decision}})"
+  },
+  "TUIActressMergeInputHint": {
+    "description": "Navigation hint for the actress merge input step",
+    "other": "Tab/↑↓ switch field • Enter on Source loads preview • Esc cancel"
+  },
+  "TUIActressMergeMerging": {
+    "description": "Header describing which source is being merged into which target",
+    "other": "Merging source #{{.Source}} into target #{{.Target}}"
+  },
+  "TUIActressMergeNoConflicts": {
+    "description": "Message shown when no field conflicts were found in a merge preview",
+    "other": "No field conflicts found. Default merge behavior will be used."
+  },
+  "TUIActressMergeNoPreview": {
+    "description": "Message shown when no merge preview has been loaded",
+    "other": "No merge preview loaded."
+  },
+  "TUIActressMergeNoPreviewHint": {
+    "description": "Hint shown when no merge preview has been loaded",
+    "other": "Press r to go back or Esc to close."
+  },
+  "TUIActressMergeNoResult": {
+    "description": "Message shown when a merge finished without a result",
+    "other": "Merge finished, but no result is available."
+  },
+  "TUIActressMergeNoResultHint": {
+    "description": "Hint shown when a merge finished without a result",
+    "other": "r new merge • Esc close"
+  },
+  "TUIActressMergePlaceholderSource": {
+    "description": "Placeholder for the actress merge source ID input",
+    "other": "Source actress ID"
+  },
+  "TUIActressMergePlaceholderTarget": {
+    "description": "Placeholder for the actress merge target ID input",
+    "other": "Target actress ID"
+  },
+  "TUIActressMergeResultHint": {
+    "description": "Navigation hint for the actress merge result step",
+    "other": "r new merge with same target • Enter/Esc close"
+  },
+  "TUIActressMergeResultMerged": {
+    "description": "Summary stating which source actress was merged into which target",
+    "other": "Merged actress #{{.From}} into #{{.Into}}"
+  },
+  "TUIActressMergeSourceIDLabel": {
+    "description": "Label for the actress merge source ID input field",
+    "other": "Source ID:"
+  },
+  "TUIActressMergeSourceValueLabel": {
+    "description": "Label prefix for the source value of a merge conflict",
+    "other": "source:"
+  },
+  "TUIActressMergeTargetIDLabel": {
+    "description": "Label for the actress merge target ID input field",
+    "other": "Target ID:"
+  },
+  "TUIActressMergeTargetValueLabel": {
+    "description": "Label prefix for the target value of a merge conflict",
+    "other": "target:"
+  },
+  "TUIActressMergeTitle": {
+    "description": "Title of the actress merge modal",
+    "other": "Actress Merge"
+  },
+  "TUIActressMergeUpdatedMovies": {
+    "description": "Number of movies updated during an actress merge",
+    "other": "Updated movies: {{.Count}}"
+  },
+  "TUIAllTasksCompletedSuccessfully": {
+    "description": "Log message shown when all processing tasks finish without errors",
+    "other": "All tasks completed successfully"
+  },
+  "TUIAllTasksSubmitted": {
+    "description": "Log message shown when all file tasks have been submitted to the runner",
+    "other": "All tasks submitted successfully"
+  },
+  "TUIAppTitle": {
+    "description": "Application title shown in the TUI header",
+    "other": "Javinizer TUI"
+  },
+  "TUIApplySucceeded": {
+    "description": "Worker event message shown when a movie has been applied/organized successfully",
+    "other": "Applied {{.MovieID}} successfully"
+  },
+  "TUIBrowserFileCount": {
+    "description": "Current position and total count of files in the browser",
+    "other": "{{.Current}}/{{.Total}} files"
+  },
+  "TUIBrowserFilesHint": {
+    "description": "Key hint shown next to the browser panel title",
+    "other": "(f:source o:output m:search M:merge)"
+  },
+  "TUIBrowserFilesTitle": {
+    "description": "Title of the file browser panel",
+    "other": "Files"
+  },
+  "TUIBrowserFrom": {
+    "description": "Label for the source path in the browser",
+    "other": "From:"
+  },
+  "TUIBrowserNoFiles": {
+    "description": "Empty state shown when no files are loaded in the browser",
+    "other": "No files found"
+  },
+  "TUIBrowserTitle": {
+    "description": "Title of the file browser panel",
+    "other": "Browser"
+  },
+  "TUIBrowserTo": {
+    "description": "Label for the destination path in the browser",
+    "other": "To:"
+  },
+  "TUICompleted": {
+    "description": "Completion banner shown when processing finishes",
+    "other": "Complete"
+  },
+  "TUIConsoleNoOutput": {
+    "description": "Empty state shown in the console panel when no output has been produced yet",
+    "other": "No output yet..."
+  },
+  "TUIConsoleScrollIndicator": {
+    "description": "Scroll position indicator shown in the console panel when entries overflow",
+    "other": "[{{.Visible}}/{{.Total}}]"
+  },
+  "TUIConsoleTitle": {
+    "description": "Title of the console panel",
+    "other": "Console"
+  },
+  "TUIDashElapsed": {
+    "description": "Label for the elapsed time on the dashboard",
+    "other": "Elapsed"
+  },
+  "TUIDashFailed": {
+    "description": "Label for the failed task count on the dashboard",
+    "other": "Failed"
+  },
+  "TUIDashProgress": {
+    "description": "Label for the overall progress on the dashboard",
+    "other": "Progress"
+  },
+  "TUIDashRunning": {
+    "description": "Label for the running task count on the dashboard",
+    "other": "Running"
+  },
+  "TUIDashSuccess": {
+    "description": "Label for the succeeded task count on the dashboard",
+    "other": "success"
+  },
+  "TUIDashTotal": {
+    "description": "Label for the total task count on the dashboard",
+    "other": "Total"
+  },
+  "TUIDashboardTitle": {
+    "description": "Title of the dashboard view",
+    "other": "Dashboard"
+  },
+  "TUIDryRunBadge": {
+    "description": "Badge shown when dry-run mode is active",
+    "other": "Dry Run"
+  },
+  "TUIEmptyBrowser": {
+    "description": "Empty state shown when no files are loaded in the browser",
+    "other": "No files found. Press 'r' to rescan or 'm' for manual search."
+  },
+  "TUIEmptyTasks": {
+    "description": "Empty state shown when there are no active tasks",
+    "other": "No active tasks"
+  },
+  "TUIEnterFolderPath": {
+    "description": "Placeholder text for the folder path input",
+    "other": "Enter folder path..."
+  },
+  "TUIFailed": {
+    "description": "Number of files that failed processing in the completion banner",
+    "one": "{{.Count}} failed",
+    "other": "{{.Count}} failed"
+  },
+  "TUIFilesFound": {
+    "description": "Number of video files found during a scan",
+    "one": "Found {{.Count}} file",
+    "other": "Found {{.Count}} files"
+  },
+  "TUIFilesProcessed": {
+    "description": "Number of files processed in the completion banner",
+    "one": "Processed {{.Count}} file in {{.Elapsed}}",
+    "other": "Processed {{.Count}} files in {{.Elapsed}}"
+  },
+  "TUIFolderPickerCurrent": {
+    "description": "Label for the current path in the folder picker",
+    "other": "Current:"
+  },
+  "TUIFolderPickerDestTitle": {
+    "description": "Title of the folder picker when selecting an output folder",
+    "other": "Select Output Folder"
+  },
+  "TUIFolderPickerHint": {
+    "description": "Navigation hint shown at the bottom of the folder picker",
+    "other": "↑↓/jk: navigate  Enter: select folder  Space: choose current  Esc: cancel"
+  },
+  "TUIFolderPickerNoFolders": {
+    "description": "Empty state shown when no subfolders are found in the folder picker",
+    "other": "No folders found"
+  },
+  "TUIFolderPickerSourceTitle": {
+    "description": "Title of the folder picker when selecting a source folder",
+    "other": "Select Source Folder"
+  },
+  "TUIFooterHelp": {
+    "description": "Footer key hint to open help",
+    "other": "Help"
+  },
+  "TUIFooterQuit": {
+    "description": "Footer key hint to quit the application",
+    "other": "Quit"
+  },
+  "TUIFooterSettings": {
+    "description": "Footer key hint to open settings",
+    "other": "Settings"
+  },
+  "TUIFooterTab": {
+    "description": "Footer key hint to switch tabs",
+    "other": "Tab"
+  },
+  "TUIHeaderDryRun": {
+    "description": "Dry-run indicator shown in the header bar",
+    "other": "[DRY RUN]"
+  },
+  "TUIHelpActionChangeFolder": {
+    "description": "Help text for the change scan folder action",
+    "other": "Change scan folder"
+  },
+  "TUIHelpActionCycleChoice": {
+    "description": "Help text for cycling a choice-row setting such as interface language",
+    "other": "Cycle choice (language)"
+  },
+  "TUIHelpActionCycleViews": {
+    "description": "Help text for the cycle views action",
+    "other": "Cycle views"
+  },
+  "TUIHelpActionDeselectAll": {
+    "description": "Help text for the deselect all action",
+    "other": "Deselect all"
+  },
+  "TUIHelpActionGoBottom": {
+    "description": "Help text for the go to bottom action",
+    "other": "Go to bottom"
+  },
+  "TUIHelpActionGoTop": {
+    "description": "Help text for the go to top action",
+    "other": "Go to top"
+  },
+  "TUIHelpActionManualSearch": {
+    "description": "Help text for the manual search action",
+    "other": "Manual search (select scrapers + ID/URL)"
+  },
+  "TUIHelpActionMoveDown": {
+    "description": "Help text for the move down action",
+    "other": "Move down"
+  },
+  "TUIHelpActionMoveUp": {
+    "description": "Help text for the move up action",
+    "other": "Move up"
+  },
+  "TUIHelpActionPauseResume": {
+    "description": "Help text for the pause/resume action",
+    "other": "Pause/resume"
+  },
+  "TUIHelpActionQuit": {
+    "description": "Help text for the quit action",
+    "other": "Quit"
+  },
+  "TUIHelpActionRefresh": {
+    "description": "Help text for the refresh/rescan action",
+    "other": "Refresh/rescan current folder"
+  },
+  "TUIHelpActionScrollDown": {
+    "description": "Help text for the scroll down action",
+    "other": "Scroll down"
+  },
+  "TUIHelpActionScrollUp": {
+    "description": "Help text for the scroll up action",
+    "other": "Scroll up"
+  },
+  "TUIHelpActionSelectAll": {
+    "description": "Help text for the select all action",
+    "other": "Select all"
+  },
+  "TUIHelpActionStartProcessing": {
+    "description": "Help text for the start processing action",
+    "other": "Start processing"
+  },
+  "TUIHelpActionSwitchViews": {
+    "description": "Help text for the switch views action",
+    "other": "Switch views"
+  },
+  "TUIHelpActionToggleAutoScroll": {
+    "description": "Help text for the toggle auto-scroll action",
+    "other": "Toggle auto-scroll"
+  },
+  "TUIHelpActionToggleHelp": {
+    "description": "Help text for the toggle help action",
+    "other": "Toggle help"
+  },
+  "TUIHelpActionToggleSelection": {
+    "description": "Help text for the toggle selection action",
+    "other": "Toggle selection (files or entire folders)"
+  },
+  "TUIHelpActionToggleSetting": {
+    "description": "Help text for toggling a boolean settings row",
+    "other": "Toggle option"
+  },
+  "TUIHelpBrowserSection": {
+    "description": "Section heading for the browser view keys in help",
+    "other": "Browser View"
+  },
+  "TUIHelpFoldersNote": {
+    "description": "Note explaining that folder checkboxes select all contained files",
+    "other": "📁 Folders with checkboxes select all files inside"
+  },
+  "TUIHelpGlobalKeys": {
+    "description": "Section heading for the global keys in help",
+    "other": "Global Keys"
+  },
+  "TUIHelpLogsSection": {
+    "description": "Section heading for the logs view keys in help",
+    "other": "Logs View"
+  },
+  "TUIHelpSettingsSection": {
+    "description": "Section heading for the settings view keys in help",
+    "other": "Settings View"
+  },
+  "TUIHelpTitle": {
+    "description": "Title of the help view",
+    "other": "Help"
+  },
+  "TUIHintAutoScroll": {
+    "description": "Footer key hint description for toggling auto-scroll",
+    "other": "auto-scroll"
+  },
+  "TUIHintCloseHelp": {
+    "description": "Footer key hint description for closing help",
+    "other": "close help"
+  },
+  "TUIHintHelp": {
+    "description": "Footer key hint description for opening help",
+    "other": "help"
+  },
+  "TUIHintManualSearch": {
+    "description": "Footer key hint description for opening manual search",
+    "other": "manual search"
+  },
+  "TUIHintMergeActress": {
+    "description": "Footer key hint description for opening the actress merge modal",
+    "other": "merge actress"
+  },
+  "TUIHintNavigate": {
+    "description": "Footer key hint description for navigating the list",
+    "other": "navigate"
+  },
+  "TUIHintOutput": {
+    "description": "Footer key hint description for choosing the output folder",
+    "other": "output"
+  },
+  "TUIHintProcess": {
+    "description": "Footer key hint description for starting processing",
+    "other": "process"
+  },
+  "TUIHintQuit": {
+    "description": "Footer key hint description for quitting the application",
+    "other": "quit"
+  },
+  "TUIHintRefresh": {
+    "description": "Footer key hint description for refreshing the file list",
+    "other": "refresh"
+  },
+  "TUIHintScroll": {
+    "description": "Footer key hint description for scrolling logs",
+    "other": "scroll"
+  },
+  "TUIHintSelect": {
+    "description": "Footer key hint description for selecting an item",
+    "other": "select"
+  },
+  "TUIHintSelectAllNone": {
+    "description": "Footer key hint description for selecting all or none",
+    "other": "sel all/none"
+  },
+  "TUIHintSource": {
+    "description": "Footer key hint description for choosing the source folder",
+    "other": "source"
+  },
+  "TUIHintSwitchView": {
+    "description": "Footer key hint description for switching views",
+    "other": "switch view"
+  },
+  "TUIHintToggle": {
+    "description": "Footer key hint description for toggling a setting",
+    "other": "toggle"
+  },
+  "TUIHintTopBottom": {
+    "description": "Footer key hint description for jumping to top or bottom",
+    "other": "top/bottom"
+  },
+  "TUIInitializing": {
+    "description": "Message shown while the TUI is initializing",
+    "other": "Initializing..."
+  },
+  "TUILogAlreadyProcessing": {
+    "description": "Log message shown when processing is already running",
+    "other": "Processing already in progress"
+  },
+  "TUILogMoveModeBlocked": {
+    "description": "Log message shown when move mode cannot be enabled due to link mode",
+    "other": "Move mode cannot be enabled while link mode is active"
+  },
+  "TUILogNoFilesSelected": {
+    "description": "Log message shown when processing starts with no files selected",
+    "other": "No files selected. Use space to select files first."
+  },
+  "TUILogPathChanged": {
+    "description": "Log message shown when the scan path is changed",
+    "other": "Path changed to: {{.Path}}"
+  },
+  "TUILogPaused": {
+    "description": "Log message shown when processing is paused",
+    "other": "Processing paused"
+  },
+  "TUILogProcessingError": {
+    "description": "Log message shown when submitting files for processing fails",
+    "other": "Processing error: {{.Error}}"
+  },
+  "TUILogRefreshing": {
+    "description": "Log message shown when the file list is being refreshed",
+    "other": "Refreshing file list..."
+  },
+  "TUILogResumed": {
+    "description": "Log message shown when processing is resumed",
+    "other": "Processing resumed"
+  },
+  "TUILogSomeTasksFailed": {
+    "description": "Log message shown when one or more processing tasks finished with errors",
+    "other": "Some tasks failed: {{.Error}}"
+  },
+  "TUILogStartProcessingFailed": {
+    "description": "Log message shown when processing fails to start",
+    "other": "Failed to start processing: {{.Error}}"
+  },
+  "TUILogStartingProcessing": {
+    "description": "Log message shown when processing is starting",
+    "other": "Enter key pressed, starting processing..."
+  },
+  "TUILogStartingProcessingFiles": {
+    "description": "Log message shown when processing begins for a count of selected files",
+    "one": "Starting processing of {{.Count}} file...",
+    "other": "Starting processing of {{.Count}} files..."
+  },
+  "TUILogsEmpty": {
+    "description": "Empty state shown when there are no logs yet",
+    "other": "No logs yet"
+  },
+  "TUILogsTitle": {
+    "description": "Title of the logs view",
+    "other": "Logs"
+  },
+  "TUIManualSearchInstructions": {
+    "description": "Instructions shown at the bottom of the manual search modal",
+    "other": "Tab: Switch Focus  Space: Toggle  Enter: Search  Esc: Cancel"
+  },
+  "TUIManualSearchPlaceholder": {
+    "description": "Placeholder for the manual search input",
+    "other": "Enter JAV ID or URL"
+  },
+  "TUIManualSearchSearchLabel": {
+    "description": "Label for the manual search input",
+    "other": "Search:"
+  },
+  "TUIManualSearchSelectScrapers": {
+    "description": "Label above the scraper list in the manual search modal",
+    "other": "Select Scrapers:"
+  },
+  "TUIManualSearchTitle": {
+    "description": "Title of the manual search modal",
+    "other": "Manual Search"
+  },
+  "TUIProcessing": {
+    "description": "Label shown next to the spinner while processing",
+    "other": "Processing"
+  },
+  "TUIProcessingComplete": {
+    "description": "Banner shown when processing completes",
+    "other": "Processing Complete!"
+  },
+  "TUIProcessingHints": {
+    "description": "Navigation hints shown on the completion banner",
+    "other": "  •  Press '1' or 'b' to return to browser  •  Press '3' for logs  •  Press 'd' to dismiss"
+  },
+  "TUIProgress": {
+    "description": "Overall progress percentage shown in the header",
+    "other": "Progress: {{.Percent}}%"
+  },
+  "TUIScrapeSucceeded": {
+    "description": "Worker event message shown when a movie has been scraped successfully",
+    "other": "Scraped {{.MovieID}} successfully"
+  },
+  "TUISettingChangesHint": {
+    "description": "Footer note on the settings view",
+    "other": "Changes take effect on next processing run"
+  },
+  "TUISettingDownload": {
+    "description": "Name of the Download Media setting",
+    "other": "Download Media"
+  },
+  "TUISettingDownloadDesc": {
+    "description": "Description of the Download Media setting",
+    "other": "Download covers, screenshots, trailers"
+  },
+  "TUISettingDryRun": {
+    "description": "Name of the Dry Run setting",
+    "other": "Dry Run"
+  },
+  "TUISettingDryRunDesc": {
+    "description": "Description of the Dry Run setting",
+    "other": "Preview mode - don't make actual changes"
+  },
+  "TUISettingExtrafanart": {
+    "description": "Name of the Download Extrafanart setting",
+    "other": "Download Extrafanart"
+  },
+  "TUISettingExtrafanartDesc": {
+    "description": "Description of the Download Extrafanart setting",
+    "other": "Download extrafanart/screenshots to subfolder"
+  },
+  "TUISettingForceRefresh": {
+    "description": "Name of the Force Refresh setting",
+    "other": "Force Refresh"
+  },
+  "TUISettingForceRefreshDesc": {
+    "description": "Description of the Force Refresh setting",
+    "other": "Clear DB cache and rescrape metadata"
+  },
+  "TUISettingForceUpdate": {
+    "description": "Name of the Force Update setting",
+    "other": "Force Update"
+  },
+  "TUISettingForceUpdateDesc": {
+    "description": "Description of the Force Update setting",
+    "other": "Replace existing files (images, NFO)"
+  },
+  "TUISettingLanguage": {
+    "description": "Name of the interface language setting",
+    "other": "Language"
+  },
+  "TUISettingLanguageDesc": {
+    "description": "Description of the interface language setting",
+    "other": "Interface display language (auto follows the system locale)"
+  },
+  "TUISettingMoveFiles": {
+    "description": "Name of the Move Files setting",
+    "other": "Move Files"
+  },
+  "TUISettingMoveFilesDesc": {
+    "description": "Description of the Move Files setting",
+    "other": "Move instead of copy (default: copy)"
+  },
+  "TUISettingNFO": {
+    "description": "Name of the Generate NFO setting",
+    "other": "Generate NFO"
+  },
+  "TUISettingNFODesc": {
+    "description": "Description of the Generate NFO setting",
+    "other": "Create NFO files for media centers"
+  },
+  "TUISettingOrganize": {
+    "description": "Name of the Organize Files setting",
+    "other": "Organize Files"
+  },
+  "TUISettingOrganizeDesc": {
+    "description": "Description of the Organize Files setting",
+    "other": "Move/copy files to organized structure"
+  },
+  "TUISettingScrape": {
+    "description": "Name of the Scrape Metadata setting",
+    "other": "Scrape Metadata"
+  },
+  "TUISettingScrapeDesc": {
+    "description": "Description of the Scrape Metadata setting",
+    "other": "Fetch metadata from JAV sources"
+  },
+  "TUISettingUpdateMode": {
+    "description": "Name of the Update Mode setting",
+    "other": "Update Mode"
+  },
+  "TUISettingUpdateModeDesc": {
+    "description": "Description of the Update Mode setting",
+    "other": "Only create/update metadata, don't move files"
+  },
+  "TUISettingsChoiceHint": {
+    "description": "Hint shown next to the settings title for choice rows",
+    "other": "(←/→ or space to change)"
+  },
+  "TUISettingsLanguageAuto": {
+    "description": "Selector label for the automatic system locale choice",
+    "other": "Automatic (system)"
+  },
+  "TUISettingsTitle": {
+    "description": "Heading of the terminal settings view",
+    "other": "Settings"
+  },
+  "TUISettingsToggleHint": {
+    "description": "Hint shown next to the settings title",
+    "other": "(space to toggle)"
+  },
+  "TUIShuttingDown": {
+    "description": "Message shown while the TUI is shutting down",
+    "other": "Shutting down gracefully..."
+  },
+  "TUISortServiceNotInitialized": {
+    "description": "Log message shown when processing starts before the sort service is wired",
+    "other": "Sort service not initialized"
+  },
+  "TUISucceeded": {
+    "description": "Number of files that succeeded processing in the completion banner",
+    "one": "{{.Count}} succeeded",
+    "other": "{{.Count}} succeeded"
+  },
+  "TUITabBrowser": {
+    "description": "Tab label for the browser view",
+    "other": "Browse"
+  },
+  "TUITabDashboard": {
+    "description": "Tab label for the dashboard view",
+    "other": "Dashboard"
+  },
+  "TUITabHelp": {
+    "description": "Tab label for the help view",
+    "other": "Help"
+  },
+  "TUITabLogs": {
+    "description": "Tab label for the logs view",
+    "other": "Logs"
+  },
+  "TUITabSettings": {
+    "description": "Tab label for the settings view",
+    "other": "Settings"
+  },
+  "TUITaskErr": {
+    "description": "Badge shown for a failed task",
+    "other": "ERR"
+  },
+  "TUITaskOK": {
+    "description": "Badge shown for a completed task",
+    "other": "OK"
+  },
+  "TUITaskPending": {
+    "description": "Badge shown for a pending task",
+    "other": "..."
+  },
+  "TUITaskRun": {
+    "description": "Badge shown for a running task",
+    "other": "RUN"
+  },
+  "TUITasksTitle": {
+    "description": "Title of the task list panel",
+    "other": "Tasks"
+  },
+  "TUIWorkers": {
+    "description": "Running and total worker counts shown in the header",
+    "other": "Workers: {{.Running}}/{{.Total}}"
+  }
+}

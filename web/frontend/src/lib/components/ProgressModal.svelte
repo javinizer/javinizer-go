@@ -12,9 +12,11 @@
 	import { createBatchJobPollingQuery, createConfigQuery } from '$lib/query/queries';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import type { BatchJobResponse, FileResult } from '$lib/api/types';
+	import { translateProgressMessage } from '$lib/i18n/api-messages';
 	import { X, CircleCheckBig, CircleX, ChevronDown, ChevronRight } from 'lucide-svelte';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		jobId: string;
@@ -44,11 +46,10 @@
 
 	const successMessage = $derived.by(() => {
 		if (!job) return '';
-		const count = job.completed;
-		const files = `${count} file${count !== 1 ? 's' : ''}`;
-		if (job.status === 'organized') return `Organization complete! ${files} organized successfully.`;
-		if (job.status === 'reverted') return `Revert complete! ${files} reverted successfully.`;
-		return `Scraping completed! ${files} processed successfully.`;
+		const files = m.common_file_count({ count: job.completed });
+		if (job.status === 'organized') return m.progress_success_organized({ files });
+		if (job.status === 'reverted') return m.progress_success_reverted({ files });
+		return m.progress_success_scraped({ files });
 	});
 
 	let showCompleted = $state(false);
@@ -187,6 +188,12 @@
 		const parts = path.split(/[\\/]/);
 		return parts[parts.length - 1] || path;
 	}
+
+	function displayProgressMessage(msg: { message: string; message_code?: string; message_args?: Record<string, unknown> }): string {
+		return msg.message_code
+			? translateProgressMessage(msg.message_code, msg.message_args ?? null, msg.message)
+			: msg.message;
+	}
 </script>
 
 <!-- Modal Overlay -->
@@ -196,12 +203,12 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between p-6 border-b">
 			<div class="flex items-center gap-3">
-				<h2 class="text-2xl font-semibold">Batch Scraping Progress</h2>
+				<h2 class="text-2xl font-semibold">{m.progress_title()}</h2>
 				{#if job && job.status === 'running'}
 					<div class="flex items-center gap-2 px-3 py-1 bg-blue-100 dark:bg-blue-900/30 rounded-full text-sm">
 						<div class="h-2 w-2 rounded-full bg-blue-600 dark:bg-blue-400 animate-pulse"></div>
 						<span class="font-medium text-blue-700 dark:text-blue-300">
-							{activeFiles.length} / {maxWorkers} workers
+							{m.progress_workers({ active: activeFiles.length, max: maxWorkers })}
 						</span>
 					</div>
 				{/if}
@@ -214,7 +221,7 @@
 		<!-- Content -->
 		<div class="flex-1 overflow-y-auto p-6 space-y-5">
 			{#if loading}
-				<p class="text-sm text-muted-foreground text-center py-6">Loading job status...</p>
+				<p class="text-sm text-muted-foreground text-center py-6">{m.progress_loading_status()}</p>
 			{:else if error}
 				<div class="bg-destructive/10 border border-destructive text-destructive px-4 py-3 rounded">
 					<p>{error}</p>
@@ -223,9 +230,9 @@
 				<!-- Progress Bar -->
 				<div class="space-y-2">
 					<div class="flex items-center justify-between text-sm">
-						<span class="font-medium">Overall Progress</span>
+						<span class="font-medium">{m.progress_overall()}</span>
 						<span class="text-muted-foreground">
-							{displayFinished} / {displayTotal} files
+							{m.progress_files_of_total({ finished: displayFinished, total: displayTotal })}
 						</span>
 					</div>
 					<div class="h-3 bg-secondary rounded-full overflow-hidden">
@@ -237,7 +244,7 @@
 					<div class="flex items-center justify-between text-xs text-muted-foreground">
 						<span>{liveProgress.toFixed(1)}%</span>
 						<span>
-							{#if failedFiles.length > 0}<span class="text-red-600 dark:text-red-400">{failedFiles.length} failed</span> • {/if}{#if queuedFiles.length > 0}{queuedFiles.length} queued{/if}
+							{#if failedFiles.length > 0}<span class="text-red-600 dark:text-red-400">{m.progress_failed_count({ count: failedFiles.length })}</span> • {/if}{#if queuedFiles.length > 0}{m.progress_queued_count({ count: queuedFiles.length })}{/if}
 						</span>
 					</div>
 				</div>
@@ -251,7 +258,7 @@
 							<div class="flex-1 min-w-0">
 								<div class="flex items-center gap-2">
 									<span class="font-medium text-sm text-blue-900 dark:text-blue-100 truncate">
-										{result.movie_id || 'Processing...'}
+										{result.movie_id || m.progress_processing()}
 									</span>
 									<span class="text-xs text-blue-600/60 dark:text-blue-400/60 truncate">
 										{getFileDisplayName(result.file_path)}
@@ -259,7 +266,7 @@
 								</div>
 								{#if messagesByFile[result.file_path]}
 									<p class="text-xs text-blue-600 dark:text-blue-400 mt-0.5 truncate">
-										{messagesByFile[result.file_path].message}
+										{displayProgressMessage(messagesByFile[result.file_path])}
 									</p>
 								{/if}
 							</div>
@@ -276,7 +283,7 @@
 						</div>
 					{/each}
 					{#if queuedFiles.length > 3}
-						<p class="text-xs text-muted-foreground pl-5">+{queuedFiles.length - 3} more queued</p>
+						<p class="text-xs text-muted-foreground pl-5">{m.progress_more_queued({ count: queuedFiles.length - 3 })}</p>
 					{/if}
 
 					<!-- Completed Summary (collapsible) -->
@@ -287,7 +294,7 @@
 						>
 							<CircleCheckBig class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
 							<span class="text-sm font-medium text-green-700 dark:text-green-300">
-								{completedFiles.length} completed
+								{m.progress_completed_count({ count: completedFiles.length })}
 							</span>
 							{#if showCompleted}
 								<ChevronDown class="h-4 w-4 text-green-600 dark:text-green-400 ml-auto" />
@@ -300,7 +307,7 @@
 								{#each completedFiles as result (result.file_path)}
 									<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-center gap-3 px-3 py-1.5 text-sm">
 										<CircleCheckBig class="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />
-										<span class="truncate text-green-900 dark:text-green-200">{result.movie_id || 'Unknown'}</span>
+										<span class="truncate text-green-900 dark:text-green-200">{result.movie_id || m.progress_unknown()}</span>
 										<span class="text-xs text-green-700/50 dark:text-green-300/50 truncate">{getFileDisplayName(result.file_path)}</span>
 									</div>
 								{/each}
@@ -316,7 +323,7 @@
 						>
 							<CircleX class="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
 							<span class="text-sm font-medium text-red-700 dark:text-red-300">
-								{failedFiles.length} failed
+								{m.progress_failed_count({ count: failedFiles.length })}
 							</span>
 							{#if showFailed}
 								<ChevronDown class="h-4 w-4 text-red-600 dark:text-red-400 ml-auto" />
@@ -331,7 +338,7 @@
 										<CircleX class="h-3.5 w-3.5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
 										<div class="flex-1 min-w-0">
 											<div class="flex items-center gap-2">
-												<span class="truncate text-red-900 dark:text-red-200">{result.movie_id || 'Unknown'}</span>
+												<span class="truncate text-red-900 dark:text-red-200">{result.movie_id || m.progress_unknown()}</span>
 												<span class="text-xs text-red-700/50 dark:text-red-300/50 truncate">{getFileDisplayName(result.file_path)}</span>
 											</div>
 											{#if result.error}
@@ -348,8 +355,8 @@
 				<!-- Latest Progress Message (fallback) -->
 				{#if latestMessage && activeFiles.length === 0 && completedFiles.length === 0}
 					<div class="bg-accent/50 rounded-lg p-4">
-						<p class="text-sm font-medium mb-1">Latest Update:</p>
-						<p class="text-sm text-muted-foreground">{latestMessage.message}</p>
+						<p class="text-sm font-medium mb-1">{m.progress_latest_update()}</p>
+						<p class="text-sm text-muted-foreground">{displayProgressMessage(latestMessage)}</p>
 						{#if latestMessage.file_path}
 							<p class="text-xs text-muted-foreground mt-1">
 								{latestMessage.file_path}
@@ -365,8 +372,8 @@
 			{#if job && job.status === 'running'}
 				<div></div>
 				<div class="flex items-center gap-3">
-					<Button variant="destructive" onclick={handleCancel}>Cancel Job</Button>
-					<Button variant="outline" onclick={onClose}>Close & Run in Background</Button>
+					<Button variant="destructive" onclick={handleCancel}>{m.progress_cancel_job()}</Button>
+					<Button variant="outline" onclick={onClose}>{m.progress_close_background()}</Button>
 				</div>
 			{:else if job && (job.status === 'completed' || job.status === 'organized' || job.status === 'reverted')}
 				{#if !cancelRedirect && countdown > 0}
@@ -377,9 +384,9 @@
 						</p>
 					</div>
 					<div class="flex items-center gap-3">
-						<p class="text-sm text-muted-foreground">Redirecting in {countdown}s...</p>
-						<Button variant="outline" onclick={handleStayHere}>Stay Here</Button>
-						<Button onclick={handleViewResults}>View Results Now</Button>
+						<p class="text-sm text-muted-foreground">{m.progress_redirecting({ seconds: countdown })}</p>
+						<Button variant="outline" onclick={handleStayHere}>{m.progress_stay_here()}</Button>
+						<Button onclick={handleViewResults}>{m.progress_view_results_now()}</Button>
 					</div>
 				{:else}
 					<div class="flex items-center gap-2">
@@ -389,14 +396,14 @@
 						</p>
 					</div>
 					<div class="flex items-center gap-3">
-						<Button variant="outline" onclick={onClose}>Close</Button>
-						<Button onclick={handleViewResults}>View Results</Button>
+						<Button variant="outline" onclick={onClose}>{m.common_close()}</Button>
+						<Button onclick={handleViewResults}>{m.progress_view_results()}</Button>
 					</div>
 				{/if}
 			{:else}
 				<div></div>
 				<Button variant="outline" onclick={onClose}>
-					{job && isTerminalStatus(job.status) ? 'Close' : 'Close & Run in Background'}
+					{job && isTerminalStatus(job.status) ? m.common_close() : m.progress_close_background()}
 				</Button>
 			{/if}
 		</div>

@@ -1,13 +1,17 @@
 package tui
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
 
 // helpView component
 type helpView struct {
-	width  int
-	height int
+	width     int
+	height    int
+	localizer *localization.Localizer
 }
 
 func newHelpView() *helpView {
@@ -19,6 +23,18 @@ func (h *helpView) SetSize(width, height int) {
 	h.height = height
 }
 
+func (h *helpView) SetLocalizer(l *localization.Localizer) {
+	h.localizer = l
+}
+
+//nolint:unparam // variadic for API consistency with other components
+func (h *helpView) loc(id string, template ...map[string]any) string {
+	if h.localizer == nil {
+		return id
+	}
+	return h.localizer.Localize(id, template...)
+}
+
 func (h *helpView) Init() tea.Cmd {
 	return nil
 }
@@ -27,35 +43,49 @@ func (h *helpView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return h, nil
 }
 
+// helpLine renders a key/action help line in the form "  key - action".
+func helpLine(key, action string) string {
+	return "  " + key + " - " + action + "\n"
+}
+
 func (h *helpView) View() string {
-	help := title("Help") + "\n\n"
+	var b strings.Builder
+	b.WriteString(title(h.loc("TUIHelpTitle")) + "\n\n")
 
-	help += helpKeyStyle.Render("Global Keys") + "\n"
-	help += "  ? - Toggle help\n"
-	help += "  q/Ctrl+C - Quit\n"
-	help += "  1-3 - Switch views\n"
-	help += "  Tab - Cycle views\n\n"
+	b.WriteString(helpKeyStyle.Render(h.loc("TUIHelpGlobalKeys")) + "\n")
+	b.WriteString(helpLine("?", h.loc("TUIHelpActionToggleHelp")))
+	b.WriteString(helpLine("q/Ctrl+C", h.loc("TUIHelpActionQuit")))
+	b.WriteString(helpLine("1-3", h.loc("TUIHelpActionSwitchViews")))
+	b.WriteString(helpLine("Tab", h.loc("TUIHelpActionCycleViews")))
+	b.WriteString("\n")
 
-	help += helpKeyStyle.Render("browser View") + "\n"
-	help += "  m - Manual search (select scrapers + ID/URL)\n"
-	help += "  f - Change scan folder\n"
-	help += "  r - Refresh/rescan current folder\n"
-	help += "  ↑/k - Move up\n"
-	help += "  ↓/j - Move down\n"
-	help += "  Space - Toggle selection (files or entire folders)\n"
-	help += "  a - Select all\n"
-	help += "  A - Deselect all\n"
-	help += "  Enter - Start processing\n"
-	help += "  p - Pause/resume\n\n"
+	b.WriteString(helpKeyStyle.Render(h.loc("TUIHelpBrowserSection")) + "\n")
+	b.WriteString(helpLine("m", h.loc("TUIHelpActionManualSearch")))
+	b.WriteString(helpLine("f", h.loc("TUIHelpActionChangeFolder")))
+	b.WriteString(helpLine("r", h.loc("TUIHelpActionRefresh")))
+	b.WriteString(helpLine("↑/k", h.loc("TUIHelpActionMoveUp")))
+	b.WriteString(helpLine("↓/j", h.loc("TUIHelpActionMoveDown")))
+	b.WriteString(helpLine("Space", h.loc("TUIHelpActionToggleSelection")))
+	b.WriteString(helpLine("a", h.loc("TUIHelpActionSelectAll")))
+	b.WriteString(helpLine("A", h.loc("TUIHelpActionDeselectAll")))
+	b.WriteString(helpLine("Enter", h.loc("TUIHelpActionStartProcessing")))
+	b.WriteString(helpLine("p", h.loc("TUIHelpActionPauseResume")))
+	b.WriteString("\n")
 
-	help += helpKeyStyle.Render("Logs View") + "\n"
-	help += "  ↑/k - Scroll up\n"
-	help += "  ↓/j - Scroll down\n"
-	help += "  g - Go to top\n"
-	help += "  G - Go to bottom\n"
-	help += "  a - Toggle auto-scroll\n\n"
+	b.WriteString(helpKeyStyle.Render(h.loc("TUIHelpLogsSection")) + "\n")
+	b.WriteString(helpLine("↑/k", h.loc("TUIHelpActionScrollUp")))
+	b.WriteString(helpLine("↓/j", h.loc("TUIHelpActionScrollDown")))
+	b.WriteString(helpLine("g", h.loc("TUIHelpActionGoTop")))
+	b.WriteString(helpLine("G", h.loc("TUIHelpActionGoBottom")))
+	b.WriteString(helpLine("a", h.loc("TUIHelpActionToggleAutoScroll")))
+	b.WriteString("\n")
 
-	help += dimmed("📁 Folders with checkboxes select all files inside")
+	b.WriteString(helpKeyStyle.Render(h.loc("TUIHelpSettingsSection")) + "\n")
+	b.WriteString(helpLine("↑/k ↓/j", h.loc("TUIHelpActionMoveUp")))
+	b.WriteString(helpLine("Space", h.loc("TUIHelpActionToggleSetting")))
+	b.WriteString(helpLine("←/→ Enter", h.loc("TUIHelpActionCycleChoice")))
 
-	return help
+	b.WriteString(dimmed(h.loc("TUIHelpFoldersNote")))
+
+	return b.String()
 }

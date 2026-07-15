@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { formatNumber } from '$lib/i18n/format';
 
 export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
@@ -10,14 +11,14 @@ export function formatBytes(bytes: number): string {
 	const k = 1024;
 	const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
 	const i = Math.floor(Math.log(bytes) / Math.log(k));
-	return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+	return `${formatNumber(parseFloat((bytes / Math.pow(k, i)).toFixed(2)))} ${sizes[i]}`;
 }
 
 export function formatDuration(minutes: number): string {
 	const hours = Math.floor(minutes / 60);
 	const mins = minutes % 60;
 	if (hours > 0) {
-		return `${hours}h ${mins}m`;
+		return `${formatNumber(hours)}h ${formatNumber(mins)}m`;
 	}
-	return `${mins}m`;
+	return `${formatNumber(mins)}m`;
 }

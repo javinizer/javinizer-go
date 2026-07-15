@@ -1,3 +1,4 @@
+	import * as m from '$lib/paraglide/messages';
 import { apiClient } from '$lib/api/client';
 import { toastStore } from '$lib/stores/toast';
 import { confirmDialog } from '$lib/stores/dialog.svelte';
@@ -121,7 +122,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 			});
 			scrapers = deps.refreshLocalProxyProfileChoices(scrapers);
 		} catch (e) {
-			toastStore.error('Failed to fetch scrapers from API');
+			toastStore.error(m.settings_scraper_fetch_failed());
 			const mergedOrder: string[] = [];
 			const seen = new Set<string>();
 

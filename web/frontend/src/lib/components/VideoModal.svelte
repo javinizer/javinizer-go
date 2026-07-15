@@ -3,6 +3,7 @@
 	import { fade, scale } from 'svelte/transition';
 	import { X } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		show: boolean;
@@ -39,7 +40,7 @@
 		<button
 			onclick={close}
 			class="absolute inset-0 bg-black/90 cursor-default"
-			aria-label="Close video modal"
+			aria-label={m.video_close_aria()}
 			in:fade|local={{ duration: 140 }}
 			out:fade|local={{ duration: 120 }}
 		></button>
@@ -57,7 +58,7 @@
 			<button
 				onclick={close}
 				class="absolute -top-12 right-0 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors"
-				title="Close (Esc)"
+				title={m.video_close_title()}
 			>
 				<X class="h-6 w-6" />
 			</button>
@@ -73,7 +74,7 @@
 			<!-- svelte-ignore a11y_media_has_caption -->
 			<video controls class="w-full rounded" src={videoUrl}>
 				<track kind="captions" />
-				Your browser does not support the video tag.
+				{m.video_not_supported()}
 			</video>
 		</div>
 	</div>

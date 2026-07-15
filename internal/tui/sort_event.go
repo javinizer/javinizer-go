@@ -32,6 +32,13 @@ const (
 // SortEvent represents a progress event emitted during a sort operation.
 // This is the TUI's own event type, decoupled from worker.JobEvent.
 // The adapter in sort_service.go converts between the two.
+//
+// Code and Args are optional structured localization handles. When Code is
+// non-empty, the TUI translates it via its localizer (falling back to Message
+// for unknown codes or missing locales). When Code is empty, the raw English
+// Message is displayed as-is. This mirrors the API/frontend code+fallback
+// pattern: known event codes localize locally, unknown/plugin events keep the
+// English fallback.
 type SortEvent struct {
 	JobID     string
 	MovieID   string
@@ -39,6 +46,8 @@ type SortEvent struct {
 	Step      SortEventStep
 	Progress  float64
 	Message   string
+	Code      string
+	Args      map[string]any
 	Timestamp time.Time
 }
 

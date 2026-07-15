@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
 
 // newFolderPickerDeps constructs the folder picker deps.
@@ -57,6 +58,18 @@ func (fp *folderPickerModal) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (fp *folderPickerModal) View() string {
+	return fp.ViewLocalized(nil)
+}
+
+// ViewLocalized renders the folder picker modal using the provided localizer.
+// A nil localizer falls back to the raw English message ids.
+func (fp *folderPickerModal) ViewLocalized(loc *localization.Localizer) string {
+	l := func(id string, template ...map[string]any) string {
+		if loc == nil {
+			return id
+		}
+		return loc.Localize(id, template...)
+	}
 	width := fp.deps.Width()
 	height := fp.deps.Height()
 	modalWidth := width - 20
@@ -68,18 +81,18 @@ func (fp *folderPickerModal) View() string {
 		modalHeight = 25
 	}
 	var b strings.Builder
-	pickerTitle := "Select Source Folder"
+	pickerTitle := l("TUIFolderPickerSourceTitle")
 	if fp.mode == "dest" {
-		pickerTitle = "Select Output Folder"
+		pickerTitle = l("TUIFolderPickerDestTitle")
 	}
 	b.WriteString(title(pickerTitle) + "\n\n")
 	displayPath := fp.path
 	if len(displayPath) > modalWidth-10 {
 		displayPath = "..." + displayPath[len(displayPath)-(modalWidth-13):]
 	}
-	b.WriteString(dimmed("Current: ") + highlight(displayPath) + "\n\n")
+	b.WriteString(dimmed(l("TUIFolderPickerCurrent")+" ") + highlight(displayPath) + "\n\n")
 	if len(fp.items) == 0 {
-		b.WriteString(dimmed("No folders found\n"))
+		b.WriteString(dimmed(l("TUIFolderPickerNoFolders") + "\n"))
 	} else {
 		visibleHeight := modalHeight - 8
 		start := fp.cursor - visibleHeight/2
@@ -117,7 +130,7 @@ func (fp *folderPickerModal) View() string {
 			b.WriteString(line + "\n")
 		}
 	}
-	b.WriteString("\n" + dimmed("↑↓/jk: navigate  Enter: select folder  Space: choose current  Esc: cancel"))
+	b.WriteString("\n" + dimmed(l("TUIFolderPickerHint")))
 	modal := panelStyle.Width(modalWidth).Height(modalHeight).Render(b.String())
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal)
 }

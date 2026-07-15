@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormNumberInput from '$lib/components/settings/FormNumberInput.svelte';
@@ -10,41 +11,42 @@
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 	}
 
-	let { config, inputClass }: Props = $props();
+	let { config, inputClass, selectClass }: Props = $props();
 </script>
 
-<SettingsSection title="Output Settings" description="Configure output paths, templates, and download options" defaultExpanded={false}>
+<SettingsSection title={m.settings_output_title()} description={m.settings_output_desc()} defaultExpanded={false}>
 	<div class="space-y-4">
-		<SettingsSubsection title="Template Options">
+		<SettingsSubsection title={m.settings_output_template_subsection()}>
 			<FormNumberInput
-				label="Max title length"
-				description="Maximum characters for movie titles in folder names. Longer titles will be intelligently truncated."
+				label={m.settings_output_max_title_label()}
+				description={m.settings_output_max_title_desc()}
 				value={config.output.max_title_length ?? 100}
 				min={10}
 				max={500}
-				unit="characters"
+				unit={m.common_unit_characters()}
 				onchange={(val) => {
 					config.output.max_title_length = val;
 				}}
 			/>
 
 			<FormNumberInput
-				label="Max path length"
-				description="Maximum total path length to prevent Windows path errors (MAX_PATH = 260)"
+				label={m.settings_output_max_path_label()}
+				description={m.settings_output_max_path_desc()}
 				value={config.output.max_path_length ?? 240}
 				min={100}
 				max={250}
-				unit="characters"
+				unit={m.common_unit_characters()}
 				onchange={(val) => {
 					config.output.max_path_length = val;
 				}}
 			/>
 
 			<FormToggle
-				label="Group actress"
-				description="Replace multiple actresses with a group folder name in templates (e.g., '@Group')"
+				label={m.settings_output_group_actress_label()}
+				description={m.settings_output_group_actress_desc()}
 				checked={config.output.group_actress ?? false}
 				onchange={(val) => {
 					config.output.group_actress = val;
@@ -53,7 +55,7 @@
 
 			{#if config.output.group_actress}
 				<div class="py-4 border-b border-border">
-					<label class="block text-sm font-medium mb-2" for="group-actress-name">Group actress name</label>
+					<label class="block text-sm font-medium mb-2" for="group-actress-name">{m.settings_output_group_actress_name_label()}</label>
 					<input
 						id="group-actress-name"
 						type="text"
@@ -62,13 +64,13 @@
 						placeholder="@Group"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Folder name used when a movie has multiple actresses (default: @Group)
+						{m.settings_output_group_actress_name_desc()}
 					</p>
 				</div>
 			{/if}
 
 			<div class="py-4 border-b border-border">
-				<label class="block text-sm font-medium mb-2" for="delimiter">Delimiter</label>
+				<label class="block text-sm font-medium mb-2" for="delimiter">{m.settings_output_delimiter_label()}</label>
 				<input
 					id="delimiter"
 					type="text"
@@ -77,13 +79,13 @@
 					placeholder=", "
 				/>
 				<p class="text-xs text-muted-foreground mt-1">
-					Character(s) used to separate multiple values (e.g., actresses, genres)
+					{m.settings_output_delimiter_desc()}
 				</p>
 			</div>
 		</SettingsSubsection>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="subfolder-format">Subfolder Format</label>
+			<label class="block text-sm font-medium mb-2" for="subfolder-format">{m.settings_output_subfolder_label()}</label>
 			<input
 				id="subfolder-format"
 				type="text"
@@ -95,40 +97,40 @@
 						.filter((s) => s.length > 0);
 				}}
 				class={inputClass}
-				placeholder="Leave empty for no subfolders"
+				placeholder={m.settings_output_subfolder_placeholder()}
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Comma-separated list of subfolder names or templates
+				{m.settings_output_subfolder_desc()}
 			</p>
 		</div>
 
 		<div class="space-y-3">
-			<h3 class="font-medium">Download Options</h3>
+			<h3 class="font-medium">{m.settings_output_download_heading()}</h3>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_poster} class="rounded" />
-				<span>Download Poster</span>
+				<span>{m.settings_output_download_poster()}</span>
 			</label>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_cover} class="rounded" />
-				<span>Download Cover</span>
+				<span>{m.settings_output_download_cover()}</span>
 			</label>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_extrafanart} class="rounded" />
-				<span>Download Extrafanart</span>
+				<span>{m.settings_output_download_extrafanart()}</span>
 			</label>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_trailer} class="rounded" />
-				<span>Download Trailer</span>
+				<span>{m.settings_output_download_trailer()}</span>
 			</label>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_actress} class="rounded" />
-				<span>Download Actress Images</span>
+				<span>{m.settings_output_download_actress()}</span>
 			</label>
 		</div>
 
 		<FormNumberInput
-			label="Download timeout"
-			description="Maximum time to wait for image/video downloads to complete"
+			label={m.settings_output_download_timeout_label()}
+			description={m.settings_output_download_timeout_desc()}
 			value={config.output.download_timeout ?? 60}
 			min={5}
 			max={600}
@@ -139,7 +141,7 @@
 		/>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="folder-format">Folder Naming Template</label>
+			<label class="block text-sm font-medium mb-2" for="folder-format">{m.settings_output_folder_template_label()}</label>
 			<input
 				id="folder-format"
 				type="text"
@@ -148,17 +150,17 @@
 				placeholder="<ID> - <TITLE>"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Available tags: &lt;ID&gt;, &lt;TITLE&gt;, &lt;STUDIO&gt;, &lt;YEAR&gt;, &lt;ACTRESS&gt;, &lt;ACTRESSES&gt;, &lt;ACTORNAME&gt;
+				{m.settings_output_folder_template_desc()}
 			</p>
 			{#if !config.output.folder_format}
 				<p class="text-xs text-primary mt-1">
-					No folder template — Organize mode will not create movie subfolders. When destination matches source, Rename file only mode is used automatically.
+					{m.settings_output_folder_template_none()}
 				</p>
 			{/if}
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="file-format">File Naming Template</label>
+			<label class="block text-sm font-medium mb-2" for="file-format">{m.settings_output_file_template_label()}</label>
 			<input
 				id="file-format"
 				type="text"
@@ -167,17 +169,17 @@
 				placeholder="<ID><PARTSUFFIX>"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Multi-part support: &lt;PART&gt; (part number), &lt;PARTSUFFIX&gt; (original suffix), &lt;IF:MULTIPART&gt;...&lt;/IF&gt;
+				{m.settings_output_file_template_desc()}
 			</p>
 			<p class="text-xs text-muted-foreground">
-				Examples: &lt;ID&gt;&lt;PARTSUFFIX&gt; or &lt;ID&gt;-CD&lt;PART:2&gt; or &lt;ID&gt;&lt;IF:MULTIPART&gt;-pt&lt;PART&gt;&lt;/IF&gt;
+				{m.settings_output_file_template_examples()}
 			</p>
 		</div>
 
-		<SettingsSubsection title="Media File Naming">
+		<SettingsSubsection title={m.settings_output_media_subsection()}>
 			<FormTemplateInput
-				label="Poster format"
-				description="Naming template for poster images"
+				label={m.settings_output_poster_format_label()}
+				description={m.settings_output_poster_format_desc()}
 				value={config.output.poster_format ?? '<ID>-poster.jpg'}
 				placeholder="<ID>-poster.jpg"
 				showTagList={true}
@@ -187,8 +189,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Fanart format"
-				description="Naming template for fanart/cover images"
+				label={m.settings_output_fanart_format_label()}
+				description={m.settings_output_fanart_format_desc()}
 				value={config.output.fanart_format ?? '<ID>-fanart.jpg'}
 				placeholder="<ID>-fanart.jpg"
 				onchange={(val) => {
@@ -197,8 +199,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Trailer format"
-				description="Naming template for trailer videos"
+				label={m.settings_output_trailer_format_label()}
+				description={m.settings_output_trailer_format_desc()}
 				value={config.output.trailer_format ?? '<ID>-trailer.mp4'}
 				placeholder="<ID>-trailer.mp4"
 				onchange={(val) => {
@@ -207,8 +209,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Screenshot format"
-				description="Naming template for screenshot images"
+				label={m.settings_output_screenshot_format_label()}
+				description={m.settings_output_screenshot_format_desc()}
 				value={config.output.screenshot_format ?? 'fanart'}
 				placeholder="fanart"
 				onchange={(val) => {
@@ -217,8 +219,8 @@
 			/>
 
 			<FormTextInput
-				label="Screenshot folder"
-				description="Folder name for storing screenshot images"
+				label={m.settings_output_screenshot_folder_label()}
+				description={m.settings_output_screenshot_folder_desc()}
 				value={config.output.screenshot_folder ?? 'extrafanart'}
 				placeholder="extrafanart"
 				onchange={(val) => {
@@ -227,20 +229,20 @@
 			/>
 
 			<FormNumberInput
-				label="Screenshot padding"
-				description="Zero-padding for screenshot numbers (e.g., 01, 02, 03)"
+				label={m.settings_output_screenshot_padding_label()}
+				description={m.settings_output_screenshot_padding_desc()}
 				value={config.output.screenshot_padding ?? 1}
 				min={1}
 				max={5}
-				unit="digits"
+				unit={m.common_unit_digits()}
 				onchange={(val) => {
 					config.output.screenshot_padding = val;
 				}}
 			/>
 
 			<FormTextInput
-				label="Actress folder"
-				description="Folder name for storing actress images"
+				label={m.settings_output_actress_folder_label()}
+				description={m.settings_output_actress_folder_desc()}
 				value={config.output.actress_folder ?? '.actors'}
 				placeholder=".actors"
 				onchange={(val) => {
@@ -249,8 +251,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Actress format"
-				description="Naming template for actress image files"
+				label={m.settings_output_actress_format_label()}
+				description={m.settings_output_actress_format_desc()}
 				value={config.output.actress_format ?? '<ACTORNAME>.jpg'}
 				placeholder="<ACTORNAME>.jpg"
 				onchange={(val) => {

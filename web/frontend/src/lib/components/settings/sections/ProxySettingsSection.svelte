@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { RefreshCw, X, Check, AlertTriangle } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
@@ -18,6 +19,7 @@
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 		testingProxy: boolean;
 		testingFlareSolverr: boolean;
 		testingProfile: Record<string, boolean>;
@@ -45,7 +47,7 @@
 
 	let {
 		config,
-		inputClass,
+		inputClass, selectClass,
 		testingProxy,
 		testingFlareSolverr,
 		testingProfile,
@@ -74,11 +76,11 @@
 	const flaresolverrEnabled = $derived(config?.scrapers?.flaresolverr?.enabled ?? false);
 </script>
 
-<SettingsSection title="Proxy and Flaresolverr Settings" description="Configure global proxy fallback, reusable proxy profiles, and FlareSolverr for Cloudflare bypass" defaultExpanded={false}>
-	<SettingsSubsection title="Scraper Proxy">
+<SettingsSection title={m.settings_proxy_title()} description={m.settings_proxy_desc()} defaultExpanded={false}>
+	<SettingsSubsection title={m.settings_proxy_scraper_subsection()}>
 		<FormToggle
-			label="Enable scraper proxy"
-			description="Enable global fallback proxy. Scrapers set to 'Inherit Global Proxy' will use this."
+			label={m.settings_proxy_enable_label()}
+			description={m.settings_proxy_enable_desc()}
 			checked={config.scrapers.proxy?.enabled ?? false}
 			onchange={(val) => {
 				if (!config.scrapers.proxy) config.scrapers.proxy = {} as ProxyConfigType;
@@ -89,10 +91,10 @@
 
 		<fieldset disabled={!scraperProxyEnabled} class={`space-y-0 ${!scraperProxyEnabled ? 'opacity-60' : ''}`}>
 			<div class="py-4 border-b border-border">
-				<label class="block text-sm font-medium mb-2" for="default-proxy-profile">Default proxy profile</label>
+				<label class="block text-sm font-medium mb-2" for="default-proxy-profile">{m.settings_proxy_default_profile_label()}</label>
 				<select
 					id="default-proxy-profile"
-					class={inputClass}
+					class={selectClass}
 					value={config.scrapers.proxy?.default_profile ?? ''}
 					onchange={(e) => {
 						if (!config.scrapers.proxy) config.scrapers.proxy = {} as ProxyConfigType;
@@ -105,20 +107,20 @@
 					{/each}
 				</select>
 				<p class="text-xs text-muted-foreground mt-1">
-					Default global fallback profile. Scrapers in 'Inherit Global Proxy' mode use this profile.
+					{m.settings_proxy_default_profile_desc()}
 				</p>
 			</div>
 
 			<div class="py-4 border-b border-border">
 				<div class="flex items-center justify-between mb-3">
 					<div>
-						<p class="block text-sm font-medium">Proxy profiles</p>
+						<p class="block text-sm font-medium">{m.settings_proxy_profiles_label()}</p>
 						<p class="text-xs text-muted-foreground mt-1">
-							Reusable proxy definitions that scrapers can reference by profile name.
+							{m.settings_proxy_profiles_desc()}
 						</p>
 					</div>
 					<Button variant="outline" size="sm" onclick={addProxyProfile}>
-						{#snippet children()}Add Profile{/snippet}
+						{#snippet children()}{m.settings_proxy_add_profile()}{/snippet}
 					</Button>
 				</div>
 
@@ -151,7 +153,7 @@
 							<input
 								type="text"
 								value={profile?.url ?? ''}
-								placeholder="http://proxy.example.com:8080"
+								placeholder={m.settings_proxy_url_placeholder()}
 								oninput={(e) => setProxyProfileField(profileName, 'url', e.currentTarget.value)}
 								class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-background text-sm"
 							/>
@@ -159,14 +161,14 @@
 								<input
 									type="text"
 									value={profile?.username ?? ''}
-									placeholder="Username (optional)"
+									placeholder={m.settings_proxy_username_placeholder()}
 									oninput={(e) => setProxyProfileField(profileName, 'username', e.currentTarget.value)}
 									class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-background text-sm"
 								/>
 								<input
 									type="password"
 									value={profile?.password ?? ''}
-									placeholder="Password (optional)"
+									placeholder={m.settings_proxy_password_placeholder()}
 									oninput={(e) => setProxyProfileField(profileName, 'password', e.currentTarget.value)}
 									class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-background text-sm"
 								/>
@@ -178,18 +180,18 @@
 									onclick={() => saveProxyProfile(profileName)}
 									disabled={!saveEnabled || savingProfile[profileName] || loading || saving}
 									title={!testResult
-										? 'Test the profile before saving'
+										? m.settings_proxy_save_tooltip_test()
 										: !testResult.success
-											? 'Fix proxy settings and test again'
+											? m.settings_proxy_save_tooltip_fix()
 											: isTestExpired(testResult)
-												? 'Test has expired, run test again'
-												: 'Save verified proxy profile'}
+												? m.settings_proxy_save_tooltip_expired()
+												: m.settings_proxy_save_tooltip_save()}
 								>
 									{#snippet children()}
 										{#if saveEnabled}
 											<Check class="h-4 w-4 mr-2 text-green-500" />
 										{/if}
-										{savingProfile[profileName] ? 'Saving...' : 'Save Profile'}
+										{savingProfile[profileName] ? m.common_saving() : m.settings_proxy_save_profile()}
 									{/snippet}
 								</Button>
 
@@ -201,20 +203,20 @@
 								>
 									{#snippet children()}
 										<RefreshCw class={`h-4 w-4 mr-2 ${testingProfile[profileName] ? 'animate-spin' : ''}`} />
-										{testingProfile[profileName] ? 'Testing...' : 'Test Profile'}
+										{testingProfile[profileName] ? m.common_testing() : m.settings_proxy_test_profile()}
 									{/snippet}
 								</Button>
 
 								{#if testResult}
 									<span class="text-xs {testResult.success ? 'text-green-600' : 'text-red-600'}">
 										{#if testResult.success}
-											✓ Verified
+											{m.settings_proxy_verified()}
 										{:else}
-											✗ Failed
+											{m.settings_proxy_failed()}
 										{/if}
 									</span>
 								{:else}
-									<span class="text-xs text-muted-foreground">Test required before save</span>
+									<span class="text-xs text-muted-foreground">{m.settings_proxy_test_required()}</span>
 								{/if}
 							</div>
 						</div>
@@ -224,14 +226,14 @@
 
 			<div class="pt-2">
 				<p class="text-xs text-muted-foreground">
-					Global proxy validation uses the default profile test. Run <span class="font-medium">Test Profile</span> on the current default profile.
+					{m.settings_proxy_global_note()}
 				</p>
 				{#if globalProxyTestResult}
 					<p class="text-xs mt-1 {globalProxyTestResult.success ? 'text-green-600' : 'text-red-600'}">
 						{#if globalProxyTestResult.success}
-							✓ Global proxy verified
+							{m.settings_proxy_global_verified()}
 						{:else}
-							✗ Global proxy test failed
+							{m.settings_proxy_global_failed()}
 						{/if}
 					</p>
 				{/if}
@@ -239,16 +241,16 @@
 
 			{#if globalProxyTestResult && !globalProxyTestResult.success}
 				<p class="text-xs text-red-600 mt-2">
-					Fix proxy settings and test again before saving configuration.
+					{m.settings_proxy_fix_before_save()}
 				</p>
 			{/if}
 		</fieldset>
 	</SettingsSubsection>
 
-	<SettingsSubsection title="FlareSolverr">
+	<SettingsSubsection title={m.settings_proxy_flaresolverr_subsection()}>
 		<FormToggle
-			label="Enable FlareSolverr"
-			description="Use FlareSolverr to bypass Cloudflare protection (required for JavLibrary). Run FlareSolverr via Docker: docker run -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest"
+			label={m.settings_proxy_flaresolverr_enable_label()}
+			description={m.settings_proxy_flaresolverr_enable_desc()}
 			checked={config.scrapers?.flaresolverr?.enabled ?? false}
 			onchange={(val) => {
 				if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {} as FlareSolverrConfigType;
@@ -259,8 +261,8 @@
 
 		<fieldset disabled={!flaresolverrEnabled} class={`space-y-0 ${!flaresolverrEnabled ? 'opacity-60' : ''}`}>
 			<FormTextInput
-				label="FlareSolverr URL"
-				description="FlareSolverr API endpoint"
+				label={m.settings_proxy_flaresolverr_url_label()}
+				description={m.settings_proxy_flaresolverr_url_desc()}
 				value={config.scrapers?.flaresolverr?.url ?? 'http://localhost:8191/v1'}
 				placeholder="http://localhost:8191/v1"
 				onchange={(val) => {
@@ -271,12 +273,12 @@
 			/>
 
 			<FormNumberInput
-				label="Timeout"
-				description="Maximum time to wait for FlareSolverr to solve challenges"
+				label={m.settings_proxy_flaresolverr_timeout_label()}
+				description={m.settings_proxy_flaresolverr_timeout_desc()}
 				value={config.scrapers?.flaresolverr?.timeout ?? 30}
 				min={5}
 				max={300}
-				unit="seconds"
+				unit={m.common_unit_seconds()}
 				onchange={(val) => {
 					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {} as FlareSolverrConfigType;
 					config.scrapers.flaresolverr.timeout = val;
@@ -285,8 +287,8 @@
 			/>
 
 			<FormNumberInput
-				label="Max retries"
-				description="Number of retry attempts for failed FlareSolverr requests"
+				label={m.settings_proxy_flaresolverr_max_retries_label()}
+				description={m.settings_proxy_flaresolverr_max_retries_desc()}
 				value={config.scrapers?.flaresolverr?.max_retries ?? 3}
 				min={0}
 				max={10}
@@ -298,12 +300,12 @@
 			/>
 
 			<FormNumberInput
-				label="Session TTL"
-				description="How long to keep FlareSolverr browser sessions alive"
+				label={m.settings_proxy_flaresolverr_session_ttl_label()}
+				description={m.settings_proxy_flaresolverr_session_ttl_desc()}
 				value={config.scrapers?.flaresolverr?.session_ttl ?? 300}
 				min={60}
 				max={3600}
-				unit="seconds"
+				unit={m.common_unit_seconds()}
 				onchange={(val) => {
 					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {} as FlareSolverrConfigType;
 					config.scrapers.flaresolverr.session_ttl = val;
@@ -320,16 +322,16 @@
 				>
 					{#snippet children()}
 						<RefreshCw class={`h-4 w-4 mr-2 ${testingFlareSolverr ? 'animate-spin' : ''}`} />
-						{testingFlareSolverr ? 'Testing FlareSolverr...' : 'Test FlareSolverr'}
+						{testingFlareSolverr ? m.settings_proxy_testing_flaresolverr() : m.settings_proxy_test_flaresolverr()}
 					{/snippet}
 				</Button>
 
 				{#if globalFlareSolverrTestResult}
 					<span class="text-xs {globalFlareSolverrTestResult.success ? 'text-green-600' : 'text-red-600'}">
 						{#if globalFlareSolverrTestResult.success}
-							✓ FlareSolverr working
+							{m.settings_proxy_flaresolverr_working()}
 						{:else}
-							✗ Test failed
+							{m.settings_proxy_flaresolverr_test_failed()}
 						{/if}
 					</span>
 				{/if}
@@ -337,7 +339,7 @@
 
 			{#if globalFlareSolverrTestResult && !globalFlareSolverrTestResult.success}
 				<p class="text-xs text-red-600 mt-2">
-					Fix FlareSolverr settings and test again before saving configuration.
+					{m.settings_proxy_flaresolverr_fix_before_save()}
 				</p>
 			{/if}
 		</fieldset>

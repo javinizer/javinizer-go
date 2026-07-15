@@ -153,6 +153,7 @@ func run(cmd *cobra.Command, args []string) error {
 	// Create TUI model with narrow config
 	model := tui.New(tui.TUIModelConfig{
 		DownloadExtrafanart: cfg.Output.Download.DownloadExtrafanart,
+		Language:            cfg.UI.Language,
 		MaxWorkers:          cfg.Performance.MaxWorkers,
 	})
 	model.SetConfigPath(configFile)

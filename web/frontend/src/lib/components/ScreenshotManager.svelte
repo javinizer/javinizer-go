@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
 	import type { Movie } from '$lib/api/types';
@@ -113,9 +114,9 @@ import { tooltip } from '$lib/actions/tooltip';
 		if (screenshots.length === 0) return;
 
 		if (!(await confirmDialog(
-			'Remove Screenshots',
-			`Remove all ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}?`,
-			{ variant: 'danger', confirmLabel: 'Remove All' }
+			m.screenshot_remove_confirm_title(),
+			m.screenshot_remove_confirm_body({ count: screenshots.length }),
+			{ variant: 'danger', confirmLabel: m.screenshot_remove_confirm_action() }
 		))) return;
 
 		screenshots = [];
@@ -130,7 +131,7 @@ import { tooltip } from '$lib/actions/tooltip';
 			return;
 		}
 
-		if (!(await confirmDialog('Use as Poster', 'Use this screenshot as the poster? This will replace the current poster image.', { confirmLabel: 'Use as Poster' }))) return;
+		if (!(await confirmDialog(m.screenshot_use_poster_title(), m.screenshot_use_poster_body(), { confirmLabel: m.screenshot_use_poster_action() }))) return;
 
 		clearCropState = true;
 		posterUrl = url;
@@ -143,7 +144,7 @@ import { tooltip } from '$lib/actions/tooltip';
 			return;
 		}
 
-		if (!(await confirmDialog('Use as Cover/Fanart', 'Use this screenshot as the cover/fanart? This will replace the current cover image.', { confirmLabel: 'Use as Cover/Fanart' }))) return;
+		if (!(await confirmDialog(m.screenshot_use_cover_title(), m.screenshot_use_cover_body(), { confirmLabel: m.screenshot_use_cover_action() }))) return;
 
 		coverUrl = url;
 		notifyParent();
@@ -181,10 +182,10 @@ import { tooltip } from '$lib/actions/tooltip';
 		if (!source) return null;
 
 		const normalized = source.toLowerCase();
-		if (normalized === 'nfo') return 'via NFO';
-		if (normalized === 'merged') return 'via merged data';
-		if (normalized === 'empty') return 'empty';
-		return `via ${source}`;
+		if (normalized === 'nfo') return m.screenshot_via_nfo();
+		if (normalized === 'merged') return m.screenshot_via_merged();
+		if (normalized === 'empty') return m.screenshot_empty_source();
+		return m.screenshot_via_source({ source });
 	}
 </script>
 
@@ -192,7 +193,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	<!-- Poster Image -->
 	<div>
 		<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-			<span>Poster Image</span>
+			<span>{m.screenshot_poster_image()}</span>
 			{#if sourceText('poster_url')}
 				<span class="text-xs font-normal text-muted-foreground">{sourceText('poster_url')}</span>
 			{/if}
@@ -200,7 +201,7 @@ import { tooltip } from '$lib/actions/tooltip';
 		<div class="space-y-3">
 			<div>
 				<label for="poster-url" class="text-sm font-medium mb-1 block">
-					Poster URL
+					{m.screenshot_poster_url()}
 					{#if sourceText('poster_url')}
 						<span class="text-xs font-normal text-muted-foreground ml-2">{sourceText('poster_url')}</span>
 					{/if}
@@ -216,7 +217,7 @@ import { tooltip } from '$lib/actions/tooltip';
 			</div>
 			<div>
 				<div class="text-sm font-medium mb-1 block">
-					Preview{movie.should_crop_poster ? ' (Cropped)' : ''}
+					{m.screenshot_preview()}{movie.should_crop_poster ? ' (' + m.screenshot_preview_cropped().replace('Preview (Cropped)', 'Cropped') + ')' : ''}
 				</div>
 				{#if displayPosterUrl || posterUrl}
 					<div class="w-full max-w-xs aspect-2/3 overflow-hidden rounded border relative">
@@ -225,7 +226,7 @@ import { tooltip } from '$lib/actions/tooltip';
 							<!-- Only apply cropping if displayPosterUrl is not available (displayPosterUrl is already cropped if temp_poster_url) -->
 							<img
 								src={posterUrl}
-								alt="Poster"
+								alt={m.screenshot_poster_alt()}
 								class="absolute h-full"
 								style="right: 0; width: auto; min-width: 211.8%; object-fit: cover; object-position: right center;" hidden={posterPreviewError}
 								onerror={() => { posterPreviewError = true; }}
@@ -234,7 +235,7 @@ import { tooltip } from '$lib/actions/tooltip';
 							<!-- Use displayPosterUrl (temp_poster_url if available) or posterUrl directly without cropping -->
 							<img
 								src={displayPosterUrl || posterUrl}
-								alt="Poster"
+								alt={m.screenshot_poster_alt()}
 								class="w-full h-full object-contain" hidden={posterPreviewError}
 								onerror={() => { posterPreviewError = true; }}
 							/>
@@ -246,7 +247,7 @@ import { tooltip } from '$lib/actions/tooltip';
 					>
 						<div class="text-center">
 							<ImageIcon class="h-12 w-12 mx-auto mb-2 opacity-50" />
-							<p class="text-sm">No poster</p>
+							<p class="text-sm">{m.screenshot_no_poster()}</p>
 						</div>
 					</div>
 				{/if}
@@ -257,7 +258,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	<!-- Cover/Fanart Image -->
 	<div>
 		<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-			<span>Cover/Fanart Image</span>
+			<span>{m.screenshot_cover_image()}</span>
 			{#if sourceText('cover_url')}
 				<span class="text-xs font-normal text-muted-foreground">{sourceText('cover_url')}</span>
 			{/if}
@@ -265,7 +266,7 @@ import { tooltip } from '$lib/actions/tooltip';
 		<div class="space-y-3">
 			<div>
 				<label for="cover-url" class="text-sm font-medium mb-1 block">
-					Cover URL
+					{m.screenshot_cover_url()}
 					{#if sourceText('cover_url')}
 						<span class="text-xs font-normal text-muted-foreground ml-2">{sourceText('cover_url')}</span>
 					{/if}
@@ -280,7 +281,7 @@ import { tooltip } from '$lib/actions/tooltip';
 				/>
 			</div>
 			<div>
-				<div class="text-sm font-medium mb-1 block">Preview</div>
+				<div class="text-sm font-medium mb-1 block">{m.screenshot_preview()}</div>
 				{#if coverUrl}
 					<button
 						onclick={() => (showCoverViewer = true)}
@@ -288,7 +289,7 @@ import { tooltip } from '$lib/actions/tooltip';
 					>
 							<img
 								src={previewImageURL(coverUrl)}
-								alt="Cover"
+								alt={m.screenshot_cover_alt()}
 								class="w-full" hidden={coverPreviewError}
 							onerror={() => { coverPreviewError = true; }}
 						/>
@@ -299,7 +300,7 @@ import { tooltip } from '$lib/actions/tooltip';
 					>
 						<div class="text-center">
 							<ImageIcon class="h-12 w-12 mx-auto mb-2 opacity-50" />
-							<p class="text-sm">No cover image</p>
+							<p class="text-sm">{m.screenshot_no_cover()}</p>
 						</div>
 					</div>
 				{/if}
@@ -310,7 +311,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	<!-- Trailer -->
 	<div>
 		<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-			<span>Trailer</span>
+			<span>{m.screenshot_trailer()}</span>
 			{#if sourceText('trailer_url')}
 				<span class="text-xs font-normal text-muted-foreground">{sourceText('trailer_url')}</span>
 			{/if}
@@ -318,7 +319,7 @@ import { tooltip } from '$lib/actions/tooltip';
 		<div class="space-y-3">
 			<div>
 				<label for="trailer-url" class="text-sm font-medium mb-1 block">
-					Trailer URL
+					{m.screenshot_trailer_url()}
 					{#if sourceText('trailer_url')}
 						<span class="text-xs font-normal text-muted-foreground ml-2">{sourceText('trailer_url')}</span>
 					{/if}
@@ -333,7 +334,7 @@ import { tooltip } from '$lib/actions/tooltip';
 				/>
 			</div>
 			<div>
-				<div class="text-sm font-medium mb-1 block">Preview</div>
+				<div class="text-sm font-medium mb-1 block">{m.screenshot_preview()}</div>
 				{#if trailerUrl}
 					<button
 						onclick={() => (showTrailerModal = true)}
@@ -341,7 +342,7 @@ import { tooltip } from '$lib/actions/tooltip';
 					>
 						<div class="text-center">
 							<Play class="h-12 w-12 mx-auto mb-2" />
-							<p class="text-sm font-medium">Play Trailer</p>
+							<p class="text-sm font-medium">{m.screenshot_play_trailer()}</p>
 						</div>
 					</button>
 				{:else}
@@ -350,7 +351,7 @@ import { tooltip } from '$lib/actions/tooltip';
 					>
 						<div class="text-center">
 							<Play class="h-12 w-12 mx-auto mb-2 opacity-50" />
-							<p class="text-sm">No trailer</p>
+							<p class="text-sm">{m.screenshot_no_trailer()}</p>
 						</div>
 					</div>
 				{/if}
@@ -362,7 +363,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	<div>
 		<div class="flex items-center justify-between mb-3">
 			<h3 class="text-lg font-semibold flex items-center gap-2">
-				<span>Screenshots ({screenshots.length})</span>
+				<span>{m.screenshot_section_title({ count: screenshots.length })}</span>
 				{#if sourceText('screenshot_urls')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('screenshot_urls')}</span>
 				{/if}
@@ -373,11 +374,11 @@ import { tooltip } from '$lib/actions/tooltip';
 					size="sm"
 					onclick={removeAllScreenshots}
 					class="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-					title="Remove all screenshots"
+					title={m.screenshot_remove_all_title()}
 				>
 					{#snippet children()}
 						<Trash2 class="h-4 w-4" />
-						Remove All
+						{m.screenshot_remove_all()}
 					{/snippet}
 				</Button>
 			{/if}
@@ -390,12 +391,12 @@ import { tooltip } from '$lib/actions/tooltip';
 				class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
 			>
 				<Info class="h-3 w-3" />
-				<span>Why fewer screenshots?</span>
+				<span>{m.screenshot_why_fewer()}</span>
 				<ChevronDown class="h-3 w-3 transition-transform {showDisclaimer ? 'rotate-180' : ''}" />
 			</button>
 			{#if showDisclaimer}
 				<p class="mt-1.5 text-xs text-muted-foreground pl-5">
-					Placeholder images are automatically filtered during scraping via hash match or file size threshold.
+					{m.screenshot_filter_disclaimer()}
 				</p>
 			{/if}
 		</div>
@@ -406,13 +407,13 @@ import { tooltip } from '$lib/actions/tooltip';
 				type="url"
 				bind:value={newScreenshotUrl}
 				onkeydown={handleKeyPress}
-				placeholder="Enter screenshot URL and press Enter or click Add"
+				placeholder={m.screenshot_add_placeholder()}
 				class="flex-1 px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 			/>
 			<Button onclick={addScreenshot} disabled={!newScreenshotUrl.trim()}>
 				{#snippet children()}
 					<Plus class="h-4 w-4 mr-2" />
-					Add
+					{m.common_add()}
 				{/snippet}
 			</Button>
 		</div>
@@ -421,8 +422,8 @@ import { tooltip } from '$lib/actions/tooltip';
 		{#if screenshots.length === 0}
 			<div class="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
 				<ImageIcon class="h-12 w-12 mx-auto mb-2 opacity-50" />
-				<p>No screenshots added</p>
-				<p class="text-xs mt-1">Add screenshot URLs above</p>
+				<p>{m.screenshot_empty()}</p>
+				<p class="text-xs mt-1">{m.screenshot_empty_hint()}</p>
 			</div>
 		{:else}
 			<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -435,16 +436,16 @@ import { tooltip } from '$lib/actions/tooltip';
 						>
 							<img
 								src={previewImageURL(url)}
-								alt="Screenshot {index + 1}"
+								alt={m.screenshot_alt_index({ index: index + 1 })}
 								class="w-full aspect-video object-cover rounded" hidden={screenshotErrors.has(url)}
 								onerror={() => { screenshotErrors = new Set([...screenshotErrors, url]); }}
 							/>
 						</button>
 						<div class="mt-2 flex items-center gap-1">
 							<p class="text-xs text-muted-foreground truncate flex-1" title={url}>
-								Screenshot {index + 1}
+								{m.screenshot_alt_index({ index: index + 1 })}
 							</p>
-							<span class="inline-flex" use:tooltip={"Use as Poster"}>
+							<span class="inline-flex" use:tooltip={m.screenshot_use_as_poster()}>
 								<Button
 										variant="ghost"
 										size="sm"
@@ -456,7 +457,7 @@ import { tooltip } from '$lib/actions/tooltip';
 										{/snippet}
 								</Button>
 							</span>
-							<span class="inline-flex" use:tooltip={"Use as Cover/Fanart"}>
+							<span class="inline-flex" use:tooltip={m.screenshot_use_as_cover()}>
 								<Button
 										variant="ghost"
 										size="sm"
@@ -500,7 +501,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	bind:show={showCoverViewer}
 	images={[previewImageURL(coverUrl)]}
 	initialIndex={0}
-	title="Cover/Fanart"
+	title={m.screenshot_cover_viewer_title()}
 	onClose={() => (showCoverViewer = false)}
 />
 
@@ -508,6 +509,6 @@ import { tooltip } from '$lib/actions/tooltip';
 <VideoModal
 	bind:show={showTrailerModal}
 	videoUrl={trailerUrl}
-	title="Trailer"
+	title={m.screenshot_trailer_viewer_title()}
 	onClose={() => (showTrailerModal = false)}
 />

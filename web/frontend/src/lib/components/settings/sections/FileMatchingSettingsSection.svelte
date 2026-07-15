@@ -1,19 +1,21 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import type { SettingsConfig } from '$lib/api/types';
 
 	interface Props {
 		config: SettingsConfig;
 		inputClass: string;
+	selectClass: string;
 	}
 
-	let { config, inputClass }: Props = $props();
+	let { config, inputClass, selectClass }: Props = $props();
 </script>
 
-<SettingsSection title="File Matching Settings" description="Configure file scanning, extensions, and ID extraction patterns" defaultExpanded={false}>
+<SettingsSection title={m.settings_file_matching_title()} description={m.settings_file_matching_desc()} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div>
-			<label class="block text-sm font-medium mb-2" for="file-extensions">File Extensions</label>
+			<label class="block text-sm font-medium mb-2" for="file-extensions">{m.settings_file_matching_extensions_label()}</label>
 			<input
 				id="file-extensions"
 				type="text"
@@ -27,12 +29,12 @@
 				placeholder=".mp4, .mkv, .avi"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Comma-separated list of video file extensions to scan
+				{m.settings_file_matching_extensions_desc()}
 			</p>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="min-size-mb">Minimum File Size (MB)</label>
+			<label class="block text-sm font-medium mb-2" for="min-size-mb">{m.settings_file_matching_min_size_label()}</label>
 			<input
 				id="min-size-mb"
 				type="number"
@@ -42,12 +44,12 @@
 				max="10000"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Ignore files smaller than this (0 = no minimum)
+				{m.settings_file_matching_min_size_desc()}
 			</p>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="exclude-patterns">Exclude Patterns</label>
+			<label class="block text-sm font-medium mb-2" for="exclude-patterns">{m.settings_file_matching_exclude_label()}</label>
 			<input
 				id="exclude-patterns"
 				type="text"
@@ -62,20 +64,20 @@
 				placeholder="*-trailer*, *-sample*"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Glob patterns to exclude from scanning
+				{m.settings_file_matching_exclude_desc()}
 			</p>
 		</div>
 
 			<div class="space-y-3">
 				<label class="flex items-center gap-2">
 					<input type="checkbox" bind:checked={config.file_matching.regex_enabled} class="rounded" />
-					<span>Enable Custom Regex Pattern</span>
+					<span>{m.settings_file_matching_regex_enable()}</span>
 				</label>
 			</div>
 
 			<fieldset disabled={!config.file_matching.regex_enabled} class={`${!config.file_matching.regex_enabled ? 'opacity-60' : ''}`}>
 				<div>
-					<label class="block text-sm font-medium mb-2" for="regex-pattern">Regex Pattern</label>
+					<label class="block text-sm font-medium mb-2" for="regex-pattern">{m.settings_file_matching_regex_label()}</label>
 					<input
 						id="regex-pattern"
 						type="text"
@@ -83,7 +85,7 @@
 						class="{inputClass} font-mono text-sm"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Custom regex pattern to extract movie IDs from filenames
+						{m.settings_file_matching_regex_desc()}
 					</p>
 				</div>
 			</fieldset>

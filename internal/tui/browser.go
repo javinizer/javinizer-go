@@ -1,11 +1,11 @@
 package tui
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
 
 // browser component
@@ -18,6 +18,7 @@ type browser struct {
 	sourcePath  string // Current scan path
 	destPath    string // Destination path for organized files
 	pathDisplay string // Formatted path display for the view
+	localizer   *localization.Localizer
 }
 
 func newBrowser() *browser {
@@ -47,6 +48,17 @@ func (b *browser) SetDestPath(path string) {
 
 func (b *browser) SetPathDisplay(display string) {
 	b.pathDisplay = display
+}
+
+func (b *browser) SetLocalizer(l *localization.Localizer) {
+	b.localizer = l
+}
+
+func (b *browser) loc(id string, template ...map[string]any) string {
+	if b.localizer == nil {
+		return id
+	}
+	return b.localizer.Localize(id, template...)
 }
 
 func (b *browser) CursorUp() {
@@ -121,7 +133,7 @@ func (b *browser) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (b *browser) View() string {
 	// title
-	view := title("Files") + " " + dimmed("(f:source o:output m:search M:merge)") + "\n"
+	view := title(b.loc("TUIBrowserFilesTitle")) + " " + dimmed(b.loc("TUIBrowserFilesHint")) + "\n"
 
 	// Source path
 	sourceDisplay := b.sourcePath
@@ -131,7 +143,7 @@ func (b *browser) View() string {
 	if len(sourceDisplay) > 40 {
 		sourceDisplay = "..." + sourceDisplay[len(sourceDisplay)-37:]
 	}
-	view += dimmed("From: ") + highlight(sourceDisplay) + "\n"
+	view += dimmed(b.loc("TUIBrowserFrom")+" ") + highlight(sourceDisplay) + "\n"
 
 	// Destination path
 	destDisplay := b.destPath
@@ -141,10 +153,10 @@ func (b *browser) View() string {
 	if len(destDisplay) > 40 {
 		destDisplay = "..." + destDisplay[len(destDisplay)-37:]
 	}
-	view += dimmed("To:   ") + highlight(destDisplay) + "\n\n"
+	view += dimmed(b.loc("TUIBrowserTo")+"   ") + highlight(destDisplay) + "\n\n"
 
 	if len(b.items) == 0 {
-		return view + dimmed("No files found")
+		return view + dimmed(b.loc("TUIEmptyBrowser"))
 	}
 
 	// Show items around cursor
@@ -213,6 +225,9 @@ func (b *browser) View() string {
 		view += cursor + indent + checkbox + icon + name + matchIndicator + "\n"
 	}
 
-	view += fmt.Sprintf("\n%d/%d files", b.cursor+1, len(b.items))
+	view += "\n" + b.loc("TUIBrowserFileCount", map[string]any{
+		"Current": b.cursor + 1,
+		"Total":   len(b.items),
+	})
 	return view
 }

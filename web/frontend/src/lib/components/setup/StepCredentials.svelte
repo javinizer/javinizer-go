@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ShieldCheck, KeyRound, User, Eye, EyeOff } from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Credentials {
 		username: string;
@@ -30,7 +31,7 @@
 		if (p.length >= 12) score++;
 		if (/[A-Z]/.test(p) && /[a-z]/.test(p)) score++;
 		if (/\d/.test(p) && /[^A-Za-z0-9]/.test(p)) score++;
-		const labels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
+		const labels = ['', m.setup_credentials_strength_weak(), m.setup_credentials_strength_fair(), m.setup_credentials_strength_good(), m.setup_credentials_strength_strong()];
 		return { score, label: labels[score], pct: (score / 4) * 100 };
 	});
 
@@ -41,9 +42,9 @@
 
 <div class="step-head">
 	<div class="step-badge"><ShieldCheck class="h-5 w-5" /></div>
-	<h1 class="step-title">Create your admin account</h1>
+	<h1 class="step-title">{m.setup_credentials_title()}</h1>
 	<p class="step-sub">
-		This becomes the master login for this Javinizer server. You can add more users later.
+		{m.setup_credentials_sub()}
 	</p>
 </div>
 
@@ -53,7 +54,7 @@
 	{/if}
 
 	<label class="field">
-		<span class="field-label">Username</span>
+		<span class="field-label">{m.setup_credentials_username()}</span>
 		<div class="field-control">
 			<User class="field-icon" />
 			<input
@@ -61,7 +62,7 @@
 				type="text"
 				required
 				autocomplete="username"
-				placeholder="admin"
+				placeholder={m.setup_credentials_placeholder_username()}
 				bind:value={credentials.username}
 				disabled={submitting}
 			/>
@@ -69,7 +70,7 @@
 	</label>
 
 	<label class="field">
-		<span class="field-label">Password</span>
+		<span class="field-label">{m.setup_credentials_password()}</span>
 		<div class="field-control">
 			<KeyRound class="field-icon" />
 			<input
@@ -78,7 +79,7 @@
 				required
 				minlength="8"
 				autocomplete="new-password"
-				placeholder="At least 8 characters"
+				placeholder={m.setup_credentials_placeholder_password()}
 				bind:value={credentials.password}
 				disabled={submitting}
 			/>
@@ -88,7 +89,7 @@
 				onclick={() => (showPassword = !showPassword)}
 				tabindex="0"
 				disabled={submitting}
-				aria-label={showPassword ? 'Hide password' : 'Show password'}
+				aria-label={showPassword ? m.setup_credentials_hide_password() : m.setup_credentials_show_password()}
 			>
 				{#if showPassword}<EyeOff class="h-4 w-4" />{:else}<Eye class="h-4 w-4" />{/if}
 			</button>
@@ -102,7 +103,7 @@
 	</label>
 
 	<label class="field">
-		<span class="field-label">Confirm password</span>
+		<span class="field-label">{m.setup_credentials_confirm()}</span>
 		<div class="field-control">
 			<KeyRound class="field-icon" />
 			<input
@@ -111,7 +112,7 @@
 				required
 				minlength="8"
 				autocomplete="new-password"
-				placeholder="Re-enter password"
+				placeholder={m.setup_credentials_placeholder_confirm()}
 				bind:value={credentials.confirm}
 				disabled={submitting}
 			/>
@@ -121,13 +122,13 @@
 				onclick={() => (showConfirm = !showConfirm)}
 				tabindex="0"
 				disabled={submitting}
-				aria-label={showConfirm ? 'Hide password' : 'Show password'}
+				aria-label={showConfirm ? m.setup_credentials_hide_password() : m.setup_credentials_show_password()}
 			>
 				{#if showConfirm}<EyeOff class="h-4 w-4" />{:else}<Eye class="h-4 w-4" />{/if}
 			</button>
 		</div>
 		{#if credentials.confirm.length > 0 && !match}
-			<span class="field-hint field-hint-error">Passwords do not match</span>
+			<span class="field-hint field-hint-error">{m.setup_err_passwords_mismatch()}</span>
 		{/if}
 	</label>
 </form>

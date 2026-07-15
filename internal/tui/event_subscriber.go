@@ -43,6 +43,10 @@ type eventSubscriberDeps struct {
 	getElapsed func() time.Duration
 	// setStartTime records when processing started.
 	setStartTime func(time.Time)
+	// loc translates a message id (with optional template data) for the current
+	// TUI locale. It is nil-safe so the subscriber cannot panic if the
+	// localizer failed to construct at startup.
+	loc func(id string, template ...map[string]any) string
 }
 
 // newEventSubscriber creates a subscriber wired to the given deps.
@@ -120,7 +124,7 @@ func (es *eventSubscriber) UpdateProgress(event SortEvent) {
 		return
 	}
 
-	es.taskTracker.updateProgress(event)
+	es.taskTracker.updateProgress(es.resolveEvent(event))
 
 	// Push updated task data to taskList (single source of truth: taskTracker.tasks)
 	if es.taskList != nil {
@@ -129,17 +133,42 @@ func (es *eventSubscriber) UpdateProgress(event SortEvent) {
 
 	// Add to console output
 	if event.Message != "" {
-		consoleMsg := fmt.Sprintf("[%s] %s", taskID, event.Message)
+		displayMsg := es.eventMessage(event)
+		consoleMsg := fmt.Sprintf("[%s] %s", taskID, displayMsg)
 		es.deps.addConsoleOutput(consoleMsg)
 	}
 
 	// Log progress if significant
 	switch event.Step {
 	case taskStepComplete:
-		es.deps.addLog("info", event.Message)
+		es.deps.addLog("info", es.eventMessage(event))
 	case taskStepFailed:
-		es.deps.addLog("error", event.Message)
+		es.deps.addLog("error", es.eventMessage(event))
 	}
+}
+
+// eventMessage resolves the user-facing text for a sort event. When the event
+// carries a structured Code, it is translated via the localizer (unknown codes
+// or a nil localizer fall back to the English Message). When Code is empty, the
+// raw Message is returned unchanged.
+func (es *eventSubscriber) eventMessage(event SortEvent) string {
+	if event.Code != "" && es.deps.loc != nil {
+		return es.deps.loc(event.Code, event.Args)
+	}
+	return event.Message
+}
+
+// resolveEvent returns a copy of event with its Message replaced by the
+// localized display text and Code cleared, so downstream pure handlers
+// (handleSortEvent) store the resolved message without needing a localizer.
+func (es *eventSubscriber) resolveEvent(event SortEvent) SortEvent {
+	if event.Code == "" || es.deps.loc == nil {
+		return event
+	}
+	resolved := event
+	resolved.Message = es.deps.loc(event.Code, event.Args)
+	resolved.Code = ""
+	return resolved
 }
 
 // UpdateStats updates statistics.

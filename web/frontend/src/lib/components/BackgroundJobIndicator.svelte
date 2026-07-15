@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { cubicOut } from 'svelte/easing';
 	import { fly, slide } from 'svelte/transition';
 	import { createBatchJobPollingQuery } from '$lib/query/queries';
@@ -89,24 +90,24 @@
 	});
 
 	const statusConfig = $derived.by(() => {
-		if (!job) return { label: 'Processing', ring: 'ring-muted-foreground/20', bar: 'bg-muted-foreground', icon: 'spinner' as const, iconClass: 'h-4 w-4 animate-spin shrink-0 text-muted-foreground' };
+		if (!job) return { label: m.bgjob_processing(), ring: 'ring-muted-foreground/20', bar: 'bg-muted-foreground', icon: 'spinner' as const, iconClass: 'h-4 w-4 animate-spin shrink-0 text-muted-foreground' };
 		switch (job.status) {
 			case 'completed':
-				return { label: 'Scraping complete', ring: 'ring-green-500/40 dark:ring-green-400/30', bar: 'bg-green-500 dark:bg-green-400', icon: 'check' as const, iconClass: 'h-4 w-4 shrink-0 text-green-500 dark:text-green-400' };
+				return { label: m.bgjob_scraping_complete(), ring: 'ring-green-500/40 dark:ring-green-400/30', bar: 'bg-green-500 dark:bg-green-400', icon: 'check' as const, iconClass: 'h-4 w-4 shrink-0 text-green-500 dark:text-green-400' };
 			case 'failed':
-				return { label: 'Scraping failed', ring: 'ring-red-500/40 dark:ring-red-400/30', bar: 'bg-red-500 dark:bg-red-400', icon: 'xcircle' as const, iconClass: 'h-4 w-4 shrink-0 text-red-500 dark:text-red-400' };
+				return { label: m.bgjob_scraping_failed(), ring: 'ring-red-500/40 dark:ring-red-400/30', bar: 'bg-red-500 dark:bg-red-400', icon: 'xcircle' as const, iconClass: 'h-4 w-4 shrink-0 text-red-500 dark:text-red-400' };
 			case 'cancelled':
-				return { label: 'Scraping cancelled', ring: 'ring-amber-500/40 dark:ring-amber-400/30', bar: 'bg-amber-500 dark:bg-amber-400', icon: 'ban' as const, iconClass: 'h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400' };
+				return { label: m.bgjob_scraping_cancelled(), ring: 'ring-amber-500/40 dark:ring-amber-400/30', bar: 'bg-amber-500 dark:bg-amber-400', icon: 'ban' as const, iconClass: 'h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400' };
 			case 'organized':
-				return { label: 'Files organized', ring: 'ring-green-500/40 dark:ring-green-400/30', bar: 'bg-green-500 dark:bg-green-400', icon: 'folder' as const, iconClass: 'h-4 w-4 shrink-0 text-green-500 dark:text-green-400' };
+				return { label: m.bgjob_files_organized(), ring: 'ring-green-500/40 dark:ring-green-400/30', bar: 'bg-green-500 dark:bg-green-400', icon: 'folder' as const, iconClass: 'h-4 w-4 shrink-0 text-green-500 dark:text-green-400' };
 			case 'reverted':
-				return { label: 'Revert complete', ring: 'ring-amber-500/40 dark:ring-amber-400/30', bar: 'bg-amber-500 dark:bg-amber-400', icon: 'revert' as const, iconClass: 'h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400' };
+				return { label: m.bgjob_revert_complete(), ring: 'ring-amber-500/40 dark:ring-amber-400/30', bar: 'bg-amber-500 dark:bg-amber-400', icon: 'revert' as const, iconClass: 'h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400' };
 			case 'pending':
-				return { label: 'Queued', ring: 'ring-muted-foreground/20', bar: 'bg-muted-foreground', icon: 'spinner' as const, iconClass: 'h-4 w-4 shrink-0 text-muted-foreground' };
+				return { label: m.bgjob_queued(), ring: 'ring-muted-foreground/20', bar: 'bg-muted-foreground', icon: 'spinner' as const, iconClass: 'h-4 w-4 shrink-0 text-muted-foreground' };
 			case 'running':
-				return { label: 'Scraping in progress', ring: 'ring-primary/30', bar: 'bg-primary', icon: 'spinner' as const, iconClass: 'h-4 w-4 animate-spin shrink-0 text-primary' };
+				return { label: m.bgjob_scraping_in_progress(), ring: 'ring-primary/30', bar: 'bg-primary', icon: 'spinner' as const, iconClass: 'h-4 w-4 animate-spin shrink-0 text-primary' };
 			default:
-				return { label: 'Processing', ring: 'ring-muted-foreground/20', bar: 'bg-muted-foreground', icon: 'spinner' as const, iconClass: 'h-4 w-4 animate-spin shrink-0 text-muted-foreground' };
+				return { label: m.bgjob_processing(), ring: 'ring-muted-foreground/20', bar: 'bg-muted-foreground', icon: 'spinner' as const, iconClass: 'h-4 w-4 animate-spin shrink-0 text-muted-foreground' };
 		}
 	});
 
@@ -130,7 +131,7 @@
 					{statusConfig.label}
 				</div>
 				<div class="text-xs text-muted-foreground mt-0.5">
-					{displayCompleted + displayFailed} / {displayTotal} files &middot; {liveProgress.toFixed(0)}%
+					{m.bgjob_files_progress({ completed: displayCompleted + displayFailed, total: displayTotal, percent: liveProgress.toFixed(0) })}
 				</div>
 			</div>
 		</button>
@@ -142,7 +143,7 @@
 					expanded = !expanded;
 				}}
 				class="p-1.5 hover:bg-accent/60 rounded-md transition-colors shrink-0 text-muted-foreground hover:text-foreground"
-				aria-label={expanded ? 'Collapse' : 'Expand'}
+				aria-label={expanded ? m.bgjob_aria_collapse() : m.bgjob_aria_expand()}
 			>
 				{#if expanded}
 					<ChevronDown class="h-3.5 w-3.5" />
@@ -157,7 +158,7 @@
 					onDismiss();
 				}}
 				class="p-1.5 hover:bg-accent/60 rounded-md transition-colors shrink-0 text-muted-foreground hover:text-foreground"
-				aria-label="Dismiss"
+				aria-label={m.bgjob_aria_dismiss()}
 			>
 				<X class="h-3.5 w-3.5" />
 			</button>
@@ -167,7 +168,7 @@
 			<div class="border-t border-border px-4 py-3 text-left" transition:slide|local={{ duration: 180, easing: cubicOut }}>
 				<div class="space-y-2.5">
 					<div class="flex items-center justify-between text-xs">
-						<span class="text-muted-foreground">Progress</span>
+						<span class="text-muted-foreground">{m.bgjob_progress()}</span>
 						<span class="font-medium tabular-nums">{liveProgress.toFixed(1)}%</span>
 					</div>
 					<div class="h-1.5 bg-muted rounded-full overflow-hidden">
@@ -177,9 +178,9 @@
 						></div>
 					</div>
 					<div class="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-						<span>{displayCompleted} completed</span>
-						<span class="text-center">{displayFailed} failed</span>
-						<span class="text-right">{Math.max(0, displayTotal - displayCompleted - displayFailed)} remaining</span>
+						<span>{m.bgjob_completed_count({ count: displayCompleted })}</span>
+						<span class="text-center">{m.bgjob_failed_count({ count: displayFailed })}</span>
+						<span class="text-right">{m.bgjob_remaining_count({ count: Math.max(0, displayTotal - displayCompleted - displayFailed) })}</span>
 					</div>
 				</div>
 			</div>

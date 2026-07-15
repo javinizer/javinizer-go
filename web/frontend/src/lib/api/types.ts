@@ -311,6 +311,8 @@ export interface ProgressMessage {
 	progress: number;
 	message: string;
 	error?: string;
+	message_code?: string;
+	message_args?: Record<string, unknown>;
 	// Authoritative job-level counts stamped by the backend (see
 	// batch.stampJobCounts) on every emitted message, so frontend consumers can
 	// compute monotonic progress WITHOUT inferring totals from message counts
@@ -526,6 +528,8 @@ export interface ActressMergeResponse {
 
 export interface ErrorResponse {
 	error: string;
+	code?: string;
+	params?: Record<string, unknown> | null;
 	errors?: string[];
 }
 
@@ -981,6 +985,12 @@ export interface FavoritesConfig {
 	genre?: string[];
 }
 
+// Interface locale preference shared by the Web UI and TUI.
+export interface UIConfig {
+	// "auto" resolves per environment (browser/OS); otherwise a BCP 47 tag.
+	language: string;
+}
+
 export interface WebUIConfig {
 	default_review_view?: string;
 	favorites?: FavoritesConfig;
@@ -1035,6 +1045,7 @@ export interface ConfigWarning {
 
 export interface Config {
 	config_version?: number;
+	ui?: UIConfig;
 	server?: ServerConfig;
 	api?: APIConfig;
 	system?: SystemConfig;
@@ -1052,6 +1063,7 @@ export interface Config {
 
 export interface SettingsConfig {
 	config_version?: number;
+	ui: UIConfig;
 	server: ServerConfig;
 	api: APIConfig;
 	system: SystemConfig;

@@ -4572,6 +4572,10 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse": {
             "type": "object",
             "properties": {
+                "code": {
+                    "description": "Stable machine-readable error code (e.g. \"JOB_NOT_FOUND\") for client-side i18n",
+                    "type": "string"
+                },
                 "error": {
                     "type": "string",
                     "example": "Movie not found"
@@ -4581,6 +4585,11 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "params": {
+                    "description": "Structured arguments for translating Code into a localized message",
+                    "type": "object",
+                    "additionalProperties": {}
                 }
             }
         },
@@ -6857,6 +6866,15 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_config.UIConfig": {
+            "type": "object",
+            "properties": {
+                "language": {
+                    "description": "Language is the interface locale: \"auto\" (default, resolve per\nenvironment) or a syntactically valid BCP 47 tag such as \"en\", \"ja\",\n\"zh-Hans\", or \"pt-BR\". Unsupported but valid tags fall back to English\nat runtime rather than being rejected here.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig": {
             "type": "object",
             "properties": {
@@ -8177,6 +8195,9 @@ const docTemplate = `{
                 },
                 "system": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig"
+                },
+                "ui": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.UIConfig"
                 },
                 "warnings": {
                     "type": "array",

@@ -37,6 +37,13 @@ type processingControllerDeps struct {
 	browserState func() browserState
 	// startTime records when processing started (owned by Model for elapsed-time display).
 	setStartTime func(time.Time)
+	// loc translates a message id (with optional template data) for the current
+	// TUI locale. It is nil-safe so the controller cannot panic if the
+	// localizer failed to construct at startup.
+	loc func(id string, template ...map[string]any) string
+	// plural translates a count-aware message id via CLDR plural rules. It is
+	// nil-safe so the controller cannot panic if the localizer is unavailable.
+	plural func(id string, count interface{}, template ...map[string]any) string
 }
 
 // newProcessingController creates a controller wired to the given deps.
@@ -82,19 +89,19 @@ func (pc *processingController) setConsole(c *console) {
 // so a thin goroutine handles the blocking Wait() call.
 func (pc *processingController) StartProcessing(ctx context.Context) error {
 	if pc.sortSvc == nil {
-		pc.deps.addLog("error", "Sort service not initialized")
+		pc.deps.addLog("error", pc.deps.loc("TUISortServiceNotInitialized"))
 		return fmt.Errorf("sort service not initialized")
 	}
 
 	if pc.taskTracker.isProcessing.Load() {
-		pc.deps.addLog("warn", "Already processing")
+		pc.deps.addLog("warn", pc.deps.loc("TUILogAlreadyProcessing"))
 		return nil
 	}
 
 	bs := pc.deps.browserState()
 	selectedCount := bs.selectedCount()
 	if selectedCount == 0 {
-		pc.deps.addLog("warn", "No files selected for processing")
+		pc.deps.addLog("warn", pc.deps.loc("TUILogNoFilesSelected"))
 		return nil
 	}
 
@@ -104,16 +111,16 @@ func (pc *processingController) StartProcessing(ctx context.Context) error {
 	// Expand directory selections into their child files (pure transformation)
 	selectedItems := expandSelectedFiles(bs.files)
 
-	pc.deps.addLog("info", fmt.Sprintf("Starting processing of %d files...", len(selectedItems)))
+	pc.deps.addLog("info", pc.deps.plural("TUILogStartingProcessingFiles", len(selectedItems)))
 	logging.Debugf("Selected %d items (including children of directories) out of %d files", len(selectedItems), len(bs.files))
 
 	// ProcessFiles is non-blocking (submits via runner.Go), so call it directly.
 	if err := pc.sortSvc.ProcessFiles(ctx, selectedItems, bs.matchResults); err != nil {
-		pc.deps.addLog("error", "Processing error: "+err.Error())
+		pc.deps.addLog("error", pc.deps.loc("TUILogProcessingError", map[string]any{"Error": err.Error()}))
 		pc.taskTracker.finishProcessing()
 		return err
 	}
-	pc.deps.addLog("info", "All tasks submitted successfully")
+	pc.deps.addLog("info", pc.deps.loc("TUIAllTasksSubmitted"))
 
 	// Wait blocks until all runner tasks complete; run in a goroutine
 	// so it doesn't freeze the UI. finishProcessing fires when done.
@@ -128,9 +135,9 @@ func (pc *processingController) StartProcessing(ctx context.Context) error {
 		}()
 
 		if err := pc.sortSvc.Wait(); err != nil {
-			pc.deps.addLog("error", "Some tasks failed: "+err.Error())
+			pc.deps.addLog("error", pc.deps.loc("TUILogSomeTasksFailed", map[string]any{"Error": err.Error()}))
 		} else {
-			pc.deps.addLog("info", "All tasks completed successfully")
+			pc.deps.addLog("info", pc.deps.loc("TUIAllTasksCompletedSuccessfully"))
 		}
 	}()
 

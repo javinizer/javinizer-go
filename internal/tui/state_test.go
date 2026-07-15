@@ -523,11 +523,11 @@ func TestSettingsManager_MoveCursor(t *testing.T) {
 	sm.moveCursor(-1)
 	assert.Equal(t, 0, sm.cursorPos())
 
-	// Can't go above maxSettings (9)
+	// Can't go above maxSettings (10: 9 toggles + language choice row)
 	for i := 0; i < 20; i++ {
 		sm.moveCursor(1)
 	}
-	assert.Equal(t, 9, sm.cursorPos())
+	assert.Equal(t, 10, sm.cursorPos())
 }
 
 func TestSettingsManager_Toggle(t *testing.T) {
@@ -610,4 +610,44 @@ func TestSettingsManager_ExtrafanartConfig(t *testing.T) {
 
 	sm2 := newSettingsManager(settingsManagerDeps{}, false, false)
 	assert.False(t, sm2.get().DownloadExtrafanart, "Extrafanart should match config")
+}
+
+func TestSettingsManager_LanguageChoice(t *testing.T) {
+	sm := newSettingsManager(settingsManagerDeps{}, false, false)
+	assert.Equal(t, "auto", sm.languageValue(), "Language should default to auto")
+
+	sm.setLanguage("en")
+	assert.Equal(t, "en", sm.languageValue())
+
+	sm.setLanguage("  Auto  ")
+	assert.Equal(t, "auto", sm.languageValue(), "setLanguage should normalize empty/auto")
+
+	sm.setLanguage("en")
+	next, changed, desc := sm.cycleLanguage(1)
+	assert.True(t, changed)
+	assert.Equal(t, "ja", next, "Cycling forward from en goes to ja")
+	assert.Contains(t, desc, "ja")
+
+	sm.setLanguage("zh-Hant")
+	wrapped, changedWrap, _ := sm.cycleLanguage(1)
+	assert.True(t, changedWrap)
+	assert.Equal(t, "auto", wrapped, "Cycling forward past zh-Hant wraps to auto")
+
+	sm.setLanguage("auto")
+	prev, changed2, _ := sm.cycleLanguage(-1)
+	assert.True(t, changed2)
+	assert.Equal(t, "zh-Hant", prev, "Cycling backward from auto wraps to zh-Hant")
+}
+
+func TestSettingsManager_ToggleUntouchedByLanguage(t *testing.T) {
+	var applyCount int
+	sm := newSettingsManager(settingsManagerDeps{
+		apply: func(s settingsSnapshot) { applyCount++ },
+		log:   func(level, message string) {},
+	}, false, false)
+
+	sm.setLanguage("en")
+	_, changed, _ := sm.cycleLanguage(1)
+	assert.True(t, changed)
+	assert.Equal(t, 0, applyCount, "Language cycling must not push the processing snapshot")
 }

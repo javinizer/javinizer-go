@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { untrack } from 'svelte';
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
@@ -56,7 +57,7 @@
 
 	// Alias group for the actress currently being edited. When the resolver
 	// knows more than one name for this performer (canonical + aliases), a
-	// "Write to NFO as" dropdown is shown so the user can pick which name the
+	// "{m.editor_write_nfo_as()}" dropdown is shown so the user can pick which name the
 	// NFO <name> tag gets. The chosen value is written to japanese_name.
 	let aliasGroup = $state<ActressAliasGroup | null>(null);
 	let aliasGroupFetching = $state(false);
@@ -158,7 +159,7 @@
 		// Skip the refetch when the name is already part of the loaded group:
 		// the select onchange writes to japanese_name, so without this guard
 		// picking an alias would re-fire the effect, briefly hide the select
-		// behind "Checking known aliases…", and make a redundant network call.
+		// behind "{m.editor_checking_aliases()}", and make a redundant network call.
 		// This holds for both forms: the matched lookup name is always present in
 		// the returned group (canonical + its aliases), so once it's loaded the
 		// guard short-circuits further fetches for that name.
@@ -222,7 +223,7 @@
 
 	function saveActress() {
 		if (!editingActress.first_name?.trim() && !editingActress.japanese_name?.trim()) {
-			void alertDialog('Validation Error', 'At least first name or Japanese name is required');
+			void alertDialog(m.editor_validation_title(), m.editor_validation_body());
 			return;
 		}
 
@@ -238,7 +239,7 @@
 	}
 
 	async function removeActress(index: number) {
-		if (await confirmDialog('Remove Actress', 'Remove this actress?', { variant: 'danger', confirmLabel: 'Remove' })) {
+		if (await confirmDialog(m.editor_remove_actress_title(), m.editor_remove_actress_body(), { variant: 'danger', confirmLabel: m.editor_remove_actress_action() })) {
 			actresses = actresses.filter((_, i) => i !== index);
 			notifyParent();
 		}
@@ -301,10 +302,10 @@
 		if (!source) return null;
 
 		const normalized = source.toLowerCase();
-		if (normalized === 'nfo') return 'via NFO';
-		if (normalized === 'merged') return 'via merged data';
-		if (normalized === 'empty') return 'empty';
-		return `via ${source}`;
+		if (normalized === 'nfo') return m.editor_via_nfo();
+		if (normalized === 'merged') return m.editor_via_merged();
+		if (normalized === 'empty') return m.editor_empty_source();
+		return m.editor_via_source({ source });
 	}
 
 	function sourceForActress(actress: Actress): string | null {
@@ -333,22 +334,22 @@
 
 <div class="space-y-4">
 	<div class="flex items-center justify-between">
-		<h3 class="text-lg font-semibold">Actresses ({actresses.length})</h3>
+		<h3 class="text-lg font-semibold">{m.editor_actresses_heading({ count: actresses.length })}</h3>
 		<Button onclick={openAddActress} size="sm" disabled={savingEdits || organizing}>
 			{#snippet children()}
 				<Plus class="h-4 w-4 mr-2" />
-				Add Actress
+				{m.editor_add_actress()}
 			{/snippet}
 		</Button>
 	</div>
 
 	{#if actresses.length === 0}
 		<div class="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
-			<p>No actresses added</p>
+			<p>{m.editor_no_actresses()}</p>
 			<Button onclick={openAddActress} size="sm" class="mt-2" disabled={savingEdits || organizing}>
 				{#snippet children()}
 					<Plus class="h-4 w-4 mr-2" />
-					Add First Actress
+					{m.editor_add_first_actress()}
 				{/snippet}
 			</Button>
 		</div>
@@ -372,7 +373,7 @@
 							<div
 								class="w-full aspect-2/3 bg-accent rounded flex items-center justify-center text-xs text-muted-foreground"
 							>
-								No Image
+								{m.editor_no_image()}
 							</div>
 						{/if}
 
@@ -423,7 +424,7 @@
 			<!-- Header -->
 			<div class="p-6 border-b flex items-center justify-between">
 				<h2 class="text-xl font-bold">
-					{editingIndex !== null ? 'Edit Actress' : 'Add Actress'}
+					{editingIndex !== null ? m.editor_edit_actress() : m.editor_add_actress()}
 				</h2>
 				<Button variant="ghost" size="icon" onclick={cancelEdit}>
 					{#snippet children()}
@@ -438,7 +439,7 @@
 				<div class="space-y-2">
 					<label class="text-sm font-medium flex items-center gap-2">
 						<Search class="h-4 w-4" />
-						Select or Search Actress
+						{m.editor_select_search_actress()}
 					</label>
 					<div class="relative">
 						<input
@@ -447,7 +448,7 @@
 							onfocus={handleSearchFocus}
 							onblur={handleSearchBlur}
 							oninput={handleSearchInput}
-							placeholder="Type to search actresses..."
+							placeholder={m.editor_search_placeholder()}
 							class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 						/>
 
@@ -468,7 +469,7 @@
 												/>
 											{:else}
 												<div class="w-12 h-16 bg-accent rounded flex items-center justify-center text-xs">
-													No Img
+													{m.editor_no_img()}
 												</div>
 											{/if}
 											<div class="flex-1">
@@ -482,17 +483,17 @@
 								</div>
 							{:else if searchQuery.trim().length === 0}
 								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
-									No actresses in database yet
+									{m.editor_no_actresses_db()}
 								</div>
 							{:else}
 								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
-									No matches found
+									{m.editor_no_matches()}
 								</div>
 							{/if}
 						{/if}
 					</div>
 					<p class="text-xs text-muted-foreground">
-						Type to search actresses or enter details manually below
+						{m.editor_search_hint()}
 					</p>
 				</div>
 
@@ -501,7 +502,7 @@
 						<div class="w-full border-t"></div>
 					</div>
 					<div class="relative flex justify-center text-xs uppercase">
-						<span class="bg-background px-2 text-muted-foreground">Or enter manually</span>
+						<span class="bg-background px-2 text-muted-foreground">{m.editor_or_enter_manually()}</span>
 					</div>
 				</div>
 
@@ -509,40 +510,40 @@
 					<!-- Left: Form -->
 					<div class="space-y-4">
 						<div>
-							<label class="text-sm font-medium mb-1 block" for="actress-first-name">First Name</label>
+							<label class="text-sm font-medium mb-1 block" for="actress-first-name">{m.editor_first_name()}</label>
 							<input
 								id="actress-first-name"
 								type="text"
 								bind:value={editingActress.first_name}
-								placeholder="e.g., Yume"
+								placeholder={m.editor_first_name_ph()}
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
 						</div>
 
 						<div>
-							<label class="text-sm font-medium mb-1 block" for="actress-last-name">Last Name</label>
+							<label class="text-sm font-medium mb-1 block" for="actress-last-name">{m.editor_last_name()}</label>
 							<input
 								id="actress-last-name"
 								type="text"
 								bind:value={editingActress.last_name}
-								placeholder="e.g., Nishimiya"
+								placeholder={m.editor_last_name_ph()}
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
 						</div>
 
 						<div>
-							<label class="text-sm font-medium mb-1 block" for="actress-japanese-name">Japanese Name</label>
+							<label class="text-sm font-medium mb-1 block" for="actress-japanese-name">{m.editor_japanese_name()}</label>
 							<input
 								id="actress-japanese-name"
 								type="text"
 								bind:value={editingActress.japanese_name}
-								placeholder="e.g., 西宮ゆめ"
+								placeholder={m.editor_japanese_name_ph()}
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
 							{#if aliasGroupFetching}
-								<p class="mt-1 text-xs text-muted-foreground">Checking known aliases…</p>
+								<p class="mt-1 text-xs text-muted-foreground">{m.editor_checking_aliases()}</p>
 							{:else if aliasGroup}
-								<label class="mt-2 text-xs font-medium block" for="actress-nfo-name">Write to NFO as</label>
+								<label class="mt-2 text-xs font-medium block" for="actress-nfo-name">{m.editor_write_nfo_as()}</label>
 								<select
 									id="actress-nfo-name"
 									value={editingActress.japanese_name}
@@ -550,20 +551,20 @@
 										editingActress.japanese_name = (event.currentTarget as HTMLSelectElement).value;
 									}}
 									class="mt-1 w-full px-3 py-2 border rounded-md bg-background text-sm focus:ring-2 focus:ring-primary focus:border-primary transition-all"
-									title="This actress has multiple known names; pick the one to write to the NFO"
+									title={m.editor_alias_title()}
 								>
 								{#each aliasGroup.names as name}
-										<option value={name}>{name}{name === aliasGroup.canonical ? ' (canonical)' : ''}</option>
+										<option value={name}>{name}{name === aliasGroup.canonical ? m.editor_canonical_suffix() : ''}</option>
 									{/each}
 								</select>
 								<p class="mt-1 text-xs text-muted-foreground">
-									{aliasGroup.names.length} known names for this performer. Selected name is written to the NFO &lt;name&gt; tag.
+									{m.editor_alias_hint({ count: aliasGroup.names.length })}
 								</p>
 							{/if}
 						</div>
 
 						<div>
-							<label class="text-sm font-medium mb-1 block" for="actress-thumb-url">Thumbnail URL</label>
+							<label class="text-sm font-medium mb-1 block" for="actress-thumb-url">{m.editor_thumbnail_url()}</label>
 							<input
 								id="actress-thumb-url"
 								type="url"
@@ -576,7 +577,7 @@
 
 					<!-- Right: Preview -->
 					<div>
-						<span class="text-sm font-medium mb-1 block">Preview</span>
+						<span class="text-sm font-medium mb-1 block">{m.editor_preview()}</span>
 						<Card class="p-3">
 							<!-- Preview hides via {#if}+thumbPreviewError (unmounts the element),
 							     not the HTML [hidden] attr. If changed to hidden=, avoid Tailwind
@@ -584,7 +585,7 @@
 							{#if thumbPreviewSrc && !thumbPreviewError}
 								<img
 									src={thumbPreviewSrc}
-									alt={getFullName(editingActress) || 'Preview'}
+									alt={getFullName(editingActress) || m.editor_preview_alt_fallback()}
 									class="w-full aspect-2/3 object-cover rounded mb-2"
 									onerror={() => { thumbPreviewError = true; }}
 								/>
@@ -592,11 +593,11 @@
 								<div
 									class="w-full aspect-2/3 bg-accent rounded flex items-center justify-center text-sm text-muted-foreground mb-2"
 								>
-									{thumbPreviewSrc ? 'Unable to load image' : 'No Thumbnail'}
+									{thumbPreviewSrc ? m.editor_unable_load_image() : m.editor_no_thumbnail()}
 								</div>
 							{/if}
 							<p class="font-medium text-sm truncate">
-								{getFullName(editingActress) || 'Name'}
+								{getFullName(editingActress) || m.editor_preview_name_fallback()}
 							</p>
 							{#if editingActress.japanese_name}
 								<p class="text-xs text-muted-foreground truncate">
@@ -616,7 +617,7 @@
 				<Button onclick={saveActress} disabled={savingEdits || organizing}>
 					{#snippet children()}
 						<Save class="h-4 w-4 mr-2" />
-						{editingIndex !== null ? 'Save Changes' : 'Add Actress'}
+						{editingIndex !== null ? m.editor_save_changes() : m.editor_add_actress()}
 					{/snippet}
 				</Button>
 			</div>

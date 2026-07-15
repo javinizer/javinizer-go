@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import type { Movie, Genre } from '$lib/api/types';
 	import { CircleAlert, X, Plus } from 'lucide-svelte';
 
@@ -38,10 +39,10 @@
 			if (!source) continue;
 
 			const normalized = source.toLowerCase();
-			if (normalized === 'nfo') return 'via NFO';
-			if (normalized === 'merged') return 'via merged data';
-			if (normalized === 'empty') return 'empty';
-			return `via ${source}`;
+			if (normalized === 'nfo') return m.movie_via_nfo();
+			if (normalized === 'merged') return m.movie_via_merged();
+			if (normalized === 'empty') return m.movie_empty_source();
+			return m.movie_via_source({ source });
 		}
 		return null;
 	}
@@ -104,7 +105,7 @@
 		<!-- ID -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Movie ID
+				{m.movie_field_movie_id()}
 				{#if sourceText('id')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('id')}</span>
 				{/if}
@@ -123,7 +124,7 @@
 		<!-- Content ID -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Content ID
+				{m.movie_field_content_id()}
 				{#if sourceText('code')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('code')}</span>
 				{/if}
@@ -142,7 +143,7 @@
 		<!-- Title -->
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Title
+				{m.movie_field_title()}
 				{#if sourceText('display_title')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('display_title')}</span>
 				{/if}
@@ -161,7 +162,7 @@
 		<!-- Original Title -->
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Original Title (Japanese)
+				{m.movie_field_original_title()}
 				{#if sourceText('original_title')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('original_title')}</span>
 				{/if}
@@ -180,7 +181,7 @@
 		<!-- Description -->
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Description
+				{m.movie_field_description()}
 				{#if sourceText('description')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('description')}</span>
 				{/if}
@@ -199,7 +200,7 @@
 		<!-- Release Date -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Release Date
+				{m.movie_field_release_date()}
 				{#if sourceText('release_date')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('release_date')}</span>
 				{/if}
@@ -218,7 +219,7 @@
 		<!-- Runtime -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Runtime (minutes)
+				{m.movie_field_runtime()}
 				{#if sourceText('runtime')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('runtime')}</span>
 				{/if}
@@ -238,7 +239,7 @@
 		<!-- Director -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Director
+				{m.movie_field_director()}
 				{#if sourceText('director')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('director')}</span>
 				{/if}
@@ -257,7 +258,7 @@
 		<!-- Maker -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Studio / Maker
+				{m.movie_field_maker()}
 				{#if sourceText('maker')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('maker')}</span>
 				{/if}
@@ -276,7 +277,7 @@
 		<!-- Label -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Label
+				{m.movie_field_label()}
 				{#if sourceText('label')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('label')}</span>
 				{/if}
@@ -295,7 +296,7 @@
 		<!-- Series -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Series
+				{m.movie_field_series()}
 				{#if sourceText('series')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('series')}</span>
 				{/if}
@@ -314,7 +315,7 @@
 		<!-- Rating Score -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Rating Score (0-10)
+				{m.movie_field_rating_score()}
 				{#if sourceText('rating_score')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('rating_score')}</span>
 				{/if}
@@ -334,9 +335,9 @@
 			/>
 			{#if editedMovie.rating_score !== undefined && editedMovie.rating_score !== null}
 				<p class="text-xs text-muted-foreground mt-1">
-					{editedMovie.rating_score.toFixed(1)}/10
+					{m.movie_rating_display({ score: editedMovie.rating_score.toFixed(1) })}
 					{#if editedMovie.rating_votes}
-						({editedMovie.rating_votes} vote{editedMovie.rating_votes !== 1 ? 's' : ''})
+						{editedMovie.rating_votes === 1 ? m.movie_rating_vote_one({ votes: editedMovie.rating_votes }) : m.movie_rating_votes({ votes: editedMovie.rating_votes })}
 					{/if}
 				</p>
 			{/if}
@@ -345,7 +346,7 @@
 		<!-- Rating Votes -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Rating Votes
+				{m.movie_field_rating_votes()}
 				{#if sourceText('rating_votes')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('rating_votes')}</span>
 				{/if}
@@ -367,7 +368,7 @@
 		<!-- Genres -->
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Genres
+				{m.movie_field_genres()}
 				{#if sourceText('genres')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('genres')}</span>
 				{/if}
@@ -386,7 +387,7 @@
 								type="button"
 								onclick={() => removeGenre(genre.name)}
 								class="ml-0.5 -mr-1 p-0.5 rounded-full hover:bg-primary/20 transition-all opacity-70 hover:opacity-100"
-								title="Remove {genre.name}"
+								title={m.movie_genre_remove_title({ name: genre.name })}
 							>
 								<X class="h-3.5 w-3.5" />
 							</button>
@@ -400,7 +401,7 @@
 						type="text"
 						bind:value={newGenreInput}
 						onkeydown={handleGenreKeydown}
-						placeholder={editedMovie.genres && editedMovie.genres.length > 0 ? "Add another..." : "Type a genre and press Enter"}
+						placeholder={editedMovie.genres && editedMovie.genres.length > 0 ? m.movie_genre_add_another_ph() : m.movie_genre_add_first_ph()}
 						class="flex-1 outline-none bg-transparent text-foreground text-sm min-w-0 placeholder:text-muted-foreground/60"
 					/>
 					{#if newGenreInput.trim()}
@@ -408,7 +409,7 @@
 							type="button"
 							onclick={addGenre}
 							class="p-1.5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-all hover:scale-110"
-							title="Add genre"
+							title={m.movie_genre_add_title()}
 						>
 							<Plus class="h-3.5 w-3.5" />
 						</button>
@@ -418,9 +419,9 @@
 
 			<p class="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
 				<kbd class="px-1.5 py-0.5 bg-accent rounded text-xs font-mono border">Enter</kbd>
-				to add
+				{m.movie_genre_enter_hint()}
 				{#if editedMovie.genres && editedMovie.genres.length > 0}
-					• Click <X class="h-3 w-3 inline" /> to remove
+					{m.movie_genre_remove_hint({ icon: '✕' })}
 				{/if}
 			</p>
 		</div>

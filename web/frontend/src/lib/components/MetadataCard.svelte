@@ -1,6 +1,8 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import type { Movie } from '$lib/api/types';
 	import { formatDuration } from '$lib/utils';
+	import { formatDate } from '$lib/i18n/format';
 	import { formatActressName } from '$lib/utils/actress';
 	import { createConfigQuery } from '$lib/query/queries';
 	import { Calendar, Clock, Star, Film } from 'lucide-svelte';
@@ -56,7 +58,7 @@
 				{#if movie.release_date}
 					<div class="flex items-center gap-1">
 						<Calendar class="h-4 w-4" />
-						{new Date(movie.release_date).toLocaleDateString()}
+						{formatDate(movie.release_date)}
 					</div>
 				{:else if movie.release_year}
 					<div class="flex items-center gap-1">
@@ -89,7 +91,7 @@
 
 			{#if movie.source_name}
 				<div class="text-xs text-muted-foreground">
-					Source: {movie.source_name}
+					{m.metadata_source_prefix({ name: movie.source_name })}
 				</div>
 			{/if}
 
@@ -115,7 +117,7 @@
 					{/each}
 					{#if movie.actresses.length > 3}
 						<span class="px-2 py-1 bg-muted text-muted-foreground rounded-md text-xs">
-							+{movie.actresses.length - 3} more
+							{m.metadata_more_actresses({ count: movie.actresses.length - 3 })}
 						</span>
 					{/if}
 				</div>
@@ -147,7 +149,7 @@
 			<!-- Actions -->
 			{#if onEdit}
 				<div class="pt-2">
-					<Button size="sm" onclick={onEdit}>Edit Metadata</Button>
+					<Button size="sm" onclick={onEdit}>{m.metadata_edit()}</Button>
 				</div>
 			{/if}
 		</div>

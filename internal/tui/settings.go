@@ -2,16 +2,71 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/javinizer/javinizer-go/internal/tui/localization"
 )
+
+// settingRowType discriminates the two kinds of settings rows.
+const (
+	settingRowToggle settingRowType = "toggle"
+	settingRowChoice settingRowType = "choice"
+)
+
+// Row index constants. Toggles occupy 0-9; the language choice row is 10.
+const (
+	settingLanguageRow = 10
+)
+
+type settingRowType string
+
+// settingRow describes one rendered settings row. Toggle rows read their
+// enabled state from settingsSnapshot; choice rows read their current value
+// from the separate language field and cycle through Choices.
+type settingRow struct {
+	index   int
+	nameKey string
+	descKey string
+	typ     settingRowType
+	choices []string
+}
+
+// supportedLanguages returns the locale choices offered in the TUI. Only
+// locales that ship a catalog should appear here; "auto" resolves the OS
+// locale preference list at localizer construction time.
+func supportedLanguages() []string {
+	return []string{"auto", "en", "ja", "zh-Hans", "zh-Hant"}
+}
+
+// languageDisplayName returns the self-name shown in the selector. Explicit
+// locales use their endonym (e.g. "English") so the picker stays usable when
+// the active locale is wrong; "auto" is localized since it is chrome.
+func (s *settingsView) languageDisplayName(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "", "auto":
+		return s.loc("TUISettingsLanguageAuto")
+	case "en":
+		return "English"
+	case "ja":
+		return "日本語"
+	case "zh-hans":
+		return "简体中文"
+	case "zh-hant":
+		return "繁體中文"
+	default:
+		return lang
+	}
+}
 
 // settingsView component
 type settingsView struct {
-	width    int
-	height   int
-	cursor   int
-	settings settingsSnapshot
+	width     int
+	height    int
+	cursor    int
+	settings  settingsSnapshot
+	language  string
+	localizer *localization.Localizer
 }
 
 func newSettingsView() *settingsView {
@@ -22,12 +77,25 @@ func newSettingsView() *settingsView {
 			OrganizeEnabled: true,
 			NFOEnabled:      true,
 		},
+		language: "auto",
 	}
 }
 
 func (s *settingsView) SetSize(width, height int) {
 	s.width = width
 	s.height = height
+}
+
+func (s *settingsView) SetLocalizer(l *localization.Localizer) {
+	s.localizer = l
+}
+
+//nolint:unparam // variadic for API consistency with other components
+func (s *settingsView) loc(id string, template ...map[string]any) string {
+	if s.localizer == nil {
+		return id
+	}
+	return s.localizer.Localize(id, template...)
 }
 
 func (s *settingsView) Init() tea.Cmd {
@@ -38,48 +106,87 @@ func (s *settingsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-func (s *settingsView) UpdateSettings(cursor int, settings settingsSnapshot) {
+func (s *settingsView) UpdateSettings(cursor int, settings settingsSnapshot, language string) {
 	s.cursor = cursor
 	s.settings = settings
+	s.language = language
+}
+
+// settingRows builds the ordered row list. Toggle rows mirror the legacy
+// 0-9 ordering so existing cursor indices and tests keep working; the
+// language choice row is appended at settingLanguageRow.
+func (s *settingsView) settingRows() []settingRow {
+	return []settingRow{
+		{0, "TUISettingDryRun", "TUISettingDryRunDesc", settingRowToggle, nil},
+		{1, "TUISettingForceUpdate", "TUISettingForceUpdateDesc", settingRowToggle, nil},
+		{2, "TUISettingForceRefresh", "TUISettingForceRefreshDesc", settingRowToggle, nil},
+		{3, "TUISettingMoveFiles", "TUISettingMoveFilesDesc", settingRowToggle, nil},
+		{4, "TUISettingScrape", "TUISettingScrapeDesc", settingRowToggle, nil},
+		{5, "TUISettingDownload", "TUISettingDownloadDesc", settingRowToggle, nil},
+		{6, "TUISettingExtrafanart", "TUISettingExtrafanartDesc", settingRowToggle, nil},
+		{7, "TUISettingOrganize", "TUISettingOrganizeDesc", settingRowToggle, nil},
+		{8, "TUISettingNFO", "TUISettingNFODesc", settingRowToggle, nil},
+		{9, "TUISettingUpdateMode", "TUISettingUpdateModeDesc", settingRowToggle, nil},
+		{settingLanguageRow, "TUISettingLanguage", "TUISettingLanguageDesc", settingRowChoice, supportedLanguages()},
+	}
 }
 
 func (s *settingsView) View() string {
-	view := title("Settings") + " " + dimmed("(space to toggle)") + "\n\n"
+	view := title(s.loc("TUISettingsTitle")) + " " +
+		dimmed(s.loc("TUISettingsToggleHint")) + "  " +
+		dimmed(s.loc("TUISettingsChoiceHint")) + "\n\n"
 
-	settings := []struct {
-		index   int
-		name    string
-		desc    string
-		enabled bool
-	}{
-		{0, "Dry Run", "Preview mode - don't make actual changes", s.settings.DryRun},
-		{1, "Force Update", "Replace existing files (images, NFO)", s.settings.ForceUpdate},
-		{2, "Force Refresh", "Clear DB cache and rescrape metadata", s.settings.ForceRefresh},
-		{3, "Move Files", "Move instead of copy (default: copy)", s.settings.MoveFiles},
-		{4, "Scrape Metadata", "Fetch metadata from JAV sources", s.settings.ScrapeEnabled},
-		{5, "Download Media", "Download covers, screenshots, trailers", s.settings.DownloadEnabled},
-		{6, "Download Extrafanart", "Download extrafanart/screenshots to subfolder", s.settings.DownloadExtrafanart},
-		{7, "Organize Files", "Move/copy files to organized structure", s.settings.OrganizeEnabled},
-		{8, "Generate NFO", "Create NFO files for media centers", s.settings.NFOEnabled},
-		{9, "Update Mode", "Only create/update metadata, don't move files", s.settings.UpdateMode},
-	}
-
-	for _, setting := range settings {
+	for _, row := range s.settingRows() {
 		cursorStr := "  "
-		if s.cursor == setting.index {
+		if s.cursor == row.index {
 			cursorStr = "> "
 		}
 
-		checkbox := "☐"
-		if setting.enabled {
-			checkbox = success("☑")
+		var value string
+		switch row.typ {
+		case settingRowToggle:
+			checkbox := "☐"
+			if s.toggleEnabled(row.index) {
+				checkbox = success("☑")
+			}
+			value = checkbox
+		case settingRowChoice:
+			value = fmt.Sprintf("‹ %s ›", highlight(s.languageDisplayName(s.language)))
 		}
 
-		view += fmt.Sprintf("%s%s %s\n", cursorStr, checkbox, helpKeyStyle.Render(setting.name))
-		view += fmt.Sprintf("   %s\n\n", dimmed(setting.desc))
+		view += fmt.Sprintf("%s%s %s\n", cursorStr, value, helpKeyStyle.Render(s.loc(row.nameKey)))
+		view += fmt.Sprintf("   %s\n\n", dimmed(s.loc(row.descKey)))
 	}
 
-	view += "\n" + dimmed("Changes take effect on next processing run")
+	view += "\n" + dimmed(s.loc("TUISettingChangesHint"))
 
 	return view
+}
+
+// toggleEnabled reports the boolean state for a toggle row index.
+func (s *settingsView) toggleEnabled(index int) bool {
+	switch index {
+	case 0:
+		return s.settings.DryRun
+	case 1:
+		return s.settings.ForceUpdate
+	case 2:
+		return s.settings.ForceRefresh
+	case 3:
+		return s.settings.MoveFiles
+	case 4:
+		return s.settings.ScrapeEnabled
+	case 5:
+		return s.settings.DownloadEnabled
+	case 6:
+		return s.settings.DownloadExtrafanart
+	case 7:
+		return s.settings.OrganizeEnabled
+	case 8:
+		return s.settings.NFOEnabled
+	case 9:
+		return s.settings.UpdateMode
+	default:
+		return false
+	}
 }

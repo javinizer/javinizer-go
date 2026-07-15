@@ -7,6 +7,7 @@
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import type { Theme } from '$lib/stores/theme.svelte';
 	import UpdateIndicator from '$lib/components/UpdateIndicator.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		authenticated?: boolean;
@@ -18,18 +19,18 @@
 
 	const themeStore = getThemeStore();
 
-	const navItems = [
-		{ href: '/browse', label: 'Scrape', icon: FolderOpen },
-		{ href: '/jobs', label: 'Jobs', icon: Activity },
-		{ href: '/actresses', label: 'Actresses', icon: Users },
-		{ href: '/genres', label: 'Genres', icon: Tags },
-		{ href: '/words', label: 'Words', icon: Type }
-	];
+	const navItems = $derived([
+		{ href: '/browse', label: m.nav_scrape(), icon: FolderOpen },
+		{ href: '/jobs', label: m.nav_jobs(), icon: Activity },
+		{ href: '/actresses', label: m.nav_actresses(), icon: Users },
+		{ href: '/genres', label: m.nav_genres(), icon: Tags },
+		{ href: '/words', label: m.nav_words(), icon: Type }
+	]);
 
-	const subMenuItems = [
-		{ href: '/logs', label: 'Logs', icon: FileText },
-		{ href: '/settings', label: 'Settings', icon: Settings }
-	];
+	const subMenuItems = $derived([
+		{ href: '/logs', label: m.nav_logs(), icon: FileText },
+		{ href: '/settings', label: m.nav_settings(), icon: Settings }
+	]);
 
 	let subMenuOpen = $state(false);
 
@@ -44,7 +45,7 @@
 	);
 
 	const themeLabel = $derived(
-		themeStore.current === 'dark' ? 'Dark' : themeStore.current === 'light' ? 'Light' : 'System'
+		themeStore.current === 'dark' ? m.nav_theme_dark() : themeStore.current === 'light' ? m.nav_theme_light() : m.nav_theme_system()
 	);
 
 	function toggleSubMenu() {
@@ -78,7 +79,7 @@
 			<!-- Logo -->
 			<a href="/" class="flex items-center gap-2 font-bold text-xl transition-opacity duration-200 hover:opacity-80">
 				<Film class="h-6 w-6 text-primary" />
-				<span>Javinizer</span>
+				<span>{m.nav_app_name()}</span>
 			</a>
 
 			<!-- Nav Links -->
@@ -135,7 +136,7 @@
 								class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all duration-150 hover:bg-accent hover:translate-x-0.5 w-full"
 							>
 								<ThemeIcon class="h-4 w-4" />
-								<span>{themeLabel}</span>
+							<span>{themeLabel}</span>
 							</button>
 
 							<div class="my-1 border-t"></div>
@@ -163,10 +164,10 @@
 						type="button"
 						class="flex items-center gap-2 px-4 py-2 rounded-md transition-all duration-200 hover:bg-accent hover:-translate-y-px hover:text-destructive"
 						onclick={() => onLogout?.()}
-						title="Logout"
+						title={m.nav_logout()}
 					>
 						<LogOut class="h-4 w-4" />
-						<span class="hidden md:inline">{username ? `${username} · Logout` : 'Logout'}</span>
+						<span class="hidden md:inline">{username ? `${username} · ${m.nav_logout()}` : m.nav_logout()}</span>
 					</button>
 				{/if}
 			</div>

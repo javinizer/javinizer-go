@@ -1,3 +1,4 @@
+	import * as m from '$lib/paraglide/messages';
 import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 import { untrack } from 'svelte';
 import { apiClient } from '$lib/api/client';
@@ -22,6 +23,7 @@ export interface SettingsStore {
 	reloading: boolean;
 	error: string | null;
 	inputClass: string;
+	selectClass: string;
 	configQuery: ReturnType<typeof createConfigQuery>;
 	reloadConfig: () => Promise<void>;
 	handleSave: () => void;
@@ -66,7 +68,12 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 	let flaresolverrConfigBaseline = $state<string>('');
 
 	const inputClass =
-		'w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-background';
+		'w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-background text-sm';
+
+	const selectClass =
+		inputClass +
+		' appearance-none bg-no-repeat bg-[right_0.5rem_center] bg-[length_1.25rem] pr-9 cursor-pointer' +
+		" bg-[url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E\")\"]";
 
 	const TEST_VALIDITY_MS = 5 * 60 * 1000;
 
@@ -258,9 +265,9 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 			if (data) {
 				applyConfigData(data);
 			}
-			toastStore.success('Configuration reloaded successfully', 4000);
+			toastStore.success(m.settings_config_reloaded_toast(), 4000);
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : 'Failed to reload configuration';
+			const msg = e instanceof Error ? e.message : m.settings_config_reload_failed();
 			toastStore.error(msg, 5000);
 		} finally {
 			reloading = false;
@@ -270,7 +277,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 	const saveConfigMutation = createMutation(() => ({
 		mutationFn: async () => {
 			if (!canSafelySave()) {
-				throw new Error('Test all modified proxy profiles before saving');
+				throw new Error(m.settings_test_proxy_before_saving());
 			}
 			const payload = {
 				...config,
@@ -284,7 +291,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 		onSuccess: () => {
 			deps.clearTestResults();
 			updateProxyConfigBaseline();
-			toastStore.success('Configuration saved successfully', 4000);
+			toastStore.success(m.settings_config_saved_toast(), 4000);
 			void queryClient.invalidateQueries({ queryKey: ['config'] }).then(() => {
 				const updated = queryClient.getQueryData<Config>(['config']);
 				if (updated && config) {
@@ -325,7 +332,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 			});
 			translationModelOptions = data.models || [];
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : 'Failed to fetch models';
+			const msg = e instanceof Error ? e.message : m.settings_models_fetch_failed();
 			toastStore.error(msg, 5000);
 			translationModelOptions = [];
 		} finally {
@@ -362,6 +369,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 			error = v;
 		},
 		inputClass,
+		selectClass,
 		get configQuery() {
 			return configQuery;
 		},

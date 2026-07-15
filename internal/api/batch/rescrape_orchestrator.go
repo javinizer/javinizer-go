@@ -160,14 +160,19 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 
 	progressFn := func(movieID string, result *contracts.BulkRescrapeMovieResult, progress float64) {
 		if o.broadcast != nil {
-			o.broadcast.BroadcastProgress(stampJobCounts(&ws.ProgressMessage{
+			msg := stampJobCounts(&ws.ProgressMessage{
 				JobID:    jobID,
 				FilePath: movieID,
 				Status:   ws.ProgressStatus(result.Status.String()),
 				Message:  fmt.Sprintf("Rescrape %s: %s", movieID, result.Status),
 				Error:    result.Error,
 				Progress: progress,
-			}, job))
+			}, job)
+			if code, args := rescrapeProgressCode(result, movieID); code != "" {
+				msg.MessageCode = code
+				msg.MessageArgs = args
+			}
+			o.broadcast.BroadcastProgress(msg)
 		}
 	}
 
@@ -215,4 +220,29 @@ type runtimeStateBroadcaster struct {
 
 func (b *runtimeStateBroadcaster) BroadcastProgress(msg *ws.ProgressMessage) {
 	broadcastProgress(b.rs, msg)
+}
+
+// rescrapeProgressCode maps a bulk-rescrape per-movie result to a stable
+// progress MessageCode (with structured args) so clients can localize the
+// outcome. Returns ("", nil) for non-terminal states so no code is stamped
+// and the English Message stays authoritative.
+func rescrapeProgressCode(result *contracts.BulkRescrapeMovieResult, movieID string) (string, map[string]any) {
+	if result == nil {
+		return "", nil
+	}
+	args := map[string]any{}
+	if movieID != "" {
+		args["movie_id"] = movieID
+	}
+	switch result.Status {
+	case models.RescrapeStatusSuccess:
+		return "SCRAPE_SUCCEEDED", args
+	case models.RescrapeStatusFailed:
+		if result.Error != "" {
+			args["error"] = result.Error
+		}
+		return "SCRAPE_FAILED", args
+	default:
+		return "", nil
+	}
 }

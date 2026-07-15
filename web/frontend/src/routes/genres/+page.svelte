@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { cubicOut } from 'svelte/easing';
 	import { fade, fly } from 'svelte/transition';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
@@ -62,11 +63,11 @@
 		onSuccess: (_data, { original, replacement }) => {
 			newOriginal = '';
 			newReplacement = '';
-			toastStore.success(`Genre replacement "${original}" → "${replacement}" added`, 3000);
+			toastStore.success(m.genres_added({ original, replacement }), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to add genre replacement', 4000);
+			toastStore.error(err.message || m.genres_add_failed(), 4000);
 		}
 	}));
 
@@ -74,22 +75,22 @@
 		mutationFn: (req: GenreReplacementUpdateRequest) => apiClient.updateGenreReplacement(req),
 		onSuccess: (_data, { original, replacement }) => {
 			editingId = null;
-			toastStore.success(`Genre replacement updated: "${original}" → "${replacement}"`, 3000);
+			toastStore.success(m.genres_updated({ original, replacement }), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to update genre replacement', 4000);
+			toastStore.error(err.message || m.genres_update_failed(), 4000);
 		}
 	}));
 
 		const deleteMutation = createMutation(() => ({
 		mutationFn: (id: number) => apiClient.deleteGenreReplacement(id),
 		onSuccess: () => {
-			toastStore.success('Genre replacement removed', 3000);
+			toastStore.success(m.genres_removed(), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to delete genre replacement', 4000);
+			toastStore.error(err.message || m.genres_delete_failed(), 4000);
 		}
 	}));
 
@@ -105,10 +106,10 @@
 			a.click();
 			document.body.removeChild(a);
 			URL.revokeObjectURL(url);
-			toastStore.success(`Exported ${data.length} genre replacement(s)`, 3000);
+			toastStore.success(m.genres_exported({ count: data.length }), 3000);
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to export genre replacements', 4000);
+			toastStore.error(err.message || m.genres_export_failed(), 4000);
 		}
 	}));
 
@@ -116,11 +117,11 @@
 		mutationFn: (payload: { replacements: { original: string; replacement: string }[] }) =>
 			apiClient.importGenreReplacements(payload),
 		onSuccess: (res: ImportResponse) => {
-			toastStore.success(`Import complete — Imported: ${res.imported}, Skipped: ${res.skipped}, Errors: ${res.errors}`, 5000);
+			toastStore.success(m.genres_import_complete({ imported: res.imported, skipped: res.skipped, errors: res.errors }), 5000);
 			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to import genre replacements', 4000);
+			toastStore.error(err.message || m.genres_import_failed(), 4000);
 		}
 	}));
 
@@ -132,7 +133,7 @@
 			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to ignore genre', 4000);
+			toastStore.error(err.message || m.genres_ignore_failed(), 4000);
 		}
 	}));
 
@@ -143,7 +144,7 @@
 			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to remove ignored genre', 4000);
+			toastStore.error(err.message || m.genres_remove_ignored_failed(), 4000);
 		}
 	}));
 
@@ -155,7 +156,7 @@
 			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to add favorite', 4000);
+			toastStore.error(err.message || m.genres_add_favorite_failed(), 4000);
 		}
 	}));
 
@@ -166,7 +167,7 @@
 			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to remove favorite', 4000);
+			toastStore.error(err.message || m.genres_remove_favorite_failed(), 4000);
 		}
 	}));
 
@@ -174,12 +175,12 @@
 		mutationFn: (genres: string[]) => apiClient.replaceFavoriteGenres({ genres }),
 		onSuccess: (res) => {
 			bulkFavorites = '';
-			toastStore.success(`Saved ${res.count} favorite genre(s)`, 3000);
+			toastStore.success(m.genres_favorites_saved({ count: res.count }), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['genre-favorites'] });
 			void queryClient.invalidateQueries({ queryKey: ['config'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to save favorites', 4000);
+			toastStore.error(err.message || m.genres_save_favorites_failed(), 4000);
 		}
 	}));
 
@@ -187,7 +188,7 @@
 		const original = newOriginal.trim();
 		const replacement = newReplacement.trim();
 		if (!original || !replacement) {
-			toastStore.error('Both original and replacement fields are required', 4000);
+			toastStore.error(m.genres_both_fields_required(), 4000);
 			return;
 		}
 		addMutation.mutate({ original, replacement });
@@ -212,7 +213,7 @@
 	function saveEdit(rep: GenreReplacement) {
 		const r = editReplacement.trim();
 		if (!r) {
-			toastStore.error('Both fields are required', 4000);
+			toastStore.error(m.genres_both_fields_required_edit(), 4000);
 			return;
 		}
 		updateMutation.mutate({ original: rep.original, replacement: r });
@@ -246,7 +247,7 @@
 	function handleAddIgnored() {
 		const genre = newIgnored.trim();
 		if (!genre) {
-			toastStore.error('Enter a genre to ignore', 3000);
+			toastStore.error(m.genres_enter_to_ignore(), 3000);
 			return;
 		}
 		addIgnoredMutation.mutate(genre);
@@ -255,7 +256,7 @@
 	function handleAddFavorite() {
 		const genre = newFavorite.trim();
 		if (!genre) {
-			toastStore.error('Enter a genre to favorite', 3000);
+			toastStore.error(m.genres_enter_to_favorite(), 3000);
 			return;
 		}
 		addFavoriteMutation.mutate(genre);
@@ -271,7 +272,7 @@
 	function handleBulkAddFavorites() {
 		const added = parseBulkGenres(bulkFavorites);
 		if (added.length === 0) {
-			toastStore.error('Enter one or more genres to add', 3000);
+			toastStore.error(m.genres_enter_genres_to_add(), 3000);
 			return;
 		}
 		const merged: string[] = [];
@@ -311,22 +312,22 @@
 		try {
 			const text = await file.text();
 			const parsed: GenreReplacement[] = JSON.parse(text);
-			if (!Array.isArray(parsed)) throw new Error('Expected a JSON array');
+			if (!Array.isArray(parsed)) throw new Error(m.genres_expected_json_array());
 
 			const replacements = parsed
 				.filter(r => r.original && r.original.trim())
 				.map(r => ({ original: r.original.trim(), replacement: (r.replacement || '').trim() }));
 
 			if (replacements.length === 0) {
-				toastStore.error('No valid replacements in file', 4000);
+				toastStore.error(m.genres_no_valid_in_file(), 4000);
 				return;
 			}
 
-			if (!confirm(`Import ${replacements.length} genre replacement(s)?`)) return;
+			if (!confirm(m.genres_import_confirm({ count: replacements.length }))) return;
 
 			importMutation.mutate({ replacements });
 		} catch (err) {
-			toastStore.error(`Invalid JSON file: ${err instanceof Error ? err.message : String(err)}`, 4000);
+			toastStore.error(m.genres_invalid_json({ error: err instanceof Error ? err.message : String(err) }), 4000);
 		}
 
 		target.value = '';
@@ -350,10 +351,10 @@
 				<div>
 					<div class="flex items-center gap-2">
 						<Tags class="h-6 w-6 text-primary" />
-						<h1 class="text-3xl font-bold">Genres</h1>
+						<h1 class="text-3xl font-bold">{m.genres_title()}</h1>
 					</div>
 					<p class="text-muted-foreground mt-1">
-						Manage ignored genres, favorites, and genre name replacements
+						{m.genres_subtitle()}
 					</p>
 				</div>
 			</div>
@@ -376,7 +377,7 @@
 					{:else}
 						<Download class="h-4 w-4 mr-1" />
 					{/if}
-					Export
+					{m.genres_export()}
 				</Button>
 				<Button
 					variant="outline"
@@ -389,7 +390,7 @@
 					{:else}
 						<Upload class="h-4 w-4 mr-1" />
 					{/if}
-					Import
+					{m.genres_import()}
 				</Button>
 			</div>
 		</div>
@@ -398,22 +399,22 @@
 			<Card class="p-5">
 				<div class="flex items-center gap-2 mb-1">
 					<Ban class="h-4 w-4 text-primary" />
-					<h2 class="text-lg font-semibold">Ignored Genres</h2>
-					<span class="text-xs text-muted-foreground">{ignoredGenres.length} excluded</span>
+					<h2 class="text-lg font-semibold">{m.genres_ignored_heading()}</h2>
+					<span class="text-xs text-muted-foreground">{m.genres_ignored_excluded({ count: ignoredGenres.length })}</span>
 				</div>
 				<p class="text-xs text-muted-foreground mb-3">
-					Genres in this list are excluded from scraping/processing. Takes effect on the next scrape.
+					{m.genres_ignored_desc()}
 				</p>
 				{#if ignoredError}
-					<p class="text-sm text-destructive mb-2">Failed to load: {ignoredError}</p>
+					<p class="text-sm text-destructive mb-2">{m.genres_load_failed({ error: ignoredError })}</p>
 				{:else if ignoredLoading}
 					<div class="flex items-center gap-2 text-sm text-muted-foreground">
-						<Loader2 class="h-4 w-4 animate-spin" /> Loading...
+						<Loader2 class="h-4 w-4 animate-spin" /> {m.genres_loading()}
 					</div>
 				{:else}
 					<div class="flex flex-wrap gap-2 mb-3">
 						{#if ignoredGenres.length === 0}
-							<span class="text-sm text-muted-foreground">No ignored genres. Add one below.</span>
+							<span class="text-sm text-muted-foreground">{m.genres_ignored_empty()}</span>
 						{:else}
 							{#each ignoredGenres as genre (genre)}
 								<span class="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 py-1 pl-3 pr-1 text-sm">
@@ -421,7 +422,7 @@
 									<button
 										type="button"
 										class="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-										title="Stop ignoring"
+										title={m.genres_stop_ignoring()}
 										onclick={() => deleteIgnoredMutation.mutate(genre)}
 										disabled={deleteIgnoredMutation.isPending}
 									>
@@ -435,7 +436,7 @@
 						<input
 							type="text"
 							bind:value={newIgnored}
-							placeholder="Genre to ignore..."
+							placeholder={m.genres_genre_to_ignore_ph()}
 							onkeydown={handleAddIgnoredKeydown}
 							class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 						/>
@@ -450,7 +451,7 @@
 							{:else}
 								<Plus class="h-4 w-4 mr-1" />
 							{/if}
-							Ignore
+							{m.genres_ignore()}
 						</Button>
 					</div>
 				{/if}
@@ -461,22 +462,22 @@
 			<Card class="p-5">
 				<div class="flex items-center gap-2 mb-1">
 					<Star class="h-4 w-4 text-primary" />
-					<h2 class="text-lg font-semibold">Favorite Genres</h2>
-					<span class="text-xs text-muted-foreground">{favoriteGenres.length} saved</span>
+					<h2 class="text-lg font-semibold">{m.genres_favorites_heading()}</h2>
+					<span class="text-xs text-muted-foreground">{m.genres_favorites_saved({ count: favoriteGenres.length })}</span>
 				</div>
 				<p class="text-xs text-muted-foreground mb-3">
-					Save a curated set of favorite genres here for later use. Favorites are a saved list you can reference when organizing your collection.
+					{m.genres_favorites_desc()}
 				</p>
 				{#if favoritesError}
-					<p class="text-sm text-destructive mb-2">Failed to load: {favoritesError}</p>
+					<p class="text-sm text-destructive mb-2">{m.genres_load_failed({ error: favoritesError })}</p>
 				{:else if favoritesLoading}
 					<div class="flex items-center gap-2 text-sm text-muted-foreground">
-						<Loader2 class="h-4 w-4 animate-spin" /> Loading...
+						<Loader2 class="h-4 w-4 animate-spin" /> {m.genres_loading()}
 					</div>
 				{:else}
 					<div class="flex flex-wrap gap-2 mb-3">
 						{#if favoriteGenres.length === 0}
-							<span class="text-sm text-muted-foreground">No favorites yet. Add one below or paste several at once.</span>
+							<span class="text-sm text-muted-foreground">{m.genres_favorites_empty()}</span>
 						{:else}
 							{#each favoriteGenres as genre (genre)}
 								<span class="inline-flex items-center gap-1 rounded-full border border-border bg-primary/10 py-1 pl-3 pr-1 text-sm">
@@ -484,7 +485,7 @@
 									<button
 										type="button"
 										class="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-										title="Remove favorite"
+										title={m.genres_remove_favorite()}
 										onclick={() => deleteFavoriteMutation.mutate(genre)}
 										disabled={deleteFavoriteMutation.isPending}
 									>
@@ -498,7 +499,7 @@
 						<input
 							type="text"
 							bind:value={newFavorite}
-							placeholder="Favorite genre..."
+							placeholder={m.genres_favorite_ph()}
 							onkeydown={handleAddFavoriteKeydown}
 							class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 						/>
@@ -513,14 +514,14 @@
 							{:else}
 								<Plus class="h-4 w-4 mr-1" />
 							{/if}
-							Add
+							{m.common_add()}
 						</Button>
 					</div>
 					<div class="rounded-md border border-border/60 bg-muted/20 p-3">
-						<p class="text-xs font-medium text-muted-foreground mb-2">Bulk add &amp; save</p>
+						<p class="text-xs font-medium text-muted-foreground mb-2">{m.genres_bulk_heading()}</p>
 						<textarea
 							bind:value={bulkFavorites}
-							placeholder="Paste genres separated by commas or new lines..."
+							placeholder={m.genres_bulk_ph()}
 							rows="2"
 							class="w-full rounded border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y"
 						></textarea>
@@ -536,7 +537,7 @@
 								{:else}
 									<Check class="h-4 w-4 mr-1" />
 								{/if}
-								Save Favorites
+								{m.genres_save_favorites()}
 							</Button>
 						</div>
 					</div>
@@ -547,32 +548,32 @@
 		{#if error}
 			<div in:fly|local={{ y: 8, duration: 180 }}>
 				<Card class="p-4 border-destructive bg-destructive/10 text-destructive">
-					Failed to load genre replacements: {error}
+					{m.genres_load_failed_replacements({ error })}
 				</Card>
 			</div>
 		{:else}
 			<div in:fly|local={{ y: 8, duration: 180, delay: 60 }}>
 				<Card class="p-5">
-					<p class="text-sm font-medium mb-3">Add a new genre replacement rule</p>
+					<p class="text-sm font-medium mb-3">{m.genres_add_rule_heading()}</p>
 					<div class="flex flex-col sm:flex-row items-start gap-3">
 						<div class="flex-1 w-full sm:w-auto">
-							<label for="genre-original" class="block text-xs font-medium text-muted-foreground mb-1">Original</label>
+							<label for="genre-original" class="block text-xs font-medium text-muted-foreground mb-1">{m.genres_original_label()}</label>
 							<input
 								id="genre-original"
 								type="text"
 								bind:value={newOriginal}
-								placeholder="e.g., HD"
+								placeholder={m.genres_original_ph()}
 								onkeydown={handleAddKeydown}
 								class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
 						</div>
 						<div class="flex-1 w-full sm:w-auto">
-							<label for="genre-replacement" class="block text-xs font-medium text-muted-foreground mb-1">Replacement</label>
+							<label for="genre-replacement" class="block text-xs font-medium text-muted-foreground mb-1">{m.genres_replacement_label()}</label>
 							<input
 								id="genre-replacement"
 								type="text"
 								bind:value={newReplacement}
-								placeholder="e.g., High Definition"
+								placeholder={m.genres_replacement_ph()}
 								onkeydown={handleAddKeydown}
 								class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
@@ -589,7 +590,7 @@
 								{:else}
 									<Plus class="h-4 w-4 mr-1" />
 								{/if}
-								Add
+								{m.common_add()}
 							</Button>
 						</div>
 					</div>
@@ -600,11 +601,11 @@
 				{#if loading}
 					<Card class="p-8 text-center text-muted-foreground">
 						<Loader2 class="h-5 w-5 animate-spin mx-auto mb-2" />
-						Loading genre replacements...
+						{m.genres_loading_replacements()}
 					</Card>
 				{:else if replacements.length === 0}
 					<Card class="p-8 text-center">
-						<p class="text-muted-foreground">No genre replacements configured yet. Add one above.</p>
+						<p class="text-muted-foreground">{m.genres_none_configured()}</p>
 					</Card>
 				{:else}
 					<div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-3">
@@ -613,7 +614,7 @@
 							<input
 								type="text"
 								bind:value={searchQuery}
-								placeholder="Search by original or replacement..."
+								placeholder={m.genres_search_ph()}
 								class="w-full pl-9 pr-8 rounded-md border border-input bg-background py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
 							{#if searchQuery}
@@ -621,7 +622,7 @@
 									type="button"
 									class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
 									onclick={clearSearch}
-									title="Clear search"
+									title={m.genres_clear_search()}
 								>
 									<X class="h-3.5 w-3.5" />
 								</button>
@@ -631,7 +632,7 @@
 							type="button"
 							class="inline-flex items-center gap-1 px-2.5 py-2 text-sm border border-input rounded-md bg-background hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
 							onclick={toggleSort}
-							title="Toggle sort order"
+							title={m.genres_toggle_sort()}
 						>
 							{#if sortDirection === 'asc'}
 								<ArrowDownUp class="h-4 w-4" />
@@ -646,15 +647,15 @@
 						<div class="relative" style="max-height: 560px; overflow-y: auto;">
 							<div class="sticky top-0 z-10">
 								<div class="grid grid-cols-[1fr_1fr_auto] gap-0 text-sm py-3 px-4 font-medium text-muted-foreground border-b border-border bg-card/95 backdrop-blur">
-									<div>Original</div>
-									<div>Replacement</div>
-									<div class="w-20 text-center">Actions</div>
+									<div>{m.genres_col_original()}</div>
+									<div>{m.genres_col_replacement()}</div>
+									<div class="w-20 text-center">{m.genres_col_actions()}</div>
 								</div>
 							</div>
 							<div class="min-h-0">
 								{#if filteredAndSorted.length === 0 && searchQuery.trim()}
 									<div class="py-12 text-center text-muted-foreground text-sm">
-										No replacements match "{searchQuery}"
+										{m.genres_no_match_search({ query: searchQuery })}
 									</div>
 								{:else}
 									{#each filteredAndSorted as rep (rep.id)}
@@ -687,7 +688,7 @@
 															{:else}
 																<Check class="h-3 w-3" />
 															{/if}
-															Save
+															{m.genres_save()}
 														</button>
 														<button
 															type="button"
@@ -695,7 +696,7 @@
 															onclick={cancelEdit}
 														>
 															<X class="h-3 w-3" />
-															Cancel
+															{m.common_cancel()}
 														</button>
 													</div>
 												</div>
@@ -711,7 +712,7 @@
 													<button
 														type="button"
 														class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-														title="Edit"
+														title={m.genres_edit()}
 														onclick={() => startEdit(rep)}
 													>
 														<Pencil class="h-4 w-4" />
@@ -719,7 +720,7 @@
 													<button
 														type="button"
 														class="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
-														title="Delete"
+														title={m.genres_delete()}
 																				onclick={() => handleDelete(rep.id)}
 													>
 														<Trash2 class="h-4 w-4" />
@@ -735,11 +736,11 @@
 
 					{#if searchQuery.trim()}
 						<p class="text-xs text-muted-foreground pt-1">
-							Showing {filteredAndSorted.length} of {replacements.length} replacements
+							{m.genres_showing_of({ shown: filteredAndSorted.length, total: replacements.length })}
 						</p>
 					{:else}
 						<p class="text-xs text-muted-foreground pt-1">
-							{replacements.length} replacement{replacements.length !== 1 ? 's' : ''} configured
+							{m.genres_replacements_configured({ count: replacements.length })}
 						</p>
 					{/if}
 				{/if}
@@ -747,7 +748,7 @@
 
 			<div class="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
 				<p class="text-xs text-muted-foreground">
-					Replacements take effect on the next scrape. Existing movies are not retroactively updated.
+					{m.genres_next_scrape_note()}
 				</p>
 			</div>
 		{/if}

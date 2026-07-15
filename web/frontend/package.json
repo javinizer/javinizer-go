@@ -7,7 +7,7 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
-		"prepare": "svelte-kit sync || echo ''",
+		"prepare": "svelte-kit sync || echo '' && npx @inlang/paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run",
@@ -40,6 +40,8 @@
 		"vitest": "^4.1.2"
 	},
 	"dependencies": {
+		"@inlang/paraglide-js": "2.21.0",
+		"@inlang/plugin-message-format": "4.4.0",
 		"@tanstack/svelte-query": "^6.1.24",
 		"clsx": "^2.1.1",
 		"fast-deep-equal": "^3.1.3",
