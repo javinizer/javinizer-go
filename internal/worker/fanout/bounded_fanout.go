@@ -1,4 +1,4 @@
-package worker
+package fanout
 
 import (
 	"context"
@@ -6,18 +6,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// boundedFanOut dispatches work items across a bounded errgroup, collecting
+// BoundedFanOut dispatches work items across a bounded errgroup, collecting
 // outcomes via a buffered channel. The caller owns pre-loop setup (building
 // commands, filtering) and post-drain aggregation (trackResults, lifecycle marks).
 //
 // The per-item work function runs under panic recovery at the caller's site
-// (applyFile/scrapeFile already wrap with withFileRecovery) — boundedFanOut
+// (applyFile/scrapeFile already wrap with withFileRecovery) — BoundedFanOut
 // itself does NOT add recovery, to keep the seam thin.
 //
 // Cancellation: when ctx is cancelled, eg.Wait() drains remaining goroutines
 // and closes the outcome channel. Callers should check ctx.Err() after
-// boundedFanOut returns and call lifecycle.MarkCancelled() if needed.
-func boundedFanOut[T any, I any](
+// BoundedFanOut returns and call lifecycle.MarkCancelled() if needed.
+func BoundedFanOut[T any, I any](
 	ctx context.Context,
 	maxWorkers int,
 	items []I,
@@ -29,9 +29,8 @@ func boundedFanOut[T any, I any](
 	outcomeCh := make(chan T, len(items))
 
 	for _, item := range items {
-		it := item // capture loop variable
 		eg.Go(func() error {
-			outcome := work(egCtx, it)
+			outcome := work(egCtx, item)
 			outcomeCh <- outcome
 			return nil
 		})

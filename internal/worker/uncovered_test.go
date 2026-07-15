@@ -244,29 +244,7 @@ func TestNewApplyPhaseUncovered(t *testing.T) {
 	require.NotNil(t, p)
 }
 
-// --- fs_case.go uncovered ---
-
-func TestFSCaseCache_ResetUncovered(t *testing.T) {
-	cache := NewFSCaseCache(nil)
-	cache.cache["/test"] = true
-	cache.Reset()
-	assert.Empty(t, cache.cache)
-}
-
-func TestFSCaseCache_AcquireProbeLockUncovered(t *testing.T) {
-	cache := NewFSCaseCache(nil)
-	mu := cache.acquireProbeLock("/test")
-	require.NotNil(t, mu)
-	mu2 := cache.acquireProbeLock("/test")
-	assert.Same(t, mu, mu2, "same path should return same mutex")
-}
-
-func TestFSCaseCache_IsCaseInsensitive_CachedUncovered(t *testing.T) {
-	cache := NewFSCaseCache(nil)
-	cache.cache["/cached_path"] = true
-	result := cache.IsCaseInsensitive("/cached_path")
-	assert.True(t, result)
-}
+// --- fs_case.go uncovered (internals moved to fscase package) ---
 
 // --- phase_interfaces.go uncovered ---
 

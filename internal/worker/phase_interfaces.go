@@ -7,6 +7,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/poster"
+	"github.com/javinizer/javinizer-go/internal/worker/fscase"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
@@ -153,7 +154,7 @@ type rescrapePhaseInputs struct {
 	Finder      resultstore.FileFinder // for FindFileForMovieID and GetRevision
 	Fs          afero.Fs               // for poster cleanup
 	TempDir     string                 // for poster cleanup paths
-	FsCaseCache *FSCaseCache           // for orphaned poster detection
+	FsCaseCache *fscase.FSCaseCache    // for orphaned poster detection
 }
 
 // Compile-time assertions that concrete types satisfy the interfaces.

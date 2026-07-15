@@ -1,8 +1,9 @@
-package worker
+package fscase
 
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"path/filepath"
 	"sync"
 
@@ -118,12 +119,16 @@ func (c *FSCaseCache) isCaseInsensitiveFS(path string) bool {
 	return string(content) == "test2"
 }
 
+// randReader is the entropy source for randomProbeToken. Defaults to
+// crypto/rand.Reader; tests may swap it to trigger the fallback path.
+var randReader io.Reader = rand.Reader
+
 // randomProbeToken returns a short hex token for unique probe filenames.
 // Uses crypto/rand so concurrent probes from different BatchJobs don't collide.
+// In the extremely unlikely event that crypto/rand fails, returns "fallback".
 func randomProbeToken() string {
 	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback: extremely unlikely, but never panic on probe naming.
+	if _, err := io.ReadFull(randReader, b); err != nil {
 		return "fallback"
 	}
 	return hex.EncodeToString(b)

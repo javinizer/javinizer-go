@@ -1237,31 +1237,7 @@ func TestJobStore_PersistJobByID_NotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// fs_case.go: isCaseInsensitiveFS with MemMapFs
 // ---------------------------------------------------------------------------
-
-func TestFSCaseCache_IsCaseInsensitiveFS_MemMapFs(t *testing.T) {
-	t.Run("MemMapFs is case-sensitive (returns false)", func(t *testing.T) {
-		// MemMapFs is case-sensitive by default
-		cache := NewFSCaseCache(afero.NewMemMapFs())
-		tmpDir := t.TempDir()
-
-		// Create the temp dir in the MemMapFs
-		cache.fs.MkdirAll(tmpDir, 0755)
-
-		result := cache.isCaseInsensitiveFS(tmpDir)
-		assert.False(t, result, "MemMapFs should be case-sensitive")
-	})
-}
-
-func TestFSCaseCache_IsCaseInsensitive_NilFS(t *testing.T) {
-	cache := NewFSCaseCache(nil)
-	tmpDir := t.TempDir()
-
-	// This will use the OS filesystem
-	result := cache.IsCaseInsensitive(tmpDir)
-	_ = result // just verifying it doesn't panic
-}
 
 // ---------------------------------------------------------------------------
 // BatchJob Run method

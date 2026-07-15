@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/javinizer/javinizer-go/internal/worker/fscase"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 )
@@ -298,7 +299,7 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 	}
 	if s.fs != nil {
 		job.fs = s.fs
-		job.fsCaseCache = NewFSCaseCache(s.fs)
+		job.fsCaseCache = fscase.NewFSCaseCache(s.fs)
 	}
 	if s.templateEngine != nil {
 		job.templateEngine = s.templateEngine

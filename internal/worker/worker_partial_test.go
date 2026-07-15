@@ -144,12 +144,3 @@ func TestMovieResult_Clone_WithMovie_Partial(t *testing.T) {
 }
 
 // --- FSCaseCache: isCaseInsensitiveFS with afero mem ---
-
-func TestFSCaseCache_IsCaseInsensitiveFS_MemMapFs_Partial(t *testing.T) {
-	// Using an afero MemMapFs, which IS case-sensitive
-	cache := NewFSCaseCache(nil)
-	// This will use OS filesystem, which on macOS is case-insensitive
-	// and on Linux is case-sensitive. Just exercise the path.
-	result := cache.IsCaseInsensitive("/tmp")
-	_ = result // result varies by OS
-}

@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/fanout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
@@ -64,7 +65,7 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 		}
 	}()
 
-	outcomes := boundedFanOut(ctx, inputs.Concurrency.MaxWorkers, files,
+	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, files,
 		func(egCtx context.Context, filePath string) scrapeFileOutcome {
 			// scrapeFile does NOT persist to the database: buildScrapeCmd sets
 			// cmd.SkipPersist=true when inputs.MovieRepo is wired, so the workflow's

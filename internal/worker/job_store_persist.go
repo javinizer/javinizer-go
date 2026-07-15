@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/fscase"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
@@ -156,7 +157,7 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		rescrapePhase:       NewRescrapePhase(),
 		scrapePhase:         NewScrapePhase(),
 		applyPhase:          NewApplyPhase(),
-		fsCaseCache:         NewFSCaseCache(s.fs),
+		fsCaseCache:         fscase.NewFSCaseCache(s.fs),
 	}
 
 	// Step 3: Wire shared dependencies

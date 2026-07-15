@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/fscase"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,7 +124,7 @@ func TestCleanupPosterPaths_MemMapFs_SkipsNonExistent(t *testing.T) {
 func TestOrphanedPosterPaths_BuildsCorrectPaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	jobID := "test-job-456"
-	cache := NewFSCaseCache(afero.NewMemMapFs())
+	cache := fscase.NewFSCaseCache(afero.NewMemMapFs())
 
 	paths := OrphanedPosterPaths([]string{"OLD-001"}, "NEW-002", tmpDir, models.JobID(jobID), cache)
 
@@ -135,7 +136,7 @@ func TestOrphanedPosterPaths_BuildsCorrectPaths(t *testing.T) {
 func TestOrphanedPosterPaths_MultipleOrphanedIDs(t *testing.T) {
 	tmpDir := t.TempDir()
 	jobID := "test-job-789"
-	cache := NewFSCaseCache(afero.NewMemMapFs())
+	cache := fscase.NewFSCaseCache(afero.NewMemMapFs())
 
 	paths := OrphanedPosterPaths([]string{"OLD-001", "OLD-002"}, "NEW-003", tmpDir, models.JobID(jobID), cache)
 
@@ -147,7 +148,7 @@ func TestOrphanedPosterPaths_MultipleOrphanedIDs(t *testing.T) {
 }
 
 func TestOrphanedPosterPaths_CaseOnlyChangeSkipsOnCaseInsensitiveFS(t *testing.T) {
-	cache := NewFSCaseCache(afero.NewMemMapFs())
+	cache := fscase.NewFSCaseCache(afero.NewMemMapFs())
 	tmpDir := t.TempDir()
 	jobID := "test-job-case"
 
@@ -165,7 +166,7 @@ func TestOrphanedPosterPaths_CaseOnlyChangeSkipsOnCaseInsensitiveFS(t *testing.T
 }
 
 func TestOrphanedPosterPaths_EmptyOrphanedIDs(t *testing.T) {
-	cache := NewFSCaseCache(afero.NewMemMapFs())
+	cache := fscase.NewFSCaseCache(afero.NewMemMapFs())
 	paths := OrphanedPosterPaths(nil, "NEW-001", "/tmp", models.JobID("job-1"), cache)
 	assert.Empty(t, paths, "empty orphaned IDs should produce no paths")
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/fscase"
 	"github.com/spf13/afero"
 )
 
@@ -43,7 +44,7 @@ func CleanupMoviePosters(fs afero.Fs, tempDir string, jobID models.JobID, movie 
 // On case-insensitive filesystems, a case-only ID change is not treated as orphaned
 // (the files are the same), so those paths are skipped.
 // The cache parameter provides per-job filesystem case-sensitivity probing.
-func OrphanedPosterPaths(orphanedIDs []string, newMovieID string, tempDir string, jobID models.JobID, cache *FSCaseCache) []string {
+func OrphanedPosterPaths(orphanedIDs []string, newMovieID string, tempDir string, jobID models.JobID, cache *fscase.FSCaseCache) []string {
 	var paths []string
 	for _, id := range orphanedIDs {
 		if strings.EqualFold(id, newMovieID) {

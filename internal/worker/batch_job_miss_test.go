@@ -94,7 +94,7 @@ func TestFindFileForMovieID_Miss_SuffixOrder(t *testing.T) {
 
 	result, err := job.results.FindFileForMovieID("SUFF-001")
 	require.NoError(t, err)
-	// Just verify it returns one of the files (sorting behavior is covered by suffixOrder unit tests)
+	// Just verify it returns one of the files (sorting behavior uses sort.Strings in resultstore)
 	assert.Contains(t, []string{"file1.mp4", "file2.mp4"}, result.FilePath)
 }
 
