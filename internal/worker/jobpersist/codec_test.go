@@ -131,3 +131,72 @@ func TestDecode_OldMovieResultFormat(t *testing.T) {
 	require.Contains(t, snapshot.Results, "file1.mp4")
 	assert.Equal(t, "OLD-001", snapshot.Results["file1.mp4"].Movie.ID)
 }
+
+func TestDecode_AllColumnsFail(t *testing.T) {
+	// All 4 JSON columns have invalid JSON
+	dbJob := &models.Job{
+		ID:            "bad-job",
+		Files:         "not json",
+		Results:       "not json",
+		Excluded:      "not json",
+		FileMatchInfo: "not json",
+	}
+	snapshot, errs := Decode(dbJob)
+	// Snapshot should still have scalar fields
+	assert.Equal(t, "bad-job", snapshot.ID)
+	assert.NotEmpty(t, errs, "should have errors for all 4 failed columns")
+	// Maps should be empty (initialized, not nil)
+	assert.NotNil(t, snapshot.Files)
+	assert.NotNil(t, snapshot.Results)
+	assert.NotNil(t, snapshot.Provenance)
+	assert.NotNil(t, snapshot.Excluded)
+	assert.NotNil(t, snapshot.FileMatchInfo)
+}
+
+func TestDecode_PartialFailure(t *testing.T) {
+	// Some columns valid, some invalid
+	dbJob := &models.Job{
+		ID:            "partial-job",
+		Files:         `["file1.mp4"]`,
+		Results:       "not json",
+		Excluded:      `{"file1.mp4":true}`,
+		FileMatchInfo: "not json",
+	}
+	snapshot, errs := Decode(dbJob)
+	assert.Equal(t, "partial-job", snapshot.ID)
+	assert.Equal(t, []string{"file1.mp4"}, snapshot.Files)
+	assert.True(t, snapshot.Excluded["file1.mp4"])
+	assert.NotEmpty(t, errs, "should have errors for Results and FileMatchInfo")
+}
+
+func TestDecode_EmptyDBJob(t *testing.T) {
+	dbJob := &models.Job{ID: "empty-job"}
+	snapshot, errs := Decode(dbJob)
+	assert.Equal(t, "empty-job", snapshot.ID)
+	assert.Empty(t, errs, "empty columns should produce no errors")
+	assert.Empty(t, snapshot.Files)
+	assert.Empty(t, snapshot.Results)
+}
+
+func TestEncode_ProvenanceOmitEmpty(t *testing.T) {
+	snapshot := Snapshot{
+		ID:         "omit-test",
+		Results:    map[string]*resultstore.MovieResult{},
+		Provenance: nil,
+	}
+	dbJob, err := Encode(snapshot)
+	require.NoError(t, err)
+	assert.NotContains(t, dbJob.Results, "provenance", "provenance should be omitted when nil")
+}
+
+func TestDecode_OldFormatWithProvenance(t *testing.T) {
+	// Old MovieResult format with field_sources and actress_sources
+	raw := `{"file1.mp4": {"file_match_info": {"path": "file1.mp4", "movie_id": "ABC-001"}, "movie": {"id": "ABC-001"}, "revision": 1, "status": "completed", "result_id": "r1", "field_sources": {"title": "dmm"}, "actress_sources": {"Actress A": "dmm"}}}`
+	parsed, err := ParseResultsJSON([]byte(raw))
+	require.NoError(t, err)
+	require.Len(t, parsed.Results, 1)
+	require.Len(t, parsed.Provenance, 1)
+	prov := parsed.Provenance["file1.mp4"]
+	assert.Equal(t, "dmm", prov.FieldSources["title"])
+	assert.Equal(t, "dmm", prov.ActressSources["Actress A"])
+}

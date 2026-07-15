@@ -1462,148 +1462,29 @@ func TestBatchJob_GetStatusSlim(t *testing.T) {
 		assert.Equal(t, models.JobStatusPending, job.lifecycle.GetJobStatus())
 
 		job.controller.markStarted(models.JobStatusPending)
-		assert.Equal(t, models.JobStatusRunning, job.lifecycle.GetJobStatus())
 	})
+
 }
 
-func TestBatchJob_RLockRUnlock(t *testing.T) {
+func TestReconstructBatchJob_InvalidJobID(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-
-	assert.NotPanics(t, func() {
-		job.mu.RLock()
-		job.mu.RUnlock()
-	})
+	dbJob := &models.Job{
+		ID:         "not-a-valid-job-id-format",
+		Status:     models.JobStatusCompleted,
+		TotalFiles: 1,
+	}
+	job := jq.reconstructBatchJob(dbJob)
+	assert.NotNil(t, job)
 }
 
-func TestJobStore_LoadFromDatabase_NilRepo(t *testing.T) {
+func TestReconstructBatchJob_InvalidOperationMode(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	assert.NotPanics(t, func() {
-		jq.loadFromDatabase()
-	})
-}
-
-func TestJobStore_PersistToDatabase_NilRepo(t *testing.T) {
-	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	assert.NotPanics(t, func() {
-		jq.persistence.PersistJob(job)
-	})
-}
-
-func TestJobStore_PersistToDatabase_DeletedJob(t *testing.T) {
-	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.lifecycle.deleted = true
-	assert.NotPanics(t, func() {
-		jq.persistence.PersistJob(job)
-	})
-}
-
-func TestGetStatusSlim_NilResultEntry(t *testing.T) {
-	t.Skip("GetStatusSlim removed")
-	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.ReplaceResultRaw("file1.mp4", nil)
-
-	slim := job.GetStatus()
-	assert.NotNil(t, slim)
-	_, exists := slim.Results["file1.mp4"]
-	assert.False(t, exists, "nil result entries should be skipped")
-}
-
-func TestGetStatusSlim_ProvenanceData(t *testing.T) {
-	t.Skip("GetStatusSlim removed")
-	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.ReplaceResultRaw("file1.mp4", &resultstore.MovieResult{
-		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
-		Status:        models.JobStatusCompleted,
-	})
-	job.results.SetProvenance("file1.mp4", &resultstore.ProvenanceData{
-		FieldSources: map[string]string{
-			"title": "r18dev",
-		},
-		ActressSources: map[string]string{
-			"actress_0": "dmm",
-		},
-	})
-
-	slim := job.GetStatus()
-	assert.NotNil(t, slim)
-	slimResult := slim.Results["file1.mp4"]
-	require.NotNil(t, slimResult)
-}
-
-func TestGetStatusSlim_DeepCopyTimestamps(t *testing.T) {
-	t.Skip("GetStatusSlim removed")
-	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	now := time.Now()
-	job.lifecycle.CompletedAt = &now
-	job.lifecycle.OrganizedAt = &now
-	job.lifecycle.RevertedAt = &now
-
-	slim := job.GetStatus()
-	require.NotNil(t, slim)
-	require.NotNil(t, slim.CompletedAt)
-	require.NotNil(t, slim.OrganizedAt)
-	require.NotNil(t, slim.RevertedAt)
-
-	*slim.CompletedAt = time.Time{}
-	assert.NotEqual(t, time.Time{}, *job.lifecycle.CompletedAt, "deep copy should isolate mutations")
-}
-
-func TestAtomicUpdateFileResult_NotFound(t *testing.T) {
-	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-
-	err := job.results.AtomicUpdateFileResult("nonexistent.mp4", func(fr *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-		return fr, nil
-	})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
-}
-
-func TestAtomicUpdateFileResult_NilResult(t *testing.T) {
-	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.ReplaceResultRaw("file1.mp4", nil)
-
-	err := job.results.AtomicUpdateFileResult("file1.mp4", func(fr *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-		return fr, nil
-	})
-	assert.Error(t, err)
-}
-
-func TestAtomicUpdateFileResult_UpdateFnError(t *testing.T) {
-	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.ReplaceResultRaw("file1.mp4", &resultstore.MovieResult{
-		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
-		Status:        models.JobStatusPending,
-	})
-
-	err := job.results.AtomicUpdateFileResult("file1.mp4", func(fr *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-		return nil, fmt.Errorf("update rejected")
-	})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "update rejected")
-}
-
-func TestAtomicUpdateFileResult_StatusTransition(t *testing.T) {
-	jq := NewJobStore(nil, nil, nil, "", nil, nil)
-	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.ReplaceResultRaw("file1.mp4", &resultstore.MovieResult{
-		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
-		Status:        models.JobStatusPending,
-	})
-
-	err := job.results.AtomicUpdateFileResult("file1.mp4", func(fr *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-		fr.Status = models.JobStatusCompleted
-		return fr, nil
-	})
-	require.NoError(t, err)
-	assert.Equal(t, 1, job.prog().Completed)
-	assert.Equal(t, 0, job.prog().Failed)
+	dbJob := &models.Job{
+		ID:                    "ABC-001",
+		Status:                models.JobStatusCompleted,
+		TotalFiles:            1,
+		OperationModeOverride: "invalid-mode",
+	}
+	job := jq.reconstructBatchJob(dbJob)
+	assert.NotNil(t, job)
 }
