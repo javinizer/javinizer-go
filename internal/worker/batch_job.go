@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/javinizer/javinizer-go/internal/worker/fscase"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
@@ -127,7 +128,7 @@ type BatchJob struct {
 	posterEditor  *PosterEditor  `json:"-"` // Poster mutation delegation (extracted from BatchJob)
 	controller    *jobController `json:"-"` // Phase-launch orchestration (DEEP-1: owns StartScrape/StartApply/Rescrape)
 
-	fsCaseCache *FSCaseCache `json:"-"` // Per-job filesystem case-sensitivity cache
+	fsCaseCache *fscase.FSCaseCache `json:"-"` // Per-job filesystem case-sensitivity cache
 
 	adapters     *jobAdapters `json:"-"` // Cached adapters — built once, used by JobStore methods (D-6)
 	adaptersOnce sync.Once    `json:"-"` // Guards adapters lazy-init against concurrent JobStore RLock callers
@@ -155,7 +156,7 @@ func newBatchJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 		rescrapePhase:       NewRescrapePhase(),
 		scrapePhase:         NewScrapePhase(),
 		applyPhase:          NewApplyPhase(),
-		fsCaseCache:         NewFSCaseCache(nil),
+		fsCaseCache:         fscase.NewFSCaseCache(nil),
 	}
 
 	// Per P-2: wireJobDeps centralizes attachLifecycleCallback, posterEditor,

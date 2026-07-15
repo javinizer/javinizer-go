@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
+	"github.com/javinizer/javinizer-go/internal/worker/fanout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
@@ -92,7 +93,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 
 	total := len(items)
 	var processed int64
-	outcomes := boundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
+	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
 			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, inputs, cfg)
 			// Report per-file progress so the frontend bar advances 0→100 across

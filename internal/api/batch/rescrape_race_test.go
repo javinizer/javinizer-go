@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/fscase"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -722,7 +723,7 @@ func TestRescrapeBatchMovie_PosterCleanup(t *testing.T) {
 func TestRescrapeBatchMovie_OverlappingRescrape_CaseInsensitiveFS(t *testing.T) {
 	// Skip on case-sensitive filesystems (Linux typically uses ext4 which is case-sensitive)
 	tempDir := t.TempDir()
-	fsCache := worker.NewFSCaseCache(afero.NewMemMapFs())
+	fsCache := fscase.NewFSCaseCache(afero.NewMemMapFs())
 	if !fsCache.IsCaseInsensitive(tempDir) {
 		t.Skip("Skipping on case-sensitive filesystem - test is for case-insensitive FS behavior")
 	}
