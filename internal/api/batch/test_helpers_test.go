@@ -22,6 +22,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -211,7 +212,7 @@ func testStartOrganizeApply(ctx context.Context, job *worker.BatchJob, jobStore 
 // This replaces the deleted UpdateFileResult method — test code sets
 // Results directly and adjusts counters manually, with mutex protection.
 // If the result does not have a ResultID, one is auto-generated from the MovieID.
-func setJobResult(job *worker.BatchJob, filePath string, result *worker.MovieResult) {
+func setJobResult(job *worker.BatchJob, filePath string, result *resultstore.MovieResult) {
 	if result.ResultID == "" {
 		result.ResultID = result.FileMatchInfo.MovieID
 	}

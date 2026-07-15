@@ -1,4 +1,4 @@
-package worker
+package resultstore
 
 import (
 	"fmt"
@@ -104,7 +104,11 @@ func (ru *resultUpdater) AtomicUpdateFileResult(filePath string, updateFn func(*
 			ru.Failed++
 		}
 	}
-	stateUpdateProgressFromCounters(ru.resultTrackerState)
+	if ru.Excluded[filePath] {
+		stateRecalculateProgress(ru.resultTrackerState)
+	} else {
+		stateUpdateProgressFromCounters(ru.resultTrackerState)
+	}
 	ru.Results[filePath] = updated
 	return nil
 }
@@ -200,21 +204,4 @@ func (ru *resultUpdater) CommitResult(filePath string, result *MovieResult, expe
 	ru.Results[filePath] = result
 	stateRecalculateProgress(ru.resultTrackerState)
 	return nil
-}
-
-// setFileMatchInfo is the unexported alias for SetFileMatchInfoMap.
-// Used internally by jobController.
-func (ru *resultUpdater) setFileMatchInfo(info map[string]models.FileMatchInfo) {
-	ru.SetFileMatchInfoMap(info)
-}
-
-// recalculateProgress recomputes Completed/Failed/Progress from the Results map.
-func (ru *resultUpdater) recalculateProgress() {
-	stateRecalculateProgress(ru.resultTrackerState)
-}
-
-// rebuildMovieIDIndexLocked rebuilds the movie ID → file path index.
-// The caller MUST be holding the lock when calling this method.
-func (ru *resultUpdater) rebuildMovieIDIndexLocked() {
-	stateRebuildMovieIDIndexLocked(ru.resultTrackerState)
 }

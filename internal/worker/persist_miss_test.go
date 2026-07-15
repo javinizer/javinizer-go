@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,12 +31,12 @@ func TestSnapshotForPersist_DeletedJob_Persist(t *testing.T) {
 func TestSnapshotForPersist_AllFieldsPopulated(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ABC-001"},
 	})
-	job.results.UpdateFileResult("file2.mp4", &MovieResult{
+	job.results.UpdateFileResult("file2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4", MovieID: "DEF-002"},
 		Status:        models.JobStatusFailed,
 		Error:         "timeout",
@@ -93,8 +94,8 @@ func TestReconstructBatchJob_LegacyFormat(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.Contains(t, result.results.Results, "file1.mp4")
-	mr := result.results.Results["file1.mp4"]
+	assert.Contains(t, result.snap().Results, "file1.mp4")
+	mr := result.snap().Results["file1.mp4"]
 	assert.Equal(t, "LEG-001", mr.FileMatchInfo.MovieID)
 	require.NotNil(t, mr.Movie)
 	assert.Equal(t, "LEG-001", mr.Movie.ID)
@@ -140,14 +141,14 @@ func TestReconstructBatchJob_OldFormat(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.Contains(t, result.results.Results, "file1.mp4")
-	mr := result.results.Results["file1.mp4"]
+	assert.Contains(t, result.snap().Results, "file1.mp4")
+	mr := result.snap().Results["file1.mp4"]
 	assert.Equal(t, "OLD-001", mr.FileMatchInfo.MovieID)
 	require.NotNil(t, mr.Movie)
 	assert.Equal(t, "OLD-001", mr.Movie.ID)
 	// Provenance should be extracted
-	assert.NotNil(t, result.results.Provenance["file1.mp4"])
-	assert.Equal(t, "r18dev", result.results.Provenance["file1.mp4"].FieldSources["title"])
+	assert.NotNil(t, result.snap().Provenance["file1.mp4"])
+	assert.Equal(t, "r18dev", result.snap().Provenance["file1.mp4"].FieldSources["title"])
 }
 
 // --- reconstructBatchJob: old format with nil entry ---
@@ -175,7 +176,7 @@ func TestReconstructBatchJob_OldFormat_NilEntry(t *testing.T) {
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
 	// nil entries should be skipped
-	_, exists := result.results.Results["file1.mp4"]
+	_, exists := result.snap().Results["file1.mp4"]
 	assert.False(t, exists, "nil entry should be skipped")
 }
 
@@ -196,7 +197,7 @@ func TestReconstructBatchJob_TempPosterCleanup(t *testing.T) {
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
 	// CroppedPosterURL should be cleared because the file doesn't exist on disk
-	mr := result.results.Results["/path/file1.mp4"]
+	mr := result.snap().Results["/path/file1.mp4"]
 	require.NotNil(t, mr)
 	require.NotNil(t, mr.Movie)
 	assert.Equal(t, "", mr.Movie.Poster.CroppedPosterURL, "missing temp poster should be cleared")
@@ -215,7 +216,7 @@ func TestReconstructBatchJob_InvalidFilesJSON(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.Empty(t, result.results.Files, "invalid Files JSON should result in empty files slice")
+	assert.Empty(t, result.snap().Files, "invalid Files JSON should result in empty files slice")
 }
 
 // --- reconstructBatchJob: invalid Results JSON ---
@@ -231,7 +232,7 @@ func TestReconstructBatchJob_InvalidResultsJSON(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.Empty(t, result.results.Results, "invalid Results JSON should result in empty results map")
+	assert.Empty(t, result.snap().Results, "invalid Results JSON should result in empty results map")
 }
 
 // --- reconstructBatchJob: Done channel already closed ---
@@ -267,8 +268,8 @@ func TestReconstructBatchJob_ValidExcluded(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.True(t, result.results.Excluded["file1.mp4"])
-	assert.False(t, result.results.Excluded["file2.mp4"])
+	assert.True(t, result.snap().Excluded["file1.mp4"])
+	assert.False(t, result.snap().Excluded["file2.mp4"])
 }
 
 // --- persistToDatabase: nil jobRepo is a no-op ---

@@ -9,7 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 )
 
@@ -42,7 +42,7 @@ func TestProcessUpdateMode_GeneratesMergedNFO(t *testing.T) {
 	writeWorkflowNFO(t, filepath.Join(tempDir, "ABC-123.nfo"), "ABC-123", "Existing Title")
 
 	job := deps.JobStore.CreateJobBatch([]string{filePath})
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "ABC-123"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -90,7 +90,7 @@ func TestProcessUpdateMode_TemplatedTitleNotDoubleApplied(t *testing.T) {
 	writeWorkflowNFO(t, filepath.Join(tempDir, "ABC-123.nfo"), "ABC-123", "[ABC-123] Existing Templated Title")
 
 	job := deps.JobStore.CreateJobBatch([]string{filePath})
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "ABC-123"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -134,7 +134,7 @@ func TestProcessUpdateMode_CancelledContextMarksJobCancelled(t *testing.T) {
 	}
 
 	job := deps.JobStore.CreateJobBatch([]string{filePath})
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "XYZ-999"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -176,7 +176,7 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 	}
 
 	job := deps.JobStore.CreateJobBatch([]string{filePath})
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-777", Extension: ".mp4"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -222,7 +222,7 @@ func TestProcessOrganizeJob_CancelledContext(t *testing.T) {
 	}
 
 	job := deps.JobStore.CreateJobBatch([]string{filePath})
-	setJobResult(job, filePath, &worker.MovieResult{
+	setJobResult(job, filePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-999"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{

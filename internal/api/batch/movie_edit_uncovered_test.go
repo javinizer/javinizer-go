@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -12,7 +12,7 @@ func TestResolvePosterID_Uncovered(t *testing.T) {
 	tests := []struct {
 		name      string
 		movieID   string
-		lookup    worker.MovieLookup
+		lookup    resultstore.MovieLookup
 		expectID  string
 		expectErr bool
 	}{
@@ -25,7 +25,7 @@ func TestResolvePosterID_Uncovered(t *testing.T) {
 		{
 			name:     "uses canonical movie ID when available",
 			movieID:  "abc-123",
-			lookup:   &stubMovieLookup{result: &worker.MovieResult{Movie: &models.Movie{ID: "ABC-123"}}},
+			lookup:   &stubMovieLookup{result: &resultstore.MovieResult{Movie: &models.Movie{ID: "ABC-123"}}},
 			expectID: "ABC-123",
 		},
 		{
@@ -49,7 +49,7 @@ func TestResolvePosterID_Uncovered(t *testing.T) {
 		{
 			name:     "movie result with empty ID falls back to movieID",
 			movieID:  "TEST-001",
-			lookup:   &stubMovieLookup{result: &worker.MovieResult{Movie: &models.Movie{ID: ""}}},
+			lookup:   &stubMovieLookup{result: &resultstore.MovieResult{Movie: &models.Movie{ID: ""}}},
 			expectID: "TEST-001",
 		},
 		{
@@ -61,7 +61,7 @@ func TestResolvePosterID_Uncovered(t *testing.T) {
 		{
 			name:     "movie result with nil Movie falls back to movieID",
 			movieID:  "TEST-003",
-			lookup:   &stubMovieLookup{result: &worker.MovieResult{Movie: nil}},
+			lookup:   &stubMovieLookup{result: &resultstore.MovieResult{Movie: nil}},
 			expectID: "TEST-003",
 		},
 	}
@@ -79,9 +79,9 @@ func TestResolvePosterID_Uncovered(t *testing.T) {
 	}
 }
 
-// stubMovieLookup implements worker.MovieLookup for tests.
+// stubMovieLookup implements resultstore.MovieLookup for tests.
 type stubMovieLookup struct {
-	result   *worker.MovieResult
+	result   *resultstore.MovieResult
 	filePath string
 }
 
@@ -89,14 +89,14 @@ func (s *stubMovieLookup) FindFilePathsForMovieID(movieID string) []string {
 	return nil
 }
 
-func (s *stubMovieLookup) FindMovieResultForMovieID(movieID string) (*worker.MovieResult, error) {
+func (s *stubMovieLookup) FindMovieResultForMovieID(movieID string) (*resultstore.MovieResult, error) {
 	if s.result == nil {
 		return nil, nil
 	}
 	return s.result, nil
 }
 
-func (s *stubMovieLookup) GetMovieResultsForMovieID(movieID string) []*worker.MovieResult {
+func (s *stubMovieLookup) GetMovieResultsForMovieID(movieID string) []*resultstore.MovieResult {
 	return nil
 }
 
@@ -104,13 +104,13 @@ func (s *stubMovieLookup) GetFileMatchInfosForMovieID(movieID string) []models.F
 	return nil
 }
 
-func (s *stubMovieLookup) GetFileResultByResultID(resultID string) (*worker.MovieResult, string, bool) {
+func (s *stubMovieLookup) GetFileResultByResultID(resultID string) (*resultstore.MovieResult, string, bool) {
 	if s.result != nil && s.result.ResultID == resultID {
 		return s.result, s.filePath, true
 	}
 	return nil, "", false
 }
 
-func (s *stubMovieLookup) GetProvenance(filePath string) *worker.ProvenanceData {
+func (s *stubMovieLookup) GetProvenance(filePath string) *resultstore.ProvenanceData {
 	return nil
 }

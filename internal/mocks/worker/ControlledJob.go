@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -174,23 +175,23 @@ func (_c *MockControlledJob_FindFilePathsForMovieID_Call) RunAndReturn(run func(
 }
 
 // FindMovieResultForMovieID provides a mock function for the type MockControlledJob
-func (_mock *MockControlledJob) FindMovieResultForMovieID(movieID string) (*worker.MovieResult, error) {
+func (_mock *MockControlledJob) FindMovieResultForMovieID(movieID string) (*resultstore.MovieResult, error) {
 	ret := _mock.Called(movieID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindMovieResultForMovieID")
 	}
 
-	var r0 *worker.MovieResult
+	var r0 *resultstore.MovieResult
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*worker.MovieResult, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) (*resultstore.MovieResult, error)); ok {
 		return returnFunc(movieID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *worker.MovieResult); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) *resultstore.MovieResult); ok {
 		r0 = returnFunc(movieID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*worker.MovieResult)
+			r0 = ret.Get(0).(*resultstore.MovieResult)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
@@ -225,12 +226,12 @@ func (_c *MockControlledJob_FindMovieResultForMovieID_Call) Run(run func(movieID
 	return _c
 }
 
-func (_c *MockControlledJob_FindMovieResultForMovieID_Call) Return(movieResult *worker.MovieResult, err error) *MockControlledJob_FindMovieResultForMovieID_Call {
+func (_c *MockControlledJob_FindMovieResultForMovieID_Call) Return(movieResult *resultstore.MovieResult, err error) *MockControlledJob_FindMovieResultForMovieID_Call {
 	_c.Call.Return(movieResult, err)
 	return _c
 }
 
-func (_c *MockControlledJob_FindMovieResultForMovieID_Call) RunAndReturn(run func(movieID string) (*worker.MovieResult, error)) *MockControlledJob_FindMovieResultForMovieID_Call {
+func (_c *MockControlledJob_FindMovieResultForMovieID_Call) RunAndReturn(run func(movieID string) (*resultstore.MovieResult, error)) *MockControlledJob_FindMovieResultForMovieID_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -289,24 +290,24 @@ func (_c *MockControlledJob_GetFileMatchInfosForMovieID_Call) RunAndReturn(run f
 }
 
 // GetFileResultByResultID provides a mock function for the type MockControlledJob
-func (_mock *MockControlledJob) GetFileResultByResultID(resultID string) (*worker.MovieResult, string, bool) {
+func (_mock *MockControlledJob) GetFileResultByResultID(resultID string) (*resultstore.MovieResult, string, bool) {
 	ret := _mock.Called(resultID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetFileResultByResultID")
 	}
 
-	var r0 *worker.MovieResult
+	var r0 *resultstore.MovieResult
 	var r1 string
 	var r2 bool
-	if returnFunc, ok := ret.Get(0).(func(string) (*worker.MovieResult, string, bool)); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) (*resultstore.MovieResult, string, bool)); ok {
 		return returnFunc(resultID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *worker.MovieResult); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) *resultstore.MovieResult); ok {
 		r0 = returnFunc(resultID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*worker.MovieResult)
+			r0 = ret.Get(0).(*resultstore.MovieResult)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(string) string); ok {
@@ -346,12 +347,12 @@ func (_c *MockControlledJob_GetFileResultByResultID_Call) Run(run func(resultID 
 	return _c
 }
 
-func (_c *MockControlledJob_GetFileResultByResultID_Call) Return(movieResult *worker.MovieResult, s string, b bool) *MockControlledJob_GetFileResultByResultID_Call {
+func (_c *MockControlledJob_GetFileResultByResultID_Call) Return(movieResult *resultstore.MovieResult, s string, b bool) *MockControlledJob_GetFileResultByResultID_Call {
 	_c.Call.Return(movieResult, s, b)
 	return _c
 }
 
-func (_c *MockControlledJob_GetFileResultByResultID_Call) RunAndReturn(run func(resultID string) (*worker.MovieResult, string, bool)) *MockControlledJob_GetFileResultByResultID_Call {
+func (_c *MockControlledJob_GetFileResultByResultID_Call) RunAndReturn(run func(resultID string) (*resultstore.MovieResult, string, bool)) *MockControlledJob_GetFileResultByResultID_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -445,23 +446,23 @@ func (_c *MockControlledJob_GetJobStatus_Call) RunAndReturn(run func() models.Jo
 }
 
 // GetMovieResult provides a mock function for the type MockControlledJob
-func (_mock *MockControlledJob) GetMovieResult(filePath string) (*worker.MovieResult, error) {
+func (_mock *MockControlledJob) GetMovieResult(filePath string) (*resultstore.MovieResult, error) {
 	ret := _mock.Called(filePath)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetMovieResult")
 	}
 
-	var r0 *worker.MovieResult
+	var r0 *resultstore.MovieResult
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*worker.MovieResult, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) (*resultstore.MovieResult, error)); ok {
 		return returnFunc(filePath)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *worker.MovieResult); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) *resultstore.MovieResult); ok {
 		r0 = returnFunc(filePath)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*worker.MovieResult)
+			r0 = ret.Get(0).(*resultstore.MovieResult)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
@@ -496,30 +497,30 @@ func (_c *MockControlledJob_GetMovieResult_Call) Run(run func(filePath string)) 
 	return _c
 }
 
-func (_c *MockControlledJob_GetMovieResult_Call) Return(movieResult *worker.MovieResult, err error) *MockControlledJob_GetMovieResult_Call {
+func (_c *MockControlledJob_GetMovieResult_Call) Return(movieResult *resultstore.MovieResult, err error) *MockControlledJob_GetMovieResult_Call {
 	_c.Call.Return(movieResult, err)
 	return _c
 }
 
-func (_c *MockControlledJob_GetMovieResult_Call) RunAndReturn(run func(filePath string) (*worker.MovieResult, error)) *MockControlledJob_GetMovieResult_Call {
+func (_c *MockControlledJob_GetMovieResult_Call) RunAndReturn(run func(filePath string) (*resultstore.MovieResult, error)) *MockControlledJob_GetMovieResult_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetMovieResultsForMovieID provides a mock function for the type MockControlledJob
-func (_mock *MockControlledJob) GetMovieResultsForMovieID(movieID string) []*worker.MovieResult {
+func (_mock *MockControlledJob) GetMovieResultsForMovieID(movieID string) []*resultstore.MovieResult {
 	ret := _mock.Called(movieID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetMovieResultsForMovieID")
 	}
 
-	var r0 []*worker.MovieResult
-	if returnFunc, ok := ret.Get(0).(func(string) []*worker.MovieResult); ok {
+	var r0 []*resultstore.MovieResult
+	if returnFunc, ok := ret.Get(0).(func(string) []*resultstore.MovieResult); ok {
 		r0 = returnFunc(movieID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*worker.MovieResult)
+			r0 = ret.Get(0).([]*resultstore.MovieResult)
 		}
 	}
 	return r0
@@ -549,30 +550,30 @@ func (_c *MockControlledJob_GetMovieResultsForMovieID_Call) Run(run func(movieID
 	return _c
 }
 
-func (_c *MockControlledJob_GetMovieResultsForMovieID_Call) Return(movieResults []*worker.MovieResult) *MockControlledJob_GetMovieResultsForMovieID_Call {
+func (_c *MockControlledJob_GetMovieResultsForMovieID_Call) Return(movieResults []*resultstore.MovieResult) *MockControlledJob_GetMovieResultsForMovieID_Call {
 	_c.Call.Return(movieResults)
 	return _c
 }
 
-func (_c *MockControlledJob_GetMovieResultsForMovieID_Call) RunAndReturn(run func(movieID string) []*worker.MovieResult) *MockControlledJob_GetMovieResultsForMovieID_Call {
+func (_c *MockControlledJob_GetMovieResultsForMovieID_Call) RunAndReturn(run func(movieID string) []*resultstore.MovieResult) *MockControlledJob_GetMovieResultsForMovieID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetProvenance provides a mock function for the type MockControlledJob
-func (_mock *MockControlledJob) GetProvenance(filePath string) *worker.ProvenanceData {
+func (_mock *MockControlledJob) GetProvenance(filePath string) *resultstore.ProvenanceData {
 	ret := _mock.Called(filePath)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetProvenance")
 	}
 
-	var r0 *worker.ProvenanceData
-	if returnFunc, ok := ret.Get(0).(func(string) *worker.ProvenanceData); ok {
+	var r0 *resultstore.ProvenanceData
+	if returnFunc, ok := ret.Get(0).(func(string) *resultstore.ProvenanceData); ok {
 		r0 = returnFunc(filePath)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*worker.ProvenanceData)
+			r0 = ret.Get(0).(*resultstore.ProvenanceData)
 		}
 	}
 	return r0
@@ -602,30 +603,30 @@ func (_c *MockControlledJob_GetProvenance_Call) Run(run func(filePath string)) *
 	return _c
 }
 
-func (_c *MockControlledJob_GetProvenance_Call) Return(provenanceData *worker.ProvenanceData) *MockControlledJob_GetProvenance_Call {
+func (_c *MockControlledJob_GetProvenance_Call) Return(provenanceData *resultstore.ProvenanceData) *MockControlledJob_GetProvenance_Call {
 	_c.Call.Return(provenanceData)
 	return _c
 }
 
-func (_c *MockControlledJob_GetProvenance_Call) RunAndReturn(run func(filePath string) *worker.ProvenanceData) *MockControlledJob_GetProvenance_Call {
+func (_c *MockControlledJob_GetProvenance_Call) RunAndReturn(run func(filePath string) *resultstore.ProvenanceData) *MockControlledJob_GetProvenance_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetResults provides a mock function for the type MockControlledJob
-func (_mock *MockControlledJob) GetResults() []worker.MovieResult {
+func (_mock *MockControlledJob) GetResults() []resultstore.MovieResult {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetResults")
 	}
 
-	var r0 []worker.MovieResult
-	if returnFunc, ok := ret.Get(0).(func() []worker.MovieResult); ok {
+	var r0 []resultstore.MovieResult
+	if returnFunc, ok := ret.Get(0).(func() []resultstore.MovieResult); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]worker.MovieResult)
+			r0 = ret.Get(0).([]resultstore.MovieResult)
 		}
 	}
 	return r0
@@ -648,12 +649,12 @@ func (_c *MockControlledJob_GetResults_Call) Run(run func()) *MockControlledJob_
 	return _c
 }
 
-func (_c *MockControlledJob_GetResults_Call) Return(movieResults []worker.MovieResult) *MockControlledJob_GetResults_Call {
+func (_c *MockControlledJob_GetResults_Call) Return(movieResults []resultstore.MovieResult) *MockControlledJob_GetResults_Call {
 	_c.Call.Return(movieResults)
 	return _c
 }
 
-func (_c *MockControlledJob_GetResults_Call) RunAndReturn(run func() []worker.MovieResult) *MockControlledJob_GetResults_Call {
+func (_c *MockControlledJob_GetResults_Call) RunAndReturn(run func() []resultstore.MovieResult) *MockControlledJob_GetResults_Call {
 	_c.Call.Return(run)
 	return _c
 }

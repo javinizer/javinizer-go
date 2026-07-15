@@ -13,12 +13,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
 // lookupResultByResultID resolves a resultID to the corresponding MovieResult
 // and all file paths for the same movie ID (handles multi-part files).
 // Returns (result, filePaths, found).
-func lookupResultByResultID(job worker.BatchJobInterface, resultID string) (*worker.MovieResult, []string, bool) {
+func lookupResultByResultID(job worker.BatchJobInterface, resultID string) (*resultstore.MovieResult, []string, bool) {
 	result, filePath, found := job.GetFileResultByResultID(resultID)
 	if !found {
 		return nil, nil, false
@@ -287,7 +288,7 @@ func excludeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 // batch job. It starts with the URL parameter movieID, then looks up the movie
 // result to use the canonical Movie.ID if available. Returns an error if the
 // resolved ID fails safe-filename validation (path traversal check).
-func resolvePosterID(lookup worker.MovieLookup, movieID string) (string, error) {
+func resolvePosterID(lookup resultstore.MovieLookup, movieID string) (string, error) {
 	posterID := movieID
 	movieResult, _ := lookup.FindMovieResultForMovieID(movieID)
 	if movieResult != nil && movieResult.Movie != nil && movieResult.Movie.ID != "" {

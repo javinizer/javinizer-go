@@ -18,7 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -78,7 +78,7 @@ func TestRescrapeBatchMovie_EdgePaths(t *testing.T) {
 		cfg := config.DefaultConfig(nil, nil)
 		deps := createTestDeps(t, cfg, "")
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-901.mp4"})
-		setJobResult(job, "/tmp/IPX-901.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-901.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-901.mp4", MovieID: "IPX-901"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-901"},
@@ -107,7 +107,7 @@ func TestRescrapeBatchMovie_EdgePaths(t *testing.T) {
 		cfg := config.DefaultConfig(nil, nil)
 		deps := createTestDeps(t, cfg, "")
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-902.mp4"})
-		setJobResult(job, "/tmp/IPX-902.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-902.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-902.mp4", MovieID: "IPX-902"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-902"},
@@ -137,7 +137,7 @@ func TestRescrapeBatchMovie_EdgePaths(t *testing.T) {
 		deps.CoreDeps.GetRegistry().RegisterInstance(&noPosterStubScraper{})
 
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-903.mp4"})
-		setJobResult(job, "/tmp/IPX-903.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-903.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-903.mp4", MovieID: "IPX-903"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-903", Title: "Old Title"},
@@ -217,7 +217,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 
 	t.Run("invalid poster id derived from movie data", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-777.mp4"})
-		setJobResult(job, "/tmp/IPX-777.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-777.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-777.mp4", MovieID: "IPX-777"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "../bad"},
@@ -234,7 +234,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 
 	t.Run("falls back to existing cropped image when full image is missing", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-778.mp4"})
-		setJobResult(job, "/tmp/IPX-778.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/IPX-778.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-778.mp4", MovieID: "IPX-778"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "IPX-778", Title: "Fallback Crop"},
@@ -255,7 +255,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 
 	t.Run("movie lookup fallback by data movie id", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/ALT-001.mp4"})
-		setJobResult(job, "/tmp/ALT-001.mp4", &worker.MovieResult{
+		setJobResult(job, "/tmp/ALT-001.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ALT-001.mp4", MovieID: "LEGACY-001"},
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: "ALT-001", Title: "Movie ID Fallback"},

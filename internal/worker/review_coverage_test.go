@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +15,7 @@ import (
 // NOT trigger envelope format detection. This was the false-positive scenario
 // that the old bytes.Contains(raw, []byte("domain")) approach suffered from.
 func TestParseJobResultsJSON_FalsePositiveDomainInTitle(t *testing.T) {
-	// Old MovieResult format with a movie title containing "domain"
+	// Old resultstore.MovieResult format with a movie title containing "domain"
 	oldResults := map[string]any{
 		"/videos/ABC-001.mp4": map[string]any{
 			"result_id": "uuid-001",
@@ -72,54 +73,6 @@ func TestParseJobResultsJSON_FalsePositiveDataTypeInTitle(t *testing.T) {
 	assert.Equal(t, "ABC-002", mr.Movie.ID)
 }
 
-// TestMovieIDsForResult_CaseInsensitiveDedup verifies that movieIDsForResult
-// deduplicates using normalized (lowercased) keys, matching the indexKey()
-// used by movieIDIndex. Without normalization, case-only variants (e.g. "ABC"
-// and "abc") would both be returned, causing stale entries on removal.
-func TestMovieIDsForResult_CaseInsensitiveDedup(t *testing.T) {
-	t.Run("same ID different case deduplicates", func(t *testing.T) {
-		r := &MovieResult{
-			Movie: &models.Movie{ID: "ABC-001"},
-			FileMatchInfo: models.FileMatchInfo{
-				MovieID: "abc-001",
-			},
-		}
-		ids := movieIDsForResult(r)
-		assert.Len(t, ids, 1, "case-only variants should deduplicate to one ID")
-		assert.Equal(t, "ABC-001", ids[0])
-	})
-
-	t.Run("different IDs both returned", func(t *testing.T) {
-		r := &MovieResult{
-			Movie: &models.Movie{ID: "ABC-001"},
-			FileMatchInfo: models.FileMatchInfo{
-				MovieID: "DEF-002",
-			},
-		}
-		ids := movieIDsForResult(r)
-		assert.Len(t, ids, 2)
-	})
-
-	t.Run("nil movie returns FileMatchInfo MovieID", func(t *testing.T) {
-		r := &MovieResult{
-			FileMatchInfo: models.FileMatchInfo{
-				MovieID: "ABC-001",
-			},
-		}
-		ids := movieIDsForResult(r)
-		assert.Len(t, ids, 1)
-		assert.Equal(t, "ABC-001", ids[0])
-	})
-
-	t.Run("nil result returns nil", func(t *testing.T) {
-		ids := movieIDsForResult(nil)
-		assert.Nil(t, ids)
-	})
-}
-
-// TestTrackApplyResults_PanicCountsAsFailed verifies that trackApplyResults
-// counts panicked outcomes as failures, so MarkOrganized() is not called
-// when panics occurred.
 func TestTrackApplyResults_PanicCountsAsFailed(t *testing.T) {
 	t.Run("panic without Failed flag counts as failure", func(t *testing.T) {
 		outcomes := []applyFileOutcome{
@@ -165,18 +118,18 @@ func TestUpdateFileResult_ExcludedDecrementSkip(t *testing.T) {
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 	// file1 completes — counter incremented
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{Status: models.JobStatusCompleted})
-	assert.Equal(t, 1, job.results.Completed)
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{Status: models.JobStatusCompleted})
+	assert.Equal(t, 1, job.prog().Completed)
 
 	// file1 is excluded — MarkExcluded decrements the counter
 	job.results.MarkExcluded("file1.mp4")
-	assert.Equal(t, 0, job.results.Completed, "MarkExcluded should decrement Completed")
-	assert.True(t, job.results.Excluded["file1.mp4"])
+	assert.Equal(t, 0, job.prog().Completed, "MarkExcluded should decrement Completed")
+	assert.True(t, job.snap().Excluded["file1.mp4"])
 
 	// Now UpdateFileResult is called again for the excluded file.
 	// Without the !Excluded guard on decrement, this would decrement
 	// Completed from 0 to -1 (counter drift).
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{Status: models.JobStatusFailed})
-	assert.Equal(t, 0, job.results.Completed, "excluded file must NOT decrement Completed")
-	assert.Equal(t, 0, job.results.Failed, "excluded file must NOT increment Failed")
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{Status: models.JobStatusFailed})
+	assert.Equal(t, 0, job.prog().Completed, "excluded file must NOT decrement Completed")
+	assert.Equal(t, 0, job.prog().Failed, "excluded file must NOT increment Failed")
 }

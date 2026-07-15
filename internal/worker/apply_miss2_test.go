@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 )
@@ -18,7 +19,7 @@ func TestMiss2_ApplyPhase_Run_PostApplyFuncWithError(t *testing.T) {
 		applyErr: fmt.Errorf("apply failed"),
 	}
 	inputs := makeApplyInputs(wf)
-	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
@@ -45,7 +46,7 @@ func TestMiss2_ApplyPhase_Run_PostApplyFuncWithSuccess(t *testing.T) {
 		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}},
 	}
 	inputs := makeApplyInputs(wf)
-	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
@@ -73,7 +74,7 @@ func TestMiss2_ApplyPhase_Run_OrganizeSkip(t *testing.T) {
 		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}},
 	}
 	inputs := makeApplyInputs(wf)
-	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
@@ -99,7 +100,7 @@ func TestMiss2_ApplyPhase_Run_NFODisabled(t *testing.T) {
 	}
 	inputs := makeApplyInputs(wf)
 	inputs.NFOEnabled = false
-	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
@@ -124,12 +125,12 @@ func TestMiss2_ApplyPhase_Run_MultipleFiles(t *testing.T) {
 	}
 	inputs := makeApplyInputs(wf)
 	inputs.Concurrency = concurrencyConfig{MaxWorkers: 2}
-	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
 	}
-	inputs.Results["/source/IPX-778.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-778.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-778.mp4", MovieID: "IPX-778"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-778"},
@@ -153,7 +154,7 @@ func TestMiss2_ApplyPhase_Run_WithPersister(t *testing.T) {
 		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}},
 	}
 	inputs := makeApplyInputs(wf)
-	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
@@ -187,7 +188,7 @@ func TestMiss2_ApplyPhase_Run_ContextCancellation(t *testing.T) {
 	}
 	inputs := makeApplyInputs(wf)
 	inputs.Concurrency = concurrencyConfig{MaxWorkers: 1}
-	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
@@ -214,7 +215,7 @@ func TestMiss2_ApplyPhase_Run_DestinationFallback(t *testing.T) {
 	}
 	inputs := makeApplyInputs(wf)
 	inputs.Destination = "/fallback-output"
-	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},
@@ -234,7 +235,7 @@ func TestMiss2_ApplyPhase_Run_DestinationFallback(t *testing.T) {
 func TestMiss2_ApplyPhase_Run_PanicRecovery(t *testing.T) {
 	wf := &panicApplyWorkflow2{}
 	inputs := makeApplyInputs(wf)
-	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+	inputs.Results["/source/IPX-777.mp4"] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777"},

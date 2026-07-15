@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,7 +17,7 @@ import (
 
 func TestUpdatePosterCrop_Miss2_WithMovieResult(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie: &models.Movie{
 			ID: "TEST-001",
@@ -44,7 +45,7 @@ func TestUpdatePosterCrop_Miss2_WithMovieResult(t *testing.T) {
 
 func TestUpdatePosterFromURL_Miss2_WithMovieResult(t *testing.T) {
 	job := newBatchJob([]string{"/test/file2.mp4"})
-	job.results.UpdateFileResult("/test/file2.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file2.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie: &models.Movie{
 			ID: "TEST-002",
@@ -88,7 +89,7 @@ func TestBackupPosterOriginals_Miss2_AlreadyBacked(t *testing.T) {
 
 func TestFindFileForMovieID_Miss2_MultipleFilesWithParts(t *testing.T) {
 	job := newBatchJob([]string{"/test/partA.mp4", "/test/partB.mp4"})
-	job.results.UpdateFileResult("/test/partA.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/partA.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie:  &models.Movie{ID: "MULTI-001"},
 		FileMatchInfo: models.FileMatchInfo{
@@ -98,7 +99,7 @@ func TestFindFileForMovieID_Miss2_MultipleFilesWithParts(t *testing.T) {
 			PartSuffix: "pt2",
 		},
 	})
-	job.results.UpdateFileResult("/test/partB.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/partB.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie:  &models.Movie{ID: "MULTI-001"},
 		FileMatchInfo: models.FileMatchInfo{
@@ -109,7 +110,7 @@ func TestFindFileForMovieID_Miss2_MultipleFilesWithParts(t *testing.T) {
 		},
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("MULTI-001")
+	result, err := job.results.FindFileForMovieID("MULTI-001")
 	require.NoError(t, err)
 	assert.NotEmpty(t, result.FilePath)
 	assert.NotEmpty(t, result.OldMovieID)
@@ -119,7 +120,7 @@ func TestFindFileForMovieID_Miss2_MultipleFilesWithParts(t *testing.T) {
 
 func TestFindMovieResultForMovieID_Miss2_NotFound(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	_, err := job.resultIndex.FindMovieResultForMovieID("NONEXISTENT-001")
+	_, err := job.results.FindMovieResultForMovieID("NONEXISTENT-001")
 	require.Error(t, err)
 }
 
@@ -127,7 +128,7 @@ func TestFindMovieResultForMovieID_Miss2_NotFound(t *testing.T) {
 
 func TestFindMovieResultForMovieID_Miss2_Found(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie:  &models.Movie{ID: "FOUND-001"},
 		FileMatchInfo: models.FileMatchInfo{
@@ -136,7 +137,7 @@ func TestFindMovieResultForMovieID_Miss2_Found(t *testing.T) {
 		},
 	})
 
-	result, err := job.resultIndex.FindMovieResultForMovieID("FOUND-001")
+	result, err := job.results.FindMovieResultForMovieID("FOUND-001")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "FOUND-001", result.Movie.ID)
@@ -146,7 +147,7 @@ func TestFindMovieResultForMovieID_Miss2_Found(t *testing.T) {
 
 func TestGetMovieResultsForMovieID_Miss2(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie:  &models.Movie{ID: "MRES-001"},
 		FileMatchInfo: models.FileMatchInfo{
@@ -155,7 +156,7 @@ func TestGetMovieResultsForMovieID_Miss2(t *testing.T) {
 		},
 	})
 
-	results := job.resultIndex.GetMovieResultsForMovieID("MRES-001")
+	results := job.results.GetMovieResultsForMovieID("MRES-001")
 	assert.Len(t, results, 1)
 }
 
@@ -163,7 +164,7 @@ func TestGetMovieResultsForMovieID_Miss2(t *testing.T) {
 
 func TestGetFileMatchInfosForMovieID_Miss2(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie:  &models.Movie{ID: "FMI-001"},
 		FileMatchInfo: models.FileMatchInfo{
@@ -172,7 +173,7 @@ func TestGetFileMatchInfosForMovieID_Miss2(t *testing.T) {
 		},
 	})
 
-	infos := job.resultIndex.GetFileMatchInfosForMovieID("FMI-001")
+	infos := job.results.GetFileMatchInfosForMovieID("FMI-001")
 	assert.Len(t, infos, 1)
 	assert.Equal(t, "FMI-001", infos[0].MovieID)
 }
@@ -181,7 +182,7 @@ func TestGetFileMatchInfosForMovieID_Miss2(t *testing.T) {
 
 func TestFindFilePathsForMovieID_Miss2_NoPaths(t *testing.T) {
 	job := newBatchJob([]string{})
-	result := job.resultIndex.FindFilePathsForMovieID("NONEXISTENT-001")
+	result := job.results.FindFilePathsForMovieID("NONEXISTENT-001")
 	assert.Nil(t, result)
 }
 
@@ -189,7 +190,7 @@ func TestFindFilePathsForMovieID_Miss2_NoPaths(t *testing.T) {
 
 func TestFindFilePathsForMovieID_Miss2_PathsFound(t *testing.T) {
 	job := newBatchJob([]string{"/test/file.mp4"})
-	job.results.UpdateFileResult("/test/file.mp4", &MovieResult{
+	job.results.UpdateFileResult("/test/file.mp4", &resultstore.MovieResult{
 		Status: models.JobStatusCompleted,
 		Movie:  &models.Movie{ID: "FP-001"},
 		FileMatchInfo: models.FileMatchInfo{
@@ -198,7 +199,7 @@ func TestFindFilePathsForMovieID_Miss2_PathsFound(t *testing.T) {
 		},
 	})
 
-	result := job.resultIndex.FindFilePathsForMovieID("FP-001")
+	result := job.results.FindFilePathsForMovieID("FP-001")
 	assert.NotEmpty(t, result)
 	assert.Equal(t, "/test/file.mp4", result[0])
 }

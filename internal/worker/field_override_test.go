@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -93,7 +94,7 @@ func TestApplyFieldOverride_NilProvenance(t *testing.T) {
 
 func TestApplyFieldOverride_NoScraperResults(t *testing.T) {
 	movie := &models.Movie{}
-	prov := &ProvenanceData{}
+	prov := &resultstore.ProvenanceData{}
 	err := applyFieldOverride(movie, prov, "maker", "dmm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "did not contribute")
@@ -101,16 +102,16 @@ func TestApplyFieldOverride_NoScraperResults(t *testing.T) {
 
 func TestApplyFieldOverride_SynthesizedSourceFallback(t *testing.T) {
 	movie := &models.Movie{ID: "ABC-001", Title: "Cached Title", Maker: "Cached Maker"}
-	prov := &ProvenanceData{}
+	prov := &resultstore.ProvenanceData{}
 	err := applyFieldOverride(movie, prov, "maker", "scraper")
 	require.NoError(t, err)
 	assert.Equal(t, "Cached Maker", movie.Maker)
 	assert.Equal(t, "scraper", prov.FieldSources["maker"])
 }
 
-func overrideFixture() (*models.Movie, *ProvenanceData) {
+func overrideFixture() (*models.Movie, *resultstore.ProvenanceData) {
 	dmmDate := time.Date(2021, 6, 1, 0, 0, 0, 0, time.UTC)
-	prov := &ProvenanceData{
+	prov := &resultstore.ProvenanceData{
 		FieldSources:   map[string]string{"maker": "r18dev", "actresses": "r18dev"},
 		ActressSources: map[string]string{"name:yuihatano": "r18dev"},
 		ScraperResults: []*models.ScraperResult{
@@ -191,7 +192,7 @@ func TestScrapeResultToMovieResult_NoScraperResults(t *testing.T) {
 
 func TestProvenanceData_Clone_DeepCopiesScraperResults(t *testing.T) {
 	date := time.Date(2021, 6, 1, 0, 0, 0, 0, time.UTC)
-	orig := &ProvenanceData{
+	orig := &resultstore.ProvenanceData{
 		FieldSources: map[string]string{"maker": "dmm"},
 		ScraperResults: []*models.ScraperResult{
 			{Source: "dmm", Maker: "DMM", ReleaseDate: &date, Genres: []string{"Drama"}},
@@ -280,20 +281,18 @@ func TestApplyFieldOverride_ConcurrentDifferentFieldsSameResult(t *testing.T) {
 		filePath := "test.mp4"
 		resultID := "res-001"
 
-		tracker := NewResultTracker(1, []string{filePath})
-		mr := &MovieResult{
+		tracker := resultstore.New(1, []string{filePath})
+		mr := &resultstore.MovieResult{
 			ResultID:      resultID,
 			FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movie.ID},
 			Movie:         movie,
 			Status:        models.JobStatusCompleted,
 		}
-		tracker.Updater().UpdateFileResult(filePath, mr)
-		tracker.Updater().SetProvenance(filePath, prov)
+		tracker.UpdateFileResult(filePath, mr)
+		tracker.SetProvenance(filePath, prov)
 
 		je := &jobEditorImpl{
-			updater:  tracker.Updater(),
-			accessor: tracker,
-			tracker:  tracker,
+			store: tracker,
 		}
 
 		var wg sync.WaitGroup
@@ -332,7 +331,7 @@ func TestApplyFieldOverride_ConcurrentDifferentFieldsSameResult(t *testing.T) {
 
 func TestApplyFieldOverride_NilMovie(t *testing.T) {
 	_, prov := overrideFixture()
-	prov = &ProvenanceData{ScraperResults: prov.ScraperResults}
+	prov = &resultstore.ProvenanceData{ScraperResults: prov.ScraperResults}
 	err := applyFieldOverride(nil, prov, "maker", "dmm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil movie")
@@ -384,20 +383,20 @@ func TestApplyFieldOverride_UnhandledKeyErrors(t *testing.T) {
 }
 
 func TestRebuildActressSources_EmptyKeySkipped(t *testing.T) {
-	prov := &ProvenanceData{}
+	prov := &resultstore.ProvenanceData{}
 	rebuildActressSources(prov, []models.Actress{{FirstName: "", LastName: "", JapaneseName: "", DMMID: 0}}, "dmm")
 	assert.Nil(t, prov.ActressSources, "actress with no identifying fields yields no source keys")
 }
 
 func TestRebuildActressSources_EmptyListClears(t *testing.T) {
-	prov := &ProvenanceData{ActressSources: map[string]string{"name:x": "dmm"}}
+	prov := &resultstore.ProvenanceData{ActressSources: map[string]string{"name:x": "dmm"}}
 	rebuildActressSources(prov, nil, "dmm")
 	assert.Nil(t, prov.ActressSources)
 }
 
 func TestApplyFieldOverride_ResultNotFound(t *testing.T) {
-	tracker := NewResultTracker(1, []string{"x.mp4"})
-	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker}
+	tracker := resultstore.New(1, []string{"x.mp4"})
+	je := &jobEditorImpl{store: tracker}
 	_, _, err := je.ApplyFieldOverride(context.Background(), "nope", "maker", "dmm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
@@ -407,12 +406,12 @@ func TestApplyFieldOverride_BogusSourceErrors(t *testing.T) {
 	movie, prov := overrideFixture()
 	filePath := "test.mp4"
 	resultID := "res-001"
-	tracker := NewResultTracker(1, []string{filePath})
-	tracker.Updater().UpdateFileResult(filePath, &MovieResult{
+	tracker := resultstore.New(1, []string{filePath})
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
 		ResultID: resultID, FileMatchInfo: models.FileMatchInfo{Path: filePath}, Movie: movie, Status: models.JobStatusCompleted,
 	})
-	tracker.Updater().SetProvenance(filePath, prov)
-	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker}
+	tracker.SetProvenance(filePath, prov)
+	je := &jobEditorImpl{store: tracker}
 	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "nonexistent-source")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "did not contribute")
@@ -422,11 +421,11 @@ func TestApplyFieldOverride_NilProvenanceUsesSynthesizedFallback(t *testing.T) {
 	movie, _ := overrideFixture()
 	filePath := "test.mp4"
 	resultID := "res-001"
-	tracker := NewResultTracker(1, []string{filePath})
-	tracker.Updater().UpdateFileResult(filePath, &MovieResult{
+	tracker := resultstore.New(1, []string{filePath})
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
 		ResultID: resultID, FileMatchInfo: models.FileMatchInfo{Path: filePath}, Movie: movie, Status: models.JobStatusCompleted,
 	})
-	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker}
+	je := &jobEditorImpl{store: tracker}
 	res, prov, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "scraper")
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -446,10 +445,10 @@ func TestApplyFieldOverride_UnregisteredKeyHitsDefault(t *testing.T) {
 func TestUpdateMovie_DBPersistError(t *testing.T) {
 	movie, _ := overrideFixture()
 	filePath := "test.mp4"
-	tracker := NewResultTracker(1, []string{filePath})
+	tracker := resultstore.New(1, []string{filePath})
 	repo := mocks.NewMockMovieRepositoryInterface(t)
 	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
-	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker, movieRepo: repo}
+	je := &jobEditorImpl{store: tracker, movieRepo: repo}
 	err := je.UpdateMovie(context.Background(), filePath, movie)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist movie update")
@@ -459,13 +458,13 @@ func TestApplyFieldOverride_PersistErrorWrapped(t *testing.T) {
 	movie, _ := overrideFixture()
 	filePath := "test.mp4"
 	resultID := "res-001"
-	tracker := NewResultTracker(1, []string{filePath})
-	tracker.Updater().UpdateFileResult(filePath, &MovieResult{
+	tracker := resultstore.New(1, []string{filePath})
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
 		ResultID: resultID, FileMatchInfo: models.FileMatchInfo{Path: filePath}, Movie: movie, Status: models.JobStatusCompleted,
 	})
 	repo := mocks.NewMockMovieRepositoryInterface(t)
 	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
-	je := &jobEditorImpl{updater: tracker.Updater(), accessor: tracker, tracker: tracker, movieRepo: repo}
+	je := &jobEditorImpl{store: tracker, movieRepo: repo}
 	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "scraper")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist field override")

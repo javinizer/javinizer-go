@@ -6,6 +6,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,16 +19,14 @@ func TestFindFileForMovieID_Miss_StaleIndexNilResult(t *testing.T) {
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 	// Set a result then nil it out — simulates stale index
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "STALE-001"},
 		Status:        models.JobStatusCompleted,
 	})
 	// Clear it but the index entry may persist
-	job.results.mu.Lock()
-	job.results.Results["file1.mp4"] = nil
-	job.results.mu.Unlock()
+	job.results.ReplaceResultRaw("file1.mp4", nil)
 
-	_, err := job.resultIndex.FindFileForMovieID("STALE-001")
+	_, err := job.results.FindFileForMovieID("STALE-001")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -38,18 +37,18 @@ func TestFindFileForMovieID_Miss_MultipleFilesPartNumberSorting(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "MULTI-001", PartNumber: 2, PartSuffix: "b"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "MULTI-001"},
 	})
-	job.SetResultDirect("file2.mp4", &MovieResult{
+	job.SetResultDirect("file2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4", MovieID: "MULTI-001", PartNumber: 1, PartSuffix: "a"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "MULTI-001"},
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("MULTI-001")
+	result, err := job.results.FindFileForMovieID("MULTI-001")
 	require.NoError(t, err)
 	assert.Contains(t, []string{"file1.mp4", "file2.mp4"}, result.FilePath)
 }
@@ -60,18 +59,18 @@ func TestFindFileForMovieID_Miss_ZeroPartNumber(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ZERO-001", PartNumber: 0},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ZERO-001"},
 	})
-	job.SetResultDirect("file2.mp4", &MovieResult{
+	job.SetResultDirect("file2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4", MovieID: "ZERO-001", PartNumber: 1},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ZERO-001"},
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("ZERO-001")
+	result, err := job.results.FindFileForMovieID("ZERO-001")
 	require.NoError(t, err)
 	assert.Contains(t, []string{"file1.mp4", "file2.mp4"}, result.FilePath)
 }
@@ -82,18 +81,18 @@ func TestFindFileForMovieID_Miss_SuffixOrder(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "SUFF-001", PartNumber: 1, PartSuffix: "b"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "SUFF-001"},
 	})
-	job.SetResultDirect("file2.mp4", &MovieResult{
+	job.SetResultDirect("file2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4", MovieID: "SUFF-001", PartNumber: 1, PartSuffix: "a"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "SUFF-001"},
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("SUFF-001")
+	result, err := job.results.FindFileForMovieID("SUFF-001")
 	require.NoError(t, err)
 	// Just verify it returns one of the files (sorting behavior is covered by suffixOrder unit tests)
 	assert.Contains(t, []string{"file1.mp4", "file2.mp4"}, result.FilePath)
@@ -105,14 +104,14 @@ func TestFindFileForMovieID_Miss_CapturedRevisionAndOldMovieID(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ORIG-001"},
 		Status:        models.JobStatusCompleted,
 		Revision:      42,
 		Movie:         &models.Movie{ID: "CHANGED-001"},
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("CHANGED-001")
+	result, err := job.results.FindFileForMovieID("CHANGED-001")
 	require.NoError(t, err)
 	assert.Equal(t, "file1.mp4", result.FilePath)
 	assert.Equal(t, uint64(42), result.CapturedRevision)
@@ -125,14 +124,14 @@ func TestFindFileForMovieID_Miss_OldMovieIDFromFileMatchInfo(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "FMID-001"},
 		Status:        models.JobStatusCompleted,
 		Revision:      1,
 		Movie:         nil,
 	})
 
-	result, err := job.resultIndex.FindFileForMovieID("FMID-001")
+	result, err := job.results.FindFileForMovieID("FMID-001")
 	require.NoError(t, err)
 	assert.Equal(t, "file1.mp4", result.FilePath)
 	assert.Equal(t, "FMID-001", result.OldMovieID)
@@ -144,13 +143,13 @@ func TestFindMovieResultForMovieID_Miss_NoMovie(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NOMOV-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         nil,
 	})
 
-	_, err := job.resultIndex.FindMovieResultForMovieID("NOMOV-001")
+	_, err := job.results.FindMovieResultForMovieID("NOMOV-001")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no movie result found")
 }
@@ -175,13 +174,13 @@ func TestUpdatePosterCrop_Miss_NoFilePaths(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// --- FindFileForMovieID: movie not found (moved to ResultTracker) ---
+// --- FindFileForMovieID: movie not found (moved to resultstore.ResultTracker) ---
 
 func TestFindFileForMovieID_Miss_NoResult(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
-	_, err := job.resultIndex.FindFileForMovieID("PRERES-001")
+	_, err := job.results.FindFileForMovieID("PRERES-001")
 	assert.Error(t, err)
 }
 

@@ -5,6 +5,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
 // batchJobBaseResponse holds the fields shared between full and slim batch job
@@ -48,7 +49,7 @@ func toBaseResponse(job *worker.BatchJobStatus) batchJobBaseResponse {
 }
 
 // movieResultToResponse converts a MovieResult into a full API response with provenance.
-func movieResultToResponse(mr *worker.MovieResult, prov *worker.ProvenanceData) *contracts.BatchFileResult {
+func movieResultToResponse(mr *resultstore.MovieResult, prov *resultstore.ProvenanceData) *contracts.BatchFileResult {
 	if mr == nil {
 		return nil
 	}
@@ -74,7 +75,7 @@ func movieResultToResponse(mr *worker.MovieResult, prov *worker.ProvenanceData) 
 
 // movieResultToSlimResponse converts a MovieResult into a lightweight API response
 // without movie data.
-func movieResultToSlimResponse(mr *worker.MovieResult, prov *worker.ProvenanceData) *contracts.BatchFileResultSlim {
+func movieResultToSlimResponse(mr *resultstore.MovieResult, prov *resultstore.ProvenanceData) *contracts.BatchFileResultSlim {
 	if mr == nil {
 		return nil
 	}
@@ -102,7 +103,7 @@ func movieResultToSlimResponse(mr *worker.MovieResult, prov *worker.ProvenanceDa
 func buildBatchJobResponse(job *worker.BatchJobStatus) *contracts.BatchJobResponse {
 	results := make(map[string]*contracts.BatchFileResult, len(job.Results))
 	for filePath, fileResult := range job.Results {
-		var prov *worker.ProvenanceData
+		var prov *resultstore.ProvenanceData
 		if job.Provenance != nil {
 			prov = job.Provenance[filePath]
 		}
@@ -135,7 +136,7 @@ func buildBatchJobResponse(job *worker.BatchJobStatus) *contracts.BatchJobRespon
 func buildBatchJobSlimResponse(job *worker.BatchJobStatus) *contracts.BatchJobResponseSlim {
 	results := make(map[string]*contracts.BatchFileResultSlim, len(job.Results))
 	for filePath, fileResult := range job.Results {
-		var prov *worker.ProvenanceData
+		var prov *resultstore.ProvenanceData
 		if job.Provenance != nil {
 			prov = job.Provenance[filePath]
 		}

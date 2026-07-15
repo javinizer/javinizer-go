@@ -10,7 +10,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,20 +37,20 @@ func TestProcessOrganizeJob_HandlesExcludedInvalidAndUnmatchedFiles(t *testing.T
 	requireWriteFile(t, unmatchedPath)
 
 	job := deps.JobStore.CreateJobBatch([]string{excludedPath, invalidTypePath, unmatchedPath})
-	setJobResult(job, excludedPath, &worker.MovieResult{
+	setJobResult(job, excludedPath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: excludedPath, MovieID: "IPX-111"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-111", Title: "Excluded"},
 	})
 	// Movie: nil means "no movie data available" — skipped gracefully by organize (not failed)
-	setJobResult(job, invalidTypePath, &worker.MovieResult{
+	setJobResult(job, invalidTypePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: invalidTypePath, MovieID: "IPX-222"},
 		Status:        models.JobStatusCompleted,
 		Movie:         nil,
 	})
 	// A Movie with UNKNOWN ID still has a valid Movie struct, so organize will attempt it.
 	// With copyOnly=true, the file is copied successfully → organized.
-	setJobResult(job, unmatchedPath, &worker.MovieResult{
+	setJobResult(job, unmatchedPath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: unmatchedPath, MovieID: "UNKNOWN"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "UNKNOWN", Title: "No Match"},
@@ -88,17 +88,17 @@ func TestProcessUpdateMode_SkipsExcludedAndInvalidResults(t *testing.T) {
 	requireWriteFile(t, invalidTypePath)
 
 	job := deps.JobStore.CreateJobBatch([]string{validPath, excludedPath, invalidTypePath})
-	setJobResult(job, validPath, &worker.MovieResult{
+	setJobResult(job, validPath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: validPath, MovieID: "IPX-333"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-333", Title: "Valid Update"},
 	})
-	setJobResult(job, excludedPath, &worker.MovieResult{
+	setJobResult(job, excludedPath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: excludedPath, MovieID: "IPX-444"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-444", Title: "Excluded Update"},
 	})
-	setJobResult(job, invalidTypePath, &worker.MovieResult{
+	setJobResult(job, invalidTypePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: invalidTypePath, MovieID: "IPX-555"},
 		Status:        models.JobStatusCompleted,
 		Movie:         nil,
@@ -137,7 +137,7 @@ func TestProcessUpdateMode_RespectsNFOEnabledConfig(t *testing.T) {
 	requireWriteFile(t, validPath)
 
 	job := deps.JobStore.CreateJobBatch([]string{validPath})
-	setJobResult(job, validPath, &worker.MovieResult{
+	setJobResult(job, validPath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: validPath, MovieID: "IPX-666"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-666", Title: "NFO Disabled Test"},
@@ -175,7 +175,7 @@ func TestProcessOrganizeJob_SkipsNFOWhenDisabled(t *testing.T) {
 	requireWriteFile(t, videoPath)
 
 	job := deps.JobStore.CreateJobBatch([]string{videoPath})
-	setJobResult(job, videoPath, &worker.MovieResult{
+	setJobResult(job, videoPath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: videoPath, MovieID: "IPX-777"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-777", Title: "Organize NFO Disabled"},

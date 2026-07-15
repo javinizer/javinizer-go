@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 )
 
@@ -287,7 +288,7 @@ func parseAndConvertJobResults(job *models.Job, fs afero.Fs) map[string]*contrac
 
 	results := make(map[string]*contracts.BatchFileResult, len(parsed.Results))
 	for filePath, mr := range parsed.Results {
-		var prov *worker.ProvenanceData
+		var prov *resultstore.ProvenanceData
 		if parsed.Provenance != nil {
 			prov = parsed.Provenance[filePath]
 		}

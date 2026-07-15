@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,7 +39,7 @@ func TestUpdateMovie_TitleOnlyEdit_NoActressWrites(t *testing.T) {
 
 	jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ABC-001", Title: "Old", Actresses: []models.Actress{a1, a2}},
@@ -71,7 +72,7 @@ func TestUpdateMovie_Rename_PreservesCreatedAt(t *testing.T) {
 
 	jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABF-153"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ABF-153", Actresses: []models.Actress{a}},
@@ -107,7 +108,7 @@ func TestUpdateMovie_Rename_BumpsUpdatedAtOnlyForRenamed(t *testing.T) {
 
 	jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "M-1"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "M-1", Actresses: []models.Actress{a, b}},
@@ -139,7 +140,7 @@ func TestUpdateMovie_Rename_DMMIDZeroCollision_StaysByD(t *testing.T) {
 
 	jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "M-1"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{ID: "M-1", Actresses: []models.Actress{
@@ -171,7 +172,7 @@ func TestUpdateMovie_Rename_MultiPart_Idempotent(t *testing.T) {
 
 	jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABF-153"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ABF-153", Actresses: []models.Actress{a}},
@@ -211,7 +212,7 @@ func TestUpdateMovie_Rename_StaleID_CreatesFreshNotResurrected(t *testing.T) {
 
 	jq := NewJobStore(nil, nil, repos.MovieRepo, "", nil, nil, WithActressRepo(repos.ActressRepo))
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "M-1"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{ID: "M-1", Actresses: []models.Actress{

@@ -7,6 +7,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -105,10 +106,10 @@ func TestScrapeResultToMovieResult_FilenameTemplateEndToEnd(t *testing.T) {
 	assert.Equal(t, "IPX-535.mp4", gotExt) // <FILENAME_EXT> keeps the extension
 }
 
-// --- Clone: nil MovieResult (line 146) ---
+// --- Clone: nil resultstore.MovieResult (line 146) ---
 
 func TestMovieResult_Clone_Nil_Partial(t *testing.T) {
-	var mr *MovieResult
+	var mr *resultstore.MovieResult
 	cloned := mr.Clone()
 	assert.Nil(t, cloned)
 }
@@ -117,7 +118,7 @@ func TestMovieResult_Clone_Nil_Partial(t *testing.T) {
 
 func TestMovieResult_Clone_WithEndedAt_Partial(t *testing.T) {
 	now := time.Now()
-	mr := &MovieResult{
+	mr := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "test.mp4"},
 		Status:        models.JobStatusCompleted,
 		EndedAt:       &now,
@@ -131,7 +132,7 @@ func TestMovieResult_Clone_WithEndedAt_Partial(t *testing.T) {
 // --- Clone: with Movie ---
 
 func TestMovieResult_Clone_WithMovie_Partial(t *testing.T) {
-	mr := &MovieResult{
+	mr := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "test.mp4"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001"},

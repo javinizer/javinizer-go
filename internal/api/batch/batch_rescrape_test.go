@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -30,7 +31,7 @@ func TestBatchRescrapeMovies(t *testing.T) {
 			name: "empty movie_ids returns 400",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -48,7 +49,7 @@ func TestBatchRescrapeMovies(t *testing.T) {
 			name: "no scrapers returns 400",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -85,7 +86,7 @@ func TestBatchRescrapeMovies(t *testing.T) {
 			name: "best-effort: mixed found and not-found movie IDs",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
-				setJobResult(job, "/path/to/IPX-535.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
@@ -114,7 +115,7 @@ func TestBatchRescrapeMovies(t *testing.T) {
 			name: "all movies not found still returns 200 with failed results",
 			setupJob: func(jq worker.JobStoreInterface) (string, []string) {
 				job := jq.CreateJobBatch([]string{"/path/to/ABC-123.mp4"})
-				setJobResult(job, "/path/to/ABC-123.mp4", &worker.MovieResult{
+				setJobResult(job, "/path/to/ABC-123.mp4", &resultstore.MovieResult{
 					FileMatchInfo: models.FileMatchInfo{Path: "/path/to/ABC-123.mp4", MovieID: "ABC-123"},
 					Status:        models.JobStatusCompleted,
 					Movie:         &models.Movie{ID: "ABC-123", Title: "Test"},

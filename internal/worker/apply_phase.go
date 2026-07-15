@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -70,7 +71,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	// prevents concurrent-modification bugs during iteration.
 	type applyItem struct {
 		filePath   string
-		fileResult *MovieResult
+		fileResult *resultstore.MovieResult
 		movie      *models.Movie
 	}
 	items := make([]applyItem, 0, len(inputs.Results))
@@ -150,7 +151,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 func buildApplyCmd(
 	filePath string,
 	movie *models.Movie,
-	fileResult *MovieResult,
+	fileResult *resultstore.MovieResult,
 	inputs applyPhaseInputs,
 	cfg ApplyPhaseConfig,
 	taskCtx context.Context,
@@ -269,7 +270,7 @@ func interpretApplyResult(
 		// failed-apply row loses its movie payload and /review/[jobId] can't
 		// render the movie card / poster preview. Same dropped-on-failure-path
 		// pattern fixed for FileMatchInfo in commit 6249de64.
-		inputs.Updater.UpdateFileResult(filePath, &MovieResult{
+		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
 			FileMatchInfo: afc.Match,
 			Movie:         movie,
 			Status:        fileStatus,
@@ -314,7 +315,7 @@ func interpretApplyResult(
 	}
 
 	if result != nil && result.Movie != nil {
-		if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *MovieResult) (*MovieResult, error) {
+		if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			current.Movie = result.Movie.Clone()
 			return current, nil
 		}); err != nil {
@@ -348,7 +349,7 @@ func applyFile(
 	egCtx context.Context,
 	wf workflow.WorkflowInterface,
 	filePath string,
-	fileResult *MovieResult,
+	fileResult *resultstore.MovieResult,
 	movie *models.Movie,
 	inputs applyPhaseInputs,
 	cfg ApplyPhaseConfig,

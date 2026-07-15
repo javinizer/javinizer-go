@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 )
 
@@ -213,7 +214,7 @@ func (s *JobStore) recoverOrphanedJobs() {
 // duplicated closure wiring.
 type jobAdapters struct {
 	reader          JobReader
-	movieLookup     MovieLookup
+	movieLookup     resultstore.MovieLookup
 	phaseController PhaseController
 	canceller       JobCanceller
 	editor          JobEditor
@@ -223,6 +224,8 @@ type jobAdapters struct {
 // Each public method assembles its return value from a subset of these
 // components, avoiding the ~20 lines of duplicated closure wiring that
 // previously appeared in CreateJob, GetJobForEdit, and GetJobForControl.
+// Per the result-store extraction: job.results is a resultstore.Store, which
+// satisfies MovieLookup, so movieLookup is wired directly from job.results.
 func buildAdapters(job *BatchJob) *jobAdapters {
 	jr := &jobReaderImpl{
 		id:          job.ID.String(),
@@ -234,7 +237,7 @@ func buildAdapters(job *BatchJob) *jobAdapters {
 	}
 	return &jobAdapters{
 		reader:      jr,
-		movieLookup: job.resultIndex,
+		movieLookup: job.results,
 		phaseController: &phaseControllerImpl{
 			startScrape:      job.controller.StartScrape,
 			startApply:       job.controller.StartApply,
@@ -248,9 +251,7 @@ func buildAdapters(job *BatchJob) *jobAdapters {
 		},
 		canceller: job.lifecycle,
 		editor: &jobEditorImpl{
-			updater:      job.results,
-			accessor:     job.results,
-			tracker:      job.results,
+			store:        job.results,
 			lifecycle:    job.lifecycle,
 			posterEditor: job.posterEditor,
 			movieRepo:    job.deps.MovieRepo,
@@ -305,7 +306,7 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 
 	// Override posterEditor with the one that has movieRepo access
 	if s.movieRepo != nil {
-		job.posterEditor = NewPosterEditor(job.resultIndex, job.results, s.movieRepo)
+		job.posterEditor = NewPosterEditor(job.results, job.results, s.movieRepo)
 	}
 
 	// Set persistFn after job is constructed so the closure captures the correct pointer

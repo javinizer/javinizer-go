@@ -248,7 +248,7 @@ func TestScrapePhase_Run_PanicRecovery(t *testing.T) {
 
 func TestScrapePhase_Run_PanicRecoveryPreservesTimestampsAndBroadcasts(t *testing.T) {
 	// A panicked scrape goroutine must (1) keep StartedAt / EndedAt on the
-	// failed MovieResult so the failed-files card timestamps stay populated,
+	// failed resultstore.MovieResult so the failed-files card timestamps stay populated,
 	// and (2) emit a StepFailed JobEvent so the progress UI updates in real
 	// time. Both were dropped on the refactor's panic path because
 	// recoveryContext.startTime was left zero and rc.broadcast was nil.
@@ -262,8 +262,8 @@ func TestScrapePhase_Run_PanicRecoveryPreservesTimestampsAndBroadcasts(t *testin
 	r := inputs.Updater.(*stubUpdater).getResult("file.mp4")
 	require.NotNil(t, r)
 	assert.Equal(t, models.JobStatusFailed, r.Status)
-	assert.False(t, r.StartedAt.IsZero(), "panic-recovered MovieResult must keep StartedAt for the UI timeline")
-	require.NotNil(t, r.EndedAt, "panic-recovered MovieResult must keep EndedAt for the UI timeline")
+	assert.False(t, r.StartedAt.IsZero(), "panic-recovered resultstore.MovieResult must keep StartedAt for the UI timeline")
+	require.NotNil(t, r.EndedAt, "panic-recovered resultstore.MovieResult must keep EndedAt for the UI timeline")
 	assert.False(t, r.EndedAt.IsZero())
 
 	// A StepFailed scrape JobEvent must be broadcast on panic, mirroring the
@@ -382,7 +382,7 @@ func TestScrapePhase_Run_BackfillsNameAndExtensionOnMapMiss(t *testing.T) {
 	// this filePath (scanner miss, nil map, or path-normalization mismatch
 	// between the API request's submitted path and what the scanner returned),
 	// `inputs.FileMatchInfo[filePath]` returns the ZERO value. Previously only
-	// fmi.Path was backfilled (commit d9106a96); the resulting MovieResult
+	// fmi.Path was backfilled (commit d9106a96); the resulting resultstore.MovieResult
 	// carried an empty Extension, so the organizer's resolveFileName built a
 	// target path of `<templateOutput>` WITHOUT the `.mp4` suffix. The /review
 	// organize preview then rendered the video row as `ABF-346` (no extension)
@@ -439,7 +439,7 @@ func TestScrapePhase_Run_NoResultPropagatesVerboseErrorMessage(t *testing.T) {
 	// per-scraper failure summary via buildNoResultsError, e.g.
 	// "No results from any scraper: fc2: movie PPV-2856053 not found on FC2".
 	// The worker phase must surface that message verbatim on the failed
-	// MovieResult rather than the generic "no result" literal, so the
+	// resultstore.MovieResult rather than the generic "no result" literal, so the
 	// /jobs UI can show why a scrape failed.
 	verboseMsg := "No results from any scraper: fc2: movie PPV-2856053 not found on FC2"
 	wf := &stubWorkflow{scrapeResult: &scrape.ScrapeResult{

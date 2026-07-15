@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -101,74 +102,74 @@ func TestBatchJob_Cancel_AlreadyCompletedUncovered(t *testing.T) {
 func TestBatchJob_IsGone_DeletedUncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
 	job.lifecycle.deleted = true
-	assert.True(t, job.resultIndex.IsGone())
+	assert.True(t, job.results.IsGone())
 }
 
 func TestBatchJob_IsGone_RunningUncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
 	job.lifecycle.Status = models.JobStatusRunning
-	assert.True(t, job.resultIndex.IsGone())
+	assert.True(t, job.results.IsGone())
 }
 
 func TestBatchJob_IsGone_PendingUncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	assert.False(t, job.resultIndex.IsGone())
+	assert.False(t, job.results.IsGone())
 }
 
 func TestBatchJob_CommitResult_NewFileUncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	result := &MovieResult{
+	result := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 	}
-	err := job.resultIndex.CommitResult("file1.mp4", result, 0)
+	err := job.results.CommitResult("file1.mp4", result, 0)
 	require.NoError(t, err)
-	assert.Equal(t, uint64(1), job.results.Results["file1.mp4"].Revision)
+	assert.Equal(t, uint64(1), job.snap().Results["file1.mp4"].Revision)
 }
 
 func TestBatchJob_CommitResult_ConflictUncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 		Status:        models.JobStatusCompleted,
 	})
-	result := &MovieResult{
+	result := &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 		Status:        models.JobStatusCompleted,
 	}
-	err := job.resultIndex.CommitResult("file1.mp4", result, 0)
+	err := job.results.CommitResult("file1.mp4", result, 0)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "conflict")
 }
 
 func TestBatchJob_OtherResultUsesMovieID_Uncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4", "file2.mp4"})
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "SHARED-001"},
 		Movie:         &models.Movie{ID: "SHARED-001"},
 	})
-	job.SetResultDirect("file2.mp4", &MovieResult{
+	job.SetResultDirect("file2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4", MovieID: "SHARED-001"},
 		Movie:         &models.Movie{ID: "SHARED-001"},
 	})
-	assert.True(t, job.resultIndex.OtherResultUsesMovieID("file1.mp4", "SHARED-001"))
-	assert.False(t, job.resultIndex.OtherResultUsesMovieID("file1.mp4", "NONEXISTENT"))
+	assert.True(t, job.results.OtherResultUsesMovieID("file1.mp4", "SHARED-001"))
+	assert.False(t, job.results.OtherResultUsesMovieID("file1.mp4", "NONEXISTENT"))
 }
 
 func TestBatchJob_FindFileForMovieID_Uncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Movie:         &models.Movie{ID: "ABC-001"},
 	})
-	result, err := job.resultIndex.FindFileForMovieID("ABC-001")
+	result, err := job.results.FindFileForMovieID("ABC-001")
 	require.NoError(t, err)
 	assert.Equal(t, "file1.mp4", result.FilePath)
 }
 
 func TestBatchJob_FindFileForMovieID_NotFoundUncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	_, err := job.resultIndex.FindFileForMovieID("NONEXISTENT")
+	_, err := job.results.FindFileForMovieID("NONEXISTENT")
 	assert.Error(t, err)
 }
 
@@ -176,18 +177,18 @@ func TestBatchJob_FindFileForMovieID_NotFoundUncovered(t *testing.T) {
 
 func TestResultTracker_MovieIDIndexUncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "ABC-001"},
 	})
 
 	// Test lookup via movieID index
-	paths := job.resultIndex.FindFilePathsForMovieID("ABC-001")
+	paths := job.results.FindFilePathsForMovieID("ABC-001")
 	assert.Contains(t, paths, "file1.mp4")
 
 	// Test case-insensitive
-	pathsLower := job.resultIndex.FindFilePathsForMovieID("abc-001")
+	pathsLower := job.results.FindFilePathsForMovieID("abc-001")
 	assert.Contains(t, pathsLower, "file1.mp4")
 }
 
@@ -199,27 +200,10 @@ func TestResultTracker_GetFilesReturnsCopyUncovered(t *testing.T) {
 	assert.Equal(t, "file1.mp4", original[0])
 }
 
-func TestResultTracker_CloneProvenanceLockedUncovered(t *testing.T) {
-	rt := newResultTrackerFromState(&resultTrackerState{
-		Provenance: map[string]*ProvenanceData{
-			"f1": {FieldSources: map[string]string{"title": "src1"}},
-		},
-	})
-	cloned := rt.SnapshotData().Provenance
-	assert.Equal(t, "src1", cloned["f1"].FieldSources["title"])
-	cloned["f1"].FieldSources["title"] = "modified"
-	assert.Equal(t, "src1", rt.Provenance["f1"].FieldSources["title"], "clone should be independent")
-}
-
-func TestResultTracker_CloneFileMatchInfoUncovered(t *testing.T) {
-	rt := newResultTrackerFromState(&resultTrackerState{
-		FileMatchInfo: map[string]models.FileMatchInfo{
-			"f1": {MovieID: "ABC-001"},
-		},
-	})
-	cloned := rt.CloneFileMatchInfo()
-	assert.Equal(t, "ABC-001", cloned["f1"].MovieID)
-}
+// TestResultTracker_CloneProvenanceLockedUncovered and
+// TestResultTracker_CloneFileMatchInfoUncovered moved to the resultstore
+// package (they construct resultTrackerState directly and assert on internal
+// state fields).
 
 // --- job_event.go uncovered ---
 

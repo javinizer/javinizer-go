@@ -5,6 +5,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
 // fieldOverrideKeys is the canonical set of field-source keys a user may
@@ -47,7 +48,7 @@ func SupportedFieldOverrideKeys() []string {
 // original's semantics (the user explicitly cherry-picked this source's value)
 // and avoids re-instantiating the full Aggregator in the review path. movie and
 // prov are mutated in place; the caller is expected to persist both.
-func applyFieldOverride(movie *models.Movie, prov *ProvenanceData, fieldKey, source string) error {
+func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, fieldKey, source string) error {
 	if movie == nil {
 		return fmt.Errorf("cannot override field on nil movie")
 	}
@@ -217,7 +218,7 @@ func genresFromScraperStrings(names []string) []models.Genre {
 // attribution is stale; this keeps the ActressSources map consistent with the
 // new Actresses slice. Keying uses scrape.ActressSourceKey so the review
 // tooltip lookup matches.
-func rebuildActressSources(prov *ProvenanceData, actresses []models.Actress, source string) {
+func rebuildActressSources(prov *resultstore.ProvenanceData, actresses []models.Actress, source string) {
 	if len(actresses) == 0 {
 		prov.ActressSources = nil
 		return

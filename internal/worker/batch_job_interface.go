@@ -9,6 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -16,7 +17,7 @@ import (
 type ApplyFileContext struct {
 	FilePath    string
 	Movie       *models.Movie
-	MovieResult *MovieResult
+	MovieResult *resultstore.MovieResult
 	Match       models.FileMatchInfo
 	Destination string
 }
@@ -68,9 +69,9 @@ type batchJobBase struct {
 // the live *BatchJob struct.
 type BatchJobStatus struct {
 	batchJobBase
-	Results     map[string]*MovieResult    `json:"results"`
-	ResultIndex map[string]string          `json:"result_index,omitempty"` // ResultID → FilePath lookup
-	Provenance  map[string]*ProvenanceData `json:"provenance,omitempty"`
+	Results     map[string]*resultstore.MovieResult    `json:"results"`
+	ResultIndex map[string]string                      `json:"result_index,omitempty"` // ResultID → FilePath lookup
+	Provenance  map[string]*resultstore.ProvenanceData `json:"provenance,omitempty"`
 }
 
 // RescrapeCmd carries everything the rescrape seam needs.
@@ -124,13 +125,6 @@ type RescrapeResult struct {
 	FilePath         string                  // File path that was rescraped (for provenance propagation)
 }
 
-// FileLookupResult holds the output of looking up a movie ID in job results.
-type FileLookupResult struct {
-	FilePath         string
-	OldMovieID       string
-	CapturedRevision uint64
-}
-
 // ---------------------------------------------------------------------------
 // Atomic sub-interfaces
 // ---------------------------------------------------------------------------
@@ -138,33 +132,15 @@ type FileLookupResult struct {
 // JobReader provides read-only access to job state.
 // Consumers that only need to observe job status and results should depend
 // on this narrow interface rather than the full composite.
+// Per the result-store extraction: GetMovieResult/GetResults return
+// resultstore.* types (MovieLookup moved to the resultstore package).
 type JobReader interface {
 	GetID() string
 	GetJobStatus() models.JobStatus
 	GetStatus() *BatchJobStatus
-	GetMovieResult(filePath string) (*MovieResult, error)
-	GetResults() []MovieResult
+	GetMovieResult(filePath string) (*resultstore.MovieResult, error)
+	GetResults() []resultstore.MovieResult
 	Subscribe() JobEventSubscriber
-}
-
-// MovieLookup provides methods to find movies within a job.
-// extracted from the former Rescraper interface — lookup is a
-// separate concern from rescrape action.
-type MovieLookup interface {
-	FindFilePathsForMovieID(movieID string) []string
-	FindMovieResultForMovieID(movieID string) (*MovieResult, error)
-	GetMovieResultsForMovieID(movieID string) []*MovieResult
-	GetFileMatchInfosForMovieID(movieID string) []models.FileMatchInfo
-
-	// GetFileResultByResultID returns the MovieResult and its file path for
-	// a given stable ResultID (thread-safe). Returns (result, filePath, found).
-	GetFileResultByResultID(resultID string) (*MovieResult, string, bool)
-
-	// GetProvenance returns the provenance (field/actress source attribution
-	// plus the in-memory raw ScraperResults) for a file path, or nil. The
-	// returned value is a clone and safe for the caller to mutate. Used by the
-	// review-page source viewer to read per-scraper raw results.
-	GetProvenance(filePath string) *ProvenanceData
 }
 
 // JobEditor provides mutation operations on a job's results.
@@ -180,7 +156,7 @@ type JobEditor interface {
 	// scraper source's raw results and applies it to the movie, updating
 	// provenance attribution. Mirrors the original Javinizer "Replace" button.
 	// Returns the updated MovieResult and ProvenanceData (both clones).
-	ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*MovieResult, *ProvenanceData, error)
+	ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)
 }
 
 // PhaseController provides phase execution and dependency-wiring operations
@@ -249,7 +225,7 @@ type JobCanceller interface {
 // to DB before updating in-memory state — callers no longer call MovieRepo directly.
 type EditableJob interface {
 	JobReader
-	MovieLookup
+	resultstore.MovieLookup
 	JobEditor
 }
 
@@ -261,7 +237,7 @@ type EditableJob interface {
 // were previously on BatchJob).
 type ControlledJob interface {
 	JobReader
-	MovieLookup
+	resultstore.MovieLookup
 	PhaseController
 	JobCanceller
 }
@@ -283,7 +259,7 @@ type ControlledJob interface {
 // (ControlledJob, EditableJob) via GetJobForControl/GetJobForEdit instead.
 type BatchJobInterface interface {
 	JobReader
-	MovieLookup
+	resultstore.MovieLookup
 	PhaseController
 	JobCanceller
 	JobEditor
@@ -339,32 +315,30 @@ type StandaloneJob interface {
 type jobReaderImpl struct {
 	id          string
 	lifecycle   *JobLifecycle
-	results     ResultMapAccessor
-	snapshotFn  func() *BatchJobStatus    // closure from BatchJob
-	subscribeFn func() JobEventSubscriber // closure from BatchJob
-	resultsFn   func() []MovieResult      // closure from ResultTracker.GetResults
+	results     resultstore.Store
+	snapshotFn  func() *BatchJobStatus           // closure from BatchJob
+	subscribeFn func() JobEventSubscriber        // closure from BatchJob
+	resultsFn   func() []resultstore.MovieResult // closure from ResultTracker.GetResults
 }
 
 func (jr *jobReaderImpl) GetID() string                  { return jr.id }
 func (jr *jobReaderImpl) GetJobStatus() models.JobStatus { return jr.lifecycle.GetJobStatus() }
 func (jr *jobReaderImpl) GetStatus() *BatchJobStatus     { return jr.snapshotFn() }
-func (jr *jobReaderImpl) GetMovieResult(filePath string) (*MovieResult, error) {
+func (jr *jobReaderImpl) GetMovieResult(filePath string) (*resultstore.MovieResult, error) {
 	return jr.results.GetMovieResult(filePath)
 }
-func (jr *jobReaderImpl) GetResults() []MovieResult     { return jr.resultsFn() }
-func (jr *jobReaderImpl) Subscribe() JobEventSubscriber { return jr.subscribeFn() }
+func (jr *jobReaderImpl) GetResults() []resultstore.MovieResult { return jr.resultsFn() }
+func (jr *jobReaderImpl) Subscribe() JobEventSubscriber         { return jr.subscribeFn() }
 
-// jobEditorImpl satisfies JobEditor by composing ResultUpdater,
-// ResultMapAccessor, JobLifecycle, and PosterEditor.
-// ExcludeFile crosses the results/lifecycle boundary — it cannot delegate to any
-// single embedded type.
-// Per DEEP-5: resultExcluder merged into ResultUpdater (MarkExcluded exported),
-// exclusionChecker merged into ResultMapAccessor (IsAllExcluded exported).
+// jobEditorImpl satisfies JobEditor by composing a resultstore.Store,
+// JobLifecycle, and PosterEditor. ExcludeFile crosses the results/lifecycle
+// boundary — it cannot delegate to any single embedded type.
+// Per the result-store extraction: the former updater/accessor/tracker fields
+// are consolidated into a single resultstore.Store (Store covers ResultUpdater,
+// ResultMapAccessor, and MovieLookup).
 // poster DB persistence is handled by PosterEditor, not by this adapter.
 type jobEditorImpl struct {
-	updater      ResultUpdater
-	accessor     ResultMapAccessor
-	tracker      *ResultTracker
+	store        resultstore.Store
 	lifecycle    *JobLifecycle
 	posterEditor *PosterEditor
 	movieRepo    database.MovieRepositoryInterface
@@ -377,7 +351,7 @@ func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie
 	// before persisting, so the cover/fanart reset survives server restarts
 	// and the DB/in-memory states stay in sync. Read-only pass: does not mutate
 	// the in-memory result, only populates movie.Poster.OriginalCoverURL.
-	_ = je.updater.AtomicUpdateFileResult(filePath, func(current *MovieResult) (*MovieResult, error) {
+	_ = je.store.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		backupCoverOriginal(current.Movie, movie)
 		return current, nil
 	})
@@ -420,7 +394,7 @@ func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie
 			return fmt.Errorf("persist movie update: %w", err)
 		}
 	}
-	return je.updater.UpdateMovie(filePath, movie)
+	return je.store.UpdateMovie(filePath, movie)
 }
 
 // ExcludeFile marks a file as excluded from the job and, if all files are excluded,
@@ -428,7 +402,7 @@ func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie
 // to a terminal state (Completed, Cancelled, Failed), because cancelAndMarkCancelled
 // has a cancelled bool guard that makes it a no-op on repeated or post-terminal calls.
 func (je *jobEditorImpl) ExcludeFile(filePath string) {
-	je.updater.MarkExcluded(filePath)
+	je.store.MarkExcluded(filePath)
 
 	je.lifecycle.mu.RLock()
 	status := je.lifecycle.Status
@@ -440,7 +414,7 @@ func (je *jobEditorImpl) ExcludeFile(filePath string) {
 	// explicit Pending/Running guard in BatchJob.ExcludeFile (batch_job.go) —
 	// do NOT reuse isJobTransitioned here, whose gone-check semantics exclude
 	// Organized and would let an Organized job be cancelled.
-	if je.accessor.IsAllExcluded() &&
+	if je.store.IsAllExcluded() &&
 		(status == models.JobStatusPending || status == models.JobStatusRunning) {
 		je.lifecycle.Cancel()
 		return
@@ -472,18 +446,18 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // Raw ScraperResults round-trip through the envelope (json:"scraper_results").
 // A per-resultID mutex serializes concurrent overrides on the same result so
 // the read-clone-mutate-write sequence cannot lose an earlier override.
-func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*MovieResult, *ProvenanceData, error) {
+func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 	mu, _ := je.overrideMu.LoadOrStore(resultID, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
 
-	result, filePath, found := je.tracker.GetFileResultByResultID(resultID)
+	result, filePath, found := je.store.GetFileResultByResultID(resultID)
 	if !found || result == nil || result.Movie == nil {
 		return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
 	}
-	prov := je.tracker.GetProvenance(filePath)
+	prov := je.store.GetProvenance(filePath)
 	if prov == nil {
-		prov = &ProvenanceData{}
+		prov = &resultstore.ProvenanceData{}
 	}
 	movie := result.Movie.Clone()
 	if err := applyFieldOverride(movie, prov, fieldKey, source); err != nil {
@@ -492,18 +466,18 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	if err := je.UpdateMovie(ctx, filePath, movie); err != nil {
 		return nil, nil, fmt.Errorf("persist field override: %w", err)
 	}
-	je.updater.SetProvenance(filePath, prov)
-	updated, _, _ := je.tracker.GetFileResultByResultID(resultID)
-	updatedProv := je.tracker.GetProvenance(filePath)
+	je.store.SetProvenance(filePath, prov)
+	updated, _, _ := je.store.GetFileResultByResultID(resultID)
+	updatedProv := je.store.GetProvenance(filePath)
 	return updated, updatedProv, nil
 }
 
 // editableJobAdapter satisfies EditableJob by composing jobReaderImpl,
-// ResultTracker, and jobEditorImpl. genuinely decomposed —
+// resultstore.MovieLookup, and jobEditorImpl. genuinely decomposed —
 // no *BatchJob embedding.
 type editableJobAdapter struct {
 	JobReader
-	MovieLookup
+	resultstore.MovieLookup
 	JobEditor
 }
 
@@ -541,12 +515,12 @@ func (pc *phaseControllerImpl) SetOperationModeOverride(mode operationmode.Opera
 func (pc *phaseControllerImpl) SetPersistError(msg string) { pc.setPersistError(msg) }
 
 // controlledJobAdapter satisfies ControlledJob by composing jobReaderImpl,
-// ResultTracker, phaseControllerImpl, and JobLifecycle.
+// resultstore.MovieLookup, phaseControllerImpl, and JobLifecycle.
 // fully decomposed — no *BatchJob embedding.
 // Per DEEP-1: PhaseController now includes SetWorkflow/SetBatchCfg/SetJobStatus/etc.
 type controlledJobAdapter struct {
 	JobReader
-	MovieLookup
+	resultstore.MovieLookup
 	PhaseController
 	JobCanceller
 }
@@ -559,7 +533,7 @@ type controlledJobAdapter struct {
 // SetBatchCfg, SetJobStatus, etc.) that were previously on BatchJob.
 type batchJobAdapter struct {
 	JobReader
-	MovieLookup
+	resultstore.MovieLookup
 	PhaseController
 	JobCanceller
 	JobEditor
@@ -606,7 +580,6 @@ var (
 	_ ControlledJob     = (*controlledJobAdapter)(nil)
 	_ BatchJobInterface = (*batchJobAdapter)(nil)
 	_ StandaloneJob     = (*standaloneJobAdapter)(nil)
-	_ MovieLookup       = (*ResultTracker)(nil)
 	_ JobCanceller      = (*JobLifecycle)(nil)
 )
 

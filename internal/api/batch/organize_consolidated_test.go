@@ -13,7 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -397,7 +397,7 @@ func TestOrganizeJob_CopyOnlySuccess(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -441,7 +441,7 @@ func TestOrganizeJob_DeniedDirectory(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -509,7 +509,7 @@ func TestOrganizeJob_InvalidLinkMode(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -617,7 +617,7 @@ func TestOrganizeJob_Miss2_CopyOnlySkipOptions(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -662,7 +662,7 @@ func TestOrganizeJob_Miss2_HardlinkMode(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -708,7 +708,7 @@ func TestOrganizeJob_Miss2_InPlaceModeAllowedDir(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -754,7 +754,7 @@ func TestOrganizeJob_Miss2_OrganizeModeAllowedDir(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -800,7 +800,7 @@ func TestOrganizeJob_Miss3_GoroutineOrganizePath(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -863,7 +863,7 @@ func TestOrganizeJob_Miss3_JobAlreadyRunning(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusRunning,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -897,7 +897,7 @@ func TestOrganizeJob_Miss3_JobNotCompleted(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusPending,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -969,7 +969,7 @@ func TestOrganizeJob_Miss3_OrganizeModeDeniedDir(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -1014,7 +1014,7 @@ func TestOrganizeJob_Miss3_PostApplyErrorPath(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -1056,7 +1056,7 @@ func TestOrganizeJob_Miss3_PreviewModeRejected(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -1103,7 +1103,7 @@ func TestOrganizeJob_Miss3_SymlinkMode(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
-	setJobResult(job, "/path/to/TEST-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},

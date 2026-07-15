@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -42,31 +43,31 @@ func (_m *MockBatchJobInterface) EXPECT() *MockBatchJobInterface_Expecter {
 }
 
 // ApplyFieldOverride provides a mock function for the type MockBatchJobInterface
-func (_mock *MockBatchJobInterface) ApplyFieldOverride(ctx context.Context, resultID string, fieldKey string, source string) (*worker.MovieResult, *worker.ProvenanceData, error) {
+func (_mock *MockBatchJobInterface) ApplyFieldOverride(ctx context.Context, resultID string, fieldKey string, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 	ret := _mock.Called(ctx, resultID, fieldKey, source)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ApplyFieldOverride")
 	}
 
-	var r0 *worker.MovieResult
-	var r1 *worker.ProvenanceData
+	var r0 *resultstore.MovieResult
+	var r1 *resultstore.ProvenanceData
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*worker.MovieResult, *worker.ProvenanceData, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)); ok {
 		return returnFunc(ctx, resultID, fieldKey, source)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) *worker.MovieResult); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) *resultstore.MovieResult); ok {
 		r0 = returnFunc(ctx, resultID, fieldKey, source)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*worker.MovieResult)
+			r0 = ret.Get(0).(*resultstore.MovieResult)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) *worker.ProvenanceData); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) *resultstore.ProvenanceData); ok {
 		r1 = returnFunc(ctx, resultID, fieldKey, source)
 	} else {
 		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(*worker.ProvenanceData)
+			r1 = ret.Get(1).(*resultstore.ProvenanceData)
 		}
 	}
 	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, string) error); ok {
@@ -119,12 +120,12 @@ func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) Run(run func(ctx contex
 	return _c
 }
 
-func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) Return(movieResult *worker.MovieResult, provenanceData *worker.ProvenanceData, err error) *MockBatchJobInterface_ApplyFieldOverride_Call {
+func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) Return(movieResult *resultstore.MovieResult, provenanceData *resultstore.ProvenanceData, err error) *MockBatchJobInterface_ApplyFieldOverride_Call {
 	_c.Call.Return(movieResult, provenanceData, err)
 	return _c
 }
 
-func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) RunAndReturn(run func(ctx context.Context, resultID string, fieldKey string, source string) (*worker.MovieResult, *worker.ProvenanceData, error)) *MockBatchJobInterface_ApplyFieldOverride_Call {
+func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) RunAndReturn(run func(ctx context.Context, resultID string, fieldKey string, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)) *MockBatchJobInterface_ApplyFieldOverride_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -302,23 +303,23 @@ func (_c *MockBatchJobInterface_FindFilePathsForMovieID_Call) RunAndReturn(run f
 }
 
 // FindMovieResultForMovieID provides a mock function for the type MockBatchJobInterface
-func (_mock *MockBatchJobInterface) FindMovieResultForMovieID(movieID string) (*worker.MovieResult, error) {
+func (_mock *MockBatchJobInterface) FindMovieResultForMovieID(movieID string) (*resultstore.MovieResult, error) {
 	ret := _mock.Called(movieID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindMovieResultForMovieID")
 	}
 
-	var r0 *worker.MovieResult
+	var r0 *resultstore.MovieResult
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*worker.MovieResult, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) (*resultstore.MovieResult, error)); ok {
 		return returnFunc(movieID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *worker.MovieResult); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) *resultstore.MovieResult); ok {
 		r0 = returnFunc(movieID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*worker.MovieResult)
+			r0 = ret.Get(0).(*resultstore.MovieResult)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
@@ -353,12 +354,12 @@ func (_c *MockBatchJobInterface_FindMovieResultForMovieID_Call) Run(run func(mov
 	return _c
 }
 
-func (_c *MockBatchJobInterface_FindMovieResultForMovieID_Call) Return(movieResult *worker.MovieResult, err error) *MockBatchJobInterface_FindMovieResultForMovieID_Call {
+func (_c *MockBatchJobInterface_FindMovieResultForMovieID_Call) Return(movieResult *resultstore.MovieResult, err error) *MockBatchJobInterface_FindMovieResultForMovieID_Call {
 	_c.Call.Return(movieResult, err)
 	return _c
 }
 
-func (_c *MockBatchJobInterface_FindMovieResultForMovieID_Call) RunAndReturn(run func(movieID string) (*worker.MovieResult, error)) *MockBatchJobInterface_FindMovieResultForMovieID_Call {
+func (_c *MockBatchJobInterface_FindMovieResultForMovieID_Call) RunAndReturn(run func(movieID string) (*resultstore.MovieResult, error)) *MockBatchJobInterface_FindMovieResultForMovieID_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -417,24 +418,24 @@ func (_c *MockBatchJobInterface_GetFileMatchInfosForMovieID_Call) RunAndReturn(r
 }
 
 // GetFileResultByResultID provides a mock function for the type MockBatchJobInterface
-func (_mock *MockBatchJobInterface) GetFileResultByResultID(resultID string) (*worker.MovieResult, string, bool) {
+func (_mock *MockBatchJobInterface) GetFileResultByResultID(resultID string) (*resultstore.MovieResult, string, bool) {
 	ret := _mock.Called(resultID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetFileResultByResultID")
 	}
 
-	var r0 *worker.MovieResult
+	var r0 *resultstore.MovieResult
 	var r1 string
 	var r2 bool
-	if returnFunc, ok := ret.Get(0).(func(string) (*worker.MovieResult, string, bool)); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) (*resultstore.MovieResult, string, bool)); ok {
 		return returnFunc(resultID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *worker.MovieResult); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) *resultstore.MovieResult); ok {
 		r0 = returnFunc(resultID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*worker.MovieResult)
+			r0 = ret.Get(0).(*resultstore.MovieResult)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(string) string); ok {
@@ -474,12 +475,12 @@ func (_c *MockBatchJobInterface_GetFileResultByResultID_Call) Run(run func(resul
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetFileResultByResultID_Call) Return(movieResult *worker.MovieResult, s string, b bool) *MockBatchJobInterface_GetFileResultByResultID_Call {
+func (_c *MockBatchJobInterface_GetFileResultByResultID_Call) Return(movieResult *resultstore.MovieResult, s string, b bool) *MockBatchJobInterface_GetFileResultByResultID_Call {
 	_c.Call.Return(movieResult, s, b)
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetFileResultByResultID_Call) RunAndReturn(run func(resultID string) (*worker.MovieResult, string, bool)) *MockBatchJobInterface_GetFileResultByResultID_Call {
+func (_c *MockBatchJobInterface_GetFileResultByResultID_Call) RunAndReturn(run func(resultID string) (*resultstore.MovieResult, string, bool)) *MockBatchJobInterface_GetFileResultByResultID_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -573,23 +574,23 @@ func (_c *MockBatchJobInterface_GetJobStatus_Call) RunAndReturn(run func() model
 }
 
 // GetMovieResult provides a mock function for the type MockBatchJobInterface
-func (_mock *MockBatchJobInterface) GetMovieResult(filePath string) (*worker.MovieResult, error) {
+func (_mock *MockBatchJobInterface) GetMovieResult(filePath string) (*resultstore.MovieResult, error) {
 	ret := _mock.Called(filePath)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetMovieResult")
 	}
 
-	var r0 *worker.MovieResult
+	var r0 *resultstore.MovieResult
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*worker.MovieResult, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) (*resultstore.MovieResult, error)); ok {
 		return returnFunc(filePath)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *worker.MovieResult); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) *resultstore.MovieResult); ok {
 		r0 = returnFunc(filePath)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*worker.MovieResult)
+			r0 = ret.Get(0).(*resultstore.MovieResult)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
@@ -624,30 +625,30 @@ func (_c *MockBatchJobInterface_GetMovieResult_Call) Run(run func(filePath strin
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetMovieResult_Call) Return(movieResult *worker.MovieResult, err error) *MockBatchJobInterface_GetMovieResult_Call {
+func (_c *MockBatchJobInterface_GetMovieResult_Call) Return(movieResult *resultstore.MovieResult, err error) *MockBatchJobInterface_GetMovieResult_Call {
 	_c.Call.Return(movieResult, err)
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetMovieResult_Call) RunAndReturn(run func(filePath string) (*worker.MovieResult, error)) *MockBatchJobInterface_GetMovieResult_Call {
+func (_c *MockBatchJobInterface_GetMovieResult_Call) RunAndReturn(run func(filePath string) (*resultstore.MovieResult, error)) *MockBatchJobInterface_GetMovieResult_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetMovieResultsForMovieID provides a mock function for the type MockBatchJobInterface
-func (_mock *MockBatchJobInterface) GetMovieResultsForMovieID(movieID string) []*worker.MovieResult {
+func (_mock *MockBatchJobInterface) GetMovieResultsForMovieID(movieID string) []*resultstore.MovieResult {
 	ret := _mock.Called(movieID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetMovieResultsForMovieID")
 	}
 
-	var r0 []*worker.MovieResult
-	if returnFunc, ok := ret.Get(0).(func(string) []*worker.MovieResult); ok {
+	var r0 []*resultstore.MovieResult
+	if returnFunc, ok := ret.Get(0).(func(string) []*resultstore.MovieResult); ok {
 		r0 = returnFunc(movieID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*worker.MovieResult)
+			r0 = ret.Get(0).([]*resultstore.MovieResult)
 		}
 	}
 	return r0
@@ -677,30 +678,30 @@ func (_c *MockBatchJobInterface_GetMovieResultsForMovieID_Call) Run(run func(mov
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetMovieResultsForMovieID_Call) Return(movieResults []*worker.MovieResult) *MockBatchJobInterface_GetMovieResultsForMovieID_Call {
+func (_c *MockBatchJobInterface_GetMovieResultsForMovieID_Call) Return(movieResults []*resultstore.MovieResult) *MockBatchJobInterface_GetMovieResultsForMovieID_Call {
 	_c.Call.Return(movieResults)
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetMovieResultsForMovieID_Call) RunAndReturn(run func(movieID string) []*worker.MovieResult) *MockBatchJobInterface_GetMovieResultsForMovieID_Call {
+func (_c *MockBatchJobInterface_GetMovieResultsForMovieID_Call) RunAndReturn(run func(movieID string) []*resultstore.MovieResult) *MockBatchJobInterface_GetMovieResultsForMovieID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetProvenance provides a mock function for the type MockBatchJobInterface
-func (_mock *MockBatchJobInterface) GetProvenance(filePath string) *worker.ProvenanceData {
+func (_mock *MockBatchJobInterface) GetProvenance(filePath string) *resultstore.ProvenanceData {
 	ret := _mock.Called(filePath)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetProvenance")
 	}
 
-	var r0 *worker.ProvenanceData
-	if returnFunc, ok := ret.Get(0).(func(string) *worker.ProvenanceData); ok {
+	var r0 *resultstore.ProvenanceData
+	if returnFunc, ok := ret.Get(0).(func(string) *resultstore.ProvenanceData); ok {
 		r0 = returnFunc(filePath)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*worker.ProvenanceData)
+			r0 = ret.Get(0).(*resultstore.ProvenanceData)
 		}
 	}
 	return r0
@@ -730,30 +731,30 @@ func (_c *MockBatchJobInterface_GetProvenance_Call) Run(run func(filePath string
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetProvenance_Call) Return(provenanceData *worker.ProvenanceData) *MockBatchJobInterface_GetProvenance_Call {
+func (_c *MockBatchJobInterface_GetProvenance_Call) Return(provenanceData *resultstore.ProvenanceData) *MockBatchJobInterface_GetProvenance_Call {
 	_c.Call.Return(provenanceData)
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetProvenance_Call) RunAndReturn(run func(filePath string) *worker.ProvenanceData) *MockBatchJobInterface_GetProvenance_Call {
+func (_c *MockBatchJobInterface_GetProvenance_Call) RunAndReturn(run func(filePath string) *resultstore.ProvenanceData) *MockBatchJobInterface_GetProvenance_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetResults provides a mock function for the type MockBatchJobInterface
-func (_mock *MockBatchJobInterface) GetResults() []worker.MovieResult {
+func (_mock *MockBatchJobInterface) GetResults() []resultstore.MovieResult {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetResults")
 	}
 
-	var r0 []worker.MovieResult
-	if returnFunc, ok := ret.Get(0).(func() []worker.MovieResult); ok {
+	var r0 []resultstore.MovieResult
+	if returnFunc, ok := ret.Get(0).(func() []resultstore.MovieResult); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]worker.MovieResult)
+			r0 = ret.Get(0).([]resultstore.MovieResult)
 		}
 	}
 	return r0
@@ -776,12 +777,12 @@ func (_c *MockBatchJobInterface_GetResults_Call) Run(run func()) *MockBatchJobIn
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetResults_Call) Return(movieResults []worker.MovieResult) *MockBatchJobInterface_GetResults_Call {
+func (_c *MockBatchJobInterface_GetResults_Call) Return(movieResults []resultstore.MovieResult) *MockBatchJobInterface_GetResults_Call {
 	_c.Call.Return(movieResults)
 	return _c
 }
 
-func (_c *MockBatchJobInterface_GetResults_Call) RunAndReturn(run func() []worker.MovieResult) *MockBatchJobInterface_GetResults_Call {
+func (_c *MockBatchJobInterface_GetResults_Call) RunAndReturn(run func() []resultstore.MovieResult) *MockBatchJobInterface_GetResults_Call {
 	_c.Call.Return(run)
 	return _c
 }

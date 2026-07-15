@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +34,7 @@ func TestBatchJob_UpdatePosterCrop_NilMovie_Partial(t *testing.T) {
 			BatchCfg: BatchJobConfig{MaxWorkers: 1, WorkerTimeout: 5 * time.Second},
 		},
 	})
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         nil,
@@ -52,7 +53,7 @@ func TestBatchJob_UpdatePosterCrop_MultipleFiles_Miss(t *testing.T) {
 			BatchCfg: BatchJobConfig{MaxWorkers: 1, WorkerTimeout: 5 * time.Second},
 		},
 	})
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -63,7 +64,7 @@ func TestBatchJob_UpdatePosterCrop_MultipleFiles_Miss(t *testing.T) {
 			},
 		},
 	})
-	job.SetResultDirect("file2.mp4", &MovieResult{
+	job.SetResultDirect("file2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -79,8 +80,8 @@ func TestBatchJob_UpdatePosterCrop_MultipleFiles_Miss(t *testing.T) {
 	require.NoError(t, err)
 
 	// Both files should be updated
-	r1 := job.results.Results["file1.mp4"]
-	r2 := job.results.Results["file2.mp4"]
+	r1 := job.snap().Results["file1.mp4"]
+	r2 := job.snap().Results["file2.mp4"]
 	assert.Equal(t, "cropped.jpg", r1.Movie.Poster.CroppedPosterURL)
 	assert.Equal(t, "cropped.jpg", r2.Movie.Poster.CroppedPosterURL)
 	assert.False(t, r1.Movie.Poster.ShouldCropPoster)
@@ -109,7 +110,7 @@ func TestBatchJob_UpdatePosterFromURL_NilMovie_Partial(t *testing.T) {
 			BatchCfg: BatchJobConfig{MaxWorkers: 1, WorkerTimeout: 5 * time.Second},
 		},
 	})
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         nil,
@@ -128,7 +129,7 @@ func TestBatchJob_UpdatePosterFromURL_MultipleFiles_Miss(t *testing.T) {
 			BatchCfg: BatchJobConfig{MaxWorkers: 1, WorkerTimeout: 5 * time.Second},
 		},
 	})
-	job.SetResultDirect("file1.mp4", &MovieResult{
+	job.SetResultDirect("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -139,7 +140,7 @@ func TestBatchJob_UpdatePosterFromURL_MultipleFiles_Miss(t *testing.T) {
 			},
 		},
 	})
-	job.SetResultDirect("file2.mp4", &MovieResult{
+	job.SetResultDirect("file2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4", MovieID: "ABC-001"},
 		Status:        models.JobStatusCompleted,
 		Movie: &models.Movie{
@@ -155,8 +156,8 @@ func TestBatchJob_UpdatePosterFromURL_MultipleFiles_Miss(t *testing.T) {
 	require.NoError(t, err)
 
 	// Both files should be updated
-	r1 := job.results.Results["file1.mp4"]
-	r2 := job.results.Results["file2.mp4"]
+	r1 := job.snap().Results["file1.mp4"]
+	r2 := job.snap().Results["file2.mp4"]
 	assert.Equal(t, "new-poster.jpg", r1.Movie.Poster.PosterURL)
 	assert.Equal(t, "new-cropped.jpg", r1.Movie.Poster.CroppedPosterURL)
 	assert.Equal(t, "new-poster.jpg", r2.Movie.Poster.PosterURL)
@@ -167,11 +168,11 @@ func TestBatchJob_UpdatePosterFromURL_MultipleFiles_Miss(t *testing.T) {
 
 func TestBatchJob_ExcludeFile_CancelsWhenAllExcluded_Partial(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4", "file2.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 		Status:        models.JobStatusCompleted,
 	})
-	job.results.UpdateFileResult("file2.mp4", &MovieResult{
+	job.results.UpdateFileResult("file2.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file2.mp4"},
 		Status:        models.JobStatusCompleted,
 	})
@@ -189,7 +190,7 @@ func TestBatchJob_ExcludeFile_CancelsWhenAllExcluded_Partial(t *testing.T) {
 
 func TestBatchJob_ExcludeFile_AlreadyTransitioned_Partial(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 		Status:        models.JobStatusCompleted,
 	})
@@ -204,7 +205,7 @@ func TestBatchJob_ExcludeFile_AlreadyTransitioned_Partial(t *testing.T) {
 
 func TestBatchJob_ExcludeFile_CancelFuncCalled(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.results.UpdateFileResult("file1.mp4", &MovieResult{
+	job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4"},
 		Status:        models.JobStatusCompleted,
 	})

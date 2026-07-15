@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,7 +63,7 @@ func TestPersistMiss2_Reconstruct_InvalidEnvelope(t *testing.T) {
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
 	// Should have empty results after parse failure
-	assert.Empty(t, result.results.Results)
+	assert.Empty(t, result.snap().Results)
 	// deserializeErrors should be incremented
 	assert.Equal(t, int64(1), jq.deserializeErrors.Load())
 }
@@ -82,7 +83,7 @@ func TestPersistMiss2_Reconstruct_InvalidLegacy(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.Empty(t, result.results.Results)
+	assert.Empty(t, result.snap().Results)
 	assert.Equal(t, int64(1), jq.deserializeErrors.Load())
 }
 
@@ -101,7 +102,7 @@ func TestPersistMiss2_Reconstruct_InvalidOldFormat(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.Empty(t, result.results.Results)
+	assert.Empty(t, result.snap().Results)
 	assert.Equal(t, int64(1), jq.deserializeErrors.Load())
 }
 
@@ -121,7 +122,7 @@ func TestPersistMiss2_Reconstruct_ValidFileMatchInfo(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.Equal(t, "FMI-001", result.results.FileMatchInfo["file1.mp4"].MovieID)
+	assert.Equal(t, "FMI-001", result.snap().FileMatchInfo["file1.mp4"].MovieID)
 }
 
 // --- reconstructBatchJob: invalid Excluded JSON ---
@@ -137,7 +138,7 @@ func TestPersistMiss2_Reconstruct_InvalidExcluded(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.Empty(t, result.results.Excluded)
+	assert.Empty(t, result.snap().Excluded)
 	assert.Equal(t, int64(1), jq.deserializeErrors.Load())
 }
 
@@ -154,7 +155,7 @@ func TestPersistMiss2_Reconstruct_InvalidFileMatchInfo(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	assert.Empty(t, result.results.FileMatchInfo)
+	assert.Empty(t, result.snap().FileMatchInfo)
 	assert.Equal(t, int64(1), jq.deserializeErrors.Load())
 }
 
@@ -177,13 +178,13 @@ func TestPersistMiss2_Reconstruct_EnvelopeWithProvenance(t *testing.T) {
 	jq := &JobStore{jobs: make(map[models.JobID]*BatchJob), fs: afero.NewMemMapFs()}
 
 	envelope := JobResultsEnvelope{
-		Domain: map[string]*MovieResult{
+		Domain: map[string]*resultstore.MovieResult{
 			"file1.mp4": {
 				FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ENV-001"},
 				Status:        models.JobStatusCompleted,
 			},
 		},
-		Provenance: map[string]*ProvenanceData{
+		Provenance: map[string]*resultstore.ProvenanceData{
 			"file1.mp4": {
 				FieldSources:   map[string]string{"title": "r18dev"},
 				ActressSources: map[string]string{"actress_0": "dmm"},
@@ -204,11 +205,11 @@ func TestPersistMiss2_Reconstruct_EnvelopeWithProvenance(t *testing.T) {
 
 	result := jq.reconstructBatchJob(dbJob)
 	require.NotNil(t, result)
-	mr := result.results.Results["file1.mp4"]
+	mr := result.snap().Results["file1.mp4"]
 	require.NotNil(t, mr)
 	assert.Equal(t, "ENV-001", mr.FileMatchInfo.MovieID)
 
-	prov := result.results.Provenance["file1.mp4"]
+	prov := result.snap().Provenance["file1.mp4"]
 	require.NotNil(t, prov)
 	assert.Equal(t, "r18dev", prov.FieldSources["title"])
 	// ScraperResults must survive the persist/reconstruct round-trip so the

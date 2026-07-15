@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
 // DataTypeMovie identifies that a result's Data field contains a Movie.
@@ -18,28 +19,28 @@ const DataTypeMovie = "movie"
 // The Results text column stores this envelope instead of
 // a raw map[string]*MovieResult.
 type JobResultsEnvelope struct {
-	Domain     map[string]*MovieResult    `json:"domain"`
-	Provenance map[string]*ProvenanceData `json:"provenance,omitempty"`
+	Domain     map[string]*resultstore.MovieResult    `json:"domain"`
+	Provenance map[string]*resultstore.ProvenanceData `json:"provenance,omitempty"`
 }
 
 // Legacy format parsing has been centralized in ParseJobResultsJSON
 // (internal/worker/result_parse.go). The legacyFileResult type and
 // convertLegacyFileResult function have been removed from this file.
 
-// reconstructResultTracker builds a ResultTracker from a database Job model,
+// reconstructResultTracker builds a resultstore.Store from a database Job model,
 // deserializing Files, Results, Excluded, and FileMatchInfo JSON fields.
 // Per P-2: extracted from reconstructBatchJob so that deserialization and tracker
 // construction are a single responsibility, independent of BatchJob wiring.
-func (s *JobStore) reconstructResultTracker(dbJob *models.Job) *ResultTracker {
-	rt := NewResultTracker(dbJob.TotalFiles, nil)
-	rt.Completed = dbJob.Completed
-	rt.Failed = dbJob.Failed
-	rt.Progress = dbJob.Progress
-	rt.Provenance = make(map[string]*ProvenanceData)
+func (s *JobStore) reconstructResultTracker(dbJob *models.Job) resultstore.Store {
+	files := []string{}
+	results := make(map[string]*resultstore.MovieResult)
+	provenance := make(map[string]*resultstore.ProvenanceData)
+	fileMatchInfo := make(map[string]models.FileMatchInfo)
+	excluded := make(map[string]bool)
 
 	// Parse Files JSON
 	if dbJob.Files != "" {
-		if err := json.Unmarshal([]byte(dbJob.Files), &rt.Files); err != nil {
+		if err := json.Unmarshal([]byte(dbJob.Files), &files); err != nil {
 			logging.Warnf("Failed to parse files for job %s: %v", dbJob.ID, err)
 			s.deserializeErrors.Add(1)
 		}
@@ -54,14 +55,14 @@ func (s *JobStore) reconstructResultTracker(dbJob *models.Job) *ResultTracker {
 			logging.Warnf("Failed to parse results for job %s: %v", dbJob.ID, err)
 			s.deserializeErrors.Add(1)
 		} else {
-			rt.Results = parsed.Results
-			rt.Provenance = parsed.Provenance
+			results = parsed.Results
+			provenance = parsed.Provenance
 		}
 	}
 
 	// Parse Excluded JSON
 	if dbJob.Excluded != "" {
-		if err := json.Unmarshal([]byte(dbJob.Excluded), &rt.Excluded); err != nil {
+		if err := json.Unmarshal([]byte(dbJob.Excluded), &excluded); err != nil {
 			logging.Warnf("Failed to parse excluded for job %s: %v", dbJob.ID, err)
 			s.deserializeErrors.Add(1)
 		}
@@ -69,17 +70,26 @@ func (s *JobStore) reconstructResultTracker(dbJob *models.Job) *ResultTracker {
 
 	// Parse models.FileMatchInfo JSON
 	if dbJob.FileMatchInfo != "" {
-		if err := json.Unmarshal([]byte(dbJob.FileMatchInfo), &rt.FileMatchInfo); err != nil {
+		if err := json.Unmarshal([]byte(dbJob.FileMatchInfo), &fileMatchInfo); err != nil {
 			logging.Warnf("Failed to parse file match info for job %s: %v", dbJob.ID, err)
 			s.deserializeErrors.Add(1)
 		}
 	}
 
-	// Rebuild movieID secondary index after bulk-loading results from DB.
-	// The index is not persisted — it is reconstructed from the Results map.
-	rt.rebuildMovieIDIndexLocked()
-
-	return rt
+	// NewFromSnapshot rebuilds the movie-ID and result-ID indexes from the
+	// provided results. The index is not persisted — it is reconstructed from
+	// the Results map.
+	return resultstore.NewFromSnapshot(
+		dbJob.TotalFiles,
+		files,
+		results,
+		provenance,
+		fileMatchInfo,
+		excluded,
+		dbJob.Completed,
+		dbJob.Failed,
+		dbJob.Progress,
+	)
 }
 
 // wireJobDeps attaches shared infrastructure to a BatchJob that both
@@ -95,7 +105,7 @@ func (s *JobStore) reconstructResultTracker(dbJob *models.Job) *ResultTracker {
 // UpdateMovie() silently skips DB persistence.
 func wireJobDeps(job *BatchJob, movieRepo database.MovieRepositoryInterface, actressRepo database.ActressRepositoryInterface, persistFn func()) {
 	job.attachLifecycleCallback()
-	job.posterEditor = NewPosterEditor(job.resultIndex, job.results, movieRepo)
+	job.posterEditor = NewPosterEditor(job.results, job.results, movieRepo)
 	job.controller = newJobController(job)
 	if movieRepo != nil {
 		job.deps.MovieRepo = movieRepo
@@ -190,7 +200,7 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 	// ClearMissingTempPosters). This clears URLs only; it never deletes files.
 	// Safe to mutate results unlocked: the job is not yet registered in s.jobs,
 	// so no concurrent reader can observe it (see loadFromDatabase / NewJobStore).
-	ClearMissingTempPosters(s.fs, batchJob.cfg.tempDir, dbJob.ID, batchJob.results.Results)
+	ClearMissingTempPosters(s.fs, batchJob.cfg.tempDir, dbJob.ID, batchJob.results.RawResults())
 
 	// Close Done channel for all states — reconstructed jobs are snapshots
 	// from the database and should not block Wait() callers.
@@ -205,14 +215,11 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 	return batchJob
 }
 
-// snapshotForPersist acquires all 3 sub-manager RLocks simultaneously in
-// documented order and returns a *models.Job populated from a consistent
-// point-in-time snapshot. Returns (nil, false) if the job is deleted or
-// if any JSON marshal fails.
-//
-// Lock ordering: lifecycle.mu → results.mu → job.mu (never reverse).
-// All 3 are read-locks so holding them simultaneously does not block
-// other readers. Writers (e.g., MarkCompleted) block until all 3 are released.
+// snapshotForPersist delegates to snapshotFull, which takes separate snapshots
+// from each sub-manager (lifecycle, results, job) rather than holding all locks
+// simultaneously. The result snapshot is from Store.SnapshotForStatus() which
+// acquires its own read lock independently. Returns (nil, false) if the job is
+// deleted or if any JSON marshal fails.
 func snapshotForPersist(job *BatchJob) (*models.Job, bool) {
 	snapshot := job.snapshotFull()
 	if snapshot.IsDeleted {

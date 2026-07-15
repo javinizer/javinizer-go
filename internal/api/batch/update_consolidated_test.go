@@ -13,7 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -471,7 +471,7 @@ func TestUpdateBatchJob_Miss2_ContentLengthZero(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -506,7 +506,7 @@ func TestUpdateBatchJob_Miss2_InvalidJSONBody(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -540,7 +540,7 @@ func TestUpdateBatchJob_Miss2_ReadAllError(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -574,7 +574,7 @@ func TestUpdateBatchJob_Miss2_ValidBodyWithSkipOptions(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -610,7 +610,7 @@ func TestUpdateBatchJob_Miss3_ForceAndPreserveMutuallyExclusive(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -646,7 +646,7 @@ func TestUpdateBatchJob_Miss3_InvalidSeamStrings(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -680,7 +680,7 @@ func TestUpdateBatchJob_Miss3_JobAlreadyRunning(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusRunning,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -711,7 +711,7 @@ func TestUpdateBatchJob_Miss3_JobNotCompleted(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusPending,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -765,7 +765,7 @@ func TestUpdateBatchJob_Miss3_PostApplySuccessPath(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -924,7 +924,7 @@ func TestUpdateBatchJob_Miss_BodyReadFailure(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -958,7 +958,7 @@ func TestUpdateBatchJob_Miss_EmptyBody(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -987,7 +987,7 @@ func TestUpdateBatchJob_Miss_ForceOverwriteAndPreserveNFOMutuallyExclusive(t *te
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -1019,7 +1019,7 @@ func TestUpdateBatchJob_Miss_InvalidPreset(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -1051,7 +1051,7 @@ func TestUpdateBatchJob_Miss_InvalidScalarStrategy(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -1152,7 +1152,7 @@ func TestUpdateBatchJob_Miss_WithConservativePreset(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -1182,7 +1182,7 @@ func TestUpdateBatchJob_Miss_WithValidBody(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
-	setJobResult(job, "/path/to/file.mp4", &worker.MovieResult{
+	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
@@ -1272,7 +1272,7 @@ func TestUpdateBatchJob_ValidNoBody(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-001.mp4"})
-	setJobResult(job, "/tmp/IPX-001.mp4", &worker.MovieResult{
+	setJobResult(job, "/tmp/IPX-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-001.mp4", MovieID: "IPX-001"},
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "IPX-001"},
