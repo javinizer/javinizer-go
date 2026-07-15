@@ -81,7 +81,7 @@
   },
   "TUIActressMergeResultHint": {
     "description": "Navigation hint for the actress merge result step",
-    "other": "r 同じターゲットで新規マージ • Enter/Esc で閉じる"
+    "other": "r で同じターゲットとの新規マージ • Enter/Esc で閉じる"
   },
   "TUIActressMergeResultMerged": {
     "description": "Summary stating which source actress was merged into which target",
@@ -657,7 +657,7 @@
   },
   "TUIShuttingDown": {
     "description": "Message shown while the TUI is shutting down",
-    "other": "graceful にシャットダウン中..."
+    "other": "安全にシャットダウン中..."
   },
   "TUISortServiceNotInitialized": {
     "description": "Log message shown when processing starts before the sort service is wired",

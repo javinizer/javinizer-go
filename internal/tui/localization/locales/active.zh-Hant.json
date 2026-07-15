@@ -69,7 +69,7 @@
   },
   "TUIActressMergeNoResultHint": {
     "description": "Hint shown when a merge finished without a result",
-    "other": "r 新合併 • Esc 關閉"
+    "other": "r 開始新合併 • Esc 關閉"
   },
   "TUIActressMergePlaceholderSource": {
     "description": "Placeholder for the actress merge source ID input",
@@ -227,8 +227,8 @@
   },
   "TUIFilesProcessed": {
     "description": "Number of files processed in the completion banner",
-    "one": "已於 {{.Elapsed}} 處理 {{.Count}} 個檔案",
-    "other": "已於 {{.Elapsed}} 處理 {{.Count}} 個檔案"
+    "one": "已在 {{.Elapsed}} 內處理 {{.Count}} 個檔案",
+    "other": "已在 {{.Elapsed}} 內處理 {{.Count}} 個檔案"
   },
   "TUIFolderPickerCurrent": {
     "description": "Label for the current path in the folder picker",
