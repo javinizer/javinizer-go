@@ -437,6 +437,17 @@ func scrapeFile(
 	result, meta, err := inputs.WF.Scrape(scrapeCtx, cmd)
 
 	// Step 3: Interpret the result.
+	// If the request timeout fired, surface it as a failure rather than
+	// persisting a partial/successful result from an expired context.
+	if scrapeCtx.Err() != nil && err == nil {
+		err = scrapeCtx.Err()
+		if result == nil {
+			result = &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: "scrape timed out"}
+		} else {
+			result.Status = scrape.StatusFailed
+			result.Message = "scrape timed out"
+		}
+	}
 	return interpretScrapeResult(filePath, fmi, cmd, startTime, taskCtx, inputs, result, meta, err, movieIDFromMatcher)
 }
 
