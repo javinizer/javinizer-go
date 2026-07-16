@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -240,7 +239,7 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 	// Apply configured umask (normally done by initConfig, which JSON mode skips)
 	if cfg.System.Umask != "" {
 		if mask, err := strconv.ParseUint(cfg.System.Umask, 8, 32); err == nil {
-			syscall.Umask(int(mask))
+			applyUmask(int(mask))
 		}
 	}
 
