@@ -160,6 +160,13 @@ func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*m
 			Message: fmt.Sprintf("scraper %q is not registered or enabled", scraperName),
 		}
 	}
+	if !scraper.IsEnabled() {
+		return nil, &models.ScraperError{
+			Scraper: scraperName,
+			Kind:    models.ScraperErrorKindUnknown,
+			Message: fmt.Sprintf("scraper %q is not enabled", scraperName),
+		}
+	}
 	resolvedID := s.resolveContentID(ctx, movieID, []string{scraperName})
 	outcome := querySingle(ctx, resolvedID, scraper)
 	if outcome.failure != nil {

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -205,7 +207,8 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 	scrapersFlag, _ := cmd.Flags().GetStringSlice("scrapers")
 	forceRefresh, _ := cmd.Flags().GetBool("force")
 	if err := validateJSONMode(scrapersFlag, forceRefresh); err != nil {
-		return err
+		writeJSONError(cmd, unknownErrorEnvelope(err.Error()))
+		return ErrJSONExit
 	}
 
 	id := args[0]
@@ -219,7 +222,6 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 	// preventing stdout contamination of the JSON output.
 	loggingCfg := &logging.Config{Output: "stderr", Level: "warn"}
 	if err := logging.InitLogger(loggingCfg); err != nil {
-		// If logger init fails, force stderr output and continue.
 		_ = logging.SetOutput(os.Stderr)
 	}
 
@@ -235,16 +237,31 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 		return ErrJSONExit
 	}
 
+	// Apply configured umask (normally done by initConfig, which JSON mode skips)
+	if cfg.System.Umask != "" {
+		if mask, err := strconv.ParseUint(cfg.System.Umask, 8, 32); err == nil {
+			syscall.Umask(int(mask))
+		}
+	}
+
 	// Re-init logger with the user's config, but remove any stdout target
 	// to keep stdout clean for JSON output. Append stderr so diagnostics are
-	// still visible.
+	// still visible. Preserve format and rotation settings.
 	logOutput := removeStdoutFromLogOutput(cfg.Logging.Output)
 	if logOutput == "" {
 		logOutput = "stderr"
 	} else if !strings.Contains(logOutput, "stderr") {
 		logOutput = logOutput + ",stderr"
 	}
-	loggingCfg = &logging.Config{Output: logOutput, Level: cfg.Logging.Level}
+	loggingCfg = &logging.Config{
+		Output:     logOutput,
+		Level:      cfg.Logging.Level,
+		Format:     cfg.Logging.Format,
+		MaxSizeMB:  cfg.Logging.MaxSizeMB,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAgeDays: cfg.Logging.MaxAgeDays,
+		Compress:   cfg.Logging.Compress,
+	}
 	_ = logging.InitLogger(loggingCfg)
 
 	bs, err := commandutil.BootstrapScrapeOnly(cfg)
