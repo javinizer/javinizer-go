@@ -55,10 +55,12 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			return
 		}
 		scrapeCtx := c.Request.Context()
-		if deps.RequestTimeout > 0 {
-			var cancel context.CancelFunc
-			scrapeCtx, cancel = context.WithTimeout(scrapeCtx, deps.RequestTimeout)
-			defer cancel()
+		if deps.RequestTimeoutFn != nil {
+			if rt := deps.RequestTimeoutFn(); rt > 0 {
+				var cancel context.CancelFunc
+				scrapeCtx, cancel = context.WithTimeout(scrapeCtx, rt)
+				defer cancel()
+			}
 		}
 		result, _, err := wf.Scrape(scrapeCtx, cmd)
 		if err != nil {

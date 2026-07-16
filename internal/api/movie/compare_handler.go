@@ -86,10 +86,12 @@ func compareNFO(deps MovieDeps) gin.HandlerFunc {
 		}
 
 		compareCtx := c.Request.Context()
-		if deps.RequestTimeout > 0 {
-			var cancel context.CancelFunc
-			compareCtx, cancel = context.WithTimeout(compareCtx, deps.RequestTimeout)
-			defer cancel()
+		if deps.RequestTimeoutFn != nil {
+			if rt := deps.RequestTimeoutFn(); rt > 0 {
+				var cancel context.CancelFunc
+				compareCtx, cancel = context.WithTimeout(compareCtx, rt)
+				defer cancel()
+			}
 		}
 		result, err := wf.Compare(compareCtx, workflow.CompareCmd{
 			MovieID:          movieID,
