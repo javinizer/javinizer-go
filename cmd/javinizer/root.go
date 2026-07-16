@@ -166,7 +166,17 @@ func shouldSkipConfigInit(cmd *cobra.Command) bool {
 
 	// `javinizer --version` should stay lightweight and side-effect free.
 	versionFlag := cmd.Flags().Lookup("version")
-	return versionFlag != nil && versionFlag.Changed
+	if versionFlag != nil && versionFlag.Changed {
+		return true
+	}
+	// `javinizer scrape --output json` handles config init itself so it can
+	// emit JSON error envelopes instead of os.Exit(1) on config failures.
+	if cmd.Name() == "scrape" {
+		if outputFlag := cmd.Flags().Lookup("output"); outputFlag != nil && outputFlag.Changed && outputFlag.Value.String() == "json" {
+			return true
+		}
+	}
+	return false
 }
 
 // isTUICommand reports whether cmd (or any ancestor) is the tui subcommand.

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"time"
 
+	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/scrape"
 	"github.com/javinizer/javinizer-go/internal/desktop"
 )
 
@@ -40,6 +42,9 @@ func run() (exitCode int) {
 		}
 	}()
 	if err := executeFn(); err != nil {
+		if errors.Is(err, scrape.ErrJSONExit) {
+			return 1
+		}
 		writeCrashLog(err.Error())
 		return 1
 	}

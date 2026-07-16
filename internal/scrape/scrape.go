@@ -143,6 +143,41 @@ type ScraperInterface interface {
 
 var _ ScraperInterface = (*Scraper)(nil)
 
+// QueryRaw queries a single scraper by name and returns the unmerged result
+// without calling Aggregate() or postProcessScraped(). It is the exported seam
+// for machine-readable CLI output (--output json). The movieID is resolved via
+// resolveScrapeInput before querying. The returned ScraperError preserves typed
+// fields (Kind, StatusCode, Retryable, Temporary) via the querySingle() fix.
+func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*models.ScraperResult, *models.ScraperError) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	scraper, exists := s.registry.GetInstance(scraperName)
+	if !exists || scraper == nil {
+		return nil, &models.ScraperError{
+			Scraper: scraperName,
+			Kind:    models.ScraperErrorKindUnknown,
+			Message: fmt.Sprintf("scraper %q is not registered or enabled", scraperName),
+		}
+	}
+	resolvedID := s.resolveContentID(ctx, movieID, []string{scraperName})
+	outcome := querySingle(ctx, resolvedID, scraper)
+	if outcome.failure != nil {
+		return nil, outcome.failure
+	}
+	return outcome.result, nil
+}
+
+// NewQueryOnly constructs a Scraper engine with only the registry populated,
+// suitable for QueryRaw() calls that bypass aggregation, cache, and persistence.
+// All other dependencies are nil — QueryRaw only needs the registry.
+func NewQueryOnly(registry ScraperInstanceResolver) *Scraper {
+	return &Scraper{
+		registry: registry,
+		cfg:      &Config{},
+	}
+}
+
 // New constructs a Scraper engine from its registry, aggregator, repositories, HTTP client, config, translator, and filesystem dependencies.
 func New(
 	registry ScraperInstanceResolver,

@@ -154,8 +154,8 @@ func querySingle(ctx context.Context, movieID string, scraper models.Scraper) (o
 
 	scraperResult, err := safeSearch(ctx, scraper, scraperQuery)
 	if err != nil {
-		if errors.Is(err, ctx.Err()) {
-			outcome = queryOutcome{failure: &models.ScraperError{Scraper: scraper.Name(), Cause: err}}
+		if isContextError(ctx, err) {
+			outcome = queryOutcome{failure: classifyContextError(scraper.Name(), err)}
 			return
 		}
 
@@ -165,16 +165,77 @@ func querySingle(ctx context.Context, movieID string, scraper models.Scraper) (o
 				outcome = queryOutcome{result: retryResult}
 				return
 			}
-			outcome = queryOutcome{failure: &models.ScraperError{Scraper: scraper.Name(), Message: fmt.Sprintf("%v (mapped query: %v)", retryErr, err)}}
+			if isContextError(ctx, retryErr) {
+				outcome = queryOutcome{failure: classifyContextError(scraper.Name(), retryErr)}
+				return
+			}
+			outcome = queryOutcome{failure: classifyScraperError(scraper.Name(), retryErr, fmt.Sprintf("%v (mapped query: %v)", retryErr, err))}
 			return
 		}
 
-		outcome = queryOutcome{failure: &models.ScraperError{Scraper: scraper.Name(), Cause: err}}
+		outcome = queryOutcome{failure: classifyScraperError(scraper.Name(), err, "")}
 		return
 	}
 
 	outcome = queryOutcome{result: scraperResult}
 	return
+}
+
+// isContextError checks if the error is a context cancellation/deadline error,
+// either via errors.Is(err, ctx.Err()) or by checking the sentinel errors directly.
+// This catches cases where the scraper returns context.DeadlineExceeded from its
+// own request context while the parent ctx.Err() is nil.
+func isContextError(ctx context.Context, err error) bool {
+	if errors.Is(err, ctx.Err()) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	return false
+}
+
+// classifyContextError constructs a typed ScraperError for context cancellation/deadline
+// errors. AsScraperError() cannot extract typed fields from raw context errors because
+// they are not ScraperError instances, so this function explicitly sets Kind=unavailable,
+// Retryable=true, Temporary=true.
+func classifyContextError(scraperName string, err error) *models.ScraperError {
+	return &models.ScraperError{
+		Scraper:   scraperName,
+		Kind:      models.ScraperErrorKindUnavailable,
+		Message:   err.Error(),
+		Retryable: true,
+		Temporary: true,
+		Cause:     err,
+	}
+}
+
+// classifyScraperError wraps a scraper error, preserving typed fields (Kind,
+// StatusCode, Retryable, Temporary) via AsScraperError when available. If the
+// error is not a ScraperError, it falls back to a generic unknown classification.
+// The fallbackMsg is used as the Message when the error has no typed fields.
+func classifyScraperError(scraperName string, err error, fallbackMsg string) *models.ScraperError {
+	if se, ok := models.AsScraperError(err); ok {
+		copied := *se
+		copied.Scraper = scraperName
+		if copied.Message == "" {
+			copied.Message = err.Error()
+		}
+		return &copied
+	}
+	msg := fallbackMsg
+	if msg == "" {
+		msg = err.Error()
+	}
+	return &models.ScraperError{
+		Scraper: scraperName,
+		Kind:    models.ScraperErrorKindUnknown,
+		Message: msg,
+		Cause:   err,
+	}
 }
 
 func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result *models.ScraperResult, err error) {
