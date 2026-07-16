@@ -2,9 +2,11 @@ package movie
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +71,7 @@ func TestScrapeMovie_RequestTimeoutApplied(t *testing.T) {
 	assert.True(t, wf.gotDeadline, "scrape context should have a deadline")
 	if wf.gotDeadline {
 		remaining := time.Until(wf.deadline)
-		assert.Less(t, remaining, 5*time.Second, "deadline should be ~5s")
+		assert.LessOrEqual(t, remaining, 5*time.Second, "deadline should be <= 5s")
 		assert.Greater(t, remaining, 3*time.Second, "deadline should not have expired")
 	}
 }
@@ -133,25 +135,27 @@ func TestRescrapeMovie_RequestTimeoutApplied(t *testing.T) {
 }
 
 func TestCompareNFO_RequestTimeoutApplied(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "test*.nfo")
+	tmpDir := t.TempDir()
+	nfoPath := filepath.Join(tmpDir, "test.nfo")
+	err := os.WriteFile(nfoPath, []byte("<movie></movie>"), 0644)
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
-	_, err = tmpFile.WriteString("<movie></movie>")
-	require.NoError(t, err)
-	tmpFile.Close()
 
 	wf := &deadlineCapturingWorkflow{}
 	deps := MovieDeps{
 		WorkflowFn:       func() workflow.WorkflowInterface { return wf },
 		RequestTimeoutFn: func() time.Duration { return 5 * time.Second },
-		AllowedDirs:      []string{os.TempDir()},
+		AllowedDirs:      []string{tmpDir},
 	}
 
 	router := gin.New()
 	router.POST("/movies/:id/compare-nfo", compareNFO(deps))
 
-	body := `{"nfo_path":"` + tmpFile.Name() + `","selected_scrapers":["r18dev"]}`
-	req := httptest.NewRequest(http.MethodPost, "/movies/TEST-001/compare-nfo", strings.NewReader(body))
+	bodyBytes, err := json.Marshal(map[string]interface{}{
+		"nfo_path":          nfoPath,
+		"selected_scrapers": []string{"r18dev"},
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/movies/TEST-001/compare-nfo", strings.NewReader(string(bodyBytes)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
