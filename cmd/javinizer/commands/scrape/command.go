@@ -165,7 +165,7 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 		MovieID:          id,
 		ForceRefresh:     forceRefresh,
 		SelectedScrapers: scrapersFlag,
-	}, nil)
+	})
 	if err != nil {
 		if result != nil && result.Movie != nil {
 			return result.Movie, result.ScraperResults, err

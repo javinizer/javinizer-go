@@ -227,7 +227,7 @@ func TestMultipartPreviewLetterPatternDiscoveryFlow(t *testing.T) {
 		result, _, scrapeErr := wf.Scrape(context.Background(), scrape.ScrapeCmd{
 			MovieID:          "CEMD-349",
 			SelectedScrapers: []string{"mock"},
-		}, nil)
+		})
 		require.NoError(t, scrapeErr, "scrape should succeed for %s", filePath)
 		require.NotNil(t, result, "scrape should return a result for %s", filePath)
 

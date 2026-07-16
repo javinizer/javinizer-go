@@ -533,10 +533,10 @@ func TestBatchJob_Rescrape_WithSelectedScrapers(t *testing.T) {
 // stubRescrapeWF is a minimal WorkflowInterface stub for Rescrape WF override tests.
 type stubRescrapeWF struct{}
 
-func (s *stubRescrapeWF) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (s *stubRescrapeWF) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	return nil, nil, nil
 }
-func (s *stubRescrapeWF) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (s *stubRescrapeWF) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return nil, nil
 }
 func (s *stubRescrapeWF) Preview(_ context.Context, _ workflow.PreviewCmd) (*workflow.PreviewResult, error) {

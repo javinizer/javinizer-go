@@ -25,14 +25,14 @@ type integrationScrapeWF struct {
 	scrapeCalled int
 }
 
-func (w *integrationScrapeWF) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (w *integrationScrapeWF) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	w.mu.Lock()
 	w.scrapeCalled++
 	w.mu.Unlock()
 	return w.scrapeResult, nil, w.scrapeErr
 }
 
-func (w *integrationScrapeWF) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (w *integrationScrapeWF) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return nil, nil
 }
 
@@ -63,11 +63,11 @@ type integrationApplyWF struct {
 	applyCalled int
 }
 
-func (w *integrationApplyWF) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (w *integrationApplyWF) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	return nil, nil, nil
 }
 
-func (w *integrationApplyWF) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (w *integrationApplyWF) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	w.mu.Lock()
 	w.applyCalled++
 	w.mu.Unlock()

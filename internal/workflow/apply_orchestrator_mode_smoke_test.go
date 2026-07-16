@@ -140,7 +140,7 @@ func TestApplyOrchestrator_AllModes_Smoke(t *testing.T) {
 				OperationMode: tt.mode,
 			}
 
-			result, err := impl.Execute(context.Background(), cmd, nil)
+			result, err := impl.Execute(context.Background(), cmd)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.Equal(t, tt.expectOrganize, result.Steps.Organized,

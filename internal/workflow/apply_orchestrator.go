@@ -10,7 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
-	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
 )
@@ -18,7 +18,7 @@ import (
 // applyOrchestrator is the internal interface for the Apply phase.
 // Unexported — only the composition root (Workflow) uses it.
 type applyOrchestrator interface {
-	Execute(ctx context.Context, cmd ApplyCmd, progress scrape.ProgressFunc) (*ApplyResult, error)
+	Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult, error)
 }
 
 // applyOrchImpl owns the 6-step Apply sequence: revert begin, organize, merge, DisplayTitle,
@@ -69,11 +69,11 @@ func newApplyOrchestrator(
 // applyStep defines a named, executable step in the Apply pipeline.
 // Each step can report progress and returns an error on failure.
 type applyStep struct {
-	name         string              // step identifier (used in FailedStep)
-	failMsg      string              // human-readable error prefix on failure (e.g. "organization", "NFO generation")
-	progressMsg  string              // empty if no progress report for this step
-	progressPct  float64             // progress percentage for this step
-	progressStep scrape.ProgressStep // progress step enum value
+	name         string                // step identifier (used in FailedStep)
+	failMsg      string                // human-readable error prefix on failure (e.g. "organization", "NFO generation")
+	progressMsg  string                // empty if no progress report for this step
+	progressPct  float64               // progress percentage for this step
+	progressStep progress.ProgressStep // progress step enum value
 	execute      func() error
 }
 
@@ -88,14 +88,14 @@ type onStepFailResult struct {
 // completion on failure. If a step fails, onStepFail is called to produce the
 // partial ApplyResult and wrapped error. Returns nil on success (all steps passed).
 func (o *applyOrchImpl) executeSteps(
+	ctx context.Context,
 	steps []applyStep,
-	progress scrape.ProgressFunc,
 	completed *stepCompletion,
 	onStepFail func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult,
 ) (*ApplyResult, error) {
 	for _, s := range steps {
-		if s.progressMsg != "" && progress != nil {
-			progress(s.progressStep, s.progressPct, s.progressMsg)
+		if s.progressMsg != "" {
+			progress.FromContext(ctx).Report(s.progressStep, s.progressPct, s.progressMsg)
 		}
 		if err := s.execute(); err != nil {
 			fail := onStepFail(s.name, s.failMsg, err, *completed)
@@ -109,7 +109,7 @@ func (o *applyOrchImpl) executeSteps(
 // Execute runs the 6-step Apply sequence. Per CONTEXT.md: Apply is NOT atomic — if
 // organize succeeds but download or NFO generation fails, files have already been moved.
 // The caller must handle partial results.
-func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd, progress scrape.ProgressFunc) (*ApplyResult, error) {
+func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -172,7 +172,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd, progress scra
 			failMsg:      "organization",
 			progressMsg:  "Planning organization...",
 			progressPct:  0.3,
-			progressStep: scrape.ProgressStepOrganize,
+			progressStep: progress.ProgressStepOrganize,
 			execute:      func() error { return o.stepOrganize(ctx, cmd, state, &steps) },
 		}
 	} else {
@@ -202,7 +202,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd, progress scra
 		failMsg:      "download",
 		progressMsg:  "Downloading media...",
 		progressPct:  0.5,
-		progressStep: scrape.ProgressStepDownload,
+		progressStep: progress.ProgressStepDownload,
 		execute:      func() error { return o.stepDownload(ctx, cmd, state, &steps) },
 	}
 
@@ -212,7 +212,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd, progress scra
 		failMsg:      "NFO generation",
 		progressMsg:  "Generating NFO...",
 		progressPct:  0.5,
-		progressStep: scrape.ProgressStepNFO,
+		progressStep: progress.ProgressStepNFO,
 		execute:      func() error { return o.stepNFO(ctx, cmd, state, &steps) },
 	}
 
@@ -225,7 +225,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd, progress scra
 		stepNFO,
 	}
 
-	failResult, failErr := o.executeSteps(pipelineSteps, progress, &steps, onStepFail)
+	failResult, failErr := o.executeSteps(ctx, pipelineSteps, &steps, onStepFail)
 	if failResult != nil {
 		return failResult, failErr
 	}
@@ -247,9 +247,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd, progress scra
 		}
 	}
 
-	if progress != nil {
-		progress(scrape.ProgressStepApply, 1.0, "Completed")
-	}
+	progress.FromContext(ctx).Report(progress.ProgressStepApply, 1.0, "Completed")
 	return &ApplyResult{
 		OrganizeResult: state.organizeResult,
 		Movie:          state.movie,
@@ -475,6 +473,6 @@ type noOpApplyOrchestrator struct{}
 
 var _ applyOrchestrator = (*noOpApplyOrchestrator)(nil)
 
-func (noOpApplyOrchestrator) Execute(_ context.Context, _ ApplyCmd, _ scrape.ProgressFunc) (*ApplyResult, error) {
+func (noOpApplyOrchestrator) Execute(_ context.Context, _ ApplyCmd) (*ApplyResult, error) {
 	return nil, fmt.Errorf("apply not configured")
 }

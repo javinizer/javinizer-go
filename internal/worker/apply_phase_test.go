@@ -24,11 +24,11 @@ type stubApplyWorkflow struct {
 	mu          sync.Mutex
 }
 
-func (s *stubApplyWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (s *stubApplyWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	return nil, nil, nil
 }
 
-func (s *stubApplyWorkflow) Apply(_ context.Context, cmd workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (s *stubApplyWorkflow) Apply(_ context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	s.mu.Lock()
 	s.applyCalled++
 	s.mu.Unlock()

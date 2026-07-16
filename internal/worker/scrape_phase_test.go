@@ -8,6 +8,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -120,7 +121,7 @@ type stubWorkflow struct {
 	scrapeErr    error
 }
 
-func (s *stubWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (s *stubWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	if s.scrapeResult == nil {
 		return nil, nil, s.scrapeErr
 	}
@@ -136,7 +137,7 @@ func (s *stubWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.Pr
 	return &clone, nil, s.scrapeErr
 }
 
-func (s *stubWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (s *stubWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return nil, nil
 }
 
@@ -455,4 +456,47 @@ func TestScrapePhase_Run_PreservesMatcherMovieIDWhenFileMatchInfoAbsent(t *testi
 	assert.Equal(t, "MIDA-660", r.FileMatchInfo.MovieID,
 		"matcher-derived MovieID must be preserved even when FileMatchInfo is not preloaded")
 	assert.Equal(t, "SAME-CONTENT-ID", r.Movie.ID, "sanity: Movie.ID stays the scraped ID")
+}
+
+func TestMakeProgressReporter_BroadcastsJobEvent(t *testing.T) {
+	broadcaster := &stubBroadcaster{}
+	jobID := models.JobID("test-job-001")
+	reporter := makeProgressReporter(broadcaster, jobID, "MOVIE-001", JobEventPhaseScrape)
+	reporter.Report(progress.ProgressStepScrape, 0.5, "halfway")
+	broadcaster.mu.Lock()
+	defer broadcaster.mu.Unlock()
+	require.Len(t, broadcaster.events, 1)
+	ev := broadcaster.events[0]
+	assert.Equal(t, jobID, ev.JobID)
+	assert.Equal(t, "MOVIE-001", ev.MovieID)
+	assert.Equal(t, JobEventPhaseScrape, ev.Phase)
+	assert.Equal(t, JobEventStep("scrape"), ev.Step)
+	assert.Equal(t, 0.5, ev.Progress)
+	assert.Equal(t, "halfway", ev.Message)
+}
+
+func TestMakeProgressReporter_ContextRoundTrip(t *testing.T) {
+	broadcaster := &stubBroadcaster{}
+	jobID := models.JobID("test-job-002")
+	reporter := makeProgressReporter(broadcaster, jobID, "MOVIE-002", jobEventPhaseApply)
+	ctx := context.Background()
+	taskCtx := progress.WithReporter(ctx, reporter)
+	retrieved := progress.FromContext(taskCtx)
+	retrieved.Report(progress.ProgressStepOrganize, 0.3, "organizing")
+	broadcaster.mu.Lock()
+	defer broadcaster.mu.Unlock()
+	require.Len(t, broadcaster.events, 1)
+	ev := broadcaster.events[0]
+	assert.Equal(t, jobEventPhaseApply, ev.Phase)
+	assert.Equal(t, JobEventStep("organize"), ev.Step)
+	assert.Equal(t, 0.3, ev.Progress)
+}
+
+func TestMakeProgressReporter_NoopWhenNotInjected(t *testing.T) {
+	ctx := context.Background()
+	reporter := progress.FromContext(ctx)
+	assert.Equal(t, progress.NoopProgress, reporter)
+	assert.NotPanics(t, func() {
+		reporter.Report(progress.ProgressStepScrape, 1.0, "done")
+	})
 }

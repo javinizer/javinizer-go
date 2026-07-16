@@ -31,7 +31,7 @@ type OrchestrationMeta struct {
 // Returns (*scrape.ScrapeResult, *OrchestrationMeta, error) so that orchestration
 // metadata is separated from the pure scrape output.
 type scrapeOrchestrator interface {
-	Execute(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, *OrchestrationMeta, error)
+	Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *OrchestrationMeta, error)
 }
 
 type scrapeOrchImpl struct {
@@ -64,7 +64,7 @@ func newScrapeOrchestrator(scraper scrape.ScraperInterface, movieRepo database.M
 //
 // Poster generation has been moved to the worker's scrape phase
 // (see scrape_phase.go) — the orchestrator is now a pure query + persist pipeline.
-func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, *OrchestrationMeta, error) {
+func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *OrchestrationMeta, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -83,7 +83,7 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd, prog
 	}
 
 	// Step 2: Scrape (core query).
-	result, err := o.scraper.Scrape(ctx, cmd, progress)
+	result, err := o.scraper.Scrape(ctx, cmd)
 	if err != nil && (result == nil || result.Movie == nil) {
 		return result, nil, err
 	}
@@ -144,6 +144,6 @@ type noOpScrapeOrchestrator struct{}
 
 var _ scrapeOrchestrator = (*noOpScrapeOrchestrator)(nil)
 
-func (noOpScrapeOrchestrator) Execute(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *OrchestrationMeta, error) {
+func (noOpScrapeOrchestrator) Execute(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *OrchestrationMeta, error) {
 	return nil, nil, fmt.Errorf("scrape not configured")
 }

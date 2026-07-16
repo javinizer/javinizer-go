@@ -58,7 +58,7 @@ func (p *rescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePhaseIn
 				err = panicErr
 			}
 		}()
-		return wf.Scrape(taskCtx, cmd, nil)
+		return wf.Scrape(taskCtx, cmd)
 	}()
 
 	return result, meta, scrapeErr

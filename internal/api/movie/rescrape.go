@@ -53,7 +53,7 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "workflow not available"})
 			return
 		}
-		result, _, err := wf.Scrape(c.Request.Context(), cmd, nil)
+		result, _, err := wf.Scrape(c.Request.Context(), cmd)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return

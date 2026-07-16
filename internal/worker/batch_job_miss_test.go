@@ -286,10 +286,10 @@ func TestStartScrape_Miss_CfgWFOverride(t *testing.T) {
 
 type noopWorkflowForMissTest struct{}
 
-func (n *noopWorkflowForMissTest) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (n *noopWorkflowForMissTest) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	return &scrape.ScrapeResult{Status: scrape.StatusCompleted}, nil, nil
 }
-func (n *noopWorkflowForMissTest) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (n *noopWorkflowForMissTest) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return &workflow.ApplyResult{}, nil
 }
 func (n *noopWorkflowForMissTest) Preview(_ context.Context, _ workflow.PreviewCmd) (*workflow.PreviewResult, error) {

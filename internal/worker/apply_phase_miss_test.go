@@ -310,10 +310,10 @@ func TestApplyPhase_Run_PanicRecoveryPreservesPriorMovie(t *testing.T) {
 // panicApplyWorkflow panics when Apply is called
 type panicApplyWorkflow struct{}
 
-func (p *panicApplyWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (p *panicApplyWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	return nil, nil, nil
 }
-func (p *panicApplyWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (p *panicApplyWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	panic("intentional test panic")
 }
 func (p *panicApplyWorkflow) Preview(_ context.Context, _ workflow.PreviewCmd) (*workflow.PreviewResult, error) {
@@ -664,10 +664,10 @@ type stubApplyWorkflowWithCounter struct {
 	failOnCall  int
 }
 
-func (s *stubApplyWorkflowWithCounter) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (s *stubApplyWorkflowWithCounter) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	return nil, nil, nil
 }
-func (s *stubApplyWorkflowWithCounter) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (s *stubApplyWorkflowWithCounter) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	*s.callCount++
 	if *s.callCount == s.failOnCall {
 		return nil, fmt.Errorf("controlled failure on call %d", s.failOnCall)

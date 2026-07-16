@@ -20,14 +20,14 @@ type Workflow struct {
 // Scrape delegates to the internal scrapeOrchestrator which owns the 5 explicit
 // Scrape steps: cache clear, scrape, DisplayTitle, persist, poster.
 // Returns the scrape result, orchestration metadata, and any error.
-func (w *Workflow) Scrape(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, *OrchestrationMeta, error) {
-	return w.scrape.Execute(ctx, cmd, progress)
+func (w *Workflow) Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *OrchestrationMeta, error) {
+	return w.scrape.Execute(ctx, cmd)
 }
 
 // Apply delegates to the internal applyOrchestrator which owns the 6-step Apply
 // sequence: revert begin, organize, merge, DisplayTitle, download, NFO, revert complete.
-func (w *Workflow) Apply(ctx context.Context, cmd ApplyCmd, progress scrape.ProgressFunc) (*ApplyResult, error) {
-	return w.apply.Execute(ctx, cmd, progress)
+func (w *Workflow) Apply(ctx context.Context, cmd ApplyCmd) (*ApplyResult, error) {
+	return w.apply.Execute(ctx, cmd)
 }
 
 // Compare delegates to the internal compareOrchestrator which owns the compare pipeline:

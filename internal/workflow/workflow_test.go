@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
+	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/template"
@@ -163,7 +164,7 @@ func TestScrape_HappyPath(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Scraped Movie", Maker: "Test Studio"}, nil).
 		build()
 
-	result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -174,7 +175,7 @@ func TestScrape_HappyPath(t *testing.T) {
 func TestScrape_EmptyMovieID(t *testing.T) {
 	s := newFixture(t).build()
 
-	result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: ""}, nil)
+	result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: ""})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty MovieID")
 	assert.Nil(t, result)
@@ -187,24 +188,25 @@ func TestScrapeApply_HappyPath(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Test Movie", Maker: "Test Studio"}, nil)
 	s := f.build()
 
-	var progressCalls []scrape.ProgressStep
-	progress := func(step scrape.ProgressStep, pct float64, msg string) {
+	var progressCalls []progress.ProgressStep
+	reporter := progress.ReporterFunc(func(step progress.ProgressStep, pct float64, msg string) {
 		progressCalls = append(progressCalls, step)
-	}
+	})
+	ctx := progress.WithReporter(context.Background(), reporter)
 
 	// Phase 1: Scrape
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, progress)
+	scrapeResult, _, err := s.Scrape(ctx, scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, scrapeResult)
 	require.NotNil(t, scrapeResult.Movie)
 
 	// Phase 2: Apply (organize only, no download/NFO)
-	_, err = s.Apply(context.Background(), ApplyCmd{
+	_, err = s.Apply(ctx, ApplyCmd{
 		Movie:    scrapeResult.Movie,
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, progress)
+	})
 	assert.NoError(t, err)
 	require.Greater(t, len(progressCalls), 0)
 }
@@ -215,23 +217,24 @@ func TestScrapeApply_WithDownload(t *testing.T) {
 		withDownloader()
 	s := f.build()
 
-	var progressCalls []scrape.ProgressStep
-	progress := func(step scrape.ProgressStep, pct float64, msg string) {
+	var progressCalls []progress.ProgressStep
+	reporter := progress.ReporterFunc(func(step progress.ProgressStep, pct float64, msg string) {
 		progressCalls = append(progressCalls, step)
-	}
+	})
+	ctx := progress.WithReporter(context.Background(), reporter)
 
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	scrapeResult, _, err := s.Scrape(ctx, scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 
-	_, err = s.Apply(context.Background(), ApplyCmd{
+	_, err = s.Apply(ctx, ApplyCmd{
 		Movie:    scrapeResult.Movie,
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, progress)
+	})
 	assert.NoError(t, err)
-	assert.Contains(t, progressCalls, scrape.ProgressStepDownload)
+	assert.Contains(t, progressCalls, progress.ProgressStepDownload)
 }
 
 func TestScrapeApply_WithNFO(t *testing.T) {
@@ -240,7 +243,7 @@ func TestScrapeApply_WithNFO(t *testing.T) {
 		withNFOGenerator()
 	s := f.build()
 
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 
 	_, err = s.Apply(context.Background(), ApplyCmd{
@@ -249,7 +252,7 @@ func TestScrapeApply_WithNFO(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 
 	exists, _ := afero.Exists(f.fs, "/dest/TEST-001.nfo")
@@ -263,7 +266,7 @@ func TestScrapeApply_WithOrganize(t *testing.T) {
 		withSourceFile("/source/input.mp4")
 	s := f.build()
 
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 
 	_, err = s.Apply(context.Background(), ApplyCmd{
@@ -271,7 +274,7 @@ func TestScrapeApply_WithOrganize(t *testing.T) {
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 }
 
@@ -282,7 +285,7 @@ func TestScrapeApply_WithOrganize_CopyLink(t *testing.T) {
 		withSourceFile("/source/input.mp4")
 	s := f.build()
 
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 
 	_, err = s.Apply(context.Background(), ApplyCmd{
@@ -290,7 +293,7 @@ func TestScrapeApply_WithOrganize_CopyLink(t *testing.T) {
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: false},
-	}, nil)
+	})
 	assert.NoError(t, err)
 
 	_, err = f.fs.Stat("/source/input.mp4")
@@ -302,7 +305,7 @@ func TestScrapeApply_ScrapeError(t *testing.T) {
 		withScraper("failing", nil, errors.New("network error")).
 		build()
 
-	result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	// Scrape returns (result, nil) on most failure paths — the result contains
 	// status info. Callers check both return values per scrape.Scraper docs.
 	if err != nil {
@@ -320,7 +323,7 @@ func TestScrapeApply_NilMovieResult(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Test Movie", Maker: "Test Studio"}, nil).
 		build()
 
-	_, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: ""}, nil)
+	_, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: ""})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty MovieID")
 }
@@ -331,7 +334,7 @@ func TestScrapeApply_OrganizeValidationError(t *testing.T) {
 		withOrganizer()
 	s := f.build()
 
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 
 	_, err = s.Apply(context.Background(), ApplyCmd{
@@ -339,7 +342,7 @@ func TestScrapeApply_OrganizeValidationError(t *testing.T) {
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, nil)
+	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "organization validation failed")
 }
@@ -354,27 +357,28 @@ func TestScrapeApply_ProgressCallbacks(t *testing.T) {
 	s := f.build()
 
 	type call struct {
-		step scrape.ProgressStep
+		step progress.ProgressStep
 		pct  float64
 	}
 	var calls []call
-	progress := func(step scrape.ProgressStep, pct float64, msg string) {
+	reporter := progress.ReporterFunc(func(step progress.ProgressStep, pct float64, msg string) {
 		calls = append(calls, call{step: step, pct: pct})
-	}
+	})
+	ctx := progress.WithReporter(context.Background(), reporter)
 
 	// Phase 1: Scrape
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, progress)
+	scrapeResult, _, err := s.Scrape(ctx, scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 
 	// Phase 2: Apply with all steps
-	_, err = s.Apply(context.Background(), ApplyCmd{
+	_, err = s.Apply(ctx, ApplyCmd{
 		Movie:       scrapeResult.Movie,
 		Match:       defaultMatch(),
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{MoveFiles: true},
 		Download:    true,
 		GenerateNFO: true,
-	}, progress)
+	})
 	assert.NoError(t, err)
 
 	var steps []string
@@ -394,7 +398,7 @@ func TestScrapeApply_DownloadMedia_WithoutDownloader(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Test Movie", Maker: "Test Studio"}, nil)
 	s := f.build()
 
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 
 	_, err = s.Apply(context.Background(), ApplyCmd{
@@ -403,7 +407,7 @@ func TestScrapeApply_DownloadMedia_WithoutDownloader(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 }
 
@@ -412,7 +416,7 @@ func TestScrapeApply_NilOrganizer(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Test Movie", Maker: "Test Studio"}, nil)
 	s := f.build()
 
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 
 	_, err = s.Apply(context.Background(), ApplyCmd{
@@ -420,7 +424,7 @@ func TestScrapeApply_NilOrganizer(t *testing.T) {
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 }
 
@@ -436,19 +440,20 @@ func TestApply_HappyPath(t *testing.T) {
 
 	movie := &models.Movie{ID: "TEST-001", Title: "Test Movie", Maker: "Test Studio"}
 
-	var progressCalls []scrape.ProgressStep
-	progress := func(step scrape.ProgressStep, pct float64, msg string) {
+	var progressCalls []progress.ProgressStep
+	reporter := progress.ReporterFunc(func(step progress.ProgressStep, pct float64, msg string) {
 		progressCalls = append(progressCalls, step)
-	}
+	})
+	ctx := progress.WithReporter(context.Background(), reporter)
 
-	result, err := s.Apply(context.Background(), ApplyCmd{
+	result, err := s.Apply(ctx, ApplyCmd{
 		Movie:       movie,
 		Match:       defaultMatch(),
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{MoveFiles: true},
 		Download:    true,
 		GenerateNFO: true,
-	}, progress)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
@@ -467,7 +472,7 @@ func TestApply_NilMovie(t *testing.T) {
 	result, err := s.Apply(context.Background(), ApplyCmd{
 		Movie: nil,
 		Match: defaultMatch(),
-	}, nil)
+	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "movie is nil")
 	assert.Nil(t, result)
@@ -486,7 +491,7 @@ func TestApply_DownloadOnly(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Nil(t, result.OrganizeResult)
@@ -505,7 +510,7 @@ func TestApply_OrganizeOnly(t *testing.T) {
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.NotNil(t, result.OrganizeResult)
@@ -525,23 +530,24 @@ func TestScrapeApply_MultiPart(t *testing.T) {
 		PartSuffix:  "-pt1",
 	}
 
-	var progressCalls []scrape.ProgressStep
-	progress := func(step scrape.ProgressStep, pct float64, msg string) {
+	var progressCalls []progress.ProgressStep
+	reporter := progress.ReporterFunc(func(step progress.ProgressStep, pct float64, msg string) {
 		progressCalls = append(progressCalls, step)
-	}
+	})
+	ctx := progress.WithReporter(context.Background(), reporter)
 
-	scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	scrapeResult, _, err := s.Scrape(ctx, scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 
-	_, err = s.Apply(context.Background(), ApplyCmd{
+	_, err = s.Apply(ctx, ApplyCmd{
 		Movie:    scrapeResult.Movie,
 		Match:    match,
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, progress)
+	})
 	assert.NoError(t, err)
-	assert.Contains(t, progressCalls, scrape.ProgressStepDownload)
+	assert.Contains(t, progressCalls, progress.ProgressStepDownload)
 }
 
 func TestApply_MultiPart(t *testing.T) {
@@ -559,22 +565,23 @@ func TestApply_MultiPart(t *testing.T) {
 
 	movie := &models.Movie{ID: "TEST-001", Title: "Test Movie"}
 
-	var progressCalls []scrape.ProgressStep
-	progress := func(step scrape.ProgressStep, pct float64, msg string) {
+	var progressCalls []progress.ProgressStep
+	reporter := progress.ReporterFunc(func(step progress.ProgressStep, pct float64, msg string) {
 		progressCalls = append(progressCalls, step)
-	}
+	})
+	ctx := progress.WithReporter(context.Background(), reporter)
 
-	result, err := s.Apply(context.Background(), ApplyCmd{
+	result, err := s.Apply(ctx, ApplyCmd{
 		Movie:    movie,
 		Match:    match,
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, progress)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Nil(t, result.OrganizeResult)
-	assert.Contains(t, progressCalls, scrape.ProgressStepDownload)
+	assert.Contains(t, progressCalls, progress.ProgressStepDownload)
 }
 
 // --- Apply unit tests (from prior wave) ---
@@ -592,7 +599,7 @@ func TestApply_SkipOrganize(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, movie, result.Movie)
@@ -615,7 +622,7 @@ func TestApply_WithOrganize(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 }
@@ -634,7 +641,7 @@ func TestApply_GenerateNFO_Respected(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: false,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Empty(t, result.NFOPath)
@@ -646,7 +653,7 @@ func TestApply_GenerateNFO_Respected(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 }
@@ -663,7 +670,7 @@ func TestApply_DisplayTitleApplied(t *testing.T) {
 		Match:    match,
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	// When displayTitle is empty (default test config), DisplayTitle should fall back to Title
@@ -685,7 +692,7 @@ func TestApply_DryRun_SkipsPersistedSteps(t *testing.T) {
 		Organize:    OrganizeOptions{Skip: true},
 		Download:    true,
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	// DryRun=true: download and NFO should be skipped
@@ -710,7 +717,7 @@ func TestApply_StepsTracking_FullSuccess(t *testing.T) {
 		Organize:    OrganizeOptions{MoveFiles: true},
 		Download:    true,
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -733,7 +740,7 @@ func TestApply_StepsTracking_SkipOrganize(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -755,7 +762,7 @@ func TestApply_StepsTracking_SkipDownloadAndNFO(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: false,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -780,7 +787,7 @@ func TestApply_WithRevertLog(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Empty(t, result.OperationID) // noOpRevertLog returns empty string
@@ -1028,7 +1035,7 @@ func TestDisplayTitleConsistency_AcrossPaths(t *testing.T) {
 			withDisplayTitle("[<ID>] <TITLE>").
 			build()
 
-		result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+		result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.Movie)
@@ -1046,7 +1053,7 @@ func TestDisplayTitleConsistency_AcrossPaths(t *testing.T) {
 			Match:    defaultMatch(),
 			DestPath: "/dest",
 			Organize: OrganizeOptions{Skip: true},
-		}, nil)
+		})
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		assert.Equal(t, "[TEST-001] Scrape Title", result.Movie.DisplayTitle)
@@ -1059,7 +1066,7 @@ func TestDisplayTitleConsistency_AcrossPaths(t *testing.T) {
 		s := f.build()
 
 		// Scrape path
-		scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+		scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 		require.NoError(t, err)
 		require.NotNil(t, scrapeResult)
 
@@ -1069,7 +1076,7 @@ func TestDisplayTitleConsistency_AcrossPaths(t *testing.T) {
 			Match:    defaultMatch(),
 			DestPath: "/dest",
 			Organize: OrganizeOptions{Skip: true},
-		}, nil)
+		})
 		require.NoError(t, err)
 		require.NotNil(t, applyResult)
 
@@ -1084,7 +1091,7 @@ func TestDisplayTitleConsistency_AcrossPaths(t *testing.T) {
 		s := f.build()
 
 		// Scrape path
-		scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+		scrapeResult, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 		require.NoError(t, err)
 		require.NotNil(t, scrapeResult)
 		assert.Equal(t, "Scrape Title", scrapeResult.Movie.DisplayTitle,
@@ -1096,7 +1103,7 @@ func TestDisplayTitleConsistency_AcrossPaths(t *testing.T) {
 			Match:    defaultMatch(),
 			DestPath: "/dest",
 			Organize: OrganizeOptions{Skip: true},
-		}, nil)
+		})
 		require.NoError(t, err)
 		require.NotNil(t, applyResult)
 		assert.Equal(t, "Scrape Title", applyResult.Movie.DisplayTitle,
@@ -1117,7 +1124,7 @@ func TestDisplayTitleConsistency_AcrossPaths(t *testing.T) {
 			DestPath:        "/dest",
 			Organize:        OrganizeOptions{Skip: true},
 			DisplayTitleSrc: titleSrc,
-		}, nil)
+		})
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		assert.Equal(t, "[TEST-001] Original Title", result.Movie.DisplayTitle,
@@ -1171,7 +1178,7 @@ func TestScrape_NeedsPersistenceClearedAfterUpsert(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Test Movie"}, nil)
 	s := f.build()
 
-	result, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -1184,7 +1191,7 @@ type needsPersistenceMockScraper struct {
 	needsPersistence bool
 }
 
-func (m *needsPersistenceMockScraper) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, error) {
+func (m *needsPersistenceMockScraper) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, error) {
 	return &scrape.ScrapeResult{
 		Movie:            &models.Movie{ID: m.result.ID, Title: m.result.Title},
 		NeedsPersistence: m.needsPersistence,
@@ -1207,7 +1214,7 @@ func TestScrape_NeedsPersistenceTrue_ClearedAndUpsertedOnce(t *testing.T) {
 	// Replace the scrape sub-orchestrator with one that uses our custom scraper
 	s.scrape = newScrapeOrchestrator(mock, f.movieRepo, "", nil, nfo.NFONameConfig{}, nil)
 
-	result, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-002"}, nil)
+	result, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-002"})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -1228,7 +1235,7 @@ func TestScrape_ForceRefreshDeletesCache(t *testing.T) {
 	s := f.build()
 
 	// First scrape: inserts into cache
-	result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -1238,7 +1245,7 @@ func TestScrape_ForceRefreshDeletesCache(t *testing.T) {
 	require.NotNil(t, cached)
 
 	// Second scrape with ForceRefresh: should delete cache and re-scrape
-	result2, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001", ForceRefresh: true}, nil)
+	result2, _, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001", ForceRefresh: true})
 	require.NoError(t, err)
 	require.NotNil(t, result2)
 	assert.Equal(t, "TEST-001", result2.Movie.ID)
@@ -1252,7 +1259,7 @@ func TestScrape_VisibilityFields_SetOnSuccess(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "VIS-001", Title: "Visible Movie"}, nil)
 	s := f.build()
 
-	_, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "VIS-001"}, nil)
+	_, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "VIS-001"})
 	require.NoError(t, err)
 	require.NotNil(t, meta)
 
@@ -1267,7 +1274,7 @@ func TestScrape_VisibilityFields_DisplayTitleNotAppliedWhenNoConfig(t *testing.T
 		withScraper("mock", &models.ScraperResult{ID: "VIS-002", Title: "No DisplayTitle"}, nil)
 	s := f.build()
 
-	_, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "VIS-002"}, nil)
+	_, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "VIS-002"})
 	require.NoError(t, err)
 	require.NotNil(t, meta)
 
@@ -1285,7 +1292,7 @@ func TestScrape_VisibilityFields_PersistedFalseWhenNoMovieRepo(t *testing.T) {
 	require.True(t, ok, "scrape should be a scrapeOrchImpl")
 	s.scrape = newScrapeOrchestrator(impl.scraper, nil, impl.displayTitle, impl.templateEngine, nfo.NFONameConfig{}, nil)
 
-	_, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "VIS-003"}, nil)
+	_, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "VIS-003"})
 	require.NoError(t, err)
 	require.NotNil(t, meta)
 
@@ -1299,7 +1306,7 @@ func TestScrape_VisibilityFields_PosterGeneratedNotSet(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "VIS-004", Title: "Poster Movie"}, nil)
 	s := f.build()
 
-	result, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "VIS-004"}, nil)
+	result, meta, err := s.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "VIS-004"})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 

@@ -202,7 +202,7 @@ func TestWorkflowFactory_NewScrapeOnlyWorkflow_Success(t *testing.T) {
 	require.True(t, ok)
 
 	// Apply should be no-op for scrape-only
-	_, err = impl.Apply(context.Background(), ApplyCmd{Movie: &models.Movie{ID: "TEST-001"}}, nil)
+	_, err = impl.Apply(context.Background(), ApplyCmd{Movie: &models.Movie{ID: "TEST-001"}})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "apply not configured")
 }
@@ -224,12 +224,12 @@ func TestWorkflowFactory_NewScanOnlyWorkflow_Success(t *testing.T) {
 	require.True(t, ok)
 
 	// Scrape should fail for scan-only
-	_, _, err = impl.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	_, _, err = impl.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "scrape not configured")
 
 	// Apply should fail for scan-only
-	_, err = impl.Apply(context.Background(), ApplyCmd{Movie: &models.Movie{ID: "TEST-001"}}, nil)
+	_, err = impl.Apply(context.Background(), ApplyCmd{Movie: &models.Movie{ID: "TEST-001"}})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "apply not configured")
 }
@@ -1366,7 +1366,7 @@ func TestWorkflowFactory_ScanOnlyLifecycle(t *testing.T) {
 	assert.NotNil(t, wf)
 
 	// Scrape should be no-op
-	_, _, scrapeErr := wf.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"}, nil)
+	_, _, scrapeErr := wf.Scrape(context.Background(), scrape.ScrapeCmd{MovieID: "TEST-001"})
 	assert.Error(t, scrapeErr)
 	assert.Contains(t, scrapeErr.Error(), "scrape not configured")
 }
@@ -1382,7 +1382,7 @@ func TestApplyOrchImpl_Execute_NilFs(t *testing.T) {
 	result, err := impl.Execute(context.Background(), ApplyCmd{
 		Movie: &models.Movie{ID: "TEST-001"},
 		Match: defaultMatch(),
-	}, nil)
+	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "filesystem is nil")
 	assert.Nil(t, result)
@@ -1406,7 +1406,7 @@ func TestApplyOrchImpl_Execute_OrganizeError_WithRevertLog(t *testing.T) {
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, nil)
+	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "organization failed")
 	assert.NotNil(t, result)

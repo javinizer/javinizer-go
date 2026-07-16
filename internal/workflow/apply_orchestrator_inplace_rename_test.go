@@ -79,7 +79,7 @@ func TestApplyOrchestrator_InPlaceNoRenameFolder_RenamesFile(t *testing.T) {
 		OperationMode: mode,
 	}
 
-	result, err := impl.Execute(context.Background(), cmd, nil)
+	result, err := impl.Execute(context.Background(), cmd)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.Organized, "organize step must run for in-place-norenamefolder")

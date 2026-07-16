@@ -322,11 +322,11 @@ type stubMiss2WF struct {
 	mu sync.Mutex
 }
 
-func (s *stubMiss2WF) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (s *stubMiss2WF) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	return nil, nil, nil
 }
 
-func (s *stubMiss2WF) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (s *stubMiss2WF) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return nil, nil
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	httpclientiface "github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -174,7 +175,7 @@ func (f *testFixture) build() *Scraper {
 
 func TestScrape_EmptyMovieID(t *testing.T) {
 	s := newFixture(t).build()
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: ""}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: ""})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty MovieID")
 	assert.Nil(t, result)
@@ -184,7 +185,7 @@ func TestScrape_AllScrapersFail(t *testing.T) {
 	s := newFixture(t).
 		withScraper("failing", nil, errors.New("network error")).
 		build()
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, StatusFailed, result.Status)
@@ -195,7 +196,7 @@ func TestScrape_CacheHit(t *testing.T) {
 	f.withCachedMovie("TEST-001", "Cached Movie")
 	s := f.build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, StatusCompleted, result.Status)
@@ -207,7 +208,7 @@ func TestScrape_CacheMiss_Scrapes(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Scraped Movie", Maker: "Test Studio"}, nil).
 		build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, StatusCompleted, result.Status)
@@ -221,7 +222,7 @@ func TestScrape_ForceRefresh_BypassesCache(t *testing.T) {
 	f.withCachedMovie("TEST-001", "Cached Movie")
 	s := f.build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001", ForceRefresh: true}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001", ForceRefresh: true})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -240,7 +241,7 @@ func TestScrape_NoDBWrites(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "No Persist"}, nil)
 	s := f.build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -257,19 +258,20 @@ func TestScrape_ProgressCallback(t *testing.T) {
 		build()
 
 	type progressCall struct {
-		step ProgressStep
+		step progress.ProgressStep
 		pct  float64
 	}
 	var calls []progressCall
-	progress := func(step ProgressStep, pct float64, msg string) {
+	reporter := progress.ReporterFunc(func(step progress.ProgressStep, pct float64, msg string) {
 		calls = append(calls, progressCall{step: step, pct: pct})
-	}
+	})
+	ctx := progress.WithReporter(context.Background(), reporter)
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, progress)
+	result, err := s.Scrape(ctx, ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.Greater(t, len(calls), 0, "should have progress callbacks")
-	require.Equal(t, ProgressStepScrape, calls[0].step, "first callback should be 'scrape'")
+	require.Equal(t, progress.ProgressStepScrape, calls[0].step, "first callback should be 'scrape'")
 	for i := 1; i < len(calls); i++ {
 		assert.GreaterOrEqual(t, calls[i].pct, calls[i-1].pct, "percentages should be monotonically non-decreasing")
 	}
@@ -282,7 +284,7 @@ func TestScrape_DisabledScraperSkipped(t *testing.T) {
 		withPriority([]string{"disabled", "enabled"}).
 		build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -296,7 +298,7 @@ func TestScrape_ContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	result, err := s.Scrape(ctx, ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(ctx, ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, StatusFailed, result.Status)
@@ -314,7 +316,7 @@ func TestScrape_CustomScrapers_SelectsSpecificScraper(t *testing.T) {
 	result, err := s.Scrape(context.Background(), ScrapeCmd{
 		MovieID:          "TEST-001",
 		SelectedScrapers: []string{"selected"},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -327,7 +329,7 @@ func TestScrape_WithHTTPClient_DoesNotPanic(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "HTTP Test"}, nil).
 		build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 }
@@ -337,7 +339,7 @@ func TestScrape_ReturnsResultWithoutDBWrite(t *testing.T) {
 		withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Result Only"}, nil)
 	s := f.build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -358,7 +360,7 @@ func TestScrape_FindByIDError_ContinuesToScrape(t *testing.T) {
 	fixture.withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Scraped After DB Error"}, nil)
 	s := fixture.build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -376,7 +378,7 @@ func TestScrape_ForceRefresh_SkipsCache(t *testing.T) {
 
 	// ForceRefresh skips the cache lookup and scrapes fresh.
 	// Cache deletion is now the caller's responsibility (not Scrape's).
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001", ForceRefresh: true}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001", ForceRefresh: true})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -393,7 +395,7 @@ func TestScrape_UpsertNotCalled(t *testing.T) {
 	s := f.build()
 
 	// Scrape is a pure query — it should NOT call Upsert, even when movieRepo has errors.
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, StatusCompleted, result.Status)
@@ -620,7 +622,7 @@ func TestScrape_ActressEnrichment(t *testing.T) {
 	}, nil)
 	s := f.build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001"})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
@@ -636,7 +638,7 @@ func TestResolveScraperNames_PriorityOverrideScrapeCmd(t *testing.T) {
 		withPriority([]string{"default", "override"}).
 		build()
 
-	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001", PriorityOverride: []string{"override"}}, nil)
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001", PriorityOverride: []string{"override"}})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)

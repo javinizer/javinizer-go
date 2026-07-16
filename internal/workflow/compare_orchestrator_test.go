@@ -44,7 +44,7 @@ type mockScraperInterface struct {
 	err    error
 }
 
-func (m *mockScraperInterface) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, error) {
+func (m *mockScraperInterface) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, error) {
 	return m.result, m.err
 }
 

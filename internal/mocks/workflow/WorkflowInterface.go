@@ -40,8 +40,8 @@ func (_m *MockWorkflowInterface) EXPECT() *MockWorkflowInterface_Expecter {
 }
 
 // Apply provides a mock function for the type MockWorkflowInterface
-func (_mock *MockWorkflowInterface) Apply(ctx context.Context, cmd workflow.ApplyCmd, progress scrape.ProgressFunc) (*workflow.ApplyResult, error) {
-	ret := _mock.Called(ctx, cmd, progress)
+func (_mock *MockWorkflowInterface) Apply(ctx context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
+	ret := _mock.Called(ctx, cmd)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Apply")
@@ -49,18 +49,18 @@ func (_mock *MockWorkflowInterface) Apply(ctx context.Context, cmd workflow.Appl
 
 	var r0 *workflow.ApplyResult
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, workflow.ApplyCmd, scrape.ProgressFunc) (*workflow.ApplyResult, error)); ok {
-		return returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, workflow.ApplyCmd) (*workflow.ApplyResult, error)); ok {
+		return returnFunc(ctx, cmd)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, workflow.ApplyCmd, scrape.ProgressFunc) *workflow.ApplyResult); ok {
-		r0 = returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, workflow.ApplyCmd) *workflow.ApplyResult); ok {
+		r0 = returnFunc(ctx, cmd)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*workflow.ApplyResult)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, workflow.ApplyCmd, scrape.ProgressFunc) error); ok {
-		r1 = returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, workflow.ApplyCmd) error); ok {
+		r1 = returnFunc(ctx, cmd)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -75,12 +75,11 @@ type MockWorkflowInterface_Apply_Call struct {
 // Apply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd workflow.ApplyCmd
-//   - progress scrape.ProgressFunc
-func (_e *MockWorkflowInterface_Expecter) Apply(ctx any, cmd any, progress any) *MockWorkflowInterface_Apply_Call {
-	return &MockWorkflowInterface_Apply_Call{Call: _e.mock.On("Apply", ctx, cmd, progress)}
+func (_e *MockWorkflowInterface_Expecter) Apply(ctx any, cmd any) *MockWorkflowInterface_Apply_Call {
+	return &MockWorkflowInterface_Apply_Call{Call: _e.mock.On("Apply", ctx, cmd)}
 }
 
-func (_c *MockWorkflowInterface_Apply_Call) Run(run func(ctx context.Context, cmd workflow.ApplyCmd, progress scrape.ProgressFunc)) *MockWorkflowInterface_Apply_Call {
+func (_c *MockWorkflowInterface_Apply_Call) Run(run func(ctx context.Context, cmd workflow.ApplyCmd)) *MockWorkflowInterface_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -90,14 +89,9 @@ func (_c *MockWorkflowInterface_Apply_Call) Run(run func(ctx context.Context, cm
 		if args[1] != nil {
 			arg1 = args[1].(workflow.ApplyCmd)
 		}
-		var arg2 scrape.ProgressFunc
-		if args[2] != nil {
-			arg2 = args[2].(scrape.ProgressFunc)
-		}
 		run(
 			arg0,
 			arg1,
-			arg2,
 		)
 	})
 	return _c
@@ -108,7 +102,7 @@ func (_c *MockWorkflowInterface_Apply_Call) Return(applyResult *workflow.ApplyRe
 	return _c
 }
 
-func (_c *MockWorkflowInterface_Apply_Call) RunAndReturn(run func(ctx context.Context, cmd workflow.ApplyCmd, progress scrape.ProgressFunc) (*workflow.ApplyResult, error)) *MockWorkflowInterface_Apply_Call {
+func (_c *MockWorkflowInterface_Apply_Call) RunAndReturn(run func(ctx context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error)) *MockWorkflowInterface_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -318,8 +312,8 @@ func (_c *MockWorkflowInterface_ScanAndMatch_Call) RunAndReturn(run func(ctx con
 }
 
 // Scrape provides a mock function for the type MockWorkflowInterface
-func (_mock *MockWorkflowInterface) Scrape(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
-	ret := _mock.Called(ctx, cmd, progress)
+func (_mock *MockWorkflowInterface) Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+	ret := _mock.Called(ctx, cmd)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Scrape")
@@ -328,25 +322,25 @@ func (_mock *MockWorkflowInterface) Scrape(ctx context.Context, cmd scrape.Scrap
 	var r0 *scrape.ScrapeResult
 	var r1 *workflow.OrchestrationMeta
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, scrape.ScrapeCmd, scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error)); ok {
-		return returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error)); ok {
+		return returnFunc(ctx, cmd)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, scrape.ScrapeCmd, scrape.ProgressFunc) *scrape.ScrapeResult); ok {
-		r0 = returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, scrape.ScrapeCmd) *scrape.ScrapeResult); ok {
+		r0 = returnFunc(ctx, cmd)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*scrape.ScrapeResult)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, scrape.ScrapeCmd, scrape.ProgressFunc) *workflow.OrchestrationMeta); ok {
-		r1 = returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, scrape.ScrapeCmd) *workflow.OrchestrationMeta); ok {
+		r1 = returnFunc(ctx, cmd)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(*workflow.OrchestrationMeta)
 		}
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, scrape.ScrapeCmd, scrape.ProgressFunc) error); ok {
-		r2 = returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, scrape.ScrapeCmd) error); ok {
+		r2 = returnFunc(ctx, cmd)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -361,12 +355,11 @@ type MockWorkflowInterface_Scrape_Call struct {
 // Scrape is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd scrape.ScrapeCmd
-//   - progress scrape.ProgressFunc
-func (_e *MockWorkflowInterface_Expecter) Scrape(ctx any, cmd any, progress any) *MockWorkflowInterface_Scrape_Call {
-	return &MockWorkflowInterface_Scrape_Call{Call: _e.mock.On("Scrape", ctx, cmd, progress)}
+func (_e *MockWorkflowInterface_Expecter) Scrape(ctx any, cmd any) *MockWorkflowInterface_Scrape_Call {
+	return &MockWorkflowInterface_Scrape_Call{Call: _e.mock.On("Scrape", ctx, cmd)}
 }
 
-func (_c *MockWorkflowInterface_Scrape_Call) Run(run func(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc)) *MockWorkflowInterface_Scrape_Call {
+func (_c *MockWorkflowInterface_Scrape_Call) Run(run func(ctx context.Context, cmd scrape.ScrapeCmd)) *MockWorkflowInterface_Scrape_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -376,14 +369,9 @@ func (_c *MockWorkflowInterface_Scrape_Call) Run(run func(ctx context.Context, c
 		if args[1] != nil {
 			arg1 = args[1].(scrape.ScrapeCmd)
 		}
-		var arg2 scrape.ProgressFunc
-		if args[2] != nil {
-			arg2 = args[2].(scrape.ProgressFunc)
-		}
 		run(
 			arg0,
 			arg1,
-			arg2,
 		)
 	})
 	return _c
@@ -394,7 +382,7 @@ func (_c *MockWorkflowInterface_Scrape_Call) Return(scrapeResult *scrape.ScrapeR
 	return _c
 }
 
-func (_c *MockWorkflowInterface_Scrape_Call) RunAndReturn(run func(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error)) *MockWorkflowInterface_Scrape_Call {
+func (_c *MockWorkflowInterface_Scrape_Call) RunAndReturn(run func(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error)) *MockWorkflowInterface_Scrape_Call {
 	_c.Call.Return(run)
 	return _c
 }
