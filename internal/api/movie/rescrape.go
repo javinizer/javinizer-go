@@ -68,6 +68,11 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			return
 		}
 
+		if scrapeCtx.Err() != nil {
+			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape timed out"})
+			return
+		}
+
 		if result.Status == scrape.StatusFailed {
 			errMsg := "No results from selected scrapers"
 			if result.Message != "" {

@@ -21,14 +21,19 @@ import (
 )
 
 type deadlineCapturingWorkflow struct {
-	gotDeadline bool
-	deadline    time.Time
+	gotDeadline      bool
+	deadline         time.Time
+	blockUntilCancel bool
 }
 
 func (w *deadlineCapturingWorkflow) Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	dl, ok := ctx.Deadline()
 	w.gotDeadline = ok
 	w.deadline = dl
+	if w.blockUntilCancel {
+		<-ctx.Done()
+		return &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: ctx.Err().Error()}, nil, nil
+	}
 	return &scrape.ScrapeResult{Status: scrape.StatusCompleted, Movie: &models.Movie{ID: cmd.MovieID}}, nil, nil
 }
 
@@ -161,6 +166,44 @@ func TestCompareNFO_RequestTimeoutApplied(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.True(t, wf.gotDeadline, "compare context should have a deadline")
+}
+
+func TestScrapeMovie_RequestTimeoutExpired(t *testing.T) {
+	wf := &deadlineCapturingWorkflow{blockUntilCancel: true}
+	deps := MovieDeps{
+		WorkflowFn:       func() workflow.WorkflowInterface { return wf },
+		RequestTimeoutFn: func() time.Duration { return 50 * time.Millisecond },
+	}
+
+	router := gin.New()
+	router.POST("/scrape", scrapeMovie(deps))
+
+	body := `{"id":"TEST-001"}`
+	req := httptest.NewRequest(http.MethodPost, "/scrape", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusGatewayTimeout, w.Code)
+}
+
+func TestRescrapeMovie_RequestTimeoutExpired(t *testing.T) {
+	wf := &deadlineCapturingWorkflow{blockUntilCancel: true}
+	deps := MovieDeps{
+		WorkflowFn:       func() workflow.WorkflowInterface { return wf },
+		RequestTimeoutFn: func() time.Duration { return 50 * time.Millisecond },
+	}
+
+	router := gin.New()
+	router.POST("/movies/:id/rescrape", rescrapeMovie(deps))
+
+	body := `{"selected_scrapers":["r18dev"],"force":false}`
+	req := httptest.NewRequest(http.MethodPost, "/movies/TEST-001/rescrape", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusGatewayTimeout, w.Code)
 }
 
 func TestStallServer_Requests(t *testing.T) {
