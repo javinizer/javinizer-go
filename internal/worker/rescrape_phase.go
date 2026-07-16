@@ -69,7 +69,17 @@ func (p *rescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePhaseIn
 			scrapeCtx, scrapeCancel = context.WithTimeout(taskCtx, resolved.Duration)
 			defer scrapeCancel()
 		}
-		return wf.Scrape(scrapeCtx, cmd)
+		result, meta, err := wf.Scrape(scrapeCtx, cmd)
+		if scrapeCtx.Err() != nil && err == nil {
+			if result == nil {
+				result = &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: "scrape timed out"}
+			} else {
+				result.Status = scrape.StatusFailed
+				result.Message = "scrape timed out"
+			}
+			err = scrapeCtx.Err()
+		}
+		return result, meta, err
 	}()
 
 	return result, meta, scrapeErr

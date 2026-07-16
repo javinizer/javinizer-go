@@ -174,6 +174,9 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 		ForceRefresh:     forceRefresh,
 		SelectedScrapers: scrapersFlag,
 	})
+	if scrapeCtx.Err() != nil {
+		return nil, nil, fmt.Errorf("scrape timed out")
+	}
 	if err != nil {
 		if result != nil && result.Movie != nil {
 			return result.Movie, result.ScraperResults, err
