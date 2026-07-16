@@ -1,6 +1,7 @@
 package movie
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -53,7 +54,13 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "workflow not available"})
 			return
 		}
-		result, _, err := wf.Scrape(c.Request.Context(), cmd)
+		scrapeCtx := c.Request.Context()
+		if deps.RequestTimeout > 0 {
+			var cancel context.CancelFunc
+			scrapeCtx, cancel = context.WithTimeout(scrapeCtx, deps.RequestTimeout)
+			defer cancel()
+		}
+		result, _, err := wf.Scrape(scrapeCtx, cmd)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return

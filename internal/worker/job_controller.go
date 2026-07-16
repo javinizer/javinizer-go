@@ -227,7 +227,7 @@ func (c *jobController) setDepsFromConfig(cfg *JobConfig) {
 	if cfg.Matcher != nil {
 		c.job.deps.Matcher = cfg.Matcher
 	}
-	if cfg.BatchCfg.MaxWorkers > 0 || cfg.BatchCfg.WorkerTimeout > 0 || len(cfg.BatchCfg.ScraperPriority) > 0 {
+	if cfg.BatchCfg.MaxWorkers > 0 || cfg.BatchCfg.WorkerTimeout > 0 || cfg.BatchCfg.RequestTimeout > 0 || len(cfg.BatchCfg.ScraperPriority) > 0 {
 		c.job.deps.BatchCfg = cfg.BatchCfg
 	}
 	if cfg.BatchFileOpRepo != nil {
@@ -278,7 +278,7 @@ func (c *jobController) buildScrapeInputs(wf workflow.WorkflowInterface, batchCf
 
 	inputs := scrapePhaseInputs{
 		JobID:               c.job.ID,
-		Concurrency:         newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, defaultMaxWorkers, defaultWorkerTimeout),
+		Concurrency:         newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, defaultMaxWorkers, defaultWorkerTimeout),
 		WF:                  wf,
 		PosterGen:           pg,
 		KeepBroadcasterOpen: keepOpen,
@@ -310,7 +310,7 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 
 	return applyPhaseInputs{
 		JobID:       c.job.ID,
-		Concurrency: newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, 1, defaultWorkerTimeout),
+		Concurrency: newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
 		NFOEnabled:  batchCfg.NFOEnabled,
 		WF:          wf,
 		Results:     snap.Results,
@@ -335,7 +335,7 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 
 	return rescrapePhaseInputs{
 		JobID:       c.job.ID,
-		Concurrency: newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, defaultMaxWorkers, defaultWorkerTimeout),
+		Concurrency: newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, defaultMaxWorkers, defaultWorkerTimeout),
 		WF:          wf,
 		PosterGen:   pg,
 		ResultMap:   c.job.results,

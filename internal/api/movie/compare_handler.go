@@ -1,6 +1,7 @@
 package movie
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -84,7 +85,13 @@ func compareNFO(deps MovieDeps) gin.HandlerFunc {
 			return
 		}
 
-		result, err := wf.Compare(c.Request.Context(), workflow.CompareCmd{
+		compareCtx := c.Request.Context()
+		if deps.RequestTimeout > 0 {
+			var cancel context.CancelFunc
+			compareCtx, cancel = context.WithTimeout(compareCtx, deps.RequestTimeout)
+			defer cancel()
+		}
+		result, err := wf.Compare(compareCtx, workflow.CompareCmd{
 			MovieID:          movieID,
 			NFOPath:          validatedPath,
 			ScalarStrategy:   resolved.ScalarStrategy,

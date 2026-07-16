@@ -406,6 +406,7 @@ func (s *RuntimeSnapshot) BatchJobFactory() worker.BatchJobFactoryInterface {
 	workerBatchCfg := worker.BatchJobConfig{
 		MaxWorkers:      batchCfg.MaxWorkers,
 		WorkerTimeout:   batchCfg.WorkerTimeout,
+		RequestTimeout:  batchCfg.RequestTimeout,
 		ScraperPriority: batchCfg.ScraperPriority,
 		NFOEnabled:      batchCfg.NFOEnabled,
 	}
@@ -545,6 +546,7 @@ func (r *APIRuntime) buildBatchJobFactory() any {
 	workerBatchCfg := worker.BatchJobConfig{
 		MaxWorkers:      batchCfg.MaxWorkers,
 		WorkerTimeout:   batchCfg.WorkerTimeout,
+		RequestTimeout:  batchCfg.RequestTimeout,
 		ScraperPriority: batchCfg.ScraperPriority,
 		NFOEnabled:      batchCfg.NFOEnabled,
 	}

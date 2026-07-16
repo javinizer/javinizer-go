@@ -49,8 +49,9 @@ type APIConfig struct {
 	AllowRevert   bool   // cfg.Output.Operation.AllowRevert
 
 	// Performance
-	MaxWorkers    int           // cfg.Performance.MaxWorkers
-	WorkerTimeout time.Duration // cfg.Performance.WorkerTimeout converted to time.Duration
+	MaxWorkers     int           // cfg.Performance.MaxWorkers
+	WorkerTimeout  time.Duration // cfg.Performance.WorkerTimeout converted to time.Duration
+	RequestTimeout time.Duration // cfg.Scrapers.RequestTimeoutSeconds converted to time.Duration
 
 	// Matching
 	RegexEnabled bool   // cfg.Matching.RegexEnabled
@@ -86,6 +87,7 @@ type BatchNarrowConfig struct {
 	OperationMode      string        // resolved operation mode for batch execution
 	MaxWorkers         int           // worker pool concurrency
 	WorkerTimeout      time.Duration // worker execution timeout
+	RequestTimeout     time.Duration // overall scrape operation timeout
 	ScraperPriority    []string      // scraper source ordering
 	NFOEnabled         bool          // whether NFO generation is active
 	ScraperUserAgent   string        // user-agent for poster downloads
@@ -138,6 +140,7 @@ func (c APIConfig) BatchConfig() *BatchNarrowConfig {
 		OperationMode:      c.OperationMode,
 		MaxWorkers:         c.MaxWorkers,
 		WorkerTimeout:      c.WorkerTimeout,
+		RequestTimeout:     c.RequestTimeout,
 		ScraperPriority:    c.ScraperPriority,
 		NFOEnabled:         c.NFOEnabled,
 		ScraperUserAgent:   c.ScraperUserAgent,
@@ -196,6 +199,7 @@ func (c APIConfig) MatcherConfig() *MatcherNarrowConfig {
 // cfg.Output.MediaFormat.MaxPosterHeight,
 // cfg.Output.Download, cfg.Output.Download.DownloadProxy,
 // cfg.Performance.MaxWorkers, cfg.Performance.WorkerTimeout,
+// cfg.Scrapers.RequestTimeoutSeconds,
 // cfg.Matching.RegexEnabled, cfg.Matching.RegexPattern,
 // cfg.System.TempDir, cfg.System.VersionCheckEnabled,
 // cfg.Logging.Level, cfg.Database.DSN, cfg.Database.LogLevel
@@ -232,6 +236,7 @@ func ConfigFromAppConfig(cfg *config.Config) APIConfig {
 		AllowRevert:         cfg.Output.Operation.AllowRevert,
 		MaxWorkers:          cfg.Performance.MaxWorkers,
 		WorkerTimeout:       time.Duration(cfg.Performance.WorkerTimeout) * time.Second,
+		RequestTimeout:      time.Duration(cfg.Scrapers.RequestTimeoutSeconds) * time.Second,
 		RegexEnabled:        cfg.Matching.RegexEnabled,
 		RegexPattern:        cfg.Matching.RegexPattern,
 		TempDir:             cfg.System.TempDir,

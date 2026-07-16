@@ -11,11 +11,13 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/timeout"
 )
 
 // NewHTTPClient creates an HTTP client for the downloader using pre-resolved configuration.
 // The bridge function resolves all proxy profiles so this function never imports internal/config.
 func NewHTTPClient(cfg HTTPClientConfig) (httpclient.HTTPClient, error) {
+	logging.Debugf("Downloader: HTTP client timeout=%s", timeout.FromDuration(cfg.Timeout, "config:downloader.timeout"))
 	adaptiveClient := &adaptiveDownloaderHTTPClient{
 		timeout:        cfg.Timeout,
 		httpCfg:        cfg,

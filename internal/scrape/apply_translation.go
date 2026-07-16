@@ -8,6 +8,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/timeout"
 	"github.com/javinizer/javinizer-go/internal/translation"
 )
 
@@ -59,13 +60,10 @@ func (ts *translationService) translateWithContext(ctx context.Context, scraped 
 		return "", nil
 	}
 
-	logging.Debugf("Translation: starting (provider=%s, source=%s, target=%s, hash=%s)", ts.provider, ts.sourceLanguage, ts.targetLanguage, ts.settingsHash)
+	resolved := timeout.FromConfig("metadata.translation.timeout_seconds", ts.timeoutSeconds, 60*time.Second)
+	logging.Debugf("Translation: starting (provider=%s, source=%s, target=%s, hash=%s, timeout=%s)", ts.provider, ts.sourceLanguage, ts.targetLanguage, ts.settingsHash, resolved)
 
-	timeout := ts.timeoutSeconds
-	if timeout <= 0 {
-		timeout = 60
-	}
-	transCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	transCtx, cancel := context.WithTimeout(ctx, resolved.Duration)
 	defer cancel()
 
 	output, warning, err := ts.service.TranslateMovie(transCtx, scraped, ts.settingsHash)
@@ -98,7 +96,6 @@ func (ts *translationService) translateWithContext(ctx context.Context, scraped 
 // newTranslationHTTPClient creates the shared HTTP client for translation providers.
 func newTranslationHTTPClient() *http.Client {
 	return &http.Client{
-		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			MaxIdleConns:        10,
 			IdleConnTimeout:     30 * time.Second,

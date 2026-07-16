@@ -1,0 +1,8 @@
+internal/update/checker.go
+internal/update/upgrade.go
+internal/updater/engine.go
+internal/api/system/proxy.go
+internal/api/system/translation.go
+internal/imageutil/poster.go
+internal/imageutil/screenshot.go
+internal/ssrf/ssrf.go

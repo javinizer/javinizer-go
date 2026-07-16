@@ -221,8 +221,13 @@ check-import-guard:
 i18n-check:
 	@bash scripts/i18n-check.sh
 
+# Check for hard-coded http.Client{Timeout: ...} literals outside the allowlist.
+# Prevents the #152 bug class (config timeout shadowed by a hard-coded literal).
+check-no-hardcoded-timeouts:
+	@./scripts/check_no_hardcoded_timeouts.sh
+
 # Run full CI test suite
-ci: vet lint vuln coverage-check test-race config-drift check-import-guard check-mocks i18n-check
+ci: vet lint vuln coverage-check test-race config-drift check-import-guard check-mocks i18n-check check-no-hardcoded-timeouts
 	@echo "All CI checks passed!"
 
 # Run full CI suite including frontend tests

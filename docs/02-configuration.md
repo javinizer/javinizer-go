@@ -1265,8 +1265,8 @@ api:
 scrapers:
   user_agent: ""  # Default: Chrome-like UA. r18dev uses the Javinizer UA automatically.
   referer: "https://www.dmm.co.jp/"
-  timeout_seconds: 30
-  request_timeout_seconds: 60
+  timeout_seconds: 30          # per-HTTP-request timeout (1–300, default 30)
+  request_timeout_seconds: 60  # overall scrape operation timeout (1–600, default 60); wraps each scraper Search()/Scrape() call as a nested context within performance.worker_timeout
   priority:
     - r18dev
     - libredmm

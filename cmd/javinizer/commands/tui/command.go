@@ -221,6 +221,7 @@ func run(cmd *cobra.Command, args []string) error {
 			worker.BatchJobConfig{
 				MaxWorkers:      processorCfg.MaxWorkers,
 				WorkerTimeout:   processorCfg.WorkerTimeout,
+				RequestTimeout:  processorCfg.RequestTimeout,
 				ScraperPriority: processorCfg.ScraperPriority,
 				NFOEnabled:      processorCfg.NFOEnabled,
 			},

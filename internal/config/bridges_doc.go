@@ -145,6 +145,7 @@
 //	cfg.Scrapers.Proxy                      → api/core, scraper, workflow
 //	cfg.Scrapers.ScrapeActress              → scraper, scrape
 //	cfg.Scrapers.TimeoutSeconds             → scraper
+//	cfg.Scrapers.RequestTimeoutSeconds      → api/core
 //	cfg.Scrapers.UserAgent                  → api/core, downloader, scrape
 //	cfg.Scrapers.Referer                    → api/core, scrape
 //	cfg.Server.Host                         → api/core
