@@ -72,13 +72,12 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			}
 		}
 		result, _, err := wf.Scrape(scrapeCtx, cmd)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
-			return
-		}
-
 		if scrapeCtx.Err() != nil {
 			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape timed out"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 

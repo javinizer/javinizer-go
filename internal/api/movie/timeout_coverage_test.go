@@ -49,6 +49,10 @@ func (w *deadlineCapturingWorkflow) Compare(ctx context.Context, cmd workflow.Co
 	dl, ok := ctx.Deadline()
 	w.gotDeadline = ok
 	w.deadline = dl
+	if w.blockUntilCancel {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return &workflow.CompareResult{}, nil
 }
 
@@ -199,6 +203,35 @@ func TestRescrapeMovie_RequestTimeoutExpired(t *testing.T) {
 
 	body := `{"selected_scrapers":["r18dev"],"force":false}`
 	req := httptest.NewRequest(http.MethodPost, "/movies/TEST-001/rescrape", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusGatewayTimeout, w.Code)
+}
+
+func TestCompareNFO_RequestTimeoutExpired(t *testing.T) {
+	tmpDir := t.TempDir()
+	nfoPath := filepath.Join(tmpDir, "test.nfo")
+	err := os.WriteFile(nfoPath, []byte("<movie></movie>"), 0644)
+	require.NoError(t, err)
+
+	wf := &deadlineCapturingWorkflow{blockUntilCancel: true}
+	deps := MovieDeps{
+		WorkflowFn:       func() workflow.WorkflowInterface { return wf },
+		RequestTimeoutFn: func() time.Duration { return 50 * time.Millisecond },
+		AllowedDirs:      []string{tmpDir},
+	}
+
+	router := gin.New()
+	router.POST("/movies/:id/compare-nfo", compareNFO(deps))
+
+	bodyBytes, err := json.Marshal(map[string]interface{}{
+		"nfo_path":          nfoPath,
+		"selected_scrapers": []string{"r18dev"},
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/movies/TEST-001/compare-nfo", strings.NewReader(string(bodyBytes)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
