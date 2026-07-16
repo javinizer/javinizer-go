@@ -249,7 +249,7 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 	logOutput := removeStdoutFromLogOutput(cfg.Logging.Output)
 	if logOutput == "" {
 		logOutput = "stderr"
-	} else if !strings.Contains(logOutput, "stderr") {
+	} else if !hasOutputToken(logOutput, "stderr") {
 		logOutput = logOutput + ",stderr"
 	}
 	loggingCfg = &logging.Config{
@@ -309,6 +309,18 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 	}
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
 	return nil
+}
+
+// hasOutputToken checks if a comma-separated output string contains an exact
+// token match (e.g. "stderr"), avoiding false positives on substrings like
+// "/var/log/javinizer-stderr.log".
+func hasOutputToken(output, token string) bool {
+	for _, part := range strings.Split(output, ",") {
+		if strings.TrimSpace(part) == token {
+			return true
+		}
+	}
+	return false
 }
 
 // removeStdoutFromLogOutput parses a comma-separated log output string and
