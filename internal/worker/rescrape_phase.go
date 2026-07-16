@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	timeoutPkg "github.com/javinizer/javinizer-go/internal/timeout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
@@ -42,11 +43,11 @@ func (p *rescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePhaseIn
 
 	// direct scrape call with panic recovery, replacing the
 	// errgroup+callback+mutex pattern. Same recovery semantics as scrape phase.
-	timeout := inputs.Concurrency.WorkerTimeout
+	workerTimeout := inputs.Concurrency.WorkerTimeout
 	taskCtx := ctx
-	if timeout > 0 {
+	if workerTimeout > 0 {
 		var taskCancel context.CancelFunc
-		taskCtx, taskCancel = context.WithTimeout(ctx, timeout)
+		taskCtx, taskCancel = context.WithTimeout(ctx, workerTimeout)
 		defer taskCancel()
 	}
 
@@ -58,7 +59,27 @@ func (p *rescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePhaseIn
 				err = panicErr
 			}
 		}()
-		return wf.Scrape(taskCtx, cmd)
+		// Nest the overall scrape operation timeout (scrapers.request_timeout_seconds)
+		// inside the worker_timeout task context. The sooner deadline wins.
+		scrapeCtx := taskCtx
+		if inputs.Concurrency.RequestTimeout > 0 {
+			resolved := timeoutPkg.FromDuration(inputs.Concurrency.RequestTimeout, "config:scrapers.request_timeout_seconds")
+			logging.Debugf("Rescrape: applying request timeout %s (nested within worker_timeout)", resolved)
+			var scrapeCancel context.CancelFunc
+			scrapeCtx, scrapeCancel = context.WithTimeout(taskCtx, resolved.Duration)
+			defer scrapeCancel()
+		}
+		result, meta, err := wf.Scrape(scrapeCtx, cmd)
+		if scrapeCtx.Err() != nil && err == nil {
+			if result == nil {
+				result = &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: "scrape timed out"}
+			} else {
+				result.Status = scrape.StatusFailed
+				result.Message = "scrape timed out"
+			}
+			err = scrapeCtx.Err()
+		}
+		return result, meta, err
 	}()
 
 	return result, meta, scrapeErr

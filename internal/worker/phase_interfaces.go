@@ -4,9 +4,11 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/poster"
+	"github.com/javinizer/javinizer-go/internal/timeout"
 	"github.com/javinizer/javinizer-go/internal/worker/fscase"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -25,24 +27,31 @@ const defaultWorkerTimeout = 5 * time.Minute
 // Construct via newConcurrencyConfig to apply defaults — zero-value fields
 // are replaced with the provided defaults.
 type concurrencyConfig struct {
-	MaxWorkers    int
-	WorkerTimeout time.Duration
+	MaxWorkers     int
+	WorkerTimeout  time.Duration
+	RequestTimeout time.Duration
 }
 
 // newConcurrencyConfig constructs a concurrencyConfig, applying defaults for
 // any zero or negative values. This is the single source of truth for default
 // resolution — callers should not duplicate the if/else logic.
-func newConcurrencyConfig(maxWorkers int, workerTimeout time.Duration, defaultMaxWorkers int, defaultWorkerTimeout time.Duration) concurrencyConfig {
+func newConcurrencyConfig(maxWorkers int, workerTimeout, requestTimeout time.Duration, defaultMaxWorkers int, defaultWorkerTimeout time.Duration) concurrencyConfig {
 	cc := concurrencyConfig{
-		MaxWorkers:    maxWorkers,
-		WorkerTimeout: workerTimeout,
+		MaxWorkers:     maxWorkers,
+		WorkerTimeout:  workerTimeout,
+		RequestTimeout: requestTimeout,
 	}
 	if cc.MaxWorkers <= 0 {
 		cc.MaxWorkers = defaultMaxWorkers
 	}
+	var resolved timeout.Timeout
 	if cc.WorkerTimeout <= 0 {
-		cc.WorkerTimeout = defaultWorkerTimeout
+		resolved = timeout.FromConfig("performance.worker_timeout", 0, defaultWorkerTimeout)
+		cc.WorkerTimeout = resolved.Duration
+	} else {
+		resolved = timeout.FromDuration(cc.WorkerTimeout, "config:performance.worker_timeout")
 	}
+	logging.Debugf("Worker concurrency: maxWorkers=%d workerTimeout=%s requestTimeout=%s", cc.MaxWorkers, resolved, cc.RequestTimeout)
 	return cc
 }
 

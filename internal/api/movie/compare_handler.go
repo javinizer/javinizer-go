@@ -1,6 +1,7 @@
 package movie
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -84,13 +85,25 @@ func compareNFO(deps MovieDeps) gin.HandlerFunc {
 			return
 		}
 
-		result, err := wf.Compare(c.Request.Context(), workflow.CompareCmd{
+		compareCtx := c.Request.Context()
+		if deps.RequestTimeoutFn != nil {
+			if rt := deps.RequestTimeoutFn(); rt > 0 {
+				var cancel context.CancelFunc
+				compareCtx, cancel = context.WithTimeout(compareCtx, rt)
+				defer cancel()
+			}
+		}
+		result, err := wf.Compare(compareCtx, workflow.CompareCmd{
 			MovieID:          movieID,
 			NFOPath:          validatedPath,
 			ScalarStrategy:   resolved.ScalarStrategy,
 			ArrayStrategy:    resolved.ArrayStrategy,
 			SelectedScrapers: req.SelectedScrapers,
 		})
+		if compareCtx.Err() != nil {
+			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "compare timed out"})
+			return
+		}
 		if err != nil {
 			// Map typed seam errors to appropriate HTTP status codes.
 			// Per GL2-3: use errors.Is() instead of strings.Contains()

@@ -3,6 +3,7 @@ package scrape
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
@@ -209,7 +210,11 @@ func TestTryCache_CacheHitNoTranslationUncovered(t *testing.T) {
 func TestNewTranslationHTTPClientUncovered(t *testing.T) {
 	client := newTranslationHTTPClient()
 	require.NotNil(t, client)
-	assert.Equal(t, 30*time.Second, client.Timeout)
+	// No hard-coded Timeout: the per-request context deadline (derived from
+	// metadata.translation.timeout_seconds) governs. http.Client.Timeout would
+	// shadow it (#152). IdleConnTimeout still governs idle reuse.
+	assert.Equal(t, time.Duration(0), client.Timeout)
+	assert.Equal(t, 30*time.Second, client.Transport.(*http.Transport).IdleConnTimeout)
 }
 
 func TestMergeOrAppendTranslation_EmptySliceUncovered(t *testing.T) {

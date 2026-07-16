@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/timeout"
 	"github.com/javinizer/javinizer-go/internal/worker/fanout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -421,9 +422,32 @@ func scrapeFile(
 	// progress.FromContext. Use taskCtx, not the parent egCtx.
 	taskCtx = progress.WithReporter(taskCtx, reporter)
 
-	result, meta, err := inputs.WF.Scrape(taskCtx, cmd)
+	// Nest the overall scrape operation timeout (scrapers.request_timeout_seconds)
+	// inside the worker_timeout task context. The sooner deadline wins via
+	// min(worker_timeout, request_timeout_seconds) — see design D3.
+	scrapeCtx := taskCtx
+	if inputs.Concurrency.RequestTimeout > 0 {
+		resolved := timeout.FromDuration(inputs.Concurrency.RequestTimeout, "config:scrapers.request_timeout_seconds")
+		logging.Debugf("Scrape: applying request timeout %s (nested within worker_timeout)", resolved)
+		var scrapeCancel context.CancelFunc
+		scrapeCtx, scrapeCancel = context.WithTimeout(taskCtx, resolved.Duration)
+		defer scrapeCancel()
+	}
+
+	result, meta, err := inputs.WF.Scrape(scrapeCtx, cmd)
 
 	// Step 3: Interpret the result.
+	// If the request timeout fired, surface it as a failure rather than
+	// persisting a partial/successful result from an expired context.
+	if scrapeCtx.Err() != nil && err == nil {
+		err = scrapeCtx.Err()
+		if result == nil {
+			result = &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: "scrape timed out"}
+		} else {
+			result.Status = scrape.StatusFailed
+			result.Message = "scrape timed out"
+		}
+	}
 	return interpretScrapeResult(filePath, fmi, cmd, startTime, taskCtx, inputs, result, meta, err, movieIDFromMatcher)
 }
 

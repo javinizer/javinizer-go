@@ -262,11 +262,11 @@ func TestPersistFunc_NonNilUncovered(t *testing.T) {
 }
 
 func TestNewConcurrencyConfigUncovered(t *testing.T) {
-	cc := newConcurrencyConfig(0, 0, 5, 10*time.Second)
+	cc := newConcurrencyConfig(0, 0, 0, 5, 10*time.Second)
 	assert.Equal(t, 5, cc.MaxWorkers)
 	assert.Equal(t, 10*time.Second, cc.WorkerTimeout)
 
-	cc2 := newConcurrencyConfig(3, 30*time.Second, 5, 10*time.Second)
+	cc2 := newConcurrencyConfig(3, 30*time.Second, 0, 5, 10*time.Second)
 	assert.Equal(t, 3, cc2.MaxWorkers)
 	assert.Equal(t, 30*time.Second, cc2.WorkerTimeout)
 }

@@ -2,6 +2,7 @@ package movie
 
 import (
 	"context"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -18,10 +19,11 @@ type WorkflowFunc func() workflow.WorkflowInterface
 // Replaces the removed MovieService — handlers take this directly,
 // matching the ActressDeps pattern used in the actress package.
 type MovieDeps struct {
-	MovieRepo   database.MovieRepositoryInterface
-	WorkflowFn  WorkflowFunc
-	PosterGen   poster.PosterGenerator
-	AllowedDirs []string
+	MovieRepo        database.MovieRepositoryInterface
+	WorkflowFn       WorkflowFunc
+	PosterGen        poster.PosterGenerator
+	AllowedDirs      []string
+	RequestTimeoutFn func() time.Duration
 }
 
 // NewMovieDeps creates a MovieDeps from the given repository and options.
@@ -49,6 +51,12 @@ func WithAllowedDirs(dirs []string) MovieDepsOption {
 // WithPosterGen sets the poster generator for temp poster creation during scrape/rescrape.
 func WithPosterGen(pg poster.PosterGenerator) MovieDepsOption {
 	return func(d *MovieDeps) { d.PosterGen = pg }
+}
+
+// WithRequestTimeoutFn sets a getter that returns the live request timeout,
+// so config reloads are reflected without re-registering routes.
+func WithRequestTimeoutFn(fn func() time.Duration) MovieDepsOption {
+	return func(d *MovieDeps) { d.RequestTimeoutFn = fn }
 }
 
 // getWorkflow returns a workflow instance or nil if unavailable.

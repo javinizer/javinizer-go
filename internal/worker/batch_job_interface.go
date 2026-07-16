@@ -34,6 +34,7 @@ type ApplyFileResult struct {
 type BatchJobConfig struct {
 	MaxWorkers      int           // cfg.Performance.MaxWorkers → pool sizing
 	WorkerTimeout   time.Duration // cfg.Performance.WorkerTimeout → per-task timeout
+	RequestTimeout  time.Duration // cfg.Scrapers.RequestTimeoutSeconds → overall scrape operation timeout
 	ScraperPriority []string      // cfg.Scrapers.Priority → selected scrapers
 	NFOEnabled      bool          // cfg.Metadata.NFO.Feature.Enabled → NFO generation toggle
 }

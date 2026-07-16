@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/javinizer/javinizer-go/internal/timeout"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/cobra"
 )
@@ -161,11 +162,21 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 	forceRefresh, _ := cmd.Flags().GetBool("force")
 	scrapersFlag, _ := cmd.Flags().GetStringSlice("scrapers")
 
-	result, _, err := wf.Scrape(ctx, scrape.ScrapeCmd{
+	scrapeCtx := ctx
+	if cfg.Scrapers.RequestTimeoutSeconds > 0 {
+		resolved := timeout.FromConfig("scrapers.request_timeout_seconds", cfg.Scrapers.RequestTimeoutSeconds, 0)
+		var cancel context.CancelFunc
+		scrapeCtx, cancel = context.WithTimeout(ctx, resolved.Duration)
+		defer cancel()
+	}
+	result, _, err := wf.Scrape(scrapeCtx, scrape.ScrapeCmd{
 		MovieID:          id,
 		ForceRefresh:     forceRefresh,
 		SelectedScrapers: scrapersFlag,
 	})
+	if scrapeCtx.Err() != nil {
+		return nil, nil, fmt.Errorf("scrape timed out")
+	}
 	if err != nil {
 		if result != nil && result.Movie != nil {
 			return result.Movie, result.ScraperResults, err

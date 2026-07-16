@@ -23,3 +23,4 @@ commits to main — GitHub only auto-closes on the keywords.
 - [ ] `make lint` passes (golangci-lint)
 - [ ] Commit messages follow `type(scope): summary` (≤72 chars)
 - [ ] Linked the issue with `Closes #NN` (if a related issue exists)
+- [ ] If adding a `*_timeout_seconds` or `*_timeout` config field, confirmed it is read by a runtime code path outside the config package (the grep lint guard only catches hard-coded timeout literals, not unread config fields)

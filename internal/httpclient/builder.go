@@ -9,6 +9,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/timeout"
 )
 
 // DefaultTimeout and DefaultRetryCount define the default HTTP client timeout and retry count for scrapers.
@@ -270,7 +271,9 @@ func FromScraperSettings(settings *models.ScraperSettings, globalProxy *models.P
 
 	if settings != nil {
 		if settings.Timeout > 0 {
-			builder.Apply(withTimeout(time.Duration(settings.Timeout) * time.Second))
+			resolved := timeout.FromConfig("scrapers.timeout_seconds", settings.Timeout, DefaultTimeout)
+			logging.Debugf("HTTPClient: scraper per-request timeout=%s", resolved)
+			builder.Apply(withTimeout(resolved.Duration))
 		}
 		if settings.RetryCount > 0 {
 			builder.Apply(withRetryCount(settings.RetryCount))
