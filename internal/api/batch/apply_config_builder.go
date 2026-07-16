@@ -350,7 +350,7 @@ func makeScrapeFileFailedBroadcaster(job worker.BatchJobInterface, sink progress
 // realtime.ProgressAdapter which forwarded every step update to the WS hub.
 // Takes an injected sink so the closure is unit-testable.
 //
-// Scale note: the scrape ProgressFunc reports pct on a 0-1 fraction
+// Scale note: the scrape progress reporter reports pct on a 0-1 fraction
 // (internal/scrape/scrape.go: 0.2 "Querying scrapers...", 0.7 "Aggregating...",
 // 1.0 "Completed"), whereas the WS ProgressMessage.progress and the frontend's
 // computeJobProgress both expect a 0-100 percentage (matching main, which

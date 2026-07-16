@@ -39,8 +39,8 @@ func (_m *MockScraperInterface) EXPECT() *MockScraperInterface_Expecter {
 }
 
 // Scrape provides a mock function for the type MockScraperInterface
-func (_mock *MockScraperInterface) Scrape(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, error) {
-	ret := _mock.Called(ctx, cmd, progress)
+func (_mock *MockScraperInterface) Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, error) {
+	ret := _mock.Called(ctx, cmd)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Scrape")
@@ -48,18 +48,18 @@ func (_mock *MockScraperInterface) Scrape(ctx context.Context, cmd scrape.Scrape
 
 	var r0 *scrape.ScrapeResult
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, scrape.ScrapeCmd, scrape.ProgressFunc) (*scrape.ScrapeResult, error)); ok {
-		return returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, scrape.ScrapeCmd) (*scrape.ScrapeResult, error)); ok {
+		return returnFunc(ctx, cmd)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, scrape.ScrapeCmd, scrape.ProgressFunc) *scrape.ScrapeResult); ok {
-		r0 = returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, scrape.ScrapeCmd) *scrape.ScrapeResult); ok {
+		r0 = returnFunc(ctx, cmd)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*scrape.ScrapeResult)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, scrape.ScrapeCmd, scrape.ProgressFunc) error); ok {
-		r1 = returnFunc(ctx, cmd, progress)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, scrape.ScrapeCmd) error); ok {
+		r1 = returnFunc(ctx, cmd)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -74,12 +74,11 @@ type MockScraperInterface_Scrape_Call struct {
 // Scrape is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd scrape.ScrapeCmd
-//   - progress scrape.ProgressFunc
-func (_e *MockScraperInterface_Expecter) Scrape(ctx any, cmd any, progress any) *MockScraperInterface_Scrape_Call {
-	return &MockScraperInterface_Scrape_Call{Call: _e.mock.On("Scrape", ctx, cmd, progress)}
+func (_e *MockScraperInterface_Expecter) Scrape(ctx any, cmd any) *MockScraperInterface_Scrape_Call {
+	return &MockScraperInterface_Scrape_Call{Call: _e.mock.On("Scrape", ctx, cmd)}
 }
 
-func (_c *MockScraperInterface_Scrape_Call) Run(run func(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc)) *MockScraperInterface_Scrape_Call {
+func (_c *MockScraperInterface_Scrape_Call) Run(run func(ctx context.Context, cmd scrape.ScrapeCmd)) *MockScraperInterface_Scrape_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -89,14 +88,9 @@ func (_c *MockScraperInterface_Scrape_Call) Run(run func(ctx context.Context, cm
 		if args[1] != nil {
 			arg1 = args[1].(scrape.ScrapeCmd)
 		}
-		var arg2 scrape.ProgressFunc
-		if args[2] != nil {
-			arg2 = args[2].(scrape.ProgressFunc)
-		}
 		run(
 			arg0,
 			arg1,
-			arg2,
 		)
 	})
 	return _c
@@ -107,7 +101,7 @@ func (_c *MockScraperInterface_Scrape_Call) Return(scrapeResult *scrape.ScrapeRe
 	return _c
 }
 
-func (_c *MockScraperInterface_Scrape_Call) RunAndReturn(run func(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, error)) *MockScraperInterface_Scrape_Call {
+func (_c *MockScraperInterface_Scrape_Call) RunAndReturn(run func(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, error)) *MockScraperInterface_Scrape_Call {
 	_c.Call.Return(run)
 	return _c
 }

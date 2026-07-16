@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
+	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/worker/fanout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -407,9 +408,13 @@ func applyFile(
 	}
 
 	// Step 2: Execute the workflow.Apply.
-	progressFn := makeProgressFn(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply)
+	reporter := makeProgressReporter(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply)
+	// Inject the reporter into taskCtx (which carries the worker timeout /
+	// errgroup cancellation) so downstream emitters resolve it via
+	// progress.FromContext. Use taskCtx, not the parent egCtx.
+	taskCtx = progress.WithReporter(taskCtx, reporter)
 
-	result, applyErr := wf.Apply(taskCtx, applyCmd, progressFn)
+	result, applyErr := wf.Apply(taskCtx, applyCmd)
 
 	// Step 3: Interpret the result.
 	return interpretApplyResult(filePath, movie, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)

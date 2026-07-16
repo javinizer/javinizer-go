@@ -118,8 +118,8 @@ type PreviewResult struct {
 
 // WorkflowInterface exposes the high-level scrape, apply, preview, compare, and scan workflows.
 type WorkflowInterface interface {
-	Scrape(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, *OrchestrationMeta, error)
-	Apply(ctx context.Context, cmd ApplyCmd, progress scrape.ProgressFunc) (*ApplyResult, error)
+	Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *OrchestrationMeta, error)
+	Apply(ctx context.Context, cmd ApplyCmd) (*ApplyResult, error)
 	Preview(ctx context.Context, cmd PreviewCmd) (*PreviewResult, error)
 	Compare(ctx context.Context, cmd CompareCmd) (*CompareResult, error)
 	ScanAndMatch(ctx context.Context, cmd ScanAndMatchCmd) (*ScanAndMatchResult, error)

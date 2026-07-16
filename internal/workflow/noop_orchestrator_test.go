@@ -16,7 +16,7 @@ import (
 
 func TestNoOpApplyOrchestrator_Execute(t *testing.T) {
 	op := noOpApplyOrchestrator{}
-	result, err := op.Execute(context.Background(), ApplyCmd{}, nil)
+	result, err := op.Execute(context.Background(), ApplyCmd{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "apply not configured")
 	assert.Nil(t, result)
@@ -26,7 +26,7 @@ func TestNoOpApplyOrchestrator_Execute(t *testing.T) {
 
 func TestNoOpScrapeOrchestrator_Execute(t *testing.T) {
 	op := noOpScrapeOrchestrator{}
-	result, meta, err := op.Execute(context.Background(), scrape.ScrapeCmd{}, nil)
+	result, meta, err := op.Execute(context.Background(), scrape.ScrapeCmd{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "scrape not configured")
 	assert.Nil(t, result)
@@ -69,7 +69,7 @@ func TestWorkflow_Apply_NotConfigured(t *testing.T) {
 	wf := &Workflow{
 		apply: noOpApplyOrchestrator{},
 	}
-	_, err := wf.Apply(context.Background(), ApplyCmd{}, nil)
+	_, err := wf.Apply(context.Background(), ApplyCmd{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "apply not configured")
 }

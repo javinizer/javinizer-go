@@ -9,7 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
-	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -166,7 +166,7 @@ func (c completeErrorRevertLog) CompleteFailed(_ context.Context, _ OperationID,
 
 func TestApplyOrchImpl_Execute_NilMovie(t *testing.T) {
 	impl := &applyOrchImpl{fs: afero.NewMemMapFs()}
-	result, err := impl.Execute(context.Background(), ApplyCmd{Movie: nil}, nil)
+	result, err := impl.Execute(context.Background(), ApplyCmd{Movie: nil})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "movie is nil")
 	assert.Nil(t, result)
@@ -185,7 +185,7 @@ func TestApplyOrchImpl_Execute_NilContext(t *testing.T) {
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 }
@@ -203,7 +203,7 @@ func TestApplyOrchImpl_Execute_SkipOrganize(t *testing.T) {
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.False(t, result.Steps.Organized)
@@ -229,7 +229,7 @@ func TestApplyOrchImpl_Execute_OrganizeSuccess(t *testing.T) {
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.Organized)
@@ -253,7 +253,7 @@ func TestApplyOrchImpl_Execute_OrganizeError(t *testing.T) {
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, nil)
+	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "organization failed")
 	require.NotNil(t, result)
@@ -282,7 +282,7 @@ func TestApplyOrchImpl_Execute_DownloadError(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err, "download failure must not abort the apply pipeline")
 	require.NotNil(t, result)
 	assert.False(t, result.Steps.Downloaded, "download step should not be marked complete on failure")
@@ -308,7 +308,7 @@ func TestApplyOrchImpl_Execute_DownloadPartialError(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err, "download partial failure must not abort the apply pipeline")
 	require.NotNil(t, result)
 	assert.False(t, result.Steps.Downloaded, "download step should not be marked complete on partial failure")
@@ -342,7 +342,7 @@ func TestApplyOrchImpl_Execute_DownloadPartialErrorPreservesPaths(t *testing.T) 
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err, "download partial failure must not abort the apply pipeline")
 	require.NotNil(t, result)
 	assert.False(t, result.Steps.Downloaded, "download step should not be marked complete on partial failure")
@@ -370,7 +370,7 @@ func TestApplyOrchImpl_Execute_DownloadSuccess(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.Downloaded)
@@ -401,7 +401,7 @@ func TestApplyOrchImpl_Execute_NFOUsesPostOrganizePathWhenMoved(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{MoveFiles: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.NFOGenerated, "NFO should be generated")
@@ -426,7 +426,7 @@ func TestApplyOrchImpl_Execute_NFOUsesOriginalPathWhenOrganizeSkipped(t *testing
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.NFOGenerated)
@@ -450,7 +450,7 @@ func TestApplyOrchImpl_Execute_DownloadSkippedDryRun(t *testing.T) {
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
 		DryRun:   true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.False(t, result.Steps.Downloaded, "Download should be skipped during dry run")
@@ -475,7 +475,7 @@ func TestApplyOrchImpl_Execute_NFOGenerationError(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "NFO generation failed")
 	require.NotNil(t, result)
@@ -500,7 +500,7 @@ func TestApplyOrchImpl_Execute_NFOGenerationSuccess(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.NFOGenerated)
@@ -524,7 +524,7 @@ func TestApplyOrchImpl_Execute_NFOSkippedDryRun(t *testing.T) {
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
 		DryRun:      true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.False(t, result.Steps.NFOGenerated, "NFO generation should be skipped during dry run")
@@ -548,7 +548,7 @@ func TestApplyOrchImpl_Execute_NFOSkippedEmptyResolvedPath(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.False(t, result.Steps.NFOGenerated, "Empty resolvedPath means NFO generation was skipped")
@@ -569,7 +569,7 @@ func TestApplyOrchImpl_Execute_DisplayTitleApplied(t *testing.T) {
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test Movie"},
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.DisplayTitle)
@@ -591,7 +591,7 @@ func TestApplyOrchImpl_Execute_DisplayTitleFallbackToTitle(t *testing.T) {
 		Movie:    movie,
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.DisplayTitle)
@@ -615,7 +615,7 @@ func TestApplyOrchImpl_Execute_DisplayTitleWithCustomSource(t *testing.T) {
 		Match:           defaultMatch(),
 		Organize:        OrganizeOptions{Skip: true},
 		DisplayTitleSrc: sourceMovie,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	// DisplayTitleSrc provides Title/OriginalTitle for template rendering, but ID comes from cmd.Movie
@@ -643,7 +643,7 @@ func TestApplyOrchImpl_Execute_MergeStep(t *testing.T) {
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.Merged)
@@ -653,14 +653,15 @@ func TestApplyOrchImpl_Execute_MergeStep(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// applyOrchImpl.Execute — progress callback
+// applyOrchImpl.Execute — progress reporter
 // ---------------------------------------------------------------------------
 
-func TestApplyOrchImpl_Execute_ProgressCallback(t *testing.T) {
-	var progressSteps []scrape.ProgressStep
-	progress := func(step scrape.ProgressStep, pct float64, msg string) {
+func TestApplyOrchImpl_Execute_ProgressReporter(t *testing.T) {
+	var progressSteps []progress.ProgressStep
+	reporter := progress.ReporterFunc(func(step progress.ProgressStep, pct float64, msg string) {
 		progressSteps = append(progressSteps, step)
-	}
+	})
+	ctx := progress.WithReporter(context.Background(), reporter)
 
 	impl := &applyOrchImpl{
 		fs: afero.NewMemMapFs(),
@@ -672,16 +673,16 @@ func TestApplyOrchImpl_Execute_ProgressCallback(t *testing.T) {
 		},
 		nfo: &applyStubNFO{},
 	}
-	result, err := impl.Execute(context.Background(), ApplyCmd{
+	result, err := impl.Execute(ctx, ApplyCmd{
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, progress)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
-	assert.Contains(t, progressSteps, scrape.ProgressStepOrganize)
-	assert.Contains(t, progressSteps, scrape.ProgressStepApply)
+	assert.Contains(t, progressSteps, progress.ProgressStepOrganize)
+	assert.Contains(t, progressSteps, progress.ProgressStepApply)
 }
 
 // ---------------------------------------------------------------------------
@@ -699,7 +700,7 @@ func TestApplyOrchImpl_Execute_WithRevertLog_Success(t *testing.T) {
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, 1, rl.beginCalls, "Begin should be called once")
@@ -726,7 +727,7 @@ func TestApplyOrchImpl_Execute_WithRevertLog_Failure(t *testing.T) {
 		Match:    defaultMatch(),
 		DestPath: "/dest",
 		Organize: OrganizeOptions{MoveFiles: true},
-	}, nil)
+	})
 	assert.Error(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, 1, rl.beginCalls, "Begin should be called once")
@@ -761,7 +762,7 @@ func TestApplyOrchImpl_Execute_MultipartDownload(t *testing.T) {
 		DestPath: "/dest",
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.Downloaded)
@@ -786,7 +787,7 @@ func TestApplyOrchImpl_Execute_NFOGenerationWithTagRepo(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.NFOGenerated)
@@ -811,7 +812,7 @@ func TestApplyOrchImpl_Execute_NFOGenerationWithTagRepoError(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.NFOGenerated, "NFO generation should succeed even if tag repo fails")
@@ -836,7 +837,7 @@ func TestApplyOrchImpl_Execute_NFOGenerationNilTagRepo(t *testing.T) {
 		DestPath:    "/dest",
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.NFOGenerated)
@@ -877,7 +878,7 @@ func TestApplyOrchImpl_Execute_FullSuccessPath(t *testing.T) {
 		Organize:    OrganizeOptions{MoveFiles: true},
 		Download:    true,
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.Organized)
@@ -915,7 +916,7 @@ func TestApplyOrchImpl_Execute_OrganizeResultChangesTargetDir(t *testing.T) {
 		DestPath: "/original-dest",
 		Organize: OrganizeOptions{MoveFiles: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.Downloaded)
@@ -941,7 +942,7 @@ func TestApplyOrchImpl_Execute_RevertLogBeginError(t *testing.T) {
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 }
@@ -962,7 +963,7 @@ func TestApplyOrchImpl_Execute_RevertLogBeginError_DryRun(t *testing.T) {
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
 		DryRun:   true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 }
@@ -982,7 +983,7 @@ func TestApplyOrchImpl_Execute_RevertLogCompleteErrorOnSuccess(t *testing.T) {
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 }
@@ -1003,7 +1004,7 @@ func TestApplyOrchImpl_Execute_NilOrganizer_SkipFalse(t *testing.T) {
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: false},
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.False(t, result.Steps.Organized, "Organize should be skipped when organizer is nil")
@@ -1024,7 +1025,7 @@ func TestApplyOrchImpl_Execute_NilDownloader(t *testing.T) {
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.False(t, result.Steps.Downloaded, "Download should be skipped when downloader is nil")
@@ -1045,7 +1046,7 @@ func TestApplyOrchImpl_Execute_NilNFOGenerator(t *testing.T) {
 		Match:       defaultMatch(),
 		Organize:    OrganizeOptions{Skip: true},
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	assert.False(t, result.Steps.NFOGenerated, "NFO generation should be skipped when nfoGen is nil")
@@ -1106,7 +1107,7 @@ func TestApplyOrchImpl_Execute_PartialFailureReportsCompletedSteps(t *testing.T)
 		Organize:    OrganizeOptions{Skip: true},
 		Download:    true,
 		GenerateNFO: true,
-	}, nil)
+	})
 	assert.Error(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "nfo_generation", result.FailedStep)

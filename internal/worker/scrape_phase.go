@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
+	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/worker/fanout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
@@ -402,21 +403,25 @@ func scrapeFile(
 	})
 
 	// Step 2: Execute the scrape.
-	progressFn := makeProgressFn(inputs.Broadcaster, inputs.JobID, cmd.MovieID, JobEventPhaseScrape)
-	// Wrap the in-process progress fn so each step update also reaches the WS
+	reporter := makeProgressReporter(inputs.Broadcaster, inputs.JobID, cmd.MovieID, JobEventPhaseScrape)
+	// Wrap the in-process reporter so each step update also reaches the WS
 	// hub (with FilePath), restoring main's realtime.ProgressAdapter live
-	// per-file step text in ProgressModal. The base fn still drives the
+	// per-file step text in ProgressModal. The base reporter still drives the
 	// in-process Broadcaster (TUI/CLI).
 	if cfg.OnScrapeStepProgress != nil {
 		wsHook := cfg.OnScrapeStepProgress
-		baseFn := progressFn
-		progressFn = func(step scrape.ProgressStep, pct float64, msg string) {
-			baseFn(step, pct, msg)
+		base := reporter
+		reporter = progress.ReporterFunc(func(step progress.ProgressStep, pct float64, msg string) {
+			base.Report(step, pct, msg)
 			wsHook(filePath, string(step), pct, msg)
-		}
+		})
 	}
+	// Inject the reporter into taskCtx (which carries the worker timeout /
+	// errgroup cancellation) so downstream emitters resolve it via
+	// progress.FromContext. Use taskCtx, not the parent egCtx.
+	taskCtx = progress.WithReporter(taskCtx, reporter)
 
-	result, meta, err := inputs.WF.Scrape(taskCtx, cmd, progressFn)
+	result, meta, err := inputs.WF.Scrape(taskCtx, cmd)
 
 	// Step 3: Interpret the result.
 	return interpretScrapeResult(filePath, fmi, cmd, startTime, taskCtx, inputs, result, meta, err, movieIDFromMatcher)

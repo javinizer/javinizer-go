@@ -23,14 +23,14 @@ type stubRescrapeWorkflow struct {
 	scrapeCalled int
 }
 
-func (s *stubRescrapeWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (s *stubRescrapeWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	s.mu.Lock()
 	s.scrapeCalled++
 	s.mu.Unlock()
 	return s.scrapeResult, nil, s.scrapeErr
 }
 
-func (s *stubRescrapeWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (s *stubRescrapeWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return nil, nil
 }
 

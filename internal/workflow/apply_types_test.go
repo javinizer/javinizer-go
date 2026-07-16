@@ -67,8 +67,8 @@ func TestApply_Signature(t *testing.T) {
 	if !ok {
 		t.Fatal("Apply method not found on WorkflowInterface")
 	}
-	// Interface method: no receiver, params are: ctx, cmd, progress
-	assert.Equal(t, 3, method.Type.NumIn(), "Apply should have 3 params (ctx, cmd, progress)")
+	// Interface method: no receiver, params are: ctx, cmd
+	assert.Equal(t, 2, method.Type.NumIn(), "Apply should have 2 params (ctx, cmd)")
 	assert.Equal(t, 2, method.Type.NumOut(), "Apply should return 2 values (*ApplyResult, error)")
 }
 

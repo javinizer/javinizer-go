@@ -89,7 +89,7 @@ func (o *compareOrchImpl) Execute(ctx context.Context, cmd CompareCmd) (*Compare
 		MovieID:          cmd.MovieID,
 		SelectedScrapers: cmd.SelectedScrapers,
 		ForceRefresh:     true,
-	}, nil)
+	})
 	if scrapeErr != nil {
 		return nil, fmt.Errorf("%w for %s: %s", ErrScrapeFailed, cmd.MovieID, scrapeErr.Error())
 	}

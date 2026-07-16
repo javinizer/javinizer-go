@@ -28,29 +28,10 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/translation"
 	"github.com/spf13/afero"
 )
-
-// ProgressStep represents a step name in the progress reporting pipeline.
-// The values match worker.JobEventStep string values so that the worker
-// can safely convert via JobEventStep(string(step)).
-type ProgressStep string
-
-// Progress step constants. Callers should use these instead of bare string
-// literals to prevent silent breakage if the step values ever change.
-const (
-	ProgressStepScrape   ProgressStep = "scrape"
-	ProgressStepOrganize ProgressStep = "organize"
-	ProgressStepDownload ProgressStep = "download"
-	ProgressStepNFO      ProgressStep = "nfo"
-	ProgressStepApply    ProgressStep = "apply"
-)
-
-// ProgressFunc is the callback signature for progress reporting during
-// scrape and apply operations. The step parameter is a typed ProgressStep
-// rather than a bare string to prevent invalid values from propagating.
-type ProgressFunc func(step ProgressStep, pct float64, msg string)
 
 // ScrapeStatus represents the status of a scrape operation.
 type ScrapeStatus string
@@ -157,7 +138,7 @@ type Scraper struct {
 
 // ScraperInterface is the contract for executing a scrape operation.
 type ScraperInterface interface {
-	Scrape(ctx context.Context, cmd ScrapeCmd, progress ProgressFunc) (*ScrapeResult, error)
+	Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, error)
 }
 
 var _ ScraperInterface = (*Scraper)(nil)
@@ -196,12 +177,6 @@ func New(
 		cfg:         cfg,
 		translator:  translator,
 		fs:          fs,
-	}
-}
-
-func prog(p ProgressFunc, step ProgressStep, pct float64, msg string) {
-	if p != nil {
-		p(step, pct, msg)
 	}
 }
 
@@ -274,14 +249,14 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 }
 
 // Scrape runs the cache-aware scrape pipeline for the given command and returns the aggregated result.
-func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd, progress ProgressFunc) (*ScrapeResult, error) {
+func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	// Scrape is a pure query — no DB writes, no poster generation.
 	// Persistence and poster generation are handled by the caller (typically Workflow.Scrape).
 	startTime := time.Now()
-	prog(progress, ProgressStepScrape, 0, "Starting...")
+	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 0, "Starting...")
 
 	// Phase 1: Resolve input
 	cmd, err := resolveScrapeInput(ctx, cmd, s.registry, s.cfg)
@@ -299,12 +274,12 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd, progress ProgressFu
 	if !skipCache {
 		result := s.tryCache(ctx, cmd, actressRepo, startTime)
 		if result != nil {
-			prog(progress, ProgressStepScrape, 1, "Found in cache")
+			progress.FromContext(ctx).Report(progress.ProgressStepScrape, 1, "Found in cache")
 			return result, nil
 		}
 	}
 
-	prog(progress, ProgressStepScrape, 0.2, "Querying scrapers...")
+	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 0.2, "Querying scrapers...")
 
 	// Phase 2: Query + aggregate
 	scraperNames := resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, s.cfg)
@@ -316,7 +291,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd, progress ProgressFu
 		return failedResult(cmd.MovieID, buildNoResultsError(failures), startTime), nil
 	}
 
-	prog(progress, ProgressStepScrape, 0.7, "Aggregating metadata...")
+	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 0.7, "Aggregating metadata...")
 
 	var scraped *models.Movie
 	var aggResult *aggregator.AggregateResult
@@ -340,7 +315,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd, progress ProgressFu
 		return nil, err
 	}
 
-	prog(progress, ProgressStepScrape, 1.0, "Completed")
+	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 1.0, "Completed")
 	return result, nil
 }
 

@@ -27,7 +27,7 @@ func TestApplyOrchImpl_Miss_NilFS(t *testing.T) {
 
 	_, err := orch.Execute(context.Background(), ApplyCmd{
 		Movie: &models.Movie{ID: "NILFS-001"},
-	}, nil)
+	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "filesystem is nil")
 }
@@ -51,7 +51,7 @@ func TestApplyOrchImpl_Miss_NilMovie(t *testing.T) {
 
 	_, err := orch.Execute(context.Background(), ApplyCmd{
 		Movie: nil,
-	}, nil)
+	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "movie is nil")
 }

@@ -168,8 +168,8 @@ seam methods callers invoke:
 
 ```go
 type WorkflowInterface interface {
-    Scrape(ctx context.Context, cmd scrape.ScrapeCmd, progress scrape.ProgressFunc) (*scrape.ScrapeResult, *OrchestrationMeta, error)
-    Apply(ctx context.Context, cmd ApplyCmd, progress scrape.ProgressFunc) (*ApplyResult, error)
+    Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *OrchestrationMeta, error)
+    Apply(ctx context.Context, cmd ApplyCmd) (*ApplyResult, error)
     Preview(...) (*PreviewResult, error)
     Compare(...) (*CompareResult, error)
     ScanAndMatch(...) (*ScanAndMatchResult, error)

@@ -25,7 +25,7 @@ func TestScrapeOrchImpl_Miss_NilCtx(t *testing.T) {
 	}
 	orch := newScrapeOrchestrator(mockScraper, nil, "", nil, nfo.NFONameConfig{}, nil)
 
-	result, meta, err := orch.Execute(nil, scrape.ScrapeCmd{}, nil)
+	result, meta, err := orch.Execute(nil, scrape.ScrapeCmd{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.NotNil(t, meta)
@@ -44,7 +44,7 @@ func TestScrapeOrchImpl_Miss_ForceRefresh(t *testing.T) {
 	result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{
 		MovieID:      "FORCE-001",
 		ForceRefresh: true,
-	}, nil)
+	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, meta.Persisted)
@@ -56,7 +56,7 @@ func TestScrapeOrchImpl_Miss_ForceRefresh(t *testing.T) {
 func TestScrapeOrchImpl_Miss_NilScraper(t *testing.T) {
 	orch := newScrapeOrchestrator(nil, nil, "", nil, nfo.NFONameConfig{}, nil)
 
-	_, _, err := orch.Execute(context.Background(), scrape.ScrapeCmd{}, nil)
+	_, _, err := orch.Execute(context.Background(), scrape.ScrapeCmd{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "scraper not configured")
 }
@@ -70,7 +70,7 @@ func TestScrapeOrchImpl_Miss_ScrapeErrorNilResult(t *testing.T) {
 	}
 	orch := newScrapeOrchestrator(mockScraper, nil, "", nil, nfo.NFONameConfig{}, nil)
 
-	result, _, err := orch.Execute(context.Background(), scrape.ScrapeCmd{}, nil)
+	result, _, err := orch.Execute(context.Background(), scrape.ScrapeCmd{})
 	require.Error(t, err)
 	assert.Nil(t, result)
 }
@@ -84,7 +84,7 @@ func TestScrapeOrchImpl_Miss_ScrapeErrorWithMovie(t *testing.T) {
 	}
 	orch := newScrapeOrchestrator(mockScraper, nil, "", nil, nfo.NFONameConfig{}, nil)
 
-	result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{}, nil)
+	result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{})
 	// Error is returned but result should still be available
 	assert.Error(t, err)
 	assert.NotNil(t, result)
@@ -104,7 +104,7 @@ func TestScrapeOrchImpl_Miss_PersistUpsertFailure(t *testing.T) {
 
 	orch := newScrapeOrchestrator(mockScraper, mockRepo, "", nil, nfo.NFONameConfig{}, nil)
 
-	_, _, err := orch.Execute(context.Background(), scrape.ScrapeCmd{}, nil)
+	_, _, err := orch.Execute(context.Background(), scrape.ScrapeCmd{})
 	require.Error(t, err)
 }
 
@@ -120,7 +120,7 @@ func TestScrapeOrchImpl_Miss_PosterGenMovedToPhase(t *testing.T) {
 
 	orch := newScrapeOrchestrator(mockScraper, nil, "", nil, nfo.NFONameConfig{}, nil)
 
-	result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{}, nil)
+	result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.False(t, meta.PosterGenerated, "poster generation should not be set by orchestrator")
@@ -140,7 +140,7 @@ func TestScrapeOrchImpl_Miss_TranslationWarning(t *testing.T) {
 
 	orch := newScrapeOrchestrator(mockScraper, nil, "", nil, nfo.NFONameConfig{}, nil)
 
-	result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{}, nil)
+	result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.NotNil(t, meta.TranslationWarning)
@@ -161,7 +161,7 @@ func TestScrapeOrchImpl_Miss_NeedsPersistence(t *testing.T) {
 
 	orch := newScrapeOrchestrator(mockScraper, mockRepo, "", nil, nfo.NFONameConfig{}, nil)
 
-	result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{}, nil)
+	result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, meta.Persisted)
@@ -176,7 +176,7 @@ type mockScraperScrape struct {
 	err    error
 }
 
-func (m *mockScraperScrape) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, error) {
+func (m *mockScraperScrape) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, error) {
 	return m.result, m.err
 }
 

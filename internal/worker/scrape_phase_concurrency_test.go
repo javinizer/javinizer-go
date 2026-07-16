@@ -28,7 +28,7 @@ func newConcurrencyTrackingWorkflow(release chan struct{}) *concurrencyTrackingW
 	return &concurrencyTrackingWorkflow{release: release}
 }
 
-func (w *concurrencyTrackingWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (w *concurrencyTrackingWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	cur := atomic.AddInt32(&w.inFlight, 1)
 	for {
 		p := atomic.LoadInt32(&w.peak)
@@ -45,7 +45,7 @@ func (w *concurrencyTrackingWorkflow) Scrape(_ context.Context, _ scrape.ScrapeC
 	return makeScrapeResult("CONC-001"), nil, nil
 }
 
-func (w *concurrencyTrackingWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (w *concurrencyTrackingWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return nil, nil
 }
 func (w *concurrencyTrackingWorkflow) Preview(_ context.Context, _ workflow.PreviewCmd) (*workflow.PreviewResult, error) {
@@ -122,7 +122,7 @@ type errorTrackingWorkflow struct {
 	release   chan struct{}
 }
 
-func (w *errorTrackingWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (w *errorTrackingWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	cur := atomic.AddInt32(&w.inFlight, 1)
 	for {
 		p := atomic.LoadInt32(&w.peak)
@@ -136,7 +136,7 @@ func (w *errorTrackingWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ 
 	return nil, nil, fmt.Errorf("scrape failed")
 }
 
-func (w *errorTrackingWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (w *errorTrackingWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return nil, nil
 }
 func (w *errorTrackingWorkflow) Preview(_ context.Context, _ workflow.PreviewCmd) (*workflow.PreviewResult, error) {
@@ -207,7 +207,7 @@ type panicTrackingWorkflow struct {
 	release   chan struct{}
 }
 
-func (w *panicTrackingWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (w *panicTrackingWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	cur := atomic.AddInt32(&w.inFlight, 1)
 	for {
 		p := atomic.LoadInt32(&w.peak)
@@ -221,7 +221,7 @@ func (w *panicTrackingWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ 
 	panic("boom")
 }
 
-func (w *panicTrackingWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (w *panicTrackingWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return nil, nil
 }
 func (w *panicTrackingWorkflow) Preview(_ context.Context, _ workflow.PreviewCmd) (*workflow.PreviewResult, error) {
@@ -333,7 +333,7 @@ type serializingWorkflow struct {
 	repo      *serializingPersistRepo
 }
 
-func (w *serializingWorkflow) Scrape(_ context.Context, cmd scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (w *serializingWorkflow) Scrape(_ context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
 	cur := atomic.AddInt32(&w.inFlight, 1)
 	for {
 		p := atomic.LoadInt32(&w.peak)
@@ -362,7 +362,7 @@ func (w *serializingWorkflow) Scrape(_ context.Context, cmd scrape.ScrapeCmd, _ 
 	return makeScrapeResult(cmd.MovieID), &workflow.OrchestrationMeta{}, nil
 }
 
-func (w *serializingWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
+func (w *serializingWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	return nil, nil
 }
 func (w *serializingWorkflow) Preview(_ context.Context, _ workflow.PreviewCmd) (*workflow.PreviewResult, error) {
