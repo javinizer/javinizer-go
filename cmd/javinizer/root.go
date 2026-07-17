@@ -87,6 +87,7 @@ func init() {
 
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "configs/config.yaml", "config file path")
+	rootCmd.SilenceErrors = true
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "enable debug logging")
 
 	// Desktop builds (injected via -X internal/desktop.BuildDesktop=1) run with

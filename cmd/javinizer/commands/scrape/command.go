@@ -30,6 +30,8 @@ func NewCommand() *cobra.Command {
 			if len(args) != 1 {
 				output, _ := cmd.Flags().GetString("output")
 				if output == "json" {
+					cmd.SilenceUsage = true
+					cmd.SilenceErrors = true
 					writeJSONError(cmd, unknownErrorEnvelope("exactly 1 argument (movie ID) is required"))
 					return ErrJSONExit
 				}
