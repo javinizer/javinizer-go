@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.3.0] - 2026-07-17
+
+### Added
+
+- Add --output json mode to scrape for machine-readable per-scraper results (#155)
+- Full internationalization support across Web UI, TUI, and API (#144)
+
+### Fixed
+
+- Enforce configurable timeouts and guard against hard-coded literals (#154)
+- Join background check goroutine to fix flaky TempDir cleanup
+- Prune phantom file selections on directory refresh (#147)
+- Preserve matcher MovieID when scraped ID differs, preventing wrong grouping (#146)
+- Check for duplicate DMM ID before actress update
+- Reuse configured port across desktop restarts instead of random
+
+### Changed
+
+- Guard web-build deps and add build-app-local Makefile target
+- Replace ProgressFunc with context-scoped ProgressReporter (#151)
+- Extract job persistence codec into jobpersist package (#150)
+- Extract fs utilities into fscase and fanout packages (#149)
+- Extract result tracker into resultstore package (#148)
+- Remove openspec from tracked .gitignore
+- Remove tracked unused.yaml fixture, use temp dirs in tests
+- Ignore node_modules at repo root, not just web/frontend
+
 ## [v1.2.3] - 2026-07-15
 
 ### Fixed
