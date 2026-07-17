@@ -84,8 +84,9 @@ func TestRunScrapeJSON_ConfiguredLogOutput(t *testing.T) {
 	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
-	logFile := filepath.Join(tmpDir, "javinizer.log")
-	cfgContent := "config_version: 3\nlogging:\n  output: " + logFile + "\ndatabase:\n  dsn: " + filepath.Join(tmpDir, "javinizer.db") + "\n  type: sqlite\nscrapers:\n  priority:\n    - e2emock\n"
+	logFile := filepath.ToSlash(filepath.Join(tmpDir, "javinizer.log"))
+	dbPath := filepath.ToSlash(filepath.Join(tmpDir, "javinizer.db"))
+	cfgContent := "config_version: 3\nlogging:\n  output: " + logFile + "\ndatabase:\n  dsn: " + dbPath + "\n  type: sqlite\nscrapers:\n  priority:\n    - e2emock\n"
 	require.NoError(t, os.WriteFile(cfgPath, []byte(cfgContent), 0o600))
 	t.Setenv("JAVINIZER_CONFIG", cfgPath)
 
@@ -107,8 +108,9 @@ func TestRunScrapeJSON_ConfiguredLogOutputWithStdout(t *testing.T) {
 	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
-	logFile := filepath.Join(tmpDir, "javinizer.log")
-	cfgContent := "config_version: 3\nlogging:\n  output: stdout," + logFile + "\ndatabase:\n  dsn: " + filepath.Join(tmpDir, "javinizer.db") + "\n  type: sqlite\nscrapers:\n  priority:\n    - e2emock\n"
+	logFile := filepath.ToSlash(filepath.Join(tmpDir, "javinizer.log"))
+	dbPath := filepath.ToSlash(filepath.Join(tmpDir, "javinizer.db"))
+	cfgContent := "config_version: 3\nlogging:\n  output: stdout," + logFile + "\ndatabase:\n  dsn: " + dbPath + "\n  type: sqlite\nscrapers:\n  priority:\n    - e2emock\n"
 	require.NoError(t, os.WriteFile(cfgPath, []byte(cfgContent), 0o600))
 	t.Setenv("JAVINIZER_CONFIG", cfgPath)
 
