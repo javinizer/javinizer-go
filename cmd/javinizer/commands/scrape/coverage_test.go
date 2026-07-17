@@ -30,6 +30,11 @@ func TestScraperErrorToEnvelope_NilError(t *testing.T) {
 	assert.Equal(t, "unknown", e.Kind)
 }
 
+func TestScraperErrorToEnvelope_EmptyKindBecomesUnknown(t *testing.T) {
+	e := scraperErrorToEnvelope(&models.ScraperError{Message: "panic"})
+	assert.Equal(t, "unknown", e.Kind)
+}
+
 func TestScraperErrorToEnvelope_UsesErrorWhenMessageEmpty(t *testing.T) {
 	e := scraperErrorToEnvelope(&models.ScraperError{Scraper: "test", StatusCode: 500})
 	assert.NotEmpty(t, e.Message)

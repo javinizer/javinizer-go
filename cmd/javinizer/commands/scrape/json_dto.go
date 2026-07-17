@@ -29,8 +29,12 @@ func scraperErrorToEnvelope(err *models.ScraperError) jsonErrorEnvelope {
 	if msg == "" {
 		msg = err.Error()
 	}
+	kind := err.Kind
+	if kind == "" {
+		kind = models.ScraperErrorKindUnknown
+	}
 	return jsonErrorEnvelope{
-		Kind:       string(err.Kind),
+		Kind:       string(kind),
 		Message:    msg,
 		StatusCode: err.StatusCode,
 		Retryable:  err.Retryable,

@@ -87,6 +87,30 @@ func TestRunScrapeJSON_ConfigErrorEmitsJSON(t *testing.T) {
 	assert.Equal(t, "unknown", wrap.Error.Kind)
 }
 
+func TestRunScrapeJSON_UnknownFlagEmitsJSON(t *testing.T) {
+	cmd := NewCommand()
+	cmd.SetArgs([]string{"TEST-001", "--output", "json", "--unknown"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	err := cmd.Execute()
+	assert.Equal(t, ErrJSONExit, err)
+	var wrap jsonErrorWrapper
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &wrap))
+	assert.Contains(t, wrap.Error.Message, "unknown flag")
+}
+
+func TestRunScrapeJSON_MissingFlagValueEmitsJSON(t *testing.T) {
+	cmd := NewCommand()
+	cmd.SetArgs([]string{"TEST-001", "--output", "json", "--scrapers"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	err := cmd.Execute()
+	assert.Equal(t, ErrJSONExit, err)
+	var wrap jsonErrorWrapper
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &wrap))
+	assert.Contains(t, wrap.Error.Message, "needs an argument")
+}
+
 func TestErrJSONExit_IsSentinel(t *testing.T) {
 	assert.Equal(t, "json error already emitted", ErrJSONExit.Error())
 }

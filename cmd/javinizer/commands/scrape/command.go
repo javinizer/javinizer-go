@@ -44,6 +44,16 @@ func NewCommand() *cobra.Command {
 			return runScrape(cmd, args, configFile)
 		},
 	}
+	scrapeCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		output, _ := cmd.Flags().GetString("output")
+		if output == "json" {
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			writeJSONError(cmd, unknownErrorEnvelope(err.Error()))
+			return ErrJSONExit
+		}
+		return err
+	})
 	scrapeCmd.Flags().StringSliceP("scrapers", "s", nil, "Comma-separated subset of enabled scrapers to use (e.g., 'r18dev,dmm'); scraper must be enabled in config.yaml")
 	scrapeCmd.Flags().BoolP("force", "f", false, "Force refresh metadata from scrapers (clear cache)")
 	scrapeCmd.Flags().String("output", "text", "Output format: 'text' (default) or 'json'. JSON mode requires --scrapers with exactly one scraper and is incompatible with --force. In JSON mode, stdout contains only the raw ScraperResult or error envelope; all logs go to stderr.")
