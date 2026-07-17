@@ -303,7 +303,7 @@ func TestScrape_ContextCancellation(t *testing.T) {
 	require.NotNil(t, result)
 	assert.Equal(t, StatusFailed, result.Status)
 	assert.NotEmpty(t, result.Message, "Scrape with cancelled context should produce a message on result")
-	assert.Contains(t, result.Message, "context canceled", "message should mention cancellation")
+	assert.Contains(t, result.Message, "scrape canceled", "message should mention cancellation")
 }
 
 func TestScrape_CustomScrapers_SelectsSpecificScraper(t *testing.T) {

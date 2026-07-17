@@ -267,12 +267,20 @@ export interface BatchScrapeResponse {
 	job_id: string;
 }
 
+export type ScraperErrorKind =
+	| 'not_found'
+	| 'unavailable'
+	| 'rate_limited'
+	| 'blocked'
+	| 'unknown';
+
 export interface FileResult {
 	result_id: string;
 	file_path: string;
 	movie_id: string;
 	status: string;
 	error?: string;
+	error_code?: ScraperErrorKind;
 	field_sources?: Record<string, string>;
 	actress_sources?: Record<string, string>;
 	movie?: Movie;

@@ -1331,6 +1331,10 @@
   "review_deselect_all": "選択をすべて解除",
   "review_destination_placeholder": "出力先パスを入力 (例: /path/to/output)",
   "review_downscaled_from": "↓ {width}×{height} から縮小",
+  "review_error_blocked": "ソースによってブロックされました",
+  "review_error_not_found": "動画が見つかりません",
+  "review_error_rate_limited": "レート制限中です。後で再試行してください",
+  "review_error_unavailable": "ソースは一時的に利用できません",
   "review_error_title": "エラー",
   "review_exclude_failed_count": [
     {

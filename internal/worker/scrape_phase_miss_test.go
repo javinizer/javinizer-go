@@ -100,6 +100,66 @@ func TestScrapePhase_Run_ScrapeErrorCancelled(t *testing.T) {
 	r := updater.getResult("file.mp4")
 	require.NotNil(t, r)
 	assert.Equal(t, models.JobStatusCancelled, r.Status, "Should use models.JobStatusCancelled when error is context.Canceled")
+	assert.Equal(t, "scrape canceled", r.Error)
+	assert.Equal(t, string(models.ScraperErrorKindUnavailable), r.ErrorCode)
+}
+
+func TestScrapePhase_Run_ErrorCodeClassification(t *testing.T) {
+	t.Run("timeout", func(t *testing.T) {
+		wf := &stubWorkflow{scrapeErr: context.DeadlineExceeded}
+		inputs := makeInputs(wf)
+		updater := inputs.Updater.(*stubUpdater)
+
+		NewScrapePhase().Run(context.Background(), inputs, []string{"file.mp4"}, ScrapePhaseConfig{})
+
+		r := updater.getResult("file.mp4")
+		require.NotNil(t, r)
+		assert.Equal(t, "scrape timed out", r.Error)
+		assert.Equal(t, string(models.ScraperErrorKindUnavailable), r.ErrorCode)
+	})
+
+	t.Run("not_found", func(t *testing.T) {
+		wf := &stubWorkflow{scrapeErr: models.NewScraperNotFoundError("r18dev", "movie not found")}
+		inputs := makeInputs(wf)
+		updater := inputs.Updater.(*stubUpdater)
+
+		NewScrapePhase().Run(context.Background(), inputs, []string{"file.mp4"}, ScrapePhaseConfig{})
+
+		r := updater.getResult("file.mp4")
+		require.NotNil(t, r)
+		assert.Equal(t, string(models.ScraperErrorKindNotFound), r.ErrorCode)
+	})
+
+	t.Run("unknown", func(t *testing.T) {
+		wf := &stubWorkflow{scrapeErr: fmt.Errorf("network error")}
+		inputs := makeInputs(wf)
+		updater := inputs.Updater.(*stubUpdater)
+
+		NewScrapePhase().Run(context.Background(), inputs, []string{"file.mp4"}, ScrapePhaseConfig{})
+
+		r := updater.getResult("file.mp4")
+		require.NotNil(t, r)
+		assert.Equal(t, string(models.ScraperErrorKindUnknown), r.ErrorCode)
+		assert.Contains(t, r.Error, "network error")
+	})
+}
+
+func TestScrapePhase_Run_NoResultPreservesFailureKind(t *testing.T) {
+	wf := &stubWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Status:      scrape.StatusFailed,
+		Message:     "No results from any scraper: r18dev: movie not found",
+		FailureKind: models.ScraperErrorKindNotFound,
+	}}
+	inputs := makeInputs(wf)
+	updater := inputs.Updater.(*stubUpdater)
+
+	NewScrapePhase().Run(context.Background(), inputs, []string{"file.mp4"}, ScrapePhaseConfig{})
+
+	r := updater.getResult("file.mp4")
+	require.NotNil(t, r)
+	assert.Equal(t, models.JobStatusFailed, r.Status)
+	assert.Equal(t, string(models.ScraperErrorKindNotFound), r.ErrorCode)
+	assert.Contains(t, r.Error, "not found")
 }
 
 func TestScrapePhase_Run_NilResult(t *testing.T) {

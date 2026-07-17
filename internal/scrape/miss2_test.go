@@ -122,12 +122,23 @@ func TestScrapeMiss2_QueryAll_ContextCancelled(t *testing.T) {
 	cancel()
 
 	scrapers := []models.Scraper{
-		&mockScraper{name: "test", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
+		&mockScraper{name: "test1", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
+		&mockScraper{name: "test2", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
 	}
 	_, failures := s.queryAll(ctx, "TEST-001", "test-001", scrapers, time.Now())
-	// The scraper may complete before checking context cancellation
-	// Just verify we don't panic and get some result
-	_ = failures
+	// The appended parent-context failure must be friendly and typed, never
+	// the raw "context canceled" sentinel leaking into buildNoResultsError.
+	var contextFailure *models.ScraperError
+	for i := range failures {
+		if failures[i].Scraper == "context" {
+			contextFailure = &failures[i]
+			break
+		}
+	}
+	require.NotNil(t, contextFailure, "expected a classified parent-context failure")
+	assert.Equal(t, models.ScraperErrorKindUnavailable, contextFailure.Kind)
+	assert.Equal(t, "scrape canceled", contextFailure.Message)
+	assert.NotContains(t, contextFailure.Message, "context canceled")
 }
 
 // --- querySingle: panic in Search recovered by safeSearch ---

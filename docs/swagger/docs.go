@@ -4262,6 +4262,9 @@ const docTemplate = `{
                 "error": {
                     "type": "string"
                 },
+                "error_code": {
+                    "type": "string"
+                },
                 "field_sources": {
                     "type": "object",
                     "additionalProperties": {

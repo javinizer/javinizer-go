@@ -62,6 +62,7 @@ func movieResultToResponse(mr *resultstore.MovieResult, prov *resultstore.Proven
 		PartSuffix:  mr.FileMatchInfo.PartSuffix,
 		Status:      mr.Status,
 		Error:       mr.Error,
+		ErrorCode:   mr.ErrorCode,
 		Movie:       contracts.MovieViewFromModel(mr.Movie),
 		StartedAt:   contracts.FormatTime(mr.StartedAt),
 		EndedAt:     contracts.FormatTimePtr(mr.EndedAt),
@@ -88,6 +89,7 @@ func movieResultToSlimResponse(mr *resultstore.MovieResult, prov *resultstore.Pr
 		PartSuffix:  mr.FileMatchInfo.PartSuffix,
 		Status:      mr.Status,
 		Error:       mr.Error,
+		ErrorCode:   mr.ErrorCode,
 		StartedAt:   contracts.FormatTime(mr.StartedAt),
 		EndedAt:     contracts.FormatTimePtr(mr.EndedAt),
 	}

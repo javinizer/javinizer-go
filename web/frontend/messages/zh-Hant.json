@@ -1331,6 +1331,10 @@
   "review_deselect_all": "取消全選",
   "review_destination_placeholder": "輸入目的地路徑（例如 /path/to/output）",
   "review_downscaled_from": "↓ 由 {width}×{height} 縮小",
+  "review_error_blocked": "被來源封鎖",
+  "review_error_not_found": "找不到影片",
+  "review_error_rate_limited": "請求頻率受限，請稍後重試",
+  "review_error_unavailable": "來源暫時無法使用",
   "review_error_title": "錯誤",
   "review_exclude_failed_count": [
     {

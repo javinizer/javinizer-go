@@ -239,10 +239,12 @@ func interpretScrapeResult(
 		if errors.Is(err, context.Canceled) {
 			fileStatus = models.JobStatusCancelled
 		}
+		errMsg, errorCode := classifyFileScrapeError(err)
 		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
 			FileMatchInfo: fmi,
 			Status:        fileStatus,
-			Error:         err.Error(),
+			Error:         errMsg,
+			ErrorCode:     errorCode,
 			StartedAt:     startTime,
 			EndedAt:       &now,
 		})
@@ -251,11 +253,11 @@ func interpretScrapeResult(
 			MovieID:   cmd.MovieID,
 			Phase:     JobEventPhaseScrape,
 			Step:      StepFailed,
-			Message:   fmt.Sprintf("Scrape failed: %v", err),
+			Message:   fmt.Sprintf("Scrape failed: %s", errMsg),
 			Timestamp: time.Now(),
 		})
 		outcome.Failed = true
-		outcome.ErrorMsg = err.Error()
+		outcome.ErrorMsg = errMsg
 		return outcome
 	}
 	if result == nil || result.Movie == nil {
@@ -265,13 +267,20 @@ func interpretScrapeResult(
 		// buildNoResultsError. When result is nil there is no scrape payload
 		// to lift a message from, so fall back to a generic "no result".
 		errorMsg := "no result"
-		if result != nil && strings.TrimSpace(result.Message) != "" {
-			errorMsg = result.Message
+		errorCode := string(models.ScraperErrorKindUnknown)
+		if result != nil {
+			if strings.TrimSpace(result.Message) != "" {
+				errorMsg = result.Message
+			}
+			if result.FailureKind != "" {
+				errorCode = string(result.FailureKind)
+			}
 		}
 		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
 			FileMatchInfo: fmi,
 			Status:        models.JobStatusFailed,
 			Error:         errorMsg,
+			ErrorCode:     errorCode,
 			StartedAt:     startTime,
 			EndedAt:       &now,
 		})
@@ -568,4 +577,28 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 		}
 		return current, nil
 	})
+}
+
+func classifyFileScrapeError(err error) (errMsg, errorCode string) {
+	if err == nil {
+		return "", string(models.ScraperErrorKindUnknown)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "scrape timed out", string(models.ScraperErrorKindUnavailable)
+	}
+	if errors.Is(err, context.Canceled) {
+		return "scrape canceled", string(models.ScraperErrorKindUnavailable)
+	}
+	if se, ok := models.AsScraperError(err); ok && se != nil {
+		code := string(se.Kind)
+		if code == "" {
+			code = string(models.ScraperErrorKindUnknown)
+		}
+		msg := se.Message
+		if strings.TrimSpace(msg) == "" {
+			msg = err.Error()
+		}
+		return msg, code
+	}
+	return err.Error(), string(models.ScraperErrorKindUnknown)
 }

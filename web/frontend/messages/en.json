@@ -1331,6 +1331,10 @@
   "review_deselect_all": "Deselect All",
   "review_destination_placeholder": "Enter destination path (e.g., /path/to/output)",
   "review_downscaled_from": "↓ downscaled from {width}×{height}",
+  "review_error_blocked": "Blocked by source",
+  "review_error_not_found": "Movie not found",
+  "review_error_rate_limited": "Rate limited, try again later",
+  "review_error_unavailable": "Source temporarily unavailable",
   "review_error_title": "Error",
   "review_exclude_failed_count": [
     {
