@@ -17,7 +17,7 @@ func TestRunScrapeJSON_BootstrapError(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 	dbPath := filepath.Join(tmpDir, "nonexistent", "deep", "db.sqlite")
-	cfgContent := "database:\n  dsn: \"" + dbPath + "\"\n  type: sqlite\nscrapers:\n  priority:\n    - r18dev\n"
+	cfgContent := "database:\n  dsn: " + dbPath + "\n  type: sqlite\nscrapers:\n  priority:\n    - r18dev\n"
 	os.WriteFile(cfgPath, []byte(cfgContent), 0644)
 	t.Setenv("JAVINIZER_CONFIG", cfgPath)
 

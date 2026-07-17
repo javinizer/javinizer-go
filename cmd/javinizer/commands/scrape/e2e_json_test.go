@@ -17,7 +17,7 @@ func TestRunScrapeJSON_FullSuccessPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 	dbPath := filepath.Join(tmpDir, "javinizer.db")
-	cfgContent := "config_version: 3\ndatabase:\n  dsn: \"" + dbPath + "\"\n  type: sqlite\nscrapers:\n  priority:\n    - e2emock\n"
+	cfgContent := "config_version: 3\ndatabase:\n  dsn: " + dbPath + "\n  type: sqlite\nscrapers:\n  priority:\n    - e2emock\n"
 	os.WriteFile(cfgPath, []byte(cfgContent), 0644)
 	t.Setenv("JAVINIZER_CONFIG", cfgPath)
 
@@ -41,7 +41,7 @@ func TestRunScrapeJSON_TimeoutError(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 	dbPath := filepath.Join(tmpDir, "javinizer.db")
-	cfgContent := "config_version: 3\ndatabase:\n  dsn: \"" + dbPath + "\"\n  type: sqlite\nscrapers:\n  priority:\n    - e2emock\n  request_timeout_seconds: 1\n"
+	cfgContent := "config_version: 3\ndatabase:\n  dsn: " + dbPath + "\n  type: sqlite\nscrapers:\n  priority:\n    - e2emock\n  request_timeout_seconds: 1\n"
 	os.WriteFile(cfgPath, []byte(cfgContent), 0644)
 	t.Setenv("JAVINIZER_CONFIG", cfgPath)
 
