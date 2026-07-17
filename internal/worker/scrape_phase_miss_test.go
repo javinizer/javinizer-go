@@ -144,6 +144,28 @@ func TestScrapePhase_Run_ErrorCodeClassification(t *testing.T) {
 	})
 }
 
+func TestClassifyFileScrapeError(t *testing.T) {
+	t.Run("nil error returns unknown", func(t *testing.T) {
+		msg, code := classifyFileScrapeError(nil)
+		assert.Equal(t, "", msg)
+		assert.Equal(t, string(models.ScraperErrorKindUnknown), code)
+	})
+
+	t.Run("scraper error with empty kind falls back to unknown", func(t *testing.T) {
+		err := &models.ScraperError{Kind: "", Message: "something failed"}
+		msg, code := classifyFileScrapeError(err)
+		assert.Equal(t, string(models.ScraperErrorKindUnknown), code)
+		assert.Equal(t, "something failed", msg)
+	})
+
+	t.Run("scraper error with empty message falls back to err.Error", func(t *testing.T) {
+		err := &models.ScraperError{Kind: models.ScraperErrorKindBlocked, Message: ""}
+		msg, code := classifyFileScrapeError(err)
+		assert.Equal(t, string(models.ScraperErrorKindBlocked), code)
+		assert.Equal(t, "scraper error", msg)
+	})
+}
+
 func TestScrapePhase_Run_NoResultPreservesFailureKind(t *testing.T) {
 	wf := &stubWorkflow{scrapeResult: &scrape.ScrapeResult{
 		Status:      scrape.StatusFailed,

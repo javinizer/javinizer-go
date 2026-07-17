@@ -54,4 +54,9 @@ func TestClassifyFailures(t *testing.T) {
 		}
 		assert.Equal(t, models.ScraperErrorKindNotFound, classifyFailures(f))
 	})
+
+	t.Run("kind not in precedence returns unknown via final fallback", func(t *testing.T) {
+		f := []models.ScraperError{{Kind: models.ScraperErrorKind("custom_kind")}}
+		assert.Equal(t, models.ScraperErrorKindUnknown, classifyFailures(f))
+	})
 }
