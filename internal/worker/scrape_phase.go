@@ -589,7 +589,7 @@ func classifyFileScrapeError(err error) (errMsg, errorCode string) {
 	if errors.Is(err, context.Canceled) {
 		return "scrape canceled", string(models.ScraperErrorKindUnavailable)
 	}
-	if se, ok := models.AsScraperError(err); ok && se != nil {
+	if se, ok := models.AsScraperError(err); ok {
 		code := string(se.Kind)
 		if code == "" {
 			code = string(models.ScraperErrorKindUnknown)
