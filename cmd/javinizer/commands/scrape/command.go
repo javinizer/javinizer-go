@@ -21,6 +21,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const jsonOutput = "json"
+
 // NewCommand creates the scrape CLI subcommand that fetches metadata for a single movie ID.
 func NewCommand() *cobra.Command {
 	scrapeCmd := &cobra.Command{
@@ -28,11 +30,14 @@ func NewCommand() *cobra.Command {
 		Short: "Scrape metadata for a movie ID",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				output, _ := cmd.Flags().GetString("output")
-				if output == "json" {
+				if requestedJSONOutput(cmd) {
 					cmd.SilenceUsage = true
 					cmd.SilenceErrors = true
-					writeJSONError(cmd, unknownErrorEnvelope("exactly 1 argument (movie ID) is required"))
+					message := "exactly 1 argument (movie ID) is required"
+					if malformed := malformedValueFlag(os.Args[1:]); malformed != "" {
+						message = fmt.Sprintf("flag needs an argument: %s", malformed)
+					}
+					writeJSONError(cmd, unknownErrorEnvelope(message))
 					return ErrJSONExit
 				}
 				return fmt.Errorf("accepts 1 arg(s), received %d", len(args))
@@ -45,8 +50,7 @@ func NewCommand() *cobra.Command {
 		},
 	}
 	scrapeCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
-		output, _ := cmd.Flags().GetString("output")
-		if output == "json" {
+		if requestedJSONOutput(cmd) {
 			cmd.SilenceUsage = true
 			cmd.SilenceErrors = true
 			writeJSONError(cmd, unknownErrorEnvelope(err.Error()))
@@ -67,6 +71,45 @@ func NewCommand() *cobra.Command {
 	scrapeCmd.Flags().Bool("genre-replacement", false, "Enable genre replacement (overrides config)")
 	scrapeCmd.Flags().Bool("no-genre-replacement", false, "Disable genre replacement (overrides config)")
 	return scrapeCmd
+}
+
+func requestedJSONOutput(cmd *cobra.Command) bool {
+	output, _ := cmd.Flags().GetString("output")
+	if output == jsonOutput {
+		return true
+	}
+	return argsRequestJSONOutput(cmd.Flags().Args()) || argsRequestJSONOutput(os.Args[1:])
+}
+
+func malformedValueFlag(args []string) string {
+	requiresValue := map[string]struct{}{
+		"--scrapers":        {},
+		"-s":                {},
+		"--output":          {},
+		"--browser-timeout": {},
+		"--config":          {},
+	}
+	for i, arg := range args {
+		if _, ok := requiresValue[arg]; !ok {
+			continue
+		}
+		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+			return arg
+		}
+	}
+	return ""
+}
+
+func argsRequestJSONOutput(args []string) bool {
+	for i, arg := range args {
+		if arg == "--output="+jsonOutput {
+			return true
+		}
+		if arg == "--output" && i+1 < len(args) && args[i+1] == jsonOutput {
+			return true
+		}
+	}
+	return false
 }
 
 // ApplyFlagOverrides applies CLI flag overrides to the config. Exported for testability.
@@ -210,7 +253,7 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 
 func runScrape(cmd *cobra.Command, args []string, configFile string) error {
 	outputFlag, _ := cmd.Flags().GetString("output")
-	if outputFlag == "json" {
+	if outputFlag == jsonOutput {
 		return runScrapeJSON(cmd, args, configFile)
 	}
 	if outputFlag != "text" && outputFlag != "" {

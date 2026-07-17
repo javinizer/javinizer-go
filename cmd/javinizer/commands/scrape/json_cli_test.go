@@ -111,6 +111,51 @@ func TestRunScrapeJSON_MissingFlagValueEmitsJSON(t *testing.T) {
 	assert.Contains(t, wrap.Error.Message, "needs an argument")
 }
 
+func TestRunScrapeJSON_UnknownFlagBeforeOutputEmitsJSON(t *testing.T) {
+	originalArgs := os.Args
+	t.Cleanup(func() { os.Args = originalArgs })
+	os.Args = []string{"javinizer", "scrape", "TEST-001", "--unknown", "--output", "json"}
+	cmd := NewCommand()
+	cmd.SetArgs([]string{"TEST-001", "--unknown", "--output", "json"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	err := cmd.Execute()
+	assert.Equal(t, ErrJSONExit, err)
+	var wrap jsonErrorWrapper
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &wrap))
+	assert.Contains(t, wrap.Error.Message, "unknown flag")
+}
+
+func TestRunScrapeJSON_MissingFlagValueBeforeOutputEmitsJSON(t *testing.T) {
+	originalArgs := os.Args
+	t.Cleanup(func() { os.Args = originalArgs })
+	os.Args = []string{"javinizer", "scrape", "TEST-001", "--scrapers", "--output", "json"}
+	cmd := NewCommand()
+	cmd.SetArgs([]string{"TEST-001", "--scrapers", "--output", "json"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	err := cmd.Execute()
+	assert.Equal(t, ErrJSONExit, err)
+	var wrap jsonErrorWrapper
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &wrap))
+	assert.Contains(t, wrap.Error.Message, "needs an argument")
+}
+
+func TestRunScrapeJSON_UnknownFlagBeforeOutputEqualsEmitsJSON(t *testing.T) {
+	originalArgs := os.Args
+	t.Cleanup(func() { os.Args = originalArgs })
+	os.Args = []string{"javinizer", "scrape", "TEST-001", "--unknown", "--output=json"}
+	cmd := NewCommand()
+	cmd.SetArgs([]string{"TEST-001", "--unknown", "--output=json"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	err := cmd.Execute()
+	assert.Equal(t, ErrJSONExit, err)
+	var wrap jsonErrorWrapper
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &wrap))
+	assert.Contains(t, wrap.Error.Message, "unknown flag")
+}
+
 func TestErrJSONExit_IsSentinel(t *testing.T) {
 	assert.Equal(t, "json error already emitted", ErrJSONExit.Error())
 }
