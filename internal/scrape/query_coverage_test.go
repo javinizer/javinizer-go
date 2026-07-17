@@ -107,6 +107,16 @@ func TestQueryRaw_NilResult(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+func TestIsContextError_WrappedDeadlineExceeded(t *testing.T) {
+	wrapped := fmt.Errorf("request failed: %w", context.DeadlineExceeded)
+	assert.True(t, isContextError(context.Background(), wrapped))
+}
+
+func TestIsContextError_WrappedCanceled(t *testing.T) {
+	wrapped := fmt.Errorf("cancelled: %w", context.Canceled)
+	assert.True(t, isContextError(context.Background(), wrapped))
+}
+
 func TestQueryRaw_DisabledScraper(t *testing.T) {
 	reg := scraperutil.NewScraperRegistry()
 	reg.RegisterInstance(&stubScrape{name: "test", enabled: false})
