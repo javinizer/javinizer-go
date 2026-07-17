@@ -167,8 +167,9 @@ func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*m
 			Message: fmt.Sprintf("scraper %q is not enabled", scraperName),
 		}
 	}
-	resolvedID := s.resolveContentID(ctx, movieID, []string{scraperName})
-	outcome := querySingle(ctx, resolvedID, scraper)
+	// Skip content-ID resolution in raw mode — it reads/writes the DB cache,
+	// which contradicts the no-persistence contract.
+	outcome := querySingle(ctx, movieID, scraper)
 	if outcome.failure != nil {
 		return nil, outcome.failure
 	}

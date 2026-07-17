@@ -219,7 +219,12 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 
 	// B1: Initialize logger to stderr-only before any code that might log,
 	// preventing stdout contamination of the JSON output.
-	loggingCfg := &logging.Config{Output: "stderr", Level: "warn"}
+	// Honor the --verbose flag like initConfig() does.
+	logLevel := "warn"
+	if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
+		logLevel = "debug"
+	}
+	loggingCfg := &logging.Config{Output: "stderr", Level: logLevel}
 	if err := logging.InitLogger(loggingCfg); err != nil {
 		_ = logging.SetOutput(os.Stderr)
 	}
