@@ -2,7 +2,7 @@
 .PHONY: coverage coverage-fast coverage-html coverage-check coverage-pkg coverage-patch coverage-patch-check coverage-func ci ci-full config-drift config-sync check-import-guard check-mocks i18n-check simulate-ci
 .PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-frontend test-e2e-field-drop test-e2e-cli test-e2e-live test-coverage
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
-.PHONY: build-app-darwin build-app-windows build-app-linux build-app-all
+.PHONY: build-app-darwin build-app-local build-app-windows build-app-linux build-app-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
 .PHONY: docker-build docker-build-no-cache docker-run docker-stop docker-restart docker-clean docker-push docker-test docker-logs docker-help
 .PHONY: docker-compose-up docker-compose-down docker-compose-restart docker-compose-logs docker-compose-build
@@ -76,6 +76,7 @@ help:
 	@echo ""
 	@echo "Desktop App (clickable .app/.exe):"
 	@echo "  make build-app-darwin   - Build macOS .app bundle (universal)"
+	@echo "  make build-app-local    - Build macOS .app for host arch (fast, no lipo)"
 	@echo "  make build-app-windows  - Build Windows .exe"
 	@echo "  make build-app-linux    - Build Linux AppImage (host arch; needs webkit2gtk-4.1 + gtk3)"
 	@echo "  make build-app-all      - Build desktop app for all platforms"
@@ -344,6 +345,10 @@ web-dev:
 	cd web/frontend && npm run dev -- --port 5174
 
 web-build:
+	@if [ ! -d web/frontend/node_modules ]; then \
+		echo "web/frontend/node_modules missing — running npm ci..."; \
+		cd web/frontend && npm ci; \
+	fi
 	cd web/frontend && npm run build
 
 web-restore-placeholder:
@@ -482,6 +487,18 @@ build-app-darwin: web-build
 	./scripts/package-app-darwin.sh bin/javinizer-app-darwin-universal \
 		bin/Javinizer.app $(VERSION) internal/desktop/icons/javinizer.icns
 	@echo "macOS desktop app built: bin/Javinizer.app"
+
+# build-app-local: single host-arch desktop build (no lipo). Faster for
+# local iteration — skips the amd64 cross-compile that build-app-darwin
+# performs. Produces bin/Javinizer.app for the current architecture.
+build-app-local: web-build
+	@echo "Building desktop app for macOS (host arch) - $(VERSION)..."
+	CGO_ENABLED=1 GOOS=darwin GOARCH=$$(go env GOHOSTARCH) CGO_LDFLAGS="-framework UniformTypeIdentifiers" \
+		./scripts/with_embedded_web.sh go build -tags '$(DESKTOP_TAGS)' $(DESKTOP_LDFLAGS) \
+		-o bin/javinizer-app-darwin-local ./cmd/javinizer
+	./scripts/package-app-darwin.sh bin/javinizer-app-darwin-local \
+		bin/Javinizer.app $(VERSION) internal/desktop/icons/javinizer.icns
+	@echo "macOS desktop app built (host arch): bin/Javinizer.app"
 
 # NOTE: Wails v2 Windows builds require CGO (go-webview2). The release workflow
 # runs natively on windows-latest. This target also supports cross-compiling
