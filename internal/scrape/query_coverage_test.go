@@ -9,6 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsContextError(t *testing.T) {
@@ -51,17 +52,6 @@ func TestClassifyScraperError_FallbackMsg(t *testing.T) {
 	assert.Equal(t, "custom fallback", err.Message)
 }
 
-func TestQueryRaw_DisabledScraper(t *testing.T) {
-	reg := scraperutil.NewScraperRegistry()
-	reg.RegisterInstance(&stubScrape{name: "test", enabled: false})
-	engine := NewQueryOnly(reg)
-	result, err := engine.QueryRaw(context.Background(), "TEST-001", "test")
-	assert.Nil(t, result)
-	assert.NotNil(t, err)
-	assert.Equal(t, models.ScraperErrorKindUnknown, err.Kind)
-	assert.Contains(t, err.Message, "not enabled")
-}
-
 type stubScrape struct {
 	name    string
 	enabled bool
@@ -76,4 +66,54 @@ func (s *stubScrape) IsEnabled() bool                                    { retur
 func (s *stubScrape) Close() error                                       { return nil }
 func (s *stubScrape) Config() *models.ScraperSettings {
 	return &models.ScraperSettings{Enabled: s.enabled}
+}
+
+type stubScrapeWithResult struct {
+	name    string
+	enabled bool
+	result  *models.ScraperResult
+}
+
+func (s *stubScrapeWithResult) Name() string { return s.name }
+func (s *stubScrapeWithResult) Search(_ context.Context, id string) (*models.ScraperResult, error) {
+	r := *s.result
+	r.ID = id
+	return &r, nil
+}
+func (s *stubScrapeWithResult) GetURL(_ context.Context, _ string) (string, error) { return "", nil }
+func (s *stubScrapeWithResult) IsEnabled() bool                                    { return s.enabled }
+func (s *stubScrapeWithResult) Close() error                                       { return nil }
+func (s *stubScrapeWithResult) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: s.enabled}
+}
+
+func TestQueryRaw_SuccessWithResult(t *testing.T) {
+	reg := scraperutil.NewScraperRegistry()
+	reg.RegisterInstance(&stubScrapeWithResult{name: "test", enabled: true, result: &models.ScraperResult{Source: "test", Title: "Hello"}})
+	engine := NewQueryOnly(reg)
+	result, err := engine.QueryRaw(context.Background(), "TEST-001", "test")
+	require.Nil(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "Hello", result.Title)
+	assert.Equal(t, "TEST-001", result.ID)
+}
+
+func TestQueryRaw_NilResult(t *testing.T) {
+	reg := scraperutil.NewScraperRegistry()
+	reg.RegisterInstance(&stubScrape{name: "test", enabled: true})
+	engine := NewQueryOnly(reg)
+	result, err := engine.QueryRaw(context.Background(), "TEST-001", "test")
+	require.Nil(t, err)
+	assert.Nil(t, result)
+}
+
+func TestQueryRaw_DisabledScraper(t *testing.T) {
+	reg := scraperutil.NewScraperRegistry()
+	reg.RegisterInstance(&stubScrape{name: "test", enabled: false})
+	engine := NewQueryOnly(reg)
+	result, err := engine.QueryRaw(context.Background(), "TEST-001", "test")
+	assert.Nil(t, result)
+	assert.NotNil(t, err)
+	assert.Equal(t, models.ScraperErrorKindUnknown, err.Kind)
+	assert.Contains(t, err.Message, "not enabled")
 }
