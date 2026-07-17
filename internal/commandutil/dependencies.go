@@ -105,6 +105,50 @@ func NewDependencies(cfg *config.Config) (*CoreDeps, error) {
 	return NewDependenciesWithOptions(cfg, nil)
 }
 
+var (
+	finalizeScrapersConfig = func(c *config.ScrapersConfig, reg *scraperutil.ScraperRegistry) error {
+		return c.Finalize(reg)
+	}
+	newScraperRegistryFrom = scraper.NewDefaultScraperRegistryFrom
+)
+
+// NewQueryOnlyDependencies initializes scrapers without opening the application database.
+func NewQueryOnlyDependencies(cfg *config.Config) (*CoreDeps, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+
+	reg := scraperutil.NewScraperRegistry()
+	if os.Getenv("JAVINIZER_E2E_SCRAPERS") == "true" {
+		e2emock.Register(reg)
+		e2emock.ApplyToConfig(cfg)
+	} else {
+		scraper.RegisterAll(reg)
+	}
+
+	if err := finalizeScrapersConfig(&cfg.Scrapers, reg); err != nil {
+		return nil, fmt.Errorf("failed to finalize scraper config: %w", err)
+	}
+	cfg.RecomputeWarnings()
+
+	r18DumpLookup, r18DumpCloser, dumpErr := OpenR18DevDumpLookup(cfg)
+	if dumpErr != nil {
+		logging.Warnf("%v", dumpErr)
+	}
+
+	registry, err := newScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), newMemoryContentIDRepository(), r18DumpLookup)
+	if err != nil {
+		if r18DumpCloser != nil {
+			_ = r18DumpCloser.Close()
+		}
+		return nil, fmt.Errorf("failed to initialize scraper registry: %w", err)
+	}
+
+	deps := &CoreDeps{ScraperRegistry: registry, Logger: logging.GlobalLogger(), r18DumpCloser: r18DumpCloser}
+	deps.config.Store(cfg)
+	return deps, nil
+}
+
 // NewDependenciesWithOptions creates a new CoreDeps instance with optional dependency injection.
 // If opts is nil or opts fields are nil, real implementations are created.
 // If opts fields are non-nil, injected dependencies are used (for testing).

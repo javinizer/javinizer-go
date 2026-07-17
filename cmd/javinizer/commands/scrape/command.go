@@ -2,11 +2,16 @@ package scrape
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/formatter"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/scrape"
@@ -16,25 +21,57 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const jsonOutput = "json"
+
+var (
+	initJSONStderrLogger   = logging.InitLogger
+	bootstrapQueryOnlyDeps = commandutil.NewQueryOnlyDependencies
+	marshalScraperResult   = json.Marshal
+)
+
 // NewCommand creates the scrape CLI subcommand that fetches metadata for a single movie ID.
 func NewCommand() *cobra.Command {
 	scrapeCmd := &cobra.Command{
 		Use:   "scrape [id]",
 		Short: "Scrape metadata for a movie ID",
-		Args:  cobra.ExactArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				if requestedJSONOutput(cmd) {
+					cmd.SilenceUsage = true
+					cmd.SilenceErrors = true
+					message := "exactly 1 argument (movie ID) is required"
+					if malformed := malformedValueFlag(os.Args[1:]); malformed != "" {
+						message = fmt.Sprintf("flag needs an argument: %s", malformed)
+					}
+					writeJSONError(cmd, unknownErrorEnvelope(message))
+					return ErrJSONExit
+				}
+				return fmt.Errorf("accepts 1 arg(s), received %d", len(args))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configFile, _ := cmd.Flags().GetString("config")
 			return runScrape(cmd, args, configFile)
 		},
 	}
+	scrapeCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		if requestedJSONOutput(cmd) {
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			writeJSONError(cmd, unknownErrorEnvelope(err.Error()))
+			return ErrJSONExit
+		}
+		return err
+	})
 	scrapeCmd.Flags().StringSliceP("scrapers", "s", nil, "Comma-separated subset of enabled scrapers to use (e.g., 'r18dev,dmm'); scraper must be enabled in config.yaml")
 	scrapeCmd.Flags().BoolP("force", "f", false, "Force refresh metadata from scrapers (clear cache)")
+	scrapeCmd.Flags().String("output", "text", "Output format: 'text' (default) or 'json'. JSON mode requires --scrapers with exactly one scraper and is incompatible with --force. In JSON mode, stdout contains only the raw ScraperResult or error envelope; all logs go to stderr.")
 	scrapeCmd.Flags().Bool("scrape-actress", false, "Enable actress scraping (overrides config)")
 	scrapeCmd.Flags().Bool("no-scrape-actress", false, "Disable actress scraping (overrides config)")
 	scrapeCmd.Flags().Bool("browser", false, "Enable browser mode for DMM video pages (overrides config)")
 	scrapeCmd.Flags().Bool("no-browser", false, "Disable browser mode for DMM video pages (overrides config)")
 	scrapeCmd.Flags().Int("browser-timeout", 0, "Browser timeout in seconds (overrides config, 0=use config)")
-
 	scrapeCmd.Flags().Bool("actress-db", false, "Enable actress database lookup (overrides config)")
 	scrapeCmd.Flags().Bool("no-actress-db", false, "Disable actress database lookup (overrides config)")
 	scrapeCmd.Flags().Bool("genre-replacement", false, "Enable genre replacement (overrides config)")
@@ -42,11 +79,48 @@ func NewCommand() *cobra.Command {
 	return scrapeCmd
 }
 
+func requestedJSONOutput(cmd *cobra.Command) bool {
+	output, _ := cmd.Flags().GetString("output")
+	if output == jsonOutput {
+		return true
+	}
+	return argsRequestJSONOutput(cmd.Flags().Args()) || argsRequestJSONOutput(os.Args[1:])
+}
+
+func malformedValueFlag(args []string) string {
+	requiresValue := map[string]struct{}{
+		"--scrapers":        {},
+		"-s":                {},
+		"--output":          {},
+		"--browser-timeout": {},
+		"--config":          {},
+	}
+	for i, arg := range args {
+		if _, ok := requiresValue[arg]; !ok {
+			continue
+		}
+		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+			return arg
+		}
+	}
+	return ""
+}
+
+func argsRequestJSONOutput(args []string) bool {
+	for i, arg := range args {
+		if arg == "--output="+jsonOutput {
+			return true
+		}
+		if arg == "--output" && i+1 < len(args) && args[i+1] == jsonOutput {
+			return true
+		}
+	}
+	return false
+}
+
 // ApplyFlagOverrides applies CLI flag overrides to the config. Exported for testability.
 func ApplyFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
 	cfg.Scrapers.Normalize()
-
-	// DMM-specific CLI flags
 	if cmd.Flags().Changed("scrape-actress") || cmd.Flags().Changed("no-scrape-actress") || cmd.Flags().Changed("browser") || cmd.Flags().Changed("no-browser") {
 		if cfg.Scrapers.Overrides == nil {
 			cfg.Scrapers.Overrides = make(map[string]*models.ScraperSettings)
@@ -80,8 +154,6 @@ func ApplyFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
 			cfg.Scrapers.Browser.Timeout = val
 		}
 	}
-
-	// Actress database flags
 	if cmd.Flags().Changed("actress-db") {
 		if val, _ := cmd.Flags().GetBool("actress-db"); val {
 			cfg.Metadata.ActressDatabase.Enabled = true
@@ -92,8 +164,6 @@ func ApplyFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
 			cfg.Metadata.ActressDatabase.Enabled = false
 		}
 	}
-
-	// Genre replacement flags
 	if cmd.Flags().Changed("genre-replacement") {
 		if val, _ := cmd.Flags().GetBool("genre-replacement"); val {
 			cfg.Metadata.GenreReplacement.Enabled = true
@@ -116,12 +186,10 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 	}()
 
 	id := args[0]
-
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load config: %w", err)
 	}
-
 	config.ApplyEnvironmentOverrides(cfg)
 	ApplyFlagOverrides(cmd, cfg)
 	if _, err := config.Prepare(cfg); err != nil {
@@ -139,9 +207,6 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 		wf = bs.Workflow
 		ownDeps = true
 	} else {
-		// Build the factory from the effective config (cfg), which has env/CLI
-		// overrides applied above — not deps.GetConfig(), which may hold a stale
-		// snapshot and would drop the overrides for injected-dependency callers.
 		fc, fcErr := workflow.NewFactoryConfigFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
 		if fcErr != nil {
 			return nil, nil, fmt.Errorf("failed to create factory config: %w", fcErr)
@@ -161,7 +226,6 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 
 	forceRefresh, _ := cmd.Flags().GetBool("force")
 	scrapersFlag, _ := cmd.Flags().GetStringSlice("scrapers")
-
 	scrapeCtx := ctx
 	if cfg.Scrapers.RequestTimeoutSeconds > 0 {
 		resolved := timeout.FromConfig("scrapers.request_timeout_seconds", cfg.Scrapers.RequestTimeoutSeconds, 0)
@@ -183,7 +247,6 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 		}
 		return nil, nil, err
 	}
-
 	if result.Status == scrape.StatusFailed {
 		errMsg := "scrape failed"
 		if result.Message != "" {
@@ -191,16 +254,206 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 		}
 		return nil, nil, fmt.Errorf("%s", errMsg)
 	}
-
 	return result.Movie, result.ScraperResults, nil
 }
 
-// runScrape is the Cobra handler that calls Run() and formats output.
 func runScrape(cmd *cobra.Command, args []string, configFile string) error {
+	outputFlag, _ := cmd.Flags().GetString("output")
+	if outputFlag == jsonOutput {
+		return runScrapeJSON(cmd, args, configFile)
+	}
+	if outputFlag != "text" {
+		return fmt.Errorf("invalid output value: must be 'text' or 'json'")
+	}
 	movie, results, err := Run(cmd.Context(), cmd, args, configFile, nil)
 	if err != nil {
 		return err
 	}
 	formatter.WriteMovie(cmd.OutOrStdout(), movie, results)
 	return nil
+}
+
+func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	scrapersFlag, _ := cmd.Flags().GetStringSlice("scrapers")
+	forceRefresh, _ := cmd.Flags().GetBool("force")
+	if err := validateJSONMode(scrapersFlag, forceRefresh); err != nil {
+		writeJSONError(cmd, unknownErrorEnvelope(err.Error()))
+		return ErrJSONExit
+	}
+
+	id := args[0]
+
+	// B3: Respect JAVINIZER_CONFIG env var like initConfig() does.
+	if envConfig := os.Getenv("JAVINIZER_CONFIG"); envConfig != "" {
+		configFile = envConfig
+	}
+
+	// B1: Initialize logger to stderr-only before any code that might log,
+	// preventing stdout contamination of the JSON output.
+	// Honor the --verbose flag like initConfig() does.
+	logLevel := "warn"
+	if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
+		logLevel = "debug"
+	}
+	loggingCfg := &logging.Config{Output: "stderr", Level: logLevel}
+	if err := initJSONStderrLogger(loggingCfg); err != nil {
+		_ = logging.SetOutput(os.Stderr)
+	}
+
+	cfg, err := config.LoadOrCreate(configFile)
+	if err != nil {
+		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to load config: %v", err)))
+		return ErrJSONExit
+	}
+	config.ApplyEnvironmentOverrides(cfg)
+	ApplyFlagOverrides(cmd, cfg)
+	if _, err := config.Prepare(cfg); err != nil {
+		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("invalid configuration: %v", err)))
+		return ErrJSONExit
+	}
+
+	// Apply configured umask (normally done by initConfig, which JSON mode skips)
+	if cfg.System.Umask != "" {
+		if mask, err := strconv.ParseUint(cfg.System.Umask, 8, 32); err == nil {
+			applyUmask(int(mask))
+		}
+	}
+
+	// Re-init logger with the user's config, but remove any stdout target
+	// to keep stdout clean for JSON output. Append stderr so diagnostics are
+	// still visible. Preserve format and rotation settings.
+	logOutput := removeStdoutFromLogOutput(cfg.Logging.Output)
+	if logOutput == "" {
+		logOutput = "stderr"
+	} else if !hasOutputToken(logOutput, "stderr") {
+		logOutput = logOutput + ",stderr"
+	}
+	logLevel = cfg.Logging.Level
+	if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
+		logLevel = "debug"
+	}
+	loggingCfg = &logging.Config{
+		Output:     logOutput,
+		Level:      logLevel,
+		Format:     cfg.Logging.Format,
+		MaxSizeMB:  cfg.Logging.MaxSizeMB,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAgeDays: cfg.Logging.MaxAgeDays,
+		Compress:   cfg.Logging.Compress,
+	}
+	if err := logging.InitLogger(loggingCfg); err != nil {
+		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to initialize logger: %v", err)))
+		return ErrJSONExit
+	}
+
+	deps, err := bootstrapQueryOnlyDeps(cfg)
+	if err != nil {
+		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to bootstrap: %v", err)))
+		return ErrJSONExit
+	}
+	defer func() { _ = deps.Close() }()
+
+	engine := scrape.NewQueryOnly(deps.ScraperRegistry)
+
+	scrapeCtx := cmd.Context()
+	if cfg.Scrapers.RequestTimeoutSeconds > 0 {
+		resolved := timeout.FromConfig("scrapers.request_timeout_seconds", cfg.Scrapers.RequestTimeoutSeconds, 0)
+		var cancel context.CancelFunc
+		scrapeCtx, cancel = context.WithTimeout(scrapeCtx, resolved.Duration)
+		defer cancel()
+	}
+
+	result, scraperErr := engine.QueryRaw(scrapeCtx, id, scrapersFlag[0])
+
+	if ctxErr := scrapeCtx.Err(); ctxErr != nil {
+		scraperErr = contextErrorForJSON(ctxErr)
+	}
+
+	if scraperErr != nil {
+		writeJSONError(cmd, jsonErrorWrapper{Error: scraperErrorToEnvelope(scraperErr)})
+		return ErrJSONExit
+	}
+
+	// F1: Handle nil result (scraper returned nil, nil)
+	if result == nil {
+		writeJSONError(cmd, unknownErrorEnvelope("scraper returned no result"))
+		return ErrJSONExit
+	}
+
+	data, err := marshalScraperResult(result)
+	if err != nil {
+		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to marshal result: %v", err)))
+		return ErrJSONExit
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
+	return nil
+}
+
+func contextErrorForJSON(err error) *models.ScraperError {
+	message := err.Error()
+	return &models.ScraperError{
+		Kind:      models.ScraperErrorKindUnavailable,
+		Message:   message,
+		Cause:     err,
+		Retryable: true,
+		Temporary: true,
+	}
+}
+
+// hasOutputToken checks if a comma-separated output string contains an exact
+// token match (e.g. "stderr"), avoiding false positives on substrings like
+// "/var/log/javinizer-stderr.log".
+func hasOutputToken(output, token string) bool {
+	for _, part := range strings.Split(output, ",") {
+		if strings.TrimSpace(part) == token {
+			return true
+		}
+	}
+	return false
+}
+
+// removeStdoutFromLogOutput parses a comma-separated log output string and
+// removes any "stdout" entries, returning the remaining outputs joined.
+func removeStdoutFromLogOutput(output string) string {
+	if output == "" {
+		return ""
+	}
+	parts := strings.Split(output, ",")
+	var filtered []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" && p != "stdout" {
+			filtered = append(filtered, p)
+		}
+	}
+	return strings.Join(filtered, ",")
+}
+
+func validateJSONMode(scrapersFlag []string, forceRefresh bool) error {
+	if len(scrapersFlag) != 1 {
+		return fmt.Errorf("json output requires --scrapers with exactly one scraper")
+	}
+	if strings.TrimSpace(scrapersFlag[0]) == "" {
+		return fmt.Errorf("json output requires --scrapers with a non-empty scraper name")
+	}
+	if forceRefresh {
+		return fmt.Errorf("json output is incompatible with --force")
+	}
+	return nil
+}
+
+// ErrJSONExit is a sentinel error that signals the JSON path already wrote
+// its error envelope to stdout; the caller should exit 1 without printing
+// anything else.
+// ErrJSONExit is a sentinel error that signals the JSON path already wrote
+// its error envelope to stdout; the caller should exit 1 without printing
+// anything else.
+var ErrJSONExit = fmt.Errorf("json error already emitted")
+
+// writeJSONError marshals and writes a JSON error envelope to the command's stdout.
+func writeJSONError(cmd *cobra.Command, wrap jsonErrorWrapper) {
+	data, _ := json.Marshal(wrap)
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
 }
