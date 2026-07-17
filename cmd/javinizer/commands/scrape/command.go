@@ -256,7 +256,7 @@ func runScrape(cmd *cobra.Command, args []string, configFile string) error {
 	if outputFlag == jsonOutput {
 		return runScrapeJSON(cmd, args, configFile)
 	}
-	if outputFlag != "text" && outputFlag != "" {
+	if outputFlag != "text" {
 		return fmt.Errorf("invalid output value: must be 'text' or 'json'")
 	}
 	movie, results, err := Run(cmd.Context(), cmd, args, configFile, nil)
@@ -337,7 +337,10 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 		MaxAgeDays: cfg.Logging.MaxAgeDays,
 		Compress:   cfg.Logging.Compress,
 	}
-	_ = logging.InitLogger(loggingCfg)
+	if err := logging.InitLogger(loggingCfg); err != nil {
+		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to initialize logger: %v", err)))
+		return ErrJSONExit
+	}
 
 	deps, err := commandutil.NewQueryOnlyDependencies(cfg)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -59,12 +60,40 @@ func TestRunScrapeJSON_ValidationEmptyScraperName(t *testing.T) {
 	assert.Contains(t, err.Error(), "non-empty")
 }
 
+func TestRunScrapeJSON_ExplicitEmptyOutputRejected(t *testing.T) {
+	cmd := NewCommand()
+	cmd.SetArgs([]string{"TEST-001", "--output="})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid output value")
+}
+
 func TestRunScrapeJSON_InvalidOutputValue(t *testing.T) {
 	cmd := NewCommand()
 	cmd.SetArgs([]string{"TEST-001", "--output", "xml"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid output value")
+}
+
+func TestRunScrapeJSON_LoggerErrorEmitsJSON(t *testing.T) {
+	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	cfgContent := "config_version: 3\nlogging:\n  level: invalid\nscrapers:\n  priority:\n    - e2emock\n"
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfgContent), 0o600))
+	t.Setenv("JAVINIZER_CONFIG", cfgPath)
+	cmd := NewCommand()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"GOOD-001", "--output", "json", "--scrapers", "e2emock"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	err := cmd.Execute()
+	assert.Equal(t, ErrJSONExit, err)
+	var wrap jsonErrorWrapper
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &wrap))
+	assert.Contains(t, wrap.Error.Message, "failed to initialize logger")
 }
 
 func TestRunScrapeJSON_ConfigErrorEmitsJSON(t *testing.T) {
