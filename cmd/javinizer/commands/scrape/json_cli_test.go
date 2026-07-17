@@ -3,6 +3,7 @@ package scrape
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -67,7 +68,11 @@ func TestRunScrapeJSON_InvalidOutputValue(t *testing.T) {
 }
 
 func TestRunScrapeJSON_ConfigErrorEmitsJSON(t *testing.T) {
-	t.Setenv("JAVINIZER_CONFIG", "/nonexistent/deep/path/config.yaml")
+	// Use an invalid YAML config file to trigger a config load error on all platforms
+	tmpDir := t.TempDir()
+	cfgPath := tmpDir + "/bad.yaml"
+	os.WriteFile(cfgPath, []byte(":invalid: yaml: ["), 0644)
+	t.Setenv("JAVINIZER_CONFIG", cfgPath)
 	cmd := NewCommand()
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
