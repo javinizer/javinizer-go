@@ -16,7 +16,9 @@ func TestRunScrapeJSON_FullSuccessPath(t *testing.T) {
 	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
-	dbPath := filepath.Join(tmpDir, "javinizer.db")
+	dbBlocker := filepath.Join(tmpDir, "database-blocker")
+	require.NoError(t, os.WriteFile(dbBlocker, []byte("not a directory"), 0o600))
+	dbPath := filepath.Join(dbBlocker, "javinizer.db")
 	cfgContent := "config_version: 3\ndatabase:\n  dsn: " + dbPath + "\n  type: sqlite\nscrapers:\n  priority:\n    - e2emock\n"
 	os.WriteFile(cfgPath, []byte(cfgContent), 0644)
 	t.Setenv("JAVINIZER_CONFIG", cfgPath)
@@ -34,6 +36,8 @@ func TestRunScrapeJSON_FullSuccessPath(t *testing.T) {
 	var result map[string]interface{}
 	require.NoError(t, json.Unmarshal([]byte(output), &result), "output: %q", output)
 	assert.Equal(t, "e2emock", result["source"])
+	_, statErr := os.Stat(dbPath)
+	assert.Error(t, statErr)
 }
 
 func TestRunScrapeJSON_TimeoutError(t *testing.T) {

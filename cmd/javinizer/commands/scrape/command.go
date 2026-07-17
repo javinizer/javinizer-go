@@ -286,14 +286,14 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 	}
 	_ = logging.InitLogger(loggingCfg)
 
-	bs, err := commandutil.BootstrapScrapeOnly(cfg)
+	deps, err := commandutil.NewQueryOnlyDependencies(cfg)
 	if err != nil {
 		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to bootstrap: %v", err)))
 		return ErrJSONExit
 	}
-	defer func() { _ = bs.Close() }()
+	defer func() { _ = deps.Close() }()
 
-	engine := scrape.NewQueryOnly(bs.ScraperRegistry)
+	engine := scrape.NewQueryOnly(deps.ScraperRegistry)
 
 	scrapeCtx := cmd.Context()
 	if cfg.Scrapers.RequestTimeoutSeconds > 0 {
