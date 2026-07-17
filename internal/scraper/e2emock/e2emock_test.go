@@ -148,3 +148,14 @@ func TestScraper_Search_FailErrorNotCollapsedToNoResult(t *testing.T) {
 		t.Errorf("error %q must carry the e2emock: substring", err.Error())
 	}
 }
+
+func TestScraper_Search_NilResult(t *testing.T) {
+	s := &Scraper{}
+	res, err := s.Search(context.Background(), "NIL-001")
+	if err != nil {
+		t.Fatalf("unexpected error for NIL-* id: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("expected nil result for NIL-* id, got %+v", res)
+	}
+}

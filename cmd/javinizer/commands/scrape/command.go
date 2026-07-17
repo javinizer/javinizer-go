@@ -23,6 +23,12 @@ import (
 
 const jsonOutput = "json"
 
+var (
+	initJSONStderrLogger   = logging.InitLogger
+	bootstrapQueryOnlyDeps = commandutil.NewQueryOnlyDependencies
+	marshalScraperResult   = json.Marshal
+)
+
 // NewCommand creates the scrape CLI subcommand that fetches metadata for a single movie ID.
 func NewCommand() *cobra.Command {
 	scrapeCmd := &cobra.Command{
@@ -292,7 +298,7 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 		logLevel = "debug"
 	}
 	loggingCfg := &logging.Config{Output: "stderr", Level: logLevel}
-	if err := logging.InitLogger(loggingCfg); err != nil {
+	if err := initJSONStderrLogger(loggingCfg); err != nil {
 		_ = logging.SetOutput(os.Stderr)
 	}
 
@@ -342,7 +348,7 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 		return ErrJSONExit
 	}
 
-	deps, err := commandutil.NewQueryOnlyDependencies(cfg)
+	deps, err := bootstrapQueryOnlyDeps(cfg)
 	if err != nil {
 		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to bootstrap: %v", err)))
 		return ErrJSONExit
@@ -376,7 +382,7 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 		return ErrJSONExit
 	}
 
-	data, err := json.Marshal(result)
+	data, err := marshalScraperResult(result)
 	if err != nil {
 		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to marshal result: %v", err)))
 		return ErrJSONExit

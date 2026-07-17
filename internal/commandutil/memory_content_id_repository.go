@@ -64,7 +64,10 @@ func (r *memoryContentIDRepository) GetAllPaginated(ctx context.Context, limit, 
 	return all[offset:end], nil
 }
 
-func (r *memoryContentIDRepository) GetAll(_ context.Context) ([]models.ContentIDMapping, error) {
+func (r *memoryContentIDRepository) GetAll(ctx context.Context) ([]models.ContentIDMapping, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	keys := make([]string, 0, len(r.mappings))

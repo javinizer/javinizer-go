@@ -124,6 +124,8 @@ func (s *Scraper) Search(_ context.Context, id string) (*models.ScraperResult, e
 		return successResult(id), nil
 	case strings.HasPrefix(upper, "MULTI-"):
 		return successResult(id), nil
+	case strings.HasPrefix(upper, "NIL-"):
+		return nil, nil
 	case strings.HasPrefix(upper, "FAIL-"):
 		return nil, fmt.Errorf("e2emock: movie %s not found — simulating a 404 from the source", id)
 	case strings.HasPrefix(upper, "ALIAS-"):

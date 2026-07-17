@@ -105,6 +105,13 @@ func NewDependencies(cfg *config.Config) (*CoreDeps, error) {
 	return NewDependenciesWithOptions(cfg, nil)
 }
 
+var (
+	finalizeScrapersConfig = func(c *config.ScrapersConfig, reg *scraperutil.ScraperRegistry) error {
+		return c.Finalize(reg)
+	}
+	newScraperRegistryFrom = scraper.NewDefaultScraperRegistryFrom
+)
+
 // NewQueryOnlyDependencies initializes scrapers without opening the application database.
 func NewQueryOnlyDependencies(cfg *config.Config) (*CoreDeps, error) {
 	if cfg == nil {
@@ -119,7 +126,7 @@ func NewQueryOnlyDependencies(cfg *config.Config) (*CoreDeps, error) {
 		scraper.RegisterAll(reg)
 	}
 
-	if err := cfg.Scrapers.Finalize(reg); err != nil {
+	if err := finalizeScrapersConfig(&cfg.Scrapers, reg); err != nil {
 		return nil, fmt.Errorf("failed to finalize scraper config: %w", err)
 	}
 	cfg.RecomputeWarnings()
@@ -129,7 +136,7 @@ func NewQueryOnlyDependencies(cfg *config.Config) (*CoreDeps, error) {
 		logging.Warnf("%v", dumpErr)
 	}
 
-	registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), newMemoryContentIDRepository(), r18DumpLookup)
+	registry, err := newScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), newMemoryContentIDRepository(), r18DumpLookup)
 	if err != nil {
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()
