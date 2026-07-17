@@ -26,7 +26,17 @@ func NewCommand() *cobra.Command {
 	scrapeCmd := &cobra.Command{
 		Use:   "scrape [id]",
 		Short: "Scrape metadata for a movie ID",
-		Args:  cobra.ExactArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				output, _ := cmd.Flags().GetString("output")
+				if output == "json" {
+					writeJSONError(cmd, unknownErrorEnvelope("exactly 1 argument (movie ID) is required"))
+					return ErrJSONExit
+				}
+				return fmt.Errorf("accepts 1 arg(s), received %d", len(args))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configFile, _ := cmd.Flags().GetString("config")
 			return runScrape(cmd, args, configFile)
@@ -203,6 +213,8 @@ func runScrape(cmd *cobra.Command, args []string, configFile string) error {
 }
 
 func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
 	scrapersFlag, _ := cmd.Flags().GetStringSlice("scrapers")
 	forceRefresh, _ := cmd.Flags().GetBool("force")
 	if err := validateJSONMode(scrapersFlag, forceRefresh); err != nil {
@@ -257,9 +269,13 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 	} else if !hasOutputToken(logOutput, "stderr") {
 		logOutput = logOutput + ",stderr"
 	}
+	logLevel = cfg.Logging.Level
+	if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
+		logLevel = "debug"
+	}
 	loggingCfg = &logging.Config{
 		Output:     logOutput,
-		Level:      cfg.Logging.Level,
+		Level:      logLevel,
 		Format:     cfg.Logging.Format,
 		MaxSizeMB:  cfg.Logging.MaxSizeMB,
 		MaxBackups: cfg.Logging.MaxBackups,
