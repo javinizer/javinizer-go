@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,6 +84,7 @@ func TestRunScrapeJSON_Umask(t *testing.T) {
 func TestRunScrapeJSON_ConfiguredLogOutput(t *testing.T) {
 	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 	tmpDir := t.TempDir()
+	t.Cleanup(func() { logging.CloseLogger() })
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 	logFile := filepath.ToSlash(filepath.Join(tmpDir, "javinizer.log"))
 	dbPath := filepath.ToSlash(filepath.Join(tmpDir, "javinizer.db"))
@@ -107,6 +109,7 @@ func TestRunScrapeJSON_ConfiguredLogOutput(t *testing.T) {
 func TestRunScrapeJSON_ConfiguredLogOutputWithStdout(t *testing.T) {
 	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 	tmpDir := t.TempDir()
+	t.Cleanup(func() { logging.CloseLogger() })
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 	logFile := filepath.ToSlash(filepath.Join(tmpDir, "javinizer.log"))
 	dbPath := filepath.ToSlash(filepath.Join(tmpDir, "javinizer.db"))
