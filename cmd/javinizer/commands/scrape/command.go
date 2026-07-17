@@ -361,13 +361,8 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 
 	result, scraperErr := engine.QueryRaw(scrapeCtx, id, scrapersFlag[0])
 
-	if scrapeCtx.Err() != nil && scraperErr == nil {
-		scraperErr = &models.ScraperError{
-			Kind:      models.ScraperErrorKindUnavailable,
-			Message:   "context deadline exceeded",
-			Retryable: true,
-			Temporary: true,
-		}
+	if ctxErr := scrapeCtx.Err(); ctxErr != nil {
+		scraperErr = contextErrorForJSON(ctxErr)
 	}
 
 	if scraperErr != nil {
@@ -388,6 +383,17 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 	}
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
 	return nil
+}
+
+func contextErrorForJSON(err error) *models.ScraperError {
+	message := err.Error()
+	return &models.ScraperError{
+		Kind:      models.ScraperErrorKindUnavailable,
+		Message:   message,
+		Cause:     err,
+		Retryable: true,
+		Temporary: true,
+	}
 }
 
 // hasOutputToken checks if a comma-separated output string contains an exact

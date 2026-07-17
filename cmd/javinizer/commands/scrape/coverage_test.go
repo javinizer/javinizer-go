@@ -1,11 +1,21 @@
 package scrape
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestContextErrorForJSONOverridesTypedError(t *testing.T) {
+	err := contextErrorForJSON(context.DeadlineExceeded)
+	assert.Equal(t, models.ScraperErrorKindUnavailable, err.Kind)
+	assert.Equal(t, context.DeadlineExceeded.Error(), err.Message)
+	assert.ErrorIs(t, err.Cause, context.DeadlineExceeded)
+	assert.True(t, err.Retryable)
+	assert.True(t, err.Temporary)
+}
 
 func TestHasOutputToken(t *testing.T) {
 	assert.True(t, hasOutputToken("stderr", "stderr"))
