@@ -30,6 +30,8 @@ javinizer init
 
 The config file includes a `config_version` field. On startup, Javinizer applies compatibility rules for older config files and writes the upgraded config back to disk.
 
+A second field, `defaults_version`, tracks which shipped default *values* your config was generated with. When a built-in default changes between releases (e.g. `scrapers.request_timeout_seconds` 60 → 180), Javinizer one-time patches configs that still carry the old generated value — printing a notice to stderr when it does — then advances the marker. Values you set yourself are left untouched, and once patched you can still set the old value explicitly. Do not edit this field by hand.
+
 ## Server Settings
 
 Configure the REST API server:
@@ -1266,7 +1268,7 @@ scrapers:
   user_agent: ""  # Default: Chrome-like UA. r18dev uses the Javinizer UA automatically.
   referer: "https://www.dmm.co.jp/"
   timeout_seconds: 30          # per-HTTP-request timeout (1–300, default 30)
-  request_timeout_seconds: 60  # overall scrape operation timeout (1–600, default 60); wraps each scraper Search()/Scrape() call as a nested context within performance.worker_timeout
+  request_timeout_seconds: 180 # overall scrape operation timeout (1–600, default 180); wraps each scraper Search()/Scrape() call as a nested context within performance.worker_timeout
   priority:
     - r18dev
     - libredmm
