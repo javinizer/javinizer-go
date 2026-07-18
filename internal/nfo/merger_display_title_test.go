@@ -130,6 +130,9 @@ func TestRemapParsedNFOTitleForMerge_PreservesStrippedFallbackWhenScrapedEmpty(t
 	}{
 		{"bracketed code prefix", "[MKMP-094] Ayaka Tomoda", "MKMP-094", "Ayaka Tomoda"},
 		{"unbracketed code prefix", "MKMP-094 Ayaka Tomoda", "MKMP-094", "Ayaka Tomoda"},
+		{"separator after bracketed code", "[MKMP-094] - Ayaka Tomoda", "MKMP-094", "Ayaka Tomoda"},
+		{"separator after unbracketed code", "MKMP-094 - Ayaka Tomoda", "MKMP-094", "Ayaka Tomoda"},
+		{"separator with year suffix", "MKMP-094 - Ayaka Tomoda (2024)", "MKMP-094", "Ayaka Tomoda (2024)"},
 		{"no code prefix stays verbatim", "Ayaka Tomoda", "MKMP-094", "Ayaka Tomoda"},
 		{"empty movie id leaves title verbatim", "[MKMP-094] Ayaka Tomoda", "", "[MKMP-094] Ayaka Tomoda"},
 	}

@@ -146,11 +146,20 @@ func stripCodePrefix(title, movieID string) string {
 	}
 	lower := strings.ToLower(title)
 	id := strings.ToLower(movieID)
+	var stripped string
 	if strings.HasPrefix(lower, "["+id+"]") {
-		return strings.TrimSpace(title[len(movieID)+2:])
+		stripped = title[len(movieID)+2:]
+	} else if strings.HasPrefix(lower, id+" ") {
+		stripped = title[len(movieID)+1:]
+	} else {
+		return title
 	}
-	if strings.HasPrefix(lower, id+" ") {
-		return strings.TrimSpace(title[len(movieID)+1:])
+	stripped = strings.TrimSpace(stripped)
+	for _, sep := range []string{"- ", "\u2013 ", "\u2014 ", "-"} {
+		if strings.HasPrefix(stripped, sep) {
+			stripped = strings.TrimSpace(stripped[len(sep):])
+			break
+		}
 	}
-	return title
+	return stripped
 }
