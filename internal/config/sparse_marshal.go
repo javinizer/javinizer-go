@@ -7,12 +7,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//nolint:unused // used by diffMappings
+// SparseSaveContext carries the defaults, schema, and known scraper names for sparse persistence.
+type SparseSaveContext struct {
+	Defaults          *Config
+	Schema            *yaml.Node
+	KnownScraperNames map[string]bool
+}
+
 var alwaysEmitPaths = map[string]bool{
 	"config_version": true,
 }
 
-//nolint:unused // used by SaveSparse in the next phase
 func diffYAMLDocuments(actual, defaults *Config) (*yaml.Node, error) {
 	if actual == nil {
 		return nil, nil
@@ -38,7 +43,6 @@ func diffYAMLDocuments(actual, defaults *Config) (*yaml.Node, error) {
 	return &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{out}}, nil
 }
 
-//nolint:unused // used by diffYAMLDocuments + reconcileSparse
 func mappingRoot(n *yaml.Node) *yaml.Node {
 	if n == nil {
 		return nil
@@ -55,7 +59,6 @@ func mappingRoot(n *yaml.Node) *yaml.Node {
 	return nil
 }
 
-//nolint:unused // used by diffYAMLDocuments
 func diffMappings(actual, defaults, out *yaml.Node, path string) {
 	if actual == nil || actual.Kind != yaml.MappingNode {
 		return
@@ -115,7 +118,6 @@ func diffMappings(actual, defaults, out *yaml.Node, path string) {
 	}
 }
 
-//nolint:unused // used by diffMappings + reconcileMappings
 func indexMapping(n *yaml.Node) map[string]*yaml.Node {
 	m := make(map[string]*yaml.Node)
 	if n == nil || n.Kind != yaml.MappingNode {
@@ -130,7 +132,6 @@ func indexMapping(n *yaml.Node) map[string]*yaml.Node {
 	return m
 }
 
-//nolint:unused // used by diffMappings
 func indexKeys(n *yaml.Node) map[string]bool {
 	m := make(map[string]bool)
 	if n == nil || n.Kind != yaml.MappingNode {
@@ -142,7 +143,6 @@ func indexKeys(n *yaml.Node) map[string]bool {
 	return m
 }
 
-//nolint:unused // used by diffMappings
 func joinPath(parent, key string) string {
 	if parent == "" {
 		return key
@@ -150,12 +150,10 @@ func joinPath(parent, key string) string {
 	return parent + "." + key
 }
 
-//nolint:unused // used by diffMappings
 func appendKV(out, key, val *yaml.Node) {
 	out.Content = append(out.Content, cloneYAMLNode(key), cloneYAMLNode(val))
 }
 
-//nolint:unused // used by diffMappings
 func nodesEqual(a, b *yaml.Node) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
@@ -175,7 +173,6 @@ func nodesEqual(a, b *yaml.Node) bool {
 	return bytes.Equal(ab.Bytes(), bb.Bytes())
 }
 
-//nolint:unused // used by SaveSparse in the next phase
 func reconcileSparse(dst, sparseTarget, schemaDoc *yaml.Node) {
 	dRoot := mappingRoot(dst)
 	sRoot := mappingRoot(sparseTarget)
@@ -186,7 +183,6 @@ func reconcileSparse(dst, sparseTarget, schemaDoc *yaml.Node) {
 	reconcileMappings(dRoot, sRoot, kRoot)
 }
 
-//nolint:unused // used by reconcileSparse
 func reconcileMappings(dst, src, known *yaml.Node) {
 	if dst == nil || src == nil {
 		return

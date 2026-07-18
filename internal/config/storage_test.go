@@ -88,8 +88,8 @@ func TestCreateConfigFromEmbedded(t *testing.T) {
 
 	// Verify key structure
 	assert.Equal(t, CurrentConfigVersion, cfg.ConfigVersion, "config_version should match current")
-	assert.NotEmpty(t, cfg.Scrapers.Priority, "scrapers.priority should be populated")
-	assert.NotEmpty(t, cfg.Scrapers.Overrides, "scrapers.overrides should be populated from registry")
+	assert.NotEmpty(t, cfg.Scrapers.Priority, "scrapers.priority should be populated from DefaultConfig overlay")
+	assert.Empty(t, cfg.Scrapers.Overrides, "scrapers.overrides should be empty (user-only)")
 }
 
 // TestLoadOrCreateIdempotent verifies calling LoadOrCreate twice produces same result
@@ -232,6 +232,4 @@ func TestCreatedConfigHasComments(t *testing.T) {
 	// Check for specific comments that exist in the example file
 	assert.Contains(t, contentStr, "#", "config should contain comment characters")
 	assert.Contains(t, contentStr, "config_version:", "config should contain config_version")
-	assert.Contains(t, contentStr, "server:", "config should contain server section")
-	assert.Contains(t, contentStr, "scrapers:", "config should contain scrapers section")
 }

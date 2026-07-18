@@ -116,9 +116,8 @@ func normalize(cfg *Config) bool {
 	return changed
 }
 
-// Prepare runs compatibility migrations, normalization, and strict validation.
-// Returns true when config data was changed during preparation.
-func Prepare(cfg *Config) (bool, error) {
+// PrepareForPersistence runs normalization and structural validation excluding translation credentials.
+func PrepareForPersistence(cfg *Config) (bool, error) {
 	if cfg == nil {
 		return false, nil
 	}
@@ -133,23 +132,42 @@ func Prepare(cfg *Config) (bool, error) {
 
 	normalized := normalize(cfg)
 
-	// An explicitly empty scrapers.priority (yaml `priority: []` or `priority:
-	// null`) means the user configured no scrapers. DefaultConfig seeds the
-	// 14-scraper default before user values overlay during Load, so by the time
-	// Prepare runs an empty slice uniquely identifies that explicit intent (a
-	// missing key keeps the default). Without this guard the aggregator's
-	// resolved priorities would be empty and every assign* loop would iterate
-	// nothing -> a blank movie (silent data loss). Surface it as a config error.
-	// (Cycle-1 MINOR-8.) This lives in Prepare (not ValidateConfig) so pure
-	// validation tests that build minimal Config structs for unrelated fields
-	// (e.g. FlareSolverr) are not forced to set a priority.
 	if len(cfg.Scrapers.Priority) == 0 {
 		return normalized, fmt.Errorf("scrapers.priority must list at least one scraper (it is empty — set it to a scraper name or remove the key to use the default order)")
 	}
 
-	if err := cfg.Validate(); err != nil {
+	if err := validateConfigExcludingTranslationCredentials(cfg); err != nil {
 		return normalized, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	return normalized, nil
+}
+
+// PrepareRuntime runs full validation including translation credentials on the post-env config.
+func PrepareRuntime(cfg *Config) (bool, error) {
+	if cfg == nil {
+		return false, nil
+	}
+	if err := cfg.Validate(); err != nil {
+		return false, fmt.Errorf("invalid configuration: %w", err)
+	}
+	return false, nil
+}
+
+// Prepare runs both PrepareForPersistence and PrepareRuntime, then recomputes warnings.
+func Prepare(cfg *Config) (bool, error) {
+	if cfg == nil {
+		return false, nil
+	}
+	persistenceChanged, err := PrepareForPersistence(cfg)
+	if err != nil {
+		return persistenceChanged, err
+	}
+	runtimeChanged, err := PrepareRuntime(cfg)
+	changed := persistenceChanged || runtimeChanged
+	if err != nil {
+		return changed, err
+	}
+	cfg.RecomputeWarnings()
+	return changed, nil
 }

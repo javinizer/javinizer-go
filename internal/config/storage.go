@@ -167,8 +167,6 @@ func (cs *ConfigStorage) LoadOrCreate(path string) (*Config, error) {
 		if err := cs.Save(cfg, path); err != nil {
 			return nil, fmt.Errorf("failed to save migrated config: %w", err)
 		}
-
-		return cfg, nil
 	}
 
 	diskCfg := cfg.Clone()
@@ -195,7 +193,7 @@ func (cs *ConfigStorage) createFromEmbedded(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	embeddedData := embeddedConfigBytes()
+	embeddedData := minimalInitStub()
 
 	if err := cs.atomicReplace(path, embeddedData, FilePerm); err != nil {
 		return nil, fmt.Errorf("failed to save default config: %w", err)
@@ -212,7 +210,51 @@ func (cs *ConfigStorage) createFromEmbedded(path string) (*Config, error) {
 		}
 	}
 
+	ApplyEnvironmentOverrides(cfg)
+	if _, err := Prepare(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+func minimalInitStub() []byte {
+	return []byte("# Javinizer configuration. Missing keys use compiled defaults; see\n# docs/02-configuration.md for all options. Edit freely.\nconfig_version: 3\n")
+}
+
+// SaveSparse saves a config using sparse diff + reconciliation.
+func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveContext) error {
+	sparseTarget, err := diffYAMLDocuments(cfg, ctx.Defaults)
+	if err != nil {
+		return fmt.Errorf("failed to diff config: %w", err)
+	}
+	unlock, err := cs.acquireLock(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	existingData, readErr := afero.ReadFile(cs.fs, path)
+	var existingDoc *yaml.Node
+	if readErr == nil {
+		existingDoc, err = parseYAMLDocument(existingData)
+		if err != nil {
+			return fmt.Errorf("failed to parse existing config: %w", err)
+		}
+	} else if !isNotExist(readErr) {
+		return fmt.Errorf("failed to read config: %w", readErr)
+	}
+	if existingDoc == nil {
+		existingDoc = &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
+	}
+	reconcileSparse(existingDoc, sparseTarget, ctx.Schema)
+	data, err := encodeYAMLDocument(existingDoc)
+	if err != nil {
+		return fmt.Errorf("failed to encode config: %w", err)
+	}
+	if readErr == nil && bytes.Equal(existingData, data) {
+		return nil
+	}
+	return cs.atomicReplace(path, data, FilePerm)
 }
 
 // acquireLock acquires a config file lock using the configured lockFactory,
