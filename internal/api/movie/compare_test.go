@@ -272,8 +272,12 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			scalarStrategy: "",
 			arrayStrategy:  "",
 			checkResponse: func(t *testing.T, resp *contracts.NFOComparisonResponse) {
-				// Default for compareNFO should be prefer-nfo (conservative, preserves existing data)
+				// Default for compareNFO should be prefer-nfo (conservative, preserves existing data).
+				// The NFO <title> here is a manual base title (no movie-code prefix), so it
+				// is preserved as the merged base Title under prefer-nfo rather than being
+				// moved to DisplayTitle.
 				assert.Equal(t, "NFO Title", resp.MergedData.Title)
+				assert.Equal(t, "", resp.MergedData.DisplayTitle)
 			},
 		},
 	}

@@ -70,12 +70,31 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		// Convert once and re-derive display_title so a title edit is reflected
+		// immediately in persisted state and any client that renders display_title
+		// (grid cards, metadata headers) without waiting for organize. Title is
+		// never modified — RenderDisplayTitle only writes DisplayTitle — so this
+		// cannot reintroduce the title-doubling bug this PR fixes. If the workflow
+		// factory is unavailable, fall back to DisplayTitle = Title, matching the
+		// canonical no-template/error degradation (display_title.go).
+		movie := contracts.MovieViewToModel(req.Movie)
+		movie.DisplayTitle = movie.Title
+		if snap := rt.Snapshot(); snap != nil {
+			if factory, fErr := snap.WorkflowFactory(); fErr == nil && factory != nil {
+				if rendered := factory.RenderDisplayTitle(c.Request.Context(), movie); rendered != "" {
+					movie.DisplayTitle = rendered
+				}
+			} else if fErr != nil {
+				logging.Warnf("Failed to create workflow for display-title re-derive on save: %v", fErr)
+			}
+		}
+
 		// UpdateMovie now handles both DB persistence and in-memory
 		// update atomically. No need to call MovieRepo directly.
 
 		// Update ALL file parts for this movie ID (handles multi-part files like CD1, CD2, etc.)
 		for _, filePath := range filePaths {
-			err := job.UpdateMovie(c.Request.Context(), filePath, contracts.MovieViewToModel(req.Movie))
+			err := job.UpdateMovie(c.Request.Context(), filePath, movie)
 
 			if err != nil {
 				logging.Errorf("Failed to update movie for %s: %v", filePath, err)
@@ -83,7 +102,7 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				return
 			}
 		}
-		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: req.Movie})
+		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie)})
 	}
 }
 
@@ -235,6 +254,43 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			CroppedPosterURL: croppedURL,
 			PosterURL:        req.URL,
 		})
+	}
+}
+
+// previewDisplayTitle godoc
+// @Summary Preview the rendered display_title template
+// @Description Render the configured display_title template for the provided movie using the shared workflow template engine, without mutating persisted state. Used by the review page to show a live NFO title preview as the user edits the base title.
+// @Tags web
+// @Accept json
+// @Produce json
+// @Param id path string true "Job ID"
+// @Param resultId path string true "Result ID"
+// @Param request body contracts.DisplayTitlePreviewRequest true "Edited movie to render"
+// @Success 200 {object} contracts.DisplayTitlePreviewResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
+// @Router /api/v1/batch/{id}/results/{resultId}/display-title-preview [post]
+func previewDisplayTitle(rt *core.APIRuntime) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req contracts.DisplayTitlePreviewRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			return
+		}
+		if req.Movie == nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "movie is required"})
+			return
+		}
+
+		snap := rt.Snapshot()
+		factory, err := snap.WorkflowFactory()
+		if err != nil || factory == nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to create workflow for display-title preview: %v", err)})
+			return
+		}
+
+		rendered := factory.RenderDisplayTitle(c.Request.Context(), contracts.MovieViewToModel(req.Movie))
+		c.JSON(http.StatusOK, contracts.DisplayTitlePreviewResponse{DisplayTitle: rendered})
 	}
 }
 

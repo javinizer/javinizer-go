@@ -193,6 +193,13 @@ class APIClient {
 	) {
 		return this.jobs.previewOrganize(jobId, resultId, request);
 	}
+	async previewDisplayTitle(
+		jobId: string,
+		resultId: string,
+		request: Parameters<JobClient['previewDisplayTitle']>[2],
+	) {
+		return this.jobs.previewDisplayTitle(jobId, resultId, request);
+	}
 	async rescrapeBatchMovie(
 		jobId: string,
 		resultId: string,

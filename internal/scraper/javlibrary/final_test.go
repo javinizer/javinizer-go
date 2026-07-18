@@ -13,6 +13,8 @@ func TestExtractTitleFinal(t *testing.T) {
 	}{
 		{"<title>ABC-123 My Movie Title - JAVLibrary</title>", "ABC-123", "My Movie Title"},
 		{"<title>ABC-123 Only Title</title>", "ABC-123", "Only Title"},
+		{"<title>[ABC-123] Bracketed Title - JAVLibrary</title>", "ABC-123", "Bracketed Title"},
+		{"<title>[ABC-123] Bracketed No Suffix</title>", "ABC-123", "Bracketed No Suffix"},
 		{"<title>No Info</title>", "XYZ-999", "No Info"},
 		{"no title tag", "ABC-123", ""},
 	}

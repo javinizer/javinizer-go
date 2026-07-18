@@ -13,6 +13,8 @@ import type {
 	OrganizeResponse,
 	OrganizePreviewRequest,
 	OrganizePreviewResponse,
+	DisplayTitlePreviewRequest,
+	DisplayTitlePreviewResponse,
 	AvailableScrapersResponse,
 	Scraper,
 	RescrapeRequest,
@@ -163,6 +165,20 @@ export class JobClient extends BaseClient {
 	): Promise<OrganizePreviewResponse> {
 		return this.request<OrganizePreviewResponse>(
 			`/api/v1/batch/${jobId}/results/${resultId}/preview`,
+			{
+				method: 'POST',
+				body: JSON.stringify(request),
+			},
+		);
+	}
+
+	async previewDisplayTitle(
+		jobId: string,
+		resultId: string,
+		request: DisplayTitlePreviewRequest,
+	): Promise<DisplayTitlePreviewResponse> {
+		return this.request<DisplayTitlePreviewResponse>(
+			`/api/v1/batch/${jobId}/results/${resultId}/display-title-preview`,
 			{
 				method: 'POST',
 				body: JSON.stringify(request),

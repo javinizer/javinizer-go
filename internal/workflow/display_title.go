@@ -19,7 +19,7 @@ import (
 // plain name rendering (Latin, grouped only when configured).
 func ApplyDisplayTitleFromSource(ctx context.Context, scraped *models.Movie, titleSource *models.Movie, displayTitleTmpl string, templateEngine template.EngineInterface, nameCfg nfo.NFONameConfig) {
 	if scraped == nil || titleSource == nil || templateEngine == nil {
-		if scraped != nil && scraped.DisplayTitle == "" {
+		if scraped != nil {
 			scraped.DisplayTitle = scraped.Title
 		}
 		return
@@ -40,10 +40,10 @@ func ApplyDisplayTitleFromSource(ctx context.Context, scraped *models.Movie, tit
 		displayCtx.ActressDelimiter = nameCfg.ActressDelimiter
 		if displayName, err := templateEngine.ExecuteWithContext(ctx, displayTitleTmpl, displayCtx); err == nil {
 			scraped.DisplayTitle = displayName
-		} else if scraped.DisplayTitle == "" {
+		} else {
 			scraped.DisplayTitle = scraped.Title
 		}
-	} else if scraped.DisplayTitle == "" {
+	} else {
 		scraped.DisplayTitle = scraped.Title
 	}
 }

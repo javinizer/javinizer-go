@@ -98,6 +98,35 @@ func TestBuildPlanContext_FileNameRenameTrue(t *testing.T) {
 	assert.NoError(t, pc.Err)
 }
 
+// TestBuildPlanContext_FolderTemplateUsesTitleNotDisplayTitle is the regression
+// test for the title-doubling bug: when Title is clean and DisplayTitle is
+// code-prefixed, the folder template <ID> - <TITLE> must resolve <TITLE> to
+// the clean base Title (single code), not the code-prefixed DisplayTitle
+// (which would double the code).
+func TestBuildPlanContext_FolderTemplateUsesTitleNotDisplayTitle(t *testing.T) {
+	cfg := &Config{
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: operationmode.OperationModeOrganize,
+	}
+	engine := template.NewEngine()
+
+	movie := &models.Movie{
+		ID:           "MKMP-094",
+		Title:        "Ayaka Tomoda",
+		DisplayTitle: "[MKMP-094] Ayaka Tomoda",
+	}
+	match := models.FileMatchInfo{
+		MovieID: "MKMP-094",
+		Path:    "/source/MKMP-094.mp4", Name: "MKMP-094.mp4", Extension: ".mp4",
+	}
+
+	pc := buildPlanContext(cfg, engine, movie, match)
+	assert.Equal(t, "MKMP-094 - Ayaka Tomoda", pc.FolderName, "folder <TITLE> resolves to clean Title, not code-prefixed DisplayTitle (no doubling)")
+	assert.NoError(t, pc.Err)
+}
+
 func TestBuildPlanContext_FileNameRenameFalse(t *testing.T) {
 	cfg := &Config{
 		FolderFormat:  "<ID>",

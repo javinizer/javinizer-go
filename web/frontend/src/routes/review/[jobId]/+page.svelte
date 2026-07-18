@@ -314,6 +314,7 @@
 								currentResult={s.currentResult}
 								bind:showFieldScraperSources={s.showFieldScraperSources}
 								isRescraping={s.rescrapingStates.get(s.currentResult?.result_id || '') || false}
+							jobId={$page.params.jobId}
 								onOpenRescrape={() => s.currentResult && s.openRescrapeModal(s.currentResult.movie_id)}
 							onOpenSourceViewer={openSourceViewer}
 								onResetCurrentMovie={s.resetCurrentMovie}

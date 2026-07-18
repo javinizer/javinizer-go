@@ -593,3 +593,16 @@ func (f *WorkflowFactory) ReloadReplacementCaches(ctx context.Context) {
 	}
 	f.fc.Aggregator.ReloadReplacementCaches(ctx)
 }
+
+// RenderDisplayTitle renders the configured display_title template for the
+// given movie using the shared workflow template engine + NFONameConfig, without
+// mutating the input movie. Used by the review-page live preview endpoint so the
+// frontend never duplicates the Go template engine in TypeScript.
+func (f *WorkflowFactory) RenderDisplayTitle(ctx context.Context, movie *models.Movie) string {
+	if f == nil || movie == nil {
+		return ""
+	}
+	rendered := *movie
+	ApplyDisplayTitleFromSource(ctx, &rendered, movie, f.fc.ApplyCfg.DisplayTitle, f.fc.TemplateEngine, f.fc.ApplyCfg.NFONameCfg)
+	return rendered.DisplayTitle
+}

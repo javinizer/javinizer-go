@@ -223,3 +223,15 @@ type OrganizePreviewResponse struct {
 	SourcePath      string                      `json:"source_path,omitempty" example:"/source/folder/ABC-123.mp4"` // Original file path (for in-place modes)
 	OperationMode   operationmode.OperationMode `json:"operation_mode,omitempty" example:"organize"`                // Which mode was used for preview
 }
+
+// DisplayTitlePreviewRequest carries the edited movie used to render a live
+// display_title preview. The movie is rendered as-is by the shared workflow
+// template engine; no persisted state is mutated.
+type DisplayTitlePreviewRequest struct {
+	Movie *MovieView `json:"movie"`
+}
+
+// DisplayTitlePreviewResponse is the rendered display_title template output.
+type DisplayTitlePreviewResponse struct {
+	DisplayTitle string `json:"display_title" example:"[IPX-123] Beautiful Woman"`
+}

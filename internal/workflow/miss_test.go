@@ -920,7 +920,7 @@ func TestApplyDisplayTitleFromSource_TemplateErrorFallsBackToTitle(t *testing.T)
 	assert.Equal(t, "Original Title", m.DisplayTitle, "should fall back to Title when template fails and DisplayTitle is empty")
 }
 
-func TestApplyDisplayTitleFromSource_TemplateErrorPreservesExisting(t *testing.T) {
+func TestApplyDisplayTitleFromSource_TemplateErrorFallsBackToTitleEvenWhenSet(t *testing.T) {
 	// Use a cancelled context to trigger template execution error
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -928,8 +928,9 @@ func TestApplyDisplayTitleFromSource_TemplateErrorPreservesExisting(t *testing.T
 	m := &models.Movie{ID: "TEST-001", Title: "Original Title", DisplayTitle: "Existing Display"}
 	src := &models.Movie{Title: "Source Title"}
 	ApplyDisplayTitleFromSource(ctx, m, src, "<ID>", template.NewEngine(), nfo.NFONameConfig{})
-	// When template fails and DisplayTitle already has a value, preserve it
-	assert.Equal(t, "Existing Display", m.DisplayTitle, "should preserve existing DisplayTitle when template fails")
+	// D4: on template execution error, DisplayTitle falls back to Title explicitly
+	// (no stale preservation) so a changed Title always propagates.
+	assert.Equal(t, "Original Title", m.DisplayTitle, "template error falls back to Title, not a stale DisplayTitle")
 }
 
 func TestApplyDisplayTitleFromSource_NilTitleSource_NilTemplateEngine(t *testing.T) {

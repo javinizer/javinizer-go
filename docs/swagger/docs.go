@@ -1045,6 +1045,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/batch/{id}/results/{resultId}/display-title-preview": {
+            "post": {
+                "description": "Render the configured display_title template for the provided movie using the shared workflow template engine, without mutating persisted state. Used by the review page to show a live NFO title preview as the user edits the base title.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Preview the rendered display_title template",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Result ID",
+                        "name": "resultId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Edited movie to render",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DisplayTitlePreviewRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DisplayTitlePreviewResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/batch/{id}/results/{resultId}/exclude": {
             "post": {
                 "description": "Mark a movie in a batch job as excluded from file organization",
@@ -4569,6 +4629,23 @@ const docTemplate = `{
                     "description": "\"scraper\" or \"nfo\"",
                     "type": "string",
                     "example": "nfo"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.DisplayTitlePreviewRequest": {
+            "type": "object",
+            "properties": {
+                "movie": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.DisplayTitlePreviewResponse": {
+            "type": "object",
+            "properties": {
+                "display_title": {
+                    "type": "string",
+                    "example": "[IPX-123] Beautiful Woman"
                 }
             }
         },

@@ -313,7 +313,7 @@ func (o *applyOrchImpl) stepDisplayTitle(ctx context.Context, cmd ApplyCmd, stat
 			titleSrc = cmd.Movie
 		}
 		ApplyDisplayTitleFromSource(ctx, state.movie, titleSrc, o.applyCfg.DisplayTitle, o.templateEngine, o.applyCfg.NFONameCfg)
-	} else if state.movie.DisplayTitle == "" {
+	} else {
 		state.movie.DisplayTitle = state.movie.Title
 	}
 	steps.DisplayTitle = true

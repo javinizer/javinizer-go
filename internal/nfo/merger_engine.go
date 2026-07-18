@@ -345,6 +345,13 @@ func mergeStringField(fieldName, scrapedVal, nfoVal string, strategy MergeStrate
 			fm.recordNFO(fieldName)
 			return nfoVal
 		}
+		if nfoEmpty {
+			if strategy != PreferScraper {
+				logging.Debugf("Critical field %s empty in NFO, using scraper value", fieldName)
+			}
+			fm.recordScraper(fieldName)
+			return scrapedVal
+		}
 	}
 
 	// Both empty
