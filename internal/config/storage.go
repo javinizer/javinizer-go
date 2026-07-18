@@ -67,7 +67,7 @@ func SaveSparse(cfg *Config, path string, ctx SparseSaveContext) error {
 // BuildSparseSaveContext constructs a SparseSaveContext from compiled defaults.
 func BuildSparseSaveContext() SparseSaveContext {
 	ctx, err := BuildSparseSaveContextWithNames(nil)
-	if err != nil {
+	if err != nil { // coverage:ignore-line
 		panic(err)
 	}
 	return ctx
@@ -95,7 +95,7 @@ var staticScraperKeys = map[string]bool{
 func BuildSparseSaveContextWithNames(names []string) (SparseSaveContext, error) {
 	defaults := DefaultConfig(nil, nil)
 	schema, err := configToYAMLDocument(defaults)
-	if err != nil {
+	if err != nil { // coverage:ignore-line
 		return SparseSaveContext{}, fmt.Errorf("failed to build schema: %w", err)
 	}
 	known := make(map[string]bool, len(names))

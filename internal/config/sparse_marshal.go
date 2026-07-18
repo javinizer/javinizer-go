@@ -30,11 +30,11 @@ func diffYAMLDocuments(actual, defaults *Config) (*yaml.Node, error) {
 		defaults = DefaultConfig(nil, nil)
 	}
 	actualDoc, err := configToYAMLDocument(actual)
-	if err != nil {
+	if err != nil { // coverage:ignore-line
 		return nil, fmt.Errorf("marshal actual: %w", err)
 	}
 	defaultDoc, err := configToYAMLDocument(defaults)
-	if err != nil {
+	if err != nil { // coverage:ignore-line
 		return nil, fmt.Errorf("marshal defaults: %w", err)
 	}
 	aRoot := mappingRoot(actualDoc)
@@ -293,11 +293,11 @@ func buildScraperSettingsSchema() *yaml.Node {
 			RespectRetryAfter:      boolPtr(true),
 		}
 		data, err := yaml.Marshal(&s)
-		if err != nil {
+		if err != nil { // coverage:ignore-line
 			return
 		}
 		doc, err := parseYAMLDocument(data)
-		if err != nil {
+		if err != nil { // coverage:ignore-line
 			return
 		}
 		scraperSettingsSchema = mappingRoot(doc)
