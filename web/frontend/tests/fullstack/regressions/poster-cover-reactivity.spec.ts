@@ -454,25 +454,45 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 			.toBeNull();
 	});
 
-	test('5. grid card metadata reflects edited title via getEffectiveMovie (fix #4)', async ({
+	test('5. title edit propagates to editedMovies; grid card keeps re-derived display_title (fix #4 + title rebind)', async ({
 		page,
 	}: {
 		page: Page;
 	}) => {
-		// Fix #4 generalizes: getEffectiveMovie() feeds EVERY grid-card
-		// field derived from the movie — including the title <p> element.
-		// Before the fix, editing display_title updated the sidebar input
-		// but the grid card title stayed at the original. This test
-		// asserts the title reactivity specific to display_title.
+		// D1 of the title-separation PR rebinds the review page's "Title"
+		// input from display_title to title. Editing the Title input now
+		// mutates `title` (the editable base field), NOT `display_title` —
+		// display_title is re-derived from the configured template on
+		// organize and live-previewed separately in MovieEditor via the
+		// display-title-preview endpoint. The grid card still renders
+		// display_title, so a base-title edit must NOT mutate the grid
+		// card's title <p>. Fix #4 still holds: getEffectiveMovie() feeds
+		// the grid card — it just feeds the (unchanged) display_title.
 		await navigateToReviewPage(page, job_id);
 		await waitForMovieCard(page, 'GOOD-001');
+
+		// Capture the grid card's display_title BEFORE editing. With no
+		// display_title template configured, the e2emock derives
+		// display_title from title ("E2E Movie GOOD-001").
+		await switchToGridView(page);
+		const gridTitle = page.locator(`[aria-label="View details for GOOD-001"] p.font-semibold`);
+		await expect(gridTitle, 'grid card title must render before edit').toBeVisible({
+			timeout: 10_000,
+		});
+		const originalDisplayTitle = await gridTitle.textContent();
+		expect(originalDisplayTitle, 'grid card must show the e2emock display_title').toContain(
+			'E2E Movie GOOD-001',
+		);
+
+		// Focus GOOD-001 — switches to detail view + renders the Title input.
 		await focusMovie(page, 'GOOD-001');
 
-		// Find the display_title input. MovieEditor renders the label text
-		// "Title" + an input as siblings inside a wrapping <div> (the label
-		// doesn't wrap the input + there's no `for`/`id` aria binding, so
-		// Playwright's getByLabel can't find it). Use the label's text +
-		// the following-sibling axis to reach the bound input.
+		// The Title input is now bound to `title` (D1 rebind). MovieEditor
+		// renders the label text "Title" + an input as siblings inside a
+		// wrapping <div> (the label doesn't wrap the input + there's no
+		// `for`/`id` aria binding, so Playwright's getByLabel can't find
+		// it). Use the label's text + the following-sibling axis to reach
+		// the bound input.
 		const titleLabel = page.getByText('Title', { exact: true }).first();
 		await expect(titleLabel, 'Title label must render').toBeVisible({ timeout: 10_000 });
 		const titleInput = titleLabel.locator('xpath=following-sibling::input[1]');
@@ -481,16 +501,38 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 		await titleInput.fill(editedTitle);
 		await titleInput.dispatchEvent('change');
 
-		// Switch back to grid view + assert the grid card's title <p>
-		// (class="font-semibold") now shows the edited title. Fix #4:
-		// getEffectiveMovie's editedMovies lookup feeds the <p>.
+		// The title edit must propagate through the reactivity graph into
+		// the editedMovies map (persisted to sessionStorage). This is the
+		// user-visible signal that the edit was captured — fix #4's
+		// getEffectiveMovie reads editedMovies, so the edit must land
+		// there.
+		await expect
+			.poll(
+				async () =>
+					page.evaluate(
+						(jid) => sessionStorage.getItem(`javinizer.review.editedMovies.${jid}`),
+						job_id,
+					),
+				{ timeout: 5_000, message: 'editedMovies must persist the edited base title' },
+			)
+			.toContain(editedTitle);
+
+		// The grid card still shows the ORIGINAL display_title — a
+		// base-title edit does not mutate display_title, which is
+		// re-derived on organize (and live-previewed separately in
+		// MovieEditor). Before the title rebind, this would have shown
+		// the edited value; now it must stay at the original.
 		await switchToGridView(page);
 		await expect
 			.poll(
 				async () =>
 					page.locator(`[aria-label="View details for GOOD-001"] p.font-semibold`).textContent(),
-				{ timeout: 10_000, message: 'grid card title must reflect the edited display_title' },
+				{
+					timeout: 10_000,
+					message:
+						'grid card title must keep the re-derived display_title (not the edited base title)',
+				},
 			)
-			.toBe(editedTitle);
+			.toBe(originalDisplayTitle);
 	});
 });

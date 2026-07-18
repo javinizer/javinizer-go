@@ -91,3 +91,45 @@ func TestPreviewDisplayTitle_MissingMovie(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+func TestPreviewDisplayTitle_InvalidJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	initTestWebSocket(t)
+
+	deps := createTestDeps(t, newDisplayTitlePreviewConfig("[<ID>] <TITLE>"), "")
+	batchDeps := testkit.GetTestRuntime(deps)
+
+	router := gin.New()
+	router.POST("/api/v1/batch/:id/results/:resultId/display-title-preview", previewDisplayTitle(batchDeps))
+
+	req := httptest.NewRequest("POST", "/api/v1/batch/test-id/results/ABC-001/display-title-preview", bytes.NewReader([]byte(`{not json`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestPreviewDisplayTitle_FactoryUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	initTestWebSocket(t)
+
+	cfg := newDisplayTitlePreviewConfig("[<ID>] <TITLE>")
+	cfg.Matching = config.MatchingConfig{RegexEnabled: true, RegexPattern: `(unclosed[`}
+
+	deps := createTestDeps(t, cfg, "")
+	batchDeps := testkit.GetTestRuntime(deps)
+
+	router := gin.New()
+	router.POST("/api/v1/batch/:id/results/:resultId/display-title-preview", previewDisplayTitle(batchDeps))
+
+	body, _ := json.Marshal(contracts.DisplayTitlePreviewRequest{
+		Movie: &contracts.MovieView{ID: "MKMP-094", Title: "Ayaka Tomoda"},
+	})
+	req := httptest.NewRequest("POST", "/api/v1/batch/test-id/results/ABC-001/display-title-preview", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}

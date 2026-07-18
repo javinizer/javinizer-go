@@ -65,3 +65,9 @@ func TestMergeWithExistingNFO_PreferNFO_CodePrefixedTitleDoesNotPolluteTitle(t *
 	assert.Equal(t, "Ayaka Tomoda", result.Movie.Title, "PreferNFO must keep the clean scraped base Title")
 	assert.Equal(t, "[MKMP-094] Ayaka Tomoda", result.Movie.DisplayTitle, "code-prefixed NFO <title> lands in DisplayTitle")
 }
+
+func TestRemapParsedNFOTitleForMerge_NilMovieDoesNotPanic(t *testing.T) {
+	assert.NotPanics(t, func() {
+		remapParsedNFOTitleForMerge(nil)
+	})
+}
