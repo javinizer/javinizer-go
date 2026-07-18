@@ -177,3 +177,35 @@ func TestApplyDefaultsPatches_Notice(t *testing.T) {
 		assert.Empty(t, out)
 	})
 }
+
+// TestLoadOrCreate_DoesNotPersistEnvOverridesDuringDefaultsPatch guards the
+// P1 regression: when the defaults patch triggers a save, environment
+// overrides (which may carry secrets like OPENAI_API_KEY or paths like
+// JAVINIZER_DB) must not be written to config.yaml. The runtime cfg still
+// honors env overrides; only the on-disk copy excludes them.
+func TestLoadOrCreate_DoesNotPersistEnvOverridesDuringDefaultsPatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("config_version: 3\nscrapers:\n    request_timeout_seconds: 60\n"), 0644))
+
+	t.Setenv("JAVINIZER_DB", "/env/secret/db.sqlite")
+	t.Setenv("OPENAI_API_KEY", "sk-env-secret-do-not-persist")
+
+	cfg, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+
+	// Runtime cfg honors env overrides + the defaults patch.
+	assert.Equal(t, "/env/secret/db.sqlite", cfg.Database.DSN, "runtime cfg honors JAVINIZER_DB")
+	assert.Equal(t, "sk-env-secret-do-not-persist", cfg.Metadata.Translation.OpenAI.APIKey, "runtime cfg honors OPENAI_API_KEY")
+	assert.Equal(t, 180, cfg.Scrapers.RequestTimeoutSeconds)
+	assert.Equal(t, CurrentDefaultsVersion, cfg.DefaultsVersion)
+
+	// Persisted file carries the patch but never env overrides (esp. secrets).
+	saved, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	savedStr := string(saved)
+	assert.Contains(t, savedStr, "defaults_version: 1")
+	assert.Contains(t, savedStr, "request_timeout_seconds: 180")
+	assert.NotContains(t, savedStr, "/env/secret/db.sqlite", "env JAVINIZER_DB must not be persisted to config.yaml")
+	assert.NotContains(t, savedStr, "sk-env-secret-do-not-persist", "env OPENAI_API_KEY must not be persisted to config.yaml")
+}

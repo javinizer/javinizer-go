@@ -171,15 +171,22 @@ func (cs *ConfigStorage) LoadOrCreate(path string) (*Config, error) {
 		return cfg, nil
 	}
 
-	ApplyEnvironmentOverrides(cfg)
+	// Apply the defaults patch before env overrides, then clone a pre-env copy
+	// for persistence. Environment overrides — which may carry secrets
+	// (OPENAI_API_KEY, DEEPL_API_KEY, …) or paths (JAVINIZER_DB,
+	// JAVINIZER_LOG_DIR) — must never be written to config.yaml. The runtime cfg
+	// still receives env overrides and full Prepare validation below; only the
+	// on-disk copy excludes them. Patching before the clone also prints the
+	// upgrade notice exactly once.
 	patched := applyDefaultsPatches(cfg)
-	changed, err := Prepare(cfg)
-	if err != nil {
+	diskCfg := cfg.Clone()
+	ApplyEnvironmentOverrides(cfg)
+	if _, err := Prepare(cfg); err != nil {
 		return nil, err
 	}
-
-	if patched || changed {
-		if err := cs.Save(cfg, path); err != nil {
+	diskChanged := normalize(diskCfg)
+	if patched || diskChanged {
+		if err := cs.Save(diskCfg, path); err != nil {
 			return nil, fmt.Errorf("failed to save migrated config: %w", err)
 		}
 	}
