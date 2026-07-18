@@ -267,11 +267,13 @@ func buildScraperSettingsSchema() *yaml.Node {
 			UserAgent:  "xx",
 			Proxy: &models.ProxyConfig{
 				Enabled:        true,
+				Profile:        "xx",
 				DefaultProfile: "xx",
 				Profiles:       map[string]models.ProxyProfile{"xx": {URL: "xx"}},
 			},
 			DownloadProxy: &models.ProxyConfig{
 				Enabled:        true,
+				Profile:        "xx",
 				DefaultProfile: "xx",
 				Profiles:       map[string]models.ProxyProfile{"xx": {URL: "xx"}},
 			},

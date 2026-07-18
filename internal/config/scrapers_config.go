@@ -238,6 +238,13 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 			}
 		default:
 			// Scraper entry — decode directly into ScraperSettings.
+			if valNode.Kind == yaml.MappingNode && len(valNode.Content) == 0 {
+				continue
+			}
+			if valNode.Kind == yaml.ScalarNode && valNode.Tag == "!!null" {
+				continue
+			}
+
 			if s.resolver != nil && !s.resolver.IsRegistered(key) {
 				return fmt.Errorf("unknown scraper %q", key)
 			}
