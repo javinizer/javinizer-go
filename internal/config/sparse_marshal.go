@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"gopkg.in/yaml.v3"
 )
 
@@ -80,6 +81,9 @@ func diffMappings(actual, defaults, out *yaml.Node, path string) {
 			continue
 		}
 		if defVal == nil {
+			if path == "scrapers" && isZeroScraperMapping(valNode) {
+				continue
+			}
 			appendKV(out, keyNode, valNode)
 			continue
 		}
@@ -205,7 +209,12 @@ func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]
 			dstKey := dst.Content[dstKeyIdx]
 			knownVal := knownByKey[srcKey.Value]
 			if dstVal.Kind == yaml.MappingNode && srcVal.Kind == yaml.MappingNode {
-				reconcileMappings(dstVal, srcVal, knownVal, knownScraperNames, joinPath(path, srcKey.Value))
+				if path == "scrapers" && knownScraperNames[srcKey.Value] {
+					scraperSchema := buildScraperSettingsSchema()
+					reconcileMappings(dstVal, srcVal, scraperSchema, knownScraperNames, joinPath(path, srcKey.Value))
+				} else {
+					reconcileMappings(dstVal, srcVal, knownVal, knownScraperNames, joinPath(path, srcKey.Value))
+				}
 				result = append(result, dstKey, dstVal)
 			} else {
 				replacement := cloneYAMLNode(srcVal)
@@ -238,4 +247,49 @@ func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]
 		result = append(result, cloneYAMLNode(dstKey), cloneYAMLNode(dstVal))
 	}
 	dst.Content = result
+}
+
+func isZeroScraperMapping(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.MappingNode || len(node.Content) == 0 {
+		return true
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		val := node.Content[i+1]
+		switch val.Kind {
+		case yaml.ScalarNode:
+			switch val.Value {
+			case "", "0", "false", "null":
+			default:
+				return false
+			}
+		case yaml.MappingNode:
+			if len(val.Content) > 0 {
+				return false
+			}
+		case yaml.SequenceNode:
+			if len(val.Content) > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+var scraperSettingsSchemaCache *yaml.Node
+
+func buildScraperSettingsSchema() *yaml.Node {
+	if scraperSettingsSchemaCache != nil {
+		return scraperSettingsSchemaCache
+	}
+	zero := models.ScraperSettings{}
+	data, err := yaml.Marshal(&zero)
+	if err != nil {
+		return nil
+	}
+	doc, err := parseYAMLDocument(data)
+	if err != nil {
+		return nil
+	}
+	scraperSettingsSchemaCache = mappingRoot(doc)
+	return scraperSettingsSchemaCache
 }

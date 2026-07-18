@@ -661,7 +661,11 @@ func (r *APIRuntime) SetInitialConfigs(runtimeCfg, diskCfg *config.Config) {
 	if runtimeCfg != nil && r.deps != nil && r.deps.CoreDeps != nil {
 		r.deps.CoreDeps.SetConfig(runtimeCfg)
 	}
-	r.diskConfigSnapshot = diskCfg
+	if diskCfg != nil {
+		r.diskConfigSnapshot = diskCfg.Clone()
+	} else {
+		r.diskConfigSnapshot = nil
+	}
 }
 
 // DiskConfigSnapshot returns the cached pre-env disk config, or nil if no
@@ -670,7 +674,10 @@ func (r *APIRuntime) DiskConfigSnapshot() *config.Config {
 	r.reloadMu.RLock()
 	cfg := r.diskConfigSnapshot
 	r.reloadMu.RUnlock()
-	return cfg
+	if cfg == nil {
+		return nil
+	}
+	return cfg.Clone()
 }
 
 // SetConfig sets the full application config and rebuilds the APIConfig snapshot.

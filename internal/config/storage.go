@@ -69,14 +69,36 @@ func BuildSparseSaveContext() SparseSaveContext {
 	return BuildSparseSaveContextWithNames(nil)
 }
 
+var staticScraperKeys = map[string]bool{
+	"user_agent":              true,
+	"referer":                 true,
+	"timeout_seconds":         true,
+	"request_timeout_seconds": true,
+	"priority":                true,
+	"flaresolverr":            true,
+	"scrape_actress":          true,
+	"browser":                 true,
+	"proxy":                   true,
+}
+
 // BuildSparseSaveContextWithNames constructs a SparseSaveContext seeded with the
 // registered scraper names so reconcileMappings can recognise (and therefore
 // delete) registered scraper blocks under the `scrapers` mapping.
+//
+// NOTE: this uses DefaultConfig(nil, nil), which relies on hardcoded compiled
+// priorities. For custom registries with different priorities this may produce
+// false diffs. A shared default-context provider is an open question in the spec.
 func BuildSparseSaveContextWithNames(names []string) SparseSaveContext {
 	defaults := DefaultConfig(nil, nil)
-	schema, _ := configToYAMLDocument(defaults)
+	schema, err := configToYAMLDocument(defaults)
+	if err != nil {
+		panic(fmt.Sprintf("failed to build schema: %v", err))
+	}
 	known := make(map[string]bool, len(names))
 	for _, n := range names {
+		if staticScraperKeys[n] {
+			continue
+		}
 		known[n] = true
 	}
 	return SparseSaveContext{Defaults: defaults, Schema: schema, KnownScraperNames: known}
