@@ -5,7 +5,7 @@ scrapers:
     user_agent: Javinizer-Test/1.0
     referer: https://www.dmm.co.jp/
     timeout_seconds: 30
-    request_timeout_seconds: 60
+    request_timeout_seconds: 180
     priority:
         - r18dev
         - dmm

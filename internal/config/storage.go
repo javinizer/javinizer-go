@@ -171,14 +171,16 @@ func (cs *ConfigStorage) LoadOrCreate(path string) (*Config, error) {
 		return cfg, nil
 	}
 
+	diskCfg := cfg.Clone()
 	ApplyEnvironmentOverrides(cfg)
 	changed, err := Prepare(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	if changed {
-		if err := cs.Save(cfg, path); err != nil {
+	diskChanged := normalize(diskCfg)
+	if changed || diskChanged {
+		if err := cs.Save(diskCfg, path); err != nil {
 			return nil, fmt.Errorf("failed to save migrated config: %w", err)
 		}
 	}

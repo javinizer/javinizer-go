@@ -61,7 +61,7 @@ func defaultScraperConfig(priorities []string, defaults map[string]*models.Scrap
 		UserAgent:             "",
 		Referer:               "https://www.dmm.co.jp/", // Referer header for CDN compatibility (required by DMM/R18 CDN)
 		TimeoutSeconds:        30,                       // HTTP client timeout
-		RequestTimeoutSeconds: 60,                       // Overall request timeout
+		RequestTimeoutSeconds: 180,                      // Overall request timeout
 		Priority:              priorities,               // Caller-injected scraper execution order
 		FlareSolverr: models.FlareSolverrConfig{
 			Enabled:    false,

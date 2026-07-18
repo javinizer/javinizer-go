@@ -114,7 +114,7 @@ sqlite3 data/javinizer.db ".recover" | sqlite3 data/javinizer-recovered.db
 ```yaml
 scrapers:
   timeout_seconds: 60          # HTTP client timeout per request (1–300, default 30)
-  request_timeout_seconds: 120 # Overall request timeout (1–600, default 60)
+  request_timeout_seconds: 300 # Overall request timeout (1–600, default 180); raise above the default for slow multi-scraper chains
   browser:
     timeout: 60                # Browser-mode page timeout (default 30)
 ```
