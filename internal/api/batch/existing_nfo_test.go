@@ -63,6 +63,17 @@ func setupExistingNFOJob(t *testing.T, cfg *config.Config, dir string, scrapedMo
 	return deps, job.GetID(), result.ResultID
 }
 
+func setupExistingNFOJobWithResult(t *testing.T, cfg *config.Config, dir string, result *resultstore.MovieResult) (*core.APIDeps, string, string) {
+	t.Helper()
+	deps := createTestDeps(t, cfg, "")
+
+	videoPath := filepath.Join(dir, "IPX-535.mp4")
+	job := deps.JobStore.CreateJobBatch([]string{videoPath})
+	setJobResult(job, videoPath, result)
+
+	return deps, job.GetID(), result.ResultID
+}
+
 func callExistingNFOEndpoint(t *testing.T, rt *core.APIRuntime, jobID, resultID string) *httptest.ResponseRecorder {
 	t.Helper()
 	router := gin.New()
@@ -184,4 +195,59 @@ func TestGetExistingNFO_ResultNotFound(t *testing.T) {
 	w := callExistingNFOEndpoint(t, rt, jobID, "missing-result-id")
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestGetExistingNFO_EarlyReturn(t *testing.T) {
+	dir := t.TempDir()
+	videoPath := filepath.Join(dir, "IPX-535.mp4")
+
+	cases := []struct {
+		name   string
+		result *resultstore.MovieResult
+	}{
+		{
+			name: "nil movie",
+			result: &resultstore.MovieResult{
+				ResultID:      "res-nil-movie",
+				FileMatchInfo: models.FileMatchInfo{Path: videoPath, MovieID: "IPX-535"},
+				Status:        models.JobStatusCompleted,
+			},
+		},
+		{
+			name: "empty movie id",
+			result: &resultstore.MovieResult{
+				ResultID:      "res-empty-id",
+				FileMatchInfo: models.FileMatchInfo{Path: videoPath, MovieID: "IPX-535"},
+				Status:        models.JobStatusCompleted,
+				Movie:         &models.Movie{Title: "missing id"},
+			},
+		},
+		{
+			name: "empty source path",
+			result: &resultstore.MovieResult{
+				ResultID:      "res-empty-path",
+				FileMatchInfo: models.FileMatchInfo{MovieID: "IPX-535"},
+				Status:        models.JobStatusCompleted,
+				Movie:         &models.Movie{ID: "IPX-535"},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := newExistingNFOConfig()
+			deps, jobID, resultID := setupExistingNFOJobWithResult(t, cfg, dir, tc.result)
+			rt := testkit.GetTestRuntime(deps)
+
+			w := callExistingNFOEndpoint(t, rt, jobID, resultID)
+
+			require.Equal(t, http.StatusOK, w.Code)
+
+			var resp contracts.ExistingNFOResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+			assert.Nil(t, resp.ExistingNFO)
+			assert.Empty(t, resp.NFODifferences)
+		})
+	}
 }
