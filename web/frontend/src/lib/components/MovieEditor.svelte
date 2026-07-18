@@ -1,8 +1,9 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
-	import type { Movie, Genre } from '$lib/api/types';
+	import type { Movie, Genre, FieldDifference } from '$lib/api/types';
 	import { apiClient } from '$lib/api/client';
 	import { CircleAlert, LoaderCircle, X, Plus } from 'lucide-svelte';
+	import NfoDiffBadge from './NfoDiffBadge.svelte';
 
 	interface Props {
 		movie: Movie;
@@ -12,9 +13,10 @@
 		showFieldSources?: boolean;
 		jobId?: string;
 		resultId?: string;
+		nfoDifferences?: FieldDifference[];
 	}
 
-	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId }: Props = $props();
+	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId, nfoDifferences }: Props = $props();
 
 	// Create a local editable copy - initialized by effect
 	let editedMovie = $state<Movie>({} as Movie);
@@ -94,6 +96,10 @@
 	// Track which fields have been modified
 	function isModified(field: keyof Movie): boolean {
 		return editedMovie[field] !== originalMovie[field];
+	}
+
+	function diffFor(field: string): FieldDifference | undefined {
+		return nfoDifferences?.find((d) => d.field === field);
 	}
 
 	function sourceText(...fieldKeys: string[]): string | null {
@@ -198,6 +204,7 @@
 				{#if isModified('code')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('content_id')}<NfoDiffBadge diff={diffFor('content_id')!} />{/if}
 			</label>
 			<input
 				type="text"
@@ -217,6 +224,7 @@
 				{#if isModified('title')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('title')}<NfoDiffBadge diff={diffFor('title')!} />{/if}
 			</label>
 			<input
 				type="text"
@@ -272,6 +280,7 @@
 				{#if isModified('description')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('description')}<NfoDiffBadge diff={diffFor('description')!} />{/if}
 			</label>
 			<textarea
 				bind:value={editedMovie.description}
@@ -291,6 +300,7 @@
 				{#if isModified('release_date')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('release_date')}<NfoDiffBadge diff={diffFor('release_date')!} />{/if}
 			</label>
 			<input
 				type="date"
@@ -310,6 +320,7 @@
 				{#if isModified('runtime')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('runtime')}<NfoDiffBadge diff={diffFor('runtime')!} />{/if}
 			</label>
 			<input
 				type="number"
@@ -330,6 +341,7 @@
 				{#if isModified('director')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('director')}<NfoDiffBadge diff={diffFor('director')!} />{/if}
 			</label>
 			<input
 				type="text"
@@ -349,6 +361,7 @@
 				{#if isModified('maker')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('maker')}<NfoDiffBadge diff={diffFor('maker')!} />{/if}
 			</label>
 			<input
 				type="text"
@@ -368,6 +381,7 @@
 				{#if isModified('label')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('label')}<NfoDiffBadge diff={diffFor('label')!} />{/if}
 			</label>
 			<input
 				type="text"
@@ -387,6 +401,7 @@
 				{#if isModified('series')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('series')}<NfoDiffBadge diff={diffFor('series')!} />{/if}
 			</label>
 			<input
 				type="text"
@@ -406,6 +421,7 @@
 				{#if isModified('rating_score')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('rating')}<NfoDiffBadge diff={diffFor('rating')!} />{/if}
 			</label>
 			<input
 				type="number"
@@ -459,6 +475,7 @@
 				{#if isModified('genres')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
+				{#if diffFor('genres')}<NfoDiffBadge diff={diffFor('genres')!} />{/if}
 			</label>
 
 			<!-- Cloud tags display -->

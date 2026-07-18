@@ -164,6 +164,9 @@ class APIClient {
 	async getBatchMovieSources(jobId: string, resultId: string) {
 		return this.jobs.getBatchMovieSources(jobId, resultId);
 	}
+	async getExistingNFO(jobId: string, resultId: string) {
+		return this.jobs.getExistingNFO(jobId, resultId);
+	}
 	async overrideBatchMovieField(
 		jobId: string,
 		resultId: string,

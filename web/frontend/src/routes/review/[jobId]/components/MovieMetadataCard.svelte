@@ -1,8 +1,9 @@
 <script lang="ts">
-	import type { FileResult, Movie } from '$lib/api/types';
+	import type { FileResult, Movie, FieldDifference } from '$lib/api/types';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import MovieEditor from '$lib/components/MovieEditor.svelte';
+	import NfoDiffSummary from './NfoDiffSummary.svelte';
 	import { LoaderCircle, RotateCcw, TableProperties } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -16,6 +17,7 @@
 		onOpenSourceViewer: () => void;
 		onResetCurrentMovie: () => void;
 		onUpdateCurrentMovie: (movie: Movie) => void;
+		nfoDifferences?: FieldDifference[];
 	}
 
 	let {
@@ -27,7 +29,8 @@
 		onOpenRescrape,
 		onOpenSourceViewer,
 		onResetCurrentMovie,
-		onUpdateCurrentMovie
+		onUpdateCurrentMovie,
+		nfoDifferences
 	}: Props = $props();
 </script>
 
@@ -80,6 +83,11 @@
 			showFieldSources={showFieldScraperSources}
 			jobId={jobId}
 			resultId={currentResult.result_id}
+			nfoDifferences={nfoDifferences}
 		/>
+
+		{#if nfoDifferences && nfoDifferences.length > 0}
+			<NfoDiffSummary nfoDifferences={nfoDifferences} />
+		{/if}
 	</div>
 </Card>
