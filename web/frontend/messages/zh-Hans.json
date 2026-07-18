@@ -1331,6 +1331,10 @@
   "review_deselect_all": "取消全选",
   "review_destination_placeholder": "输入目标路径（例如 /path/to/output）",
   "review_downscaled_from": "↓ 从 {width}×{height} 缩小",
+  "review_error_blocked": "被来源屏蔽",
+  "review_error_not_found": "未找到影片",
+  "review_error_rate_limited": "请求频率受限，请稍后重试",
+  "review_error_unavailable": "来源暂时不可用",
   "review_error_title": "错误",
   "review_exclude_failed_count": [
     {

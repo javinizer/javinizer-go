@@ -27,7 +27,18 @@ func TestClassifyContextError(t *testing.T) {
 	assert.Equal(t, models.ScraperErrorKindUnavailable, err.Kind)
 	assert.True(t, err.Retryable)
 	assert.True(t, err.Temporary)
-	assert.Contains(t, err.Message, "deadline")
+	assert.Equal(t, "scrape timed out", err.Message)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+	canceled := classifyContextError("test", context.Canceled)
+	assert.Equal(t, models.ScraperErrorKindUnavailable, canceled.Kind)
+	assert.Equal(t, "scrape canceled", canceled.Message)
+	assert.ErrorIs(t, canceled, context.Canceled)
+
+	wrapped := fmt.Errorf("wrapped: %w", context.DeadlineExceeded)
+	wrappedErr := classifyContextError("test", wrapped)
+	assert.Equal(t, "scrape timed out", wrappedErr.Message)
+	assert.ErrorIs(t, wrappedErr, context.DeadlineExceeded)
 }
 
 func TestClassifyScraperError_WithTypedError(t *testing.T) {

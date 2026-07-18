@@ -63,6 +63,7 @@ type MovieResult struct {
 	Revision      uint64               `json:"revision"`
 	Status        models.JobStatus     `json:"status"`
 	Error         string               `json:"error,omitempty"`
+	ErrorCode     string               `json:"error_code,omitempty"`
 	StartedAt     time.Time            `json:"started_at"`
 	EndedAt       *time.Time           `json:"ended_at,omitempty"`
 

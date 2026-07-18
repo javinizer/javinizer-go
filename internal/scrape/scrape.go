@@ -90,6 +90,7 @@ type ScrapeResult struct {
 	ActressSources map[string]string
 	Status         ScrapeStatus
 	Message        string
+	FailureKind    models.ScraperErrorKind
 
 	// Cached indicates this result was served from the movie DB cache
 	// (tryCache) rather than a live scrape. Set so downstream consumers can
@@ -331,7 +332,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 
 	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, scrapers, startTime)
 	if len(results) == 0 {
-		return failedResult(cmd.MovieID, buildNoResultsError(failures), startTime), nil
+		return failedResult(cmd.MovieID, buildNoResultsError(failures), classifyFailures(failures), startTime), nil
 	}
 
 	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 0.7, "Aggregating metadata...")
@@ -362,12 +363,13 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	return result, nil
 }
 
-func failedResult(movieID string, message string, startTime time.Time) *ScrapeResult {
+func failedResult(movieID string, message string, failureKind models.ScraperErrorKind, startTime time.Time) *ScrapeResult {
 	now := time.Now()
 	return &ScrapeResult{
-		Status:    StatusFailed,
-		Message:   message,
-		StartedAt: startTime,
-		EndedAt:   now,
+		Status:      StatusFailed,
+		Message:     message,
+		FailureKind: failureKind,
+		StartedAt:   startTime,
+		EndedAt:     now,
 	}
 }

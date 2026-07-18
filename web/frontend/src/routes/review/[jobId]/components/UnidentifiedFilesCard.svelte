@@ -15,6 +15,21 @@
 	function basename(path: string): string {
 		return path.replace(/\\/g, '/').split('/').pop() ?? path;
 	}
+
+	function errorMessage(result: FileResult): string {
+		switch (result.error_code) {
+			case 'unavailable':
+				return m.review_error_unavailable();
+			case 'not_found':
+				return m.review_error_not_found();
+			case 'rate_limited':
+				return m.review_error_rate_limited();
+			case 'blocked':
+				return m.review_error_blocked();
+			default:
+				return result.error ?? '';
+		}
+	}
 </script>
 
 {#if failedResults.length > 0}
@@ -33,8 +48,8 @@
 							{basename(result.file_path)}
 						</p>
 						{#if result.error}
-							<p class="text-xs text-destructive mt-0.5 truncate" title={result.error}>
-								{result.error}
+							<p class="text-xs text-destructive mt-0.5 truncate" title={errorMessage(result)}>
+								{errorMessage(result)}
 							</p>
 						{/if}
 					</div>

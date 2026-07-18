@@ -127,9 +127,11 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 		}
 	}
 
-	// If the parent context was cancelled, append a context error.
+	// If the parent context was cancelled, append a classified context error
+	// so its message is friendly ("scrape timed out"/"scrape canceled") and
+	// its Kind is unavailable, rather than a raw sentinel.
 	if ctx.Err() != nil {
-		failures = append(failures, models.ScraperError{Scraper: "context", Cause: ctx.Err()})
+		failures = append(failures, *classifyContextError("context", ctx.Err()))
 	}
 
 	return results, failures
@@ -203,10 +205,16 @@ func isContextError(ctx context.Context, err error) bool {
 // they are not ScraperError instances, so this function explicitly sets Kind=unavailable,
 // Retryable=true, Temporary=true.
 func classifyContextError(scraperName string, err error) *models.ScraperError {
+	msg := err.Error()
+	if errors.Is(err, context.DeadlineExceeded) {
+		msg = "scrape timed out"
+	} else if errors.Is(err, context.Canceled) {
+		msg = "scrape canceled"
+	}
 	return &models.ScraperError{
 		Scraper:   scraperName,
 		Kind:      models.ScraperErrorKindUnavailable,
-		Message:   err.Error(),
+		Message:   msg,
 		Retryable: true,
 		Temporary: true,
 		Cause:     err,

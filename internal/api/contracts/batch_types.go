@@ -36,6 +36,7 @@ type BatchFileResult struct {
 	PartSuffix     string            `json:"part_suffix"`
 	Status         models.JobStatus  `json:"status"`
 	Error          string            `json:"error,omitempty"`
+	ErrorCode      string            `json:"error_code,omitempty"`
 	FieldSources   map[string]string `json:"field_sources,omitempty"`
 	ActressSources map[string]string `json:"actress_sources,omitempty"`
 	Movie          *MovieView        `json:"movie,omitempty"`
@@ -53,6 +54,7 @@ type BatchFileResultSlim struct {
 	PartSuffix     string            `json:"part_suffix"`
 	Status         models.JobStatus  `json:"status"`
 	Error          string            `json:"error,omitempty"`
+	ErrorCode      string            `json:"error_code,omitempty"`
 	FieldSources   map[string]string `json:"field_sources,omitempty"`
 	ActressSources map[string]string `json:"actress_sources,omitempty"`
 	StartedAt      string            `json:"started_at"`

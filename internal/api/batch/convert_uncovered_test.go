@@ -58,6 +58,25 @@ func TestMovieResultToSlimResponse_NilInput(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+func TestMovieResultToResponse_PreservesErrorCode(t *testing.T) {
+	mr := &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/test/movie.mp4"},
+		Status:        models.JobStatusFailed,
+		Error:         "scrape timed out",
+		ErrorCode:     string(models.ScraperErrorKindUnavailable),
+	}
+
+	resp := movieResultToResponse(mr, nil)
+	require.NotNil(t, resp)
+	assert.Equal(t, string(models.ScraperErrorKindUnavailable), resp.ErrorCode)
+	assert.Equal(t, "scrape timed out", resp.Error)
+
+	slim := movieResultToSlimResponse(mr, nil)
+	require.NotNil(t, slim)
+	assert.Equal(t, string(models.ScraperErrorKindUnavailable), slim.ErrorCode)
+	assert.Equal(t, "scrape timed out", slim.Error)
+}
+
 func TestMovieResultToSlimResponse_WithProvenance(t *testing.T) {
 	now := time.Now()
 	mr := &resultstore.MovieResult{
