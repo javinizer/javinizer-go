@@ -2,6 +2,7 @@ package nfo
 
 import (
 	"path/filepath"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -64,7 +65,7 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 		logging.Warnf("[workflow] Failed to parse existing NFO for %s: %v (using scraped data only)", movie.ID, parseErr)
 		return result
 	}
-	RemapParsedNFOTitleForMerge(parseResult.Movie)
+	RemapParsedNFOTitleForMerge(parseResult.Movie, movie.Title)
 	scalarStrategy := opts.ScalarStrategy
 	mergeArrays := opts.ArrayStrategy
 	// preset is resolved at the boundary before constructing
@@ -87,12 +88,45 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 // (javinizer writes DisplayTitle there): when DisplayTitle is empty it moves
 // Title to DisplayTitle and clears Title, so merges never pull a code-prefixed
 // NFO display title into the base Title.
-func RemapParsedNFOTitleForMerge(movie *models.Movie) {
+//
+// scrapedTitle is the scraper's base Title for the same movie. When it is empty
+// (sparse scraper result or temporary title-extraction failure), moving the NFO
+// <title> to DisplayTitle would leave both merge inputs without a base Title,
+// and since Title is a critical field the merge would fall back to
+// "[Unknown Title]" despite the NFO carrying a valid <title>. To avoid that,
+// when the scraped title is empty the NFO <title> is kept in Title (with its
+// code prefix stripped) as the base-title fallback instead of being moved.
+func RemapParsedNFOTitleForMerge(movie *models.Movie, scrapedTitle string) {
 	if movie == nil {
 		return
 	}
-	if movie.DisplayTitle == "" && movie.Title != "" {
-		movie.DisplayTitle = movie.Title
-		movie.Title = ""
+	if movie.DisplayTitle != "" || movie.Title == "" {
+		return
 	}
+	if strings.TrimSpace(scrapedTitle) == "" {
+		movie.Title = stripCodePrefix(movie.Title, movie.ID)
+		return
+	}
+	movie.DisplayTitle = movie.Title
+	movie.Title = ""
+}
+
+// stripCodePrefix removes a leading "[<id>] " or "<id> " code prefix (case-
+// insensitive) from title, if present, and trims surrounding whitespace. When
+// the prefix is absent the title is returned unchanged so manual/imported base
+// titles are preserved verbatim.
+func stripCodePrefix(title, movieID string) string {
+	title = strings.TrimSpace(title)
+	if movieID == "" {
+		return title
+	}
+	lower := strings.ToLower(title)
+	id := strings.ToLower(movieID)
+	if strings.HasPrefix(lower, "["+id+"]") {
+		return strings.TrimSpace(title[len(movieID)+2:])
+	}
+	if strings.HasPrefix(lower, id+" ") {
+		return strings.TrimSpace(title[len(movieID)+1:])
+	}
+	return title
 }
