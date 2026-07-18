@@ -88,7 +88,7 @@ func TestReconcileSparse_SourceOnlyKeyAdded(t *testing.T) {
 	dst := mustParseYAML(t, "ui:\n    theme: dark\n")
 	sparse := mustParseYAML(t, "config_version: 3\n")
 
-	reconcileSparse(dst, sparse, schemaDoc(t))
+	reconcileSparse(dst, sparse, schemaDoc(t), nil)
 
 	root := mappingRoot(dst)
 	require.NotNil(t, root)
@@ -102,7 +102,7 @@ func TestReconcileSparse_KnownStaleKeyRemoved(t *testing.T) {
 	dst := mustParseYAML(t, "scrapers:\n    request_timeout_seconds: 60\n")
 	sparse := mustParseYAML(t, "config_version: 3\n")
 
-	reconcileSparse(dst, sparse, schemaDoc(t))
+	reconcileSparse(dst, sparse, schemaDoc(t), nil)
 
 	root := mappingRoot(dst)
 	require.NotNil(t, root)
@@ -114,7 +114,7 @@ func TestReconcileSparse_UnknownKeyPreserved(t *testing.T) {
 	dst := mustParseYAML(t, "my_custom_key: custom_value\nconfig_version: 2\n")
 	sparse := mustParseYAML(t, "config_version: 3\n")
 
-	reconcileSparse(dst, sparse, schemaDoc(t))
+	reconcileSparse(dst, sparse, schemaDoc(t), nil)
 
 	root := mappingRoot(dst)
 	require.NotNil(t, root)
@@ -130,11 +130,56 @@ func TestReconcileSparse_NilSchemaDisablesDeletion(t *testing.T) {
 	dst := mustParseYAML(t, "scrapers:\n    request_timeout_seconds: 60\nextra_key: keepme\n")
 	sparse := mustParseYAML(t, "config_version: 3\n")
 
-	reconcileSparse(dst, sparse, nil)
+	reconcileSparse(dst, sparse, nil, nil)
 
 	root := mappingRoot(dst)
 	require.NotNil(t, root)
 	assert.NotEqual(t, -1, findMappingValueIndex(root, "scrapers"))
 	assert.NotEqual(t, -1, findMappingValueIndex(root, "extra_key"))
 	assert.NotEqual(t, -1, findMappingValueIndex(root, "config_version"))
+}
+
+func TestReconcileSparse_KnownScraperNameDeleted(t *testing.T) {
+	dst := mustParseYAML(t, "scrapers:\n    dmm:\n        enabled: true\n    custom:\n        enabled: true\n    request_timeout_seconds: 60\n")
+	sparse := mustParseYAML(t, "config_version: 3\n")
+	known := map[string]bool{"dmm": true}
+
+	reconcileSparse(dst, sparse, schemaDoc(t), known)
+
+	root := mappingRoot(dst)
+	require.NotNil(t, root)
+	scrapersIdx := findMappingValueIndex(root, "scrapers")
+	require.NotEqual(t, -1, scrapersIdx)
+	scrapers := root.Content[scrapersIdx]
+	require.Equal(t, yaml.MappingNode, scrapers.Kind)
+	assert.Equal(t, -1, findMappingValueIndex(scrapers, "dmm"))
+	assert.Equal(t, -1, findMappingValueIndex(scrapers, "request_timeout_seconds"))
+	assert.NotEqual(t, -1, findMappingValueIndex(scrapers, "custom"))
+}
+
+func TestReconcileSparse_UnknownScraperNamePreserved(t *testing.T) {
+	dst := mustParseYAML(t, "scrapers:\n    dmm:\n        enabled: true\n    custom_scraper:\n        enabled: true\n")
+	sparse := mustParseYAML(t, "config_version: 3\n")
+	known := map[string]bool{"dmm": true}
+
+	reconcileSparse(dst, sparse, schemaDoc(t), known)
+
+	root := mappingRoot(dst)
+	require.NotNil(t, root)
+	scrapersIdx := findMappingValueIndex(root, "scrapers")
+	require.NotEqual(t, -1, scrapersIdx)
+	scrapers := root.Content[scrapersIdx]
+	require.Equal(t, yaml.MappingNode, scrapers.Kind)
+	assert.Equal(t, -1, findMappingValueIndex(scrapers, "dmm"))
+	assert.NotEqual(t, -1, findMappingValueIndex(scrapers, "custom_scraper"))
+}
+
+func TestDiffYAMLDocuments_EmptyMappingSkipped(t *testing.T) {
+	actual := mustParseYAML(t, "scrapers: {}\nconfig_version: 3\n")
+	defaults := mustParseYAML(t, "scrapers:\n    request_timeout_seconds: 30\nconfig_version: 3\n")
+	out := &yaml.Node{Kind: yaml.MappingNode}
+
+	diffMappings(mappingRoot(actual), mappingRoot(defaults), out, "")
+
+	assert.Equal(t, -1, findMappingValueIndex(out, "scrapers"))
 }

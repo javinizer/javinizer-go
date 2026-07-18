@@ -26,6 +26,17 @@ func NewConfigUpdateService(rt *core.APIRuntime, configFile string) *ConfigUpdat
 	return &ConfigUpdateService{rt: rt, deps: rt.Deps(), configFile: configFile}
 }
 
+// scraperNames returns the names of scrapers registered in the active registry,
+// so sparse persistence can recognise (and delete) registered scraper blocks.
+// Returns nil when no registry is wired (e.g. minimal test deps), in which case
+// scraper blocks are treated as unknown and preserved.
+func (s *ConfigUpdateService) scraperNames() []string {
+	if s.deps == nil || s.deps.CoreDeps == nil || s.deps.CoreDeps.ScraperRegistry == nil {
+		return nil
+	}
+	return s.deps.CoreDeps.GetRegistry().Names()
+}
+
 // ValidateAndApply runs the full config update pipeline:
 //  1. Load disk-origin snapshot for secret preservation (pre-env)
 //  2. Preserve redacted secrets from disk state, never runtime state
@@ -40,9 +51,13 @@ func NewConfigUpdateService(rt *core.APIRuntime, configFile string) *ConfigUpdat
 // The caller (HTTP handler) is responsible for serialising concurrent access
 // (via Runtime.ConfigUpdateMu) before calling this method.
 func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *config.Config, proxyTokens map[string]string) error {
-	diskCfg, err := config.Load(s.configFile)
-	if err != nil {
-		return &persistError{message: "Failed to load disk config for secret preservation"}
+	diskCfg := s.rt.DiskConfigSnapshot()
+	if diskCfg == nil {
+		loaded, err := config.Load(s.configFile)
+		if err != nil {
+			return &persistError{message: "Failed to load disk config for secret preservation"}
+		}
+		diskCfg = loaded
 	}
 	preserveRedactedSecrets(diskCfg, newCfg)
 
@@ -63,7 +78,7 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 		return &validationError{message: "Invalid configuration: " + err.Error()}
 	}
 
-	ctx := config.BuildSparseSaveContext()
+	ctx := config.BuildSparseSaveContextWithNames(s.scraperNames())
 	storage := config.NewConfigStorage(nil, nil)
 	if err := storage.SaveSparse(newCfg, s.configFile, ctx); err != nil {
 		logging.Errorf("Failed to save config: %v", err)
@@ -87,6 +102,7 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 	}
 
 	logging.Info("Configuration updated and reloaded successfully")
+	s.rt.SetInitialConfigs(runtimeCfg, newCfg)
 	return nil
 }
 

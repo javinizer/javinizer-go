@@ -88,7 +88,6 @@ func diffMappings(actual, defaults, out *yaml.Node, path string) {
 		}
 		if valNode.Kind == yaml.MappingNode && defVal.Kind == yaml.MappingNode {
 			if len(valNode.Content) == 0 {
-				appendKV(out, keyNode, valNode)
 				continue
 			}
 			childOut := &yaml.Node{Kind: yaml.MappingNode}
@@ -173,17 +172,17 @@ func nodesEqual(a, b *yaml.Node) bool {
 	return bytes.Equal(ab.Bytes(), bb.Bytes())
 }
 
-func reconcileSparse(dst, sparseTarget, schemaDoc *yaml.Node) {
+func reconcileSparse(dst, sparseTarget, schemaDoc *yaml.Node, knownScraperNames map[string]bool) {
 	dRoot := mappingRoot(dst)
 	sRoot := mappingRoot(sparseTarget)
 	kRoot := mappingRoot(schemaDoc)
 	if dRoot == nil || sRoot == nil {
 		return
 	}
-	reconcileMappings(dRoot, sRoot, kRoot)
+	reconcileMappings(dRoot, sRoot, kRoot, knownScraperNames, "")
 }
 
-func reconcileMappings(dst, src, known *yaml.Node) {
+func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]bool, path string) {
 	if dst == nil || src == nil {
 		return
 	}
@@ -206,7 +205,7 @@ func reconcileMappings(dst, src, known *yaml.Node) {
 			dstKey := dst.Content[dstKeyIdx]
 			knownVal := knownByKey[srcKey.Value]
 			if dstVal.Kind == yaml.MappingNode && srcVal.Kind == yaml.MappingNode {
-				reconcileMappings(dstVal, srcVal, knownVal)
+				reconcileMappings(dstVal, srcVal, knownVal, knownScraperNames, joinPath(path, srcKey.Value))
 				result = append(result, dstKey, dstVal)
 			} else {
 				replacement := cloneYAMLNode(srcVal)
@@ -225,10 +224,11 @@ func reconcileMappings(dst, src, known *yaml.Node) {
 			continue
 		}
 		knownVal, isKnown := knownByKey[dstKey.Value]
-		if isKnown {
+		isKnownScraper := path == "scrapers" && knownScraperNames[dstKey.Value]
+		if isKnown || isKnownScraper {
 			if dstVal.Kind == yaml.MappingNode && knownVal != nil && knownVal.Kind == yaml.MappingNode {
 				emptySrc := &yaml.Node{Kind: yaml.MappingNode}
-				reconcileMappings(dstVal, emptySrc, knownVal)
+				reconcileMappings(dstVal, emptySrc, knownVal, knownScraperNames, joinPath(path, dstKey.Value))
 				if len(dstVal.Content) > 0 {
 					result = append(result, dstKey, dstVal)
 				}

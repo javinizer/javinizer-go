@@ -66,9 +66,20 @@ func SaveSparse(cfg *Config, path string, ctx SparseSaveContext) error {
 
 // BuildSparseSaveContext constructs a SparseSaveContext from compiled defaults.
 func BuildSparseSaveContext() SparseSaveContext {
+	return BuildSparseSaveContextWithNames(nil)
+}
+
+// BuildSparseSaveContextWithNames constructs a SparseSaveContext seeded with the
+// registered scraper names so reconcileMappings can recognise (and therefore
+// delete) registered scraper blocks under the `scrapers` mapping.
+func BuildSparseSaveContextWithNames(names []string) SparseSaveContext {
 	defaults := DefaultConfig(nil, nil)
 	schema, _ := configToYAMLDocument(defaults)
-	return SparseSaveContext{Defaults: defaults, Schema: schema}
+	known := make(map[string]bool, len(names))
+	for _, n := range names {
+		known[n] = true
+	}
+	return SparseSaveContext{Defaults: defaults, Schema: schema, KnownScraperNames: known}
 }
 
 // Save writes the configuration to a YAML file using the configured filesystem.
@@ -179,6 +190,12 @@ func (cs *ConfigStorage) LoadOrCreate(path string) (*Config, error) {
 		if err := cs.Save(cfg, path); err != nil {
 			return nil, fmt.Errorf("failed to save migrated config: %w", err)
 		}
+
+		reloaded, err := cs.Load(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to re-load migrated config: %w", err)
+		}
+		cfg = reloaded
 	}
 
 	diskCfg := cfg.Clone()
@@ -221,6 +238,11 @@ func (cs *ConfigStorage) createFromEmbedded(path string) (*Config, error) {
 		if err := cs.SaveSparse(cfg, path, ctx); err != nil {
 			return nil, fmt.Errorf("failed to save config with environment overrides: %w", err)
 		}
+		reloaded, err := cs.Load(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to re-load config: %w", err)
+		}
+		cfg = reloaded
 	}
 
 	ApplyEnvironmentOverrides(cfg)
@@ -267,7 +289,7 @@ func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveCont
 	if existingDoc == nil {
 		existingDoc = &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
 	}
-	reconcileSparse(existingDoc, sparseTarget, ctx.Schema)
+	reconcileSparse(existingDoc, sparseTarget, ctx.Schema, ctx.KnownScraperNames)
 	data, err := encodeYAMLDocument(existingDoc)
 	if err != nil {
 		return fmt.Errorf("failed to encode config: %w", err)
@@ -275,7 +297,10 @@ func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveCont
 	if readErr == nil && bytes.Equal(existingData, data) {
 		return nil
 	}
-	return cs.atomicReplace(path, data, FilePerm)
+	if err := cs.atomicReplace(path, data, FilePerm); err != nil {
+		return fmt.Errorf("failed to write sparse config: %w", err)
+	}
+	return nil
 }
 
 // acquireLock acquires a config file lock using the configured lockFactory,

@@ -78,6 +78,12 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	rt.SetConfig(cfg)
 	rt.EnsureRuntime()
 
+	if configFile != "" {
+		if diskCfg, err := config.Load(configFile); err == nil {
+			rt.SetInitialConfigs(cfg, diskCfg)
+		}
+	}
+
 	// Start the background update checker, gated on cfg.System.VersionCheckEnabled.
 	// Bound to rt.ServerCtx() so it stops cleanly on rt.Shutdown().
 	startUpdateChecker(rt, cfg, update.ServiceOptions{})
