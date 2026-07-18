@@ -212,10 +212,10 @@ func TestMergeMovieMetadataWithOptions_EmptyFields(t *testing.T) {
 	result, err := MergeMovieMetadataWithOptions(scraped, nfoData, PreferNFO, false)
 	require.NoError(t, err)
 
-	// With strict PreferNFO: empty NFO title is used (no fallback to scraped)
-	// Note: Critical field protection only applies when the PREFERRED source is empty AND the other source is also empty
-	// Here, NFO (preferred) is empty, but scraper is non-empty, so strict mode uses empty NFO value
-	assert.Equal(t, "", result.Merged.Title, "Strict PreferNFO uses empty NFO value (no fallback to scraper)")
+	// Critical field protection: Title must never be empty regardless of strategy.
+	// With PreferNFO + empty NFO title, the scraper title is used (no wipe) —
+	// the parsed NFO <title> is a display title and is merged into DisplayTitle.
+	assert.Equal(t, "Scraped Title", result.Merged.Title, "Critical Title is never wiped under PreferNFO; falls back to scraper")
 	// When preferring NFO, non-empty NFO description should be used
 	assert.Equal(t, "NFO Description", result.Merged.Description, "Should use NFO when it's not empty")
 	// When preferring NFO, non-empty NFO maker should be used

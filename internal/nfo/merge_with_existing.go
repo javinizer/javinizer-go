@@ -64,6 +64,7 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 		logging.Warnf("[workflow] Failed to parse existing NFO for %s: %v (using scraped data only)", movie.ID, parseErr)
 		return result
 	}
+	remapParsedNFOTitleForMerge(parseResult.Movie)
 	scalarStrategy := opts.ScalarStrategy
 	mergeArrays := opts.ArrayStrategy
 	// preset is resolved at the boundary before constructing
@@ -80,4 +81,14 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 	result.Merged = true
 	result.MergeStats = &mergeResult.Stats
 	return result
+}
+
+func remapParsedNFOTitleForMerge(movie *models.Movie) {
+	if movie == nil {
+		return
+	}
+	if movie.DisplayTitle == "" && movie.Title != "" {
+		movie.DisplayTitle = movie.Title
+		movie.Title = ""
+	}
 }

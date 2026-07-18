@@ -21,6 +21,7 @@ import {
 	type PosterCropMetrics,
 } from '../review-utils';
 import { overlayFieldOverride } from './overlay-field-override';
+import { buildMovieToSave } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
 interface ReviewMutationsDeps {
@@ -192,10 +193,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		mutationFn: async () => {
 			const job = deps.getJob();
 			const savePromises = Array.from(deps.getEditedMovies().entries()).map(([filePath, movie]) => {
-				const movieToSave = { ...movie };
-				if (movieToSave.display_title) {
-					movieToSave.title = movieToSave.display_title;
-				}
+				const movieToSave = buildMovieToSave(movie);
 				const resultId = job?.results?.[filePath]?.result_id;
 				if (!resultId) return null;
 				return deps.updateBatchMovie(deps.getJobId(), resultId, movieToSave);

@@ -35,3 +35,13 @@ func TestApplyDisplayTitleFromSource_ActressLanguageJa(t *testing.T) {
 		assert.Equal(t, "波多野結衣", m.DisplayTitle)
 	})
 }
+
+// TestApplyDisplayTitleFromSource_EmptyTemplate_UpdatesDisplayTitleWhenTitleChanges
+// covers D4: with no display_title template, DisplayTitle tracks Title
+// unconditionally (not only when DisplayTitle is empty), so a stale
+// DisplayTitle never persists after Title changes.
+func TestApplyDisplayTitleFromSource_EmptyTemplate_UpdatesDisplayTitleWhenTitleChanges(t *testing.T) {
+	m := &models.Movie{ID: "TEST-001", Title: "New Title", DisplayTitle: "Old Title"}
+	ApplyDisplayTitleFromSource(context.Background(), m, m, "", template.NewEngine(), nfo.NFONameConfig{})
+	assert.Equal(t, "New Title", m.DisplayTitle, "with no template, DisplayTitle tracks Title unconditionally")
+}

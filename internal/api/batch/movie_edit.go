@@ -238,6 +238,43 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
+// previewDisplayTitle godoc
+// @Summary Preview the rendered display_title template
+// @Description Render the configured display_title template for the provided movie using the shared workflow template engine, without mutating persisted state. Used by the review page to show a live NFO title preview as the user edits the base title.
+// @Tags web
+// @Accept json
+// @Produce json
+// @Param id path string true "Job ID"
+// @Param resultId path string true "Result ID"
+// @Param request body contracts.DisplayTitlePreviewRequest true "Edited movie to render"
+// @Success 200 {object} contracts.DisplayTitlePreviewResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
+// @Router /api/v1/batch/{id}/results/{resultId}/display-title-preview [post]
+func previewDisplayTitle(rt *core.APIRuntime) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req contracts.DisplayTitlePreviewRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			return
+		}
+		if req.Movie == nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "movie is required"})
+			return
+		}
+
+		snap := rt.Snapshot()
+		factory, err := snap.WorkflowFactory()
+		if err != nil || factory == nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to create workflow for display-title preview: %v", err)})
+			return
+		}
+
+		rendered := factory.RenderDisplayTitle(c.Request.Context(), contracts.MovieViewToModel(req.Movie))
+		c.JSON(http.StatusOK, contracts.DisplayTitlePreviewResponse{DisplayTitle: rendered})
+	}
+}
+
 // excludeBatchMovie godoc
 // @Summary Exclude movie from batch organization
 // @Description Mark a movie in a batch job as excluded from file organization

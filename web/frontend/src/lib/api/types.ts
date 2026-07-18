@@ -617,6 +617,14 @@ export interface OrganizePreviewResponse {
 	operation_mode?: string;
 }
 
+export interface DisplayTitlePreviewRequest {
+	movie: Movie;
+}
+
+export interface DisplayTitlePreviewResponse {
+	display_title: string;
+}
+
 export interface ScraperOption {
 	key: string;
 	label: string;

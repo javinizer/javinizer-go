@@ -45,6 +45,7 @@ import equal from 'fast-deep-equal';
 import { calculateCompleteness, type CompletenessTier } from '$lib/utils/completeness';
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
+import { buildMovieOverride } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
 interface MovieGroup {
@@ -363,11 +364,7 @@ export function createReviewState(pageStore: Page) {
 			const isEdited = editedMovies.has(fp);
 			let movieOverride: Movie | undefined;
 			if (isEdited) {
-				const edited = editedMovies.get(fp);
-				movieOverride = edited ? { ...edited } : undefined;
-				if (movieOverride && movieOverride.display_title) {
-					movieOverride.title = movieOverride.display_title;
-				}
+				movieOverride = buildMovieOverride(editedMovies.get(fp));
 			}
 
 			return apiClient.previewOrganize(jobId, currentResult!.result_id, {

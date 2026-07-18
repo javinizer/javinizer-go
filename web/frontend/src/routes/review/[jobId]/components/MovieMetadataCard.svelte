@@ -11,6 +11,7 @@
 		currentResult: FileResult;
 		showFieldScraperSources: boolean;
 		isRescraping: boolean;
+		jobId?: string;
 		onOpenRescrape: () => void;
 		onOpenSourceViewer: () => void;
 		onResetCurrentMovie: () => void;
@@ -22,6 +23,7 @@
 		currentResult,
 		showFieldScraperSources = $bindable(false),
 		isRescraping,
+		jobId,
 		onOpenRescrape,
 		onOpenSourceViewer,
 		onResetCurrentMovie,
@@ -76,6 +78,8 @@
 			onUpdate={onUpdateCurrentMovie}
 			fieldSources={currentResult.field_sources}
 			showFieldSources={showFieldScraperSources}
+			jobId={jobId}
+			resultId={currentResult.result_id}
 		/>
 	</div>
 </Card>

@@ -1,7 +1,8 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
 	import type { Movie, Genre } from '$lib/api/types';
-	import { CircleAlert, X, Plus } from 'lucide-svelte';
+	import { apiClient } from '$lib/api/client';
+	import { CircleAlert, LoaderCircle, X, Plus } from 'lucide-svelte';
 
 	interface Props {
 		movie: Movie;
@@ -9,15 +10,71 @@
 		onUpdate: (movie: Movie) => void;
 		fieldSources?: Record<string, string>;
 		showFieldSources?: boolean;
+		jobId?: string;
+		resultId?: string;
 	}
 
-	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false }: Props = $props();
+	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId }: Props = $props();
 
 	// Create a local editable copy - initialized by effect
 	let editedMovie = $state<Movie>({} as Movie);
 
 	// Genre input state
 	let newGenreInput = $state('');
+
+	// Display-title (NFO <title>) live preview state. Rendered by the backend
+	// template engine so it never drifts from the Go engine. Debounced so
+	// rapid edits don't flood the preview endpoint. Never blocks editing/saving.
+	let previewDisplayTitle = $state<string | null>(null);
+	let previewLoading = $state(false);
+	let previewError = $state(false);
+	let previewTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const previewSignature = $derived(
+		JSON.stringify({
+			id: editedMovie.id,
+			code: editedMovie.code,
+			title: editedMovie.title,
+			original_title: editedMovie.original_title,
+			actresses: editedMovie.actresses,
+			runtime: editedMovie.runtime,
+			release_year: editedMovie.release_year,
+			director: editedMovie.director,
+			maker: editedMovie.maker,
+			label: editedMovie.label,
+			series: editedMovie.series,
+			genres: editedMovie.genres,
+		}),
+	);
+
+	$effect(() => {
+		const sig = previewSignature;
+		const jid = jobId;
+		const rid = resultId;
+		if (!jid || !rid) {
+			previewDisplayTitle = null;
+			previewLoading = false;
+			previewError = false;
+			return;
+		}
+		previewLoading = true;
+		previewError = false;
+		clearTimeout(previewTimer);
+		const snapshot = { ...editedMovie };
+		previewTimer = setTimeout(async () => {
+			try {
+				const resp = await apiClient.previewDisplayTitle(jid, rid, { movie: snapshot });
+				previewDisplayTitle = resp.display_title || null;
+				previewError = false;
+			} catch {
+				previewError = true;
+				previewDisplayTitle = null;
+			} finally {
+				previewLoading = false;
+			}
+		}, 200);
+		return () => clearTimeout(previewTimer);
+	});
 
 	// Sync editedMovie when movie prop changes (including initial mount)
 	$effect(() => {
@@ -144,19 +201,36 @@
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				{m.movie_field_title()}
-				{#if sourceText('display_title')}
-					<span class="text-xs font-normal text-muted-foreground">{sourceText('display_title')}</span>
+				{#if sourceText('title')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('title')}</span>
 				{/if}
-				{#if isModified('display_title')}
+				{#if isModified('title')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
 			</label>
 			<input
 				type="text"
-				bind:value={editedMovie.display_title}
+				bind:value={editedMovie.title}
 				onchange={() => onUpdate(editedMovie)}
 				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
+			{#if jobId && resultId}
+				<div class="mt-1.5 min-h-4">
+					{#if previewLoading}
+						<p class="text-xs text-muted-foreground flex items-center gap-1">
+							<LoaderCircle class="h-3 w-3 animate-spin" />
+							{m.movie_display_title_preview_loading()}
+						</p>
+					{:else if previewError}
+						<p class="text-xs text-muted-foreground">{m.movie_display_title_preview_error()}</p>
+					{:else if previewDisplayTitle !== null}
+						<p class="text-xs text-muted-foreground">
+							{m.movie_display_title_preview_label()}:
+							<span class="font-medium text-foreground">{previewDisplayTitle}</span>
+						</p>
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		<!-- Original Title -->

@@ -429,6 +429,17 @@ definitions:
         example: nfo
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.DisplayTitlePreviewRequest:
+    properties:
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.DisplayTitlePreviewResponse:
+    properties:
+      display_title:
+        example: '[IPX-123] Beautiful Woman'
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse:
     properties:
       code:
@@ -3720,6 +3731,49 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update movie in batch job
+      tags:
+      - web
+  /api/v1/batch/{id}/results/{resultId}/display-title-preview:
+    post:
+      consumes:
+      - application/json
+      description: Render the configured display_title template for the provided movie
+        using the shared workflow template engine, without mutating persisted state.
+        Used by the review page to show a live NFO title preview as the user edits
+        the base title.
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Result ID
+        in: path
+        name: resultId
+        required: true
+        type: string
+      - description: Edited movie to render
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DisplayTitlePreviewRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DisplayTitlePreviewResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Preview the rendered display_title template
       tags:
       - web
   /api/v1/batch/{id}/results/{resultId}/exclude:

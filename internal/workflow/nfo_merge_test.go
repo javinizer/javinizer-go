@@ -83,7 +83,8 @@ func TestMergeWithExistingNFO_PreserveNFO_PreservesExistingFields(t *testing.T) 
 
 	assert.True(t, result.Merged, "Should merge when existing NFO found")
 	assert.Equal(t, filepath.FromSlash("/source/ABC-123.nfo"), result.FoundNFOPath, "FoundNFOPath should be set")
-	assert.Equal(t, "Existing Title", result.Movie.Title, "Existing title should be preserved with PreserveNFO")
+	assert.Equal(t, "Scraped Title", result.Movie.Title, "PreferNFO must not pollute base Title with the NFO display title")
+	assert.Equal(t, "Existing Title", result.Movie.DisplayTitle, "NFO <title> is preserved as the display title")
 }
 
 func TestMergeWithExistingNFO_PreferScraper_UsesScrapedValues(t *testing.T) {
