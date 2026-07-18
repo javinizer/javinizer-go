@@ -237,6 +237,8 @@ func ValidateScraperOverrides(c *Config) error {
 // ValidateTranslationProvider validates cross-field translation provider configuration.
 // It checks provider-specific requirements (base URLs, API keys, modes) based on the
 // selected provider. When translation is disabled, all checks are skipped.
+//
+//nolint:goconst // duplicated from validateTranslationProviderInternal for credential-excluding validation
 func validateTranslationProviderExcludingCredentials(c *Config) error {
 	if c == nil {
 		return nil

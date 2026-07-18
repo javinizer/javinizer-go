@@ -317,6 +317,7 @@ func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveCont
 		existingDoc = &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
 	}
 	reconcileSparse(existingDoc, sparseTarget, ctx.Schema, ctx.KnownScraperNames)
+	pruneMetadataPriorityFields(existingDoc, sparseTarget)
 	data, err := encodeYAMLDocument(existingDoc)
 	if err != nil {
 		return fmt.Errorf("failed to encode config: %w", err)

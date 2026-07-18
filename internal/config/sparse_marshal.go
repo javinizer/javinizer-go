@@ -214,8 +214,12 @@ func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]
 				} else if path == "scrapers" && knownScraperNames[srcKey.Value] {
 					scraperSchema := buildScraperSettingsSchema()
 					reconcileMappings(dstVal, srcVal, scraperSchema, knownScraperNames, joinPath(path, srcKey.Value))
-				} else {
+				} else if knownVal != nil && knownVal.Kind == yaml.MappingNode {
 					reconcileMappings(dstVal, srcVal, knownVal, knownScraperNames, joinPath(path, srcKey.Value))
+				} else {
+					replacement := cloneYAMLNode(srcVal)
+					applyNodeMetadataPreservingComments(dstVal, replacement)
+					*dstVal = *replacement
 				}
 				result = append(result, dstKey, dstVal)
 			} else {
