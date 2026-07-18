@@ -346,10 +346,6 @@ func mergeStringField(fieldName, scrapedVal, nfoVal string, strategy MergeStrate
 			return nfoVal
 		}
 		if nfoEmpty {
-			// NFO empty but scraper has value - use scraper. Without this, strict
-			// strategies (PreferNFO) would wipe a critical field (e.g. Title when
-			// the parsed NFO <title> is treated as a display title) and the
-			// "critical fields must never be empty" invariant would be violated.
 			if strategy != PreferScraper {
 				logging.Debugf("Critical field %s empty in NFO, using scraper value", fieldName)
 			}

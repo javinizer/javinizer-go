@@ -36,12 +36,29 @@ func TestApplyDisplayTitleFromSource_ActressLanguageJa(t *testing.T) {
 	})
 }
 
-// TestApplyDisplayTitleFromSource_EmptyTemplate_UpdatesDisplayTitleWhenTitleChanges
-// covers D4: with no display_title template, DisplayTitle tracks Title
-// unconditionally (not only when DisplayTitle is empty), so a stale
-// DisplayTitle never persists after Title changes.
 func TestApplyDisplayTitleFromSource_EmptyTemplate_UpdatesDisplayTitleWhenTitleChanges(t *testing.T) {
 	m := &models.Movie{ID: "TEST-001", Title: "New Title", DisplayTitle: "Old Title"}
 	ApplyDisplayTitleFromSource(context.Background(), m, m, "", template.NewEngine(), nfo.NFONameConfig{})
 	assert.Equal(t, "New Title", m.DisplayTitle, "with no template, DisplayTitle tracks Title unconditionally")
+}
+
+// TestStepDisplayTitle_NoTemplate_OverwritesStaleDisplayTitle covers the P1
+// finding: when no display_title template is configured, stepDisplayTitle
+// must unconditionally set DisplayTitle = Title (not only when DisplayTitle
+// is empty), so a stale DisplayTitle from a prior scrape is overwritten.
+func TestStepDisplayTitle_NoTemplate_OverwritesStaleDisplayTitle(t *testing.T) {
+	movie := &models.Movie{ID: "TEST-001", Title: "Edited Title", DisplayTitle: "Stale Old Title"}
+	state := &applyPipelineState{movie: movie}
+	steps := &stepCompletion{}
+
+	o := &applyOrchImpl{
+		applyCfg:       ApplyConfig{DisplayTitle: ""},
+		templateEngine: nil,
+	}
+
+	err := o.stepDisplayTitle(context.Background(), ApplyCmd{Movie: movie}, state, steps)
+	assert.NoError(t, err)
+	assert.Equal(t, "Edited Title", state.movie.DisplayTitle,
+		"with no template, stepDisplayTitle must overwrite stale DisplayTitle with Title")
+	assert.True(t, steps.DisplayTitle, "step should be marked complete")
 }

@@ -22,13 +22,11 @@
 	// Genre input state
 	let newGenreInput = $state('');
 
-	// Display-title (NFO <title>) live preview state. Rendered by the backend
-	// template engine so it never drifts from the Go engine. Debounced so
-	// rapid edits don't flood the preview endpoint. Never blocks editing/saving.
 	let previewDisplayTitle = $state<string | null>(null);
 	let previewLoading = $state(false);
 	let previewError = $state(false);
 	let previewTimer: ReturnType<typeof setTimeout> | undefined;
+	let previewGeneration = 0;
 
 	const previewSignature = $derived(
 		JSON.stringify({
@@ -36,14 +34,21 @@
 			code: editedMovie.code,
 			title: editedMovie.title,
 			original_title: editedMovie.original_title,
+			description: editedMovie.description,
 			actresses: editedMovie.actresses,
+			genres: editedMovie.genres,
 			runtime: editedMovie.runtime,
 			release_year: editedMovie.release_year,
+			release_date: editedMovie.release_date,
 			director: editedMovie.director,
 			maker: editedMovie.maker,
 			label: editedMovie.label,
 			series: editedMovie.series,
-			genres: editedMovie.genres,
+			rating_score: editedMovie.rating_score,
+			poster_url: editedMovie.poster_url,
+			cover_url: editedMovie.cover_url,
+			trailer_url: editedMovie.trailer_url,
+			original_filename: editedMovie.original_filename,
 		}),
 	);
 
@@ -61,16 +66,21 @@
 		previewError = false;
 		clearTimeout(previewTimer);
 		const snapshot = { ...editedMovie };
+		const gen = ++previewGeneration;
 		previewTimer = setTimeout(async () => {
 			try {
 				const resp = await apiClient.previewDisplayTitle(jid, rid, { movie: snapshot });
+				if (gen !== previewGeneration) return;
 				previewDisplayTitle = resp.display_title || null;
 				previewError = false;
 			} catch {
+				if (gen !== previewGeneration) return;
 				previewError = true;
 				previewDisplayTitle = null;
 			} finally {
-				previewLoading = false;
+				if (gen === previewGeneration) {
+					previewLoading = false;
+				}
 			}
 		}, 200);
 		return () => clearTimeout(previewTimer);
