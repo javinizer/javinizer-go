@@ -128,6 +128,38 @@ func (c *ScrapersConfig) getValidateFn(name string) func(*models.ScraperSettings
 	return c.validateFns[name]
 }
 
+// Override returns the creating accessor for a scraper's user-supplied settings.
+func (c *ScrapersConfig) Override(name string) *models.ScraperSettings {
+	if c.Overrides == nil {
+		c.Overrides = make(map[string]*models.ScraperSettings)
+	}
+	if c.Overrides[name] == nil {
+		c.Overrides[name] = &models.ScraperSettings{}
+	}
+	return c.Overrides[name]
+}
+
+// ApplyOverride applies the given options to the named scraper's override block.
+// With no options it returns immediately without creating an override block.
+func (c *ScrapersConfig) ApplyOverride(name string, opts ...models.ScraperOverride) {
+	if len(opts) == 0 {
+		return
+	}
+	s := c.Override(name)
+	for _, opt := range opts {
+		opt(s)
+	}
+}
+
+// UserOverride returns the named scraper's user-supplied override without creating one.
+func (c *ScrapersConfig) UserOverride(name string) (*models.ScraperSettings, bool) {
+	if c.Overrides == nil {
+		return nil, false
+	}
+	s, ok := c.Overrides[name]
+	return s, ok && s != nil
+}
+
 // IsScraperRegistered reports whether a scraper name is known to the resolver.
 // Returns true when no resolver is set (permissive default for standalone configs).
 func (c *ScrapersConfig) IsScraperRegistered(name string) bool {

@@ -27,55 +27,62 @@ func NewConfigUpdateService(rt *core.APIRuntime, configFile string) *ConfigUpdat
 }
 
 // ValidateAndApply runs the full config update pipeline:
-//  1. Prepare (defaults, validation)
-//  2. Validate translation provider config
-//  3. Validate proxy verification tokens
-//  4. Preserve redacted secrets from the old config
-//  5. Save the new config to YAML
-//  6. Reload components (scraper registry, logging)
-//  7. Roll back YAML file if reload fails
+//  1. Load disk-origin snapshot for secret preservation (pre-env)
+//  2. Preserve redacted secrets from disk state, never runtime state
+//  3. Prepare for persistence (structural validation, no credential check)
+//  4. Clone + apply env overrides -> runtimeCfg
+//  5. Prepare runtime (full validation incl. credentials)
+//  6. Validate translation + proxy tokens against runtimeCfg
+//  7. Save persistedCfg sparsely to disk
+//  8. Reload components (publishes runtimeCfg only on success)
+//  9. Roll back sparsely to diskCfg if reload fails
 //
 // The caller (HTTP handler) is responsible for serialising concurrent access
 // (via Runtime.ConfigUpdateMu) before calling this method.
 func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *config.Config, proxyTokens map[string]string) error {
-	// Preserve secrets that were redacted in the GET response
-	preserveRedactedSecrets(oldCfg, newCfg)
+	diskCfg, err := config.Load(s.configFile)
+	if err != nil {
+		return &persistError{message: "Failed to load disk config for secret preservation"}
+	}
+	preserveRedactedSecrets(diskCfg, newCfg)
 
-	// Run full config preparation pipeline before save/reload.
-	if _, err := config.Prepare(newCfg); err != nil {
+	if _, err := config.PrepareForPersistence(newCfg); err != nil {
 		return &validationError{message: err.Error()}
 	}
-	if err := validateTranslationSaveConfig(newCfg); err != nil {
+
+	runtimeCfg := newCfg.Clone()
+	config.ApplyEnvironmentOverrides(runtimeCfg)
+	if _, err := config.PrepareRuntime(runtimeCfg); err != nil {
+		return &validationError{message: err.Error()}
+	}
+
+	if err := validateTranslationSaveConfig(runtimeCfg); err != nil {
 		return &validationError{message: "Invalid configuration: " + err.Error()}
 	}
-	if err := validateProxySaveConfig(s.deps, newCfg, proxyTokens); err != nil {
+	if err := validateProxySaveConfig(s.deps, runtimeCfg, proxyTokens); err != nil {
 		return &validationError{message: "Invalid configuration: " + err.Error()}
 	}
 
-	// Save new config to YAML file (empty arrays are preserved, not removed)
-	if err := config.Save(newCfg, s.configFile); err != nil {
+	ctx := config.BuildSparseSaveContext()
+	storage := config.NewConfigStorage(nil, nil)
+	if err := storage.SaveSparse(newCfg, s.configFile, ctx); err != nil {
 		logging.Errorf("Failed to save config: %v", err)
 		return &persistError{message: "Failed to save configuration"}
 	}
 
-	// Reload components with new config (config not published until components are ready)
-	if err := reloadComponents(s.rt, s.deps, newCfg); err != nil {
+	if err := reloadComponents(s.rt, s.deps, runtimeCfg); err != nil {
 		logging.Errorf("Failed to reload components: %v", err)
-
-		// Rollback: restore old config to YAML file to prevent restart failures
-		// (in-memory config was never changed, so no need to rollback in memory)
-		if saveErr := config.Save(oldCfg, s.configFile); saveErr != nil {
-			logging.Errorf("CRITICAL: Failed to restore old config to file during rollback: %v", saveErr)
+		if saveErr := storage.SaveSparse(diskCfg, s.configFile, ctx); saveErr != nil {
+			logging.Errorf("CRITICAL: Failed to restore old config: %v", saveErr)
 			return &rollbackError{
 				rollbackErr: saveErr,
 				originalErr: err,
-				message:     fmt.Sprintf("Configuration reload failed AND rollback save failed - manual intervention required: %v (original error: %v)", saveErr, err),
+				message:     fmt.Sprintf("Configuration reload failed AND rollback save failed: %v (original: %v)", saveErr, err),
 			}
 		}
-
 		return &reloadError{
 			originalErr: err,
-			message:     "Configuration reload failed, reverted to previous version: " + err.Error(),
+			message:     "Configuration reload failed, reverted: " + err.Error(),
 		}
 	}
 

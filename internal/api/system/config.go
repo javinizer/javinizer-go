@@ -277,21 +277,22 @@ func preserveRedactedSecrets(old, new *config.Config) {
 	preserveRedactedProxyProfiles(old.Scrapers.Proxy.Profiles, new.Scrapers.Proxy.Profiles)
 	preserveRedactedProxyProfiles(old.Output.Download.DownloadProxy.Profiles, new.Output.Download.DownloadProxy.Profiles)
 
-	if old.Scrapers.Overrides != nil && new.Scrapers.Overrides != nil {
-		for name, oldSettings := range old.Scrapers.Overrides {
-			newSettings, ok := new.Scrapers.Overrides[name]
-			if !ok || oldSettings == nil || newSettings == nil {
-				continue
-			}
-			if oldSettings.Proxy != nil && newSettings.Proxy != nil {
-				preserveRedactedProxyProfiles(oldSettings.Proxy.Profiles, newSettings.Proxy.Profiles)
-			}
-			if oldSettings.DownloadProxy != nil && newSettings.DownloadProxy != nil {
-				preserveRedactedProxyProfiles(oldSettings.DownloadProxy.Profiles, newSettings.DownloadProxy.Profiles)
-			}
-			if newSettings.APIKey == models.RedactedValue {
-				newSettings.APIKey = oldSettings.APIKey
-			}
+	for name, oldSettings := range old.Scrapers.Overrides {
+		if oldSettings == nil {
+			continue
+		}
+		newSettings, ok := new.Scrapers.UserOverride(name)
+		if !ok || newSettings == nil {
+			continue
+		}
+		if oldSettings.Proxy != nil && newSettings.Proxy != nil {
+			preserveRedactedProxyProfiles(oldSettings.Proxy.Profiles, newSettings.Proxy.Profiles)
+		}
+		if oldSettings.DownloadProxy != nil && newSettings.DownloadProxy != nil {
+			preserveRedactedProxyProfiles(oldSettings.DownloadProxy.Profiles, newSettings.DownloadProxy.Profiles)
+		}
+		if newSettings.APIKey == models.RedactedValue {
+			newSettings.APIKey = oldSettings.APIKey
 		}
 	}
 }

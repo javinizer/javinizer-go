@@ -486,3 +486,18 @@ func (c *BrowserConfig) Validate(path string) error {
 
 	return nil
 }
+
+// ScraperOverride mutates a ScraperSettings via the sanctioned ApplyOverride chokepoint.
+type ScraperOverride func(*ScraperSettings)
+
+// WithScrapeActress sets the tri-state scrape_actress override.
+func WithScrapeActress(v bool) ScraperOverride {
+	return func(s *ScraperSettings) { s.ScrapeActress = boolPtr(v) }
+}
+
+// WithBrowser sets the use_browser override.
+func WithBrowser(v bool) ScraperOverride {
+	return func(s *ScraperSettings) { s.UseBrowser = v }
+}
+
+func boolPtr(b bool) *bool { return &b }

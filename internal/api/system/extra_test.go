@@ -732,7 +732,7 @@ func TestUpdateConfig_SaveAndTranslationFailures(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusInternalServerError, w.Code)
-		assert.Contains(t, w.Body.String(), "Failed to save configuration")
+		assert.Contains(t, w.Body.String(), "Failed to load disk config for secret preservation")
 	})
 }
 

@@ -59,6 +59,18 @@ func Save(cfg *Config, path string) error {
 	return defaultStorage().Save(cfg, path)
 }
 
+// SaveSparse saves a config using sparse diff + reconciliation via the default OS storage.
+func SaveSparse(cfg *Config, path string, ctx SparseSaveContext) error {
+	return defaultStorage().SaveSparse(cfg, path, ctx)
+}
+
+// BuildSparseSaveContext constructs a SparseSaveContext from compiled defaults.
+func BuildSparseSaveContext() SparseSaveContext {
+	defaults := DefaultConfig(nil, nil)
+	schema, _ := configToYAMLDocument(defaults)
+	return SparseSaveContext{Defaults: defaults, Schema: schema}
+}
+
 // Save writes the configuration to a YAML file using the configured filesystem.
 func (cs *ConfigStorage) Save(cfg *Config, path string) error {
 	dir := filepath.Dir(path)
@@ -205,7 +217,8 @@ func (cs *ConfigStorage) createFromEmbedded(path string) (*Config, error) {
 	}
 
 	if applyInitDefaultsFromEnv(cfg) {
-		if err := cs.Save(cfg, path); err != nil {
+		ctx := BuildSparseSaveContext()
+		if err := cs.SaveSparse(cfg, path, ctx); err != nil {
 			return nil, fmt.Errorf("failed to save config with environment overrides: %w", err)
 		}
 	}
@@ -219,7 +232,7 @@ func (cs *ConfigStorage) createFromEmbedded(path string) (*Config, error) {
 }
 
 func minimalInitStub() []byte {
-	return []byte("# Javinizer configuration. Missing keys use compiled defaults; see\n# docs/02-configuration.md for all options. Edit freely.\nconfig_version: 3\n")
+	return []byte(fmt.Sprintf("# Javinizer configuration. Missing keys use compiled defaults; see\n# docs/02-configuration.md for all options. Edit freely.\nconfig_version: %d\n", CurrentConfigVersion))
 }
 
 // SaveSparse saves a config using sparse diff + reconciliation.
@@ -227,6 +240,10 @@ func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveCont
 	sparseTarget, err := diffYAMLDocuments(cfg, ctx.Defaults)
 	if err != nil {
 		return fmt.Errorf("failed to diff config: %w", err)
+	}
+	dir := filepath.Dir(path)
+	if err := cs.fs.MkdirAll(dir, DirPerm); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 	unlock, err := cs.acquireLock(path)
 	if err != nil {
@@ -239,6 +256,10 @@ func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveCont
 		existingDoc, err = parseYAMLDocument(existingData)
 		if err != nil {
 			return fmt.Errorf("failed to parse existing config: %w", err)
+		}
+		root := mappingRoot(existingDoc)
+		if root == nil || root.Kind != yaml.MappingNode {
+			return fmt.Errorf("existing config is not a YAML mapping")
 		}
 	} else if !isNotExist(readErr) {
 		return fmt.Errorf("failed to read config: %w", readErr)
