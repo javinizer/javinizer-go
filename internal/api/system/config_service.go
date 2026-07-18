@@ -78,7 +78,10 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 		return &validationError{message: "Invalid configuration: " + err.Error()}
 	}
 
-	ctx := config.BuildSparseSaveContextWithNames(s.scraperNames())
+	ctx, err := config.BuildSparseSaveContextWithNames(s.scraperNames())
+	if err != nil {
+		return &validationError{message: err.Error()}
+	}
 	storage := config.NewConfigStorage(nil, nil)
 	if err := storage.SaveSparse(newCfg, s.configFile, ctx); err != nil {
 		logging.Errorf("Failed to save config: %v", err)

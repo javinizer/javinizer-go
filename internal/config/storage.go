@@ -66,7 +66,11 @@ func SaveSparse(cfg *Config, path string, ctx SparseSaveContext) error {
 
 // BuildSparseSaveContext constructs a SparseSaveContext from compiled defaults.
 func BuildSparseSaveContext() SparseSaveContext {
-	return BuildSparseSaveContextWithNames(nil)
+	ctx, err := BuildSparseSaveContextWithNames(nil)
+	if err != nil {
+		panic(err)
+	}
+	return ctx
 }
 
 var staticScraperKeys = map[string]bool{
@@ -88,20 +92,20 @@ var staticScraperKeys = map[string]bool{
 // NOTE: this uses DefaultConfig(nil, nil), which relies on hardcoded compiled
 // priorities. For custom registries with different priorities this may produce
 // false diffs. A shared default-context provider is an open question in the spec.
-func BuildSparseSaveContextWithNames(names []string) SparseSaveContext {
+func BuildSparseSaveContextWithNames(names []string) (SparseSaveContext, error) {
 	defaults := DefaultConfig(nil, nil)
 	schema, err := configToYAMLDocument(defaults)
 	if err != nil {
-		panic(fmt.Sprintf("failed to build schema: %v", err))
+		return SparseSaveContext{}, fmt.Errorf("failed to build schema: %w", err)
 	}
 	known := make(map[string]bool, len(names))
 	for _, n := range names {
 		if staticScraperKeys[n] {
-			continue
+			return SparseSaveContext{}, fmt.Errorf("scraper name %q collides with static config key", n)
 		}
 		known[n] = true
 	}
-	return SparseSaveContext{Defaults: defaults, Schema: schema, KnownScraperNames: known}
+	return SparseSaveContext{Defaults: defaults, Schema: schema, KnownScraperNames: known}, nil
 }
 
 // Save writes the configuration to a YAML file using the configured filesystem.

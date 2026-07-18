@@ -3,10 +3,13 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gopkg.in/yaml.v3"
 )
+
+func boolPtr(b bool) *bool { return &b }
 
 // SparseSaveContext carries the defaults, schema, and known scraper names for sparse persistence.
 type SparseSaveContext struct {
@@ -255,41 +258,72 @@ func isZeroScraperMapping(node *yaml.Node) bool {
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		val := node.Content[i+1]
-		switch val.Kind {
-		case yaml.ScalarNode:
-			switch val.Value {
-			case "", "0", "false", "null":
-			default:
-				return false
-			}
-		case yaml.MappingNode:
+		if val.Kind == yaml.MappingNode || val.Kind == yaml.SequenceNode {
 			if len(val.Content) > 0 {
 				return false
 			}
-		case yaml.SequenceNode:
-			if len(val.Content) > 0 {
+			continue
+		}
+		if val.Kind != yaml.ScalarNode {
+			return false
+		}
+		switch val.Tag {
+		case "!!str":
+			if val.Value != "" {
 				return false
 			}
+		case "!!int", "!!float":
+			if val.Value != "0" {
+				return false
+			}
+		case "!!bool":
+			if val.Value != "false" {
+				return false
+			}
+		case "!!null":
+		default:
+			return false
 		}
 	}
 	return true
 }
 
-var scraperSettingsSchemaCache *yaml.Node
+var (
+	scraperSettingsSchemaOnce sync.Once
+	scraperSettingsSchema     *yaml.Node
+)
 
 func buildScraperSettingsSchema() *yaml.Node {
-	if scraperSettingsSchemaCache != nil {
-		return scraperSettingsSchemaCache
-	}
-	zero := models.ScraperSettings{}
-	data, err := yaml.Marshal(&zero)
-	if err != nil {
-		return nil
-	}
-	doc, err := parseYAMLDocument(data)
-	if err != nil {
-		return nil
-	}
-	scraperSettingsSchemaCache = mappingRoot(doc)
-	return scraperSettingsSchemaCache
+	scraperSettingsSchemaOnce.Do(func() {
+		s := models.ScraperSettings{
+			Enabled:                true,
+			Language:               "xx",
+			Timeout:                1,
+			RateLimit:              1,
+			RetryCount:             1,
+			UserAgent:              "xx",
+			Proxy:                  &models.ProxyConfig{Enabled: true},
+			DownloadProxy:          &models.ProxyConfig{Enabled: true},
+			BaseURL:                "xx",
+			UseFlareSolverr:        true,
+			UseBrowser:             true,
+			ScrapeActress:          boolPtr(true),
+			Cookies:                map[string]string{"k": "v"},
+			PlaceholderThresholdKB: 1,
+			ExtraPlaceholderHashes: []string{"xx"},
+			ScrapeBonusScreens:     true,
+			APIKey:                 "xx",
+			RespectRetryAfter:      boolPtr(true),
+		}
+		data, err := yaml.Marshal(&s)
+		if err != nil {
+			return
+		}
+		doc, err := parseYAMLDocument(data)
+		if err != nil {
+			return
+		}
+		scraperSettingsSchema = mappingRoot(doc)
+	})
+	return scraperSettingsSchema
 }

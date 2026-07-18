@@ -2,9 +2,6 @@ package config
 
 import "github.com/javinizer/javinizer-go/internal/models"
 
-// boolPtr returns a pointer to the given bool value.
-func boolPtr(b bool) *bool { return &b }
-
 // NewTestScraperConfigResolverInterface creates a models.ScraperConfigResolverInterface for testing.
 func NewTestScraperConfigResolverInterface() models.ScraperConfigResolverInterface {
 	return &staticTestConfigResolver{
