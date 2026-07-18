@@ -64,7 +64,7 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 		logging.Warnf("[workflow] Failed to parse existing NFO for %s: %v (using scraped data only)", movie.ID, parseErr)
 		return result
 	}
-	remapParsedNFOTitleForMerge(parseResult.Movie)
+	RemapParsedNFOTitleForMerge(parseResult.Movie)
 	scalarStrategy := opts.ScalarStrategy
 	mergeArrays := opts.ArrayStrategy
 	// preset is resolved at the boundary before constructing
@@ -83,7 +83,11 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 	return result
 }
 
-func remapParsedNFOTitleForMerge(movie *models.Movie) {
+// RemapParsedNFOTitleForMerge treats a parsed NFO <title> as a display title
+// (javinizer writes DisplayTitle there): when DisplayTitle is empty it moves
+// Title to DisplayTitle and clears Title, so merges never pull a code-prefixed
+// NFO display title into the base Title.
+func RemapParsedNFOTitleForMerge(movie *models.Movie) {
 	if movie == nil {
 		return
 	}

@@ -248,3 +248,38 @@ func TestCompareOrchestrator_DifferencesPopulated(t *testing.T) {
 	assert.Equal(t, "NFO Title", result.Differences[0].NFOValue)
 	assert.Equal(t, "Scraped Title", result.Differences[0].ScrapedValue)
 }
+
+// TestCompareOrchestrator_PreferNFO_CodePrefixedNFOTitleDoesNotPolluteMergedTitle
+// covers the compare-path variant of the title-doubling bug: a javinizer-written
+// NFO stores the display title in <title>, so merging it back under PreferNFO
+// must not pull the code-prefixed value into the merged base Title. The raw
+// NFOData is preserved for the diff view; only the merge input is remapped.
+func TestCompareOrchestrator_PreferNFO_CodePrefixedNFOTitleDoesNotPolluteMergedTitle(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	nfoData := &models.Movie{ID: "MKMP-094", ContentID: "mkmp094", Title: "[MKMP-094] Ayaka Tomoda"}
+	writeTestNFO(t, fs, "/source/MKMP-094.nfo", nfoData)
+
+	scrapedData := &models.Movie{ID: "MKMP-094", ContentID: "mkmp094", Title: "Ayaka Tomoda"}
+
+	orch := newCompareOrchestrator(
+		fs,
+		&mockNFOFieldMerger{},
+		&mockScraperInterface{
+			result: &scrape.ScrapeResult{Movie: scrapedData},
+		},
+		nil,
+	)
+
+	result, err := orch.Execute(context.Background(), CompareCmd{
+		MovieID:        "MKMP-094",
+		NFOPath:        "/source/MKMP-094.nfo",
+		ScalarStrategy: nfo.PreferNFO,
+		ArrayStrategy:  false,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	assert.Equal(t, "Ayaka Tomoda", result.Movie.Title, "PreferNFO must not pollute the merged base Title with the code-prefixed NFO display title")
+	assert.Equal(t, "[MKMP-094] Ayaka Tomoda", result.Movie.DisplayTitle, "merged DisplayTitle carries the NFO display title under PreferNFO")
+	assert.Equal(t, "[MKMP-094] Ayaka Tomoda", result.NFOData.Title, "raw NFOData keeps the file <title> for the diff view")
+}

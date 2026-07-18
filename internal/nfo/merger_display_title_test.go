@@ -12,14 +12,14 @@ import (
 
 func TestRemapParsedNFOTitleForMerge_MovesTitleToDisplayTitle(t *testing.T) {
 	movie := &models.Movie{ID: "MKMP-094", Title: "[MKMP-094] Ayaka Tomoda"}
-	remapParsedNFOTitleForMerge(movie)
+	RemapParsedNFOTitleForMerge(movie)
 	assert.Equal(t, "", movie.Title, "Title is cleared so the merge treats the NFO <title> as a display title")
 	assert.Equal(t, "[MKMP-094] Ayaka Tomoda", movie.DisplayTitle, "NFO <title> is carried as the display title")
 }
 
 func TestRemapParsedNFOTitleForMerge_KeepsExistingDisplayTitle(t *testing.T) {
 	movie := &models.Movie{ID: "MKMP-094", Title: "ignored", DisplayTitle: "already set"}
-	remapParsedNFOTitleForMerge(movie)
+	RemapParsedNFOTitleForMerge(movie)
 	assert.Equal(t, "ignored", movie.Title)
 	assert.Equal(t, "already set", movie.DisplayTitle)
 }
@@ -28,7 +28,7 @@ func TestMergePreferNFO_CodePrefixedNFOTitleDoesNotPolluteTitle(t *testing.T) {
 	scraped := &models.Movie{ID: "MKMP-094", ContentID: "mkmp094", Title: "Ayaka Tomoda"}
 	nfoMovie := &models.Movie{ID: "MKMP-094", ContentID: "mkmp094", Title: "[MKMP-094] Ayaka Tomoda"}
 
-	remapParsedNFOTitleForMerge(nfoMovie)
+	RemapParsedNFOTitleForMerge(nfoMovie)
 	require.Equal(t, "", nfoMovie.Title)
 	require.Equal(t, "[MKMP-094] Ayaka Tomoda", nfoMovie.DisplayTitle)
 
@@ -68,6 +68,6 @@ func TestMergeWithExistingNFO_PreferNFO_CodePrefixedTitleDoesNotPolluteTitle(t *
 
 func TestRemapParsedNFOTitleForMerge_NilMovieDoesNotPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
-		remapParsedNFOTitleForMerge(nil)
+		RemapParsedNFOTitleForMerge(nil)
 	})
 }

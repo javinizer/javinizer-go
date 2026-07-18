@@ -111,8 +111,12 @@ func (o *compareOrchImpl) Execute(ctx context.Context, cmd CompareCmd) (*Compare
 	scalarStrategy := cmd.ScalarStrategy
 	mergeArrays := cmd.ArrayStrategy
 
-	// Step 5: Merge.
-	mergeResult, mergeErr := nfo.MergeMovieMetadataWithOptions(result.ScrapedData, result.NFOData, scalarStrategy, mergeArrays)
+	// Step 5: Merge. The parsed NFO <title> is a display title (javinizer writes
+	// DisplayTitle there), so merge with a remapped copy; NFOData keeps the raw
+	// file values for the diff view.
+	nfoForMerge := *result.NFOData
+	nfo.RemapParsedNFOTitleForMerge(&nfoForMerge)
+	mergeResult, mergeErr := nfo.MergeMovieMetadataWithOptions(result.ScrapedData, &nfoForMerge, scalarStrategy, mergeArrays)
 	if mergeErr != nil {
 		return nil, fmt.Errorf("%w: %s", ErrMergeFailed, mergeErr.Error())
 	}
