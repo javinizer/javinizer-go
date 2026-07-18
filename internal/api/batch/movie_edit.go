@@ -70,12 +70,31 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		// Convert once and re-derive display_title so a title edit is reflected
+		// immediately in persisted state and any client that renders display_title
+		// (grid cards, metadata headers) without waiting for organize. Title is
+		// never modified — RenderDisplayTitle only writes DisplayTitle — so this
+		// cannot reintroduce the title-doubling bug this PR fixes. If the workflow
+		// factory is unavailable, fall back to DisplayTitle = Title, matching the
+		// canonical no-template/error degradation (display_title.go).
+		movie := contracts.MovieViewToModel(req.Movie)
+		movie.DisplayTitle = movie.Title
+		if snap := rt.Snapshot(); snap != nil {
+			if factory, fErr := snap.WorkflowFactory(); fErr == nil && factory != nil {
+				if rendered := factory.RenderDisplayTitle(c.Request.Context(), movie); rendered != "" {
+					movie.DisplayTitle = rendered
+				}
+			} else if fErr != nil {
+				logging.Warnf("Failed to create workflow for display-title re-derive on save: %v", fErr)
+			}
+		}
+
 		// UpdateMovie now handles both DB persistence and in-memory
 		// update atomically. No need to call MovieRepo directly.
 
 		// Update ALL file parts for this movie ID (handles multi-part files like CD1, CD2, etc.)
 		for _, filePath := range filePaths {
-			err := job.UpdateMovie(c.Request.Context(), filePath, contracts.MovieViewToModel(req.Movie))
+			err := job.UpdateMovie(c.Request.Context(), filePath, movie)
 
 			if err != nil {
 				logging.Errorf("Failed to update movie for %s: %v", filePath, err)
@@ -83,7 +102,7 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				return
 			}
 		}
-		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: req.Movie})
+		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie)})
 	}
 }
 

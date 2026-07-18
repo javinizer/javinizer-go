@@ -517,11 +517,12 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 			)
 			.toContain(editedTitle);
 
-		// The grid card still shows the ORIGINAL display_title — a
-		// base-title edit does not mutate display_title, which is
-		// re-derived on organize (and live-previewed separately in
-		// MovieEditor). Before the title rebind, this would have shown
-		// the edited value; now it must stay at the original.
+		// Pre-Save (window A): the edit lives only in local editedMovies; it has
+		// NOT been persisted yet, so the grid still shows the persisted display_title.
+		// display_title is re-derived on Save (backend) and on organize — but only
+		// after a Save click, which this test deliberately does not perform. The
+		// editor owns the live preview in the meantime. (Post-Save freshness is
+		// covered by the backend TestUpdateBatchMovie_ReDerivesDisplayTitleOnSave.)
 		await switchToGridView(page);
 		await expect
 			.poll(
