@@ -233,7 +233,8 @@ func (cs *ConfigStorage) LoadOrCreate(path string) (*Config, error) {
 
 	diskChanged := normalize(diskCfg)
 	if changed || diskChanged {
-		if err := cs.Save(diskCfg, path); err != nil {
+		ctx := BuildSparseSaveContext()
+		if err := cs.SaveSparse(diskCfg, path, ctx); err != nil {
 			return nil, fmt.Errorf("failed to save migrated config: %w", err)
 		}
 	}
