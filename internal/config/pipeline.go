@@ -152,6 +152,17 @@ func Prepare(cfg *Config) (bool, error) {
 		)
 	}
 
+	if cfg.DefaultsVersion > CurrentDefaultsVersion {
+		return false, fmt.Errorf(
+			"defaults version %d is newer than supported version %d; please update Javinizer",
+			cfg.DefaultsVersion,
+			CurrentDefaultsVersion,
+		)
+	}
+	if cfg.DefaultsVersion < 0 {
+		return false, fmt.Errorf("defaults version must be >= 0, got %d", cfg.DefaultsVersion)
+	}
+
 	normalized := normalize(cfg)
 
 	// An explicitly empty scrapers.priority (yaml `priority: []` or `priority:

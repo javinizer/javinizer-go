@@ -41,6 +41,10 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 	// Preserve secrets that were redacted in the GET response
 	preserveRedactedSecrets(oldCfg, newCfg)
 
+	if oldCfg != nil {
+		newCfg.DefaultsVersion = oldCfg.DefaultsVersion
+	}
+
 	// Run full config preparation pipeline before save/reload.
 	if _, err := config.Prepare(newCfg); err != nil {
 		return &validationError{message: err.Error()}

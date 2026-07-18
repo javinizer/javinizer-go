@@ -6654,7 +6654,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "request_timeout_seconds": {
-                    "description": "Overall request timeout in seconds (default: 60)",
+                    "description": "Overall request timeout in seconds (default: 180)",
                     "type": "integer"
                 },
                 "scrape_actress": {

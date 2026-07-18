@@ -38,7 +38,7 @@ type ScrapersConfig struct {
 	UserAgent             string                                         `yaml:"user_agent" json:"user_agent"`
 	Referer               string                                         `yaml:"referer" json:"referer"`                                 // Referer header for CDN compatibility (default: https://www.dmm.co.jp/)
 	TimeoutSeconds        int                                            `yaml:"timeout_seconds" json:"timeout_seconds"`                 // HTTP client timeout in seconds (default: 30)
-	RequestTimeoutSeconds int                                            `yaml:"request_timeout_seconds" json:"request_timeout_seconds"` // Overall request timeout in seconds (default: 60)
+	RequestTimeoutSeconds int                                            `yaml:"request_timeout_seconds" json:"request_timeout_seconds"` // Overall request timeout in seconds (default: 180)
 	Priority              []string                                       `yaml:"priority" json:"priority"`                               // Global scraper priority order
 	FlareSolverr          models.FlareSolverrConfig                      `yaml:"flaresolverr" json:"flaresolverr"`                       // Global FlareSolverr config for Cloudflare bypass
 	ScrapeActress         bool                                           `yaml:"scrape_actress" json:"scrape_actress"`                   // Global scrape_actress default (opt-out, default: true)

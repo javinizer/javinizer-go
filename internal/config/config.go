@@ -15,6 +15,8 @@ import (
 const (
 	CurrentConfigVersion = 3
 
+	CurrentDefaultsVersion = 1
+
 	// DirPerm is the default permission for directory creation.
 	DirPerm = 0777
 	// DirPermTemp is the permission for temporary directory creation.
@@ -117,21 +119,22 @@ type UIConfig struct {
 
 // Config represents the application configuration
 type Config struct {
-	ConfigVersion int               `yaml:"config_version" json:"config_version"`
-	UI            UIConfig          `yaml:"ui" json:"ui"`
-	Server        ServerConfig      `yaml:"server" json:"server"`
-	API           APIConfig         `yaml:"api" json:"api"`
-	System        SystemConfig      `yaml:"system" json:"system"`
-	Scrapers      ScrapersConfig    `yaml:"scrapers" json:"scrapers"`
-	Metadata      MetadataConfig    `yaml:"metadata" json:"metadata"`
-	Matching      MatchingConfig    `yaml:"file_matching" json:"file_matching"`
-	Output        OutputConfig      `yaml:"output" json:"output"`
-	Database      DatabaseConfig    `yaml:"database" json:"database"`
-	Logging       LoggingConfig     `yaml:"logging" json:"logging"`
-	Performance   PerformanceConfig `yaml:"performance" json:"performance"`
-	MediaInfo     mediaInfoConfig   `yaml:"mediainfo" json:"mediainfo"`
-	WebUI         webUIConfig       `yaml:"webui" json:"webui"`
-	Warnings      []ConfigWarning   `yaml:"-" json:"warnings,omitempty"`
+	ConfigVersion   int               `yaml:"config_version" json:"config_version"`
+	DefaultsVersion int               `yaml:"defaults_version" json:"-"`
+	UI              UIConfig          `yaml:"ui" json:"ui"`
+	Server          ServerConfig      `yaml:"server" json:"server"`
+	API             APIConfig         `yaml:"api" json:"api"`
+	System          SystemConfig      `yaml:"system" json:"system"`
+	Scrapers        ScrapersConfig    `yaml:"scrapers" json:"scrapers"`
+	Metadata        MetadataConfig    `yaml:"metadata" json:"metadata"`
+	Matching        MatchingConfig    `yaml:"file_matching" json:"file_matching"`
+	Output          OutputConfig      `yaml:"output" json:"output"`
+	Database        DatabaseConfig    `yaml:"database" json:"database"`
+	Logging         LoggingConfig     `yaml:"logging" json:"logging"`
+	Performance     PerformanceConfig `yaml:"performance" json:"performance"`
+	MediaInfo       mediaInfoConfig   `yaml:"mediainfo" json:"mediainfo"`
+	WebUI           webUIConfig       `yaml:"webui" json:"webui"`
+	Warnings        []ConfigWarning   `yaml:"-" json:"warnings,omitempty"`
 }
 
 // ServerConfig holds API server configuration
@@ -193,19 +196,20 @@ type SystemConfig struct {
 // marshaling is always applied.
 func (c *Config) MarshalYAML() (interface{}, error) {
 	m := map[string]any{
-		"config_version": c.ConfigVersion,
-		"ui":             c.UI,
-		"server":         c.Server,
-		"api":            c.API,
-		"system":         c.System,
-		"metadata":       c.Metadata,
-		"file_matching":  c.Matching,
-		"output":         c.Output,
-		"database":       c.Database,
-		"logging":        c.Logging,
-		"performance":    c.Performance,
-		"mediainfo":      c.MediaInfo,
-		"webui":          c.WebUI,
+		"config_version":   c.ConfigVersion,
+		"defaults_version": c.DefaultsVersion,
+		"ui":               c.UI,
+		"server":           c.Server,
+		"api":              c.API,
+		"system":           c.System,
+		"metadata":         c.Metadata,
+		"file_matching":    c.Matching,
+		"output":           c.Output,
+		"database":         c.Database,
+		"logging":          c.Logging,
+		"performance":      c.Performance,
+		"mediainfo":        c.MediaInfo,
+		"webui":            c.WebUI,
 	}
 
 	scrapersYAML, err := c.Scrapers.MarshalYAML()

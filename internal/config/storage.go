@@ -172,12 +172,13 @@ func (cs *ConfigStorage) LoadOrCreate(path string) (*Config, error) {
 	}
 
 	ApplyEnvironmentOverrides(cfg)
+	patched := applyDefaultsPatches(cfg)
 	changed, err := Prepare(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	if changed {
+	if patched || changed {
 		if err := cs.Save(cfg, path); err != nil {
 			return nil, fmt.Errorf("failed to save migrated config: %w", err)
 		}
@@ -413,6 +414,7 @@ func decodeConfig(data []byte) (*Config, error) {
 	// Treat existing files without config_version as legacy schema (v0) so
 	// LoadOrCreate can apply migrations and persist newly introduced fields.
 	cfg.ConfigVersion = 0
+	cfg.DefaultsVersion = 0
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)

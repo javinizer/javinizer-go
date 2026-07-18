@@ -1,4 +1,5 @@
 config_version: 3
+defaults_version: 1
 # API authentication credentials are stored in `auth.credentials.json` next to this file.
 # To reset credentials, stop the server, delete that file, then restart `javinizer web`.
 #
@@ -88,8 +89,8 @@ scrapers:
     referer: https://www.dmm.co.jp/
     # HTTP client timeout in seconds (default: 30)
     timeout_seconds: 30
-    # Overall request timeout in seconds (default: 60)
-    request_timeout_seconds: 60
+    # Overall request timeout in seconds (default: 180)
+    request_timeout_seconds: 180
     priority:
         - r18dev
         - libredmm
