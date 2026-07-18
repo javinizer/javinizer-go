@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -144,4 +145,35 @@ func TestEmbeddedConfigCarriesCurrentDefaultsVersion(t *testing.T) {
 	cfg, err := decodeConfig(embeddedConfigBytes())
 	require.NoError(t, err)
 	assert.Equal(t, CurrentDefaultsVersion, cfg.DefaultsVersion)
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+
+	fn()
+
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return string(out)
+}
+
+func TestApplyDefaultsPatches_Notice(t *testing.T) {
+	t.Run("prints notice when a value is rewritten", func(t *testing.T) {
+		cfg := &Config{DefaultsVersion: 0, Scrapers: ScrapersConfig{RequestTimeoutSeconds: 60}}
+		out := captureStderr(t, func() { applyDefaultsPatches(cfg) })
+		assert.Contains(t, out, "scrapers.request_timeout_seconds")
+		assert.Contains(t, out, "180")
+	})
+
+	t.Run("silent when only the marker advances", func(t *testing.T) {
+		cfg := &Config{DefaultsVersion: 0, Scrapers: ScrapersConfig{RequestTimeoutSeconds: 120}}
+		out := captureStderr(t, func() { applyDefaultsPatches(cfg) })
+		assert.Empty(t, out)
+	})
 }
