@@ -132,7 +132,17 @@ func looksLikeJavinizerDisplayTitle(title, movieID string) bool {
 	}
 	lower := strings.ToLower(title)
 	id := strings.ToLower(movieID)
-	return strings.HasPrefix(lower, "["+id+"]") || strings.HasPrefix(lower, id+" ")
+	if strings.HasPrefix(lower, "["+id+"]") {
+		return true
+	}
+	if !strings.HasPrefix(lower, id) {
+		return false
+	}
+	rest := lower[len(id):]
+	if rest == "" {
+		return false
+	}
+	return !isAlnum(rune(rest[0]))
 }
 
 // stripCodePrefix removes a leading "[<id>] " or "<id> " code prefix (case-
@@ -149,17 +159,18 @@ func stripCodePrefix(title, movieID string) string {
 	var stripped string
 	if strings.HasPrefix(lower, "["+id+"]") {
 		stripped = title[len(movieID)+2:]
-	} else if strings.HasPrefix(lower, id+" ") {
-		stripped = title[len(movieID)+1:]
+	} else if strings.HasPrefix(lower, id) {
+		stripped = title[len(movieID):]
 	} else {
 		return title
 	}
 	stripped = strings.TrimSpace(stripped)
-	for _, sep := range []string{"- ", "\u2013 ", "\u2014 ", "-"} {
-		if strings.HasPrefix(stripped, sep) {
-			stripped = strings.TrimSpace(stripped[len(sep):])
-			break
-		}
+	if stripped != "" && !isAlnum(rune(stripped[0])) {
+		stripped = strings.TrimSpace(stripped[1:])
 	}
 	return stripped
+}
+
+func isAlnum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
