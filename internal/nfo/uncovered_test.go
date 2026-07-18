@@ -253,12 +253,13 @@ func TestMergeWithExistingNFO_PreserveNFO_Uncovered(t *testing.T) {
 	}
 
 	result := nfoImpl.MergeWithExistingNFO(movie, opts)
-	// With PreserveNFO, the merge uses PreserveExisting. The NFO <title> is a
-	// display title (javinizer writes DisplayTitle there), so it is preserved in
-	// DisplayTitle while the clean scraped base Title is kept untouched.
+	// With PreserveNFO, the merge uses PreserveExisting. A manual/imported NFO
+	// <title> (no movie-code prefix) is the desired base title, so it is kept in
+	// Title and preserved by PreserveExisting rather than being moved to
+	// DisplayTitle and overwritten by the scraped title.
 	assert.True(t, result.Merged, "should have merged with existing NFO")
-	assert.Equal(t, "Scraped Title", result.Movie.Title, "PreserveNFO must not pollute base Title with the NFO display title")
-	assert.Equal(t, "Existing Title", result.Movie.DisplayTitle, "PreserveNFO preserves the NFO <title> as the display title")
+	assert.Equal(t, "Existing Title", result.Movie.Title, "PreserveNFO keeps the existing manual NFO <title> as the base Title")
+	assert.Equal(t, "", result.Movie.DisplayTitle, "a manual NFO <title> is not remapped to DisplayTitle")
 }
 
 func TestDefaultMediaAnalyzer_Analyze_Uncovered(t *testing.T) {

@@ -273,11 +273,11 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			arrayStrategy:  "",
 			checkResponse: func(t *testing.T, resp *contracts.NFOComparisonResponse) {
 				// Default for compareNFO should be prefer-nfo (conservative, preserves existing data).
-				// The NFO <title> is a display title (javinizer writes DisplayTitle there),
-				// so the merged base Title keeps the clean scraped value while the NFO
-				// <title> is preserved in DisplayTitle.
-				assert.Equal(t, "Scraped Title", resp.MergedData.Title)
-				assert.Equal(t, "NFO Title", resp.MergedData.DisplayTitle)
+				// The NFO <title> here is a manual base title (no movie-code prefix), so it
+				// is preserved as the merged base Title under prefer-nfo rather than being
+				// moved to DisplayTitle.
+				assert.Equal(t, "NFO Title", resp.MergedData.Title)
+				assert.Equal(t, "", resp.MergedData.DisplayTitle)
 			},
 		},
 	}

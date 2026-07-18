@@ -66,6 +66,49 @@ func TestMergeWithExistingNFO_PreferNFO_CodePrefixedTitleDoesNotPolluteTitle(t *
 	assert.Equal(t, "[MKMP-094] Ayaka Tomoda", result.Movie.DisplayTitle, "code-prefixed NFO <title> lands in DisplayTitle")
 }
 
+// TestRemapParsedNFOTitleForMerge_LeavesManualBaseTitleUntouched guards
+// codex P2 finding 3: a manually-edited or imported NFO whose <title> is the
+// desired base title (no code prefix) must not be moved to DisplayTitle and
+// cleared, otherwise preserve_nfo/prefer-nfo could no longer keep the existing
+// NFO <title> as the base Title.
+func TestRemapParsedNFOTitleForMerge_LeavesManualBaseTitleUntouched(t *testing.T) {
+	cases := []struct {
+		name         string
+		title        string
+		id           string
+		scrapedTitle string
+	}{
+		{"plain base title", "Ayaka Tomoda", "MKMP-094", "Scraped Title"},
+		{"title without movie id prefix", "Best Movie Ever", "MKMP-094", "Scraped Title"},
+		{"empty movie id cannot be classified", "[MKMP-094] Ayaka Tomoda", "", "Scraped Title"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			movie := &models.Movie{ID: tc.id, Title: tc.title}
+			RemapParsedNFOTitleForMerge(movie, tc.scrapedTitle)
+			assert.Equal(t, tc.title, movie.Title, "manual base title is left in Title")
+			assert.Equal(t, "", movie.DisplayTitle, "DisplayTitle is not populated from a manual base title")
+		})
+	}
+}
+
+// TestMergePreferNFO_ManualNFOTitleIsPreservedAsBaseTitle asserts the end-to-end
+// merge path for finding 3: under PreferNFO an imported/manual NFO <title> that
+// is a plain base title is preserved as the merged base Title rather than being
+// emptied and overwritten by the scraped title.
+func TestMergePreferNFO_ManualNFOTitleIsPreservedAsBaseTitle(t *testing.T) {
+	scraped := &models.Movie{ID: "MKMP-094", ContentID: "mkmp094", Title: "Scraped Title"}
+	nfoMovie := &models.Movie{ID: "MKMP-094", ContentID: "mkmp094", Title: "Imported Manual Title"}
+
+	RemapParsedNFOTitleForMerge(nfoMovie, scraped.Title)
+	require.Equal(t, "Imported Manual Title", nfoMovie.Title, "manual NFO title is not remapped")
+	require.Equal(t, "", nfoMovie.DisplayTitle)
+
+	result, err := MergeMovieMetadataWithOptions(scraped, nfoMovie, PreferNFO, false)
+	require.NoError(t, err)
+	assert.Equal(t, "Imported Manual Title", result.Merged.Title, "PreferNFO keeps the existing manual NFO <title>")
+}
+
 func TestRemapParsedNFOTitleForMerge_NilMovieDoesNotPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
 		RemapParsedNFOTitleForMerge(nil, "")

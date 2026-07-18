@@ -89,6 +89,12 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 // Title to DisplayTitle and clears Title, so merges never pull a code-prefixed
 // NFO display title into the base Title.
 //
+// The remap only fires when the NFO <title> looks like a javinizer-generated
+// display title — i.e. it is prefixed with the movie's own code (optionally
+// bracketed). Manually-edited or imported NFOs whose <title> is the desired
+// base title are left untouched so preserve_nfo / prefer-nfo strategies keep
+// the existing NFO <title> as the base Title.
+//
 // scrapedTitle is the scraper's base Title for the same movie. When it is empty
 // (sparse scraper result or temporary title-extraction failure), moving the NFO
 // <title> to DisplayTitle would leave both merge inputs without a base Title,
@@ -103,12 +109,30 @@ func RemapParsedNFOTitleForMerge(movie *models.Movie, scrapedTitle string) {
 	if movie.DisplayTitle != "" || movie.Title == "" {
 		return
 	}
+	if !looksLikeJavinizerDisplayTitle(movie.Title, movie.ID) {
+		return
+	}
 	if strings.TrimSpace(scrapedTitle) == "" {
 		movie.Title = stripCodePrefix(movie.Title, movie.ID)
 		return
 	}
 	movie.DisplayTitle = movie.Title
 	movie.Title = ""
+}
+
+// looksLikeJavinizerDisplayTitle reports whether title is prefixed with the
+// movie's own code, optionally wrapped in brackets (e.g. "[MKMP-094] ..." or
+// "MKMP-094 ..."). This is the signature of a javinizer-generated display title
+// written to the NFO <title> field; plain base titles from manual/imported NFOs
+// do not start with the movie code.
+func looksLikeJavinizerDisplayTitle(title, movieID string) bool {
+	title = strings.TrimSpace(title)
+	if movieID == "" || title == "" {
+		return false
+	}
+	lower := strings.ToLower(title)
+	id := strings.ToLower(movieID)
+	return strings.HasPrefix(lower, "["+id+"]") || strings.HasPrefix(lower, id+" ")
 }
 
 // stripCodePrefix removes a leading "[<id>] " or "<id> " code prefix (case-
