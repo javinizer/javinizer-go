@@ -57,14 +57,13 @@ func run(cmd *cobra.Command, configFile string) error {
 	defer func() { _ = deps.Close() }()
 
 	for _, name := range cfg.Scrapers.Priority {
-		if scraper, ok := cfg.Scrapers.Overrides[name]; ok && scraper != nil {
-			displayName := name
-			if provider, exists := deps.ScraperRegistry.GetOptions(name); exists {
-				displayName = provider.DisplayTitle
-			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - %s: %v\n", displayName, scraper.Enabled); err != nil {
-				return err
-			}
+		settings := cfg.Scrapers.ResolvedSettings(name)
+		displayName := name
+		if provider, exists := deps.ScraperRegistry.GetOptions(name); exists {
+			displayName = provider.DisplayTitle
+		}
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - %s: %v\n", displayName, settings.Enabled); err != nil {
+			return err
 		}
 	}
 	if _, err := fmt.Fprintln(cmd.OutOrStdout()); err != nil {

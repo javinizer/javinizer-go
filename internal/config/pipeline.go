@@ -86,27 +86,6 @@ func normalize(cfg *Config) bool {
 		changed = true
 	}
 
-	languageDefaults := map[string]string{
-		"r18dev":          "en",
-		"javlibrary":      "en",
-		"javbus":          "ja",
-		"tokyohot":        "ja",
-		"caribbeancom":    "ja",
-		"aventertainment": "en",
-	}
-
-	for name, defaultLang := range languageDefaults {
-		if _, ok := cfg.Scrapers.Overrides[name]; ok {
-			if scraper := cfg.Scrapers.Overrides[name]; scraper != nil {
-				// Only set default when empty — trim/lowercase happens in Validate(),
-				// not normalize(), so the original value (including whitespace) is preserved.
-				if strings.TrimSpace(scraper.Language) == "" {
-					scraper.Language = defaultLang
-					changed = true
-				}
-			}
-		}
-	}
 	if strings.TrimSpace(cfg.Scrapers.Referer) == "" {
 		cfg.Scrapers.Referer = "https://www.dmm.co.jp/"
 		changed = true

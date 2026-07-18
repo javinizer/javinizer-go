@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -36,8 +37,8 @@ func TestNormalize_Idempotent(t *testing.T) {
 	cfg.Scrapers.Finalize(NewTestScraperConfigResolverInterface())
 	cfg.Database.Type = " SQLITE "
 	// Set per-scraper override values
-	cfg.Scrapers.Overrides["r18dev"].Language = ""
-	cfg.Scrapers.Overrides["javlibrary"].Language = " JA "
+	cfg.Scrapers.Overrides["r18dev"] = &models.ScraperSettings{}
+	cfg.Scrapers.Overrides["javlibrary"] = &models.ScraperSettings{Language: " JA "}
 	cfg.Scrapers.Referer = ""
 	cfg.Metadata.Translation.Provider = " OpenAI "
 	cfg.Metadata.Translation.TimeoutSeconds = 0
@@ -45,7 +46,7 @@ func TestNormalize_Idempotent(t *testing.T) {
 	changed := normalize(cfg)
 	require.True(t, changed)
 	assert.Equal(t, "sqlite", cfg.Database.Type)
-	assert.Equal(t, "en", cfg.Scrapers.Overrides["r18dev"].Language)
+	assert.Equal(t, "en", cfg.Scrapers.ResolvedSettings("r18dev").Language)
 	// Language trim/lowercase now happens in Validate(), not normalize()
 	assert.Equal(t, " JA ", cfg.Scrapers.Overrides["javlibrary"].Language)
 	assert.Equal(t, "https://www.dmm.co.jp/", cfg.Scrapers.Referer)
@@ -76,7 +77,7 @@ func TestValidate_DoesNotMutateConfig(t *testing.T) {
 	cfg := DefaultConfig(nil, nil)
 	cfg.Scrapers.Finalize(NewTestScraperConfigResolverInterface())
 	cfg.Database.Type = " SQLITE "
-	cfg.Scrapers.Overrides["r18dev"].Language = ""
+	cfg.Scrapers.Overrides["r18dev"] = &models.ScraperSettings{}
 	cfg.Scrapers.Referer = ""
 
 	before := *cfg

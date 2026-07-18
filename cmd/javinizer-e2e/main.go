@@ -130,7 +130,7 @@ func run() error {
 	// Instantiate scraper instances — populates the instance store so the
 	// worker pool's GetInstancesByPriority call returns our e2emock.
 	registry, err := scraper.NewDefaultScraperRegistryFrom(reg,
-		scraper.ScraperRegistryConfigFromApp(cfg),
+		scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()),
 		database.NewContentIDMappingRepository(db),
 		nil, // e2e does not use the local r18.dev dump
 	)

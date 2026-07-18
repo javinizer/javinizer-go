@@ -86,23 +86,37 @@ func (c *ScrapersConfig) normalize() {
 		delete(c.validateFns, name)
 	}
 
-	registeredDefaults := c.resolver.GetAllDefaults()
-	for name, entry := range registeredDefaults {
-		if c.Overrides[name] == nil {
-			entryCopy := entry
-			c.Overrides[name] = &entryCopy
-		} else {
-			// Merge module defaults for zero-value fields using MergeDefaultsFrom.
-			c.Overrides[name].MergeDefaultsFrom(entry)
-		}
-	}
-
 	for name := range c.Overrides {
 		if validateFn := c.resolver.GetValidateFn(name); validateFn != nil {
 			c.validateFns[name] = validateFn
 		}
 	}
 
+}
+
+// ResolvedSettings returns the effective settings for a scraper by deep-cloning
+// the registered module defaults and merging any user override on top. It never
+// mutates Overrides or the resolver's defaults.
+func (c *ScrapersConfig) ResolvedSettings(name string) models.ScraperSettings {
+	if c.resolver == nil {
+		if c.Overrides[name] != nil {
+			return c.Overrides[name].Clone()
+		}
+		return models.ScraperSettings{}
+	}
+	defaults, ok := c.resolver.GetAllDefaults()[name]
+	if !ok {
+		if c.Overrides[name] != nil {
+			return c.Overrides[name].Clone()
+		}
+		return models.ScraperSettings{}
+	}
+	if c.Overrides[name] == nil {
+		return defaults.Clone()
+	}
+	resolved := c.Overrides[name].Clone()
+	resolved.MergeDefaultsFrom(defaults)
+	return resolved
 }
 
 // getValidateFn returns the scraper-specific validation function for the named scraper.

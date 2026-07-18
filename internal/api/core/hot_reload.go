@@ -109,7 +109,7 @@ func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.Scr
 		// fallback, but the failure is logged so it is diagnosable.
 		logging.Warnf("%v", dumpErr)
 	}
-	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
+	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
 	if err != nil {
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()

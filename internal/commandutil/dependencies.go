@@ -136,7 +136,7 @@ func NewQueryOnlyDependencies(cfg *config.Config) (*CoreDeps, error) {
 		logging.Warnf("%v", dumpErr)
 	}
 
-	registry, err := newScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), newMemoryContentIDRepository(), r18DumpLookup)
+	registry, err := newScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), newMemoryContentIDRepository(), r18DumpLookup)
 	if err != nil {
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()
@@ -243,7 +243,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 			// diagnosable instead of looking like the dump was never downloaded.
 			logging.Warnf("%v", dumpErr)
 		}
-		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), database.NewContentIDMappingRepository(deps.DB), r18DumpLookup)
+		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), database.NewContentIDMappingRepository(deps.DB), r18DumpLookup)
 		if err != nil {
 			// Only close a DB we created here; never close an injected one
 			// (avoids leaking or double-closing injected handles).
