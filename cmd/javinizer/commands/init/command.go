@@ -50,9 +50,13 @@ func run(cmd *cobra.Command, configFile string) error {
 	fmt.Printf("✅ Initialized database: %s\n", cfg.Database.DSN)
 
 	// Save config
+	diskCfg, err := config.Load(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to load disk config: %w", err)
+	}
 	ctx := config.BuildSparseSaveContext()
 	storage := config.NewConfigStorage(nil, nil)
-	if err := storage.SaveSparse(cfg, configFile, ctx); err != nil {
+	if err := storage.SaveSparse(diskCfg, configFile, ctx); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 	fmt.Printf("✅ Saved configuration: %s\n", configFile)
