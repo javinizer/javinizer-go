@@ -297,6 +297,12 @@ func buildScraperSettingsSchema() *yaml.Node {
 			return
 		}
 		scraperSettingsSchema = mappingRoot(doc)
+		scraperSettingsSchema.Content = append(scraperSettingsSchema.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "request_delay", Tag: "!!str"},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "0"},
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "max_retries", Tag: "!!str"},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "0"},
+		)
 	})
 	return scraperSettingsSchema
 }

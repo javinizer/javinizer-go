@@ -58,7 +58,11 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 				return fmt.Errorf("failed to unmarshal browser: %w", err)
 			}
 		default:
-			// Scraper entry — decode with strict unknown-field checking.
+			trimmed := bytes.TrimSpace(rawVal)
+			if bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("{}")) {
+				continue
+			}
+
 			if s.resolver != nil && !s.resolver.IsRegistered(key) {
 				return fmt.Errorf("unknown scraper %q", key)
 			}
