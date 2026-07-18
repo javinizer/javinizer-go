@@ -84,9 +84,6 @@ func diffMappings(actual, defaults, out *yaml.Node, path string) {
 			continue
 		}
 		if defVal == nil {
-			if path == "scrapers" && isZeroScraperMapping(valNode) {
-				continue
-			}
 			appendKV(out, keyNode, valNode)
 			continue
 		}
@@ -212,7 +209,9 @@ func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]
 			dstKey := dst.Content[dstKeyIdx]
 			knownVal := knownByKey[srcKey.Value]
 			if dstVal.Kind == yaml.MappingNode && srcVal.Kind == yaml.MappingNode {
-				if path == "scrapers" && knownScraperNames[srcKey.Value] {
+				if path == "scrapers" && staticScraperKeys[srcKey.Value] {
+					reconcileMappings(dstVal, srcVal, knownVal, knownScraperNames, joinPath(path, srcKey.Value))
+				} else if path == "scrapers" && knownScraperNames[srcKey.Value] {
 					scraperSchema := buildScraperSettingsSchema()
 					reconcileMappings(dstVal, srcVal, scraperSchema, knownScraperNames, joinPath(path, srcKey.Value))
 				} else {
@@ -252,42 +251,6 @@ func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]
 	dst.Content = result
 }
 
-func isZeroScraperMapping(node *yaml.Node) bool {
-	if node == nil || node.Kind != yaml.MappingNode || len(node.Content) == 0 {
-		return true
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		val := node.Content[i+1]
-		if val.Kind == yaml.MappingNode || val.Kind == yaml.SequenceNode {
-			if len(val.Content) > 0 {
-				return false
-			}
-			continue
-		}
-		if val.Kind != yaml.ScalarNode {
-			return false
-		}
-		switch val.Tag {
-		case "!!str":
-			if val.Value != "" {
-				return false
-			}
-		case "!!int", "!!float":
-			if val.Value != "0" {
-				return false
-			}
-		case "!!bool":
-			if val.Value != "false" {
-				return false
-			}
-		case "!!null":
-		default:
-			return false
-		}
-	}
-	return true
-}
-
 var (
 	scraperSettingsSchemaOnce sync.Once
 	scraperSettingsSchema     *yaml.Node
@@ -296,14 +259,22 @@ var (
 func buildScraperSettingsSchema() *yaml.Node {
 	scraperSettingsSchemaOnce.Do(func() {
 		s := models.ScraperSettings{
-			Enabled:                true,
-			Language:               "xx",
-			Timeout:                1,
-			RateLimit:              1,
-			RetryCount:             1,
-			UserAgent:              "xx",
-			Proxy:                  &models.ProxyConfig{Enabled: true},
-			DownloadProxy:          &models.ProxyConfig{Enabled: true},
+			Enabled:    true,
+			Language:   "xx",
+			Timeout:    1,
+			RateLimit:  1,
+			RetryCount: 1,
+			UserAgent:  "xx",
+			Proxy: &models.ProxyConfig{
+				Enabled:        true,
+				DefaultProfile: "xx",
+				Profiles:       map[string]models.ProxyProfile{"xx": {URL: "xx"}},
+			},
+			DownloadProxy: &models.ProxyConfig{
+				Enabled:        true,
+				DefaultProfile: "xx",
+				Profiles:       map[string]models.ProxyProfile{"xx": {URL: "xx"}},
+			},
 			BaseURL:                "xx",
 			UseFlareSolverr:        true,
 			UseBrowser:             true,
