@@ -63,6 +63,7 @@ func (c *Config) Clone() *Config {
 		cp.Scrapers.Overrides = make(map[string]*models.ScraperSettings, len(c.Scrapers.Overrides))
 		for k, v := range c.Scrapers.Overrides {
 			if v == nil {
+				cp.Scrapers.Overrides[k] = nil
 				continue
 			}
 			cloned := v.Clone()

@@ -22,6 +22,7 @@ type ConfigUpdateService struct {
 	configFile string
 	saveSparse func(cfg *config.Config, path string, ctx config.SparseSaveContext) error
 	reload     func(rt *core.APIRuntime, deps *core.APIDeps, cfg *config.Config) error
+	finalize   func(cfg *config.ScrapersConfig, reg models.ScraperConfigResolverInterface) error
 }
 
 // NewConfigUpdateService creates a service bound to the given runtime and config file path.
@@ -31,6 +32,9 @@ func NewConfigUpdateService(rt *core.APIRuntime, configFile string) *ConfigUpdat
 		return config.NewConfigStorage(nil, nil).SaveSparse(cfg, path, ctx)
 	}
 	svc.reload = reloadComponents
+	svc.finalize = func(cfg *config.ScrapersConfig, reg models.ScraperConfigResolverInterface) error {
+		return cfg.Finalize(reg)
+	}
 	return svc
 }
 
@@ -50,6 +54,13 @@ func (s *ConfigUpdateService) scraperDefaults() map[string]models.ScraperSetting
 		return nil
 	}
 	return s.deps.CoreDeps.GetRegistry().GetAllDefaults()
+}
+
+func (s *ConfigUpdateService) scraperResolver() models.ScraperConfigResolverInterface {
+	if s.deps == nil || s.deps.CoreDeps == nil || s.deps.CoreDeps.ScraperRegistry == nil {
+		return nil
+	}
+	return s.deps.CoreDeps.ScraperRegistry
 }
 
 // ValidateAndApply runs the full config update pipeline:
@@ -75,6 +86,12 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 		diskCfg = loaded
 	}
 	preserveRedactedSecrets(diskCfg, newCfg)
+
+	if reg := s.scraperResolver(); reg != nil {
+		if err := s.finalize(&newCfg.Scrapers, reg); err != nil {
+			return &validationError{message: err.Error()}
+		}
+	}
 
 	if _, err := config.PrepareForPersistence(newCfg); err != nil {
 		return &validationError{message: err.Error()}

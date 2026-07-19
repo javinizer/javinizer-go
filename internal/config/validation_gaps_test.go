@@ -39,14 +39,14 @@ func TestValidateScraperOverrides_NilConfig(t *testing.T) {
 	assert.NoError(t, ValidateScraperOverrides(nil))
 }
 
-func TestValidateScraperOverrides_NilOverridesNormalizes(t *testing.T) {
+func TestValidateScraperOverrides_NilOverridesDoesNotMutateCaller(t *testing.T) {
 	cfg := DefaultConfig(nil, nil)
 	cfg.Scrapers.Finalize(NewTestScraperConfigResolverInterface())
-	// Force Overrides to nil so the nil-guard Normalize path runs.
+	// Force Overrides to nil so the nil-guard treats it as empty.
 	cfg.Scrapers.Overrides = nil
 	assert.NoError(t, ValidateScraperOverrides(cfg))
-	// Normalize should have populated Overrides.
-	assert.NotNil(t, cfg.Scrapers.Overrides)
+	// Validation must not allocate or rebuild state as a side-effect.
+	assert.Nil(t, cfg.Scrapers.Overrides)
 }
 
 func TestValidateScraperOverrides_NegativeRateLimit(t *testing.T) {
@@ -79,10 +79,9 @@ func TestValidateScraperOverrides_NegativeTimeout(t *testing.T) {
 	assert.Contains(t, err.Error(), "timeout")
 }
 
-func TestValidateScraperOverrides_NilSettingsSkipped(t *testing.T) {
+func TestValidateScraperOverrides_NilSettingsRejected(t *testing.T) {
 	cfg := DefaultConfig(nil, nil)
 	cfg.Scrapers.Finalize(NewTestScraperConfigResolverInterface())
-	// Inject a nil entry directly to exercise the sc.Validate nil guard.
 	cfg.Scrapers.Overrides["r18dev"] = nil
 	err := ValidateScraperOverrides(cfg)
 	require.Error(t, err)

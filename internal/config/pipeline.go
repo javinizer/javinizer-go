@@ -75,6 +75,15 @@ func normalize(cfg *Config) bool {
 	cfg.Scrapers.Normalize()
 
 	changed := false
+	for _, sc := range cfg.Scrapers.Overrides {
+		if sc == nil {
+			continue
+		}
+		if normalized := strings.ToLower(strings.TrimSpace(sc.Language)); normalized != sc.Language {
+			sc.Language = normalized
+			changed = true
+		}
+	}
 	changed = normalizeField(&cfg.Database.Type, "sqlite", true) || changed
 
 	// Logging.Output: default to the standard dual-output target if empty. A config

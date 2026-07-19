@@ -197,35 +197,33 @@ func ValidateProxyProfiles(c *Config) error {
 	return validateProxyProfileConfig(c)
 }
 
-// ValidateScraperOverrides validates per-scraper configuration overrides.
-// It checks each scraper's base settings and runs scraper-specific validation
-// via getValidateFn for enabled scrapers. Disabled scrapers skip specific checks.
+// ValidateScraperOverrides validates per-scraper overrides against their
+// effective (resolved) settings, so sparse overrides — including those
+// omitting `enabled` — are validated as the runtime will see them. Requires
+// Finalize to have populated per-scraper ValidateFns; without a resolver,
+// scraper-specific checks are skipped.
 func ValidateScraperOverrides(c *Config) error {
 	if c == nil {
 		return nil
 	}
 
-	// Ensure Overrides is populated before validation.
 	if c.Scrapers.Overrides == nil {
-		c.Scrapers.Normalize()
+		return nil
 	}
 
-	// CONF-04: Generic scraper config validation — uses getValidateFn for dispatch.
-	// NO hardcoded scraper-name branches.
 	for name, sc := range c.Scrapers.Overrides {
-		// Base check: ScraperSettings.Validate handles nil, enabled, rate_limit, retry_count, timeout.
-		if err := sc.Validate(name); err != nil {
+		if sc == nil {
+			return fmt.Errorf("%s: config is nil", name)
+		}
+		resolved := c.Scrapers.ResolvedSettings(name)
+		if err := resolved.Validate(name); err != nil {
 			return err
 		}
-		// Skip scraper-specific validation for disabled scrapers (DRY: one guard here
-		// vs adding enabled checks to all 13 individual ValidateFn closures).
-		if !sc.Enabled {
+		if !resolved.Enabled {
 			continue
 		}
-
-		// Scraper-specific check via ValidateFn (no switch on scraper name)
 		if validateFn := c.Scrapers.getValidateFn(name); validateFn != nil {
-			if err := validateFn(sc); err != nil {
+			if err := validateFn(&resolved); err != nil {
 				return err
 			}
 		}

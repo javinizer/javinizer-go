@@ -352,7 +352,7 @@ func TestIsSourceAuthoritativeFreeFormMap(t *testing.T) {
 		"output.download.download_proxy.profiles": false,
 		"":                        false,
 		"metadata.priority":       false,
-		"scrapers.r18dev.cookies": false,
+		"scrapers.r18dev.cookies": true,
 	}
 	for path, want := range cases {
 		assert.Equal(t, want, isSourceAuthoritativeFreeFormMap(path), "path=%q", path)

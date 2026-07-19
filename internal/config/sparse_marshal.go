@@ -301,7 +301,9 @@ func isSourceAuthoritativeFreeFormMap(path string) bool {
 		return true
 	}
 	return strings.HasPrefix(path, "scrapers.") &&
-		(strings.HasSuffix(path, ".proxy.profiles") || strings.HasSuffix(path, ".download_proxy.profiles"))
+		(strings.HasSuffix(path, ".proxy.profiles") ||
+			strings.HasSuffix(path, ".download_proxy.profiles") ||
+			strings.HasSuffix(path, ".cookies"))
 }
 
 type yamlMarshalFunc func(any) ([]byte, error)

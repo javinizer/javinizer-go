@@ -98,6 +98,9 @@ func (r *APIRuntime) prepareReload(cfg *config.Config, resolver models.ScraperCo
 		return fmt.Errorf("failed to finalize scraper config: %w", err)
 	}
 	cfg.RecomputeWarnings()
+	if err := config.ValidateScraperOverrides(cfg); err != nil {
+		return fmt.Errorf("invalid scraper configuration: %w", err)
+	}
 	return nil
 }
 
