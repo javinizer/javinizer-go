@@ -1,6 +1,8 @@
 package scraper
 
 import (
+	"reflect"
+
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -24,6 +26,13 @@ func ScraperRegistryConfigFromApp(cfg *config.Config, names []string, defaults m
 			resolved := override.Clone()
 			if def, ok := defaults[name]; ok {
 				resolved.MergeDefaultsFrom(def)
+				if !resolved.Enabled && def.Enabled {
+					hasOtherFields := !reflect.DeepEqual(*override, models.ScraperSettings{}) &&
+						!reflect.DeepEqual(*override, models.ScraperSettings{Enabled: false})
+					if hasOtherFields {
+						resolved.Enabled = def.Enabled
+					}
+				}
 			}
 			overrides[name] = resolved
 		} else {

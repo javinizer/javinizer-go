@@ -66,7 +66,10 @@ func SaveSparse(cfg *Config, path string, ctx SparseSaveContext) error {
 
 // BuildSparseSaveContext constructs a SparseSaveContext from compiled defaults.
 func BuildSparseSaveContext() SparseSaveContext {
-	ctx, err := BuildSparseSaveContextWithNames(nil)
+	return mustSparseSaveContext(BuildSparseSaveContextWithNames(nil))
+}
+
+func mustSparseSaveContext(ctx SparseSaveContext, err error) SparseSaveContext {
 	if err != nil {
 		panic(err)
 	}

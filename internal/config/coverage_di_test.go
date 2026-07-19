@@ -67,3 +67,27 @@ func TestBuildScraperSettingsSchemaWith_ParseError(t *testing.T) {
 	)
 	assert.Nil(t, schema)
 }
+
+func TestMustSparseSaveContext_PanicsOnError(t *testing.T) {
+	expected := errors.New("build failed")
+	assert.PanicsWithValue(t, expected, func() {
+		mustSparseSaveContext(SparseSaveContext{}, expected)
+	})
+}
+
+func TestMustSparseSaveContext_ReturnsContext(t *testing.T) {
+	ctx := SparseSaveContext{KnownScraperNames: map[string]bool{"dmm": true}}
+	result := mustSparseSaveContext(ctx, nil)
+	assert.Equal(t, ctx, result)
+}
+
+func TestDiffYAMLDocumentsWith_NonMappingRoot(t *testing.T) {
+	scalarDoc := &yaml.Node{Kind: yaml.ScalarNode, Value: "test"}
+	_, err := diffYAMLDocumentsWith(
+		DefaultConfig(nil, nil),
+		DefaultConfig(nil, nil),
+		func(*Config) (*yaml.Node, error) { return scalarDoc, nil },
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected mapping document roots")
+}
