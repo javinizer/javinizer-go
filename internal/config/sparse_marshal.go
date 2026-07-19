@@ -22,19 +22,25 @@ var alwaysEmitPaths = map[string]bool{
 	"config_version": true,
 }
 
+type configDocumentFunc func(*Config) (*yaml.Node, error)
+
 func diffYAMLDocuments(actual, defaults *Config) (*yaml.Node, error) {
+	return diffYAMLDocumentsWith(actual, defaults, configToYAMLDocument)
+}
+
+func diffYAMLDocumentsWith(actual, defaults *Config, toDocument configDocumentFunc) (*yaml.Node, error) {
 	if actual == nil {
 		return nil, nil
 	}
 	if defaults == nil {
 		defaults = DefaultConfig(nil, nil)
 	}
-	actualDoc, err := configToYAMLDocument(actual)
-	if err != nil { // coverage:ignore-line
+	actualDoc, err := toDocument(actual)
+	if err != nil {
 		return nil, fmt.Errorf("marshal actual: %w", err)
 	}
-	defaultDoc, err := configToYAMLDocument(defaults)
-	if err != nil { // coverage:ignore-line
+	defaultDoc, err := toDocument(defaults)
+	if err != nil {
 		return nil, fmt.Errorf("marshal defaults: %w", err)
 	}
 	aRoot := mappingRoot(actualDoc)
@@ -260,53 +266,61 @@ var (
 	scraperSettingsSchema     *yaml.Node
 )
 
+type yamlMarshalFunc func(any) ([]byte, error)
+type yamlParseFunc func([]byte) (*yaml.Node, error)
+
 func buildScraperSettingsSchema() *yaml.Node {
 	scraperSettingsSchemaOnce.Do(func() {
-		s := models.ScraperSettings{
-			Enabled:    true,
-			Language:   "xx",
-			Timeout:    1,
-			RateLimit:  1,
-			RetryCount: 1,
-			UserAgent:  "xx",
-			Proxy: &models.ProxyConfig{
-				Enabled:        true,
-				Profile:        "xx",
-				DefaultProfile: "xx",
-				Profiles:       map[string]models.ProxyProfile{"xx": {URL: "xx"}},
-			},
-			DownloadProxy: &models.ProxyConfig{
-				Enabled:        true,
-				Profile:        "xx",
-				DefaultProfile: "xx",
-				Profiles:       map[string]models.ProxyProfile{"xx": {URL: "xx"}},
-			},
-			BaseURL:                "xx",
-			UseFlareSolverr:        true,
-			UseBrowser:             true,
-			ScrapeActress:          boolPtr(true),
-			Cookies:                map[string]string{"k": "v"},
-			PlaceholderThresholdKB: 1,
-			ExtraPlaceholderHashes: []string{"xx"},
-			ScrapeBonusScreens:     true,
-			APIKey:                 "xx",
-			RespectRetryAfter:      boolPtr(true),
-		}
-		data, err := yaml.Marshal(&s)
-		if err != nil { // coverage:ignore-line
-			return
-		}
-		doc, err := parseYAMLDocument(data)
-		if err != nil { // coverage:ignore-line
-			return
-		}
-		scraperSettingsSchema = mappingRoot(doc)
-		scraperSettingsSchema.Content = append(scraperSettingsSchema.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Value: "request_delay", Tag: "!!str"},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "0"},
-			&yaml.Node{Kind: yaml.ScalarNode, Value: "max_retries", Tag: "!!str"},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "0"},
-		)
+		scraperSettingsSchema = buildScraperSettingsSchemaWith(yaml.Marshal, parseYAMLDocument)
 	})
 	return scraperSettingsSchema
+}
+
+func buildScraperSettingsSchemaWith(marshal yamlMarshalFunc, parse yamlParseFunc) *yaml.Node {
+	s := models.ScraperSettings{
+		Enabled:    true,
+		Language:   "xx",
+		Timeout:    1,
+		RateLimit:  1,
+		RetryCount: 1,
+		UserAgent:  "xx",
+		Proxy: &models.ProxyConfig{
+			Enabled:        true,
+			Profile:        "xx",
+			DefaultProfile: "xx",
+			Profiles:       map[string]models.ProxyProfile{"xx": {URL: "xx"}},
+		},
+		DownloadProxy: &models.ProxyConfig{
+			Enabled:        true,
+			Profile:        "xx",
+			DefaultProfile: "xx",
+			Profiles:       map[string]models.ProxyProfile{"xx": {URL: "xx"}},
+		},
+		BaseURL:                "xx",
+		UseFlareSolverr:        true,
+		UseBrowser:             true,
+		ScrapeActress:          boolPtr(true),
+		Cookies:                map[string]string{"k": "v"},
+		PlaceholderThresholdKB: 1,
+		ExtraPlaceholderHashes: []string{"xx"},
+		ScrapeBonusScreens:     true,
+		APIKey:                 "xx",
+		RespectRetryAfter:      boolPtr(true),
+	}
+	data, err := marshal(&s)
+	if err != nil {
+		return nil
+	}
+	doc, err := parse(data)
+	if err != nil {
+		return nil
+	}
+	schema := mappingRoot(doc)
+	schema.Content = append(schema.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: "request_delay", Tag: "!!str"},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "0"},
+		&yaml.Node{Kind: yaml.ScalarNode, Value: "max_retries", Tag: "!!str"},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "0"},
+	)
+	return schema
 }
