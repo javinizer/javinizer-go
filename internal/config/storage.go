@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"gopkg.in/yaml.v3"
 )
@@ -57,6 +58,71 @@ func (cs *ConfigStorage) Load(path string) (*Config, error) {
 // Save writes the configuration to a YAML file.
 func Save(cfg *Config, path string) error {
 	return defaultStorage().Save(cfg, path)
+}
+
+// SaveSparse saves a config using sparse diff + reconciliation via the default OS storage.
+func SaveSparse(cfg *Config, path string, ctx SparseSaveContext) error {
+	return defaultStorage().SaveSparse(cfg, path, ctx)
+}
+
+// BuildSparseSaveContext constructs a SparseSaveContext from compiled defaults.
+func BuildSparseSaveContext() SparseSaveContext {
+	return mustSparseSaveContext(BuildSparseSaveContextWithNames(nil))
+}
+
+func mustSparseSaveContext(ctx SparseSaveContext, err error) SparseSaveContext {
+	if err != nil {
+		panic(err)
+	}
+	return ctx
+}
+
+var staticScraperKeys = map[string]bool{
+	"user_agent":              true,
+	"referer":                 true,
+	"timeout_seconds":         true,
+	"request_timeout_seconds": true,
+	"priority":                true,
+	"flaresolverr":            true,
+	"scrape_actress":          true,
+	"browser":                 true,
+	"proxy":                   true,
+}
+
+// BuildSparseSaveContextWithNames constructs a SparseSaveContext seeded with the
+// registered scraper names so reconcileMappings can recognise (and therefore
+// delete) registered scraper blocks under the `scrapers` mapping. Registered
+// scraper defaults are not supplied, so default-only scraper blocks are
+// preserved as explicit overrides. Callers with a scraper registry should prefer
+// BuildSparseSaveContextWithScrapers to also prune default-only scraper blocks.
+func BuildSparseSaveContextWithNames(names []string) (SparseSaveContext, error) {
+	return buildSparseSaveContextWithScrapers(names, nil, configToYAMLDocument)
+}
+
+// BuildSparseSaveContextWithScrapers constructs a SparseSaveContext seeded with
+// the registered scraper names and their registered default settings. Seeding
+// the defaults lets the sparse diff prune scraper blocks that merely repeat
+// registered defaults (e.g. r18dev: {enabled: true}) while preserving explicit
+// overrides that differ, so unrelated saves remain minimal and future
+// module-default changes are inherited.
+func BuildSparseSaveContextWithScrapers(names []string, scraperDefaults map[string]models.ScraperSettings) (SparseSaveContext, error) {
+	return buildSparseSaveContextWithScrapers(names, scraperDefaults, configToYAMLDocument)
+}
+
+func buildSparseSaveContextWithScrapers(names []string, scraperDefaults map[string]models.ScraperSettings, toDocument configDocumentFunc) (SparseSaveContext, error) {
+	defaults := DefaultConfig(nil, nil)
+	schema, err := toDocument(defaults)
+	if err != nil {
+		return SparseSaveContext{}, fmt.Errorf("failed to build schema: %w", err)
+	}
+	known := make(map[string]bool, len(names))
+	for _, n := range names {
+		if staticScraperKeys[n] {
+			return SparseSaveContext{}, fmt.Errorf("scraper name %q collides with static config key", n)
+		}
+		known[n] = true
+	}
+	return SparseSaveContext{Defaults: defaults, Schema: schema, KnownScraperNames: known, ScraperDefaults: scraperDefaults}, nil
 }
 
 // Save writes the configuration to a YAML file using the configured filesystem.
@@ -168,7 +234,11 @@ func (cs *ConfigStorage) LoadOrCreate(path string) (*Config, error) {
 			return nil, fmt.Errorf("failed to save migrated config: %w", err)
 		}
 
-		return cfg, nil
+		reloaded, err := cs.Load(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to re-load migrated config: %w", err)
+		}
+		cfg = reloaded
 	}
 
 	diskCfg := cfg.Clone()
@@ -180,7 +250,8 @@ func (cs *ConfigStorage) LoadOrCreate(path string) (*Config, error) {
 
 	diskChanged := normalize(diskCfg)
 	if changed || diskChanged {
-		if err := cs.Save(diskCfg, path); err != nil {
+		ctx := BuildSparseSaveContext()
+		if err := cs.SaveSparse(diskCfg, path, ctx); err != nil {
 			return nil, fmt.Errorf("failed to save migrated config: %w", err)
 		}
 	}
@@ -195,7 +266,7 @@ func (cs *ConfigStorage) createFromEmbedded(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	embeddedData := embeddedConfigBytes()
+	embeddedData := minimalInitStub()
 
 	if err := cs.atomicReplace(path, embeddedData, FilePerm); err != nil {
 		return nil, fmt.Errorf("failed to save default config: %w", err)
@@ -207,12 +278,82 @@ func (cs *ConfigStorage) createFromEmbedded(path string) (*Config, error) {
 	}
 
 	if applyInitDefaultsFromEnv(cfg) {
-		if err := cs.Save(cfg, path); err != nil {
+		ctx := BuildSparseSaveContext()
+		if err := cs.SaveSparse(cfg, path, ctx); err != nil {
 			return nil, fmt.Errorf("failed to save config with environment overrides: %w", err)
 		}
+		reloaded, err := cs.Load(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to re-load config: %w", err)
+		}
+		cfg = reloaded
+	}
+
+	ApplyEnvironmentOverrides(cfg)
+	if _, err := Prepare(cfg); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
+}
+
+func minimalInitStub() []byte {
+	return []byte(fmt.Sprintf("# Javinizer configuration. Missing keys use compiled defaults; see\n# docs/02-configuration.md for all options. Edit freely.\nconfig_version: %d\n", CurrentConfigVersion))
+}
+
+// SaveSparse saves a config using sparse diff + reconciliation.
+func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveContext) error {
+	return cs.saveSparseWith(cfg, path, ctx, configToYAMLDocument, encodeYAMLDocument)
+}
+
+// encodeYAMLDocFunc mirrors encodeYAMLDocument for dependency injection.
+type encodeYAMLDocFunc func(*yaml.Node) ([]byte, error)
+
+func (cs *ConfigStorage) saveSparseWith(cfg *Config, path string, ctx SparseSaveContext, toDocument configDocumentFunc, encode encodeYAMLDocFunc) error {
+	diffCfg, diffDefaults := resolveScraperOverridesForDiff(cfg, ctx.Defaults, ctx.ScraperDefaults)
+	sparseTarget, err := diffYAMLDocumentsWith(diffCfg, diffDefaults, toDocument)
+	if err != nil {
+		return fmt.Errorf("failed to diff config: %w", err)
+	}
+	dir := filepath.Dir(path)
+	if err := cs.fs.MkdirAll(dir, DirPerm); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	unlock, err := cs.acquireLock(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	existingData, readErr := afero.ReadFile(cs.fs, path)
+	var existingDoc *yaml.Node
+	if readErr == nil {
+		existingDoc, err = parseYAMLDocument(existingData)
+		if err != nil {
+			return fmt.Errorf("failed to parse existing config: %w", err)
+		}
+		root := mappingRoot(existingDoc)
+		if root == nil || root.Kind != yaml.MappingNode {
+			return fmt.Errorf("existing config is not a YAML mapping")
+		}
+	} else if !isNotExist(readErr) {
+		return fmt.Errorf("failed to read config: %w", readErr)
+	}
+	if existingDoc == nil {
+		existingDoc = &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
+	}
+	reconcileSparse(existingDoc, sparseTarget, ctx.Schema, ctx.KnownScraperNames)
+	pruneMetadataPriorityFields(existingDoc, sparseTarget)
+	data, err := encode(existingDoc)
+	if err != nil {
+		return fmt.Errorf("failed to encode config: %w", err)
+	}
+	if readErr == nil && bytes.Equal(existingData, data) {
+		return nil
+	}
+	if err := cs.atomicReplace(path, data, FilePerm); err != nil {
+		return fmt.Errorf("failed to write sparse config: %w", err)
+	}
+	return nil
 }
 
 // acquireLock acquires a config file lock using the configured lockFactory,

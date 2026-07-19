@@ -18,12 +18,28 @@ func NewCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Get config file from persistent flag (set by root command)
 			configFile, _ := cmd.Flags().GetString("config")
-			return run(cmd, configFile)
+			return run(cmd, configFile, defaultInitDeps())
 		},
 	}
 }
 
-func run(cmd *cobra.Command, configFile string) error {
+type initDeps struct {
+	loadDiskConfig   func(path string) (*config.Config, error)
+	saveSparseConfig func(cfg *config.Config, path string, ctx config.SparseSaveContext) error
+	newDeps          func(cfg *config.Config) (*commandutil.CoreDeps, error)
+}
+
+func defaultInitDeps() initDeps {
+	return initDeps{
+		loadDiskConfig: config.Load,
+		saveSparseConfig: func(cfg *config.Config, path string, ctx config.SparseSaveContext) error {
+			return config.NewConfigStorage(nil, nil).SaveSparse(cfg, path, ctx)
+		},
+		newDeps: commandutil.NewDependencies,
+	}
+}
+
+func run(cmd *cobra.Command, configFile string, deps initDeps) error {
 	fmt.Println("Initializing Javinizer...")
 
 	// Load or create configuration
@@ -40,17 +56,21 @@ func run(cmd *cobra.Command, configFile string) error {
 	fmt.Printf("✅ Created data directory: %s\n", dataDir)
 
 	// Initialize dependencies (which includes database setup)
-	deps, err := commandutil.NewDependencies(cfg)
+	cmdDeps, err := deps.newDeps(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer func() { _ = deps.Close() }()
+	defer func() { _ = cmdDeps.Close() }()
 
 	// Dependencies initialization already runs startup migrations.
 	fmt.Printf("✅ Initialized database: %s\n", cfg.Database.DSN)
 
-	// Save config
-	if err := config.Save(cfg, configFile); err != nil {
+	diskCfg, err := deps.loadDiskConfig(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to load disk config: %w", err)
+	}
+	ctx := config.BuildSparseSaveContext()
+	if err := deps.saveSparseConfig(diskCfg, configFile, ctx); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 	fmt.Printf("✅ Saved configuration: %s\n", configFile)

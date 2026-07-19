@@ -3,9 +3,12 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"io"
 
 	"gopkg.in/yaml.v3"
 )
+
+type yamlUnmarshalFunc func([]byte, any) error
 
 func cloneYAMLNode(node *yaml.Node) *yaml.Node {
 	if node == nil {
@@ -145,13 +148,17 @@ func pruneMetadataPriorityFields(dst, src *yaml.Node) {
 }
 
 func configToYAMLDocument(cfg *Config) (*yaml.Node, error) {
-	data, err := yaml.Marshal(cfg)
+	return configToYAMLDocumentWith(cfg, yaml.Marshal, yaml.Unmarshal)
+}
+
+func configToYAMLDocumentWith(cfg *Config, marshal yamlMarshalFunc, unmarshal yamlUnmarshalFunc) (*yaml.Node, error) {
+	data, err := marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal config: %w", err)
 	}
 
 	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("failed to parse marshaled config: %w", err)
 	}
 
@@ -173,16 +180,35 @@ func parseYAMLDocument(data []byte) (*yaml.Node, error) {
 	return &doc, nil
 }
 
+// yamlEncoder is the subset of *yaml.Encoder used by encodeYAMLDocument so
+// tests can inject an encoder whose Close fails.
+type yamlEncoder interface {
+	Encode(any) error
+	Close() error
+}
+
+var defaultYAMLEncoderFactory = func(w io.Writer) yamlEncoder {
+	enc := yaml.NewEncoder(w)
+	enc.SetIndent(4)
+	return enc
+}
+
 func encodeYAMLDocument(doc *yaml.Node) ([]byte, error) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(4)
-	if err := enc.Encode(doc); err != nil {
-		_ = enc.Close()
-		return nil, fmt.Errorf("failed to encode YAML document: %w", err)
-	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("failed to finalize YAML encoding: %w", err)
+	if err := encodeYAMLDocumentWith(&buf, doc, defaultYAMLEncoderFactory); err != nil {
+		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func encodeYAMLDocumentWith(w io.Writer, doc *yaml.Node, factory func(io.Writer) yamlEncoder) error {
+	enc := factory(w)
+	if err := enc.Encode(doc); err != nil {
+		_ = enc.Close()
+		return fmt.Errorf("failed to encode YAML document: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return fmt.Errorf("failed to finalize YAML encoding: %w", err)
+	}
+	return nil
 }

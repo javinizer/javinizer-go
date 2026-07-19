@@ -10,14 +10,29 @@ import (
 // the scraper package that imports *config.Config — the registry itself
 // never sees the god-pointer.
 //
+// names and defaults come from the scraper registry (scraperutil cannot be
+// imported here without an import cycle), so each registered scraper is
+// resolved by merging the user override over the module defaults.
+//
 // Config-bridge reads: cfg.Scrapers.Overrides, cfg.Scrapers.Proxy,
 // cfg.Scrapers.FlareSolverr, cfg.Scrapers.Browser,
 // cfg.Scrapers.TimeoutSeconds, cfg.Scrapers.ScrapeActress
-func ScraperRegistryConfigFromApp(cfg *config.Config) ScraperRegistryConfig {
-	overrides := make(map[string]models.ScraperSettings, len(cfg.Scrapers.Overrides))
-	for name, override := range cfg.Scrapers.Overrides {
-		if override != nil {
-			overrides[name] = *override
+func ScraperRegistryConfigFromApp(cfg *config.Config, names []string, defaults map[string]models.ScraperSettings) ScraperRegistryConfig {
+	overrides := make(map[string]models.ScraperSettings, len(names))
+	for _, name := range names {
+		if override := cfg.Scrapers.Overrides[name]; override != nil {
+			resolved := override.Clone()
+			if def, ok := defaults[name]; ok {
+				resolved.MergeDefaultsFrom(def)
+				resolved.MergeEnabledDefault(def)
+			}
+			overrides[name] = resolved
+		} else {
+			if def, ok := defaults[name]; ok {
+				overrides[name] = def.Clone()
+			} else {
+				overrides[name] = models.ScraperSettings{}
+			}
 		}
 	}
 	return ScraperRegistryConfig{

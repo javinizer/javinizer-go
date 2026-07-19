@@ -22,10 +22,14 @@ func TestFinalize_NilResolver(t *testing.T) {
 }
 
 func TestFinalize_PopulatesDefaults(t *testing.T) {
-	sc := &ScrapersConfig{Overrides: map[string]*models.ScraperSettings{"r18dev": {}}}
+	sc := &ScrapersConfig{}
 	resolver := NewTestScraperConfigResolverInterface()
 	require.NoError(t, sc.Finalize(resolver))
-	assert.NotNil(t, sc.Overrides["r18dev"])
+	assert.Empty(t, sc.Overrides)
+	resolved := sc.ResolvedSettings("r18dev")
+	assert.True(t, resolved.Enabled)
+	assert.Equal(t, "en", resolved.Language)
+	assert.Equal(t, DefaultUserAgent, resolved.UserAgent)
 }
 
 func TestFinalize_MergesDefaults(t *testing.T) {
@@ -37,8 +41,11 @@ func TestFinalize_MergesDefaults(t *testing.T) {
 		defaults:   map[string]models.ScraperSettings{"r18dev": {Enabled: true, UserAgent: "Javinizer"}},
 	}
 	require.NoError(t, sc.Finalize(resolver))
-	assert.Equal(t, "ja", sc.Overrides["r18dev"].Language)         // preserved
-	assert.Equal(t, "Javinizer", sc.Overrides["r18dev"].UserAgent) // filled from defaults
+	assert.Equal(t, "ja", sc.Overrides["r18dev"].Language)
+	assert.Empty(t, sc.Overrides["r18dev"].UserAgent)
+	resolved := sc.ResolvedSettings("r18dev")
+	assert.Equal(t, "ja", resolved.Language)
+	assert.Equal(t, "Javinizer", resolved.UserAgent)
 }
 
 func TestNormalize_WithoutFinalize(t *testing.T) {
@@ -263,4 +270,12 @@ func TestUnmarshalJSON_NonAliasPath_RejectsUnknownFields(t *testing.T) {
 		err := json.Unmarshal([]byte(jsonInput), &cfg)
 		assert.NoError(t, err)
 	})
+}
+
+func TestScrapersConfig_DefaultEnabled(t *testing.T) {
+	sc := &ScrapersConfig{}
+	sc.resolver = newEnabledResolver()
+	assert.True(t, sc.defaultEnabled("r18dev"))
+	assert.False(t, sc.defaultEnabled("dmm"))
+	assert.False(t, sc.defaultEnabled("ghost"))
 }

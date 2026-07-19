@@ -112,6 +112,12 @@ type APIRuntime struct {
 	// Rebuilt on every config hot-reload via ConfigFromAppConfig under reloadMu.
 	apiCfg APIConfig
 
+	// diskConfigSnapshot is the pre-env-overrides config as last read from disk.
+	// Owned by APIRuntime so the config-update service can preserve redacted
+	// secrets without re-reading the file on every save. Updated atomically
+	// under reloadMu alongside a config publication.
+	diskConfigSnapshot *config.Config
+
 	// reloadGen is bumped under reloadMu on every config publication (reload /
 	// SetConfig). RuntimeSnapshot captures it so its factory accessors can tell
 	// whether a reload has landed since the snapshot was taken: a generation

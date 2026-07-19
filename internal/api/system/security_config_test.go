@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -199,10 +200,11 @@ func TestUpdateSecurityConfig_MissingFieldRejected(t *testing.T) {
 
 // TestUpdateSecurityConfig_ValidateAndApplyError exercises the ValidateAndApply
 // error branch in updateSecurityConfig — the path that calls
-// mapConfigErrorToHTTP and returns the mapped status. A persist failure (config
-// file path whose parent directory cannot be created) yields a persistError,
-// which mapConfigErrorToHTTP maps to HTTP 500 — the non-400 path that the happy
-// and invalid-JSON tests do not cover.
+// mapConfigErrorToHTTP and returns the mapped status. With the D9 sequence,// ValidateAndApply first loads a disk-origin snapshot for secret preservation.
+// Blocking the config file's parent directory (a regular file where a
+// directory is expected) makes config.Load fail with a non-not-exist error,
+// which the service wraps as a persistError (mapped to 500 by
+// mapConfigErrorToHTTP).
 func TestUpdateSecurityConfig_ValidateAndApplyError(t *testing.T) {
 	initial := config.DefaultConfig(nil, nil)
 	initial.API.Security.AllowedDirectories = []string{"/old"}
@@ -232,8 +234,9 @@ func TestUpdateSecurityConfig_ValidateAndApplyError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusInternalServerError, w.Code, "body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "Failed to save configuration",
-		"should surface the persistError message from mapConfigErrorToHTTP")
+	respBody := w.Body.String()
+	assert.True(t, strings.Contains(respBody, "Failed to save configuration") || strings.Contains(respBody, "Failed to load disk config"),
+		"should surface a persistError message, got: %s", respBody)
 }
 
 // TestUpdateSecurityConfig_BodyReadError covers the io.ReadAll error branch in

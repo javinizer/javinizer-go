@@ -245,3 +245,36 @@ func TestValidatePriorityOverrides_EmptyPriorityList(t *testing.T) {
 	warnings := ValidatePriorityOverrides(cfg)
 	assert.Empty(t, warnings, "empty priority list means all scrapers are queryable")
 }
+
+func TestValidatePriorityOverrides_DecodedOmittedEnabledNotFlaggedDisabled(t *testing.T) {
+	cfg := newConfigWithOverrides(map[string]*scraperconfig.ScraperSettings{
+		"r18dev": {Enabled: false},
+	})
+	cfg.Scrapers.Overrides["r18dev"].SetEnabledPresence(false)
+	cfg.Scrapers.resolver = &staticTestConfigResolver{
+		registered: map[string]bool{"r18dev": true},
+		defaults:   map[string]scraperconfig.ScraperSettings{"r18dev": {Enabled: true}},
+	}
+	cfg.Scrapers.Priority = []string{"r18dev"}
+	cfg.Metadata.Priority.Fields["content_id"] = []string{"r18dev"}
+
+	warnings := ValidatePriorityOverrides(cfg)
+	assert.Empty(t, warnings, "omitted-enabled default-true scraper must not be flagged disabled")
+}
+
+func TestValidatePriorityOverrides_DecodedExplicitFalseFlaggedDisabled(t *testing.T) {
+	cfg := newConfigWithOverrides(map[string]*scraperconfig.ScraperSettings{
+		"r18dev": {Enabled: false},
+	})
+	cfg.Scrapers.Overrides["r18dev"].SetEnabledPresence(true)
+	cfg.Scrapers.resolver = &staticTestConfigResolver{
+		registered: map[string]bool{"r18dev": true},
+		defaults:   map[string]scraperconfig.ScraperSettings{"r18dev": {Enabled: true}},
+	}
+	cfg.Scrapers.Priority = []string{"r18dev"}
+	cfg.Metadata.Priority.Fields["content_id"] = []string{"r18dev"}
+
+	warnings := ValidatePriorityOverrides(cfg)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0].Message, "disabled")
+}

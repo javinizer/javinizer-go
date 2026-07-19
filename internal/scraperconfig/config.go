@@ -5,7 +5,9 @@
 package scraperconfig
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -30,47 +32,270 @@ type ProxyConfig struct {
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling for ProxyConfig.
-// It validates that no legacy proxy fields (url, username, password, use_main_proxy)
-// are present at the YAML level, then decodes into the struct.
 func (p *ProxyConfig) UnmarshalYAML(node *yaml.Node) error {
-	if err := rejectUnknownProxyFields(node, "proxy"); err != nil {
-		return err
-	}
-	type plain ProxyConfig
-	return node.Decode((*plain)(p))
-}
-
-// rejectUnknownProxyFields checks if the raw YAML node contains legacy proxy fields
-// that are no longer supported. Returns an error if any are found.
-func rejectUnknownProxyFields(node *yaml.Node, context string) error {
 	if node == nil {
 		return nil
 	}
-
-	if node.Kind != yaml.MappingNode {
-		return nil
+	keys, err := effectiveMappingKeys(node)
+	if err != nil {
+		return err
 	}
-
-	legacyFields := []string{"url", "username", "password", "use_main_proxy"}
-
-	for i := 0; i < len(node.Content); i += 2 {
-		if i < len(node.Content) {
-			keyNode := node.Content[i]
-			key := strings.ToLower(keyNode.Value)
-
-			for _, legacy := range legacyFields {
-				if key == legacy {
-					return fmt.Errorf(
-						"%s: field '%s' is no longer supported. "+
-							"Use 'profile: <name>' to reference a proxy profile from scrapers.proxy.profiles instead",
-						context, keyNode.Value,
-					)
-				}
-			}
+	if err := rejectLegacyProxyFieldsYAML(keys, "proxy"); err != nil {
+		return err
+	}
+	profilesVal, profilesPresent := keys["profiles"]
+	tmp := *p
+	tmp.Profiles = maps.Clone(p.Profiles)
+	if profilesPresent {
+		tmp.Profiles = nil
+	}
+	var profilesResolved map[string]*yaml.Node
+	if profilesPresent && profilesVal != nil && profilesVal.Kind == yaml.MappingNode {
+		profilesResolved, err = effectiveMappingKeys(profilesVal)
+		if err != nil {
+			return err
 		}
 	}
-
+	type plain ProxyConfig
+	if err := node.Decode((*plain)(&tmp)); err != nil {
+		return err
+	}
+	if profilesResolved != nil {
+		stripNullProfileEntries(profilesResolved, tmp.Profiles)
+	}
+	*p = tmp
 	return nil
+}
+
+// UnmarshalJSON decodes ProxyConfig preserving profiles presence semantics.
+func (p *ProxyConfig) UnmarshalJSON(data []byte) error {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return err
+	}
+	if err := rejectLegacyProxyFieldsJSON(probe, "proxy"); err != nil {
+		return err
+	}
+	resolved, present, err := resolveProfilesJSON(data)
+	if err != nil {
+		return err
+	}
+	tmp := *p
+	tmp.Profiles = maps.Clone(p.Profiles)
+	if present {
+		tmp.Profiles = nil
+	}
+	type plain ProxyConfig
+	if err := json.Unmarshal(data, (*plain)(&tmp)); err != nil {
+		return err
+	}
+	if present {
+		tmp.Profiles = resolved
+	}
+	*p = tmp
+	return nil
+}
+
+func resolveProfilesJSON(data []byte) (map[string]ProxyProfile, bool, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	t, err := dec.Token()
+	if err != nil {
+		return nil, false, err
+	}
+	if d, ok := t.(json.Delim); !ok || d != '{' {
+		return nil, false, fmt.Errorf("proxy: JSON value must be an object")
+	}
+	var profiles map[string]ProxyProfile
+	present := false
+	for dec.More() {
+		t, err = dec.Token()
+		if err != nil {
+			return nil, false, err
+		}
+		key := t.(string)
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, false, err
+		}
+		if !strings.EqualFold(key, "profiles") {
+			continue
+		}
+		present = true
+		if err := stripNullProfileEntriesJSON(raw, &profiles); err != nil {
+			return nil, false, err
+		}
+	}
+	return profiles, present, nil
+}
+
+func resolveAlias(n *yaml.Node) *yaml.Node {
+	for n != nil && n.Kind == yaml.AliasNode {
+		if n.Alias == nil {
+			return nil
+		}
+		n = n.Alias
+	}
+	return n
+}
+
+var errMergeCycle = errors.New("yaml: merge key cycle detected")
+
+func effectiveMappingKeys(node *yaml.Node) (map[string]*yaml.Node, error) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	keys := make(map[string]*yaml.Node)
+	if err := resolveMappingEntries(node, keys, make(map[*yaml.Node]bool)); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+func resolveMappingEntries(node *yaml.Node, keys map[string]*yaml.Node, visited map[*yaml.Node]bool) error {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		if keyNode.Tag == "!!merge" {
+			continue
+		}
+		keys[keyNode.Value] = resolveAlias(node.Content[i+1])
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Tag != "!!merge" {
+			continue
+		}
+		if err := resolveMergeTarget(resolveAlias(node.Content[i+1]), keys, visited); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func resolveMergeTarget(target *yaml.Node, keys map[string]*yaml.Node, visited map[*yaml.Node]bool) error {
+	if target == nil {
+		return nil
+	}
+	switch target.Kind {
+	case yaml.MappingNode:
+		if visited[target] {
+			return errMergeCycle
+		}
+		visited[target] = true
+		local := make(map[string]*yaml.Node)
+		err := resolveMappingEntries(target, local, visited)
+		delete(visited, target)
+		if err != nil {
+			return err
+		}
+		for k, v := range local {
+			if _, exists := keys[k]; !exists {
+				keys[k] = v
+			}
+		}
+	case yaml.SequenceNode:
+		if visited[target] {
+			return errMergeCycle
+		}
+		visited[target] = true
+		for _, item := range target.Content {
+			if err := resolveMergeTarget(resolveAlias(item), keys, visited); err != nil {
+				delete(visited, target)
+				return err
+			}
+		}
+		delete(visited, target)
+	}
+	return nil
+}
+
+func stripNullProfileEntries(resolved map[string]*yaml.Node, profiles map[string]ProxyProfile) {
+	if resolved == nil || profiles == nil {
+		return
+	}
+	for name, v := range resolved {
+		if v != nil && v.Kind == yaml.ScalarNode && v.Tag == "!!null" {
+			delete(profiles, name)
+		}
+	}
+}
+
+var proxyConfigLegacyFields = map[string]bool{
+	"url":            true,
+	"username":       true,
+	"password":       true,
+	"use_main_proxy": true,
+}
+
+func rejectLegacyProxyFieldsYAML(keys map[string]*yaml.Node, context string) error {
+	for field := range keys {
+		if proxyConfigLegacyFields[strings.ToLower(field)] {
+			return fmt.Errorf(
+				"%s: field '%s' is no longer supported. "+
+					"Use 'profile: <name>' to reference a proxy profile from scrapers.proxy.profiles instead",
+				context, field,
+			)
+		}
+	}
+	return nil
+}
+
+func rejectLegacyProxyFieldsJSON(probe map[string]json.RawMessage, context string) error {
+	for field := range probe {
+		if proxyConfigLegacyFields[strings.ToLower(field)] {
+			return fmt.Errorf(
+				"%s: field '%s' is no longer supported. "+
+					"Use 'profile: <name>' to reference a proxy profile from scrapers.proxy.profiles instead",
+				context, field,
+			)
+		}
+	}
+	return nil
+}
+
+func stripNullProfileEntriesJSON(raw json.RawMessage, profiles *map[string]ProxyProfile) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if isNullJSONValue(raw) {
+		*profiles = nil
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if d, ok := t.(json.Delim); !ok || d != '{' {
+		return fmt.Errorf("proxy: profiles must be an object or null")
+	}
+	if *profiles == nil {
+		*profiles = make(map[string]ProxyProfile)
+	}
+	for dec.More() {
+		t, err = dec.Token()
+		if err != nil {
+			return err
+		}
+		name := t.(string)
+		var entryRaw json.RawMessage
+		if err := dec.Decode(&entryRaw); err != nil {
+			return err
+		}
+		if isNullJSONValue(entryRaw) {
+			delete(*profiles, name)
+			continue
+		}
+		var profile ProxyProfile
+		if err := json.Unmarshal(entryRaw, &profile); err != nil {
+			return err
+		}
+		(*profiles)[name] = profile
+	}
+	return nil
+}
+
+func isNullJSONValue(raw json.RawMessage) bool {
+	t := strings.TrimSpace(string(raw))
+	return t == "" || t == "null"
 }
 
 // ScraperProxyMode represents how a scraper should use proxy
@@ -200,6 +425,9 @@ type ScraperSettings struct {
 	ScrapeBonusScreens     bool              `yaml:"scrape_bonus_screens,omitempty" json:"scrape_bonus_screens,omitempty"`
 	APIKey                 string            `yaml:"api_key,omitempty" json:"api_key,omitempty"`
 	RespectRetryAfter      *bool             `yaml:"respect_retry_after,omitempty" json:"respect_retry_after,omitempty"`
+
+	enabledDecoded  bool `yaml:"-" json:"-"`
+	enabledExplicit bool `yaml:"-" json:"-"`
 }
 
 // MarshalYAML preserves the full unified scraper settings shape so config
@@ -340,6 +568,34 @@ func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
 		val := *defaults.RespectRetryAfter
 		s.RespectRetryAfter = &val
 	}
+}
+
+// SetEnabledPresence records whether the `enabled` key was present when
+// decoding a scraper entry. explicit=true means present (true or false);
+// explicit=false means omitted. Programmatic literals must not call it.
+func (s *ScraperSettings) SetEnabledPresence(explicit bool) {
+	s.enabledDecoded = true
+	s.enabledExplicit = explicit
+}
+
+// MergeEnabledDefault inherits defaults.Enabled when s was decoded with an
+// omitted `enabled` key. Programmatic literals and explicit enabled values
+// are preserved.
+func (s *ScraperSettings) MergeEnabledDefault(defaults ScraperSettings) {
+	if s.enabledDecoded && !s.enabledExplicit {
+		s.Enabled = defaults.Enabled
+	}
+}
+
+// EffectiveEnabled returns the resolved enabled state for validation when the
+// registered default's Enabled is known. A decoded omitted `enabled` inherits
+// defaultEnabled; programmatic literals and explicit enabled values are
+// preserved. Callers must guard against a nil receiver.
+func (s *ScraperSettings) EffectiveEnabled(defaultEnabled bool) bool {
+	if s.enabledDecoded && !s.enabledExplicit {
+		return defaultEnabled
+	}
+	return s.Enabled
 }
 
 // ShouldScrapeActress returns whether actress scraping is enabled for this scraper.
@@ -486,3 +742,18 @@ func (c *BrowserConfig) Validate(path string) error {
 
 	return nil
 }
+
+// ScraperOverride mutates a ScraperSettings via the sanctioned ApplyOverride chokepoint.
+type ScraperOverride func(*ScraperSettings)
+
+// WithScrapeActress sets the tri-state scrape_actress override.
+func WithScrapeActress(v bool) ScraperOverride {
+	return func(s *ScraperSettings) { s.ScrapeActress = boolPtr(v) }
+}
+
+// WithBrowser sets the use_browser override.
+func WithBrowser(v bool) ScraperOverride {
+	return func(s *ScraperSettings) { s.UseBrowser = v }
+}
+
+func boolPtr(b bool) *bool { return &b }

@@ -86,23 +86,49 @@ func (c *ScrapersConfig) normalize() {
 		delete(c.validateFns, name)
 	}
 
-	registeredDefaults := c.resolver.GetAllDefaults()
-	for name, entry := range registeredDefaults {
-		if c.Overrides[name] == nil {
-			entryCopy := entry
-			c.Overrides[name] = &entryCopy
-		} else {
-			// Merge module defaults for zero-value fields using MergeDefaultsFrom.
-			c.Overrides[name].MergeDefaultsFrom(entry)
-		}
-	}
-
 	for name := range c.Overrides {
 		if validateFn := c.resolver.GetValidateFn(name); validateFn != nil {
 			c.validateFns[name] = validateFn
 		}
 	}
 
+}
+
+// ResolvedSettings returns the effective settings for a scraper by deep-cloning
+// the registered module defaults and merging any user override on top. It never
+// mutates Overrides or the resolver's defaults.
+func (c *ScrapersConfig) ResolvedSettings(name string) models.ScraperSettings {
+	if c.resolver == nil {
+		if c.Overrides[name] != nil {
+			return c.Overrides[name].Clone()
+		}
+		return models.ScraperSettings{}
+	}
+	defaults, ok := c.resolver.GetAllDefaults()[name]
+	if !ok {
+		if c.Overrides[name] != nil {
+			return c.Overrides[name].Clone()
+		}
+		return models.ScraperSettings{}
+	}
+	if c.Overrides[name] == nil {
+		return defaults.Clone()
+	}
+	resolved := c.Overrides[name].Clone()
+	resolved.MergeDefaultsFrom(defaults)
+	resolved.MergeEnabledDefault(defaults)
+	return resolved
+}
+
+func (c *ScrapersConfig) defaultEnabled(name string) bool {
+	if c.resolver == nil {
+		return false
+	}
+	defaults, ok := c.resolver.GetAllDefaults()[name]
+	if !ok {
+		return false
+	}
+	return defaults.Enabled
 }
 
 // getValidateFn returns the scraper-specific validation function for the named scraper.
@@ -112,6 +138,38 @@ func (c *ScrapersConfig) getValidateFn(name string) func(*models.ScraperSettings
 		return nil
 	}
 	return c.validateFns[name]
+}
+
+// Override returns the creating accessor for a scraper's user-supplied settings.
+func (c *ScrapersConfig) Override(name string) *models.ScraperSettings {
+	if c.Overrides == nil {
+		c.Overrides = make(map[string]*models.ScraperSettings)
+	}
+	if c.Overrides[name] == nil {
+		c.Overrides[name] = &models.ScraperSettings{}
+	}
+	return c.Overrides[name]
+}
+
+// ApplyOverride applies the given options to the named scraper's override block.
+// With no options it returns immediately without creating an override block.
+func (c *ScrapersConfig) ApplyOverride(name string, opts ...models.ScraperOverride) {
+	if len(opts) == 0 {
+		return
+	}
+	s := c.Override(name)
+	for _, opt := range opts {
+		opt(s)
+	}
+}
+
+// UserOverride returns the named scraper's user-supplied override without creating one.
+func (c *ScrapersConfig) UserOverride(name string) (*models.ScraperSettings, bool) {
+	if c.Overrides == nil {
+		return nil, false
+	}
+	s, ok := c.Overrides[name]
+	return s, ok && s != nil
 }
 
 // IsScraperRegistered reports whether a scraper name is known to the resolver.
@@ -192,6 +250,13 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 			}
 		default:
 			// Scraper entry — decode directly into ScraperSettings.
+			if valNode.Kind == yaml.MappingNode && len(valNode.Content) == 0 {
+				continue
+			}
+			if valNode.Kind == yaml.ScalarNode && valNode.Tag == "!!null" {
+				continue
+			}
+
 			if s.resolver != nil && !s.resolver.IsRegistered(key) {
 				return fmt.Errorf("unknown scraper %q", key)
 			}
@@ -200,6 +265,7 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 			if err := valNode.Decode(&ss); err != nil {
 				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 			}
+			ss.SetEnabledPresence(scraperYAMLHasEnabledKey(valNode))
 
 			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
 			// Walk the node content to find alias keys and apply them if the canonical
@@ -244,6 +310,18 @@ func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.Scraper
 			}
 		}
 	}
+}
+
+func scraperYAMLHasEnabledKey(valNode *yaml.Node) bool {
+	if valNode == nil || valNode.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(valNode.Content); i += 2 {
+		if valNode.Content[i].Value == "enabled" {
+			return true
+		}
+	}
+	return false
 }
 
 // validateYAMLScraperKeys checks for unknown fields in a scraper entry's YAML node.

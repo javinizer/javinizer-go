@@ -112,6 +112,17 @@ var (
 	newScraperRegistryFrom = scraper.NewDefaultScraperRegistryFrom
 )
 
+func finalizeAndValidateScrapers(cfg *config.Config, reg *scraperutil.ScraperRegistry) error {
+	if err := finalizeScrapersConfig(&cfg.Scrapers, reg); err != nil {
+		return fmt.Errorf("failed to finalize scraper config: %w", err)
+	}
+	cfg.RecomputeWarnings()
+	if err := config.ValidateScraperOverrides(cfg); err != nil {
+		return fmt.Errorf("invalid scraper configuration: %w", err)
+	}
+	return nil
+}
+
 // NewQueryOnlyDependencies initializes scrapers without opening the application database.
 func NewQueryOnlyDependencies(cfg *config.Config) (*CoreDeps, error) {
 	if cfg == nil {
@@ -126,17 +137,16 @@ func NewQueryOnlyDependencies(cfg *config.Config) (*CoreDeps, error) {
 		scraper.RegisterAll(reg)
 	}
 
-	if err := finalizeScrapersConfig(&cfg.Scrapers, reg); err != nil {
-		return nil, fmt.Errorf("failed to finalize scraper config: %w", err)
+	if err := finalizeAndValidateScrapers(cfg, reg); err != nil {
+		return nil, err
 	}
-	cfg.RecomputeWarnings()
 
 	r18DumpLookup, r18DumpCloser, dumpErr := OpenR18DevDumpLookup(cfg)
 	if dumpErr != nil {
 		logging.Warnf("%v", dumpErr)
 	}
 
-	registry, err := newScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), newMemoryContentIDRepository(), r18DumpLookup)
+	registry, err := newScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), newMemoryContentIDRepository(), r18DumpLookup)
 	if err != nil {
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()
@@ -210,6 +220,12 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 	// Use injected registry or create real one
 	if opts != nil && opts.ScraperRegistry != nil {
 		deps.ScraperRegistry = opts.ScraperRegistry
+		if err := finalizeAndValidateScrapers(cfg, opts.ScraperRegistry); err != nil {
+			if ownsDB {
+				_ = deps.DB.Close()
+			}
+			return nil, err
+		}
 	} else {
 		reg := scraperutil.NewScraperRegistry()
 		// E2E seam: when JAVINIZER_E2E_SCRAPERS=true, substitute the deterministic
@@ -224,16 +240,12 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 			scraper.RegisterAll(reg)
 		}
 
-		// Set up config resolver for scraper normalization.
-		// This populates cfg.Scrapers.Overrides from the registered scraper defaults.
-		if err := cfg.Scrapers.Finalize(reg); err != nil {
-			// Only close a DB we created here; never close an injected one.
+		if err := finalizeAndValidateScrapers(cfg, reg); err != nil {
 			if ownsDB {
 				_ = deps.DB.Close()
 			}
-			return nil, fmt.Errorf("failed to finalize scraper config: %w", err)
+			return nil, err
 		}
-		cfg.RecomputeWarnings()
 
 		r18DumpLookup, r18DumpCloser, dumpErr := OpenR18DevDumpLookup(cfg)
 		if dumpErr != nil {
@@ -243,7 +255,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 			// diagnosable instead of looking like the dump was never downloaded.
 			logging.Warnf("%v", dumpErr)
 		}
-		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), database.NewContentIDMappingRepository(deps.DB), r18DumpLookup)
+		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), database.NewContentIDMappingRepository(deps.DB), r18DumpLookup)
 		if err != nil {
 			// Only close a DB we created here; never close an injected one
 			// (avoids leaking or double-closing injected handles).

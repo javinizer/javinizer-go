@@ -9,6 +9,7 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 )
 
 // validateUILanguage checks that lang is "auto" or a syntactically valid BCP 47
@@ -72,7 +73,7 @@ func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
 			if !ok || settings == nil {
 				continue
 			}
-			if settings.Enabled && scraperInPriority(cfg.Scrapers.Priority, name) {
+			if settings.EffectiveEnabled(cfg.Scrapers.defaultEnabled(name)) && scraperInPriority(cfg.Scrapers.Priority, name) {
 				hasQueryable = true
 			} else {
 				unqueryable = append(unqueryable, name)
@@ -83,7 +84,7 @@ func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
 			var reasons []string
 			for _, name := range unqueryable {
 				settings := cfg.Scrapers.Overrides[name]
-				if settings != nil && !settings.Enabled {
+				if settings != nil && !settings.EffectiveEnabled(cfg.Scrapers.defaultEnabled(name)) {
 					reasons = append(reasons, fmt.Sprintf("%s is disabled", name))
 				} else {
 					reasons = append(reasons, fmt.Sprintf("%s is not in scrapers.priority", name))
@@ -196,35 +197,33 @@ func ValidateProxyProfiles(c *Config) error {
 	return validateProxyProfileConfig(c)
 }
 
-// ValidateScraperOverrides validates per-scraper configuration overrides.
-// It checks each scraper's base settings and runs scraper-specific validation
-// via getValidateFn for enabled scrapers. Disabled scrapers skip specific checks.
+// ValidateScraperOverrides validates per-scraper overrides against their
+// effective (resolved) settings, so sparse overrides — including those
+// omitting `enabled` — are validated as the runtime will see them. Requires
+// Finalize to have populated per-scraper ValidateFns; without a resolver,
+// scraper-specific checks are skipped.
 func ValidateScraperOverrides(c *Config) error {
 	if c == nil {
 		return nil
 	}
 
-	// Ensure Overrides is populated before validation.
 	if c.Scrapers.Overrides == nil {
-		c.Scrapers.Normalize()
+		return nil
 	}
 
-	// CONF-04: Generic scraper config validation — uses getValidateFn for dispatch.
-	// NO hardcoded scraper-name branches.
 	for name, sc := range c.Scrapers.Overrides {
-		// Base check: ScraperSettings.Validate handles nil, enabled, rate_limit, retry_count, timeout.
-		if err := sc.Validate(name); err != nil {
+		if sc == nil {
+			return fmt.Errorf("%s: config is nil", name)
+		}
+		resolved := c.Scrapers.ResolvedSettings(name)
+		if err := resolved.Validate(name); err != nil {
 			return err
 		}
-		// Skip scraper-specific validation for disabled scrapers (DRY: one guard here
-		// vs adding enabled checks to all 13 individual ValidateFn closures).
-		if !sc.Enabled {
+		if !resolved.Enabled {
 			continue
 		}
-
-		// Scraper-specific check via ValidateFn (no switch on scraper name)
 		if validateFn := c.Scrapers.getValidateFn(name); validateFn != nil {
-			if err := validateFn(sc); err != nil {
+			if err := validateFn(&resolved); err != nil {
 				return err
 			}
 		}
@@ -236,6 +235,199 @@ func ValidateScraperOverrides(c *Config) error {
 // ValidateTranslationProvider validates cross-field translation provider configuration.
 // It checks provider-specific requirements (base URLs, API keys, modes) based on the
 // selected provider. When translation is disabled, all checks are skipped.
+//
+//nolint:goconst // duplicated from validateTranslationProviderInternal for credential-excluding validation
+func validateTranslationProviderExcludingCredentials(c *Config) error {
+	if c == nil {
+		return nil
+	}
+	t := c.Metadata.Translation
+
+	provider := strings.ToLower(strings.TrimSpace(t.Provider))
+	if provider == "" {
+		provider = translationProviderOpenAI
+	}
+
+	timeoutSeconds := t.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 60
+	}
+
+	openAIBaseURL := strings.TrimSpace(t.OpenAI.BaseURL)
+	if openAIBaseURL == "" {
+		openAIBaseURL = "https://api.openai.com/v1"
+	}
+
+	deepLMode := models.DeepLMode(strings.ToLower(strings.TrimSpace(string(t.DeepL.Mode))))
+	if deepLMode == "" {
+		deepLMode = models.DeepLModeFree
+	}
+
+	googleMode := models.GoogleMode(strings.ToLower(strings.TrimSpace(string(t.Google.Mode))))
+	if googleMode == "" {
+		googleMode = models.GoogleModeFree
+	}
+
+	if !t.Enabled {
+		return nil
+	}
+
+	if timeoutSeconds < 5 || timeoutSeconds > 300 {
+		return fmt.Errorf("metadata.translation.timeout_seconds must be between 5 and 300")
+	}
+
+	switch provider {
+	case translationProviderOpenAI:
+		if err := validateHTTPBaseURL("metadata.translation.openai.base_url", openAIBaseURL); err != nil {
+			return err
+		}
+	case "deepl":
+		if deepLMode != models.DeepLModeFree && deepLMode != models.DeepLModePro {
+			return fmt.Errorf("metadata.translation.deepl.mode must be either 'free' or 'pro'")
+		}
+		if strings.TrimSpace(t.DeepL.BaseURL) != "" {
+			if err := validateHTTPBaseURL("metadata.translation.deepl.base_url", t.DeepL.BaseURL); err != nil {
+				return err
+			}
+		}
+	case "google":
+		if googleMode != models.GoogleModeFree && googleMode != models.GoogleModePaid {
+			return fmt.Errorf("metadata.translation.google.mode must be either 'free' or 'paid'")
+		}
+		if strings.TrimSpace(t.Google.BaseURL) != "" {
+			if err := validateHTTPBaseURL("metadata.translation.google.base_url", t.Google.BaseURL); err != nil {
+				return err
+			}
+		}
+	case "openai-compatible":
+		if strings.TrimSpace(t.OpenAICompatible.BaseURL) == "" {
+			return fmt.Errorf("metadata.translation.openai_compatible.base_url is required when provider=openai-compatible")
+		}
+		if err := validateHTTPBaseURL("metadata.translation.openai_compatible.base_url", t.OpenAICompatible.BaseURL); err != nil {
+			return err
+		}
+		if strings.TrimSpace(t.OpenAICompatible.Model) == "" {
+			return fmt.Errorf("metadata.translation.openai_compatible.model is required when provider=openai-compatible")
+		}
+		switch t.OpenAICompatible.NormalizedBackendType() {
+		case "", "vllm", "ollama", "llama.cpp", "other":
+		default:
+			return fmt.Errorf("metadata.translation.openai_compatible.backend_type must be one of: auto, vllm, ollama, llama.cpp, other")
+		}
+	case "anthropic":
+		if strings.TrimSpace(t.Anthropic.BaseURL) == "" {
+			return fmt.Errorf("metadata.translation.anthropic.base_url is required when provider=anthropic")
+		}
+		if err := validateHTTPBaseURL("metadata.translation.anthropic.base_url", t.Anthropic.BaseURL); err != nil {
+			return err
+		}
+		if strings.TrimSpace(t.Anthropic.Model) == "" {
+			return fmt.Errorf("metadata.translation.anthropic.model is required when provider=anthropic")
+		}
+	default:
+		return fmt.Errorf("metadata.translation.provider must be one of: openai, openai-compatible, anthropic, deepl, google")
+	}
+
+	return nil
+}
+
+const dbTypeSQLite = "sqlite"
+
+func validateConfigExcludingTranslationCredentials(cfg *Config) error {
+	cfg = cfg.Clone()
+
+	dbType := strings.ToLower(strings.TrimSpace(cfg.Database.Type))
+	if dbType == "" {
+		dbType = dbTypeSQLite
+	}
+	if dbType != dbTypeSQLite {
+		return fmt.Errorf("database.type must be 'sqlite' (currently only sqlite is supported)")
+	}
+
+	if strings.TrimSpace(cfg.Database.DSN) == "" {
+		return fmt.Errorf("database.dsn is required")
+	}
+
+	if cfg.Scrapers.TimeoutSeconds < 1 || cfg.Scrapers.TimeoutSeconds > 300 {
+		return fmt.Errorf("scrapers.timeout_seconds must be between 1 and 300")
+	}
+	if cfg.Scrapers.RequestTimeoutSeconds < 1 || cfg.Scrapers.RequestTimeoutSeconds > 600 {
+		return fmt.Errorf("scrapers.request_timeout_seconds must be between 1 and 600")
+	}
+
+	if err := cfg.Scrapers.FlareSolverr.Validate("scrapers.flaresolverr"); err != nil {
+		return err
+	}
+
+	if err := cfg.Scrapers.Browser.Validate("scrapers.browser"); err != nil {
+		return err
+	}
+
+	referer := strings.TrimSpace(cfg.Scrapers.Referer)
+	if referer == "" {
+		referer = "https://www.dmm.co.jp/"
+	}
+	u, err := url.Parse(referer)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("scrapers.referer must be a valid http(s) URL with a host")
+	}
+
+	if cfg.Performance.MaxWorkers < 1 || cfg.Performance.MaxWorkers > 100 {
+		return fmt.Errorf("performance.max_workers must be between 1 and 100")
+	}
+	if cfg.Performance.WorkerTimeout < 10 || cfg.Performance.WorkerTimeout > 3600 {
+		return fmt.Errorf("performance.worker_timeout must be between 10 and 3600")
+	}
+	if cfg.Performance.UpdateInterval < 10 || cfg.Performance.UpdateInterval > 5000 {
+		return fmt.Errorf("performance.update_interval must be between 10 and 5000")
+	}
+
+	if cfg.System.VersionCheckIntervalHours != 0 && (cfg.System.VersionCheckIntervalHours < 1 || cfg.System.VersionCheckIntervalHours > 168) {
+		return fmt.Errorf("system.version_check_interval_hours must be between 1 and 168 (1 week), or 0 for default")
+	}
+
+	if cfg.Logging.MaxSizeMB < 0 {
+		return fmt.Errorf("logging.max_size_mb must be >= 0")
+	}
+	if cfg.Logging.MaxBackups < 0 {
+		return fmt.Errorf("logging.max_backups must be >= 0")
+	}
+	if cfg.Logging.MaxAgeDays < 0 {
+		return fmt.Errorf("logging.max_age_days must be >= 0")
+	}
+
+	if v := cfg.WebUI.DefaultReviewView; v != "" {
+		switch v {
+		case "detail", "grid-poster", "grid-cover":
+		default:
+			return fmt.Errorf("webui.default_review_view must be one of: detail, grid-poster, grid-cover")
+		}
+	}
+
+	if err := validateUILanguage(cfg.UI.Language); err != nil {
+		return err
+	}
+
+	if rawMode := strings.TrimSpace(string(cfg.Output.Operation.OperationMode)); rawMode != "" {
+		if _, err := operationmode.ParseOperationMode(rawMode); err != nil {
+			return fmt.Errorf("output.operation_mode is invalid: %w", err)
+		}
+	}
+
+	if err := ValidateScraperOverrides(cfg); err != nil {
+		return err
+	}
+	if err := ValidateProxyProfiles(cfg); err != nil {
+		return err
+	}
+	if err := validateTranslationProviderExcludingCredentials(cfg); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ValidateTranslationProvider validates cross-field translation provider configuration including API keys.
 func ValidateTranslationProvider(c *Config) error {
 	if c == nil {
 		return nil

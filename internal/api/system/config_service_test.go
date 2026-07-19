@@ -30,6 +30,7 @@ func TestConfigUpdateService_ValidateAndApply_PreserveRedactedSecrets(t *testing
 	newCfg.Metadata.Translation.Anthropic.APIKey = models.RedactedValue
 
 	tempConfigFile := t.TempDir() + "/config.yaml"
+	require.NoError(t, config.Save(oldCfg, tempConfigFile))
 	deps := createTestDeps(t, oldCfg, tempConfigFile)
 	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), tempConfigFile)
 
@@ -172,6 +173,7 @@ func TestConfigUpdateService_PreserveRedactedProxyProfiles(t *testing.T) {
 	}
 
 	tempConfigFile := t.TempDir() + "/config.yaml"
+	require.NoError(t, config.Save(oldCfg, tempConfigFile))
 	deps := createTestDeps(t, oldCfg, tempConfigFile)
 	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), tempConfigFile)
 
@@ -195,6 +197,7 @@ func TestConfigUpdateService_PreserveRedactedScraperOverrideAPIKey(t *testing.T)
 	}
 
 	tempConfigFile := t.TempDir() + "/config.yaml"
+	require.NoError(t, config.Save(oldCfg, tempConfigFile))
 	deps := createTestDeps(t, oldCfg, tempConfigFile)
 	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), tempConfigFile)
 

@@ -259,3 +259,20 @@ func TestProxyConfig_UnmarshalYAML_NilNode(t *testing.T) {
 	err := yaml.Unmarshal([]byte("proxy:\n"), &p)
 	require.NoError(t, err)
 }
+
+func TestWithScrapeActress_AppliesOverride(t *testing.T) {
+	t.Parallel()
+
+	s := &ScraperSettings{}
+	WithScrapeActress(true)(s)
+	require.NotNil(t, s.ScrapeActress)
+	assert.True(t, *s.ScrapeActress)
+}
+
+func TestWithBrowser_AppliesOverride(t *testing.T) {
+	t.Parallel()
+
+	s := &ScraperSettings{}
+	WithBrowser(true)(s)
+	assert.True(t, s.UseBrowser)
+}

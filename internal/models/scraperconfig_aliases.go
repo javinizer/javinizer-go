@@ -40,4 +40,10 @@ var (
 	ResolveScraperProxy     = scraperconfig.ResolveScraperProxy
 	ResolveGlobalProxy      = scraperconfig.ResolveGlobalProxy
 	ResolveScraperProxyMode = scraperconfig.ResolveScraperProxyMode
+
+	WithScrapeActress = scraperconfig.WithScrapeActress
+	WithBrowser       = scraperconfig.WithBrowser
 )
+
+// ScraperOverride aliases the scraperconfig.ScraperOverride type for backward compatibility.
+type ScraperOverride = scraperconfig.ScraperOverride

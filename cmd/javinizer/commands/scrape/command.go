@@ -15,7 +15,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/scrape"
-	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/timeout"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/cobra"
@@ -121,33 +120,29 @@ func argsRequestJSONOutput(args []string) bool {
 // ApplyFlagOverrides applies CLI flag overrides to the config. Exported for testability.
 func ApplyFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
 	cfg.Scrapers.Normalize()
-	if cmd.Flags().Changed("scrape-actress") || cmd.Flags().Changed("no-scrape-actress") || cmd.Flags().Changed("browser") || cmd.Flags().Changed("no-browser") {
-		if cfg.Scrapers.Overrides == nil {
-			cfg.Scrapers.Overrides = make(map[string]*models.ScraperSettings)
-		}
-		if cfg.Scrapers.Overrides["dmm"] == nil {
-			cfg.Scrapers.Overrides["dmm"] = &models.ScraperSettings{}
-		}
-	}
+	var dmmOpts []models.ScraperOverride
 	if cmd.Flags().Changed("scrape-actress") {
 		if val, _ := cmd.Flags().GetBool("scrape-actress"); val {
-			cfg.Scrapers.Overrides["dmm"].ScrapeActress = scraperutil.BoolPtr(true)
+			dmmOpts = append(dmmOpts, models.WithScrapeActress(true))
 		}
 	}
 	if cmd.Flags().Changed("no-scrape-actress") {
 		if val, _ := cmd.Flags().GetBool("no-scrape-actress"); val {
-			cfg.Scrapers.Overrides["dmm"].ScrapeActress = scraperutil.BoolPtr(false)
+			dmmOpts = append(dmmOpts, models.WithScrapeActress(false))
 		}
 	}
 	if cmd.Flags().Changed("browser") {
 		if val, _ := cmd.Flags().GetBool("browser"); val {
-			cfg.Scrapers.Overrides["dmm"].UseBrowser = true
+			dmmOpts = append(dmmOpts, models.WithBrowser(true))
 		}
 	}
 	if cmd.Flags().Changed("no-browser") {
 		if val, _ := cmd.Flags().GetBool("no-browser"); val {
-			cfg.Scrapers.Overrides["dmm"].UseBrowser = false
+			dmmOpts = append(dmmOpts, models.WithBrowser(false))
 		}
+	}
+	if len(dmmOpts) > 0 {
+		cfg.Scrapers.ApplyOverride("dmm", dmmOpts...)
 	}
 	if cmd.Flags().Changed("browser-timeout") {
 		if val, _ := cmd.Flags().GetInt("browser-timeout"); val > 0 {

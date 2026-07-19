@@ -58,25 +58,33 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 				return fmt.Errorf("failed to unmarshal browser: %w", err)
 			}
 		default:
-			// Scraper entry — decode with strict unknown-field checking.
+			trimmed := bytes.TrimSpace(rawVal)
+			if bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("{}")) {
+				continue
+			}
+
 			if s.resolver != nil && !s.resolver.IsRegistered(key) {
 				return fmt.Errorf("unknown scraper %q", key)
 			}
 
 			var ss models.ScraperSettings
 
-			// Pre-check for deprecated aliases using bytes.Contains to avoid
+			var scraperRaw map[string]json.RawMessage
+			if err := json.Unmarshal(rawVal, &scraperRaw); err != nil {
+				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
+			}
+
+			// Pre-check for deprecated aliases using the parsed map to avoid
 			// unnecessary double-decode in the common (no-alias) case.
-			hasAliases := bytes.Contains(rawVal, []byte(`"request_delay"`)) ||
-				bytes.Contains(rawVal, []byte(`"max_retries"`))
+			hasAliases := false
+			for k := range scraperRaw {
+				if k == "request_delay" || k == "max_retries" {
+					hasAliases = true
+					break
+				}
+			}
 
 			if hasAliases {
-				// Decode the raw value into a map for alias handling.
-				var scraperRaw map[string]json.RawMessage
-				if err := json.Unmarshal(rawVal, &scraperRaw); err != nil {
-					return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
-				}
-
 				// Decode without strict mode, then apply aliases,
 				// then validate remaining keys.
 				if err := json.Unmarshal(rawVal, &ss); err != nil {
@@ -98,6 +106,8 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 					return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 				}
 			}
+			_, explicitEnabled := scraperRaw["enabled"]
+			ss.SetEnabledPresence(explicitEnabled)
 
 			s.Overrides[key] = &ss
 		}
@@ -123,8 +133,7 @@ func (s *ScrapersConfig) applyJSONAliases(raw map[string]json.RawMessage, ss *mo
 	}
 }
 
-// MarshalJSON implements custom JSON marshaling for ScrapersConfig.
-func (s *ScrapersConfig) MarshalJSON() ([]byte, error) {
+func (s *ScrapersConfig) marshalScrapersMap(effective bool) map[string]any {
 	m := make(map[string]any)
 
 	m["user_agent"] = s.UserAgent
@@ -137,34 +146,45 @@ func (s *ScrapersConfig) MarshalJSON() ([]byte, error) {
 	m["scrape_actress"] = s.ScrapeActress
 	m["browser"] = s.Browser
 
+	var defaults map[string]models.ScraperSettings
+	if effective && s.resolver != nil {
+		defaults = s.resolver.GetAllDefaults()
+	}
 	for name, settings := range s.Overrides {
-		if settings != nil {
+		if settings == nil {
+			continue
+		}
+		if effective {
+			m[name] = s.effectiveOverrideForMarshal(name, settings, defaults)
+		} else {
 			m[name] = settings
 		}
 	}
+	return m
+}
 
-	return json.Marshal(m)
+func (s *ScrapersConfig) effectiveOverrideForMarshal(name string, settings *models.ScraperSettings, defaults map[string]models.ScraperSettings) *models.ScraperSettings {
+	if settings == nil {
+		return nil
+	}
+	if defaults == nil {
+		return settings
+	}
+	def, ok := defaults[name]
+	if !ok {
+		return settings
+	}
+	resolved := settings.Clone()
+	resolved.MergeEnabledDefault(def)
+	return &resolved
+}
+
+// MarshalJSON implements custom JSON marshaling for ScrapersConfig.
+func (s *ScrapersConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.marshalScrapersMap(true))
 }
 
 // MarshalYAML serializes scrapers with full unified ScraperSettings.
 func (s *ScrapersConfig) MarshalYAML() (interface{}, error) {
-	m := make(map[string]any)
-
-	m["user_agent"] = s.UserAgent
-	m["referer"] = s.Referer
-	m["timeout_seconds"] = s.TimeoutSeconds
-	m["request_timeout_seconds"] = s.RequestTimeoutSeconds
-	m["priority"] = s.Priority
-	m["proxy"] = s.Proxy
-	m["flaresolverr"] = s.FlareSolverr
-	m["scrape_actress"] = s.ScrapeActress
-	m["browser"] = s.Browser
-
-	for name, settings := range s.Overrides {
-		if settings != nil {
-			m[name] = settings
-		}
-	}
-
-	return m, nil
+	return s.marshalScrapersMap(false), nil
 }

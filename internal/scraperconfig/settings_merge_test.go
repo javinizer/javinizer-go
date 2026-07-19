@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestScraperSettings_MergeDefaultsFrom_StringFields(t *testing.T) {
@@ -229,4 +231,122 @@ func TestScraperSettings_MergeDefaultsFrom_BothZero(t *testing.T) {
 	s := ScraperSettings{Language: ""}
 	s.MergeDefaultsFrom(defaults)
 	assert.Equal(t, "", s.Language, "both zero should remain zero")
+}
+
+func TestScraperSettings_MergeEnabledDefault(t *testing.T) {
+	t.Parallel()
+
+	trueDefaults := ScraperSettings{Enabled: true}
+	falseDefaults := ScraperSettings{Enabled: false}
+
+	t.Run("programmatic_false_preserved_against_true_default", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		s.MergeEnabledDefault(trueDefaults)
+		assert.False(t, s.Enabled)
+	})
+
+	t.Run("programmatic_true_preserved_against_false_default", func(t *testing.T) {
+		s := ScraperSettings{Enabled: true}
+		s.MergeEnabledDefault(falseDefaults)
+		assert.True(t, s.Enabled)
+	})
+
+	t.Run("decoded_omitted_inherits_true_default", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		s.SetEnabledPresence(false)
+		s.MergeEnabledDefault(trueDefaults)
+		assert.True(t, s.Enabled)
+	})
+
+	t.Run("decoded_omitted_inherits_false_default", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		s.SetEnabledPresence(false)
+		s.MergeEnabledDefault(falseDefaults)
+		assert.False(t, s.Enabled)
+	})
+
+	t.Run("decoded_explicit_false_preserved_against_true_default", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		s.SetEnabledPresence(true)
+		s.MergeEnabledDefault(trueDefaults)
+		assert.False(t, s.Enabled)
+	})
+
+	t.Run("decoded_explicit_true_preserved_against_false_default", func(t *testing.T) {
+		s := ScraperSettings{Enabled: true}
+		s.SetEnabledPresence(true)
+		s.MergeEnabledDefault(falseDefaults)
+		assert.True(t, s.Enabled)
+	})
+}
+
+func TestScraperSettings_EffectiveEnabled(t *testing.T) {
+	t.Parallel()
+
+	t.Run("programmatic_false_uses_raw", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		assert.False(t, s.EffectiveEnabled(true))
+	})
+
+	t.Run("programmatic_true_uses_raw", func(t *testing.T) {
+		s := ScraperSettings{Enabled: true}
+		assert.True(t, s.EffectiveEnabled(false))
+	})
+
+	t.Run("decoded_omitted_inherits_default", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		s.SetEnabledPresence(false)
+		assert.True(t, s.EffectiveEnabled(true))
+		assert.False(t, s.EffectiveEnabled(false))
+	})
+
+	t.Run("decoded_explicit_false_uses_raw", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		s.SetEnabledPresence(true)
+		assert.False(t, s.EffectiveEnabled(true))
+	})
+
+	t.Run("decoded_explicit_true_uses_raw", func(t *testing.T) {
+		s := ScraperSettings{Enabled: true}
+		s.SetEnabledPresence(true)
+		assert.True(t, s.EffectiveEnabled(false))
+	})
+}
+
+func TestScraperSettings_Clone_PreservesEnabledPresence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("omitted_presence_survives_clone", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		s.SetEnabledPresence(false)
+		cp := s.Clone()
+		cp.MergeEnabledDefault(ScraperSettings{Enabled: true})
+		assert.True(t, cp.Enabled)
+	})
+
+	t.Run("explicit_presence_survives_clone", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		s.SetEnabledPresence(true)
+		cp := s.Clone()
+		cp.MergeEnabledDefault(ScraperSettings{Enabled: true})
+		assert.False(t, cp.Enabled)
+	})
+
+	t.Run("programmatic_absence_survives_clone", func(t *testing.T) {
+		s := ScraperSettings{Enabled: false}
+		cp := s.Clone()
+		cp.MergeEnabledDefault(ScraperSettings{Enabled: true})
+		assert.False(t, cp.Enabled)
+	})
+}
+
+func TestScraperSettings_MarshalYAML_OmitsPresenceMetadata(t *testing.T) {
+	t.Parallel()
+
+	s := ScraperSettings{Enabled: true, Language: "en"}
+	s.SetEnabledPresence(true)
+	out, err := yaml.Marshal(&s)
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), "enabledDecoded")
+	assert.NotContains(t, string(out), "enabledExplicit")
 }
