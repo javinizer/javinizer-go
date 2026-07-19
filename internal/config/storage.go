@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"gopkg.in/yaml.v3"
 )
@@ -90,16 +91,25 @@ var staticScraperKeys = map[string]bool{
 
 // BuildSparseSaveContextWithNames constructs a SparseSaveContext seeded with the
 // registered scraper names so reconcileMappings can recognise (and therefore
-// delete) registered scraper blocks under the `scrapers` mapping.
-//
-// NOTE: this uses DefaultConfig(nil, nil), which relies on hardcoded compiled
-// priorities. For custom registries with different priorities this may produce
-// false diffs. A shared default-context provider is an open question in the spec.
+// delete) registered scraper blocks under the `scrapers` mapping. Registered
+// scraper defaults are not supplied, so default-only scraper blocks are
+// preserved as explicit overrides. Callers with a scraper registry should prefer
+// BuildSparseSaveContextWithScrapers to also prune default-only scraper blocks.
 func BuildSparseSaveContextWithNames(names []string) (SparseSaveContext, error) {
-	return buildSparseSaveContextWithNames(names, configToYAMLDocument)
+	return buildSparseSaveContextWithScrapers(names, nil, configToYAMLDocument)
 }
 
-func buildSparseSaveContextWithNames(names []string, toDocument configDocumentFunc) (SparseSaveContext, error) {
+// BuildSparseSaveContextWithScrapers constructs a SparseSaveContext seeded with
+// the registered scraper names and their registered default settings. Seeding
+// the defaults lets the sparse diff prune scraper blocks that merely repeat
+// registered defaults (e.g. r18dev: {enabled: true}) while preserving explicit
+// overrides that differ, so unrelated saves remain minimal and future
+// module-default changes are inherited.
+func BuildSparseSaveContextWithScrapers(names []string, scraperDefaults map[string]models.ScraperSettings) (SparseSaveContext, error) {
+	return buildSparseSaveContextWithScrapers(names, scraperDefaults, configToYAMLDocument)
+}
+
+func buildSparseSaveContextWithScrapers(names []string, scraperDefaults map[string]models.ScraperSettings, toDocument configDocumentFunc) (SparseSaveContext, error) {
 	defaults := DefaultConfig(nil, nil)
 	schema, err := toDocument(defaults)
 	if err != nil {
@@ -112,7 +122,7 @@ func buildSparseSaveContextWithNames(names []string, toDocument configDocumentFu
 		}
 		known[n] = true
 	}
-	return SparseSaveContext{Defaults: defaults, Schema: schema, KnownScraperNames: known}, nil
+	return SparseSaveContext{Defaults: defaults, Schema: schema, KnownScraperNames: known, ScraperDefaults: scraperDefaults}, nil
 }
 
 // Save writes the configuration to a YAML file using the configured filesystem.
@@ -300,7 +310,8 @@ func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveCont
 type encodeYAMLDocFunc func(*yaml.Node) ([]byte, error)
 
 func (cs *ConfigStorage) saveSparseWith(cfg *Config, path string, ctx SparseSaveContext, toDocument configDocumentFunc, encode encodeYAMLDocFunc) error {
-	sparseTarget, err := diffYAMLDocumentsWith(cfg, ctx.Defaults, toDocument)
+	diffCfg, diffDefaults := resolveScraperOverridesForDiff(cfg, ctx.Defaults, ctx.ScraperDefaults)
+	sparseTarget, err := diffYAMLDocumentsWith(diffCfg, diffDefaults, toDocument)
 	if err != nil {
 		return fmt.Errorf("failed to diff config: %w", err)
 	}

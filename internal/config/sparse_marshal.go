@@ -16,6 +16,7 @@ type SparseSaveContext struct {
 	Defaults          *Config
 	Schema            *yaml.Node
 	KnownScraperNames map[string]bool
+	ScraperDefaults   map[string]models.ScraperSettings
 }
 
 var alwaysEmitPaths = map[string]bool{
@@ -52,6 +53,29 @@ func diffYAMLDocumentsWith(actual, defaults *Config, toDocument configDocumentFu
 	out := &yaml.Node{Kind: yaml.MappingNode}
 	diffMappings(aRoot, dRoot, out, "")
 	return &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{out}}, nil
+}
+
+func resolveScraperOverridesForDiff(cfg, defaults *Config, scraperDefaults map[string]models.ScraperSettings) (*Config, *Config) {
+	if len(scraperDefaults) == 0 || cfg == nil {
+		return cfg, defaults
+	}
+	diffCfg := cfg.Clone()
+	seeded := defaults.Clone()
+	if seeded.Scrapers.Overrides == nil {
+		seeded.Scrapers.Overrides = make(map[string]*models.ScraperSettings, len(diffCfg.Scrapers.Overrides))
+	}
+	for name, override := range diffCfg.Scrapers.Overrides {
+		def, ok := scraperDefaults[name]
+		if !ok {
+			continue
+		}
+		resolved := override.Clone()
+		resolved.MergeDefaultsFrom(def)
+		diffCfg.Scrapers.Overrides[name] = &resolved
+		d := def.Clone()
+		seeded.Scrapers.Overrides[name] = &d
+	}
+	return diffCfg, seeded
 }
 
 func mappingRoot(n *yaml.Node) *yaml.Node {

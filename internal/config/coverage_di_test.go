@@ -44,7 +44,8 @@ func TestDiffYAMLDocumentsWith_DefaultDocumentError(t *testing.T) {
 
 func TestBuildSparseSaveContextWithNames_DocumentError(t *testing.T) {
 	expected := errors.New("marshal failed")
-	ctx, err := buildSparseSaveContextWithNames(
+	ctx, err := buildSparseSaveContextWithScrapers(
+		nil,
 		nil,
 		func(*Config) (*yaml.Node, error) { return nil, expected },
 	)

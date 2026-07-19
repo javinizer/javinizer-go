@@ -7,6 +7,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 // ConfigUpdateService encapsulates the business logic for validating, persisting,
@@ -42,6 +43,13 @@ func (s *ConfigUpdateService) scraperNames() []string {
 		return nil
 	}
 	return s.deps.CoreDeps.GetRegistry().Names()
+}
+
+func (s *ConfigUpdateService) scraperDefaults() map[string]models.ScraperSettings {
+	if s.deps == nil || s.deps.CoreDeps == nil || s.deps.CoreDeps.ScraperRegistry == nil {
+		return nil
+	}
+	return s.deps.CoreDeps.GetRegistry().GetAllDefaults()
 }
 
 // ValidateAndApply runs the full config update pipeline:
@@ -82,7 +90,7 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 		return &validationError{message: "Invalid configuration: " + err.Error()}
 	}
 
-	ctx, err := config.BuildSparseSaveContextWithNames(s.scraperNames())
+	ctx, err := config.BuildSparseSaveContextWithScrapers(s.scraperNames(), s.scraperDefaults())
 	if err != nil {
 		return &validationError{message: err.Error()}
 	}
