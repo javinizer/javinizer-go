@@ -24,6 +24,7 @@ var alwaysEmitPaths = map[string]bool{
 
 type configDocumentFunc func(*Config) (*yaml.Node, error)
 
+//nolint:unused // public API wrapper for diffYAMLDocumentsWith
 func diffYAMLDocuments(actual, defaults *Config) (*yaml.Node, error) {
 	return diffYAMLDocumentsWith(actual, defaults, configToYAMLDocument)
 }

@@ -293,7 +293,14 @@ func minimalInitStub() []byte {
 
 // SaveSparse saves a config using sparse diff + reconciliation.
 func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveContext) error {
-	sparseTarget, err := diffYAMLDocuments(cfg, ctx.Defaults)
+	return cs.saveSparseWith(cfg, path, ctx, configToYAMLDocument, encodeYAMLDocument)
+}
+
+// encodeYAMLDocFunc mirrors encodeYAMLDocument for dependency injection.
+type encodeYAMLDocFunc func(*yaml.Node) ([]byte, error)
+
+func (cs *ConfigStorage) saveSparseWith(cfg *Config, path string, ctx SparseSaveContext, toDocument configDocumentFunc, encode encodeYAMLDocFunc) error {
+	sparseTarget, err := diffYAMLDocumentsWith(cfg, ctx.Defaults, toDocument)
 	if err != nil {
 		return fmt.Errorf("failed to diff config: %w", err)
 	}
@@ -325,7 +332,7 @@ func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveCont
 	}
 	reconcileSparse(existingDoc, sparseTarget, ctx.Schema, ctx.KnownScraperNames)
 	pruneMetadataPriorityFields(existingDoc, sparseTarget)
-	data, err := encodeYAMLDocument(existingDoc)
+	data, err := encode(existingDoc)
 	if err != nil {
 		return fmt.Errorf("failed to encode config: %w", err)
 	}
