@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -270,6 +271,9 @@ func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]
 		if emittedDst[dstKey.Value] {
 			continue
 		}
+		if isSourceAuthoritativeFreeFormMap(path) {
+			continue
+		}
 		knownVal, isKnown := knownByKey[dstKey.Value]
 		isKnownScraper := path == "scrapers" && knownScraperNames[dstKey.Value]
 		if isKnown || isKnownScraper {
@@ -291,6 +295,14 @@ var (
 	scraperSettingsSchemaOnce sync.Once
 	scraperSettingsSchema     *yaml.Node
 )
+
+func isSourceAuthoritativeFreeFormMap(path string) bool {
+	if path == "output.download_proxy.profiles" {
+		return true
+	}
+	return strings.HasPrefix(path, "scrapers.") &&
+		(strings.HasSuffix(path, ".proxy.profiles") || strings.HasSuffix(path, ".download_proxy.profiles"))
+}
 
 type yamlMarshalFunc func(any) ([]byte, error)
 type yamlParseFunc func([]byte) (*yaml.Node, error)
