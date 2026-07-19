@@ -283,6 +283,24 @@ func TestCovLoadOrCreate_MigrationReloadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to re-load migrated config")
 }
 
+func TestCovLoadOrCreate_PostMigrationSaveSparseError(t *testing.T) {
+	base := afero.NewMemMapFs()
+	seedCfg := DefaultConfig(nil, nil)
+	seedCfg.Logging.Output = ""
+	doc, err := configToYAMLDocument(seedCfg)
+	require.NoError(t, err)
+	seed, err := encodeYAMLDocument(doc)
+	require.NoError(t, err)
+	require.NoError(t, base.MkdirAll("/cfg", DirPerm))
+	require.NoError(t, afero.WriteFile(base, "/cfg/c.yaml", seed, 0o644))
+
+	cs := NewConfigStorage(base, errLockFactory)
+	_, err = cs.LoadOrCreate("/cfg/c.yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to save migrated config")
+	assert.Contains(t, err.Error(), "lock boom")
+}
+
 func TestCovSyncDir_SyncError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires /dev/null")

@@ -130,10 +130,6 @@ func reloadComponents(rt *core.APIRuntime, deps *core.APIDeps, newCfg *config.Co
 	return nil
 }
 
-func validateTranslationSaveConfig(cfg *config.Config) error {
-	return config.ValidateTranslationProvider(cfg)
-}
-
 // configErrorResponse maps a config-update HTTP status + message to a
 // contracts.ErrorResponse, stamping the stable CONFIG_INVALID code on
 // client-side validation failures (HTTP 400). Server-side persist/reload

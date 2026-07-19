@@ -19,11 +19,18 @@ type ConfigUpdateService struct {
 	rt         *core.APIRuntime
 	deps       *core.APIDeps
 	configFile string
+	saveSparse func(cfg *config.Config, path string, ctx config.SparseSaveContext) error
+	reload     func(rt *core.APIRuntime, deps *core.APIDeps, cfg *config.Config) error
 }
 
 // NewConfigUpdateService creates a service bound to the given runtime and config file path.
 func NewConfigUpdateService(rt *core.APIRuntime, configFile string) *ConfigUpdateService {
-	return &ConfigUpdateService{rt: rt, deps: rt.Deps(), configFile: configFile}
+	svc := &ConfigUpdateService{rt: rt, deps: rt.Deps(), configFile: configFile}
+	svc.saveSparse = func(cfg *config.Config, path string, ctx config.SparseSaveContext) error {
+		return config.NewConfigStorage(nil, nil).SaveSparse(cfg, path, ctx)
+	}
+	svc.reload = reloadComponents
+	return svc
 }
 
 // scraperNames returns the names of scrapers registered in the active registry,
@@ -71,9 +78,6 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 		return &validationError{message: err.Error()}
 	}
 
-	if err := validateTranslationSaveConfig(runtimeCfg); err != nil {
-		return &validationError{message: "Invalid configuration: " + err.Error()}
-	}
 	if err := validateProxySaveConfig(s.deps, runtimeCfg, proxyTokens); err != nil {
 		return &validationError{message: "Invalid configuration: " + err.Error()}
 	}
@@ -82,15 +86,14 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 	if err != nil {
 		return &validationError{message: err.Error()}
 	}
-	storage := config.NewConfigStorage(nil, nil)
-	if err := storage.SaveSparse(newCfg, s.configFile, ctx); err != nil {
+	if err := s.saveSparse(newCfg, s.configFile, ctx); err != nil {
 		logging.Errorf("Failed to save config: %v", err)
 		return &persistError{message: "Failed to save configuration"}
 	}
 
-	if err := reloadComponents(s.rt, s.deps, runtimeCfg); err != nil {
+	if err := s.reload(s.rt, s.deps, runtimeCfg); err != nil {
 		logging.Errorf("Failed to reload components: %v", err)
-		if saveErr := storage.SaveSparse(diskCfg, s.configFile, ctx); saveErr != nil {
+		if saveErr := s.saveSparse(diskCfg, s.configFile, ctx); saveErr != nil {
 			logging.Errorf("CRITICAL: Failed to restore old config: %v", saveErr)
 			return &rollbackError{
 				rollbackErr: saveErr,
