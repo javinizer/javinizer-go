@@ -24,6 +24,7 @@ func ScraperRegistryConfigFromApp(cfg *config.Config, names []string, defaults m
 			resolved := override.Clone()
 			if def, ok := defaults[name]; ok {
 				resolved.MergeDefaultsFrom(def)
+				resolved.MergeEnabledDefault(def)
 			}
 			overrides[name] = resolved
 		} else {

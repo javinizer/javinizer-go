@@ -116,7 +116,19 @@ func (c *ScrapersConfig) ResolvedSettings(name string) models.ScraperSettings {
 	}
 	resolved := c.Overrides[name].Clone()
 	resolved.MergeDefaultsFrom(defaults)
+	resolved.MergeEnabledDefault(defaults)
 	return resolved
+}
+
+func (c *ScrapersConfig) defaultEnabled(name string) bool {
+	if c.resolver == nil {
+		return false
+	}
+	defaults, ok := c.resolver.GetAllDefaults()[name]
+	if !ok {
+		return false
+	}
+	return defaults.Enabled
 }
 
 // getValidateFn returns the scraper-specific validation function for the named scraper.
@@ -253,6 +265,7 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 			if err := valNode.Decode(&ss); err != nil {
 				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 			}
+			ss.SetEnabledPresence(scraperYAMLHasEnabledKey(valNode))
 
 			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
 			// Walk the node content to find alias keys and apply them if the canonical
@@ -297,6 +310,18 @@ func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.Scraper
 			}
 		}
 	}
+}
+
+func scraperYAMLHasEnabledKey(valNode *yaml.Node) bool {
+	if valNode == nil || valNode.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(valNode.Content); i += 2 {
+		if valNode.Content[i].Value == "enabled" {
+			return true
+		}
+	}
+	return false
 }
 
 // validateYAMLScraperKeys checks for unknown fields in a scraper entry's YAML node.

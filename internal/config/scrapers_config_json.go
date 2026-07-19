@@ -69,18 +69,22 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 
 			var ss models.ScraperSettings
 
-			// Pre-check for deprecated aliases using bytes.Contains to avoid
+			var scraperRaw map[string]json.RawMessage
+			if err := json.Unmarshal(rawVal, &scraperRaw); err != nil {
+				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
+			}
+
+			// Pre-check for deprecated aliases using the parsed map to avoid
 			// unnecessary double-decode in the common (no-alias) case.
-			hasAliases := bytes.Contains(rawVal, []byte(`"request_delay"`)) ||
-				bytes.Contains(rawVal, []byte(`"max_retries"`))
+			hasAliases := false
+			for k := range scraperRaw {
+				if k == "request_delay" || k == "max_retries" {
+					hasAliases = true
+					break
+				}
+			}
 
 			if hasAliases {
-				// Decode the raw value into a map for alias handling.
-				var scraperRaw map[string]json.RawMessage
-				if err := json.Unmarshal(rawVal, &scraperRaw); err != nil {
-					return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
-				}
-
 				// Decode without strict mode, then apply aliases,
 				// then validate remaining keys.
 				if err := json.Unmarshal(rawVal, &ss); err != nil {
@@ -102,6 +106,8 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 					return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 				}
 			}
+			_, explicitEnabled := scraperRaw["enabled"]
+			ss.SetEnabledPresence(explicitEnabled)
 
 			s.Overrides[key] = &ss
 		}

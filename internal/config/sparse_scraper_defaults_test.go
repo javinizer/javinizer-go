@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func scraperDefaultsForTest() map[string]models.ScraperSettings {
@@ -302,4 +303,65 @@ func TestBuildSparseSaveContextWithScrapers_NilDefaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, ctx.ScraperDefaults)
 	assert.True(t, ctx.KnownScraperNames["javdb"])
+}
+
+func TestSaveSparseScraperDefaults_DecodedOmittedEnabledPrunesBlock(t *testing.T) {
+	yamlSrc := []byte(strings.Join([]string{
+		"config_version: 3",
+		"scrapers:",
+		"    r18dev:",
+		"        rate_limit: 500",
+	}, "\n"))
+	cfg := DefaultConfig(nil, nil)
+	require.NoError(t, yaml.Unmarshal(yamlSrc, cfg))
+
+	cs, path := saveSparseScraperConfig(t, cfg)
+	got := readPersistedScraperYAML(t, cs, path)
+
+	assert.Contains(t, got, "r18dev:")
+	assert.Contains(t, got, "rate_limit: 500")
+	assert.NotContains(t, got, "enabled: false", "omitted enabled must not be persisted as false")
+	assert.NotContains(t, got, "enabled: true", "default-matching enabled must be pruned")
+}
+
+func TestSaveSparseScraperDefaults_DecodedExplicitFalsePreserved(t *testing.T) {
+	yamlSrc := []byte(strings.Join([]string{
+		"config_version: 3",
+		"scrapers:",
+		"    r18dev:",
+		"        enabled: false",
+	}, "\n"))
+	cfg := DefaultConfig(nil, nil)
+	require.NoError(t, yaml.Unmarshal(yamlSrc, cfg))
+
+	cs, path := saveSparseScraperConfig(t, cfg)
+	got := readPersistedScraperYAML(t, cs, path)
+
+	assert.Contains(t, got, "r18dev:")
+	assert.Contains(t, got, "enabled: false")
+}
+
+func TestSaveSparseScraperDefaults_DecodedOmittedEnabledReloadKeepsDefaultTrue(t *testing.T) {
+	yamlSrc := []byte(strings.Join([]string{
+		"config_version: 3",
+		"scrapers:",
+		"    r18dev:",
+		"        rate_limit: 500",
+	}, "\n"))
+	cs := newMemStorage()
+	path := "/cfg/config.yaml"
+	require.NoError(t, afero.WriteFile(cs.fs, path, yamlSrc, 0o644))
+
+	loaded, err := cs.Load(path)
+	require.NoError(t, err)
+	require.NotNil(t, loaded.Scrapers.Overrides["r18dev"])
+	assert.False(t, loaded.Scrapers.Overrides["r18dev"].Enabled, "raw override decodes omitted enabled as false")
+
+	loaded.Scrapers.Finalize(&staticTestConfigResolver{
+		registered: map[string]bool{"r18dev": true},
+		defaults:   map[string]models.ScraperSettings{"r18dev": {Enabled: true, Language: "en"}},
+	})
+	resolved := loaded.Scrapers.ResolvedSettings("r18dev")
+	assert.True(t, resolved.Enabled, "reload must inherit default true for omitted enabled")
+	assert.Equal(t, 500, resolved.RateLimit)
 }

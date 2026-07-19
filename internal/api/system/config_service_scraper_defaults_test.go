@@ -1,6 +1,7 @@
 package system
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -132,4 +133,35 @@ func TestConfigUpdateService_SaveSparse_DefaultFalseExplicitTruePreserved(t *tes
 	assert.Contains(t, persisted, "javdb:")
 	assert.Contains(t, persisted, "enabled: true")
 	assert.NotContains(t, persisted, "rate_limit: 1000")
+}
+
+func TestConfigUpdateService_SaveSparse_JSONOmittedEnabledPrunesBlock(t *testing.T) {
+	oldCfg := config.DefaultConfig(nil, nil)
+	tempConfigFile := t.TempDir() + "/config.yaml"
+	require.NoError(t, config.Save(oldCfg, tempConfigFile))
+	deps := createTestDeps(t, oldCfg, tempConfigFile)
+
+	deps.CoreDeps.ScraperRegistry.Register(scraperutil.ScraperRegistration{
+		Name:     "r18dev",
+		Defaults: models.ScraperSettings{Enabled: true, Language: "en"},
+	})
+
+	jsonBody := `{"scrapers":{"priority":["r18dev"],"r18dev":{"rate_limit":500}}}`
+	newCfg := config.DefaultConfig(nil, nil)
+	require.NoError(t, json.Unmarshal([]byte(jsonBody), newCfg))
+
+	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), tempConfigFile)
+	svc.reload = func(rt *core.APIRuntime, d *core.APIDeps, cfg *config.Config) error { return nil }
+
+	err := svc.ValidateAndApply(oldCfg, newCfg, nil)
+	require.NoError(t, err)
+
+	data, err := afero.ReadFile(afero.NewOsFs(), tempConfigFile)
+	require.NoError(t, err)
+	persisted := string(data)
+
+	assert.Contains(t, persisted, "r18dev:")
+	assert.Contains(t, persisted, "rate_limit: 500")
+	assert.NotContains(t, persisted, "enabled: false", "JSON-omitted enabled must not persist as false")
+	assert.NotContains(t, persisted, "enabled: true", "default-matching enabled must be pruned")
 }

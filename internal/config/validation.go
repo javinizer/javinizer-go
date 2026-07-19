@@ -73,7 +73,7 @@ func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
 			if !ok || settings == nil {
 				continue
 			}
-			if settings.Enabled && scraperInPriority(cfg.Scrapers.Priority, name) {
+			if settings.EffectiveEnabled(cfg.Scrapers.defaultEnabled(name)) && scraperInPriority(cfg.Scrapers.Priority, name) {
 				hasQueryable = true
 			} else {
 				unqueryable = append(unqueryable, name)
@@ -84,7 +84,7 @@ func ValidatePriorityOverrides(cfg *Config) []ConfigWarning {
 			var reasons []string
 			for _, name := range unqueryable {
 				settings := cfg.Scrapers.Overrides[name]
-				if settings != nil && !settings.Enabled {
+				if settings != nil && !settings.EffectiveEnabled(cfg.Scrapers.defaultEnabled(name)) {
 					reasons = append(reasons, fmt.Sprintf("%s is disabled", name))
 				} else {
 					reasons = append(reasons, fmt.Sprintf("%s is not in scrapers.priority", name))

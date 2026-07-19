@@ -271,3 +271,11 @@ func TestUnmarshalJSON_NonAliasPath_RejectsUnknownFields(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestScrapersConfig_DefaultEnabled(t *testing.T) {
+	sc := &ScrapersConfig{}
+	sc.resolver = newEnabledResolver()
+	assert.True(t, sc.defaultEnabled("r18dev"))
+	assert.False(t, sc.defaultEnabled("dmm"))
+	assert.False(t, sc.defaultEnabled("ghost"))
+}

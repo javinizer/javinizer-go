@@ -96,3 +96,22 @@ func TestValidateYAMLScraperKeys_NonMappingNoOp(t *testing.T) {
 	sc := &ScrapersConfig{}
 	assert.NoError(t, sc.validateYAMLScraperKeys("r18dev", &yaml.Node{Kind: yaml.ScalarNode, Value: "x"}))
 }
+
+func TestScraperYAMLHasEnabledKey(t *testing.T) {
+	assert.False(t, scraperYAMLHasEnabledKey(nil))
+	assert.False(t, scraperYAMLHasEnabledKey(&yaml.Node{Kind: yaml.ScalarNode, Value: "x"}))
+	assert.True(t, scraperYAMLHasEnabledKey(&yaml.Node{
+		Kind: yaml.MappingNode,
+		Content: []*yaml.Node{
+			{Value: "enabled"},
+			{Value: "true"},
+		},
+	}))
+	assert.False(t, scraperYAMLHasEnabledKey(&yaml.Node{
+		Kind: yaml.MappingNode,
+		Content: []*yaml.Node{
+			{Value: "rate_limit"},
+			{Value: "500"},
+		},
+	}))
+}

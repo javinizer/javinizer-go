@@ -71,6 +71,7 @@ func resolveScraperOverridesForDiff(cfg, defaults *Config, scraperDefaults map[s
 		}
 		resolved := override.Clone()
 		resolved.MergeDefaultsFrom(def)
+		resolved.MergeEnabledDefault(def)
 		diffCfg.Scrapers.Overrides[name] = &resolved
 		d := def.Clone()
 		seeded.Scrapers.Overrides[name] = &d

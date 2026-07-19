@@ -200,6 +200,9 @@ type ScraperSettings struct {
 	ScrapeBonusScreens     bool              `yaml:"scrape_bonus_screens,omitempty" json:"scrape_bonus_screens,omitempty"`
 	APIKey                 string            `yaml:"api_key,omitempty" json:"api_key,omitempty"`
 	RespectRetryAfter      *bool             `yaml:"respect_retry_after,omitempty" json:"respect_retry_after,omitempty"`
+
+	enabledDecoded  bool `yaml:"-" json:"-"`
+	enabledExplicit bool `yaml:"-" json:"-"`
 }
 
 // MarshalYAML preserves the full unified scraper settings shape so config
@@ -340,6 +343,34 @@ func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
 		val := *defaults.RespectRetryAfter
 		s.RespectRetryAfter = &val
 	}
+}
+
+// SetEnabledPresence records whether the `enabled` key was present when
+// decoding a scraper entry. explicit=true means present (true or false);
+// explicit=false means omitted. Programmatic literals must not call it.
+func (s *ScraperSettings) SetEnabledPresence(explicit bool) {
+	s.enabledDecoded = true
+	s.enabledExplicit = explicit
+}
+
+// MergeEnabledDefault inherits defaults.Enabled when s was decoded with an
+// omitted `enabled` key. Programmatic literals and explicit enabled values
+// are preserved.
+func (s *ScraperSettings) MergeEnabledDefault(defaults ScraperSettings) {
+	if s.enabledDecoded && !s.enabledExplicit {
+		s.Enabled = defaults.Enabled
+	}
+}
+
+// EffectiveEnabled returns the resolved enabled state for validation when the
+// registered default's Enabled is known. A decoded omitted `enabled` inherits
+// defaultEnabled; programmatic literals and explicit enabled values are
+// preserved. Callers must guard against a nil receiver.
+func (s *ScraperSettings) EffectiveEnabled(defaultEnabled bool) bool {
+	if s.enabledDecoded && !s.enabledExplicit {
+		return defaultEnabled
+	}
+	return s.Enabled
 }
 
 // ShouldScrapeActress returns whether actress scraping is enabled for this scraper.
