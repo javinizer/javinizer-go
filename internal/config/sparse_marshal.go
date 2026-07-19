@@ -224,7 +224,7 @@ func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]
 		return
 	}
 	if dst.Kind != yaml.MappingNode || src.Kind != yaml.MappingNode {
-		replacement := cloneYAMLNode(src)
+		replacement := cloneStrippingFreeFormNulls(src, path)
 		applyNodeMetadataPreservingComments(dst, replacement)
 		*dst = *replacement
 		return
@@ -236,6 +236,10 @@ func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]
 	for i := 0; i+1 < len(src.Content); i += 2 {
 		srcKey := src.Content[i]
 		srcVal := src.Content[i+1]
+		if isSourceAuthoritativeFreeFormMap(path) && isNullScalar(srcVal) {
+			emittedDst[srcKey.Value] = true
+			continue
+		}
 		if dstVal, ok := dstByKey[srcKey.Value]; ok {
 			emittedDst[srcKey.Value] = true
 			dstKeyIdx := findMappingValueIndex(dst, srcKey.Value) - 1
@@ -250,19 +254,19 @@ func reconcileMappings(dst, src, known *yaml.Node, knownScraperNames map[string]
 				} else if knownVal != nil && knownVal.Kind == yaml.MappingNode {
 					reconcileMappings(dstVal, srcVal, knownVal, knownScraperNames, joinPath(path, srcKey.Value))
 				} else {
-					replacement := cloneYAMLNode(srcVal)
+					replacement := cloneStrippingFreeFormNulls(srcVal, joinPath(path, srcKey.Value))
 					applyNodeMetadataPreservingComments(dstVal, replacement)
 					*dstVal = *replacement
 				}
 				result = append(result, dstKey, dstVal)
 			} else {
-				replacement := cloneYAMLNode(srcVal)
+				replacement := cloneStrippingFreeFormNulls(srcVal, joinPath(path, srcKey.Value))
 				applyNodeMetadataPreservingComments(dstVal, replacement)
 				*dstVal = *replacement
 				result = append(result, dstKey, dstVal)
 			}
 		} else {
-			result = append(result, cloneYAMLNode(srcKey), cloneYAMLNode(srcVal))
+			result = append(result, cloneYAMLNode(srcKey), cloneStrippingFreeFormNulls(srcVal, joinPath(path, srcKey.Value)))
 		}
 	}
 	for i := 0; i+1 < len(dst.Content); i += 2 {
@@ -295,6 +299,34 @@ var (
 	scraperSettingsSchemaOnce sync.Once
 	scraperSettingsSchema     *yaml.Node
 )
+
+func isNullScalar(n *yaml.Node) bool {
+	return n != nil && n.Kind == yaml.ScalarNode && n.Tag == "!!null"
+}
+
+func cloneStrippingFreeFormNulls(src *yaml.Node, path string) *yaml.Node {
+	cloned := cloneYAMLNode(src)
+	stripFreeFormNulls(cloned, path)
+	return cloned
+}
+
+func stripFreeFormNulls(n *yaml.Node, path string) {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return
+	}
+	if isSourceAuthoritativeFreeFormMap(path) {
+		kept := make([]*yaml.Node, 0, len(n.Content))
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if !isNullScalar(n.Content[i+1]) {
+				kept = append(kept, n.Content[i], n.Content[i+1])
+			}
+		}
+		n.Content = kept
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		stripFreeFormNulls(n.Content[i+1], joinPath(path, n.Content[i].Value))
+	}
+}
 
 func isSourceAuthoritativeFreeFormMap(path string) bool {
 	if path == "output.download_proxy.profiles" {
