@@ -111,10 +111,17 @@ export async function bootstrapLocale(): Promise<string> {
 }
 
 // applyLocale sets the Paraglide locale and updates <html lang> and <html dir>.
+// setLocale reloads the page by default, so skip it when Paraglide already
+// renders the target: its own no-reload guard compares against getLocale(),
+// which cannot map region tags like zh-CN onto script locales (zh-Hans) and
+// reports baseLocale instead — callers that clear the cached tag before
+// applying (the 'auto' flows) would otherwise reload on every pass (#164).
 export async function applyLocale(tag: string): Promise<void> {
 	if (!browser) return;
 	const resolved = isSupported(tag) ? tag : baseLocale;
-	await setLocale(resolved as typeof locales[number]);
+	if (getLocale() !== resolved) {
+		await setLocale(resolved as typeof locales[number]);
+	}
 	document.documentElement.lang = resolved;
 	document.documentElement.dir = localeDir(resolved);
 }
@@ -136,8 +143,16 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 
 	const configured = ui?.language?.trim() ?? '';
 	if (configured === '' || canonicalizeTag(configured) === 'auto') {
-		localStorage.removeItem(LOCALE_STORAGE_KEY);
 		const browserLocale = resolveBrowserLocale();
+		// Steady state: Paraglide already renders the browser-preferred locale.
+		// Clearing the cached tag and reapplying on every reconcile (which runs
+		// on each page load post-auth) makes getLocale() fall back to baseLocale
+		// for script-based locales (zh-Hans/zh-Hant), so setLocale's reload
+		// guard misfires and the page reloads forever (#164).
+		if (getLocale() === browserLocale) {
+			return browserLocale;
+		}
+		localStorage.removeItem(LOCALE_STORAGE_KEY);
 		await applyLocale(browserLocale);
 		return browserLocale;
 	}
