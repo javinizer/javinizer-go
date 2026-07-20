@@ -169,10 +169,19 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 	return baseLocale;
 }
 
+// selectLocale applies a locale picked from a selector. 'auto' resolves the
+// browser preference (mapped onto the shipped catalogs). When the effective
+// locale differs from the currently rendered one, setLocale pins it through
+// the localStorage strategy and reloads the page so compiled messages
+// re-render; a same-locale pick only re-pins the cache.
 export async function selectLocale(tag: string): Promise<void> {
 	if (!browser) return;
-	if (tag !== 'auto' && isSupported(tag)) {
-		localStorage.setItem(LOCALE_STORAGE_KEY, tag);
+	const resolved = tag === 'auto' ? resolveBrowserLocale() : isSupported(tag) ? tag : baseLocale;
+	if (getLocale() === resolved) {
+		localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
+	} else {
+		await setLocale(resolved as typeof locales[number]);
 	}
-	await applyLocale(isSupported(tag) ? tag : baseLocale);
+	document.documentElement.lang = resolved;
+	document.documentElement.dir = localeDir(resolved);
 }

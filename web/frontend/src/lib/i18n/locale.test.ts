@@ -4,6 +4,7 @@ import {
 	LOCALE_STORAGE_KEY,
 	reconcileWithConfig,
 	resolveLocaleTag,
+	selectLocale,
 	SUPPORTED_LOCALES
 } from './locale';
 import type { UIConfig } from '$lib/api/types';
@@ -148,5 +149,55 @@ describe('reconcileWithConfig / applyLocale reload guards (#164)', () => {
 		await applyLocale('zh-Hans');
 
 		expect(mockSetLocale).toHaveBeenCalledWith('zh-Hans');
+	});
+});
+
+describe('selectLocale', () => {
+	function stubLanguages(langs: string[]) {
+		Object.defineProperty(window.navigator, 'languages', { value: langs, configurable: true });
+	}
+
+	beforeEach(() => {
+		localStorage.clear();
+		mockGetLocale.mockReset();
+		mockSetLocale.mockReset();
+		mockGetLocale.mockImplementation(() => localStorage.getItem(LOCALE_STORAGE_KEY) ?? 'en');
+		mockSetLocale.mockImplementation(async (tag: string) => {
+			localStorage.setItem(LOCALE_STORAGE_KEY, tag);
+		});
+		stubLanguages(['zh-CN']);
+	});
+
+	it("'auto' resolves the browser locale instead of forcing the base locale", async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'en');
+
+		await selectLocale('auto');
+
+		expect(mockSetLocale).toHaveBeenCalledWith('zh-Hans');
+	});
+
+	it('applies an explicit pick via setLocale when it differs from the rendered locale', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'en');
+
+		await selectLocale('ja');
+
+		expect(mockSetLocale).toHaveBeenCalledWith('ja');
+	});
+
+	it('re-pins the cache without setLocale when the pick is already rendered', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-Hans');
+
+		await selectLocale('zh-Hans');
+
+		expect(mockSetLocale).not.toHaveBeenCalled();
+		expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-Hans');
+	});
+
+	it('falls back to the base locale for unsupported tags', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'ja');
+
+		await selectLocale('fr');
+
+		expect(mockSetLocale).toHaveBeenCalledWith('en');
 	});
 });

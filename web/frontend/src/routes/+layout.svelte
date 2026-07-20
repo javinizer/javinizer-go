@@ -21,6 +21,7 @@
 	import { translateErrorCode } from '$lib/i18n/api-messages';
 	import { ApiError } from '$lib/api/clients/common';
 	import LocaleReconciler from '$lib/components/LocaleReconciler.svelte';
+	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
 	import '../app.css';
 
 	let { children } = $props();
@@ -141,6 +142,12 @@
 
 <svelte:head>
 </svelte:head>
+
+{#if !authAuthenticated}
+	<div class="fixed top-4 right-4 z-50">
+		<LanguageSelector />
+	</div>
+{/if}
 
 {#if authLoading}
 	<div class="min-h-screen bg-background flex items-center justify-center px-4">
