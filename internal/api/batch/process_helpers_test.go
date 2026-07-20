@@ -33,6 +33,7 @@ func copyTempCroppedPoster(job *worker.BatchJob, movie *models.Movie, destDir st
 
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = cfg.Output.Operation.GroupActress
+	ctx.GroupActressMin = cfg.Output.Operation.GroupActressMin
 	if multipart != nil {
 		ctx.IsMultiPart = multipart.IsMultiPart
 		ctx.PartNumber = multipart.PartNumber

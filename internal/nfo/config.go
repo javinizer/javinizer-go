@@ -11,6 +11,7 @@ import (
 type NFONameConfig struct {
 	FilenameTemplate string
 	GroupActress     bool
+	GroupActressMin  int    // Minimum actress count to trigger grouping (0 => 2)
 	GroupActressName string // Folder name when GroupActress is enabled and multiple actresses
 	PerFile          bool
 	IsMultiPart      bool
@@ -55,6 +56,7 @@ type Config struct {
 	// Dependencies
 	TemplateEngine   template.EngineInterface
 	GroupActress     bool
+	GroupActressMin  int    // Minimum actress count to trigger grouping (0 => 2)
 	GroupActressName string // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
 
 	// Actress rendering options for <ACTORS>/<ACTRESSES> template tags.
@@ -100,6 +102,7 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg NFONameConfig) *Config {
 		Tagline:                 cfg.Metadata.NFO.Format.Tagline,
 		Credits:                 cfg.Metadata.NFO.Extra.Credits,
 		GroupActress:            nameCfg.GroupActress,
+		GroupActressMin:         nameCfg.GroupActressMin,
 		GroupActressName:        nameCfg.GroupActressName,
 		GroupUnknownActressName: nameCfg.GroupUnknownActressName,
 		ActressDelimiter:        nameCfg.ActressDelimiter,
@@ -113,6 +116,7 @@ func (c *Config) ToNFONameConfig(isMultiPart bool, partSuffix string) NFONameCon
 	return NFONameConfig{
 		FilenameTemplate:        c.FilenameTemplate,
 		GroupActress:            c.GroupActress,
+		GroupActressMin:         c.GroupActressMin,
 		GroupActressName:        c.GroupActressName,
 		PerFile:                 c.PerFile,
 		IsMultiPart:             isMultiPart,
@@ -130,9 +134,9 @@ func (c *Config) ToNFONameConfig(isMultiPart bool, partSuffix string) NFONameCon
 // full bridge chain.
 //
 // Config-bridge reads: cfg.Metadata.NFO.Format.FilenameTemplate, cfg.Metadata.NFO.Format.FirstNameOrder,
-// cfg.Metadata.NFO.Feature.PerFile, cfg.Output.Operation.GroupActress, cfg.Output.Operation.GroupActressName,
-// cfg.Output.Operation.GroupUnknownActressName, cfg.Output.Template, cfg.Output.Template.ActressDelimiter,
-// cfg.Metadata.NFO.Format.ActressLanguageJA
+// cfg.Metadata.NFO.Feature.PerFile, cfg.Output.Operation.GroupActress, cfg.Output.Operation.GroupActressMin,
+// cfg.Output.Operation.GroupActressName, cfg.Output.Operation.GroupUnknownActressName, cfg.Output.Template,
+// cfg.Output.Template.ActressDelimiter, cfg.Metadata.NFO.Format.ActressLanguageJA
 func NFONameConfigFromAppConfig(cfg *config.Config) NFONameConfig {
 	if cfg == nil {
 		return NFONameConfig{}
@@ -140,6 +144,7 @@ func NFONameConfigFromAppConfig(cfg *config.Config) NFONameConfig {
 	return NFONameConfig{
 		FilenameTemplate:        cfg.Metadata.NFO.Format.FilenameTemplate,
 		GroupActress:            cfg.Output.Operation.GroupActress,
+		GroupActressMin:         cfg.Output.Operation.GroupActressMin,
 		GroupActressName:        cfg.Output.Operation.GroupActressName,
 		PerFile:                 cfg.Metadata.NFO.Feature.PerFile,
 		FirstNameOrder:          cfg.Metadata.NFO.Format.FirstNameOrder,

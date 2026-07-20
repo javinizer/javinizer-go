@@ -6573,6 +6573,10 @@ const docTemplate = `{
                     "description": "Replace multiple actresses with group name in templates (default: false)",
                     "type": "boolean"
                 },
+                "group_actress_min": {
+                    "description": "Minimum number of actresses to trigger group substitution; grouping applies when count \u003e= this value (default: 2; 0 or negative treated as 2)",
+                    "type": "integer"
+                },
                 "group_actress_name": {
                     "description": "Folder name when group_actress is enabled and multiple actresses (default: \"@Group\")",
                     "type": "string"

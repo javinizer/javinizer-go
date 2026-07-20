@@ -247,6 +247,7 @@ func defaultOutputConfig() OutputConfig {
 			RenameFile:              true,       // Rename files by default
 			AllowRevert:             false,      // Opt-in: revert is disabled by default for safety
 			GroupActress:            false,      // Don't group actresses by default
+			GroupActressMin:         2,          // Default: group when >= 2 actresses (preserves "more than 1" behavior)
 			GroupActressName:        "@Group",   // Default group name when group_actress is enabled
 			GroupUnknownActressName: "@Unknown", // Default unknown-actress name when group_actress is enabled and the actress list is empty or unknown
 			MoveSubtitles:           false,

@@ -2015,6 +2015,8 @@
   "settings_output_group_actress_label": "Group actress",
   "settings_output_group_actress_name_desc": "Folder name used when a movie has multiple actresses (default: @Group)",
   "settings_output_group_actress_name_label": "Group actress name",
+  "settings_output_group_actress_min_label": "Group actress min",
+  "settings_output_group_actress_min_desc": "Minimum number of actresses to trigger group substitution (default: 2; 0 or negative treated as 2)",
   "settings_output_max_path_desc": "Maximum total path length to prevent Windows path errors (MAX_PATH = 260)",
   "settings_output_max_path_label": "Max path length",
   "settings_output_max_title_desc": "Maximum characters for movie titles in folder names. Longer titles will be intelligently truncated.",

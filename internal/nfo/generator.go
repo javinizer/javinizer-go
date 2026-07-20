@@ -182,6 +182,7 @@ func (g *Generator) Generate(ctx context.Context, movie *models.Movie, outputPat
 		FirstNameOrder: g.config.FirstNameOrder,
 	})
 	tmplCtx.GroupActress = g.config.GroupActress
+	tmplCtx.GroupActressMin = g.config.GroupActressMin
 	tmplCtx.GroupActressName = g.config.GroupActressName
 	tmplCtx.GroupUnknownActressName = g.config.GroupUnknownActressName
 	tmplCtx.ActressLanguageJa = g.config.ActressLanguageJA
@@ -248,6 +249,7 @@ func (g *Generator) ResolveAndGenerate(ctx context.Context, movie *models.Movie,
 		FirstNameOrder: nameCfg.FirstNameOrder,
 	})
 	tmplCtx.GroupActress = nameCfg.GroupActress
+	tmplCtx.GroupActressMin = nameCfg.GroupActressMin
 	tmplCtx.GroupActressName = nameCfg.GroupActressName
 	if _, tmplErr := g.templateEngine.Execute(nameCfg.FilenameTemplate, tmplCtx); tmplErr != nil {
 		return "", nil //nolint:nilerr // intentional: broken templates skip NFO generation, not an error
@@ -428,6 +430,7 @@ func ResolveNFOFilename(engine template.EngineInterface, movie *models.Movie, cf
 		FirstNameOrder: cfg.FirstNameOrder,
 	})
 	tmplCtx.GroupActress = cfg.GroupActress
+	tmplCtx.GroupActressMin = cfg.GroupActressMin
 	tmplCtx.GroupActressName = cfg.GroupActressName
 	tmplCtx.GroupUnknownActressName = cfg.GroupUnknownActressName
 	tmplCtx.ActressLanguageJa = cfg.ActressLanguageJA

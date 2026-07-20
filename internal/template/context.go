@@ -37,7 +37,7 @@ type Context struct {
 	// People
 	Director       string
 	Actresses      []string        // Pre-formatted actress names (LastName FirstName via FullName). Legacy: use ActressDetails for FirstNameOrder-aware formatting.
-	ActressDetails []ActressDetail // Source of truth for name formatting; formatActressName/formatActressNames uses this first, falls back to Actresses.
+	ActressDetails []ActressDetail // Source of truth for name formatting; formatActressName uses this first, falls back to Actresses.
 	FirstName      string          // For single actress context
 	LastName       string          // For single actress context
 	ActressName    string          // Explicit actress name for .actors image filenames
@@ -84,6 +84,7 @@ type Context struct {
 
 	// Output configuration
 	GroupActress            bool   // Replace multiple actresses with group name
+	GroupActressMin         int    // Minimum actress count to trigger grouping; grouping applies when count >= this value (0 => 2, the default)
 	GroupActressName        string // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
 	GroupUnknownActressName string // Replacement when GroupActress is enabled and the actress list is empty or unknown (default: "@Unknown")
 
@@ -200,6 +201,7 @@ func (c *Context) Clone() *Context {
 		TrailerURL:              c.TrailerURL,
 		DefaultLanguage:         c.DefaultLanguage,
 		GroupActress:            c.GroupActress,
+		GroupActressMin:         c.GroupActressMin,
 		GroupActressName:        c.GroupActressName,
 		GroupUnknownActressName: c.GroupUnknownActressName,
 		FirstNameOrder:          c.FirstNameOrder,
@@ -347,8 +349,13 @@ func (c *Context) formatActressName(detail ActressDetail) string {
 	return c.formatActressNameLang(detail, c.ActressLanguageJa, nil)
 }
 
-// formatActressNames returns a slice of formatted actress names using ActressDetails.
-// Falls back to the pre-formatted Actresses slice if ActressDetails is empty.
-func (c *Context) formatActressNames() []string {
-	return c.formatActressNamesLang(c.ActressLanguageJa, nil)
+// groupActressMin returns the configured minimum actress count that triggers
+// group substitution under GroupActress. A non-positive value (the zero value
+// when the field is unset) is treated as 2, preserving the original "more than
+// 1" behaviour. Grouping applies when len(actresses) >= this value.
+func (c *Context) groupActressMin() int {
+	if c.GroupActressMin <= 0 {
+		return 2
+	}
+	return c.GroupActressMin
 }

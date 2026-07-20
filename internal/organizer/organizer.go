@@ -57,6 +57,7 @@ func resolveBaseFileName(cfg *Config, engine template.EngineInterface, movie *mo
 	if cfg.RenameFile {
 		baseCtx := template.NewContextFromMovie(movie)
 		baseCtx.GroupActress = cfg.GroupActress
+		baseCtx.GroupActressMin = cfg.GroupActressMin
 		baseCtx.GroupActressName = cfg.GroupActressName
 		baseCtx.GroupUnknownActressName = cfg.GroupUnknownActressName
 		baseCtx.FirstNameOrder = cfg.FirstNameOrder
@@ -138,6 +139,7 @@ type planContext struct {
 func buildPlanContext(cfg *Config, engine template.EngineInterface, movie *models.Movie, match models.FileMatchInfo) planContext {
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = cfg.GroupActress
+	ctx.GroupActressMin = cfg.GroupActressMin
 	ctx.GroupActressName = cfg.GroupActressName
 	ctx.GroupUnknownActressName = cfg.GroupUnknownActressName
 	ctx.FirstNameOrder = cfg.FirstNameOrder

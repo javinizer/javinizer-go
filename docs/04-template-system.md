@@ -96,7 +96,7 @@ The modifiers available depend on the tag (see [Modifiers](#modifiers) below). F
 
 > **Japanese names:** Set `output.actress_language_ja: true` to prefer Japanese names (e.g., `波多野結衣`) over Latin names (e.g., `Hatano Yui`) for all actress tags. You can also use the tag-level `:JA` modifier (e.g., `<ACTORS:JA>`) to override per-tag. See [Actress Language (Japanese Names)](#actress-language-japanese-names).
 
-> **Group actress:** When `output.group_actress` is enabled and a movie has multiple actresses, `<ACTRESSES>` returns the group name (default: `@Group`) instead of listing individual names. When the actress list is empty or unknown, `<ACTRESSES>` returns the `group_unknown_actress_name` value (default: `@Unknown`). See [Group Actress Organization](#group-actress-organization).
+> **Group actress:** When `output.group_actress` is enabled and the actress count meets the `group_actress_min` threshold (default 2), `<ACTRESSES>` returns the group name (default: `@Group`) instead of listing individual names. When the actress list is empty or unknown, `<ACTRESSES>` returns the `group_unknown_actress_name` value (default: `@Unknown`). See [Group Actress Organization](#group-actress-organization).
 
 ### Categories
 
@@ -803,11 +803,12 @@ Result:
 
 ### Group Actress Organization
 
-When a movie has multiple actresses, you can organize them into a shared group folder instead of listing all names. This is controlled by `output.group_actress`:
+When the number of actresses reaches the configured minimum, you can organize them into a shared group folder instead of listing all names. This is controlled by `output.group_actress` and `output.group_actress_min`:
 
 ```yaml
 output:
   group_actress: true
+  # group_actress_min: 2  # Minimum actress count to trigger grouping (default: 2; 0 or negative treated as 2)
   # group_actress_name: "@Group"  # Custom group folder name (default: @Group)
   # group_unknown_actress_name: "@Unknown"  # Folder name when actress is unknown (default: @Unknown)
 ```
@@ -815,8 +816,8 @@ output:
 **How it works:**
 
 When `group_actress` is enabled and `<ACTRESSES>` appears in your folder template:
-- **Multiple actresses** → `<ACTRESSES>` resolves to the group name (default: `@Group`)
-- **Single actress** → `<ACTRESSES>` resolves to the actress name as normal
+- **Actress count >= group_actress_min** → `<ACTRESSES>` resolves to the group name (default: `@Group`)
+- **Below threshold** → `<ACTRESSES>` resolves to the joined actress names as normal
 - **No actress / unknown actress** → `<ACTRESSES>` resolves to the unknown actress name (default: `@Unknown`)
 
 **Example with group_actress enabled:**

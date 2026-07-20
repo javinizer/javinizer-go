@@ -429,6 +429,10 @@ output:
     rename_file: true
     allow_revert: false
     group_actress: false
+    # Minimum number of actresses to trigger group substitution; grouping applies
+    # when the actress count is >= this value (default: 2; 0 or negative treated as 2).
+    # Set to 4 to mirror the original PowerShell Javinizer ">3" rule (4+ actresses group).
+    # group_actress_min: 2
     # Folder name when group_actress is enabled and multiple actresses are found (default: "@Group")
     # group_actress_name: "@Group"
     # Replacement when group_actress is enabled and the actress list is empty or

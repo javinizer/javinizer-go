@@ -2015,6 +2015,8 @@
   "settings_output_group_actress_label": "分组女优",
   "settings_output_group_actress_name_desc": "当影片有多个女优时使用的文件夹名（默认：@Group）",
   "settings_output_group_actress_name_label": "分组女优名",
+  "settings_output_group_actress_min_label": "分组最小人数",
+  "settings_output_group_actress_min_desc": "触发分组的最小女优数（默认: 2）",
   "settings_output_max_path_desc": "最大总路径长度，以防止 Windows 路径错误（MAX_PATH = 260）",
   "settings_output_max_path_label": "最大路径长度",
   "settings_output_max_title_desc": "文件夹名中影片标题的最大字符数。更长的标题将被智能截断。",

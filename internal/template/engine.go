@@ -589,25 +589,11 @@ func newComputedTagRegistry() map[string]tagResolver {
 	return registry
 }
 
-// newListTagRegistry returns list-type tags (ACTORS, GENRES, etc.).
+// newListTagRegistry returns list-type tags (GENRES, etc.). ACTORS/ACTRESSES
+// are handled directly by resolveActressListTag (resolveTag intercepts them
+// before the registry is consulted), so they are intentionally absent here.
 func newListTagRegistry() map[string]tagResolver {
 	registry := make(map[string]tagResolver)
-
-	registry["ACTORS"] = func(ctx *Context) (string, error) {
-		if len(ctx.Actresses) > 0 {
-			if ctx.GroupActress && len(ctx.Actresses) > 1 {
-				groupName := ctx.GroupActressName
-				if groupName == "" {
-					groupName = "@Group"
-				}
-				return groupName, nil
-			}
-			names := ctx.formatActressNames()
-			return strings.Join(names, listDelimiterSentinel), nil
-		}
-		return "", nil
-	}
-	registry["ACTRESSES"] = registry["ACTORS"]
 
 	registry["GENRES"] = func(ctx *Context) (string, error) {
 		if len(ctx.Genres) > 0 {
@@ -856,22 +842,6 @@ func (e *Engine) resolveActressListTag(modifier string, ctx *Context) string {
 	}
 	names := ctx.formatActressNamesLang(preferJa, pm.firstNameOrder)
 
-	if ctx.GroupActress {
-		if len(names) > 1 {
-			groupName := ctx.GroupActressName
-			if groupName == "" {
-				groupName = "@Group"
-			}
-			return groupName
-		}
-		// Single actress: mirror the original javinizer which substitutes
-		// @Unknown when the only name is unknown or empty.
-		if len(names) == 0 || isUnknownActressName(names[0]) {
-			return resolveGroupUnknownName(ctx.GroupUnknownActressName)
-		}
-		return names[0]
-	}
-
 	// Join delimiter precedence (main's coherent ACTORS design):
 	//  1. Tag-level DELIM= modifier (explicit, may be empty: <ACTORS:DELIM=>).
 	//  2. ctx.ActressDelimiter (config-level actress_delimiter).
@@ -887,6 +857,28 @@ func (e *Engine) resolveActressListTag(modifier string, ctx *Context) string {
 	if pm.delimSet {
 		delimiter = pm.delimiter
 	}
+
+	if ctx.GroupActress {
+		// An empty list or a lone unknown actress always resolves to the
+		// @Unknown replacement, regardless of the configured threshold —
+		// mirrors the original PowerShell javinizer.
+		if len(names) == 0 || (len(names) == 1 && isUnknownActressName(names[0])) {
+			return resolveGroupUnknownName(ctx.GroupUnknownActressName)
+		}
+		// Group substitution applies when the actress count reaches the
+		// configured minimum (group_actress_min, default 2 — preserves the
+		// original "more than 1" behaviour). Below the threshold names are
+		// joined normally.
+		if len(names) >= ctx.groupActressMin() {
+			groupName := ctx.GroupActressName
+			if groupName == "" {
+				groupName = "@Group"
+			}
+			return groupName
+		}
+		return strings.Join(names, delimiter)
+	}
+
 	return strings.Join(names, delimiter)
 }
 

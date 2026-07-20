@@ -33,6 +33,7 @@ func ApplyDisplayTitleFromSource(ctx context.Context, scraped *models.Movie, tit
 		// Thread the actress-rendering options so display-title templates using
 		// <ACTORS>/<ACTRESSES> honor the configured delimiter/grouping/JA preference.
 		displayCtx.GroupActress = nameCfg.GroupActress
+		displayCtx.GroupActressMin = nameCfg.GroupActressMin
 		displayCtx.GroupActressName = nameCfg.GroupActressName
 		displayCtx.GroupUnknownActressName = nameCfg.GroupUnknownActressName
 		displayCtx.FirstNameOrder = nameCfg.FirstNameOrder
