@@ -715,6 +715,7 @@ func TestTemplateEngine_GroupActress(t *testing.T) {
 		name                    string
 		actresses               []string
 		groupActress            bool
+		groupActressMin         int
 		groupActressName        string
 		groupUnknownActressName string
 		template                string
@@ -818,6 +819,86 @@ func TestTemplateEngine_GroupActress(t *testing.T) {
 			template:         "<ID> - <ACTORS>",
 			want:             "IPX-535 - @Group",
 		},
+		{
+			name:            "GroupActressMin=3 groups three actresses",
+			actresses:       []string{"Actress One", "Actress Two", "Actress Three"},
+			groupActress:    true,
+			groupActressMin: 3,
+			template:        "<ID> - <ACTORS>",
+			want:            "IPX-535 - @Group",
+		},
+		{
+			name:            "GroupActressMin=3 joins two actresses (below threshold)",
+			actresses:       []string{"Actress One", "Actress Two"},
+			groupActress:    true,
+			groupActressMin: 3,
+			template:        "<ID> - <ACTORS>",
+			want:            "IPX-535 - Actress One, Actress Two",
+		},
+		{
+			name:            "GroupActressMin=4 mirrors PowerShell >3 rule (4 actresses group)",
+			actresses:       []string{"A1", "A2", "A3", "A4"},
+			groupActress:    true,
+			groupActressMin: 4,
+			template:        "<ID> - <ACTORS>",
+			want:            "IPX-535 - @Group",
+		},
+		{
+			name:            "GroupActressMin=4 leaves three actresses joined (below threshold)",
+			actresses:       []string{"A1", "A2", "A3"},
+			groupActress:    true,
+			groupActressMin: 4,
+			template:        "<ID> - <ACTORS>",
+			want:            "IPX-535 - A1, A2, A3",
+		},
+		{
+			name:            "GroupActressMin=0 treated as default 2 (two actresses still group)",
+			actresses:       []string{"Actress One", "Actress Two"},
+			groupActress:    true,
+			groupActressMin: 0,
+			template:        "<ID> - <ACTORS>",
+			want:            "IPX-535 - @Group",
+		},
+		{
+			name:            "GroupActressMin=0 single actress not grouped (default behaviour)",
+			actresses:       []string{"Single Actress"},
+			groupActress:    true,
+			groupActressMin: 0,
+			template:        "<ID> - <ACTORS>",
+			want:            "IPX-535 - Single Actress",
+		},
+		{
+			name:            "GroupActressMin=1 groups a single valid actress",
+			actresses:       []string{"Solo Actress"},
+			groupActress:    true,
+			groupActressMin: 1,
+			template:        "<ID> - <ACTORS>",
+			want:            "IPX-535 - @Group",
+		},
+		{
+			name:            "GroupActressMin=1 lone unknown actress still resolves to @Unknown",
+			actresses:       []string{"Unknown"},
+			groupActress:    true,
+			groupActressMin: 1,
+			template:        "<ID> - <ACTORS>",
+			want:            "IPX-535 - @Unknown",
+		},
+		{
+			name:            "Negative GroupActressMin treated as default 2",
+			actresses:       []string{"A1", "A2"},
+			groupActress:    true,
+			groupActressMin: -5,
+			template:        "<ID> - <ACTORS>",
+			want:            "IPX-535 - @Group",
+		},
+		{
+			name:            "Below threshold with DELIM modifier joins correctly",
+			actresses:       []string{"A1", "A2"},
+			groupActress:    true,
+			groupActressMin: 4,
+			template:        "<ID> - <ACTORS:DELIM=|>",
+			want:            "IPX-535 - A1|A2",
+		},
 	}
 
 	for _, tt := range tests {
@@ -826,6 +907,7 @@ func TestTemplateEngine_GroupActress(t *testing.T) {
 				ID:                      "IPX-535",
 				Actresses:               tt.actresses,
 				GroupActress:            tt.groupActress,
+				GroupActressMin:         tt.groupActressMin,
 				GroupActressName:        tt.groupActressName,
 				GroupUnknownActressName: tt.groupUnknownActressName,
 			}

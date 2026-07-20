@@ -123,6 +123,7 @@ func (d *Downloader) buildTemplateContext(movie *models.Movie, multipart *Multip
 	ctx := template.NewContextFromMovie(movie)
 	ctx.Index = 0
 	ctx.GroupActress = d.config.GroupActress
+	ctx.GroupActressMin = d.config.GroupActressMin
 	ctx.GroupActressName = d.config.GroupActressName
 	ctx.GroupUnknownActressName = d.config.GroupUnknownActressName
 	ctx.ActressDelimiter = d.config.ActressDelimiter
@@ -145,6 +146,7 @@ func (d *Downloader) generateActressFilename(movie *models.Movie, actressName st
 	ctx := template.NewContextFromMovie(movie)
 	ctx.ActressName = actressName
 	ctx.GroupActress = d.config.GroupActress
+	ctx.GroupActressMin = d.config.GroupActressMin
 	ctx.GroupActressName = d.config.GroupActressName
 	ctx.GroupUnknownActressName = d.config.GroupUnknownActressName
 	ctx.ActressDelimiter = d.config.ActressDelimiter

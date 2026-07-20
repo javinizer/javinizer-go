@@ -67,6 +67,21 @@
 						{m.settings_output_group_actress_name_desc()}
 					</p>
 				</div>
+
+				<div class="py-4 border-b border-border">
+					<label class="block text-sm font-medium mb-2" for="group-actress-min">{m.settings_output_group_actress_min_label()}</label>
+					<input
+						id="group-actress-min"
+						type="number"
+						min="1"
+						bind:value={config.output.group_actress_min}
+						class={inputClass}
+						placeholder="2"
+					/>
+					<p class="text-xs text-muted-foreground mt-1">
+						{m.settings_output_group_actress_min_desc()}
+					</p>
+				</div>
 			{/if}
 
 			<div class="py-4 border-b border-border">

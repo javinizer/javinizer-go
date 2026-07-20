@@ -121,6 +121,7 @@
 //	cfg.Output.Template.FolderFormat                 → organizer
 //	cfg.Output.GetOperationMode()           → api/core, organizer
 //	cfg.Output.Operation.GroupActress                 → downloader, nfo, organizer, workflow
+//	cfg.Output.Operation.GroupActressMin              → downloader, nfo, organizer, workflow
 //	cfg.Output.Operation.GroupActressName             → downloader, nfo, organizer, workflow
 //	cfg.Output.Operation.GroupUnknownActressName     → downloader, nfo, organizer, workflow
 //	cfg.Output.MediaFormat.MaxPosterHeight            → api/core, downloader

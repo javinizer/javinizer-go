@@ -2015,6 +2015,8 @@
   "settings_output_group_actress_label": "女優をグループ化",
   "settings_output_group_actress_name_desc": "動画に複数の女優がいる場合のフォルダー名 (デフォルト: @Group)",
   "settings_output_group_actress_name_label": "グループ女優名",
+  "settings_output_group_actress_min_label": "グループ化最小人数",
+  "settings_output_group_actress_min_desc": "グループ化を適用する最小女優数（デフォルト: 2）",
   "settings_output_max_path_desc": "Windows パスエラーを防ぐための最大パス長 (MAX_PATH = 260)",
   "settings_output_max_path_label": "最大パス長",
   "settings_output_max_title_desc": "フォルダー名内の動画タイトルの最大文字数。長いタイトルは賢く切り詰められます。",

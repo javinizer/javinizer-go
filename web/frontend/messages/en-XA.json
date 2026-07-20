@@ -1354,6 +1354,8 @@
   "settings_output_group_actress_label": "[ Gröüp åçtrëss ]",
   "settings_output_group_actress_name_desc": "[ Földër ñåmë üsëd whëñ å mövíë hås mültíplë åçtrëssës (dëfåült: @Gröüp) ]",
   "settings_output_group_actress_name_label": "[ Gröüp åçtrëss ñåmë ]",
+  "settings_output_group_actress_min_label": "[ Group Actress Min ]",
+  "settings_output_group_actress_min_desc": "[ Minimum actress count to trigger group substitution (default: 2; 0 or negative treated as 2) ]",
   "settings_output_max_path_desc": "[ Måxímüm tötål påth lëñgth tö prëvëñt Wíñdöws påth ërrörs (MÅX_PÅTH = 260) ]",
   "settings_output_max_path_label": "[ Måx påth lëñgth ]",
   "settings_output_max_title_desc": "[ Måxímüm çhåråçtërs för mövíë títlës íñ földër ñåmës. Löñgër títlës wíll bë íñtëllígëñtly trüñçåtëd. ]",

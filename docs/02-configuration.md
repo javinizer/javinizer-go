@@ -680,6 +680,8 @@ Actresses: Sakura Momo, Mikami Yua, Anzai Rara
 
 **group_actress**: When `true` and a movie has multiple actresses, the `<ACTRESSES>` template tag resolves to a group folder name instead of listing individual names. Only affects templates that contain `<ACTRESSES>`. Default: `false`.
 
+**group_actress_min**: Minimum number of actresses required to trigger group substitution when `group_actress` is enabled. Grouping applies when the actress count is greater than or equal to this value. Default: `2` (preserves the original "more than 1" behaviour — any 2+ actresses group). Set to `4` to mirror the original PowerShell Javinizer `>3` rule, where 4+ actresses collapse to the group name but 1–3 are listed individually. A value of `0` or negative is treated as `2`.
+
 **group_actress_name**: Folder name used when `group_actress` is enabled and multiple actresses are found. Default: `@Group`.
 
 **group_unknown_actress_name**: Folder name used when `group_actress` is enabled and the actress list is empty or contains only an unknown actress. Default: `@Unknown`.

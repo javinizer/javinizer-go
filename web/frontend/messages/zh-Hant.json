@@ -2015,6 +2015,8 @@
   "settings_output_group_actress_label": "群組女優",
   "settings_output_group_actress_name_desc": "當影片有多位女優時使用的資料夾名稱（預設：@Group）",
   "settings_output_group_actress_name_label": "群組女優名稱",
+  "settings_output_group_actress_min_label": "分組最小人数",
+  "settings_output_group_actress_min_desc": "觸發分組的最小女優数（預設: 2）",
   "settings_output_max_path_desc": "防止 Windows 路徑錯誤的最大總路徑長度（MAX_PATH = 260）",
   "settings_output_max_path_label": "最大路徑長度",
   "settings_output_max_title_desc": "資料夾名稱中影片標題的最大字元數。過長的標題將被智慧截斷。",
