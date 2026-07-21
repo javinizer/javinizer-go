@@ -144,7 +144,7 @@
 <svelte:head>
 </svelte:head>
 
-{#if !authAuthenticated && !setupSessionActive}
+{#if !authAuthenticated && !(setupSessionActive && !authInitialized)}
 	<div class="fixed top-4 right-4 z-50">
 		<LanguageSelector />
 	</div>
