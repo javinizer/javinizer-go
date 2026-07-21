@@ -130,6 +130,20 @@ describe('reconcileWithConfig / applyLocale reload guards (#164)', () => {
 		expect(mockSetLocale).not.toHaveBeenCalled();
 	});
 
+	it('auto config syncs the choice key so a stale pre-auth pick cannot loop with bootstrap', async () => {
+		// Pre-auth selector left an explicit 'ja' choice; config is 'auto' and the
+		// browser is en-US. reconcile must clear the choice to 'auto' so the next
+		// bootstrap (which honors an explicit choice) doesn't re-apply 'ja' and loop.
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'ja');
+		localStorage.setItem(LOCALE_CHOICE_KEY, 'ja');
+		stubLanguages(['en-US']);
+
+		const result = await reconcileWithConfig({ language: 'auto' } as UIConfig);
+
+		expect(result).toBe('en');
+		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBe('auto');
+	});
+
 	it('auto config corrects a stale cached tag exactly once, then stays stable', async () => {
 		localStorage.setItem(LOCALE_STORAGE_KEY, 'en');
 

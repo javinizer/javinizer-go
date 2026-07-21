@@ -172,6 +172,11 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 	const configured = ui?.language?.trim() ?? '';
 	if (configured === '' || canonicalizeTag(configured) === 'auto') {
 		const browserLocale = resolveBrowserLocale();
+		// Sync the choice to 'auto' so bootstrap (which honors an explicit
+		// LOCALE_CHOICE_KEY) and reconcile agree — otherwise a pre-auth
+		// explicit pick left in the choice key would make bootstrap re-apply
+		// it, then reconcile flip back to the browser locale, looping.
+		localStorage.setItem(LOCALE_CHOICE_KEY, 'auto');
 		// Steady state: Paraglide already renders the browser-preferred locale.
 		// Clearing the cached tag and reapplying on every reconcile (which runs
 		// on each page load post-auth) makes getLocale() fall back to baseLocale
@@ -187,12 +192,17 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 
 	const resolved = resolveLocaleTag(configured);
 	if (resolved) {
+		// Mirror the explicit config into the choice key so bootstrap honors it
+		// before the protected config loads on the next startup.
+		localStorage.setItem(LOCALE_CHOICE_KEY, resolved);
 		localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
 		await applyLocale(resolved);
 		return resolved;
 	}
 
-	// Valid but unsupported configured tag: render English, do not cache.
+	// Valid but unsupported configured tag: render English, do not cache. Treat
+	// the choice as 'auto' so bootstrap follows the browser, not a stale pick.
+	localStorage.setItem(LOCALE_CHOICE_KEY, 'auto');
 	await applyLocale(baseLocale);
 	return baseLocale;
 }
