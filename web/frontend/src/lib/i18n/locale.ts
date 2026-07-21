@@ -228,6 +228,12 @@ export async function applySavedLocale(language?: string | null): Promise<void> 
 	const configured = language?.trim() ?? '';
 	const isAuto = configured === '' || canonicalizeTag(configured) === 'auto';
 	const resolved = isAuto ? resolveBrowserLocale() : (resolveLocaleTag(configured) ?? baseLocale);
+	// Sync the selector choice to the just-saved config so bootstrapLocale
+	// honors it before the protected config loads on the next startup: 'auto'
+	// keeps the browser preference authoritative, an explicit tag is recorded
+	// as such. Without this a stale 'auto' choice would make bootstrap re-resolve
+	// the browser locale and briefly undo an explicit settings save.
+	localStorage.setItem(LOCALE_CHOICE_KEY, isAuto ? 'auto' : resolved);
 	if (getLocale() === resolved) {
 		// Already rendering the target. Don't pin a concrete tag for 'auto' —
 		// that would conflate the rendering cache with an explicit choice and

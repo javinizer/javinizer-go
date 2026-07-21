@@ -279,6 +279,15 @@ describe('applySavedLocale', () => {
 		await applySavedLocale('ja');
 
 		expect(mockSetLocale).toHaveBeenCalledWith('ja');
+		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBe('ja');
+	});
+
+	it('syncs the selector choice to auto for an auto save', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-Hans');
+
+		await applySavedLocale('auto');
+
+		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBe('auto');
 	});
 
 	it('resolves auto to the browser preference', async () => {
@@ -305,7 +314,8 @@ describe('applySavedLocale', () => {
 		expect(mockSetLocale).not.toHaveBeenCalled();
 		// The rendering cache stays as-is; no conflation with an explicit pick.
 		expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-Hans');
-		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBeNull();
+		// The choice is synced to the saved 'auto' so bootstrap honors it.
+		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBe('auto');
 	});
 
 	it('re-pins without setLocale when an explicit saved locale is already rendered', async () => {
