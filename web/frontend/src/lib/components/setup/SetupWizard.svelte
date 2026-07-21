@@ -24,9 +24,10 @@
 
 	interface Props {
 		onComplete: () => void;
+		onSessionCreated?: () => void;
 	}
 
-	let { onComplete }: Props = $props();
+	let { onComplete, onSessionCreated }: Props = $props();
 
 	type StepId = 'credentials' | 'directories' | 'scrapers';
 
@@ -152,6 +153,7 @@
 			if (result?.session_id) BaseClient.setSessionID(result.session_id);
 			syncWebSocketAuth();
 			credentialsRegistered = true;
+		onSessionCreated?.();
 		} catch (e) {
 			error = e instanceof Error ? e.message : m.setup_err_create_admin();
 		} finally {
