@@ -21,6 +21,8 @@ vi.mock('$lib/paraglide/messages', () => ({
 	movie_field_genres: () => 'Genres',
 	review_fields_will_change: ({ count }: { count: number }) => `${count} fields will change`,
 	review_fields_will_change_one: ({ count }: { count: number }) => `${count} field will change`,
+	review_nfo_diff_fields: ({ count }: { count: number }) => `${count} fields differ from the existing NFO`,
+	review_nfo_diff_fields_one: ({ count }: { count: number }) => `${count} field differs from the existing NFO`,
 	review_hide_unchanged_fields: () => 'Hide unchanged fields',
 	review_show_unchanged_fields: ({ count }: { count: number }) => `Show ${count} unchanged fields`,
 	review_nfo_value_label: () => 'Current NFO',
@@ -40,14 +42,14 @@ describe('NfoDiffSummary', () => {
 			{ field: 'runtime', nfo_value: 100, scraped_value: 120 },
 		];
 		const { container } = render(NfoDiffSummary, { nfoDifferences: diffs });
-		expect(container.textContent).toContain('3 fields will change');
+		expect(container.textContent).toContain('3 fields differ from the existing NFO');
 	});
 
 	it('uses the singular form for a single change', () => {
 		const { container } = render(NfoDiffSummary, {
 			nfoDifferences: [{ field: 'title', nfo_value: 'Old', scraped_value: 'New' }],
 		});
-		expect(container.textContent).toContain('1 field will change');
+		expect(container.textContent).toContain('1 field differs from the existing NFO');
 	});
 
 	it('expands to show the full color-coded diff table', async () => {

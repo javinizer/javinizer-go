@@ -1419,6 +1419,8 @@
   "review_fields_aria": "字段",
   "review_fields_will_change": "将更改 {count} 个字段",
   "review_fields_will_change_one": "将更改 {count} 个字段",
+  "review_nfo_diff_fields": "{count} 个字段与现有 NFO 不同",
+  "review_nfo_diff_fields_one": "{count} 个字段与现有 NFO 不同",
   "review_file_operation_label": "文件操作",
   "review_files_organized_in_dir": "文件将连同元数据、图片和 NFO 文件整理到此目录中",
   "review_files_stay_in_place": "{label} — 文件保留在当前位置。",

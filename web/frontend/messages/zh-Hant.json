@@ -1419,6 +1419,8 @@
   "review_fields_aria": "欄位",
   "review_fields_will_change": "將更改 {count} 個欄位",
   "review_fields_will_change_one": "將更改 {count} 個欄位",
+  "review_nfo_diff_fields": "{count} 個欄位與現有 NFO 不同",
+  "review_nfo_diff_fields_one": "{count} 個欄位與現有 NFO 不同",
   "review_file_operation_label": "檔案操作",
   "review_files_organized_in_dir": "檔案將連同中繼資料、圖片與 NFO 檔案整理至此目錄",
   "review_files_stay_in_place": "{label} — 檔案保留在目前位置。",

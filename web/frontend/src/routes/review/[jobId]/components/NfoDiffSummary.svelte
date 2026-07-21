@@ -88,8 +88,8 @@
 			<ClipboardList class="h-4 w-4 text-muted-foreground" />
 			<span>
 				{changeCount === 1
-					? m.review_fields_will_change_one({ count: changeCount })
-					: m.review_fields_will_change({ count: changeCount })}
+					? m.review_nfo_diff_fields_one({ count: changeCount })
+					: m.review_nfo_diff_fields({ count: changeCount })}
 			</span>
 			<span class="ml-auto text-muted-foreground">
 				{#if expanded}

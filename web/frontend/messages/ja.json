@@ -1419,6 +1419,8 @@
   "review_fields_aria": "フィールド",
   "review_fields_will_change": "{count} フィールドが変更されます",
   "review_fields_will_change_one": "{count} フィールドが変更されます",
+  "review_nfo_diff_fields": "{count} フィールドが既存のNFOと異なります",
+  "review_nfo_diff_fields_one": "{count} フィールドが既存のNFOと異なります",
   "review_file_operation_label": "ファイル操作",
   "review_files_organized_in_dir": "ファイルはこのディレクトリにメタデータ、アートワーク、NFO ファイルと共に整理されます",
   "review_files_stay_in_place": "{label} — ファイルは現在の場所に保持されます。",
