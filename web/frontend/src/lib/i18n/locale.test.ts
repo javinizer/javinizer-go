@@ -377,6 +377,19 @@ describe('bootstrapLocale', () => {
 		expect(mockSetLocale).not.toHaveBeenCalled();
 	});
 
+	it('honors an explicit choice even when the rendering pin is absent', async () => {
+		// Edge case: localStorage was unavailable when setLocale tried to write
+		// the pin, so the choice is recorded but the mirror key is not. The
+		// explicit choice must win over the browser locale, not revert to it.
+		localStorage.setItem(LOCALE_CHOICE_KEY, 'ja');
+		stubLanguages(['en-US']);
+
+		const effective = await bootstrapLocale();
+
+		expect(effective).toBe('ja');
+		expect(mockSetLocale).toHaveBeenCalledWith('ja');
+	});
+
 	it('falls back to the browser preference when no choice is recorded', async () => {
 		stubLanguages(['zh-CN']);
 

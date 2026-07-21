@@ -117,14 +117,19 @@ function readCachedLocale(): string | null {
 // preference — the concrete tag pinned by setLocale (for catalogs
 // preferredLanguage can't derive, e.g. zh-CN -> zh-Hans) is just a rendering
 // cache and must not pin the language across browser-language changes. For an
-// explicit choice (or none recorded yet) it trusts the cached pin and falls
-// back to the browser. Sets document.documentElement.lang and dir.
+// explicit choice it is authoritative even if the rendering pin is absent
+// (e.g. localStorage was unavailable when setLocale tried to write it), so the
+// pre-auth selector stays consistent with the rendered locale. With no choice
+// recorded it trusts the cached pin and falls back to the browser.
 export async function bootstrapLocale(): Promise<string> {
 	if (!browser) return baseLocale;
 
+	const choice = localStorage.getItem(LOCALE_CHOICE_KEY);
 	let effective: string;
-	if (localStorage.getItem(LOCALE_CHOICE_KEY) === 'auto') {
+	if (choice === 'auto') {
 		effective = resolveBrowserLocale();
+	} else if (choice && isSupported(choice)) {
+		effective = choice;
 	} else {
 		effective = readCachedLocale() ?? resolveBrowserLocale();
 	}
