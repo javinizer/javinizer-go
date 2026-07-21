@@ -319,6 +319,7 @@
 							onOpenSourceViewer={openSourceViewer}
 								onResetCurrentMovie={s.resetCurrentMovie}
 								onUpdateCurrentMovie={s.updateCurrentMovie}
+							nfoDifferences={s.nfoDifferences}
 							/>
 
 							<Card class="p-6">

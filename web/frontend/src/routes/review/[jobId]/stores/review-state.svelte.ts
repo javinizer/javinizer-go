@@ -14,6 +14,8 @@ import type {
 	Scraper,
 	UpdateRequest,
 	CompletenessConfig,
+	ExistingNFOResponse,
+	FieldDifference,
 } from '$lib/api/types';
 import { toastStore } from '$lib/stores/toast';
 import { confirmDialog } from '$lib/stores/dialog.svelte';
@@ -1019,6 +1021,40 @@ export function createReviewState(pageStore: Page) {
 		await organizeController.retryFailed();
 	}
 
+	let existingNfo = $state<ExistingNFOResponse | null>(null);
+	let nfoDifferences = $state<FieldDifference[] | undefined>(undefined);
+	let existingNfoTimer: ReturnType<typeof setTimeout> | undefined;
+	let existingNfoGen = 0;
+
+	$effect(() => {
+		const jid = jobId;
+		const rid = currentResult?.result_id;
+		const gen = ++existingNfoGen;
+		if (existingNfoTimer) clearTimeout(existingNfoTimer);
+		if (!jid || !rid) {
+			existingNfo = null;
+			nfoDifferences = undefined;
+			return;
+		}
+		existingNfo = null;
+		nfoDifferences = undefined;
+		existingNfoTimer = setTimeout(async () => {
+			try {
+				const resp = await apiClient.getExistingNFO(jid, rid);
+				if (gen !== existingNfoGen) return;
+				existingNfo = resp;
+				nfoDifferences = resp.nfo_differences;
+			} catch {
+				if (gen !== existingNfoGen) return;
+				existingNfo = null;
+				nfoDifferences = undefined;
+			}
+		}, 200);
+		return () => {
+			if (existingNfoTimer) clearTimeout(existingNfoTimer);
+		};
+	});
+
 	$effect(() => {
 		currentMovieIndex;
 		showFullSourcePath = false;
@@ -1527,6 +1563,12 @@ export function createReviewState(pageStore: Page) {
 		},
 		get currentResult() {
 			return currentResult;
+		},
+		get existingNfo() {
+			return existingNfo;
+		},
+		get nfoDifferences() {
+			return nfoDifferences;
 		},
 		get canResetPoster() {
 			return canResetPoster;

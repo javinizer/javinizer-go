@@ -33,6 +33,7 @@ import type {
 	SourceResultsResponse,
 	FieldOverrideRequest,
 	FieldOverrideResponse,
+	ExistingNFOResponse,
 } from '../types';
 import { BaseClient } from './common';
 
@@ -100,6 +101,12 @@ export class JobClient extends BaseClient {
 	async getBatchMovieSources(jobId: string, resultId: string): Promise<SourceResultsResponse> {
 		return this.request<SourceResultsResponse>(
 			`/api/v1/batch/${jobId}/results/${resultId}/sources`,
+		);
+	}
+
+	async getExistingNFO(jobId: string, resultId: string): Promise<ExistingNFOResponse> {
+		return this.request<ExistingNFOResponse>(
+			`/api/v1/batch/${jobId}/results/${resultId}/existing-nfo`,
 		);
 	}
 

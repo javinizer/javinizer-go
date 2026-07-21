@@ -129,6 +129,28 @@ func TestFindNFOFile(t *testing.T) {
 			videoFilePath: "/movies/ABC-123-pt1.mp4",
 			wantPath:      "/movies/ABC-123-pt1.nfo",
 		},
+		{
+			name: "title-changed template falls back to video sidecar",
+			setupFS: func(fs afero.Fs) {
+				_ = fs.MkdirAll("/movies", 0755)
+				_ = afero.WriteFile(fs, "/movies/[IPX-535] New.nfo", []byte("<old-sidecar/>"), 0644)
+			},
+			baseDir:       "/movies",
+			cfg:           NFONameConfig{FilenameTemplate: "[<ID>] <TITLE>.nfo"},
+			videoFilePath: "/movies/[IPX-535] New.mp4",
+			wantPath:      "/movies/[IPX-535] New.nfo",
+		},
+		{
+			name: "unrelated NFO in shared directory is not picked",
+			setupFS: func(fs afero.Fs) {
+				_ = fs.MkdirAll("/movies", 0755)
+				_ = afero.WriteFile(fs, "/movies/B.nfo", []byte("<unrelated/>"), 0644)
+			},
+			baseDir:       "/movies",
+			cfg:           NFONameConfig{FilenameTemplate: "[<ID>] <TITLE>.nfo"},
+			videoFilePath: "/movies/A.mp4",
+			wantPath:      "",
+		},
 	}
 
 	for _, tc := range testCases {

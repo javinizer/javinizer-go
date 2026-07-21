@@ -174,6 +174,14 @@ type BulkRescrapeResponse struct {
 	Job       *BatchJobResponse         `json:"job"`
 }
 
+// ExistingNFOResponse is the lazy-loaded existing-NFO comparison for a single
+// batch result. Both fields are omitted when no NFO is found or parsing fails,
+// so the review page renders no diff badges (non-blocking).
+type ExistingNFOResponse struct {
+	ExistingNFO    *MovieView        `json:"existing_nfo,omitempty"`
+	NFODifferences []FieldDifference `json:"nfo_differences,omitempty"`
+}
+
 // UpdateRequest represents a batch update request.
 type UpdateRequest struct {
 	ForceOverwrite bool   `json:"force_overwrite"`

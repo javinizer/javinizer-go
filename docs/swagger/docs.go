@@ -1150,6 +1150,48 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/batch/{id}/results/{resultId}/existing-nfo": {
+            "get": {
+                "description": "Lazy-load the existing NFO at the source file's directory, parse it, and return per-field differences against the scraped movie. Returns an empty response (no error) when no NFO is found or parsing fails.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Get existing NFO comparison for a batch result",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Result ID",
+                        "name": "resultId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ExistingNFOResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/batch/{id}/results/{resultId}/field-override": {
             "post": {
                 "description": "Cherry-pick a single field's value from the named source's raw scraper results, overwriting the aggregated movie field and updating provenance attribution. Mirrors the original Javinizer \"Replace\" button (javinizergui.ps1:2538).",
@@ -4670,6 +4712,20 @@ const docTemplate = `{
                     "description": "Structured arguments for translating Code into a localized message",
                     "type": "object",
                     "additionalProperties": {}
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ExistingNFOResponse": {
+            "type": "object",
+            "properties": {
+                "existing_nfo": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
+                },
+                "nfo_differences": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference"
+                    }
                 }
             }
         },

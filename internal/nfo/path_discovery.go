@@ -9,6 +9,10 @@ import (
 	"github.com/spf13/afero"
 )
 
+// nfoExtension is the file extension used when scanning a directory for an
+// existing NFO whose templated name no longer matches the freshly scraped movie.
+const nfoExtension = ".nfo"
+
 // resolveNFOPath builds the expected NFO file path and a list of legacy paths
 // to check for backward compatibility.
 // The engine parameter is forwarded to ResolveNFOFilename for template rendering;
@@ -49,6 +53,23 @@ func findNFOFile(fs afero.Fs, baseDir string, movie *models.Movie, cfg NFONameCo
 	for _, legacyPath := range legacyPaths {
 		if _, err := fs.Stat(legacyPath); err == nil {
 			return legacyPath
+		}
+	}
+
+	// Fallback: the configured NFO filename template may embed mutable scraped
+	// metadata (e.g. <TITLE>), so a file written under the old title is missed
+	// when the fresh scrape changes it. Locate the existing NFO independently of
+	// scraped-only fields via the video sidecar (<video>.nfo) — the standard
+	// convention that survives title changes. A directory scan for any .nfo is
+	// intentionally avoided: it could pick an unrelated file from a shared
+	// directory (e.g. a sibling movie's NFO) and merge wrong metadata.
+	if videoFilePath != "" {
+		videoName := strings.TrimSuffix(filepath.Base(videoFilePath), filepath.Ext(videoFilePath))
+		sidecarNFO := filepath.Join(baseDir, videoName+nfoExtension)
+		if sidecarNFO != nfoPath {
+			if _, err := fs.Stat(sidecarNFO); err == nil {
+				return sidecarNFO
+			}
 		}
 	}
 

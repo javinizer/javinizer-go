@@ -25,6 +25,7 @@ func RegisterRoutes(protected *gin.RouterGroup, rt *core.APIRuntime) {
 		batch.POST("/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(rt))
 		batch.POST("/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(rt))
 		batch.POST("/:id/results/:resultId/field-override", overrideBatchMovieField(rt))
+		batch.GET("/:id/results/:resultId/existing-nfo", getExistingNFO(rt))
 		batch.POST("/:id/results/:resultId/exclude", excludeBatchMovie(rt))
 		batch.POST("/:id/results/:resultId/preview", previewOrganize(rt))
 		batch.POST("/:id/results/:resultId/display-title-preview", previewDisplayTitle(rt))

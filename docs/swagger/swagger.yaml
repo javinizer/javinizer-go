@@ -458,6 +458,15 @@ definitions:
         description: Structured arguments for translating Code into a localized message
         type: object
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ExistingNFOResponse:
+    properties:
+      existing_nfo:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+      nfo_differences:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference'
+        type: array
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference:
     properties:
       field:
@@ -3808,6 +3817,36 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Exclude movie from batch organization
+      tags:
+      - web
+  /api/v1/batch/{id}/results/{resultId}/existing-nfo:
+    get:
+      description: Lazy-load the existing NFO at the source file's directory, parse
+        it, and return per-field differences against the scraped movie. Returns an
+        empty response (no error) when no NFO is found or parsing fails.
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Result ID
+        in: path
+        name: resultId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ExistingNFOResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Get existing NFO comparison for a batch result
       tags:
       - web
   /api/v1/batch/{id}/results/{resultId}/field-override:

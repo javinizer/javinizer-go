@@ -238,6 +238,11 @@ export interface FieldDifference {
 	reason?: string;
 }
 
+export interface ExistingNFOResponse {
+	existing_nfo?: Movie;
+	nfo_differences?: FieldDifference[];
+}
+
 export interface NFOComparisonRequest {
 	nfo_path?: string;
 	preset?: 'conservative' | 'gap-fill' | 'aggressive';
