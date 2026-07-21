@@ -1419,6 +1419,7 @@
   "review_fields_aria": "フィールド",
   "review_fields_will_change": "{count} フィールドが変更されます",
   "review_fields_will_change_one": "{count} フィールドが変更されます",
+  "review_field_column": "フィールド",
   "review_nfo_diff_fields": "{count} フィールドが既存のNFOと異なります",
   "review_nfo_diff_fields_one": "{count} フィールドが既存のNFOと異なります",
   "review_file_operation_label": "ファイル操作",

@@ -26,6 +26,7 @@ vi.mock('$lib/paraglide/messages', () => ({
 	review_hide_unchanged_fields: () => 'Hide unchanged fields',
 	review_show_unchanged_fields: ({ count }: { count: number }) => `Show ${count} unchanged fields`,
 	review_nfo_value_label: () => 'Current NFO',
+	review_field_column: () => 'Field',
 	review_scraped_value_label: () => 'Scraped (new)',
 }));
 

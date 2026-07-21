@@ -105,7 +105,7 @@
 				<table class="w-full text-xs">
 					<thead>
 						<tr class="text-left text-muted-foreground border-b border-input">
-							<th class="py-1.5 pr-3 font-medium">{m.review_nfo_value_label().replace('Current ', '')}</th>
+							<th class="py-1.5 pr-3 font-medium">{m.review_field_column()}</th>
 							<th class="py-1.5 pr-3 font-medium">{m.review_nfo_value_label()}</th>
 							<th class="py-1.5 font-medium">{m.review_scraped_value_label()}</th>
 						</tr>

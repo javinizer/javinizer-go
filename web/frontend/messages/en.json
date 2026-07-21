@@ -1419,6 +1419,7 @@
   "review_fields_aria": "Fields",
   "review_fields_will_change": "{count} fields will change",
   "review_fields_will_change_one": "{count} field will change",
+  "review_field_column": "Field",
   "review_nfo_diff_fields": "{count} fields differ from the existing NFO",
   "review_nfo_diff_fields_one": "{count} field differs from the existing NFO",
   "review_file_operation_label": "File operation",

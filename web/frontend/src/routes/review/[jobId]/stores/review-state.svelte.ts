@@ -1024,10 +1024,12 @@ export function createReviewState(pageStore: Page) {
 	let existingNfo = $state<ExistingNFOResponse | null>(null);
 	let nfoDifferences = $state<FieldDifference[] | undefined>(undefined);
 	let existingNfoTimer: ReturnType<typeof setTimeout> | undefined;
+	let existingNfoGen = 0;
 
 	$effect(() => {
 		const jid = jobId;
 		const rid = currentResult?.result_id;
+		const gen = ++existingNfoGen;
 		if (existingNfoTimer) clearTimeout(existingNfoTimer);
 		if (!jid || !rid) {
 			existingNfo = null;
@@ -1039,11 +1041,11 @@ export function createReviewState(pageStore: Page) {
 		existingNfoTimer = setTimeout(async () => {
 			try {
 				const resp = await apiClient.getExistingNFO(jid, rid);
-				if (currentResult?.result_id !== rid) return;
+				if (gen !== existingNfoGen) return;
 				existingNfo = resp;
 				nfoDifferences = resp.nfo_differences;
 			} catch {
-				if (currentResult?.result_id !== rid) return;
+				if (gen !== existingNfoGen) return;
 				existingNfo = null;
 				nfoDifferences = undefined;
 			}

@@ -1419,6 +1419,7 @@
   "review_fields_aria": "欄位",
   "review_fields_will_change": "將更改 {count} 個欄位",
   "review_fields_will_change_one": "將更改 {count} 個欄位",
+  "review_field_column": "欄位",
   "review_nfo_diff_fields": "{count} 個欄位與現有 NFO 不同",
   "review_nfo_diff_fields_one": "{count} 個欄位與現有 NFO 不同",
   "review_file_operation_label": "檔案操作",
