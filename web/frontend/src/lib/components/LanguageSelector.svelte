@@ -4,24 +4,14 @@
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { Languages, ChevronDown } from 'lucide-svelte';
-	import { LOCALE_STORAGE_KEY, SUPPORTED_LOCALES, selectLocale } from '$lib/i18n/locale';
+	import { SUPPORTED_LOCALES, currentLocaleChoice, selectLocale } from '$lib/i18n/locale';
 	import * as m from '$lib/paraglide/messages';
 
-	// Pre-auth there is no config access, so mirror the cached explicit pick
-	// and fall back to 'auto' (browser preference). Post-auth the configured
-	// ui.language wins again via reconcileWithConfig.
-	function currentSelection(): string {
-		if (!browser) return 'auto';
-		const cached = localStorage.getItem(LOCALE_STORAGE_KEY);
-		if (cached && SUPPORTED_LOCALES.some((l) => l.tag === cached)) return cached;
-		return 'auto';
-	}
-
-	// SSR/hydration renders 'auto' everywhere; the cached pick is applied
+	// SSR/hydration renders 'auto' everywhere; the recorded choice is applied
 	// post-mount to avoid a hydration value mismatch on the <select>.
 	let selected = $state('auto');
 	onMount(() => {
-		selected = currentSelection();
+		selected = currentLocaleChoice();
 	});
 
 	async function handleChange(event: Event) {

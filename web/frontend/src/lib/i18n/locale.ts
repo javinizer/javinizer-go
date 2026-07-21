@@ -8,6 +8,24 @@ import type { UIConfig } from '$lib/api/types';
 // across reloads and clearClientStorage-tolerant flows.
 export const LOCALE_STORAGE_KEY = 'javinizer-locale';
 
+// Records the user's selector choice ('auto' or an explicit tag), kept separate
+// from LOCALE_STORAGE_KEY: that key is also Paraglide's rendering cache
+// (setLocale writes the resolved tag there for catalogs that preferredLanguage
+// can't derive, e.g. zh-CN -> zh-Hans), so it cannot on its own distinguish an
+// explicit pick from an auto-resolved one. Without this, choosing Automatic
+// would come back as a concrete tag after reload (#165 P2).
+export const LOCALE_CHOICE_KEY = 'javinizer-locale-choice';
+
+// currentLocaleChoice returns the selector value for the recorded choice:
+// 'auto' (browser preference) or an explicit supported tag. Pre-auth there is
+// no config, so this is the source of truth for the dropdown display.
+export function currentLocaleChoice(): string {
+	if (!browser) return 'auto';
+	const choice = localStorage.getItem(LOCALE_CHOICE_KEY);
+	if (choice === 'auto' || (choice !== null && isSupported(choice))) return choice;
+	return 'auto';
+}
+
 // Supported locales that ship a catalog. Currently English only; future
 // reviewed locales are added here. Use self-names so the selector stays usable
 // when the current locale is wrong.
@@ -170,17 +188,18 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 }
 
 // selectLocale applies a locale picked from a selector. 'auto' resolves the
-// browser preference (mapped onto the shipped catalogs). When the effective
-// locale differs from the currently rendered one, setLocale pins it through
-// the localStorage strategy and reloads the page so compiled messages
-// re-render; a same-locale pick only re-pins the cache.
+// browser preference (mapped onto the shipped catalogs). The choice is recorded
+// under LOCALE_CHOICE_KEY separately from Paraglide's rendering cache
+// (LOCALE_STORAGE_KEY): when the effective locale differs from the rendered
+// one, setLocale pins the resolved tag for rendering and reloads so compiled
+// messages re-render; a same-locale pick only updates the recorded choice.
 export async function selectLocale(tag: string): Promise<void> {
 	if (!browser) return;
 	const resolved = tag === 'auto' ? resolveBrowserLocale() : isSupported(tag) ? tag : baseLocale;
-	if (getLocale() === resolved) {
-		localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
-	} else {
+	localStorage.setItem(LOCALE_CHOICE_KEY, tag);
+	if (getLocale() !== resolved) {
 		await setLocale(resolved as typeof locales[number]);
+		return;
 	}
 	document.documentElement.lang = resolved;
 	document.documentElement.dir = localeDir(resolved);
@@ -196,13 +215,14 @@ export async function selectLocale(tag: string): Promise<void> {
 export async function applySavedLocale(language?: string | null): Promise<void> {
 	if (!browser) return;
 	const configured = language?.trim() ?? '';
-	const resolved =
-		configured === '' || canonicalizeTag(configured) === 'auto'
-			? resolveBrowserLocale()
-			: (resolveLocaleTag(configured) ?? baseLocale);
+	const isAuto = configured === '' || canonicalizeTag(configured) === 'auto';
+	const resolved = isAuto ? resolveBrowserLocale() : (resolveLocaleTag(configured) ?? baseLocale);
 	if (getLocale() === resolved) {
-		localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
-	} else {
-		await setLocale(resolved as typeof locales[number]);
+		// Already rendering the target. Don't pin a concrete tag for 'auto' —
+		// that would conflate the rendering cache with an explicit choice and
+		// mask later browser-preference changes.
+		if (!isAuto) localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
+		return;
 	}
+	await setLocale(resolved as typeof locales[number]);
 }

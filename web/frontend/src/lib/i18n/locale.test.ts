@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
 	applyLocale,
 	applySavedLocale,
+	currentLocaleChoice,
+	LOCALE_CHOICE_KEY,
 	LOCALE_STORAGE_KEY,
 	reconcileWithConfig,
 	resolveLocaleTag,
@@ -214,6 +216,20 @@ describe('selectLocale', () => {
 
 		expect(mockSetLocale).not.toHaveBeenCalled();
 		expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-Hans');
+		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBe('zh-Hans');
+	});
+
+	it('records the choice separately so auto does not read back as an explicit tag', async () => {
+		// zh-CN browser already rendering zh-Hans (pinned by setLocale for rendering).
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-Hans');
+
+		await selectLocale('auto');
+
+		// No reload: the rendered locale already matches the browser preference.
+		expect(mockSetLocale).not.toHaveBeenCalled();
+		// The choice is recorded as 'auto', not the resolved concrete tag.
+		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBe('auto');
+		expect(currentLocaleChoice()).toBe('auto');
 	});
 
 	it('falls back to the base locale for unsupported tags', async () => {
@@ -265,7 +281,18 @@ describe('applySavedLocale', () => {
 		expect(mockSetLocale).toHaveBeenCalledWith('zh-Hans');
 	});
 
-	it('re-pins without setLocale when the saved locale is already rendered', async () => {
+	it('does not pin a concrete tag when auto is already rendered', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-Hans');
+
+		await applySavedLocale('auto');
+
+		expect(mockSetLocale).not.toHaveBeenCalled();
+		// The rendering cache stays as-is; no conflation with an explicit pick.
+		expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-Hans');
+		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBeNull();
+	});
+
+	it('re-pins without setLocale when an explicit saved locale is already rendered', async () => {
 		localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-Hans');
 
 		await applySavedLocale('zh-Hans');
@@ -280,5 +307,32 @@ describe('applySavedLocale', () => {
 		await applySavedLocale('pt-BR');
 
 		expect(mockSetLocale).toHaveBeenCalledWith('en');
+	});
+});
+
+describe('currentLocaleChoice', () => {
+	beforeEach(() => {
+		localStorage.clear();
+	});
+
+	it('returns the recorded explicit choice', () => {
+		localStorage.setItem(LOCALE_CHOICE_KEY, 'ja');
+		expect(currentLocaleChoice()).toBe('ja');
+	});
+
+	it('returns auto when the choice is auto', () => {
+		localStorage.setItem(LOCALE_CHOICE_KEY, 'auto');
+		// A concrete tag may still be pinned for rendering; the choice stays auto.
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-Hans');
+		expect(currentLocaleChoice()).toBe('auto');
+	});
+
+	it('falls back to auto when no choice is recorded', () => {
+		expect(currentLocaleChoice()).toBe('auto');
+	});
+
+	it('falls back to auto for an invalid recorded choice', () => {
+		localStorage.setItem(LOCALE_CHOICE_KEY, 'klingon');
+		expect(currentLocaleChoice()).toBe('auto');
 	});
 });

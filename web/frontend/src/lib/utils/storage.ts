@@ -2,7 +2,7 @@
 // locale pin must persist or a language picked on the setup wizard is
 // silently discarded on the next page load (the wipe runs on every mount
 // while the server is uninitialized).
-const PRESERVED_KEYS = ['javinizer-locale', 'javinizer-theme'];
+const PRESERVED_KEYS = ['javinizer-locale', 'javinizer-locale-choice', 'javinizer-theme'];
 
 export function clearClientStorage(): void {
 	if (typeof window === 'undefined') return;

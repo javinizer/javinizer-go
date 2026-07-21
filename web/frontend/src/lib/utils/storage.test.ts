@@ -12,6 +12,7 @@ describe('clearClientStorage', () => {
 
 	it('preserves UI preference keys while wiping per-server state', () => {
 		localStorage.setItem('javinizer-locale', 'zh-Hans');
+		localStorage.setItem('javinizer-locale-choice', 'auto');
 		localStorage.setItem('javinizer-theme', 'dark');
 		// Real session key used by BaseClient (lib/api/clients/common.ts).
 		localStorage.setItem('javinizer_session', 'stale-session-id');
@@ -20,6 +21,7 @@ describe('clearClientStorage', () => {
 		clearClientStorage();
 
 		expect(localStorage.getItem('javinizer-locale')).toBe('zh-Hans');
+		expect(localStorage.getItem('javinizer-locale-choice')).toBe('auto');
 		expect(localStorage.getItem('javinizer-theme')).toBe('dark');
 		expect(localStorage.getItem('javinizer_session')).toBeNull();
 		expect(localStorage.getItem('some-other-cache')).toBeNull();
