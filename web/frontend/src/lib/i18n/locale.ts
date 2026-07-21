@@ -192,7 +192,10 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 // under LOCALE_CHOICE_KEY separately from Paraglide's rendering cache
 // (LOCALE_STORAGE_KEY): when the effective locale differs from the rendered
 // one, setLocale pins the resolved tag for rendering and reloads so compiled
-// messages re-render; a same-locale pick only updates the recorded choice.
+// messages re-render. For an explicit pick that already matches the rendered
+// locale, the rendering cache is still pinned so a later browser-language
+// change doesn't override the explicit selection on the next bootstrap; 'auto'
+// never pins, so the browser preference stays authoritative.
 export async function selectLocale(tag: string): Promise<void> {
 	if (!browser) return;
 	const resolved = tag === 'auto' ? resolveBrowserLocale() : isSupported(tag) ? tag : baseLocale;
@@ -200,6 +203,9 @@ export async function selectLocale(tag: string): Promise<void> {
 	if (getLocale() !== resolved) {
 		await setLocale(resolved as typeof locales[number]);
 		return;
+	}
+	if (tag !== 'auto' && isSupported(tag)) {
+		localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
 	}
 	document.documentElement.lang = resolved;
 	document.documentElement.dir = localeDir(resolved);

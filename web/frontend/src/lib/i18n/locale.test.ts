@@ -232,6 +232,21 @@ describe('selectLocale', () => {
 		expect(currentLocaleChoice()).toBe('auto');
 	});
 
+	it('pins the rendering cache for an explicit pick even when already rendered', async () => {
+		// ja-JP browser: Paraglide resolves ja via preferredLanguage with no pin,
+		// so the UI renders ja without a cached tag. Picking ja explicitly must
+		// still pin the cache so a later browser-language change doesn't override
+		// the explicit selection on the next bootstrap.
+		mockGetLocale.mockImplementation(() => localStorage.getItem(LOCALE_STORAGE_KEY) ?? 'ja');
+		stubLanguages(['ja-JP']);
+
+		await selectLocale('ja');
+
+		expect(mockSetLocale).not.toHaveBeenCalled();
+		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBe('ja');
+		expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('ja');
+	});
+
 	it('falls back to the base locale for unsupported tags', async () => {
 		localStorage.setItem(LOCALE_STORAGE_KEY, 'ja');
 
