@@ -7,6 +7,7 @@
 	import { toastStore } from '$lib/stores/toast';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import { websocketStore } from '$lib/stores/websocket';
+	import { currentLocaleChoice } from '$lib/i18n/locale';
 	import Button from '$lib/components/ui/Button.svelte';
 	import StepCredentials from './StepCredentials.svelte';
 	import StepCredentialsSuccess from './StepCredentialsSuccess.svelte';
@@ -203,11 +204,19 @@
 					(sc[scraper.name] as Record<string, unknown>).enabled = selectedScrapers.includes(scraper.name);
 				}
 				fresh.scrapers = sc as typeof fresh.scrapers;
-				await apiClient.request('/api/v1/config', {
-					method: 'PUT',
-					body: JSON.stringify(fresh),
-				});
 			}
+			// Persist the interface language chosen during setup so post-auth
+			// reconciliation honors it instead of reverting to the browser
+			// locale under the default 'auto' config.
+			const localeChoice = currentLocaleChoice();
+			if (localeChoice !== 'auto') {
+				if (!fresh.ui) fresh.ui = { language: 'auto' };
+				fresh.ui.language = localeChoice;
+			}
+			await apiClient.request('/api/v1/config', {
+				method: 'PUT',
+				body: JSON.stringify(fresh),
+			});
 			toastStore.success(m.setup_toast_complete(), 4000);
 			onComplete();
 		} catch (e) {
