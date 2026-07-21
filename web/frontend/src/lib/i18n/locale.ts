@@ -185,8 +185,13 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 		if (getLocale() === browserLocale) {
 			return browserLocale;
 		}
-		localStorage.removeItem(LOCALE_STORAGE_KEY);
-		await applyLocale(browserLocale);
+		// Stale pin differs from the browser locale. applyLocale's guard can't
+		// force the reload here: once the pin is cleared getLocale() resolves to
+		// the browser locale and it would skip setLocale, leaving the already-
+		// rendered page in the stale language. setLocale captures its snapshot
+		// while the stale pin is still present (so it differs from browserLocale),
+		// pins the browser locale, and reloads.
+		await setLocale(browserLocale as typeof locales[number]);
 		return browserLocale;
 	}
 

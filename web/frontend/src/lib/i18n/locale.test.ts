@@ -161,6 +161,19 @@ describe('reconcileWithConfig / applyLocale reload guards (#164)', () => {
 		expect(mockSetLocale).toHaveBeenCalledTimes(1);
 	});
 
+	it('auto config forces a reload when a stale pin differs from the browser locale', async () => {
+		// Pre-auth selector pinned ja on an en-US browser; config is auto. The
+		// stale pin must be overwritten and the page reloaded (setLocale called),
+		// not silently left rendering ja.
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'ja');
+		stubLanguages(['en-US']);
+
+		const result = await reconcileWithConfig({ language: 'auto' } as UIConfig);
+
+		expect(result).toBe('en');
+		expect(mockSetLocale).toHaveBeenCalledWith('en');
+	});
+
 	it('explicit configured locale is cached; the fresh cache makes reapply a no-op', async () => {
 		stubLanguages(['en-US']);
 
