@@ -8,10 +8,16 @@ export function clearClientStorage(): void {
 	if (typeof window === 'undefined') return;
 
 	try {
-		const preserved = PRESERVED_KEYS.map((key) => [key, localStorage.getItem(key)] as const);
-		localStorage.clear();
-		for (const [key, value] of preserved) {
-			if (value !== null) localStorage.setItem(key, value);
+		// Remove only non-preserved keys instead of clear()+restore: a setItem
+		// failure mid-restore (e.g. Safari private mode QuotaExceededError)
+		// would otherwise silently lose the preserved preferences.
+		const keysToRemove: string[] = [];
+		for (let i = 0; i < localStorage.length; i++) {
+			const key = localStorage.key(i);
+			if (key && !PRESERVED_KEYS.includes(key)) keysToRemove.push(key);
+		}
+		for (const key of keysToRemove) {
+			localStorage.removeItem(key);
 		}
 	} catch {
 		// localStorage may be unavailable in private mode or sandboxed frames

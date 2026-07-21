@@ -185,3 +185,24 @@ export async function selectLocale(tag: string): Promise<void> {
 	document.documentElement.lang = resolved;
 	document.documentElement.dir = localeDir(resolved);
 }
+
+// applySavedLocale applies a just-persisted ui.language after a settings
+// save. Unlike reconcileWithConfig (which never reloads in steady state and
+// pins before applying, so it can leave the UI rendering the old locale),
+// this forces a reload when the saved locale differs from the rendered one —
+// otherwise a language change saved in settings would not re-render the page.
+// Config values go through resolveLocaleTag so variants like zh-Hans-CN map
+// onto shipped catalogs; 'auto' resolves the browser preference.
+export async function applySavedLocale(language?: string | null): Promise<void> {
+	if (!browser) return;
+	const configured = language?.trim() ?? '';
+	const resolved =
+		configured === '' || canonicalizeTag(configured) === 'auto'
+			? resolveBrowserLocale()
+			: (resolveLocaleTag(configured) ?? baseLocale);
+	if (getLocale() === resolved) {
+		localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
+	} else {
+		await setLocale(resolved as typeof locales[number]);
+	}
+}

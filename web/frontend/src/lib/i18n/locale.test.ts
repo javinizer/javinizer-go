@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
 	applyLocale,
+	applySavedLocale,
 	LOCALE_STORAGE_KEY,
 	reconcileWithConfig,
 	resolveLocaleTag,
@@ -104,6 +105,28 @@ describe('reconcileWithConfig / applyLocale reload guards (#164)', () => {
 		expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-Hans');
 	});
 
+	it('auto config with an unpinned ja browser is steady via preferredLanguage', async () => {
+		// No cached tag: Paraglide resolves ja directly from navigator.languages.
+		mockGetLocale.mockImplementation(() => localStorage.getItem(LOCALE_STORAGE_KEY) ?? 'ja');
+		stubLanguages(['ja-JP']);
+
+		const result = await reconcileWithConfig({ language: 'auto' } as UIConfig);
+
+		expect(result).toBe('ja');
+		expect(mockSetLocale).not.toHaveBeenCalled();
+	});
+
+	it('auto config with an unsupported browser locale falls back to base and stays steady', async () => {
+		// de-DE maps to no catalog: app and Paraglide both resolve baseLocale.
+		mockGetLocale.mockImplementation(() => localStorage.getItem(LOCALE_STORAGE_KEY) ?? 'en');
+		stubLanguages(['de-DE']);
+
+		const result = await reconcileWithConfig({ language: 'auto' } as UIConfig);
+
+		expect(result).toBe('en');
+		expect(mockSetLocale).not.toHaveBeenCalled();
+	});
+
 	it('auto config corrects a stale cached tag exactly once, then stays stable', async () => {
 		localStorage.setItem(LOCALE_STORAGE_KEY, 'en');
 
@@ -197,6 +220,64 @@ describe('selectLocale', () => {
 		localStorage.setItem(LOCALE_STORAGE_KEY, 'ja');
 
 		await selectLocale('fr');
+
+		expect(mockSetLocale).toHaveBeenCalledWith('en');
+	});
+});
+
+describe('applySavedLocale', () => {
+	function stubLanguages(langs: string[]) {
+		Object.defineProperty(window.navigator, 'languages', { value: langs, configurable: true });
+	}
+
+	beforeEach(() => {
+		localStorage.clear();
+		mockGetLocale.mockReset();
+		mockSetLocale.mockReset();
+		mockGetLocale.mockImplementation(() => localStorage.getItem(LOCALE_STORAGE_KEY) ?? 'en');
+		mockSetLocale.mockImplementation(async (tag: string) => {
+			localStorage.setItem(LOCALE_STORAGE_KEY, tag);
+		});
+		stubLanguages(['zh-CN']);
+	});
+
+	it('reloads via setLocale when the saved locale differs from the rendered one', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-Hans');
+
+		await applySavedLocale('ja');
+
+		expect(mockSetLocale).toHaveBeenCalledWith('ja');
+	});
+
+	it('resolves auto to the browser preference', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'ja');
+
+		await applySavedLocale('auto');
+
+		expect(mockSetLocale).toHaveBeenCalledWith('zh-Hans');
+	});
+
+	it('maps config variants onto shipped catalogs', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'en');
+
+		await applySavedLocale('zh-Hans-CN');
+
+		expect(mockSetLocale).toHaveBeenCalledWith('zh-Hans');
+	});
+
+	it('re-pins without setLocale when the saved locale is already rendered', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-Hans');
+
+		await applySavedLocale('zh-Hans');
+
+		expect(mockSetLocale).not.toHaveBeenCalled();
+		expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-Hans');
+	});
+
+	it('falls back to the base locale for valid but unsupported config tags', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'ja');
+
+		await applySavedLocale('pt-BR');
 
 		expect(mockSetLocale).toHaveBeenCalledWith('en');
 	});

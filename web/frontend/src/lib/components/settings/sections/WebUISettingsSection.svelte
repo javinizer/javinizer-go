@@ -2,7 +2,7 @@
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import type { SettingsConfig } from '$lib/api/types';
 	import * as m from '$lib/paraglide/messages';
-	import { SUPPORTED_LOCALES, selectLocale } from '$lib/i18n/locale';
+	import { SUPPORTED_LOCALES } from '$lib/i18n/locale';
 
 	interface Props {
 		config: SettingsConfig;
@@ -30,9 +30,12 @@
 		config.ui.language = value;
 	}
 
-	async function handleLanguageChange(value: string) {
+	function handleLanguageChange(value: string) {
+		// Only mark the config dirty here. Applying immediately would reload the
+		// page and discard the unsaved change; the saved language is applied
+		// (with a reload if the rendered locale changed) after a successful save
+		// via applySavedLocale in the settings store.
 		setSelectedLanguage(value);
-		await selectLocale(value);
 	}
 </script>
 
