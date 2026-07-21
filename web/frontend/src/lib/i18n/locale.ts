@@ -113,15 +113,20 @@ function readCachedLocale(): string | null {
 }
 
 // bootstrapLocale resolves the effective locale before the protected full-config
-// request finishes. Order: valid localStorage mirror -> browser preference ->
-// base locale. Sets document.documentElement.lang and dir. Returns the resolved
-// locale tag.
+// request finishes. For an 'auto' choice it always re-resolves the browser
+// preference — the concrete tag pinned by setLocale (for catalogs
+// preferredLanguage can't derive, e.g. zh-CN -> zh-Hans) is just a rendering
+// cache and must not pin the language across browser-language changes. For an
+// explicit choice (or none recorded yet) it trusts the cached pin and falls
+// back to the browser. Sets document.documentElement.lang and dir.
 export async function bootstrapLocale(): Promise<string> {
 	if (!browser) return baseLocale;
 
-	let effective = readCachedLocale();
-	if (!effective) {
+	let effective: string;
+	if (localStorage.getItem(LOCALE_CHOICE_KEY) === 'auto') {
 		effective = resolveBrowserLocale();
+	} else {
+		effective = readCachedLocale() ?? resolveBrowserLocale();
 	}
 
 	await applyLocale(effective);

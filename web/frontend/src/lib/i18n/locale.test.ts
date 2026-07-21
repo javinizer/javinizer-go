@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
 	applyLocale,
 	applySavedLocale,
+	bootstrapLocale,
 	currentLocaleChoice,
 	LOCALE_CHOICE_KEY,
 	LOCALE_STORAGE_KEY,
@@ -322,6 +323,56 @@ describe('applySavedLocale', () => {
 		await applySavedLocale('pt-BR');
 
 		expect(mockSetLocale).toHaveBeenCalledWith('en');
+	});
+});
+
+describe('bootstrapLocale', () => {
+	function stubLanguages(langs: string[]) {
+		Object.defineProperty(window.navigator, 'languages', { value: langs, configurable: true });
+	}
+
+	beforeEach(() => {
+		localStorage.clear();
+		mockGetLocale.mockReset();
+		mockSetLocale.mockReset();
+		mockGetLocale.mockImplementation(() => localStorage.getItem(LOCALE_STORAGE_KEY) ?? 'en');
+		mockSetLocale.mockImplementation(async (tag: string) => {
+			localStorage.setItem(LOCALE_STORAGE_KEY, tag);
+		});
+	});
+
+	it('re-resolves the browser locale for an auto choice, ignoring a stale pin', async () => {
+		// A prior setLocale pinned zh-Hans for a zh-CN browser; the user later
+		// switches the browser to ja-JP and chose 'auto'. bootstrap must follow
+		// the browser, not the stale pin.
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-Hans');
+		localStorage.setItem(LOCALE_CHOICE_KEY, 'auto');
+		stubLanguages(['ja-JP']);
+
+		const effective = await bootstrapLocale();
+
+		expect(effective).toBe('ja');
+		// applyLocale sees the stale pin != ja and delegates to setLocale.
+		expect(mockSetLocale).toHaveBeenCalledWith('ja');
+	});
+
+	it('trusts the cached pin for an explicit choice', async () => {
+		localStorage.setItem(LOCALE_STORAGE_KEY, 'ja');
+		localStorage.setItem(LOCALE_CHOICE_KEY, 'ja');
+		stubLanguages(['zh-CN']);
+
+		const effective = await bootstrapLocale();
+
+		expect(effective).toBe('ja');
+		expect(mockSetLocale).not.toHaveBeenCalled();
+	});
+
+	it('falls back to the browser preference when no choice is recorded', async () => {
+		stubLanguages(['zh-CN']);
+
+		const effective = await bootstrapLocale();
+
+		expect(effective).toBe('zh-Hans');
 	});
 });
 
