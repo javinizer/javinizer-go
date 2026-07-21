@@ -360,6 +360,7 @@ describe('applySavedLocale', () => {
 		await applySavedLocale('pt-BR');
 
 		expect(mockSetLocale).toHaveBeenCalledWith('en');
+		expect(localStorage.getItem(LOCALE_CHOICE_KEY)).toBe('en');
 	});
 });
 

@@ -205,9 +205,11 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 		return resolved;
 	}
 
-	// Valid but unsupported configured tag: render English, do not cache. Treat
-	// the choice as 'auto' so bootstrap follows the browser, not a stale pick.
-	localStorage.setItem(LOCALE_CHOICE_KEY, 'auto');
+	// Valid but unsupported configured tag: render English, do not cache the
+	// tag. Record the rendered fallback (baseLocale) as the choice — NOT 'auto'
+	// — so bootstrap honors it on the next load instead of re-resolving the
+	// browser locale and looping back here (browser -> en -> browser ...).
+	localStorage.setItem(LOCALE_CHOICE_KEY, baseLocale);
 	await applyLocale(baseLocale);
 	return baseLocale;
 }
