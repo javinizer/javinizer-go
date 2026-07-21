@@ -1034,12 +1034,16 @@ export function createReviewState(pageStore: Page) {
 			nfoDifferences = undefined;
 			return;
 		}
+		existingNfo = null;
+		nfoDifferences = undefined;
 		existingNfoTimer = setTimeout(async () => {
 			try {
 				const resp = await apiClient.getExistingNFO(jid, rid);
+				if (currentResult?.result_id !== rid) return;
 				existingNfo = resp;
 				nfoDifferences = resp.nfo_differences;
 			} catch {
+				if (currentResult?.result_id !== rid) return;
 				existingNfo = null;
 				nfoDifferences = undefined;
 			}
