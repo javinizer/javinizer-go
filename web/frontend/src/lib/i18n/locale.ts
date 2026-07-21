@@ -8,6 +8,24 @@ import type { UIConfig } from '$lib/api/types';
 // across reloads and clearClientStorage-tolerant flows.
 export const LOCALE_STORAGE_KEY = 'javinizer-locale';
 
+// Records the user's selector choice ('auto' or an explicit tag), kept separate
+// from LOCALE_STORAGE_KEY: that key is also Paraglide's rendering cache
+// (setLocale writes the resolved tag there for catalogs that preferredLanguage
+// can't derive, e.g. zh-CN -> zh-Hans), so it cannot on its own distinguish an
+// explicit pick from an auto-resolved one. Without this, choosing Automatic
+// would come back as a concrete tag after reload (#165 P2).
+export const LOCALE_CHOICE_KEY = 'javinizer-locale-choice';
+
+// currentLocaleChoice returns the selector value for the recorded choice:
+// 'auto' (browser preference) or an explicit supported tag. Pre-auth there is
+// no config, so this is the source of truth for the dropdown display.
+export function currentLocaleChoice(): string {
+	if (!browser) return 'auto';
+	const choice = localStorage.getItem(LOCALE_CHOICE_KEY);
+	if (choice === 'auto' || (choice !== null && isSupported(choice))) return choice;
+	return 'auto';
+}
+
 // Supported locales that ship a catalog. Currently English only; future
 // reviewed locales are added here. Use self-names so the selector stays usable
 // when the current locale is wrong.
@@ -95,15 +113,25 @@ function readCachedLocale(): string | null {
 }
 
 // bootstrapLocale resolves the effective locale before the protected full-config
-// request finishes. Order: valid localStorage mirror -> browser preference ->
-// base locale. Sets document.documentElement.lang and dir. Returns the resolved
-// locale tag.
+// request finishes. For an 'auto' choice it always re-resolves the browser
+// preference — the concrete tag pinned by setLocale (for catalogs
+// preferredLanguage can't derive, e.g. zh-CN -> zh-Hans) is just a rendering
+// cache and must not pin the language across browser-language changes. For an
+// explicit choice it is authoritative even if the rendering pin is absent
+// (e.g. localStorage was unavailable when setLocale tried to write it), so the
+// pre-auth selector stays consistent with the rendered locale. With no choice
+// recorded it trusts the cached pin and falls back to the browser.
 export async function bootstrapLocale(): Promise<string> {
 	if (!browser) return baseLocale;
 
-	let effective = readCachedLocale();
-	if (!effective) {
+	const choice = localStorage.getItem(LOCALE_CHOICE_KEY);
+	let effective: string;
+	if (choice === 'auto') {
 		effective = resolveBrowserLocale();
+	} else if (choice && isSupported(choice)) {
+		effective = choice;
+	} else {
+		effective = readCachedLocale() ?? resolveBrowserLocale();
 	}
 
 	await applyLocale(effective);
@@ -111,10 +139,17 @@ export async function bootstrapLocale(): Promise<string> {
 }
 
 // applyLocale sets the Paraglide locale and updates <html lang> and <html dir>.
+// setLocale reloads the page by default, so skip it when Paraglide already
+// renders the target: its own no-reload guard compares against getLocale(),
+// which cannot map region tags like zh-CN onto script locales (zh-Hans) and
+// reports baseLocale instead — callers that clear the cached tag before
+// applying (the 'auto' flows) would otherwise reload on every pass (#164).
 export async function applyLocale(tag: string): Promise<void> {
 	if (!browser) return;
 	const resolved = isSupported(tag) ? tag : baseLocale;
-	await setLocale(resolved as typeof locales[number]);
+	if (getLocale() !== resolved) {
+		await setLocale(resolved as typeof locales[number]);
+	}
 	document.documentElement.lang = resolved;
 	document.documentElement.dir = localeDir(resolved);
 }
@@ -136,28 +171,97 @@ export async function reconcileWithConfig(ui?: UIConfig | null): Promise<string>
 
 	const configured = ui?.language?.trim() ?? '';
 	if (configured === '' || canonicalizeTag(configured) === 'auto') {
-		localStorage.removeItem(LOCALE_STORAGE_KEY);
 		const browserLocale = resolveBrowserLocale();
-		await applyLocale(browserLocale);
+		// Sync the choice to 'auto' so bootstrap (which honors an explicit
+		// LOCALE_CHOICE_KEY) and reconcile agree — otherwise a pre-auth
+		// explicit pick left in the choice key would make bootstrap re-apply
+		// it, then reconcile flip back to the browser locale, looping.
+		localStorage.setItem(LOCALE_CHOICE_KEY, 'auto');
+		// Steady state: Paraglide already renders the browser-preferred locale.
+		// Clearing the cached tag and reapplying on every reconcile (which runs
+		// on each page load post-auth) makes getLocale() fall back to baseLocale
+		// for script-based locales (zh-Hans/zh-Hant), so setLocale's reload
+		// guard misfires and the page reloads forever (#164).
+		if (getLocale() === browserLocale) {
+			return browserLocale;
+		}
+		// Stale pin differs from the browser locale. applyLocale's guard can't
+		// force the reload here: once the pin is cleared getLocale() resolves to
+		// the browser locale and it would skip setLocale, leaving the already-
+		// rendered page in the stale language. setLocale captures its snapshot
+		// while the stale pin is still present (so it differs from browserLocale),
+		// pins the browser locale, and reloads.
+		await setLocale(browserLocale as typeof locales[number]);
 		return browserLocale;
 	}
 
 	const resolved = resolveLocaleTag(configured);
 	if (resolved) {
+		// Mirror the explicit config into the choice key so bootstrap honors it
+		// before the protected config loads on the next startup.
+		localStorage.setItem(LOCALE_CHOICE_KEY, resolved);
 		localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
 		await applyLocale(resolved);
 		return resolved;
 	}
 
-	// Valid but unsupported configured tag: render English, do not cache.
+	// Valid but unsupported configured tag: render English, do not cache the
+	// tag. Record the rendered fallback (baseLocale) as the choice — NOT 'auto'
+	// — so bootstrap honors it on the next load instead of re-resolving the
+	// browser locale and looping back here (browser -> en -> browser ...).
+	localStorage.setItem(LOCALE_CHOICE_KEY, baseLocale);
 	await applyLocale(baseLocale);
 	return baseLocale;
 }
 
+// selectLocale applies a locale picked from a selector. 'auto' resolves the
+// browser preference (mapped onto the shipped catalogs). The choice is recorded
+// under LOCALE_CHOICE_KEY separately from Paraglide's rendering cache
+// (LOCALE_STORAGE_KEY): when the effective locale differs from the rendered
+// one, setLocale pins the resolved tag for rendering and reloads so compiled
+// messages re-render. For an explicit pick that already matches the rendered
+// locale, the rendering cache is still pinned so a later browser-language
+// change doesn't override the explicit selection on the next bootstrap; 'auto'
+// never pins, so the browser preference stays authoritative.
 export async function selectLocale(tag: string): Promise<void> {
 	if (!browser) return;
-	if (tag !== 'auto' && isSupported(tag)) {
-		localStorage.setItem(LOCALE_STORAGE_KEY, tag);
+	const resolved = tag === 'auto' ? resolveBrowserLocale() : isSupported(tag) ? tag : baseLocale;
+	localStorage.setItem(LOCALE_CHOICE_KEY, tag);
+	if (getLocale() !== resolved) {
+		await setLocale(resolved as typeof locales[number]);
+		return;
 	}
-	await applyLocale(isSupported(tag) ? tag : baseLocale);
+	if (tag !== 'auto' && isSupported(tag)) {
+		localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
+	}
+	document.documentElement.lang = resolved;
+	document.documentElement.dir = localeDir(resolved);
+}
+
+// applySavedLocale applies a just-persisted ui.language after a settings
+// save. Unlike reconcileWithConfig (which never reloads in steady state and
+// pins before applying, so it can leave the UI rendering the old locale),
+// this forces a reload when the saved locale differs from the rendered one —
+// otherwise a language change saved in settings would not re-render the page.
+// Config values go through resolveLocaleTag so variants like zh-Hans-CN map
+// onto shipped catalogs; 'auto' resolves the browser preference.
+export async function applySavedLocale(language?: string | null): Promise<void> {
+	if (!browser) return;
+	const configured = language?.trim() ?? '';
+	const isAuto = configured === '' || canonicalizeTag(configured) === 'auto';
+	const resolved = isAuto ? resolveBrowserLocale() : (resolveLocaleTag(configured) ?? baseLocale);
+	// Sync the selector choice to the just-saved config so bootstrapLocale
+	// honors it before the protected config loads on the next startup: 'auto'
+	// keeps the browser preference authoritative, an explicit tag is recorded
+	// as such. Without this a stale 'auto' choice would make bootstrap re-resolve
+	// the browser locale and briefly undo an explicit settings save.
+	localStorage.setItem(LOCALE_CHOICE_KEY, isAuto ? 'auto' : resolved);
+	if (getLocale() === resolved) {
+		// Already rendering the target. Don't pin a concrete tag for 'auto' —
+		// that would conflate the rendering cache with an explicit choice and
+		// mask later browser-preference changes.
+		if (!isAuto) localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
+		return;
+	}
+	await setLocale(resolved as typeof locales[number]);
 }

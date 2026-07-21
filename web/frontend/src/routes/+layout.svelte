@@ -21,6 +21,7 @@
 	import { translateErrorCode } from '$lib/i18n/api-messages';
 	import { ApiError } from '$lib/api/clients/common';
 	import LocaleReconciler from '$lib/components/LocaleReconciler.svelte';
+	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
 	import '../app.css';
 
 	let { children } = $props();
@@ -39,6 +40,7 @@
 	let loginPassword = $state('');
 	let loginRememberMe = $state(true);
 	let clientStorageCleared = false;
+	let setupSessionActive = $state(false);
 
 	function localizeApiError(error: unknown, fallback: string): string {
 		if (error instanceof ApiError && error.code) {
@@ -142,6 +144,12 @@
 <svelte:head>
 </svelte:head>
 
+{#if !authAuthenticated && !(setupSessionActive && !authInitialized)}
+	<div class="fixed top-4 right-4 z-50">
+		<LanguageSelector />
+	</div>
+{/if}
+
 {#if authLoading}
 	<div class="min-h-screen bg-background flex items-center justify-center px-4">
 		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm text-center">
@@ -174,7 +182,10 @@
 		</div>
 	</div>
 {:else if !authInitialized}
-	<SetupWizard onComplete={() => { void refreshAuthStatus(); }} />
+	<SetupWizard
+		onComplete={() => { void refreshAuthStatus(); }}
+		onSessionCreated={() => { setupSessionActive = true; }}
+	/>
 {:else if !authAuthenticated}
 	<div class="min-h-screen bg-background flex items-center justify-center px-4 py-10">
 		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm space-y-4">

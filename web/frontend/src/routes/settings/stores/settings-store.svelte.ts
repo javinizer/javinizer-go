@@ -4,6 +4,7 @@ import { untrack } from 'svelte';
 import { apiClient } from '$lib/api/client';
 import { createConfigQuery } from '$lib/query/queries';
 import { toastStore } from '$lib/stores/toast';
+import { applySavedLocale } from '$lib/i18n/locale';
 import { isProxyConfigDirty, isTestValid, type TestResult } from '$lib/proxy/proxy-logic';
 import type {
 	Config,
@@ -292,6 +293,10 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 			deps.clearTestResults();
 			updateProxyConfigBaseline();
 			toastStore.success(m.settings_config_saved_toast(), 4000);
+			// Apply the just-saved ui.language before the config refetch re-fires
+			// LocaleReconciler: this reloads when the rendered locale must change,
+			// which reconcileWithConfig deliberately never does on its own.
+			void applySavedLocale(config?.ui?.language);
 			void queryClient.invalidateQueries({ queryKey: ['config'] }).then(() => {
 				const updated = queryClient.getQueryData<Config>(['config']);
 				if (updated && config) {
