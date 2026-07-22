@@ -74,15 +74,26 @@ func (w *windowsSwapper) SwapAndRelaunch(ctx context.Context, stagedPath string,
 	if err := os.WriteFile(batchPath, []byte(script), 0o644); err != nil {
 		return fmt.Errorf("write batch helper: %w", err)
 	}
+	cmd := newWindowsHelperCmd(oldPID, exePath, batchPath, stagedPath)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start detached helper: %w", err)
+	}
+	_ = cmd.Process.Release()
+	return nil
+}
+
+// newWindowsHelperCmd builds the detached cmd.exe helper that runs the swap
+// .bat after the current process exits. Extracted from SwapAndRelaunch so the
+// process-creation attributes (CreationFlags, HideWindow, nil stdio) are
+// unit-testable without spawning cmd.exe. The returned Cmd is NOT started;
+// the caller starts it and releases the process handle so the helper
+// outlives the parent.
+func newWindowsHelperCmd(oldPID int, exePath, batchPath, stagedPath string) *exec.Cmd {
 	cmd := exec.Command("cmd.exe", "/c", batchPath, strconv.Itoa(oldPID), exePath, stagedPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: windowsHelperCreationFlags,
 		HideWindow:    true,
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start detached helper: %w", err)
-	}
-	_ = cmd.Process.Release()
-	return nil
+	return cmd
 }

@@ -3,6 +3,7 @@
 package updater
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -80,33 +81,78 @@ func TestRenderWindowsBatScript_UsesArgPassing(t *testing.T) {
 	}
 }
 
-// TestWindowsHelperCreationFlags_NoVisibleWindow pins the fix for the stray
+// TestNewWindowsHelperCmd_NoVisibleWindow asserts the actual *exec.Cmd that
+// SwapAndRelaunch builds (via newWindowsHelperCmd) carries the
+// process-creation attributes that keep the Windows upgrade helper silent —
+// not just the constant value. It is the regression guard for the stray
 // 'find "<pid>"' Windows Terminal window users saw mid desktop upgrade.
 //
 // The desktop exe is built with -H windowsgui (GUI subsystem, no console).
 // DETACHED_PROCESS (0x8) only detaches cmd.exe from the parent's console; the
 // batch's children (tasklist.exe, ping.exe) then each allocate their OWN
-// visible console -> a #0c0c0c Windows Terminal pops up echoing the poll line
-// 'tasklist ... | find "<pid>" >nul' and lingering until the app quits.
-// CREATE_NO_WINDOW (0x08000000) suppresses all child console windows instead.
+// visible console -> a #0c0c0c Windows Terminal pops up. CREATE_NO_WINDOW
+// (0x08000000) suppresses console allocation for the helper and the
+// console-subsystem commands it runs. Per MS docs, CREATE_NO_WINDOW is
+// ignored when combined with DETACHED_PROCESS or CREATE_NEW_CONSOLE, so
+// neither may be present alongside it.
 //
-// This test is the regression guard: it does not spawn a process, so it runs
-// deterministically on Windows CI; it asserts the invariant by value.
-func TestWindowsHelperCreationFlags_NoVisibleWindow(t *testing.T) {
-	const createNoWindow = uint32(0x08000000)
-	const detachedProcess = uint32(0x00000008)
+// This test does not spawn a process (cmd.Start is never called), so it is
+// deterministic on Windows CI.
+func TestNewWindowsHelperCmd_NoVisibleWindow(t *testing.T) {
+	const (
+		createNoWindow        = uint32(0x08000000)
+		detachedProcess       = uint32(0x00000008)
+		createNewConsole      = uint32(0x00000010)
+		createNewProcessGroup = uint32(0x00000200)
+	)
 
-	flags := uint32(windowsHelperCreationFlags)
+	const pid = 41784
+	exe := "C:/Program Files/Javinizer/Javinizer.exe"
+	batch := "C:/Users/me/AppData/Local/Temp/javinizer-update-41784.bat"
+	staged := "C:/Users/me/.javinizer-bundle-upgrade-41784.tmp"
+
+	cmd := newWindowsHelperCmd(pid, exe, batch, staged)
+
+	// The helper is invoked as: cmd.exe /c <batch> <pid> <exe> <staged>
+	wantArgs := []string{"cmd.exe", "/c", batch, strconv.Itoa(pid), exe, staged}
+	if len(cmd.Args) != len(wantArgs) {
+		t.Fatalf("cmd.Args length = %d, want %d; got %#v", len(cmd.Args), len(wantArgs), cmd.Args)
+	}
+	for i, want := range wantArgs {
+		if cmd.Args[i] != want {
+			t.Fatalf("cmd.Args[%d] = %q, want %q; full args %#v", i, cmd.Args[i], want, cmd.Args)
+		}
+	}
+
+	sp := cmd.SysProcAttr
+	if sp == nil {
+		t.Fatal("cmd.SysProcAttr is nil; expected CREATE_NO_WINDOW flags to be set")
+	}
+	flags := uint32(sp.CreationFlags)
 
 	if flags&createNoWindow == 0 {
-		t.Fatalf("windowsHelperCreationFlags = %#x is missing CREATE_NO_WINDOW (0x08000000); "+
+		t.Errorf("CreationFlags = %#x is missing CREATE_NO_WINDOW (0x08000000); "+
 			"the desktop upgrade helper would pop a visible Windows Terminal window "+
 			"(regression: previously used DETACHED_PROCESS)", flags)
 	}
 	if flags&detachedProcess != 0 {
-		t.Fatalf("windowsHelperCreationFlags = %#x must NOT include DETACHED_PROCESS (0x8); "+
-			"DETACHED_PROCESS + GUI-subsystem parent lets tasklist/ping allocate visible "+
-			"consoles, and DETACHED_PROCESS is mutually exclusive with CREATE_NO_WINDOW at "+
-			"the Win32 level", flags)
+		t.Errorf("CreationFlags = %#x must NOT include DETACHED_PROCESS (0x8); "+
+			"CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS, so "+
+			"the no-window behavior would be silently dropped", flags)
+	}
+	if flags&createNewConsole != 0 {
+		t.Errorf("CreationFlags = %#x must NOT include CREATE_NEW_CONSOLE (0x10); "+
+			"it allocates a visible console for the helper", flags)
+	}
+	if flags&createNewProcessGroup == 0 {
+		t.Errorf("CreationFlags = %#x is missing CREATE_NEW_PROCESS_GROUP (0x200); "+
+			"process-group/Ctrl+C isolation for the helper was lost", flags)
+	}
+	if !sp.HideWindow {
+		t.Error("HideWindow = false; expected true as defense in depth (cmd.exe window)")
+	}
+	if cmd.Stdin != nil || cmd.Stdout != nil || cmd.Stderr != nil {
+		t.Errorf("stdio must be nil so the helper never touches the parent's pipes; "+
+			"got stdin=%v stdout=%v stderr=%v", cmd.Stdin, cmd.Stdout, cmd.Stderr)
 	}
 }
