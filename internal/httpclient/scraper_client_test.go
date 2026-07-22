@@ -91,7 +91,10 @@ func TestInitScraperClient_WithProxy(t *testing.T) {
 	result := InitScraperClient(settings, nil, models.FlareSolverrConfig{})
 	assert.NotNil(t, result)
 	assert.NotNil(t, result.Client)
-	assert.True(t, result.ProxyEnabled)
+	// No global proxy configured: the resolver's circuit breaker forces Direct
+	// mode for every scraper, so the flag must report no proxy even when the
+	// scraper carries its own enabled proxy override.
+	assert.False(t, result.ProxyEnabled)
 }
 
 func TestInitScraperClient_WithGlobalProxy(t *testing.T) {

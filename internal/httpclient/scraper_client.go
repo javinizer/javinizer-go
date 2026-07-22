@@ -6,6 +6,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperconfig"
 )
 
 // ScraperHTTPClientOption configures a scraper HTTP client at construction.
@@ -92,10 +93,7 @@ func InitScraperClient(settings *models.ScraperSettings, globalProxy *models.Pro
 		globalProxyVal = *globalProxy
 	}
 
-	proxyEnabled := globalProxyVal.Enabled
-	if settings.Proxy != nil && settings.Proxy.Enabled {
-		proxyEnabled = true
-	}
+	proxyEnabled := scraperconfig.ResolveScraperProxyMode(globalProxyVal, settings.Proxy) != scraperconfig.ScraperProxyModeDirect
 
 	proxyConfig := models.ResolveScraperProxy(globalProxyVal, settings.Proxy)
 
