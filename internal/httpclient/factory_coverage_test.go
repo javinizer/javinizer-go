@@ -104,7 +104,27 @@ func TestInitScraperClient_WithProxyEnabled(t *testing.T) {
 	globalProxy := &models.ProxyConfig{Enabled: false}
 	result := InitScraperClient(settings, globalProxy, models.FlareSolverrConfig{})
 	require.NotNil(t, result)
-	assert.True(t, result.ProxyEnabled)
+	// Circuit breaker: global proxy disabled means Direct mode for ALL scrapers,
+	// regardless of any per-scraper override, so the flag must report no proxy.
+	assert.False(t, result.ProxyEnabled)
+}
+
+func TestInitScraperClient_ScraperOptsOutOfGlobalProxy(t *testing.T) {
+	settings := &models.ScraperSettings{
+		Enabled:    true,
+		Timeout:    30,
+		RetryCount: 3,
+		Proxy:      &models.ProxyConfig{Enabled: false},
+	}
+	globalProxy := &models.ProxyConfig{
+		Enabled:        true,
+		Profiles:       map[string]models.ProxyProfile{"default": {URL: "http://proxy:8080"}},
+		DefaultProfile: "default",
+	}
+	result := InitScraperClient(settings, globalProxy, models.FlareSolverrConfig{})
+	require.NotNil(t, result)
+	// Scraper explicitly opted out of a globally-enabled proxy → Direct mode (no proxy).
+	assert.False(t, result.ProxyEnabled)
 }
 
 func TestInitScraperClient_GlobalProxyEnabled(t *testing.T) {
