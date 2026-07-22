@@ -79,3 +79,34 @@ func TestRenderWindowsBatScript_UsesArgPassing(t *testing.T) {
 		t.Errorf("script should NOT hardcode the staged path (uses %%~3); got %q in script", newPath)
 	}
 }
+
+// TestWindowsHelperCreationFlags_NoVisibleWindow pins the fix for the stray
+// 'find "<pid>"' Windows Terminal window users saw mid desktop upgrade.
+//
+// The desktop exe is built with -H windowsgui (GUI subsystem, no console).
+// DETACHED_PROCESS (0x8) only detaches cmd.exe from the parent's console; the
+// batch's children (tasklist.exe, ping.exe) then each allocate their OWN
+// visible console -> a #0c0c0c Windows Terminal pops up echoing the poll line
+// 'tasklist ... | find "<pid>" >nul' and lingering until the app quits.
+// CREATE_NO_WINDOW (0x08000000) suppresses all child console windows instead.
+//
+// This test is the regression guard: it does not spawn a process, so it runs
+// deterministically on Windows CI; it asserts the invariant by value.
+func TestWindowsHelperCreationFlags_NoVisibleWindow(t *testing.T) {
+	const createNoWindow = uint32(0x08000000)
+	const detachedProcess = uint32(0x00000008)
+
+	flags := uint32(windowsHelperCreationFlags)
+
+	if flags&createNoWindow == 0 {
+		t.Fatalf("windowsHelperCreationFlags = %#x is missing CREATE_NO_WINDOW (0x08000000); "+
+			"the desktop upgrade helper would pop a visible Windows Terminal window "+
+			"(regression: previously used DETACHED_PROCESS)", flags)
+	}
+	if flags&detachedProcess != 0 {
+		t.Fatalf("windowsHelperCreationFlags = %#x must NOT include DETACHED_PROCESS (0x8); "+
+			"DETACHED_PROCESS + GUI-subsystem parent lets tasklist/ping allocate visible "+
+			"consoles, and DETACHED_PROCESS is mutually exclusive with CREATE_NO_WINDOW at "+
+			"the Win32 level", flags)
+	}
+}

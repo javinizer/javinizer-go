@@ -76,7 +76,7 @@ func (w *windowsSwapper) SwapAndRelaunch(ctx context.Context, stagedPath string,
 	}
 	cmd := exec.Command("cmd.exe", "/c", batchPath, strconv.Itoa(oldPID), exePath, stagedPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: windowsDetachedProcess | windowsCreateNewProcessGroup,
+		CreationFlags: windowsHelperCreationFlags,
 		HideWindow:    true,
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil

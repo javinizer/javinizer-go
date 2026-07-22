@@ -6,12 +6,30 @@ import (
 	"strings"
 )
 
-// Windows detached-helper process creation flags. CREATE_NEW_PROCESS_GROUP
-// is also exported by the syscall package; DETACHED_PROCESS is not, so it is
-// defined here for the windows build to use.
+// Windows helper process creation flags, passed as CreateProcess
+// dwCreationFlags via syscall.SysProcAttr.CreationFlags. CREATE_NEW_PROCESS_GROUP
+// is also exported by the syscall package; CREATE_NO_WINDOW is not, so it is
+// defined here.
+//
+// CREATE_NO_WINDOW (0x08000000) — NOT DETACHED_PROCESS (0x8) — is required:
+// the desktop exe is a GUI-subsystem binary (built with -H windowsgui) and has
+// no console. DETACHED_PROCESS only detaches cmd.exe from the parent console;
+// the batch child processes (tasklist.exe, ping.exe) then each allocate their
+// OWN visible console, surfacing as a stray 'find "<pid>"' Windows Terminal
+// window during an upgrade. CREATE_NO_WINDOW suppresses console allocation for
+// the helper and the console-subsystem commands it runs (the helper is silent).
+// Per MS docs, CREATE_NO_WINDOW is IGNORED when combined with DETACHED_PROCESS or
+// CREATE_NEW_CONSOLE — it does not reject the combination, it just silently drops
+// the no-window behavior — so DETACHED_PROCESS must not be present alongside it.
 const (
-	windowsDetachedProcess       = 0x00000008
+	windowsCreateNoWindow        = 0x08000000
 	windowsCreateNewProcessGroup = 0x00000200
+
+	// windowsHelperCreationFlags is the combined dwCreationFlags used by
+	// SwapAndRelaunch when spawning the detached .bat helper. Exposed as a
+	// named const so the "no visible console window" invariant is unit-tested
+	// (TestWindowsHelperCreationFlags_NoVisibleWindow) without spawning a process.
+	windowsHelperCreationFlags = windowsCreateNoWindow | windowsCreateNewProcessGroup
 )
 
 // winBase returns the filename component of a Windows path, handling both
