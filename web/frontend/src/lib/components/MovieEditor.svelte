@@ -195,6 +195,15 @@
 		}
 		return unique.sort((a, b) => a.localeCompare(b));
 	});
+	const favoritedNameByKey = $derived.by(() => {
+		const map = new Map<string, string>();
+		for (const g of favoriteGenres) {
+			const trimmed = g.trim();
+			if (!trimmed) continue;
+			map.set(trimmed.toLowerCase(), trimmed);
+		}
+		return map;
+	});
 	const presentGenreNames = $derived.by(() => {
 		const set = new Set<string>();
 		editedMovie.genres?.forEach(g => set.add(normalizeGenreName(g.name)));
@@ -515,12 +524,13 @@
 							<span class="leading-none">{genre.name}</span>
 							{#if onAddFavorite && onRemoveFavorite}
 								{@const isFavorited = favoritedGenreNames.has(normalizeGenreName(genre.name))}
+								{@const storedFavoriteName = favoritedNameByKey.get(normalizeGenreName(genre.name)) ?? genre.name}
 								{@const favoriteLabel = isFavorited
 									? m.movie_genre_remove_from_favorites_title({ name: genre.name })
 									: m.movie_genre_add_to_favorites_title({ name: genre.name })}
 								<button
 									type="button"
-									onclick={() => isFavorited ? onRemoveFavorite?.(genre.name) : onAddFavorite?.(genre.name)}
+									onclick={() => isFavorited ? onRemoveFavorite?.(storedFavoriteName) : onAddFavorite?.(genre.name)}
 									class="ml-0.5 p-0.5 rounded-full hover:bg-primary/20 transition-all opacity-70 hover:opacity-100"
 									aria-label={favoriteLabel}
 									title={favoriteLabel}
