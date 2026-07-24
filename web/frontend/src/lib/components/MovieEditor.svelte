@@ -141,7 +141,7 @@
 
 	// Genre management functions
 	function normalizeGenreName(name: string): string {
-		return name.trim().toLocaleLowerCase();
+		return name.trim().toLowerCase();
 	}
 
 	function isGenrePresent(genres: Genre[] | undefined, name: string): boolean {
