@@ -18,9 +18,10 @@
 		favoritedGenreNames?: Set<string>;
 		onAddFavorite?: (genre: string) => void;
 		onRemoveFavorite?: (genre: string) => void;
+		favoriteMutationPending?: boolean;
 	}
 
-	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId, nfoDifferences, favoriteGenres = [], favoritedGenreNames = new Set<string>(), onAddFavorite, onRemoveFavorite }: Props = $props();
+	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId, nfoDifferences, favoriteGenres = [], favoritedGenreNames = new Set<string>(), onAddFavorite, onRemoveFavorite, favoriteMutationPending = false }: Props = $props();
 
 	// Create a local editable copy - initialized by effect
 	let editedMovie = $state<Movie>({} as Movie);
@@ -530,8 +531,9 @@
 									: m.movie_genre_add_to_favorites_title({ name: genre.name })}
 								<button
 									type="button"
+									disabled={favoriteMutationPending}
 									onclick={() => isFavorited ? onRemoveFavorite?.(storedFavoriteName) : onAddFavorite?.(genre.name)}
-									class="ml-0.5 p-0.5 rounded-full hover:bg-primary/20 transition-all opacity-70 hover:opacity-100"
+									class="ml-0.5 p-0.5 rounded-full hover:bg-primary/20 transition-all opacity-70 hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
 									aria-label={favoriteLabel}
 									title={favoriteLabel}
 								>

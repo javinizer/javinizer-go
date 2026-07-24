@@ -75,6 +75,7 @@
 	function handleRemoveFavorite(genre: string) {
 		removeFavoriteMutation.mutate(genre);
 	}
+	let favoriteMutationPending = $derived(addFavoriteMutation.isPending || removeFavoriteMutation.isPending);
 </script>
 
 <Card class="p-6">
@@ -131,6 +132,7 @@
 			favoritedGenreNames={favoritedGenreNames}
 			onAddFavorite={handleAddFavorite}
 			onRemoveFavorite={handleRemoveFavorite}
+			favoriteMutationPending={favoriteMutationPending}
 		/>
 
 		{#if nfoDifferences && nfoDifferences.length > 0}
