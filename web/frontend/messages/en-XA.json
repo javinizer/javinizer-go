@@ -811,6 +811,8 @@
   "movie_genre_favorites_label": "[ Fåvörítës ]",
   "movie_genre_favorite_add_title": "[ Ädd {name} ]",
   "movie_genre_favorite_already_added_title": "[ {name} ålrëådy åddëd ]",
+  "movie_genre_add_to_favorites_title": "[ Ädd {name} tö fåvörítës ]",
+  "movie_genre_remove_from_favorites_title": "[ Rëmövë {name} fröm fåvörítës ]",
   "movie_rating_display": "[ {score}/10 ]",
   "movie_rating_vote_one": "[ ({votes} vötë) ]",
   "movie_rating_votes": "[ ({votes} vötës) ]",

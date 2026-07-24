@@ -5,6 +5,9 @@
 	import MovieEditor from '$lib/components/MovieEditor.svelte';
 	import NfoDiffSummary from './NfoDiffSummary.svelte';
 	import { createFavoriteGenresQuery } from '$lib/query/queries';
+	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
+	import { apiClient } from '$lib/api/client';
+	import { toastStore } from '$lib/stores/toast';
 	import { LoaderCircle, RotateCcw, TableProperties } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -38,6 +41,40 @@
 	let favoriteGenres = $derived<string[]>(
 		favoritesQuery.isError ? [] : (favoritesQuery.data?.favorites ?? [])
 	);
+	const favoritedGenreNames = $derived.by(() => {
+		const set = new Set<string>();
+		for (const g of favoriteGenres) set.add(g.trim().toLowerCase());
+		return set;
+	});
+
+	const queryClient = useQueryClient();
+	const addFavoriteMutation = createMutation(() => ({
+		mutationFn: (genre: string) => apiClient.addFavoriteGenre({ genre }),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: ['genre-favorites'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || m.genres_add_favorite_failed(), 4000);
+		},
+	}));
+	const removeFavoriteMutation = createMutation(() => ({
+		mutationFn: (genre: string) => apiClient.deleteFavoriteGenre(genre),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: ['genre-favorites'] });
+			void queryClient.invalidateQueries({ queryKey: ['config'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || m.genres_remove_favorite_failed(), 4000);
+		},
+	}));
+
+	function handleAddFavorite(genre: string) {
+		addFavoriteMutation.mutate(genre);
+	}
+	function handleRemoveFavorite(genre: string) {
+		removeFavoriteMutation.mutate(genre);
+	}
 </script>
 
 <Card class="p-6">
@@ -91,6 +128,9 @@
 			resultId={currentResult.result_id}
 			nfoDifferences={nfoDifferences}
 			favoriteGenres={favoriteGenres}
+			favoritedGenreNames={favoritedGenreNames}
+			onAddFavorite={handleAddFavorite}
+			onRemoveFavorite={handleRemoveFavorite}
 		/>
 
 		{#if nfoDifferences && nfoDifferences.length > 0}

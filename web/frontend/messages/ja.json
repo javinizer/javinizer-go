@@ -1108,6 +1108,8 @@
   "movie_genre_favorites_label": "お気に入り",
   "movie_genre_favorite_add_title": "{name} を追加",
   "movie_genre_favorite_already_added_title": "{name} は既に追加済み",
+  "movie_genre_add_to_favorites_title": "{name} をお気に入りに追加",
+  "movie_genre_remove_from_favorites_title": "{name} をお気に入りから削除",
   "movie_rating_display": "{score}/10",
   "movie_rating_vote_one": "({votes} 票)",
   "movie_rating_votes": "({votes} 票)",
