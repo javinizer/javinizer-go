@@ -4,6 +4,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import MovieEditor from '$lib/components/MovieEditor.svelte';
 	import NfoDiffSummary from './NfoDiffSummary.svelte';
+	import { createFavoriteGenresQuery } from '$lib/query/queries';
 	import { LoaderCircle, RotateCcw, TableProperties } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -32,6 +33,11 @@
 		onUpdateCurrentMovie,
 		nfoDifferences
 	}: Props = $props();
+
+	const favoritesQuery = createFavoriteGenresQuery();
+	let favoriteGenres = $derived<string[]>(
+		favoritesQuery.isError ? [] : (favoritesQuery.data?.favorites ?? [])
+	);
 </script>
 
 <Card class="p-6">
@@ -84,6 +90,7 @@
 			jobId={jobId}
 			resultId={currentResult.result_id}
 			nfoDifferences={nfoDifferences}
+			favoriteGenres={favoriteGenres}
 		/>
 
 		{#if nfoDifferences && nfoDifferences.length > 0}

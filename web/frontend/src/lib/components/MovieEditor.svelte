@@ -2,7 +2,7 @@
 	import * as m from '$lib/paraglide/messages';
 	import type { Movie, Genre, FieldDifference } from '$lib/api/types';
 	import { apiClient } from '$lib/api/client';
-	import { CircleAlert, LoaderCircle, X, Plus } from 'lucide-svelte';
+	import { CircleAlert, LoaderCircle, X, Plus, Check } from 'lucide-svelte';
 	import NfoDiffBadge from './NfoDiffBadge.svelte';
 
 	interface Props {
@@ -14,9 +14,10 @@
 		jobId?: string;
 		resultId?: string;
 		nfoDifferences?: FieldDifference[];
+		favoriteGenres?: string[];
 	}
 
-	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId, nfoDifferences }: Props = $props();
+	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId, nfoDifferences, favoriteGenres = [] }: Props = $props();
 
 	// Create a local editable copy - initialized by effect
 	let editedMovie = $state<Movie>({} as Movie);
@@ -139,29 +140,35 @@
 	});
 
 	// Genre management functions
-	function addGenre() {
-		const trimmedInput = newGenreInput.trim();
-		if (!trimmedInput) return;
+	function normalizeGenreName(name: string): string {
+		return name.trim().toLocaleLowerCase();
+	}
 
-		// Check if genre already exists
-		const exists = editedMovie.genres?.some(g => g.name.toLowerCase() === trimmedInput.toLowerCase());
-		if (exists) {
-			newGenreInput = '';
+	function isGenrePresent(genres: Genre[] | undefined, name: string): boolean {
+		const normalized = normalizeGenreName(name);
+		if (!normalized) return false;
+		return genres?.some(g => normalizeGenreName(g.name) === normalized) ?? false;
+	}
+
+	function addGenre(name?: string) {
+		const value = (name ?? newGenreInput).trim();
+		if (!value) return;
+		if (isGenrePresent(editedMovie.genres, value)) {
+			if (!name) newGenreInput = '';
 			return;
 		}
-
-		// Add new genre
 		if (!editedMovie.genres) {
 			editedMovie.genres = [];
 		}
-		editedMovie.genres = [...editedMovie.genres, { name: trimmedInput }];
-		newGenreInput = '';
+		editedMovie.genres = [...editedMovie.genres, { name: value }];
+		if (!name) newGenreInput = '';
 		onUpdate(editedMovie);
 	}
 
 	function removeGenre(genreName: string) {
 		if (!editedMovie.genres) return;
-		editedMovie.genres = editedMovie.genres.filter(g => g.name !== genreName);
+		const normalized = normalizeGenreName(genreName);
+		editedMovie.genres = editedMovie.genres.filter(g => normalizeGenreName(g.name) !== normalized);
 		onUpdate(editedMovie);
 	}
 
@@ -171,6 +178,25 @@
 			addGenre();
 		}
 	}
+
+	const sortedFavoriteGenres = $derived.by(() => {
+		const seen = new Set<string>();
+		const unique: string[] = [];
+		for (const g of favoriteGenres) {
+			const trimmed = g.trim();
+			if (!trimmed) continue;
+			const key = trimmed.toLocaleLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			unique.push(trimmed);
+		}
+		return unique.sort((a, b) => a.localeCompare(b));
+	});
+	const presentGenreNames = $derived.by(() => {
+		const set = new Set<string>();
+		editedMovie.genres?.forEach(g => set.add(normalizeGenreName(g.name)));
+		return set;
+	});
 </script>
 
 <div class="space-y-4">
@@ -508,7 +534,7 @@
 					{#if newGenreInput.trim()}
 						<button
 							type="button"
-							onclick={addGenre}
+							onclick={() => addGenre()}
 							class="p-1.5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-all hover:scale-110"
 							title={m.movie_genre_add_title()}
 						>
@@ -525,6 +551,35 @@
 					{m.movie_genre_remove_hint({ icon: '✕' })}
 				{/if}
 			</p>
+
+			{#if sortedFavoriteGenres.length > 0}
+				<div class="mt-2 flex flex-wrap gap-1.5 items-center" role="group" aria-label={m.movie_genre_favorites_label()}>
+					<span class="text-xs text-muted-foreground mr-0.5">{m.movie_genre_favorites_label()}</span>
+					{#each sortedFavoriteGenres as favorite (favorite)}
+						{@const added = presentGenreNames.has(normalizeGenreName(favorite))}
+						{@const label = added
+							? m.movie_genre_favorite_already_added_title({ name: favorite })
+							: m.movie_genre_favorite_add_title({ name: favorite })}
+						<span title={label}>
+							<button
+								type="button"
+								disabled={added}
+								onclick={() => addGenre(favorite)}
+								aria-label={label}
+								class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all border disabled:cursor-not-allowed
+									{added
+										? 'bg-muted text-muted-foreground border-muted opacity-60'
+										: 'bg-primary/5 text-primary border-primary/10 hover:bg-primary/10 hover:border-primary/20'}"
+							>
+								{#if added}
+									<Check class="h-3 w-3" />
+								{/if}
+								<span class="leading-none">{favorite}</span>
+							</button>
+						</span>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	</div>
 </div>
