@@ -27,7 +27,7 @@
 	import type { ScraperResult } from '$lib/api/types';
 	import UnidentifiedFilesCard from './components/UnidentifiedFilesCard.svelte';
 	import { createReviewState } from './stores/review-state.svelte';
-	import { shouldSyncTab, buildTabUrl, type ReviewTabId } from '$lib/utils/review-tab-sync';
+	import { shouldSyncTab, buildReviewUrl, viewModeToUrlParam, type ReviewTabId } from '$lib/utils/review-tab-sync';
 	import * as m from '$lib/paraglide/messages';
 	import {
 		AlertTriangle,
@@ -53,9 +53,11 @@
 	});
 
 	$effect(() => {
-		const currentParam = $page.url.searchParams.get('tab');
-		if (!shouldSyncTab(currentParam, activeTab)) return;
-		void goto(buildTabUrl($page.url, activeTab), { replaceState: true, noScroll: true, keepFocus: true });
+		if (!s.viewModeInitialized) return;
+		const currentTab = $page.url.searchParams.get('tab');
+		const currentView = $page.url.searchParams.get('view');
+		if (currentTab === (activeTab === 'movies' ? null : activeTab) && currentView === viewModeToUrlParam(s.viewMode)) return;
+		void goto(buildReviewUrl($page.url, activeTab, s.viewMode), { replaceState: true, noScroll: true, keepFocus: true });
 	});
 
 	let sourceViewerLoading = $state(false);

@@ -2,6 +2,7 @@ import { onDestroy, onMount, untrack } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
+import { VIEW_URL_PARAM, viewModeToUrlParam as sharedViewModeToUrlParam, type ReviewViewMode } from '$lib/utils/review-tab-sync';
 import type { Page } from '@sveltejs/kit';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
@@ -114,11 +115,9 @@ export function createReviewState(pageStore: Page) {
 	let showFieldScraperSources = $state(false);
 	const SHOW_FIELD_SCRAPER_SOURCES_KEY = 'javinizer.review.showFieldScraperSources';
 	const VIEW_MODE_KEY = 'javinizer.review.viewMode';
-	const VIEW_MODE_URL_PARAM = 'view';
-	type ViewMode = 'detail' | 'grid-poster' | 'grid-cover';
-	function viewModeToUrlParam(mode: ViewMode): string {
-		return mode === 'grid-poster' ? 'poster' : mode === 'grid-cover' ? 'cover' : 'detail';
-	}
+	const VIEW_MODE_URL_PARAM = VIEW_URL_PARAM;
+	type ViewMode = ReviewViewMode;
+	const viewModeToUrlParam = sharedViewModeToUrlParam;
 	function urlParamToViewMode(param: string | null): ViewMode | null {
 		if (param === 'detail') return 'detail';
 		if (param === 'poster') return 'grid-poster';
@@ -1085,17 +1084,6 @@ export function createReviewState(pageStore: Page) {
 		if (!browser) return;
 		if (!viewModeInitialized) return;
 		localStorage.setItem(VIEW_MODE_KEY, viewMode);
-		const param = viewModeToUrlParam(viewMode);
-		// Use goto with replaceState so $page.url stays in sync (a raw
-		// replaceState leaves $page.url stale, which causes the tab-sync
-		// effect to rebuild the URL without the view param). goto with
-		// replaceState + noScroll + keepFocus performs a shallow update that
-		// preserves the tab param and other query params.
-		const url = new URL(window.location.href);
-		if (url.searchParams.get(VIEW_MODE_URL_PARAM) !== param) {
-			url.searchParams.set(VIEW_MODE_URL_PARAM, param);
-			void goto(url, { replaceState: true, noScroll: true, keepFocus: true });
-		}
 	});
 
 	$effect(() => {
@@ -1349,6 +1337,9 @@ export function createReviewState(pageStore: Page) {
 		},
 		set viewMode(v) {
 			viewMode = v;
+		},
+		get viewModeInitialized() {
+			return viewModeInitialized;
 		},
 		get organizeProgress() {
 			return organizeProgress;
