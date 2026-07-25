@@ -95,6 +95,9 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 	)
 
 	if err := ctx.Err(); err != nil {
+		if inputs.MovieRepo != nil {
+			persistScrapeOutcomePool(ctx, outcomes, inputs, cfg.OnFileScrapeFailed)
+		}
 		trackScrapeResults(inputs, outcomes)
 		inputs.Lifecycle.MarkCancelled()
 		return
@@ -466,18 +469,6 @@ func scrapeFile(
 func trackScrapeResults(inputs scrapePhaseInputs, outcomes []scrapeFileOutcome) {
 	for _, o := range outcomes {
 		if o.Cancelled {
-			continue
-		}
-		if o.Success && o.Result != nil && o.Result.Movie != nil {
-			auditCtx, cancel := historyAuditContext()
-			defer cancel()
-			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-				MovieID:      o.MovieID,
-				BatchJobID:   jobIDPtr(inputs.JobID),
-				Operation:    models.HistoryOpScrape,
-				OriginalPath: o.FilePath,
-				Status:       models.HistoryStatusSuccess,
-			})
 			continue
 		}
 		if o.Panic {
