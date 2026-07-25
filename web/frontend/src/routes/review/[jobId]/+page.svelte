@@ -5,14 +5,17 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import ActressEditor from '$lib/components/ActressEditor.svelte';
-	import ImageViewer from '$lib/components/ImageViewer.svelte';
-	import VideoModal from '$lib/components/VideoModal.svelte';
+	
 	import DestinationBrowserModal from './components/DestinationBrowserModal.svelte';
 	import DestinationSettingsCard from './components/DestinationSettingsCard.svelte';
-	import ImagesMediaCard from './components/ImagesMediaCard.svelte';
+	
 	import MovieNavigationCard from './components/MovieNavigationCard.svelte';
 	import MovieMetadataCard from './components/MovieMetadataCard.svelte';
 	import OrganizeStatusCard from './components/OrganizeStatusCard.svelte';
+	import OutputPreviewModal from './components/OutputPreviewModal.svelte';
+	import VideoModal from '$lib/components/VideoModal.svelte';
+	import ImageViewer from '$lib/components/ImageViewer.svelte';
+	import ImageManagerModal from './components/ImageManagerModal.svelte';
 	import PosterCropModal from './components/PosterCropModal.svelte';
 	import ReviewActionBar from './components/ReviewActionBar.svelte';
 	import ReviewGridCard from './components/ReviewGridCard.svelte';
@@ -22,7 +25,6 @@
 	import BulkRescrapeProgress from './components/BulkRescrapeProgress.svelte';
 	import SourceViewerModal from './components/SourceViewerModal.svelte';
 	import type { ScraperResult } from '$lib/api/types';
-	import SourceFilesCard from './components/SourceFilesCard.svelte';
 	import UnidentifiedFilesCard from './components/UnidentifiedFilesCard.svelte';
 	import { createReviewState } from './stores/review-state.svelte';
 	import { shouldSyncTab, buildTabUrl, type ReviewTabId } from '$lib/utils/review-tab-sync';
@@ -93,8 +95,8 @@
 	}
 </script>
 
-<div class="container mx-auto px-4 py-8">
-	<div class="max-w-7xl mx-auto space-y-6">
+<div class="w-full px-4 py-6 lg:px-6">
+	<div class="space-y-6">
 		{#if s.loading}
 			<div class="text-center py-12">
 				<p class="text-muted-foreground">{m.review_loading_job()}</p>
@@ -258,7 +260,7 @@
 						</div>
 					{:else}
 						{#key s.currentResult.file_path}
-							<div class="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6" in:fade|local={{ duration: 180 }}>
+							<div class="grid grid-cols-1 gap-4 lg:grid-cols-[clamp(20rem,24vw,22.5rem)_minmax(0,1fr)] lg:gap-6" in:fade|local={{ duration: 180 }}>
 							<ReviewMediaSidebar
 								currentMovie={s.currentMovie}
 								displayPosterUrl={s.displayPosterUrl}
@@ -266,19 +268,19 @@
 								showCoverPanel={s.showCoverPanel}
 								showTrailerPanel={s.showTrailerPanel}
 								showScreenshotsPanel={s.showScreenshotsPanel}
-								bind:showAllSidebarScreenshots={s.showAllSidebarScreenshots}
-								bind:showTrailerModal={s.showTrailerModal}
-								onOpenPosterCropModal={s.posterCropController.openPosterCropModal}
-								onOpenCoverViewer={s.reviewPageController.openCoverViewer}
-								onOpenScreenshotViewer={s.reviewPageController.openScreenshotViewer}
-								onUseScreenshotAsPoster={s.useScreenshotAsPoster}
-								onUseScreenshotAsCover={s.useScreenshotAsCover}
-								onResetPoster={s.resetPoster}
-							onResetCover={s.resetCover}
-							canResetPoster={s.canResetPoster}
-							canResetCover={s.canResetCover}
-								previewImageURL={s.reviewPageController.previewImageURL}
-							/>
+								onOpenImageManager={() => (s.showImageManagerModal = true)}
+							onOpenTrailerModal={() => (s.showTrailerModal = true)}
+							onOpenPosterViewer={() => {
+								if (!s.displayPosterUrl) return;
+								s.imageViewerImages = [s.displayPosterUrl];
+								s.imageViewerIndex = 0;
+								s.imageViewerTitle = m.review_poster();
+								s.showImageViewer = true;
+							}}
+							onOpenCoverViewer={s.reviewPageController.openCoverViewer}
+							onOpenScreenshotViewer={s.reviewPageController.openScreenshotViewer}
+							previewImageURL={s.reviewPageController.previewImageURL}
+						/>
 
 						<div class="space-y-6 min-w-0">
 							<MovieNavigationCard
@@ -286,28 +288,14 @@
 								movieResultsLength={s.movieResults.length}
 								currentMovieId={s.currentMovie.id}
 								hasChanges={s.reviewPageController.hasChanges(s.currentResult.file_path)}
-								onExclude={s.reviewPageController.excludeCurrentMovie}
-							/>
-
-							<SourceFilesCard
 								sourceResults={s.currentMovieGroup?.results || [s.currentResult]}
 								primaryFilePath={s.currentResult.file_path}
 								bind:showFullSourcePath={s.showFullSourcePath}
+								showOutputPreview={s.canOrganize}
+								outputPreviewDisabled={s.previewNeedsDestination && !s.destinationPath.trim()}
+								onOpenOutputPreview={() => (s.showOutputPreviewModal = true)}
+								onExclude={s.reviewPageController.excludeCurrentMovie}
 							/>
-
-							{#if s.canOrganize}
-								<DestinationSettingsCard
-									bind:destinationPath={s.destinationPath}
-									bind:organizeOperation={s.organizeOperation}
-								preview={s.preview}
-								previewNeedsDestination={s.previewNeedsDestination}
-									effectiveOperationMode={s.getEffectiveOperationMode()}
-									bind:showAllPreviewScreenshots={s.showAllPreviewScreenshots}
-									bind:skipNfo={s.skipNfo}
-									bind:skipDownload={s.skipDownload}
-									onOpenDestinationBrowser={s.reviewPageController.openDestinationBrowser}
-								/>
-							{/if}
 
 							<MovieMetadataCard
 								currentMovie={s.currentMovie}
@@ -334,19 +322,24 @@
 								/>
 							</Card>
 
-							<ImagesMediaCard
-								showScreenshotsPanel={s.showScreenshotsPanel}
-								bind:showImagePanelContent={s.showImagePanelContent}
-								currentMovie={s.currentMovie}
-								currentResult={s.currentResult}
-								displayPosterUrl={s.displayPosterUrl}
-								showFieldScraperSources={s.showFieldScraperSources}
-								onUpdateCurrentMovie={s.updateCurrentMovie}
-								onUseScreenshotAsPoster={s.useScreenshotAsPoster}
-								onUseScreenshotAsCover={s.useScreenshotAsCover}
-							/>
+							
 
+							
 							{#if s.canOrganize}
+								<DestinationSettingsCard
+									bind:destinationPath={s.destinationPath}
+									bind:organizeOperation={s.organizeOperation}
+								previewNeedsDestination={s.previewNeedsDestination}
+									effectiveOperationMode={s.getEffectiveOperationMode()}
+									bind:skipNfo={s.skipNfo}
+									bind:skipDownload={s.skipDownload}
+									onOpenDestinationBrowser={s.reviewPageController.openDestinationBrowser}
+								/>
+							{/if}
+
+							
+
+{#if s.canOrganize}
 								<ReviewActionBar
 									isUpdateMode={s.isUpdateMode}
 									organizing={s.organizing}
@@ -402,6 +395,35 @@
 		{/if}
 	</div>
 </div>
+
+
+
+{#if s.currentMovie && s.currentResult}
+	<ImageManagerModal
+		bind:show={s.showImageManagerModal}
+		currentMovie={s.currentMovie}
+		currentResult={s.currentResult}
+		displayPosterUrl={s.displayPosterUrl}
+		showFieldScraperSources={s.showFieldScraperSources}
+		canResetPoster={s.canResetPoster}
+		canResetCover={s.canResetCover}
+		onUpdateCurrentMovie={s.updateCurrentMovie}
+		onUseScreenshotAsPoster={s.useScreenshotAsPoster}
+		onUseScreenshotAsCover={s.useScreenshotAsCover}
+		onOpenPosterCropModal={s.posterCropController.openPosterCropModal}
+		onResetPoster={s.resetPoster}
+		onResetCover={s.resetCover}
+	/>
+{/if}
+
+<OutputPreviewModal
+	bind:show={s.showOutputPreviewModal}
+	preview={s.preview}
+	destinationPath={s.destinationPath}
+	previewNeedsDestination={s.previewNeedsDestination}
+	onClose={() => (s.showOutputPreviewModal = false)}
+/>
+
 
 <VideoModal
 	bind:show={s.showTrailerModal}

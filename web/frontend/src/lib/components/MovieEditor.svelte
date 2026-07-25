@@ -19,9 +19,10 @@
 		onAddFavorite?: (genre: string) => void;
 		onRemoveFavorite?: (genre: string) => void;
 		favoriteMutationPending?: boolean;
+		compact?: boolean;
 	}
 
-	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId, nfoDifferences, favoriteGenres = [], favoritedGenreNames = new Set<string>(), onAddFavorite, onRemoveFavorite, favoriteMutationPending = false }: Props = $props();
+	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId, nfoDifferences, favoriteGenres = [], favoritedGenreNames = new Set<string>(), onAddFavorite, onRemoveFavorite, favoriteMutationPending = false, compact = false }: Props = $props();
 
 	// Create a local editable copy - initialized by effect
 	let editedMovie = $state<Movie>({} as Movie);
@@ -212,8 +213,8 @@
 	});
 </script>
 
-<div class="space-y-4">
-	<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="{compact ? 'space-y-3' : 'space-y-4'}">
+	<div class="grid grid-flow-dense grid-cols-1 md:grid-cols-2 {compact ? 'xl:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-3' : 'gap-4'}">
 		<!-- ID -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
@@ -310,7 +311,7 @@
 		</div>
 
 		<!-- Description -->
-		<div class="md:col-span-2">
+		<div class="md:col-span-2 {compact ? 'xl:col-span-3 2xl:col-span-4' : ''}">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				{m.movie_field_description()}
 				{#if sourceText('description')}
@@ -450,7 +451,8 @@
 			/>
 		</div>
 
-		<!-- Rating Score -->
+		<!-- Rating Score + Votes share one grid cell so the dense flow has no holes -->
+		<div class="grid grid-cols-2 gap-x-4 {compact ? 'md:col-span-2 xl:col-span-1' : ''}">
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				{m.movie_field_rating_score()}
@@ -503,9 +505,10 @@
 				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
+		</div>
 
 		<!-- Genres -->
-		<div class="md:col-span-2">
+		<div class="md:col-span-2 {compact ? 'xl:col-span-3 2xl:col-span-4' : ''}">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				{m.movie_field_genres()}
 				{#if sourceText('genres')}

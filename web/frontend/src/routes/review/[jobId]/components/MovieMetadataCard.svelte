@@ -78,8 +78,8 @@
 	let favoriteMutationPending = $derived(addFavoriteMutation.isPending || removeFavoriteMutation.isPending);
 </script>
 
-<Card class="p-6">
-	<div class="space-y-4">
+<Card class="p-4 lg:p-5">
+	<div class="space-y-3">
 		<div class="flex items-center justify-between">
 			<h2 class="text-xl font-semibold">{m.review_movie_metadata()}</h2>
 			<div class="flex items-center gap-3">
@@ -122,6 +122,7 @@
 		<MovieEditor
 			movie={currentMovie}
 			originalMovie={currentResult.movie!}
+			compact={true}
 			onUpdate={onUpdateCurrentMovie}
 			fieldSources={currentResult.field_sources}
 			showFieldSources={showFieldScraperSources}

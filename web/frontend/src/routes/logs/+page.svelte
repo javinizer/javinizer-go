@@ -230,7 +230,7 @@
 <svelte:window onscroll={handleScroll} />
 
 <div class="min-h-screen bg-background" bind:this={containerEl}>
-	<div class="container mx-auto px-4 py-8 max-w-7xl">
+	<div class="w-full px-4 py-8 lg:px-6">
 		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
 			<div>
 				<h1 class="text-2xl font-bold tracking-tight">{m.logs_title()}</h1>

@@ -239,6 +239,15 @@
 		return () => window.removeEventListener('keydown', handleKeyDown);
 	});
 
+	// Preload all images while the viewer is open so next/prev navigation is instant
+	$effect(() => {
+		if (!show) return;
+		for (const src of images) {
+			const img = new Image();
+			img.src = src;
+		}
+	});
+
 	const currentImage = $derived(images[currentIndex]);
 	const hasMultipleImages = $derived(images.length > 1);
 </script>
@@ -335,7 +344,7 @@
 			<!-- Image Container with Pan Support -->
 			<div
 				bind:this={imageContainer}
-				class="absolute inset-0 flex items-center justify-center overflow-hidden"
+				class="absolute inset-0 overflow-hidden"
 				role="button"
 				tabindex="0"
 				onwheel={handleWheel}
@@ -357,12 +366,12 @@
 						tabindex="0"
 						onclick={handleImageClick}
 						onkeydown={handleImageKeyDown}
-						style="transform: scale({zoom}) translate({panX}px, {panY}px); transition: {isDragging ? 'none' : 'transform 0.1s ease-out'}; user-select: none; cursor: {imageCursor};"
-						class="max-w-full max-h-full object-contain"
+						style="transform: translate(-50%, -50%) scale({zoom}) translate({panX}px, {panY}px); transition: {isDragging ? 'none' : 'transform 0.1s ease-out'}; user-select: none; cursor: {imageCursor};"
+						class="absolute top-1/2 left-1/2 max-w-[calc(100%-2rem)] max-h-[calc(100%-2rem)] object-contain"
 						draggable="false"
 						aria-label={zoom === 1 ? m.viewer_aria_zoom_in() : m.viewer_aria_zoom_out()}
-						in:fade|local={{ duration: 160 }}
-						out:fade|local={{ duration: 120 }}
+						in:fade|local={{ duration: 150 }}
+						out:fade|local={{ duration: 150 }}
 					/>
 				{/key}
 			</div>

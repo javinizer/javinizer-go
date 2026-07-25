@@ -206,8 +206,8 @@
 <svelte:head><title>{m.manual_title()}</title></svelte:head>
 
 {#if snapshot}
-	<div class="container mx-auto px-4 py-8 pb-32">
-		<div class="max-w-7xl mx-auto space-y-8">
+	<div class="w-full px-4 py-8 pb-32 lg:px-6">
+		<div class="space-y-8">
 			<!-- Header -->
 			<div class="flex items-start justify-between gap-4">
 				<div>

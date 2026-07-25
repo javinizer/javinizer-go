@@ -357,13 +357,13 @@
 		<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 			{#each actresses as actress, index (actress.id || `${actress.first_name}-${actress.last_name}-${actress.japanese_name}-${index}`)}
 				<div animate:flip={{ duration: 220, easing: quintOut }}>
-					<Card class="p-3 hover:shadow-md transition-shadow">
+					<Card class="p-3 w-fit hover:shadow-md transition-shadow">
 					<div class="space-y-2">
 						{#if actress.thumb_url}
 							<img
 								src={actress.thumb_url}
 								alt={getFullName(actress)}
-								class="w-full aspect-2/3 object-cover rounded"
+								class="w-28 aspect-2/3 object-cover rounded"
 								onerror={(e) => {
 									(e.currentTarget as HTMLImageElement).src =
 										"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300' fill='%23374151'%3E%3Crect width='200' height='300'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%239CA3AF' font-family='system-ui' font-size='14'%3ENo Image%3C/text%3E%3C/svg%3E";
@@ -371,7 +371,7 @@
 							/>
 						{:else}
 							<div
-								class="w-full aspect-2/3 bg-accent rounded flex items-center justify-center text-xs text-muted-foreground"
+								class="w-28 aspect-2/3 bg-accent rounded flex items-center justify-center text-xs text-muted-foreground"
 							>
 								{m.editor_no_image()}
 							</div>

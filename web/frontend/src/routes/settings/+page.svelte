@@ -76,8 +76,8 @@
 	}
 </script>
 
-<div class="container mx-auto px-4 py-8">
-	<div class="max-w-7xl mx-auto space-y-6">
+<div class="w-full px-4 py-8 lg:px-6">
+	<div class="space-y-6">
 		<div class="space-y-4">
 			<div class="flex items-center gap-3">
 				<a href="/browse" aria-label={m.settings_back_to_browse_aria()}>

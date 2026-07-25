@@ -539,8 +539,8 @@
 	}
 </script>
 
-<div class="container mx-auto px-4 py-8 pb-32">
-	<div class="max-w-7xl mx-auto space-y-6">
+<div class="w-full px-4 py-8 pb-32 lg:px-6">
+	<div class="space-y-6">
 		<!-- Header -->
 		<div class="flex items-center justify-between">
 			<div>
@@ -876,7 +876,7 @@
 	<!-- Expandable Options Panel -->
 	{#if showOptionsPanel}
 		<div class="border-b bg-accent/20" transition:slide|local={{ duration: 180, easing: quintOut }}>
-			<div class="container mx-auto px-4 py-4 max-w-7xl">
+			<div class="w-full px-4 py-4">
 				<div class="flex items-center justify-between mb-3">
 					<h3 class="text-sm font-semibold">{m.browse_options()}</h3>
 					<button
@@ -942,7 +942,7 @@
 	{/if}
 
 	<!-- Main Action Bar -->
-	<div class="container mx-auto px-4 py-3 max-w-7xl">
+	<div class="w-full px-4 py-3">
 		<div class="flex items-center justify-between gap-4">
 			<!-- Left: Selection info and options toggle -->
 			<div class="flex items-center gap-3">

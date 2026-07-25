@@ -347,8 +347,8 @@
 	}
 </script>
 
-<div class="container mx-auto px-4 py-8">
-	<div class="max-w-7xl mx-auto space-y-6">
+<div class="w-full px-4 py-8 lg:px-6">
+	<div class="space-y-6">
 		<!-- Top Row -->
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 			<div class="lg:col-span-2" in:fly|local={{ y: -12, duration: 240, easing: cubicOut }}>
