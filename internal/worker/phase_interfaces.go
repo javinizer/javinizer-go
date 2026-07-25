@@ -111,6 +111,8 @@ type scrapePhaseInputs struct {
 	// the workflow's Scrape persists inline as before.
 	MovieRepo database.MovieRepositoryInterface
 
+	HistoryRepo database.HistoryRepositoryInterface
+
 	Broadcaster progressBroadcaster
 	Updater     resultstore.ResultUpdater
 	Lifecycle   PhaseLifecycle
@@ -130,6 +132,9 @@ type applyPhaseInputs struct {
 	Excluded    map[string]bool
 	Destination string
 	Update      bool // Update mode (in-place, no file organization)
+
+	HistoryRepo   database.HistoryRepositoryInterface
+	OperationMode string
 
 	Broadcaster progressBroadcaster
 	Updater     resultstore.ResultUpdater

@@ -15,7 +15,7 @@ func TestTrackApplyResults_PanicCountsAsFailed(t *testing.T) {
 			{FilePath: "b.mp4", Success: false, Failed: false, Panic: true, PanicMsg: "boom"},
 		}
 		var organized, failed int64
-		trackApplyResults(outcomes, &organized, &failed)
+		trackApplyResults(applyPhaseInputs{}, outcomes, &organized, &failed)
 		assert.Equal(t, int64(1), organized)
 		assert.Equal(t, int64(1), failed, "panicked outcome must count toward failed")
 	})
@@ -26,7 +26,7 @@ func TestTrackApplyResults_PanicCountsAsFailed(t *testing.T) {
 			{FilePath: "b.mp4", Success: true},
 		}
 		var organized, failed int64
-		trackApplyResults(outcomes, &organized, &failed)
+		trackApplyResults(applyPhaseInputs{}, outcomes, &organized, &failed)
 		assert.Equal(t, int64(2), organized)
 		assert.Equal(t, int64(0), failed)
 	})
@@ -38,7 +38,7 @@ func TestTrackApplyResults_PanicCountsAsFailed(t *testing.T) {
 			{FilePath: "c.mp4", Success: false, Panic: true},
 		}
 		var organized, failed int64
-		trackApplyResults(outcomes, &organized, &failed)
+		trackApplyResults(applyPhaseInputs{}, outcomes, &organized, &failed)
 		assert.Equal(t, int64(1), organized)
 		assert.Equal(t, int64(2), failed)
 	})

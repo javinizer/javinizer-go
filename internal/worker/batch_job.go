@@ -161,7 +161,7 @@ func newBatchJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 
 	// Per P-2: wireJobDeps centralizes attachLifecycleCallback, posterEditor,
 	// controller, and PersistFn wiring shared with reconstructBatchJob.
-	wireJobDeps(job, nil, nil, nil)
+	wireJobDeps(job, nil, nil, nil, nil)
 
 	if len(jobCfg) > 0 && jobCfg[0] != nil {
 		cfg := jobCfg[0]

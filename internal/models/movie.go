@@ -376,7 +376,11 @@ func (MovieTag) TableName() string {
 	return "movie_tags"
 }
 
-// History represents a log of file organization operations
+// History represents a log of file organization operations.
+// History is the canonical operation-audit log read by the dashboard history
+// endpoints (GET /history, GET /history/stats). BatchFileOperation is the
+// file-move revert ledger read by the reverter; both rows are written for a
+// single successful organize through the production full workflow.
 type History struct {
 	ID           uint             `json:"id" gorm:"primaryKey"`
 	MovieID      string           `json:"movie_id" gorm:"index"`

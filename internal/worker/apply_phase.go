@@ -114,17 +114,15 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	)
 
 	if err := ctx.Err(); err != nil {
+		var org, fail int64
+		trackApplyResults(inputs, outcomes, &org, &fail)
 		inputs.Lifecycle.MarkCancelled()
-		// On cancellation, skip trackResults + OnPhaseComplete + MarkOrganized/
-		// MarkCompleted — the job is cancelled, not completed. Any outcomes
-		// collected before cancellation are already reflected on the in-memory
-		// result via UpdateFileResult inside each worker goroutine.
 		return
 	}
 
 	var organized int64
 	var failed int64
-	trackApplyResults(outcomes, &organized, &failed)
+	trackApplyResults(inputs, outcomes, &organized, &failed)
 
 	orgCount := atomic.LoadInt64(&organized)
 	failCount := atomic.LoadInt64(&failed)
@@ -313,6 +311,19 @@ func interpretApplyResult(
 		}
 		outcome.Failed = true
 		outcome.ErrorMsg = errMsg
+		auditCtx, auditCancel := historyAuditContext()
+		defer auditCancel()
+		recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+			MovieID:      movie.ID,
+			BatchJobID:   jobIDPtr(inputs.JobID),
+			Operation:    models.HistoryOpOrganize,
+			OriginalPath: filePath,
+			NewPath:      nilGuardOrganizeNewPath(result),
+			Status:       models.HistoryStatusFailed,
+			ErrorMessage: errMsg,
+			DryRun:       cfg.DryRun,
+			Metadata:     organizeMetadata(inputs.OperationMode, result),
+		})
 		return outcome
 	}
 
@@ -342,6 +353,18 @@ func interpretApplyResult(
 		cfg.OnFileOrganized(filePath)
 	}
 	outcome.Success = true
+	auditCtx, auditCancel := historyAuditContext()
+	defer auditCancel()
+	recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+		MovieID:      movie.ID,
+		BatchJobID:   jobIDPtr(inputs.JobID),
+		Operation:    models.HistoryOpOrganize,
+		OriginalPath: filePath,
+		NewPath:      nilGuardOrganizeNewPath(result),
+		Status:       models.HistoryStatusSuccess,
+		DryRun:       cfg.DryRun,
+		Metadata:     organizeMetadata(inputs.OperationMode, result),
+	})
 	return outcome
 }
 
@@ -423,16 +446,25 @@ func applyFile(
 // trackApplyResults processes collected applyFileOutcomes: increments counters
 // for organized/failed. The actual Updater/Broadcaster calls are already done
 // inside applyFile; this function only handles the aggregate counters.
-func trackApplyResults(outcomes []applyFileOutcome, organized *int64, failed *int64) {
+func trackApplyResults(inputs applyPhaseInputs, outcomes []applyFileOutcome, organized *int64, failed *int64) {
 	for _, o := range outcomes {
 		if o.Success {
 			atomic.AddInt64(organized, 1)
 		}
-		// Count panics as failures too. Currently setPanic() sets both Panic
-		// and Failed, so the || o.Panic is defensive — it future-proofs against
-		// changes to setPanic that might set only Panic without Failed.
 		if o.Failed || o.Panic {
 			atomic.AddInt64(failed, 1)
+		}
+		if o.Panic && !o.Cancelled {
+			auditCtx, cancel := historyAuditContext()
+			defer cancel()
+			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+				MovieID:      o.MovieID,
+				BatchJobID:   jobIDPtr(inputs.JobID),
+				Operation:    models.HistoryOpOrganize,
+				OriginalPath: o.FilePath,
+				Status:       models.HistoryStatusFailed,
+				ErrorMessage: o.PanicMsg,
+			})
 		}
 	}
 }

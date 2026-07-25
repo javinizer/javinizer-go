@@ -39,15 +39,16 @@ func NewScrapePhase() ScrapePhase {
 // batch path). The dedicated persist pool reads Result.Movie to persist off
 // the per-goroutine critical path. It is nil for the failed/error/panic paths.
 type scrapeFileOutcome struct {
-	FilePath string
-	MovieID  string
-	Success  bool
-	Failed   bool // true if scrape failed (not panic)
-	Panic    bool // true if goroutine panicked
-	PanicMsg string
-	ErrorMsg string
-	Result   *scrape.ScrapeResult
-	Meta     *workflow.OrchestrationMeta
+	FilePath  string
+	MovieID   string
+	Success   bool
+	Failed    bool // true if scrape failed (not panic)
+	Panic     bool // true if goroutine panicked
+	Cancelled bool // true if scrape failed due to context.Canceled
+	PanicMsg  string
+	ErrorMsg  string
+	Result    *scrape.ScrapeResult
+	Meta      *workflow.OrchestrationMeta
 }
 
 // Run executes the scrape phase: setup errgroup → iterate files → dispatch
@@ -94,11 +95,8 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 	)
 
 	if err := ctx.Err(); err != nil {
+		trackScrapeResults(inputs, outcomes)
 		inputs.Lifecycle.MarkCancelled()
-		// On cancellation, skip persist + MarkCompleted — the job is cancelled,
-		// not completed. Any outcomes collected before cancellation are already
-		// reflected on the in-memory result via UpdateFileResult inside each
-		// worker goroutine.
 		return
 	}
 
@@ -125,11 +123,12 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 	// re-check cancellation before MarkCompleted so a canceled job finishes as
 	// Cancelled rather than being marked Completed with a partially-persisted set.
 	if err := ctx.Err(); err != nil {
+		trackScrapeResults(inputs, outcomes)
 		inputs.Lifecycle.MarkCancelled()
 		return
 	}
 
-	trackScrapeResults(outcomes)
+	trackScrapeResults(inputs, outcomes)
 
 	inputs.Lifecycle.MarkCompleted()
 }
@@ -226,8 +225,8 @@ func interpretScrapeResult(
 	meta *workflow.OrchestrationMeta,
 	err error,
 	preserveMovieID bool,
-) scrapeFileOutcome {
-	outcome := scrapeFileOutcome{
+) (outcome scrapeFileOutcome) {
+	outcome = scrapeFileOutcome{
 		FilePath: filePath,
 		MovieID:  cmd.MovieID,
 	}
@@ -238,6 +237,7 @@ func interpretScrapeResult(
 		fileStatus := models.JobStatusFailed
 		if errors.Is(err, context.Canceled) {
 			fileStatus = models.JobStatusCancelled
+			outcome.Cancelled = true
 		}
 		errMsg, errorCode := classifyFileScrapeError(err)
 		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
@@ -258,7 +258,7 @@ func interpretScrapeResult(
 		})
 		outcome.Failed = true
 		outcome.ErrorMsg = errMsg
-		return outcome
+		return
 	}
 	if result == nil || result.Movie == nil {
 		// The scrape package populates result.Message with a verbose,
@@ -352,8 +352,8 @@ func scrapeFile(
 	fromMatcher bool,
 	inputs scrapePhaseInputs,
 	cfg ScrapePhaseConfig,
-) scrapeFileOutcome {
-	outcome := scrapeFileOutcome{
+) (outcome scrapeFileOutcome) {
+	outcome = scrapeFileOutcome{
 		FilePath: filePath,
 		MovieID:  cmd.MovieID,
 	}
@@ -463,9 +463,37 @@ func scrapeFile(
 // trackScrapeResults processes collected scrapeFileOutcomes.
 // The actual Updater/Broadcaster calls are already done inside scrapeFile;
 // this function is a seam for future aggregation (e.g., counters, logging).
-func trackScrapeResults(outcomes []scrapeFileOutcome) {
-	// Currently a no-op seam — all per-file tracking is done inline in scrapeFile.
-	// Future: aggregate counters, emit summary events, etc.
+func trackScrapeResults(inputs scrapePhaseInputs, outcomes []scrapeFileOutcome) {
+	for _, o := range outcomes {
+		if o.Cancelled {
+			continue
+		}
+		if o.Panic {
+			auditCtx, cancel := historyAuditContext()
+			defer cancel()
+			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+				MovieID:      o.MovieID,
+				BatchJobID:   jobIDPtr(inputs.JobID),
+				Operation:    models.HistoryOpScrape,
+				OriginalPath: o.FilePath,
+				Status:       models.HistoryStatusFailed,
+				ErrorMessage: o.PanicMsg,
+			})
+			continue
+		}
+		if o.Failed {
+			auditCtx, cancel := historyAuditContext()
+			defer cancel()
+			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+				MovieID:      o.MovieID,
+				BatchJobID:   jobIDPtr(inputs.JobID),
+				Operation:    models.HistoryOpScrape,
+				OriginalPath: o.FilePath,
+				Status:       models.HistoryStatusFailed,
+				ErrorMessage: o.ErrorMsg,
+			})
+		}
+	}
 }
 
 // persistScrapeOutcomePool fans persist work for a batch of scrape outcomes out
@@ -478,9 +506,6 @@ func trackScrapeResults(outcomes []scrapeFileOutcome) {
 // Only successful scrapes with a movie are persisted; the failed/no-result/panic
 // paths are already reflected on the in-memory result and have nothing to write.
 func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) {
-	// Seed a buffered channel (closed up-front) so persist workers can drain it
-	// concurrently without coordination. Buffer == outcome count guarantees the
-	// sends never block.
 	work := make(chan scrapeFileOutcome, len(outcomes))
 	for _, o := range outcomes {
 		work <- o
@@ -493,11 +518,6 @@ func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome,
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// Recover panics inside the persist worker. The top-level Run defer
-			// cannot catch panics from these goroutines; an unrecovered panic from
-			// repository persistence would crash the process and bypass lifecycle
-			// accounting. Log and swallow so the pool drains and the job resolves
-			// through its normal failure path instead of taking down the binary.
 			defer func() {
 				if r := recover(); r != nil {
 					logging.Errorf("persist worker panic recovered: %v", r)
@@ -542,6 +562,9 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	}
 	saved, err := inputs.MovieRepo.UpsertWithTranslations(ctx, cloned, genreTrans, actressTrans)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		logging.Warnf("[scrape-phase] Failed to persist %s: %v", o.MovieID, err)
 		_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			current.Status = models.JobStatusFailed
@@ -565,6 +588,16 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 		if onFileFailed != nil {
 			onFileFailed(o.FilePath, o.MovieID, fmt.Sprintf("persist failed: %v", err))
 		}
+		recordAuditCtx, recordAuditCancel := historyAuditContext()
+		defer recordAuditCancel()
+		recordHistory(recordAuditCtx, inputs.HistoryRepo, models.History{
+			MovieID:      o.MovieID,
+			BatchJobID:   jobIDPtr(inputs.JobID),
+			Operation:    models.HistoryOpScrape,
+			OriginalPath: o.FilePath,
+			Status:       models.HistoryStatusFailed,
+			ErrorMessage: fmt.Sprintf("persist failed: %v", err),
+		})
 		return
 	}
 	// Refresh the in-memory movie with the DB-saved version (DB-assigned IDs,
@@ -576,6 +609,19 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 			current.Movie = saved.Clone()
 		}
 		return current, nil
+	})
+	movieID := o.MovieID
+	if saved != nil {
+		movieID = saved.ID
+	}
+	recordAuditCtx, recordAuditCancel := historyAuditContext()
+	defer recordAuditCancel()
+	recordHistory(recordAuditCtx, inputs.HistoryRepo, models.History{
+		MovieID:      movieID,
+		BatchJobID:   jobIDPtr(inputs.JobID),
+		Operation:    models.HistoryOpScrape,
+		OriginalPath: o.FilePath,
+		Status:       models.HistoryStatusSuccess,
 	})
 }
 

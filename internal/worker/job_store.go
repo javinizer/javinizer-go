@@ -31,6 +31,7 @@ type JobStore struct {
 	batchFileOpRepo   database.BatchFileOperationRepositoryInterface
 	movieRepo         database.MovieRepositoryInterface
 	actressRepo       database.ActressRepositoryInterface
+	historyRepo       database.HistoryRepositoryInterface
 	persistence       JobPersistencer
 	tempDir           string
 	templateEngine    template.EngineInterface
@@ -71,6 +72,14 @@ func WithPersistence(p JobPersistencer) JobStoreOption {
 func WithActressRepo(r database.ActressRepositoryInterface) JobStoreOption {
 	return func(s *JobStore) {
 		s.actressRepo = r
+	}
+}
+
+// WithHistoryRepo sets the history repository used to record operation
+// history during scrape and organize. When unset, history writes are skipped.
+func WithHistoryRepo(r database.HistoryRepositoryInterface) JobStoreOption {
+	return func(s *JobStore) {
+		s.historyRepo = r
 	}
 }
 
@@ -159,6 +168,9 @@ func (s *JobStore) SetReconstructionDeps(m matcher.MatcherInterface, pg poster.P
 		// BatchCfg is a value type (not a pointer), so we always overwrite to
 		// pick up the latest config snapshot.
 		job.deps.BatchCfg = batchCfg
+		if s.historyRepo != nil {
+			job.deps.HistoryRepo = s.historyRepo
+		}
 		job.mu.Unlock()
 	}
 	s.mu.Unlock()
@@ -322,6 +334,9 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 	}
 	if job.deps.ActressRepo == nil {
 		job.deps.ActressRepo = s.actressRepo
+	}
+	if job.deps.HistoryRepo == nil {
+		job.deps.HistoryRepo = s.historyRepo
 	}
 
 	s.mu.Lock()

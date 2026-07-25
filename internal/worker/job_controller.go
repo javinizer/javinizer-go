@@ -267,6 +267,7 @@ func (c *jobController) buildScrapeInputs(wf workflow.WorkflowInterface, batchCf
 	m := c.job.deps.Matcher
 	pg := c.job.deps.PosterGen
 	movieRepo := c.job.deps.MovieRepo
+	histRepo := c.job.deps.HistoryRepo
 	c.job.mu.RUnlock()
 
 	c.job.batchJobEventSource.mu.RLock()
@@ -288,6 +289,7 @@ func (c *jobController) buildScrapeInputs(wf workflow.WorkflowInterface, batchCf
 		persister:           persistFunc(persistFn),
 		FileMatchInfo:       fileMatchInfo,
 		MovieRepo:           movieRepo,
+		HistoryRepo:         histRepo,
 	}
 	if m != nil {
 		inputs.Matcher = m
@@ -306,21 +308,28 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 
 	c.job.mu.RLock()
 	upd := c.job.cfg.update
+	opMode := string(c.job.cfg.operationMode)
+	histRepo := c.job.deps.HistoryRepo
 	c.job.mu.RUnlock()
+	if opMode == "" {
+		opMode = "organize"
+	}
 
 	return applyPhaseInputs{
-		JobID:       c.job.ID,
-		Concurrency: newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
-		NFOEnabled:  batchCfg.NFOEnabled,
-		WF:          wf,
-		Results:     snap.Results,
-		Excluded:    snap.Excluded,
-		Destination: cfg.Destination,
-		Update:      upd,
-		Broadcaster: broadcaster,
-		Updater:     c.job.results,
-		Lifecycle:   c.job.lifecycle,
-		persister:   persistFunc(persistFn),
+		JobID:         c.job.ID,
+		Concurrency:   newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
+		NFOEnabled:    batchCfg.NFOEnabled,
+		WF:            wf,
+		Results:       snap.Results,
+		Excluded:      snap.Excluded,
+		Destination:   cfg.Destination,
+		Update:        upd,
+		HistoryRepo:   histRepo,
+		OperationMode: opMode,
+		Broadcaster:   broadcaster,
+		Updater:       c.job.results,
+		Lifecycle:     c.job.lifecycle,
+		persister:     persistFunc(persistFn),
 	}
 }
 

@@ -28,7 +28,7 @@ import (
 // (created via getAdapters/buildAdapters) can persist movie edits to the
 // database. Without this, reconstructed jobs have nil MovieRepo and
 // UpdateMovie() silently skips DB persistence.
-func wireJobDeps(job *BatchJob, movieRepo database.MovieRepositoryInterface, actressRepo database.ActressRepositoryInterface, persistFn func()) {
+func wireJobDeps(job *BatchJob, movieRepo database.MovieRepositoryInterface, actressRepo database.ActressRepositoryInterface, historyRepo database.HistoryRepositoryInterface, persistFn func()) {
 	job.attachLifecycleCallback()
 	job.posterEditor = NewPosterEditor(job.results, job.results, movieRepo)
 	job.controller = newJobController(job)
@@ -37,6 +37,9 @@ func wireJobDeps(job *BatchJob, movieRepo database.MovieRepositoryInterface, act
 	}
 	if actressRepo != nil {
 		job.deps.ActressRepo = actressRepo
+	}
+	if historyRepo != nil {
+		job.deps.HistoryRepo = historyRepo
 	}
 	if persistFn != nil {
 		job.deps.PersistFn = persistFn
@@ -99,7 +102,7 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		fsCaseCache:         fscase.NewFSCaseCache(s.fs),
 	}
 
-	wireJobDeps(batchJob, s.movieRepo, s.actressRepo, func() { s.persistence.PersistJob(batchJob) })
+	wireJobDeps(batchJob, s.movieRepo, s.actressRepo, s.historyRepo, func() { s.persistence.PersistJob(batchJob) })
 
 	batchJob.mu.Lock()
 	if s.reconMatcher != nil {

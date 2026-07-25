@@ -596,7 +596,7 @@ func TestJobController_SetBatchCfg(t *testing.T) {
 
 func TestTrackScrapeResults(t *testing.T) {
 	assert.NotPanics(t, func() {
-		trackScrapeResults(nil)
+		trackScrapeResults(scrapePhaseInputs{}, nil)
 	})
 }
 
