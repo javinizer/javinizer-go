@@ -95,10 +95,7 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 	)
 
 	if err := ctx.Err(); err != nil {
-		if inputs.MovieRepo != nil {
-			persistScrapeOutcomePool(ctx, outcomes, inputs, cfg.OnFileScrapeFailed)
-		}
-		trackScrapeResults(inputs, outcomes)
+		trackScrapeResults(inputs, outcomes, nil)
 		inputs.Lifecycle.MarkCancelled()
 		return
 	}
@@ -112,6 +109,7 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 	// callers (CLI/API/rescrape) still persist inline inside Workflow.Scrape.
 	// Must complete before MarkCompleted so job-state persistence (deferred at
 	// the top of Run) captures Persisted=true and any surfacable persist errors.
+	var recorded map[string]bool
 	if inputs.MovieRepo != nil {
 		// Pass cfg.OnFileScrapeFailed so a persist failure can correct the
 		// per-file WS status: the scrape worker already emitted a terminal
@@ -119,19 +117,19 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 		// runs later in a separate pool and can fail. Re-firing the per-file
 		// failure hook overwrites messagesByFile[filePath] so the frontend
 		// never shows a stale "success" for a file whose persist failed.
-		persistScrapeOutcomePool(ctx, outcomes, inputs, cfg.OnFileScrapeFailed)
+		recorded = persistScrapeOutcomePool(ctx, outcomes, inputs, cfg.OnFileScrapeFailed)
 	}
 
 	// ctx can be canceled while the persist pool is draining. After it returns,
 	// re-check cancellation before MarkCompleted so a canceled job finishes as
 	// Cancelled rather than being marked Completed with a partially-persisted set.
 	if err := ctx.Err(); err != nil {
-		trackScrapeResults(inputs, outcomes)
+		trackScrapeResults(inputs, outcomes, recorded)
 		inputs.Lifecycle.MarkCancelled()
 		return
 	}
 
-	trackScrapeResults(inputs, outcomes)
+	trackScrapeResults(inputs, outcomes, recorded)
 
 	inputs.Lifecycle.MarkCompleted()
 }
@@ -466,9 +464,21 @@ func scrapeFile(
 // trackScrapeResults processes collected scrapeFileOutcomes.
 // The actual Updater/Broadcaster calls are already done inside scrapeFile;
 // this function is a seam for future aggregation (e.g., counters, logging).
-func trackScrapeResults(inputs scrapePhaseInputs, outcomes []scrapeFileOutcome) {
+func trackScrapeResults(inputs scrapePhaseInputs, outcomes []scrapeFileOutcome, recordedSuccesses map[string]bool) {
 	for _, o := range outcomes {
 		if o.Cancelled {
+			continue
+		}
+		if o.Success && o.Result != nil && o.Result.Movie != nil && !recordedSuccesses[o.FilePath] {
+			auditCtx, cancel := historyAuditContext()
+			defer cancel()
+			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+				MovieID:      o.MovieID,
+				BatchJobID:   jobIDPtr(inputs.JobID),
+				Operation:    models.HistoryOpScrape,
+				OriginalPath: o.FilePath,
+				Status:       models.HistoryStatusSuccess,
+			})
 			continue
 		}
 		if o.Panic {
@@ -508,7 +518,9 @@ func trackScrapeResults(inputs scrapePhaseInputs, outcomes []scrapeFileOutcome) 
 //
 // Only successful scrapes with a movie are persisted; the failed/no-result/panic
 // paths are already reflected on the in-memory result and have nothing to write.
-func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) {
+func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) map[string]bool {
+	recorded := make(map[string]bool)
+	var recordedMu sync.Mutex
 	work := make(chan scrapeFileOutcome, len(outcomes))
 	for _, o := range outcomes {
 		work <- o
@@ -526,22 +538,31 @@ func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome,
 					logging.Errorf("persist worker panic recovered: %v", r)
 				}
 			}()
-			persistScrapeOutcomes(ctx, work, inputs, onFileFailed)
+			for k, v := range persistScrapeOutcomes(ctx, work, inputs, onFileFailed) {
+				recordedMu.Lock()
+				recorded[k] = v
+				recordedMu.Unlock()
+			}
 		}()
 	}
 	wg.Wait()
+	return recorded
 }
 
 // persistScrapeOutcomes drains a channel of scrape outcomes and persists each
 // successful one. Used by persistScrapeOutcomePool to fan persist work across
 // the pool goroutines.
-func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) {
+func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) map[string]bool {
+	recorded := make(map[string]bool)
 	for o := range ch {
 		if !o.Success || o.Result == nil || o.Result.Movie == nil || inputs.MovieRepo == nil {
 			continue
 		}
-		persistScrapeOutcome(ctx, o, inputs, onFileFailed)
+		if persistScrapeOutcome(ctx, o, inputs, onFileFailed) {
+			recorded[o.FilePath] = true
+		}
 	}
+	return recorded
 }
 
 // persistScrapeOutcome persists a single successful scrape's movie off the
@@ -551,7 +572,7 @@ func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inp
 // AtomicUpdateFileResult so API/UI readers observe a consistent snapshot.
 // Persist failures surface on the MovieResult, preserving the original
 // error semantics (persist error → Status=Failed).
-func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) {
+func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) (recordedSuccess bool) {
 	// Clone before persisting: UpsertWithTranslations mutates its input movie in
 	// place (resets association slices to reapply associations). The in-memory
 	// MovieResult.Movie shares the result.Movie pointer, so mutating it here
@@ -566,7 +587,7 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	saved, err := inputs.MovieRepo.UpsertWithTranslations(ctx, cloned, genreTrans, actressTrans)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return
+			return false
 		}
 		logging.Warnf("[scrape-phase] Failed to persist %s: %v", o.MovieID, err)
 		_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
@@ -601,7 +622,7 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 			Status:       models.HistoryStatusFailed,
 			ErrorMessage: fmt.Sprintf("persist failed: %v", err),
 		})
-		return
+		return true
 	}
 	// Refresh the in-memory movie with the DB-saved version (DB-assigned IDs,
 	// normalized associations) and flip Persisted. AtomicUpdateFileResult clones
@@ -626,6 +647,7 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 		OriginalPath: o.FilePath,
 		Status:       models.HistoryStatusSuccess,
 	})
+	return true
 }
 
 func classifyFileScrapeError(err error) (errMsg, errorCode string) {

@@ -117,7 +117,7 @@ func TestTrackScrapeResults_CancelledNotWritten(t *testing.T) {
 		{FilePath: "b.mp4", MovieID: "B-001", Failed: true, ErrorMsg: "real error"},
 		{FilePath: "c.mp4", MovieID: "C-001", Panic: true, PanicMsg: "boom"},
 	}
-	trackScrapeResults(scrapePhaseInputs{HistoryRepo: repo}, outcomes)
+	trackScrapeResults(scrapePhaseInputs{HistoryRepo: repo}, outcomes, nil)
 	assert.Equal(t, 2, repo.createCount(), "cancelled outcome should NOT be written; failed+panic should")
 }
 

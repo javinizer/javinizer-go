@@ -60,7 +60,7 @@ func TestHistoryIntegration_ScrapeFailureWritesFailedRow(t *testing.T) {
 		{FilePath: "/input/FAIL-001.mp4", MovieID: "FAIL-001", Failed: true, ErrorMsg: "no results"},
 		{FilePath: "/input/BOOM-001.mp4", MovieID: "BOOM-001", Panic: true, PanicMsg: "goroutine panic"},
 	}
-	trackScrapeResults(scrapePhaseInputs{JobID: "job-2", HistoryRepo: repo}, outcomes)
+	trackScrapeResults(scrapePhaseInputs{JobID: "job-2", HistoryRepo: repo}, outcomes, nil)
 
 	records, err := repo.FindByBatchJobID(context.Background(), "job-2")
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestHistoryIntegration_ScrapeCancelledNotWritten(t *testing.T) {
 		{FilePath: "/input/CAN-001.mp4", MovieID: "CAN-001", Failed: true, Cancelled: true, ErrorMsg: "canceled"},
 		{FilePath: "/input/ERR-001.mp4", MovieID: "ERR-001", Failed: true, ErrorMsg: "real error"},
 	}
-	trackScrapeResults(scrapePhaseInputs{JobID: "job-3", HistoryRepo: repo}, outcomes)
+	trackScrapeResults(scrapePhaseInputs{JobID: "job-3", HistoryRepo: repo}, outcomes, nil)
 
 	records, err := repo.FindByBatchJobID(context.Background(), "job-3")
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestHistoryConcurrency_MultiFileScrapeRace(t *testing.T) {
 			ErrorMsg: "test error",
 		}
 	}
-	trackScrapeResults(scrapePhaseInputs{JobID: "race-job", HistoryRepo: repo}, outcomes)
+	trackScrapeResults(scrapePhaseInputs{JobID: "race-job", HistoryRepo: repo}, outcomes, nil)
 
 	records, err := repo.FindByBatchJobID(context.Background(), "race-job")
 	require.NoError(t, err)
@@ -216,6 +216,44 @@ func TestHistoryOrganizeMetadata_IncludesOperationMode(t *testing.T) {
 	meta := organizeMetadata("in-place", result)
 	assert.Contains(t, meta, "in-place")
 	assert.Contains(t, meta, "operation_mode")
+}
+
+func TestHistoryCardinality_PersistedSuccessExactlyOneRow(t *testing.T) {
+	db := newHistoryTestDB(t)
+	repos := db.Repositories()
+	repo := repos.HistoryRepo
+	movieRepo := repos.MovieRepo
+
+	movie := &models.Movie{ID: "CARD-001", Title: "Cardinality Test"}
+	_, err := movieRepo.Upsert(context.Background(), movie)
+	require.NoError(t, err)
+
+	inputs := scrapePhaseInputs{
+		JobID:       "card-job",
+		MovieRepo:   movieRepo,
+		HistoryRepo: repo,
+		Updater:     resultstore.New(1, []string{"/input/CARD-001.mp4"}),
+	}
+
+	o := scrapeFileOutcome{
+		FilePath: "/input/CARD-001.mp4",
+		MovieID:  "CARD-001",
+		Success:  true,
+		Result: &scrape.ScrapeResult{
+			Movie:  movie.Clone(),
+			Status: scrape.StatusCompleted,
+		},
+	}
+
+	persistScrapeOutcome(context.Background(), o, inputs, nil)
+	trackScrapeResults(inputs, []scrapeFileOutcome{o}, map[string]bool{o.FilePath: true})
+
+	records, err := repo.FindByBatchJobID(context.Background(), "card-job")
+	require.NoError(t, err)
+	assert.Len(t, records, 1, "persist + track must produce exactly one success row")
+	if len(records) == 1 {
+		assert.Equal(t, models.HistoryStatusSuccess, records[0].Status)
+	}
 }
 
 func strPtrHist(s string) *string { return &s }
