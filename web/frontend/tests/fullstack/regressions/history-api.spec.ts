@@ -77,7 +77,11 @@ async function getHistoryStats(api: APIRequestContext): Promise<HistoryStats> {
 
 test.describe('History API: real contract against the e2emock backend', () => {
 	async function clearHistory(api: APIRequestContext): Promise<void> {
-		await api.delete(`${BACKEND_BASE}/api/v1/history?older_than_days=36500`);
+		const resp = await getHistory(api, { limit: 1000 });
+		for (const record of resp.records) {
+			const id = String((record as Record<string, unknown>).id);
+			await api.delete(`${BACKEND_BASE}/api/v1/history/${id}`);
+		}
 	}
 
 	test('GET /history returns the well-formed empty-state response', async ({
