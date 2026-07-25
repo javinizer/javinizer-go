@@ -42,15 +42,15 @@
 </script>
 
 <div class="space-y-4 lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
-	{#if showPosterPanel || showCoverPanel || showTrailerPanel || showScreenshotsPanel}
-		<Card class="p-4">
-			<div class="flex items-center justify-between gap-2 mb-3">
-				<h3 class="font-semibold text-sm">{currentMovie.id}</h3>
-				<Button size="sm" variant="ghost" onclick={onOpenImageManager} class="h-7 text-xs gap-1 shrink-0">
-					{#snippet children()}<Settings2 class="h-3.5 w-3.5" />{m.review_manage_images()}{/snippet}
-				</Button>
-			</div>
+	<Card class="p-4">
+		<div class="flex items-center justify-between gap-2 mb-3">
+			<h3 class="font-semibold text-sm">{currentMovie.id}</h3>
+			<Button size="sm" variant="ghost" onclick={onOpenImageManager} class="h-7 text-xs gap-1 shrink-0">
+				{#snippet children()}<Settings2 class="h-3.5 w-3.5" />{m.review_manage_images()}{/snippet}
+			</Button>
+		</div>
 
+		{#if showPosterPanel || showCoverPanel || showTrailerPanel || showScreenshotsPanel}
 			{#if showPosterPanel}
 				<div class="mb-4">
 					<p class="text-xs font-medium text-muted-foreground mb-1.5">{currentMovie.should_crop_poster ? m.review_poster_cropped() : m.review_poster()}</p>
@@ -145,6 +145,6 @@
 					{/if}
 				</div>
 			{/if}
-		</Card>
-	{/if}
+		{/if}
+	</Card>
 </div>

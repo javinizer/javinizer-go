@@ -47,7 +47,14 @@
 
 	function handleKey(e: KeyboardEvent) {
 		if (!show) return;
-		if (e.key === 'Escape') close();
+		if (e.key !== 'Escape') return;
+		// If a nested dialog (cover/screenshot viewer, trailer, crop, or
+		// confirmation) is open on top of this manager, let THAT dialog's own
+		// Escape handler dismiss it — don't also close the manager underneath.
+		// Checked synchronously at keydown time, while the nested dialog is
+		// still mounted (its DOM is removed only after Svelte flushes).
+		if (document.querySelectorAll('[role="dialog"][aria-modal="true"]').length > 1) return;
+		close();
 	}
 </script>
 
