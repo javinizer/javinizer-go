@@ -53,7 +53,7 @@
 	}
 </script>
 
-<div class="rounded-md border border-border bg-card shadow-sm">
+<div class="rounded-md border border-border bg-card shadow-sm" data-testid="movie-navigation-card">
 	<div class="flex h-10 items-center gap-2 px-2">
 		<Button
 			variant="ghost"

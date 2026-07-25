@@ -55,7 +55,7 @@
 				<div class="mb-4">
 					<p class="text-xs font-medium text-muted-foreground mb-1.5">{currentMovie.should_crop_poster ? m.review_poster_cropped() : m.review_poster()}</p>
 					{#if displayPosterUrl}
-						<button onclick={onOpenPosterViewer} class="cursor-zoom-in hover:opacity-80 transition-opacity w-full block" title={m.review_poster_alt()}>
+						<button onclick={onOpenPosterViewer} class="cursor-zoom-in hover:opacity-80 transition-opacity w-full block" title={m.review_view_poster_image()} aria-label={m.review_view_poster_image()}>
 						<div class="w-full max-w-60 mx-auto aspect-2/3 overflow-hidden rounded border relative">
 							{#if currentMovie.should_crop_poster && !currentMovie.cropped_poster_url}
 								<img
@@ -87,7 +87,7 @@
 				<div class="mb-4">
 					<p class="text-xs font-medium text-muted-foreground mb-1.5">{m.review_cover_fanart()}</p>
 					{#if currentMovie.cover_url}
-						<button onclick={onOpenCoverViewer} class="cursor-zoom-in hover:opacity-80 transition-opacity" title={m.review_cover_alt()}>
+						<button onclick={onOpenCoverViewer} class="cursor-zoom-in hover:opacity-80 transition-opacity" title={m.review_view_cover_image()} aria-label={m.review_view_cover_image()}>
 							<img
 								src={previewImageURL(currentMovie.cover_url)}
 								alt={m.review_cover_alt()}

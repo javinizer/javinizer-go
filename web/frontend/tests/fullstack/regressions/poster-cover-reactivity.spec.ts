@@ -99,6 +99,24 @@ async function focusMovie(page: Page, movieId: string): Promise<void> {
 	await page.locator(`[aria-label="View details for ${movieId}"]`).click();
 }
 
+/**
+ * The review-page redesign moved #poster-url out of the detail view and
+ * into the image manager modal (opened via the sidebar's "Manage Images"
+ * button). Open it so callers can operate on #poster-url as before.
+ */
+async function openImageManager(page: Page): Promise<void> {
+	await page.getByRole('button', { name: 'Manage Images' }).click();
+	await expect(page.locator('#poster-url'), '#poster-url must render inside the image manager modal').toBeVisible({
+		timeout: 10_000,
+	});
+}
+
+/** Close the image manager modal so view toggles behind it are clickable. */
+async function closeImageManager(page: Page): Promise<void> {
+	await page.keyboard.press('Escape');
+	await expect(page.locator('#poster-url')).toBeHidden({ timeout: 5_000 });
+}
+
 test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', () => {
 	test.describe.configure({ mode: 'serial' });
 
@@ -156,8 +174,10 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 			'GOOD-001',
 		);
 
-		// Focus GOOD-001 — switches to detail view + renders #poster-url.
+		// Focus GOOD-001 — switches to detail view; #poster-url now lives in
+		// the image manager modal, so open it.
 		await focusMovie(page, 'GOOD-001');
+		await openImageManager(page);
 
 		// Edit the poster URL input — fill + dispatch change so
 		// onPosterUrlChange fires (which calls notifyParent(true) ->
@@ -165,9 +185,6 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 		// cropped_poster_url + deletes the posterPreviewOverride).
 		const sentinelUrl = 'https://e2e-edited.invalid/poster-EDITED.jpg';
 		const posterInput = page.locator('#poster-url');
-		await expect(posterInput, '#poster-url input must render after focusing the card').toBeVisible({
-			timeout: 10_000,
-		});
 		await posterInput.fill(sentinelUrl);
 		await posterInput.dispatchEvent('change');
 
@@ -203,6 +220,7 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 		// /api/v1/temp/image?url=...e2e-edited.invalid...). Before fix
 		// #4, the grid card ignored editedMovies entirely + kept the
 		// original src.
+		await closeImageManager(page);
 		await switchToGridView(page);
 		await expect
 			.poll(
@@ -234,11 +252,11 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 		await navigateToReviewPage(page, job_id);
 		await waitForMovieCard(page, 'GOOD-001');
 		await focusMovie(page, 'GOOD-001');
+		await openImageManager(page);
 
 		// Edit the poster URL first — this is the precondition for fix #3.
 		const sentinelUrl = 'https://e2e-edited.invalid/poster-CROP.jpg';
 		const posterInput = page.locator('#poster-url');
-		await expect(posterInput).toBeVisible({ timeout: 10_000 });
 		await posterInput.fill(sentinelUrl);
 		await posterInput.dispatchEvent('change');
 
@@ -289,10 +307,10 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 		await navigateToReviewPage(page, job_id);
 		await waitForMovieCard(page, 'GOOD-001');
 		await focusMovie(page, 'GOOD-001');
+		await openImageManager(page);
 
 		const sentinelUrl = 'https://e2e-edited.invalid/poster-PERSIST.jpg';
 		const posterInput = page.locator('#poster-url');
-		await expect(posterInput).toBeVisible({ timeout: 10_000 });
 		await posterInput.fill(sentinelUrl);
 		await posterInput.dispatchEvent('change');
 
@@ -333,7 +351,12 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 		//       This is the user-visible signal that the restored edit
 		//       propagated through the reactivity graph after reload.
 		await page.reload();
-		await waitForMovieCard(page, 'GOOD-001');
+		// The view mode is persisted in the URL (?view=detail), so the reload
+		// restores the DETAIL view, not the grid — wait for it to be ready.
+		// (Grid assertions happen in step (b) after switchToGridView.)
+		await expect(page.getByRole('button', { name: 'Manage Images' })).toBeVisible({
+			timeout: 15_000,
+		});
 
 		// (a) sessionStorage entry still present after reload — the
 		// restore-on-mount path ran successfully.
@@ -387,13 +410,14 @@ test.describe('Poster/cover reactivity + edit persistence (commit 683b4a1e)', ()
 
 		// Edit the poster URL first — this flips the Modified badge on.
 		await focusMovie(page, 'GOOD-001');
+		await openImageManager(page);
 		const sentinelUrl = 'https://e2e-edited.invalid/poster-RESET.jpg';
 		const posterInput = page.locator('#poster-url');
-		await expect(posterInput).toBeVisible({ timeout: 10_000 });
 		await posterInput.fill(sentinelUrl);
 		await posterInput.dispatchEvent('change');
 
 		// Switch to grid view + assert the Modified badge appeared.
+		await closeImageManager(page);
 		await switchToGridView(page);
 		const modifiedBadge = page
 			.locator(`[aria-label="View details for GOOD-001"]`)

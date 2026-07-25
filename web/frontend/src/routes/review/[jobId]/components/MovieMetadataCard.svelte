@@ -78,7 +78,7 @@
 	let favoriteMutationPending = $derived(addFavoriteMutation.isPending || removeFavoriteMutation.isPending);
 </script>
 
-<Card class="p-4 lg:p-5">
+<Card class="p-4 lg:p-5" data-testid="movie-metadata-card">
 	<div class="space-y-3">
 		<div class="flex items-center justify-between">
 			<h2 class="text-xl font-semibold">{m.review_movie_metadata()}</h2>

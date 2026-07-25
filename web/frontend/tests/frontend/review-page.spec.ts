@@ -561,9 +561,7 @@ test.describe('Grid to Detail Navigation', () => {
 		await page.waitForTimeout(500);
 
 		const metadataCard = page
-			.locator('.p-6')
-			.filter({ hasText: /movie metadata/i })
-			.first();
+			.getByTestId('movie-metadata-card');
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await expect(rescrapeBtn).toBeVisible({ timeout: 5_000 });
 	});
@@ -575,7 +573,7 @@ test.describe('Grid to Detail Navigation', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const movieNav = page.getByText(/movie \d+ of \d+/i);
+		const movieNav = page.getByText(/\d+ \/ \d+/).first();
 		await expect(movieNav).toBeVisible({ timeout: 5_000 });
 	});
 
@@ -586,8 +584,10 @@ test.describe('Grid to Detail Navigation', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const sourceFileHeading = page.getByText('Source File', { exact: true });
-		await expect(sourceFileHeading).toBeVisible({ timeout: 5_000 });
+		// The source file card was merged into the navigation card as a
+		// compact strip showing the (truncated) source path.
+		const sourcePath = page.getByTestId('movie-navigation-card').locator('code').first();
+		await expect(sourcePath).toBeVisible({ timeout: 5_000 });
 	});
 
 	test('detail view shows remove button in navigation card', async ({ page }) => {
@@ -597,10 +597,7 @@ test.describe('Grid to Detail Navigation', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const navCard = page
-			.locator('.p-4')
-			.filter({ hasText: /movie \d+ of \d+/i })
-			.first();
+		const navCard = page.getByTestId('movie-navigation-card');
 		const removeBtn = navCard.getByRole('button', { name: /remove/i });
 		await expect(removeBtn).toBeVisible({ timeout: 5_000 });
 	});
@@ -623,14 +620,14 @@ test.describe('Grid to Detail Navigation', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const movieNavBefore = page.getByText(/movie 1 of \d+/i);
+		const movieNavBefore = page.getByText(/^1 \/ \d+$/);
 		await expect(movieNavBefore).toBeVisible({ timeout: 5_000 });
 
 		const nextBtn = page.getByRole('button', { name: /next/i });
 		await nextBtn.click();
 		await page.waitForTimeout(500);
 
-		const movieNavAfter = page.getByText(/movie 2 of \d+/i);
+		const movieNavAfter = page.getByText(/^2 \/ \d+$/);
 		await expect(movieNavAfter).toBeVisible({ timeout: 5_000 });
 	});
 
@@ -647,7 +644,7 @@ test.describe('Grid to Detail Navigation', () => {
 		await pageSelect.selectOption('3');
 		await page.waitForTimeout(500);
 
-		const movieNav = page.getByText(/movie 3 of \d+/i);
+		const movieNav = page.getByText(/^3 \/ \d+$/);
 		await expect(movieNav).toBeVisible({ timeout: 5_000 });
 	});
 });
@@ -661,9 +658,7 @@ test.describe('Detail View Rescrape', () => {
 		await page.waitForTimeout(500);
 
 		const metadataCard = page
-			.locator('.p-6')
-			.filter({ hasText: /movie metadata/i })
-			.first();
+			.getByTestId('movie-metadata-card');
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
 
@@ -681,9 +676,7 @@ test.describe('Detail View Rescrape', () => {
 		await page.waitForTimeout(500);
 
 		const metadataCard = page
-			.locator('.p-6')
-			.filter({ hasText: /movie metadata/i })
-			.first();
+			.getByTestId('movie-metadata-card');
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
 
@@ -701,9 +694,7 @@ test.describe('Detail View Rescrape', () => {
 		await page.waitForTimeout(500);
 
 		const metadataCard = page
-			.locator('.p-6')
-			.filter({ hasText: /movie metadata/i })
-			.first();
+			.getByTestId('movie-metadata-card');
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
 
@@ -723,9 +714,7 @@ test.describe('Detail View Rescrape', () => {
 		await page.waitForTimeout(500);
 
 		const metadataCard = page
-			.locator('.p-6')
-			.filter({ hasText: /movie metadata/i })
-			.first();
+			.getByTestId('movie-metadata-card');
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
 
@@ -746,9 +735,7 @@ test.describe('Detail View Rescrape', () => {
 		await page.waitForTimeout(500);
 
 		const metadataCard = page
-			.locator('.p-6')
-			.filter({ hasText: /movie metadata/i })
-			.first();
+			.getByTestId('movie-metadata-card');
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
 
@@ -768,14 +755,11 @@ test.describe('Detail View Remove', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const navCard = page
-			.locator('.p-4')
-			.filter({ hasText: /movie \d+ of \d+/i })
-			.first();
+		const navCard = page.getByTestId('movie-navigation-card');
 		const removeBtn = navCard.getByRole('button', { name: /remove/i });
 		await removeBtn.click();
 
-		const movieNav = page.getByText(/movie \d+ of \d+/i);
+		const movieNav = page.getByText(/\d+ \/ \d+/).first();
 		await expect(movieNav).toBeVisible({ timeout: 5_000 });
 	});
 
@@ -786,10 +770,7 @@ test.describe('Detail View Remove', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const navCard = page
-			.locator('.p-4')
-			.filter({ hasText: /movie \d+ of \d+/i })
-			.first();
+		const navCard = page.getByTestId('movie-navigation-card');
 		const removeBtn = navCard.getByRole('button', { name: /remove/i });
 		await expect(removeBtn).toBeVisible({ timeout: 5_000 });
 	});
