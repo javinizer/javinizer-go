@@ -468,6 +468,18 @@ func trackScrapeResults(inputs scrapePhaseInputs, outcomes []scrapeFileOutcome) 
 		if o.Cancelled {
 			continue
 		}
+		if o.Success && o.Result != nil && o.Result.Movie != nil {
+			auditCtx, cancel := historyAuditContext()
+			defer cancel()
+			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+				MovieID:      o.MovieID,
+				BatchJobID:   jobIDPtr(inputs.JobID),
+				Operation:    models.HistoryOpScrape,
+				OriginalPath: o.FilePath,
+				Status:       models.HistoryStatusSuccess,
+			})
+			continue
+		}
 		if o.Panic {
 			auditCtx, cancel := historyAuditContext()
 			defer cancel()
