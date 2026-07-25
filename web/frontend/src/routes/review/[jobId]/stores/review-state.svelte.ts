@@ -1,7 +1,7 @@
 import { onDestroy, onMount, untrack } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browser } from '$app/environment';
-import { goto, replaceState } from '$app/navigation';
+import { goto } from '$app/navigation';
 import type { Page } from '@sveltejs/kit';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
@@ -1086,10 +1086,15 @@ export function createReviewState(pageStore: Page) {
 		if (!viewModeInitialized) return;
 		localStorage.setItem(VIEW_MODE_KEY, viewMode);
 		const param = viewModeToUrlParam(viewMode);
+		// Use goto with replaceState so $page.url stays in sync (a raw
+		// replaceState leaves $page.url stale, which causes the tab-sync
+		// effect to rebuild the URL without the view param). goto with
+		// replaceState + noScroll + keepFocus performs a shallow update that
+		// preserves the tab param and other query params.
 		const url = new URL(window.location.href);
 		if (url.searchParams.get(VIEW_MODE_URL_PARAM) !== param) {
 			url.searchParams.set(VIEW_MODE_URL_PARAM, param);
-			replaceState(url, window.history.state);
+			void goto(url, { replaceState: true, noScroll: true, keepFocus: true });
 		}
 	});
 
