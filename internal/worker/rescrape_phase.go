@@ -140,7 +140,20 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 		}
 	}
 
-	return &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Status: models.RescrapeStatusSuccess}, nil
+	rescrapeResult := &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Status: models.RescrapeStatusSuccess}
+	if inputs.HistoryRepo != nil {
+		auditCtx, auditCancel := historyAuditContext()
+		defer auditCancel()
+		recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+			MovieID:      movieID,
+			BatchJobID:   jobIDPtr(inputs.JobID),
+			Operation:    models.HistoryOpScrape,
+			OriginalPath: filePath,
+			Status:       models.HistoryStatusSuccess,
+			Metadata:     organizeMetadata("rescrape", nil),
+		})
+	}
+	return rescrapeResult, nil
 }
 
 // singleScrapeWork was removed. ScrapeSingle now calls

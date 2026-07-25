@@ -165,6 +165,8 @@ type rescrapePhaseInputs struct {
 	persister persister
 
 	// additional dependencies for full rescrape sequence
+	HistoryRepo database.HistoryRepositoryInterface
+
 	Finder      resultstore.FileFinder // for FindFileForMovieID and GetRevision
 	Fs          afero.Fs               // for poster cleanup
 	TempDir     string                 // for poster cleanup paths

@@ -76,14 +76,19 @@ async function getHistoryStats(api: APIRequestContext): Promise<HistoryStats> {
 }
 
 test.describe('History API: real contract against the e2emock backend', () => {
+	async function clearHistory(api: APIRequestContext): Promise<void> {
+		await api.delete(`${BACKEND_BASE}/api/v1/history?older_than_days=36500`);
+	}
+
 	test('GET /history returns the well-formed empty-state response', async ({
 		request,
 	}: {
 		request: APIRequestContext;
 	}) => {
 		await loginAgainstRealBackend(request);
+		await clearHistory(request);
 
-		// The history table is empty (nothing writes to it — see spec header).
+		// The history table is empty (after clearing any rows from prior specs).
 		// The empty-state contract: records is an empty array (not null),
 		// total is 0, + limit/offset echo the request. The dashboard's
 		// "Recent Runs" list renders "No operations recorded yet." off this.
@@ -283,7 +288,7 @@ test.describe('History happy path — records appear after real scrape+organize'
 
 		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-001.mp4`] });
 		await waitForJobCompletion(request, jobId);
-		await submitOrganize(request, jobId, '/tmp/e2e-output');
+		await submitOrganize(request, jobId, '/tmp/javinizer-e2e-output');
 		await waitForJobCompletion(request, jobId);
 
 		const listResp = await request.get(`${BACKEND_BASE}/api/v1/history?limit=50`);

@@ -340,6 +340,7 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 	pg := c.job.deps.PosterGen
 	pfn := c.job.deps.PersistFn
 	tempDir := c.job.cfg.tempDir
+	histRepo := c.job.deps.HistoryRepo
 	c.job.mu.RUnlock()
 
 	return rescrapePhaseInputs{
@@ -347,6 +348,7 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 		Concurrency: newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, defaultMaxWorkers, defaultWorkerTimeout),
 		WF:          wf,
 		PosterGen:   pg,
+		HistoryRepo: histRepo,
 		ResultMap:   c.job.results,
 		Lifecycle:   c.job.lifecycle,
 		persister:   persistFunc(pfn),
