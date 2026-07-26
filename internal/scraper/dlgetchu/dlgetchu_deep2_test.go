@@ -50,10 +50,41 @@ func TestExtractNumericIDDeep2(t *testing.T) {
 		{"id=67890", "67890"},
 		{"/item12345", "12345"},
 		{"no id here", ""},
+		{"12345", "12345"},
+		{"1234abc", ""},
+		{"123", ""},
 		{"", ""},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.expected, extractNumericID(tt.input), "input=%q", tt.input)
+	}
+}
+
+func TestExtractIDFromURLDeep2(t *testing.T) {
+	s := &scraper{}
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"plain numeric ID", "12345", "12345", false},
+		{"partial numeric (no match)", "1234abc", "", true},
+		{"prefixed id=", "id=67890", "67890", false},
+		{"no match", "no id here", "", true},
+		{"item URL", "https://dl.getchu.com/i/item12345", "12345", false},
+		{"id query URL", "http://dl.getchu.com/item?id=67890", "67890", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.ExtractIDFromURL(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+			}
+		})
 	}
 }
 
@@ -147,15 +178,4 @@ func TestCanHandleURLDeep2(t *testing.T) {
 	assert.True(t, s.CanHandleURL("https://dl.getchu.com/i/item12345"))
 	assert.True(t, s.CanHandleURL("http://www.getchu.com/test"))
 	assert.False(t, s.CanHandleURL("https://example.com"))
-}
-
-func TestExtractIDFromURLDeep2(t *testing.T) {
-	s := &scraper{}
-	id, err := s.ExtractIDFromURL("https://dl.getchu.com/i/item12345")
-	assert.NoError(t, err)
-	assert.Equal(t, "12345", id)
-
-	id, err = s.ExtractIDFromURL("http://dl.getchu.com/item?id=67890")
-	assert.NoError(t, err)
-	assert.Equal(t, "67890", id)
 }
