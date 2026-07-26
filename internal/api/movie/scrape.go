@@ -136,8 +136,15 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer auditCancel()
 				safeInput := redactURLCredentials(cmd.RawInput)
+				movieID := safeInput
+				for _, sr := range result.ScraperResults {
+					if sr.ID != "" {
+						movieID = sr.ID
+						break
+					}
+				}
 				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
-					MovieID:      safeInput,
+					MovieID:      movieID,
 					Operation:    models.HistoryOpScrape,
 					OriginalPath: safeInput,
 					Status:       models.HistoryStatusFailed,
