@@ -24,7 +24,7 @@ import (
 const defaultBaseURL = "http://dl.getchu.com"
 
 var (
-	itemIDRegex      = regexp.MustCompile(`(?i)(?:作品ID[:：]\s*|id=|/item|^)(\d{4,})(?:$|[^0-9])`)
+	itemIDRegex      = regexp.MustCompile(`(?i)(?:作品ID[:：]\s*|id=|/item)(\d{4,})|^(\d{4,})$`)
 	descriptionRegex = regexp.MustCompile(`(?is)作品内容</td>(.*?)</td>`)
 	releaseDateRegex = regexp.MustCompile(`(\d{4}/\d{2}/\d{2})`)
 	runtimeRegex     = regexp.MustCompile(`([０-９\s]{1,3})分`)
@@ -126,6 +126,9 @@ func (s *scraper) CanHandleURL(rawURL string) bool {
 
 func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	if m := itemIDRegex.FindStringSubmatch(urlStr); len(m) > 1 {
+		if m[1] == "" {
+			m[1] = m[2]
+		}
 		return strings.TrimSpace(m[1]), nil
 	}
 	u, err := url.Parse(urlStr)
@@ -368,6 +371,9 @@ func findFirstDetailLink(html, base string) string {
 
 func extractNumericID(v string) string {
 	if m := itemIDRegex.FindStringSubmatch(v); len(m) > 1 {
+		if m[1] == "" {
+			m[1] = m[2]
+		}
 		return strings.TrimSpace(m[1])
 	}
 	return ""
