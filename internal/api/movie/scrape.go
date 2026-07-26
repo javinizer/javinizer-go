@@ -22,11 +22,16 @@ func redactURLCredentials(input string) string {
 		return "redacted"
 	}
 	if u.Host == "" {
+		if u.Scheme != "" {
+			return "redacted"
+		}
 		return input
 	}
 	if u.User != nil {
 		u.User = url.UserPassword("redacted", "redacted")
 	}
+	u.RawQuery = ""
+	u.Fragment = ""
 	return u.String()
 }
 

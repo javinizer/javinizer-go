@@ -91,7 +91,7 @@ func TestScrapeHistoryAuditMatrix(t *testing.T) {
 			var testRecords []models.History
 			reqID := tc.requestBody.(contracts.ScrapeRequest).ID
 			for _, r := range records {
-				if r.OriginalPath == reqID {
+				if r.OriginalPath == reqID || r.MovieID == reqID {
 					testRecords = append(testRecords, r)
 				}
 			}
@@ -100,6 +100,69 @@ func TestScrapeHistoryAuditMatrix(t *testing.T) {
 				assert.Equal(t, tc.wantHistoryStatus, testRecords[0].Status)
 				assert.Equal(t, tc.wantHistoryOp, testRecords[0].Operation)
 			}
+		})
+	}
+}
+
+func TestRedactURLCredentials(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "valid URL with credentials",
+			input: "https://alice:secret@example.com/path",
+			want:  "https://redacted:redacted@example.com/path",
+		},
+		{
+			name:  "URL without credentials",
+			input: "https://example.com/path",
+			want:  "https://example.com/path",
+		},
+		{
+			name:  "ordinary movie ID",
+			input: "IPX-123",
+			want:  "IPX-123",
+		},
+		{
+			name:  "malformed URL with credentials",
+			input: "https://alice:secret@example.com/%zz",
+			want:  "redacted",
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "URL with only username",
+			input: "https://alice@example.com/path",
+			want:  "https://redacted:redacted@example.com/path",
+		},
+		{
+			name:  "opaque URL with credentials",
+			input: "https:alice:secret@example.com/path",
+			want:  "redacted",
+		},
+		{
+			name:  "URL with query string containing token",
+			input: "https://example.com/path?token=secret",
+			want:  "https://example.com/path",
+		},
+		{
+			name:  "URL with fragment",
+			input: "https://example.com/path#session",
+			want:  "https://example.com/path",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactURLCredentials(tc.input)
+			assert.Equal(t, tc.want, got)
+			assert.NotContains(t, got, "alice", "credentials must not appear in output")
+			assert.NotContains(t, got, "secret", "credentials must not appear in output")
 		})
 	}
 }
