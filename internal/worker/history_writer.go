@@ -71,7 +71,7 @@ func auditScrapeFailure(inputs scrapePhaseInputs, o scrapeFileOutcome) {
 	if o.Panic {
 		errMsg = o.PanicMsg
 	}
-	if errMsg == "" && !o.Failed && !o.Panic {
+	if errMsg == "" {
 		return
 	}
 	recordHistory(auditCtx, inputs.HistoryRepo, models.History{
@@ -207,13 +207,17 @@ func auditRescrapeFailure(inputs rescrapePhaseInputs, movieID, filePath string, 
 	}
 	auditCtx, cancel := historyAuditContext()
 	defer cancel()
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
 	recordHistory(auditCtx, inputs.HistoryRepo, models.History{
 		MovieID:      movieID,
 		BatchJobID:   jobIDPtr(inputs.JobID),
 		Operation:    models.HistoryOpScrape,
 		OriginalPath: filePath,
 		Status:       models.HistoryStatusFailed,
-		ErrorMessage: err.Error(),
+		ErrorMessage: errMsg,
 		Metadata:     organizeMetadata("rescrape", nil),
 	})
 }
