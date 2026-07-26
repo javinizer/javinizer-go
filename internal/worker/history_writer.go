@@ -136,6 +136,10 @@ func auditOrganizeFailure(inputs applyPhaseInputs, movie *models.Movie, filePath
 	}
 	auditCtx, cancel := historyAuditContext()
 	defer cancel()
+	errMsg := ""
+	if applyErr != nil {
+		errMsg = applyErr.Error()
+	}
 	recordHistory(auditCtx, inputs.HistoryRepo, models.History{
 		MovieID:      movie.ID,
 		BatchJobID:   jobIDPtr(inputs.JobID),
@@ -143,7 +147,7 @@ func auditOrganizeFailure(inputs applyPhaseInputs, movie *models.Movie, filePath
 		OriginalPath: filePath,
 		NewPath:      nilGuardOrganizeNewPath(result),
 		Status:       models.HistoryStatusFailed,
-		ErrorMessage: applyErr.Error(),
+		ErrorMessage: errMsg,
 		DryRun:       cfg.DryRun,
 		Metadata:     organizeMetadata(inputs.OperationMode, result),
 	})

@@ -583,7 +583,7 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	saved, err := inputs.MovieRepo.UpsertWithTranslations(ctx, cloned, genreTrans, actressTrans)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return true
+			return false
 		}
 		logging.Warnf("[scrape-phase] Failed to persist %s: %v", o.MovieID, err)
 		_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
