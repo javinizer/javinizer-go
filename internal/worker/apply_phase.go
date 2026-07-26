@@ -313,7 +313,9 @@ func interpretApplyResult(
 		}
 		outcome.Failed = true
 		outcome.ErrorMsg = errMsg
-		auditOrganizeFailure(inputs, movie, filePath, result, applyErr, cfg)
+		if !cfg.OrganizeOptions.Skip || (result != nil && result.OrganizeResult != nil) {
+			auditOrganizeFailure(inputs, movie, filePath, result, applyErr, cfg)
+		}
 		return outcome
 	}
 
