@@ -212,6 +212,11 @@ func TestAuditMatrix_Organize(t *testing.T) {
 				if tc.wantNewPath != "" {
 					assert.Equal(t, tc.wantNewPath, records[0].NewPath)
 				}
+				if tc.outcome.Panic {
+					assert.Equal(t, tc.outcome.PanicMsg, records[0].ErrorMessage)
+				} else if tc.outcome.Failed {
+					assert.Equal(t, tc.outcome.ErrorMsg, records[0].ErrorMessage)
+				}
 			}
 		})
 	}
