@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -141,18 +142,7 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 	}
 
 	rescrapeResult := &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Status: models.RescrapeStatusSuccess}
-	if inputs.HistoryRepo != nil {
-		auditCtx, auditCancel := historyAuditContext()
-		defer auditCancel()
-		recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-			MovieID:      movieID,
-			BatchJobID:   jobIDPtr(inputs.JobID),
-			Operation:    models.HistoryOpScrape,
-			OriginalPath: filePath,
-			Status:       models.HistoryStatusSuccess,
-			Metadata:     organizeMetadata("rescrape", nil),
-		})
-	}
+	auditRescrapeSuccess(inputs, movieID, filePath)
 	return rescrapeResult, nil
 }
 
@@ -181,21 +171,11 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 	if err != nil {
 		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
 		if lc.inputs.HistoryRepo != nil {
-			auditCtx, auditCancel := historyAuditContext()
-			defer auditCancel()
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
 				movieID = movieResult.Movie.ID
 			}
-			recordHistory(auditCtx, lc.inputs.HistoryRepo, models.History{
-				MovieID:      movieID,
-				BatchJobID:   jobIDPtr(lc.inputs.JobID),
-				Operation:    models.HistoryOpScrape,
-				OriginalPath: lc.lookup.FilePath,
-				Status:       models.HistoryStatusFailed,
-				ErrorMessage: err.Error(),
-				Metadata:     organizeMetadata("rescrape", nil),
-			})
+			auditRescrapeFailure(lc.inputs, movieID, lc.lookup.FilePath, err)
 		}
 		return nil, err
 	}
@@ -207,8 +187,6 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 	case models.RescrapeStatusGone, models.RescrapeStatusConflict, models.RescrapeStatusFailed:
 		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
 		if lc.inputs.HistoryRepo != nil {
-			auditCtx, auditCancel := historyAuditContext()
-			defer auditCancel()
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
 				movieID = movieResult.Movie.ID
@@ -217,15 +195,7 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 			if errMsg == "" {
 				errMsg = fmt.Sprintf("rescrape %s", outcome.Status)
 			}
-			recordHistory(auditCtx, lc.inputs.HistoryRepo, models.History{
-				MovieID:      movieID,
-				BatchJobID:   jobIDPtr(lc.inputs.JobID),
-				Operation:    models.HistoryOpScrape,
-				OriginalPath: lc.lookup.FilePath,
-				Status:       models.HistoryStatusFailed,
-				ErrorMessage: errMsg,
-				Metadata:     organizeMetadata("rescrape", nil),
-			})
+			auditRescrapeFailure(lc.inputs, movieID, lc.lookup.FilePath, errors.New(errMsg))
 		}
 		return outcome, nil
 	}

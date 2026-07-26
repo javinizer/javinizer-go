@@ -469,42 +469,12 @@ func trackScrapeResults(inputs scrapePhaseInputs, outcomes []scrapeFileOutcome, 
 		if o.Cancelled {
 			continue
 		}
-		if o.Success && o.Result != nil && o.Result.Movie != nil && !recordedSuccesses[o.FilePath] {
-			auditCtx, cancel := historyAuditContext()
-			defer cancel()
-			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-				MovieID:      o.MovieID,
-				BatchJobID:   jobIDPtr(inputs.JobID),
-				Operation:    models.HistoryOpScrape,
-				OriginalPath: o.FilePath,
-				Status:       models.HistoryStatusSuccess,
-			})
+		if o.Success && !recordedSuccesses[o.FilePath] {
+			auditScrapeSuccess(inputs, o)
 			continue
 		}
-		if o.Panic {
-			auditCtx, cancel := historyAuditContext()
-			defer cancel()
-			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-				MovieID:      o.MovieID,
-				BatchJobID:   jobIDPtr(inputs.JobID),
-				Operation:    models.HistoryOpScrape,
-				OriginalPath: o.FilePath,
-				Status:       models.HistoryStatusFailed,
-				ErrorMessage: o.PanicMsg,
-			})
-			continue
-		}
-		if o.Failed {
-			auditCtx, cancel := historyAuditContext()
-			defer cancel()
-			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-				MovieID:      o.MovieID,
-				BatchJobID:   jobIDPtr(inputs.JobID),
-				Operation:    models.HistoryOpScrape,
-				OriginalPath: o.FilePath,
-				Status:       models.HistoryStatusFailed,
-				ErrorMessage: o.ErrorMsg,
-			})
+		if o.Panic || o.Failed {
+			auditScrapeFailure(inputs, o)
 		}
 	}
 }
@@ -558,9 +528,17 @@ func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inp
 		if !o.Success || o.Result == nil || o.Result.Movie == nil || inputs.MovieRepo == nil {
 			continue
 		}
-		if persistScrapeOutcome(ctx, o, inputs, onFileFailed) {
-			recorded[o.FilePath] = true
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logging.Errorf("persistScrapeOutcome panic recovered: %v", r)
+					recorded[o.FilePath] = true
+				}
+			}()
+			if persistScrapeOutcome(ctx, o, inputs, onFileFailed) {
+				recorded[o.FilePath] = true
+			}
+		}()
 	}
 	return recorded
 }

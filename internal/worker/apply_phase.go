@@ -279,7 +279,7 @@ func interpretApplyResult(
 			EndedAt:       &now,
 		})
 		if isCancelled {
-			// Cancellation is not a failure: broadcast a non-failure apply event
+			auditOrganizeSuccess(inputs, movie, filePath, result, cfg)
 			// and do NOT invoke OnFileFailed, otherwise the review page records
 			// the file as failed and offers a Retry path despite the persisted
 			// result being Cancelled.
@@ -311,21 +311,7 @@ func interpretApplyResult(
 		}
 		outcome.Failed = true
 		outcome.ErrorMsg = errMsg
-		if result != nil && result.OrganizeResult != nil {
-			auditCtx, auditCancel := historyAuditContext()
-			defer auditCancel()
-			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-				MovieID:      movie.ID,
-				BatchJobID:   jobIDPtr(inputs.JobID),
-				Operation:    models.HistoryOpOrganize,
-				OriginalPath: filePath,
-				NewPath:      nilGuardOrganizeNewPath(result),
-				Status:       models.HistoryStatusFailed,
-				ErrorMessage: errMsg,
-				DryRun:       cfg.DryRun,
-				Metadata:     organizeMetadata(inputs.OperationMode, result),
-			})
-		}
+		auditOrganizeFailure(inputs, movie, filePath, result, errMsg, cfg)
 		return outcome
 	}
 
@@ -355,20 +341,7 @@ func interpretApplyResult(
 		cfg.OnFileOrganized(filePath)
 	}
 	outcome.Success = true
-	if result != nil && result.OrganizeResult != nil {
-		auditCtx, auditCancel := historyAuditContext()
-		defer auditCancel()
-		recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-			MovieID:      movie.ID,
-			BatchJobID:   jobIDPtr(inputs.JobID),
-			Operation:    models.HistoryOpOrganize,
-			OriginalPath: filePath,
-			NewPath:      nilGuardOrganizeNewPath(result),
-			Status:       models.HistoryStatusSuccess,
-			DryRun:       cfg.DryRun,
-			Metadata:     organizeMetadata(inputs.OperationMode, result),
-		})
-	}
+	auditOrganizeSuccess(inputs, movie, filePath, result, cfg)
 	return outcome
 }
 
@@ -459,16 +432,7 @@ func trackApplyResults(inputs applyPhaseInputs, outcomes []applyFileOutcome, org
 			atomic.AddInt64(failed, 1)
 		}
 		if o.Panic && !o.Cancelled {
-			auditCtx, cancel := historyAuditContext()
-			defer cancel()
-			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-				MovieID:      o.MovieID,
-				BatchJobID:   jobIDPtr(inputs.JobID),
-				Operation:    models.HistoryOpOrganize,
-				OriginalPath: o.FilePath,
-				Status:       models.HistoryStatusFailed,
-				ErrorMessage: o.PanicMsg,
-			})
+			auditOrganizePanic(inputs, o)
 		}
 	}
 }
