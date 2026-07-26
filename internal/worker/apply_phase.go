@@ -311,19 +311,21 @@ func interpretApplyResult(
 		}
 		outcome.Failed = true
 		outcome.ErrorMsg = errMsg
-		auditCtx, auditCancel := historyAuditContext()
-		defer auditCancel()
-		recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-			MovieID:      movie.ID,
-			BatchJobID:   jobIDPtr(inputs.JobID),
-			Operation:    models.HistoryOpOrganize,
-			OriginalPath: filePath,
-			NewPath:      nilGuardOrganizeNewPath(result),
-			Status:       models.HistoryStatusFailed,
-			ErrorMessage: errMsg,
-			DryRun:       cfg.DryRun,
-			Metadata:     organizeMetadata(inputs.OperationMode, result),
-		})
+		if result != nil && result.OrganizeResult != nil {
+			auditCtx, auditCancel := historyAuditContext()
+			defer auditCancel()
+			recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+				MovieID:      movie.ID,
+				BatchJobID:   jobIDPtr(inputs.JobID),
+				Operation:    models.HistoryOpOrganize,
+				OriginalPath: filePath,
+				NewPath:      nilGuardOrganizeNewPath(result),
+				Status:       models.HistoryStatusFailed,
+				ErrorMessage: errMsg,
+				DryRun:       cfg.DryRun,
+				Metadata:     organizeMetadata(inputs.OperationMode, result),
+			})
+		}
 		return outcome
 	}
 
@@ -353,18 +355,20 @@ func interpretApplyResult(
 		cfg.OnFileOrganized(filePath)
 	}
 	outcome.Success = true
-	auditCtx, auditCancel := historyAuditContext()
-	defer auditCancel()
-	recordHistory(auditCtx, inputs.HistoryRepo, models.History{
-		MovieID:      movie.ID,
-		BatchJobID:   jobIDPtr(inputs.JobID),
-		Operation:    models.HistoryOpOrganize,
-		OriginalPath: filePath,
-		NewPath:      nilGuardOrganizeNewPath(result),
-		Status:       models.HistoryStatusSuccess,
-		DryRun:       cfg.DryRun,
-		Metadata:     organizeMetadata(inputs.OperationMode, result),
-	})
+	if result != nil && result.OrganizeResult != nil {
+		auditCtx, auditCancel := historyAuditContext()
+		defer auditCancel()
+		recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+			MovieID:      movie.ID,
+			BatchJobID:   jobIDPtr(inputs.JobID),
+			Operation:    models.HistoryOpOrganize,
+			OriginalPath: filePath,
+			NewPath:      nilGuardOrganizeNewPath(result),
+			Status:       models.HistoryStatusSuccess,
+			DryRun:       cfg.DryRun,
+			Metadata:     organizeMetadata(inputs.OperationMode, result),
+		})
+	}
 	return outcome
 }
 

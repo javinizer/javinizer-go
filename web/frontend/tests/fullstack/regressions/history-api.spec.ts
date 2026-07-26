@@ -290,7 +290,7 @@ test.describe('History happy path — records appear after real scrape+organize'
 	}) => {
 		await loginAgainstRealBackend(request);
 
-		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-003.mp4`] });
+		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-001.mp4`] });
 		await waitForJobCompletion(request, jobId);
 		await submitOrganize(request, jobId, '/tmp/javinizer-e2e-output/history-test');
 		await waitForJobCompletion(request, jobId);
@@ -304,6 +304,9 @@ test.describe('History happy path — records appear after real scrape+organize'
 		const operations = list.records.map((r) => (r as Record<string, unknown>).operation);
 		expect(operations, 'must contain a scrape record').toContain('scrape');
 		expect(operations, 'must contain an organize record').toContain('organize');
+		const organizeRecord = list.records.find((r) => (r as Record<string, unknown>).operation === 'organize');
+		expect(organizeRecord, 'organize record must exist').toBeTruthy();
+		expect((organizeRecord as Record<string, unknown>).status, 'organize record must be success').toBe('success');
 
 		const statsResp = await request.get(`${BACKEND_BASE}/api/v1/history/stats`);
 		expect(statsResp.ok()).toBeTruthy();
