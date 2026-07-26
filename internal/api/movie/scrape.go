@@ -2,6 +2,7 @@ package movie
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -74,7 +75,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 		result, _, err := wf.Scrape(scrapeCtx, cmd)
 		if scrapeCtx.Err() != nil {
-			if deps.HistoryRepo != nil {
+			if deps.HistoryRepo != nil && !errors.Is(scrapeCtx.Err(), context.Canceled) {
 				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer auditCancel()
 				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
@@ -89,7 +90,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			return
 		}
 		if err != nil {
-			if deps.HistoryRepo != nil {
+			if deps.HistoryRepo != nil && !errors.Is(err, context.Canceled) {
 				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer auditCancel()
 				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
