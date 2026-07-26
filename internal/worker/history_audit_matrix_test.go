@@ -87,6 +87,11 @@ func TestAuditMatrix_Scrape(t *testing.T) {
 				assert.Equal(t, tc.wantStatus, records[0].Status)
 				assert.Equal(t, tc.wantOp, records[0].Operation)
 				assert.Equal(t, tc.outcome.FilePath, records[0].OriginalPath)
+				if tc.outcome.Panic {
+					assert.Equal(t, tc.outcome.PanicMsg, records[0].ErrorMessage)
+				} else if tc.outcome.Failed {
+					assert.Equal(t, tc.outcome.ErrorMsg, records[0].ErrorMessage)
+				}
 			}
 		})
 	}
