@@ -33,7 +33,7 @@
  * that contract.
  */
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import { BACKEND_BASE, loginAgainstRealBackend, submitScrape, submitOrganize, waitForJobCompletion, DEFAULT_INPUT_DIR } from '../helpers';
+import { BACKEND_BASE, loginAgainstRealBackend, submitScrape, submitOrganize, waitForJobCompletion, DEFAULT_INPUT_DIR, seedInputFiles } from '../helpers';
 
 interface HistoryListResponse {
 	records: unknown[];
@@ -289,8 +289,9 @@ test.describe('History happy path — records appear after real scrape+organize'
 		request: APIRequestContext;
 	}) => {
 		await loginAgainstRealBackend(request);
+		await seedInputFiles(['GOOD-003.mp4']);
 
-		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-001.mp4`] });
+		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-003.mp4`] });
 		await waitForJobCompletion(request, jobId);
 		await submitOrganize(request, jobId, '/tmp/javinizer-e2e-output/history-test');
 		await waitForJobCompletion(request, jobId);
