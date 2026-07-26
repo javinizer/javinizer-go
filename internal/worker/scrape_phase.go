@@ -533,6 +533,16 @@ func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inp
 				if r := recover(); r != nil {
 					logging.Errorf("persistScrapeOutcome panic recovered: %v", r)
 					recorded[o.FilePath] = true
+					auditCtx, auditCancel := historyAuditContext()
+					defer auditCancel()
+					recordHistory(auditCtx, inputs.HistoryRepo, models.History{
+						MovieID:      o.MovieID,
+						BatchJobID:   jobIDPtr(inputs.JobID),
+						Operation:    models.HistoryOpScrape,
+						OriginalPath: o.FilePath,
+						Status:       models.HistoryStatusFailed,
+						ErrorMessage: fmt.Sprintf("persist panic: %v", r),
+					})
 				}
 			}()
 			if persistScrapeOutcome(ctx, o, inputs, onFileFailed) {

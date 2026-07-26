@@ -311,7 +311,7 @@ func interpretApplyResult(
 		}
 		outcome.Failed = true
 		outcome.ErrorMsg = errMsg
-		auditOrganizeFailure(inputs, movie, filePath, result, errMsg, cfg)
+		auditOrganizeFailure(inputs, movie, filePath, result, applyErr, cfg)
 		return outcome
 	}
 

@@ -127,11 +127,11 @@ func auditOrganizeSuccess(inputs applyPhaseInputs, movie *models.Movie, filePath
 // auditOrganizeFailure writes a failed organize history row for non-cancellation failures.
 // Called from interpretApplyResult when applyErr is non-nil and not context.Canceled.
 // Writes regardless of whether OrganizeResult exists — organize was requested and failed.
-func auditOrganizeFailure(inputs applyPhaseInputs, movie *models.Movie, filePath string, result *workflow.ApplyResult, errMsg string, cfg ApplyPhaseConfig) {
+func auditOrganizeFailure(inputs applyPhaseInputs, movie *models.Movie, filePath string, result *workflow.ApplyResult, applyErr error, cfg ApplyPhaseConfig) {
 	if inputs.HistoryRepo == nil {
 		return
 	}
-	if errors.Is(errors.New(errMsg), context.Canceled) {
+	if applyErr != nil && errors.Is(applyErr, context.Canceled) {
 		return
 	}
 	auditCtx, cancel := historyAuditContext()
@@ -143,7 +143,7 @@ func auditOrganizeFailure(inputs applyPhaseInputs, movie *models.Movie, filePath
 		OriginalPath: filePath,
 		NewPath:      nilGuardOrganizeNewPath(result),
 		Status:       models.HistoryStatusFailed,
-		ErrorMessage: errMsg,
+		ErrorMessage: applyErr.Error(),
 		DryRun:       cfg.DryRun,
 		Metadata:     organizeMetadata(inputs.OperationMode, result),
 	})
