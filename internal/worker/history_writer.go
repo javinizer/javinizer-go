@@ -168,6 +168,7 @@ func auditOrganizePanic(inputs applyPhaseInputs, o applyFileOutcome) {
 		OriginalPath: o.FilePath,
 		Status:       models.HistoryStatusFailed,
 		ErrorMessage: o.PanicMsg,
+		DryRun:       o.DryRun,
 	})
 }
 

@@ -41,6 +41,7 @@ type applyFileOutcome struct {
 	PanicMsg  string
 	ErrorMsg  string
 	Movie     *models.Movie // updated movie after apply (nil if failed)
+	DryRun    bool          // true if apply was a dry-run
 }
 
 // Run executes the apply phase: setup errgroup → iterate files → dispatch
@@ -380,6 +381,7 @@ func applyFile(
 	outcome = applyFileOutcome{
 		FilePath: filePath,
 		MovieID:  movie.ID,
+		DryRun:   cfg.DryRun,
 	}
 
 	rc := recoveryContext{
