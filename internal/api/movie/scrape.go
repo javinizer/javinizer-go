@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,6 +16,12 @@ import (
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
+
+var movieEmbeddedURLRe = regexp.MustCompile(`(?i)https?://[^\s/]+@`)
+
+func redactEmbeddedURLs(s string) string {
+	return movieEmbeddedURLRe.ReplaceAllString(s, "https://redacted:redacted@")
+}
 
 func redactURLCredentials(input string) string {
 	u, err := url.Parse(input)
@@ -120,7 +127,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 					Operation:    models.HistoryOpScrape,
 					OriginalPath: safeInput,
 					Status:       models.HistoryStatusFailed,
-					ErrorMessage: err.Error(),
+					ErrorMessage: redactEmbeddedURLs(err.Error()),
 				})
 			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
@@ -130,20 +137,17 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		if result.Status == scrape.StatusFailed {
 			errMsg := "Movie not found"
 			if result.Message != "" {
-				errMsg = result.Message
+				errMsg = redactEmbeddedURLs(result.Message)
 			}
 			if deps.HistoryRepo != nil {
 				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer auditCancel()
 				safeInput := redactURLCredentials(cmd.RawInput)
-				movieID := cmd.MovieID
-				if movieID == "" {
-					movieID = safeInput
-					for _, sr := range result.ScraperResults {
-						if sr.ID != "" {
-							movieID = sr.ID
-							break
-						}
+				movieID := safeInput
+				for _, sr := range result.ScraperResults {
+					if sr.ID != "" {
+						movieID = sr.ID
+						break
 					}
 				}
 				_ = deps.HistoryRepo.Create(auditCtx, &models.History{

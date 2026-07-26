@@ -17,6 +17,7 @@ func recordHistory(ctx context.Context, repo database.HistoryRepositoryInterface
 	if repo == nil {
 		return
 	}
+	h.ErrorMessage = redactEmbeddedURLs(h.ErrorMessage)
 	if err := repo.Create(ctx, &h); err != nil {
 		logging.Warnf("[history] create failed for %s %s: %v", h.Operation, h.MovieID, err)
 	}
@@ -176,10 +177,10 @@ func auditOrganizePanic(inputs applyPhaseInputs, o applyFileOutcome) {
 }
 
 // auditRescrapeSuccess writes a success scrape history row for a completed rescrape.
-var embeddedURLRe = regexp.MustCompile(`https?://[^@\s/]+:[^@\s/]+@`)
+var workerEmbeddedURLRe = regexp.MustCompile(`(?i)https?://[^\s/]+@`)
 
 func redactEmbeddedURLs(s string) string {
-	return embeddedURLRe.ReplaceAllString(s, "https://redacted:redacted@")
+	return workerEmbeddedURLRe.ReplaceAllString(s, "https://redacted:redacted@")
 }
 
 func auditRescrapeSuccess(inputs rescrapePhaseInputs, movieID, filePath string) {
