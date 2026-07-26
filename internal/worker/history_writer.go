@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/url"
+	"regexp"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -142,12 +142,7 @@ func auditOrganizeFailure(inputs applyPhaseInputs, movie *models.Movie, filePath
 		errMsg = applyErr.Error()
 	}
 	// Redact any URLs that may contain credentials in the error message
-	if u, e := url.Parse(errMsg); e == nil && u.Host != "" && u.User != nil {
-		u.User = url.UserPassword("redacted", "redacted")
-		u.RawQuery = ""
-		u.Fragment = ""
-		errMsg = u.String()
-	}
+	errMsg = redactEmbeddedURLs(errMsg)
 	recordHistory(auditCtx, inputs.HistoryRepo, models.History{
 		MovieID:      movie.ID,
 		BatchJobID:   jobIDPtr(inputs.JobID),
@@ -181,6 +176,12 @@ func auditOrganizePanic(inputs applyPhaseInputs, o applyFileOutcome) {
 }
 
 // auditRescrapeSuccess writes a success scrape history row for a completed rescrape.
+var embeddedURLRe = regexp.MustCompile(`https?://[^@\s/]+:[^@\s/]+@`)
+
+func redactEmbeddedURLs(s string) string {
+	return embeddedURLRe.ReplaceAllString(s, "https://redacted:redacted@")
+}
+
 func auditRescrapeSuccess(inputs rescrapePhaseInputs, movieID, filePath string) {
 	if inputs.HistoryRepo == nil {
 		return
