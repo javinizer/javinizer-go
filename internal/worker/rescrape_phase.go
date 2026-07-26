@@ -183,7 +183,7 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 		if lc.inputs.HistoryRepo != nil {
 			auditCtx, auditCancel := historyAuditContext()
 			defer auditCancel()
-			movieID := ""
+			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
 				movieID = movieResult.Movie.ID
 			}
@@ -200,15 +200,22 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 		return nil, err
 	}
 
+	if outcome == nil {
+		return nil, nil
+	}
 	switch outcome.Status {
 	case models.RescrapeStatusGone, models.RescrapeStatusConflict, models.RescrapeStatusFailed:
 		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
 		if lc.inputs.HistoryRepo != nil {
 			auditCtx, auditCancel := historyAuditContext()
 			defer auditCancel()
-			movieID := ""
+			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
 				movieID = movieResult.Movie.ID
+			}
+			errMsg := outcome.Error
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("rescrape %s", outcome.Status)
 			}
 			recordHistory(auditCtx, lc.inputs.HistoryRepo, models.History{
 				MovieID:      movieID,
@@ -216,7 +223,7 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 				Operation:    models.HistoryOpScrape,
 				OriginalPath: lc.lookup.FilePath,
 				Status:       models.HistoryStatusFailed,
-				ErrorMessage: fmt.Sprintf("rescrape %s", outcome.Status),
+				ErrorMessage: errMsg,
 				Metadata:     organizeMetadata("rescrape", nil),
 			})
 		}
