@@ -435,7 +435,7 @@ func trackApplyResults(inputs applyPhaseInputs, outcomes []applyFileOutcome, org
 		if o.Failed || o.Panic {
 			atomic.AddInt64(failed, 1)
 		}
-		if o.Panic && !o.Cancelled {
+		if o.Panic && !o.Cancelled && !inputs.OrganizeSkipped {
 			auditOrganizePanic(inputs, o)
 		}
 	}

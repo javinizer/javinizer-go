@@ -133,8 +133,9 @@ type applyPhaseInputs struct {
 	Destination string
 	Update      bool // Update mode (in-place, no file organization)
 
-	HistoryRepo   database.HistoryRepositoryInterface
-	OperationMode string
+	HistoryRepo     database.HistoryRepositoryInterface
+	OperationMode   string
+	OrganizeSkipped bool
 
 	Broadcaster progressBroadcaster
 	Updater     resultstore.ResultUpdater

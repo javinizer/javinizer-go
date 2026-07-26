@@ -316,20 +316,21 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 	}
 
 	return applyPhaseInputs{
-		JobID:         c.job.ID,
-		Concurrency:   newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
-		NFOEnabled:    batchCfg.NFOEnabled,
-		WF:            wf,
-		Results:       snap.Results,
-		Excluded:      snap.Excluded,
-		Destination:   cfg.Destination,
-		Update:        upd,
-		HistoryRepo:   histRepo,
-		OperationMode: opMode,
-		Broadcaster:   broadcaster,
-		Updater:       c.job.results,
-		Lifecycle:     c.job.lifecycle,
-		persister:     persistFunc(persistFn),
+		JobID:           c.job.ID,
+		Concurrency:     newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
+		NFOEnabled:      batchCfg.NFOEnabled,
+		WF:              wf,
+		Results:         snap.Results,
+		Excluded:        snap.Excluded,
+		Destination:     cfg.Destination,
+		Update:          upd,
+		HistoryRepo:     histRepo,
+		OperationMode:   opMode,
+		OrganizeSkipped: cfg.OrganizeOptions.Skip,
+		Broadcaster:     broadcaster,
+		Updater:         c.job.results,
+		Lifecycle:       c.job.lifecycle,
+		persister:       persistFunc(persistFn),
 	}
 }
 
