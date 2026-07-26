@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,6 +15,20 @@ import (
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
+
+func redactURLCredentials(input string) string {
+	u, err := url.Parse(input)
+	if err != nil {
+		return "redacted"
+	}
+	if u.Host == "" {
+		return input
+	}
+	if u.User != nil {
+		u.User = url.UserPassword("redacted", "redacted")
+	}
+	return u.String()
+}
 
 // scrapeMovie godoc
 // @Summary Scrape movie metadata
@@ -78,10 +93,11 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			if deps.HistoryRepo != nil && !errors.Is(scrapeCtx.Err(), context.Canceled) {
 				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer auditCancel()
+				safeInput := redactURLCredentials(cmd.RawInput)
 				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
-					MovieID:      cmd.RawInput,
+					MovieID:      safeInput,
 					Operation:    models.HistoryOpScrape,
-					OriginalPath: cmd.RawInput,
+					OriginalPath: safeInput,
 					Status:       models.HistoryStatusFailed,
 					ErrorMessage: "scrape timed out",
 				})
@@ -93,10 +109,11 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			if deps.HistoryRepo != nil && !errors.Is(err, context.Canceled) {
 				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer auditCancel()
+				safeInput := redactURLCredentials(cmd.RawInput)
 				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
-					MovieID:      cmd.RawInput,
+					MovieID:      safeInput,
 					Operation:    models.HistoryOpScrape,
-					OriginalPath: cmd.RawInput,
+					OriginalPath: safeInput,
 					Status:       models.HistoryStatusFailed,
 					ErrorMessage: err.Error(),
 				})
@@ -113,10 +130,11 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			if deps.HistoryRepo != nil {
 				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer auditCancel()
+				safeInput := redactURLCredentials(cmd.RawInput)
 				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
-					MovieID:      cmd.RawInput,
+					MovieID:      safeInput,
 					Operation:    models.HistoryOpScrape,
-					OriginalPath: cmd.RawInput,
+					OriginalPath: safeInput,
 					Status:       models.HistoryStatusFailed,
 					ErrorMessage: errMsg,
 				})
@@ -131,7 +149,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			_ = deps.HistoryRepo.Create(auditCtx, &models.History{
 				MovieID:      result.Movie.ID,
 				Operation:    models.HistoryOpScrape,
-				OriginalPath: cmd.RawInput,
+				OriginalPath: redactURLCredentials(cmd.RawInput),
 				Status:       models.HistoryStatusSuccess,
 			})
 		}
