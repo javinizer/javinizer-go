@@ -245,12 +245,39 @@ func TestHistoryCardinality_PersistedSuccessExactlyOneRow(t *testing.T) {
 		},
 	}
 
-	persistScrapeOutcome(context.Background(), o, inputs, nil)
-	trackScrapeResults(inputs, []scrapeFileOutcome{o}, map[string]bool{o.FilePath: true})
+	recorded := persistScrapeOutcomePool(context.Background(), []scrapeFileOutcome{o}, inputs, nil)
+	trackScrapeResults(inputs, []scrapeFileOutcome{o}, recorded)
 
 	records, err := repo.FindByBatchJobID(context.Background(), "card-job")
 	require.NoError(t, err)
-	assert.Len(t, records, 1, "persist + track must produce exactly one success row")
+	assert.Len(t, records, 1, "persist pool + track must produce exactly one success row")
+	if len(records) == 1 {
+		assert.Equal(t, models.HistoryStatusSuccess, records[0].Status)
+	}
+}
+
+func TestHistoryCardinality_PrePersistCancelAuditsSuccess(t *testing.T) {
+	db := newHistoryTestDB(t)
+	repos := db.Repositories()
+	repo := repos.HistoryRepo
+
+	inputs := scrapePhaseInputs{
+		JobID:       "card-cancel-job",
+		HistoryRepo: repo,
+	}
+
+	o := scrapeFileOutcome{
+		FilePath: "/input/CARD-002.mp4",
+		MovieID:  "CARD-002",
+		Success:  true,
+		Result:   &scrape.ScrapeResult{Movie: &models.Movie{ID: "CARD-002"}, Status: scrape.StatusCompleted},
+	}
+
+	trackScrapeResults(inputs, []scrapeFileOutcome{o}, nil)
+
+	records, err := repo.FindByBatchJobID(context.Background(), "card-cancel-job")
+	require.NoError(t, err)
+	assert.Len(t, records, 1, "pre-persist cancel must audit one success row via trackScrapeResults(nil)")
 	if len(records) == 1 {
 		assert.Equal(t, models.HistoryStatusSuccess, records[0].Status)
 	}

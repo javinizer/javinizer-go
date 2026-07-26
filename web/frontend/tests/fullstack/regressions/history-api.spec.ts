@@ -290,9 +290,9 @@ test.describe('History happy path — records appear after real scrape+organize'
 	}) => {
 		await loginAgainstRealBackend(request);
 
-		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-001.mp4`] });
+		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-003.mp4`] });
 		await waitForJobCompletion(request, jobId);
-		await submitOrganize(request, jobId, '/tmp/javinizer-e2e-output');
+		await submitOrganize(request, jobId, '/tmp/javinizer-e2e-output/history-test');
 		await waitForJobCompletion(request, jobId);
 
 		const listResp = await request.get(`${BACKEND_BASE}/api/v1/history?limit=50`);

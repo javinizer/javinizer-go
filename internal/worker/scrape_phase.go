@@ -572,7 +572,7 @@ func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inp
 // AtomicUpdateFileResult so API/UI readers observe a consistent snapshot.
 // Persist failures surface on the MovieResult, preserving the original
 // error semantics (persist error → Status=Failed).
-func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) (recordedSuccess bool) {
+func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) (handled bool) {
 	// Clone before persisting: UpsertWithTranslations mutates its input movie in
 	// place (resets association slices to reapply associations). The in-memory
 	// MovieResult.Movie shares the result.Movie pointer, so mutating it here
@@ -587,7 +587,7 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	saved, err := inputs.MovieRepo.UpsertWithTranslations(ctx, cloned, genreTrans, actressTrans)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return false
+			return true
 		}
 		logging.Warnf("[scrape-phase] Failed to persist %s: %v", o.MovieID, err)
 		_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
