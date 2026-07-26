@@ -24,7 +24,7 @@ import (
 const defaultBaseURL = "http://dl.getchu.com"
 
 var (
-	itemIDRegex      = regexp.MustCompile(`(?i)(?:作品ID[:：]\s*|id=|/item|^)(\d{4,})`)
+	itemIDRegex      = regexp.MustCompile(`(?i)(?:作品ID[:：]\s*|id=|/item|^)(\d{4,})(?:$|[^0-9])`)
 	descriptionRegex = regexp.MustCompile(`(?is)作品内容</td>(.*?)</td>`)
 	releaseDateRegex = regexp.MustCompile(`(\d{4}/\d{2}/\d{2})`)
 	runtimeRegex     = regexp.MustCompile(`([０-９\s]{1,3})分`)
