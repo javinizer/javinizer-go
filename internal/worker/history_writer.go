@@ -178,9 +178,12 @@ func auditOrganizePanic(inputs applyPhaseInputs, o applyFileOutcome) {
 
 // auditRescrapeSuccess writes a success scrape history row for a completed rescrape.
 var workerEmbeddedURLRe = regexp.MustCompile(`(?i)https?://[^\s/]+@`)
+var workerQueryURLRe = regexp.MustCompile(`(?i)(https?://[^\s?]+)\?[^\s]+`)
 
 func redactEmbeddedURLs(s string) string {
-	return workerEmbeddedURLRe.ReplaceAllString(s, "https://redacted:redacted@")
+	s = workerEmbeddedURLRe.ReplaceAllString(s, "https://redacted:redacted@")
+	s = workerQueryURLRe.ReplaceAllString(s, "$1")
+	return s
 }
 
 func auditRescrapeSuccess(inputs rescrapePhaseInputs, movieID, filePath string) {
