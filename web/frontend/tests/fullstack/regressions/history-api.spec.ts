@@ -293,7 +293,7 @@ test.describe('History happy path — records appear after real scrape+organize'
 
 		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-003.mp4`] });
 		await waitForJobCompletion(request, jobId);
-		await submitOrganize(request, jobId, '/tmp/javinizer-e2e-output/history-test');
+		await submitOrganize(request, jobId, `/tmp/javinizer-e2e-output/history-test-${Date.now()}`);
 		// Wait for the organize goroutine to transition the job to 'organized'
 		let organized = false;
 		for (let i = 0; i < 30; i++) {
