@@ -32,7 +32,7 @@ func redactURLCredentials(input string) string {
 		return "redacted"
 	}
 	if u.Host == "" {
-		if u.Scheme != "" {
+		if strings.EqualFold(u.Scheme, "http") || strings.EqualFold(u.Scheme, "https") {
 			return "redacted"
 		}
 		return input
