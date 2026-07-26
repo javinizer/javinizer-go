@@ -294,7 +294,8 @@ test.describe('History happy path — records appear after real scrape+organize'
 		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-003.mp4`] });
 		await waitForJobCompletion(request, jobId);
 		await submitOrganize(request, jobId, '/tmp/javinizer-e2e-output/history-test');
-		await waitForJobCompletion(request, jobId);
+		// Wait for the job to transition from completed to running, then to organized
+		await waitForJobCompletion(request, jobId, { timeout: 30000 });
 
 		const listResp = await request.get(`${BACKEND_BASE}/api/v1/history?limit=50`);
 		expect(listResp.ok(), 'GET /history must return 200 after scrape+organize').toBeTruthy();
