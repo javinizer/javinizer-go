@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -73,10 +74,32 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 		result, _, err := wf.Scrape(scrapeCtx, cmd)
 		if scrapeCtx.Err() != nil {
+			if deps.HistoryRepo != nil {
+				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer auditCancel()
+				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
+					MovieID:      cmd.RawInput,
+					Operation:    models.HistoryOpScrape,
+					OriginalPath: cmd.RawInput,
+					Status:       models.HistoryStatusFailed,
+					ErrorMessage: "scrape timed out",
+				})
+			}
 			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape timed out"})
 			return
 		}
 		if err != nil {
+			if deps.HistoryRepo != nil {
+				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer auditCancel()
+				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
+					MovieID:      cmd.RawInput,
+					Operation:    models.HistoryOpScrape,
+					OriginalPath: cmd.RawInput,
+					Status:       models.HistoryStatusFailed,
+					ErrorMessage: err.Error(),
+				})
+			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
@@ -86,8 +109,30 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			if result.Message != "" {
 				errMsg = result.Message
 			}
+			if deps.HistoryRepo != nil {
+				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer auditCancel()
+				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
+					MovieID:      cmd.RawInput,
+					Operation:    models.HistoryOpScrape,
+					OriginalPath: cmd.RawInput,
+					Status:       models.HistoryStatusFailed,
+					ErrorMessage: errMsg,
+				})
+			}
 			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: errMsg})
 			return
+		}
+
+		if deps.HistoryRepo != nil && result.Movie != nil {
+			auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer auditCancel()
+			_ = deps.HistoryRepo.Create(auditCtx, &models.History{
+				MovieID:      result.Movie.ID,
+				Operation:    models.HistoryOpScrape,
+				OriginalPath: cmd.RawInput,
+				Status:       models.HistoryStatusSuccess,
+			})
 		}
 
 		// Generate temp poster for the scraped movie.

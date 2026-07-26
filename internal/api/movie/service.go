@@ -20,6 +20,7 @@ type WorkflowFunc func() workflow.WorkflowInterface
 // matching the ActressDeps pattern used in the actress package.
 type MovieDeps struct {
 	MovieRepo        database.MovieRepositoryInterface
+	HistoryRepo      database.HistoryRepositoryInterface
 	WorkflowFn       WorkflowFunc
 	PosterGen        poster.PosterGenerator
 	AllowedDirs      []string
@@ -37,6 +38,11 @@ func NewMovieDeps(movieRepo database.MovieRepositoryInterface, opts ...MovieDeps
 
 // MovieDepsOption configures a MovieDeps instance.
 type MovieDepsOption func(*MovieDeps)
+
+// WithHistoryRepo sets the history repository for recording scrape operations.
+func WithHistoryRepo(r database.HistoryRepositoryInterface) MovieDepsOption {
+	return func(d *MovieDeps) { d.HistoryRepo = r }
+}
 
 // WithWorkflow sets the workflow factory function for scrape and compare operations.
 func WithWorkflow(fn WorkflowFunc) MovieDepsOption {

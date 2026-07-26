@@ -153,6 +153,7 @@ func registerAPIV1Routes(router *gin.Engine, rt *core.APIRuntime) {
 		movie.WithAllowedDirs(secCfg.AllowedDirectories),
 		movie.WithPosterGen(posterGenForMovie),
 		movie.WithRequestTimeoutFn(func() time.Duration { return rt.GetAPIConfig().RequestTimeout }),
+		movie.WithHistoryRepo(deps.Repos.HistoryRepo),
 	)
 	tokenSvc := token.NewTokenService(deps.Repos.ApiTokenRepo)
 
