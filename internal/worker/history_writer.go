@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -139,6 +140,13 @@ func auditOrganizeFailure(inputs applyPhaseInputs, movie *models.Movie, filePath
 	errMsg := ""
 	if applyErr != nil {
 		errMsg = applyErr.Error()
+	}
+	// Redact any URLs that may contain credentials in the error message
+	if u, e := url.Parse(errMsg); e == nil && u.Host != "" && u.User != nil {
+		u.User = url.UserPassword("redacted", "redacted")
+		u.RawQuery = ""
+		u.Fragment = ""
+		errMsg = u.String()
 	}
 	recordHistory(auditCtx, inputs.HistoryRepo, models.History{
 		MovieID:      movie.ID,
