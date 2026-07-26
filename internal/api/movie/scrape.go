@@ -18,7 +18,7 @@ import (
 )
 
 var movieEmbeddedURLRe = regexp.MustCompile(`(?i)https?://[^\s/]+@`)
-var movieQueryURLRe = regexp.MustCompile(`(?i)(https?://[^\s?]+)\?[^\s]+`)
+var movieQueryURLRe = regexp.MustCompile(`(?i)(https?://[^\s?#]+)[?#][^\s]+`)
 
 func redactEmbeddedURLs(s string) string {
 	s = movieEmbeddedURLRe.ReplaceAllString(s, "https://redacted:redacted@")
