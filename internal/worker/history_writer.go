@@ -107,12 +107,8 @@ func auditScrapeSuccess(inputs scrapePhaseInputs, o scrapeFileOutcome) {
 // Only called when organize actually ran (result.OrganizeResult != nil) or when organizing
 // was cancelled after a partial move (OrganizeResult exists despite context.Canceled).
 func auditOrganizeSuccess(inputs applyPhaseInputs, movie *models.Movie, filePath string, result *workflow.ApplyResult, cfg ApplyPhaseConfig) {
-	if inputs.HistoryRepo == nil || result == nil {
+	if inputs.HistoryRepo == nil || result == nil || result.OrganizeResult == nil {
 		return
-	}
-	newPath := ""
-	if result.OrganizeResult != nil {
-		newPath = result.OrganizeResult.NewPath
 	}
 	auditCtx, cancel := historyAuditContext()
 	defer cancel()
@@ -121,7 +117,7 @@ func auditOrganizeSuccess(inputs applyPhaseInputs, movie *models.Movie, filePath
 		BatchJobID:   jobIDPtr(inputs.JobID),
 		Operation:    models.HistoryOpOrganize,
 		OriginalPath: filePath,
-		NewPath:      newPath,
+		NewPath:      result.OrganizeResult.NewPath,
 		Status:       models.HistoryStatusSuccess,
 		DryRun:       cfg.DryRun,
 		Metadata:     organizeMetadata(inputs.OperationMode, result),

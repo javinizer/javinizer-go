@@ -533,6 +533,14 @@ func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inp
 				if r := recover(); r != nil {
 					logging.Errorf("persistScrapeOutcome panic recovered: %v", r)
 					recorded[o.FilePath] = true
+					_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+						current.Status = models.JobStatusFailed
+						current.Error = fmt.Sprintf("persist panic: %v", r)
+						return current, nil
+					})
+					if onFileFailed != nil {
+						onFileFailed(o.FilePath, o.MovieID, fmt.Sprintf("persist panic: %v", r))
+					}
 					auditCtx, auditCancel := historyAuditContext()
 					defer auditCancel()
 					recordHistory(auditCtx, inputs.HistoryRepo, models.History{

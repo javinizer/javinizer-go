@@ -279,7 +279,9 @@ func interpretApplyResult(
 			EndedAt:       &now,
 		})
 		if isCancelled {
-			auditOrganizeSuccess(inputs, movie, filePath, result, cfg)
+			if result != nil && result.OrganizeResult != nil {
+				auditOrganizeSuccess(inputs, movie, filePath, result, cfg)
+			}
 			// and do NOT invoke OnFileFailed, otherwise the review page records
 			// the file as failed and offers a Retry path despite the persisted
 			// result being Cancelled.
