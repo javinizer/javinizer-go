@@ -40,8 +40,8 @@ func TestExecuteWithMaxBytes_TitleBudgetExhausted(t *testing.T) {
 	// maxBytes so small that titleBudget <= 0 after subtracting frame bytes
 	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<YEAR>)", ctx, 5)
 	require.NoError(t, err)
-	// Falls back to Execute without truncation
-	assert.Contains(t, got, "ABC-123")
+	// Result is clamped to maxBytes
+	assert.LessOrEqual(t, len(got), 5)
 }
 
 func TestExecuteWithMaxBytes_TitleFitsInBudget(t *testing.T) {

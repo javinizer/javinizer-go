@@ -134,18 +134,30 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 
 	frame, err := e.Execute(tmpl, frameCtx)
 	if err != nil {
-		return e.Execute(tmpl, ctx)
+		result, execErr := e.Execute(tmpl, ctx)
+		if execErr != nil {
+			return "", execErr
+		}
+		return clampBytes(result, maxBytes), nil
 	}
 
 	frameBytes := len(frame) - strings.Count(frame, sentinel)*len(sentinel)
 	titleBudget := maxBytes - frameBytes
 	if titleBudget <= 0 {
-		return e.Execute(tmpl, ctx)
+		result, err := e.Execute(tmpl, ctx)
+		if err != nil {
+			return "", err
+		}
+		return clampBytes(result, maxBytes), nil
 	}
 
 	titleBytes := len(ctx.Title)
 	if titleBytes <= titleBudget {
-		return e.Execute(tmpl, ctx)
+		result, err := e.Execute(tmpl, ctx)
+		if err != nil {
+			return "", err
+		}
+		return clampBytes(result, maxBytes), nil
 	}
 
 	truncatedCtx := ctx.Clone()
@@ -157,7 +169,29 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 		truncatedCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, titleBudget)
 	}
 
-	return e.Execute(tmpl, truncatedCtx)
+	result, err := e.Execute(tmpl, truncatedCtx)
+	if err != nil {
+		return "", err
+	}
+	return clampBytes(result, maxBytes), nil
+}
+
+func clampBytes(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return s
+	}
+	runes := []rune(s)
+	currentBytes := 0
+	endIdx := 0
+	for i, r := range runes {
+		runeSize := len(string(r))
+		if currentBytes+runeSize > maxBytes {
+			break
+		}
+		currentBytes += runeSize
+		endIdx = i + 1
+	}
+	return string(runes[:endIdx])
 }
 
 // ExecuteWithContext processes a template string with cancellation support and output limits.
@@ -649,7 +683,11 @@ func newTagRegistry() map[string]tagResolver {
 
 // TruncateTitle smartly truncates a title to maxLen characters
 func (e *Engine) TruncateTitle(title string, maxLen int) string {
-	if maxLen <= 0 || len(title) <= maxLen {
+	if maxLen <= 0 {
+		return title
+	}
+	runes := []rune(title)
+	if len(runes) <= maxLen {
 		return title
 	}
 
@@ -659,7 +697,6 @@ func (e *Engine) TruncateTitle(title string, maxLen int) string {
 
 	if isCJK {
 		if maxLen > 3 {
-			runes := []rune(title)
 			if len(runes) > maxLen-3 {
 				return string(runes[:maxLen-3]) + marker
 			}
@@ -667,7 +704,6 @@ func (e *Engine) TruncateTitle(title string, maxLen int) string {
 		return title
 	}
 
-	runes := []rune(title)
 	if maxLen > 3 {
 		if len(runes) > maxLen-3 {
 			truncated := runes[:maxLen-3]
