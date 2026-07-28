@@ -214,26 +214,6 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	sort.Ints(sortedBudgets)
 	seenTruncations := make(map[string]bool)
 	shortestLen := len(sanitized)
-	// Short-circuit: if even an empty title exceeds the budget, no truncation will help.
-	emptyCtx := ctx.Clone()
-	emptyCtx.Title = ""
-	emptyCtx.OriginalTitle = ""
-	for lang, tr := range emptyCtx.Translations {
-		tr.Title = ""
-		tr.OriginalTitle = ""
-		emptyCtx.Translations[lang] = tr
-	}
-	emptyResult, emptyErr := e.Execute(tmpl, emptyCtx)
-	if emptyErr == nil {
-		emptySanitized := SanitizeFolderPath(emptyResult)
-		if len(emptySanitized) < shortestLen {
-			shortestLen = len(emptySanitized)
-		}
-		// If even an empty title exceeds maxBytes, no truncation will help.
-		if len(emptySanitized) > maxBytes {
-			return "", fmt.Errorf("folder template cannot fit within the available %d-byte budget by truncating title fields; shortest sanitized rendering is %d bytes; shorten the folder template or destination path, or increase max_path_length", maxBytes, shortestLen)
-		}
-	}
 	for i := len(sortedBudgets) - 1; i >= 0; i-- {
 		budget := sortedBudgets[i]
 		t := e.TruncateTitleBytes(ctx.Title, budget)
