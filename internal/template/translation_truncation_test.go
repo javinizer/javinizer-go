@@ -100,6 +100,16 @@ func TestExecuteWithMaxBytes_LinearScanExecuteError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestExecuteWithMaxBytes_ConditionalElseExceedsMaxOutput(t *testing.T) {
+	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 20})
+	ctx := &Context{ID: "ABC", Title: "CD"}
+	// When TITLE is present: IF branch renders "ABC-CD" (6 bytes ≤ 20 → passes)
+	// When TITLE is empty: ELSE branch renders "ABC-VeryLongElseContent" (22 > 20 → error)
+	// The render loop's 'continue' catches the error and tries the next state.
+	_, err := e.ExecuteWithMaxBytes("<ID>-<IF:TITLE><TITLE><ELSE>VeryLongElseContent</IF>", ctx, 4)
+	require.Error(t, err, "should error when no candidate fits within budget")
+}
+
 func TestExecuteWithMaxBytes_PropagateError_TitleBudgetPath(t *testing.T) {
 	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 16})
 	ctx := &Context{ID: "ABC", Title: "VeryLongTitle"}
