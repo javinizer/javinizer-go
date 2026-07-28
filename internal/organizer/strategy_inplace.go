@@ -79,36 +79,6 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 
 	sourceDir := filepath.Dir(match.Path)
 	parentDir := filepath.Dir(sourceDir)
-	// In in-place mode, the target is under the source directory tree,
-	// so destDir is irrelevant for overhead calculation. Only include it
-	// for organize mode where the target may be under destDir.
-	baseDir := parentDir
-	if s.config.OperationMode != operationmode.OperationModeInPlace && len(destDir) > len(parentDir) {
-		baseDir = destDir
-	}
-	// Use a placeholder folder to compute actual separator overhead
-	fullOverhead := filepath.Join(baseDir, "X", pc.FileName)
-	overheadBytes := len(fullOverhead) - len("X")
-	folderMaxBytes := 0
-	if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
-		folderMaxBytes = s.config.MaxPathLength - overheadBytes
-	}
-
-	folderName := pc.FolderName
-	if folderMaxBytes > 0 {
-		var err error
-		folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, pc.Ctx, folderMaxBytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate folder name: %w", err)
-		}
-		folderName = template.SanitizeFolderPath(folderName)
-		if folderName == "" {
-			folderName = template.SanitizeFolderPath(match.MovieID)
-			if folderName == "" {
-				folderName = "unknown"
-			}
-		}
-	}
 
 	var targetDir string
 	targetPath := ""
@@ -125,23 +95,66 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 		if err != nil {
 			return nil, err
 		}
-
-		if isDedicated {
-			currentFolderName := filepath.Base(sourceDir)
-			if currentFolderName != folderName {
-				inPlace = true
-				oldDir = sourceDir
-				targetDir = filepath.Join(filepath.Dir(sourceDir), folderName)
-				targetPath = filepath.Join(targetDir, pc.FileName)
-				willMove = true
-			} else {
-				skipInPlaceReason = "folder already has correct name"
-			}
-		} else {
-			skipInPlaceReason = "folder contains mixed IDs"
-		}
+		_ = isDedicated
 	} else {
 		skipInPlaceReason = "matcher not set"
+	}
+
+	// Determine whether the folder will be renamed before enforcing the budget.
+	// Only compute folderMaxBytes when the folder name will actually be used.
+	folderWillRename := false
+	if s.config.OperationMode == operationmode.OperationModeOrganize {
+		folderWillRename = true
+	} else if isDedicated {
+		currentFolderName := filepath.Base(sourceDir)
+		folderWillRename = currentFolderName != pc.FolderName
+	}
+
+	folderName := pc.FolderName
+	if folderWillRename {
+		// In in-place mode, the target is under the source directory tree,
+		// so destDir is irrelevant for overhead calculation.
+		baseDir := parentDir
+		if s.config.OperationMode != operationmode.OperationModeInPlace && len(destDir) > len(parentDir) {
+			baseDir = destDir
+		}
+		fullOverhead := filepath.Join(baseDir, "X", pc.FileName)
+		overheadBytes := len(fullOverhead) - len("X")
+		folderMaxBytes := 0
+		if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
+			folderMaxBytes = s.config.MaxPathLength - overheadBytes
+		}
+		if folderMaxBytes > 0 {
+			var err error
+			folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, pc.Ctx, folderMaxBytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate folder name: %w", err)
+			}
+			folderName = template.SanitizeFolderPath(folderName)
+			if folderName == "" {
+				folderName = template.SanitizeFolderPath(match.MovieID)
+				if folderName == "" {
+					folderName = "unknown"
+				}
+			}
+		}
+	}
+
+	if s.matcher != nil && isDedicated {
+		currentFolderName := filepath.Base(sourceDir)
+		if currentFolderName != folderName {
+			inPlace = true
+			oldDir = sourceDir
+			targetDir = filepath.Join(filepath.Dir(sourceDir), folderName)
+			targetPath = filepath.Join(targetDir, pc.FileName)
+			willMove = true
+		} else {
+			skipInPlaceReason = "folder already has correct name"
+		}
+	} else if s.matcher == nil {
+		skipInPlaceReason = "matcher not set"
+	} else {
+		skipInPlaceReason = "folder contains mixed IDs"
 	}
 
 	if !inPlace && s.config.OperationMode == operationmode.OperationModeOrganize {
