@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 // Package-level compiled regexes for performance
@@ -191,16 +189,7 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			maxTitleLen = len(tr.OriginalTitle)
 		}
 	}
-	// Collect distinct truncation states by scanning rune boundaries.
-	// Iterate at rune counts to avoid O(n²) byte-by-byte scanning for long titles.
-	type truncState struct {
-		title, origTitle string
-		translations     map[string]models.MovieTranslation
-	}
-	seenTruncations := make(map[string]bool)
-	var states []truncState
 	// Build a set of byte budgets at actual UTF-8 byte boundaries.
-	// Compute cumulative byte widths in one pass (avoids O(n²) prefix copying).
 	byteBudgets := map[int]bool{0: true}
 	for _, s := range []string{ctx.Title, ctx.OriginalTitle} {
 		cumBytes := 0
@@ -218,12 +207,13 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			}
 		}
 	}
-	// Sort byte budgets descending
 	sortedBudgets := make([]int, 0, len(byteBudgets))
 	for b := range byteBudgets {
 		sortedBudgets = append(sortedBudgets, b)
 	}
 	sort.Ints(sortedBudgets)
+	seenTruncations := make(map[string]bool)
+	shortestLen := len(sanitized)
 	for i := len(sortedBudgets) - 1; i >= 0; i-- {
 		budget := sortedBudgets[i]
 		t := e.TruncateTitleBytes(ctx.Title, budget)
@@ -234,27 +224,21 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			ot = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
 		}
 		key := t + "\x00" + ot
-		trans := make(map[string]models.MovieTranslation)
-		for lang, tr := range ctx.Translations {
-			trCopy := tr
-			trCopy.Title = e.TruncateTitleBytes(tr.Title, budget)
-			trCopy.OriginalTitle = e.TruncateTitleBytes(tr.OriginalTitle, budget)
-			trans[lang] = trCopy
-			key += "\x00" + trCopy.Title + "\x00" + trCopy.OriginalTitle
+		for _, tr := range ctx.Translations {
+			key += "\x00" + e.TruncateTitleBytes(tr.Title, budget) + "\x00" + e.TruncateTitleBytes(tr.OriginalTitle, budget)
 		}
 		if seenTruncations[key] {
 			continue
 		}
 		seenTruncations[key] = true
-		states = append(states, truncState{title: t, origTitle: ot, translations: trans})
-	}
-	// Render only distinct states, from longest title to shortest
-	shortestLen := len(sanitized)
-	for _, st := range states {
 		truncCtx := ctx.Clone()
-		truncCtx.Title = st.title
-		truncCtx.OriginalTitle = st.origTitle
-		truncCtx.Translations = st.translations
+		truncCtx.Title = t
+		truncCtx.OriginalTitle = ot
+		for lang, tr := range ctx.Translations {
+			tr.Title = e.TruncateTitleBytes(ctx.Translations[lang].Title, budget)
+			tr.OriginalTitle = e.TruncateTitleBytes(ctx.Translations[lang].OriginalTitle, budget)
+			truncCtx.Translations[lang] = tr
+		}
 		candidate, err := e.Execute(tmpl, truncCtx)
 		if err != nil {
 			continue
