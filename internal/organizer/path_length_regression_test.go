@@ -64,8 +64,8 @@ func TestPathLengthRegression_InplaceStrategy_LongDir(t *testing.T) {
 	strategy := newInPlaceStrategy(fs, cfg, nil, engine)
 	_, err := strategy.Plan(match, movie, "/dest", false)
 
-	require.Error(t, err, "should error when path exceeds max_path_length")
-	assert.Contains(t, err.Error(), "path validation failed", "error should mention path validation")
+	require.Error(t, err, "should error when overhead exceeds max_path_length")
+	assert.Contains(t, err.Error(), "overhead", "error should explain the overhead issue")
 }
 
 func TestPathLengthRegression_InplaceNoRenameFolder_LongPath(t *testing.T) {
