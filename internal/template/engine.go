@@ -239,7 +239,9 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	}
 	// Bounded probes for non-monotonic templates (e.g. <IF:TITLE> with longer <ELSE>).
 	// Check budgets where conditional branches switch state.
-	for _, budget := range []int{0, 1} {
+	// Probe budgets where conditional branches switch state.
+	// Cover all UTF-8 first-rune byte widths: ASCII=1, CJK=3, emoji=4.
+	for _, budget := range []int{0, 1, 2, 3, 4} {
 		candidate, candLen, err := renderBudget(budget)
 		if err != nil {
 			continue

@@ -110,6 +110,17 @@ func TestExecuteWithMaxBytes_ConditionalElseExceedsMaxOutput(t *testing.T) {
 	require.Error(t, err, "should error when no candidate fits within budget")
 }
 
+func TestExecuteWithMaxBytes_CJKConditionalBoundedProbe(t *testing.T) {
+	e := NewEngine()
+	ctx := &Context{ID: "XY", Title: "これは長い日本語のタイトルです"}
+	// CJK title: each rune is 3 bytes. Budget 1-2 leaves title empty (<IF:TITLE> false).
+	// Budget 3: first rune "こ" (3 bytes) → <IF:TITLE> true → IF branch.
+	// Empty title: ELSE branch (shorter).
+	got, err := e.ExecuteWithMaxBytes("<IF:TITLE><TITLE>-<ID><ELSE><ID></IF>", ctx, 5)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(got), 5)
+}
+
 func TestExecuteWithMaxBytes_BoundedProbeFindsFit(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "XY", Title: "ABCDEFGHIJ"}
