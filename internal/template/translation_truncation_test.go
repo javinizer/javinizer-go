@@ -31,14 +31,6 @@ func TestClampResult_DifferentOriginalTitle(t *testing.T) {
 	assert.LessOrEqual(t, len(got), 30)
 }
 
-func TestExecuteWithMaxBytes_DifferentOriginalTitleTruncation(t *testing.T) {
-	e := NewEngine()
-	ctx := &Context{ID: "AB", Title: "VeryLongTitleThatExceedsBudget", OriginalTitle: "DifferentLongOriginalTitle"}
-	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<ORIGINALTITLE>)", ctx, 20)
-	require.NoError(t, err)
-	assert.LessOrEqual(t, len(got), 20)
-}
-
 func TestClampResult_TranslationWithLongOriginalTitle(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{
@@ -60,4 +52,12 @@ func TestClampResult_HardTruncationLastResort(t *testing.T) {
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(got), 5)
 	assert.Equal(t, "ABCDE", got, "should be first 5 chars of ID")
+}
+
+func TestExecuteWithMaxBytes_DifferentOriginalTitleTruncation(t *testing.T) {
+	e := NewEngine()
+	ctx := &Context{ID: "AB", Title: "VeryLongTitleThatExceedsBudget", OriginalTitle: "DifferentLongOriginalTitle"}
+	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<ORIGINALTITLE>)", ctx, 20)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(got), 20)
 }
