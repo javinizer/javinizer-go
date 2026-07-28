@@ -144,13 +144,19 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 	frameBytes := len(frame) - strings.Count(frame, sentinel)*len(sentinel)
 	titleBudget := maxBytes - frameBytes
 	if titleBudget <= 0 {
-		result, _ := e.Execute(tmpl, ctx)
+		result, err := e.Execute(tmpl, ctx)
+		if err != nil {
+			return "", err
+		}
 		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
 	titleBytes := len(ctx.Title)
 	if titleBytes <= titleBudget {
-		result, _ := e.Execute(tmpl, ctx)
+		result, err := e.Execute(tmpl, ctx)
+		if err != nil {
+			return "", err
+		}
 		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
@@ -163,7 +169,10 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 		truncatedCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, titleBudget)
 	}
 
-	result, _ := e.Execute(tmpl, truncatedCtx)
+	result, err := e.Execute(tmpl, truncatedCtx)
+	if err != nil {
+		return "", err
+	}
 	return e.clampResult(tmpl, truncatedCtx, result, maxBytes), nil
 }
 
@@ -172,7 +181,11 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		return result
 	}
 	// Try progressively truncating the title to fit within maxBytes
-	for budget := len(ctx.Title) - 1; budget >= 0; budget-- {
+	maxTitleLen := len(ctx.Title)
+	if len(ctx.OriginalTitle) > maxTitleLen {
+		maxTitleLen = len(ctx.OriginalTitle)
+	}
+	for budget := maxTitleLen - 1; budget >= 0; budget-- {
 		truncCtx := ctx.Clone()
 		truncCtx.Title = e.TruncateTitleBytes(ctx.Title, budget)
 		if ctx.OriginalTitle == ctx.Title {
@@ -180,7 +193,10 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		} else {
 			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
 		}
-		candidate, _ := e.Execute(tmpl, truncCtx)
+		candidate, candErr := e.Execute(tmpl, truncCtx)
+		if candErr != nil {
+			continue
+		}
 		if len(candidate) <= maxBytes {
 			return candidate
 		}
