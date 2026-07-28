@@ -110,6 +110,11 @@ func applyTitleTruncation(engine template.EngineInterface, ctx *template.Context
 	}
 	ctx.Title = engine.TruncateTitle(ctx.Title, maxLen)
 	ctx.OriginalTitle = engine.TruncateTitle(ctx.OriginalTitle, maxLen)
+	for lang, tr := range ctx.Translations {
+		tr.Title = engine.TruncateTitle(tr.Title, maxLen)
+		tr.OriginalTitle = engine.TruncateTitle(tr.OriginalTitle, maxLen)
+		ctx.Translations[lang] = tr
+	}
 }
 
 func checkTargetConflict(fs afero.Fs, sourcePath, targetPath string, forceUpdate, willMove bool) []string {
