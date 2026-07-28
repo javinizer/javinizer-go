@@ -61,3 +61,13 @@ func TestExecuteWithMaxBytes_DifferentOriginalTitleTruncation(t *testing.T) {
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(got), 20)
 }
+
+func TestExecuteWithMaxBytes_PropagateError_TitleBudgetPath(t *testing.T) {
+	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 16})
+	ctx := &Context{ID: "ABC", Title: "VeryLongTitle"}
+	// Sentinel "ABC-\x00MAXBYTES\x00" = 16 bytes, 16 > 16 = false → passes
+	// frameBytes = 4, titleBudget = 3 - 4 = -1 ≤ 0 → titleBudget path
+	// Execute "ABC-VeryLongTitle" = 17 > 16 → error!
+	_, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 3)
+	assert.Error(t, err)
+}

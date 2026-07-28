@@ -144,7 +144,10 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 	frameBytes := len(frame) - strings.Count(frame, sentinel)*len(sentinel)
 	titleBudget := maxBytes - frameBytes
 	if titleBudget <= 0 {
-		result, _ := e.Execute(tmpl, ctx)
+		result, renderErr := e.Execute(tmpl, ctx)
+		if renderErr != nil {
+			return "", renderErr
+		}
 		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
