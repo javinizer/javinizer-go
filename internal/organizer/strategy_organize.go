@@ -60,7 +60,8 @@ func (s *organizeStrategy) Plan(match models.FileMatchInfo, movie *models.Movie,
 
 	pathParts := []string{destDir}
 	pathParts = append(pathParts, subfolderParts...)
-	overheadBytes := len(filepath.Join(pathParts...)) + 2 + len(pc.FileName)
+	overheadBase := filepath.Join(pathParts...)
+	overheadBytes := len(overheadBase) + 1 + len(pc.FileName)
 	folderMaxBytes := 0
 	if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
 		folderMaxBytes = s.config.MaxPathLength - overheadBytes

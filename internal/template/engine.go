@@ -185,6 +185,14 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	if len(ctx.OriginalTitle) > maxTitleLen {
 		maxTitleLen = len(ctx.OriginalTitle)
 	}
+	for _, tr := range ctx.Translations {
+		if len(tr.Title) > maxTitleLen {
+			maxTitleLen = len(tr.Title)
+		}
+		if len(tr.OriginalTitle) > maxTitleLen {
+			maxTitleLen = len(tr.OriginalTitle)
+		}
+	}
 	for budget := maxTitleLen - 1; budget >= 0; budget-- {
 		truncCtx := ctx.Clone()
 		truncCtx.Title = e.TruncateTitleBytes(ctx.Title, budget)
@@ -196,6 +204,7 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		// Also truncate translated titles so <TITLE:en> etc. get shortened too
 		for lang, tr := range truncCtx.Translations {
 			tr.Title = e.TruncateTitleBytes(ctx.Translations[lang].Title, budget)
+			tr.OriginalTitle = e.TruncateTitleBytes(ctx.Translations[lang].OriginalTitle, budget)
 			truncCtx.Translations[lang] = tr
 		}
 		candidate, candErr := e.Execute(tmpl, truncCtx)
