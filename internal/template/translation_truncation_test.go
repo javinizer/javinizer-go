@@ -110,6 +110,17 @@ func TestExecuteWithMaxBytes_ConditionalElseExceedsMaxOutput(t *testing.T) {
 	require.Error(t, err, "should error when no candidate fits within budget")
 }
 
+func TestExecuteWithMaxBytes_TruncatedRenderOnExecuteError(t *testing.T) {
+	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 15})
+	longTitle := strings.Repeat("A", 100)
+	ctx := &Context{ID: "AB", Title: longTitle}
+	// Full title: "AB-" + 100 A's = 103 bytes > MaxOutputBytes=10 → Execute errors
+	// Truncated to maxBytes=10: "AB-" + 7 A's = 10 bytes ≤ 10 → succeeds
+	got, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 10)
+	require.NoError(t, err, "truncated render should succeed")
+	assert.LessOrEqual(t, len(got), 10)
+}
+
 func TestClampResult_EmojiConditionalProbeFindsFit(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "AB", Title: "\U0001F600\U0001F600\U0001F600\U0001F600"}
