@@ -132,8 +132,8 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 	frameCtx.Title = sentinel
 	frameCtx.OriginalTitle = sentinel
 
-	frame, err := e.Execute(tmpl, frameCtx)
-	if err != nil {
+	frame, frameErr := e.Execute(tmpl, frameCtx)
+	if frameErr != nil {
 		result, execErr := e.Execute(tmpl, ctx)
 		if execErr != nil {
 			return "", execErr
@@ -144,19 +144,13 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 	frameBytes := len(frame) - strings.Count(frame, sentinel)*len(sentinel)
 	titleBudget := maxBytes - frameBytes
 	if titleBudget <= 0 {
-		result, err := e.Execute(tmpl, ctx)
-		if err != nil {
-			return "", err
-		}
+		result, _ := e.Execute(tmpl, ctx)
 		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
 	titleBytes := len(ctx.Title)
 	if titleBytes <= titleBudget {
-		result, err := e.Execute(tmpl, ctx)
-		if err != nil {
-			return "", err
-		}
+		result, _ := e.Execute(tmpl, ctx)
 		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
@@ -169,10 +163,7 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 		truncatedCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, titleBudget)
 	}
 
-	result, err := e.Execute(tmpl, truncatedCtx)
-	if err != nil {
-		return "", err
-	}
+	result, _ := e.Execute(tmpl, truncatedCtx)
 	return e.clampResult(tmpl, truncatedCtx, result, maxBytes), nil
 }
 
@@ -189,8 +180,8 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		} else {
 			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
 		}
-		candidate, err := e.Execute(tmpl, truncCtx)
-		if err == nil && len(candidate) <= maxBytes {
+		candidate, _ := e.Execute(tmpl, truncCtx)
+		if len(candidate) <= maxBytes {
 			return candidate
 		}
 	}
