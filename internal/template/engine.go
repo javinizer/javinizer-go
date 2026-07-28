@@ -241,16 +241,22 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	// Check budgets where conditional branches switch state.
 	// Probe budgets where conditional branches switch state.
 	// Cover all UTF-8 first-rune byte widths: ASCII=1, CJK=3, emoji=4.
-	for _, budget := range []int{0, 1, 2, 3, 4} {
+	probeFit := func(budget int) (string, int, bool) {
 		candidate, candLen, err := renderBudget(budget)
 		if err != nil {
-			continue
+			return "", 0, false
 		}
-		if candLen < shortestLen {
-			shortestLen = candLen
-		}
-		if candLen <= maxBytes {
-			return candidate, nil
+		return candidate, candLen, true
+	}
+	for _, budget := range []int{0, 1, 2, 3, 4} {
+		candidate, candLen, ok := probeFit(budget)
+		if ok {
+			if candLen < shortestLen {
+				shortestLen = candLen
+			}
+			if candLen <= maxBytes {
+				return candidate, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("folder template cannot fit within the available %d-byte budget by truncating title fields; shortest sanitized rendering is %d bytes; shorten the folder template or destination path, or increase max_path_length", maxBytes, shortestLen)

@@ -121,6 +121,16 @@ func TestExecuteWithMaxBytes_CJKConditionalBoundedProbe(t *testing.T) {
 	assert.LessOrEqual(t, len(got), 5)
 }
 
+func TestExecuteWithMaxBytes_BoundedProbeErrorAndShortest(t *testing.T) {
+	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 20})
+	ctx := &Context{ID: "ABC", Title: "LongTitle"}
+	// Template: empty title → ELSE branch exceeds MaxOutputBytes → probe errors
+	// Non-empty title → IF branch → "ABC-LongTitle" exceeds maxBytes=4
+	// Binary search fails, probes try budget 0-4, budget 0 errors (ELSE too long)
+	_, err := e.ExecuteWithMaxBytes("<ID>-<IF:TITLE><TITLE><ELSE>VeryLongElseContentThatExceeds</IF>", ctx, 4)
+	require.Error(t, err, "should error when no candidate fits")
+}
+
 func TestExecuteWithMaxBytes_BoundedProbeFindsFit(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "XY", Title: "ABCDEFGHIJ"}
