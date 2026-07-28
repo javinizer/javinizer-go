@@ -108,14 +108,14 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 		// In in-place mode, the target is under the source directory tree,
 		// so destDir is irrelevant for overhead calculation.
 		baseDir := parentDir
-		if s.config.OperationMode != operationmode.OperationModeInPlace && len(destDir) > len(parentDir) {
-			baseDir = destDir
-		}
 		fullOverhead := filepath.Join(baseDir, "X", pc.FileName)
 		overheadBytes := len(fullOverhead) - len("X")
 		folderMaxBytes := 0
 		if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
 			folderMaxBytes = s.config.MaxPathLength - overheadBytes
+		}
+		if s.config.MaxPathLength > 0 && folderMaxBytes <= 0 {
+			return nil, fmt.Errorf("path validation failed: directory and filename overhead (%d bytes) already exceeds max_path_length (%d); reduce the path or increase max_path_length", overheadBytes, s.config.MaxPathLength)
 		}
 		if folderMaxBytes > 0 {
 			var err error
