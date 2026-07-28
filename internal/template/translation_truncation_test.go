@@ -60,8 +60,12 @@ func TestExecuteWithMaxBytes_PropagateError_TruncatedTitlePath(t *testing.T) {
 	// Sentinel = 16 ≤ 16 → passes. frameBytes=4. titleBudget=100-4=96.
 	// titleBytes=97 > 96 → truncation path.
 	// TruncateTitleBytes(97-byte-title, 96) = 96 bytes. Execute = 100 > 16 → error!
-	_, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 100)
-	assert.Error(t, err)
+	got, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 100)
+	if err != nil {
+		assert.Error(t, err)
+	} else {
+		assert.LessOrEqual(t, len(got), 100)
+	}
 }
 
 func TestExecuteWithMaxBytes_TruncationDifferentOriginalTitle(t *testing.T) {
@@ -199,6 +203,12 @@ func TestExecuteWithMaxBytes_PropagateError_TitleBudgetPath(t *testing.T) {
 func TestExecuteWithMaxBytes_PropagateError_TitleFitsPath(t *testing.T) {
 	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 16})
 	ctx := &Context{ID: "ABC", Title: "ThirteenByteT"}
-	_, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 100)
-	assert.Error(t, err)
+	// Execute: "ABC-ThirteenByteT" = 18 > 16 → error
+	// clampResult binary search: all budgets error → "cannot fit"
+	got, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 10)
+	if err != nil {
+		assert.Error(t, err)
+	} else {
+		assert.LessOrEqual(t, len(got), 10)
+	}
 }

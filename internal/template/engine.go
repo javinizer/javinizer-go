@@ -136,31 +136,15 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 func (e *Engine) executeOrClamp(tmpl string, ctx *Context, maxBytes int) (string, error) {
 	result, err := e.Execute(tmpl, ctx)
 	if err != nil {
-		// If the initial render fails (e.g. title exceeds MaxOutputBytes),
-		// try a truncated render before giving up.
-		truncCtx := ctx.Clone()
-		truncCtx.Title = e.TruncateTitleBytes(ctx.Title, maxBytes)
-		if ctx.OriginalTitle != ctx.Title {
-			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, maxBytes)
-		} else {
-			truncCtx.OriginalTitle = truncCtx.Title
-		}
-		for lang, tr := range ctx.Translations {
-			tr.Title = e.TruncateTitleBytes(tr.Title, maxBytes)
-			tr.OriginalTitle = e.TruncateTitleBytes(tr.OriginalTitle, maxBytes)
-			truncCtx.Translations[lang] = tr
-		}
-		truncResult, truncErr := e.Execute(tmpl, truncCtx)
-		if truncErr != nil {
-			return "", err
-		}
-		return e.clampResult(tmpl, truncCtx, truncResult, maxBytes)
+		// Initial render failed (e.g. title exceeds MaxOutputBytes).
+		// Let clampResult binary search for a budget that fits.
+		return e.clampResult(tmpl, ctx, "", maxBytes)
 	}
 	return e.clampResult(tmpl, ctx, result, maxBytes)
 }
 
 func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes int) (string, error) {
-	if len(result) <= maxBytes {
+	if result != "" && len(result) <= maxBytes {
 		return result, nil
 	}
 	// renderBudget renders the template with all title fields truncated to the given byte budget.

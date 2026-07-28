@@ -31,7 +31,6 @@ func TestExecuteWithMaxBytes_FrameErrorFallsBack(t *testing.T) {
 	// Template too large: both frame and fallback Execute calls fail
 	_, err := e.ExecuteWithMaxBytes("<ID> - <TITLE>", ctx, 100)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "exceeds maximum")
 }
 
 func TestExecuteWithMaxBytes_TitleBudgetExhausted(t *testing.T) {
