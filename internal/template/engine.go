@@ -130,29 +130,6 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 	if maxBytes <= 0 {
 		return "", fmt.Errorf("maxBytes must be positive, got %d", maxBytes)
 	}
-	sentinel := "\x00MAXBYTES\x00"
-	frameCtx := ctx.Clone()
-	frameCtx.Title = sentinel
-	frameCtx.OriginalTitle = sentinel
-
-	frame, frameErr := e.Execute(tmpl, frameCtx)
-	if frameErr != nil {
-		return e.executeOrClamp(tmpl, ctx, maxBytes)
-	}
-
-	frameBytes := len(frame) - strings.Count(frame, sentinel)*len(sentinel)
-	titleBudget := maxBytes - frameBytes
-	if titleBudget <= 0 {
-		return e.executeOrClamp(tmpl, ctx, maxBytes)
-	}
-
-	titleBytes := len(ctx.Title)
-	if titleBytes <= titleBudget {
-		return e.executeOrClamp(tmpl, ctx, maxBytes)
-	}
-
-	// Don't pre-truncate: clampResult needs the original context to search
-	// different truncation budgets. Pre-truncating limits the search range.
 	return e.executeOrClamp(tmpl, ctx, maxBytes)
 }
 
