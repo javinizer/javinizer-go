@@ -22,10 +22,9 @@ func TestClampResult_LastResortHardTruncation(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "ABCDEFGHIJKLMNOP", Title: ""}
 	// ID alone is 16 chars, maxBytes=5. Even empty title exceeds.
-	// Should hard-truncate at rune boundary.
-	got, err := e.ExecuteWithMaxBytes("<ID>", ctx, 5)
-	require.NoError(t, err)
-	assert.LessOrEqual(t, len(got), 5)
+	// Now returns error instead of hard-truncating.
+	_, err := e.ExecuteWithMaxBytes("<ID>", ctx, 5)
+	require.Error(t, err, "should error when fixed content exceeds maxBytes")
 }
 
 func TestClampResult_TitleAlreadyFits(t *testing.T) {

@@ -622,11 +622,9 @@ func TestTruncateTitle_CJK_ShortRunes_Partial(t *testing.T) {
 func TestTruncateTitle_CJK_MaxLen3OrLess_Partial(t *testing.T) {
 	e := NewEngine()
 
-	// CJK with maxLen=2: isCJK is true but maxLen <= 3 so it returns title as-is
-	// (the `if maxLen > 3` check fails for CJK path)
+	// CJK with maxLen=2: truncates at rune boundary (no marker for maxLen <= 3)
 	got := e.TruncateTitle("日本語", 2)
-	// maxLen <= 3: CJK returns title (length > maxLen but maxLen <= 3 check)
-	assert.Equal(t, "日本語", got) // CJK path returns title when maxLen <= 3
+	assert.Equal(t, "日本", got) // CJK truncates to maxLen runes when maxLen <= 3
 }
 
 // TestTruncateTitle_NonCJK_NoSpaceForWordBreak covers case where lastSpace <= 0
@@ -1178,7 +1176,8 @@ func TestExecuteWithMaxBytes_OriginalTitleDifferentFromTitle_Partial(t *testing.
 	// Force truncation with small maxBytes
 	got, err := e.ExecuteWithMaxBytes("<ORIGINALTITLE>", ctx, 15)
 	require.NoError(t, err)
-	assert.Contains(t, got, "...")
+	assert.LessOrEqual(t, len(got), 15)
+	assert.NotEqual(t, "Japanese Title Very Long For Truncation", got, "should be truncated")
 }
 
 // --- Partial line coverage for isNumericModifier ---

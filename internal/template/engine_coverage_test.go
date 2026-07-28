@@ -21,8 +21,8 @@ func TestExecuteWithMaxBytes_OriginalTitleDiffersFromTitle(t *testing.T) {
 	// maxBytes so small that title truncation is required
 	got, err := e.ExecuteWithMaxBytes("<ORIGINALTITLE>", ctx, 8)
 	require.NoError(t, err)
-	// Should truncate OriginalTitle independently since Title != OriginalTitle
-	assert.Contains(t, got, "...")
+	assert.LessOrEqual(t, len(got), 8)
+	assert.NotEqual(t, "Japanese Title", got, "should be truncated")
 }
 
 func TestExecuteWithMaxBytes_FrameErrorFallsBack(t *testing.T) {
@@ -38,10 +38,8 @@ func TestExecuteWithMaxBytes_TitleBudgetExhausted(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "ABC-123", Title: "T", ReleaseYear: 2024}
 	// maxBytes so small that titleBudget <= 0 after subtracting frame bytes
-	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<YEAR>)", ctx, 5)
-	require.NoError(t, err)
-	// Result is clamped to maxBytes
-	assert.LessOrEqual(t, len(got), 5)
+	_, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<YEAR>)", ctx, 5)
+	require.Error(t, err, "should error when fixed content exceeds maxBytes")
 }
 
 func TestExecuteWithMaxBytes_TitleFitsInBudget(t *testing.T) {
@@ -295,9 +293,9 @@ func TestTruncateTitle_NonCJKMaxLenGt3RunesFit(t *testing.T) {
 
 func TestTruncateTitle_CJKMaxLenLTE3(t *testing.T) {
 	e := NewEngine()
-	// CJK with maxLen <= 3, returns title (can't fit marker)
+	// CJK with maxLen <= 3: truncates at rune boundary (no marker)
 	result := e.TruncateTitle("日本語タイトル", 3)
-	assert.Equal(t, "日本語タイトル", result)
+	assert.Equal(t, "日本語", result)
 }
 
 func TestTruncateTitle_NonCJKMaxLenLTE3NoTruncation(t *testing.T) {

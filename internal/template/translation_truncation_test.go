@@ -49,10 +49,8 @@ func TestClampResult_TranslationWithLongOriginalTitle(t *testing.T) {
 func TestClampResult_HardTruncationLastResort(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", Title: ""}
-	got, err := e.ExecuteWithMaxBytes("<ID>", ctx, 5)
-	require.NoError(t, err)
-	assert.LessOrEqual(t, len(got), 5)
-	assert.Equal(t, "ABCDE", got, "should be first 5 chars of ID")
+	_, err := e.ExecuteWithMaxBytes("<ID>", ctx, 5)
+	require.Error(t, err, "should error when ID alone exceeds maxBytes")
 }
 
 func TestExecuteWithMaxBytes_PropagateError_TruncatedTitlePath(t *testing.T) {
@@ -82,6 +80,24 @@ func TestExecuteWithMaxBytes_DifferentOriginalTitleTruncation(t *testing.T) {
 	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<ORIGINALTITLE>)", ctx, 20)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(got), 20)
+}
+
+func TestExecuteWithMaxBytes_RejectNonPositiveMaxBytes(t *testing.T) {
+	e := NewEngine()
+	ctx := &Context{ID: "ABC", Title: "T"}
+	_, err := e.ExecuteWithMaxBytes("<ID>", ctx, 0)
+	assert.Error(t, err, "should reject maxBytes=0")
+	_, err = e.ExecuteWithMaxBytes("<ID>", ctx, -1)
+	assert.Error(t, err, "should reject negative maxBytes")
+}
+
+func TestExecuteWithMaxBytes_LinearScanExecuteError(t *testing.T) {
+	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 5})
+	ctx := &Context{ID: "ABC", Title: "LongTitle"}
+	// Sentinel frame "ABC-\x00MAXBYTES\x00" = 16 > 5 → frame error → executeOrClamp
+	// executeOrClamp: Execute "ABC-LongTitle" = 14 > 5 → error
+	_, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 10)
+	assert.Error(t, err)
 }
 
 func TestExecuteWithMaxBytes_PropagateError_TitleBudgetPath(t *testing.T) {

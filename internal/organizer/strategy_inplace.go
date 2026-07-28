@@ -79,14 +79,16 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 
 	sourceDir := filepath.Dir(match.Path)
 	parentDir := filepath.Dir(sourceDir)
-	baseDirLen := len(parentDir)
 	// In in-place mode, the target is under the source directory tree,
 	// so destDir is irrelevant for overhead calculation. Only include it
 	// for organize mode where the target may be under destDir.
-	if s.config.OperationMode != operationmode.OperationModeInPlace && len(destDir) > baseDirLen {
-		baseDirLen = len(destDir)
+	baseDir := parentDir
+	if s.config.OperationMode != operationmode.OperationModeInPlace && len(destDir) > len(parentDir) {
+		baseDir = destDir
 	}
-	overheadBytes := baseDirLen + 2 + len(pc.FileName)
+	// Use a placeholder folder to compute actual separator overhead
+	fullOverhead := filepath.Join(baseDir, "X", pc.FileName)
+	overheadBytes := len(fullOverhead) - len("X")
 	folderMaxBytes := 0
 	if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
 		folderMaxBytes = s.config.MaxPathLength - overheadBytes

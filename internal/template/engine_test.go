@@ -441,7 +441,7 @@ func TestTemplateEngine_TruncateTitle(t *testing.T) {
 			name:   "CJK title with maxLen <= 3 needs truncation",
 			title:  "日本語タイトル",
 			maxLen: 2,
-			want:   "日本語タイトル",
+			want:   "日本",
 		},
 		{
 			name:   "English title with maxLen > 3 but no truncation needed",

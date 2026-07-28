@@ -104,12 +104,14 @@ func TestPathLengthRegression_ExecuteWithMaxBytes_NeverExceedsLimit(t *testing.T
 		tmpl     string
 		ctx      *template.Context
 		maxBytes int
+		wantErr  bool
 	}{
 		{
 			name:     "title budget exhausted",
 			tmpl:     "<ID> - <TITLE> (<YEAR>)",
 			ctx:      &template.Context{ID: "ABC-123", Title: "T", ReleaseYear: 2024},
 			maxBytes: 5,
+			wantErr:  true,
 		},
 		{
 			name:     "multiple TITLE tags",
@@ -134,6 +136,10 @@ func TestPathLengthRegression_ExecuteWithMaxBytes_NeverExceedsLimit(t *testing.T
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := engine.ExecuteWithMaxBytes(tc.tmpl, tc.ctx, tc.maxBytes)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 			assert.LessOrEqual(t, len(got), tc.maxBytes,
 				"ExecuteWithMaxBytes result (%d bytes) must not exceed maxBytes (%d): got %q",

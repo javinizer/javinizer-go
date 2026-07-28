@@ -10,31 +10,25 @@ import (
 func TestExecuteWithMaxBytes_FrameErrorReturnsClampedResult(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "ABC", Title: "T"}
-	// Use a valid template so Execute doesn't error — the frame error path
-	// is when the sentinel frame execution fails, which is hard to trigger.
-	// Instead test the titleBudget<=0 path with a small maxBytes.
-	got, err := e.ExecuteWithMaxBytes("<ID>", ctx, 2)
-	require.NoError(t, err)
-	assert.LessOrEqual(t, len(got), 2)
+	// ID alone is 3 bytes, maxBytes=2. Now returns error instead of hard-truncating.
+	_, err := e.ExecuteWithMaxBytes("<ID>", ctx, 2)
+	require.Error(t, err, "should error when fixed content exceeds maxBytes")
 }
 
 func TestExecuteWithMaxBytes_TitleBudgetExhaustedErrorPath(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "ABC-123", Title: "T"}
-	// maxBytes=1 — very small, titleBudget will be <= 0 or very small
-	got, err := e.ExecuteWithMaxBytes("<ID>", ctx, 1)
-	require.NoError(t, err)
-	assert.LessOrEqual(t, len(got), 1)
+	// maxBytes=1 — ID alone (7 bytes) exceeds budget. Now returns error.
+	_, err := e.ExecuteWithMaxBytes("<ID>", ctx, 1)
+	require.Error(t, err, "should error when fixed content exceeds maxBytes")
 }
 
 func TestExecuteWithMaxBytes_TitleFitsInBudgetClampPath(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "AB", Title: "X"}
-	// maxBytes=3 — "AB - X" = 5 bytes, but title (1 byte) fits in budget.
-	// The result exceeds maxBytes so clampBytes should truncate.
-	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE>", ctx, 3)
-	require.NoError(t, err)
-	assert.LessOrEqual(t, len(got), 3)
+	// maxBytes=3 — "AB - X" = 6 bytes exceeds budget. Now returns error.
+	_, err := e.ExecuteWithMaxBytes("<ID> - <TITLE>", ctx, 3)
+	require.Error(t, err, "should error when fixed content exceeds maxBytes")
 }
 
 func TestExecuteWithMaxBytes_TruncatedTitleClampPath(t *testing.T) {

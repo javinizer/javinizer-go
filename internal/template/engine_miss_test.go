@@ -107,9 +107,9 @@ func TestResolveTag_Miss_TitleRejectedLanguage(t *testing.T) {
 
 func TestTruncateTitle_Miss_CJKMaxLen3(t *testing.T) {
 	e := NewEngine()
-	// When isCJK and maxLen <= 3, CJK branch returns title unchanged
+	// When isCJK and maxLen <= 3, CJK branch truncates at rune boundary
 	result := e.TruncateTitle("テスト映画", 3)
-	assert.Equal(t, "テスト映画", result)
+	assert.Equal(t, "テスト", result)
 }
 
 // --- TruncateTitle: CJK text shorter than maxLen ---
