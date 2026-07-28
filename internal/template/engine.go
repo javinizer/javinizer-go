@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 // Package-level compiled regexes for performance
@@ -188,11 +191,39 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		}
 	}
 	// Collect distinct truncation states by scanning rune boundaries.
-	// This avoids rendering the template for every byte budget (quadratic for long titles).
-	type truncState struct{ title, origTitle string }
+	// Iterate at rune counts to avoid O(n²) byte-by-byte scanning for long titles.
+	type truncState struct {
+		title, origTitle string
+		translations     map[string]models.MovieTranslation
+	}
 	seenTruncations := make(map[string]bool)
 	var states []truncState
-	for budget := maxTitleLen; budget >= 0; budget-- {
+	// Build a set of rune counts to try (boundaries where truncation changes)
+	runeCounts := map[int]bool{0: true}
+	for _, s := range []string{ctx.Title, ctx.OriginalTitle} {
+		runes := []rune(s)
+		for i := 1; i <= len(runes); i++ {
+			runeCounts[i] = true
+		}
+	}
+	for _, tr := range ctx.Translations {
+		for _, s := range []string{tr.Title, tr.OriginalTitle} {
+			runes := []rune(s)
+			for i := 1; i <= len(runes); i++ {
+				runeCounts[i] = true
+			}
+		}
+	}
+	// Sort rune counts descending
+	sortedCounts := make([]int, 0, len(runeCounts))
+	for rc := range runeCounts {
+		sortedCounts = append(sortedCounts, rc)
+	}
+	sort.Ints(sortedCounts)
+	for i := len(sortedCounts) - 1; i >= 0; i-- {
+		runeCount := sortedCounts[i]
+		// Convert rune count to byte budget for TruncateTitleBytes
+		budget := runeCount * 4 // worst case: 4 bytes per rune
 		t := e.TruncateTitleBytes(ctx.Title, budget)
 		var ot string
 		if ctx.OriginalTitle == ctx.Title {
@@ -201,25 +232,26 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			ot = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
 		}
 		key := t + "\x00" + ot
-		for _, tr := range ctx.Translations {
-			key += "\x00" + e.TruncateTitleBytes(tr.Title, budget) + "\x00" + e.TruncateTitleBytes(tr.OriginalTitle, budget)
+		trans := make(map[string]models.MovieTranslation)
+		for lang, tr := range ctx.Translations {
+			trCopy := tr
+			trCopy.Title = e.TruncateTitleBytes(tr.Title, budget)
+			trCopy.OriginalTitle = e.TruncateTitleBytes(tr.OriginalTitle, budget)
+			trans[lang] = trCopy
+			key += "\x00" + trCopy.Title + "\x00" + trCopy.OriginalTitle
 		}
 		if seenTruncations[key] {
 			continue
 		}
 		seenTruncations[key] = true
-		states = append(states, truncState{title: t, origTitle: ot})
+		states = append(states, truncState{title: t, origTitle: ot, translations: trans})
 	}
 	// Render only distinct states, from longest title to shortest
 	for _, st := range states {
 		truncCtx := ctx.Clone()
 		truncCtx.Title = st.title
 		truncCtx.OriginalTitle = st.origTitle
-		for lang, tr := range ctx.Translations {
-			tr.Title = e.TruncateTitleBytes(tr.Title, len(st.title))
-			tr.OriginalTitle = e.TruncateTitleBytes(tr.OriginalTitle, len(st.title))
-			truncCtx.Translations[lang] = tr
-		}
+		truncCtx.Translations = st.translations
 		candidate, err := e.Execute(tmpl, truncCtx)
 		if err != nil {
 			continue
