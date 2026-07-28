@@ -171,9 +171,8 @@ func (e *Engine) executeOrClamp(tmpl string, ctx *Context, maxBytes int) (string
 }
 
 func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes int) (string, error) {
-	sanitized := SanitizeFolderPath(result)
-	if len(sanitized) <= maxBytes {
-		return sanitized, nil
+	if len(result) <= maxBytes {
+		return result, nil
 	}
 	// renderBudget renders the template with all title fields truncated to the given byte budget.
 	renderBudget := func(budget int) (string, int, error) {
@@ -209,7 +208,7 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			maxBudget = len(tr.OriginalTitle)
 		}
 	}
-	shortestLen := len(sanitized)
+	shortestLen := len(result)
 	// Binary search for the largest budget that fits.
 	// For monotonic templates (shorter title = shorter output), this finds the optimal
 	// in O(log N). For non-monotonic templates (conditionals), try a few bounded probes.
