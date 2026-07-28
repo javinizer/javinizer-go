@@ -2,6 +2,7 @@ package template
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -136,8 +137,9 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 func (e *Engine) executeOrClamp(tmpl string, ctx *Context, maxBytes int) (string, error) {
 	result, err := e.Execute(tmpl, ctx)
 	if err != nil {
-		// Initial render failed (e.g. title exceeds MaxOutputBytes).
-		// Let clampResult binary search for a budget that fits.
+		if !errors.Is(err, errOutputLimit) {
+			return "", err
+		}
 		return e.clampResult(tmpl, ctx, "", maxBytes)
 	}
 	return e.clampResult(tmpl, ctx, result, maxBytes)
@@ -181,6 +183,9 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		}
 	}
 	shortestLen := len(result)
+	if shortestLen == 0 {
+		shortestLen = maxBytes + 1
+	}
 	// Binary search for the largest budget that fits.
 	// For monotonic templates (shorter title = shorter output), this finds the optimal
 	// in O(log N). For non-monotonic templates (conditionals), try a few bounded probes.
@@ -381,9 +386,11 @@ func (e *Engine) Validate(template string) error {
 	return nil
 }
 
+var errOutputLimit = fmt.Errorf("output exceeds maximum")
+
 func (e *Engine) ensureOutputWithinLimit(output string) error {
 	if len(output) > e.options.MaxOutputBytes {
-		return fmt.Errorf("rendered template size %d exceeds maximum %d bytes", len(output), e.options.MaxOutputBytes)
+		return fmt.Errorf("rendered template size %d exceeds maximum %d bytes: %w", len(output), e.options.MaxOutputBytes, errOutputLimit)
 	}
 	return nil
 }
