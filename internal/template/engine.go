@@ -193,6 +193,11 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		} else {
 			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
 		}
+		// Also truncate translated titles so <TITLE:en> etc. get shortened too
+		for lang, tr := range truncCtx.Translations {
+			tr.Title = e.TruncateTitleBytes(ctx.Translations[lang].Title, budget)
+			truncCtx.Translations[lang] = tr
+		}
 		candidate, candErr := e.Execute(tmpl, truncCtx)
 		if candErr != nil {
 			continue
