@@ -214,6 +214,25 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	sort.Ints(sortedBudgets)
 	seenTruncations := make(map[string]bool)
 	shortestLen := len(sanitized)
+	// Short-circuit: if even an empty title exceeds the budget, no truncation will help.
+	emptyCtx := ctx.Clone()
+	emptyCtx.Title = ""
+	emptyCtx.OriginalTitle = ""
+	for lang, tr := range emptyCtx.Translations {
+		tr.Title = ""
+		tr.OriginalTitle = ""
+		emptyCtx.Translations[lang] = tr
+	}
+	emptyResult, emptyErr := e.Execute(tmpl, emptyCtx)
+	if emptyErr == nil {
+		emptySanitized := SanitizeFolderPath(emptyResult)
+		if len(emptySanitized) < shortestLen {
+			shortestLen = len(emptySanitized)
+		}
+		if len(emptySanitized) <= maxBytes {
+			return emptySanitized, nil
+		}
+	}
 	for i := len(sortedBudgets) - 1; i >= 0; i-- {
 		budget := sortedBudgets[i]
 		t := e.TruncateTitleBytes(ctx.Title, budget)

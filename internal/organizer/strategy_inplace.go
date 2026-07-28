@@ -100,32 +100,35 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 		skipInPlaceReason = "matcher not set"
 	}
 
-	// Always compute the budgeted folder name, then compare with current.
-	// In in-place mode, the target is under the source directory tree,
-	// so destDir is irrelevant for overhead calculation.
-	baseDir := parentDir
-	if s.config.OperationMode != operationmode.OperationModeInPlace && len(destDir) > len(parentDir) {
-		baseDir = destDir
-	}
-	fullOverhead := filepath.Join(baseDir, "X", pc.FileName)
-	overheadBytes := len(fullOverhead) - len("X")
-	folderMaxBytes := 0
-	if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
-		folderMaxBytes = s.config.MaxPathLength - overheadBytes
-	}
-
+	// Compute the budgeted folder name only when the folder will be used.
+	// For non-dedicated in-place folders, the folder name is never used.
 	folderName := pc.FolderName
-	if folderMaxBytes > 0 {
-		var err error
-		folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, pc.Ctx, folderMaxBytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate folder name: %w", err)
+	folderWillRename := s.config.OperationMode == operationmode.OperationModeOrganize || isDedicated
+	if folderWillRename {
+		// In in-place mode, the target is under the source directory tree,
+		// so destDir is irrelevant for overhead calculation.
+		baseDir := parentDir
+		if s.config.OperationMode != operationmode.OperationModeInPlace && len(destDir) > len(parentDir) {
+			baseDir = destDir
 		}
-		folderName = template.SanitizeFolderPath(folderName)
-		if folderName == "" {
-			folderName = template.SanitizeFolderPath(match.MovieID)
+		fullOverhead := filepath.Join(baseDir, "X", pc.FileName)
+		overheadBytes := len(fullOverhead) - len("X")
+		folderMaxBytes := 0
+		if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
+			folderMaxBytes = s.config.MaxPathLength - overheadBytes
+		}
+		if folderMaxBytes > 0 {
+			var err error
+			folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, pc.Ctx, folderMaxBytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate folder name: %w", err)
+			}
+			folderName = template.SanitizeFolderPath(folderName)
 			if folderName == "" {
-				folderName = "unknown"
+				folderName = template.SanitizeFolderPath(match.MovieID)
+				if folderName == "" {
+					folderName = "unknown"
+				}
 			}
 		}
 	}
