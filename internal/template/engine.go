@@ -171,7 +171,7 @@ func (e *Engine) executeOrClamp(tmpl string, ctx *Context, maxBytes int) (string
 }
 
 func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes int) (string, error) {
-	if len(SanitizeFolderPath(result)) <= maxBytes {
+	if len(result) <= maxBytes {
 		return result, nil
 	}
 	// renderBudget renders the template with all title fields truncated to the given byte budget.
@@ -192,7 +192,7 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		if err != nil {
 			return "", 0, err
 		}
-		return candidate, len(SanitizeFolderPath(candidate)), nil
+		return candidate, len(candidate), nil
 	}
 	// Find the maximum byte budget across all title fields.
 	maxBudget := len(ctx.Title)
