@@ -198,32 +198,31 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	}
 	seenTruncations := make(map[string]bool)
 	var states []truncState
-	// Build a set of rune counts to try (boundaries where truncation changes)
-	runeCounts := map[int]bool{0: true}
+	// Build a set of byte budgets to try at actual UTF-8 byte boundaries.
+	// For each field, truncate to each rune count and use the actual byte length.
+	byteBudgets := map[int]bool{0: true}
 	for _, s := range []string{ctx.Title, ctx.OriginalTitle} {
 		runes := []rune(s)
 		for i := 1; i <= len(runes); i++ {
-			runeCounts[i] = true
+			byteBudgets[len(string(runes[:i]))] = true
 		}
 	}
 	for _, tr := range ctx.Translations {
 		for _, s := range []string{tr.Title, tr.OriginalTitle} {
 			runes := []rune(s)
 			for i := 1; i <= len(runes); i++ {
-				runeCounts[i] = true
+				byteBudgets[len(string(runes[:i]))] = true
 			}
 		}
 	}
-	// Sort rune counts descending
-	sortedCounts := make([]int, 0, len(runeCounts))
-	for rc := range runeCounts {
-		sortedCounts = append(sortedCounts, rc)
+	// Sort byte budgets descending
+	sortedBudgets := make([]int, 0, len(byteBudgets))
+	for b := range byteBudgets {
+		sortedBudgets = append(sortedBudgets, b)
 	}
-	sort.Ints(sortedCounts)
-	for i := len(sortedCounts) - 1; i >= 0; i-- {
-		runeCount := sortedCounts[i]
-		// Convert rune count to byte budget for TruncateTitleBytes
-		budget := runeCount * 4 // worst case: 4 bytes per rune
+	sort.Ints(sortedBudgets)
+	for i := len(sortedBudgets) - 1; i >= 0; i-- {
+		budget := sortedBudgets[i]
 		t := e.TruncateTitleBytes(ctx.Title, budget)
 		var ot string
 		if ctx.OriginalTitle == ctx.Title {
@@ -247,6 +246,7 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		states = append(states, truncState{title: t, origTitle: ot, translations: trans})
 	}
 	// Render only distinct states, from longest title to shortest
+	shortestLen := len(sanitized)
 	for _, st := range states {
 		truncCtx := ctx.Clone()
 		truncCtx.Title = st.title
@@ -257,11 +257,14 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			continue
 		}
 		sanitizedCandidate := SanitizeFolderPath(candidate)
+		if len(sanitizedCandidate) < shortestLen {
+			shortestLen = len(sanitizedCandidate)
+		}
 		if len(sanitizedCandidate) <= maxBytes {
 			return sanitizedCandidate, nil
 		}
 	}
-	return "", fmt.Errorf("folder template cannot fit within the available %d-byte budget by truncating title fields; shortest sanitized rendering is %d bytes; shorten the folder template or destination path, or increase max_path_length", maxBytes, len(sanitized))
+	return "", fmt.Errorf("folder template cannot fit within the available %d-byte budget by truncating title fields; shortest sanitized rendering is %d bytes; shorten the folder template or destination path, or increase max_path_length", maxBytes, shortestLen)
 } // ExecuteWithContext processes a template string with cancellation support and output limits.
 // ExecuteWithContext processes a template string with cancellation support and output limits.
 func (e *Engine) ExecuteWithContext(execCtx context.Context, template string, ctx *Context) (string, error) {
