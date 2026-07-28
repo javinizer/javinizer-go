@@ -151,15 +151,9 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 		return e.executeOrClamp(tmpl, ctx, maxBytes)
 	}
 
-	truncatedCtx := ctx.Clone()
-	truncated := e.TruncateTitleBytes(ctx.Title, titleBudget)
-	truncatedCtx.Title = truncated
-	truncatedCtx.OriginalTitle = truncated
-	if ctx.OriginalTitle != ctx.Title {
-		truncatedCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, titleBudget)
-	}
-
-	return e.executeOrClamp(tmpl, truncatedCtx, maxBytes)
+	// Don't pre-truncate: clampResult needs the original context to search
+	// different truncation budgets. Pre-truncating limits the search range.
+	return e.executeOrClamp(tmpl, ctx, maxBytes)
 }
 
 func (e *Engine) executeOrClamp(tmpl string, ctx *Context, maxBytes int) (string, error) {
@@ -249,7 +243,7 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			}
 		}
 	}
-	return "", fmt.Errorf("folder template cannot fit within the available %d-byte budget by truncating title fields; shortest sanitized rendering is %d bytes; shorten the folder template or destination path, or increase max_path_length", maxBytes, shortestLen)
+	return "", fmt.Errorf("folder template cannot fit within the available %d-byte budget by truncating title fields; shortest rendering is %d bytes; shorten the folder template or destination path, or increase max_path_length", maxBytes, shortestLen)
 } // ExecuteWithContext processes a template string with cancellation support and output limits.
 // ExecuteWithContext processes a template string with cancellation support and output limits.
 func (e *Engine) ExecuteWithContext(execCtx context.Context, template string, ctx *Context) (string, error) {
