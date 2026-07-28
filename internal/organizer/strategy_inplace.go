@@ -88,9 +88,6 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 	if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
 		folderMaxBytes = s.config.MaxPathLength - overheadBytes
 	}
-	if s.config.MaxPathLength > 0 && folderMaxBytes <= 0 {
-		return nil, fmt.Errorf("path validation failed: directory and filename overhead (%d bytes) already exceeds max_path_length (%d); reduce the path or increase max_path_length", overheadBytes, s.config.MaxPathLength)
-	}
 
 	folderName := pc.FolderName
 	if folderMaxBytes > 0 {

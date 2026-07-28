@@ -138,7 +138,7 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 		if execErr != nil {
 			return "", execErr
 		}
-		return clampBytes(result, maxBytes), nil
+		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
 	frameBytes := len(frame) - strings.Count(frame, sentinel)*len(sentinel)
@@ -148,7 +148,7 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 		if err != nil {
 			return "", err
 		}
-		return clampBytes(result, maxBytes), nil
+		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
 	titleBytes := len(ctx.Title)
@@ -157,7 +157,7 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 		if err != nil {
 			return "", err
 		}
-		return clampBytes(result, maxBytes), nil
+		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
 	truncatedCtx := ctx.Clone()
@@ -173,14 +173,29 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 	if err != nil {
 		return "", err
 	}
-	return clampBytes(result, maxBytes), nil
+	return e.clampResult(tmpl, truncatedCtx, result, maxBytes), nil
 }
 
-func clampBytes(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		return s
+func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes int) string {
+	if len(result) <= maxBytes {
+		return result
 	}
-	runes := []rune(s)
+	// Try progressively truncating the title to fit within maxBytes
+	for budget := len(ctx.Title) - 1; budget >= 0; budget-- {
+		truncCtx := ctx.Clone()
+		truncCtx.Title = e.TruncateTitleBytes(ctx.Title, budget)
+		if ctx.OriginalTitle == ctx.Title {
+			truncCtx.OriginalTitle = truncCtx.Title
+		} else {
+			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
+		}
+		candidate, err := e.Execute(tmpl, truncCtx)
+		if err == nil && len(candidate) <= maxBytes {
+			return candidate
+		}
+	}
+	// Last resort: hard truncate at rune boundary
+	runes := []rune(result)
 	currentBytes := 0
 	endIdx := 0
 	for i, r := range runes {
