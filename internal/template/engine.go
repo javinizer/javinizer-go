@@ -153,7 +153,10 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 
 	titleBytes := len(ctx.Title)
 	if titleBytes <= titleBudget {
-		result, _ := e.Execute(tmpl, ctx)
+		result, renderErr := e.Execute(tmpl, ctx)
+		if renderErr != nil {
+			return "", renderErr
+		}
 		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
@@ -166,7 +169,10 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 		truncatedCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, titleBudget)
 	}
 
-	result, _ := e.Execute(tmpl, truncatedCtx)
+	result, renderErr := e.Execute(tmpl, truncatedCtx)
+	if renderErr != nil {
+		return "", renderErr
+	}
 	return e.clampResult(tmpl, truncatedCtx, result, maxBytes), nil
 }
 

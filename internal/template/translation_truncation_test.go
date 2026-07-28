@@ -1,6 +1,7 @@
 package template
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -54,6 +55,27 @@ func TestClampResult_HardTruncationLastResort(t *testing.T) {
 	assert.Equal(t, "ABCDE", got, "should be first 5 chars of ID")
 }
 
+func TestExecuteWithMaxBytes_PropagateError_TruncatedTitlePath(t *testing.T) {
+	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 16})
+	longTitle := strings.Repeat("A", 97)
+	ctx := &Context{ID: "ABC", Title: longTitle}
+	// Sentinel = 16 ≤ 16 → passes. frameBytes=4. titleBudget=100-4=96.
+	// titleBytes=97 > 96 → truncation path.
+	// TruncateTitleBytes(97-byte-title, 96) = 96 bytes. Execute = 100 > 16 → error!
+	_, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 100)
+	assert.Error(t, err)
+}
+
+func TestExecuteWithMaxBytes_TruncationDifferentOriginalTitle(t *testing.T) {
+	e := NewEngine()
+	ctx := &Context{ID: "AB", Title: "VeryLongTitleThatExceedsBudget", OriginalTitle: "DifferentLongOriginalTitle"}
+	// titleBytes=34 > titleBudget → truncation path
+	// OriginalTitle != Title → else branch (line 166-168)
+	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<ORIGINALTITLE>)", ctx, 20)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(got), 20)
+}
+
 func TestExecuteWithMaxBytes_DifferentOriginalTitleTruncation(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "AB", Title: "VeryLongTitleThatExceedsBudget", OriginalTitle: "DifferentLongOriginalTitle"}
@@ -65,9 +87,13 @@ func TestExecuteWithMaxBytes_DifferentOriginalTitleTruncation(t *testing.T) {
 func TestExecuteWithMaxBytes_PropagateError_TitleBudgetPath(t *testing.T) {
 	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 16})
 	ctx := &Context{ID: "ABC", Title: "VeryLongTitle"}
-	// Sentinel "ABC-\x00MAXBYTES\x00" = 16 bytes, 16 > 16 = false → passes
-	// frameBytes = 4, titleBudget = 3 - 4 = -1 ≤ 0 → titleBudget path
-	// Execute "ABC-VeryLongTitle" = 17 > 16 → error!
 	_, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 3)
+	assert.Error(t, err)
+}
+
+func TestExecuteWithMaxBytes_PropagateError_TitleFitsPath(t *testing.T) {
+	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 16})
+	ctx := &Context{ID: "ABC", Title: "ThirteenByteT"}
+	_, err := e.ExecuteWithMaxBytes("<ID>-<TITLE>", ctx, 100)
 	assert.Error(t, err)
 }
