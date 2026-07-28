@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // Package-level compiled regexes for performance
@@ -177,61 +175,15 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	if len(sanitized) <= maxBytes {
 		return sanitized, nil
 	}
-	maxTitleLen := len(ctx.Title)
-	if len(ctx.OriginalTitle) > maxTitleLen {
-		maxTitleLen = len(ctx.OriginalTitle)
-	}
-	for _, tr := range ctx.Translations {
-		if len(tr.Title) > maxTitleLen {
-			maxTitleLen = len(tr.Title)
-		}
-		if len(tr.OriginalTitle) > maxTitleLen {
-			maxTitleLen = len(tr.OriginalTitle)
-		}
-	}
-	// Build a set of byte budgets at actual UTF-8 byte boundaries.
-	byteBudgets := map[int]bool{0: true}
-	for _, s := range []string{ctx.Title, ctx.OriginalTitle} {
-		cumBytes := 0
-		for _, r := range s {
-			cumBytes += utf8.RuneLen(r)
-			byteBudgets[cumBytes] = true
-		}
-	}
-	for _, tr := range ctx.Translations {
-		for _, s := range []string{tr.Title, tr.OriginalTitle} {
-			cumBytes := 0
-			for _, r := range s {
-				cumBytes += utf8.RuneLen(r)
-				byteBudgets[cumBytes] = true
-			}
-		}
-	}
-	sortedBudgets := make([]int, 0, len(byteBudgets))
-	for b := range byteBudgets {
-		sortedBudgets = append(sortedBudgets, b)
-	}
-	sort.Ints(sortedBudgets)
-	seenTruncations := make(map[string]bool)
-	shortestLen := len(sanitized)
-	for i := len(sortedBudgets) - 1; i >= 0; i-- {
-		budget := sortedBudgets[i]
-		t := e.TruncateTitleBytes(ctx.Title, budget)
-		ot := t
-		if ctx.OriginalTitle != ctx.Title {
-			ot = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
-		}
-		key := t + "\x00" + ot
-		for _, tr := range ctx.Translations {
-			key += "\x00" + e.TruncateTitleBytes(tr.Title, budget) + "\x00" + e.TruncateTitleBytes(tr.OriginalTitle, budget)
-		}
-		if seenTruncations[key] {
-			continue
-		}
-		seenTruncations[key] = true
+	// renderBudget renders the template with all title fields truncated to the given byte budget.
+	renderBudget := func(budget int) (string, int, error) {
 		truncCtx := ctx.Clone()
-		truncCtx.Title = t
-		truncCtx.OriginalTitle = ot
+		truncCtx.Title = e.TruncateTitleBytes(ctx.Title, budget)
+		if ctx.OriginalTitle != ctx.Title {
+			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
+		} else {
+			truncCtx.OriginalTitle = truncCtx.Title
+		}
 		for lang, tr := range ctx.Translations {
 			tr.Title = e.TruncateTitleBytes(ctx.Translations[lang].Title, budget)
 			tr.OriginalTitle = e.TruncateTitleBytes(ctx.Translations[lang].OriginalTitle, budget)
@@ -239,14 +191,64 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		}
 		candidate, err := e.Execute(tmpl, truncCtx)
 		if err != nil {
+			return "", 0, err
+		}
+		s := SanitizeFolderPath(candidate)
+		return s, len(s), nil
+	}
+	// Find the maximum byte budget across all title fields.
+	maxBudget := len(ctx.Title)
+	if len(ctx.OriginalTitle) > maxBudget {
+		maxBudget = len(ctx.OriginalTitle)
+	}
+	for _, tr := range ctx.Translations {
+		if len(tr.Title) > maxBudget {
+			maxBudget = len(tr.Title)
+		}
+		if len(tr.OriginalTitle) > maxBudget {
+			maxBudget = len(tr.OriginalTitle)
+		}
+	}
+	shortestLen := len(sanitized)
+	// Binary search for the largest budget that fits.
+	// For monotonic templates (shorter title = shorter output), this finds the optimal
+	// in O(log N). For non-monotonic templates (conditionals), try a few bounded probes.
+	lo, hi := 0, maxBudget
+	bestFit := ""
+	foundFit := false
+	for lo <= hi {
+		mid := lo + (hi-lo)/2
+		candidate, candLen, err := renderBudget(mid)
+		if err != nil {
+			hi = mid - 1
 			continue
 		}
-		sanitizedCandidate := SanitizeFolderPath(candidate)
-		if len(sanitizedCandidate) < shortestLen {
-			shortestLen = len(sanitizedCandidate)
+		if candLen < shortestLen {
+			shortestLen = candLen
 		}
-		if len(sanitizedCandidate) <= maxBytes {
-			return sanitizedCandidate, nil
+		if candLen <= maxBytes {
+			bestFit = candidate
+			foundFit = true
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	if foundFit {
+		return bestFit, nil
+	}
+	// Bounded probes for non-monotonic templates (e.g. <IF:TITLE> with longer <ELSE>).
+	// Check budgets where conditional branches switch state.
+	for _, budget := range []int{0, 1} {
+		candidate, candLen, err := renderBudget(budget)
+		if err != nil {
+			continue
+		}
+		if candLen < shortestLen {
+			shortestLen = candLen
+		}
+		if candLen <= maxBytes {
+			return candidate, nil
 		}
 	}
 	return "", fmt.Errorf("folder template cannot fit within the available %d-byte budget by truncating title fields; shortest sanitized rendering is %d bytes; shorten the folder template or destination path, or increase max_path_length", maxBytes, shortestLen)

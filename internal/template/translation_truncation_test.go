@@ -110,6 +110,16 @@ func TestExecuteWithMaxBytes_ConditionalElseExceedsMaxOutput(t *testing.T) {
 	require.Error(t, err, "should error when no candidate fits within budget")
 }
 
+func TestExecuteWithMaxBytes_BoundedProbeFindsFit(t *testing.T) {
+	e := NewEngine()
+	ctx := &Context{ID: "XY", Title: "ABCDEFGHIJ"}
+	// Template with conditional: empty title uses ELSE (short), non-empty uses IF (long)
+	// maxBytes=5: binary search on IF branch fails (long), probe at budget=0 hits ELSE (short)
+	got, err := e.ExecuteWithMaxBytes("<IF:TITLE><TITLE>-<ID><ELSE><ID></IF>", ctx, 5)
+	require.NoError(t, err, "bounded probe should find ELSE branch fits")
+	assert.LessOrEqual(t, len(got), 5)
+}
+
 func TestExecuteWithMaxBytes_ScanLoopDifferentOriginalTitle(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "AB", Title: "VeryLongTitle", OriginalTitle: "DifferentLongOriginal"}
