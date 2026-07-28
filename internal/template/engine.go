@@ -187,29 +187,43 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			maxTitleLen = len(tr.OriginalTitle)
 		}
 	}
+	// Collect distinct truncation states by scanning rune boundaries.
+	// This avoids rendering the template for every byte budget (quadratic for long titles).
+	type truncState struct{ title, origTitle string }
 	seenTruncations := make(map[string]bool)
+	var states []truncState
 	for budget := maxTitleLen; budget >= 0; budget-- {
-		truncCtx := ctx.Clone()
-		truncCtx.Title = e.TruncateTitleBytes(ctx.Title, budget)
+		t := e.TruncateTitleBytes(ctx.Title, budget)
+		var ot string
 		if ctx.OriginalTitle == ctx.Title {
-			truncCtx.OriginalTitle = truncCtx.Title
+			ot = t
 		} else {
-			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
+			ot = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
 		}
-		for lang, tr := range truncCtx.Translations {
-			tr.Title = e.TruncateTitleBytes(ctx.Translations[lang].Title, budget)
-			tr.OriginalTitle = e.TruncateTitleBytes(ctx.Translations[lang].OriginalTitle, budget)
-			truncCtx.Translations[lang] = tr
+		key := t + "\x00" + ot
+		for _, tr := range ctx.Translations {
+			key += "\x00" + e.TruncateTitleBytes(tr.Title, budget) + "\x00" + e.TruncateTitleBytes(tr.OriginalTitle, budget)
 		}
-		truncKey := truncCtx.Title + "\x00" + truncCtx.OriginalTitle
-		for _, tr := range truncCtx.Translations {
-			truncKey += "\x00" + tr.Title + "\x00" + tr.OriginalTitle
-		}
-		if seenTruncations[truncKey] {
+		if seenTruncations[key] {
 			continue
 		}
-		seenTruncations[truncKey] = true
-		candidate, _ := e.Execute(tmpl, truncCtx)
+		seenTruncations[key] = true
+		states = append(states, truncState{title: t, origTitle: ot})
+	}
+	// Render only distinct states, from longest title to shortest
+	for _, st := range states {
+		truncCtx := ctx.Clone()
+		truncCtx.Title = st.title
+		truncCtx.OriginalTitle = st.origTitle
+		for lang, tr := range ctx.Translations {
+			tr.Title = e.TruncateTitleBytes(tr.Title, len(st.title))
+			tr.OriginalTitle = e.TruncateTitleBytes(tr.OriginalTitle, len(st.title))
+			truncCtx.Translations[lang] = tr
+		}
+		candidate, err := e.Execute(tmpl, truncCtx)
+		if err != nil {
+			continue
+		}
 		sanitizedCandidate := SanitizeFolderPath(candidate)
 		if len(sanitizedCandidate) <= maxBytes {
 			return sanitizedCandidate, nil
