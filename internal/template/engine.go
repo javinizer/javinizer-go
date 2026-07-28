@@ -134,46 +134,37 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 
 	frame, frameErr := e.Execute(tmpl, frameCtx)
 	if frameErr != nil {
-		result, execErr := e.Execute(tmpl, ctx)
-		if execErr != nil {
-			return "", execErr
-		}
-		return e.clampResult(tmpl, ctx, result, maxBytes), nil
+		return e.executeOrClamp(tmpl, ctx, maxBytes)
 	}
 
 	frameBytes := len(frame) - strings.Count(frame, sentinel)*len(sentinel)
 	titleBudget := maxBytes - frameBytes
 	if titleBudget <= 0 {
-		result, renderErr := e.Execute(tmpl, ctx)
-		if renderErr != nil {
-			return "", renderErr
-		}
-		return e.clampResult(tmpl, ctx, result, maxBytes), nil
+		return e.executeOrClamp(tmpl, ctx, maxBytes)
 	}
 
 	titleBytes := len(ctx.Title)
 	if titleBytes <= titleBudget {
-		result, renderErr := e.Execute(tmpl, ctx)
-		if renderErr != nil {
-			return "", renderErr
-		}
-		return e.clampResult(tmpl, ctx, result, maxBytes), nil
+		return e.executeOrClamp(tmpl, ctx, maxBytes)
 	}
 
 	truncatedCtx := ctx.Clone()
 	truncated := e.TruncateTitleBytes(ctx.Title, titleBudget)
 	truncatedCtx.Title = truncated
-	if ctx.OriginalTitle == ctx.Title {
-		truncatedCtx.OriginalTitle = truncated
-	} else {
+	truncatedCtx.OriginalTitle = truncated
+	if ctx.OriginalTitle != ctx.Title {
 		truncatedCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, titleBudget)
 	}
 
-	result, renderErr := e.Execute(tmpl, truncatedCtx)
-	if renderErr != nil {
-		return "", renderErr
+	return e.executeOrClamp(tmpl, truncatedCtx, maxBytes)
+}
+
+func (e *Engine) executeOrClamp(tmpl string, ctx *Context, maxBytes int) (string, error) {
+	result, err := e.Execute(tmpl, ctx)
+	if err != nil {
+		return "", err
 	}
-	return e.clampResult(tmpl, truncatedCtx, result, maxBytes), nil
+	return e.clampResult(tmpl, ctx, result, maxBytes), nil
 }
 
 func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes int) string {
