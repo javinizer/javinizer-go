@@ -144,13 +144,19 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 	frameBytes := len(frame) - strings.Count(frame, sentinel)*len(sentinel)
 	titleBudget := maxBytes - frameBytes
 	if titleBudget <= 0 {
-		result, _ := e.Execute(tmpl, ctx)
+		result, err := e.Execute(tmpl, ctx)
+		if err != nil {
+			return "", err
+		}
 		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
 	titleBytes := len(ctx.Title)
 	if titleBytes <= titleBudget {
-		result, _ := e.Execute(tmpl, ctx)
+		result, err := e.Execute(tmpl, ctx)
+		if err != nil {
+			return "", err
+		}
 		return e.clampResult(tmpl, ctx, result, maxBytes), nil
 	}
 
@@ -163,7 +169,10 @@ func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (s
 		truncatedCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, titleBudget)
 	}
 
-	result, _ := e.Execute(tmpl, truncatedCtx)
+	result, err := e.Execute(tmpl, truncatedCtx)
+	if err != nil {
+		return "", err
+	}
 	return e.clampResult(tmpl, truncatedCtx, result, maxBytes), nil
 }
 
@@ -171,7 +180,7 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	if len(result) <= maxBytes {
 		return result
 	}
-	// Try progressively truncating the title to fit within maxBytes
+	// Binary search for the largest title budget that fits within maxBytes
 	maxTitleLen := len(ctx.Title)
 	if len(ctx.OriginalTitle) > maxTitleLen {
 		maxTitleLen = len(ctx.OriginalTitle)
@@ -184,27 +193,36 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			maxTitleLen = len(tr.OriginalTitle)
 		}
 	}
-	for budget := maxTitleLen - 1; budget >= 0; budget-- {
+	lo, hi := 0, maxTitleLen
+	bestFit := ""
+	for lo <= hi {
+		mid := (lo + hi) / 2
 		truncCtx := ctx.Clone()
-		truncCtx.Title = e.TruncateTitleBytes(ctx.Title, budget)
+		truncCtx.Title = e.TruncateTitleBytes(ctx.Title, mid)
 		if ctx.OriginalTitle == ctx.Title {
 			truncCtx.OriginalTitle = truncCtx.Title
 		} else {
-			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
+			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, mid)
 		}
-		// Also truncate translated titles so <TITLE:en> etc. get shortened too
 		for lang, tr := range truncCtx.Translations {
-			tr.Title = e.TruncateTitleBytes(ctx.Translations[lang].Title, budget)
-			tr.OriginalTitle = e.TruncateTitleBytes(ctx.Translations[lang].OriginalTitle, budget)
+			tr.Title = e.TruncateTitleBytes(ctx.Translations[lang].Title, mid)
+			tr.OriginalTitle = e.TruncateTitleBytes(ctx.Translations[lang].OriginalTitle, mid)
 			truncCtx.Translations[lang] = tr
 		}
 		candidate, candErr := e.Execute(tmpl, truncCtx)
 		if candErr != nil {
+			hi = mid - 1
 			continue
 		}
 		if len(candidate) <= maxBytes {
-			return candidate
+			bestFit = candidate
+			lo = mid + 1
+		} else {
+			hi = mid - 1
 		}
+	}
+	if bestFit != "" {
+		return bestFit
 	}
 	// Last resort: hard truncate at rune boundary
 	runes := []rune(result)
