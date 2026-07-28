@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -198,20 +199,22 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	}
 	seenTruncations := make(map[string]bool)
 	var states []truncState
-	// Build a set of byte budgets to try at actual UTF-8 byte boundaries.
-	// For each field, truncate to each rune count and use the actual byte length.
+	// Build a set of byte budgets at actual UTF-8 byte boundaries.
+	// Compute cumulative byte widths in one pass (avoids O(n²) prefix copying).
 	byteBudgets := map[int]bool{0: true}
 	for _, s := range []string{ctx.Title, ctx.OriginalTitle} {
-		runes := []rune(s)
-		for i := 1; i <= len(runes); i++ {
-			byteBudgets[len(string(runes[:i]))] = true
+		cumBytes := 0
+		for _, r := range s {
+			cumBytes += utf8.RuneLen(r)
+			byteBudgets[cumBytes] = true
 		}
 	}
 	for _, tr := range ctx.Translations {
 		for _, s := range []string{tr.Title, tr.OriginalTitle} {
-			runes := []rune(s)
-			for i := 1; i <= len(runes); i++ {
-				byteBudgets[len(string(runes[:i]))] = true
+			cumBytes := 0
+			for _, r := range s {
+				cumBytes += utf8.RuneLen(r)
+				byteBudgets[cumBytes] = true
 			}
 		}
 	}
