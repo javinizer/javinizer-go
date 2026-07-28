@@ -110,6 +110,20 @@ func TestExecuteWithMaxBytes_ConditionalElseExceedsMaxOutput(t *testing.T) {
 	require.Error(t, err, "should error when no candidate fits within budget")
 }
 
+func TestClampResult_EmojiConditionalProbeFindsFit(t *testing.T) {
+	e := NewEngine()
+	ctx := &Context{ID: "AB", Title: "\U0001F600\U0001F600\U0001F600\U0001F600"}
+	// Title = 4 emoji (16 bytes). Template: <IF:TITLE><TITLE><ELSE>12345</IF>
+	// Render full title: 4 emoji = 16 bytes > maxBytes=4 → enters clampResult.
+	// Binary search skips budget=4 (one emoji) because it converges to 0-3 where
+	// title is empty → ELSE "12345" = 5 > 4. Probes try 0-4, budget=4 finds fit.
+	result, err := e.Execute("<IF:TITLE><TITLE><ELSE>12345</IF>", ctx)
+	require.NoError(t, err)
+	got, err := e.clampResult("<IF:TITLE><TITLE><ELSE>12345</IF>", ctx, result, 4)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(got), 4)
+}
+
 func TestExecuteWithMaxBytes_CJKConditionalBoundedProbe(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "XY", Title: "これは長い日本語のタイトルです"}
@@ -119,6 +133,18 @@ func TestExecuteWithMaxBytes_CJKConditionalBoundedProbe(t *testing.T) {
 	got, err := e.ExecuteWithMaxBytes("<IF:TITLE><TITLE>-<ID><ELSE><ID></IF>", ctx, 5)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(got), 5)
+}
+
+func TestClampResult_ProbeErrorPath(t *testing.T) {
+	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 20})
+	ctx := &Context{ID: "ABC", Title: "LongTitle"}
+	// Template: empty title → ELSE branch exceeds MaxOutputBytes → probe errors at budget=0
+	// Non-empty title → IF branch → "ABC-LongTitle" exceeds maxBytes=4
+	// Probes at budget=0 error (ELSE too long), probes at 1-4 produce short results.
+	result, err := e.Execute("<ID>-<IF:TITLE><TITLE><ELSE>VeryLongElseContentThatExceeds</IF>", ctx)
+	require.NoError(t, err)
+	_, err = e.clampResult("<ID>-<IF:TITLE><TITLE><ELSE>VeryLongElseContentThatExceeds</IF>", ctx, result, 4)
+	require.Error(t, err, "should error when no candidate fits")
 }
 
 func TestExecuteWithMaxBytes_BoundedProbeErrorAndShortest(t *testing.T) {

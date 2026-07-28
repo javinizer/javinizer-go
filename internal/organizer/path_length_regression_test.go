@@ -3,6 +3,7 @@ package organizer
 import (
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/template"
@@ -66,6 +67,33 @@ func TestPathLengthRegression_InplaceStrategy_LongDir(t *testing.T) {
 
 	require.Error(t, err, "should error when path exceeds max_path_length")
 	assert.Contains(t, err.Error(), "path validation failed", "error should mention path validation")
+}
+
+func TestPathLengthRegression_InplaceEmptyMovieIDFallback(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	engine := template.NewEngine()
+	m, _ := matcher.NewMatcher(&matcher.Config{})
+	cfg := &Config{
+		FolderFormat:      "<TITLE>",
+		FileFormat:        "<ID>.mp4",
+		MaxPathLength:     240,
+		OperationMode:     operationmode.OperationModeInPlace,
+		RenameFile:        true,
+		MediaFormatConfig: MediaFormatConfig{},
+	}
+
+	sourceDir := "/source"
+	sourceFile := sourceDir + "/***.mp4"
+	_ = fs.MkdirAll(sourceDir, 0755)
+	_ = afero.WriteFile(fs, sourceFile, []byte("test"), 0644)
+
+	match := models.FileMatchInfo{Path: sourceFile, MovieID: "***", Name: "***.mp4"}
+	movie := &models.Movie{ID: "***", Title: ""}
+
+	strategy := newInPlaceStrategy(fs, cfg, m, engine)
+	plan, err := strategy.Plan(match, movie, "/dest", false)
+	require.NoError(t, err)
+	assert.Equal(t, "unknown", plan.FolderName, "should fall back to 'unknown' when movie ID sanitizes to empty")
 }
 
 func TestPathLengthRegression_InplaceNoRenameFolder_LongPath(t *testing.T) {

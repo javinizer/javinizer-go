@@ -237,20 +237,12 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 	if foundFit {
 		return bestFit, nil
 	}
-	// Bounded probes for non-monotonic templates (e.g. <IF:TITLE> with longer <ELSE>).
-	// Check budgets where conditional branches switch state.
-	// Probe budgets where conditional branches switch state.
-	// Cover all UTF-8 first-rune byte widths: ASCII=1, CJK=3, emoji=4.
-	probeFit := func(budget int) (string, int, bool) {
-		candidate, candLen, err := renderBudget(budget)
-		if err != nil {
-			return "", 0, false
-		}
-		return candidate, candLen, true
-	}
+	// Bounded probes for non-monotonic templates where binary search misses valid budgets.
+	// This happens when conditionals switch branches at rune boundaries (e.g. emoji titles
+	// where a single rune is 4 bytes; binary search may skip the 4-byte budget).
 	for _, budget := range []int{0, 1, 2, 3, 4} {
-		candidate, candLen, ok := probeFit(budget)
-		if ok {
+		candidate, candLen, err := renderBudget(budget)
+		if err == nil {
 			if candLen < shortestLen {
 				shortestLen = candLen
 			}
