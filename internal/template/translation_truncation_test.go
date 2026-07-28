@@ -23,6 +23,28 @@ func TestClampResult_TranslationTruncation(t *testing.T) {
 	assert.Contains(t, got, "ABC -", "ID prefix should be preserved")
 }
 
+func TestClampResult_DifferentOriginalTitle(t *testing.T) {
+	e := NewEngine()
+	ctx := &Context{ID: "ABC", Title: "LongTitle", OriginalTitle: "DifferentLongOriginalTitle"}
+	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<ORIGINALTITLE>)", ctx, 30)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(got), 30)
+}
+
+func TestClampResult_TranslationWithLongOriginalTitle(t *testing.T) {
+	e := NewEngine()
+	ctx := &Context{
+		ID:    "ABC",
+		Title: "Short",
+		Translations: map[string]models.MovieTranslation{
+			"en": {Title: "Short", OriginalTitle: "Very Long Original Translated Title For Coverage"},
+		},
+	}
+	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE:en> (<ORIGINALTITLE:en>)", ctx, 30)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(got), 30)
+}
+
 func TestClampResult_HardTruncationLastResort(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", Title: ""}
