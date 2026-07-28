@@ -229,17 +229,16 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 		if len(emptySanitized) < shortestLen {
 			shortestLen = len(emptySanitized)
 		}
-		if len(emptySanitized) <= maxBytes {
-			return emptySanitized, nil
+		// If even an empty title exceeds maxBytes, no truncation will help.
+		if len(emptySanitized) > maxBytes {
+			return "", fmt.Errorf("folder template cannot fit within the available %d-byte budget by truncating title fields; shortest sanitized rendering is %d bytes; shorten the folder template or destination path, or increase max_path_length", maxBytes, shortestLen)
 		}
 	}
 	for i := len(sortedBudgets) - 1; i >= 0; i-- {
 		budget := sortedBudgets[i]
 		t := e.TruncateTitleBytes(ctx.Title, budget)
-		var ot string
-		if ctx.OriginalTitle == ctx.Title {
-			ot = t
-		} else {
+		ot := t
+		if ctx.OriginalTitle != ctx.Title {
 			ot = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
 		}
 		key := t + "\x00" + ot

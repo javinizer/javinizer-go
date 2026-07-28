@@ -110,6 +110,17 @@ func TestExecuteWithMaxBytes_ConditionalElseExceedsMaxOutput(t *testing.T) {
 	require.Error(t, err, "should error when no candidate fits within budget")
 }
 
+func TestExecuteWithMaxBytes_ScanLoopDifferentOriginalTitle(t *testing.T) {
+	e := NewEngine()
+	ctx := &Context{ID: "AB", Title: "VeryLongTitle", OriginalTitle: "DifferentLongOriginal"}
+	// maxBytes=10: "AB - VeryLongTitle (DifferentLongOriginal)" exceeds → clampResult
+	// Empty title: "AB -  ()" fits ≤ 10 → scan runs
+	// Scan tries budgets, OriginalTitle != Title → else branch
+	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<ORIGINALTITLE>)", ctx, 10)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(got), 10)
+}
+
 func TestExecuteWithMaxBytes_PropagateError_TitleBudgetPath(t *testing.T) {
 	e := newEngineWithOptions(engineOptions{MaxOutputBytes: 16})
 	ctx := &Context{ID: "ABC", Title: "VeryLongTitle"}
