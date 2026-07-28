@@ -108,9 +108,6 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 		// In in-place mode, the target is under the source directory tree,
 		// so destDir is irrelevant for overhead calculation.
 		baseDir := parentDir
-		if s.config.OperationMode == operationmode.OperationModeOrganize && len(destDir) > len(parentDir) {
-			baseDir = destDir
-		}
 		fullOverhead := filepath.Join(baseDir, "X", pc.FileName)
 		overheadBytes := len(fullOverhead) - len("X")
 		folderMaxBytes := 0
