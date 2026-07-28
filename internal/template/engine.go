@@ -202,6 +202,9 @@ func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes 
 			truncCtx.Translations[lang] = tr
 		}
 		truncKey := truncCtx.Title + "\x00" + truncCtx.OriginalTitle
+		for _, tr := range truncCtx.Translations {
+			truncKey += "\x00" + tr.Title + "\x00" + tr.OriginalTitle
+		}
 		if seenTruncations[truncKey] {
 			continue
 		}
