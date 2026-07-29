@@ -231,7 +231,7 @@
 					/>
 
 					{#if s.viewMode === 'grid-poster' || s.viewMode === 'grid-cover'}
-						<div class="grid {s.viewMode === 'grid-cover' ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'} {s.viewMode === 'grid-cover' ? 'gap-2' : 'gap-4'}">
+						<div class="grid {s.viewMode === 'grid-cover' ? 'grid-cols-[repeat(auto-fill,minmax(22rem,1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]'} {s.viewMode === 'grid-cover' ? 'gap-2' : 'gap-4'}">
 							{#each s.filteredMovieGroups as group}
 								{@const effMovie = s.getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie)}
 								<ReviewGridCard
@@ -263,6 +263,22 @@
 					{:else}
 						{#key s.currentResult.file_path}
 							<div class="grid grid-cols-1 gap-4 lg:grid-cols-[clamp(20rem,24vw,22.5rem)_minmax(0,1fr)] lg:gap-6" in:fade|local={{ duration: 180 }}>
+							<div class="lg:col-start-2 lg:row-start-1 sticky top-0 z-20 bg-background lg:static lg:z-auto lg:bg-transparent">
+							<MovieNavigationCard
+								bind:currentMovieIndex={s.currentMovieIndex}
+								movieResultsLength={s.movieResults.length}
+								currentMovieId={s.currentMovie.id}
+								hasChanges={s.reviewPageController.hasChanges(s.currentResult.file_path)}
+								sourceResults={s.currentMovieGroup?.results || [s.currentResult]}
+								primaryFilePath={s.currentResult.file_path}
+								bind:showFullSourcePath={s.showFullSourcePath}
+								showOutputPreview={s.canOrganize}
+								outputPreviewDisabled={s.previewNeedsDestination && !s.destinationPath.trim()}
+								onOpenOutputPreview={() => (s.showOutputPreviewModal = true)}
+								onExclude={s.reviewPageController.excludeCurrentMovie}
+							/>
+							</div>
+							<div class="lg:col-start-1 lg:row-start-1 lg:row-span-2">
 							<ReviewMediaSidebar
 								currentMovie={s.currentMovie}
 								displayPosterUrl={s.displayPosterUrl}
@@ -283,22 +299,9 @@
 							onOpenScreenshotViewer={s.reviewPageController.openScreenshotViewer}
 							previewImageURL={s.reviewPageController.previewImageURL}
 						/>
+						</div>
 
-						<div class="space-y-6 min-w-0">
-							<MovieNavigationCard
-								bind:currentMovieIndex={s.currentMovieIndex}
-								movieResultsLength={s.movieResults.length}
-								currentMovieId={s.currentMovie.id}
-								hasChanges={s.reviewPageController.hasChanges(s.currentResult.file_path)}
-								sourceResults={s.currentMovieGroup?.results || [s.currentResult]}
-								primaryFilePath={s.currentResult.file_path}
-								bind:showFullSourcePath={s.showFullSourcePath}
-								showOutputPreview={s.canOrganize}
-								outputPreviewDisabled={s.previewNeedsDestination && !s.destinationPath.trim()}
-								onOpenOutputPreview={() => (s.showOutputPreviewModal = true)}
-								onExclude={s.reviewPageController.excludeCurrentMovie}
-							/>
-
+						<div class="space-y-6 min-w-0 lg:col-start-2 lg:row-start-2">
 							<MovieMetadataCard
 								currentMovie={s.currentMovie}
 								currentResult={s.currentResult}

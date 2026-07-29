@@ -87,12 +87,11 @@
 				<div class="mb-4">
 					<p class="text-xs font-medium text-muted-foreground mb-1.5">{m.review_cover_fanart()}</p>
 					{#if currentMovie.cover_url}
-						<button onclick={onOpenCoverViewer} class="cursor-zoom-in hover:opacity-80 transition-opacity" title={m.review_view_cover_image()} aria-label={m.review_view_cover_image()}>
+						<button onclick={onOpenCoverViewer} class="cursor-zoom-in hover:opacity-80 transition-opacity w-full block" title={m.review_view_cover_image()} aria-label={m.review_view_cover_image()}>
 							<img
 								src={previewImageURL(currentMovie.cover_url)}
 								alt={m.review_cover_alt()}
-								class="rounded border object-contain"
-								style="max-width: 100%; max-height: 300px; width: auto;"
+								class="w-full rounded border"
 								onerror={(e) => { (e.currentTarget as HTMLImageElement).src = COVER_PLACEHOLDER_SVG; }}
 							/>
 						</button>
