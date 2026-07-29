@@ -21,6 +21,8 @@
 //     includes the ID prefix, so the multipart spec can
 //     assert multi-file grouping by shared MovieID with
 //     distinctive metadata.
+//   - "PATH-*"    → success with a long title and non-empty original title for
+//     path-length fullstack coverage.
 //   - "FAIL-*"     → returns an error whose message carries a per-scraper
 //     substring ("e2emock:") so E2E tests can assert the
 //     verbose per-scraper failure summary surfaces through
@@ -124,6 +126,8 @@ func (s *Scraper) Search(_ context.Context, id string) (*models.ScraperResult, e
 		return successResult(id), nil
 	case strings.HasPrefix(upper, "MULTI-"):
 		return successResult(id), nil
+	case strings.HasPrefix(upper, "PATH-"):
+		return pathLengthResult(id), nil
 	case strings.HasPrefix(upper, "NIL-"):
 		return nil, nil
 	case strings.HasPrefix(upper, "FAIL-"):
@@ -131,7 +135,7 @@ func (s *Scraper) Search(_ context.Context, id string) (*models.ScraperResult, e
 	case strings.HasPrefix(upper, "ALIAS-"):
 		return aliasResult(id), nil
 	default:
-		return nil, fmt.Errorf("e2emock: unrecognized ID %q — use GOOD-* / MULTI-* prefix for success, FAIL-* for verbose failure, ALIAS-* for alias dedup (this guard prevents accidental green results)", id)
+		return nil, fmt.Errorf("e2emock: unrecognized ID %q — use GOOD-* / MULTI-* / PATH-* prefix for success, FAIL-* for verbose failure, ALIAS-* for alias dedup (this guard prevents accidental green results)", id)
 	}
 }
 
@@ -159,6 +163,13 @@ func successResult(id string) *models.ScraperResult {
 		CoverURL:   fmt.Sprintf("https://e2e.invalid/cover-%s.jpg", id),
 		TrailerURL: "",
 	}
+}
+
+func pathLengthResult(id string) *models.ScraperResult {
+	res := successResult(id)
+	res.Title = strings.Repeat("Long ", 40) + id
+	res.OriginalTitle = "Path length fixture"
+	return res
 }
 
 // aliasResult returns a ScraperResult whose actress carries a JapaneseName

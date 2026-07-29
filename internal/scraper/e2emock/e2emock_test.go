@@ -22,6 +22,7 @@ func TestScraper_Search(t *testing.T) {
 		{"good prefix success", "GOOD-001", false, "", "GOOD-001", "E2E Movie GOOD-001", ""},
 		{"good prefix lowercased", "good-002", false, "", "good-002", "E2E Movie good-002", ""},
 		{"multi prefix success", "MULTI-001", false, "", "MULTI-001", "E2E Movie MULTI-001", ""},
+		{"path prefix returns long title + original title", "PATH-001", false, "", "PATH-001", strings.Repeat("Long ", 40) + "PATH-001", ""},
 		{"fail prefix returns verbose error", "FAIL-002", true, "e2emock:", "", "", ""},
 		{"fail error mentions id", "FAIL-003", true, "FAIL-003", "", "", ""},
 		{"alias prefix success with seeded japanese name", "ALIAS-001", false, "", "ALIAS-001", "E2E Alias Movie ALIAS-001", "朝日芹奈"},
@@ -67,6 +68,23 @@ func TestScraper_Search(t *testing.T) {
 				t.Errorf("actress JapaneseName = %q, want %q", res.Actresses[0].JapaneseName, tc.wantActrJP)
 			}
 		})
+	}
+}
+
+func TestScraper_pathLengthResult_LongTitleAndOriginalTitle(t *testing.T) {
+	res := pathLengthResult("PATH-001")
+	if res == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if res.OriginalTitle == "" {
+		t.Error("OriginalTitle must be non-empty so the <IF:ORIGINALTITLE> folder template takes the <TITLE> branch")
+	}
+	wantTitle := strings.Repeat("Long ", 40) + "PATH-001"
+	if res.Title != wantTitle {
+		t.Errorf("Title = %q, want %q", res.Title, wantTitle)
+	}
+	if len(res.Title) <= 100 {
+		t.Errorf("Title length %d must exceed 100 bytes to force truncation under default max_path_length", len(res.Title))
 	}
 }
 

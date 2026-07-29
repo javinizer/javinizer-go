@@ -228,7 +228,7 @@ func loadConfig() (*config.Config, error) {
 	// organizer appends match.Extension. With our template, the preview
 	// response's file_name should be the movie ID plus the `.mp4` extension
 	// when the scrape phase preserves match.Extension.
-	cfg.Output.Template.FolderFormat = "<ID>"
+	cfg.Output.Template.FolderFormat = "<IF:ORIGINALTITLE><TITLE><ELSE><ID></IF>"
 	cfg.Output.Template.FileFormat = "<ID>"
 	cfg.Output.Operation.RenameFile = true
 	// Enable revert so the full-stack Playwright suite can exercise the
