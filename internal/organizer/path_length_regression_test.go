@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -172,6 +173,54 @@ func TestPathLengthRegression_ExecuteWithMaxBytes_NeverExceedsLimit(t *testing.T
 			assert.LessOrEqual(t, len(got), tc.maxBytes,
 				"ExecuteWithMaxBytes result (%d bytes) must not exceed maxBytes (%d): got %q",
 				len(got), tc.maxBytes, got)
+		})
+	}
+}
+
+func TestPathLengthRegression_InplaceOrganizeFallbackUsesDestinationBudget(t *testing.T) {
+	testCases := []struct {
+		name      string
+		sourceDir string
+		destDir   string
+	}{
+		{
+			name:      "long destination truncates folder",
+			sourceDir: "/source/mixed",
+			destDir:   "/destination/with/a/very/long/path/that/requires/the/generated/folder/title/to/be/truncated",
+		},
+		{
+			name:      "long source parent does not consume destination budget",
+			sourceDir: "/source/with/a/very/long/path/that/would/exceed/the/configured/limit/if/used/for/the/fallback/budget/mixed",
+			destDir:   "/dest",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			engine := template.NewEngine()
+			m, err := matcher.NewMatcher(&matcher.Config{})
+			require.NoError(t, err)
+			cfg := &Config{
+				FolderFormat:  "<ID> - <TITLE>",
+				FileFormat:    "<ID>.mp4",
+				MaxPathLength: 120,
+				OperationMode: operationmode.OperationModeOrganize,
+				RenameFile:    true,
+			}
+			sourceFile := tc.sourceDir + "/ABC-001.mp4"
+			require.NoError(t, fs.MkdirAll(tc.sourceDir, 0755))
+			require.NoError(t, afero.WriteFile(fs, sourceFile, []byte("test"), 0644))
+			require.NoError(t, afero.WriteFile(fs, tc.sourceDir+"/XYZ-002.mp4", []byte("test"), 0644))
+
+			match := models.FileMatchInfo{Path: sourceFile, MovieID: "ABC-001", Name: "ABC-001.mp4"}
+			movie := &models.Movie{ID: "ABC-001", Title: "A Very Long Movie Title That Must Be Truncated To Fit The Destination Path Budget"}
+			plan, err := newInPlaceStrategy(fs, cfg, m, engine).Plan(match, movie, tc.destDir, false)
+
+			require.NoError(t, err)
+			assert.False(t, plan.InPlace)
+			assert.LessOrEqual(t, len(plan.TargetPath), cfg.MaxPathLength)
+			assert.Equal(t, filepath.Clean(tc.destDir), filepath.Dir(plan.TargetDir))
 		})
 	}
 }
