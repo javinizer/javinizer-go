@@ -263,7 +263,7 @@
 					{:else}
 						{#key s.currentResult.file_path}
 							<div class="grid grid-cols-1 gap-4 lg:grid-cols-[clamp(20rem,24vw,22.5rem)_minmax(0,1fr)] lg:gap-6" in:fade|local={{ duration: 180 }}>
-							<div class="lg:col-start-2 lg:row-start-1 sticky top-0 z-20 bg-background lg:static lg:z-auto lg:bg-transparent">
+							<div class="lg:col-start-2 lg:row-start-1 sticky top-16 z-30 bg-background lg:static lg:z-auto lg:bg-transparent">
 							<MovieNavigationCard
 								bind:currentMovieIndex={s.currentMovieIndex}
 								movieResultsLength={s.movieResults.length}
