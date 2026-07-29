@@ -231,7 +231,7 @@
 					/>
 
 					{#if s.viewMode === 'grid-poster' || s.viewMode === 'grid-cover'}
-						<div class="grid {s.viewMode === 'grid-cover' ? 'grid-cols-[repeat(auto-fill,minmax(22rem,1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]'} {s.viewMode === 'grid-cover' ? 'gap-2' : 'gap-4'}">
+						<div class="grid {s.viewMode === 'grid-cover' ? 'grid-cols-[repeat(auto-fill,minmax(min(22rem,100%),1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(min(11rem,100%),1fr))]'} {s.viewMode === 'grid-cover' ? 'gap-2' : 'gap-4'}">
 							{#each s.filteredMovieGroups as group}
 								{@const effMovie = s.getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie)}
 								<ReviewGridCard
