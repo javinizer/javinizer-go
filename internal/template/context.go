@@ -83,10 +83,11 @@ type Context struct {
 	DefaultLanguage string
 
 	// Output configuration
-	GroupActress            bool   // Replace multiple actresses with group name
-	GroupActressMin         int    // Minimum actress count to trigger grouping; grouping applies when count >= this value (0 => 2, the default)
-	GroupActressName        string // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
-	GroupUnknownActressName string // Replacement when GroupActress is enabled and the actress list is empty or unknown (default: "@Unknown")
+	GroupActress            bool                      // Replace multiple actresses with group name
+	GroupActressMin         int                       // Minimum actress count to trigger grouping; grouping applies when count >= this value (0 => 2, the default)
+	GroupActressName        string                    // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
+	GroupUnknownActressName string                    // Replacement when GroupActress is enabled and the actress list is empty or unknown (default: "@Unknown")
+	UnknownActressMode      models.UnknownActressMode // Governs @Unknown substitution under GroupActress: "skip" (default) suppresses it, "fallback" inserts it
 
 	// Name formatting
 	FirstNameOrder    bool   // true = FirstName LastName, false = LastName FirstName (default: false for backward compat)
@@ -204,6 +205,7 @@ func (c *Context) Clone() *Context {
 		GroupActressMin:         c.GroupActressMin,
 		GroupActressName:        c.GroupActressName,
 		GroupUnknownActressName: c.GroupUnknownActressName,
+		UnknownActressMode:      c.UnknownActressMode,
 		FirstNameOrder:          c.FirstNameOrder,
 		ActressLanguageJa:       c.ActressLanguageJa,
 		ActressDelimiter:        c.ActressDelimiter,
@@ -358,4 +360,15 @@ func (c *Context) groupActressMin() int {
 		return 2
 	}
 	return c.GroupActressMin
+}
+
+// skipUnknownActress reports whether the @Unknown placeholder should be
+// suppressed when GroupActress is enabled and the actress list is empty or
+// the only name is unknown. Mirrors the aggregator's SkipUnknown flag: true
+// when unknown_actress_mode is "skip" (or unset, the config default); false
+// only when mode is "fallback". Keeping the template substitution consistent
+// with the aggregator prevents @Unknown from leaking into <ACTORS>/<ACTRESSES>
+// when the user has disabled the unknown-actress fallback.
+func (c *Context) skipUnknownActress() bool {
+	return c.UnknownActressMode != models.UnknownActressModeFallback
 }

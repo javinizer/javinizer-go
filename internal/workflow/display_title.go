@@ -36,6 +36,7 @@ func ApplyDisplayTitleFromSource(ctx context.Context, scraped *models.Movie, tit
 		displayCtx.GroupActressMin = nameCfg.GroupActressMin
 		displayCtx.GroupActressName = nameCfg.GroupActressName
 		displayCtx.GroupUnknownActressName = nameCfg.GroupUnknownActressName
+		displayCtx.UnknownActressMode = nameCfg.UnknownActressMode
 		displayCtx.FirstNameOrder = nameCfg.FirstNameOrder
 		displayCtx.ActressLanguageJa = nameCfg.ActressLanguageJA
 		displayCtx.ActressDelimiter = nameCfg.ActressDelimiter

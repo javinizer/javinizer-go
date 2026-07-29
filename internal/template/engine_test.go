@@ -718,6 +718,7 @@ func TestTemplateEngine_GroupActress(t *testing.T) {
 		groupActressMin         int
 		groupActressName        string
 		groupUnknownActressName string
+		unknownActressMode      models.UnknownActressMode
 		template                string
 		want                    string
 	}{
@@ -903,6 +904,13 @@ func TestTemplateEngine_GroupActress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Default to fallback so the @Unknown substitution cases
+			// (which predate the skip/fallback distinction) still pass;
+			// cases with real actresses never hit the @Unknown path.
+			mode := tt.unknownActressMode
+			if mode == "" {
+				mode = models.UnknownActressModeFallback
+			}
 			ctx := &Context{
 				ID:                      "IPX-535",
 				Actresses:               tt.actresses,
@@ -910,6 +918,7 @@ func TestTemplateEngine_GroupActress(t *testing.T) {
 				GroupActressMin:         tt.groupActressMin,
 				GroupActressName:        tt.groupActressName,
 				GroupUnknownActressName: tt.groupUnknownActressName,
+				UnknownActressMode:      mode,
 			}
 
 			got, err := engine.Execute(tt.template, ctx)

@@ -171,6 +171,7 @@ func (o *previewOrchImpl) resolveMediaPaths(
 	previewTmplCtx.GroupActressMin = o.previewCfg.PathCfg.GroupActressMin
 	previewTmplCtx.GroupActressName = o.previewCfg.PathCfg.GroupActressName
 	previewTmplCtx.GroupUnknownActressName = o.previewCfg.PathCfg.GroupUnknownActressName
+	previewTmplCtx.UnknownActressMode = o.previewCfg.PathCfg.UnknownActressMode
 	previewTmplCtx.ActressDelimiter = o.previewCfg.PathCfg.ActressDelimiter
 	previewTmplCtx.FirstNameOrder = o.previewCfg.PathCfg.FirstNameOrder
 	previewTmplCtx.ActressLanguageJa = o.previewCfg.PathCfg.ActressLanguageJA

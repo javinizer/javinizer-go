@@ -891,9 +891,15 @@ func (e *Engine) resolveActressListTag(modifier string, ctx *Context) string {
 	if len(ctx.Actresses) == 0 && len(ctx.ActressDetails) == 0 {
 		// No actresses at all. Under GroupActress, mirror the original
 		// PowerShell javinizer which substitutes @Unknown when the actress
-		// list is empty (so folder naming stays "@Unknown" rather than
-		// blank). Without GroupActress, return empty.
+		// list is empty — but only when unknown_actress_mode is "fallback".
+		// When the mode is "skip" (the config default), suppress the
+		// @Unknown placeholder so the field is left empty, matching the
+		// aggregator's SkipUnknown behaviour. Without GroupActress, return
+		// empty.
 		if ctx.GroupActress {
+			if ctx.skipUnknownActress() {
+				return ""
+			}
 			return resolveGroupUnknownName(ctx.GroupUnknownActressName)
 		}
 		return ""
@@ -923,10 +929,16 @@ func (e *Engine) resolveActressListTag(modifier string, ctx *Context) string {
 	}
 
 	if ctx.GroupActress {
-		// An empty list or a lone unknown actress always resolves to the
+		// An empty list or a lone unknown actress resolves to the
 		// @Unknown replacement, regardless of the configured threshold —
-		// mirrors the original PowerShell javinizer.
+		// mirrors the original PowerShell javinizer — but only when
+		// unknown_actress_mode is "fallback". When the mode is "skip" (the
+		// config default), suppress @Unknown so the field is left empty,
+		// matching the aggregator's SkipUnknown behaviour.
 		if len(names) == 0 || (len(names) == 1 && isUnknownActressName(names[0])) {
+			if ctx.skipUnknownActress() {
+				return ""
+			}
 			return resolveGroupUnknownName(ctx.GroupUnknownActressName)
 		}
 		// Group substitution applies when the actress count reaches the

@@ -22,6 +22,7 @@ type NFONameConfig struct {
 	// <ACTORS>/<ACTRESSES> tag resolution picks up main's actress features
 	// (group unknown substitution, JA preference, custom delimiter).
 	GroupUnknownActressName string
+	UnknownActressMode      models.UnknownActressMode
 	ActressDelimiter        string
 	ActressLanguageJA       bool
 }
@@ -123,6 +124,7 @@ func (c *Config) ToNFONameConfig(isMultiPart bool, partSuffix string) NFONameCon
 		PartSuffix:              partSuffix,
 		FirstNameOrder:          c.FirstNameOrder,
 		GroupUnknownActressName: c.GroupUnknownActressName,
+		UnknownActressMode:      c.UnknownActressMode,
 		ActressDelimiter:        c.ActressDelimiter,
 		ActressLanguageJA:       c.ActressLanguageJA,
 	}
@@ -136,7 +138,7 @@ func (c *Config) ToNFONameConfig(isMultiPart bool, partSuffix string) NFONameCon
 // Config-bridge reads: cfg.Metadata.NFO.Format.FilenameTemplate, cfg.Metadata.NFO.Format.FirstNameOrder,
 // cfg.Metadata.NFO.Feature.PerFile, cfg.Output.Operation.GroupActress, cfg.Output.Operation.GroupActressMin,
 // cfg.Output.Operation.GroupActressName, cfg.Output.Operation.GroupUnknownActressName, cfg.Output.Template,
-// cfg.Output.Template.ActressDelimiter, cfg.Metadata.NFO.Format.ActressLanguageJA
+// cfg.Output.Template.ActressDelimiter, cfg.Metadata.NFO.Format.ActressLanguageJA, cfg.Metadata.NFO.Format.UnknownActressMode
 func NFONameConfigFromAppConfig(cfg *config.Config) NFONameConfig {
 	if cfg == nil {
 		return NFONameConfig{}
@@ -149,6 +151,7 @@ func NFONameConfigFromAppConfig(cfg *config.Config) NFONameConfig {
 		PerFile:                 cfg.Metadata.NFO.Feature.PerFile,
 		FirstNameOrder:          cfg.Metadata.NFO.Format.FirstNameOrder,
 		GroupUnknownActressName: cfg.Output.Operation.GroupUnknownActressName,
+		UnknownActressMode:      cfg.Metadata.NFO.Format.UnknownActressMode,
 		ActressDelimiter:        cfg.Output.Template.ActressDelimiter,
 		ActressLanguageJA:       cfg.Metadata.NFO.Format.ActressLanguageJA,
 	}

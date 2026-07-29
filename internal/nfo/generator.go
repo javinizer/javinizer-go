@@ -185,6 +185,7 @@ func (g *Generator) Generate(ctx context.Context, movie *models.Movie, outputPat
 	tmplCtx.GroupActressMin = g.config.GroupActressMin
 	tmplCtx.GroupActressName = g.config.GroupActressName
 	tmplCtx.GroupUnknownActressName = g.config.GroupUnknownActressName
+	tmplCtx.UnknownActressMode = g.config.UnknownActressMode
 	tmplCtx.ActressLanguageJa = g.config.ActressLanguageJA
 	tmplCtx.ActressDelimiter = g.config.ActressDelimiter
 	filename, err := g.templateEngine.Execute(g.config.FilenameTemplate, tmplCtx)
@@ -433,6 +434,7 @@ func ResolveNFOFilename(engine template.EngineInterface, movie *models.Movie, cf
 	tmplCtx.GroupActressMin = cfg.GroupActressMin
 	tmplCtx.GroupActressName = cfg.GroupActressName
 	tmplCtx.GroupUnknownActressName = cfg.GroupUnknownActressName
+	tmplCtx.UnknownActressMode = cfg.UnknownActressMode
 	tmplCtx.ActressLanguageJa = cfg.ActressLanguageJA
 	tmplCtx.ActressDelimiter = cfg.ActressDelimiter
 	filename, err := engine.Execute(cfg.FilenameTemplate, tmplCtx)

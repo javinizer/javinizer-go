@@ -78,6 +78,7 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg nfo.NFONameConfig) *Config 
 			GroupActressMin:         nameCfg.GroupActressMin,
 			GroupActressName:        nameCfg.GroupActressName,
 			GroupUnknownActressName: nameCfg.GroupUnknownActressName,
+			UnknownActressMode:      nameCfg.UnknownActressMode,
 			ActressFolder:           cfg.Output.MediaFormat.ActressFolder,
 			ActressDelimiter:        cfg.Output.Template.ActressDelimiter,
 			FirstNameOrder:          nameCfg.FirstNameOrder,

@@ -60,6 +60,7 @@ func resolveBaseFileName(cfg *Config, engine template.EngineInterface, movie *mo
 		baseCtx.GroupActressMin = cfg.GroupActressMin
 		baseCtx.GroupActressName = cfg.GroupActressName
 		baseCtx.GroupUnknownActressName = cfg.GroupUnknownActressName
+		baseCtx.UnknownActressMode = cfg.UnknownActressMode
 		baseCtx.FirstNameOrder = cfg.FirstNameOrder
 		baseCtx.ActressLanguageJa = cfg.ActressLanguageJA
 		baseCtx.ActressDelimiter = cfg.ActressDelimiter
@@ -147,6 +148,7 @@ func buildPlanContext(cfg *Config, engine template.EngineInterface, movie *model
 	ctx.GroupActressMin = cfg.GroupActressMin
 	ctx.GroupActressName = cfg.GroupActressName
 	ctx.GroupUnknownActressName = cfg.GroupUnknownActressName
+	ctx.UnknownActressMode = cfg.UnknownActressMode
 	ctx.FirstNameOrder = cfg.FirstNameOrder
 	ctx.ActressLanguageJa = cfg.ActressLanguageJA
 	ctx.ActressDelimiter = cfg.ActressDelimiter
