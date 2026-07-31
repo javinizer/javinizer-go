@@ -188,7 +188,9 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			if resolver, ok := scraper.(models.ActressMetadataResolver); ok {
 				logging.Debugf("Actress sync: resolving DMM ID %d with %s", actress.DMMID, name)
 				sourceInput := resolverInput
-				sourceInput.ThumbURL = ""
+				if name != "javdb" {
+					sourceInput.ThumbURL = ""
+				}
 				metadata := resolver.ResolveActressMetadata(ctx, sourceInput)
 				if strings.TrimSpace(metadata.ThumbURL) != "" && validateThumbnail != nil {
 					if validateErr := validateActressThumbnail(ctx, scraper, validateThumbnail, metadata.ThumbURL); validateErr != nil {

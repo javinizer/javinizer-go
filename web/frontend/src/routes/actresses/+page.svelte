@@ -44,13 +44,14 @@
 		if (!currentJob || syncPollInFlight) return;
 		syncPollInFlight = true;
 		try {
-			const [jobResponse, taskResponse] = await Promise.all([apiClient.getActressSyncJob(currentJob.id), apiClient.listActressSyncJobTasks(currentJob.id)]);
+			const jobResponse = await apiClient.getActressSyncJob(currentJob.id);
 			if (!syncJob || syncJob.id !== currentJob.id) return;
 			syncJob = jobResponse.job;
-			syncTasks = taskResponse.tasks;
 			if (isActressSyncTerminal(syncJob)) {
 				if (syncTimer) clearInterval(syncTimer);
 				syncTimer = undefined;
+				const taskResponse = await apiClient.listActressSyncJobTasks(currentJob.id);
+				syncTasks = taskResponse.tasks;
 				await queryClient.invalidateQueries({ queryKey: ['actresses'] });
 			}
 		} catch (error) {
