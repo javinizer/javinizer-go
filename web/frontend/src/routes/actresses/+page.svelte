@@ -41,6 +41,7 @@
 	let syncRestoring = $state(true);
 	let advanceAfterReconcile = false;
 	let syncDestroyed = false;
+	let syncAdvancePromise: Promise<boolean> | undefined;
 	let syncTimer: ReturnType<typeof setInterval> | undefined;
 
 	function stopPolling() {
@@ -58,7 +59,7 @@
 		mergeActiveSyncJobs(jobs);
 	}
 
-	async function showNextSyncJob() {
+	async function advanceSyncJob() {
 		if (syncDestroyed) return false;
 		if (syncQueue.length === 0) await refreshActiveSyncQueue();
 		if (syncDestroyed) return false;
@@ -70,6 +71,12 @@
 		showSyncModal = true;
 		startPolling();
 		return true;
+	}
+
+	function showNextSyncJob() {
+		if (syncAdvancePromise) return syncAdvancePromise;
+		syncAdvancePromise = advanceSyncJob().finally(() => { syncAdvancePromise = undefined; });
+		return syncAdvancePromise;
 	}
 
 	async function pollSyncJob() {
@@ -101,7 +108,7 @@
 			stopPolling();
 			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
 		} finally {
-			syncPollInFlight = false;
+			if (!syncDestroyed) syncPollInFlight = false;
 		}
 	}
 
@@ -121,6 +128,11 @@
 		syncStarting = true;
 		try {
 			if (await showNextSyncJob()) return;
+			if (syncDestroyed) return;
+			if (syncJob && !isActressSyncTerminal(syncJob)) {
+				showSyncModal = true;
+				return;
+			}
 			const response = await apiClient.createActressSyncJob({ scope, actress_ids: scope === 'selected' ? store.selectedIds : undefined });
 			if (syncDestroyed) return;
 			syncJob = response.job;
