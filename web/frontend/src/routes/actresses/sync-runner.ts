@@ -25,9 +25,19 @@ export async function loadActressSyncSnapshot(client: ActressSyncSnapshotClient,
 	return { job: jobResponse.job, tasks: taskResponse.tasks };
 }
 
-export async function loadNewestActiveActressSyncJob(client: ActressSyncSnapshotClient) {
+export async function loadActiveActressSyncJobs(client: ActressSyncSnapshotClient) {
 	const response = await client.listActiveActressSyncJobs();
-	return response.jobs.at(-1) ?? null;
+	return response.jobs;
+}
+
+export function orderActiveActressSyncJobs(jobs: ActressSyncJob[]) {
+	return { current: jobs.at(-1) ?? null, queued: jobs.slice(0, -1).reverse() };
+}
+
+export function mergeActiveActressSyncJobs(current: ActressSyncJob | null, queued: ActressSyncJob[], active: ActressSyncJob[]) {
+	const known = new Set([current?.id, ...queued.map((job) => job.id)]);
+	const additions = [...active].reverse().filter((job) => !known.has(job.id));
+	return [...additions, ...queued];
 }
 
 export function buildActressSyncSummary(

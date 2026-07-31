@@ -18,7 +18,7 @@
 	import ActressMergeModal from './components/ActressMergeModal.svelte';
 	import ActressPagination from './components/ActressPagination.svelte';
 	import ActressSyncModal from './components/ActressSyncModal.svelte';
-	import { isActressSyncTerminal, loadActressSyncSnapshot, loadNewestActiveActressSyncJob } from './sync-runner';
+	import { isActressSyncTerminal, loadActressSyncSnapshot, loadActiveActressSyncJobs, mergeActiveActressSyncJobs, orderActiveActressSyncJobs } from './sync-runner';
 	import * as m from '$lib/paraglide/messages';
 	import { createConfigQuery } from '$lib/query/queries';
 
@@ -33,95 +33,154 @@
 	let importFile = $state<HTMLInputElement | null>(null);
 	let syncJob = $state<ActressSyncJob | null>(null);
 	let syncTasks = $state<ActressSyncTask[]>([]);
+	let syncQueue = $state<ActressSyncJob[]>([]);
 	let showSyncModal = $state(false);
 	let syncStarting = $state(false);
 	let syncCancelling = $state(false);
 	let syncPollInFlight = $state(false);
+	let syncRestoring = $state(true);
+	let advanceAfterReconcile = false;
+	let syncDestroyed = false;
 	let syncTimer: ReturnType<typeof setInterval> | undefined;
 
-	async function pollSyncJob() {
-		const currentJob = syncJob;
-		if (!currentJob || syncPollInFlight) return;
-		syncPollInFlight = true;
-		try {
-			const snapshot = await loadActressSyncSnapshot(apiClient, currentJob.id);
-			if (!syncJob || syncJob.id !== currentJob.id) return;
-			syncJob = snapshot.job;
-			syncTasks = snapshot.tasks;
-			if (isActressSyncTerminal(syncJob)) {
-				if (syncTimer) clearInterval(syncTimer);
-				syncTimer = undefined;
-				await queryClient.invalidateQueries({ queryKey: ['actresses'] });
-				await showNewestActiveSyncJob();
-			}
-		} catch (error) {
-			if (!syncJob || syncJob.id !== currentJob.id) return;
-			if (syncTimer) clearInterval(syncTimer);
-			syncTimer = undefined;
-			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
-		} finally {
-			syncPollInFlight = false;
-		}
+	function stopPolling() {
+		if (syncTimer) clearInterval(syncTimer);
+		syncTimer = undefined;
 	}
 
-	async function showNewestActiveSyncJob() {
-		const active = await loadNewestActiveActressSyncJob(apiClient);
-		if (!active) return false;
-		syncJob = active;
+	function mergeActiveSyncJobs(jobs: ActressSyncJob[]) {
+		syncQueue = mergeActiveActressSyncJobs(syncJob, syncQueue, jobs);
+	}
+
+	async function refreshActiveSyncQueue() {
+		const jobs = await loadActiveActressSyncJobs(apiClient);
+		if (syncDestroyed) return;
+		mergeActiveSyncJobs(jobs);
+	}
+
+	async function showNextSyncJob() {
+		if (syncDestroyed) return false;
+		if (syncQueue.length === 0) await refreshActiveSyncQueue();
+		if (syncDestroyed) return false;
+		const [next, ...remaining] = syncQueue;
+		if (!next) return false;
+		syncQueue = remaining;
+		syncJob = next;
 		syncTasks = [];
 		showSyncModal = true;
 		startPolling();
 		return true;
 	}
 
+	async function pollSyncJob() {
+		const currentJob = syncJob;
+		if (!currentJob || syncPollInFlight || syncDestroyed) return;
+		syncPollInFlight = true;
+		try {
+			const snapshot = await loadActressSyncSnapshot(apiClient, currentJob.id);
+			if (syncDestroyed || !syncJob || syncJob.id !== currentJob.id) return;
+			syncJob = snapshot.job;
+			syncTasks = snapshot.tasks;
+			if (isActressSyncTerminal(syncJob)) {
+				stopPolling();
+				await queryClient.invalidateQueries({ queryKey: ['actresses'] });
+				if (syncDestroyed) return;
+				syncRestoring = true;
+				try {
+					await refreshActiveSyncQueue();
+				} finally {
+					if (!syncDestroyed) syncRestoring = false;
+				}
+				if (advanceAfterReconcile) {
+					advanceAfterReconcile = false;
+					void showNextSyncJob();
+				}
+			}
+		} catch (error) {
+			if (syncDestroyed || !syncJob || syncJob.id !== currentJob.id) return;
+			stopPolling();
+			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
+		} finally {
+			syncPollInFlight = false;
+		}
+	}
+
 	function startPolling() {
-		if (syncTimer) clearInterval(syncTimer);
+		if (syncDestroyed) return;
+		stopPolling();
 		void pollSyncJob();
 		syncTimer = setInterval(pollSyncJob, 1500);
 	}
 
 	async function startSync(scope: 'missing' | 'selected') {
+		if (syncDestroyed || syncRestoring || syncStarting) return;
 		if (syncJob && !isActressSyncTerminal(syncJob)) {
 			showSyncModal = true;
 			return;
 		}
 		syncStarting = true;
 		try {
+			if (await showNextSyncJob()) return;
 			const response = await apiClient.createActressSyncJob({ scope, actress_ids: scope === 'selected' ? store.selectedIds : undefined });
+			if (syncDestroyed) return;
 			syncJob = response.job;
 			syncTasks = [];
 			showSyncModal = true;
 			startPolling();
 		} catch (error) {
-			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_start_failed());
+			if (!syncDestroyed) toastStore.error(error instanceof Error ? error.message : m.actresses_sync_start_failed());
 		} finally {
-			syncStarting = false;
+			if (!syncDestroyed) syncStarting = false;
 		}
 	}
 
 	async function cancelSync() {
 		const currentJob = syncJob;
-		if (!currentJob || currentJob.cancel_requested || syncCancelling) return;
+		if (!currentJob || currentJob.cancel_requested || syncCancelling || syncDestroyed) return;
 		syncCancelling = true;
 		try {
 			const response = await apiClient.cancelActressSyncJob(currentJob.id);
-			if (syncJob?.id === currentJob.id) {
+			if (!syncDestroyed && syncJob?.id === currentJob.id) {
 				syncJob = response.job;
 				void pollSyncJob();
 			}
 		} catch (error) {
-			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
+			if (!syncDestroyed) toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
 		} finally {
-			syncCancelling = false;
+			if (!syncDestroyed) syncCancelling = false;
 		}
+	}
+
+	function closeSyncModal() {
+		showSyncModal = false;
+		if (!syncJob || !isActressSyncTerminal(syncJob)) return;
+		if (syncRestoring) {
+			advanceAfterReconcile = true;
+			return;
+		}
+		void showNextSyncJob();
 	}
 
 	onMount(() => {
 		store.hydrateSortPreferences();
-		void showNewestActiveSyncJob().catch((error) => {
-			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
+		void loadActiveActressSyncJobs(apiClient).then((jobs) => {
+			if (syncDestroyed) return;
+			const ordered = orderActiveActressSyncJobs(jobs);
+			syncJob = ordered.current;
+			syncQueue = ordered.queued;
+			if (syncJob) {
+				showSyncModal = true;
+				startPolling();
+			}
+		}).catch((error) => {
+			if (!syncDestroyed) toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
+		}).finally(() => {
+			if (!syncDestroyed) syncRestoring = false;
 		});
-		return () => { if (syncTimer) clearInterval(syncTimer); };
+		return () => {
+			syncDestroyed = true;
+			stopPolling();
+		};
 	});
 
 	const exportMutation = createMutation(() => ({
@@ -202,8 +261,8 @@
 				<p class="text-muted-foreground mt-1">{m.actresses_subtitle()}</p>
 			</div>
 			<div class="flex items-center gap-2">
-				<Button variant="outline" size="sm" onclick={() => startSync('missing')} disabled={syncStarting}><WandSparkles class="h-4 w-4" />{m.actresses_sync_missing()}</Button>
-				<Button variant="outline" size="sm" onclick={() => startSync('selected')} disabled={syncStarting || store.selectedIds.length === 0}><WandSparkles class="h-4 w-4" />{m.actresses_sync_selected()}</Button>
+				<Button variant="outline" size="sm" onclick={() => startSync('missing')} disabled={syncStarting || syncRestoring}><WandSparkles class="h-4 w-4" />{m.actresses_sync_missing()}</Button>
+				<Button variant="outline" size="sm" onclick={() => startSync('selected')} disabled={syncStarting || syncRestoring || store.selectedIds.length === 0}><WandSparkles class="h-4 w-4" />{m.actresses_sync_selected()}</Button>
 				<input
 					type="file"
 					accept=".json"
@@ -354,7 +413,7 @@
 </div>
 
 {#if showSyncModal && syncJob}
-	<ActressSyncModal job={syncJob} tasks={syncTasks} onCancel={cancelSync} onClose={() => showSyncModal = false} />
+	<ActressSyncModal job={syncJob} tasks={syncTasks} onCancel={cancelSync} onClose={closeSyncModal} />
 {/if}
 
 <ActressMergeModal

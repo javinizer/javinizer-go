@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActressSyncJob, ActressSyncTask } from '$lib/api/types';
-import { buildActressSyncSummary, isActressSyncTerminal, loadActressSyncSnapshot, loadNewestActiveActressSyncJob } from './sync-runner';
+import { buildActressSyncSummary, isActressSyncTerminal, loadActressSyncSnapshot, loadActiveActressSyncJobs, mergeActiveActressSyncJobs, orderActiveActressSyncJobs } from './sync-runner';
 
 const job: ActressSyncJob = {
 	id: 'job',
@@ -65,9 +65,12 @@ describe('actress sync summary', () => {
 			async listActressSyncJobTasks() { return { tasks: [] }; },
 			async listActiveActressSyncJobs() { return { jobs: [job, newer] }; },
 		};
-		expect(await loadNewestActiveActressSyncJob(client)).toEqual(newer);
-		client.listActiveActressSyncJobs = async () => ({ jobs: [] });
-		expect(await loadNewestActiveActressSyncJob(client)).toBeNull();
+		const active = await loadActiveActressSyncJobs(client);
+		expect(active).toEqual([job, newer]);
+		expect(orderActiveActressSyncJobs(active)).toEqual({ current: newer, queued: [job] });
+		expect(orderActiveActressSyncJobs([])).toEqual({ current: null, queued: [] });
+		const concurrent = { ...job, id: 'concurrent' };
+		expect(mergeActiveActressSyncJobs(newer, [job], [job, concurrent])).toEqual([concurrent, job]);
 	});
 
 	it('recognizes durable terminal states', () => {
