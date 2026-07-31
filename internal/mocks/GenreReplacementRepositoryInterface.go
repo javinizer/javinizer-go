@@ -63,7 +63,7 @@ type MockGenreReplacementRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - replacement *models.GenreReplacement
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) Create(ctx interface{}, replacement interface{}) *MockGenreReplacementRepositoryInterface_Create_Call {
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) Create(ctx any, replacement any) *MockGenreReplacementRepositoryInterface_Create_Call {
 	return &MockGenreReplacementRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, replacement)}
 }
 
@@ -120,7 +120,7 @@ type MockGenreReplacementRepositoryInterface_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - original string
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) Delete(ctx interface{}, original interface{}) *MockGenreReplacementRepositoryInterface_Delete_Call {
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) Delete(ctx any, original any) *MockGenreReplacementRepositoryInterface_Delete_Call {
 	return &MockGenreReplacementRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, original)}
 }
 
@@ -177,7 +177,7 @@ type MockGenreReplacementRepositoryInterface_DeleteByID_Call struct {
 // DeleteByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) DeleteByID(ctx interface{}, id interface{}) *MockGenreReplacementRepositoryInterface_DeleteByID_Call {
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) DeleteByID(ctx any, id any) *MockGenreReplacementRepositoryInterface_DeleteByID_Call {
 	return &MockGenreReplacementRepositoryInterface_DeleteByID_Call{Call: _e.mock.On("DeleteByID", ctx, id)}
 }
 
@@ -245,7 +245,7 @@ type MockGenreReplacementRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockGenreReplacementRepositoryInterface_FindByID_Call {
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockGenreReplacementRepositoryInterface_FindByID_Call {
 	return &MockGenreReplacementRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -313,7 +313,7 @@ type MockGenreReplacementRepositoryInterface_FindByOriginal_Call struct {
 // FindByOriginal is a helper method to define mock.On call
 //   - ctx context.Context
 //   - original string
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) FindByOriginal(ctx interface{}, original interface{}) *MockGenreReplacementRepositoryInterface_FindByOriginal_Call {
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) FindByOriginal(ctx any, original any) *MockGenreReplacementRepositoryInterface_FindByOriginal_Call {
 	return &MockGenreReplacementRepositoryInterface_FindByOriginal_Call{Call: _e.mock.On("FindByOriginal", ctx, original)}
 }
 
@@ -380,7 +380,7 @@ type MockGenreReplacementRepositoryInterface_GetReplacementMap_Call struct {
 
 // GetReplacementMap is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) GetReplacementMap(ctx interface{}) *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call {
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) GetReplacementMap(ctx any) *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call {
 	return &MockGenreReplacementRepositoryInterface_GetReplacementMap_Call{Call: _e.mock.On("GetReplacementMap", ctx)}
 }
 
@@ -442,7 +442,7 @@ type MockGenreReplacementRepositoryInterface_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) List(ctx interface{}) *MockGenreReplacementRepositoryInterface_List_Call {
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) List(ctx any) *MockGenreReplacementRepositoryInterface_List_Call {
 	return &MockGenreReplacementRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx)}
 }
 
@@ -494,7 +494,7 @@ type MockGenreReplacementRepositoryInterface_Upsert_Call struct {
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
 //   - replacement *models.GenreReplacement
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) Upsert(ctx interface{}, replacement interface{}) *MockGenreReplacementRepositoryInterface_Upsert_Call {
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) Upsert(ctx any, replacement any) *MockGenreReplacementRepositoryInterface_Upsert_Call {
 	return &MockGenreReplacementRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, replacement)}
 }
 

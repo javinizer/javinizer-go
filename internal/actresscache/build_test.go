@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -250,7 +251,9 @@ func TestWriteFileAtomicallyWritesCache(t *testing.T) {
 	assert.Contains(t, string(data), `"schema_version": 1`)
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	}
 	_, err = os.Stat(path + ".tmp")
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }

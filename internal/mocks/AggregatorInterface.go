@@ -82,7 +82,7 @@ type MockAggregatorInterface_Aggregate_Call struct {
 
 // Aggregate is a helper method to define mock.On call
 //   - results []*models.ScraperResult
-func (_e *MockAggregatorInterface_Expecter) Aggregate(results interface{}) *MockAggregatorInterface_Aggregate_Call {
+func (_e *MockAggregatorInterface_Expecter) Aggregate(results any) *MockAggregatorInterface_Aggregate_Call {
 	return &MockAggregatorInterface_Aggregate_Call{Call: _e.mock.On("Aggregate", results)}
 }
 
@@ -153,7 +153,7 @@ type MockAggregatorInterface_AggregateWithPriority_Call struct {
 // AggregateWithPriority is a helper method to define mock.On call
 //   - results []*models.ScraperResult
 //   - customPriority []string
-func (_e *MockAggregatorInterface_Expecter) AggregateWithPriority(results interface{}, customPriority interface{}) *MockAggregatorInterface_AggregateWithPriority_Call {
+func (_e *MockAggregatorInterface_Expecter) AggregateWithPriority(results any, customPriority any) *MockAggregatorInterface_AggregateWithPriority_Call {
 	return &MockAggregatorInterface_AggregateWithPriority_Call{Call: _e.mock.On("AggregateWithPriority", results, customPriority)}
 }
 
@@ -198,7 +198,7 @@ type MockAggregatorInterface_ReloadReplacementCaches_Call struct {
 
 // ReloadReplacementCaches is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockAggregatorInterface_Expecter) ReloadReplacementCaches(ctx interface{}) *MockAggregatorInterface_ReloadReplacementCaches_Call {
+func (_e *MockAggregatorInterface_Expecter) ReloadReplacementCaches(ctx any) *MockAggregatorInterface_ReloadReplacementCaches_Call {
 	return &MockAggregatorInterface_ReloadReplacementCaches_Call{Call: _e.mock.On("ReloadReplacementCaches", ctx)}
 }
 

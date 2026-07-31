@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,7 +45,9 @@ func TestWriteRuntimeFileIsDeterministicAndCompact(t *testing.T) {
 	assert.Equal(t, firstData, secondData)
 	info, err := os.Stat(first)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	}
 
 	file, err := os.Open(first)
 	require.NoError(t, err)

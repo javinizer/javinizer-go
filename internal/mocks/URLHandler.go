@@ -62,7 +62,7 @@ type MockURLHandler_CanHandleURL_Call struct {
 
 // CanHandleURL is a helper method to define mock.On call
 //   - url string
-func (_e *MockURLHandler_Expecter) CanHandleURL(url interface{}) *MockURLHandler_CanHandleURL_Call {
+func (_e *MockURLHandler_Expecter) CanHandleURL(url any) *MockURLHandler_CanHandleURL_Call {
 	return &MockURLHandler_CanHandleURL_Call{Call: _e.mock.On("CanHandleURL", url)}
 }
 
@@ -122,7 +122,7 @@ type MockURLHandler_ExtractIDFromURL_Call struct {
 
 // ExtractIDFromURL is a helper method to define mock.On call
 //   - url string
-func (_e *MockURLHandler_Expecter) ExtractIDFromURL(url interface{}) *MockURLHandler_ExtractIDFromURL_Call {
+func (_e *MockURLHandler_Expecter) ExtractIDFromURL(url any) *MockURLHandler_ExtractIDFromURL_Call {
 	return &MockURLHandler_ExtractIDFromURL_Call{Call: _e.mock.On("ExtractIDFromURL", url)}
 }
 
@@ -185,7 +185,7 @@ type MockURLHandler_ScrapeURL_Call struct {
 // ScrapeURL is a helper method to define mock.On call
 //   - ctx context.Context
 //   - url string
-func (_e *MockURLHandler_Expecter) ScrapeURL(ctx interface{}, url interface{}) *MockURLHandler_ScrapeURL_Call {
+func (_e *MockURLHandler_Expecter) ScrapeURL(ctx any, url any) *MockURLHandler_ScrapeURL_Call {
 	return &MockURLHandler_ScrapeURL_Call{Call: _e.mock.On("ScrapeURL", ctx, url)}
 }
 

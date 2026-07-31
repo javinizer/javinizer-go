@@ -79,7 +79,7 @@ type MockDownloadProxyResolver_ResolveDownloadProxyForHost_Call struct {
 
 // ResolveDownloadProxyForHost is a helper method to define mock.On call
 //   - host string
-func (_e *MockDownloadProxyResolver_Expecter) ResolveDownloadProxyForHost(host interface{}) *MockDownloadProxyResolver_ResolveDownloadProxyForHost_Call {
+func (_e *MockDownloadProxyResolver_Expecter) ResolveDownloadProxyForHost(host any) *MockDownloadProxyResolver_ResolveDownloadProxyForHost_Call {
 	return &MockDownloadProxyResolver_ResolveDownloadProxyForHost_Call{Call: _e.mock.On("ResolveDownloadProxyForHost", host)}
 }
 

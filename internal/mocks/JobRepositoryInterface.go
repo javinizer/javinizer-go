@@ -64,7 +64,7 @@ type MockJobRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - job *models.Job
-func (_e *MockJobRepositoryInterface_Expecter) Create(ctx interface{}, job interface{}) *MockJobRepositoryInterface_Create_Call {
+func (_e *MockJobRepositoryInterface_Expecter) Create(ctx any, job any) *MockJobRepositoryInterface_Create_Call {
 	return &MockJobRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, job)}
 }
 
@@ -121,7 +121,7 @@ type MockJobRepositoryInterface_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *MockJobRepositoryInterface_Expecter) Delete(ctx interface{}, id interface{}) *MockJobRepositoryInterface_Delete_Call {
+func (_e *MockJobRepositoryInterface_Expecter) Delete(ctx any, id any) *MockJobRepositoryInterface_Delete_Call {
 	return &MockJobRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, id)}
 }
 
@@ -178,7 +178,7 @@ type MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call struct {
 // DeleteOrganizedOlderThan is a helper method to define mock.On call
 //   - ctx context.Context
 //   - date time.Time
-func (_e *MockJobRepositoryInterface_Expecter) DeleteOrganizedOlderThan(ctx interface{}, date interface{}) *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call {
+func (_e *MockJobRepositoryInterface_Expecter) DeleteOrganizedOlderThan(ctx any, date any) *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call {
 	return &MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call{Call: _e.mock.On("DeleteOrganizedOlderThan", ctx, date)}
 }
 
@@ -246,7 +246,7 @@ type MockJobRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *MockJobRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockJobRepositoryInterface_FindByID_Call {
+func (_e *MockJobRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockJobRepositoryInterface_FindByID_Call {
 	return &MockJobRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -313,7 +313,7 @@ type MockJobRepositoryInterface_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockJobRepositoryInterface_Expecter) List(ctx interface{}) *MockJobRepositoryInterface_List_Call {
+func (_e *MockJobRepositoryInterface_Expecter) List(ctx any) *MockJobRepositoryInterface_List_Call {
 	return &MockJobRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx)}
 }
 
@@ -365,7 +365,7 @@ type MockJobRepositoryInterface_Update_Call struct {
 // Update is a helper method to define mock.On call
 //   - ctx context.Context
 //   - job *models.Job
-func (_e *MockJobRepositoryInterface_Expecter) Update(ctx interface{}, job interface{}) *MockJobRepositoryInterface_Update_Call {
+func (_e *MockJobRepositoryInterface_Expecter) Update(ctx any, job any) *MockJobRepositoryInterface_Update_Call {
 	return &MockJobRepositoryInterface_Update_Call{Call: _e.mock.On("Update", ctx, job)}
 }
 
@@ -422,7 +422,7 @@ type MockJobRepositoryInterface_Upsert_Call struct {
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
 //   - job *models.Job
-func (_e *MockJobRepositoryInterface_Expecter) Upsert(ctx interface{}, job interface{}) *MockJobRepositoryInterface_Upsert_Call {
+func (_e *MockJobRepositoryInterface_Expecter) Upsert(ctx any, job any) *MockJobRepositoryInterface_Upsert_Call {
 	return &MockJobRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, job)}
 }
 

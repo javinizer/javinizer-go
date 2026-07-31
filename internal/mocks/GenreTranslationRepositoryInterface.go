@@ -64,7 +64,7 @@ type MockGenreTranslationRepositoryInterface_Delete_Call struct {
 //   - ctx context.Context
 //   - genreID uint
 //   - language string
-func (_e *MockGenreTranslationRepositoryInterface_Expecter) Delete(ctx interface{}, genreID interface{}, language interface{}) *MockGenreTranslationRepositoryInterface_Delete_Call {
+func (_e *MockGenreTranslationRepositoryInterface_Expecter) Delete(ctx any, genreID any, language any) *MockGenreTranslationRepositoryInterface_Delete_Call {
 	return &MockGenreTranslationRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, genreID, language)}
 }
 
@@ -137,7 +137,7 @@ type MockGenreTranslationRepositoryInterface_FindAllByGenre_Call struct {
 // FindAllByGenre is a helper method to define mock.On call
 //   - ctx context.Context
 //   - genreID uint
-func (_e *MockGenreTranslationRepositoryInterface_Expecter) FindAllByGenre(ctx interface{}, genreID interface{}) *MockGenreTranslationRepositoryInterface_FindAllByGenre_Call {
+func (_e *MockGenreTranslationRepositoryInterface_Expecter) FindAllByGenre(ctx any, genreID any) *MockGenreTranslationRepositoryInterface_FindAllByGenre_Call {
 	return &MockGenreTranslationRepositoryInterface_FindAllByGenre_Call{Call: _e.mock.On("FindAllByGenre", ctx, genreID)}
 }
 
@@ -206,7 +206,7 @@ type MockGenreTranslationRepositoryInterface_FindByGenreAndLanguage_Call struct 
 //   - ctx context.Context
 //   - genreID uint
 //   - language string
-func (_e *MockGenreTranslationRepositoryInterface_Expecter) FindByGenreAndLanguage(ctx interface{}, genreID interface{}, language interface{}) *MockGenreTranslationRepositoryInterface_FindByGenreAndLanguage_Call {
+func (_e *MockGenreTranslationRepositoryInterface_Expecter) FindByGenreAndLanguage(ctx any, genreID any, language any) *MockGenreTranslationRepositoryInterface_FindByGenreAndLanguage_Call {
 	return &MockGenreTranslationRepositoryInterface_FindByGenreAndLanguage_Call{Call: _e.mock.On("FindByGenreAndLanguage", ctx, genreID, language)}
 }
 
@@ -280,7 +280,7 @@ type MockGenreTranslationRepositoryInterface_FindByGenreIDsAndLanguage_Call stru
 //   - ctx context.Context
 //   - genreIDs []uint
 //   - language string
-func (_e *MockGenreTranslationRepositoryInterface_Expecter) FindByGenreIDsAndLanguage(ctx interface{}, genreIDs interface{}, language interface{}) *MockGenreTranslationRepositoryInterface_FindByGenreIDsAndLanguage_Call {
+func (_e *MockGenreTranslationRepositoryInterface_Expecter) FindByGenreIDsAndLanguage(ctx any, genreIDs any, language any) *MockGenreTranslationRepositoryInterface_FindByGenreIDsAndLanguage_Call {
 	return &MockGenreTranslationRepositoryInterface_FindByGenreIDsAndLanguage_Call{Call: _e.mock.On("FindByGenreIDsAndLanguage", ctx, genreIDs, language)}
 }
 
@@ -342,7 +342,7 @@ type MockGenreTranslationRepositoryInterface_Upsert_Call struct {
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
 //   - translation *models.GenreTranslation
-func (_e *MockGenreTranslationRepositoryInterface_Expecter) Upsert(ctx interface{}, translation interface{}) *MockGenreTranslationRepositoryInterface_Upsert_Call {
+func (_e *MockGenreTranslationRepositoryInterface_Expecter) Upsert(ctx any, translation any) *MockGenreTranslationRepositoryInterface_Upsert_Call {
 	return &MockGenreTranslationRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, translation)}
 }
 
