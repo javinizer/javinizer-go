@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 )
@@ -61,6 +63,23 @@ func TestApplyPlanTrace_RequestPersistenceAndEffectiveConfig(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.NotEmpty(t, out.JobID)
+
+			// Wait for the job to reach a terminal status so async worker
+			// goroutines finish before t.TempDir cleanup runs (otherwise
+			// RemoveAll fails with "directory not empty").
+			t.Cleanup(func() {
+				for i := 0; i < 100; i++ {
+					job, ok := deps.JobStore.GetBatchJob(out.JobID)
+					if !ok {
+						break
+					}
+					if s := job.GetStatus().Status; s == models.JobStatusCompleted || s == models.JobStatusOrganized || s == models.JobStatusFailed || s == models.JobStatusCancelled {
+						break
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				rt.Shutdown()
+			})
 
 			row, err := deps.Repos.JobRepo.FindByID(context.Background(), out.JobID)
 			require.NoError(t, err)

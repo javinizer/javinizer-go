@@ -70,6 +70,7 @@ var commandFlags = map[string][]flagSpec{
 		{"force-refresh", ""},
 		{"force-overwrite", ""},
 		{"preserve-nfo", ""},
+		{"overwrite-existing-media", ""},
 		{"preset", ""},
 		{"scalar-strategy", ""},
 		{"array-strategy", ""},
