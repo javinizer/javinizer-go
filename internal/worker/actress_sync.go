@@ -240,23 +240,6 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 				}
 			}
 		}
-	} else if actressThumbnailNeedsResolution(actress.ThumbURL) {
-		for _, scraper := range scrapers {
-			resolver, ok := scraper.(models.ActressThumbnailResolver)
-			if !ok {
-				continue
-			}
-			thumbnail := strings.TrimSpace(resolver.ResolveActressThumbnail(ctx, resolverInput))
-			if thumbnail != "" && validateThumbnail != nil {
-				if validateErr := validateActressThumbnail(ctx, scraper, validateThumbnail, thumbnail); validateErr != nil {
-					thumbnail = ""
-				}
-			}
-			if thumbnail == "" || models.IsKnownInvalidDMMActressThumbnail(thumbnail) {
-				continue
-			}
-			matches = append(matches, models.ActressInfo{DMMID: actress.DMMID, ThumbURL: thumbnail})
-		}
 	}
 	if revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID {
 		if fallback := cacheFallbackMatch(actress, matches, cacheMatch); len(actressInfoFields(fallback)) > 0 {
@@ -394,35 +377,37 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 	if len(matchesByDMM) != 1 {
 		return nil, nil, nil, nil
 	}
-	for dmmID, match := range matchesByDMM {
-		existing, findErr := actressRepo.FindByDMMID(ctx, dmmID)
-		if findErr == nil && existing.ID != actress.ID {
-			if !canMergeMissingDMMActress(actress, existing) {
-				return nil, nil, nil, nil
-			}
-			merged, mergeErr := mergeActresses(existing.ID, actress.ID)
-			if mergeErr != nil {
-				return nil, nil, nil, mergeErr
-			}
-			return &merged.MergedActress, []models.ActressInfo{match}, []string{"merged_duplicate"}, nil
-		}
-		if findErr != nil && !database.IsNotFound(findErr) {
-			return nil, nil, nil, findErr
-		}
-		assigned, assignErr := assignDMMID(actress.ID, dmmID)
-		if assignErr != nil {
-			return nil, nil, nil, assignErr
-		}
-		if !assigned {
+	var dmmID int
+	var match models.ActressInfo
+	for dmmID, match = range matchesByDMM {
+		break
+	}
+	existing, findErr := actressRepo.FindByDMMID(ctx, dmmID)
+	if findErr == nil && existing.ID != actress.ID {
+		if !canMergeMissingDMMActress(actress, existing) {
 			return nil, nil, nil, nil
 		}
-		updated, loadErr := actressRepo.FindByID(ctx, actress.ID)
-		if loadErr != nil {
-			return nil, nil, nil, loadErr
+		merged, mergeErr := mergeActresses(existing.ID, actress.ID)
+		if mergeErr != nil {
+			return nil, nil, nil, mergeErr
 		}
-		return updated, []models.ActressInfo{match}, []string{"dmm_id"}, nil
+		return &merged.MergedActress, []models.ActressInfo{match}, []string{"merged_duplicate"}, nil
 	}
-	return nil, nil, nil, nil
+	if findErr != nil && !database.IsNotFound(findErr) {
+		return nil, nil, nil, findErr
+	}
+	assigned, assignErr := assignDMMID(actress.ID, dmmID)
+	if assignErr != nil {
+		return nil, nil, nil, assignErr
+	}
+	if !assigned {
+		return nil, nil, nil, nil
+	}
+	updated, loadErr := actressRepo.FindByID(ctx, actress.ID)
+	if loadErr != nil {
+		return nil, nil, nil, loadErr
+	}
+	return updated, []models.ActressInfo{match}, []string{"dmm_id"}, nil
 }
 
 // lookupActressCache ...
