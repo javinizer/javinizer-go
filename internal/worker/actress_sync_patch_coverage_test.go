@@ -286,6 +286,6 @@ func TestCachedIdentityAssignmentRaceBranches(t *testing.T) {
 			AssignDMMID: func(uint, int) (bool, error) { return false, uniqueErr },
 		})
 		require.Error(t, err)
-		require.True(t, database.IsUniqueConstraint(err))
+		require.True(t, database.IsNotFound(err))
 	})
 }

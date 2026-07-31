@@ -118,7 +118,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 				}
 				canonical, reloadErr := actressRepo.FindByDMMID(ctx, cacheMatch.DMMID)
 				if reloadErr != nil {
-					return false, assignErr
+					return false, fmt.Errorf("reload canonical actress after DMM ID assignment race: %w", reloadErr)
 				}
 				return mergeCachedDuplicate(canonical)
 			}
