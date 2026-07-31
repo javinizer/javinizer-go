@@ -3,7 +3,6 @@ package imageutil
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -57,35 +56,23 @@ func resolvePublicDialAddress(ctx context.Context, addr string, lookup func(cont
 	return net.JoinHostPort(ip.String(), port), nil
 }
 
-func tlsConfigForPinnedTarget(base *tls.Config, targetHost string, targetIP net.IP) *tls.Config {
-	config := base.Clone()
-	originalVerifyConnection := config.VerifyConnection
-	originalInsecureSkipVerify := config.InsecureSkipVerify
-	config.InsecureSkipVerify = true
-	config.ServerName = ""
-	config.VerifyConnection = func(state tls.ConnectionState) error {
-		if !originalInsecureSkipVerify {
-			dnsName := state.ServerName
-			if serverIP := net.ParseIP(strings.Trim(dnsName, "[]")); serverIP != nil && serverIP.Equal(targetIP) {
-				dnsName = targetHost
-			}
-			if len(state.PeerCertificates) == 0 {
-				return fmt.Errorf("TLS peer sent no certificates")
-			}
-			intermediates := x509.NewCertPool()
-			for _, certificate := range state.PeerCertificates[1:] {
-				intermediates.AddCert(certificate)
-			}
-			if _, err := state.PeerCertificates[0].Verify(x509.VerifyOptions{DNSName: dnsName, Roots: config.RootCAs, Intermediates: intermediates}); err != nil {
-				return err
-			}
-		}
-		if originalVerifyConnection != nil {
-			return originalVerifyConnection(state)
-		}
-		return nil
+func dialTLSProxy(ctx context.Context, network, addr string, dial func(context.Context, string, string) (net.Conn, error), config *tls.Config) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
 	}
-	return config
+	conn, err := dial(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+	tlsConfig := config.Clone()
+	tlsConfig.ServerName = host
+	tlsConn := tls.Client(conn, tlsConfig)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return tlsConn, nil
 }
 
 type pinnedProxyTransport struct {
@@ -143,7 +130,19 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 	transport := t.base.Clone()
 	transport.Proxy = http.ProxyURL(proxyURL)
 	if req.URL.Scheme == "https" {
-		transport.TLSClientConfig = tlsConfigForPinnedTarget(transport.TLSClientConfig, host, ip)
+		baseTLSConfig := transport.TLSClientConfig.Clone()
+		targetTLSConfig := baseTLSConfig.Clone()
+		targetTLSConfig.ServerName = host
+		transport.TLSClientConfig = targetTLSConfig
+		if proxyURL.Scheme == "https" && transport.DialTLSContext == nil {
+			dial := transport.DialContext
+			if dial == nil {
+				dial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+			}
+			transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialTLSProxy(ctx, network, addr, dial, baseTLSConfig)
+			}
+		}
 	}
 	resp, err := transport.RoundTrip(pinnedReq)
 	if resp != nil {

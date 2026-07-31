@@ -117,6 +117,17 @@ func TestValidateRemoteImageWithSafeClientPinsProxyTarget(t *testing.T) {
 	}
 	_, err = privateSocks.RoundTrip(socksReq)
 	require.ErrorContains(t, err, "private/internal")
+
+	secureProxy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(secureProxy.Close)
+	secureProxyURL, err := url.Parse(secureProxy.URL)
+	require.NoError(t, err)
+	proxyRoots := x509.NewCertPool()
+	proxyRoots.AddCert(secureProxy.Certificate())
+	secureClient := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(secureProxyURL), TLSClientConfig: &tls.Config{RootCAs: proxyRoots}}}
+	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), secureClient, "https://1.1.1.1/image.png", "agent", ""))
 }
 
 func TestResolvePublicTargetIP(t *testing.T) {
@@ -151,45 +162,29 @@ func TestResolvePublicDialAddress(t *testing.T) {
 	require.ErrorContains(t, err, "private/internal")
 }
 
-func TestTLSConfigForPinnedTarget(t *testing.T) {
+func TestDialTLSProxy(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(server.Close)
-	certificate := server.Certificate()
-	require.Contains(t, certificate.DNSNames, "example.com")
 	roots := x509.NewCertPool()
-	roots.AddCert(certificate)
-	verifyCalls := 0
-	config := tlsConfigForPinnedTarget(&tls.Config{
-		RootCAs: roots,
-		VerifyConnection: func(tls.ConnectionState) error {
-			verifyCalls++
-			return nil
-		},
-	}, "example.com", net.ParseIP("1.1.1.1"))
-	require.True(t, config.InsecureSkipVerify)
-	require.Empty(t, config.ServerName)
-	state := tls.ConnectionState{ServerName: "1.1.1.1", PeerCertificates: []*x509.Certificate{certificate, certificate}}
-	require.NoError(t, config.VerifyConnection(state))
-	state.ServerName = "example.com"
-	require.NoError(t, config.VerifyConnection(state))
-	require.Equal(t, 2, verifyCalls)
-	require.Error(t, config.VerifyConnection(tls.ConnectionState{ServerName: "example.com"}))
-	state.ServerName = "wrong.example"
-	require.Error(t, config.VerifyConnection(state))
+	roots.AddCert(server.Certificate())
+	dialer := &net.Dialer{}
+	conn, err := dialTLSProxy(t.Context(), "tcp", server.Listener.Addr().String(), dialer.DialContext, &tls.Config{RootCAs: roots})
+	require.NoError(t, err)
+	require.Equal(t, server.Listener.Addr().String(), conn.RemoteAddr().String())
+	require.NoError(t, conn.Close())
 
-	insecureCalls := 0
-	insecure := tlsConfigForPinnedTarget(&tls.Config{
-		InsecureSkipVerify: true,
-		VerifyConnection: func(tls.ConnectionState) error {
-			insecureCalls++
-			return nil
-		},
-	}, "example.com", net.ParseIP("1.1.1.1"))
-	require.NoError(t, insecure.VerifyConnection(tls.ConnectionState{}))
-	require.Equal(t, 1, insecureCalls)
+	_, err = dialTLSProxy(t.Context(), "tcp", "invalid", dialer.DialContext, &tls.Config{})
+	require.Error(t, err)
+	dialErr := errors.New("dial failed")
+	_, err = dialTLSProxy(t.Context(), "tcp", "proxy.example:443", func(context.Context, string, string) (net.Conn, error) {
+		return nil, dialErr
+	}, &tls.Config{})
+	require.ErrorIs(t, err, dialErr)
 
-	withoutCallback := tlsConfigForPinnedTarget(&tls.Config{RootCAs: roots}, "example.com", net.ParseIP("1.1.1.1"))
-	require.NoError(t, withoutCallback.VerifyConnection(tls.ConnectionState{ServerName: "example.com", PeerCertificates: []*x509.Certificate{certificate}}))
+	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(plain.Close)
+	_, err = dialTLSProxy(t.Context(), "tcp", plain.Listener.Addr().String(), dialer.DialContext, &tls.Config{InsecureSkipVerify: true})
+	require.Error(t, err)
 }
 
 func TestValidateRemoteImageWithClientRequestAndTransportErrors(t *testing.T) {

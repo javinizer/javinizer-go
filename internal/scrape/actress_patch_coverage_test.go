@@ -79,6 +79,25 @@ func TestResolverEnrichmentPrefersSessionValidation(t *testing.T) {
 	assert.Equal(t, resolver.metadata.ThumbURL, movie.Actresses[0].ThumbURL)
 }
 
+func TestResolverEnrichmentSkipsReplacementValidationForExistingThumbnail(t *testing.T) {
+	resolver := &sessionValidatingMetadataResolver{testMetadataResolver: &testMetadataResolver{
+		name: "session", enabled: true,
+		metadata: models.ActressInfo{DMMID: 8, FirstName: "Filled", ThumbURL: "https://replacement.example/thumb.jpg"},
+	}}
+	fallbackCalls := 0
+	cfg := &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error {
+		fallbackCalls++
+		return nil
+	}}
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 8, ThumbURL: "https://existing.example/thumb.jpg"}}}
+
+	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), movie, newTestRegistry(resolver), cfg))
+	assert.Zero(t, resolver.validationCalls)
+	assert.Zero(t, fallbackCalls)
+	assert.Equal(t, "https://existing.example/thumb.jpg", movie.Actresses[0].ThumbURL)
+	assert.Equal(t, "Filled", movie.Actresses[0].FirstName)
+}
+
 type unnamedMetadataResolver struct{}
 
 func (unnamedMetadataResolver) ResolveActressMetadata(context.Context, models.ActressInfo) models.ActressInfo {

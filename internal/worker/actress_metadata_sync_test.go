@@ -149,6 +149,25 @@ func TestSyncActressMetadataPrefersScraperSessionForThumbnailValidation(t *testi
 	require.Zero(t, fallbackCalls)
 }
 
+func TestSyncActressMetadataSkipsReplacementValidationForExistingThumbnail(t *testing.T) {
+	_, actressRepo, movieRepo, actress := newActressSyncFixture(t, &models.Actress{DMMID: 944, JapaneseName: "既存", ThumbURL: "https://existing.example/thumb.jpg"})
+	resolver := &sessionValidatingActressScraper{metadataOnlyActressScraper: &metadataOnlyActressScraper{name: "dmm", info: models.ActressInfo{DMMID: 944, FirstName: "New", ThumbURL: "https://replacement.example/thumb.jpg"}}}
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(resolver)
+	fallbackCalls := 0
+	_, err := SyncActressMetadata(t.Context(), actress.ID, actressRepo, movieRepo, registry, ActressSyncOptions{ValidateThumbnail: func(context.Context, string) error {
+		fallbackCalls++
+		return nil
+	}})
+	require.NoError(t, err)
+	require.Zero(t, resolver.validationCalls)
+	require.Zero(t, fallbackCalls)
+	updated, err := actressRepo.FindByID(t.Context(), actress.ID)
+	require.NoError(t, err)
+	require.Equal(t, "https://existing.example/thumb.jpg", updated.ThumbURL)
+	require.Equal(t, "New", updated.FirstName)
+}
+
 func TestSyncActressMetadataUsesDirectResolverWithoutLinkedMovies(t *testing.T) {
 	db, err := database.New(&database.Config{Type: "sqlite", DSN: filepath.Join(t.TempDir(), "sync.db")})
 	require.NoError(t, err)

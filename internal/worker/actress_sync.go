@@ -192,6 +192,9 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 					sourceInput.ThumbURL = ""
 				}
 				metadata := resolver.ResolveActressMetadata(ctx, sourceInput)
+				if !revalidate && !actressThumbnailNeedsResolution(actress.ThumbURL) {
+					metadata.ThumbURL = ""
+				}
 				if strings.TrimSpace(metadata.ThumbURL) != "" && validateThumbnail != nil {
 					if validateErr := validateActressThumbnail(ctx, scraper, validateThumbnail, metadata.ThumbURL); validateErr != nil {
 						logging.Debugf("Actress sync: %s rejected thumbnail for DMM ID %d: %v", name, actress.DMMID, validateErr)

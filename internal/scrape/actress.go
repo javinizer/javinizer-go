@@ -211,15 +211,13 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			}
 			resolverFilled := false
 			thumbnail := strings.TrimSpace(metadata.ThumbURL)
-			if thumbnail != "" {
+			if actressThumbNeedsResolution(actress.ThumbURL) && thumbnail != "" && !models.IsKnownInvalidDMMActressThumbnail(thumbnail) {
 				if err := validateResolverActressThumbnail(ctx, resolver, cfg.ValidateActressThumbnail, thumbnail); err != nil {
 					logging.Debugf("Rejected resolver actress thumbnail %s: %v", thumbnail, err)
-					thumbnail = ""
+				} else {
+					actress.ThumbURL = thumbnail
+					resolverFilled = true
 				}
-			}
-			if actressThumbNeedsResolution(actress.ThumbURL) && thumbnail != "" && !models.IsKnownInvalidDMMActressThumbnail(thumbnail) {
-				actress.ThumbURL = thumbnail
-				resolverFilled = true
 			}
 			if actress.FirstName == "" && metadata.FirstName != "" {
 				actress.FirstName = metadata.FirstName
