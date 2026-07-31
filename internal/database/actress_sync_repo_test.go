@@ -297,6 +297,7 @@ func TestActressFiltersReturnExpectedSubsets(t *testing.T) {
 	require.NoError(t, repo.Create(context.Background(), &models.Actress{DMMID: 0, JapaneseName: "無名"}))
 	require.NoError(t, repo.Create(context.Background(), &models.Actress{DMMID: 200, JapaneseName: "サムネ", ThumbURL: "https://example.com/custom_thumb.jpg"}))
 	require.NoError(t, repo.Create(context.Background(), &models.Actress{DMMID: 0, FirstName: "Romaji", LastName: "Only"}))
+	require.NoError(t, repo.Create(context.Background(), &models.Actress{DMMID: 300, FirstName: "Query", JapaneseName: "照会", ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/iseya_takami?cache=1.0#v2.0"}))
 
 	missingDMM, err := repo.ListFiltered(context.Background(), "missing_dmm", 100, 0, "id", "asc")
 	require.NoError(t, err)
@@ -304,11 +305,11 @@ func TestActressFiltersReturnExpectedSubsets(t *testing.T) {
 
 	hasDMM, err := repo.ListFiltered(context.Background(), "has_dmm", 100, 0, "id", "asc")
 	require.NoError(t, err)
-	require.Len(t, hasDMM, 2)
+	require.Len(t, hasDMM, 3)
 
 	missingThumb, err := repo.ListFiltered(context.Background(), "missing_thumbnail", 100, 0, "id", "asc")
 	require.NoError(t, err)
-	require.Len(t, missingThumb, 2)
+	require.Len(t, missingThumb, 3)
 
 	jpOnly, err := repo.ListFiltered(context.Background(), "japanese_name_only", 100, 0, "id", "asc")
 	require.NoError(t, err)

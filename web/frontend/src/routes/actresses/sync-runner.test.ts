@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActressSyncJob, ActressSyncTask } from '$lib/api/types';
-import { buildActressSyncSummary, isActressSyncTerminal, loadActressSyncSnapshot } from './sync-runner';
+import { buildActressSyncSummary, isActressSyncTerminal, loadActressSyncSnapshot, loadNewestActiveActressSyncJob } from './sync-runner';
 
 const job: ActressSyncJob = {
 	id: 'job',
@@ -52,9 +52,22 @@ describe('actress sync summary', () => {
 		const snapshot = await loadActressSyncSnapshot({
 			async getActressSyncJob(jobID) { calls.push(`job:${jobID}`); jobLoaded = true; return { job }; },
 			async listActressSyncJobTasks(jobID) { expect(jobLoaded).toBe(true); calls.push(`tasks:${jobID}`); return { tasks: [active] }; },
+			async listActiveActressSyncJobs() { return { jobs: [job] }; },
 		}, job.id);
 		expect(calls).toEqual(['job:job', 'tasks:job']);
 		expect(snapshot).toEqual({ job, tasks: [active] });
+	});
+
+	it('selects the newest active job and handles an empty queue', async () => {
+		const newer = { ...job, id: 'newer' };
+		const client = {
+			async getActressSyncJob() { return { job }; },
+			async listActressSyncJobTasks() { return { tasks: [] }; },
+			async listActiveActressSyncJobs() { return { jobs: [job, newer] }; },
+		};
+		expect(await loadNewestActiveActressSyncJob(client)).toEqual(newer);
+		client.listActiveActressSyncJobs = async () => ({ jobs: [] });
+		expect(await loadNewestActiveActressSyncJob(client)).toBeNull();
 	});
 
 	it('recognizes durable terminal states', () => {

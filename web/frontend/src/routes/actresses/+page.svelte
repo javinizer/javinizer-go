@@ -18,7 +18,7 @@
 	import ActressMergeModal from './components/ActressMergeModal.svelte';
 	import ActressPagination from './components/ActressPagination.svelte';
 	import ActressSyncModal from './components/ActressSyncModal.svelte';
-	import { isActressSyncTerminal, loadActressSyncSnapshot } from './sync-runner';
+	import { isActressSyncTerminal, loadActressSyncSnapshot, loadNewestActiveActressSyncJob } from './sync-runner';
 	import * as m from '$lib/paraglide/messages';
 	import { createConfigQuery } from '$lib/query/queries';
 
@@ -52,6 +52,7 @@
 				if (syncTimer) clearInterval(syncTimer);
 				syncTimer = undefined;
 				await queryClient.invalidateQueries({ queryKey: ['actresses'] });
+				await showNewestActiveSyncJob();
 			}
 		} catch (error) {
 			if (!syncJob || syncJob.id !== currentJob.id) return;
@@ -61,6 +62,16 @@
 		} finally {
 			syncPollInFlight = false;
 		}
+	}
+
+	async function showNewestActiveSyncJob() {
+		const active = await loadNewestActiveActressSyncJob(apiClient);
+		if (!active) return false;
+		syncJob = active;
+		syncTasks = [];
+		showSyncModal = true;
+		startPolling();
+		return true;
 	}
 
 	function startPolling() {
@@ -107,12 +118,8 @@
 
 	onMount(() => {
 		store.hydrateSortPreferences();
-		void apiClient.listActiveActressSyncJobs().then((response) => {
-			const active = response.jobs.at(-1);
-			if (!active) return;
-			syncJob = active;
-			showSyncModal = true;
-			startPolling();
+		void showNewestActiveSyncJob().catch((error) => {
+			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
 		});
 		return () => { if (syncTimer) clearInterval(syncTimer); };
 	});

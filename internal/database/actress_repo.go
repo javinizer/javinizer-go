@@ -180,14 +180,24 @@ func (r *ActressRepository) FindOrCreate(ctx context.Context, actress *models.Ac
 	return r.Create(ctx, actress)
 }
 
+const actressThumbnailPathExpr = "LOWER(SUBSTR(COALESCE(thumb_url,''), 1, MIN(INSTR(COALESCE(thumb_url,'') || '?', '?'), INSTR(COALESCE(thumb_url,'') || '#', '#')) - 1))"
+
+const missingActressThumbnailClause = "TRIM(COALESCE(thumb_url,'')) = ''" +
+	" OR " + actressThumbnailPathExpr + " LIKE '%//pics.dmm.co.jp%/mono/noimage/now_printing.jpg'" +
+	" OR " + actressThumbnailPathExpr + " LIKE '%//awsimgsrc.dmm.co.jp%/mono/noimage/now_printing.jpg'" +
+	" OR " + actressThumbnailPathExpr + " LIKE '%//awsimgsrc.dmm.com%/mono/noimage/now_printing.jpg'" +
+	" OR (" + actressThumbnailPathExpr + " LIKE '%//pics.dmm.co.jp%/mono/actjpgs/%' AND " + actressThumbnailPathExpr + " NOT LIKE '%//pics.dmm.co.jp%/mono/actjpgs/%.%')" +
+	" OR (" + actressThumbnailPathExpr + " LIKE '%//awsimgsrc.dmm.co.jp%/mono/actjpgs/%' AND " + actressThumbnailPathExpr + " NOT LIKE '%//awsimgsrc.dmm.co.jp%/mono/actjpgs/%.%')" +
+	" OR (" + actressThumbnailPathExpr + " LIKE '%//awsimgsrc.dmm.com%/mono/actjpgs/%' AND " + actressThumbnailPathExpr + " NOT LIKE '%//awsimgsrc.dmm.com%/mono/actjpgs/%.%')"
+
 // actressFilterClauses ...
 var actressFilterClauses = map[string]string{
 	"missing_dmm":           "dmm_id <= 0",
 	"has_dmm":               "dmm_id > 0",
-	"missing_thumbnail":     "TRIM(COALESCE(thumb_url,'')) = '' OR LOWER(COALESCE(thumb_url,'')) LIKE '%//pics.dmm.co.jp%/mono/noimage/now_printing.jpg' OR LOWER(COALESCE(thumb_url,'')) LIKE '%//awsimgsrc.dmm.co.jp%/mono/noimage/now_printing.jpg' OR LOWER(COALESCE(thumb_url,'')) LIKE '%//awsimgsrc.dmm.com%/mono/noimage/now_printing.jpg' OR (LOWER(COALESCE(thumb_url,'')) LIKE '%//pics.dmm.co.jp%/mono/actjpgs/%' AND LOWER(COALESCE(thumb_url,'')) NOT LIKE '%//pics.dmm.co.jp%/mono/actjpgs/%.%') OR (LOWER(COALESCE(thumb_url,'')) LIKE '%//awsimgsrc.dmm.co.jp%/mono/actjpgs/%' AND LOWER(COALESCE(thumb_url,'')) NOT LIKE '%//awsimgsrc.dmm.co.jp%/mono/actjpgs/%.%') OR (LOWER(COALESCE(thumb_url,'')) LIKE '%//awsimgsrc.dmm.com%/mono/actjpgs/%' AND LOWER(COALESCE(thumb_url,'')) NOT LIKE '%//awsimgsrc.dmm.com%/mono/actjpgs/%.%')",
+	"missing_thumbnail":     missingActressThumbnailClause,
 	"missing_japanese_name": "TRIM(COALESCE(japanese_name,'')) = ''",
 	"japanese_name_only":    "TRIM(COALESCE(japanese_name,'')) <> '' AND TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = ''",
-	"missing_metadata":      "dmm_id > 0 AND (TRIM(COALESCE(thumb_url,'')) = '' OR LOWER(COALESCE(thumb_url,'')) LIKE '%//pics.dmm.co.jp%/mono/noimage/now_printing.jpg' OR LOWER(COALESCE(thumb_url,'')) LIKE '%//awsimgsrc.dmm.co.jp%/mono/noimage/now_printing.jpg' OR LOWER(COALESCE(thumb_url,'')) LIKE '%//awsimgsrc.dmm.com%/mono/noimage/now_printing.jpg' OR (LOWER(COALESCE(thumb_url,'')) LIKE '%//pics.dmm.co.jp%/mono/actjpgs/%' AND LOWER(COALESCE(thumb_url,'')) NOT LIKE '%//pics.dmm.co.jp%/mono/actjpgs/%.%') OR (LOWER(COALESCE(thumb_url,'')) LIKE '%//awsimgsrc.dmm.co.jp%/mono/actjpgs/%' AND LOWER(COALESCE(thumb_url,'')) NOT LIKE '%//awsimgsrc.dmm.co.jp%/mono/actjpgs/%.%') OR (LOWER(COALESCE(thumb_url,'')) LIKE '%//awsimgsrc.dmm.com%/mono/actjpgs/%' AND LOWER(COALESCE(thumb_url,'')) NOT LIKE '%//awsimgsrc.dmm.com%/mono/actjpgs/%.%') OR TRIM(COALESCE(japanese_name,'')) = '' OR (TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = ''))",
+	"missing_metadata":      "dmm_id > 0 AND (" + missingActressThumbnailClause + " OR TRIM(COALESCE(japanese_name,'')) = '' OR (TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = ''))",
 }
 
 // ValidActressFilter ...

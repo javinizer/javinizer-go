@@ -3,6 +3,7 @@ import type { ActressSyncJob, ActressSyncTask } from '$lib/api/types';
 export interface ActressSyncSnapshotClient {
 	getActressSyncJob(jobID: string): Promise<{ job: ActressSyncJob }>;
 	listActressSyncJobTasks(jobID: string): Promise<{ tasks: ActressSyncTask[] }>;
+	listActiveActressSyncJobs(): Promise<{ jobs: ActressSyncJob[] }>;
 }
 
 export interface ActressSyncSummary {
@@ -22,6 +23,11 @@ export async function loadActressSyncSnapshot(client: ActressSyncSnapshotClient,
 	const jobResponse = await client.getActressSyncJob(jobID);
 	const taskResponse = await client.listActressSyncJobTasks(jobID);
 	return { job: jobResponse.job, tasks: taskResponse.tasks };
+}
+
+export async function loadNewestActiveActressSyncJob(client: ActressSyncSnapshotClient) {
+	const response = await client.listActiveActressSyncJobs();
+	return response.jobs.at(-1) ?? null;
 }
 
 export function buildActressSyncSummary(
