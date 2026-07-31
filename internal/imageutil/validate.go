@@ -125,7 +125,7 @@ func dialPublicTarget(ctx context.Context, network, addr string, lookup func(con
 
 func cloneTLSConfig(config *tls.Config) *tls.Config {
 	if config == nil {
-		return &tls.Config{}
+		return &tls.Config{MinVersion: tls.VersionTLS12}
 	}
 	return config.Clone()
 }

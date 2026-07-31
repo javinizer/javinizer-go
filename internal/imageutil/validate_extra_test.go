@@ -536,7 +536,7 @@ func TestDialPublicTargetPreservesFailover(t *testing.T) {
 }
 
 func TestCloneTLSConfig(t *testing.T) {
-	require.NotNil(t, cloneTLSConfig(nil))
+	require.Equal(t, uint16(tls.VersionTLS12), cloneTLSConfig(nil).MinVersion)
 	original := &tls.Config{ServerName: "example.com"}
 	cloned := cloneTLSConfig(original)
 	require.NotSame(t, original, cloned)
