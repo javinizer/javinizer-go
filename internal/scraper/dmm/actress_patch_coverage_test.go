@@ -215,6 +215,14 @@ func TestStreamingResolutionAndHelpersFailureBranches(t *testing.T) {
 	require.Nil(t, extractRomajiVariantsFromActressDoc(nil))
 	h1Doc := docFromHTMLDMM(t, `<h1 class="list-title"><span class="bold">女優 (あい)</span></h1>`)
 	require.NotEmpty(t, extractRomajiVariantsFromActressDoc(h1Doc))
+	longDoc := docFromHTMLDMM(t, `<title>女優 (しらかみえみか)</title>`)
+	splitFound := false
+	for _, variant := range extractRomajiVariantsFromActressDoc(longDoc) {
+		if strings.Contains(variant, "_") {
+			splitFound = true
+		}
+	}
+	require.True(t, splitFound)
 	require.Equal(t, []string{"one"}, dedupeActressImageCandidates([]string{"", "one", "one"}))
 	require.Equal(t, 0, actressProbeStatus(nil))
 }

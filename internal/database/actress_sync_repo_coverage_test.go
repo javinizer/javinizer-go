@@ -191,7 +191,10 @@ func TestActressMergeChangedBranches(t *testing.T) {
 	require.NoError(t, repo.Create(context.Background(), source))
 	plan, err := repo.merger.PlanMerge(context.Background(), target.ID, source.ID, map[string]string{"dmm_id": "source"})
 	require.NoError(t, err)
-	require.NoError(t, db.Model(target).Update("japanese_name", "changed").Error)
+	require.NoError(t, db.Model(target).Updates(map[string]any{
+		"japanese_name": "changed",
+		"updated_at":    time.Now().UTC().Add(time.Second),
+	}).Error)
 	_, err = repo.merger.ExecuteMerge(context.Background(), plan, db)
 	require.ErrorIs(t, err, ErrActressMergeStalePlan)
 

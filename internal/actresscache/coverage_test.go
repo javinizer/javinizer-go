@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -342,6 +343,9 @@ func TestFileWritersRejectInvalidDirectories(t *testing.T) {
 	require.NoError(t, os.WriteFile(bad, []byte("x"), 0o600))
 	assert.Error(t, WriteFile(filepath.Join(bad, "cache.json"), Cache{}))
 	assert.Error(t, WriteRuntimeFile(filepath.Join(bad, "cache.json.gz"), Cache{}))
+	if runtime.GOOS == "windows" {
+		return
+	}
 
 	locked := filepath.Join(t.TempDir(), "locked")
 	require.NoError(t, os.Mkdir(locked, 0o500))
