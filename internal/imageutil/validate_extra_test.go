@@ -482,7 +482,7 @@ func TestEncodeProxyRequestPreservesHostAndAuthentication(t *testing.T) {
 }
 
 func TestIsPublicTargetIPRejectsSpecialUseRanges(t *testing.T) {
-	for _, raw := range []string{"239.0.0.1", "255.255.255.255", "192.0.2.1", "192.88.99.2", "198.51.100.1", "203.0.113.1", "2001:db8::1", "2002:7f00:1::", "3fff::1", "ff02::1", "invalid"} {
+	for _, raw := range []string{"239.0.0.1", "255.255.255.255", "192.0.2.1", "192.31.196.1", "192.52.193.1", "192.88.99.2", "192.175.48.1", "198.51.100.1", "203.0.113.1", "2001:db8::1", "2002:7f00:1::", "2620:4f:8000::1", "3fff::1", "ff02::1", "invalid"} {
 		require.False(t, isPublicTargetIP(net.ParseIP(raw)), raw)
 	}
 	require.True(t, isPublicTargetIP(net.ParseIP("1.1.1.1")))
