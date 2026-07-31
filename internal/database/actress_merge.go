@@ -124,7 +124,6 @@ func moveMovieAssociations(tx *gorm.DB, sourceID, targetID uint) (int, error) {
 		if !hasSource {
 			continue
 		}
-
 		stub := models.Movie{ContentID: movie.ContentID}
 		if err := tx.Model(&stub).Association("Actresses").Replace(nextActresses); err != nil {
 			return updatedMovies, err
@@ -197,7 +196,6 @@ func (m *actressMerger) PreviewMerge(ctx context.Context, targetID, sourceID uin
 
 	conflicts := buildActressMergeConflicts(target, source)
 	defaultResolutions := defaultResolutionsFromConflicts(conflicts)
-	// Defaults are derived from these conflicts, so every decision is valid.
 	merged, _ := mergeActressValues(target, source, defaultResolutions)
 
 	canonicalName := canonicalActressName(&merged)
@@ -236,8 +234,6 @@ func (m *actressMerger) PlanMerge(ctx context.Context, targetID, sourceID uint, 
 		}
 	}
 
-	// normalizeMergeResolutions validated every supplied decision, and defaults
-	// above cover all remaining conflicts.
 	merged, _ := mergeActressValues(&preview.Target, &preview.Source, normalizedResolutions)
 
 	canonicalName := canonicalActressName(&merged)

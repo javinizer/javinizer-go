@@ -33,6 +33,17 @@ func residualMovieAssociationFixture(t *testing.T) (*DB, models.Actress, models.
 }
 
 func TestMoveMovieAssociationsResidualBranches(t *testing.T) {
+	t.Run("adds missing target association", func(t *testing.T) {
+		db, source, target := residualMovieAssociationFixture(t)
+		updated, err := moveMovieAssociations(db.DB, source.ID, target.ID)
+		require.NoError(t, err)
+		require.Equal(t, 1, updated)
+
+		var actressIDs []uint
+		require.NoError(t, db.DB.Table("movie_actresses").Pluck("actress_id", &actressIDs).Error)
+		require.Equal(t, []uint{target.ID}, actressIDs)
+	})
+
 	t.Run("movie load error", func(t *testing.T) {
 		db, source, target := residualMovieAssociationFixture(t)
 		name := "residual:movie-query:" + uuid.NewString()

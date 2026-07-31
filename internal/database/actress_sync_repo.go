@@ -277,7 +277,6 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	// JSON marshaling a string slice cannot fail.
 	fields, _ := appendSyncTaskFields(task.UpdatedFields, []string{"merged_duplicate"})
 	result := tx.Model(&models.ActressSyncTask{}).
 		Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ? AND actress_id = ?", id, models.ActressSyncTaskRunning, token, leaseNow, expectedActressID).
@@ -612,7 +611,6 @@ func recordSyncTaskFieldsTx(tx *gorm.DB, taskID, leaseToken string, additional [
 		}
 		return err
 	}
-	// JSON marshaling a string slice cannot fail.
 	fields, _ := appendSyncTaskFields(task.UpdatedFields, additional)
 	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", taskID, models.ActressSyncTaskRunning, leaseToken, time.Now().UTC()).Update("updated_fields", fields)
 	if result.Error != nil {
