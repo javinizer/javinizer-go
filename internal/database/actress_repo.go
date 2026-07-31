@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -405,4 +406,15 @@ func (r *ActressRepository) PreviewMerge(ctx context.Context, targetID, sourceID
 // Merge ...
 func (r *ActressRepository) Merge(ctx context.Context, targetID, sourceID uint, resolutions map[string]string) (*ActressMergeResult, error) {
 	return r.merger.Merge(ctx, targetID, sourceID, resolutions, r.GetDB())
+}
+
+// MergeWithVersions ...
+func (r *ActressRepository) MergeWithVersions(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, targetUpdatedAt, sourceUpdatedAt time.Time) (*ActressMergeResult, error) {
+	plan, err := r.merger.PlanMerge(ctx, targetID, sourceID, resolutions)
+	if err != nil {
+		return nil, err
+	}
+	plan.TargetUpdatedAt = targetUpdatedAt
+	plan.SourceUpdatedAt = sourceUpdatedAt
+	return r.merger.ExecuteMerge(ctx, plan, r.GetDB())
 }

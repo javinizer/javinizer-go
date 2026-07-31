@@ -1,8 +1,10 @@
 package actress
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -20,7 +22,8 @@ func writeActressMergeError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 	case database.IsNotFound(err):
 		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
-	case errors.Is(err, database.ErrActressMergeUniqueConstraint):
+	case errors.Is(err, database.ErrActressMergeUniqueConstraint),
+		errors.Is(err, database.ErrActressMergeStalePlan):
 		c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
 	default:
 		core.RespondInternalError(c, err)
@@ -70,6 +73,8 @@ func previewActressMerge(deps ActressDeps) gin.HandlerFunc {
 			ProposedMerged:     preview.ProposedMerged,
 			Conflicts:          conflicts,
 			DefaultResolutions: preview.DefaultResolutions,
+			TargetUpdatedAt:    preview.Target.UpdatedAt,
+			SourceUpdatedAt:    preview.Source.UpdatedAt,
 		})
 	}
 }
@@ -94,8 +99,14 @@ func mergeActresses(deps ActressDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-
-		result, err := deps.ActressRepo.Merge(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions)
+		versionedRepo, ok := deps.ActressRepo.(interface {
+			MergeWithVersions(context.Context, uint, uint, map[string]string, time.Time, time.Time) (*database.ActressMergeResult, error)
+		})
+		if !ok {
+			core.RespondInternalError(c, errors.New("actress repository does not support versioned merges"))
+			return
+		}
+		result, err := versionedRepo.MergeWithVersions(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions, req.TargetUpdatedAt, req.SourceUpdatedAt)
 		if err != nil {
 			writeActressMergeError(c, err)
 			return

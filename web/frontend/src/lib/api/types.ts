@@ -596,12 +596,16 @@ export interface ActressMergePreviewResponse {
 	proposed_merged: Actress;
 	conflicts: ActressMergeConflict[];
 	default_resolutions: Record<string, ActressMergeResolution>;
+	target_updated_at: string;
+	source_updated_at: string;
 }
 
 export interface ActressMergeRequest {
 	target_id: number;
 	source_id: number;
 	resolutions?: Record<string, ActressMergeResolution>;
+	target_updated_at: string;
+	source_updated_at: string;
 }
 
 export interface ActressMergeResponse {

@@ -151,6 +151,8 @@ export function createActressStore() {
 			target_id: number;
 			source_id: number;
 			resolutions: Record<string, ActressMergeResolution>;
+			target_updated_at: string;
+			source_updated_at: string;
 		}) => apiClient.mergeActresses(params),
 		onSuccess: (result, variables) => {
 			mergeSummary = {
@@ -419,6 +421,8 @@ export function createActressStore() {
 			target_id: mergePrimaryId,
 			source_id: mergeCurrentSourceId,
 			resolutions: mergeResolutions,
+			target_updated_at: mergePreviewQuery.data.target_updated_at,
+			source_updated_at: mergePreviewQuery.data.source_updated_at,
 		});
 	}
 

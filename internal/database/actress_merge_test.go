@@ -361,6 +361,28 @@ func TestExecuteMergeRecomputesCurrentTargetValues(t *testing.T) {
 	require.Equal(t, "Fresh", result.MergedActress.FirstName)
 }
 
+func TestMergeWithVersionsRejectsChangesAfterPreview(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	target := &models.Actress{DMMID: 9010, FirstName: "Target"}
+	source := &models.Actress{DMMID: 9011, FirstName: "Previewed"}
+	require.NoError(t, repo.Create(t.Context(), target))
+	require.NoError(t, repo.Create(t.Context(), source))
+	_, err := repo.MergeWithVersions(t.Context(), 0, source.ID, nil, target.UpdatedAt, source.UpdatedAt)
+	require.ErrorIs(t, err, ErrActressMergeInvalidID)
+	preview, err := repo.PreviewMerge(t.Context(), target.ID, source.ID)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", source.ID).Updates(map[string]any{
+		"first_name": "Changed",
+		"updated_at": preview.Source.UpdatedAt.Add(time.Second),
+	}).Error)
+	_, err = repo.MergeWithVersions(t.Context(), target.ID, source.ID, map[string]string{"first_name": MergeResolutionSource}, preview.Target.UpdatedAt, preview.Source.UpdatedAt)
+	require.ErrorIs(t, err, ErrActressMergeStalePlan)
+	stored, err := repo.FindByID(t.Context(), source.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Changed", stored.FirstName)
+}
+
 func TestExecuteMergeRejectsStaleSourceResolution(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewActressRepository(db)

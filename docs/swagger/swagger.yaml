@@ -37,8 +37,12 @@ definitions:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
       source:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      source_updated_at:
+        type: string
       target:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      target_updated_at:
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeRequest:
     properties:
@@ -52,12 +56,18 @@ definitions:
       source_id:
         example: 34
         type: integer
+      source_updated_at:
+        type: string
       target_id:
         example: 12
         type: integer
+      target_updated_at:
+        type: string
     required:
     - source_id
+    - source_updated_at
     - target_id
+    - target_updated_at
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeResponse:
     properties:

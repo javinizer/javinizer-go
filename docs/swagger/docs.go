@@ -4116,8 +4116,14 @@ const docTemplate = `{
                 "source": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
                 },
+                "source_updated_at": {
+                    "type": "string"
+                },
                 "target": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                },
+                "target_updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -4125,7 +4131,9 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "source_id",
-                "target_id"
+                "source_updated_at",
+                "target_id",
+                "target_updated_at"
             ],
             "properties": {
                 "resolutions": {
@@ -4142,9 +4150,15 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 34
                 },
+                "source_updated_at": {
+                    "type": "string"
+                },
                 "target_id": {
                     "type": "integer",
                     "example": 12
+                },
+                "target_updated_at": {
+                    "type": "string"
                 }
             }
         },
