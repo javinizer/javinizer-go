@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -378,15 +379,7 @@ func mergeCandidates(candidates []rankedCandidate) []Record {
 			groups[base].dmmIDs[candidate.candidate.Candidate.DMMID] = struct{}{}
 		}
 		for _, group := range matches[1:] {
-			groups[base].items = append(groups[base].items, groups[group].items...)
-			for _, identity := range groups[group].identities {
-				addGroupIdentities(&groups[base], []string{identity})
-				registerGroup(identityGroups, base, []string{identity})
-			}
-			for dmmID := range groups[group].dmmIDs {
-				groups[base].dmmIDs[dmmID] = struct{}{}
-			}
-			groups[group] = candidateGroup{}
+			mergeCandidateGroup(groups, identityGroups, base, group)
 		}
 	}
 	records := make([]Record, 0, len(groups))
@@ -404,6 +397,18 @@ func mergeCandidates(candidates []rankedCandidate) []Record {
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].BuiltinKey < records[j].BuiltinKey })
 	return records
+}
+
+func mergeCandidateGroup(groups []candidateGroup, identityGroups map[string]map[int]struct{}, base, group int) {
+	groups[base].items = append(groups[base].items, groups[group].items...)
+	for _, identity := range groups[group].identities {
+		addGroupIdentities(&groups[base], []string{identity})
+		registerGroup(identityGroups, base, []string{identity})
+	}
+	for dmmID := range groups[group].dmmIDs {
+		groups[base].dmmIDs[dmmID] = struct{}{}
+	}
+	groups[group] = candidateGroup{}
 }
 
 // newCandidateGroup ...
@@ -620,6 +625,17 @@ func builtinKey(record Record, fallback Candidate) string {
 	return "actress:" + strings.ToLower(strings.TrimSpace(fallback.Source)) + ":" + normalizeIdentity(fallback.SourceID)
 }
 
+type cacheTempFile interface {
+	io.Writer
+	Name() string
+	Chmod(os.FileMode) error
+	Close() error
+}
+
+var createCacheTemp = func(dir, pattern string) (cacheTempFile, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
 // WriteFile ...
 func WriteFile(path string, cache Cache) error {
 	if strings.TrimSpace(path) == "" {
@@ -628,7 +644,7 @@ func WriteFile(path string, cache Cache) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".actress-cache-*.json")
+	tmp, err := createCacheTemp(filepath.Dir(path), ".actress-cache-*.json")
 	if err != nil {
 		return err
 	}

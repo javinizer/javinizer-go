@@ -40,22 +40,26 @@ func (c *thumbnailValidatorCache) Validate(ctx context.Context, candidate Candid
 		return result.validation, result.err
 	}
 	value, err, _ := c.group.Do(key, func() (any, error) {
-		if result, ok := c.cached(key); ok {
-			return result, result.err
-		}
-		validation, validationErr := c.validator(ctx, candidate)
-		result := thumbnailValidationResult{validation: validation, err: validationErr}
-		if validationErr == nil || isPermanentThumbnailError(validationErr) {
-			c.mu.Lock()
-			c.entries[key] = result
-			c.mu.Unlock()
-		}
-		return result, validationErr
+		return c.validateAndCache(ctx, key, candidate)
 	})
 	if result, ok := value.(thumbnailValidationResult); ok {
 		return result.validation, result.err
 	}
 	return ThumbnailValidation{}, err
+}
+
+func (c *thumbnailValidatorCache) validateAndCache(ctx context.Context, key string, candidate Candidate) (thumbnailValidationResult, error) {
+	if result, ok := c.cached(key); ok {
+		return result, result.err
+	}
+	validation, validationErr := c.validator(ctx, candidate)
+	result := thumbnailValidationResult{validation: validation, err: validationErr}
+	if validationErr == nil || isPermanentThumbnailError(validationErr) {
+		c.mu.Lock()
+		c.entries[key] = result
+		c.mu.Unlock()
+	}
+	return result, validationErr
 }
 
 func (c *thumbnailValidatorCache) cached(key string) (thumbnailValidationResult, bool) {

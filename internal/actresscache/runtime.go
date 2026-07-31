@@ -106,6 +106,12 @@ func runtimeRecordReachable(record RuntimeRecord, index int, dmmCounts map[int]i
 	return false
 }
 
+var createRuntimeTemp = func(dir, pattern string) (cacheTempFile, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
+var newRuntimeGzipWriter = gzip.NewWriterLevel
+
 // WriteRuntimeFile ...
 func WriteRuntimeFile(path string, cache Cache) error {
 	if strings.TrimSpace(path) == "" {
@@ -114,13 +120,13 @@ func WriteRuntimeFile(path string, cache Cache) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".actress-runtime-cache-*.json.gz")
+	tmp, err := createRuntimeTemp(filepath.Dir(path), ".actress-runtime-cache-*.json.gz")
 	if err != nil {
 		return err
 	}
 	tmpPath := tmp.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
-	writer, err := gzip.NewWriterLevel(tmp, gzip.BestCompression)
+	writer, err := newRuntimeGzipWriter(tmp, gzip.BestCompression)
 	if err != nil {
 		_ = tmp.Close()
 		return err
@@ -168,9 +174,13 @@ func runtimeThumbnailURL(raw string) string {
 	return raw
 }
 
+var newRuntimeGzipReader = func(reader io.Reader) (io.ReadCloser, error) {
+	return gzip.NewReader(reader)
+}
+
 // decodeRuntimeCache ...
 func decodeRuntimeCache(reader io.Reader) (RuntimeCache, error) {
-	compressed, err := gzip.NewReader(reader)
+	compressed, err := newRuntimeGzipReader(reader)
 	if err != nil {
 		return RuntimeCache{}, fmt.Errorf("open built-in actress cache: %w", err)
 	}

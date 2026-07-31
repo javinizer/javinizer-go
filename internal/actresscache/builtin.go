@@ -35,13 +35,15 @@ func Builtin() (Cache, error) {
 	return cache, builtinIndex.err
 }
 
+var marshalBuiltinCache = json.Marshal
+
 // BuiltinData ...
 func BuiltinData() []byte {
 	loadBuiltin()
 	if builtinIndex.err != nil {
 		return nil
 	}
-	data, err := json.Marshal(RuntimeCache{SchemaVersion: RuntimeSchemaVersion, Records: builtinIndex.records})
+	data, err := marshalBuiltinCache(RuntimeCache{SchemaVersion: RuntimeSchemaVersion, Records: builtinIndex.records})
 	if err != nil {
 		return nil
 	}

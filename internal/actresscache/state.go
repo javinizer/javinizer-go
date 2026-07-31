@@ -12,6 +12,17 @@ import (
 	"sync"
 )
 
+var (
+	stateReadFile       = os.ReadFile
+	stateRepairTail     = repairStateTail
+	stateMkdirAll       = os.MkdirAll
+	stateOpenFile       = os.OpenFile
+	stateOpenRepairFile = os.OpenFile
+	stateTruncate       = func(file *os.File, size int64) error { return file.Truncate(size) }
+	stateSeekEnd        = func(file *os.File) error { _, err := file.Seek(0, io.SeekEnd); return err }
+	stateWriteNewline   = func(file *os.File) error { _, err := file.Write([]byte{10}); return err }
+)
+
 type stateStore struct {
 	mu      sync.Mutex
 	entries map[string]StateEntry
@@ -24,7 +35,7 @@ func openState(path string) (*stateStore, error) {
 	if path == "" {
 		return store, nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := stateReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return openStateWriter(path, store)
 	}
@@ -35,17 +46,17 @@ func openState(path string) (*stateStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := repairStateTail(path, data, incompleteTail); err != nil {
+	if err := stateRepairTail(path, data, incompleteTail); err != nil {
 		return nil, err
 	}
 	return openStateWriter(path, store)
 }
 
 func openStateWriter(path string, store *stateStore) (*stateStore, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if err := stateMkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	file, err := stateOpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -78,21 +89,21 @@ func repairStateTail(path string, data []byte, incomplete bool) error {
 	if len(data) == 0 || bytes.HasSuffix(data, []byte{10}) {
 		return nil
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	file, err := stateOpenRepairFile(path, os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = file.Close() }()
 	if incomplete {
 		cutoff := bytes.LastIndexByte(data, 10) + 1
-		if err := file.Truncate(int64(cutoff)); err != nil {
+		if err := stateTruncate(file, int64(cutoff)); err != nil {
 			return err
 		}
 	} else {
-		if _, err := file.Seek(0, io.SeekEnd); err != nil {
+		if err := stateSeekEnd(file); err != nil {
 			return err
 		}
-		if _, err := file.Write([]byte{10}); err != nil {
+		if err := stateWriteNewline(file); err != nil {
 			return err
 		}
 	}

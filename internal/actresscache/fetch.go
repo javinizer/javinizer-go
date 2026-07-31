@@ -19,6 +19,8 @@ const (
 	maxRetryDelay    = 5 * time.Minute
 )
 
+var fetchAttempts = maxFetchAttempts
+
 // HTTPError ...
 type HTTPError struct {
 	StatusCode int
@@ -99,13 +101,13 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 	req.Header.Set("User-Agent", f.userAgent)
 	req.Header.Set("Accept", accept)
 	limiter := f.limiterForHost(req.URL.Hostname())
-	for attempt := 0; attempt < maxFetchAttempts; attempt++ {
+	for attempt := 0; attempt < fetchAttempts; attempt++ {
 		if err := limiter.Wait(requestCtx); err != nil {
 			return nil, nil, err
 		}
 		resp, err := f.client.Do(req)
 		if err != nil {
-			if attempt+1 == maxFetchAttempts || requestCtx.Err() != nil {
+			if attempt+1 == fetchAttempts || requestCtx.Err() != nil {
 				return nil, nil, err
 			}
 			if err := waitRetry(requestCtx, retryBaseDelay<<attempt); err != nil {
@@ -114,7 +116,7 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 			continue
 		}
 		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			if attempt+1 < maxFetchAttempts && retryableStatus(resp.StatusCode) {
+			if attempt+1 < fetchAttempts && retryableStatus(resp.StatusCode) {
 				delay := retryDelay(resp.Header, attempt)
 				_ = resp.Body.Close()
 				if err := waitRetry(requestCtx, delay); err != nil {
@@ -132,7 +134,7 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 		_ = resp.Body.Close()
 		if err != nil {
-			if attempt+1 == maxFetchAttempts || requestCtx.Err() != nil {
+			if attempt+1 == fetchAttempts || requestCtx.Err() != nil {
 				return nil, resp.Header, err
 			}
 			if err := waitRetry(requestCtx, retryBaseDelay<<attempt); err != nil {
