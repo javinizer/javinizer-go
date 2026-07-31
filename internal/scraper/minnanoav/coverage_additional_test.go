@@ -42,6 +42,24 @@ func TestBuildClientFallsBackForInvalidProxy(t *testing.T) {
 	require.NotNil(t, client)
 }
 
+func TestResolveActressMetadataRejectsExcessivelyNestedHTML(t *testing.T) {
+	body := strings.Repeat("<div>", 513)
+	client := resty.New().SetTransport(roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		profileRequest := req.Clone(req.Context())
+		profileRequest.URL, _ = req.URL.Parse("/actress1.html")
+		return response(profileRequest, http.StatusOK, body, nil), nil
+	}))
+	s := newScraperWithClient(&models.ScraperSettings{Enabled: true, BaseURL: "https://www.minnano-av.test"}, client)
+
+	got := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 8, JapaneseName: "花子"})
+	assert.Equal(t, models.ActressInfo{DMMID: 8}, got)
+}
+
+func TestParseActressProfileRejectsExcessivelyNestedHTML(t *testing.T) {
+	_, err := ParseActressProfile(strings.Repeat("<div>", 513), "https://www.minnano-av.com/actress1.html")
+	require.Error(t, err)
+}
+
 func TestResolveActressMetadataEarlyReturns(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
 		s := newScraperWithClient(&models.ScraperSettings{}, resty.New())

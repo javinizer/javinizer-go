@@ -49,6 +49,36 @@ func TestCollectReturnsEmitError(t *testing.T) {
 	require.ErrorIs(t, err, want)
 }
 
+type cancelOnDoneContext struct {
+	context.Context
+	once     sync.Once
+	done     chan struct{}
+	canceled bool
+}
+
+func (c *cancelOnDoneContext) Done() <-chan struct{} {
+	c.once.Do(func() {
+		c.canceled = true
+		close(c.done)
+	})
+	return c.done
+}
+
+func (c *cancelOnDoneContext) Err() error {
+	if c.canceled {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestCollectObservesCancellationBeforeFirstRow(t *testing.T) {
+	ctx := &cancelOnDoneContext{Context: context.Background(), done: make(chan struct{})}
+	err := New().Collect(ctx, actresscache.SourceOptions{
+		Parameters: map[string]string{"legacy.csv": writeCSV(t, "FullName,ThumbUrl\nOne,https://example.test/one.jpg\n")},
+	}, func(actresscache.Candidate) error { return nil })
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestCollectObservesCancellationWhileReading(t *testing.T) {
 	path := writeCSV(t, "FullName,ThumbUrl\nOne,https://example.test/one.jpg\nTwo,https://example.test/two.jpg\n")
 	ctx, cancel := context.WithCancel(context.Background())

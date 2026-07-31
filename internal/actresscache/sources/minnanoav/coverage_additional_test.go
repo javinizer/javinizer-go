@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -70,6 +71,33 @@ func TestCollectUsesGenericSitemapParameter(t *testing.T) {
 	assert.Contains(t, requested, "generic.xml")
 }
 
+type donePatternHookContext struct {
+	context.Context
+	calls int
+	hook  func()
+}
+
+func (c *donePatternHookContext) Done() <-chan struct{} {
+	c.calls++
+	if c.calls == 1 {
+		c.hook()
+	}
+	return nil
+}
+
+func TestCollectRejectsProfileURLInvalidatedAfterDiscovery(t *testing.T) {
+	originalPattern := profilePathPattern
+	ctx := &donePatternHookContext{Context: context.Background()}
+	ctx.hook = func() { profilePathPattern = regexp.MustCompile(`^/never$`) }
+	t.Cleanup(func() { profilePathPattern = originalPattern })
+	client := &http.Client{Transport: sitemapTransport(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(profileFixture())), Request: req}, nil
+	})}
+
+	err := New().Collect(ctx, actresscache.SourceOptions{Fetcher: actresscache.NewFetcher(client, 0, "test")}, func(actresscache.Candidate) error { return nil })
+	require.ErrorContains(t, err, "invalid MinnanoAV profile URL")
+}
+
 func TestCollectReturnsEmitterErrorDuringEnqueue(t *testing.T) {
 	client := &http.Client{Transport: testTransport(func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
@@ -84,6 +112,37 @@ func TestCollectReturnsEmitterErrorDuringEnqueue(t *testing.T) {
 	want := errors.New("emit failed")
 	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: actresscache.NewFetcher(client, 0, "test"), Workers: 1}, func(actresscache.Candidate) error { return want })
 	require.ErrorIs(t, err, want)
+}
+
+func TestCollectHandlesProfileParseFailures(t *testing.T) {
+	invalidHTML := strings.Repeat("<div>", 513)
+	newFetcher := func() *actresscache.Fetcher {
+		client := &http.Client{Transport: sitemapTransport(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/html"}}, Body: io.NopCloser(strings.NewReader(invalidHTML)), Request: req}, nil
+		})}
+		return actresscache.NewFetcher(client, 0, "test")
+	}
+
+	t.Run("without recorder", func(t *testing.T) {
+		err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: newFetcher()}, func(actresscache.Candidate) error { return nil })
+		require.ErrorContains(t, err, "parse")
+	})
+	t.Run("recorder error", func(t *testing.T) {
+		want := errors.New("record failed")
+		err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: newFetcher(), RecordFailure: func(actresscache.Candidate, error) error { return want }}, func(actresscache.Candidate) error { return nil })
+		require.ErrorIs(t, err, want)
+	})
+	t.Run("recorder continues", func(t *testing.T) {
+		failures := 0
+		err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: newFetcher(), RecordFailure: func(actresscache.Candidate, error) error { failures++; return nil }}, func(actresscache.Candidate) error { return nil })
+		require.NoError(t, err)
+		assert.Equal(t, 1, failures)
+	})
+	t.Run("recorder cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		err := New().Collect(ctx, actresscache.SourceOptions{Fetcher: newFetcher(), RecordFailure: func(actresscache.Candidate, error) error { cancel(); return nil }}, func(actresscache.Candidate) error { return nil })
+		require.NoError(t, err)
+	})
 }
 
 func TestCollectReturnsRecordFailureError(t *testing.T) {
