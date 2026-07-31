@@ -2,11 +2,16 @@ package imageutil
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"image"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -34,6 +39,7 @@ func TestValidateRemoteImageWithSafeClientHonorsRedirectPolicy(t *testing.T) {
 func TestValidateRemoteImageWithSafeClientWrapsHTTPTransportAndLimitsRedirects(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
+	require.Error(t, ValidateRemoteImageWithSafeClient(ctx, &http.Client{}, "https://example.com/image", "", ""))
 	transport := &http.Transport{}
 	err := ValidateRemoteImageWithSafeClient(ctx, &http.Client{Transport: transport}, "https://example.com/image", "", "")
 	require.Error(t, err)
@@ -48,6 +54,62 @@ func TestValidateRemoteImageWithSafeClientWrapsHTTPTransportAndLimitsRedirects(t
 	err = ValidateRemoteImageWithSafeClient(t.Context(), client, "https://example.com/start", "", "")
 	require.ErrorContains(t, err, "stopped after 10 redirects")
 	assert.Equal(t, 10, redirects)
+}
+
+func TestValidateRemoteImageWithSafeClientPinsProxyTarget(t *testing.T) {
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	require.NoError(t, err)
+	var targetHost string
+	var hostHeader string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		targetHost = req.URL.Host
+		hostHeader = req.Host
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
+	}))
+	t.Cleanup(proxy.Close)
+	proxyURL, err := url.Parse(proxy.URL)
+	require.NoError(t, err)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	require.NoError(t, ValidateRemoteImageWithSafeClient(t.Context(), client, "http://1.1.1.1/image.png", "agent", ""))
+	assert.Equal(t, "1.1.1.1", targetHost)
+	assert.Equal(t, "1.1.1.1", hostHeader)
+	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), client, "https://1.1.1.1/image.png", "agent", ""))
+
+	proxyErr := errors.New("proxy selection failed")
+	errorClient := &http.Client{Transport: &http.Transport{Proxy: func(*http.Request) (*url.URL, error) { return nil, proxyErr }}}
+	require.ErrorIs(t, ValidateRemoteImageWithSafeClient(t.Context(), errorClient, "http://1.1.1.1/image.png", "agent", ""), proxyErr)
+
+	pinned := &pinnedProxyTransport{base: &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}}
+	privateReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1/image.png", nil)
+	require.NoError(t, err)
+	_, err = pinned.RoundTrip(privateReq)
+	require.ErrorContains(t, err, "private/internal")
+	httpsReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://1.1.1.1/image.png", nil)
+	require.NoError(t, err)
+	pinnedNilTLS := &pinnedProxyTransport{base: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	_, err = pinnedNilTLS.RoundTrip(httpsReq)
+	require.Error(t, err)
+	_, err = pinned.RoundTrip(httpsReq)
+	require.Error(t, err)
+}
+
+func TestResolvePublicTargetIP(t *testing.T) {
+	lookupErr := errors.New("lookup failed")
+	_, err := resolvePublicTargetIP(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) { return nil, lookupErr })
+	require.ErrorIs(t, err, lookupErr)
+	_, err = resolvePublicTargetIP(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) { return nil, nil })
+	require.ErrorContains(t, err, "no addresses")
+	_, err = resolvePublicTargetIP(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	})
+	require.ErrorContains(t, err, "private/internal")
+	ip, err := resolvePublicTargetIP(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, net.ParseIP("1.1.1.1"), ip)
 }
 
 func TestValidateRemoteImageWithClientRequestAndTransportErrors(t *testing.T) {

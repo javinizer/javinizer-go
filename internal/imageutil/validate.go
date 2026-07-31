@@ -9,7 +9,9 @@ import (
 	_ "image/png"
 	"io"
 	"mime"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,6 +25,73 @@ import (
 const maxThumbnailValidationBytes = 2 * 1024 * 1024
 
 var validateRemoteImageWithClient = ValidateRemoteImageWithClient
+
+func resolvePublicTargetIP(ctx context.Context, host string, lookup func(context.Context, string) ([]net.IPAddr, error)) (net.IP, error) {
+	addresses, err := lookup(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("SSRF blocked: failed to resolve hostname %q: %w", host, err)
+	}
+	if len(addresses) == 0 {
+		return nil, fmt.Errorf("SSRF blocked: hostname %q resolved to no addresses", host)
+	}
+	for _, address := range addresses {
+		ip := address.IP
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return nil, fmt.Errorf("SSRF blocked: %s resolves to private/internal IP", host)
+		}
+	}
+	return addresses[0].IP, nil
+}
+
+type pinnedProxyTransport struct {
+	base *http.Transport
+}
+
+func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var proxyURL *url.URL
+	var err error
+	if t.base.Proxy != nil {
+		proxyURL, err = t.base.Proxy(req)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if proxyURL == nil {
+		transport := t.base.Clone()
+		transport.Proxy = nil
+		return ssrf.WrapTransportWithSSRFCheck(transport).RoundTrip(req)
+	}
+	host := req.URL.Hostname()
+	ip, err := resolvePublicTargetIP(req.Context(), host, net.DefaultResolver.LookupIPAddr)
+	if err != nil {
+		return nil, err
+	}
+	port := req.URL.Port()
+	if port == "" {
+		if req.URL.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	pinnedReq := req.Clone(req.Context())
+	pinnedURL := *req.URL
+	pinnedURL.Host = net.JoinHostPort(ip.String(), port)
+	pinnedReq.URL = &pinnedURL
+	pinnedReq.Host = req.URL.Host
+	transport := t.base.Clone()
+	transport.Proxy = http.ProxyURL(proxyURL)
+	if req.URL.Scheme == "https" {
+		tlsConfig := transport.TLSClientConfig.Clone()
+		tlsConfig.ServerName = host
+		transport.TLSClientConfig = tlsConfig
+	}
+	resp, err := transport.RoundTrip(pinnedReq)
+	if resp != nil {
+		resp.Request = req
+	}
+	return resp, err
+}
 
 // ValidateRemoteImage ...
 func ValidateRemoteImage(ctx context.Context, rawURL string) error {
@@ -41,8 +110,10 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 		return fmt.Errorf("image validator client is nil")
 	}
 	safeClient := *client
-	if transport, ok := client.Transport.(*http.Transport); ok {
-		safeClient.Transport = ssrf.WrapTransportWithSSRFCheck(transport.Clone())
+	if client.Transport == nil {
+		safeClient.Transport = &pinnedProxyTransport{base: http.DefaultTransport.(*http.Transport).Clone()}
+	} else if transport, ok := client.Transport.(*http.Transport); ok {
+		safeClient.Transport = &pinnedProxyTransport{base: transport.Clone()}
 	}
 	previousCheckRedirect := client.CheckRedirect
 	safeClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {

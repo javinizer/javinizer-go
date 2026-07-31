@@ -164,11 +164,49 @@ func TestActressSyncManagerStartAndDispatchFinalBranches(t *testing.T) {
 		require.False(t, manager.started)
 	})
 
-	t.Run("start retries list error", func(t *testing.T) {
+	t.Run("start schedules repository retry", func(t *testing.T) {
 		db, _, _, manager := newFinalManagerFixture(t, &models.Actress{DMMID: 81})
 		require.NoError(t, db.Close())
 		manager.Start()
 		require.False(t, manager.started)
+		require.NotNil(t, manager.retryTimer)
+		manager.scheduleStartRetry()
+		manager.Stop()
+		require.Nil(t, manager.retryTimer)
+	})
+
+	t.Run("stale retry callback does not restart manager", func(t *testing.T) {
+		manager := &ActressSyncManager{retryDelay: 10 * time.Millisecond}
+		manager.mu.Lock()
+		manager.scheduleStartRetry()
+		manager.retryGeneration++
+		manager.mu.Unlock()
+		time.Sleep(30 * time.Millisecond)
+		manager.mu.Lock()
+		require.NotNil(t, manager.retryTimer)
+		manager.retryTimer = nil
+		manager.mu.Unlock()
+	})
+
+	t.Run("transient startup failure recovers persisted job", func(t *testing.T) {
+		db, repo, _, manager := newFinalManagerFixture(t, &models.Actress{DMMID: 83})
+		var failed atomic.Bool
+		require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:fail_active_jobs_once", func(tx *gorm.DB) {
+			if _, ok := tx.Statement.Dest.(*[]models.ActressSyncJob); ok && failed.CompareAndSwap(false, true) {
+				tx.AddError(errors.New("transient active jobs failure"))
+			}
+		}))
+		t.Cleanup(manager.Stop)
+
+		actress, err := repo.FindByDMMID(t.Context(), 83)
+		require.NoError(t, err)
+		job, err := manager.CreateJob(t.Context(), ActressSyncCreateRequest{Scope: "selected", ActressIDs: []uint{actress.ID}})
+		require.NoError(t, err)
+		require.False(t, manager.started)
+		require.Eventually(t, func() bool {
+			current, findErr := manager.GetJob(job.ID)
+			return findErr == nil && current.Status == models.ActressSyncJobCompleted
+		}, 4*time.Second, 20*time.Millisecond)
 	})
 
 	t.Run("start tolerates recovery error", func(t *testing.T) {

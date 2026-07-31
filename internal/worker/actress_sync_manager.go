@@ -35,21 +35,24 @@ type ActressSyncCreateRequest struct {
 
 // ActressSyncManager ...
 type ActressSyncManager struct {
-	deps    ActressSyncManagerDeps
-	repo    *database.ActressSyncRepository
-	owner   string
-	mu      sync.Mutex
-	started bool
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	wake    chan struct{}
-	active  atomic.Int32
+	deps            ActressSyncManagerDeps
+	repo            *database.ActressSyncRepository
+	owner           string
+	mu              sync.Mutex
+	started         bool
+	retryTimer      *time.Timer
+	retryGeneration uint64
+	retryDelay      time.Duration
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	wake            chan struct{}
+	active          atomic.Int32
 }
 
 // NewActressSyncManager ...
 func NewActressSyncManager(deps ActressSyncManagerDeps) *ActressSyncManager {
-	m := &ActressSyncManager{deps: deps, owner: uuid.NewString(), wake: make(chan struct{}, 1)}
+	m := &ActressSyncManager{deps: deps, owner: uuid.NewString(), wake: make(chan struct{}, 1), retryDelay: time.Second}
 	if deps.DB != nil {
 		m.repo = database.NewActressSyncRepository(deps.DB)
 	}
@@ -63,12 +66,17 @@ func (m *ActressSyncManager) Start() {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.startLocked()
+}
+
+func (m *ActressSyncManager) startLocked() {
 	if m.started {
 		return
 	}
 	jobs, err := m.repo.ListActiveJobs()
 	if err != nil {
-		logging.Warnf("Actress sync startup failed, will retry on next signal: %v", err)
+		logging.Warnf("Actress sync startup failed, scheduling retry: %v", err)
+		m.scheduleStartRetry()
 		return
 	}
 	if len(jobs) == 0 {
@@ -83,6 +91,23 @@ func (m *ActressSyncManager) Start() {
 	go m.dispatch(m.ctx)
 }
 
+func (m *ActressSyncManager) scheduleStartRetry() {
+	if m.retryTimer != nil {
+		return
+	}
+	generation := m.retryGeneration
+	m.retryTimer = time.AfterFunc(m.retryDelay, func() {
+		m.mu.Lock()
+		if generation != m.retryGeneration {
+			m.mu.Unlock()
+			return
+		}
+		m.retryTimer = nil
+		m.startLocked()
+		m.mu.Unlock()
+	})
+}
+
 // Stop ...
 func (m *ActressSyncManager) Stop() {
 	if m == nil {
@@ -90,6 +115,11 @@ func (m *ActressSyncManager) Stop() {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.retryGeneration++
+	if m.retryTimer != nil {
+		m.retryTimer.Stop()
+		m.retryTimer = nil
+	}
 	if !m.started {
 		return
 	}
