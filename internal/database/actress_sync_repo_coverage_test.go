@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func newActressSyncJobAndTask(t *testing.T, db *DB, actressID *uint, key string) (*ActressSyncRepository, *models.ActressSyncJob, models.ActressSyncTask) {
@@ -273,4 +274,66 @@ func TestActressSyncRepositoryDatabaseErrors(t *testing.T) {
 		_, err := NewActressRepository(db).FillBlankMetadata(ctx, 1, 1, models.ActressInfo{DMMID: 1})
 		require.Error(t, err)
 	})
+}
+
+func seedTerminalActressSyncHistory(t *testing.T, db *DB, count int) []string {
+	t.Helper()
+	ids := make([]string, 0, count)
+	base := time.Now().UTC().Add(-time.Duration(count) * time.Hour)
+	for i := 0; i < count; i++ {
+		completedAt := base.Add(time.Duration(i) * time.Hour)
+		job := models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobCompleted, Scope: "missing", CreatedAt: completedAt, CompletedAt: &completedAt}
+		task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, DedupeKey: "history:" + job.ID, Status: models.ActressSyncTaskCompleted, Stage: "completed", CreatedAt: completedAt, CompletedAt: &completedAt, Messages: []string{}, UpdatedFields: []string{}}
+		require.NoError(t, db.Create(&job).Error)
+		require.NoError(t, db.Create(&task).Error)
+		ids = append(ids, job.ID)
+	}
+	return ids
+}
+
+func TestActressSyncTerminalHistoryRetention(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressSyncRepository(db)
+	ids := seedTerminalActressSyncHistory(t, db, actressSyncTerminalRetention+2)
+	active := models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobRunning, Scope: "missing", CreatedAt: time.Now().UTC().Add(-48 * time.Hour)}
+	require.NoError(t, db.Create(&active).Error)
+
+	newJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: time.Now().UTC()}
+	newTask := models.ActressSyncTask{ID: uuid.NewString(), JobID: newJob.ID, DedupeKey: "new:" + newJob.ID, Status: models.ActressSyncTaskPending, Stage: "queued", CreatedAt: newJob.CreatedAt, Messages: []string{}, UpdatedFields: []string{}}
+	require.NoError(t, repo.CreateJob(newJob, []models.ActressSyncTask{newTask}))
+
+	var terminalCount int64
+	require.NoError(t, db.Model(&models.ActressSyncJob{}).Where("status IN ?", []string{models.ActressSyncJobCompleted, models.ActressSyncJobCancelled}).Count(&terminalCount).Error)
+	require.EqualValues(t, actressSyncTerminalRetention, terminalCount)
+	var oldTaskCount int64
+	require.NoError(t, db.Model(&models.ActressSyncTask{}).Where("job_id IN ?", ids[:2]).Count(&oldTaskCount).Error)
+	require.Zero(t, oldTaskCount)
+	var retainedCount int64
+	require.NoError(t, db.Model(&models.ActressSyncJob{}).Where("id IN ?", []string{active.ID, newJob.ID, ids[len(ids)-1]}).Count(&retainedCount).Error)
+	require.EqualValues(t, 3, retainedCount)
+	require.NoError(t, repo.pruneTerminalJobsTx(db.DB))
+}
+
+func TestActressSyncTerminalHistoryRetentionErrors(t *testing.T) {
+	t.Run("query", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewActressSyncRepository(db)
+		require.NoError(t, db.Close())
+		require.Error(t, repo.pruneTerminalJobsTx(db.DB))
+	})
+	for _, table := range []string{"actress_sync_tasks", "actress_sync_jobs"} {
+		t.Run(table, func(t *testing.T) {
+			db := newDatabaseTestDB(t)
+			repo := NewActressSyncRepository(db)
+			seedTerminalActressSyncHistory(t, db, actressSyncTerminalRetention+1)
+			name := "retention:delete:" + table + ":" + uuid.NewString()
+			require.NoError(t, db.DB.Callback().Delete().Before("gorm:delete").Register(name, func(tx *gorm.DB) {
+				if tx.Statement.Table == table {
+					tx.AddError(errForcedActressCoverage)
+				}
+			}))
+			defer func() { require.NoError(t, db.DB.Callback().Delete().Remove(name)) }()
+			require.ErrorIs(t, repo.pruneTerminalJobsTx(db.DB), errForcedActressCoverage)
+		})
+	}
 }

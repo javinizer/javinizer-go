@@ -18,7 +18,7 @@
 	import ActressMergeModal from './components/ActressMergeModal.svelte';
 	import ActressPagination from './components/ActressPagination.svelte';
 	import ActressSyncModal from './components/ActressSyncModal.svelte';
-	import { isActressSyncTerminal } from './sync-runner';
+	import { isActressSyncTerminal, loadActressSyncSnapshot } from './sync-runner';
 	import * as m from '$lib/paraglide/messages';
 	import { createConfigQuery } from '$lib/query/queries';
 
@@ -44,14 +44,13 @@
 		if (!currentJob || syncPollInFlight) return;
 		syncPollInFlight = true;
 		try {
-			const jobResponse = await apiClient.getActressSyncJob(currentJob.id);
+			const snapshot = await loadActressSyncSnapshot(apiClient, currentJob.id);
 			if (!syncJob || syncJob.id !== currentJob.id) return;
-			syncJob = jobResponse.job;
+			syncJob = snapshot.job;
+			syncTasks = snapshot.tasks;
 			if (isActressSyncTerminal(syncJob)) {
 				if (syncTimer) clearInterval(syncTimer);
 				syncTimer = undefined;
-				const taskResponse = await apiClient.listActressSyncJobTasks(currentJob.id);
-				syncTasks = taskResponse.tasks;
 				await queryClient.invalidateQueries({ queryKey: ['actresses'] });
 			}
 		} catch (error) {

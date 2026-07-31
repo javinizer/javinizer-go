@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActressSyncJob, ActressSyncTask } from '$lib/api/types';
-import { buildActressSyncSummary, isActressSyncTerminal } from './sync-runner';
+import { buildActressSyncSummary, isActressSyncTerminal, loadActressSyncSnapshot } from './sync-runner';
 
 const job: ActressSyncJob = {
 	id: 'job',
@@ -43,6 +43,17 @@ describe('actress sync summary', () => {
 		expect(summary.active.map((item) => item.id)).toEqual(['active']);
 		expect(summary.diagnostics.map((item) => item.id)).toEqual(['skip']);
 		expect(summary.processed).toBe(2);
+	});
+
+	it('loads job and task state for live polling', async () => {
+		const calls: string[] = [];
+		const active = task('active', 'running');
+		const snapshot = await loadActressSyncSnapshot({
+			async getActressSyncJob(jobID) { calls.push(`job:${jobID}`); return { job }; },
+			async listActressSyncJobTasks(jobID) { calls.push(`tasks:${jobID}`); return { tasks: [active] }; },
+		}, job.id);
+		expect(calls).toEqual(['job:job', 'tasks:job']);
+		expect(snapshot).toEqual({ job, tasks: [active] });
 	});
 
 	it('recognizes durable terminal states', () => {

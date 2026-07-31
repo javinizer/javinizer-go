@@ -13,7 +13,10 @@ import (
 	"gorm.io/gorm"
 )
 
-const actressSyncAttemptCap = 3
+const (
+	actressSyncAttemptCap        = 3
+	actressSyncTerminalRetention = 20
+)
 
 var errActressSyncLeaseLost = errors.New("actress sync task lease lost")
 
@@ -45,7 +48,10 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 					}
 				}
 			}
-			return r.refreshJobTx(tx, job.ID, time.Now().UTC())
+			if err := r.refreshJobTx(tx, job.ID, time.Now().UTC()); err != nil {
+				return err
+			}
+			return r.pruneTerminalJobsTx(tx)
 		})
 	})
 	if err != nil {
@@ -56,6 +62,23 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 		*job = *fresh
 	}
 	return err
+}
+
+func (r *ActressSyncRepository) pruneTerminalJobsTx(tx *gorm.DB) error {
+	var jobIDs []string
+	if err := tx.Model(&models.ActressSyncJob{}).
+		Where("status IN ?", []string{models.ActressSyncJobCompleted, models.ActressSyncJobCancelled}).
+		Order("COALESCE(completed_at, created_at) DESC, created_at DESC, id DESC").
+		Offset(actressSyncTerminalRetention).Limit(-1).Pluck("id", &jobIDs).Error; err != nil {
+		return err
+	}
+	if len(jobIDs) == 0 {
+		return nil
+	}
+	if err := tx.Where("job_id IN ?", jobIDs).Delete(&models.ActressSyncTask{}).Error; err != nil {
+		return err
+	}
+	return tx.Where("id IN ?", jobIDs).Delete(&models.ActressSyncJob{}).Error
 }
 
 // FindJob ...
