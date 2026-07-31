@@ -2,6 +2,8 @@ package imageutil
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -43,11 +45,59 @@ func resolvePublicTargetIP(ctx context.Context, host string, lookup func(context
 	return addresses[0].IP, nil
 }
 
+func resolvePublicDialAddress(ctx context.Context, addr string, lookup func(context.Context, string) ([]net.IPAddr, error)) (string, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
+	}
+	ip, err := resolvePublicTargetIP(ctx, host, lookup)
+	if err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(ip.String(), port), nil
+}
+
+func tlsConfigForPinnedTarget(base *tls.Config, targetHost string, targetIP net.IP) *tls.Config {
+	config := base.Clone()
+	originalVerifyConnection := config.VerifyConnection
+	originalInsecureSkipVerify := config.InsecureSkipVerify
+	config.InsecureSkipVerify = true
+	config.ServerName = ""
+	config.VerifyConnection = func(state tls.ConnectionState) error {
+		if !originalInsecureSkipVerify {
+			dnsName := state.ServerName
+			if serverIP := net.ParseIP(strings.Trim(dnsName, "[]")); serverIP != nil && serverIP.Equal(targetIP) {
+				dnsName = targetHost
+			}
+			if len(state.PeerCertificates) == 0 {
+				return fmt.Errorf("TLS peer sent no certificates")
+			}
+			intermediates := x509.NewCertPool()
+			for _, certificate := range state.PeerCertificates[1:] {
+				intermediates.AddCert(certificate)
+			}
+			if _, err := state.PeerCertificates[0].Verify(x509.VerifyOptions{DNSName: dnsName, Roots: config.RootCAs, Intermediates: intermediates}); err != nil {
+				return err
+			}
+		}
+		if originalVerifyConnection != nil {
+			return originalVerifyConnection(state)
+		}
+		return nil
+	}
+	return config
+}
+
 type pinnedProxyTransport struct {
-	base *http.Transport
+	base   *http.Transport
+	lookup func(context.Context, string) ([]net.IPAddr, error)
 }
 
 func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	lookup := t.lookup
+	if lookup == nil {
+		lookup = net.DefaultResolver.LookupIPAddr
+	}
 	var proxyURL *url.URL
 	var err error
 	if t.base.Proxy != nil {
@@ -59,10 +109,21 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 	if proxyURL == nil {
 		transport := t.base.Clone()
 		transport.Proxy = nil
-		return ssrf.WrapTransportWithSSRFCheck(transport).RoundTrip(req)
+		originalDialContext := transport.DialContext
+		if originalDialContext == nil {
+			originalDialContext = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+		}
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			pinnedAddr, err := resolvePublicDialAddress(ctx, addr, lookup)
+			if err != nil {
+				return nil, err
+			}
+			return originalDialContext(ctx, network, pinnedAddr)
+		}
+		return transport.RoundTrip(req)
 	}
 	host := req.URL.Hostname()
-	ip, err := resolvePublicTargetIP(req.Context(), host, net.DefaultResolver.LookupIPAddr)
+	ip, err := resolvePublicTargetIP(req.Context(), host, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -82,9 +143,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 	transport := t.base.Clone()
 	transport.Proxy = http.ProxyURL(proxyURL)
 	if req.URL.Scheme == "https" {
-		tlsConfig := transport.TLSClientConfig.Clone()
-		tlsConfig.ServerName = host
-		transport.TLSClientConfig = tlsConfig
+		transport.TLSClientConfig = tlsConfigForPinnedTarget(transport.TLSClientConfig, host, ip)
 	}
 	resp, err := transport.RoundTrip(pinnedReq)
 	if resp != nil {

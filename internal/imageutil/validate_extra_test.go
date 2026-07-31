@@ -3,6 +3,7 @@ package imageutil
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -93,6 +94,29 @@ func TestValidateRemoteImageWithSafeClientPinsProxyTarget(t *testing.T) {
 	require.Error(t, err)
 	_, err = pinned.RoundTrip(httpsReq)
 	require.Error(t, err)
+
+	dialErr := errors.New("dial stopped")
+	var dialedAddr string
+	socks := &pinnedProxyTransport{
+		base: &http.Transport{DialContext: func(_ context.Context, _ string, addr string) (net.Conn, error) {
+			dialedAddr = addr
+			return nil, dialErr
+		}},
+		lookup: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
+		},
+	}
+	socksReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/image.png", nil)
+	require.NoError(t, err)
+	_, err = socks.RoundTrip(socksReq)
+	require.ErrorIs(t, err, dialErr)
+	assert.Equal(t, "1.1.1.1:80", dialedAddr)
+	privateSocks := *socks
+	privateSocks.lookup = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	}
+	_, err = privateSocks.RoundTrip(socksReq)
+	require.ErrorContains(t, err, "private/internal")
 }
 
 func TestResolvePublicTargetIP(t *testing.T) {
@@ -110,6 +134,62 @@ func TestResolvePublicTargetIP(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, net.ParseIP("1.1.1.1"), ip)
+}
+
+func TestResolvePublicDialAddress(t *testing.T) {
+	lookup := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
+	}
+	_, err := resolvePublicDialAddress(t.Context(), "invalid", lookup)
+	require.ErrorContains(t, err, "invalid address")
+	addr, err := resolvePublicDialAddress(t.Context(), "public.example:443", lookup)
+	require.NoError(t, err)
+	require.Equal(t, "1.1.1.1:443", addr)
+	_, err = resolvePublicDialAddress(t.Context(), "private.example:80", func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	})
+	require.ErrorContains(t, err, "private/internal")
+}
+
+func TestTLSConfigForPinnedTarget(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(server.Close)
+	certificate := server.Certificate()
+	require.Contains(t, certificate.DNSNames, "example.com")
+	roots := x509.NewCertPool()
+	roots.AddCert(certificate)
+	verifyCalls := 0
+	config := tlsConfigForPinnedTarget(&tls.Config{
+		RootCAs: roots,
+		VerifyConnection: func(tls.ConnectionState) error {
+			verifyCalls++
+			return nil
+		},
+	}, "example.com", net.ParseIP("1.1.1.1"))
+	require.True(t, config.InsecureSkipVerify)
+	require.Empty(t, config.ServerName)
+	state := tls.ConnectionState{ServerName: "1.1.1.1", PeerCertificates: []*x509.Certificate{certificate, certificate}}
+	require.NoError(t, config.VerifyConnection(state))
+	state.ServerName = "example.com"
+	require.NoError(t, config.VerifyConnection(state))
+	require.Equal(t, 2, verifyCalls)
+	require.Error(t, config.VerifyConnection(tls.ConnectionState{ServerName: "example.com"}))
+	state.ServerName = "wrong.example"
+	require.Error(t, config.VerifyConnection(state))
+
+	insecureCalls := 0
+	insecure := tlsConfigForPinnedTarget(&tls.Config{
+		InsecureSkipVerify: true,
+		VerifyConnection: func(tls.ConnectionState) error {
+			insecureCalls++
+			return nil
+		},
+	}, "example.com", net.ParseIP("1.1.1.1"))
+	require.NoError(t, insecure.VerifyConnection(tls.ConnectionState{}))
+	require.Equal(t, 1, insecureCalls)
+
+	withoutCallback := tlsConfigForPinnedTarget(&tls.Config{RootCAs: roots}, "example.com", net.ParseIP("1.1.1.1"))
+	require.NoError(t, withoutCallback.VerifyConnection(tls.ConnectionState{ServerName: "example.com", PeerCertificates: []*x509.Certificate{certificate}}))
 }
 
 func TestValidateRemoteImageWithClientRequestAndTransportErrors(t *testing.T) {
