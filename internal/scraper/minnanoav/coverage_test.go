@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
@@ -38,4 +39,13 @@ func TestValidateScraperSettings(t *testing.T) {
 func TestRegister(t *testing.T) {
 	registry := scraperutil.NewScraperRegistry()
 	Register(registry)
+}
+
+func TestMinnanoAVValidateActressThumbnailBranches(t *testing.T) {
+	var nilScraper *scraper
+	_ = nilScraper.ValidateActressThumbnail(context.Background(), "http://127.0.0.1/img.jpg")
+	s := &scraper{client: resty.New(), settings: models.ScraperSettings{}}
+	_ = s.ValidateActressThumbnail(context.Background(), "http://127.0.0.1/img.jpg")
+	s.settings.UserAgent = "custom-agent"
+	_ = s.ValidateActressThumbnail(context.Background(), "http://127.0.0.1/img.jpg")
 }
