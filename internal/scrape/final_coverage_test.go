@@ -80,7 +80,7 @@ func (a *finalAggregator) ReloadReplacementCaches(context.Context) {}
 
 func TestValidateAndResolverEnrichmentRemainingBranches(t *testing.T) {
 	movie := &models.Movie{Actresses: []models.Actress{{ThumbURL: "   "}}}
-	assert.Zero(t, validateActressThumbnails(t.Context(), movie, &Config{}))
+	assert.Zero(t, validateActressThumbnails(movie, &Config{}))
 
 	complete := models.Actress{FirstName: "Complete", JapaneseName: "完全", ThumbURL: "https://example.com/thumb.jpg"}
 	resolver := &testMetadataResolver{name: "unused", enabled: true}

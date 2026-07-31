@@ -137,7 +137,7 @@ func enrichActressFields(actress *models.Actress, dbActress *models.Actress) boo
 	return changed
 }
 
-func validateActressThumbnails(ctx context.Context, scraped *models.Movie, cfg *Config) int {
+func validateActressThumbnails(scraped *models.Movie, cfg *Config) int {
 	if scraped == nil || cfg == nil {
 		return 0
 	}
@@ -152,13 +152,22 @@ func validateActressThumbnails(ctx context.Context, scraped *models.Movie, cfg *
 			invalid++
 			continue
 		}
-		if cfg.ValidateActressThumbnail != nil {
-			if err := cfg.ValidateActressThumbnail(ctx, thumbnail); err != nil {
-				logging.Debugf("Transient actress thumbnail validation failure for %s: %v", thumbnail, err)
-			}
-		}
 	}
 	return invalid
+}
+
+type actressThumbnailSessionValidator interface {
+	ValidateActressThumbnail(context.Context, string) error
+}
+
+func validateResolverActressThumbnail(ctx context.Context, resolver models.ActressMetadataResolver, fallback func(context.Context, string) error, rawURL string) error {
+	if validator, ok := resolver.(actressThumbnailSessionValidator); ok {
+		return validator.ValidateActressThumbnail(ctx, rawURL)
+	}
+	if fallback != nil {
+		return fallback(ctx, rawURL)
+	}
+	return nil
 }
 
 func actressNeedsMetadata(a models.Actress) bool {
@@ -202,8 +211,8 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			}
 			resolverFilled := false
 			thumbnail := strings.TrimSpace(metadata.ThumbURL)
-			if thumbnail != "" && cfg.ValidateActressThumbnail != nil {
-				if err := cfg.ValidateActressThumbnail(ctx, thumbnail); err != nil {
+			if thumbnail != "" {
+				if err := validateResolverActressThumbnail(ctx, resolver, cfg.ValidateActressThumbnail, thumbnail); err != nil {
 					logging.Debugf("Rejected resolver actress thumbnail %s: %v", thumbnail, err)
 					thumbnail = ""
 				}

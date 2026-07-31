@@ -274,7 +274,7 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		logging.Debugf("[scrape] Enriched %d actresses from built-in cache", enriched)
 	}
 
-	if invalid := validateActressThumbnails(ctx, scraped, cfg); invalid > 0 {
+	if invalid := validateActressThumbnails(scraped, cfg); invalid > 0 {
 		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails", invalid)
 	}
 

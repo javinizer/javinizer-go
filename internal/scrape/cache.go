@@ -68,7 +68,7 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		needsPersistence = true
 		logging.Debugf("[scrape] Enriched %d actresses from built-in cache after cache hit", enriched)
 	}
-	if invalid := validateActressThumbnails(ctx, scrapedToReturn, s.cfg); invalid > 0 {
+	if invalid := validateActressThumbnails(scrapedToReturn, s.cfg); invalid > 0 {
 		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails after cache hit", invalid)
 	}
 	if s.registry != nil {

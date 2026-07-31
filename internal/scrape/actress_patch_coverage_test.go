@@ -25,14 +25,14 @@ func TestBuiltinEnrichmentIdentityAndFirstNameBranches(t *testing.T) {
 	assert.Equal(t, "Filled", matching.Actresses[0].FirstName)
 }
 
-func TestValidateActressThumbnailsNilAndTransientFailure(t *testing.T) {
-	assert.Zero(t, validateActressThumbnails(t.Context(), nil, &Config{}))
-	assert.Zero(t, validateActressThumbnails(t.Context(), &models.Movie{}, nil))
+func TestValidateActressThumbnailsSkipsRemoteValidation(t *testing.T) {
+	assert.Zero(t, validateActressThumbnails(nil, &Config{}))
+	assert.Zero(t, validateActressThumbnails(&models.Movie{}, nil))
 	movie := &models.Movie{Actresses: []models.Actress{{ThumbURL: " https://example.com/valid.jpg "}}}
 	calls := 0
 	cfg := &Config{ValidateActressThumbnail: func(context.Context, string) error { calls++; return errors.New("temporary") }}
-	assert.Zero(t, validateActressThumbnails(t.Context(), movie, cfg))
-	assert.Equal(t, 1, calls)
+	assert.Zero(t, validateActressThumbnails(movie, cfg))
+	assert.Zero(t, calls)
 	assert.NotEmpty(t, movie.Actresses[0].ThumbURL)
 }
 
@@ -45,6 +45,38 @@ func TestResolverEnrichmentSkipsMismatchesAndRejectedThumbnails(t *testing.T) {
 	assert.Equal(t, "Right", movie.Actresses[0].FirstName)
 	assert.Empty(t, movie.Actresses[0].ThumbURL)
 	assert.Equal(t, 1, mismatch.calls)
+}
+
+type sessionValidatingMetadataResolver struct {
+	*testMetadataResolver
+	validationCalls int
+	validationErr   error
+}
+
+func (r *sessionValidatingMetadataResolver) ValidateActressThumbnail(context.Context, string) error {
+	r.validationCalls++
+	return r.validationErr
+}
+
+func TestResolverEnrichmentPrefersSessionValidation(t *testing.T) {
+	resolver := &sessionValidatingMetadataResolver{testMetadataResolver: &testMetadataResolver{
+		name: "session", enabled: true,
+		metadata: models.ActressInfo{DMMID: 8, ThumbURL: "https://session.example/thumb.jpg"},
+	}}
+	fallbackCalls := 0
+	cfg := &Config{
+		ScrapeActress: true,
+		ValidateActressThumbnail: func(context.Context, string) error {
+			fallbackCalls++
+			return errors.New("direct request rejected")
+		},
+	}
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 8}}}
+
+	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), movie, newTestRegistry(resolver), cfg))
+	assert.Equal(t, 1, resolver.validationCalls)
+	assert.Zero(t, fallbackCalls)
+	assert.Equal(t, resolver.metadata.ThumbURL, movie.Actresses[0].ThumbURL)
 }
 
 type unnamedMetadataResolver struct{}

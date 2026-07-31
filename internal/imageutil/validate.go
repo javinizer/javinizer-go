@@ -42,7 +42,7 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 	}
 	safeClient := *client
 	if transport, ok := client.Transport.(*http.Transport); ok {
-		safeClient.Transport = ssrf.WrapTransportWithSSRFCheck(transport)
+		safeClient.Transport = ssrf.WrapTransportWithSSRFCheck(transport.Clone())
 	}
 	previousCheckRedirect := client.CheckRedirect
 	safeClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {

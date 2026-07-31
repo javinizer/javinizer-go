@@ -34,8 +34,10 @@ func TestValidateRemoteImageWithSafeClientHonorsRedirectPolicy(t *testing.T) {
 func TestValidateRemoteImageWithSafeClientWrapsHTTPTransportAndLimitsRedirects(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	err := ValidateRemoteImageWithSafeClient(ctx, &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}, "https://example.com/image", "", "")
+	transport := &http.Transport{}
+	err := ValidateRemoteImageWithSafeClient(ctx, &http.Client{Transport: transport}, "https://example.com/image", "", "")
 	require.Error(t, err)
+	require.Nil(t, transport.DialContext)
 
 	redirects := 0
 	client := &http.Client{Transport: validationTransport(func(req *http.Request) (*http.Response, error) {
