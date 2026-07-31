@@ -68,6 +68,7 @@ type MergePlan struct {
 	Resolutions        map[string]string
 	TargetUpdatedAt    time.Time
 	SourceUpdatedAt    time.Time
+	Versioned          bool
 }
 
 // actressMerger handles actress merge operations, extracted from ActressRepository
@@ -302,7 +303,7 @@ func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *D
 					return err
 				}
 			}
-			if hasSourceMergeResolution(plan.Resolutions) {
+			if plan.Versioned || hasSourceMergeResolution(plan.Resolutions) {
 				targetChanged := !plan.TargetUpdatedAt.IsZero() && !target.UpdatedAt.Equal(plan.TargetUpdatedAt)
 				sourceChanged := !plan.SourceUpdatedAt.IsZero() && !source.UpdatedAt.Equal(plan.SourceUpdatedAt)
 				if targetChanged || sourceChanged {

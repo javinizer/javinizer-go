@@ -22,9 +22,13 @@ func writeActressMergeError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 	case database.IsNotFound(err):
 		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
-	case errors.Is(err, database.ErrActressMergeUniqueConstraint),
-		errors.Is(err, database.ErrActressMergeStalePlan):
+	case errors.Is(err, database.ErrActressMergeUniqueConstraint):
 		c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
+	case errors.Is(err, database.ErrActressMergeStalePlan):
+		c.JSON(http.StatusConflict, contracts.ErrorResponse{
+			Error: err.Error(),
+			Code:  "ACTRESS_MERGE_STALE_PLAN",
+		})
 	default:
 		core.RespondInternalError(c, err)
 	}

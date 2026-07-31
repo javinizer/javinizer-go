@@ -20,6 +20,7 @@ func TestWriteActressMergeError_Uncovered(t *testing.T) {
 		name           string
 		err            error
 		expectedStatus int
+		expectedCode   string
 	}{
 		{
 			name:           "invalid ID",
@@ -55,6 +56,7 @@ func TestWriteActressMergeError_Uncovered(t *testing.T) {
 			name:           "stale plan",
 			err:            database.ErrActressMergeStalePlan,
 			expectedStatus: http.StatusConflict,
+			expectedCode:   "ACTRESS_MERGE_STALE_PLAN",
 		},
 		{
 			name:           "generic error",
@@ -69,6 +71,9 @@ func TestWriteActressMergeError_Uncovered(t *testing.T) {
 			c, _ := gin.CreateTestContext(w)
 			writeActressMergeError(c, tt.err)
 			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.expectedCode != "" {
+				assert.Contains(t, w.Body.String(), tt.expectedCode)
+			}
 		})
 	}
 }

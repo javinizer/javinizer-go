@@ -2,6 +2,7 @@ import { untrack } from 'svelte';
 import { confirmDialog } from '$lib/stores/dialog.svelte';
 import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
+import { ApiError } from '$lib/api/clients/common';
 import { toastStore } from '$lib/stores/toast';
 import type { Actress, ActressUpsertRequest, ActressMergeResolution, ActressFilter } from '$lib/api/types';
 import { formatActressName } from '$lib/utils/actress';
@@ -177,6 +178,10 @@ export function createActressStore() {
 				failed: mergeSummary.failed + 1,
 				messages: [...mergeSummary.messages, m.actresses_merge_failed({ source: variables.source_id, error: err.message })],
 			};
+			if (err instanceof ApiError && err.code === 'ACTRESS_MERGE_STALE_PLAN') {
+				queryClient.invalidateQueries({ queryKey: ['actress-merge-preview'] });
+				return;
+			}
 			mergeSourceQueue = mergeSourceQueue.slice(1);
 			queryClient.invalidateQueries({ queryKey: ['actress-merge-preview'] });
 			advanceMergeQueue();

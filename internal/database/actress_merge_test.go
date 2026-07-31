@@ -376,7 +376,7 @@ func TestMergeWithVersionsRejectsChangesAfterPreview(t *testing.T) {
 		"first_name": "Changed",
 		"updated_at": preview.Source.UpdatedAt.Add(time.Second),
 	}).Error)
-	_, err = repo.MergeWithVersions(t.Context(), target.ID, source.ID, map[string]string{"first_name": MergeResolutionSource}, preview.Target.UpdatedAt, preview.Source.UpdatedAt)
+	_, err = repo.MergeWithVersions(t.Context(), target.ID, source.ID, nil, preview.Target.UpdatedAt, preview.Source.UpdatedAt)
 	require.ErrorIs(t, err, ErrActressMergeStalePlan)
 	stored, err := repo.FindByID(t.Context(), source.ID)
 	require.NoError(t, err)

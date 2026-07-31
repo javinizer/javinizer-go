@@ -416,5 +416,6 @@ func (r *ActressRepository) MergeWithVersions(ctx context.Context, targetID, sou
 	}
 	plan.TargetUpdatedAt = targetUpdatedAt
 	plan.SourceUpdatedAt = sourceUpdatedAt
+	plan.Versioned = true
 	return r.merger.ExecuteMerge(ctx, plan, r.GetDB())
 }
