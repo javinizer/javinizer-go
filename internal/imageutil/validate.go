@@ -16,6 +16,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -31,10 +32,50 @@ import (
 const (
 	maxThumbnailValidationBytes   = 2 * 1024 * 1024
 	defaultMaxResponseHeaderBytes = 10 << 20
+	responseHeaderReadSlop        = 4 << 10
 	httpsScheme                   = "https"
 )
 
 var validateRemoteImageWithClient = ValidateRemoteImageWithClient
+
+var blockedTargetPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/3"),
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("4000::/2"),
+	netip.MustParsePrefix("8000::/1"),
+}
+
+func isPublicTargetIP(ip net.IP) bool {
+	address, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	address = address.Unmap()
+	if !address.IsGlobalUnicast() {
+		return false
+	}
+	for _, prefix := range blockedTargetPrefixes {
+		if prefix.Contains(address) {
+			return false
+		}
+	}
+	return true
+}
 
 func resolvePublicTargetIPs(ctx context.Context, host string, lookup func(context.Context, string) ([]net.IPAddr, error)) ([]net.IP, error) {
 	addresses, err := lookup(ctx, host)
@@ -47,7 +88,7 @@ func resolvePublicTargetIPs(ctx context.Context, host string, lookup func(contex
 	ips := make([]net.IP, 0, len(addresses))
 	for _, address := range addresses {
 		ip := address.IP
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		if !isPublicTargetIP(ip) {
 			return nil, fmt.Errorf("SSRF blocked: %s resolves to private/internal IP", host)
 		}
 		ips = append(ips, ip)
@@ -139,33 +180,18 @@ func encodeProxyRequest(req *http.Request, pinnedURL *url.URL, proxyUser *url.Us
 type responseHeaderLimitReader struct {
 	reader    io.Reader
 	remaining int64
-	matched   int
 	done      bool
 }
 
 func (r *responseHeaderLimitReader) Read(data []byte) (int, error) {
 	read, err := r.reader.Read(data)
-	separator := [...]byte{'\r', '\n', '\r', '\n'}
-	for i, value := range data[:read] {
-		if r.done {
-			break
-		}
-		r.remaining--
-		if r.remaining < 0 {
-			return i + 1, fmt.Errorf("response headers exceed configured limit")
-		}
-		switch value {
-		case separator[r.matched]:
-			r.matched++
-			if r.matched == len(separator) {
-				r.done = true
-			}
-		case separator[0]:
-			r.matched = 1
-		default:
-			r.matched = 0
-		}
+	if r.done {
+		return read, err
 	}
+	if int64(read) > r.remaining {
+		return int(r.remaining) + 1, fmt.Errorf("response headers exceed configured limit")
+	}
+	r.remaining -= int64(read)
 	return read, err
 }
 
@@ -235,13 +261,21 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 	if maxHeaderBytes <= 0 {
 		maxHeaderBytes = defaultMaxResponseHeaderBytes
 	}
-	headerReader := &responseHeaderLimitReader{reader: conn, remaining: maxHeaderBytes}
-	resp, err := http.ReadResponse(bufio.NewReader(headerReader), req)
-	if err != nil {
-		return closeConn(err)
+	headerReader := &responseHeaderLimitReader{reader: conn, remaining: maxHeaderBytes + responseHeaderReadSlop}
+	bufferedReader := bufio.NewReader(headerReader)
+	for {
+		resp, err := http.ReadResponse(bufferedReader, req)
+		if err != nil {
+			return closeConn(err)
+		}
+		if resp.StatusCode >= 100 && resp.StatusCode < 200 && resp.StatusCode != http.StatusSwitchingProtocols {
+			_ = resp.Body.Close()
+			continue
+		}
+		headerReader.done = true
+		resp.Body = &proxyResponseBody{ReadCloser: resp.Body, conn: conn, done: done}
+		return resp, nil
 	}
-	resp.Body = &proxyResponseBody{ReadCloser: resp.Body, conn: conn, done: done}
-	return resp, nil
 }
 
 func isRetryableProxyStatus(status int) bool {
@@ -345,7 +379,7 @@ func ValidateRemoteImage(ctx context.Context, rawURL string) error {
 	if err := ssrf.CheckURL(rawURL); err != nil {
 		return err
 	}
-	return validateRemoteImageWithClient(ctx, ssrf.NewSSRFSafeClient(30*time.Second), rawURL, config.DefaultUserAgent, httpclient.ResolveMediaReferer(rawURL, ""))
+	return ValidateRemoteImageWithSafeClient(ctx, ssrf.NewSSRFSafeClient(30*time.Second), rawURL, config.DefaultUserAgent, httpclient.ResolveMediaReferer(rawURL, ""))
 }
 
 // ValidateRemoteImageWithSafeClient ...
@@ -375,7 +409,7 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 		}
 		return nil
 	}
-	return ValidateRemoteImageWithClient(ctx, &safeClient, rawURL, userAgent, referer)
+	return validateRemoteImageWithClient(ctx, &safeClient, rawURL, userAgent, referer)
 }
 
 // ValidateRemoteImageWithClient ...

@@ -19,6 +19,7 @@ func TestValidateRemoteImageRejectsUnsafeAndDelegatesSafeURL(t *testing.T) {
 	validateRemoteImageWithClient = func(ctx context.Context, client *http.Client, rawURL, userAgent, referer string) error {
 		assert.NotNil(t, ctx)
 		assert.NotNil(t, client)
+		assert.IsType(t, &pinnedProxyTransport{}, client.Transport)
 		assert.Equal(t, "https://example.com/image.jpg", rawURL)
 		assert.NotEmpty(t, userAgent)
 		assert.Equal(t, "https://example.com/", referer)

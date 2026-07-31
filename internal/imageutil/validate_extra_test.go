@@ -188,11 +188,10 @@ func TestResponseHeaderLimitReaderRejectsOversizedHeaders(t *testing.T) {
 	read, err := reader.Read(data)
 	require.Equal(t, 17, read)
 	require.ErrorContains(t, err, "headers exceed configured limit")
-	restart := &responseHeaderLimitReader{reader: strings.NewReader("\r\r\n\r\nbody"), remaining: 32}
-	read, err = restart.Read(data)
+	finished := &responseHeaderLimitReader{reader: strings.NewReader("body"), remaining: 0, done: true}
+	read, err = finished.Read(data)
 	require.NoError(t, err)
-	require.Equal(t, len("\r\r\n\r\nbody"), read)
-	require.True(t, restart.done)
+	require.Equal(t, len("body"), read)
 }
 
 func TestProxyResponseBodyClosesConnectionBeforeBody(t *testing.T) {
@@ -242,7 +241,7 @@ func TestRoundTripHTTPProxyErrorsAndCancellation(t *testing.T) {
 	go func() {
 		defer server.Close()
 		_, _ = http.ReadRequest(bufio.NewReader(server))
-		_, _ = fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nX-Large: %s\r\n\r\n", strings.Repeat("x", 128))
+		_, _ = fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nX-Large: %s\r\n\r\n", strings.Repeat("x", 8192))
 	}()
 	_, err = roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{
 		DialContext:            func(context.Context, string, string) (net.Conn, error) { return client, nil },
@@ -286,6 +285,26 @@ func TestPinnedTransportDisablesPerRequestKeepAlives(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.True(t, <-closed)
+}
+
+func TestRoundTripHTTPProxySkipsInformationalResponses(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	go func() {
+		_, _ = http.ReadRequest(bufio.NewReader(server))
+		_, _ = io.WriteString(server, "HTTP/1.1 103 Early Hints\r\nLink: </image>; rel=preload\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody")
+	}()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/image", nil)
+	require.NoError(t, err)
+	resp, err := roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil },
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "body", string(body))
+	require.NoError(t, resp.Body.Close())
 }
 
 func TestPinnedProxyTransportHTTPSFailoverSuccess(t *testing.T) {
@@ -460,6 +479,14 @@ func TestEncodeProxyRequestPreservesHostAndAuthentication(t *testing.T) {
 	badReq.ContentLength = -1
 	_, err = encodeProxyRequest(badReq, pinnedURL, nil)
 	require.ErrorContains(t, err, writeErr.Error())
+}
+
+func TestIsPublicTargetIPRejectsSpecialUseRanges(t *testing.T) {
+	for _, raw := range []string{"239.0.0.1", "255.255.255.255", "192.0.2.1", "198.51.100.1", "203.0.113.1", "2001:db8::1", "ff02::1", "invalid"} {
+		require.False(t, isPublicTargetIP(net.ParseIP(raw)), raw)
+	}
+	require.True(t, isPublicTargetIP(net.ParseIP("1.1.1.1")))
+	require.True(t, isPublicTargetIP(net.ParseIP("2606:4700:4700::1111")))
 }
 
 func TestResolvePublicTargetIPs(t *testing.T) {
