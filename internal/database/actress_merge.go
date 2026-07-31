@@ -272,10 +272,10 @@ func hasSourceMergeResolution(resolutions map[string]string) bool {
 // It performs the actual row updates, association moves, alias upserts, and source deletion.
 // The db parameter provides the database connection for the transaction boundary.
 func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *DB) (*ActressMergeResult, error) {
-	return m.executeMerge(ctx, plan, db, nil)
+	return m.executeMerge(ctx, plan, db, nil, nil)
 }
 
-func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *DB, taskHook func(*gorm.DB, uint, uint) error) (*ActressMergeResult, error) {
+func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *DB, preMergeHook func(*gorm.DB, *models.Actress, *models.Actress) error, taskHook func(*gorm.DB, uint, uint) error) (*ActressMergeResult, error) {
 	if plan == nil || db == nil {
 		return nil, fmt.Errorf("merge plan and database are required")
 	}
@@ -294,6 +294,11 @@ func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *D
 			var source models.Actress
 			if err := tx.First(&source, "id = ?", sourceID).Error; err != nil {
 				return err
+			}
+			if preMergeHook != nil {
+				if err := preMergeHook(tx, &target, &source); err != nil {
+					return err
+				}
 			}
 			if !plan.TargetUpdatedAt.IsZero() && !target.UpdatedAt.Equal(plan.TargetUpdatedAt) && hasSourceMergeResolution(plan.Resolutions) {
 				return ErrActressMergeStalePlan

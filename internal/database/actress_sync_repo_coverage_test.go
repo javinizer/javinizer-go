@@ -356,3 +356,62 @@ func TestActressSyncTerminalHistoryRetentionErrors(t *testing.T) {
 		})
 	}
 }
+func TestMergeCachedIdentityPreconditions(t *testing.T) {
+	newPair := func(t *testing.T) (*DB, *ActressRepository, *models.Actress, *models.Actress) {
+		t.Helper()
+		db := newDatabaseTestDB(t)
+		repo := NewActressRepository(db)
+		target := &models.Actress{DMMID: 1201, JapaneseName: "canonical"}
+		source := &models.Actress{JapaneseName: "duplicate"}
+		require.NoError(t, repo.Create(t.Context(), target))
+		require.NoError(t, repo.Create(t.Context(), source))
+		return db, repo, target, source
+	}
+	t.Run("success", func(t *testing.T) {
+		_, repo, target, source := newPair(t)
+		merged, err := repo.MergeCachedIdentity(t.Context(), target.ID, source.ID, target.DMMID)
+		require.NoError(t, err)
+		require.Equal(t, target.ID, merged.MergedActress.ID)
+		_, err = repo.FindByID(t.Context(), source.ID)
+		require.Error(t, err)
+	})
+	for _, tc := range []struct {
+		name     string
+		expected int
+		assign   bool
+	}{
+		{name: "canonical changed", expected: 9999},
+		{name: "source assigned", expected: 1201, assign: true},
+		{name: "invalid expected identity", expected: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, repo, target, source := newPair(t)
+			if tc.assign {
+				require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", source.ID).Update("dmm_id", 1202).Error)
+			}
+			_, err := repo.MergeCachedIdentity(t.Context(), target.ID, source.ID, tc.expected)
+			require.ErrorIs(t, err, ErrActressSyncIdentityChanged)
+			_, err = repo.FindByID(t.Context(), source.ID)
+			require.NoError(t, err)
+		})
+	}
+	t.Run("task validation and plan failure", func(t *testing.T) {
+		_, repo, target, source := newPair(t)
+		_, err := repo.MergeCachedIdentityForSyncTask(t.Context(), target.ID, source.ID, target.DMMID, "", "token")
+		require.ErrorIs(t, err, ErrInvalidLookup)
+		_, err = repo.MergeCachedIdentityForSyncTask(t.Context(), 0, source.ID, target.DMMID, "task", "token")
+		require.ErrorIs(t, err, ErrActressMergeInvalidID)
+		_, err = repo.MergeCachedIdentity(t.Context(), 0, source.ID, target.DMMID)
+		require.ErrorIs(t, err, ErrActressMergeInvalidID)
+	})
+	t.Run("leased success", func(t *testing.T) {
+		db, repo, target, source := newPair(t)
+		syncRepo, _, _ := newActressSyncJobAndTask(t, db, &source.ID, "cached-identity-lease:"+uuid.NewString())
+		claimed, err := syncRepo.ClaimNext("owner", time.Now().Add(time.Hour))
+		require.NoError(t, err)
+		require.NotNil(t, claimed)
+		merged, err := repo.MergeCachedIdentityForSyncTask(t.Context(), target.ID, source.ID, target.DMMID, claimed.ID, claimed.LeaseToken)
+		require.NoError(t, err)
+		require.Equal(t, target.ID, merged.MergedActress.ID)
+	})
+}

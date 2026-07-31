@@ -289,3 +289,23 @@ func TestCachedIdentityAssignmentRaceBranches(t *testing.T) {
 		require.True(t, database.IsNotFound(err))
 	})
 }
+func TestCachedIdentityMergeRejectsConcurrentSourceAssignment(t *testing.T) {
+	_, actressRepo, movieRepo, source := newActressSyncFixture(t, &models.Actress{JapaneseName: "duplicate"})
+	canonical := &models.Actress{DMMID: 912, JapaneseName: "canonical"}
+	require.NoError(t, actressRepo.Create(t.Context(), canonical))
+	_, err := SyncActressMetadata(t.Context(), source.ID, actressRepo, movieRepo, nil, ActressSyncOptions{
+		LookupCache: func(int, string, string, string) (models.ActressInfo, bool) {
+			return models.ActressInfo{DMMID: 912, JapaneseName: "canonical", Aliases: []string{"duplicate"}}, true
+		},
+		MergeCachedIdentity: func(targetID, sourceID uint, expectedDMMID int) (*database.ActressMergeResult, error) {
+			assigned, assignErr := actressRepo.AssignDMMIDIfMissing(t.Context(), sourceID, 913)
+			require.NoError(t, assignErr)
+			require.True(t, assigned)
+			return actressRepo.MergeCachedIdentity(t.Context(), targetID, sourceID, expectedDMMID)
+		},
+	})
+	require.ErrorIs(t, err, database.ErrActressSyncIdentityChanged)
+	stored, err := actressRepo.FindByID(t.Context(), source.ID)
+	require.NoError(t, err)
+	require.Equal(t, 913, stored.DMMID)
+}

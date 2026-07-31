@@ -20,6 +20,9 @@ const (
 
 var errActressSyncLeaseLost = errors.New("actress sync task lease lost")
 
+// ErrActressSyncIdentityChanged ...
+var ErrActressSyncIdentityChanged = errors.New("actress sync identity changed during merge")
+
 // ActressSyncRepository ...
 type ActressSyncRepository struct{ db *DB }
 
@@ -263,7 +266,40 @@ func (r *ActressRepository) MergeForSyncTask(ctx context.Context, targetID, sour
 		return nil, err
 	}
 	syncRepo := NewActressSyncRepository(r.GetDB())
-	return r.merger.executeMerge(ctx, plan, r.GetDB(), func(tx *gorm.DB, canonicalID, duplicateID uint) error {
+	return r.merger.executeMerge(ctx, plan, r.GetDB(), nil, func(tx *gorm.DB, canonicalID, duplicateID uint) error {
+		return syncRepo.reassignTaskActressTx(tx, taskID, leaseToken, canonicalID, duplicateID)
+	})
+}
+
+func cachedIdentityPrecondition(expectedDMMID int) func(*gorm.DB, *models.Actress, *models.Actress) error {
+	return func(_ *gorm.DB, target, source *models.Actress) error {
+		if expectedDMMID <= 0 || target.DMMID != expectedDMMID || source.DMMID > 0 {
+			return ErrActressSyncIdentityChanged
+		}
+		return nil
+	}
+}
+
+// MergeCachedIdentity ...
+func (r *ActressRepository) MergeCachedIdentity(ctx context.Context, targetID, sourceID uint, expectedDMMID int) (*ActressMergeResult, error) {
+	plan, err := r.merger.PlanMerge(ctx, targetID, sourceID, nil)
+	if err != nil {
+		return nil, err
+	}
+	return r.merger.executeMerge(ctx, plan, r.GetDB(), cachedIdentityPrecondition(expectedDMMID), nil)
+}
+
+// MergeCachedIdentityForSyncTask ...
+func (r *ActressRepository) MergeCachedIdentityForSyncTask(ctx context.Context, targetID, sourceID uint, expectedDMMID int, taskID, leaseToken string) (*ActressMergeResult, error) {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(leaseToken) == "" {
+		return nil, ErrInvalidLookup
+	}
+	plan, err := r.merger.PlanMerge(ctx, targetID, sourceID, nil)
+	if err != nil {
+		return nil, err
+	}
+	syncRepo := NewActressSyncRepository(r.GetDB())
+	return r.merger.executeMerge(ctx, plan, r.GetDB(), cachedIdentityPrecondition(expectedDMMID), func(tx *gorm.DB, canonicalID, duplicateID uint) error {
 		return syncRepo.reassignTaskActressTx(tx, taskID, leaseToken, canonicalID, duplicateID)
 	})
 }

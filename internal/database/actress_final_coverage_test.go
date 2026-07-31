@@ -232,7 +232,7 @@ func TestActressMergeRemainingTransactionPaths(t *testing.T) {
 		require.NoError(t, repo.Create(ctx, source))
 		plan, err := repo.merger.PlanMerge(ctx, target.ID, source.ID, nil)
 		require.NoError(t, err)
-		_, err = repo.merger.executeMerge(ctx, plan, db, func(*gorm.DB, uint, uint) error { return errForcedActressCoverage })
+		_, err = repo.merger.executeMerge(ctx, plan, db, nil, func(*gorm.DB, uint, uint) error { return errForcedActressCoverage })
 		require.ErrorIs(t, err, errForcedActressCoverage)
 		_, err = repo.FindByID(ctx, source.ID)
 		require.NoError(t, err)
