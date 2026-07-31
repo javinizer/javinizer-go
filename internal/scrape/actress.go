@@ -138,7 +138,7 @@ func enrichActressFields(actress *models.Actress, dbActress *models.Actress) boo
 }
 
 func validateActressThumbnails(ctx context.Context, scraped *models.Movie, cfg *Config) int {
-	if scraped == nil || cfg == nil || cfg.ValidateActressThumbnail == nil {
+	if scraped == nil || cfg == nil {
 		return 0
 	}
 	invalid := 0
@@ -152,10 +152,12 @@ func validateActressThumbnails(ctx context.Context, scraped *models.Movie, cfg *
 			invalid++
 			continue
 		}
-		if err := cfg.ValidateActressThumbnail(ctx, thumbnail); err != nil {
-			logging.Debugf("Rejected actress thumbnail %s: %v", thumbnail, err)
-			scraped.Actresses[i].ThumbURL = ""
-			invalid++
+		if cfg.ValidateActressThumbnail != nil {
+			if err := cfg.ValidateActressThumbnail(ctx, thumbnail); err != nil {
+				logging.Debugf("Rejected actress thumbnail %s: %v", thumbnail, err)
+				scraped.Actresses[i].ThumbURL = ""
+				invalid++
+			}
 		}
 	}
 	return invalid
