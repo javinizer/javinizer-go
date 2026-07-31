@@ -42,6 +42,7 @@
 	let advanceAfterReconcile = false;
 	let syncDestroyed = false;
 	let syncAdvancePromise: Promise<boolean> | undefined;
+	let syncPollFailureShown = false;
 	let syncTimer: ReturnType<typeof setInterval> | undefined;
 
 	function stopPolling() {
@@ -86,6 +87,7 @@
 		try {
 			const snapshot = await loadActressSyncSnapshot(apiClient, currentJob.id);
 			if (syncDestroyed || !syncJob || syncJob.id !== currentJob.id) return;
+			syncPollFailureShown = false;
 			syncJob = snapshot.job;
 			syncTasks = snapshot.tasks;
 			if (isActressSyncTerminal(syncJob)) {
@@ -105,8 +107,10 @@
 			}
 		} catch (error) {
 			if (syncDestroyed || !syncJob || syncJob.id !== currentJob.id) return;
-			stopPolling();
-			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
+			if (!syncPollFailureShown) {
+				syncPollFailureShown = true;
+				toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
+			}
 		} finally {
 			if (!syncDestroyed) syncPollInFlight = false;
 		}
@@ -123,6 +127,7 @@
 		if (syncDestroyed || syncRestoring || syncStarting) return;
 		if (syncJob && !isActressSyncTerminal(syncJob)) {
 			showSyncModal = true;
+			if (!syncTimer) startPolling();
 			return;
 		}
 		syncStarting = true;
@@ -131,6 +136,7 @@
 			if (syncDestroyed) return;
 			if (syncJob && !isActressSyncTerminal(syncJob)) {
 				showSyncModal = true;
+				if (!syncTimer) startPolling();
 				return;
 			}
 			const response = await apiClient.createActressSyncJob({ scope, actress_ids: scope === 'selected' ? store.selectedIds : undefined });

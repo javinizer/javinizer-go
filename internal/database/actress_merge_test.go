@@ -381,4 +381,14 @@ func TestExecuteMergeRejectsStaleSourceResolution(t *testing.T) {
 	require.Equal(t, "Fresh", updated.FirstName)
 	_, err = repo.FindByID(context.Background(), source.ID)
 	require.NoError(t, err)
+
+	plan, err = repo.merger.PlanMerge(context.Background(), target.ID, source.ID, map[string]string{"first_name": "source"})
+	require.NoError(t, err)
+	freshTime = freshTime.Add(time.Second)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", source.ID).Updates(map[string]any{"first_name": "New Source", "updated_at": freshTime}).Error)
+	_, err = repo.merger.ExecuteMerge(context.Background(), plan, db)
+	require.ErrorIs(t, err, ErrActressMergeStalePlan)
+	unchanged, err := repo.FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Fresh", unchanged.FirstName)
 }

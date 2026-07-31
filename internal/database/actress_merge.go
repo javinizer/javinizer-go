@@ -67,6 +67,7 @@ type MergePlan struct {
 	ConflictsResolved  int
 	Resolutions        map[string]string
 	TargetUpdatedAt    time.Time
+	SourceUpdatedAt    time.Time
 }
 
 // actressMerger handles actress merge operations, extracted from ActressRepository
@@ -256,6 +257,7 @@ func (m *actressMerger) PlanMerge(ctx context.Context, targetID, sourceID uint, 
 		ConflictsResolved:  len(preview.Conflicts),
 		Resolutions:        normalizedResolutions,
 		TargetUpdatedAt:    preview.Target.UpdatedAt,
+		SourceUpdatedAt:    preview.Source.UpdatedAt,
 	}, nil
 }
 
@@ -300,8 +302,12 @@ func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *D
 					return err
 				}
 			}
-			if !plan.TargetUpdatedAt.IsZero() && !target.UpdatedAt.Equal(plan.TargetUpdatedAt) && hasSourceMergeResolution(plan.Resolutions) {
-				return ErrActressMergeStalePlan
+			if hasSourceMergeResolution(plan.Resolutions) {
+				targetChanged := !plan.TargetUpdatedAt.IsZero() && !target.UpdatedAt.Equal(plan.TargetUpdatedAt)
+				sourceChanged := !plan.SourceUpdatedAt.IsZero() && !source.UpdatedAt.Equal(plan.SourceUpdatedAt)
+				if targetChanged || sourceChanged {
+					return ErrActressMergeStalePlan
+				}
 			}
 
 			resolutions := make(map[string]string, len(plan.Resolutions))

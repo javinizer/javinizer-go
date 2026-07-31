@@ -211,14 +211,12 @@ func TestActressMergeRemainingTransactionPaths(t *testing.T) {
 		for _, actress := range []*models.Actress{target, source, third} {
 			require.NoError(t, repo.Create(ctx, actress))
 		}
-		plan, err := repo.merger.PlanMerge(ctx, target.ID, source.ID, nil)
-		require.NoError(t, err)
-		plan.Resolutions["dmm_id"] = MergeResolutionSource
-		plan.Merged.DMMID = third.DMMID
 		// Remove the schema guard so the repository's explicit conflict check can
 		// observe a legacy database containing duplicate identifiers.
 		require.NoError(t, db.Exec("DROP INDEX idx_actresses_dmm_id_positive").Error)
 		require.NoError(t, db.Model(source).Update("dmm_id", third.DMMID).Error)
+		plan, err := repo.merger.PlanMerge(ctx, target.ID, source.ID, map[string]string{"dmm_id": MergeResolutionSource})
+		require.NoError(t, err)
 		_, err = repo.merger.ExecuteMerge(ctx, plan, db)
 		require.ErrorIs(t, err, ErrActressMergeUniqueConstraint)
 	})
