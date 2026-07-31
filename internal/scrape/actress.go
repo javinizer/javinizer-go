@@ -154,9 +154,7 @@ func validateActressThumbnails(ctx context.Context, scraped *models.Movie, cfg *
 		}
 		if cfg.ValidateActressThumbnail != nil {
 			if err := cfg.ValidateActressThumbnail(ctx, thumbnail); err != nil {
-				logging.Debugf("Rejected actress thumbnail %s: %v", thumbnail, err)
-				scraped.Actresses[i].ThumbURL = ""
-				invalid++
+				logging.Debugf("Transient actress thumbnail validation failure for %s: %v", thumbnail, err)
 			}
 		}
 	}

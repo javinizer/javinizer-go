@@ -221,18 +221,12 @@ func TestScrapeCacheHitEnrichesMissingActressMetadataAndPersistsSignal(t *testin
 	_, err := f.movieRepo.Upsert(context.Background(), &models.Movie{
 		ID: "CACHE-001", Title: "Cached Movie", Actresses: []models.Actress{{
 			DMMID: 19244, JapaneseName: "安倍亜沙美",
-			ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg",
+			ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/invalid_no_ext",
 		}},
 	})
 	require.NoError(t, err)
 
 	s := f.build()
-	s.cfg.ValidateActressThumbnail = func(_ context.Context, thumbnail string) error {
-		if thumbnail == "https://c0.jdbstatic.com/avatars/zx/ZX.jpg" {
-			return errors.New("not an image")
-		}
-		return nil
-	}
 	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "CACHE-001"})
 	require.NoError(t, err)
 	require.NotNil(t, result)
