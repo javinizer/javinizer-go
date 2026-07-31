@@ -56,6 +56,7 @@ var blockedTargetPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("::/3"),
 	netip.MustParsePrefix("2001::/23"),
 	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("3fff::/20"),
 	netip.MustParsePrefix("4000::/2"),
 	netip.MustParsePrefix("8000::/1"),
 }
