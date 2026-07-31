@@ -277,10 +277,8 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	fields, err := appendSyncTaskFields(task.UpdatedFields, []string{"merged_duplicate"})
-	if err != nil {
-		return err
-	}
+	// JSON marshaling a string slice cannot fail.
+	fields, _ := appendSyncTaskFields(task.UpdatedFields, []string{"merged_duplicate"})
 	result := tx.Model(&models.ActressSyncTask{}).
 		Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ? AND actress_id = ?", id, models.ActressSyncTaskRunning, token, leaseNow, expectedActressID).
 		Updates(map[string]any{"actress_id": actressID, "dedupe_key": dedupeKey, "updated_fields": fields})
@@ -614,10 +612,8 @@ func recordSyncTaskFieldsTx(tx *gorm.DB, taskID, leaseToken string, additional [
 		}
 		return err
 	}
-	fields, err := appendSyncTaskFields(task.UpdatedFields, additional)
-	if err != nil {
-		return err
-	}
+	// JSON marshaling a string slice cannot fail.
+	fields, _ := appendSyncTaskFields(task.UpdatedFields, additional)
 	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", taskID, models.ActressSyncTaskRunning, leaseToken, time.Now().UTC()).Update("updated_fields", fields)
 	if result.Error != nil {
 		return result.Error

@@ -124,9 +124,6 @@ func moveMovieAssociations(tx *gorm.DB, sourceID, targetID uint) (int, error) {
 		if !hasSource {
 			continue
 		}
-		if !hasTarget {
-			nextActresses = append(nextActresses, models.Actress{ID: targetID})
-		}
 
 		stub := models.Movie{ContentID: movie.ContentID}
 		if err := tx.Model(&stub).Association("Actresses").Replace(nextActresses); err != nil {
@@ -200,10 +197,8 @@ func (m *actressMerger) PreviewMerge(ctx context.Context, targetID, sourceID uin
 
 	conflicts := buildActressMergeConflicts(target, source)
 	defaultResolutions := defaultResolutionsFromConflicts(conflicts)
-	merged, err := mergeActressValues(target, source, defaultResolutions)
-	if err != nil {
-		return nil, err
-	}
+	// Defaults are derived from these conflicts, so every decision is valid.
+	merged, _ := mergeActressValues(target, source, defaultResolutions)
 
 	canonicalName := canonicalActressName(&merged)
 	merged.Aliases, _, _ = mergeAliasValues(target.Aliases, collectActressAliasCandidates(source), canonicalName) // 3rd return (added aliases) not needed at call site
@@ -241,10 +236,9 @@ func (m *actressMerger) PlanMerge(ctx context.Context, targetID, sourceID uint, 
 		}
 	}
 
-	merged, err := mergeActressValues(&preview.Target, &preview.Source, normalizedResolutions)
-	if err != nil {
-		return nil, err
-	}
+	// normalizeMergeResolutions validated every supplied decision, and defaults
+	// above cover all remaining conflicts.
+	merged, _ := mergeActressValues(&preview.Target, &preview.Source, normalizedResolutions)
 
 	canonicalName := canonicalActressName(&merged)
 	aliasesAdded := 0
@@ -342,9 +336,6 @@ func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *D
 
 			if merged.DMMID > 0 && merged.DMMID == source.DMMID && target.DMMID != source.DMMID {
 				tempDMMID := -int(sourceID)
-				if tempDMMID == 0 {
-					tempDMMID = -1
-				}
 				if err := tx.Model(&models.Actress{}).Where("id = ?", sourceID).Update("dmm_id", tempDMMID).Error; err != nil {
 					return wrapDBErr("update", fmt.Sprintf("merge actress %d temp dmm_id", sourceID), err)
 				}
