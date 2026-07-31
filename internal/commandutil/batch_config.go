@@ -24,16 +24,17 @@ func BatchJobConfigFromAppConfig(cfg *config.Config) worker.BatchJobConfig {
 // CLIApplyOptions holds the resolved CLI flags for the apply phase.
 // Extracted from sort/update commands to centralize the mapping.
 type CLIApplyOptions struct {
-	DryRun              bool
-	MoveFiles           bool
-	LinkMode            organizer.LinkMode
-	ForceUpdate         bool
-	SkipOrganize        bool
-	GenerateNFO         bool
-	Download            bool
-	DownloadExtrafanart bool
-	Destination         string
-	MergeOptions        workflow.MergeOptions
+	DryRun                 bool
+	MoveFiles              bool
+	LinkMode               organizer.LinkMode
+	ForceUpdate            bool
+	SkipOrganize           bool
+	GenerateNFO            bool
+	Download               bool
+	DownloadExtrafanart    bool
+	OverwriteExistingMedia bool
+	Destination            string
+	MergeOptions           workflow.MergeOptions
 }
 
 // ToApplyPhaseConfig converts CLIApplyOptions to a worker.ApplyPhaseConfig.
@@ -55,11 +56,12 @@ func (o CLIApplyOptions) ToApplyPhaseConfig() worker.ApplyPhaseConfig {
 			LinkMode:    o.LinkMode,
 			ForceUpdate: o.ForceUpdate,
 		},
-		MergeOptions:        o.MergeOptions,
-		Destination:         o.Destination,
-		DryRun:              o.DryRun,
-		GenerateNFO:         o.GenerateNFO,
-		Download:            o.Download,
-		DownloadExtrafanart: downloadExtrafanart,
+		MergeOptions:           o.MergeOptions,
+		Destination:            o.Destination,
+		DryRun:                 o.DryRun,
+		GenerateNFO:            o.GenerateNFO,
+		Download:               o.Download,
+		DownloadExtrafanart:    downloadExtrafanart,
+		OverwriteExistingMedia: o.OverwriteExistingMedia,
 	}
 }

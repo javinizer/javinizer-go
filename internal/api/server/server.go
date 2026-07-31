@@ -154,7 +154,7 @@ func NewServer(rt *core.APIRuntime) *gin.Engine {
 	registerCoreRoutes(router, rt)
 	registerAPIV1Routes(router, rt)
 	registerStaticWebRoutes(router, webAssets)
-	registerNoRouteHandler(router, webAssets)
+	registerNoRouteHandler(router, webAssets, rt)
 	logRegisteredRoutes(router)
 
 	return router

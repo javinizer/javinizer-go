@@ -51,6 +51,10 @@
 	border-color: hsl(var(--border));
 }
 
+html {
+	scrollbar-gutter: stable;
+}
+
 body {
 	background-color: hsl(var(--background));
 	color: hsl(var(--foreground));
@@ -133,6 +137,55 @@ body {
 }
 .ring-ring {
 	--tw-ring-color: hsl(var(--ring));
+}
+
+@utility bg-primary-faint {
+	background-color: hsl(var(--primary) / 0.04);
+}
+@utility bg-primary-soft {
+	background-color: hsl(var(--primary) / 0.07);
+}
+@utility bg-primary-tint {
+	background-color: hsl(var(--primary) / 0.1);
+}
+@utility bg-destructive-faint {
+	background-color: hsl(var(--destructive) / 0.05);
+}
+@utility bg-destructive-soft {
+	background-color: hsl(var(--destructive) / 0.12);
+}
+@utility bg-muted-faint {
+	background-color: hsl(var(--muted) / 0.3);
+}
+@utility bg-muted-soft {
+	background-color: hsl(var(--muted) / 0.45);
+}
+@utility bg-accent-soft {
+	background-color: hsl(var(--accent) / 0.55);
+}
+@utility bg-canvas-soft {
+	background-color: hsl(var(--background) / 0.6);
+}
+@utility bg-bar {
+	background-color: hsl(var(--background) / 0.92);
+}
+@utility bg-border {
+	background-color: hsl(var(--border));
+}
+@utility border-primary-soft {
+	border-color: hsl(var(--primary) / 0.35);
+}
+@utility border-primary-strong {
+	border-color: hsl(var(--primary) / 0.6);
+}
+@utility border-destructive-soft {
+	border-color: hsl(var(--destructive) / 0.4);
+}
+@utility ring-primary-soft {
+	--tw-ring-color: hsl(var(--primary) / 0.5);
+}
+@utility ring-destructive-soft {
+	--tw-ring-color: hsl(var(--destructive) / 0.55);
 }
 
 .dark

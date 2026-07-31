@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -95,6 +96,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 
 	total := len(items)
 	var processed int64
+	inputs.Dedup = &sync.Map{}
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
 			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, inputs, cfg)
@@ -180,19 +182,21 @@ func buildApplyCmd(
 	}
 
 	applyCmd := workflow.ApplyCmd{
-		Movie:               movie,
-		Match:               match,
-		DestPath:            destPath,
-		DryRun:              cfg.DryRun,
-		Organize:            cfg.OrganizeOptions,
-		Merge:               cfg.MergeOptions,
-		Download:            cfg.Download,
-		DisplayTitleSrc:     movie,
-		DownloadExtrafanart: cfg.DownloadExtrafanart,
-		OperationMode:       cfg.OperationModeOverride,
+		Movie:                  movie,
+		Match:                  match,
+		DestPath:               destPath,
+		DryRun:                 cfg.DryRun,
+		Organize:               cfg.OrganizeOptions,
+		Merge:                  cfg.MergeOptions,
+		Download:               cfg.Download,
+		DisplayTitleSrc:        movie,
+		DownloadExtrafanart:    cfg.DownloadExtrafanart,
+		OverwriteExistingMedia: cfg.OverwriteExistingMedia,
+		Dedup:                  inputs.Dedup,
+		OperationMode:          cfg.OperationModeOverride,
 	}
 
-	applyCmd.GenerateNFO = cfg.GenerateNFO && inputs.NFOEnabled
+	applyCmd.GenerateNFO = cfg.GenerateNFO && (inputs.NFOEnabled || cfg.ForceNFO)
 
 	afc := &ApplyFileContext{
 		FilePath:    filePath,

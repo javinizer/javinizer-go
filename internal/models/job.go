@@ -48,6 +48,7 @@ type Job struct {
 	Destination           string                      `json:"destination"`
 	TempDir               string                      `json:"temp_dir" gorm:"default:'data/temp'"`
 	OperationModeOverride operationmode.OperationMode `json:"operation_mode_override,omitempty"`
+	ApplyPlan             *string                     `json:"apply_plan,omitempty" gorm:"type:text"`
 	Files                 string                      `json:"files" gorm:"type:text"`
 	Results               string                      `json:"results" gorm:"type:text"`
 	Excluded              string                      `json:"excluded" gorm:"type:text"`

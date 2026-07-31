@@ -8,7 +8,7 @@ export function createConfigQuery(enabled?: () => boolean) {
 		queryKey: ['config'],
 		queryFn: () => apiClient.getConfig(),
 		staleTime: 30_000,
-		enabled: enabled?.() ?? true
+		enabled: enabled?.()
 	}));
 }
 

@@ -193,11 +193,18 @@
 						organizing={s.organizing}
 						movieResultsLength={s.movieResults.length}
 						destinationPath={s.destinationPath}
+						operationMode={s.getEffectiveOperationMode()}
+						applyInvalid={s.applyInvalid}
 						bind:viewMode={s.viewMode}
 						bind:forceOverwrite={s.forceOverwrite}
 						bind:preserveNfo={s.preserveNfo}
 						bind:skipNfo={s.skipNfo}
 						bind:skipDownload={s.skipDownload}
+						bind:overwriteExistingMedia={s.overwriteExistingMedia}
+						bind:applyPreset={s.applyPreset}
+						bind:applyScalarStrategy={s.applyScalarStrategy}
+						bind:applyArrayStrategy={s.applyArrayStrategy}
+						usesLegacyApplyDefaults={s.usesLegacyApplyDefaults}
 						selectedCount={s.selectedCount}
 						allSelected={s.allSelected}
 						bulkExcluding={s.bulkExcludeMutation.isPending}
@@ -272,7 +279,7 @@
 								sourceResults={s.currentMovieGroup?.results || [s.currentResult]}
 								primaryFilePath={s.currentResult.file_path}
 								bind:showFullSourcePath={s.showFullSourcePath}
-								showOutputPreview={s.canOrganize}
+								showOutputPreview={s.canPreviewOutput}
 								outputPreviewDisabled={s.previewNeedsDestination && !s.destinationPath.trim()}
 								onOpenOutputPreview={() => (s.showOutputPreviewModal = true)}
 								onExclude={s.reviewPageController.excludeCurrentMovie}
@@ -349,6 +356,8 @@
 									isUpdateMode={s.isUpdateMode}
 									organizing={s.organizing}
 									destinationPath={s.destinationPath}
+									operationMode={s.getEffectiveOperationMode()}
+									applyInvalid={s.applyInvalid}
 									movieResultsLength={s.movieResults.length}
 									onCancel={() => goto('/browse')}
 									onOrganizeAll={s.organizeAll}

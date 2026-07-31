@@ -2,6 +2,7 @@ package batch
 
 import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -25,6 +26,7 @@ type batchJobBaseResponse struct {
 	OperationModeOverride operationmode.OperationMode
 	Update                bool
 	PersistError          string
+	ApplyPlan             *applyplan.Plan
 }
 
 // toBaseResponse extracts the fields shared between full and slim batch job
@@ -45,6 +47,7 @@ func toBaseResponse(job *worker.BatchJobStatus) batchJobBaseResponse {
 		OperationModeOverride: job.OperationModeOverride,
 		Update:                job.Update,
 		PersistError:          job.PersistError,
+		ApplyPlan:             applyplan.Clone(job.ApplyPlan),
 	}
 }
 
@@ -130,6 +133,7 @@ func buildBatchJobResponse(job *worker.BatchJobStatus) *contracts.BatchJobRespon
 		OperationModeOverride: base.OperationModeOverride,
 		Update:                base.Update,
 		PersistError:          base.PersistError,
+		ApplyPlan:             applyplan.Clone(base.ApplyPlan),
 	}
 }
 
@@ -162,5 +166,6 @@ func buildBatchJobSlimResponse(job *worker.BatchJobStatus) *contracts.BatchJobRe
 		OperationModeOverride: base.OperationModeOverride,
 		Update:                base.Update,
 		PersistError:          base.PersistError,
+		ApplyPlan:             applyplan.Clone(base.ApplyPlan),
 	}
 }

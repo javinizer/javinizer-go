@@ -7,8 +7,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -94,6 +97,10 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 		// job.results inline). parseAndConvertJobResults also handles the legacy
 		// "data" JSON field via jobpersist.ParseResultsJSON.
 		results := parseAndConvertJobResults(&job, deps.GetFs())
+		persisted, decodeErrs := jobpersist.Decode(&job)
+		for _, decodeErr := range decodeErrs {
+			logging.Warnf("Failed to decode job %s apply plan: %v", job.ID, decodeErr)
+		}
 
 		response.Jobs = append(response.Jobs, contracts.BatchJobResponse{
 			ID:                    job.ID,
@@ -112,6 +119,7 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 			CompletedAt:           contracts.FormatTimePtr(job.CompletedAt),
 			OperationModeOverride: job.OperationModeOverride,
 			Update:                job.Update,
+			ApplyPlan:             applyplan.Clone(persisted.ApplyPlan),
 		})
 	}
 
@@ -130,6 +138,8 @@ type StartScrapeInput struct {
 	ScalarStrategy   string
 	ArrayStrategy    string
 	Update           *bool
+	ApplyPlan        *applyplan.Plan
+	MirrorPresence   planMirrors
 	SelectedScrapers []string
 	Strict           bool
 	Force            bool
@@ -170,12 +180,29 @@ func StartScrapeUseCase(
 	propagatedManualInputs := resolvedManualInput.overrides
 	allFiles = resolvedManualInput.allFiles
 
-	resolved, err := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
-		OperationMode:  input.OperationMode,
-		Preset:         input.Preset,
-		ScalarStrategy: input.ScalarStrategy,
-		ArrayStrategy:  input.ArrayStrategy,
-	})
+	plan, projection, err := normalizeScrapePlan(input)
+	if err != nil {
+		return nil, fmt.Errorf("invalid apply plan: %w", err)
+	}
+	destination := input.Destination
+	operationMode := input.OperationMode
+	update := input.Update
+	if plan != nil {
+		destination = projection.Destination
+		operationMode = string(projection.OperationMode)
+		updateValue := projection.Update
+		update = &updateValue
+		if projection.OperationMode == operationmode.OperationModeOrganize && !isDirAllowed(snap.RT().Deps().GetFs(), projection.Destination, snap.APIConfig().SecurityConfig()) {
+			return nil, fmt.Errorf("access denied to requested directory")
+		}
+	}
+	seamInput := workflow.SeamStringsInput{OperationMode: operationMode}
+	if plan == nil {
+		seamInput.Preset = input.Preset
+		seamInput.ScalarStrategy = input.ScalarStrategy
+		seamInput.ArrayStrategy = input.ArrayStrategy
+	}
+	resolved, err := workflow.ResolveSeamStrings(seamInput)
 	if err != nil {
 		return nil, fmt.Errorf("invalid seam parameters: %w", err)
 	}
@@ -199,9 +226,10 @@ func StartScrapeUseCase(
 
 	job := factory.CreateJob(allFiles, worker.BatchJobOptions{
 		ID:                    jobID,
-		Destination:           input.Destination,
+		Destination:           destination,
 		OperationModeOverride: resolved.OperationMode,
-		Update:                input.Update,
+		Update:                update,
+		ApplyPlan:             plan,
 		WF:                    wf,
 		FileMatchInfo:         matchInfo,
 	})

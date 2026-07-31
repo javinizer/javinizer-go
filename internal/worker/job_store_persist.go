@@ -3,6 +3,7 @@ package worker
 import (
 	"fmt"
 
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -93,6 +94,7 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 			destination: snapshot.Destination,
 			tempDir:     snapshot.TempDir,
 			update:      snapshot.Update,
+			applyPlan:   applyplan.Clone(snapshot.ApplyPlan),
 		},
 		fs:                  s.fs,
 		batchJobEventSource: newBatchJobEventSource(),
@@ -168,6 +170,7 @@ func snapshotForPersist(job *BatchJob) (*models.Job, bool) {
 		Destination:           snapshot.Destination,
 		TempDir:               snapshot.TempDir,
 		OperationModeOverride: snapshot.OperationModeOverride,
+		ApplyPlan:             applyplan.Clone(snapshot.ApplyPlan),
 		StartedAt:             snapshot.StartedAt,
 		CompletedAt:           snapshot.CompletedAt,
 		OrganizedAt:           snapshot.OrganizedAt,

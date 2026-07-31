@@ -46,7 +46,7 @@ func TestRegisterNoRouteHandler_WithUI_HTMLAccept(t *testing.T) {
 	}
 
 	router := gin.New()
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	// Test GET with HTML Accept header
 	req := httptest.NewRequest(http.MethodGet, "/some/page", nil)
@@ -69,7 +69,7 @@ func TestRegisterNoRouteHandler_WithUI_HeadMethod(t *testing.T) {
 	}
 
 	router := gin.New()
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	req := httptest.NewRequest(http.MethodHead, "/some/page", nil)
 	req.Header.Set("Accept", "text/html")
@@ -90,7 +90,7 @@ func TestRegisterNoRouteHandler_WithUI_PostMethod(t *testing.T) {
 	}
 
 	router := gin.New()
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/some/api", nil)
 	req.Header.Set("Accept", "text/html")
@@ -107,7 +107,7 @@ func TestRegisterNoRouteHandler_NoUI_NonHTMLAccept(t *testing.T) {
 
 	router := gin.New()
 	assets := webUIAssets{} // no UI available
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", nil)
 	req.Header.Set("Accept", "application/json")
@@ -318,7 +318,7 @@ func TestRegisterNoRouteHandler_DebugLogging(t *testing.T) {
 
 	router := gin.New()
 	assets := webUIAssets{}
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/movies", nil)
 	req.Header.Set("Accept", "application/json")

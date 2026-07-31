@@ -21,6 +21,7 @@ type stubApplyWorkflow struct {
 	applyResult *workflow.ApplyResult
 	applyErr    error
 	applyCalled int
+	lastCmd     workflow.ApplyCmd
 	mu          sync.Mutex
 }
 
@@ -31,6 +32,7 @@ func (s *stubApplyWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd) (*scra
 func (s *stubApplyWorkflow) Apply(_ context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
 	s.mu.Lock()
 	s.applyCalled++
+	s.lastCmd = cmd
 	s.mu.Unlock()
 	return s.applyResult, s.applyErr
 }
@@ -45,6 +47,12 @@ func (s *stubApplyWorkflow) Compare(_ context.Context, _ workflow.CompareCmd) (*
 
 func (s *stubApplyWorkflow) ScanAndMatch(_ context.Context, _ workflow.ScanAndMatchCmd) (*workflow.ScanAndMatchResult, error) {
 	return nil, nil
+}
+
+func (s *stubApplyWorkflow) getLastCmd() workflow.ApplyCmd {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastCmd
 }
 
 func (s *stubApplyWorkflow) getApplyCalled() int {

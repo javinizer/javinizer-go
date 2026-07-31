@@ -8,6 +8,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
@@ -29,12 +30,40 @@ func resolveOrganizeApplyConfig(
 	apiCfg := snap.APIConfig()
 	batchCfg := apiCfg.BatchConfig()
 	secCfg := apiCfg.SecurityConfig()
-
-	// Re-resolve seam strings with the typed request's fields (overrides generic map).
+	destination := req.Destination
+	operationInput := req.OperationMode
+	skipNFO := req.SkipNFO
+	skipDownload := req.SkipDownload
+	forceRenameFile := false
+	jobStatus := job.GetStatus()
+	planAware := jobStatus != nil && jobStatus.ApplyPlan != nil
+	if planAware {
+		plan := jobStatus.ApplyPlan
+		if plan.VideoOperation == applyplan.VideoOperationLeaveInPlace {
+			return worker.ApplyPhaseConfig{}, ErrApplyEndpointConflict
+		}
+		overrides, err := reviewOverridesForOrganize(req)
+		if err != nil {
+			return worker.ApplyPhaseConfig{}, err
+		}
+		effective, err := effectiveFromOverrides(plan, overrides)
+		if err != nil {
+			return worker.ApplyPhaseConfig{}, err
+		}
+		projection, err := applyplan.Project(effective.Plan)
+		if err != nil {
+			return worker.ApplyPhaseConfig{}, err
+		}
+		destination = projection.Destination
+		operationInput = string(projection.OperationMode)
+		skipNFO = projection.SkipNFO
+		skipDownload = projection.SkipDownload
+		forceRenameFile = projection.ForceRenameFile
+	}
 	resolved, seamErr := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
 		OperationMode: func() string {
-			if req.OperationMode != "" {
-				return req.OperationMode
+			if operationInput != "" {
+				return operationInput
 			}
 			return batchCfg.OperationMode
 		}(),
@@ -43,38 +72,33 @@ func resolveOrganizeApplyConfig(
 	if seamErr != nil {
 		return worker.ApplyPhaseConfig{}, seamErr
 	}
-
 	effectiveMode := resolved.OperationMode
-
 	if effectiveMode == operationmode.OperationModePreview {
-		return worker.ApplyPhaseConfig{}, fmt.Errorf("Preview mode should use the preview endpoint, not organize") //nolint:staticcheck // intentional: matches existing test expectations
+		return worker.ApplyPhaseConfig{}, fmt.Errorf("preview mode should use the preview endpoint, not organize")
 	}
-
 	if effectiveMode == operationmode.OperationModeOrganize {
-		if req.Destination == "" {
+		if destination == "" {
 			return worker.ApplyPhaseConfig{}, fmt.Errorf("destination is required for organize mode")
 		}
-		if !isDirAllowed(deps.GetFs(), req.Destination, secCfg) {
-			return worker.ApplyPhaseConfig{}, fmt.Errorf("Access denied to requested directory") //nolint:staticcheck // intentional: matches existing test expectations
+		if !isDirAllowed(deps.GetFs(), destination, secCfg) {
+			return worker.ApplyPhaseConfig{}, fmt.Errorf("access denied to requested directory")
 		}
 	}
-
-	logging.Infof("Organize job %s: copy_only=%v operation_mode=%q link_mode=%q destination=%q", job.GetID(), req.CopyOnly, req.OperationMode, req.LinkMode, req.Destination)
-
+	logging.Infof("Organize job %s: copy_only=%v operation_mode=%q link_mode=%q destination=%q", job.GetID(), req.CopyOnly, operationInput, req.LinkMode, destination)
 	applyOpts := factory.NewApplyConfig(
 		workflow.OrganizeOptions{
-			MoveFiles:   !req.CopyOnly,
-			LinkMode:    resolved.LinkMode,
-			ForceUpdate: true,
-			Skip:        !effectiveMode.RequiresOrganize(),
+			MoveFiles:       !req.CopyOnly,
+			LinkMode:        resolved.LinkMode,
+			ForceUpdate:     true,
+			ForceRenameFile: forceRenameFile,
+			Skip:            !effectiveMode.RequiresOrganize(),
 		},
-		workflow.MergeOptions{
-			ForceOverwrite: true,
-		},
-		req.Destination,
+		workflow.MergeOptions{ForceOverwrite: true},
+		destination,
 	)
-	applyOpts.GenerateNFO = !req.SkipNFO
-	applyOpts.Download = !req.SkipDownload
+	applyOpts.GenerateNFO = !skipNFO
+	applyOpts.ForceNFO = planAware && !skipNFO
+	applyOpts.Download = !skipDownload
 	applyOpts.OperationModeOverride = resolved.OperationMode
 	sink := newOrganizeBroadcastSink(snap.RT())
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, false /* isUpdate */, sink)
@@ -115,29 +139,94 @@ func resolveUpdateApplyConfig(
 	req contracts.UpdateRequest,
 ) (worker.ApplyPhaseConfig, error) {
 	deps := snap.RT().Deps()
-	resolvedUpdate, seamErr := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
-		Preset:         req.Preset,
-		ScalarStrategy: req.ScalarStrategy,
-		ArrayStrategy:  req.ArrayStrategy,
-	})
-	if seamErr != nil {
-		return worker.ApplyPhaseConfig{}, seamErr
+	var applyOpts worker.ApplyPhaseConfig
+	status := job.GetStatus()
+	if status != nil && status.ApplyPlan != nil {
+		if status.ApplyPlan.VideoOperation != applyplan.VideoOperationLeaveInPlace {
+			return worker.ApplyPhaseConfig{}, ErrApplyEndpointConflict
+		}
+		overrides, err := reviewOverridesForUpdate(req)
+		if err != nil {
+			return worker.ApplyPhaseConfig{}, err
+		}
+		effective, err := effectiveFromOverrides(status.ApplyPlan, overrides)
+		if err != nil {
+			return worker.ApplyPhaseConfig{}, err
+		}
+		projection, err := applyplan.Project(effective.Plan)
+		if err != nil {
+			return worker.ApplyPhaseConfig{}, err
+		}
+		mergeOpts := legacyMergeOptions(effective.Plan)
+		mergeOpts.ForceOverwrite = effective.MergeOverride == applyplan.MergeOverrideForceOverwrite
+		mergeOpts.PreserveNFO = effective.MergeOverride == applyplan.MergeOverridePreserveNFO
+		applyOpts = factory.NewApplyConfig(workflow.OrganizeOptions{Skip: true}, mergeOpts, "")
+		applyOpts.GenerateNFO = !projection.SkipNFO
+		applyOpts.ForceNFO = !projection.SkipNFO
+		applyOpts.Download = !projection.SkipDownload
+		applyOpts.OverwriteExistingMedia = projection.OverwriteExistingMedia
+	} else {
+		preset := req.Preset
+		scalarStrategy := req.ScalarStrategy
+		arrayStrategy := req.ArrayStrategy
+		forceOverwrite := req.ForceOverwrite
+		preserveNFO := req.PreserveNFO
+		skipNFO := req.SkipNFO
+		skipDownload := req.SkipDownload
+		overwriteExistingMedia := req.OverwriteExistingMedia
+		overrides, mergeErr := reviewOverridesForUpdate(req)
+		if mergeErr != nil {
+			return worker.ApplyPhaseConfig{}, mergeErr
+		}
+		if overrides.Preset != nil {
+			preset = *overrides.Preset
+		}
+		if overrides.ScalarStrategy != nil {
+			scalarStrategy = *overrides.ScalarStrategy
+		}
+		if overrides.ArrayStrategy != nil {
+			arrayStrategy = *overrides.ArrayStrategy
+		}
+		if overrides.ForceOverwrite != nil {
+			forceOverwrite = *overrides.ForceOverwrite
+		}
+		if overrides.PreserveNFO != nil {
+			preserveNFO = *overrides.PreserveNFO
+		}
+		if overrides.SkipNFO != nil {
+			skipNFO = *overrides.SkipNFO
+		}
+		if overrides.SkipDownload != nil {
+			skipDownload = *overrides.SkipDownload
+		}
+		if overrides.OverwriteExistingMedia != nil {
+			overwriteExistingMedia = *overrides.OverwriteExistingMedia
+		}
+		if forceOverwrite && preserveNFO {
+			return worker.ApplyPhaseConfig{}, fmt.Errorf("force_overwrite and preserve_nfo cannot both be true")
+		}
+		if skipDownload && overwriteExistingMedia {
+			return worker.ApplyPhaseConfig{}, fmt.Errorf("skip_download and overwrite_existing_media cannot both be true")
+		}
+		resolvedUpdate, seamErr := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
+			Preset: preset, ScalarStrategy: scalarStrategy, ArrayStrategy: arrayStrategy,
+		})
+		if seamErr != nil {
+			return worker.ApplyPhaseConfig{}, seamErr
+		}
+		applyOpts = factory.NewApplyConfig(
+			workflow.OrganizeOptions{Skip: true},
+			workflow.MergeOptions{
+				ForceOverwrite: forceOverwrite,
+				PreserveNFO:    preserveNFO,
+				ScalarStrategy: resolvedUpdate.ScalarStrategy,
+				ArrayStrategy:  resolvedUpdate.ArrayStrategy,
+			}, "",
+		)
+		applyOpts.GenerateNFO = !skipNFO
+		applyOpts.Download = !skipDownload
+		applyOpts.OverwriteExistingMedia = overwriteExistingMedia
 	}
-
-	applyOpts := factory.NewApplyConfig(
-		workflow.OrganizeOptions{
-			Skip: true,
-		},
-		workflow.MergeOptions{
-			ForceOverwrite: req.ForceOverwrite,
-			PreserveNFO:    req.PreserveNFO,
-			ScalarStrategy: resolvedUpdate.ScalarStrategy,
-			ArrayStrategy:  resolvedUpdate.ArrayStrategy,
-		},
-		"", // no destination for update
-	)
-	applyOpts.GenerateNFO = !req.SkipNFO
-	applyOpts.Download = !req.SkipDownload
 	sink := newOrganizeBroadcastSink(snap.RT())
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, true /* isUpdate */, sink)

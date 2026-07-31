@@ -865,7 +865,7 @@ func TestBatchScrapeValidation(t *testing.T) {
 				Destination: allowedDir,
 			},
 			expectedStatus: 403,
-			errorContains:  "Access denied",
+			errorContains:  "access denied",
 		},
 		{
 			name: "accept valid paths within allowed directory",

@@ -7,6 +7,8 @@
 		isUpdateMode: boolean;
 		organizing: boolean;
 		destinationPath: string;
+		operationMode?: string;
+		applyInvalid?: boolean;
 		movieResultsLength: number;
 		onCancel: () => void;
 		onOrganizeAll: () => void;
@@ -16,6 +18,8 @@
 		isUpdateMode,
 		organizing,
 		destinationPath,
+		operationMode = 'organize',
+		applyInvalid = false,
 		movieResultsLength,
 		onCancel,
 		onOrganizeAll
@@ -36,7 +40,7 @@
 							{m.common_cancel()}
 						{/snippet}
 					</Button>
-					<Button onclick={onOrganizeAll} disabled={organizing || !destinationPath.trim()}>
+					<Button onclick={onOrganizeAll} disabled={organizing || applyInvalid || (operationMode === 'organize' && !destinationPath.trim())}>
 						{#snippet children()}
 							{#if organizing}
 								<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />

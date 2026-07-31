@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/eventlog"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -25,6 +26,7 @@ type BatchJobOptions struct {
 	Destination           string
 	OperationModeOverride operationmode.OperationMode
 	Update                *bool
+	ApplyPlan             *applyplan.Plan
 
 	// Per-call scrape configuration
 	SelectedScrapers []string
@@ -197,6 +199,7 @@ func (f *batchJobFactory) buildJobConfig(opts BatchJobOptions) *JobConfig {
 		Destination:           opts.Destination,
 		OperationModeOverride: opts.OperationModeOverride,
 		Update:                opts.Update,
+		ApplyPlan:             applyplan.Clone(opts.ApplyPlan),
 		BatchJobDeps:          deps,
 	}
 }

@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -526,6 +528,26 @@ func TestReconstructBatchJob_RestoresBatchCfgAndPosterGen(t *testing.T) {
 // SetReconstructionDeps sets infrastructure deps on already-loaded jobs
 // (reconstructed at startup before the factory was built), not just on
 // future jobs reconstructed afterwards.
+func TestReconstructBatchJob_RestoresApplyPlan(t *testing.T) {
+	plan := applyplan.Default(applyplan.VideoOperationLeaveInPlace, "")
+	raw, err := json.Marshal(plan)
+	require.NoError(t, err)
+	encoded := string(raw)
+	job := (&JobStore{fs: afero.NewMemMapFs()}).reconstructBatchJob(&models.Job{
+		ID:                    "plan-restart",
+		Status:                models.JobStatusCompleted,
+		ApplyPlan:             &encoded,
+		Update:                true,
+		OperationModeOverride: "metadata-artwork",
+	})
+	require.NotNil(t, job)
+	status := job.GetStatus()
+	require.NotNil(t, status.ApplyPlan)
+	assert.Equal(t, plan, status.ApplyPlan)
+	status.ApplyPlan.Merge.ScalarStrategy = applyplan.ScalarPreferScraper
+	assert.Equal(t, applyplan.ScalarPreferNFO, job.GetStatus().ApplyPlan.Merge.ScalarStrategy)
+}
+
 func TestSetReconstructionDeps_RehydratesExistingJobs(t *testing.T) {
 	t.Parallel()
 

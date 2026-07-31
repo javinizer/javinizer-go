@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
 	import { untrack } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
@@ -11,6 +12,7 @@
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
+	import VideoOperationSelector from './VideoOperationSelector.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
 	import { startJob } from '$lib/stores/background-job.svelte';
@@ -23,21 +25,39 @@
 	import { clearManualInputs } from '$lib/stores/manual-inputs-session';
 	import { createConfigQuery, createScrapersQuery } from '$lib/query/queries';
 	import { isTerminalStatus } from '$lib/utils/job-progress';
-	import { Play, FolderOutput, FolderOpen, FileEdit, FileText, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X, Scan } from 'lucide-svelte';
-	import type { Scraper, FileInfo, Config } from '$lib/api/types';
-	import type { OperationMode } from '$lib/api/types';
+	import { Play, FolderOutput, FolderOpen, FileEdit, FileText, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X, Scan, FileX, Download, Replace, ImageOff, ListChecks, CircleAlert, TriangleAlert } from 'lucide-svelte';
+	import type { Scraper, FileInfo, Config, BrowseResponse } from '$lib/api/types';
+	import type { BatchApplyPlan, MediaPolicy, MergePreset, NFOOutputPolicy, OperationMode, ScalarMergeStrategy, ArrayMergeStrategy, VideoOperation } from '$lib/api/types';
+	import { applyPlanSummary, applyPreset as applyPlanPreset, defaultApplyPlan, initialApplyPlan, migrateLegacyPlan, normalizeApplyPlan, projectLegacyPlan, setMergeStrategies, validateApplyPlan } from '$lib/apply-plan';
+	import { BrowseBootstrapCookie, encodeBrowseBootstrap, type BrowseBootstrap } from '$lib/browse-bootstrap';
+
+	let { data = {} }: { data?: { browseBootstrap?: BrowseBootstrap | null; initialPath?: string; initialBrowse?: BrowseResponse | null } } = $props();
+	const browseBootstrap = untrack(() => {
+		if (data.browseBootstrap) return data.browseBootstrap;
+		if (typeof window !== 'undefined') {
+			const ssr = (window as unknown as { __JAVINIZER_SSR__?: { browseBootstrap?: BrowseBootstrap | null } }).__JAVINIZER_SSR__;
+			return ssr?.browseBootstrap ?? null;
+		}
+		return null;
+	});
+	const serverInitialPath = untrack(() => data.initialPath ?? '');
+	const serverInitialBrowse = untrack(() => data.initialBrowse ?? null);
+	let bootstrappedPlan: BatchApplyPlan | null = null;
+	if (browseBootstrap?.applyPlan) {
+		try { bootstrappedPlan = normalizeApplyPlan(browseBootstrap.applyPlan); } catch {}
+	}
 
 	type BrowseMode = 'scrape' | 'update';
 	let selectedFiles: string[] = $state([]);
 	let scraping = $state(false);
-	let forceRefresh = $state(false);
+	let forceRefresh = $state(browseBootstrap?.forceRefresh ?? false);
 	let operationMode: BrowseMode = $state('scrape');
 	let scanning = $state(false);
 	let recursiveScan = $state(false);
 	let selectedFolders: string[] = $state([]);
 	let triggerScan = $state(0);
-	let initialPath = $state('');
-	let destinationPath = $state('');
+	let initialPath = $state(serverInitialPath || browseBootstrap?.initialPath || '');
+	let destinationPath = $state(browseBootstrap?.destinationPath ?? '');
 	let showDestinationBrowser = $state(false);
 	let tempDestinationPath = $state('');
 	let currentBrowserPath = $state('');
@@ -47,13 +67,14 @@
 	const cwdQuery = createQuery(() => ({
 		queryKey: ['cwd'],
 		queryFn: () => apiClient.getCurrentWorkingDirectory(),
+		enabled: !initialPath,
 	}));
 
 	let config = $derived(configQuery.data ?? null);
 	let availableScrapers = $derived(scrapersQuery.data ?? []);
-	let selectedScrapers: string[] = $state([]);
-	let showScraperSelector = $state(false);
-	let scrapersInitialized = $state(false);
+	let selectedScrapers: string[] = $state(browseBootstrap?.selectedScrapers ?? []);
+	let showScraperSelector = $state(browseBootstrap?.showScraperSelector ?? false);
+	let scrapersInitialized = $state((browseBootstrap?.selectedScrapers.length ?? 0) > 0 || browseBootstrap?.showScraperSelector === true);
 
 	$effect(() => {
 		const scrapers = scrapersQuery.data;
@@ -70,16 +91,23 @@
 	let pathInitialized = $state(false);
 
 	$effect(() => {
-		const cwd = cwdQuery.data?.path;
-		if (!cwd || pathInitialized) return;
-		pathInitialized = true;
+		if (pathInitialized) return;
 		const savedInputPath = localStorage.getItem(STORAGE_KEY_INPUT);
+		const cwd = cwdQuery.data?.path;
 		if (!initialPath) {
-			initialPath = savedInputPath || cwd;
+			initialPath = savedInputPath || cwd || '';
 		}
+		// Restore destination from localStorage even when cwdQuery is disabled
+		// (initialPath was supplied by the SSR bootstrap). Without this, a
+		// returning user's saved output dir is silently dropped.
 		const savedOutputPath = localStorage.getItem(STORAGE_KEY_OUTPUT);
 		if (!destinationPath) {
 			destinationPath = savedOutputPath || initialPath;
+		}
+		// Only mark initialized once we've attempted the restore — if cwd
+		// hasn't loaded yet and we have no initialPath, keep the effect open.
+		if (initialPath || cwd) {
+			pathInitialized = true;
 		}
 	});
 	type ScalarStrategy = 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
@@ -89,9 +117,34 @@
 	let scalarStrategy: ScalarStrategy = $state('prefer-nfo');  // For scalar fields
 	let arrayStrategy: ArrayStrategy = $state('merge');        // For array fields
 	let showOptionsPanel = $state(false);  // Expandable options panel in sticky bar
+
+	function closeOptionsPanel() {
+		showOptionsPanel = false;
+		queueMicrotask(() => document.getElementById('browse-options-trigger')?.focus());
+	}
+
+	function handleOptionsKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && showOptionsPanel && !showDestinationBrowser) {
+			event.preventDefault();
+			closeOptionsPanel();
+		}
+	}
 	let operationModeOverride: OperationMode = $state('organize');
 	let operationModeOverrideTouched: boolean = $state(false);
-	let manualScrapeMode: boolean = $state(false);
+	let manualScrapeMode: boolean = $state(browseBootstrap?.manualScrapeMode ?? false);
+	let applyPlan: BatchApplyPlan | null = $state(bootstrappedPlan);
+	let selectedVideoOperation: VideoOperation | null = $state(bootstrappedPlan?.video_operation ?? null);
+	let planInitialized = $state(browseBootstrap !== null);
+	let planMigrationWarning: string | undefined = $state(browseBootstrap?.planMigrationWarning);
+	const prefersReducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)');
+	let planExpanded = $state(browseBootstrap?.planExpanded ?? true);
+	let planErrors = $derived(validateApplyPlan(applyPlan));
+	let planSummary = $derived(applyPlan ? applyPlanSummary(applyPlan) : []);
+	let planDigest = $derived(planSummary.length > 0 ? planSummary.join(' · ') : m.browse_plan_digest_empty());
+	let destinationMatchesSource = $derived.by(() => {
+		const plan = applyPlan as BatchApplyPlan | null;
+		return plan?.video_operation === 'organize' && selectedFiles.some((file) => { const normalized = file.replaceAll('\\', '/'); return normalized.slice(0, normalized.lastIndexOf('/')) === destinationPath.replaceAll('\\', '/').replace(/\/$/, ''); });
+	});
 
 	// D4: persist /browse scrape state to sessionStorage + hydrate on mount so a
 	// Back round-trip from /manual preserves selection + globals. When hydrated
@@ -100,6 +153,9 @@
 	const STORAGE_KEY_SCRAPE_STATE = 'javinizer_browse_scrape_state';
 
 	interface BrowseScrapeState {
+		version?: 2;
+		applyPlan?: BatchApplyPlan | null;
+		planMigrationWarning?: string;
 		selectedFiles: string[];
 		operationMode: BrowseMode;
 		operationModeOverride: OperationMode;
@@ -111,9 +167,11 @@
 		scalarStrategy: ScalarStrategy;
 		arrayStrategy: ArrayStrategy;
 		manualScrapeMode: boolean;
+		planExpanded?: boolean;
 	}
 
 	let scrapeStateHydrated = $state(false);
+	let pendingLegacyState = $state<Partial<BrowseScrapeState> | null>(null);
 
 	$effect(() => {
 		if (scrapeStateHydrated) return;
@@ -123,6 +181,20 @@
 			const raw = sessionStorage.getItem(STORAGE_KEY_SCRAPE_STATE);
 			if (!raw) return;
 			const saved = JSON.parse(raw) as Partial<BrowseScrapeState>;
+			if (saved.version === 2) {
+				try {
+					applyPlan = saved.applyPlan ? normalizeApplyPlan(saved.applyPlan) : null;
+					planMigrationWarning = saved.planMigrationWarning;
+				} catch {
+					applyPlan = null;
+					planMigrationWarning = 'Saved apply settings are unsupported; select an operation again.';
+				}
+				selectedVideoOperation = applyPlan?.video_operation ?? null;
+				if (applyPlan?.video_operation === 'organize') destinationPath = applyPlan.destination ?? '';
+				planInitialized = true;
+			} else {
+				pendingLegacyState = saved;
+			}
 			if (Array.isArray(saved.selectedFiles)) selectedFiles = saved.selectedFiles;
 			if (saved.operationMode === 'scrape' || saved.operationMode === 'update') operationMode = saved.operationMode;
 			if (saved.operationModeOverride) operationModeOverride = saved.operationModeOverride;
@@ -145,13 +217,17 @@
 			if (saved.scalarStrategy) scalarStrategy = saved.scalarStrategy;
 			if (saved.arrayStrategy) arrayStrategy = saved.arrayStrategy;
 			if (typeof saved.manualScrapeMode === 'boolean') manualScrapeMode = saved.manualScrapeMode;
+			if (typeof saved.planExpanded === 'boolean') planExpanded = saved.planExpanded;
 		} catch {}
 	});
 
 	$effect(() => {
-		if (!scrapeStateHydrated) return;
+		if (!scrapeStateHydrated || !planInitialized) return;
 		if (typeof sessionStorage === 'undefined') return;
 		const state: BrowseScrapeState = {
+			version: 2,
+			applyPlan: applyPlan ? normalizeApplyPlan(applyPlan) : null,
+			planMigrationWarning,
 			selectedFiles,
 			operationMode,
 			operationModeOverride,
@@ -162,10 +238,24 @@
 			selectedPreset,
 			scalarStrategy,
 			arrayStrategy,
-			manualScrapeMode
+			manualScrapeMode,
+			planExpanded
 		};
 		try {
 			sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify(state));
+			const bootstrap: BrowseBootstrap = {
+				version: 1,
+				applyPlan: state.applyPlan ?? null,
+				planMigrationWarning,
+				initialPath: currentBrowserPath || initialPath,
+				destinationPath,
+				forceRefresh,
+				showScraperSelector,
+				selectedScrapers,
+				manualScrapeMode,
+				planExpanded
+			};
+			document.cookie = `${BrowseBootstrapCookie}=${encodeBrowseBootstrap(bootstrap)}; Path=/; SameSite=Lax${typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : ''}`;
 		} catch {}
 	});
 
@@ -261,6 +351,70 @@
 	$effect(() => {
 		return () => stopCompletionPoll();
 	});
+
+	$effect(() => {
+		if (!config || !pathInitialized || planInitialized) return;
+		if (pendingLegacyState) {
+			const saved = pendingLegacyState;
+			const impliedInPlace = destinationPath.trim() !== '' && destinationPath.trim() === initialPath.trim() && !config.output?.folder_format && (!config.output?.subfolder_format || config.output.subfolder_format.length === 0);
+			let effectiveOperationMode: OperationMode | undefined;
+			if (saved.operationMode !== 'update') {
+				const savedOverride = saved.operationModeOverride;
+				if (impliedInPlace && (savedOverride === 'organize' || savedOverride === 'in-place')) effectiveOperationMode = 'in-place-norenamefolder';
+				else effectiveOperationMode = saved.operationModeOverrideTouched ? savedOverride : config.output?.operation_mode as OperationMode | undefined;
+			}
+			const migrated = migrateLegacyPlan({ browseMode: saved.operationMode, update: saved.operationMode === 'update', effectiveOperationMode, destination: destinationPath, scalarStrategy: saved.scalarStrategy, arrayStrategy: saved.arrayStrategy });
+			applyPlan = migrated.plan;
+			selectedVideoOperation = migrated.plan?.video_operation ?? null;
+			planMigrationWarning = migrated.warning;
+			pendingLegacyState = null;
+		} else {
+			applyPlan = initialApplyPlan(config.output?.operation_mode as OperationMode | undefined, destinationPath);
+			selectedVideoOperation = applyPlan?.video_operation ?? null;
+		}
+		planInitialized = true;
+	});
+
+	$effect(() => {
+		if (!selectedVideoOperation) {
+			applyPlan = null;
+			return;
+		}
+		if (!applyPlan || applyPlan.video_operation !== selectedVideoOperation) {
+			applyPlan = defaultApplyPlan(selectedVideoOperation, destinationPath);
+			planMigrationWarning = undefined;
+		}
+	});
+
+	$effect(() => {
+		if (applyPlan?.video_operation === 'organize' && applyPlan.destination !== destinationPath.trim()) {
+			applyPlan = normalizeApplyPlan({ ...applyPlan, destination: destinationPath });
+		}
+	});
+
+	function setNFOOutput(value: NFOOutputPolicy) { if (applyPlan) applyPlan = normalizeApplyPlan({ ...applyPlan, nfo_output: value }); }
+	function setMediaPolicy(value: MediaPolicy) { if (applyPlan) applyPlan = normalizeApplyPlan({ ...applyPlan, media_policy: value }); }
+	function choosePreset(value: MergePreset) { if (applyPlan) applyPlan = applyPlanPreset(applyPlan, value); }
+	function chooseScalar(value: ScalarMergeStrategy) { if (applyPlan?.merge) applyPlan = setMergeStrategies(applyPlan, value, applyPlan.merge.array_strategy); }
+	function chooseArray(value: ArrayMergeStrategy) { if (applyPlan?.merge) applyPlan = setMergeStrategies(applyPlan, applyPlan.merge.scalar_strategy, value); }
+
+	const nfoChoices = [
+		{ value: 'write' as NFOOutputPolicy, label: m.browse_plan_nfo_write(), icon: FileText },
+		{ value: 'skip' as NFOOutputPolicy, label: m.browse_plan_nfo_skip(), icon: FileX }
+	];
+	let mediaChoices = $derived.by(() => {
+		const plan = applyPlan as BatchApplyPlan | null;
+		return [
+			{ value: 'missing' as MediaPolicy, label: m.browse_plan_media_missing(), icon: Download, destructive: false },
+			...(plan?.video_operation === 'leave-in-place' ? [{ value: 'replace' as MediaPolicy, label: m.browse_plan_media_replace(), icon: Replace, destructive: true }] : []),
+			{ value: 'skip' as MediaPolicy, label: m.browse_plan_media_skip(), icon: ImageOff, destructive: false }
+		];
+	});
+	const presetChoices = [
+		{ value: 'conservative' as MergePreset, name: m.browse_plan_preset_conservative(), desc: m.browse_preset_conservative_desc(), mapping: 'preserve-existing · merge' },
+		{ value: 'gap-fill' as MergePreset, name: m.browse_plan_preset_gap_fill(), desc: m.browse_preset_gap_fill_desc(), mapping: 'fill-missing-only · merge' },
+		{ value: 'aggressive' as MergePreset, name: m.browse_plan_preset_aggressive(), desc: m.browse_preset_aggressive_desc(), mapping: 'prefer-scraper · replace' }
+	];
 
 	function getSettingsOperationMode(): OperationMode {
 		if (config) {
@@ -435,42 +589,32 @@
 	}
 
 	function continueToManual() {
-		if (selectedFiles.length === 0) return;
-		setPendingScrape(
-			buildPendingScrapeSnapshot({
-				files: selectedFiles,
-				browseMode: operationMode,
-				effectiveOperationMode: effectiveOperationMode,
-				isInPlaceImplied: isInPlaceImplied,
-				showScraperSelector: showScraperSelector,
-				destination: operationMode === 'update' ? '' : destinationPath,
-				selectedScrapers: showScraperSelector ? selectedScrapers : [],
-				force: forceRefresh,
-				preset: operationMode === 'update' ? (selectedPreset as 'conservative' | 'gap-fill' | 'aggressive' | undefined) : undefined,
-				scalarStrategy: operationMode === 'update' ? scalarStrategy : undefined,
-				arrayStrategy: operationMode === 'update' ? arrayStrategy : undefined
-			})
-		);
+		if (selectedFiles.length === 0 || !applyPlan || planErrors.length > 0) return;
+		setPendingScrape(buildPendingScrapeSnapshot({
+			files: selectedFiles,
+			applyPlan: normalizeApplyPlan(applyPlan),
+			migrationWarning: planMigrationWarning,
+			showScraperSelector,
+			selectedScrapers: showScraperSelector ? selectedScrapers : [],
+			force: forceRefresh
+		}));
 		void goto('/manual');
 	}
 
 	async function startBatchScrape() {
-		if (selectedFiles.length === 0) return;
-
-		const isUpdateMode = operationMode === 'update';
+		if (selectedFiles.length === 0 || !applyPlan || planErrors.length > 0) return;
+		const plan = normalizeApplyPlan(applyPlan);
+		const legacy = projectLegacyPlan(plan);
+		const isUpdateMode = plan.video_operation === 'leave-in-place';
 		scraping = true;
 		try {
 			const response = await apiClient.batchScrape({
 				files: selectedFiles,
 				strict: false,
 				force: forceRefresh,
-				destination: isUpdateMode ? undefined : (destinationPath.trim() || undefined),
-				update: isUpdateMode,
-				selected_scrapers: showScraperSelector ? selectedScrapers : undefined,
-				preset: isUpdateMode ? (selectedPreset as 'conservative' | 'gap-fill' | 'aggressive' | undefined) : undefined,
-				scalar_strategy: isUpdateMode ? scalarStrategy : undefined,
-				array_strategy: isUpdateMode ? arrayStrategy : undefined,
-				operation_mode: effectiveOperationMode,
+				...legacy,
+				apply_plan: plan,
+				selected_scrapers: showScraperSelector ? selectedScrapers : undefined
 			});
 			startJob(response.job_id);
 			launchedFiles = [...selectedFiles];
@@ -527,6 +671,7 @@
 	async function resetDirectories() {
 		// Clear localStorage
 		localStorage.removeItem(STORAGE_KEY_INPUT);
+		currentBrowserPath = '';
 		localStorage.removeItem(STORAGE_KEY_OUTPUT);
 		// Reset to working directory
 		try {
@@ -539,302 +684,245 @@
 	}
 </script>
 
+<svelte:window onkeydown={handleOptionsKeydown} />
+
 <div class="w-full px-4 py-8 pb-32 lg:px-6">
 	<div class="space-y-6">
 		<!-- Header -->
-		<div class="flex items-center justify-between">
-			<div>
-				<h1 class="text-3xl font-bold">{m.browse_title()}</h1>
-				<p class="text-muted-foreground mt-1">
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div class="min-w-0">
+				<p class="font-mono text-[0.6875rem] font-medium uppercase tracking-[0.18em] text-muted-foreground">{m.browse_eyebrow()}</p>
+				<h1 class="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{m.browse_title()}</h1>
+				<p class="mt-1 max-w-2xl text-sm text-muted-foreground">
 					{m.browse_subtitle()}
 				</p>
 			</div>
-			<div class="flex gap-2">
-				<Button variant="outline" onclick={resetDirectories}>
-					{#snippet children()}
-						<RotateCcw class="h-4 w-4 mr-2" />
-						{m.browse_reset_paths()}
-					{/snippet}
-				</Button>
-			</div>
+			<Button variant="outline" onclick={resetDirectories} class="shrink-0">
+				{#snippet children()}
+					<RotateCcw class="h-4 w-4 mr-2" />
+					{m.browse_reset_paths()}
+				{/snippet}
+			</Button>
 		</div>
 
-		<!-- Operation Mode Selection -->
-		<Card class="p-4">
-			<div class="space-y-3">
-				<h3 class="font-semibold">{m.browse_operation_mode()}</h3>
-				<div class="grid grid-cols-2 gap-3">
-					<button
-						onclick={() => operationMode = 'scrape'}
-						class="flex flex-col items-start gap-2 p-4 rounded-lg border-2 transition-all {operationMode === 'scrape' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}"
-					>
-						<div class="flex items-center gap-2">
-							<Play class="h-5 w-5 {operationMode === 'scrape' ? 'text-primary' : 'text-muted-foreground'}" />
-							<span class="font-medium {operationMode === 'scrape' ? 'text-primary' : ''}">{m.browse_mode_scrape_organize()}</span>
-						</div>
-						<p class="text-xs text-muted-foreground text-left">
-							{m.browse_mode_scrape_desc()}
-						</p>
-					</button>
-
-					<button
-						onclick={() => operationMode = 'update'}
-						class="flex flex-col items-start gap-2 p-4 rounded-lg border-2 transition-all {operationMode === 'update' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}"
-					>
-						<div class="flex items-center gap-2">
-							<RefreshCw class="h-5 w-5 {operationMode === 'update' ? 'text-primary' : 'text-muted-foreground'}" />
-							<span class="font-medium {operationMode === 'update' ? 'text-primary' : ''}">{m.browse_mode_update_metadata()}</span>
-						</div>
-						<p class="text-xs text-muted-foreground text-left">
-							{m.browse_mode_update_desc()}
-						</p>
-					</button>
-				</div>
-			</div>
-		</Card>
-
-
-	<!-- Merge Strategy Selection (only shown in update mode) -->
-	{#if operationMode === 'update'}
-		<div transition:slide|local={{ duration: 220, easing: quintOut }}>
-		<Card class="p-4">
-			<div class="space-y-4">
-				<div>
-					<h3 class="font-semibold">{m.browse_nfo_merge_strategy()}</h3>
-					<p class="text-sm text-muted-foreground">{m.browse_merge_strategy_desc()}</p>
-				</div>
-
-				<!-- Preset Selection -->
-				<div class="space-y-2">
-					<div class="flex items-center justify-between">
-						<h4 class="text-sm font-medium">{m.browse_quick_presets()}</h4>
-						{#if selectedPreset}
-							<button
-								onclick={() => { selectedPreset = undefined; }}
-								class="text-xs text-primary hover:underline"
-							>
-								{m.browse_clear_preset()}
-							</button>
-						{/if}
-					</div>
-					<div class="grid grid-cols-3 gap-2">
-						<button
-							onclick={() => applyPreset('conservative')}
-							class="p-3 rounded-lg border-2 text-sm transition-all {selectedPreset === 'conservative' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">{m.browse_preset_conservative()}</div>
-							<div class="text-xs text-muted-foreground mt-1">{m.browse_preset_conservative_desc()}</div>
-						</button>
-						<button
-							onclick={() => applyPreset('gap-fill')}
-							class="p-3 rounded-lg border-2 text-sm transition-all {selectedPreset === 'gap-fill' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">{m.browse_preset_gap_fill()}</div>
-							<div class="text-xs text-muted-foreground mt-1">{m.browse_preset_gap_fill_desc()}</div>
-						</button>
-						<button
-							onclick={() => applyPreset('aggressive')}
-							class="p-3 rounded-lg border-2 text-sm transition-all {selectedPreset === 'aggressive' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">{m.browse_preset_aggressive()}</div>
-							<div class="text-xs text-muted-foreground mt-1">{m.browse_preset_aggressive_desc()}</div>
-						</button>
-					</div>
-				</div>
-
-				<!-- Scalar Fields Strategy -->
-				<div class="space-y-2">
-					<h4 class="text-sm font-medium">{m.browse_scalar_fields()}</h4>
-					<div class="grid grid-cols-2 gap-2">
-						<button
-							onclick={() => { scalarStrategy = 'prefer-nfo'; selectedPreset = undefined; }}
-							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'prefer-nfo' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">{m.browse_prefer_nfo()}</div>
-							<div class="text-xs text-muted-foreground mt-1">{m.browse_prefer_nfo_desc()}</div>
-						</button>
-						<button
-							onclick={() => { scalarStrategy = 'prefer-scraper'; selectedPreset = undefined; }}
-							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'prefer-scraper' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">{m.browse_prefer_scraped()}</div>
-							<div class="text-xs text-muted-foreground mt-1">{m.browse_prefer_scraped_desc()}</div>
-						</button>
-						<button
-							onclick={() => { scalarStrategy = 'preserve-existing'; selectedPreset = undefined; }}
-							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'preserve-existing' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">{m.browse_preserve_existing()}</div>
-							<div class="text-xs text-muted-foreground mt-1">{m.browse_preserve_existing_desc()}</div>
-						</button>
-						<button
-							onclick={() => { scalarStrategy = 'fill-missing-only'; selectedPreset = undefined; }}
-							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'fill-missing-only' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">{m.browse_fill_missing_only()}</div>
-							<div class="text-xs text-muted-foreground mt-1">{m.browse_fill_missing_only_desc()}</div>
-						</button>
-					</div>
-				</div>
-
-				<!-- Array Fields Strategy -->
-				<div class="space-y-2">
-					<h4 class="text-sm font-medium">{m.browse_array_fields()}</h4>
-					<div class="grid grid-cols-2 gap-2">
-						<button
-							onclick={() => { arrayStrategy = 'merge'; selectedPreset = undefined; }}
-							class="p-3 rounded-lg border-2 text-sm transition-all {arrayStrategy === 'merge' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">{m.browse_merge()}</div>
-							<div class="text-xs text-muted-foreground mt-1">{m.browse_merge_desc()}</div>
-						</button>
-						<button
-							onclick={() => { arrayStrategy = 'replace'; selectedPreset = undefined; }}
-							class="p-3 rounded-lg border-2 text-sm transition-all {arrayStrategy === 'replace' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">{m.browse_replace()}</div>
-							<div class="text-xs text-muted-foreground mt-1">{m.browse_replace_desc()}</div>
-						</button>
-					</div>
-				</div>
-			</div>
-		</Card>
-		</div>
-	{/if}
-	<!-- File Operations Selection (only shown in scrape mode) -->
-	{#if operationMode === 'scrape'}
-		<div transition:slide|local={{ duration: 220, easing: quintOut }}>
-		<Card class="p-4">
-			<div class="space-y-3">
-				<div>
-					<h3 class="font-semibold">{m.browse_file_operations()}</h3>
-					<p class="text-sm text-muted-foreground">{m.browse_file_operations_desc()}</p>
-				</div>
-				<div class="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4">
-					{#each [
-						{ value: 'organize' as OperationMode, label: m.browse_op_organize(), desc: m.browse_op_organize_desc(), icon: FolderOutput },
-						{ value: 'in-place' as OperationMode, label: m.browse_op_reorganize(), desc: m.browse_op_reorganize_desc(), icon: FolderOpen },
-						{ value: 'in-place-norenamefolder' as OperationMode, label: m.browse_op_rename_only(), desc: m.browse_op_rename_only_desc(), icon: FileEdit },
-						{ value: 'metadata-artwork' as OperationMode, label: m.browse_op_metadata_artwork(), desc: m.browse_op_metadata_artwork_desc(), icon: FileText },
-					] as mode}
-						{@const disabled = isInPlaceImplied && (mode.value === 'organize' || mode.value === 'in-place')}
-						<button
-							onclick={() => { if (!disabled) { operationModeOverride = mode.value; operationModeOverrideTouched = true; } }}
-							disabled={disabled}
-							class="relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {disabled ? 'border-border opacity-40 cursor-not-allowed' : effectiveOperationMode === mode.value ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							{#if !operationModeOverrideTouched && getSettingsOperationMode() === mode.value}
-								<span class="absolute top-1 right-1 text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded">{m.browse_op_default_badge()}</span>
-							{/if}
-							<div class="font-medium">{mode.label}</div>
-							<div class="text-xs text-muted-foreground">{mode.desc}</div>
-						</button>
-					{/each}
-				</div>
-				{#if isInPlaceImplied}
-					<p class="text-xs text-muted-foreground">
-						{m.browse_in_place_implied_notice()} <button class="underline text-primary" onclick={() => { destinationPath = ''; localStorage.removeItem(STORAGE_KEY_OUTPUT); }}>{m.browse_change_destination()}</button>
-					</p>
-				{:else if operationModeOverrideTouched && effectiveOperationMode !== getSettingsOperationMode()}
-					<p class="text-xs text-primary">
-						{m.browse_overriding_settings()} <button class="underline" onclick={() => operationModeOverrideTouched = false}>{m.browse_reset_to_default()}</button>
-					</p>
-				{/if}
-			</div>
-		</Card>
-		</div>
-	{/if}
-
-	<!-- Destination Folder (only shown in scrape mode) -->
-	{#if operationMode === 'scrape'}
-		<div transition:slide|local={{ duration: 220, easing: quintOut }}>
-		<Card class="p-4">
-				<div class="space-y-3">
-					<div class="flex items-center gap-2">
-						<FolderOutput class="h-5 w-5 text-primary" />
-						<h3 class="font-semibold">{m.browse_output_destination()}</h3>
-					</div>
-					<div class="flex gap-2">
-						<PathInput
-							bind:value={destinationPath}
-							onchange={(v) => {
-								localStorage.setItem(STORAGE_KEY_OUTPUT, v);
-							}}
-							placeholder={m.browse_destination_placeholder()}
-							whitelistPaths={config?.api?.security?.allowed_directories ?? []}
-							class="px-3 py-2"
-						/>
-						<Button onclick={openDestinationBrowser}>
-							{#snippet children()}
-								<FolderOpen class="h-4 w-4 mr-2" />
-								{m.browse_browse_button()}
-							{/snippet}
-						</Button>
-					</div>
-					<p class="text-xs text-muted-foreground">
-					{#if isInPlaceImplied}
-						{m.browse_dest_in_place_note()}
+		<!-- Canonical apply plan -->
+		<Card class="overflow-hidden">
+			<div class="flex flex-wrap items-start justify-between gap-3 border-b bg-muted-faint px-5 py-4 {planExpanded ? 'border-border' : 'border-transparent'}">
+				<div class="min-w-0 flex-1">
+					<h2 id="apply-plan-title" class="font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{m.browse_plan_eyebrow()}</h2>
+					{#if planExpanded}
+						<p class="mt-1 min-h-5 max-w-2xl text-sm leading-5 text-muted-foreground">{m.browse_plan_intro()}</p>
 					{:else}
-						{m.browse_dest_organize_note()}
+						<p class="plan-motion mt-1 flex min-h-5 items-center gap-2 font-mono text-xs leading-5 text-muted-foreground" in:fade|local={{ duration: prefersReducedMotion.current ? 0 : 140 }}>
+							<ListChecks class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+							<span class="truncate" title={planDigest}>{planDigest}</span>
+						</p>
 					{/if}
-				</p>
 				</div>
-			</Card>
-		</div>
-		{/if}
+				<div class="flex shrink-0 items-center gap-2">
+					{#if !planExpanded && planErrors.length > 0}
+						<span role="status" class="flex items-center gap-1.5 rounded border border-destructive-soft bg-destructive-faint px-1.5 py-0.5 font-mono text-[0.6875rem] text-destructive" aria-label={planErrors.join('. ')}>
+							<CircleAlert class="h-3 w-3" aria-hidden="true" />
+							<span class="tabular-nums">{planErrors.length}</span>
+						</span>
+					{/if}
+					<Button variant="outline" size="sm" class="w-36 justify-between" aria-expanded={planExpanded} aria-controls="apply-plan-body" onclick={() => planExpanded = !planExpanded}>
+						{#snippet children()}
+							{planExpanded ? m.browse_plan_collapse() : m.browse_plan_expand()}
+							{#if planExpanded}<ChevronUp class="h-4 w-4 ml-1" aria-hidden="true" />{:else}<ChevronDown class="h-4 w-4 ml-1" aria-hidden="true" />{/if}
+						{/snippet}
+					</Button>
+				</div>
+			</div>
+
+			{#if planMigrationWarning}
+				<div class="border-b border-amber-500/30 bg-amber-500/10 px-5 py-3 text-sm" role="alert">
+					<span class="flex items-start gap-2"><TriangleAlert class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" /><span class="min-w-0">{planMigrationWarning}</span></span>
+				</div>
+			{/if}
+
+			{#if planExpanded}
+				<div id="apply-plan-body" role="region" aria-labelledby="apply-plan-title" class="plan-motion space-y-8 p-5 sm:p-6" transition:slide|local={{ duration: prefersReducedMotion.current ? 0 : 180, easing: quintOut }}>
+				<div class="grid gap-3 sm:grid-cols-[1.75rem_minmax(0,1fr)] sm:gap-5">
+					<div class="flex sm:flex-col sm:items-center" aria-hidden="true">
+						<span class="font-mono text-xs font-medium tabular-nums text-muted-foreground sm:pt-0.5">01</span>
+						<span class="mt-2 hidden w-px flex-1 bg-border sm:block"></span>
+					</div>
+					<div class="min-w-0">
+						<VideoOperationSelector bind:value={selectedVideoOperation} errorId={planErrors.length > 0 ? 'apply-plan-errors' : undefined} />
+					</div>
+				</div>
+
+				{#if applyPlan}
+					<div class="grid gap-3 sm:grid-cols-[1.75rem_minmax(0,1fr)] sm:gap-5">
+						<div class="flex sm:flex-col sm:items-center" aria-hidden="true">
+							<span class="font-mono text-xs font-medium tabular-nums text-muted-foreground sm:pt-0.5">02</span>
+							<span class="mt-2 hidden w-px flex-1 bg-border sm:block"></span>
+						</div>
+						<div class="min-w-0 space-y-3">
+							<h3 class="text-sm font-semibold">{m.browse_plan_outputs()}</h3>
+							<div class="grid gap-4 lg:grid-cols-2">
+								<fieldset class="min-w-0 space-y-2">
+									<legend class="text-sm font-medium">{m.browse_plan_nfo_output()}</legend>
+									<div class="flex flex-col gap-1 rounded-lg border border-border bg-muted-soft p-1 sm:flex-row">
+										{#each nfoChoices as choice}
+											{@const active = applyPlan.nfo_output === choice.value}
+											<label class="min-w-0 flex-1">
+												<input type="radio" name="nfo-output" class="peer sr-only" checked={active} onchange={() => setNFOOutput(choice.value)} />
+												<span class="flex min-h-10 cursor-pointer select-none items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-background {active ? 'bg-background text-foreground shadow-sm ring-1 ring-primary-soft' : 'text-muted-foreground hover:bg-canvas-soft hover:text-foreground'}">
+													<choice.icon class="h-4 w-4 shrink-0 {active ? 'text-primary' : ''}" aria-hidden="true" />
+													<span class="truncate">{choice.label}</span>
+												</span>
+											</label>
+										{/each}
+									</div>
+								</fieldset>
+
+								<fieldset class="min-w-0 space-y-2">
+									<legend class="text-sm font-medium">{m.browse_plan_media_policy()}</legend>
+									<div class="flex flex-col gap-1 rounded-lg border border-border bg-muted-soft p-1 sm:flex-row">
+										{#each mediaChoices as choice}
+											{@const active = applyPlan.media_policy === choice.value}
+											<label class="min-w-0 flex-1">
+												<input type="radio" name="media-policy" class="peer sr-only" checked={active} onchange={() => setMediaPolicy(choice.value)} />
+												<span class="flex min-h-10 cursor-pointer select-none items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-background {active ? choice.destructive ? 'bg-destructive-soft text-destructive shadow-sm ring-1 ring-destructive-soft' : 'bg-background text-foreground shadow-sm ring-1 ring-primary-soft' : 'text-muted-foreground hover:bg-canvas-soft hover:text-foreground'}">
+													<choice.icon class="h-4 w-4 shrink-0 {active ? choice.destructive ? 'text-destructive' : 'text-primary' : ''}" aria-hidden="true" />
+													<span class="truncate">{choice.label}</span>
+												</span>
+											</label>
+										{/each}
+									</div>
+								</fieldset>
+							</div>
+						</div>
+					</div>
+
+					{#if applyPlan.video_operation === 'organize'}
+						<div class="grid gap-3 sm:grid-cols-[1.75rem_minmax(0,1fr)] sm:gap-5">
+							<div class="flex sm:flex-col sm:items-center" aria-hidden="true">
+								<span class="font-mono text-xs font-medium tabular-nums text-muted-foreground sm:pt-0.5">03</span>
+								<span class="mt-2 hidden w-px flex-1 bg-border sm:block"></span>
+							</div>
+							<div class="min-w-0 space-y-2">
+								<div class="flex items-center gap-2">
+									<FolderOutput class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+									<label class="text-sm font-semibold" for="apply-destination">{m.browse_output_destination()}</label>
+								</div>
+								<div class="flex flex-col gap-2 sm:flex-row">
+									<PathInput id="apply-destination" bind:value={destinationPath} onchange={(v) => localStorage.setItem(STORAGE_KEY_OUTPUT, v)} placeholder={m.browse_destination_placeholder()} whitelistPaths={config?.api?.security?.allowed_directories ?? []} ariaDescribedby={planErrors.length > 0 ? 'apply-plan-errors' : undefined} ariaInvalid={planErrors.some((error) => error.toLowerCase().includes('destination'))} required={true} class="px-3 py-2" />
+									<Button onclick={openDestinationBrowser} class="w-full shrink-0 sm:w-auto">{#snippet children()}<FolderOpen class="h-4 w-4 mr-2" />{m.browse_browse_button()}{/snippet}</Button>
+								</div>
+								{#if destinationMatchesSource}<p class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300" role="status"><TriangleAlert class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /><span class="min-w-0">{m.browse_plan_same_source_warning()}</span></p>{/if}
+							</div>
+						</div>
+					{:else if applyPlan.video_operation === 'leave-in-place' && applyPlan.merge}
+						<div class="grid gap-3 sm:grid-cols-[1.75rem_minmax(0,1fr)] sm:gap-5">
+							<div class="flex sm:flex-col sm:items-center" aria-hidden="true">
+								<span class="font-mono text-xs font-medium tabular-nums text-muted-foreground sm:pt-0.5">03</span>
+								<span class="mt-2 hidden w-px flex-1 bg-border sm:block"></span>
+							</div>
+							<div class="min-w-0 space-y-4">
+								<div>
+									<h3 class="text-sm font-semibold">{m.browse_plan_existing_merge()}</h3>
+									<p class="mt-0.5 text-sm text-muted-foreground">{m.browse_merge_strategy_desc()}</p>
+								</div>
+								<div class="grid gap-2 sm:grid-cols-3" role="group" aria-label={m.browse_quick_presets()}>
+									{#each presetChoices as preset}
+										{@const active = applyPlan.merge?.source_preset === preset.value}
+										<button type="button" aria-pressed={active} class="rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background {active ? 'border-primary-strong bg-primary-soft shadow-sm' : 'border-border hover:border-primary-soft hover:bg-accent-soft'}" onclick={() => choosePreset(preset.value)}>
+											<span class="block text-sm font-semibold">{preset.name}</span>
+											<span class="mt-0.5 block text-xs text-muted-foreground">{preset.desc}</span>
+											<span class="mt-2 block font-mono text-[0.6875rem] tracking-tight text-muted-foreground opacity-80">{preset.mapping}</span>
+										</button>
+									{/each}
+								</div>
+								<div class="grid gap-3 sm:grid-cols-2">
+									<label class="block text-sm font-medium">{m.browse_scalar_fields()}<select class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={applyPlan.merge.scalar_strategy} onchange={(e) => chooseScalar(e.currentTarget.value as ScalarMergeStrategy)}><option value="prefer-nfo">{m.browse_prefer_nfo()}</option><option value="prefer-scraper">{m.browse_prefer_scraped()}</option><option value="preserve-existing">{m.browse_preserve_existing()}</option><option value="fill-missing-only">{m.browse_fill_missing_only()}</option></select></label>
+									<label class="block text-sm font-medium">{m.browse_array_fields()}<select class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={applyPlan.merge.array_strategy} onchange={(e) => chooseArray(e.currentTarget.value as ArrayMergeStrategy)}><option value="merge">{m.browse_merge()}</option><option value="replace">{m.browse_replace()}</option></select></label>
+								</div>
+							</div>
+						</div>
+					{/if}
+
+					<div class="grid gap-3 sm:grid-cols-[1.75rem_minmax(0,1fr)] sm:gap-5">
+						<div class="hidden sm:flex sm:flex-col sm:items-center" aria-hidden="true">
+							<span class="grid h-5 w-5 place-items-center rounded border border-primary-soft bg-primary-soft text-primary"><ListChecks class="h-3 w-3" /></span>
+						</div>
+						<div class="min-w-0">
+							<div class="rounded-lg border border-dashed border-primary-soft bg-primary-faint p-4" aria-live="polite">
+								<div class="flex items-center gap-2">
+									<ListChecks class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+									<h3 class="font-mono text-xs font-semibold uppercase tracking-[0.14em]">{m.browse_plan_summary_title()}</h3>
+								</div>
+								<ul class="mt-3 space-y-1.5 font-mono text-[0.8125rem] leading-relaxed text-foreground">
+									{#each planSummary as line}<li class="flex gap-2"><span class="shrink-0 text-primary" aria-hidden="true">✓</span><span class="min-w-0 break-words">{line}</span></li>{/each}
+								</ul>
+							</div>
+						</div>
+					</div>
+				{/if}
+
+				{#if planErrors.length > 0}
+						<div class="rounded-lg border border-destructive-soft bg-destructive-faint px-4 py-3">
+							<ul id="apply-plan-errors" class="space-y-1 text-sm text-destructive" role="alert">
+								{#each planErrors as error}<li class="flex items-start gap-2"><CircleAlert class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /><span class="min-w-0">{error}</span></li>{/each}
+							</ul>
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</Card>
 
 	<!-- Selected Files List -->
 	{#if selectedFiles.length > 0}
 		<div transition:fade|local={{ duration: 180 }}>
-		<Card class="p-4">
-				<div class="space-y-3">
-					<div class="flex items-center justify-between">
-						<div class="flex items-center gap-2">
-							<div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-							<h3 class="font-semibold">
-								{m.browse_selected_for_scraping({ count: selectedFiles.length })}
-							</h3>
-						</div>
-						<Button
-							variant="ghost"
-							size="sm"
-								onclick={clearSelection}
-						>
-							{#snippet children()}
-								{m.browse_clear_all()}
-							{/snippet}
-						</Button>
+		<Card class="overflow-hidden">
+				<div class="flex items-center justify-between gap-3 border-b border-border bg-muted-faint px-4 py-3">
+					<div class="flex min-w-0 items-center gap-2">
+						<div class="plan-motion w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+						<h3 class="truncate text-sm font-semibold">
+							{m.browse_selected_for_scraping({ count: selectedFiles.length })}
+						</h3>
 					</div>
+					<Button
+						variant="ghost"
+						size="sm"
+							onclick={clearSelection}
+					>
+						{#snippet children()}
+							{m.browse_clear_all()}
+						{/snippet}
+					</Button>
+				</div>
 
-					<!-- Files List -->
-					<div class="max-h-60 overflow-y-auto space-y-1 border rounded-md p-2 bg-accent/20">
-						{#each selectedFiles as filePath (filePath)}
-						{@const fileName = filePath.split(/[\\/]/).pop()}
-						{@const dirPath = filePath.substring(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')))}
-							<div animate:flip={{ duration: 220, easing: quintOut }}>
-								<div
-									class="flex items-center justify-between bg-background px-3 py-2 rounded border hover:border-primary transition-colors group"
-								>
-									<div class="flex-1 min-w-0">
-										<div class="font-medium text-sm truncate" title={fileName}>{fileName}</div>
-										<div class="text-xs text-muted-foreground truncate" title={dirPath}>
-											{dirPath}
-										</div>
+				<!-- Files List -->
+				<div class="max-h-60 overflow-y-auto space-y-1 p-2">
+					{#each selectedFiles as filePath (filePath)}
+					{@const fileName = filePath.split(/[\\/]/).pop()}
+					{@const dirPath = filePath.substring(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')))}
+						<div animate:flip={{ duration: 220, easing: quintOut }}>
+							<div
+								class="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 transition-colors hover:border-primary-soft group"
+							>
+								<div class="flex-1 min-w-0">
+									<div class="truncate font-mono text-[0.8125rem] font-medium" title={fileName}>{fileName}</div>
+									<div class="truncate font-mono text-xs text-muted-foreground" title={dirPath}>
+										{dirPath}
 									</div>
-									<button
-										onclick={(e) => {
-											e.stopPropagation();
-											selectedFiles = selectedFiles.filter((f) => f !== filePath);
-										}}
-										class="ml-2 px-2 py-1 text-destructive hover:bg-destructive/10 rounded transition-colors opacity-0 group-hover:opacity-100"
-										title={m.browse_remove_file()}
-									>
-										×
-									</button>
 								</div>
+								<button
+									onclick={(e) => {
+										e.stopPropagation();
+										selectedFiles = selectedFiles.filter((f) => f !== filePath);
+									}}
+									class="ml-2 grid h-11 w-11 shrink-0 place-items-center rounded text-destructive transition-colors hover:bg-destructive-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+									title={m.browse_remove_file()}
+								>
+									<X class="h-4 w-4" aria-hidden="true" />
+								</button>
 							</div>
-						{/each}
-					</div>
+						</div>
+					{/each}
 				</div>
 			</Card>
 		</div>
@@ -852,19 +940,20 @@
 			bind:selectedFolders={selectedFolders}
 			triggerScan={triggerScan}
 			whitelistPaths={config?.api?.security?.allowed_directories ?? []}
+			initialData={serverInitialBrowse ?? undefined}
 		/>
 
 		<!-- Help Text -->
-		<Card class="p-4 bg-accent/30">
-			<h3 class="font-semibold mb-2">{m.browse_how_to_use()}</h3>
-			<ul class="text-sm text-muted-foreground space-y-1">
+		<Card class="p-5">
+			<h3 class="font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{m.browse_how_to_use()}</h3>
+			<ul class="mt-3 text-sm text-muted-foreground space-y-1.5">
 				<li>{m.browse_howto_1()}</li>
 				<li>{m.browse_howto_2()}</li>
 				<li>{m.browse_howto_3()}</li>
 				<li>{m.browse_howto_4()}</li>
 				<li>{m.browse_howto_5()}</li>
 			</ul>
-			<p class="text-xs text-muted-foreground mt-3 pt-3 border-t border-border/50">
+			<p class="text-xs text-muted-foreground mt-3 pt-3 border-t border-border/50 font-mono">
 				{m.browse_tip_filter()}
 			</p>
 		</Card>
@@ -872,23 +961,25 @@
 </div>
 
 <!-- Sticky Bottom Action Bar -->
-<div class="sticky bottom-0 left-0 right-0 bg-background border-t shadow-lg z-40">
+<div class="sticky bottom-0 left-0 right-0 z-40 border-t border-border bg-bar shadow-[0_-12px_32px_-16px_rgb(0_0_0/0.35)] backdrop-blur-sm">
 	<!-- Expandable Options Panel -->
 	{#if showOptionsPanel}
-		<div class="border-b bg-accent/20" transition:slide|local={{ duration: 180, easing: quintOut }}>
-			<div class="w-full px-4 py-4">
-				<div class="flex items-center justify-between mb-3">
-					<h3 class="text-sm font-semibold">{m.browse_options()}</h3>
+		<div id="browse-options-panel" class="plan-motion absolute bottom-full left-3 right-3 mb-2 max-h-[min(65vh,32rem)] overflow-y-auto rounded-lg border border-border bg-background shadow-xl sm:left-auto sm:right-4 sm:w-[32rem]" role="region" aria-labelledby="browse-options-title" transition:slide|local={{ duration: prefersReducedMotion.current ? 0 : 180, easing: quintOut }}>
+			<div class="p-3">
+				<div class="mb-2 flex items-center justify-between">
+					<h3 id="browse-options-title" class="text-sm font-semibold">{m.browse_options()}</h3>
 					<button
-						onclick={() => showOptionsPanel = false}
-						class="text-muted-foreground hover:text-foreground transition-colors"
+						type="button"
+						onclick={closeOptionsPanel}
+						class="grid h-9 w-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						aria-label={m.common_close()}
 					>
-						<X class="h-4 w-4" />
+						<X class="h-4 w-4" aria-hidden="true" />
 					</button>
 				</div>
-				<div class="grid gap-3 md:grid-cols-2">
+				<div class="grid gap-2 sm:grid-cols-2">
 					<label
-						class="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 cursor-pointer transition-colors"
+						class="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-border bg-background p-2.5 transition-colors hover:border-primary-soft hover:bg-accent-soft"
 					>
 						<input
 							type="checkbox"
@@ -902,7 +993,7 @@
 					</label>
 
 					<label
-						class="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 cursor-pointer transition-colors"
+						class="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-border bg-background p-2.5 transition-colors hover:border-primary-soft hover:bg-accent-soft"
 					>
 						<input
 							type="checkbox"
@@ -916,7 +1007,7 @@
 					</label>
 
 					<label
-						class="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 cursor-pointer transition-colors"
+						class="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-border bg-background p-2.5 transition-colors hover:border-primary-soft hover:bg-accent-soft"
 					>
 						<input
 							type="checkbox"
@@ -924,7 +1015,7 @@
 							class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 						/>
 						<div class="flex-1">
-							<span class="text-sm font-medium">{m.browse_manual_scrape()}</span>
+							<span class="text-sm font-medium">{m.browse_plan_manual_ids_urls()}</span>
 							<p class="text-xs text-muted-foreground">{m.browse_manual_scrape_desc()}</p>
 						</div>
 					</label>
@@ -943,29 +1034,9 @@
 
 	<!-- Main Action Bar -->
 	<div class="w-full px-4 py-3">
-		<div class="flex items-center justify-between gap-4">
-			<!-- Left: Selection info and options toggle -->
-			<div class="flex items-center gap-3">
-				{#if selectedFiles.length > 0}
-					<div class="flex items-center gap-2">
-						<div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-						<span class="text-sm font-medium">
-							{m.browse_files_selected_count({ count: selectedFiles.length })}
-						</span>
-						<button
-									onclick={clearSelection}
-							class="text-xs text-muted-foreground hover:text-destructive transition-colors"
-						>
-							{m.browse_clear_selection_link()}
-						</button>
-					</div>
-				{:else}
-					<span class="text-sm text-muted-foreground">{m.browse_no_files_selected()}</span>
-				{/if}
-			</div>
-
+		<div class="flex justify-end">
 			<!-- Right: Scan, options toggle and action button -->
-			<div class="flex items-center gap-3">
+			<div class="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap sm:gap-3">
 				<!-- Recursive toggle + Scan -->
 				<div class="flex items-center gap-2">
 					<label class="flex items-center gap-1.5 text-xs cursor-pointer">
@@ -1001,6 +1072,10 @@
 				<Button
 					variant="outline"
 					size="sm"
+					id="browse-options-trigger"
+					aria-expanded={showOptionsPanel}
+					aria-controls="browse-options-panel"
+					aria-haspopup="true"
 					onclick={() => showOptionsPanel = !showOptionsPanel}
 				>
 					{#snippet children()}
@@ -1018,25 +1093,25 @@
 				{#if manualScrapeMode || forceRefresh || showScraperSelector}
 					<div class="hidden sm:flex items-center gap-1 text-xs">
 						{#if manualScrapeMode}
-							<span class="px-2 py-0.5 bg-primary/10 text-primary rounded">{m.browse_manual_badge()}</span>
+							<span class="rounded border border-primary-soft bg-primary-tint px-1.5 py-0.5 font-mono text-[0.6875rem] text-primary">{m.browse_manual_badge()}</span>
 						{/if}
 						{#if forceRefresh}
-							<span class="px-2 py-0.5 bg-primary/10 text-primary rounded">{m.browse_force_badge()}</span>
+							<span class="rounded border border-primary-soft bg-primary-tint px-1.5 py-0.5 font-mono text-[0.6875rem] text-primary">{m.browse_force_badge()}</span>
 						{/if}
 						{#if showScraperSelector}
-							<span class="px-2 py-0.5 bg-primary/10 text-primary rounded">{m.browse_scrapers_count({ count: selectedScrapers.length })}</span>
+							<span class="rounded border border-primary-soft bg-primary-tint px-1.5 py-0.5 font-mono text-[0.6875rem] text-primary">{m.browse_scrapers_count({ count: selectedScrapers.length })}</span>
 						{/if}
 					</div>
 				{/if}
 
 				<!-- Action button -->
-				<Button onclick={manualScrapeMode ? continueToManual : startBatchScrape} disabled={selectedFiles.length === 0 || scraping}>
+				<Button onclick={manualScrapeMode ? continueToManual : startBatchScrape} disabled={selectedFiles.length === 0 || scraping || !applyPlan || planErrors.length > 0}>
 					{#snippet children()}
 						{#if manualScrapeMode && !scraping}
 							<FileEdit class="h-4 w-4 mr-2" />
 						{:else if scraping}
 							<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
-						{:else if operationMode === 'update'}
+						{:else if applyPlan?.video_operation === 'leave-in-place'}
 							<RefreshCw class="h-4 w-4 mr-2" />
 						{:else}
 							<Play class="h-4 w-4 mr-2" />
@@ -1045,7 +1120,7 @@
 							{m.browse_continue_to_manual()}
 						{:else if scraping}
 							{m.browse_starting()}
-						{:else if operationMode === 'update'}
+						{:else if applyPlan?.video_operation === 'leave-in-place'}
 							{m.browse_action_update({ count: selectedFiles.length })}
 						{:else}
 							{m.browse_action_scrape({ count: selectedFiles.length })}
@@ -1115,3 +1190,12 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+	@media (prefers-reduced-motion: reduce) {
+		.plan-motion {
+			animation: none !important;
+			transition: none !important;
+		}
+	}
+</style>

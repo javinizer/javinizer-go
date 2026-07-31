@@ -1,4 +1,5 @@
-import type { BatchScrapeRequest, OperationMode } from '$lib/api/types';
+import type { BatchApplyPlan, BatchScrapeRequest, OperationMode } from '$lib/api/types';
+import { normalizePersistedApplyPlan, projectLegacyPlan } from '$lib/apply-plan';
 
 export type InputClass = 'auto' | 'manual-id' | 'manual-url';
 
@@ -8,6 +9,7 @@ export interface ManualRow {
 }
 
 export interface ManualScrapeOptions {
+	apply_plan?: BatchApplyPlan;
 	destination?: string;
 	operation_mode?: OperationMode;
 	selected_scrapers?: string[];
@@ -68,17 +70,22 @@ export function buildManualScrapeRequest(
 			manual_inputs[row.filePath] = trimmed;
 		}
 	}
+	const plan = opts.apply_plan ? normalizePersistedApplyPlan(opts.apply_plan) : undefined;
+	const legacy = plan ? projectLegacyPlan(plan) : {
+		destination: opts.destination,
+		operation_mode: opts.operation_mode,
+		update: opts.update,
+		preset: opts.preset,
+		scalar_strategy: opts.scalar_strategy,
+		array_strategy: opts.array_strategy
+	};
 	return {
 		files,
 		strict: false,
 		force: opts.force ?? false,
-		destination: opts.destination,
-		update: opts.update,
+		...legacy,
+		apply_plan: plan,
 		selected_scrapers: opts.selected_scrapers,
-		preset: opts.preset,
-		scalar_strategy: opts.scalar_strategy,
-		array_strategy: opts.array_strategy,
-		operation_mode: opts.operation_mode,
 		manual_inputs: Object.keys(manual_inputs).length > 0 ? manual_inputs : undefined
 	};
 }

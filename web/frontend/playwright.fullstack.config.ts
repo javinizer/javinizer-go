@@ -119,6 +119,7 @@ export default defineConfig({
 			port: FRONTEND_PORT,
 			timeout: 60_000,
 			reuseExistingServer: !process.env.CI,
+			env: { ...process.env, JAVINIZER_SSR_API_URL: `http://127.0.0.1:${BACKEND_PORT}` },
 		},
 	],
 	projects: [

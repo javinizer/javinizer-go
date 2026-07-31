@@ -329,7 +329,7 @@ func TestApplyOrchImpl_Execute_DownloadPartialErrorPreservesPaths(t *testing.T) 
 		fs: afero.NewMemMapFs(),
 		downloader: &stubDownloader{
 			outcome: &downloader.DownloadOutcome{
-				DownloadedPaths: []string{"/dest/extrafanart/s1.jpg"},
+				CreatedPaths: []string{"/dest/extrafanart/s1.jpg"},
 			},
 			err: &downloader.DownloadPartialError{Attempted: 2, Succeeded: 0},
 		},
@@ -359,7 +359,7 @@ func TestApplyOrchImpl_Execute_DownloadSuccess(t *testing.T) {
 		fs: afero.NewMemMapFs(),
 		downloader: &stubDownloader{
 			outcome: &downloader.DownloadOutcome{
-				DownloadedPaths: []string{"/dest/poster.jpg"},
+				CreatedPaths: []string{"/dest/poster.jpg"},
 			},
 		},
 		nfo: &applyStubNFO{},
@@ -744,7 +744,7 @@ func TestApplyOrchImpl_Execute_MultipartDownload(t *testing.T) {
 		fs: afero.NewMemMapFs(),
 		downloader: &stubDownloader{
 			outcome: &downloader.DownloadOutcome{
-				DownloadedPaths: []string{"/dest/poster.jpg"},
+				CreatedPaths: []string{"/dest/poster.jpg"},
 			},
 		},
 		nfo: &applyStubNFO{},
@@ -859,7 +859,7 @@ func TestApplyOrchImpl_Execute_FullSuccessPath(t *testing.T) {
 		},
 		downloader: &stubDownloader{
 			outcome: &downloader.DownloadOutcome{
-				DownloadedPaths: []string{"/dest/TEST-001/poster.jpg"},
+				CreatedPaths: []string{"/dest/TEST-001/poster.jpg"},
 			},
 		},
 		nfoGen: &stubNFOGen{
@@ -905,7 +905,7 @@ func TestApplyOrchImpl_Execute_OrganizeResultChangesTargetDir(t *testing.T) {
 		},
 		downloader: &stubDownloader{
 			outcome: &downloader.DownloadOutcome{
-				DownloadedPaths: []string{"/actual-dest/poster.jpg"},
+				CreatedPaths: []string{"/actual-dest/poster.jpg"},
 			},
 		},
 		nfo: &applyStubNFO{},
@@ -1093,7 +1093,7 @@ func TestApplyOrchImpl_Execute_PartialFailureReportsCompletedSteps(t *testing.T)
 		fs: afero.NewMemMapFs(),
 		downloader: &stubDownloader{
 			outcome: &downloader.DownloadOutcome{
-				DownloadedPaths: []string{"/dest/poster.jpg"},
+				CreatedPaths: []string{"/dest/poster.jpg"},
 			},
 		},
 		nfo:       &applyStubNFO{},

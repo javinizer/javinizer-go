@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/eventlog"
@@ -230,7 +231,7 @@ func setJobStatus(job *worker.BatchJob, status models.JobStatus) {
 // This matches the production flow where lifecycle.go creates jobs with jobConfig.WF.
 // Tests that hit HTTP handler endpoints (rescrape, organize, etc.) should use this
 // instead of bare CreateJob, since handlers assume the job has a WF.
-func createJobWithWF(deps *core.APIDeps, cfg *config.Config, files []string) *worker.BatchJob {
+func createJobWithWF(deps *core.APIDeps, cfg *config.Config, files []string, plans ...*applyplan.Plan) *worker.BatchJob {
 	fc, _ := workflow.NewFactoryConfigFromRepos(cfg, deps.CoreDeps.ScraperRegistry, deps.CoreDeps.DB.Repositories())
 	factory, err := workflow.NewWorkflowFactory(fc)
 	if err != nil {
@@ -241,7 +242,12 @@ func createJobWithWF(deps *core.APIDeps, cfg *config.Config, files []string) *wo
 		panic(fmt.Sprintf("createJobWithWF: failed to create workflow: %v", err))
 	}
 
+	var plan *applyplan.Plan
+	if len(plans) > 0 {
+		plan = plans[0]
+	}
 	return deps.JobStore.CreateJobBatch(files, &worker.JobConfig{
+		ApplyPlan: plan,
 		BatchJobDeps: worker.BatchJobDeps{
 			WF: wf,
 			BatchCfg: worker.BatchJobConfig{

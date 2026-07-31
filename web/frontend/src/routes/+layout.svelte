@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import { QueryClientProvider } from '@tanstack/svelte-query';
@@ -20,21 +20,26 @@
 	import { bootstrapLocale } from '$lib/i18n/locale';
 	import { translateErrorCode } from '$lib/i18n/api-messages';
 	import { ApiError } from '$lib/api/clients/common';
+	import type { AuthStatusResponse } from '$lib/api/types';
+	import { BrowseBootstrapCookie, type BrowseBootstrap } from '$lib/browse-bootstrap';
 	import LocaleReconciler from '$lib/components/LocaleReconciler.svelte';
 	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
 	import '../app.css';
 
-	let { children } = $props();
+	let { children, data = {} }: { children?: import('svelte').Snippet; data?: { authStatus?: AuthStatusResponse | null; browseBootstrap?: BrowseBootstrap | null } } = $props();
+	const ssrState = untrack(() => { if (typeof window === "undefined") return null; return (window as unknown as { __JAVINIZER_SSR__?: { authStatus?: AuthStatusResponse | null; browseBootstrap?: BrowseBootstrap | null } }).__JAVINIZER_SSR__ ?? null; }); const initialAuthStatus = untrack(() => data.authStatus ?? ssrState?.authStatus ?? null);
 
 	let bgJobId = $derived(getBackgroundJobState().jobId);
 	let bgShowModal = $derived(getBackgroundJobState().showModal);
 
-	let authLoading = $state(true);
+	let authLoading = $state(!initialAuthStatus);
+	let showAuthLoading = $state(false);
+	let authLoadingTimer: number | undefined;
 	let authSubmitting = $state(false);
 	let authUnavailable = $state(false);
-	let authInitialized = $state(false);
-	let authAuthenticated = $state(false);
-	let authUsername = $state('');
+	let authInitialized = $state(initialAuthStatus?.initialized ?? false);
+	let authAuthenticated = $state(initialAuthStatus?.authenticated ?? false);
+	let authUsername = $state(initialAuthStatus?.username ?? '');
 	let authError = $state<string | null>(null);
 	let loginUsername = $state('');
 	let loginPassword = $state('');
@@ -81,6 +86,8 @@
 			authError = localizeApiError(error, m.auth_failed_status());
 		} finally {
 			authLoading = false;
+			showAuthLoading = false;
+			if (authLoadingTimer !== undefined) window.clearTimeout(authLoadingTimer);
 			syncWebSocketAuthState();
 		}
 	}
@@ -113,6 +120,7 @@
 			authError = localizeApiError(error, m.auth_failed_logout());
 		} finally {
 			BaseClient.setSessionID(null);
+			try { document.cookie = `${BrowseBootstrapCookie}=; Path=/; Max-Age=0`; } catch {}
 			authAuthenticated = false;
 			authUsername = '';
 			loginPassword = '';
@@ -122,6 +130,9 @@
 	}
 
 	onMount(() => {
+		authLoadingTimer = window.setTimeout(() => {
+			if (authLoading) showAuthLoading = true;
+		}, 500);
 		getThemeStore().initTheme();
 		// Bootstrap the interface locale before rendering the auth UI so the
 		// login/setup screens are localized. Reconciliation with the configured
@@ -136,6 +147,7 @@
 	// createConfigQuery call has access to the QueryClient context.
 
 	onDestroy(() => {
+		if (authLoadingTimer !== undefined) window.clearTimeout(authLoadingTimer);
 		getThemeStore().destroyTheme();
 		websocketStore.disconnect();
 	});
@@ -151,11 +163,13 @@
 {/if}
 
 {#if authLoading}
-	<div class="min-h-screen bg-background flex items-center justify-center px-4">
-		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm text-center">
-			<p class="text-lg font-semibold">{m.auth_checking()}</p>
+	{#if showAuthLoading}
+		<div class="min-h-screen bg-background flex items-center justify-center px-4">
+			<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm text-center">
+				<p class="text-lg font-semibold">{m.auth_checking()}</p>
+			</div>
 		</div>
-	</div>
+	{/if}
 {:else if authUnavailable}
 	<div class="min-h-screen bg-background flex items-center justify-center px-4 py-10">
 		<div class="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm space-y-4">
@@ -249,9 +263,8 @@
 		</div>
 	</div>
 {:else}
-	{#if browser}
-		<QueryClientProvider client={getQueryClient()}>
-			<LocaleReconciler getAuthenticated={() => authAuthenticated} />
+	<QueryClientProvider client={getQueryClient()}>
+		{#if browser}<LocaleReconciler getAuthenticated={() => authAuthenticated} />{/if}
 			<div class="min-h-screen bg-background">
 				<Navigation authenticated={authAuthenticated} username={authUsername} onLogout={handleLogout} />
 				<main class="route-container">
@@ -277,21 +290,7 @@
 				/>
 			{/if}
 		</div>
-		</QueryClientProvider>
-	{:else}
-		<div class="min-h-screen bg-background">
-			<Navigation authenticated={authAuthenticated} username={authUsername} onLogout={handleLogout} />
-			<main class="route-container">
-				{#key page.url.pathname}
-					<div class="route-content">
-						{@render children?.()}
-					</div>
-				{/key}
-			</main>
-			<ToastContainer />
-			<DialogContainer />
-		</div>
-	{/if}
+	</QueryClientProvider>
 {/if}
 
 <style>

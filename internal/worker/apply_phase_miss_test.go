@@ -457,6 +457,17 @@ func TestApplyPhase_Run_NFOEnabledFalseOverridesGenerateNFO(t *testing.T) {
 	})
 
 	assert.Equal(t, 1, wf.getApplyCalled())
+	assert.False(t, wf.getLastCmd().GenerateNFO)
+
+	wf.applyCalled = 0
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+		GenerateNFO:     true,
+		ForceNFO:        true,
+	})
+	assert.True(t, wf.getLastCmd().GenerateNFO)
 }
 
 func TestApplyPhase_Run_ApplyResultNilMovie(t *testing.T) {

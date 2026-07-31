@@ -459,7 +459,7 @@ func TestOrganizeJob_DeniedDirectory(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 403, w.Code)
-	assert.Contains(t, w.Body.String(), "Access denied")
+	assert.Contains(t, w.Body.String(), "access denied")
 }
 
 func TestOrganizeJob_InvalidBody(t *testing.T) {
@@ -1077,7 +1077,7 @@ func TestOrganizeJob_Miss3_PreviewModeRejected(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 400, w.Code)
-	assert.Contains(t, w.Body.String(), "Preview mode")
+	assert.Contains(t, w.Body.String(), "preview mode")
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,9 @@ import type {
 	CompletenessConfig,
 	ExistingNFOResponse,
 	FieldDifference,
+	ScalarMergeStrategy,
+	ArrayMergeStrategy,
+	ReviewApplyOverrides,
 } from '$lib/api/types';
 import { toastStore } from '$lib/stores/toast';
 import { confirmDialog } from '$lib/stores/dialog.svelte';
@@ -57,6 +60,72 @@ interface MovieGroup {
 	primaryResult: FileResult;
 }
 
+export type ReviewMergePreset = 'conservative' | 'gap-fill' | 'aggressive';
+
+export interface ReviewApplyControlState {
+	destinationPath: string;
+	forceOverwrite: boolean;
+	preserveNfo: boolean;
+	skipNfo: boolean;
+	skipDownload: boolean;
+	overwriteExistingMedia: boolean;
+	applyPreset?: ReviewMergePreset;
+	applyScalarStrategy: ScalarMergeStrategy;
+	applyArrayStrategy: ArrayMergeStrategy;
+}
+
+export function hydrateReviewApplyControls(job: BatchJobResponse): ReviewApplyControlState {
+	const plan = job.apply_plan;
+	return {
+		destinationPath: plan ? (plan.destination ?? '') : (job.destination ?? ''),
+		forceOverwrite: false,
+		preserveNfo: false,
+		skipNfo: plan?.nfo_output === 'skip',
+		skipDownload: plan?.media_policy === 'skip',
+		overwriteExistingMedia: plan?.media_policy === 'replace',
+		applyPreset: plan?.merge?.source_preset,
+		applyScalarStrategy: plan?.merge?.scalar_strategy ?? 'prefer-nfo',
+		applyArrayStrategy: plan?.merge?.array_strategy ?? 'merge'
+	};
+}
+
+export function shouldHydrateReviewApplyControls(hydratedJobId: string | null, job: BatchJobResponse, routeJobId: string): boolean {
+	return job.id === routeJobId && hydratedJobId !== job.id;
+}
+
+export function withCustomReviewMergeStrategy(
+	state: ReviewApplyControlState,
+	change: { scalar?: ScalarMergeStrategy; array?: ArrayMergeStrategy }
+): ReviewApplyControlState {
+	return {
+		...state,
+		applyScalarStrategy: change.scalar ?? state.applyScalarStrategy,
+		applyArrayStrategy: change.array ?? state.applyArrayStrategy,
+		applyPreset: undefined
+	};
+}
+
+export function buildReviewApplyOverrides(
+	state: ReviewApplyControlState,
+	isUpdateMode: boolean,
+	operationMode: ReviewApplyOverrides['operation_mode']
+): ReviewApplyOverrides {
+	const overrides: ReviewApplyOverrides = {
+		operation_mode: operationMode,
+		destination: state.destinationPath,
+		skip_nfo: state.skipNfo,
+		skip_download: state.skipDownload,
+		overwrite_existing_media: state.overwriteExistingMedia
+	};
+	if (isUpdateMode) {
+		overrides.preset = state.applyPreset;
+		overrides.scalar_strategy = state.applyScalarStrategy;
+		overrides.array_strategy = state.applyArrayStrategy;
+		overrides.force_overwrite = state.forceOverwrite;
+		overrides.preserve_nfo = state.preserveNfo;
+	}
+	return overrides;
+}
 export function createReviewState(pageStore: Page) {
 	let jobId = $derived(pageStore.params.jobId as string);
 
@@ -65,7 +134,7 @@ export function createReviewState(pageStore: Page) {
 	const jobQuery = createQuery(() => ({
 		queryKey: ['batch-job', jobId],
 		queryFn: () => apiClient.getBatchJob(jobId, true),
-		placeholderData: (prev) => prev,
+		placeholderData: (prev) => prev?.id === jobId ? prev : undefined,
 	}));
 
 	let job = $state<BatchJobResponse | null>(null);
@@ -80,7 +149,7 @@ export function createReviewState(pageStore: Page) {
 				skipJobSync = false;
 				return;
 			}
-			if (data) {
+			if (data?.id === jobId) {
 				job = JSON.parse(JSON.stringify(data));
 			} else if (isPending && !isPlaceholder) {
 				job = null;
@@ -88,7 +157,7 @@ export function createReviewState(pageStore: Page) {
 		});
 	});
 
-	let loading = $derived(jobQuery.isPending);
+	let loading = $derived(jobQuery.isPending || !job || job.id !== jobId);
 	let error = $derived(jobQuery.error?.message ?? null);
 
 	const configQuery = createConfigQuery();
@@ -154,6 +223,13 @@ export function createReviewState(pageStore: Page) {
 	let preserveNfo = $state(false);
 	let skipNfo = $state(false);
 	let skipDownload = $state(false);
+	let overwriteExistingMedia = $state(false);
+	let applyScalarStrategy = $state<ScalarMergeStrategy>('prefer-nfo');
+	let applyArrayStrategy = $state<ArrayMergeStrategy>('merge');
+	let applyPreset = $state<'conservative' | 'gap-fill' | 'aggressive' | undefined>(undefined);
+	let hydratedApplyPlanJobId: string | null = null;
+	let activeApplyJobId: string | null = null;
+	let applyInvalid = $derived(isUpdateMode && skipNfo && skipDownload);
 
 	let showImagePanelContent = $state(true);
 	let showAllPreviewScreenshots = $state(false);
@@ -174,14 +250,40 @@ export function createReviewState(pageStore: Page) {
 	let posterCropStates = new SvelteMap<string, PosterCropState>();
 
 	$effect(() => {
+		const currentJobId = jobId;
+		if (activeApplyJobId === currentJobId) return;
+		untrack(() => {
+			job = null;
+			destinationPath = '';
+			forceOverwrite = false;
+			preserveNfo = false;
+			skipNfo = false;
+			skipDownload = false;
+			overwriteExistingMedia = false;
+			applyPreset = undefined;
+			applyScalarStrategy = 'prefer-nfo';
+			applyArrayStrategy = 'merge';
+			hydratedApplyPlanJobId = null;
+			activeApplyJobId = currentJobId;
+		});
+	});
+
+	$effect(() => {
 		const jobData = jobQuery.data;
-		if (jobData) {
-			untrack(() => {
-				if (jobData.destination && !destinationPath) {
-					destinationPath = jobData.destination;
-				}
-			});
-		}
+		if (!jobData || !shouldHydrateReviewApplyControls(hydratedApplyPlanJobId, jobData, jobId)) return;
+		untrack(() => {
+			const controls = hydrateReviewApplyControls(jobData);
+			destinationPath = controls.destinationPath;
+			forceOverwrite = controls.forceOverwrite;
+			preserveNfo = controls.preserveNfo;
+			skipNfo = controls.skipNfo;
+			skipDownload = controls.skipDownload;
+			overwriteExistingMedia = controls.overwriteExistingMedia;
+			applyPreset = controls.applyPreset;
+			applyScalarStrategy = controls.applyScalarStrategy;
+			applyArrayStrategy = controls.applyArrayStrategy;
+			hydratedApplyPlanJobId = jobData.id;
+		});
 	});
 
 	let availableScrapers: Scraper[] = $state([]);
@@ -302,6 +404,11 @@ export function createReviewState(pageStore: Page) {
 	});
 
 	function getEffectiveOperationMode(): string {
+		const planned = job?.apply_plan?.video_operation;
+		if (planned === 'organize') return 'organize';
+		if (planned === 'rename-in-place') return 'in-place';
+		if (planned === 'rename-file') return 'in-place-norenamefolder';
+		if (planned === 'leave-in-place') return 'metadata-artwork';
 		const configured = job?.operation_mode_override || config?.output?.operation_mode || 'organize';
 		if (configured === 'organize') {
 			const srcDir = currentResult?.file_path
@@ -335,6 +442,7 @@ export function createReviewState(pageStore: Page) {
 	}
 
 	const canOrganize = $derived(getCanOrganize());
+	const canPreviewOutput = $derived(canOrganize || !!job?.apply_plan);
 
 	let previewEnabled = $derived.by(() => {
 		if (!currentMovie) return false;
@@ -363,6 +471,12 @@ export function createReviewState(pageStore: Page) {
 			organizeOperation,
 			skipNfo,
 			skipDownload,
+			overwriteExistingMedia,
+			forceOverwrite,
+			preserveNfo,
+			applyPreset,
+			applyScalarStrategy,
+			applyArrayStrategy,
 			editedMovieKey,
 		],
 		queryFn: () => {
@@ -393,6 +507,7 @@ export function createReviewState(pageStore: Page) {
 					| 'preview',
 				skip_nfo: skipNfo,
 				skip_download: skipDownload,
+				overrides: buildReviewOverrides(),
 				movie: movieOverride,
 			});
 		},
@@ -1016,16 +1131,26 @@ export function createReviewState(pageStore: Page) {
 		await rescrapeController.executeRescrape(mode);
 	}
 
+	function buildReviewOverrides(): ReviewApplyOverrides {
+		return buildReviewApplyOverrides({
+			destinationPath,
+			forceOverwrite,
+			preserveNfo,
+			skipNfo,
+			skipDownload,
+			overwriteExistingMedia,
+			applyPreset,
+			applyScalarStrategy,
+			applyArrayStrategy
+		}, isUpdateMode, getEffectiveOperationMode() as ReviewApplyOverrides['operation_mode']);
+	}
+
 	async function organizeAll() {
-		await organizeController.organizeAll(skipNfo, skipDownload);
+		await organizeController.organizeAll(skipNfo, skipDownload, buildReviewOverrides());
 	}
 
 	async function updateAll() {
-		const options: UpdateRequest = {};
-		if (forceOverwrite) options.force_overwrite = true;
-		if (preserveNfo) options.preserve_nfo = true;
-		if (skipNfo) options.skip_nfo = true;
-		if (skipDownload) options.skip_download = true;
+		const options: UpdateRequest = { overrides: buildReviewOverrides() };
 		await organizeController.updateAll(options);
 	}
 
@@ -1412,12 +1537,14 @@ export function createReviewState(pageStore: Page) {
 		},
 		set forceOverwrite(v) {
 			forceOverwrite = v;
+			if (v) preserveNfo = false;
 		},
 		get preserveNfo() {
 			return preserveNfo;
 		},
 		set preserveNfo(v) {
 			preserveNfo = v;
+			if (v) forceOverwrite = false;
 		},
 		get skipNfo() {
 			return skipNfo;
@@ -1430,7 +1557,22 @@ export function createReviewState(pageStore: Page) {
 		},
 		set skipDownload(v) {
 			skipDownload = v;
+			if (v) overwriteExistingMedia = false;
 		},
+		get overwriteExistingMedia() {
+			return overwriteExistingMedia;
+		},
+		set overwriteExistingMedia(v) {
+			overwriteExistingMedia = v;
+			if (v) skipDownload = false;
+		},
+		get applyPreset() { return applyPreset; },
+		set applyPreset(v) { applyPreset = v; },
+		get applyScalarStrategy() { return applyScalarStrategy; },
+		set applyScalarStrategy(v) { applyScalarStrategy = v; applyPreset = undefined; },
+		get applyArrayStrategy() { return applyArrayStrategy; },
+		set applyArrayStrategy(v) { applyArrayStrategy = v; applyPreset = undefined; },
+		get usesLegacyApplyDefaults() { return !job?.apply_plan; },
 		get showImagePanelContent() {
 			return showImagePanelContent;
 		},
@@ -1626,6 +1768,8 @@ export function createReviewState(pageStore: Page) {
 		get canOrganize() {
 			return canOrganize;
 		},
+		get canPreviewOutput() { return canPreviewOutput; },
+		get applyInvalid() { return applyInvalid; },
 		posterFromUrlMutation: mutations.posterFromUrlMutation,
 		posterCropMutation: mutations.posterCropMutation,
 		get posterCropSaving() { return mutations.posterCropMutation.isPending || cropApplying; },

@@ -40,6 +40,7 @@
 		triggerScan?: number;
 		whitelistPaths?: string[];
 		scope?: 'operation' | 'configure';
+		initialData?: BrowseResponse;
 	}
 
 	let {
@@ -55,20 +56,39 @@
 		triggerScan = 0,
 		whitelistPaths = [],
 		scope = 'operation',
+		initialData,
 	}: Props = $props();
 
-	let currentPath = $state('');
-	let parentPath = $state('');
-	let items: FileInfo[] = $state([]);
+	let currentPath = $state(untrack(() => initialData?.current_path ?? initialPath));
+	let parentPath = $state(untrack(() => initialData?.parent_path ?? ''));
+	let items: FileInfo[] = $state(untrack(() => initialData?.items ?? []));
 
 	let selectedFilesSet = $derived(new Set(externalSelectedFiles));
-	let loading = $state(false);
+	let loading = $state(untrack(() => initialData === undefined && initialPath !== ''));
 	let error = $state<string | null>(null);
 	let filterText = $state('');
 	let pathParts = $derived(splitPath(currentPath));
 
 	// Editable path input state
-	let pathInputValue = $state('');
+	let pathInputValue = $state(untrack(() => initialData?.current_path ?? initialPath));
+	let skipInitialBrowse = untrack(() => initialData !== undefined);
+
+	untrack(() => {
+		if (!initialData) return;
+		const presentPaths = new Set(initialData.items.filter((i) => !i.is_dir).map((i) => i.path));
+		const normDir = (d: string): string => d.replace(/[\\/]+$/, '') || d;
+		const isChildOfCurrent = (p: string): boolean => {
+			const parent = p.substring(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')));
+			return normDir(parent) === normDir(initialData.current_path);
+		};
+		const pruned = externalSelectedFiles.filter(
+			(p) => !isChildOfCurrent(p) || presentPaths.has(p)
+		);
+		if (pruned.length !== externalSelectedFiles.length) {
+			externalSelectedFiles = pruned;
+			onFileSelect?.(externalSelectedFiles);
+		}
+	});
 
 	// Sync path state when initialPath changes
 	$effect(() => {
@@ -185,9 +205,12 @@
 
 	// Watch for changes to initialPath and browse when it's set
 	$effect(() => {
-		if (initialPath) {
-			browse(initialPath);
+		if (!initialPath) return;
+		if (skipInitialBrowse) {
+			skipInitialBrowse = false;
+			return;
 		}
+		browse(initialPath);
 	});
 
 	async function browse(path: string) {
@@ -485,10 +508,10 @@
 
 	<!-- Sort Controls (hidden in folderOnly mode) -->
 	{#if items.length > 0 && !folderOnly}
-		<div class="mb-4 pb-4 border-b flex items-center justify-between gap-4">
-			<div class="flex items-center gap-2">
+		<div class="mb-4 flex flex-col items-stretch gap-3 border-b pb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+			<div class="flex flex-wrap items-center gap-2">
 				<span class="text-xs text-muted-foreground font-medium">{m.filebrowser_sort_by()}</span>
-				<div class="flex items-center gap-1">
+				<div class="flex flex-wrap items-center gap-1">
 					<button
 						onclick={() => toggleSort('name')}
 						class="px-2 py-1 text-xs rounded transition-colors flex items-center gap-1
@@ -538,13 +561,13 @@
 			</div>
 			<!-- Selection controls -->
 			{#if !folderOnly && (selectableFileCount > 0 || folderCount > 0)}
-				<div class="flex items-center justify-between gap-3">
+				<div class="flex flex-wrap items-center justify-between gap-2 sm:justify-end sm:gap-3">
 					<div class="flex items-center gap-3">
 						{#if visibleSelectedCount > 0}
 							<span class="text-xs text-primary font-medium">{m.filebrowser_selected_count({ count: visibleSelectedCount })}</span>
 						{/if}
 					</div>
-					<div class="flex items-center gap-2">
+					<div class="flex flex-wrap items-center gap-2">
 						<Button variant="outline" size="sm" onclick={selectAll} disabled={selectableFileCount === 0 && folderCount === 0}>
 							{#snippet children()}
 								<CheckSquare class="h-3.5 w-3.5 mr-1.5" />

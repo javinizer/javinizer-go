@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
@@ -32,6 +33,7 @@ func TestEncodeDecode_RoundTrip(t *testing.T) {
 		Destination:           "/output",
 		TempDir:               "/tmp/job",
 		OperationModeOverride: operationmode.OperationModeOrganize,
+		ApplyPlan:             applyplan.Default(applyplan.VideoOperationLeaveInPlace, ""),
 		StartedAt:             time.Date(2026, 3, 1, 11, 0, 0, 0, time.UTC),
 		CompletedAt:           &completedAt,
 		OrganizedAt:           &organizedAt,
@@ -55,6 +57,7 @@ func TestEncodeDecode_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.Destination, decoded.Destination)
 	assert.Equal(t, original.TempDir, decoded.TempDir)
 	assert.Equal(t, original.OperationModeOverride, decoded.OperationModeOverride)
+	assert.Equal(t, original.ApplyPlan, decoded.ApplyPlan)
 	assert.Equal(t, original.StartedAt, decoded.StartedAt)
 	require.NotNil(t, decoded.CompletedAt)
 	assert.Equal(t, *original.CompletedAt, *decoded.CompletedAt)
@@ -66,6 +69,34 @@ func TestEncodeDecode_RoundTrip(t *testing.T) {
 	assert.Equal(t, "ABC-001", decoded.Results["file1.mp4"].Movie.ID)
 	assert.Equal(t, "r18dev", decoded.Provenance["file1.mp4"].FieldSources["title"])
 	assert.Equal(t, "ABC-001", decoded.FileMatchInfo["file1.mp4"].MovieID)
+}
+
+func TestApplyPlanCodecCases(t *testing.T) {
+	t.Run("nil legacy plan", func(t *testing.T) {
+		dbJob, err := Encode(Snapshot{ID: "legacy"})
+		require.NoError(t, err)
+		assert.Nil(t, dbJob.ApplyPlan)
+		decoded, errs := Decode(dbJob)
+		assert.Empty(t, errs)
+		assert.Nil(t, decoded.ApplyPlan)
+	})
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"malformed", `{`},
+		{"unknown version", `{"version":2,"video_operation":"leave-in-place","nfo_output":"write","media_policy":"missing","merge":{"scalar_strategy":"prefer-nfo","array_strategy":"merge"}}`},
+		{"invalid enum", `{"version":1,"video_operation":"bad","nfo_output":"write","media_policy":"missing"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := tc.raw
+			decoded, errs := Decode(&models.Job{ID: tc.name, ApplyPlan: &raw})
+			assert.Len(t, errs, 1)
+			assert.Nil(t, decoded.ApplyPlan)
+			assert.Equal(t, tc.name, decoded.ID)
+		})
+	}
 }
 
 func TestEncode_ResultsColumnIsEnvelope(t *testing.T) {

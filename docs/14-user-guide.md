@@ -46,6 +46,7 @@ Update Metadata merges scraped data into the existing NFO on disk. The merge opt
 | `preset` | `conservative`, `gap-fill`, `aggressive` | Convenience preset that overrides `scalar_strategy`/`array_strategy`. `conservative` = preserve-existing + merge; `gap-fill` = fill-missing-only + merge; `aggressive` = prefer-scraper + replace |
 | `preserve_nfo` | `true` / `false` | Never overwrite existing NFO fields, only add missing data (most conservative) |
 | `force_overwrite` | `true` / `false` | Ignore the existing NFO and use only scraper data (destructive) |
+| `overwrite_existing_media` | `true` / `false` | Re-download and atomically replace existing enabled media using freshly scraped URLs; default `false` |
 
 ### What each mode writes to disk
 
@@ -91,6 +92,10 @@ The single-phase workflow used by the web UI's "Update Metadata" button:
 
 1. **Scrape + merge + write** — Fetch metadata, merge with the existing NFO file on disk, save to database, write updated NFO, and download artwork
 
+By default, existing media files are skipped. To refresh artwork during an update, use `--overwrite-existing-media` with the CLI or send `"overwrite_existing_media": true` in the update batch API request. This re-downloads all enabled media types (covers, posters, screenshots, trailers, and actress images) from the freshly scraped URLs. Replacement is staged and performed atomically; if the download or replacement fails, the existing artwork is preserved.
+
+This option defaults to `false` and applies to Update Metadata only. It is distinct from `force_overwrite`, which controls NFO merging, and `force-refresh`, which controls the scraper cache. Media downloads use freshly scraped URLs regardless of the NFO merge strategy.
+
 This is designed for files that already have an NFO you want to update rather than replace. The merge strategies let you control how existing field values are preserved or overwritten.
 
 ## Web UI Flows
@@ -99,11 +104,7 @@ The web UI (`javinizer web`) drives the batch workflows through a few routes:
 
 ### Browse (`/browse`)
 
-The primary scraping workspace (the **Scrape** item in the navigation; the post-login landing page is the dashboard at `/`). You pick a directory, select files, choose the operation mode (Scrape & Organize vs Update Metadata), and start a batch.
-
-- **Scrape & Organize** — starts a batch scrape job and navigates to `/review` for the review/organize flow.
-- **Update Metadata** — starts a batch in update mode (merge metadata into existing NFO, no file moves).
-- **Manual Scrape** — toggle the "Manual Scrape" checkbox before starting to override the matcher per file. Instead of scraping immediately, the selected files and settings are carried over to `/manual`.
+The primary scraping workspace (the **Scrape** item in the navigation; the post-login landing page is the dashboard at `/`). Select files, then build one explicit action plan. The operation never changes implicitly because a destination happens to match a source directory.\n\n| Video operation | Destination | NFO | Media | Existing metadata |\n|---|---|---|---|---|\n| **Organize into another location** | Required | Write or skip | Missing or skip | Scraper result |\n| **Rename in place** | Not used | Write or skip | Missing or skip | Scraper result |\n| **Rename video file only** | Not used | Write or skip | Missing or skip | Scraper result |\n| **Leave video files in place** | Not used | Write or skip | Missing, replace, or skip | Preset or custom scalar/array merge |\n\nThe “This operation will…” summary and sticky compact summary are generated from that same plan. A leave-in-place plan cannot skip both NFO and media because that would have no output; explicit rename operations may skip both sidecar outputs because renaming is still an effect.\n\n- **Provide IDs or URLs manually** carries the complete read-only plan to `/manual`; only per-file IDs/URLs, force refresh, and scraper selection remain editable there.\n- **Force refresh** controls scraper cache usage and does not change output policy.\n- **Manual scraper selection** controls scrape sources and does not change the apply plan.
 
 ### Manual Scrape (`/manual`)
 
@@ -116,12 +117,13 @@ The post-scrape review screen for a batch job. Tabs:
 - **Movies** — edit metadata per result (title, actresses, genres, poster crop, poster-from-URL), exclude individual movies, preview the organize path, and re-scrape a single movie (with merge strategies).
 - **Failed** — files that could not be matched or scraped, with re-scrape options.
 
-The action bar runs the organize (or update) step for the job using the selected operation mode, with real-time progress streamed over the `/ws/progress` WebSocket.
+The operation selected on Browse is read-only on Review. Destination, NFO, media, and supported merge policies can be adjusted before applying. Preview and apply resolve the same persisted plan and Review overrides, so the displayed paths and output policies are the ones executed. The action bar runs the organize or update endpoint for the plan family, with real-time progress streamed over `/ws/progress`.
+
+Replacing existing media is destructive and is intentionally available only for **Leave video files in place**. Review shows it as a safety-gated option. Replacement is atomic, but media overwrites are not covered by normal organize rollback and should be treated as non-revertible.
 
 ### Typical paths
 
 ```
-/browse  ──Scrape & Organize──▶  /review/[jobId]  ──organize──▶  done
-/browse  ──Manual Scrape──▶  /manual  ──submit──▶  /review/[jobId]  ──organize──▶  done
-/browse  ──Update Metadata──▶  /review/[jobId]  ──update──▶  done
+/browse  ──choose operation──▶  /review/[jobId]  ──preview/apply──▶  done
+/browse  ──provide IDs or URLs──▶  /manual  ──submit same plan──▶  /review/[jobId]  ──apply──▶  done
 ```

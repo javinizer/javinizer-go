@@ -4,6 +4,7 @@ import type {
 	OperationMode,
 	ProgressMessage,
 	UpdateRequest,
+	ReviewApplyOverrides,
 } from '$lib/api/types';
 
 export type OrganizeOperation = 'move' | 'copy' | 'hardlink' | 'softlink';
@@ -47,6 +48,7 @@ interface OrganizeControllerDeps {
 				operation_mode?: OperationMode;
 				skip_nfo?: boolean;
 				skip_download?: boolean;
+				overrides?: ReviewApplyOverrides;
 			},
 		) => Promise<unknown>;
 		updateBatchJob: (jobId: string, request?: UpdateRequest) => Promise<unknown>;
@@ -234,8 +236,9 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	let lastUpdateOptions: UpdateRequest | undefined;
 	let lastSkipNfo = false;
 	let lastSkipDownload = false;
+	let lastOrganizeOverrides: ReviewApplyOverrides | undefined;
 
-	async function organizeAll(skipNfo?: boolean, skipDownload?: boolean) {
+	async function organizeAll(skipNfo?: boolean, skipDownload?: boolean, overrides?: ReviewApplyOverrides) {
 		const effectiveMode = deps.getOperationMode();
 		const needsDestination = effectiveMode === 'organize';
 		if (needsDestination && !deps.getDestinationPath().trim()) {
@@ -245,6 +248,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 		lastSkipNfo = skipNfo ?? false;
 		lastSkipDownload = skipDownload ?? false;
+		lastOrganizeOverrides = overrides;
 
 		const { copyOnly, linkMode } = getOrganizeRequestOptions(deps.getOrganizeOperation());
 		prepareOrganizeRun();
@@ -261,6 +265,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				operation_mode: deps.getOperationMode() as OperationMode,
 				skip_nfo: skipNfo || false,
 				skip_download: skipDownload || false,
+				overrides,
 			});
 
 			startOrganizeCompletionPolling();
@@ -307,7 +312,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		if (deps.getIsUpdateMode()) {
 			await updateAll(lastUpdateOptions);
 		} else {
-			await organizeAll(lastSkipNfo, lastSkipDownload);
+			await organizeAll(lastSkipNfo, lastSkipDownload, lastOrganizeOverrides);
 		}
 	}
 

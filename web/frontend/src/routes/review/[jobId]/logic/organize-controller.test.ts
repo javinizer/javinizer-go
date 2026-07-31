@@ -26,6 +26,7 @@ interface DepsOverrides {
 	completionDelayMs?: number;
 	redirectDelayMs?: number;
 	organizeBatchJob?: typeof defaultOrganizeBatchJob;
+	updateBatchJob?: (jobId: string, request?: UpdateRequest) => Promise<void>;
 }
 
 const defaultOrganizeBatchJob = vi.fn().mockResolvedValue(undefined);
@@ -95,7 +96,7 @@ function makeDeps(overrides: DepsOverrides = {}) {
 				return currentJob ?? makeJob('organizing');
 			},
 			organizeBatchJob: overrides.organizeBatchJob ?? defaultOrganizeBatchJob,
-			updateBatchJob: async (_jobId: string, _request?: UpdateRequest) => undefined,
+			updateBatchJob: overrides.updateBatchJob ?? (async (_jobId: string, _request?: UpdateRequest) => undefined),
 		},
 		pollIntervalMs: 5,
 		pollTimeoutMs: 60_000,
@@ -241,5 +242,23 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 
 		expect(calls.setOrganizeProgress).toContain(100);
 		controller.cleanup();
+	});
+
+	describe('update payloads', () => {
+		it('passes overwrite_existing_media to the update API', async () => {
+			const requests: UpdateRequest[] = [];
+			const { deps } = makeDeps({
+				isUpdateMode: true,
+				updateBatchJob: async (_jobId, request) => {
+					if (request) requests.push(request);
+				},
+			});
+			const controller = createOrganizeController(deps);
+
+			await controller.updateAll({ overwrite_existing_media: true });
+
+			expect(requests).toEqual([{ overwrite_existing_media: true }]);
+			controller.cleanup();
+		});
 	});
 });

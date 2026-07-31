@@ -227,6 +227,18 @@ func buildMatcher(matchCfg *matcher.Config) (matcher.MatcherInterface, error) {
 }
 
 // buildOrganizer constructs an organizer from its narrow config and dependencies.
+func newForcedRenameStrategyResolver(fs afero.Fs, orgCfg *organizer.Config, m matcher.MatcherInterface, engine *template.Engine) StrategyResolverFunc {
+	return func(operationMode operationmode.OperationMode) organizer.OperationStrategy {
+		strategyCfg := organizer.Config{OperationMode: operationMode, RenameFile: true}
+		if orgCfg != nil {
+			strategyCfg = *orgCfg
+			strategyCfg.OperationMode = operationMode
+			strategyCfg.RenameFile = true
+		}
+		return organizer.ResolveStrategy(fs, &strategyCfg, m, engine)
+	}
+}
+
 func buildOrganizer(fs afero.Fs, orgCfg *organizer.Config, engine *template.Engine, m matcher.MatcherInterface) organizer.OrganizerInterface {
 	return organizer.NewOrganizer(fs, orgCfg, engine, m)
 }
@@ -295,12 +307,13 @@ func buildOrchestratorConfigs(cfg *config.Config, dcs domainConfigs, fs afero.Fs
 		PathCfg: PreviewPathConfig{
 			MediaFormatConfig: dcs.orgCfg.MediaFormatConfig,
 		},
-		ResolveStrategy: newStrategyResolver(fs, dcs.orgCfg, fileMatcher, sharedEngine),
-		NFOEnabled:      cfg.Metadata.NFO.Feature.Enabled,
-		NFOPerFile:      dcs.nfoCfg.PerFile,
-		DisplayTitle:    cfg.Metadata.NFO.Format.DisplayTitle,
-		OpMode:          cfg.Output.GetOperationMode(),
-		MaxPathLength:   cfg.Output.Template.MaxPathLength,
+		ResolveStrategy:             newStrategyResolver(fs, dcs.orgCfg, fileMatcher, sharedEngine),
+		ResolveForcedRenameStrategy: newForcedRenameStrategyResolver(fs, dcs.orgCfg, fileMatcher, sharedEngine),
+		NFOEnabled:                  cfg.Metadata.NFO.Feature.Enabled,
+		NFOPerFile:                  dcs.nfoCfg.PerFile,
+		DisplayTitle:                cfg.Metadata.NFO.Format.DisplayTitle,
+		OpMode:                      cfg.Output.GetOperationMode(),
+		MaxPathLength:               cfg.Output.Template.MaxPathLength,
 		Downloads: downloadToggles{
 			Poster:      cfg.Output.Download.DownloadPoster,
 			Cover:       cfg.Output.Download.DownloadCover,

@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterAll, beforeAll } from 'vitest';
-import { render, fireEvent, waitFor } from '@testing-library/svelte';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll, beforeAll } from 'vitest';
+import { cleanup, render, fireEvent, waitFor, within } from '@testing-library/svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import QueryClientWrapper from '$lib/components/QueryClientWrapper.svelte';
 import BrowsePage from './+page.svelte';
 import { goto as mockGoto } from '$app/navigation';
+import { decodeBrowseBootstrap } from '$lib/browse-bootstrap';
 
 // STORAGE_KEY must mirror +page.svelte exactly. A Back round-trip from /manual
 // preserves /browse selection because this snapshot is re-read on mount.
@@ -35,6 +36,10 @@ beforeAll(() => {
 
 // jsdom lacks the Web Animations API; +page.svelte uses animate:flip and
 // transition:fade/slide on mount-rendered blocks, so polyfill animate().
+// jsdom lacks matchMedia — Svelte's MediaQuery (used for prefers-reduced-motion) needs it.
+if (!window.matchMedia) {
+	window.matchMedia = (q: string) => ({ matches: false, media: q, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false });
+}
 const savedAnimate = window.Element.prototype.animate;
 window.Element.prototype.animate = function () {
 	return {
@@ -113,12 +118,14 @@ function mockBrowseResponse(path: string) {
 	};
 }
 
-function renderPage() {
-	return render(BrowsePage, {}, {
+function renderPage(props: Record<string, unknown> = {}) {
+	return render(BrowsePage, props, {
 		wrapper: QueryClientWrapper,
 		wrapperProps: { client }
 	});
 }
+
+afterEach(() => cleanup());
 
 beforeEach(() => {
 	vi.clearAllMocks();
@@ -135,6 +142,50 @@ beforeEach(() => {
 });
 
 describe('/browse D4 — sessionStorage hydrate + Manual Scrape checkbox', () => {
+	it('migrates a legacy update snapshot without treating its hidden organize value as contradictory', async () => {
+		sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify({ operationMode: 'update', operationModeOverride: 'organize', operationModeOverrideTouched: false, selectedFiles: [], selectedScrapers: [], scalarStrategy: 'prefer-nfo', arrayStrategy: 'merge' }));
+		const { findByText } = renderPage();
+		expect(await findByText('Leave video files in place', { exact: true })).toBeTruthy();
+	});
+
+	it('uses configured effective mode for an untouched legacy scrape snapshot', async () => {
+		apiClient.getConfig.mockResolvedValue({ ...mockConfig(), output: { ...mockConfig().output, operation_mode: 'in-place' } } as never);
+		localStorage.setItem('javinizer_input_path', '/library');
+		localStorage.setItem('javinizer_output_path', '/other');
+		sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify({ operationMode: 'scrape', operationModeOverride: 'organize', operationModeOverrideTouched: false, selectedFiles: [], selectedScrapers: [] }));
+		const { findByText } = renderPage();
+		expect(await findByText('Rename in place', { exact: true })).toBeTruthy();
+	});
+
+	it('restores the legacy implied rename-file mode for same-source output', async () => {
+		localStorage.setItem('javinizer_input_path', '/library');
+		localStorage.setItem('javinizer_output_path', '/library');
+		sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify({ operationMode: 'scrape', operationModeOverride: 'organize', operationModeOverrideTouched: false, selectedFiles: [], selectedScrapers: [] }));
+		const { findByText } = renderPage();
+		expect(await findByText('Rename video file only', { exact: true })).toBeTruthy();
+	});
+	it('hydrates the canonical organize destination instead of stale local storage', async () => {
+		localStorage.setItem('javinizer_output_path', '/stale');
+		sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify({
+			version: 2,
+			applyPlan: { version: 1, video_operation: 'organize', destination: '/persisted', nfo_output: 'write', media_policy: 'missing' },
+			selectedFiles: [], forceRefresh: false, showScraperSelector: false, selectedScrapers: [], manualScrapeMode: false
+		}));
+		const { findByText } = renderPage();
+		expect(await findByText('Destination: /persisted')).toBeTruthy();
+	});
+
+	it('preserves a version-2 null plan and warning across refresh', async () => {
+		sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify({
+			version: 2, applyPlan: null, planMigrationWarning: 'Select an operation again.',
+			selectedFiles: ['/library/a.mp4'], forceRefresh: false, showScraperSelector: false,
+			selectedScrapers: [], manualScrapeMode: false
+		}));
+		const { getByText, getAllByRole } = renderPage();
+		await waitFor(() => expect(getByText('Select an operation again.')).toBeTruthy());
+		expect((getAllByRole('radio') as HTMLInputElement[]).every((radio) => !radio.checked)).toBe(true);
+	});
+
 	it('4.5 (P0-5): hydrates selectedFiles + globals from sessionStorage on mount (Back round-trip preserves selection)', async () => {
 		const seed = {
 			selectedFiles: ['/library/kept-a.mp4', '/library/kept-b.mp4'],
@@ -163,13 +214,13 @@ describe('/browse D4 — sessionStorage hydrate + Manual Scrape checkbox', () =>
 			]
 		} as never);
 
-		const { findByText, getByText } = renderPage();
+		const { findByText, getByText, getAllByText } = renderPage();
 
 		// The hydrate $effect restores selectedFiles, so the "Selected Files"
 		// card renders the pre-seeded paths — a Back round-trip preserves them.
 		await findByText('2 Files Selected for Scraping');
-		expect(getByText('kept-a.mp4')).toBeTruthy();
-		expect(getByText('kept-b.mp4')).toBeTruthy();
+		expect(getAllByText('kept-a.mp4').length).toBeGreaterThan(0);
+		expect(getAllByText('kept-b.mp4').length).toBeGreaterThan(0);
 
 		// manualScrapeMode:false ⇒ primary action stays the Scrape path.
 		expect(getByText(/Scrape 2 Files/)).toBeTruthy();
@@ -263,7 +314,7 @@ describe('/browse — phantom selection pruning on refresh', () => {
 			]
 		} as never);
 
-		const { findByText, getByText, getByTitle, queryByText } = renderPage();
+		const { findByText, getByText, getByTitle, getByRole } = renderPage();
 		await findByText('a.mp4');
 
 		// Select a.mp4 (only the file-list row renders it pre-selection).
@@ -273,12 +324,9 @@ describe('/browse — phantom selection pruning on refresh', () => {
 		// Refresh the directory — a.mp4 is gone from disk.
 		await fireEvent.click(getByTitle('Refresh'));
 
-		// The phantom selection is pruned. The bottom action bar is the
-		// transition-free signal that selectedFiles is now empty (the
-		// "Selected Files" card itself uses transition:fade, whose outro never
-		// completes under jsdom, so we cannot assert its disappearance).
 		await waitFor(() => {
-			expect(queryByText('No files selected')).toBeTruthy();
+			const action = getByRole('button', { name: /^(Scrape|Update) 0 Files$/ });
+			expect((action as HTMLButtonElement).disabled).toBe(true);
 		});
 	});
 
@@ -309,7 +357,7 @@ describe('/browse — phantom selection pruning on refresh', () => {
 			})
 		);
 
-		const { findByText, getByTitle, getByText } = renderPage();
+		const { findByText, getByTitle, getByText, getByRole } = renderPage();
 		await findByText('a.mp4');
 
 		// The unrelated selection is restored on hydrate and survives a refresh
@@ -320,7 +368,18 @@ describe('/browse — phantom selection pruning on refresh', () => {
 		await fireEvent.click(getByTitle('Refresh'));
 		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(2));
 		expect(getByText('kept.mp4')).toBeTruthy();
-		expect(getByText(/1 file selected/)).toBeTruthy();
+		expect((getByRole('button', { name: /1 File/ }) as HTMLButtonElement).disabled).toBe(false);
+	});
+
+	it('persists the live-browsed directory in the SSR cookie, not the stale seed', async () => {
+		apiClient.browse.mockResolvedValue({ current_path: '/library', parent_path: '', items: [] } as never);
+		apiClient.getCurrentWorkingDirectory.mockResolvedValue({ path: '/cwd' } as never);
+		const { findByRole } = renderPage({ data: { browseBootstrap: { version: 1, applyPlan: null, initialPath: '/seed', destinationPath: '', forceRefresh: false, showScraperSelector: false, selectedScrapers: [], manualScrapeMode: false, planExpanded: true } } });
+		await findByRole('radio', { name: /Organize into another location/ });
+		await waitFor(() => {
+			const encoded = document.cookie.split('; ').find((v) => v.startsWith('javinizer_browse_bootstrap='))?.split('=')[1];
+			expect(encoded ? decodeBrowseBootstrap(encoded)?.initialPath : undefined).toBe('/library');
+		});
 	});
 
 	it('does not prune subfolder selections when refreshing the parent directory', async () => {
@@ -354,7 +413,7 @@ describe('/browse — phantom selection pruning on refresh', () => {
 			})
 		);
 
-		const { findByText, getByTitle, getByText } = renderPage();
+		const { findByText, getByTitle, getByText, getByRole } = renderPage();
 		await findByText('a.mp4');
 
 		// The subfolder selection is restored on hydrate and survives a refresh
@@ -364,6 +423,6 @@ describe('/browse — phantom selection pruning on refresh', () => {
 		await fireEvent.click(getByTitle('Refresh'));
 		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(2));
 		expect(getByText('deep.mp4')).toBeTruthy();
-		expect(getByText(/1 file selected/)).toBeTruthy();
+		expect((getByRole('button', { name: /1 File/ }) as HTMLButtonElement).disabled).toBe(false);
 	});
 });

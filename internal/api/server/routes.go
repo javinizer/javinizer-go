@@ -198,7 +198,7 @@ func registerStaticWebRoutes(router *gin.Engine, assets webUIAssets) {
 	}
 }
 
-func registerNoRouteHandler(router *gin.Engine, assets webUIAssets) {
+func registerNoRouteHandler(router *gin.Engine, assets webUIAssets, rt *core.APIRuntime) {
 	router.NoRoute(func(c *gin.Context) {
 		logging.Debugf("NoRoute hit: %s %s (Accept: %s)", c.Request.Method, c.Request.URL.Path, c.Request.Header.Get("Accept"))
 
@@ -209,7 +209,11 @@ func registerNoRouteHandler(router *gin.Engine, assets webUIAssets) {
 				return
 			}
 			if method == http.MethodGet {
-				c.Data(http.StatusOK, "text/html; charset=utf-8", assets.indexHTML)
+				html := assets.indexHTML
+				if rt != nil {
+					html = injectSSRState(html, rt, c)
+				}
+				c.Data(http.StatusOK, "text/html; charset=utf-8", html)
 				return
 			}
 		}

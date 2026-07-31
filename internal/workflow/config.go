@@ -45,14 +45,15 @@ type StrategyResolverFunc func(operationMode operationmode.OperationMode) organi
 // strategy resolver function decouples preview from the full organizer.Config
 // — organizer additions that don't affect preview stop at the factory boundary.
 type PreviewConfig struct {
-	PathCfg         PreviewPathConfig
-	ResolveStrategy StrategyResolverFunc
-	NFOEnabled      bool
-	NFOPerFile      bool
-	DisplayTitle    string
-	OpMode          operationmode.OperationMode
-	MaxPathLength   int
-	Downloads       downloadToggles
+	PathCfg                     PreviewPathConfig
+	ResolveStrategy             StrategyResolverFunc
+	ResolveForcedRenameStrategy StrategyResolverFunc
+	NFOEnabled                  bool
+	NFOPerFile                  bool
+	DisplayTitle                string
+	OpMode                      operationmode.OperationMode
+	MaxPathLength               int
+	Downloads                   downloadToggles
 }
 
 // ApplyConfig groups the workflow-level configuration fields that the

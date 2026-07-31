@@ -263,14 +263,15 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 // stepOrganize executes the organize step: move/link files to destination.
 func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *applyPipelineState, steps *stepCompletion) error {
 	organizeCmd := organizer.OrganizeCmd{
-		Match:         cmd.Match,
-		Movie:         state.movie,
-		DestDir:       cmd.DestPath,
-		ForceUpdate:   cmd.Organize.ForceUpdate,
-		MoveFiles:     cmd.Organize.MoveFiles,
-		LinkMode:      cmd.Organize.LinkMode,
-		DryRun:        cmd.DryRun,
-		OperationMode: cmd.OperationMode,
+		Match:           cmd.Match,
+		Movie:           state.movie,
+		DestDir:         cmd.DestPath,
+		ForceUpdate:     cmd.Organize.ForceUpdate,
+		MoveFiles:       cmd.Organize.MoveFiles,
+		LinkMode:        cmd.Organize.LinkMode,
+		DryRun:          cmd.DryRun,
+		OperationMode:   cmd.OperationMode,
+		ForceRenameFile: cmd.Organize.ForceRenameFile,
 	}
 	var organizeErr error
 	state.organizeResult, organizeErr = o.organizer.Organize(ctx, organizeCmd)
@@ -287,6 +288,7 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 
 // stepMerge merges scraped data with any existing NFO on disk.
 func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps *stepCompletion) error {
+	state.scrapedMediaURLs = snapshotScrapedMedia(cmd.Movie)
 	if o.nfo == nil {
 		steps.Merged = true
 		return nil
@@ -334,31 +336,30 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, state *a
 			PartSuffix:  cmd.Match.PartSuffix,
 		}
 	}
+	downloadMovie := state.movie
+	if cmd.OverwriteExistingMedia {
+		downloadMovie = state.movie.Clone()
+		if state.scrapedMediaURLs != nil {
+			downloadMovie = state.scrapedMediaURLs.overlay(downloadMovie)
+		}
+	}
 	outcome, dlErr := o.downloader.Download(ctx, downloader.DownloadCmd{
-		Movie:               state.movie,
-		DestDir:             state.finalDir,
-		Multipart:           multipart,
-		DownloadExtrafanart: cmd.DownloadExtrafanart,
+		Movie:                  downloadMovie,
+		DestDir:                state.finalDir,
+		Multipart:              multipart,
+		DownloadExtrafanart:    cmd.DownloadExtrafanart,
+		OverwriteExistingMedia: cmd.OverwriteExistingMedia,
+		Dedup:                  cmd.Dedup,
 	})
-	// Download failures (including DownloadPartialError, where all critical
-	// media failed) are non-fatal: log and continue so NFO generation still
-	// runs. This mirrors main's ProcessFileTask.Execute, which logged the
-	// download error and still generated the NFO — the project guarantee is
-	// that a correct NFO is produced regardless of artwork availability.
 	if dlErr != nil {
 		resolveLogger(o.logger).Warnf("[workflow] Download failed for %s: %v (continuing to NFO generation)", state.movie.ID, dlErr)
-		// Preserve any artifacts the downloader produced before the error (e.g.
-		// non-critical media that succeeded in a DownloadPartialError) so later
-		// Complete/CompleteFailed can record them for revert cleanup. The
-		// downloader returns a non-nil outcome alongside a partial error; guard
-		// for nil on total failures so this never panics.
 		if outcome != nil {
-			state.downloadPaths = outcome.DownloadedPaths
+			state.downloadPaths = outcome.CreatedPaths
 		}
 		steps.Downloaded = false
 		return nil
 	}
-	state.downloadPaths = outcome.DownloadedPaths
+	state.downloadPaths = outcome.CreatedPaths
 	steps.Downloaded = true
 	return nil
 }
@@ -410,14 +411,15 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 // applyPipelineState holds mutable state shared across the apply pipeline steps.
 // Steps mutate this via closure — eliminating the need for per-step return value plumbing.
 type applyPipelineState struct {
-	movie          *models.Movie
-	targetDir      string
-	finalDir       string
-	organizeResult *organizer.OrganizeResult
-	merged         bool
-	foundNFOPath   string
-	downloadPaths  []string
-	nfoPath        string
+	movie            *models.Movie
+	targetDir        string
+	finalDir         string
+	organizeResult   *organizer.OrganizeResult
+	merged           bool
+	foundNFOPath     string
+	downloadPaths    []string
+	nfoPath          string
+	scrapedMediaURLs *scrapedMediaSnapshot
 }
 
 // completeRevertLogWithState marks an in-progress revert operation as failed,

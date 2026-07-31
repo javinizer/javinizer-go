@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
@@ -38,6 +39,7 @@ type Snapshot struct {
 	Destination           string
 	TempDir               string
 	OperationModeOverride operationmode.OperationMode
+	ApplyPlan             *applyplan.Plan
 	StartedAt             time.Time
 	CompletedAt           *time.Time
 	OrganizedAt           *time.Time
@@ -78,6 +80,20 @@ func Encode(snapshot Snapshot) (*models.Job, error) {
 		return nil, fmt.Errorf("failed to marshal file match info for job %s: %w", snapshot.ID, err)
 	}
 
+	var applyPlanJSON *string
+	if snapshot.ApplyPlan != nil {
+		normalized, normalizeErr := applyplan.Normalize(snapshot.ApplyPlan)
+		if normalizeErr != nil {
+			return nil, fmt.Errorf("invalid apply plan for job %s: %w", snapshot.ID, normalizeErr)
+		}
+		encoded, marshalErr := MarshalFn(normalized)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("failed to marshal apply plan for job %s: %w", snapshot.ID, marshalErr)
+		}
+		value := string(encoded)
+		applyPlanJSON = &value
+	}
+
 	return &models.Job{
 		ID:                    snapshot.ID,
 		Status:                snapshot.Status,
@@ -88,6 +104,7 @@ func Encode(snapshot Snapshot) (*models.Job, error) {
 		Destination:           snapshot.Destination,
 		TempDir:               snapshot.TempDir,
 		OperationModeOverride: snapshot.OperationModeOverride,
+		ApplyPlan:             applyPlanJSON,
 		Files:                 string(filesJSON),
 		Results:               string(resultsJSON),
 		Excluded:              string(excludedJSON),
@@ -124,11 +141,23 @@ func Decode(dbJob *models.Job) (Snapshot, []error) {
 		OrganizedAt:           dbJob.OrganizedAt,
 		RevertedAt:            dbJob.RevertedAt,
 		Update:                dbJob.Update,
+		ApplyPlan:             nil,
 		Files:                 []string{},
 		Results:               make(map[string]*resultstore.MovieResult),
 		Provenance:            make(map[string]*resultstore.ProvenanceData),
 		Excluded:              make(map[string]bool),
 		FileMatchInfo:         make(map[string]models.FileMatchInfo),
+	}
+
+	if dbJob.ApplyPlan != nil && *dbJob.ApplyPlan != "" {
+		var plan applyplan.Plan
+		if err := json.Unmarshal([]byte(*dbJob.ApplyPlan), &plan); err != nil {
+			errs = append(errs, fmt.Errorf("failed to parse apply plan for job %s: %w", dbJob.ID, err))
+		} else if normalized, err := applyplan.Normalize(&plan); err != nil {
+			errs = append(errs, fmt.Errorf("invalid apply plan for job %s: %w", dbJob.ID, err))
+		} else {
+			snapshot.ApplyPlan = normalized
+		}
 	}
 
 	if dbJob.Files != "" {

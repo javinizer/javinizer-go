@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/eventlog"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -78,6 +79,7 @@ type JobConfig struct {
 	Destination           string                      // Target directory for organized files (persisted on job for UI retrieval)
 	OperationModeOverride operationmode.OperationMode // Resolved operation mode (set at API boundary)
 	Update                *bool                       // Update mode: nil = don't change, true/false = set explicitly
+	ApplyPlan             *applyplan.Plan             // Canonical proposed apply intent; nil for legacy jobs
 	BatchJobDeps                                      // Embedded deps — all 9 infrastructure fields promoted
 }
 
@@ -93,6 +95,7 @@ type jobConfig struct {
 	tempDir       string                      // Temp directory for poster paths
 	operationMode operationmode.OperationMode // Resolved operation mode (set at API boundary)
 	update        bool                        // Update mode (in-place, no file organization)
+	applyPlan     *applyplan.Plan             // Canonical proposed apply intent; nil for legacy jobs
 }
 
 // BatchJob represents a batch processing job.
@@ -177,6 +180,7 @@ func newBatchJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 		if cfg.Update != nil {
 			job.cfg.update = *cfg.Update
 		}
+		job.cfg.applyPlan = applyplan.Clone(cfg.ApplyPlan)
 		job.controller.setDepsFromConfig(cfg)
 	}
 
@@ -292,6 +296,7 @@ func (job *BatchJob) snapshotFull() batchJobSnapshot {
 			RevertedAt:            lcSnap.RevertedAt,
 			OperationModeOverride: job.cfg.operationMode,
 			Update:                job.cfg.update,
+			ApplyPlan:             applyplan.Clone(job.cfg.applyPlan),
 			PersistError:          job.persistError,
 			IsDeleted:             lcSnap.IsDeleted,
 		},

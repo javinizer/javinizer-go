@@ -29,6 +29,7 @@ func NewCommand() *cobra.Command {
 	updateCmd.Flags().Bool("force-refresh", false, "Force refresh metadata from scrapers (clear cache)")
 	updateCmd.Flags().Bool("force-overwrite", false, "Ignore existing NFO, use only scraper data (destructive)")
 	updateCmd.Flags().Bool("preserve-nfo", false, "Never overwrite NFO fields, only add missing data (conservative)")
+	updateCmd.Flags().Bool("overwrite-existing-media", false, "Re-download and replace existing media files")
 	// --show-merge-stats is registered for backward compatibility with existing
 	// scripts/aliases but is a no-op (merge stats are not collected per-file).
 	// Mark it hidden so help does not advertise a flag that does nothing.
@@ -54,6 +55,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	forceRefresh, _ := cmd.Flags().GetBool("force-refresh")
 	forceOverwrite, _ := cmd.Flags().GetBool("force-overwrite")
 	preserveNFO, _ := cmd.Flags().GetBool("preserve-nfo")
+	overwriteExistingMedia, _ := cmd.Flags().GetBool("overwrite-existing-media")
 	preset, _ := cmd.Flags().GetString("preset")
 	scalarStrategyStr, _ := cmd.Flags().GetString("scalar-strategy")
 	arrayStrategyStr, _ := cmd.Flags().GetString("array-strategy")
@@ -90,26 +92,27 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	}
 
 	return commandutil.RunBatchCommand(ctx, w, commandutil.BatchCommandOptions{
-		ConfigFile:          configFile,
-		SourcePath:          sourcePath,
-		Destination:         sourcePath, // Update mode: files stay in place
-		Recursive:           true,       // Always scan recursively
-		DryRun:              dryRun,
-		DownloadMedia:       downloadMedia,
-		DownloadExtrafanart: downloadExtrafanart,
-		GenerateNFO:         true, // Update always generates NFO
-		SkipOrganize:        true, // Never move files in update mode
-		ScraperPriority:     scraperPriority,
-		ForceRefresh:        forceRefresh,
-		ForceOverwrite:      forceOverwrite,
-		PreserveNFO:         preserveNFO,
-		Resolved:            resolved,
-		CommandLabel:        "Javinizer Update",
-		ActionVerb:          "Updating metadata",
-		CompletionMessage:   "Update complete!",
-		ModeLine:            "Update (metadata & artwork, files remain in place)",
-		EventHandler:        commandutil.UpdateEventHandler,
-		SummaryPrinter:      updateSummaryPrinter(resolvedScalarStr, resolvedArrayStr),
+		ConfigFile:             configFile,
+		SourcePath:             sourcePath,
+		Destination:            sourcePath, // Update mode: files stay in place
+		Recursive:              true,       // Always scan recursively
+		DryRun:                 dryRun,
+		DownloadMedia:          downloadMedia,
+		DownloadExtrafanart:    downloadExtrafanart,
+		GenerateNFO:            true, // Update always generates NFO
+		SkipOrganize:           true, // Never move files in update mode
+		ScraperPriority:        scraperPriority,
+		ForceRefresh:           forceRefresh,
+		ForceOverwrite:         forceOverwrite,
+		PreserveNFO:            preserveNFO,
+		OverwriteExistingMedia: overwriteExistingMedia,
+		Resolved:               resolved,
+		CommandLabel:           "Javinizer Update",
+		ActionVerb:             "Updating metadata",
+		CompletionMessage:      "Update complete!",
+		ModeLine:               "Update (metadata & artwork, files remain in place)",
+		EventHandler:           commandutil.UpdateEventHandler,
+		SummaryPrinter:         updateSummaryPrinter(resolvedScalarStr, resolvedArrayStr),
 	})
 }
 

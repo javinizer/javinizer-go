@@ -1,6 +1,9 @@
 package contracts
 
 import (
+	"encoding/json"
+
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 )
@@ -18,7 +21,64 @@ type BatchScrapeRequest struct {
 	ArrayStrategy    string            `json:"array_strategy,omitempty" example:"merge"`                           // For Update mode: merge, replace
 	OperationMode    string            `json:"operation_mode,omitempty" example:"organize"`                        // Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-artwork, preview
 	ManualInputs     map[string]string `json:"manual_inputs,omitempty" example:"{\"/path/file.mp4\":\"IPX-123\"}"` // Per-file manual input override keyed by file path; an ID scrapes as that ID (bypasses matcher), a URL scrapes with URL-compatible scrapers
+	ApplyPlan        *applyplan.Plan   `json:"apply_plan,omitempty"`
+	present          map[string]bool   `json:"-"`
 }
+
+// UnmarshalJSON .
+func (r *BatchScrapeRequest) UnmarshalJSON(data []byte) error {
+	type alias BatchScrapeRequest
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*r = BatchScrapeRequest(decoded)
+	r.present = make(map[string]bool, len(raw))
+	for key, value := range raw {
+		if string(value) != "null" {
+			r.present[key] = true
+		}
+	}
+	return nil
+}
+
+// Has .
+func (r BatchScrapeRequest) Has(field string) bool { return r.present[field] }
+
+func presentJSONFields(data []byte) map[string]bool {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(data, &raw) != nil {
+		return nil
+	}
+	present := make(map[string]bool, len(raw))
+	for key, value := range raw {
+		if string(value) != "null" {
+			present[key] = true
+		}
+	}
+	return present
+}
+
+// ReviewApplyOverrides .
+type ReviewApplyOverrides struct {
+	OperationMode          *string `json:"operation_mode,omitempty"`
+	Destination            *string `json:"destination,omitempty"`
+	SkipNFO                *bool   `json:"skip_nfo,omitempty"`
+	SkipDownload           *bool   `json:"skip_download,omitempty"`
+	OverwriteExistingMedia *bool   `json:"overwrite_existing_media,omitempty"`
+	Preset                 *string `json:"preset,omitempty"`
+	ScalarStrategy         *string `json:"scalar_strategy,omitempty"`
+	ArrayStrategy          *string `json:"array_strategy,omitempty"`
+	ForceOverwrite         *bool   `json:"force_overwrite,omitempty"`
+	PreserveNFO            *bool   `json:"preserve_nfo,omitempty"`
+}
+
+// EffectiveApplyPlan .
+type EffectiveApplyPlan = applyplan.EffectivePlan
 
 // BatchScrapeResponse represents batch scrape response
 type BatchScrapeResponse struct {
@@ -80,6 +140,7 @@ type BatchJobResponse struct {
 	OperationModeOverride operationmode.OperationMode `json:"operation_mode_override,omitempty"`
 	Update                bool                        `json:"update"`
 	PersistError          string                      `json:"persist_error,omitempty"`
+	ApplyPlan             *applyplan.Plan             `json:"apply_plan,omitempty"`
 }
 
 // BatchJobResponseSlim is a lightweight batch job status response without movie Data.
@@ -99,6 +160,7 @@ type BatchJobResponseSlim struct {
 	OperationModeOverride operationmode.OperationMode     `json:"operation_mode_override,omitempty"`
 	Update                bool                            `json:"update"`
 	PersistError          string                          `json:"persist_error,omitempty"`
+	ApplyPlan             *applyplan.Plan                 `json:"apply_plan,omitempty"`
 }
 
 // BatchJobListResponse represents a paginated list of batch jobs.
@@ -184,35 +246,87 @@ type ExistingNFOResponse struct {
 
 // UpdateRequest represents a batch update request.
 type UpdateRequest struct {
-	ForceOverwrite bool   `json:"force_overwrite"`
-	PreserveNFO    bool   `json:"preserve_nfo"`
-	Preset         string `json:"preset,omitempty" binding:"omitempty,oneof=conservative gap-fill aggressive"`
-	ScalarStrategy string `json:"scalar_strategy,omitempty" binding:"omitempty,oneof=prefer-scraper prefer-nfo preserve-existing fill-missing-only"`
-	ArrayStrategy  string `json:"array_strategy,omitempty" binding:"omitempty,oneof=merge replace"`
-	SkipNFO        bool   `json:"skip_nfo"`
-	SkipDownload   bool   `json:"skip_download"`
+	Overrides              *ReviewApplyOverrides `json:"overrides,omitempty"`
+	ForceOverwrite         bool                  `json:"force_overwrite"`
+	OverwriteExistingMedia bool                  `json:"overwrite_existing_media" example:"false" default:"false"`
+	PreserveNFO            bool                  `json:"preserve_nfo"`
+	Preset                 string                `json:"preset,omitempty" binding:"omitempty,oneof=conservative gap-fill aggressive"`
+	ScalarStrategy         string                `json:"scalar_strategy,omitempty" binding:"omitempty,oneof=prefer-scraper prefer-nfo preserve-existing fill-missing-only"`
+	ArrayStrategy          string                `json:"array_strategy,omitempty" binding:"omitempty,oneof=merge replace"`
+	SkipNFO                bool                  `json:"skip_nfo"`
+	SkipDownload           bool                  `json:"skip_download"`
+	present                map[string]bool       `json:"-"`
 }
+
+// UnmarshalJSON .
+func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
+	type alias UpdateRequest
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = UpdateRequest(decoded)
+	r.present = presentJSONFields(data)
+	return nil
+}
+
+// Has .
+func (r UpdateRequest) Has(field string) bool { return r.present[field] }
 
 // OrganizeRequest represents an organize request
 type OrganizeRequest struct {
-	Destination   string `json:"destination" example:"/path/to/output"` // Required for organize mode; optional for in-place modes
-	CopyOnly      bool   `json:"copy_only" example:"false"`
-	LinkMode      string `json:"link_mode,omitempty" example:"hard"`          // Validated at the API layer (HTTP 400 for invalid)
-	OperationMode string `json:"operation_mode,omitempty" example:"organize"` // Validated at the API layer (HTTP 400 for invalid)
-	SkipNFO       bool   `json:"skip_nfo"`
-	SkipDownload  bool   `json:"skip_download"`
+	Overrides     *ReviewApplyOverrides `json:"overrides,omitempty"`
+	Destination   string                `json:"destination" example:"/path/to/output"` // Required for organize mode; optional for in-place modes
+	CopyOnly      bool                  `json:"copy_only" example:"false"`
+	LinkMode      string                `json:"link_mode,omitempty" example:"hard"`          // Validated at the API layer (HTTP 400 for invalid)
+	OperationMode string                `json:"operation_mode,omitempty" example:"organize"` // Validated at the API layer (HTTP 400 for invalid)
+	SkipNFO       bool                  `json:"skip_nfo"`
+	SkipDownload  bool                  `json:"skip_download"`
+	present       map[string]bool       `json:"-"`
 }
+
+// UnmarshalJSON .
+func (r *OrganizeRequest) UnmarshalJSON(data []byte) error {
+	type alias OrganizeRequest
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = OrganizeRequest(decoded)
+	r.present = presentJSONFields(data)
+	return nil
+}
+
+// Has .
+func (r OrganizeRequest) Has(field string) bool { return r.present[field] }
 
 // OrganizePreviewRequest represents an organize preview request.
 type OrganizePreviewRequest struct {
-	Destination   string     `json:"destination" example:"/path/to/output"` // Required for organize and preview modes; optional for in-place modes
-	CopyOnly      bool       `json:"copy_only" example:"false"`
-	LinkMode      string     `json:"link_mode,omitempty" example:"hard"`          // Validated at the API layer (HTTP 400 for invalid)
-	OperationMode string     `json:"operation_mode,omitempty" example:"organize"` // Validated at the API layer (HTTP 400 for invalid)
-	SkipNFO       bool       `json:"skip_nfo"`
-	SkipDownload  bool       `json:"skip_download"`
-	Movie         *MovieView `json:"movie,omitempty"` // Optional movie override for previewing unsaved edits
+	Overrides     *ReviewApplyOverrides `json:"overrides,omitempty"`
+	Destination   string                `json:"destination" example:"/path/to/output"` // Required for organize and preview modes; optional for in-place modes
+	CopyOnly      bool                  `json:"copy_only" example:"false"`
+	LinkMode      string                `json:"link_mode,omitempty" example:"hard"`          // Validated at the API layer (HTTP 400 for invalid)
+	OperationMode string                `json:"operation_mode,omitempty" example:"organize"` // Validated at the API layer (HTTP 400 for invalid)
+	SkipNFO       bool                  `json:"skip_nfo"`
+	SkipDownload  bool                  `json:"skip_download"`
+	Movie         *MovieView            `json:"movie,omitempty"` // Optional movie override for previewing unsaved edits
+	present       map[string]bool       `json:"-"`
 }
+
+// UnmarshalJSON .
+func (r *OrganizePreviewRequest) UnmarshalJSON(data []byte) error {
+	type alias OrganizePreviewRequest
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = OrganizePreviewRequest(decoded)
+	r.present = presentJSONFields(data)
+	return nil
+}
+
+// Has .
+func (r OrganizePreviewRequest) Has(field string) bool { return r.present[field] }
 
 // OrganizePreviewResponse represents the expected output structure
 type OrganizePreviewResponse struct {
@@ -230,6 +344,7 @@ type OrganizePreviewResponse struct {
 	Screenshots     []string                    `json:"screenshots,omitempty" example:"fanart1.jpg,fanart2.jpg,fanart3.jpg"`
 	SourcePath      string                      `json:"source_path,omitempty" example:"/source/folder/ABC-123.mp4"` // Original file path (for in-place modes)
 	OperationMode   operationmode.OperationMode `json:"operation_mode,omitempty" example:"organize"`                // Which mode was used for preview
+	EffectiveApply  *EffectiveApplyPlan         `json:"effective_apply,omitempty"`
 }
 
 // DisplayTitlePreviewRequest carries the edited movie used to render a live

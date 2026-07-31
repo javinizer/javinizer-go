@@ -4421,6 +4421,9 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse": {
             "type": "object",
             "properties": {
+                "apply_plan": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan"
+                },
                 "completed": {
                     "type": "integer"
                 },
@@ -4547,6 +4550,9 @@ const docTemplate = `{
                 "files"
             ],
             "properties": {
+                "apply_plan": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan"
+                },
                 "array_strategy": {
                     "description": "For Update mode: merge, replace",
                     "type": "string",
@@ -4688,6 +4694,17 @@ const docTemplate = `{
                 "display_title": {
                     "type": "string",
                     "example": "[IPX-123] Beautiful Woman"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.EffectiveApplyPlan": {
+            "type": "object",
+            "properties": {
+                "merge_override": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.MergeOverride"
+                },
+                "plan": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan"
                 }
             }
         },
@@ -5432,6 +5449,9 @@ const docTemplate = `{
                     "type": "string",
                     "example": "organize"
                 },
+                "overrides": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides"
+                },
                 "skip_download": {
                     "type": "boolean"
                 },
@@ -5443,6 +5463,9 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.OrganizePreviewResponse": {
             "type": "object",
             "properties": {
+                "effective_apply": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.EffectiveApplyPlan"
+                },
                 "extrafanart_path": {
                     "type": "string",
                     "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart"
@@ -5543,6 +5566,9 @@ const docTemplate = `{
                     "description": "Validated at the API layer (HTTP 400 for invalid)",
                     "type": "string",
                     "example": "organize"
+                },
+                "overrides": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides"
                 },
                 "skip_download": {
                     "type": "boolean"
@@ -5868,6 +5894,41 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides": {
+            "type": "object",
+            "properties": {
+                "array_strategy": {
+                    "type": "string"
+                },
+                "destination": {
+                    "type": "string"
+                },
+                "force_overwrite": {
+                    "type": "boolean"
+                },
+                "operation_mode": {
+                    "type": "string"
+                },
+                "overwrite_existing_media": {
+                    "type": "boolean"
+                },
+                "preserve_nfo": {
+                    "type": "boolean"
+                },
+                "preset": {
+                    "type": "string"
+                },
+                "scalar_strategy": {
+                    "type": "string"
+                },
+                "skip_download": {
+                    "type": "boolean"
+                },
+                "skip_nfo": {
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.ScanRequest": {
             "type": "object",
             "required": [
@@ -6088,6 +6149,14 @@ const docTemplate = `{
                 "force_overwrite": {
                     "type": "boolean"
                 },
+                "overrides": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides"
+                },
+                "overwrite_existing_media": {
+                    "type": "boolean",
+                    "default": false,
+                    "example": false
+                },
                 "preserve_nfo": {
                     "type": "boolean"
                 },
@@ -6115,6 +6184,134 @@ const docTemplate = `{
                     "type": "boolean"
                 }
             }
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.ArrayStrategy": {
+            "type": "string",
+            "enum": [
+                "merge",
+                "replace"
+            ],
+            "x-enum-varnames": [
+                "ArrayMerge",
+                "ArrayReplace"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.MediaPolicy": {
+            "type": "string",
+            "enum": [
+                "missing",
+                "replace",
+                "skip"
+            ],
+            "x-enum-varnames": [
+                "MediaPolicyMissing",
+                "MediaPolicyReplace",
+                "MediaPolicySkip"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.MergeOverride": {
+            "type": "string",
+            "enum": [
+                "none",
+                "force-overwrite",
+                "preserve-nfo"
+            ],
+            "x-enum-varnames": [
+                "MergeOverrideNone",
+                "MergeOverrideForceOverwrite",
+                "MergeOverridePreserveNFO"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.MergePolicy": {
+            "type": "object",
+            "properties": {
+                "array_strategy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.ArrayStrategy"
+                },
+                "scalar_strategy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.ScalarStrategy"
+                },
+                "source_preset": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Preset"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.NFOOutput": {
+            "type": "string",
+            "enum": [
+                "write",
+                "skip"
+            ],
+            "x-enum-varnames": [
+                "NFOOutputWrite",
+                "NFOOutputSkip"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.Plan": {
+            "type": "object",
+            "properties": {
+                "destination": {
+                    "type": "string"
+                },
+                "media_policy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.MediaPolicy"
+                },
+                "merge": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.MergePolicy"
+                },
+                "nfo_output": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.NFOOutput"
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "video_operation": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.VideoOperation"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.Preset": {
+            "type": "string",
+            "enum": [
+                "conservative",
+                "gap-fill",
+                "aggressive"
+            ],
+            "x-enum-varnames": [
+                "PresetConservative",
+                "PresetGapFill",
+                "PresetAggressive"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.ScalarStrategy": {
+            "type": "string",
+            "enum": [
+                "prefer-nfo",
+                "prefer-scraper",
+                "preserve-existing",
+                "fill-missing-only"
+            ],
+            "x-enum-varnames": [
+                "ScalarPreferNFO",
+                "ScalarPreferScraper",
+                "ScalarPreserveExisting",
+                "ScalarFillMissingOnly"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.VideoOperation": {
+            "type": "string",
+            "enum": [
+                "organize",
+                "rename-in-place",
+                "rename-file",
+                "leave-in-place"
+            ],
+            "x-enum-varnames": [
+                "VideoOperationOrganize",
+                "VideoOperationRenameInPlace",
+                "VideoOperationRenameFile",
+                "VideoOperationLeaveInPlace"
+            ]
         },
         "github_com_javinizer_javinizer-go_internal_config.APIConfig": {
             "type": "object",

@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/spf13/afero"
@@ -27,10 +28,12 @@ type Downloader struct {
 // DownloadCmd carries all parameters for the single-method Download seam.
 // Per Phase 48: replaces the multi-method DownloaderInterface with one command struct.
 type DownloadCmd struct {
-	Movie               *models.Movie
-	DestDir             string
-	Multipart           *MultipartInfo
-	DownloadExtrafanart *bool // Optional override for config.DownloadExtrafanart; nil = use config
+	Movie                  *models.Movie
+	DestDir                string
+	Multipart              *MultipartInfo
+	DownloadExtrafanart    *bool // Optional override for config.DownloadExtrafanart; nil = use config
+	OverwriteExistingMedia bool
+	Dedup                  *sync.Map
 }
 
 // DownloadOutcome wraps the results of a Download call.
@@ -38,7 +41,8 @@ type DownloadCmd struct {
 // helper fields for the common case of extracting just the downloaded paths.
 type DownloadOutcome struct {
 	Results         []DownloadResult
-	DownloadedPaths []string // Convenience: LocalPath of each result where Downloaded=true
+	DownloadedPaths []string
+	CreatedPaths    []string
 }
 
 // DownloaderInterface is the single-method seam for media downloads.
@@ -77,6 +81,8 @@ type DownloadResult struct {
 	LocalPath  string
 	Size       int64
 	Downloaded bool
+	Replaced   bool
+	Skipped    bool
 	Error      error
 	Type       MediaType
 	Duration   time.Duration
@@ -175,38 +181,31 @@ func (d *Downloader) Download(ctx context.Context, cmd DownloadCmd) (*DownloadOu
 		extrafanartEnabled = *cmd.DownloadExtrafanart
 	}
 
-	results, err := d.downloadAllWithExtrafanart(ctx, cmd.Movie, cmd.DestDir, cmd.Multipart, extrafanartEnabled)
-	if err != nil {
-		// On a DownloadPartialError sentinel, some non-critical media (actress
-		// images, extrafanart) may have succeeded even though all critical media
-		// (cover/poster) failed. Return the outcome with those partial paths
-		// ALONGSIDE the error so callers can record the artifacts for revert
-		// cleanup instead of discarding them. Total (non-partial) failures still
-		// return a nil outcome. (Callers must nil-check the outcome on error.)
-		if _, partial := err.(*DownloadPartialError); partial {
-			downloadedPaths := make([]string, 0, len(results))
-			for _, r := range results {
-				if r.Downloaded && r.LocalPath != "" {
-					downloadedPaths = append(downloadedPaths, r.LocalPath)
-				}
+	results, err := d.downloadAllWithExtrafanart(ctx, cmd.Movie, cmd.DestDir, cmd.Multipart, extrafanartEnabled, cmd.OverwriteExistingMedia, cmd.Dedup)
+	createdPaths := make([]string, 0, len(results))
+	downloadedPaths := make([]string, 0, len(results))
+	for _, r := range results {
+		if r.Downloaded && r.LocalPath != "" {
+			downloadedPaths = append(downloadedPaths, r.LocalPath)
+			if !r.Replaced {
+				createdPaths = append(createdPaths, r.LocalPath)
 			}
+		}
+	}
+	if err != nil {
+		if _, partial := err.(*DownloadPartialError); partial {
 			return &DownloadOutcome{
 				Results:         results,
 				DownloadedPaths: downloadedPaths,
+				CreatedPaths:    createdPaths,
 			}, err
 		}
 		return nil, err
 	}
 
-	downloadedPaths := make([]string, 0, len(results))
-	for _, r := range results {
-		if r.Downloaded && r.LocalPath != "" {
-			downloadedPaths = append(downloadedPaths, r.LocalPath)
-		}
-	}
-
 	return &DownloadOutcome{
 		Results:         results,
 		DownloadedPaths: downloadedPaths,
+		CreatedPaths:    createdPaths,
 	}, nil
 }

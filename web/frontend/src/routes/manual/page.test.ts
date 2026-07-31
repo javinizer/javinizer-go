@@ -23,13 +23,10 @@ const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
 
 function snapshot(overrides: Partial<PendingScrape> = {}): PendingScrape {
 	return {
+		version: 2,
 		files: ['/library/a.mp4'],
-		browseMode: 'scrape',
-		update: false,
-		effectiveOperationMode: 'organize',
-		isInPlaceImplied: false,
+		applyPlan: { version: 1, video_operation: 'organize', destination: '/out', nfo_output: 'write', media_policy: 'missing' },
 		showScraperSelector: true,
-		destination: '/out',
 		selectedScrapers: ['javdb'],
 		force: false,
 		...overrides
@@ -53,12 +50,11 @@ beforeEach(() => {
 describe('/manual tracer', () => {
 	it('renders the read-only summary + rows and submits a valid BatchScrapeRequest (#1)', async () => {
 		setPendingScrape(snapshot());
-		const { getByText, getByLabelText, getByRole, getByDisplayValue } = renderPage();
+		const { getByText, getByLabelText, getByRole } = renderPage();
 
 		expect(getByText('Manual Scrape')).toBeTruthy();
-		expect(getByText('Scrape & Organize')).toBeTruthy();
-		expect(getByDisplayValue('/out')).toBeTruthy();
-		expect(getByText('javdb')).toBeTruthy();
+		expect(getByText('Organize videos into another location')).toBeTruthy();
+		expect(getByText('Destination: /out')).toBeTruthy();
 		expect(getByText('a.mp4')).toBeTruthy();
 		expect(getByText('/library')).toBeTruthy();
 
@@ -70,7 +66,7 @@ describe('/manual tracer', () => {
 		await fireEvent.click(submitBtn);
 
 		await waitFor(() => expect(mockBatchScrape).toHaveBeenCalledTimes(1));
-		expect(mockBatchScrape).toHaveBeenCalledWith({
+		expect(mockBatchScrape).toHaveBeenCalledWith(expect.objectContaining({
 			files: ['/library/a.mp4'],
 			strict: false,
 			force: false,
@@ -78,8 +74,9 @@ describe('/manual tracer', () => {
 			update: false,
 			selected_scrapers: ['javdb'],
 			operation_mode: 'organize',
-			manual_inputs: { '/library/a.mp4': 'IPX-123' }
-		});
+			manual_inputs: { '/library/a.mp4': 'IPX-123' },
+			apply_plan: expect.objectContaining({ video_operation: 'organize' })
+		}));
 		expect(mockStartJob).toHaveBeenCalledWith('job-1');
 		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['batch-jobs'] });
 		expect(mockGoto).not.toHaveBeenCalled();
@@ -106,18 +103,14 @@ describe('/manual tracer', () => {
 		expect(scrapeRender.queryByText('Preset')).toBeNull();
 
 		clearPendingScrape();
-		setPendingScrape(
-			snapshot({
-				browseMode: 'update',
-				update: true,
-				effectiveOperationMode: 'in-place',
-				preset: 'gap-fill',
-				scalarStrategy: 'prefer-scraper',
-				arrayStrategy: 'replace'
-			})
-		);
+		setPendingScrape(snapshot({
+			applyPlan: {
+				version: 1, video_operation: 'leave-in-place', nfo_output: 'write', media_policy: 'missing',
+				merge: { scalar_strategy: 'prefer-scraper', array_strategy: 'replace' }
+			}
+		}));
 		const updateRender = renderPage();
-		expect(updateRender.getByDisplayValue('Gap Fill')).toBeTruthy();
+		expect(updateRender.getByText('Existing metadata: prefer-scraper, arrays replace')).toBeTruthy();
 	});
 
 	it('removes the row from the batch and the request when "Remove from batch" is clicked (#4.8a)', async () => {
@@ -148,7 +141,7 @@ describe('/manual tracer', () => {
 		// is absent from both files[] and manual_inputs.
 		await fireEvent.click(getByRole('button', { name: 'Start manual scrape' }));
 		await waitFor(() => expect(mockBatchScrape).toHaveBeenCalledTimes(1));
-		expect(mockBatchScrape).toHaveBeenCalledWith({
+		expect(mockBatchScrape).toHaveBeenCalledWith(expect.objectContaining({
 			files: ['/library/b.mp4'],
 			strict: false,
 			force: false,
@@ -156,8 +149,9 @@ describe('/manual tracer', () => {
 			update: false,
 			selected_scrapers: ['javdb'],
 			operation_mode: 'organize',
-			manual_inputs: { '/library/b.mp4': 'IPX-999' }
-		});
+			manual_inputs: { '/library/b.mp4': 'IPX-999' },
+			apply_plan: expect.objectContaining({ video_operation: 'organize' })
+		}));
 	});
 
 	it('empties every row input but keeps the rows when "Clear all overrides" is clicked (#4.8b)', async () => {
@@ -189,7 +183,7 @@ describe('/manual tracer', () => {
 		// Submit still carries every file, with manual_inputs dropped (no overrides).
 		await fireEvent.click(getByRole('button', { name: 'Start manual scrape' }));
 		await waitFor(() => expect(mockBatchScrape).toHaveBeenCalledTimes(1));
-		expect(mockBatchScrape).toHaveBeenCalledWith({
+		expect(mockBatchScrape).toHaveBeenCalledWith(expect.objectContaining({
 			files: ['/library/a.mp4', '/library/b.mp4'],
 			strict: false,
 			force: false,
@@ -197,7 +191,8 @@ describe('/manual tracer', () => {
 			update: false,
 			selected_scrapers: ['javdb'],
 			operation_mode: 'organize',
-			manual_inputs: undefined
-		});
+			manual_inputs: undefined,
+			apply_plan: expect.objectContaining({ video_operation: 'organize' })
+		}));
 	});
 });

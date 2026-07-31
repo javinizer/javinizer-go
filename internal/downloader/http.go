@@ -2,22 +2,27 @@ package downloader
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 )
 
-func (d *Downloader) download(ctx context.Context, url, destPath string, mediaType MediaType) (*DownloadResult, error) {
+func (d *Downloader) download(ctx context.Context, url, destPath string, mediaType MediaType, options ...any) (finalResult *DownloadResult, finalErr error) {
 	startTime := time.Now()
+	overwriteExisting, dedup := resolveDownloadOptions(options)
 
 	result := &DownloadResult{
 		URL:        url,
@@ -26,13 +31,20 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		Downloaded: false,
 	}
 
+	if overwriteExisting && dedup != nil {
+		if _, loaded := dedup.LoadOrStore(destPath, struct{}{}); loaded {
+			result.Skipped = true
+			result.Duration = time.Since(startTime)
+			return result, nil
+		}
+	}
+
 	if err := validateURLScheme(url); err != nil {
 		result.Error = err
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
 
-	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
 		result.Error = ctx.Err()
@@ -41,15 +53,25 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	default:
 	}
 
-	// Check if file already exists
-	if info, err := d.fs.Stat(destPath); err == nil {
+	existed := false
+	if overwriteExisting {
+		info, err := d.fs.Stat(destPath)
+		switch {
+		case err == nil:
+			existed = true
+			result.Size = info.Size()
+		case os.IsNotExist(err):
+		default:
+			result.Error = fmt.Errorf("failed to stat destination: %w", err)
+			result.Duration = time.Since(startTime)
+			return result, result.Error
+		}
+	} else if info, err := d.fs.Stat(destPath); err == nil {
 		result.Size = info.Size()
-		result.Downloaded = false // Already exists, not downloaded
 		result.Duration = time.Since(startTime)
 		return result, nil
 	}
 
-	// Create destination directory
 	destDir := filepath.Dir(destPath)
 	if err := d.fs.MkdirAll(destDir, config.DirPerm); err != nil {
 		result.Error = fmt.Errorf("failed to create directory: %w", err)
@@ -57,7 +79,6 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create request: %w", err)
@@ -65,7 +86,6 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	// Set user agent
 	if d.config.UserAgent != "" {
 		req.Header.Set("User-Agent", d.config.UserAgent)
 	}
@@ -73,7 +93,6 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		req.Header.Set("Referer", referer)
 	}
 
-	// Execute request
 	resp, err := d.httpClient.Do(req)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to download: %w", err)
@@ -84,15 +103,18 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		_ = httpclient.DrainAndClose(resp.Body)
 	}()
 
-	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		result.Error = &statusError{statusCode: resp.StatusCode}
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
 
-	// Create temporary file
-	tempPath := destPath + ".tmp"
+	tempPath, err := uniqueTempPath(destPath, "tmp")
+	if err != nil {
+		result.Error = fmt.Errorf("failed to create temporary path: %w", err)
+		result.Duration = time.Since(startTime)
+		return result, result.Error
+	}
 	outFile, err := d.fs.Create(tempPath)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create file: %w", err)
@@ -100,7 +122,6 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	// Download to temp file
 	written, err := io.Copy(outFile, resp.Body)
 	closeErr := outFile.Close()
 	if err == nil && closeErr != nil {
@@ -114,19 +135,41 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	// Rename temp file to final destination
-	if err := d.fs.Rename(tempPath, destPath); err != nil {
+	if err := replaceFile(d.fs, tempPath, destPath); err != nil {
 		_ = d.fs.Remove(tempPath)
-		result.Error = fmt.Errorf("failed to rename file: %w", err)
+		result.Error = fmt.Errorf("failed to replace file: %w", err)
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
 
 	result.Size = written
 	result.Downloaded = true
+	result.Replaced = existed
 	result.Duration = time.Since(startTime)
 
 	return result, nil
+}
+
+func resolveDownloadOptions(options []any) (bool, *sync.Map) {
+	var overwriteExisting bool
+	var dedup *sync.Map
+	for _, option := range options {
+		switch value := option.(type) {
+		case bool:
+			overwriteExisting = value
+		case *sync.Map:
+			dedup = value
+		}
+	}
+	return overwriteExisting, dedup
+}
+
+func uniqueTempPath(destPath, suffix string) (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return destPath + "." + hex.EncodeToString(buf) + "." + suffix, nil
 }
 
 // retryableOperation wraps an attempt function with retry logic for transient errors.

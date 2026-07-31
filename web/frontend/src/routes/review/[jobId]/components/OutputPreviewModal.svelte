@@ -73,6 +73,18 @@
 				</div>
 
 				<div class="flex-1 overflow-y-auto p-6">
+					{#if preview?.effective_apply}
+						<div class="mb-4 rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm">
+							<h3 class="font-semibold">{m.browse_plan_summary_title()}</h3>
+							<ul class="mt-2 space-y-1">
+								<li>{m.browse_plan_nfo_output()}: {preview.effective_apply.plan.nfo_output}</li>
+								<li>{m.browse_plan_media_policy()}: {preview.effective_apply.plan.media_policy}</li>
+								{#if preview.effective_apply.plan.merge}<li>{m.browse_plan_existing_merge()}: {preview.effective_apply.plan.merge.scalar_strategy}, {preview.effective_apply.plan.merge.array_strategy}</li>{/if}
+								<li>{m.review_force_overwrite()}: {preview.effective_apply.merge_override}</li>
+							</ul>
+							{#if preview.effective_apply.plan.media_policy === 'replace'}<p class="mt-3 font-medium text-destructive" role="alert">{m.review_media_replace_warning()}</p>{/if}
+						</div>
+					{/if}
 					{#if previewNeedsDestination && !destinationPath.trim()}
 						<div class="text-center py-12 text-muted-foreground">
 							<p>{m.review_output_preview_empty()}</p>

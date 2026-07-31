@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -136,6 +137,7 @@ type applyPhaseInputs struct {
 	HistoryRepo     database.HistoryRepositoryInterface
 	OperationMode   string
 	OrganizeSkipped bool
+	Dedup           *sync.Map
 
 	Broadcaster progressBroadcaster
 	Updater     resultstore.ResultUpdater

@@ -100,7 +100,19 @@ func (o *previewOrchImpl) Execute(ctx context.Context, cmd PreviewCmd) (*Preview
 		sharedEngine = template.NewEngine()
 	}
 
-	strategy, err := o.createPreviewStrategy(operationMode)
+	runner := o
+	if cmd.ForceNFO && !o.previewCfg.NFOEnabled {
+		clone := *o
+		clone.previewCfg.NFOEnabled = true
+		runner = &clone
+	}
+	var strategy organizer.OperationStrategy
+	var err error
+	if cmd.ForceRenameFile && o.previewCfg.ResolveForcedRenameStrategy != nil {
+		strategy = o.previewCfg.ResolveForcedRenameStrategy(operationMode)
+	} else {
+		strategy, err = o.createPreviewStrategy(operationMode)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +136,7 @@ func (o *previewOrchImpl) Execute(ctx context.Context, cmd PreviewCmd) (*Preview
 
 	encodingInfo := organizer.DetectPathEncodingInfo(sourcePath, destination)
 
-	return o.executePreview(ctx, movie, fileResults, destination, operationMode, skipNFO, skipDownload, sharedEngine, strategy, encodingInfo), nil
+	return runner.executePreview(ctx, movie, fileResults, destination, operationMode, skipNFO, skipDownload, sharedEngine, strategy, encodingInfo), nil
 }
 
 // mediaPathsResult holds the resolved media paths for a preview operation.

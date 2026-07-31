@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
@@ -15,10 +16,11 @@ import (
 // LinkMode is resolved at the factory boundary — callers
 // pass a validated link mode, not raw CLI input.
 type OrganizeOptions struct {
-	Skip        bool
-	MoveFiles   bool
-	LinkMode    organizer.LinkMode // resolved at factory boundary, not inside orchestrator
-	ForceUpdate bool
+	Skip            bool
+	MoveFiles       bool
+	LinkMode        organizer.LinkMode // resolved at factory boundary, not inside orchestrator
+	ForceUpdate     bool
+	ForceRenameFile bool
 }
 
 // MergeOptions controls the NFO merge step within Apply.
@@ -37,17 +39,19 @@ type MergeOptions struct {
 // and step-control options grouped by step (Organize, Merge).
 // OperationMode is resolved at the factory boundary.
 type ApplyCmd struct {
-	Movie               *models.Movie
-	Match               models.FileMatchInfo
-	DestPath            string
-	DryRun              bool
-	Organize            OrganizeOptions
-	Merge               MergeOptions
-	Download            bool
-	GenerateNFO         bool
-	DisplayTitleSrc     *models.Movie
-	DownloadExtrafanart *bool                       // Optional override for extrafanart downloads; nil = use config default
-	OperationMode       operationmode.OperationMode // resolved at factory boundary
+	Movie                  *models.Movie
+	Match                  models.FileMatchInfo
+	DestPath               string
+	DryRun                 bool
+	Organize               OrganizeOptions
+	Merge                  MergeOptions
+	Download               bool
+	GenerateNFO            bool
+	DisplayTitleSrc        *models.Movie
+	DownloadExtrafanart    *bool // Optional override for extrafanart downloads; nil = use config default
+	OverwriteExistingMedia bool
+	Dedup                  *sync.Map
+	OperationMode          operationmode.OperationMode // resolved at factory boundary
 }
 
 // stepCompletion records which Apply steps completed successfully.
@@ -90,12 +94,14 @@ type ApplyResult struct {
 // PreviewCmd is the command struct that crosses the Preview seam (ADR-0004).
 // OperationMode is resolved at the factory boundary.
 type PreviewCmd struct {
-	Movie         *models.Movie
-	FileResults   []models.FileMatchInfo
-	Destination   string
-	OperationMode operationmode.OperationMode // resolved at factory boundary
-	SkipNFO       bool
-	SkipDownload  bool
+	Movie           *models.Movie
+	FileResults     []models.FileMatchInfo
+	Destination     string
+	OperationMode   operationmode.OperationMode // resolved at factory boundary
+	SkipNFO         bool
+	SkipDownload    bool
+	ForceNFO        bool
+	ForceRenameFile bool
 }
 
 // PreviewResult is the domain result from the Preview seam (ADR-0004).

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
@@ -60,6 +61,7 @@ type batchJobBase struct {
 	RevertedAt            *time.Time                      `json:"reverted_at,omitempty"`
 	OperationModeOverride operationmode.OperationMode     `json:"operation_mode_override,omitempty"`
 	Update                bool                            `json:"update"`
+	ApplyPlan             *applyplan.Plan                 `json:"apply_plan,omitempty"`
 	PersistError          string                          `json:"persist_error,omitempty"`
 	IsDeleted             bool                            `json:"is_deleted"`
 }
@@ -640,13 +642,15 @@ type ScrapePhaseConfig struct {
 // factory/job level instead of per-call phase config overrides.
 type ApplyPhaseConfig struct {
 	// Per-apply configuration (maps directly to ApplyCmd fields)
-	OrganizeOptions     workflow.OrganizeOptions // File organization settings
-	MergeOptions        workflow.MergeOptions    // NFO merge strategy settings
-	Destination         string                   // Target directory for organized files
-	GenerateNFO         bool                     // Generate NFO file for each movie
-	Download            bool                     // Download media (poster, fanart, etc.)
-	DownloadExtrafanart *bool                    // Optional override for extrafanart downloads; nil = use config default
-	DryRun              bool                     // Dry-run mode: preview without making changes
+	OrganizeOptions        workflow.OrganizeOptions // File organization settings
+	MergeOptions           workflow.MergeOptions    // NFO merge strategy settings
+	Destination            string                   // Target directory for organized files
+	GenerateNFO            bool                     // Generate NFO file for each movie
+	ForceNFO               bool
+	Download               bool  // Download media (poster, fanart, etc.)
+	DownloadExtrafanart    *bool // Optional override for extrafanart downloads; nil = use config default
+	OverwriteExistingMedia bool
+	DryRun                 bool // Dry-run mode: preview without making changes
 
 	// Job-level config applied before apply starts
 	OperationModeOverride operationmode.OperationMode // resolved at factory boundary

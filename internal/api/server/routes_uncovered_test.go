@@ -69,7 +69,7 @@ func TestRegisterNoRouteHandler_NoUI_Uncovered(t *testing.T) {
 	router := gin.New()
 	// Empty assets (no UI available)
 	assets := webUIAssets{}
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	// Should return JSON 404 for API routes
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", nil)

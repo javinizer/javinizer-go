@@ -111,9 +111,10 @@ type BatchCommandOptions struct {
 	ForceRefresh    bool
 
 	// Update-specific merge options
-	SkipOrganize   bool
-	ForceOverwrite bool
-	PreserveNFO    bool
+	SkipOrganize           bool
+	ForceOverwrite         bool
+	PreserveNFO            bool
+	OverwriteExistingMedia bool
 
 	// Resolved seam strings (caller must resolve before calling)
 	Resolved *workflow.ResolvedSeamStrings
@@ -246,14 +247,15 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 
 	// Set run options using the shared CLIApplyOptions helper
 	applyOpts := CLIApplyOptions{
-		DryRun:       opts.DryRun,
-		MoveFiles:    opts.MoveFiles,
-		LinkMode:     opts.Resolved.LinkMode,
-		ForceUpdate:  opts.ForceUpdate,
-		SkipOrganize: opts.SkipOrganize,
-		GenerateNFO:  opts.GenerateNFO,
-		Download:     opts.DownloadMedia,
-		Destination:  opts.Destination,
+		DryRun:                 opts.DryRun,
+		MoveFiles:              opts.MoveFiles,
+		LinkMode:               opts.Resolved.LinkMode,
+		ForceUpdate:            opts.ForceUpdate,
+		SkipOrganize:           opts.SkipOrganize,
+		GenerateNFO:            opts.GenerateNFO,
+		Download:               opts.DownloadMedia,
+		OverwriteExistingMedia: opts.OverwriteExistingMedia,
+		Destination:            opts.Destination,
 		MergeOptions: workflow.MergeOptions{
 			ForceOverwrite: opts.ForceOverwrite,
 			PreserveNFO:    opts.PreserveNFO,

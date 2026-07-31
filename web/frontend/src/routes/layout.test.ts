@@ -34,7 +34,9 @@ vi.mock('$lib/stores/theme.svelte', () => ({
 
 vi.mock('$lib/query/queries', () => ({
 	createConfigQuery: () => ({ data: null }),
+	createVersionStatusQuery: () => ({ data: null }),
 }));
+vi.mock('$lib/components/UpdateIndicator.svelte', () => ({ default: () => {} }));
 
 import { toastStore } from '$lib/stores/toast';
 
@@ -157,6 +159,29 @@ afterEach(() => {
 	localStorage.clear();
 });
 
+describe('authentication bootstrap', () => {
+it('renders server-authenticated navigation immediately without a blank or loading state', () => {
+		apiClient.getAuthStatus.mockReturnValue(new Promise(() => {}));
+		const { getByText, queryByText } = render(Layout, { data: { authStatus: authenticatedStatus() } });
+		expect(getByText('Scrape')).toBeTruthy();
+		expect(getByText('admin · Logout')).toBeTruthy();
+		expect(queryByText('Checking authentication...')).toBeNull();
+	});	it('shows no loading message for fast checks and reveals one only after 500ms', async () => {
+		vi.useFakeTimers();
+		try {
+			apiClient.getAuthStatus.mockReturnValue(new Promise(() => {}));
+			const { queryByText, getByText } = render(Layout);
+			expect(queryByText('Checking authentication...')).toBeNull();
+			await vi.advanceTimersByTimeAsync(499);
+			expect(queryByText('Checking authentication...')).toBeNull();
+			await vi.advanceTimersByTimeAsync(1);
+			await tick();
+			expect(getByText('Checking authentication...')).toBeTruthy();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
 describe('first-run setup wizard', () => {
 	it('shows the credentials step before auth is initialized', async () => {
 		const { container } = render(Layout);

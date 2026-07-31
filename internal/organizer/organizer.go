@@ -210,7 +210,8 @@ type OrganizeCmd struct {
 	// o.config.OperationMode, so a per-request override (e.g. the API's
 	// OperationModeOverride) reaches ResolveStrategy even when the organizer
 	// config still carries the global default. Empty = use config mode.
-	OperationMode operationmode.OperationMode
+	OperationMode   operationmode.OperationMode
+	ForceRenameFile bool
 }
 
 // OrganizerInterface is the single-method seam for file organization.
@@ -480,7 +481,15 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	default:
 	}
 
-	plan, err := o.plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
+	planner := o
+	if cmd.ForceRenameFile && o.config != nil && !o.config.RenameFile {
+		clone := *o
+		cfg := *o.config
+		cfg.RenameFile = true
+		clone.config = &cfg
+		planner = &clone
+	}
+	plan, err := planner.plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
 	if err != nil {
 		return nil, err
 	}

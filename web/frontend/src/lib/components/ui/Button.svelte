@@ -12,6 +12,10 @@
 		title?: string;
 		'aria-label'?: string;
 		'aria-pressed'?: boolean;
+		id?: string;
+		'aria-expanded'?: boolean;
+		'aria-controls'?: string;
+		'aria-haspopup'?: 'true' | 'false' | 'menu' | 'listbox' | 'tree' | 'grid' | 'dialog';
 	}
 
 	let {
@@ -24,7 +28,11 @@
 		children,
 		title,
 		'aria-label': ariaLabel,
-		'aria-pressed': ariaPressed
+		'aria-pressed': ariaPressed,
+		id,
+		'aria-expanded': ariaExpanded,
+		'aria-controls': ariaControls,
+		'aria-haspopup': ariaHaspopup
 	}: Props = $props();
 
 	const variants = {
@@ -46,11 +54,15 @@
 </script>
 
 <button
+	{id}
 	{type}
 	{disabled}
 	{title}
 	aria-label={ariaLabel}
 	{...(ariaPressed !== undefined ? { 'aria-pressed': ariaPressed } : {})}
+	{...(ariaExpanded !== undefined ? { 'aria-expanded': ariaExpanded } : {})}
+	{...(ariaControls ? { 'aria-controls': ariaControls } : {})}
+	{...(ariaHaspopup ? { 'aria-haspopup': ariaHaspopup } : {})}
 	onclick={onclick}
 	class={cn(
 		'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',

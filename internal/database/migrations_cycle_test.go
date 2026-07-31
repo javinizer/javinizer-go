@@ -74,6 +74,7 @@ func TestMigrations_Up_Down_Up_Cycle(t *testing.T) {
 	upCols := jobColumnNames(t, sqlDB)
 	assert.Contains(t, upCols, "update", "000008 Up should add the update column")
 	assert.Contains(t, upCols, "operation_mode_override", "000010 Up should add operation_mode_override")
+	assert.Contains(t, upCols, "apply_plan", "000012 Up should add the nullable apply plan")
 
 	// Roll every migration back down to (but not including) version 0. This is the
 	// path that broke before the fix: 000010 Down runs, then 000008 Down runs.
@@ -98,6 +99,7 @@ func TestMigrations_Up_Down_Up_Cycle(t *testing.T) {
 	assert.Equal(t, upCols, finalCols, "jobs schema after Up->Down->Up must match the initial Up schema")
 	assert.Contains(t, finalCols, "update")
 	assert.Contains(t, finalCols, "operation_mode_override")
+	assert.Contains(t, finalCols, "apply_plan")
 
 	// Sanity: the migration version table should report the latest version.
 	latest, err := provider.GetDBVersion(ctx)
