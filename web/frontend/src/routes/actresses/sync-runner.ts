@@ -19,10 +19,8 @@ export interface ActressSyncSummary {
 }
 
 export async function loadActressSyncSnapshot(client: ActressSyncSnapshotClient, jobID: string) {
-	const [jobResponse, taskResponse] = await Promise.all([
-		client.getActressSyncJob(jobID),
-		client.listActressSyncJobTasks(jobID),
-	]);
+	const jobResponse = await client.getActressSyncJob(jobID);
+	const taskResponse = await client.listActressSyncJobTasks(jobID);
 	return { job: jobResponse.job, tasks: taskResponse.tasks };
 }
 

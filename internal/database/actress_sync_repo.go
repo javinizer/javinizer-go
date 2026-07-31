@@ -457,7 +457,13 @@ SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) cancelled FROM actress_syn
 		}
 		completedAt = &now
 	}
-	return tx.Model(&models.ActressSyncJob{}).Where("id = ?", jobID).Updates(map[string]any{"status": status, "total_tasks": c.Total, "completed": c.Terminal, "updated": c.Updated, "warnings": c.Warnings, "skipped": c.Skipped, "conflicts": c.Conflicts, "failed": c.Failed, "cancelled": c.Cancelled, "completed_at": completedAt}).Error
+	if err := tx.Model(&models.ActressSyncJob{}).Where("id = ?", jobID).Updates(map[string]any{"status": status, "total_tasks": c.Total, "completed": c.Terminal, "updated": c.Updated, "warnings": c.Warnings, "skipped": c.Skipped, "conflicts": c.Conflicts, "failed": c.Failed, "cancelled": c.Cancelled, "completed_at": completedAt}).Error; err != nil {
+		return err
+	}
+	if status == models.ActressSyncJobCompleted || status == models.ActressSyncJobCancelled {
+		return r.pruneTerminalJobsTx(tx)
+	}
+	return nil
 }
 
 // ListSyncCandidates ...

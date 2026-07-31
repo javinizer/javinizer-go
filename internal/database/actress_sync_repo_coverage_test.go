@@ -314,6 +314,25 @@ func TestActressSyncTerminalHistoryRetention(t *testing.T) {
 	require.NoError(t, repo.pruneTerminalJobsTx(db.DB))
 }
 
+func TestActressSyncTerminalHistoryRetentionOnRefresh(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressSyncRepository(db)
+	seedTerminalActressSyncHistory(t, db, actressSyncTerminalRetention+1)
+	now := time.Now().UTC()
+	job := models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobRunning, Scope: "selected", CreatedAt: now}
+	task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, DedupeKey: "refresh:" + job.ID, Status: models.ActressSyncTaskCompleted, Stage: "completed", CreatedAt: now, CompletedAt: &now, Messages: []string{}, UpdatedFields: []string{}}
+	require.NoError(t, db.Create(&job).Error)
+	require.NoError(t, db.Create(&task).Error)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return repo.refreshJobTx(tx, job.ID, now) }))
+
+	stored, err := repo.FindJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncJobCompleted, stored.Status)
+	var terminalCount int64
+	require.NoError(t, db.Model(&models.ActressSyncJob{}).Where("status IN ?", []string{models.ActressSyncJobCompleted, models.ActressSyncJobCancelled}).Count(&terminalCount).Error)
+	require.EqualValues(t, actressSyncTerminalRetention, terminalCount)
+}
+
 func TestActressSyncTerminalHistoryRetentionErrors(t *testing.T) {
 	t.Run("query", func(t *testing.T) {
 		db := newDatabaseTestDB(t)

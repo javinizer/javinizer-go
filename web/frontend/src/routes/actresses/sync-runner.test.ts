@@ -47,10 +47,11 @@ describe('actress sync summary', () => {
 
 	it('loads job and task state for live polling', async () => {
 		const calls: string[] = [];
+		let jobLoaded = false;
 		const active = task('active', 'running');
 		const snapshot = await loadActressSyncSnapshot({
-			async getActressSyncJob(jobID) { calls.push(`job:${jobID}`); return { job }; },
-			async listActressSyncJobTasks(jobID) { calls.push(`tasks:${jobID}`); return { tasks: [active] }; },
+			async getActressSyncJob(jobID) { calls.push(`job:${jobID}`); jobLoaded = true; return { job }; },
+			async listActressSyncJobTasks(jobID) { expect(jobLoaded).toBe(true); calls.push(`tasks:${jobID}`); return { tasks: [active] }; },
 		}, job.id);
 		expect(calls).toEqual(['job:job', 'tasks:job']);
 		expect(snapshot).toEqual({ job, tasks: [active] });
