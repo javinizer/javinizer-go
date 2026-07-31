@@ -182,6 +182,19 @@ func TestValidateRemoteImageWithSafeClientPinsProxyTarget(t *testing.T) {
 	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), secureClient, "https://1.1.1.1/image.png", "agent", ""))
 }
 
+func TestResponseHeaderLimitReaderRejectsOversizedHeaders(t *testing.T) {
+	reader := &responseHeaderLimitReader{reader: strings.NewReader(strings.Repeat("x", 64)), remaining: 16}
+	data := make([]byte, 64)
+	read, err := reader.Read(data)
+	require.Equal(t, 17, read)
+	require.ErrorContains(t, err, "headers exceed configured limit")
+	restart := &responseHeaderLimitReader{reader: strings.NewReader("\r\r\n\r\nbody"), remaining: 32}
+	read, err = restart.Read(data)
+	require.NoError(t, err)
+	require.Equal(t, len("\r\r\n\r\nbody"), read)
+	require.True(t, restart.done)
+}
+
 func TestProxyResponseBodyClosesConnectionBeforeBody(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = server.Close() })
@@ -224,6 +237,18 @@ func TestRoundTripHTTPProxyErrorsAndCancellation(t *testing.T) {
 		return writeFailConn{Conn: client, err: writeErr}, nil
 	}})
 	require.ErrorIs(t, err, writeErr)
+
+	client, server = net.Pipe()
+	go func() {
+		defer server.Close()
+		_, _ = http.ReadRequest(bufio.NewReader(server))
+		_, _ = fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nX-Large: %s\r\n\r\n", strings.Repeat("x", 128))
+	}()
+	_, err = roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{
+		DialContext:            func(context.Context, string, string) (net.Conn, error) { return client, nil },
+		MaxResponseHeaderBytes: 32,
+	})
+	require.Error(t, err)
 
 	cancelCtx, cancel := context.WithCancel(t.Context())
 	client, server = net.Pipe()

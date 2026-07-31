@@ -29,8 +29,9 @@ import (
 
 // maxThumbnailValidationBytes ...
 const (
-	maxThumbnailValidationBytes = 2 * 1024 * 1024
-	httpsScheme                 = "https"
+	maxThumbnailValidationBytes   = 2 * 1024 * 1024
+	defaultMaxResponseHeaderBytes = 10 << 20
+	httpsScheme                   = "https"
 )
 
 var validateRemoteImageWithClient = ValidateRemoteImageWithClient
@@ -135,6 +136,39 @@ func encodeProxyRequest(req *http.Request, pinnedURL *url.URL, proxyUser *url.Us
 	return append([]byte(requestLine), requestBytes[lineEnd+2:]...), nil
 }
 
+type responseHeaderLimitReader struct {
+	reader    io.Reader
+	remaining int64
+	matched   int
+	done      bool
+}
+
+func (r *responseHeaderLimitReader) Read(data []byte) (int, error) {
+	read, err := r.reader.Read(data)
+	separator := [...]byte{'\r', '\n', '\r', '\n'}
+	for i, value := range data[:read] {
+		if r.done {
+			break
+		}
+		r.remaining--
+		if r.remaining < 0 {
+			return i + 1, fmt.Errorf("response headers exceed configured limit")
+		}
+		switch value {
+		case separator[r.matched]:
+			r.matched++
+			if r.matched == len(separator) {
+				r.done = true
+			}
+		case separator[0]:
+			r.matched = 1
+		default:
+			r.matched = 0
+		}
+	}
+	return read, err
+}
+
 type proxyResponseBody struct {
 	io.ReadCloser
 	conn net.Conn
@@ -197,7 +231,12 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 	if err := writeFull(conn, requestBytes); err != nil {
 		return closeConn(err)
 	}
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	maxHeaderBytes := transport.MaxResponseHeaderBytes
+	if maxHeaderBytes <= 0 {
+		maxHeaderBytes = defaultMaxResponseHeaderBytes
+	}
+	headerReader := &responseHeaderLimitReader{reader: conn, remaining: maxHeaderBytes}
+	resp, err := http.ReadResponse(bufio.NewReader(headerReader), req)
 	if err != nil {
 		return closeConn(err)
 	}
