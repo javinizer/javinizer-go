@@ -6,11 +6,11 @@ import (
 )
 
 // RegisterRoutes registers the actress CRUD, search, merge, and import/export routes on the given protected router group.
-func RegisterRoutes(protected *gin.RouterGroup, deps ActressDeps, rt *core.APIRuntime) {
+func RegisterRoutes(protected, writeProtected *gin.RouterGroup, deps ActressDeps, rt *core.APIRuntime) {
 	protected.GET("/actresses", listActresses(deps))
 	protected.POST("/actresses", createActress(deps))
 	protected.GET("/actresses/sync-candidates", listActressSyncCandidates(rt))
-	protected.POST("/actresses/sync-jobs", createActressSyncJob(rt))
+	writeProtected.POST("/actresses/sync-jobs", createActressSyncJob(rt))
 	protected.GET("/actresses/sync-jobs/active", listActiveActressSyncJobs(rt))
 	protected.GET("/actresses/sync-jobs/:jobID", getActressSyncJob(rt))
 	protected.GET("/actresses/sync-jobs/:jobID/tasks", listActressSyncJobTasks(rt))

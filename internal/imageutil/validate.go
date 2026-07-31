@@ -1,8 +1,12 @@
 package imageutil
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -14,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -23,11 +28,14 @@ import (
 )
 
 // maxThumbnailValidationBytes ...
-const maxThumbnailValidationBytes = 2 * 1024 * 1024
+const (
+	maxThumbnailValidationBytes = 2 * 1024 * 1024
+	httpsScheme                 = "https"
+)
 
 var validateRemoteImageWithClient = ValidateRemoteImageWithClient
 
-func resolvePublicTargetIP(ctx context.Context, host string, lookup func(context.Context, string) ([]net.IPAddr, error)) (net.IP, error) {
+func resolvePublicTargetIPs(ctx context.Context, host string, lookup func(context.Context, string) ([]net.IPAddr, error)) ([]net.IP, error) {
 	addresses, err := lookup(ctx, host)
 	if err != nil {
 		return nil, fmt.Errorf("SSRF blocked: failed to resolve hostname %q: %w", host, err)
@@ -35,25 +43,35 @@ func resolvePublicTargetIP(ctx context.Context, host string, lookup func(context
 	if len(addresses) == 0 {
 		return nil, fmt.Errorf("SSRF blocked: hostname %q resolved to no addresses", host)
 	}
+	ips := make([]net.IP, 0, len(addresses))
 	for _, address := range addresses {
 		ip := address.IP
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
 			return nil, fmt.Errorf("SSRF blocked: %s resolves to private/internal IP", host)
 		}
+		ips = append(ips, ip)
 	}
-	return addresses[0].IP, nil
+	return ips, nil
 }
 
-func resolvePublicDialAddress(ctx context.Context, addr string, lookup func(context.Context, string) ([]net.IPAddr, error)) (string, error) {
+func dialPublicTarget(ctx context.Context, network, addr string, lookup func(context.Context, string) ([]net.IPAddr, error), dial func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return "", fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
+		return nil, fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
 	}
-	ip, err := resolvePublicTargetIP(ctx, host, lookup)
+	ips, err := resolvePublicTargetIPs(ctx, host, lookup)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return net.JoinHostPort(ip.String(), port), nil
+	var dialErr error
+	for _, ip := range ips {
+		conn, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		dialErr = errors.Join(dialErr, err)
+	}
+	return nil, dialErr
 }
 
 func dialTLSProxy(ctx context.Context, network, addr string, dial func(context.Context, string, string) (net.Conn, error), config *tls.Config) (net.Conn, error) {
@@ -73,6 +91,96 @@ func dialTLSProxy(ctx context.Context, network, addr string, dial func(context.C
 		return nil, err
 	}
 	return tlsConn, nil
+}
+
+func encodeProxyRequest(req *http.Request, pinnedURL *url.URL, proxyUser *url.Userinfo) ([]byte, error) {
+	writeReq := req.Clone(req.Context())
+	writeReq.URL = pinnedURL
+	writeReq.Host = req.URL.Host
+	writeReq.Header = req.Header.Clone()
+	if proxyUser != nil {
+		password, _ := proxyUser.Password()
+		credentials := base64.StdEncoding.EncodeToString([]byte(proxyUser.Username() + ":" + password))
+		writeReq.Header.Set("Proxy-Authorization", "Basic "+credentials)
+	}
+	var encoded bytes.Buffer
+	if err := writeReq.Write(&encoded); err != nil {
+		return nil, err
+	}
+	requestBytes := encoded.Bytes()
+	lineEnd := bytes.Index(requestBytes, []byte("\r\n"))
+	requestLine := fmt.Sprintf("%s %s %s\r\n", req.Method, pinnedURL.String(), req.Proto)
+	return append([]byte(requestLine), requestBytes[lineEnd+2:]...), nil
+}
+
+type proxyResponseBody struct {
+	io.ReadCloser
+	conn net.Conn
+	done chan struct{}
+	once sync.Once
+}
+
+func (b *proxyResponseBody) Close() error {
+	var closeErr error
+	b.once.Do(func() {
+		close(b.done)
+		closeErr = errors.Join(b.ReadCloser.Close(), b.conn.Close())
+	})
+	return closeErr
+}
+
+func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.URL, pinnedHost string, transport *http.Transport) (*http.Response, error) {
+	proxyAddr := proxyURL.Host
+	if proxyURL.Port() == "" {
+		if proxyURL.Scheme == httpsScheme {
+			proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "443")
+		} else {
+			proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "80")
+		}
+	}
+	dial := transport.DialContext
+	if dial == nil {
+		dial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+	}
+	var conn net.Conn
+	var err error
+	if proxyURL.Scheme == httpsScheme {
+		conn, err = dialTLSProxy(ctx, "tcp", proxyAddr, dial, transport.TLSClientConfig)
+	} else {
+		conn, err = dial(ctx, "tcp", proxyAddr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-done:
+		}
+	}()
+	closeConn := func(err error) (*http.Response, error) {
+		close(done)
+		_ = conn.Close()
+		return nil, err
+	}
+	pinnedURL := *req.URL
+	pinnedURL.Host = pinnedHost
+	pinnedURL.Opaque = ""
+	requestBytes, err := encodeProxyRequest(req, &pinnedURL, proxyURL.User)
+	if err != nil {
+		return closeConn(err)
+	}
+	if _, err := conn.Write(requestBytes); err != nil {
+		return closeConn(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		return closeConn(err)
+	}
+	resp.Body = &proxyResponseBody{ReadCloser: resp.Body, conn: conn, done: done}
+	return resp, nil
 }
 
 type pinnedProxyTransport struct {
@@ -101,54 +209,65 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 			originalDialContext = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
 		}
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			pinnedAddr, err := resolvePublicDialAddress(ctx, addr, lookup)
-			if err != nil {
-				return nil, err
-			}
-			return originalDialContext(ctx, network, pinnedAddr)
+			return dialPublicTarget(ctx, network, addr, lookup, originalDialContext)
 		}
 		return transport.RoundTrip(req)
 	}
 	host := req.URL.Hostname()
-	ip, err := resolvePublicTargetIP(req.Context(), host, lookup)
+	ips, err := resolvePublicTargetIPs(req.Context(), host, lookup)
 	if err != nil {
 		return nil, err
 	}
 	port := req.URL.Port()
 	if port == "" {
-		if req.URL.Scheme == "https" {
+		if req.URL.Scheme == httpsScheme {
 			port = "443"
 		} else {
 			port = "80"
 		}
 	}
-	pinnedReq := req.Clone(req.Context())
-	pinnedURL := *req.URL
-	pinnedURL.Host = net.JoinHostPort(ip.String(), port)
-	pinnedReq.URL = &pinnedURL
-	pinnedReq.Host = req.URL.Host
-	transport := t.base.Clone()
-	transport.Proxy = http.ProxyURL(proxyURL)
-	if req.URL.Scheme == "https" {
-		baseTLSConfig := transport.TLSClientConfig.Clone()
-		targetTLSConfig := baseTLSConfig.Clone()
-		targetTLSConfig.ServerName = host
-		transport.TLSClientConfig = targetTLSConfig
-		if proxyURL.Scheme == "https" && transport.DialTLSContext == nil {
-			dial := transport.DialContext
-			if dial == nil {
-				dial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+	var roundTripErr error
+	for _, ip := range ips {
+		pinnedHost := net.JoinHostPort(ip.String(), port)
+		transport := t.base.Clone()
+		transport.Proxy = http.ProxyURL(proxyURL)
+		if req.URL.Scheme == "http" {
+			resp, err := roundTripHTTPProxy(req.Context(), req, proxyURL, pinnedHost, transport)
+			if err == nil {
+				resp.Request = req
+				return resp, nil
 			}
-			transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialTLSProxy(ctx, network, addr, dial, baseTLSConfig)
+			roundTripErr = errors.Join(roundTripErr, err)
+			continue
+		}
+		pinnedReq := req.Clone(req.Context())
+		pinnedURL := *req.URL
+		pinnedURL.Host = pinnedHost
+		pinnedReq.URL = &pinnedURL
+		pinnedReq.Host = req.URL.Host
+		if req.URL.Scheme == httpsScheme {
+			baseTLSConfig := transport.TLSClientConfig.Clone()
+			targetTLSConfig := baseTLSConfig.Clone()
+			targetTLSConfig.ServerName = host
+			transport.TLSClientConfig = targetTLSConfig
+			if proxyURL.Scheme == httpsScheme && transport.DialTLSContext == nil {
+				dial := transport.DialContext
+				if dial == nil {
+					dial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+				}
+				transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return dialTLSProxy(ctx, network, addr, dial, baseTLSConfig)
+				}
 			}
 		}
+		resp, err := transport.RoundTrip(pinnedReq)
+		if err == nil {
+			resp.Request = req
+			return resp, nil
+		}
+		roundTripErr = errors.Join(roundTripErr, err)
 	}
-	resp, err := transport.RoundTrip(pinnedReq)
-	if resp != nil {
-		resp.Request = req
-	}
-	return resp, err
+	return nil, roundTripErr
 }
 
 // ValidateRemoteImage ...

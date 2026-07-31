@@ -21,6 +21,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSyncCreationUsesWriteProtectedGroup(t *testing.T) {
+	router := gin.New()
+	protected := router.Group("")
+	writeProtected := router.Group("")
+	writeProtected.Use(func(c *gin.Context) { c.AbortWithStatus(http.StatusTooManyRequests) })
+	RegisterRoutes(protected, writeProtected, ActressDeps{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/actresses/sync-jobs", strings.NewReader(`{"scope":"missing"}`))
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	require.Equal(t, http.StatusTooManyRequests, response.Code)
+}
+
 func TestListActressesFilteredPaths(t *testing.T) {
 	_, repo, _ := setupActressTestDB(t)
 	require.NoError(t, repo.Create(context.Background(), &models.Actress{DMMID: 1, FirstName: "Complete", JapaneseName: "完全", ThumbURL: "https://example.com/1.jpg"}))

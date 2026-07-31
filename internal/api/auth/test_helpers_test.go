@@ -61,7 +61,7 @@ func NewServer(deps *core.APIDeps) *gin.Engine {
 	tokenSvc := token.NewTokenService(deps.Repos.ApiTokenRepo)
 
 	movie.RegisterRoutes(protected, movieDeps)
-	actress.RegisterRoutes(protected, actressDeps, testkit.GetTestRuntime(deps))
+	actress.RegisterRoutes(protected, protected, actressDeps, testkit.GetTestRuntime(deps))
 	genre.RegisterRoutes(protected, genreDeps, func() {})
 	system.RegisterRoutes(protected, testkit.GetTestRuntime(deps))
 	apiversion.RegisterRoutes(protected, deps)

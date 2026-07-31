@@ -20,6 +20,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
+
+type writeFailConn struct {
+	net.Conn
+	err error
+}
+
+func (c writeFailConn) Write([]byte) (int, error) { return 0, c.err }
+
 func TestValidateRemoteImageWithSafeClientGuards(t *testing.T) {
 	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), nil, "https://example.com/a.jpg", "", ""))
 	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), http.DefaultClient, "http://127.0.0.1/a.jpg", "", ""))
@@ -74,8 +85,8 @@ func TestValidateRemoteImageWithSafeClientPinsProxyTarget(t *testing.T) {
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
 
 	require.NoError(t, ValidateRemoteImageWithSafeClient(t.Context(), client, "http://1.1.1.1/image.png", "agent", ""))
-	assert.Equal(t, "1.1.1.1", targetHost)
-	assert.Equal(t, "1.1.1.1", hostHeader)
+	assert.Equal(t, "1.1.1.1:80", targetHost)
+	assert.Equal(t, "1.1.1.1:80", hostHeader)
 	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), client, "https://1.1.1.1/image.png", "agent", ""))
 
 	proxyErr := errors.New("proxy selection failed")
@@ -130,36 +141,186 @@ func TestValidateRemoteImageWithSafeClientPinsProxyTarget(t *testing.T) {
 	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), secureClient, "https://1.1.1.1/image.png", "agent", ""))
 }
 
-func TestResolvePublicTargetIP(t *testing.T) {
-	lookupErr := errors.New("lookup failed")
-	_, err := resolvePublicTargetIP(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) { return nil, lookupErr })
-	require.ErrorIs(t, err, lookupErr)
-	_, err = resolvePublicTargetIP(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) { return nil, nil })
-	require.ErrorContains(t, err, "no addresses")
-	_, err = resolvePublicTargetIP(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) {
-		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
-	})
-	require.ErrorContains(t, err, "private/internal")
-	ip, err := resolvePublicTargetIP(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) {
-		return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
-	})
+func TestRoundTripHTTPProxyErrorsAndCancellation(t *testing.T) {
+	dialErr := errors.New("dial failed")
+	var dialed string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) { dialed = addr; return nil, dialErr }
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/image", nil)
 	require.NoError(t, err)
-	require.Equal(t, net.ParseIP("1.1.1.1"), ip)
+	httpProxy, err := url.Parse("http://proxy.example")
+	require.NoError(t, err)
+	_, err = roundTripHTTPProxy(t.Context(), req, httpProxy, "1.1.1.1:80", &http.Transport{DialContext: dial})
+	require.ErrorIs(t, err, dialErr)
+	require.Equal(t, "proxy.example:80", dialed)
+	httpsProxy, err := url.Parse("https://proxy.example")
+	require.NoError(t, err)
+	_, err = roundTripHTTPProxy(t.Context(), req, httpsProxy, "1.1.1.1:80", &http.Transport{DialContext: dial})
+	require.ErrorIs(t, err, dialErr)
+	require.Equal(t, "proxy.example:443", dialed)
+
+	badReq := req.Clone(t.Context())
+	writeErr := errors.New("body failed")
+	badReq.Body = io.NopCloser(failingReader{err: writeErr})
+	badReq.ContentLength = -1
+	client, server := net.Pipe()
+	_, err = roundTripHTTPProxy(t.Context(), badReq, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil }})
+	require.ErrorContains(t, err, writeErr.Error())
+	_ = server.Close()
+
+	client, server = net.Pipe()
+	_ = server.Close()
+	_, err = roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return writeFailConn{Conn: client, err: writeErr}, nil
+	}})
+	require.ErrorIs(t, err, writeErr)
+
+	cancelCtx, cancel := context.WithCancel(t.Context())
+	client, server = net.Pipe()
+	result := make(chan error, 1)
+	go func() {
+		_, proxyErr := roundTripHTTPProxy(cancelCtx, req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil }})
+		result <- proxyErr
+	}()
+	go func() { _, _ = io.Copy(io.Discard, server) }()
+	cancel()
+	require.Error(t, <-result)
+	_ = server.Close()
 }
 
-func TestResolvePublicDialAddress(t *testing.T) {
-	lookup := func(context.Context, string) ([]net.IPAddr, error) {
-		return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
-	}
-	_, err := resolvePublicDialAddress(t.Context(), "invalid", lookup)
-	require.ErrorContains(t, err, "invalid address")
-	addr, err := resolvePublicDialAddress(t.Context(), "public.example:443", lookup)
+func TestPinnedProxyTransportHTTPSFailoverSuccess(t *testing.T) {
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
 	require.NoError(t, err)
-	require.Equal(t, "1.1.1.1:443", addr)
-	_, err = resolvePublicDialAddress(t.Context(), "private.example:80", func(context.Context, string) ([]net.IPAddr, error) {
-		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
+	}))
+	t.Cleanup(target.Close)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, http.MethodConnect, req.Method)
+		targetConn, dialErr := net.Dial("tcp", target.Listener.Addr().String())
+		require.NoError(t, dialErr)
+		clientConn, rw, hijackErr := w.(http.Hijacker).Hijack()
+		require.NoError(t, hijackErr)
+		_, _ = rw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+		require.NoError(t, rw.Flush())
+		go func() { _, _ = io.Copy(targetConn, clientConn); _ = targetConn.Close() }()
+		_, _ = io.Copy(clientConn, targetConn)
+		_ = clientConn.Close()
+	}))
+	t.Cleanup(proxy.Close)
+	proxyURL, err := url.Parse(proxy.URL)
+	require.NoError(t, err)
+	roots := x509.NewCertPool()
+	roots.AddCert(target.Certificate())
+	transport := &pinnedProxyTransport{
+		base: &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{RootCAs: roots}},
+		lookup: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
+		},
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.com/image.png", nil)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+}
+
+func TestPinnedProxyTransportPreservesDNSFailover(t *testing.T) {
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	require.NoError(t, err)
+	var targets []string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		targets = append(targets, req.URL.Host)
+		if req.URL.Host == "1.1.1.1:80" {
+			conn, _, hijackErr := w.(http.Hijacker).Hijack()
+			require.NoError(t, hijackErr)
+			_ = conn.Close()
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
+	}))
+	t.Cleanup(proxy.Close)
+	proxyURL, err := url.Parse(proxy.URL)
+	require.NoError(t, err)
+	transport := &pinnedProxyTransport{
+		base: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		lookup: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}, {IP: net.ParseIP("1.0.0.1")}}, nil
+		},
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/image.png", nil)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, []string{"1.1.1.1:80", "1.0.0.1:80"}, targets)
+}
+
+func TestEncodeProxyRequestPreservesHostAndAuthentication(t *testing.T) {
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/image.png?q=1", nil)
+	require.NoError(t, err)
+	pinnedURL, err := url.Parse("http://1.1.1.1:80/image.png?q=1")
+	require.NoError(t, err)
+	encoded, err := encodeProxyRequest(req, pinnedURL, url.UserPassword("user", "pass"))
+	require.NoError(t, err)
+	request := string(encoded)
+	require.Contains(t, request, "GET http://1.1.1.1:80/image.png?q=1 HTTP/1.1\r\n")
+	require.Contains(t, request, "Host: public.example\r\n")
+	require.Contains(t, request, "Proxy-Authorization: Basic dXNlcjpwYXNz\r\n")
+
+	badReq := req.Clone(t.Context())
+	writeErr := errors.New("body read failed")
+	badReq.Body = io.NopCloser(failingReader{err: writeErr})
+	badReq.ContentLength = -1
+	_, err = encodeProxyRequest(badReq, pinnedURL, nil)
+	require.ErrorContains(t, err, writeErr.Error())
+}
+
+func TestResolvePublicTargetIPs(t *testing.T) {
+	lookupErr := errors.New("lookup failed")
+	_, err := resolvePublicTargetIPs(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) { return nil, lookupErr })
+	require.ErrorIs(t, err, lookupErr)
+	_, err = resolvePublicTargetIPs(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) { return nil, nil })
+	require.ErrorContains(t, err, "no addresses")
+	_, err = resolvePublicTargetIPs(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}, {IP: net.ParseIP("127.0.0.1")}}, nil
 	})
 	require.ErrorContains(t, err, "private/internal")
+	ips, err := resolvePublicTargetIPs(t.Context(), "example.com", func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}, {IP: net.ParseIP("1.0.0.1")}}, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, []net.IP{net.ParseIP("1.1.1.1"), net.ParseIP("1.0.0.1")}, ips)
+}
+
+func TestDialPublicTargetPreservesFailover(t *testing.T) {
+	lookup := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}, {IP: net.ParseIP("1.0.0.1")}}, nil
+	}
+	_, err := dialPublicTarget(t.Context(), "tcp", "invalid", lookup, nil)
+	require.ErrorContains(t, err, "invalid address")
+	firstErr := errors.New("first address unavailable")
+	peer, server := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	var attempts []string
+	conn, err := dialPublicTarget(t.Context(), "tcp", "public.example:443", lookup, func(_ context.Context, _, addr string) (net.Conn, error) {
+		attempts = append(attempts, addr)
+		if addr == "1.1.1.1:443" {
+			return nil, firstErr
+		}
+		return peer, nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+	require.Equal(t, []string{"1.1.1.1:443", "1.0.0.1:443"}, attempts)
+
+	_, err = dialPublicTarget(t.Context(), "tcp", "private.example:80", func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	}, nil)
+	require.ErrorContains(t, err, "private/internal")
+	_, err = dialPublicTarget(t.Context(), "tcp", "public.example:80", lookup, func(context.Context, string, string) (net.Conn, error) { return nil, firstErr })
+	require.ErrorIs(t, err, firstErr)
 }
 
 func TestDialTLSProxy(t *testing.T) {

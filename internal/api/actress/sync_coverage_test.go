@@ -44,7 +44,7 @@ func TestRegisterRoutes(t *testing.T) {
 	rt := core.NewAPIRuntime(deps)
 	router := gin.New()
 	group := router.Group("/api/v1")
-	RegisterRoutes(group, ActressDeps{ContentRepos: repos.ContentRepos}, rt)
+	RegisterRoutes(group, group, ActressDeps{ContentRepos: repos.ContentRepos}, rt)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/actresses/sync-candidates", nil))
 	assert.Equal(t, http.StatusOK, w.Code)
