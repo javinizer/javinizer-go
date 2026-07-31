@@ -328,6 +328,49 @@ func TestActressFiltersReturnExpectedSubsets(t *testing.T) {
 	assert.Equal(t, int64(1), searchCount)
 }
 
+func TestActressRepositoryWrappersWorkWithoutTaskContext(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	syncRepo := NewActressSyncRepository(db)
+	actress := &models.Actress{DMMID: 777, JapaneseName: "テスト", ThumbURL: "https://example.test/old.jpg"}
+	require.NoError(t, repo.Create(context.Background(), actress))
+
+	replaced, err := repo.ReplaceThumbnail(context.Background(), actress.ID, 777, "https://example.test/old.jpg", "https://example.test/new.jpg")
+	require.NoError(t, err)
+	assert.True(t, replaced)
+
+	assigned, err := repo.AssignDMMIDIfMissing(context.Background(), actress.ID, 888)
+	require.NoError(t, err)
+	assert.False(t, assigned)
+
+	noDMM := &models.Actress{JapaneseName: "ノーDMM"}
+	require.NoError(t, repo.Create(context.Background(), noDMM))
+	assigned, err = repo.AssignDMMIDIfMissing(context.Background(), noDMM.ID, 999)
+	require.NoError(t, err)
+	assert.True(t, assigned)
+
+	_, err = syncRepo.ListActiveJobs()
+	require.NoError(t, err)
+}
+
+func TestActressSyncCancelJob(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressSyncRepository(db)
+	now := time.Now().UTC()
+	job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "missing", CreatedAt: now}
+	task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, Label: "test", DedupeKey: "actress:cancel-test", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	require.NoError(t, repo.CreateJob(job, []models.ActressSyncTask{task}))
+	require.NoError(t, repo.CancelJob(job.ID))
+	fresh, err := repo.FindJob(job.ID)
+	require.NoError(t, err)
+	assert.True(t, fresh.CancelRequested)
+	assert.Equal(t, models.ActressSyncJobCancelled, fresh.Status)
+	tasks, err := repo.ListTasks(job.ID)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, models.ActressSyncTaskCancelled, tasks[0].Status)
+}
+
 func TestListSyncCandidatesIncludesNamedMissingDMMActresses(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewActressRepository(db)
