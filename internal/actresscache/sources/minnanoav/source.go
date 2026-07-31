@@ -83,9 +83,6 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	var errOnce sync.Once
 	var sourceErr error
 	setError := func(err error) {
-		if err == nil {
-			return
-		}
 		errOnce.Do(func() {
 			sourceErr = err
 			cancel()
