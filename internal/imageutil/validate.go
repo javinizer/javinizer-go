@@ -183,6 +183,10 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 	return resp, nil
 }
 
+func isRetryableProxyStatus(status int) bool {
+	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+}
+
 type pinnedProxyTransport struct {
 	base   *http.Transport
 	lookup func(context.Context, string) ([]net.IPAddr, error)
@@ -233,9 +237,12 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		transport.Proxy = http.ProxyURL(proxyURL)
 		if req.URL.Scheme == "http" {
 			resp, err := roundTripHTTPProxy(req.Context(), req, proxyURL, pinnedHost, transport)
-			if err == nil {
+			if err == nil && !isRetryableProxyStatus(resp.StatusCode) {
 				resp.Request = req
 				return resp, nil
+			}
+			if resp != nil {
+				err = errors.Join(err, fmt.Errorf("proxy returned retryable status %d", resp.StatusCode), resp.Body.Close())
 			}
 			roundTripErr = errors.Join(roundTripErr, err)
 			continue

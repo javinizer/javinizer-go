@@ -259,9 +259,7 @@ func TestPinnedProxyTransportPreservesDNSFailover(t *testing.T) {
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		targets = append(targets, req.URL.Host)
 		if req.URL.Host == "1.1.1.1:80" {
-			conn, _, hijackErr := w.(http.Hijacker).Hijack()
-			require.NoError(t, hijackErr)
-			_ = conn.Close()
+			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
 		w.Header().Set("Content-Type", "image/png")
@@ -282,6 +280,13 @@ func TestPinnedProxyTransportPreservesDNSFailover(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, []string{"1.1.1.1:80", "1.0.0.1:80"}, targets)
+}
+
+func TestRetryableProxyStatuses(t *testing.T) {
+	require.True(t, isRetryableProxyStatus(http.StatusBadGateway))
+	require.True(t, isRetryableProxyStatus(http.StatusServiceUnavailable))
+	require.True(t, isRetryableProxyStatus(http.StatusGatewayTimeout))
+	require.False(t, isRetryableProxyStatus(http.StatusNotFound))
 }
 
 func TestEncodeProxyRequestPreservesHostAndAuthentication(t *testing.T) {
