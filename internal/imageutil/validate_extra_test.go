@@ -2,6 +2,7 @@ package imageutil
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -23,6 +24,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(data []byte) (int, error) { return f(data) }
 
 type failingReader struct{ err error }
 
@@ -50,6 +55,22 @@ type waitForConnectionCloseBody struct{ closed <-chan struct{} }
 
 func (b waitForConnectionCloseBody) Read([]byte) (int, error) { return 0, io.EOF }
 func (b waitForConnectionCloseBody) Close() error             { <-b.closed; return nil }
+
+func TestWriteFullHandlesShortWrites(t *testing.T) {
+	var output bytes.Buffer
+	writer := writerFunc(func(data []byte) (int, error) {
+		if len(data) > 2 {
+			data = data[:2]
+		}
+		return output.Write(data)
+	})
+	require.NoError(t, writeFull(writer, []byte("complete")))
+	require.Equal(t, "complete", output.String())
+	writeErr := errors.New("write failed")
+	require.ErrorIs(t, writeFull(writerFunc(func([]byte) (int, error) { return 0, writeErr }), []byte("x")), writeErr)
+	require.ErrorIs(t, writeFull(writerFunc(func([]byte) (int, error) { return 0, nil }), []byte("x")), io.ErrShortWrite)
+	require.NoError(t, writeFull(writer, nil))
+}
 
 func TestValidateRemoteImageWithSafeClientGuards(t *testing.T) {
 	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), nil, "https://example.com/a.jpg", "", ""))
@@ -217,6 +238,31 @@ func TestRoundTripHTTPProxyErrorsAndCancellation(t *testing.T) {
 	_ = server.Close()
 }
 
+func TestPinnedTransportDisablesPerRequestKeepAlives(t *testing.T) {
+	closed := make(chan bool, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		closed <- req.Close
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("response"))
+	}))
+	t.Cleanup(server.Close)
+	transport := &pinnedProxyTransport{
+		base: &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			dialer := &net.Dialer{}
+			return dialer.DialContext(ctx, network, server.Listener.Addr().String())
+		}},
+		lookup: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
+		},
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/image", nil)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.True(t, <-closed)
+}
+
 func TestPinnedProxyTransportHTTPSFailoverSuccess(t *testing.T) {
 	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
 	require.NoError(t, err)
@@ -306,6 +352,10 @@ func TestPinnedProxyTransportPreservesSOCKSHandshake(t *testing.T) {
 		}
 		if request.Host != "public.example" {
 			serverErr <- fmt.Errorf("unexpected host %q", request.Host)
+			return
+		}
+		if !request.Close {
+			serverErr <- errors.New("expected SOCKS request to disable keep-alives")
 			return
 		}
 		_, writeErr := fmt.Fprintf(conn, "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: %d\r\n\r\n%s", len(png), png)

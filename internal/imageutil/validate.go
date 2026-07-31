@@ -100,6 +100,20 @@ func dialTLSProxy(ctx context.Context, network, addr string, dial func(context.C
 	return tlsConn, nil
 }
 
+func writeFull(writer io.Writer, data []byte) error {
+	for len(data) > 0 {
+		written, err := writer.Write(data)
+		if err != nil {
+			return err
+		}
+		if written == 0 {
+			return io.ErrShortWrite
+		}
+		data = data[written:]
+	}
+	return nil
+}
+
 func encodeProxyRequest(req *http.Request, pinnedURL *url.URL, proxyUser *url.Userinfo) ([]byte, error) {
 	writeReq := req.Clone(req.Context())
 	writeReq.URL = pinnedURL
@@ -180,7 +194,7 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 	if err != nil {
 		return closeConn(err)
 	}
-	if _, err := conn.Write(requestBytes); err != nil {
+	if err := writeFull(conn, requestBytes); err != nil {
 		return closeConn(err)
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
@@ -216,6 +230,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 	if proxyURL == nil {
 		transport := t.base.Clone()
 		transport.Proxy = nil
+		transport.DisableKeepAlives = true
 		originalDialContext := transport.DialContext
 		if originalDialContext == nil {
 			originalDialContext = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
@@ -243,6 +258,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		pinnedHost := net.JoinHostPort(ip.String(), port)
 		transport := t.base.Clone()
 		transport.Proxy = http.ProxyURL(proxyURL)
+		transport.DisableKeepAlives = true
 		if req.URL.Scheme == "http" && (proxyURL.Scheme == "http" || proxyURL.Scheme == httpsScheme) {
 			resp, err := roundTripHTTPProxy(req.Context(), req, proxyURL, pinnedHost, transport)
 			if err == nil && !isRetryableProxyStatus(resp.StatusCode) {
