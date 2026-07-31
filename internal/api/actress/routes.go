@@ -14,7 +14,7 @@ func RegisterRoutes(protected, writeProtected *gin.RouterGroup, deps ActressDeps
 	protected.GET("/actresses/sync-jobs/active", listActiveActressSyncJobs(rt))
 	protected.GET("/actresses/sync-jobs/:jobID", getActressSyncJob(rt))
 	protected.GET("/actresses/sync-jobs/:jobID/tasks", listActressSyncJobTasks(rt))
-	protected.POST("/actresses/sync-jobs/:jobID/cancel", cancelActressSyncJob(rt))
+	writeProtected.POST("/actresses/sync-jobs/:jobID/cancel", cancelActressSyncJob(rt))
 	protected.GET("/actresses/search", searchActresses(deps))
 	protected.GET("/actresses/alias-group", getAliasGroup(deps))
 	protected.POST("/actresses/merge/preview", previewActressMerge(deps))

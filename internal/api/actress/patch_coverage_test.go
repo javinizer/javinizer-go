@@ -28,11 +28,13 @@ func TestSyncCreationUsesWriteProtectedGroup(t *testing.T) {
 	writeProtected.Use(func(c *gin.Context) { c.AbortWithStatus(http.StatusTooManyRequests) })
 	RegisterRoutes(protected, writeProtected, ActressDeps{}, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/actresses/sync-jobs", strings.NewReader(`{"scope":"missing"}`))
-	req.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, req)
-	require.Equal(t, http.StatusTooManyRequests, response.Code)
+	for _, path := range []string{"/actresses/sync-jobs", "/actresses/sync-jobs/job-1/cancel"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"scope":"missing"}`))
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		require.Equal(t, http.StatusTooManyRequests, response.Code, path)
+	}
 }
 
 func TestListActressesFilteredPaths(t *testing.T) {
