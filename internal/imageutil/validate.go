@@ -74,6 +74,13 @@ func dialPublicTarget(ctx context.Context, network, addr string, lookup func(con
 	return nil, dialErr
 }
 
+func cloneTLSConfig(config *tls.Config) *tls.Config {
+	if config == nil {
+		return &tls.Config{}
+	}
+	return config.Clone()
+}
+
 func dialTLSProxy(ctx context.Context, network, addr string, dial func(context.Context, string, string) (net.Conn, error), config *tls.Config) (net.Conn, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -83,7 +90,7 @@ func dialTLSProxy(ctx context.Context, network, addr string, dial func(context.C
 	if err != nil {
 		return nil, err
 	}
-	tlsConfig := config.Clone()
+	tlsConfig := cloneTLSConfig(config)
 	tlsConfig.ServerName = host
 	tlsConn := tls.Client(conn, tlsConfig)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
@@ -109,7 +116,8 @@ func encodeProxyRequest(req *http.Request, pinnedURL *url.URL, proxyUser *url.Us
 	}
 	requestBytes := encoded.Bytes()
 	lineEnd := bytes.Index(requestBytes, []byte("\r\n"))
-	requestLine := fmt.Sprintf("%s %s %s\r\n", req.Method, pinnedURL.String(), req.Proto)
+	absoluteURI := pinnedURL.Scheme + "://" + pinnedURL.Host + pinnedURL.RequestURI()
+	requestLine := fmt.Sprintf("%s %s %s\r\n", req.Method, absoluteURI, req.Proto)
 	return append([]byte(requestLine), requestBytes[lineEnd+2:]...), nil
 }
 
@@ -235,7 +243,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		pinnedHost := net.JoinHostPort(ip.String(), port)
 		transport := t.base.Clone()
 		transport.Proxy = http.ProxyURL(proxyURL)
-		if req.URL.Scheme == "http" {
+		if req.URL.Scheme == "http" && (proxyURL.Scheme == "http" || proxyURL.Scheme == httpsScheme) {
 			resp, err := roundTripHTTPProxy(req.Context(), req, proxyURL, pinnedHost, transport)
 			if err == nil && !isRetryableProxyStatus(resp.StatusCode) {
 				resp.Request = req
@@ -253,7 +261,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		pinnedReq.URL = &pinnedURL
 		pinnedReq.Host = req.URL.Host
 		if req.URL.Scheme == httpsScheme {
-			baseTLSConfig := transport.TLSClientConfig.Clone()
+			baseTLSConfig := cloneTLSConfig(transport.TLSClientConfig)
 			targetTLSConfig := baseTLSConfig.Clone()
 			targetTLSConfig.ServerName = host
 			transport.TLSClientConfig = targetTLSConfig

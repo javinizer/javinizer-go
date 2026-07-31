@@ -1,10 +1,12 @@
 package imageutil
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
@@ -13,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -252,6 +255,79 @@ func TestPinnedProxyTransportHTTPSFailoverSuccess(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 }
 
+func TestPinnedProxyTransportPreservesSOCKSHandshake(t *testing.T) {
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	require.NoError(t, err)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	targets := make(chan string, 1)
+	serverErr := make(chan error, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			serverErr <- acceptErr
+			return
+		}
+		defer conn.Close()
+		greeting := make([]byte, 3)
+		if _, readErr := io.ReadFull(conn, greeting); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		if _, writeErr := conn.Write([]byte{5, 0}); writeErr != nil {
+			serverErr <- writeErr
+			return
+		}
+		header := make([]byte, 4)
+		if _, readErr := io.ReadFull(conn, header); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		address := make([]byte, net.IPv4len)
+		port := make([]byte, 2)
+		if _, readErr := io.ReadFull(conn, address); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		if _, readErr := io.ReadFull(conn, port); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		targets <- net.JoinHostPort(net.IP(address).String(), strconv.Itoa(int(binary.BigEndian.Uint16(port))))
+		if _, writeErr := conn.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); writeErr != nil {
+			serverErr <- writeErr
+			return
+		}
+		request, readErr := http.ReadRequest(bufio.NewReader(conn))
+		if readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		if request.Host != "public.example" {
+			serverErr <- fmt.Errorf("unexpected host %q", request.Host)
+			return
+		}
+		_, writeErr := fmt.Fprintf(conn, "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: %d\r\n\r\n%s", len(png), png)
+		serverErr <- writeErr
+	}()
+	proxyURL, err := url.Parse("socks5://" + listener.Addr().String())
+	require.NoError(t, err)
+	transport := &pinnedProxyTransport{
+		base: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		lookup: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
+		},
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/image.png", nil)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, "1.1.1.1:80", <-targets)
+	require.NoError(t, <-serverErr)
+}
+
 func TestPinnedProxyTransportPreservesDNSFailover(t *testing.T) {
 	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
 	require.NoError(t, err)
@@ -292,7 +368,7 @@ func TestRetryableProxyStatuses(t *testing.T) {
 func TestEncodeProxyRequestPreservesHostAndAuthentication(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/image.png?q=1", nil)
 	require.NoError(t, err)
-	pinnedURL, err := url.Parse("http://1.1.1.1:80/image.png?q=1")
+	pinnedURL, err := url.Parse("http://user:secret@1.1.1.1:80/image.png?q=1#fragment")
 	require.NoError(t, err)
 	encoded, err := encodeProxyRequest(req, pinnedURL, url.UserPassword("user", "pass"))
 	require.NoError(t, err)
@@ -300,6 +376,8 @@ func TestEncodeProxyRequestPreservesHostAndAuthentication(t *testing.T) {
 	require.Contains(t, request, "GET http://1.1.1.1:80/image.png?q=1 HTTP/1.1\r\n")
 	require.Contains(t, request, "Host: public.example\r\n")
 	require.Contains(t, request, "Proxy-Authorization: Basic dXNlcjpwYXNz\r\n")
+	require.NotContains(t, request, "user:secret")
+	require.NotContains(t, request, "fragment")
 
 	badReq := req.Clone(t.Context())
 	writeErr := errors.New("body read failed")
@@ -353,6 +431,14 @@ func TestDialPublicTargetPreservesFailover(t *testing.T) {
 	require.ErrorContains(t, err, "private/internal")
 	_, err = dialPublicTarget(t.Context(), "tcp", "public.example:80", lookup, func(context.Context, string, string) (net.Conn, error) { return nil, firstErr })
 	require.ErrorIs(t, err, firstErr)
+}
+
+func TestCloneTLSConfig(t *testing.T) {
+	require.NotNil(t, cloneTLSConfig(nil))
+	original := &tls.Config{ServerName: "example.com"}
+	cloned := cloneTLSConfig(original)
+	require.NotSame(t, original, cloned)
+	require.Equal(t, original.ServerName, cloned.ServerName)
 }
 
 func TestDialTLSProxy(t *testing.T) {
