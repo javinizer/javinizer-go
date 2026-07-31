@@ -180,15 +180,7 @@ func (r *ActressRepository) FindOrCreate(ctx context.Context, actress *models.Ac
 	return r.Create(ctx, actress)
 }
 
-const actressThumbnailPathExpr = "LOWER(SUBSTR(COALESCE(thumb_url,''), 1, MIN(INSTR(COALESCE(thumb_url,'') || '?', '?'), INSTR(COALESCE(thumb_url,'') || '#', '#')) - 1))"
-
-const missingActressThumbnailClause = "TRIM(COALESCE(thumb_url,'')) = ''" +
-	" OR " + actressThumbnailPathExpr + " LIKE '%//pics.dmm.co.jp%/mono/noimage/now_printing.jpg'" +
-	" OR " + actressThumbnailPathExpr + " LIKE '%//awsimgsrc.dmm.co.jp%/mono/noimage/now_printing.jpg'" +
-	" OR " + actressThumbnailPathExpr + " LIKE '%//awsimgsrc.dmm.com%/mono/noimage/now_printing.jpg'" +
-	" OR (" + actressThumbnailPathExpr + " LIKE '%//pics.dmm.co.jp%/mono/actjpgs/%' AND " + actressThumbnailPathExpr + " NOT LIKE '%//pics.dmm.co.jp%/mono/actjpgs/%.%')" +
-	" OR (" + actressThumbnailPathExpr + " LIKE '%//awsimgsrc.dmm.co.jp%/mono/actjpgs/%' AND " + actressThumbnailPathExpr + " NOT LIKE '%//awsimgsrc.dmm.co.jp%/mono/actjpgs/%.%')" +
-	" OR (" + actressThumbnailPathExpr + " LIKE '%//awsimgsrc.dmm.com%/mono/actjpgs/%' AND " + actressThumbnailPathExpr + " NOT LIKE '%//awsimgsrc.dmm.com%/mono/actjpgs/%.%')"
+const missingActressThumbnailClause = "javinizer_missing_actress_thumbnail(COALESCE(thumb_url,'')) = 1"
 
 // actressFilterClauses ...
 var actressFilterClauses = map[string]string{

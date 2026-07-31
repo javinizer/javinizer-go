@@ -1,12 +1,15 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/mattn/go-sqlite3"
 	"github.com/spf13/afero"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -21,6 +24,19 @@ type DB struct {
 }
 
 var sqliteMemoryDSNCounter atomic.Uint64
+
+const javinizerSQLiteDriverName = "sqlite3_javinizer"
+
+func init() {
+	sql.Register(javinizerSQLiteDriverName, &sqlite3.SQLiteDriver{ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+		return conn.RegisterFunc("javinizer_missing_actress_thumbnail", func(raw string) int {
+			if strings.TrimSpace(raw) == "" || models.IsKnownInvalidDMMActressThumbnail(raw) {
+				return 1
+			}
+			return 0
+		}, true)
+	}})
+}
 
 // parseLogLevel converts a log level string to a GORM logger.LogLevel
 // Normalizes input by trimming whitespace and converting to lowercase
@@ -51,7 +67,7 @@ func New(cfg *Config) (*DB, error) {
 
 	switch cfg.Type {
 	case "sqlite", "":
-		dialector = sqlite.Open(normalizeSQLiteDSN(cfg.DSN))
+		dialector = sqlite.Dialector{DriverName: javinizerSQLiteDriverName, DSN: normalizeSQLiteDSN(cfg.DSN)}
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", cfg.Type)
 	}
