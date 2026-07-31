@@ -124,7 +124,7 @@ func (b *proxyResponseBody) Close() error {
 	var closeErr error
 	b.once.Do(func() {
 		close(b.done)
-		closeErr = errors.Join(b.ReadCloser.Close(), b.conn.Close())
+		closeErr = errors.Join(b.conn.Close(), b.ReadCloser.Close())
 	})
 	return closeErr
 }

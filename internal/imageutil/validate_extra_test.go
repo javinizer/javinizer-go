@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,6 +31,22 @@ type writeFailConn struct {
 }
 
 func (c writeFailConn) Write([]byte) (int, error) { return 0, c.err }
+
+type closeSignalConn struct {
+	net.Conn
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (c *closeSignalConn) Close() error {
+	c.once.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
+type waitForConnectionCloseBody struct{ closed <-chan struct{} }
+
+func (b waitForConnectionCloseBody) Read([]byte) (int, error) { return 0, io.EOF }
+func (b waitForConnectionCloseBody) Close() error             { <-b.closed; return nil }
 
 func TestValidateRemoteImageWithSafeClientGuards(t *testing.T) {
 	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), nil, "https://example.com/a.jpg", "", ""))
@@ -139,6 +156,16 @@ func TestValidateRemoteImageWithSafeClientPinsProxyTarget(t *testing.T) {
 	proxyRoots.AddCert(secureProxy.Certificate())
 	secureClient := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(secureProxyURL), TLSClientConfig: &tls.Config{RootCAs: proxyRoots}}}
 	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), secureClient, "https://1.1.1.1/image.png", "agent", ""))
+}
+
+func TestProxyResponseBodyClosesConnectionBeforeBody(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	closed := make(chan struct{})
+	conn := &closeSignalConn{Conn: client, closed: closed}
+	body := &proxyResponseBody{ReadCloser: waitForConnectionCloseBody{closed: closed}, conn: conn, done: make(chan struct{})}
+	require.NoError(t, body.Close())
+	require.NoError(t, body.Close())
 }
 
 func TestRoundTripHTTPProxyErrorsAndCancellation(t *testing.T) {
