@@ -260,6 +260,10 @@ func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
 	return fmt.Sprintf(s.baseURL+searchPath, url.QueryEscape(strings.TrimSpace(id))), nil
 }
 
+var parseActressProfileHTML = func(bodyHTML string) (*goquery.Document, error) {
+	return goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
+}
+
 func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.ActressInfo) models.ActressInfo {
 	metadata := models.ActressInfo{DMMID: actress.DMMID}
 	if !s.enabled {
@@ -279,7 +283,7 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 	if err != nil {
 		return metadata
 	}
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	doc, err := parseActressProfileHTML(html)
 	if err != nil {
 		return metadata
 	}
@@ -301,7 +305,7 @@ func (s *scraper) findActorID(ctx context.Context, name string) string {
 	if err != nil {
 		return ""
 	}
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	doc, err := parseActressProfileHTML(html)
 	if err != nil {
 		return ""
 	}

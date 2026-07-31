@@ -356,8 +356,10 @@ func (s *scraper) tryActressThumbURLsWithProfileDoc(ctx context.Context, firstNa
 	return ""
 }
 
+var newActressProbeClient = httpclient.NewRestyClient
+
 func (s *scraper) firstExistingActressImage(ctx context.Context, candidates []string) string {
-	testClient, err := httpclient.NewRestyClient(s.proxyProfile, 5*time.Second, 0)
+	testClient, err := newActressProbeClient(s.proxyProfile, 5*time.Second, 0)
 	if err != nil {
 		// Warn (not Debug): falling back to an explicit no-proxy client can
 		// expose the caller's direct IP when the configured proxy is unreachable,
@@ -401,13 +403,19 @@ func (s *scraper) resolveActressThumbnailFromStreamingList(ctx context.Context, 
 	return extractExactActressThumbFromStreamingDoc(detailDoc, dmmID)
 }
 
+var fetchActressPageWithBrowser = fetchWithBrowser
+
+var parseActressPageHTML = func(bodyHTML string) (*goquery.Document, error) {
+	return goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
+}
+
 func (s *scraper) fetchActressStreamingDoc(ctx context.Context, rawURL string) (*goquery.Document, error) {
 	if s.useBrowser {
-		bodyHTML, err := fetchWithBrowser(ctx, rawURL, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := fetchActressPageWithBrowser(ctx, rawURL, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
 		if err != nil {
 			return nil, err
 		}
-		return goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
+		return parseActressPageHTML(bodyHTML)
 	}
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return nil, err
@@ -419,7 +427,7 @@ func (s *scraper) fetchActressStreamingDoc(ctx context.Context, rawURL string) (
 	if resp.StatusCode() != http.StatusOK {
 		return nil, models.NewScraperStatusError("DMM", resp.StatusCode(), "DMM actress streaming page lookup failed")
 	}
-	return goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+	return parseActressPageHTML(resp.String())
 }
 
 func firstActressStreamingDetailURL(doc *goquery.Document) string {
@@ -429,10 +437,7 @@ func firstActressStreamingDetailURL(doc *goquery.Document) string {
 	base, _ := url.Parse("https://video.dmm.co.jp")
 	var detailURL string
 	doc.Find(`a[href*='/av/content/?id=']`).EachWithBreak(func(_ int, sel *goquery.Selection) bool {
-		href, exists := sel.Attr("href")
-		if !exists {
-			return true
-		}
+		href := sel.AttrOr("href", "")
 		ref, err := url.Parse(strings.TrimSpace(href))
 		if err != nil {
 			return true
@@ -525,12 +530,12 @@ var _ models.ActressMetadataResolver = (*scraper)(nil)
 func (s *scraper) fetchActressMetadataDoc(ctx context.Context, dmmID int) *goquery.Document {
 	profileURL := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)
 	if s.useBrowser {
-		bodyHTML, err := fetchWithBrowser(ctx, profileURL, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := fetchActressPageWithBrowser(ctx, profileURL, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
 		if err != nil {
 			logging.Debugf("DMM: Failed to fetch actress profile in browser for ID %d: %v", dmmID, err)
 			return nil
 		}
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
+		doc, err := parseActressPageHTML(bodyHTML)
 		if err != nil {
 			return nil
 		}
@@ -550,7 +555,7 @@ func (s *scraper) fetchActressPageDoc(ctx context.Context, dmmID int) *goquery.D
 		logging.Debugf("DMM: Failed to fetch actress page for ID %d", dmmID)
 		return nil
 	}
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+	doc, err := parseActressPageHTML(resp.String())
 	if err != nil {
 		return nil
 	}
