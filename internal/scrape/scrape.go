@@ -279,7 +279,7 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	}
 
 	if registry != nil {
-		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg); enriched > 0 {
+		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg, resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, cfg)); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers", enriched)
 		}
 	}

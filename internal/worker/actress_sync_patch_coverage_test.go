@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -234,4 +235,57 @@ func TestActressSyncManagerPatchBranches(t *testing.T) {
 	manager.wg.Add(1)
 	manager.runTask(task, 10*time.Millisecond, nil)
 	require.Equal(t, models.ActressSyncTaskFailed, task.Status)
+}
+func TestCachedIdentityAssignmentRaceMergesCanonicalActress(t *testing.T) {
+	_, actressRepo, movieRepo, duplicate := newActressSyncFixture(t, &models.Actress{JapaneseName: "同一女優"})
+	canonical := &models.Actress{DMMID: 909, JapaneseName: "同一女優"}
+	result, err := SyncActressMetadata(t.Context(), duplicate.ID, actressRepo, movieRepo, nil, ActressSyncOptions{
+		LookupCache: func(int, string, string, string) (models.ActressInfo, bool) {
+			return models.ActressInfo{DMMID: 909, JapaneseName: "同一女優"}, true
+		},
+		AssignDMMID: func(uint, int) (bool, error) {
+			require.NoError(t, actressRepo.Create(t.Context(), canonical))
+			return false, sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintUnique}
+		},
+	})
+	require.NoError(t, err)
+	require.Contains(t, result.UpdatedFields, "merged_duplicate")
+	stored, err := actressRepo.FindByDMMID(t.Context(), 909)
+	require.NoError(t, err)
+	require.Equal(t, canonical.ID, stored.ID)
+	_, err = actressRepo.FindByID(t.Context(), duplicate.ID)
+	require.True(t, database.IsNotFound(err))
+}
+func TestCachedIdentityAssignmentRaceBranches(t *testing.T) {
+	uniqueErr := sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintUnique}
+	t.Run("same actress assigned concurrently", func(t *testing.T) {
+		_, actressRepo, movieRepo, actress := newActressSyncFixture(t, &models.Actress{JapaneseName: "同一"})
+		result, err := SyncActressMetadata(t.Context(), actress.ID, actressRepo, movieRepo, nil, ActressSyncOptions{
+			LookupCache: func(int, string, string, string) (models.ActressInfo, bool) {
+				return models.ActressInfo{DMMID: 910, JapaneseName: "同一"}, true
+			},
+			AssignDMMID: func(id uint, dmmID int) (bool, error) {
+				assigned, assignErr := actressRepo.AssignDMMIDIfMissing(t.Context(), id, dmmID)
+				require.NoError(t, assignErr)
+				require.True(t, assigned)
+				return false, uniqueErr
+			},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		stored, err := actressRepo.FindByDMMID(t.Context(), 910)
+		require.NoError(t, err)
+		require.Equal(t, actress.ID, stored.ID)
+	})
+	t.Run("canonical reload fails", func(t *testing.T) {
+		_, actressRepo, movieRepo, actress := newActressSyncFixture(t, &models.Actress{JapaneseName: "未登録"})
+		_, err := SyncActressMetadata(t.Context(), actress.ID, actressRepo, movieRepo, nil, ActressSyncOptions{
+			LookupCache: func(int, string, string, string) (models.ActressInfo, bool) {
+				return models.ActressInfo{DMMID: 911, JapaneseName: "未登録"}, true
+			},
+			AssignDMMID: func(uint, int) (bool, error) { return false, uniqueErr },
+		})
+		require.Error(t, err)
+		require.True(t, database.IsUniqueConstraint(err))
+	})
 }

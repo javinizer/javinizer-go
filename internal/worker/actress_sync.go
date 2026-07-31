@@ -83,30 +83,44 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	scrapers := authoritativeActressScrapers(registry)
 	metadataScrapers := actressMetadataScrapers(registry)
 	cacheMatch, cacheHit := lookupActressCache(actress, lookupCache)
+	mergeCachedDuplicate := func(existing *models.Actress) (bool, error) {
+		if existing.ID == actress.ID {
+			actress = existing
+			return true, nil
+		}
+		if !cacheMatchesCanonical(cacheMatch, existing) {
+			cacheHit = false
+			return false, nil
+		}
+		merged, mergeErr := mergeActresses(existing.ID, actress.ID)
+		if mergeErr != nil {
+			return false, mergeErr
+		}
+		actress = &merged.MergedActress
+		result.UpdatedFields = append(result.UpdatedFields, "merged_duplicate")
+		return true, nil
+	}
 	applyCachedIdentity := func() (bool, error) {
 		if actress.DMMID > 0 || !cacheHit || cacheMatch.DMMID <= 0 {
 			return false, nil
 		}
 		existing, findErr := actressRepo.FindByDMMID(ctx, cacheMatch.DMMID)
 		switch {
-		case findErr == nil && existing.ID != actress.ID:
-			if !cacheMatchesCanonical(cacheMatch, existing) {
-				cacheHit = false
-				return false, nil
-			}
-			merged, mergeErr := mergeActresses(existing.ID, actress.ID)
-			if mergeErr != nil {
-				return false, mergeErr
-			}
-			actress = &merged.MergedActress
-			result.UpdatedFields = append(result.UpdatedFields, "merged_duplicate")
-			return true, nil
+		case findErr == nil:
+			return mergeCachedDuplicate(existing)
 		case findErr != nil && !database.IsNotFound(findErr):
 			return false, findErr
 		default:
 			assigned, assignErr := assignDMMID(actress.ID, cacheMatch.DMMID)
 			if assignErr != nil {
-				return false, assignErr
+				if !database.IsUniqueConstraint(assignErr) {
+					return false, assignErr
+				}
+				canonical, reloadErr := actressRepo.FindByDMMID(ctx, cacheMatch.DMMID)
+				if reloadErr != nil {
+					return false, assignErr
+				}
+				return mergeCachedDuplicate(canonical)
 			}
 			if !assigned {
 				cacheHit = false

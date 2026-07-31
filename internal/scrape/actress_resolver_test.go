@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -177,4 +178,22 @@ func (r *stubInstanceResolver) Names() []string {
 		names = append(names, s.Name())
 	}
 	return names
+}
+func TestEnrichActressesFromResolversHonorsPriority(t *testing.T) {
+	dmm := &testMetadataResolver{name: "dmm", enabled: true, metadata: models.ActressInfo{DMMID: 77, FirstName: "DMM"}}
+	minnano := &testMetadataResolver{name: "minnanoav", enabled: true, metadata: models.ActressInfo{DMMID: 77, FirstName: "Minnano"}}
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(dmm)
+	registry.RegisterInstance(minnano)
+
+	configured := &models.Movie{Actresses: []models.Actress{{DMMID: 77}}}
+	require.Equal(t, 1, enrichActressesFromResolvers(t.Context(), configured, registry, &Config{ScrapeActress: true, ScrapersPriority: []string{"minnanoav", "dmm"}}))
+	require.Equal(t, "Minnano", configured.Actresses[0].FirstName)
+
+	selected := &models.Movie{Actresses: []models.Actress{{DMMID: 77}}}
+	require.Equal(t, 1, enrichActressesFromResolvers(t.Context(), selected, registry, &Config{ScrapeActress: true, ScrapersPriority: []string{"dmm", "minnanoav"}}, []string{"minnanoav", "dmm"}))
+	require.Equal(t, "Minnano", selected.Actresses[0].FirstName)
+}
+func TestCollectMetadataResolversSkipsNilInstances(t *testing.T) {
+	require.Empty(t, collectMetadataResolvers(newTestRegistry(nil), []string{"missing"}))
 }
