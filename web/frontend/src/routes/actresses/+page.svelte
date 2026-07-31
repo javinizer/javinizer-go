@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { cubicOut, quintOut } from 'svelte/easing';
 	import { fade, fly, scale } from 'svelte/transition';
+	import { onMount } from 'svelte';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { Plus, RefreshCw, Download, Upload, Loader2 } from 'lucide-svelte';
+	import { Plus, RefreshCw, Download, Upload, Loader2, WandSparkles } from 'lucide-svelte';
 	import { apiClient } from '$lib/api/client';
-	import type { Actress, ActressUpsertRequest, ImportResponse } from '$lib/api/types';
+	import type { Actress, ActressUpsertRequest, ImportResponse, ActressSyncJob, ActressSyncTask } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -16,6 +17,8 @@
 	import ActressTableView from './components/ActressTableView.svelte';
 	import ActressMergeModal from './components/ActressMergeModal.svelte';
 	import ActressPagination from './components/ActressPagination.svelte';
+	import ActressSyncModal from './components/ActressSyncModal.svelte';
+	import { isActressSyncTerminal } from './sync-runner';
 	import * as m from '$lib/paraglide/messages';
 	import { createConfigQuery } from '$lib/query/queries';
 
@@ -28,6 +31,91 @@
 		(configQuery.data?.metadata?.nfo?.actress_language_ja ?? false)
 	);
 	let importFile = $state<HTMLInputElement | null>(null);
+	let syncJob = $state<ActressSyncJob | null>(null);
+	let syncTasks = $state<ActressSyncTask[]>([]);
+	let showSyncModal = $state(false);
+	let syncStarting = $state(false);
+	let syncCancelling = $state(false);
+	let syncPollInFlight = $state(false);
+	let syncTimer: ReturnType<typeof setInterval> | undefined;
+
+	async function pollSyncJob() {
+		const currentJob = syncJob;
+		if (!currentJob || syncPollInFlight) return;
+		syncPollInFlight = true;
+		try {
+			const [jobResponse, taskResponse] = await Promise.all([apiClient.getActressSyncJob(currentJob.id), apiClient.listActressSyncJobTasks(currentJob.id)]);
+			if (!syncJob || syncJob.id !== currentJob.id) return;
+			syncJob = jobResponse.job;
+			syncTasks = taskResponse.tasks;
+			if (isActressSyncTerminal(syncJob)) {
+				if (syncTimer) clearInterval(syncTimer);
+				syncTimer = undefined;
+				await queryClient.invalidateQueries({ queryKey: ['actresses'] });
+			}
+		} catch (error) {
+			if (!syncJob || syncJob.id !== currentJob.id) return;
+			if (syncTimer) clearInterval(syncTimer);
+			syncTimer = undefined;
+			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
+		} finally {
+			syncPollInFlight = false;
+		}
+	}
+
+	function startPolling() {
+		if (syncTimer) clearInterval(syncTimer);
+		void pollSyncJob();
+		syncTimer = setInterval(pollSyncJob, 1500);
+	}
+
+	async function startSync(scope: 'missing' | 'selected') {
+		if (syncJob && !isActressSyncTerminal(syncJob)) {
+			showSyncModal = true;
+			return;
+		}
+		syncStarting = true;
+		try {
+			const response = await apiClient.createActressSyncJob({ scope, actress_ids: scope === 'selected' ? store.selectedIds : undefined });
+			syncJob = response.job;
+			syncTasks = [];
+			showSyncModal = true;
+			startPolling();
+		} catch (error) {
+			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_start_failed());
+		} finally {
+			syncStarting = false;
+		}
+	}
+
+	async function cancelSync() {
+		const currentJob = syncJob;
+		if (!currentJob || currentJob.cancel_requested || syncCancelling) return;
+		syncCancelling = true;
+		try {
+			const response = await apiClient.cancelActressSyncJob(currentJob.id);
+			if (syncJob?.id === currentJob.id) {
+				syncJob = response.job;
+				void pollSyncJob();
+			}
+		} catch (error) {
+			toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
+		} finally {
+			syncCancelling = false;
+		}
+	}
+
+	onMount(() => {
+		store.hydrateSortPreferences();
+		void apiClient.listActiveActressSyncJobs().then((response) => {
+			const active = response.jobs.at(-1);
+			if (!active) return;
+			syncJob = active;
+			showSyncModal = true;
+			startPolling();
+		});
+		return () => { if (syncTimer) clearInterval(syncTimer); };
+	});
 
 	const exportMutation = createMutation(() => ({
 		mutationFn: () => apiClient.exportActresses(),
@@ -107,6 +195,8 @@
 				<p class="text-muted-foreground mt-1">{m.actresses_subtitle()}</p>
 			</div>
 			<div class="flex items-center gap-2">
+				<Button variant="outline" size="sm" onclick={() => startSync('missing')} disabled={syncStarting}><WandSparkles class="h-4 w-4" />{m.actresses_sync_missing()}</Button>
+				<Button variant="outline" size="sm" onclick={() => startSync('selected')} disabled={syncStarting || store.selectedIds.length === 0}><WandSparkles class="h-4 w-4" />{m.actresses_sync_selected()}</Button>
 				<input
 					type="file"
 					accept=".json"
@@ -170,6 +260,7 @@
 					bind:viewMode={store.viewMode}
 					bind:sortBy={store.sortBy}
 					sortOrder={store.sortOrder}
+				bind:filter={store.filter}
 					selectedIds={store.selectedIds}
 					total={store.total}
 					actressesCount={store.actresses.length}
@@ -254,6 +345,10 @@
 		</div>
 	</div>
 </div>
+
+{#if showSyncModal && syncJob}
+	<ActressSyncModal job={syncJob} tasks={syncTasks} onCancel={cancelSync} onClose={() => showSyncModal = false} />
+{/if}
 
 <ActressMergeModal
 	bind:showMergeModal={store.showMergeModal}

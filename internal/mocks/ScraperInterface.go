@@ -74,7 +74,7 @@ type MockScraperInterface_Scrape_Call struct {
 // Scrape is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd scrape.ScrapeCmd
-func (_e *MockScraperInterface_Expecter) Scrape(ctx any, cmd any) *MockScraperInterface_Scrape_Call {
+func (_e *MockScraperInterface_Expecter) Scrape(ctx interface{}, cmd interface{}) *MockScraperInterface_Scrape_Call {
 	return &MockScraperInterface_Scrape_Call{Call: _e.mock.On("Scrape", ctx, cmd)}
 }
 

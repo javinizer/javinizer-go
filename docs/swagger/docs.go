@@ -300,7 +300,7 @@ const docTemplate = `{
         },
         "/api/v1/actresses/search": {
             "get": {
-                "description": "Search for actresses by name (first, last, or Japanese)",
+                "description": "Search for actresses by name or DMM ID",
                 "produces": [
                     "application/json"
                 ],
@@ -5978,6 +5978,14 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption"
                     }
+                },
+                "supports_actress_metadata": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "supports_movie_search": {
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -7146,6 +7154,12 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_models.ActressInfo": {
             "type": "object",
             "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "dmm_id": {
                     "description": "DMM actress ID for unique identification",
                     "type": "integer"

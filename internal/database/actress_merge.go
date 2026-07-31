@@ -24,6 +24,7 @@ var (
 	ErrActressMergeSameID           = errors.New("target_id and source_id must be different")
 	ErrActressMergeInvalidID        = errors.New("target_id and source_id must be greater than 0")
 	ErrActressMergeUniqueConstraint = errors.New("merge would violate unique constraints")
+	ErrActressMergeStalePlan        = errors.New("actress merge plan is stale")
 )
 
 // ActressMergeConflict describes a single field conflict between two actresses being merged.
@@ -64,6 +65,8 @@ type MergePlan struct {
 	AliasesAdded       int
 	SourceAliasUpserts []string
 	ConflictsResolved  int
+	Resolutions        map[string]string
+	TargetUpdatedAt    time.Time
 }
 
 // actressMerger handles actress merge operations, extracted from ActressRepository
@@ -261,41 +264,83 @@ func (m *actressMerger) PlanMerge(ctx context.Context, targetID, sourceID uint, 
 		AliasesAdded:       aliasesAdded,
 		SourceAliasUpserts: sourceAliasUpserts,
 		ConflictsResolved:  len(preview.Conflicts),
+		Resolutions:        normalizedResolutions,
+		TargetUpdatedAt:    preview.Target.UpdatedAt,
 	}, nil
+}
+
+func hasSourceMergeResolution(resolutions map[string]string) bool {
+	for _, decision := range resolutions {
+		if strings.EqualFold(strings.TrimSpace(decision), MergeResolutionSource) {
+			return true
+		}
+	}
+	return false
 }
 
 // ExecuteMerge applies a precomputed MergePlan to the database within a transaction.
 // It performs the actual row updates, association moves, alias upserts, and source deletion.
 // The db parameter provides the database connection for the transaction boundary.
 func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *DB) (*ActressMergeResult, error) {
+	return m.executeMerge(ctx, plan, db, nil)
+}
+
+func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *DB, taskHook func(*gorm.DB, uint, uint) error) (*ActressMergeResult, error) {
+	if plan == nil || db == nil {
+		return nil, fmt.Errorf("merge plan and database are required")
+	}
 	targetID := plan.TargetID
 	sourceID := plan.SourceID
-	merged := plan.Merged
-
 	updatedMovies := 0
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if merged.DMMID > 0 {
-			var existing models.Actress
-			checkErr := tx.Where("dmm_id = ? AND id NOT IN ?", merged.DMMID, []uint{targetID, sourceID}).First(&existing).Error
-			if checkErr == nil {
-				return fmt.Errorf("%w: dmm_id %d is already used by actress #%d", ErrActressMergeUniqueConstraint, merged.DMMID, existing.ID)
-			}
-			if checkErr != nil && !errors.Is(checkErr, gorm.ErrRecordNotFound) {
-				return wrapDBErr("find", fmt.Sprintf("actress by dmm_id %d for merge", merged.DMMID), checkErr)
-			}
-		}
+	aliasesAdded := 0
+	conflictsResolved := 0
 
-		// Load source to check whether DMMID swap is needed
-		source, err := m.repo.FindByID(ctx, sourceID)
-		if err != nil {
-			return err
-		}
-		if merged.DMMID > 0 && merged.DMMID == source.DMMID {
-			target, err := m.repo.FindByID(ctx, targetID)
+	err := retryOnLocked(func() error {
+		return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var target models.Actress
+			if err := tx.First(&target, "id = ?", targetID).Error; err != nil {
+				return err
+			}
+			var source models.Actress
+			if err := tx.First(&source, "id = ?", sourceID).Error; err != nil {
+				return err
+			}
+			if !plan.TargetUpdatedAt.IsZero() && !target.UpdatedAt.Equal(plan.TargetUpdatedAt) && hasSourceMergeResolution(plan.Resolutions) {
+				return ErrActressMergeStalePlan
+			}
+
+			resolutions := make(map[string]string, len(plan.Resolutions))
+			for field, decision := range plan.Resolutions {
+				resolutions[field] = decision
+			}
+			conflicts := buildActressMergeConflicts(&target, &source)
+			for _, conflict := range conflicts {
+				if _, exists := resolutions[conflict.Field]; !exists {
+					resolutions[conflict.Field] = resolutionTarget
+				}
+			}
+			merged, err := mergeActressValues(&target, &source, resolutions)
 			if err != nil {
 				return err
 			}
-			if target.DMMID != source.DMMID {
+			canonicalName := canonicalActressName(&merged)
+			sourceCandidates := collectActressAliasCandidates(&source)
+			merged.Aliases, aliasesAdded, _ = mergeAliasValues(target.Aliases, sourceCandidates, canonicalName)
+			sourceAliasUpserts := sourceAliasesForUpsert(sourceCandidates, canonicalName)
+			conflictsResolved = len(conflicts)
+
+			if merged.DMMID > 0 {
+				var existing models.Actress
+				checkErr := tx.Where("dmm_id = ? AND id NOT IN ?", merged.DMMID, []uint{targetID, sourceID}).First(&existing).Error
+				if checkErr == nil {
+					return fmt.Errorf("%w: dmm_id %d is already used by actress #%d", ErrActressMergeUniqueConstraint, merged.DMMID, existing.ID)
+				}
+				if checkErr != nil && !errors.Is(checkErr, gorm.ErrRecordNotFound) {
+					return wrapDBErr("find", fmt.Sprintf("actress by dmm_id %d for merge", merged.DMMID), checkErr)
+				}
+			}
+
+			if merged.DMMID > 0 && merged.DMMID == source.DMMID && target.DMMID != source.DMMID {
 				tempDMMID := -int(sourceID)
 				if tempDMMID == 0 {
 					tempDMMID = -1
@@ -304,38 +349,42 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 					return wrapDBErr("update", fmt.Sprintf("merge actress %d temp dmm_id", sourceID), err)
 				}
 			}
-		}
 
-		if err := tx.Model(&models.Actress{}).Where("id = ?", targetID).Updates(map[string]any{
-			"dmm_id":        merged.DMMID,
-			"first_name":    merged.FirstName,
-			"last_name":     merged.LastName,
-			"japanese_name": merged.JapaneseName,
-			"thumb_url":     merged.ThumbURL,
-			"aliases":       merged.Aliases,
-			"updated_at":    time.Now().UTC(),
-		}).Error; err != nil {
-			if errors.Is(err, gorm.ErrDuplicatedKey) {
-				return ErrActressMergeUniqueConstraint
+			if err := tx.Model(&models.Actress{}).Where("id = ?", targetID).Updates(map[string]any{
+				"dmm_id":        merged.DMMID,
+				"first_name":    merged.FirstName,
+				"last_name":     merged.LastName,
+				"japanese_name": merged.JapaneseName,
+				"thumb_url":     merged.ThumbURL,
+				"aliases":       merged.Aliases,
+				"updated_at":    time.Now().UTC(),
+			}).Error; err != nil {
+				if errors.Is(err, gorm.ErrDuplicatedKey) {
+					return ErrActressMergeUniqueConstraint
+				}
+				return wrapDBErr("update", fmt.Sprintf("actress %d", targetID), err)
 			}
-			return wrapDBErr("update", fmt.Sprintf("merge actress %d", targetID), err)
-		}
 
-		var moveErr error
-		updatedMovies, moveErr = moveMovieAssociations(tx, sourceID, targetID)
-		if moveErr != nil {
-			return wrapDBErr("merge", fmt.Sprintf("actress movie associations from %d to %d", sourceID, targetID), moveErr)
-		}
+			var moveErr error
+			updatedMovies, moveErr = moveMovieAssociations(tx, sourceID, targetID)
+			if moveErr != nil {
+				return wrapDBErr("merge", fmt.Sprintf("actress movie associations from %d to %d", sourceID, targetID), moveErr)
+			}
 
-		if err := upsertActressAliases(tx, plan.SourceAliasUpserts, plan.CanonicalName); err != nil {
-			return wrapDBErr("merge", fmt.Sprintf("actress aliases for %s", plan.CanonicalName), err)
-		}
+			if err := upsertActressAliases(tx, sourceAliasUpserts, canonicalName); err != nil {
+				return wrapDBErr("merge", fmt.Sprintf("actress aliases for %s", canonicalName), err)
+			}
+			if taskHook != nil {
+				if err := taskHook(tx, targetID, sourceID); err != nil {
+					return err
+				}
+			}
 
-		if err := tx.Delete(&models.Actress{}, sourceID).Error; err != nil {
-			return wrapDBErr("delete", fmt.Sprintf("merge source actress %d", sourceID), err)
-		}
-
-		return nil
+			if err := tx.Delete(&models.Actress{}, sourceID).Error; err != nil {
+				return wrapDBErr("delete", fmt.Sprintf("merge source actress %d", sourceID), err)
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -350,8 +399,8 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 		MergedActress:     *mergedRecord,
 		MergedFromID:      sourceID,
 		UpdatedMovies:     updatedMovies,
-		ConflictsResolved: plan.ConflictsResolved,
-		AliasesAdded:      plan.AliasesAdded,
+		ConflictsResolved: conflictsResolved,
+		AliasesAdded:      aliasesAdded,
 	}, nil
 }
 

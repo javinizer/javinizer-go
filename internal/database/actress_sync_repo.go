@@ -1,0 +1,666 @@
+package database
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"gorm.io/gorm"
+)
+
+const actressSyncAttemptCap = 3
+
+var errActressSyncLeaseLost = errors.New("actress sync task lease lost")
+
+// ActressSyncRepository ...
+type ActressSyncRepository struct{ db *DB }
+
+// NewActressSyncRepository ...
+func NewActressSyncRepository(db *DB) *ActressSyncRepository { return &ActressSyncRepository{db: db} }
+
+// CreateJob ...
+func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []models.ActressSyncTask) error {
+	err := retryOnLocked(func() error {
+		return r.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(job).Error; err != nil {
+				return err
+			}
+			for i := range tasks {
+				if err := tx.Create(&tasks[i]).Error; err != nil {
+					if !strings.Contains(strings.ToLower(err.Error()), "unique") {
+						return err
+					}
+					now := time.Now().UTC()
+					tasks[i].Status, tasks[i].Stage, tasks[i].Outcome = models.ActressSyncTaskSkipped, "completed", "skipped"
+					tasks[i].Messages = []string{"duplicate_active_task"}
+					tasks[i].CompletedAt = &now
+					tasks[i].DedupeKey += ":duplicate:" + tasks[i].ID
+					if err := tx.Create(&tasks[i]).Error; err != nil {
+						return err
+					}
+				}
+			}
+			return r.refreshJobTx(tx, job.ID, time.Now().UTC())
+		})
+	})
+	if err != nil {
+		return wrapDBErr("create", "actress sync job", err)
+	}
+	fresh, err := r.FindJob(job.ID)
+	if err == nil {
+		*job = *fresh
+	}
+	return err
+}
+
+// FindJob ...
+func (r *ActressSyncRepository) FindJob(id string) (*models.ActressSyncJob, error) {
+	var job models.ActressSyncJob
+	if err := r.db.First(&job, "id = ?", id).Error; err != nil {
+		return nil, wrapDBErr("find", "actress sync job", err)
+	}
+	return &job, nil
+}
+
+// ListActiveJobs ...
+func (r *ActressSyncRepository) ListActiveJobs() ([]models.ActressSyncJob, error) {
+	jobs := make([]models.ActressSyncJob, 0)
+	err := r.db.Where("status IN ?", []string{models.ActressSyncJobPending, models.ActressSyncJobRunning}).Order("created_at ASC").Find(&jobs).Error
+	return jobs, err
+}
+
+// ListTasks ...
+func (r *ActressSyncRepository) ListTasks(jobID string) ([]models.ActressSyncTask, error) {
+	tasks := make([]models.ActressSyncTask, 0)
+	err := r.db.Where("job_id = ?", jobID).Order("created_at ASC, id ASC").Find(&tasks).Error
+	return tasks, err
+}
+
+// ClaimNext ...
+func (r *ActressSyncRepository) ClaimNext(owner string, leaseUntil time.Time) (*models.ActressSyncTask, error) {
+	var claimed models.ActressSyncTask
+	err := retryOnLocked(func() error {
+		return r.db.Transaction(func(tx *gorm.DB) error {
+			now, token := time.Now().UTC(), uuid.NewString()
+			pendingTaskID := tx.Table("actress_sync_tasks AS task").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").
+				Where("task.status = ? AND task.attempts < ? AND job.cancel_requested = 0", models.ActressSyncTaskPending, actressSyncAttemptCap).
+				Order("task.created_at ASC, task.id ASC").Limit(1).Select("task.id")
+			res := tx.Model(&models.ActressSyncTask{}).Where("id IN (?)", pendingTaskID).Updates(map[string]any{
+				"status": models.ActressSyncTaskRunning, "stage": "resolving", "lease_owner": owner, "lease_token": token,
+				"heartbeat_at": now, "lease_expires_at": leaseUntil, "attempts": gorm.Expr("attempts + 1"), "started_at": gorm.Expr("COALESCE(started_at, ?)", now),
+			})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return nil
+			}
+			if err := tx.Where("lease_token = ? AND lease_owner = ?", token, owner).First(&claimed).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&models.ActressSyncJob{}).Where("id = ? AND status = ?", claimed.JobID, models.ActressSyncJobPending).Updates(map[string]any{"status": models.ActressSyncJobRunning, "started_at": now}).Error; err != nil {
+				return err
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, wrapDBErr("claim", "actress sync task", err)
+	}
+	if claimed.ID == "" {
+		return nil, nil
+	}
+	return &claimed, nil
+}
+
+// RecoverExpiredLeases ...
+func (r *ActressSyncRepository) RecoverExpiredLeases(now time.Time) error {
+	return retryOnLocked(func() error {
+		return r.db.Transaction(func(tx *gorm.DB) error {
+			var tasks []models.ActressSyncTask
+			if err := tx.Where("status = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)", models.ActressSyncTaskRunning, now).Find(&tasks).Error; err != nil {
+				return err
+			}
+			jobs := map[string]struct{}{}
+			for _, task := range tasks {
+				var job models.ActressSyncJob
+				if err := tx.First(&job, "id = ?", task.JobID).Error; err != nil {
+					return err
+				}
+				transitioned, err := r.recoverExpiredTask(tx, task, job.CancelRequested, now)
+				if err != nil {
+					return err
+				}
+				if transitioned {
+					jobs[task.JobID] = struct{}{}
+				}
+			}
+			for id := range jobs {
+				if err := r.refreshJobTx(tx, id, now); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+}
+
+func (r *ActressSyncRepository) recoverExpiredTask(tx *gorm.DB, task models.ActressSyncTask, cancelRequested bool, now time.Time) (bool, error) {
+	updates := map[string]any{"lease_owner": "", "lease_token": "", "lease_expires_at": nil}
+	switch {
+	case cancelRequested:
+		updates["status"], updates["stage"], updates["outcome"], updates["completed_at"] = models.ActressSyncTaskCancelled, "completed", "cancelled", now
+	case task.Attempts >= actressSyncAttemptCap:
+		updates["status"], updates["stage"], updates["outcome"], updates["error_message"], updates["completed_at"] = models.ActressSyncTaskFailed, "completed", "failed", "attempt_cap_reached", now
+	default:
+		updates["status"], updates["stage"] = models.ActressSyncTaskPending, "queued"
+	}
+	query := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_owner = ? AND lease_token = ?", task.ID, models.ActressSyncTaskRunning, task.LeaseOwner, task.LeaseToken)
+	if task.LeaseExpiresAt == nil {
+		query = query.Where("lease_expires_at IS NULL")
+	} else {
+		query = query.Where("lease_expires_at = ? AND lease_expires_at <= ?", *task.LeaseExpiresAt, now)
+	}
+	res := query.Updates(updates)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+func (r *ActressSyncRepository) releaseOwnerTask(tx *gorm.DB, task models.ActressSyncTask, cancelRequested bool, now time.Time) (bool, error) {
+	updates := map[string]any{"status": models.ActressSyncTaskPending, "stage": "queued", "lease_owner": "", "lease_token": "", "heartbeat_at": nil, "lease_expires_at": nil}
+	switch {
+	case cancelRequested:
+		updates["status"], updates["stage"], updates["outcome"], updates["completed_at"] = models.ActressSyncTaskCancelled, "completed", "cancelled", now
+	case task.Attempts >= actressSyncAttemptCap:
+		updates["status"], updates["stage"], updates["outcome"], updates["error_message"], updates["completed_at"] = models.ActressSyncTaskFailed, "completed", "failed", "attempt_cap_reached", now
+	}
+	query := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_owner = ? AND lease_token = ?", task.ID, models.ActressSyncTaskRunning, task.LeaseOwner, task.LeaseToken)
+	if task.LeaseExpiresAt == nil {
+		query = query.Where("lease_expires_at IS NULL")
+	} else {
+		query = query.Where("lease_expires_at = ?", *task.LeaseExpiresAt)
+	}
+	res := query.Updates(updates)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// ReleaseOwnerLeases ...
+func (r *ActressSyncRepository) ReleaseOwnerLeases(owner string) error {
+	if owner == "" {
+		return nil
+	}
+	return retryOnLocked(func() error {
+		return r.db.Transaction(func(tx *gorm.DB) error {
+			var tasks []models.ActressSyncTask
+			if err := tx.Where("status = ? AND lease_owner = ?", models.ActressSyncTaskRunning, owner).Find(&tasks).Error; err != nil {
+				return err
+			}
+			now := time.Now().UTC()
+			jobs := map[string]struct{}{}
+			for _, task := range tasks {
+				var job models.ActressSyncJob
+				if err := tx.First(&job, "id = ?", task.JobID).Error; err != nil {
+					return err
+				}
+				transitioned, err := r.releaseOwnerTask(tx, task, job.CancelRequested, now)
+				if err != nil {
+					return err
+				}
+				if transitioned {
+					jobs[task.JobID] = struct{}{}
+				}
+			}
+			for id := range jobs {
+				if err := r.refreshJobTx(tx, id, now); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+}
+
+// MergeForSyncTask ...
+func (r *ActressRepository) MergeForSyncTask(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, taskID, leaseToken string) (*ActressMergeResult, error) {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(leaseToken) == "" {
+		return nil, ErrInvalidLookup
+	}
+	plan, err := r.merger.PlanMerge(ctx, targetID, sourceID, resolutions)
+	if err != nil {
+		return nil, err
+	}
+	syncRepo := NewActressSyncRepository(r.GetDB())
+	return r.merger.executeMerge(ctx, plan, r.GetDB(), func(tx *gorm.DB, canonicalID, duplicateID uint) error {
+		return syncRepo.reassignTaskActressTx(tx, taskID, leaseToken, canonicalID, duplicateID)
+	})
+}
+
+func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token string, actressID, expectedActressID uint) error {
+	leaseNow := time.Now().UTC()
+	var task models.ActressSyncTask
+	if err := tx.Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", id, models.ActressSyncTaskRunning, token, leaseNow).First(&task).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errActressSyncLeaseLost
+		}
+		return err
+	}
+	if task.ActressID == nil || *task.ActressID != expectedActressID {
+		return errActressSyncLeaseLost
+	}
+	dedupeKey := fmt.Sprintf("actress:%d", actressID)
+	var conflict models.ActressSyncTask
+	err := tx.Where("id <> ? AND dedupe_key = ? AND status IN ?", id, dedupeKey, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).First(&conflict).Error
+	if err == nil {
+		if conflict.Status == models.ActressSyncTaskRunning {
+			return fmt.Errorf("canonical actress %d already has a running sync task", actressID)
+		}
+		now := time.Now().UTC()
+		messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
+		if err := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", conflict.ID, models.ActressSyncTaskPending).Updates(map[string]any{
+			"status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		if err := r.refreshJobTx(tx, conflict.JobID, now); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	fields, err := appendSyncTaskFields(task.UpdatedFields, []string{"merged_duplicate"})
+	if err != nil {
+		return err
+	}
+	result := tx.Model(&models.ActressSyncTask{}).
+		Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ? AND actress_id = ?", id, models.ActressSyncTaskRunning, token, leaseNow, expectedActressID).
+		Updates(map[string]any{"actress_id": actressID, "dedupe_key": dedupeKey, "updated_fields": fields})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errActressSyncLeaseLost
+	}
+	return nil
+}
+
+func mergeSyncTaskFields(existing, additional []string) []string {
+	seen := make(map[string]struct{}, len(existing)+len(additional))
+	fields := make([]string, 0, len(existing)+len(additional))
+	for _, field := range append(append([]string(nil), existing...), additional...) {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if _, ok := seen[field]; ok {
+			continue
+		}
+		seen[field] = struct{}{}
+		fields = append(fields, field)
+	}
+	return fields
+}
+
+func appendSyncTaskFields(existing, additional []string) (string, error) {
+	data, err := json.Marshal(mergeSyncTaskFields(existing, additional))
+	return string(data), err
+}
+
+// Heartbeat ...
+func (r *ActressSyncRepository) Heartbeat(id, token string, until time.Time) error {
+	return retryOnLocked(func() error {
+		now := time.Now().UTC()
+		res := r.db.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", id, models.ActressSyncTaskRunning, token, now).Updates(map[string]any{"heartbeat_at": now, "lease_expires_at": until})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return errActressSyncLeaseLost
+		}
+		return nil
+	})
+}
+
+// UpdateStage ...
+func (r *ActressSyncRepository) UpdateStage(id, token, stage string) error {
+	return retryOnLocked(func() error {
+		res := r.db.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", id, models.ActressSyncTaskRunning, token, time.Now().UTC()).Update("stage", stage)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return errActressSyncLeaseLost
+		}
+		return nil
+	})
+}
+
+// CompleteTask ...
+func (r *ActressSyncRepository) CompleteTask(task *models.ActressSyncTask, token string) error {
+	if task == nil {
+		return ErrInvalidLookup
+	}
+	return retryOnLocked(func() error {
+		return r.db.Transaction(func(tx *gorm.DB) error {
+			now := time.Now().UTC()
+			var current models.ActressSyncTask
+			if err := tx.Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", task.ID, models.ActressSyncTaskRunning, token, now).First(&current).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return errActressSyncLeaseLost
+				}
+				return err
+			}
+			mergedFields := mergeSyncTaskFields(current.UpdatedFields, task.UpdatedFields)
+			if task.Status == models.ActressSyncTaskFailed && len(mergedFields) > 0 {
+				task.Status = models.ActressSyncTaskCompleted
+				task.Outcome = "updated_with_warning"
+				if strings.TrimSpace(task.Warning) == "" {
+					task.Warning = "partial_sync_error"
+				}
+			}
+			task.UpdatedFields = mergedFields
+			messages, _ := json.Marshal(task.Messages)
+			fields, _ := json.Marshal(mergedFields)
+			res := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", task.ID, models.ActressSyncTaskRunning, token, now).Updates(map[string]any{
+				"status": task.Status, "stage": "completed", "outcome": task.Outcome, "messages": string(messages), "updated_fields": string(fields),
+				"warning": task.Warning, "error_message": task.ErrorMessage, "completed_at": now, "lease_owner": "", "lease_token": "", "lease_expires_at": nil,
+			})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return errActressSyncLeaseLost
+			}
+			return r.refreshJobTx(tx, task.JobID, now)
+		})
+	})
+}
+
+// CancelJob ...
+func (r *ActressSyncRepository) CancelJob(jobID string) error {
+	return retryOnLocked(func() error {
+		return r.db.Transaction(func(tx *gorm.DB) error {
+			now := time.Now().UTC()
+			res := tx.Model(&models.ActressSyncJob{}).Where("id = ? AND status IN ?", jobID, []string{models.ActressSyncJobPending, models.ActressSyncJobRunning}).Update("cancel_requested", true)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				var n int64
+				if err := tx.Model(&models.ActressSyncJob{}).Where("id = ?", jobID).Count(&n).Error; err != nil {
+					return err
+				}
+				if n == 0 {
+					return ErrNotFound
+				}
+			}
+			if err := tx.Model(&models.ActressSyncTask{}).Where("job_id = ? AND status = ?", jobID, models.ActressSyncTaskPending).Updates(map[string]any{"status": models.ActressSyncTaskCancelled, "stage": "completed", "outcome": "cancelled", "completed_at": now}).Error; err != nil {
+				return err
+			}
+			return r.refreshJobTx(tx, jobID, now)
+		})
+	})
+}
+
+func (r *ActressSyncRepository) refreshJobTx(tx *gorm.DB, jobID string, now time.Time) error {
+	type totals struct{ Total, Terminal, Updated, Warnings, Skipped, Conflicts, Failed, Cancelled int }
+	var c totals
+	if err := tx.Raw(`SELECT COUNT(*) total,
+SUM(CASE WHEN status IN ('completed','skipped','conflict','failed','cancelled') THEN 1 ELSE 0 END) terminal,
+SUM(CASE WHEN outcome IN ('updated','updated_with_warning') THEN 1 ELSE 0 END) updated,
+SUM(CASE WHEN outcome = 'updated_with_warning' OR TRIM(COALESCE(warning,'')) <> '' THEN 1 ELSE 0 END) warnings,
+SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) skipped,
+SUM(CASE WHEN status = 'conflict' THEN 1 ELSE 0 END) conflicts,
+SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) failed,
+SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) cancelled FROM actress_sync_tasks WHERE job_id = ?`, jobID).Scan(&c).Error; err != nil {
+		return err
+	}
+	var job models.ActressSyncJob
+	if err := tx.First(&job, "id = ?", jobID).Error; err != nil {
+		return err
+	}
+	status := job.Status
+	completedAt := job.CompletedAt
+	if c.Total == c.Terminal {
+		status = models.ActressSyncJobCompleted
+		if job.CancelRequested {
+			status = models.ActressSyncJobCancelled
+		}
+		completedAt = &now
+	}
+	return tx.Model(&models.ActressSyncJob{}).Where("id = ?", jobID).Updates(map[string]any{"status": status, "total_tasks": c.Total, "completed": c.Terminal, "updated": c.Updated, "warnings": c.Warnings, "skipped": c.Skipped, "conflicts": c.Conflicts, "failed": c.Failed, "cancelled": c.Cancelled, "completed_at": completedAt}).Error
+}
+
+// ListSyncCandidates ...
+func (r *ActressRepository) ListSyncCandidates(ctx context.Context) ([]models.Actress, error) {
+	potential := make([]models.Actress, 0)
+	err := r.GetDB().WithContext(ctx).Where(`(dmm_id > 0 AND (
+TRIM(COALESCE(thumb_url,'')) = '' OR
+TRIM(COALESCE(japanese_name,'')) = '' OR
+(TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = '') OR
+LOWER(COALESCE(thumb_url,'')) LIKE ? OR
+LOWER(COALESCE(thumb_url,'')) LIKE ?
+)) OR (dmm_id <= 0 AND (
+TRIM(COALESCE(japanese_name,'')) <> '' OR TRIM(COALESCE(aliases,'')) <> ''
+))`, "%/mono/actjpgs/%", "%/mono/noimage/now_printing.jpg%").Order("id ASC").Find(&potential).Error
+	if err != nil {
+		return nil, err
+	}
+	actresses := make([]models.Actress, 0, len(potential))
+	for _, actress := range potential {
+		if actress.DMMID <= 0 {
+			if strings.TrimSpace(actress.JapaneseName) != "" || strings.TrimSpace(actress.Aliases) != "" {
+				actresses = append(actresses, actress)
+			}
+			continue
+		}
+		if strings.TrimSpace(actress.ThumbURL) == "" ||
+			models.IsKnownInvalidDMMActressThumbnail(actress.ThumbURL) ||
+			strings.TrimSpace(actress.JapaneseName) == "" ||
+			(strings.TrimSpace(actress.FirstName) == "" && strings.TrimSpace(actress.LastName) == "") {
+			actresses = append(actresses, actress)
+		}
+	}
+	return actresses, nil
+}
+
+// FillBlankMetadata ...
+func (r *ActressRepository) FillBlankMetadata(ctx context.Context, id uint, dmmID int, source models.ActressInfo) ([]string, error) {
+	return r.fillBlankMetadata(ctx, id, dmmID, source, "", "")
+}
+
+// FillBlankMetadataForSyncTask ...
+func (r *ActressRepository) FillBlankMetadataForSyncTask(ctx context.Context, id uint, dmmID int, source models.ActressInfo, taskID, leaseToken string) ([]string, error) {
+	return r.fillBlankMetadata(ctx, id, dmmID, source, taskID, leaseToken)
+}
+
+func (r *ActressRepository) fillBlankMetadata(ctx context.Context, id uint, dmmID int, source models.ActressInfo, taskID, leaseToken string) ([]string, error) {
+	before, err := r.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if before.DMMID <= 0 || before.DMMID != dmmID || source.DMMID != dmmID {
+		return nil, ErrInvalidLookup
+	}
+	updates := map[string]any{
+		"japanese_name": gorm.Expr("CASE WHEN TRIM(COALESCE(japanese_name,'')) = '' THEN ? ELSE japanese_name END", strings.TrimSpace(source.JapaneseName)),
+		"first_name":    gorm.Expr("CASE WHEN TRIM(COALESCE(first_name,'')) = '' THEN ? ELSE first_name END", strings.TrimSpace(source.FirstName)),
+		"last_name":     gorm.Expr("CASE WHEN TRIM(COALESCE(last_name,'')) = '' THEN ? ELSE last_name END", strings.TrimSpace(source.LastName)),
+	}
+	sourceThumb := strings.TrimSpace(source.ThumbURL)
+	fields := make([]string, 0, 4)
+	if err := retryOnLocked(func() error {
+		fields = fields[:0]
+		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := ensureSyncTaskLeaseTx(tx, taskID, leaseToken); err != nil {
+				return err
+			}
+			if err := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = ?", id, dmmID).Updates(updates).Error; err != nil {
+				return err
+			}
+			thumbUpdated := false
+			if sourceThumb != "" && !models.IsKnownInvalidDMMActressThumbnail(sourceThumb) {
+				query := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = ?", id, dmmID)
+				switch {
+				case strings.TrimSpace(before.ThumbURL) == "":
+					query = query.Where("TRIM(COALESCE(thumb_url,'')) = ''")
+				case models.IsKnownInvalidDMMActressThumbnail(before.ThumbURL):
+					query = query.Where("thumb_url = ?", before.ThumbURL)
+				default:
+					query = nil
+				}
+				if query != nil {
+					result := query.Update("thumb_url", sourceThumb)
+					if result.Error != nil {
+						return result.Error
+					}
+					thumbUpdated = result.RowsAffected == 1
+				}
+			}
+			var after models.Actress
+			if err := tx.First(&after, "id = ?", id).Error; err != nil {
+				return err
+			}
+			if thumbUpdated && strings.TrimSpace(after.ThumbURL) != "" {
+				fields = append(fields, "thumb_url")
+			}
+			if strings.TrimSpace(before.JapaneseName) == "" && strings.TrimSpace(after.JapaneseName) != "" {
+				fields = append(fields, "japanese_name")
+			}
+			if strings.TrimSpace(before.FirstName) == "" && strings.TrimSpace(after.FirstName) != "" {
+				fields = append(fields, "first_name")
+			}
+			if strings.TrimSpace(before.LastName) == "" && strings.TrimSpace(after.LastName) != "" {
+				fields = append(fields, "last_name")
+			}
+			return recordSyncTaskFieldsTx(tx, taskID, leaseToken, fields)
+		})
+	}); err != nil {
+		return nil, err
+	}
+	return append([]string(nil), fields...), nil
+}
+
+// ReplaceThumbnail ...
+func (r *ActressRepository) ReplaceThumbnail(ctx context.Context, id uint, dmmID int, expected, replacement string) (bool, error) {
+	return r.replaceThumbnail(ctx, id, dmmID, expected, replacement, "", "")
+}
+
+// ReplaceThumbnailForSyncTask ...
+func (r *ActressRepository) ReplaceThumbnailForSyncTask(ctx context.Context, id uint, dmmID int, expected, replacement, taskID, leaseToken string) (bool, error) {
+	return r.replaceThumbnail(ctx, id, dmmID, expected, replacement, taskID, leaseToken)
+}
+
+func (r *ActressRepository) replaceThumbnail(ctx context.Context, id uint, dmmID int, expected, replacement, taskID, leaseToken string) (bool, error) {
+	expected = strings.TrimSpace(expected)
+	replacement = strings.TrimSpace(replacement)
+	if id == 0 || dmmID <= 0 || expected == "" || replacement == "" || models.IsKnownInvalidDMMActressThumbnail(replacement) {
+		return false, ErrInvalidLookup
+	}
+	var replaced bool
+	if err := retryOnLocked(func() error {
+		replaced = false
+		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := ensureSyncTaskLeaseTx(tx, taskID, leaseToken); err != nil {
+				return err
+			}
+			result := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = ? AND thumb_url = ?", id, dmmID, expected).Update("thumb_url", replacement)
+			if result.Error != nil {
+				return result.Error
+			}
+			replaced = result.RowsAffected == 1
+			if replaced {
+				return recordSyncTaskFieldsTx(tx, taskID, leaseToken, []string{"thumb_url"})
+			}
+			return nil
+		})
+	}); err != nil {
+		return false, err
+	}
+	return replaced, nil
+}
+
+func ensureSyncTaskLeaseTx(tx *gorm.DB, taskID, leaseToken string) error {
+	if strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", taskID, models.ActressSyncTaskRunning, leaseToken, time.Now().UTC()).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return errActressSyncLeaseLost
+	}
+	return nil
+}
+
+func recordSyncTaskFieldsTx(tx *gorm.DB, taskID, leaseToken string, additional []string) error {
+	if strings.TrimSpace(taskID) == "" || len(additional) == 0 {
+		return nil
+	}
+	var task models.ActressSyncTask
+	if err := tx.Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", taskID, models.ActressSyncTaskRunning, leaseToken, time.Now().UTC()).First(&task).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errActressSyncLeaseLost
+		}
+		return err
+	}
+	fields, err := appendSyncTaskFields(task.UpdatedFields, additional)
+	if err != nil {
+		return err
+	}
+	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", taskID, models.ActressSyncTaskRunning, leaseToken, time.Now().UTC()).Update("updated_fields", fields)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errActressSyncLeaseLost
+	}
+	return nil
+}
+
+// AssignDMMIDIfMissing ...
+func (r *ActressRepository) AssignDMMIDIfMissing(ctx context.Context, id uint, dmmID int) (bool, error) {
+	return r.assignDMMIDIfMissing(ctx, id, dmmID, "", "")
+}
+
+// AssignDMMIDIfMissingForSyncTask ...
+func (r *ActressRepository) AssignDMMIDIfMissingForSyncTask(ctx context.Context, id uint, dmmID int, taskID, leaseToken string) (bool, error) {
+	return r.assignDMMIDIfMissing(ctx, id, dmmID, taskID, leaseToken)
+}
+
+func (r *ActressRepository) assignDMMIDIfMissing(ctx context.Context, id uint, dmmID int, taskID, leaseToken string) (bool, error) {
+	if id == 0 || dmmID <= 0 {
+		return false, ErrInvalidLookup
+	}
+	var assigned bool
+	if err := retryOnLocked(func() error {
+		assigned = false
+		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := ensureSyncTaskLeaseTx(tx, taskID, leaseToken); err != nil {
+				return err
+			}
+			result := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = 0", id).Update("dmm_id", dmmID)
+			if result.Error != nil {
+				return result.Error
+			}
+			assigned = result.RowsAffected == 1
+			if assigned {
+				return recordSyncTaskFieldsTx(tx, taskID, leaseToken, []string{"dmm_id"})
+			}
+			return nil
+		})
+	}); err != nil {
+		return false, err
+	}
+	return assigned, nil
+}

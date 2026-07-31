@@ -1,4 +1,4 @@
-	import * as m from '$lib/paraglide/messages';
+import * as m from '$lib/paraglide/messages';
 import { apiClient } from '$lib/api/client';
 import { toastStore } from '$lib/stores/toast';
 import { confirmDialog } from '$lib/stores/dialog.svelte';
@@ -13,6 +13,7 @@ export interface ScraperItem {
 	enabled: boolean;
 	displayName: string;
 	expanded: boolean;
+	supportsMovieSearch: boolean;
 	options: ScraperOption[];
 }
 
@@ -85,6 +86,23 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 				scraperEnabledMap[scraper.name] = scraper.enabled;
 			});
 
+			const actressOnlyNames = new Set(
+				response.scrapers
+					.filter((scraper) => scraper.supports_movie_search === false)
+					.map((scraper) => scraper.name),
+			);
+			sc.priority = sc.priority.filter((name: string) => !actressOnlyNames.has(name));
+			if (cfg.metadata?.priority) {
+				for (const field of Object.keys(cfg.metadata.priority)) {
+					const priority = cfg.metadata.priority[field];
+					if (Array.isArray(priority)) {
+						cfg.metadata.priority[field] = priority.filter(
+							(name: string) => !actressOnlyNames.has(name),
+						);
+					}
+				}
+			}
+
 			const mergedOrder: string[] = [];
 			const seen = new Set<string>();
 
@@ -112,11 +130,13 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 					(sc[name] as ScraperSettings).enabled = scraperEnabledMap[name];
 				}
 
+				const scraperInfo = response.scrapers.find((scraper) => scraper.name === name);
 				return {
 					name,
 					enabled: (sc[name] as ScraperSettings)?.enabled ?? false,
 					displayName: scraperDisplayNames[name] || name,
 					expanded: false,
+					supportsMovieSearch: scraperInfo?.supports_movie_search !== false,
 					options: scraperOptionsMap[name] || [],
 				};
 			});
@@ -147,6 +167,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 				enabled: (sc[name] as ScraperSettings)?.enabled ?? false,
 				displayName: name,
 				expanded: false,
+				supportsMovieSearch: true,
 				options: [],
 			}));
 			scrapers = deps.refreshLocalProxyProfileChoices(scrapers);
@@ -368,7 +389,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 		if (!config.scrapers) config.scrapers = {};
 		const sc = config.scrapers;
 
-		sc.priority = scrapers.map((s) => s.name);
+		sc.priority = scrapers.filter((s) => s.supportsMovieSearch).map((s) => s.name);
 
 		scrapers.forEach((scraper) => {
 			if (!sc[scraper.name]) sc[scraper.name] = {} as ScraperSettings;
@@ -477,8 +498,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 		const fieldsUsing: string[] = [];
 
 		metadataFields.forEach((field) => {
-			const fieldPriority =
-			config?.metadata?.priority?.[field.key];
+			const fieldPriority = config?.metadata?.priority?.[field.key];
 			const priority = fieldPriority && fieldPriority.length > 0 ? fieldPriority : globalPriority;
 
 			if (priority.includes(scraperName)) {

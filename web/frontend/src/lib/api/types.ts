@@ -272,12 +272,7 @@ export interface BatchScrapeResponse {
 	job_id: string;
 }
 
-export type ScraperErrorKind =
-	| 'not_found'
-	| 'unavailable'
-	| 'rate_limited'
-	| 'blocked'
-	| 'unknown';
+export type ScraperErrorKind = 'not_found' | 'unavailable' | 'rate_limited' | 'blocked' | 'unknown';
 
 export interface FileResult {
 	result_id: string;
@@ -473,12 +468,90 @@ export interface Actress {
 	aliases?: string;
 }
 
+export type ActressSyncJobStatus = 'pending' | 'running' | 'completed' | 'cancelled';
+export type ActressSyncTaskStatus =
+	| 'pending'
+	| 'running'
+	| 'completed'
+	| 'skipped'
+	| 'conflict'
+	| 'failed'
+	| 'cancelled';
+
+export interface ActressSyncJob {
+	id: string;
+	status: ActressSyncJobStatus;
+	scope: string;
+	total_tasks: number;
+	completed: number;
+	updated: number;
+	warnings: number;
+	skipped: number;
+	conflicts: number;
+	failed: number;
+	cancelled: number;
+	cancel_requested: boolean;
+	created_at: string;
+	started_at?: string;
+	completed_at?: string;
+}
+
+export interface ActressSyncTask {
+	id: string;
+	job_id: string;
+	actress_id?: number;
+	label: string;
+	dedupe_key: string;
+	status: ActressSyncTaskStatus;
+	stage: string;
+	outcome?: string;
+	messages: string[];
+	updated_fields: string[];
+	warning?: string;
+	error_message?: string;
+	heartbeat_at?: string;
+	lease_expires_at?: string;
+	attempts: number;
+	created_at: string;
+	started_at?: string;
+	completed_at?: string;
+}
+
+export interface ActressSyncCandidatesResponse {
+	ids: number[];
+	actresses: Actress[];
+	total: number;
+}
+export interface ActressSyncJobResponse {
+	job: ActressSyncJob;
+}
+export interface ActressSyncJobsResponse {
+	jobs: ActressSyncJob[];
+}
+export interface ActressSyncTasksResponse {
+	tasks: ActressSyncTask[];
+	total: number;
+}
+export interface ActressSyncJobCreateRequest {
+	scope: 'missing' | 'selected';
+	actress_ids?: number[];
+}
+
+export type ActressFilter =
+	| 'missing_dmm'
+	| 'has_dmm'
+	| 'missing_thumbnail'
+	| 'missing_japanese_name'
+	| 'japanese_name_only'
+	| 'missing_metadata';
+
 export interface ActressListParams {
 	limit?: number;
 	offset?: number;
 	q?: string;
 	sort_by?: 'name' | 'japanese_name' | 'id' | 'dmm_id' | 'updated_at' | 'created_at';
 	sort_order?: 'asc' | 'desc';
+	filter?: ActressFilter;
 }
 
 export interface ActressListResponse {
@@ -646,6 +719,8 @@ export interface ScraperInfo {
 	name: string;
 	display_title: string;
 	enabled: boolean;
+	supports_movie_search: boolean;
+	supports_actress_metadata: boolean;
 	options?: ScraperOption[];
 }
 
@@ -653,6 +728,8 @@ export interface Scraper {
 	name: string;
 	display_title: string;
 	enabled: boolean;
+	supports_movie_search: boolean;
+	supports_actress_metadata: boolean;
 	options?: Record<string, string | number | boolean>;
 }
 

@@ -15,6 +15,7 @@
 		enabled: boolean;
 		displayName: string;
 		expanded: boolean;
+		supportsMovieSearch: boolean;
 		options: ScraperOption[];
 	}
 

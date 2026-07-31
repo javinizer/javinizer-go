@@ -4,21 +4,23 @@ import (
 	"context"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/translation"
 )
 
 // Config holds the subset of application configuration needed by the Scrape seam.
 type Config struct {
-	ScrapersPriority        []string
-	TranslationEnabled      bool
-	TranslationSettingsHash string
-	TranslationTargetLang   string
-	ActressDBEnabled        bool
-	ScrapeActress           bool
-	UserAgent               string
-	Referer                 string
-	TempDir                 string
+	ScrapersPriority         []string
+	TranslationEnabled       bool
+	TranslationSettingsHash  string
+	TranslationTargetLang    string
+	ActressDBEnabled         bool
+	ScrapeActress            bool
+	UserAgent                string
+	Referer                  string
+	TempDir                  string
+	ValidateActressThumbnail func(context.Context, string) error
 }
 
 // Translator is the interface for applying metadata translation to a scraped Movie.
@@ -106,14 +108,15 @@ func ConfigFromAppConfig(cfg *config.Config) *Config {
 		return nil
 	}
 	c := &Config{
-		ScrapersPriority:      cfg.Scrapers.Priority,
-		TranslationEnabled:    cfg.Metadata.Translation.Enabled,
-		TranslationTargetLang: cfg.Metadata.Translation.TargetLanguage,
-		ActressDBEnabled:      cfg.Metadata.ActressDatabase.Enabled,
-		ScrapeActress:         cfg.Scrapers.ScrapeActress,
-		UserAgent:             cfg.Scrapers.UserAgent,
-		Referer:               cfg.Scrapers.Referer,
-		TempDir:               cfg.System.TempDir,
+		ScrapersPriority:         cfg.Scrapers.Priority,
+		TranslationEnabled:       cfg.Metadata.Translation.Enabled,
+		TranslationTargetLang:    cfg.Metadata.Translation.TargetLanguage,
+		ActressDBEnabled:         cfg.Metadata.ActressDatabase.Enabled,
+		ScrapeActress:            cfg.Scrapers.ScrapeActress,
+		UserAgent:                cfg.Scrapers.UserAgent,
+		Referer:                  cfg.Scrapers.Referer,
+		TempDir:                  cfg.System.TempDir,
+		ValidateActressThumbnail: imageutil.ValidateRemoteImage,
 	}
 	if c.TranslationEnabled {
 		c.TranslationSettingsHash = cfg.Metadata.Translation.SettingsHash()

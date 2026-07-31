@@ -238,6 +238,24 @@ class APIClient {
 	async getActress(id: number) {
 		return this.actresses.getActress(id);
 	}
+	async listActressSyncCandidates() {
+		return this.actresses.listActressSyncCandidates();
+	}
+	async createActressSyncJob(request: Parameters<ActressClient['createActressSyncJob']>[0]) {
+		return this.actresses.createActressSyncJob(request);
+	}
+	async listActiveActressSyncJobs() {
+		return this.actresses.listActiveActressSyncJobs();
+	}
+	async getActressSyncJob(jobID: string) {
+		return this.actresses.getActressSyncJob(jobID);
+	}
+	async listActressSyncJobTasks(jobID: string) {
+		return this.actresses.listActressSyncJobTasks(jobID);
+	}
+	async cancelActressSyncJob(jobID: string) {
+		return this.actresses.cancelActressSyncJob(jobID);
+	}
 	async createActress(request: Parameters<ActressClient['createActress']>[0]) {
 		return this.actresses.createActress(request);
 	}

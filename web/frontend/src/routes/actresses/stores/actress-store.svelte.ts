@@ -3,9 +3,15 @@ import { confirmDialog } from '$lib/stores/dialog.svelte';
 import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
 import { toastStore } from '$lib/stores/toast';
-import type { Actress, ActressUpsertRequest, ActressMergeResolution } from '$lib/api/types';
+import type { Actress, ActressUpsertRequest, ActressMergeResolution, ActressFilter } from '$lib/api/types';
 import { formatActressName } from '$lib/utils/actress';
 import * as m from '$lib/paraglide/messages';
+import {
+	loadActressSortPreferences,
+	saveActressSortPreferences,
+	type ActressSortField,
+	type ActressSortOrder,
+} from '../sort-preferences';
 
 export type ActressForm = {
 	dmm_id: string;
@@ -26,20 +32,34 @@ export function createActressStore() {
 	let limit = $state(DEFAULT_LIMIT);
 	let offset = $state(0);
 	let viewMode = $state<'cards' | 'compact' | 'table'>('cards');
-	let sortBy = $state<'name' | 'japanese_name' | 'id' | 'dmm_id' | 'updated_at' | 'created_at'>(
-		'name',
-	);
-	let sortOrder = $state<'asc' | 'desc'>('asc');
+	let sortBy = $state<ActressSortField>('name');
+	let sortOrder = $state<ActressSortOrder>('asc');
+	let sortPreferencesHydrated = $state(false);
+	let filter = $state<ActressFilter | ''>('');
 
 	let editingId = $state<number | null>(null);
 	let form = $state<ActressForm>(emptyForm());
 	let formError = $state<string | null>(null);
 	let selectedIds = $state<number[]>([]);
 
+	function hydrateSortPreferences() {
+		const preferences = loadActressSortPreferences(typeof localStorage === 'undefined' ? null : localStorage);
+		sortBy = preferences.sortBy;
+		sortOrder = preferences.sortOrder;
+		offset = 0;
+		sortPreferencesHydrated = true;
+	}
+
+	$effect(() => {
+		const preferences = { sortBy, sortOrder };
+		if (!sortPreferencesHydrated || typeof localStorage === 'undefined') return;
+		saveActressSortPreferences(localStorage, preferences);
+	});
+
 	const actressesQuery = createQuery(() => ({
 		queryKey: [
 			'actresses',
-			{ limit, offset, q: activeQuery, sort_by: sortBy, sort_order: sortOrder },
+			{ limit, offset, q: activeQuery, sort_by: sortBy, sort_order: sortOrder, filter },
 		],
 		queryFn: () =>
 			apiClient.listActresses({
@@ -48,6 +68,7 @@ export function createActressStore() {
 				q: activeQuery || undefined,
 				sort_by: sortBy,
 				sort_order: sortOrder,
+				filter: filter || undefined,
 			}),
 		placeholderData: (prev) => prev,
 	}));
@@ -101,20 +122,6 @@ export function createActressStore() {
 			toastStore.error(err.message);
 		},
 	}));
-
-	$effect(() => {
-		const data = actressesQuery.data;
-		if (!data || showMergeModal) return;
-		const pageIDs = new Set(
-			data.actresses.map((actress) => actress.id).filter((id): id is number => id !== undefined),
-		);
-		untrack(() => {
-			const pruned = selectedIds.filter((id) => pageIDs.has(id));
-			if (pruned.length !== selectedIds.length) {
-				selectedIds = pruned;
-			}
-		});
-	});
 
 	let showMergeModal = $state(false);
 	let mergePrimaryId = $state<number | null>(null);
@@ -249,6 +256,7 @@ export function createActressStore() {
 	}
 
 	function selectCurrentPage() {
+		if (isRefreshing) return;
 		const ids = actresses
 			.map((actress) => actress.id)
 			.filter((id): id is number => id !== undefined);
@@ -453,8 +461,16 @@ export function createActressStore() {
 		get sortBy() {
 			return sortBy;
 		},
+		get filter() {
+			return filter;
+		},
+		set filter(v: ActressFilter | '') {
+			filter = v;
+			offset = 0;
+		},
 		set sortBy(v: string) {
-			sortBy = v as typeof sortBy;
+			sortBy = v as ActressSortField;
+			offset = 0;
 		},
 		get sortOrder() {
 			return sortOrder;
@@ -558,6 +574,7 @@ export function createActressStore() {
 		applySearch,
 		clearSearch,
 		toggleSortOrder,
+		hydrateSortPreferences,
 		prevPage,
 		nextPage,
 		closeMergeModal,

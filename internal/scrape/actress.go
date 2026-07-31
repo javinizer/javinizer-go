@@ -2,11 +2,63 @@ package scrape
 
 import (
 	"context"
+	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/actresscache"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
+
+var lookupBuiltinActress = actresscache.Lookup
+
+func enrichActressesFromBuiltinCache(scraped *models.Movie) int {
+	if scraped == nil {
+		return 0
+	}
+	enriched := 0
+	for i := range scraped.Actresses {
+		actress := &scraped.Actresses[i]
+		record, ok := lookupBuiltinActress(actress.DMMID, actress.JapaneseName, actress.FirstName, actress.LastName)
+		if !ok {
+			continue
+		}
+		if actress.DMMID > 0 && record.DMMID > 0 && actress.DMMID != record.DMMID {
+			continue
+		}
+		changed := false
+		if actress.DMMID == 0 && record.DMMID > 0 {
+			actress.DMMID = record.DMMID
+			changed = true
+		}
+		if actress.ThumbURL == "" || models.IsKnownInvalidDMMActressThumbnail(actress.ThumbURL) {
+			if record.ThumbURL != "" {
+				actress.ThumbURL = record.ThumbURL
+				changed = true
+			}
+		}
+		if actress.FirstName == "" && record.FirstName != "" {
+			actress.FirstName = record.FirstName
+			changed = true
+		}
+		if actress.LastName == "" && record.LastName != "" {
+			actress.LastName = record.LastName
+			changed = true
+		}
+		if actress.JapaneseName == "" && record.JapaneseName != "" {
+			actress.JapaneseName = record.JapaneseName
+			changed = true
+		}
+		if strings.TrimSpace(actress.Aliases) == "" && len(record.Aliases) > 0 {
+			actress.Aliases = strings.Join(record.Aliases, "|")
+			changed = true
+		}
+		if changed {
+			enriched++
+		}
+	}
+	return enriched
+}
 
 func enrichActressesFromDB(ctx context.Context, scraped *models.Movie, actressRepo database.ActressRepositoryInterface, cfg *Config) int {
 	if cfg == nil || !cfg.ActressDBEnabled {
@@ -83,4 +135,125 @@ func enrichActressFields(actress *models.Actress, dbActress *models.Actress) boo
 		logging.Debugf("Enriched actress %s from database (ThumbURL=%s)", actress.FullName(), actress.ThumbURL)
 	}
 	return changed
+}
+
+func validateActressThumbnails(ctx context.Context, scraped *models.Movie, cfg *Config) int {
+	if scraped == nil || cfg == nil || cfg.ValidateActressThumbnail == nil {
+		return 0
+	}
+	invalid := 0
+	for i := range scraped.Actresses {
+		thumbnail := strings.TrimSpace(scraped.Actresses[i].ThumbURL)
+		if thumbnail == "" {
+			continue
+		}
+		if models.IsKnownInvalidDMMActressThumbnail(thumbnail) {
+			scraped.Actresses[i].ThumbURL = ""
+			invalid++
+			continue
+		}
+		if err := cfg.ValidateActressThumbnail(ctx, thumbnail); err != nil {
+			logging.Debugf("Rejected actress thumbnail %s: %v", thumbnail, err)
+			scraped.Actresses[i].ThumbURL = ""
+			invalid++
+		}
+	}
+	return invalid
+}
+
+func actressNeedsMetadata(a models.Actress) bool {
+	return actressThumbNeedsResolution(a.ThumbURL) ||
+		strings.TrimSpace(a.JapaneseName) == "" ||
+		(strings.TrimSpace(a.FirstName) == "" && strings.TrimSpace(a.LastName) == "")
+}
+
+func actressThumbNeedsResolution(thumbURL string) bool {
+	return strings.TrimSpace(thumbURL) == "" || models.IsKnownInvalidDMMActressThumbnail(thumbURL)
+}
+
+func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, registry ScraperInstanceResolver, cfg *Config) int {
+	if cfg == nil || !cfg.ScrapeActress || scraped == nil || registry == nil {
+		return 0
+	}
+	resolvers := collectMetadataResolvers(registry)
+	if len(resolvers) == 0 {
+		return 0
+	}
+	enriched := 0
+	for i := range scraped.Actresses {
+		actress := &scraped.Actresses[i]
+		if !actressNeedsMetadata(*actress) {
+			continue
+		}
+		actressEnriched := false
+		for _, resolver := range resolvers {
+			if !actressNeedsMetadata(*actress) {
+				break
+			}
+			metadata := resolver.ResolveActressMetadata(ctx, models.ActressInfo{
+				DMMID:        actress.DMMID,
+				FirstName:    actress.FirstName,
+				LastName:     actress.LastName,
+				JapaneseName: actress.JapaneseName,
+				ThumbURL:     actress.ThumbURL,
+			})
+			if metadata.DMMID != actress.DMMID && actress.DMMID > 0 {
+				continue
+			}
+			resolverFilled := false
+			thumbnail := strings.TrimSpace(metadata.ThumbURL)
+			if thumbnail != "" && cfg.ValidateActressThumbnail != nil {
+				if err := cfg.ValidateActressThumbnail(ctx, thumbnail); err != nil {
+					logging.Debugf("Rejected resolver actress thumbnail %s: %v", thumbnail, err)
+					thumbnail = ""
+				}
+			}
+			if actressThumbNeedsResolution(actress.ThumbURL) && thumbnail != "" && !models.IsKnownInvalidDMMActressThumbnail(thumbnail) {
+				actress.ThumbURL = thumbnail
+				resolverFilled = true
+			}
+			if actress.FirstName == "" && metadata.FirstName != "" {
+				actress.FirstName = metadata.FirstName
+				resolverFilled = true
+			}
+			if actress.LastName == "" && metadata.LastName != "" {
+				actress.LastName = metadata.LastName
+				resolverFilled = true
+			}
+			if actress.JapaneseName == "" && metadata.JapaneseName != "" {
+				actress.JapaneseName = metadata.JapaneseName
+				resolverFilled = true
+			}
+			if resolverFilled {
+				actressEnriched = true
+				logging.Debugf("Enriched actress %s from resolver %s", actress.FullName(), resolverName(resolver))
+			}
+		}
+		if actressEnriched {
+			enriched++
+		}
+	}
+	return enriched
+}
+
+func collectMetadataResolvers(registry ScraperInstanceResolver) []models.ActressMetadataResolver {
+	instances := registry.GetAllInstances()
+	resolvers := make([]models.ActressMetadataResolver, 0, len(instances))
+	for _, s := range instances {
+		if s == nil || !s.IsEnabled() {
+			continue
+		}
+		if r, ok := s.(models.ActressMetadataResolver); ok {
+			resolvers = append(resolvers, r)
+		}
+	}
+	return resolvers
+}
+
+func resolverName(r models.ActressMetadataResolver) string {
+	type named interface{ Name() string }
+	if n, ok := r.(named); ok {
+		return n.Name()
+	}
+	return "resolver"
 }

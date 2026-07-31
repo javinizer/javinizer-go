@@ -232,6 +232,14 @@ scrapers:
         api_key: "" # API key for authentication (or set JAVSTASH_API_KEY env var)
         base_url: "https://javstash.org/graphql"
         language: en # en | ja
+    # Minnano-AV: actress metadata-only source (no movie scraping).
+    # Resolves Japanese names, romaji first/last names, and 125px thumbnails
+    # via minnano-av.com's actress directory. Direct access (no proxy needed).
+    # Used by the "Sync Missing" actress job and movie-scrape enrichment.
+    minnanoav:
+        enabled: false # Opt-in actress metadata resolver
+        rate_limit: 1000 # Delay between requests in milliseconds
+        base_url: "https://www.minnano-av.com"
 metadata:
     # Per-field priorities default to inherit `scrapers.priority` (empty []).
     # A non-empty list here locks the field to those scrapers exclusively with

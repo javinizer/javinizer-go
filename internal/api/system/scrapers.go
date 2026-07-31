@@ -65,10 +65,12 @@ func getAvailableScrapers(rt *core.APIRuntime) gin.HandlerFunc {
 			displayName, options := scraperDisplayTitleAndOptions(deps, name, profileChoices, downloadProfileChoices)
 
 			scrapers = append(scrapers, contracts.ScraperInfo{
-				Name:         name,
-				DisplayTitle: displayName,
-				Enabled:      scraper.IsEnabled(),
-				Options:      options,
+				Name:                    name,
+				DisplayTitle:            displayName,
+				Enabled:                 scraper.IsEnabled(),
+				SupportsMovieSearch:     supportsMovieSearch(scraper),
+				SupportsActressMetadata: supportsActressMetadata(scraper),
+				Options:                 options,
 			})
 		}
 
@@ -76,6 +78,18 @@ func getAvailableScrapers(rt *core.APIRuntime) gin.HandlerFunc {
 			Scrapers: scrapers,
 		})
 	}
+}
+
+func supportsMovieSearch(scraper models.Scraper) bool {
+	if c, ok := scraper.(models.MovieSearchCapable); ok {
+		return c.SupportsMovieSearch()
+	}
+	return true
+}
+
+func supportsActressMetadata(scraper models.Scraper) bool {
+	_, ok := scraper.(models.ActressMetadataResolver)
+	return ok
 }
 
 func scraperProxyOptions(profileChoices []contracts.ScraperChoice) []contracts.ScraperOption {

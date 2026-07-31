@@ -64,7 +64,7 @@ type MockActressAliasRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - alias *models.ActressAlias
-func (_e *MockActressAliasRepositoryInterface_Expecter) Create(ctx any, alias any) *MockActressAliasRepositoryInterface_Create_Call {
+func (_e *MockActressAliasRepositoryInterface_Expecter) Create(ctx interface{}, alias interface{}) *MockActressAliasRepositoryInterface_Create_Call {
 	return &MockActressAliasRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, alias)}
 }
 
@@ -121,7 +121,7 @@ type MockActressAliasRepositoryInterface_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - aliasName string
-func (_e *MockActressAliasRepositoryInterface_Expecter) Delete(ctx any, aliasName any) *MockActressAliasRepositoryInterface_Delete_Call {
+func (_e *MockActressAliasRepositoryInterface_Expecter) Delete(ctx interface{}, aliasName interface{}) *MockActressAliasRepositoryInterface_Delete_Call {
 	return &MockActressAliasRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, aliasName)}
 }
 
@@ -189,7 +189,7 @@ type MockActressAliasRepositoryInterface_FindByAliasName_Call struct {
 // FindByAliasName is a helper method to define mock.On call
 //   - ctx context.Context
 //   - aliasName string
-func (_e *MockActressAliasRepositoryInterface_Expecter) FindByAliasName(ctx any, aliasName any) *MockActressAliasRepositoryInterface_FindByAliasName_Call {
+func (_e *MockActressAliasRepositoryInterface_Expecter) FindByAliasName(ctx interface{}, aliasName interface{}) *MockActressAliasRepositoryInterface_FindByAliasName_Call {
 	return &MockActressAliasRepositoryInterface_FindByAliasName_Call{Call: _e.mock.On("FindByAliasName", ctx, aliasName)}
 }
 
@@ -257,7 +257,7 @@ type MockActressAliasRepositoryInterface_FindByCanonicalName_Call struct {
 // FindByCanonicalName is a helper method to define mock.On call
 //   - ctx context.Context
 //   - canonicalName string
-func (_e *MockActressAliasRepositoryInterface_Expecter) FindByCanonicalName(ctx any, canonicalName any) *MockActressAliasRepositoryInterface_FindByCanonicalName_Call {
+func (_e *MockActressAliasRepositoryInterface_Expecter) FindByCanonicalName(ctx interface{}, canonicalName interface{}) *MockActressAliasRepositoryInterface_FindByCanonicalName_Call {
 	return &MockActressAliasRepositoryInterface_FindByCanonicalName_Call{Call: _e.mock.On("FindByCanonicalName", ctx, canonicalName)}
 }
 
@@ -323,7 +323,7 @@ type MockActressAliasRepositoryInterface_GetAliasGroup_Call struct {
 // GetAliasGroup is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
-func (_e *MockActressAliasRepositoryInterface_Expecter) GetAliasGroup(ctx any, name any) *MockActressAliasRepositoryInterface_GetAliasGroup_Call {
+func (_e *MockActressAliasRepositoryInterface_Expecter) GetAliasGroup(ctx interface{}, name interface{}) *MockActressAliasRepositoryInterface_GetAliasGroup_Call {
 	return &MockActressAliasRepositoryInterface_GetAliasGroup_Call{Call: _e.mock.On("GetAliasGroup", ctx, name)}
 }
 
@@ -390,7 +390,7 @@ type MockActressAliasRepositoryInterface_GetAliasMap_Call struct {
 
 // GetAliasMap is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockActressAliasRepositoryInterface_Expecter) GetAliasMap(ctx any) *MockActressAliasRepositoryInterface_GetAliasMap_Call {
+func (_e *MockActressAliasRepositoryInterface_Expecter) GetAliasMap(ctx interface{}) *MockActressAliasRepositoryInterface_GetAliasMap_Call {
 	return &MockActressAliasRepositoryInterface_GetAliasMap_Call{Call: _e.mock.On("GetAliasMap", ctx)}
 }
 
@@ -452,7 +452,7 @@ type MockActressAliasRepositoryInterface_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockActressAliasRepositoryInterface_Expecter) List(ctx any) *MockActressAliasRepositoryInterface_List_Call {
+func (_e *MockActressAliasRepositoryInterface_Expecter) List(ctx interface{}) *MockActressAliasRepositoryInterface_List_Call {
 	return &MockActressAliasRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx)}
 }
 
@@ -504,7 +504,7 @@ type MockActressAliasRepositoryInterface_Upsert_Call struct {
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
 //   - alias *models.ActressAlias
-func (_e *MockActressAliasRepositoryInterface_Expecter) Upsert(ctx any, alias any) *MockActressAliasRepositoryInterface_Upsert_Call {
+func (_e *MockActressAliasRepositoryInterface_Expecter) Upsert(ctx interface{}, alias interface{}) *MockActressAliasRepositoryInterface_Upsert_Call {
 	return &MockActressAliasRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, alias)}
 }
 

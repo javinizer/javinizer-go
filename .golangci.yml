@@ -105,6 +105,12 @@ linters:
       - path: internal/database/actress_merge\.go
         linters:
           - goconst
+      - path: internal/database/actress_sync_repo\.go
+        linters:
+          - goconst
+      - path: internal/worker/actress_sync_manager\.go
+        linters:
+          - goconst
       - path: internal/database/actress_merge_domain\.go
         linters:
           - goconst
@@ -239,6 +245,9 @@ linters:
         linters:
           - unparam
       - path: internal/scraper/r18dev/r18dev\.go
+        linters:
+          - unparam
+      - path: internal/scraper/minnanoav/minnanoav\.go
         linters:
           - unparam
       - path: internal/scraper/r18dev/content_id_prefixes\.go

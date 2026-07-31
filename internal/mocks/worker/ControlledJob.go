@@ -147,7 +147,7 @@ type MockControlledJob_FindFilePathsForMovieID_Call struct {
 
 // FindFilePathsForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockControlledJob_Expecter) FindFilePathsForMovieID(movieID any) *MockControlledJob_FindFilePathsForMovieID_Call {
+func (_e *MockControlledJob_Expecter) FindFilePathsForMovieID(movieID interface{}) *MockControlledJob_FindFilePathsForMovieID_Call {
 	return &MockControlledJob_FindFilePathsForMovieID_Call{Call: _e.mock.On("FindFilePathsForMovieID", movieID)}
 }
 
@@ -209,7 +209,7 @@ type MockControlledJob_FindMovieResultForMovieID_Call struct {
 
 // FindMovieResultForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockControlledJob_Expecter) FindMovieResultForMovieID(movieID any) *MockControlledJob_FindMovieResultForMovieID_Call {
+func (_e *MockControlledJob_Expecter) FindMovieResultForMovieID(movieID interface{}) *MockControlledJob_FindMovieResultForMovieID_Call {
 	return &MockControlledJob_FindMovieResultForMovieID_Call{Call: _e.mock.On("FindMovieResultForMovieID", movieID)}
 }
 
@@ -262,7 +262,7 @@ type MockControlledJob_GetFileMatchInfosForMovieID_Call struct {
 
 // GetFileMatchInfosForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockControlledJob_Expecter) GetFileMatchInfosForMovieID(movieID any) *MockControlledJob_GetFileMatchInfosForMovieID_Call {
+func (_e *MockControlledJob_Expecter) GetFileMatchInfosForMovieID(movieID interface{}) *MockControlledJob_GetFileMatchInfosForMovieID_Call {
 	return &MockControlledJob_GetFileMatchInfosForMovieID_Call{Call: _e.mock.On("GetFileMatchInfosForMovieID", movieID)}
 }
 
@@ -330,7 +330,7 @@ type MockControlledJob_GetFileResultByResultID_Call struct {
 
 // GetFileResultByResultID is a helper method to define mock.On call
 //   - resultID string
-func (_e *MockControlledJob_Expecter) GetFileResultByResultID(resultID any) *MockControlledJob_GetFileResultByResultID_Call {
+func (_e *MockControlledJob_Expecter) GetFileResultByResultID(resultID interface{}) *MockControlledJob_GetFileResultByResultID_Call {
 	return &MockControlledJob_GetFileResultByResultID_Call{Call: _e.mock.On("GetFileResultByResultID", resultID)}
 }
 
@@ -480,7 +480,7 @@ type MockControlledJob_GetMovieResult_Call struct {
 
 // GetMovieResult is a helper method to define mock.On call
 //   - filePath string
-func (_e *MockControlledJob_Expecter) GetMovieResult(filePath any) *MockControlledJob_GetMovieResult_Call {
+func (_e *MockControlledJob_Expecter) GetMovieResult(filePath interface{}) *MockControlledJob_GetMovieResult_Call {
 	return &MockControlledJob_GetMovieResult_Call{Call: _e.mock.On("GetMovieResult", filePath)}
 }
 
@@ -533,7 +533,7 @@ type MockControlledJob_GetMovieResultsForMovieID_Call struct {
 
 // GetMovieResultsForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockControlledJob_Expecter) GetMovieResultsForMovieID(movieID any) *MockControlledJob_GetMovieResultsForMovieID_Call {
+func (_e *MockControlledJob_Expecter) GetMovieResultsForMovieID(movieID interface{}) *MockControlledJob_GetMovieResultsForMovieID_Call {
 	return &MockControlledJob_GetMovieResultsForMovieID_Call{Call: _e.mock.On("GetMovieResultsForMovieID", movieID)}
 }
 
@@ -586,7 +586,7 @@ type MockControlledJob_GetProvenance_Call struct {
 
 // GetProvenance is a helper method to define mock.On call
 //   - filePath string
-func (_e *MockControlledJob_Expecter) GetProvenance(filePath any) *MockControlledJob_GetProvenance_Call {
+func (_e *MockControlledJob_Expecter) GetProvenance(filePath interface{}) *MockControlledJob_GetProvenance_Call {
 	return &MockControlledJob_GetProvenance_Call{Call: _e.mock.On("GetProvenance", filePath)}
 }
 
@@ -774,7 +774,7 @@ type MockControlledJob_Rescrape_Call struct {
 // Rescrape is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd worker.RescrapeCmd
-func (_e *MockControlledJob_Expecter) Rescrape(ctx any, cmd any) *MockControlledJob_Rescrape_Call {
+func (_e *MockControlledJob_Expecter) Rescrape(ctx interface{}, cmd interface{}) *MockControlledJob_Rescrape_Call {
 	return &MockControlledJob_Rescrape_Call{Call: _e.mock.On("Rescrape", ctx, cmd)}
 }
 
@@ -819,7 +819,7 @@ type MockControlledJob_SetBatchCfg_Call struct {
 
 // SetBatchCfg is a helper method to define mock.On call
 //   - cfg worker.BatchJobConfig
-func (_e *MockControlledJob_Expecter) SetBatchCfg(cfg any) *MockControlledJob_SetBatchCfg_Call {
+func (_e *MockControlledJob_Expecter) SetBatchCfg(cfg interface{}) *MockControlledJob_SetBatchCfg_Call {
 	return &MockControlledJob_SetBatchCfg_Call{Call: _e.mock.On("SetBatchCfg", cfg)}
 }
 
@@ -859,7 +859,7 @@ type MockControlledJob_SetJobStatus_Call struct {
 
 // SetJobStatus is a helper method to define mock.On call
 //   - status models.JobStatus
-func (_e *MockControlledJob_Expecter) SetJobStatus(status any) *MockControlledJob_SetJobStatus_Call {
+func (_e *MockControlledJob_Expecter) SetJobStatus(status interface{}) *MockControlledJob_SetJobStatus_Call {
 	return &MockControlledJob_SetJobStatus_Call{Call: _e.mock.On("SetJobStatus", status)}
 }
 
@@ -910,7 +910,7 @@ type MockControlledJob_SetOperationModeOverride_Call struct {
 
 // SetOperationModeOverride is a helper method to define mock.On call
 //   - mode operationmode.OperationMode
-func (_e *MockControlledJob_Expecter) SetOperationModeOverride(mode any) *MockControlledJob_SetOperationModeOverride_Call {
+func (_e *MockControlledJob_Expecter) SetOperationModeOverride(mode interface{}) *MockControlledJob_SetOperationModeOverride_Call {
 	return &MockControlledJob_SetOperationModeOverride_Call{Call: _e.mock.On("SetOperationModeOverride", mode)}
 }
 
@@ -950,7 +950,7 @@ type MockControlledJob_SetPersistError_Call struct {
 
 // SetPersistError is a helper method to define mock.On call
 //   - msg string
-func (_e *MockControlledJob_Expecter) SetPersistError(msg any) *MockControlledJob_SetPersistError_Call {
+func (_e *MockControlledJob_Expecter) SetPersistError(msg interface{}) *MockControlledJob_SetPersistError_Call {
 	return &MockControlledJob_SetPersistError_Call{Call: _e.mock.On("SetPersistError", msg)}
 }
 
@@ -990,7 +990,7 @@ type MockControlledJob_SetWorkflow_Call struct {
 
 // SetWorkflow is a helper method to define mock.On call
 //   - wf workflow.WorkflowInterface
-func (_e *MockControlledJob_Expecter) SetWorkflow(wf any) *MockControlledJob_SetWorkflow_Call {
+func (_e *MockControlledJob_Expecter) SetWorkflow(wf interface{}) *MockControlledJob_SetWorkflow_Call {
 	return &MockControlledJob_SetWorkflow_Call{Call: _e.mock.On("SetWorkflow", wf)}
 }
 
@@ -1042,7 +1042,7 @@ type MockControlledJob_StartApply_Call struct {
 // StartApply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cfg worker.ApplyPhaseConfig
-func (_e *MockControlledJob_Expecter) StartApply(ctx any, cfg any) *MockControlledJob_StartApply_Call {
+func (_e *MockControlledJob_Expecter) StartApply(ctx interface{}, cfg interface{}) *MockControlledJob_StartApply_Call {
 	return &MockControlledJob_StartApply_Call{Call: _e.mock.On("StartApply", ctx, cfg)}
 }
 
@@ -1100,7 +1100,7 @@ type MockControlledJob_StartScrape_Call struct {
 //   - ctx context.Context
 //   - files []string
 //   - cfg worker.ScrapePhaseConfig
-func (_e *MockControlledJob_Expecter) StartScrape(ctx any, files any, cfg any) *MockControlledJob_StartScrape_Call {
+func (_e *MockControlledJob_Expecter) StartScrape(ctx interface{}, files interface{}, cfg interface{}) *MockControlledJob_StartScrape_Call {
 	return &MockControlledJob_StartScrape_Call{Call: _e.mock.On("StartScrape", ctx, files, cfg)}
 }
 

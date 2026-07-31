@@ -161,6 +161,9 @@ type APIRuntime struct {
 	serverCtxOnce sync.Once
 	serverCtx     context.Context
 	serverCancel  context.CancelFunc
+
+	actressSyncMu      sync.Mutex
+	actressSyncManager *worker.ActressSyncManager
 }
 
 // NewAPIRuntime creates an APIRuntime that manages the given APIDeps.
@@ -171,6 +174,7 @@ func NewAPIRuntime(deps *APIDeps) *APIRuntime {
 	r := &APIRuntime{deps: deps}
 	r.workflowFactory = newLazyValue(r.buildWorkflowFactory, func(v any) bool { return v == nil })
 	r.batchJobFactory = newLazyValue(r.buildBatchJobFactory, func(v any) bool { return v == nil })
+	r.EnsureActressSyncManager()
 	return r
 }
 

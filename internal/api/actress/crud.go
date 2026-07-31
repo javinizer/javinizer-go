@@ -106,10 +106,17 @@ func listActresses(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, offset := core.ParsePagination(c, 50, 500)
 		query := strings.TrimSpace(c.Query("q"))
+		filter := strings.TrimSpace(c.Query("filter"))
 		sortBy, sortOrder, err := parseSort(c)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
+		}
+		if filter != "" {
+			if _, ok := database.ValidActressFilter(filter); !ok {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("unsupported filter: %s", filter)})
+				return
+			}
 		}
 
 		var actresses []models.Actress
@@ -117,25 +124,41 @@ func listActresses(deps ActressDeps) gin.HandlerFunc {
 
 		repo := deps.ActressRepo
 		if query == "" {
-			total, err = repo.Count(c.Request.Context())
+			if filter != "" {
+				total, err = repo.CountFiltered(c.Request.Context(), filter)
+			} else {
+				total, err = repo.Count(c.Request.Context())
+			}
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			actresses, err = repo.ListSorted(c.Request.Context(), limit, offset, sortBy, sortOrder)
+			if filter != "" {
+				actresses, err = repo.ListFiltered(c.Request.Context(), filter, limit, offset, sortBy, sortOrder)
+			} else {
+				actresses, err = repo.ListSorted(c.Request.Context(), limit, offset, sortBy, sortOrder)
+			}
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 		} else {
-			total, err = repo.CountSearch(c.Request.Context(), query)
+			if filter != "" {
+				total, err = repo.CountSearchFiltered(c.Request.Context(), query, filter)
+			} else {
+				total, err = repo.CountSearch(c.Request.Context(), query)
+			}
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			actresses, err = repo.SearchPagedSorted(c.Request.Context(), query, limit, offset, sortBy, sortOrder)
+			if filter != "" {
+				actresses, err = repo.SearchFiltered(c.Request.Context(), query, filter, limit, offset, sortBy, sortOrder)
+			} else {
+				actresses, err = repo.SearchPagedSorted(c.Request.Context(), query, limit, offset, sortBy, sortOrder)
+			}
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return

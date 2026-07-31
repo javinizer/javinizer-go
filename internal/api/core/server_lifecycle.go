@@ -28,4 +28,5 @@ func (r *APIRuntime) Shutdown() {
 	if r.serverCancel != nil {
 		r.serverCancel()
 	}
+	r.stopActressSyncManager()
 }

@@ -1338,6 +1338,12 @@ definitions:
         items:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption'
         type: array
+      supports_actress_metadata:
+        example: false
+        type: boolean
+      supports_movie_search:
+        example: true
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption:
     properties:
@@ -2142,6 +2148,10 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_models.ActressInfo:
     properties:
+      aliases:
+        items:
+          type: string
+        type: array
       dmm_id:
         description: DMM actress ID for unique identification
         type: integer
@@ -3378,7 +3388,7 @@ paths:
       - actress
   /api/v1/actresses/search:
     get:
-      description: Search for actresses by name (first, last, or Japanese)
+      description: Search for actresses by name or DMM ID
       parameters:
       - description: Search query
         in: query

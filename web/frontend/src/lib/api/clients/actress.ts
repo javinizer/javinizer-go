@@ -10,6 +10,11 @@ import type {
 	ActressesImportRequest,
 	ImportResponse,
 	ActressAliasGroup,
+	ActressSyncCandidatesResponse,
+	ActressSyncJobCreateRequest,
+	ActressSyncJobResponse,
+	ActressSyncJobsResponse,
+	ActressSyncTasksResponse,
 } from '../types';
 import { BaseClient } from './common';
 
@@ -22,12 +27,44 @@ export class ActressClient extends BaseClient {
 		if (params?.q) queryParams.set('q', params.q);
 		if (params?.sort_by) queryParams.set('sort_by', params.sort_by);
 		if (params?.sort_order) queryParams.set('sort_order', params.sort_order);
+		if (params?.filter) queryParams.set('filter', params.filter);
 		const query = queryParams.toString() ? `?${queryParams}` : '';
 		return this.request<ActressListResponse>(`/api/v1/actresses${query}`);
 	}
 
 	async getActress(id: number): Promise<Actress> {
 		return this.request<Actress>(`/api/v1/actresses/${id}`);
+	}
+
+	async listActressSyncCandidates(): Promise<ActressSyncCandidatesResponse> {
+		return this.request<ActressSyncCandidatesResponse>('/api/v1/actresses/sync-candidates');
+	}
+
+	async createActressSyncJob(
+		request: ActressSyncJobCreateRequest,
+	): Promise<ActressSyncJobResponse> {
+		return this.request<ActressSyncJobResponse>('/api/v1/actresses/sync-jobs', {
+			method: 'POST',
+			body: JSON.stringify(request),
+		});
+	}
+
+	async listActiveActressSyncJobs(): Promise<ActressSyncJobsResponse> {
+		return this.request<ActressSyncJobsResponse>('/api/v1/actresses/sync-jobs/active');
+	}
+
+	async getActressSyncJob(jobID: string): Promise<ActressSyncJobResponse> {
+		return this.request<ActressSyncJobResponse>(`/api/v1/actresses/sync-jobs/${jobID}`);
+	}
+
+	async listActressSyncJobTasks(jobID: string): Promise<ActressSyncTasksResponse> {
+		return this.request<ActressSyncTasksResponse>(`/api/v1/actresses/sync-jobs/${jobID}/tasks`);
+	}
+
+	async cancelActressSyncJob(jobID: string): Promise<ActressSyncJobResponse> {
+		return this.request<ActressSyncJobResponse>(`/api/v1/actresses/sync-jobs/${jobID}/cancel`, {
+			method: 'POST',
+		});
 	}
 
 	async createActress(request: ActressUpsertRequest): Promise<Actress> {

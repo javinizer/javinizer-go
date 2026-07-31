@@ -7,6 +7,7 @@ import (
 
 	"net/http"
 
+	"github.com/javinizer/javinizer-go/internal/actresscache"
 	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -160,6 +161,7 @@ func (f *testFixture) build() *Scraper {
 	f.agg = f.buildAggregator()
 	cfg := &Config{
 		ScrapersPriority:      f.cfg.Scrapers.Priority,
+		ScrapeActress:         f.cfg.Scrapers.ScrapeActress,
 		TranslationEnabled:    f.cfg.Metadata.Translation.Enabled,
 		TranslationTargetLang: f.cfg.Metadata.Translation.TargetLanguage,
 		ActressDBEnabled:      f.cfg.Metadata.ActressDatabase.Enabled,
@@ -201,6 +203,46 @@ func TestScrape_CacheHit(t *testing.T) {
 	require.NotNil(t, result)
 	assert.Equal(t, StatusCompleted, result.Status)
 	assert.Equal(t, "Cached Movie", result.Movie.Title)
+}
+
+func TestScrapeCacheHitEnrichesMissingActressMetadataAndPersistsSignal(t *testing.T) {
+	previousLookup := lookupBuiltinActress
+	lookupBuiltinActress = func(int, string, string, string) (actresscache.Record, bool) {
+		return actresscache.Record{}, false
+	}
+	defer func() { lookupBuiltinActress = previousLookup }()
+	f := newFixture(t)
+	f.cfg.Scrapers.ScrapeActress = true
+	resolver := &testMetadataResolver{name: "minnanoav", enabled: true, metadata: models.ActressInfo{
+		DMMID: 19244, FirstName: "Asami", LastName: "Abe", JapaneseName: "安倍亜沙美",
+		ThumbURL: "https://www.minnano-av.com/p_actress_125_125/001/811239.jpg",
+	}}
+	f.registry.RegisterInstance(resolver)
+	_, err := f.movieRepo.Upsert(context.Background(), &models.Movie{
+		ID: "CACHE-001", Title: "Cached Movie", Actresses: []models.Actress{{
+			DMMID: 19244, JapaneseName: "安倍亜沙美",
+			ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg",
+		}},
+	})
+	require.NoError(t, err)
+
+	s := f.build()
+	s.cfg.ValidateActressThumbnail = func(_ context.Context, thumbnail string) error {
+		if thumbnail == "https://c0.jdbstatic.com/avatars/zx/ZX.jpg" {
+			return errors.New("not an image")
+		}
+		return nil
+	}
+	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "CACHE-001"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Cached)
+	require.True(t, result.NeedsPersistence)
+	require.Equal(t, 1, resolver.calls)
+	require.Len(t, result.Movie.Actresses, 1)
+	assert.Equal(t, "Asami", result.Movie.Actresses[0].FirstName)
+	assert.Equal(t, "Abe", result.Movie.Actresses[0].LastName)
+	assert.Equal(t, resolver.metadata.ThumbURL, result.Movie.Actresses[0].ThumbURL)
 }
 
 func TestScrape_CacheMiss_Scrapes(t *testing.T) {

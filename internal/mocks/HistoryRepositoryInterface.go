@@ -72,7 +72,7 @@ type MockHistoryRepositoryInterface_Count_Call struct {
 
 // Count is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockHistoryRepositoryInterface_Expecter) Count(ctx any) *MockHistoryRepositoryInterface_Count_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) Count(ctx interface{}) *MockHistoryRepositoryInterface_Count_Call {
 	return &MockHistoryRepositoryInterface_Count_Call{Call: _e.mock.On("Count", ctx)}
 }
 
@@ -133,7 +133,7 @@ type MockHistoryRepositoryInterface_CountByMovieID_Call struct {
 // CountByMovieID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - movieID string
-func (_e *MockHistoryRepositoryInterface_Expecter) CountByMovieID(ctx any, movieID any) *MockHistoryRepositoryInterface_CountByMovieID_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) CountByMovieID(ctx interface{}, movieID interface{}) *MockHistoryRepositoryInterface_CountByMovieID_Call {
 	return &MockHistoryRepositoryInterface_CountByMovieID_Call{Call: _e.mock.On("CountByMovieID", ctx, movieID)}
 }
 
@@ -199,7 +199,7 @@ type MockHistoryRepositoryInterface_CountByOperation_Call struct {
 // CountByOperation is a helper method to define mock.On call
 //   - ctx context.Context
 //   - operation models.HistoryOperation
-func (_e *MockHistoryRepositoryInterface_Expecter) CountByOperation(ctx any, operation any) *MockHistoryRepositoryInterface_CountByOperation_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) CountByOperation(ctx interface{}, operation interface{}) *MockHistoryRepositoryInterface_CountByOperation_Call {
 	return &MockHistoryRepositoryInterface_CountByOperation_Call{Call: _e.mock.On("CountByOperation", ctx, operation)}
 }
 
@@ -265,7 +265,7 @@ type MockHistoryRepositoryInterface_CountByStatus_Call struct {
 // CountByStatus is a helper method to define mock.On call
 //   - ctx context.Context
 //   - status models.HistoryStatus
-func (_e *MockHistoryRepositoryInterface_Expecter) CountByStatus(ctx any, status any) *MockHistoryRepositoryInterface_CountByStatus_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) CountByStatus(ctx interface{}, status interface{}) *MockHistoryRepositoryInterface_CountByStatus_Call {
 	return &MockHistoryRepositoryInterface_CountByStatus_Call{Call: _e.mock.On("CountByStatus", ctx, status)}
 }
 
@@ -322,7 +322,7 @@ type MockHistoryRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - history *models.History
-func (_e *MockHistoryRepositoryInterface_Expecter) Create(ctx any, history any) *MockHistoryRepositoryInterface_Create_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) Create(ctx interface{}, history interface{}) *MockHistoryRepositoryInterface_Create_Call {
 	return &MockHistoryRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, history)}
 }
 
@@ -379,7 +379,7 @@ type MockHistoryRepositoryInterface_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockHistoryRepositoryInterface_Expecter) Delete(ctx any, id any) *MockHistoryRepositoryInterface_Delete_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) Delete(ctx interface{}, id interface{}) *MockHistoryRepositoryInterface_Delete_Call {
 	return &MockHistoryRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, id)}
 }
 
@@ -436,7 +436,7 @@ type MockHistoryRepositoryInterface_DeleteByMovieID_Call struct {
 // DeleteByMovieID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - movieID string
-func (_e *MockHistoryRepositoryInterface_Expecter) DeleteByMovieID(ctx any, movieID any) *MockHistoryRepositoryInterface_DeleteByMovieID_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) DeleteByMovieID(ctx interface{}, movieID interface{}) *MockHistoryRepositoryInterface_DeleteByMovieID_Call {
 	return &MockHistoryRepositoryInterface_DeleteByMovieID_Call{Call: _e.mock.On("DeleteByMovieID", ctx, movieID)}
 }
 
@@ -493,7 +493,7 @@ type MockHistoryRepositoryInterface_DeleteOlderThan_Call struct {
 // DeleteOlderThan is a helper method to define mock.On call
 //   - ctx context.Context
 //   - date time.Time
-func (_e *MockHistoryRepositoryInterface_Expecter) DeleteOlderThan(ctx any, date any) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) DeleteOlderThan(ctx interface{}, date interface{}) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
 	return &MockHistoryRepositoryInterface_DeleteOlderThan_Call{Call: _e.mock.On("DeleteOlderThan", ctx, date)}
 }
 
@@ -561,7 +561,7 @@ type MockHistoryRepositoryInterface_FindByBatchJobID_Call struct {
 // FindByBatchJobID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - batchJobID string
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByBatchJobID(ctx any, batchJobID any) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByBatchJobID(ctx interface{}, batchJobID interface{}) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
 	return &MockHistoryRepositoryInterface_FindByBatchJobID_Call{Call: _e.mock.On("FindByBatchJobID", ctx, batchJobID)}
 }
 
@@ -630,7 +630,7 @@ type MockHistoryRepositoryInterface_FindByDateRange_Call struct {
 //   - ctx context.Context
 //   - start time.Time
 //   - end time.Time
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByDateRange(ctx any, start any, end any) *MockHistoryRepositoryInterface_FindByDateRange_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByDateRange(ctx interface{}, start interface{}, end interface{}) *MockHistoryRepositoryInterface_FindByDateRange_Call {
 	return &MockHistoryRepositoryInterface_FindByDateRange_Call{Call: _e.mock.On("FindByDateRange", ctx, start, end)}
 }
 
@@ -703,7 +703,7 @@ type MockHistoryRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockHistoryRepositoryInterface_FindByID_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockHistoryRepositoryInterface_FindByID_Call {
 	return &MockHistoryRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -771,7 +771,7 @@ type MockHistoryRepositoryInterface_FindByMovieID_Call struct {
 // FindByMovieID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - movieID string
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByMovieID(ctx any, movieID any) *MockHistoryRepositoryInterface_FindByMovieID_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByMovieID(ctx interface{}, movieID interface{}) *MockHistoryRepositoryInterface_FindByMovieID_Call {
 	return &MockHistoryRepositoryInterface_FindByMovieID_Call{Call: _e.mock.On("FindByMovieID", ctx, movieID)}
 }
 
@@ -840,7 +840,7 @@ type MockHistoryRepositoryInterface_FindByOperation_Call struct {
 //   - ctx context.Context
 //   - operation models.HistoryOperation
 //   - limit int
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByOperation(ctx any, operation any, limit any) *MockHistoryRepositoryInterface_FindByOperation_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByOperation(ctx interface{}, operation interface{}, limit interface{}) *MockHistoryRepositoryInterface_FindByOperation_Call {
 	return &MockHistoryRepositoryInterface_FindByOperation_Call{Call: _e.mock.On("FindByOperation", ctx, operation, limit)}
 }
 
@@ -914,7 +914,7 @@ type MockHistoryRepositoryInterface_FindByStatus_Call struct {
 //   - ctx context.Context
 //   - status models.HistoryStatus
 //   - limit int
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByStatus(ctx any, status any, limit any) *MockHistoryRepositoryInterface_FindByStatus_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByStatus(ctx interface{}, status interface{}, limit interface{}) *MockHistoryRepositoryInterface_FindByStatus_Call {
 	return &MockHistoryRepositoryInterface_FindByStatus_Call{Call: _e.mock.On("FindByStatus", ctx, status, limit)}
 }
 
@@ -987,7 +987,7 @@ type MockHistoryRepositoryInterface_FindRecent_Call struct {
 // FindRecent is a helper method to define mock.On call
 //   - ctx context.Context
 //   - limit int
-func (_e *MockHistoryRepositoryInterface_Expecter) FindRecent(ctx any, limit any) *MockHistoryRepositoryInterface_FindRecent_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) FindRecent(ctx interface{}, limit interface{}) *MockHistoryRepositoryInterface_FindRecent_Call {
 	return &MockHistoryRepositoryInterface_FindRecent_Call{Call: _e.mock.On("FindRecent", ctx, limit)}
 }
 
@@ -1056,7 +1056,7 @@ type MockHistoryRepositoryInterface_List_Call struct {
 //   - ctx context.Context
 //   - limit int
 //   - offset int
-func (_e *MockHistoryRepositoryInterface_Expecter) List(ctx any, limit any, offset any) *MockHistoryRepositoryInterface_List_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) List(ctx interface{}, limit interface{}, offset interface{}) *MockHistoryRepositoryInterface_List_Call {
 	return &MockHistoryRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx, limit, offset)}
 }
 
@@ -1131,7 +1131,7 @@ type MockHistoryRepositoryInterface_ListByMovieID_Call struct {
 //   - movieID string
 //   - limit int
 //   - offset int
-func (_e *MockHistoryRepositoryInterface_Expecter) ListByMovieID(ctx any, movieID any, limit any, offset any) *MockHistoryRepositoryInterface_ListByMovieID_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) ListByMovieID(ctx interface{}, movieID interface{}, limit interface{}, offset interface{}) *MockHistoryRepositoryInterface_ListByMovieID_Call {
 	return &MockHistoryRepositoryInterface_ListByMovieID_Call{Call: _e.mock.On("ListByMovieID", ctx, movieID, limit, offset)}
 }
 
@@ -1211,7 +1211,7 @@ type MockHistoryRepositoryInterface_ListByOperation_Call struct {
 //   - operation models.HistoryOperation
 //   - limit int
 //   - offset int
-func (_e *MockHistoryRepositoryInterface_Expecter) ListByOperation(ctx any, operation any, limit any, offset any) *MockHistoryRepositoryInterface_ListByOperation_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) ListByOperation(ctx interface{}, operation interface{}, limit interface{}, offset interface{}) *MockHistoryRepositoryInterface_ListByOperation_Call {
 	return &MockHistoryRepositoryInterface_ListByOperation_Call{Call: _e.mock.On("ListByOperation", ctx, operation, limit, offset)}
 }
 
@@ -1291,7 +1291,7 @@ type MockHistoryRepositoryInterface_ListByStatus_Call struct {
 //   - status models.HistoryStatus
 //   - limit int
 //   - offset int
-func (_e *MockHistoryRepositoryInterface_Expecter) ListByStatus(ctx any, status any, limit any, offset any) *MockHistoryRepositoryInterface_ListByStatus_Call {
+func (_e *MockHistoryRepositoryInterface_Expecter) ListByStatus(ctx interface{}, status interface{}, limit interface{}, offset interface{}) *MockHistoryRepositoryInterface_ListByStatus_Call {
 	return &MockHistoryRepositoryInterface_ListByStatus_Call{Call: _e.mock.On("ListByStatus", ctx, status, limit, offset)}
 }
 

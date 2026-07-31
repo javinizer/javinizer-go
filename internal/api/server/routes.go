@@ -158,7 +158,7 @@ func registerAPIV1Routes(router *gin.Engine, rt *core.APIRuntime) {
 	tokenSvc := token.NewTokenService(deps.Repos.ApiTokenRepo)
 
 	movie.RegisterRoutes(writeProtected, movieDeps)
-	actress.RegisterRoutes(protected, actressDeps)
+	actress.RegisterRoutes(protected, actressDeps, rt)
 	genre.RegisterRoutes(writeProtected, genreDeps, genreInvalidateCaches)
 	system.RegisterRoutes(protected, rt)
 	apiversion.RegisterRoutes(protected, deps)

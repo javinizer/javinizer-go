@@ -253,7 +253,7 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 
 // postProcessScraped enriches the aggregated movie with actress DB data,
 // translation, and assembles the final ScrapeResult.
-func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, startTime time.Time) (*ScrapeResult, error) {
+func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, registry ScraperInstanceResolver, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, startTime time.Time) (*ScrapeResult, error) {
 	var fieldSources map[string]string
 	var resolvedPriorities map[string][]string
 	if aggResult != nil {
@@ -266,6 +266,19 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	if actressRepo != nil {
 		if enriched := enrichActressesFromDB(ctx, scraped, actressRepo, cfg); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from database", enriched)
+		}
+	}
+	if enriched := enrichActressesFromBuiltinCache(scraped); enriched > 0 {
+		logging.Debugf("[scrape] Enriched %d actresses from built-in cache", enriched)
+	}
+
+	if invalid := validateActressThumbnails(ctx, scraped, cfg); invalid > 0 {
+		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails", invalid)
+	}
+
+	if registry != nil {
+		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg); enriched > 0 {
+			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers", enriched)
 		}
 	}
 
@@ -328,7 +341,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	// Phase 2: Query + aggregate
 	scraperNames := resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, s.cfg)
 	resolvedID := s.resolveContentID(ctx, cmd.MovieID, scraperNames)
-	scrapers := s.registry.GetInstancesByPriorityForInput(scraperNames, resolvedID)
+	scrapers := filterMovieScrapers(s.registry.GetInstancesByPriorityForInput(scraperNames, resolvedID))
 
 	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, scrapers, startTime)
 	if len(results) == 0 {
@@ -354,7 +367,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	}
 
 	// Phase 3: Post-process
-	result, err := postProcessScraped(ctx, scraped, results, aggResult, s.cfg, s.translator, actressRepo, cmd, startTime)
+	result, err := postProcessScraped(ctx, scraped, results, aggResult, s.registry, s.cfg, s.translator, actressRepo, cmd, startTime)
 	if err != nil {
 		return nil, err
 	}

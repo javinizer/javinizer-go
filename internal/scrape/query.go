@@ -18,6 +18,20 @@ type queryOutcome struct {
 	failure *models.ScraperError
 }
 
+func filterMovieScrapers(scrapers []models.Scraper) []models.Scraper {
+	filtered := make([]models.Scraper, 0, len(scrapers))
+	for _, s := range scrapers {
+		if s == nil {
+			continue
+		}
+		if c, ok := s.(models.MovieSearchCapable); ok && !c.SupportsMovieSearch() {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered
+}
+
 func resolveScraperNames(selectedScrapers, priorityOverride []string, cfg *Config) []string {
 	if len(selectedScrapers) > 0 {
 		return selectedScrapers

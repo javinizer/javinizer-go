@@ -1,3 +1,4 @@
+import { movieSearchScraperNames } from '$lib/scraper-capabilities';
 import type {
 	BatchJobResponse,
 	BatchRescrapeResponse,
@@ -110,7 +111,11 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 	}
 
 	async function executeRescrape(mode?: { manualSearchMode: boolean; manualSearchInput: string }) {
-		const selectedScrapers = deps.getSelectedScrapers();
+		const selectedScrapers = movieSearchScraperNames(
+			deps.getAvailableScrapers(),
+			deps.getSelectedScrapers(),
+		);
+		deps.setSelectedScrapers(selectedScrapers);
 		if (selectedScrapers.length === 0) {
 			deps.toastError('Please select at least one scraper');
 			return;

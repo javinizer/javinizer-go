@@ -1,10 +1,13 @@
 package database
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMergeFieldDecision(t *testing.T) {
@@ -339,4 +342,43 @@ func TestNonEmptyString(t *testing.T) {
 	assert.True(t, nonEmptyString("  hello  "))
 	assert.False(t, nonEmptyString(""))
 	assert.False(t, nonEmptyString("   "))
+}
+
+func TestExecuteMergeRecomputesCurrentTargetValues(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	target := &models.Actress{DMMID: 9001, FirstName: "Old", JapaneseName: "Canonical"}
+	source := &models.Actress{FirstName: "Source"}
+	require.NoError(t, repo.Create(context.Background(), target))
+	require.NoError(t, repo.Create(context.Background(), source))
+
+	plan, err := repo.merger.PlanMerge(context.Background(), target.ID, source.ID, nil)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", target.ID).Update("first_name", "Fresh").Error)
+
+	result, err := repo.merger.ExecuteMerge(context.Background(), plan, db)
+	require.NoError(t, err)
+	require.Equal(t, "Fresh", result.MergedActress.FirstName)
+}
+
+func TestExecuteMergeRejectsStaleSourceResolution(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	target := &models.Actress{DMMID: 9002, FirstName: "Old", JapaneseName: "Canonical"}
+	source := &models.Actress{FirstName: "Source"}
+	require.NoError(t, repo.Create(context.Background(), target))
+	require.NoError(t, repo.Create(context.Background(), source))
+
+	plan, err := repo.merger.PlanMerge(context.Background(), target.ID, source.ID, map[string]string{"first_name": "source"})
+	require.NoError(t, err)
+	freshTime := time.Now().UTC().Add(time.Second)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", target.ID).Updates(map[string]any{"first_name": "Fresh", "updated_at": freshTime}).Error)
+
+	_, err = repo.merger.ExecuteMerge(context.Background(), plan, db)
+	require.ErrorIs(t, err, ErrActressMergeStalePlan)
+	updated, err := repo.FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Fresh", updated.FirstName)
+	_, err = repo.FindByID(context.Background(), source.ID)
+	require.NoError(t, err)
 }

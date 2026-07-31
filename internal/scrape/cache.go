@@ -64,6 +64,20 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 			logging.Debugf("[scrape] Enriched %d actresses from database after cache hit", enriched)
 		}
 	}
+	if enriched := enrichActressesFromBuiltinCache(scrapedToReturn); enriched > 0 {
+		needsPersistence = true
+		logging.Debugf("[scrape] Enriched %d actresses from built-in cache after cache hit", enriched)
+	}
+	if invalid := validateActressThumbnails(ctx, scrapedToReturn, s.cfg); invalid > 0 {
+		needsPersistence = true
+		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails after cache hit", invalid)
+	}
+	if s.registry != nil {
+		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg); enriched > 0 {
+			needsPersistence = true
+			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers after cache hit", enriched)
+		}
+	}
 
 	now := time.Now()
 	return &ScrapeResult{

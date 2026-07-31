@@ -4,6 +4,7 @@
 	import { Search, ArrowUpDown, GitMerge } from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import type { ActressFilter } from '$lib/api/types';
 	import * as m from '$lib/paraglide/messages';
 
 	let {
@@ -12,6 +13,7 @@
 		viewMode = $bindable(),
 		sortBy = $bindable(),
 		sortOrder,
+		filter = $bindable(),
 		selectedIds,
 		total,
 		actressesCount,
@@ -28,6 +30,7 @@
 		viewMode: 'cards' | 'compact' | 'table';
 		sortBy: string;
 		sortOrder: 'asc' | 'desc';
+		filter: ActressFilter | '';
 		selectedIds: number[];
 		total: number;
 		actressesCount: number;
@@ -95,6 +98,19 @@
 			</div>
 			<div class="flex items-center gap-2">
 				<select
+					bind:value={filter}
+					class="rounded-md border border-input bg-background px-3 py-2 text-sm"
+					aria-label={m.actresses_filter_aria()}
+				>
+					<option value="">{m.actresses_filter_all()}</option>
+					<option value="missing_dmm">{m.actresses_filter_missing_dmm()}</option>
+					<option value="has_dmm">{m.actresses_filter_has_dmm()}</option>
+					<option value="missing_thumbnail">{m.actresses_filter_missing_thumbnail()}</option>
+					<option value="missing_japanese_name">{m.actresses_filter_missing_japanese_name()}</option>
+					<option value="japanese_name_only">{m.actresses_filter_japanese_name_only()}</option>
+					<option value="missing_metadata">{m.actresses_filter_missing_metadata()}</option>
+				</select>
+				<select
 					bind:value={sortBy}
 					class="rounded-md border border-input bg-background px-3 py-2 text-sm"
 					aria-label={m.actresses_sort_aria()}
@@ -116,6 +132,9 @@
 			{m.actresses_showing_count({ shown: actressesCount, total })}
 			{#if activeQuery}
 				for "{activeQuery}"
+			{/if}
+			{#if filter}
+				· {filter === 'missing_dmm' ? m.actresses_filter_missing_dmm() : filter === 'has_dmm' ? m.actresses_filter_has_dmm() : filter === 'missing_thumbnail' ? m.actresses_filter_missing_thumbnail() : filter === 'missing_japanese_name' ? m.actresses_filter_missing_japanese_name() : filter === 'japanese_name_only' ? m.actresses_filter_japanese_name_only() : m.actresses_filter_missing_metadata()}
 			{/if}
 		</div>
 		<div class="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-input bg-muted/20 px-3 py-2">

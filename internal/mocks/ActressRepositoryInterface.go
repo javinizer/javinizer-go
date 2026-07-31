@@ -72,7 +72,7 @@ type MockActressRepositoryInterface_Count_Call struct {
 
 // Count is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockActressRepositoryInterface_Expecter) Count(ctx any) *MockActressRepositoryInterface_Count_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Count(ctx interface{}) *MockActressRepositoryInterface_Count_Call {
 	return &MockActressRepositoryInterface_Count_Call{Call: _e.mock.On("Count", ctx)}
 }
 
@@ -95,6 +95,72 @@ func (_c *MockActressRepositoryInterface_Count_Call) Return(n int64, err error) 
 }
 
 func (_c *MockActressRepositoryInterface_Count_Call) RunAndReturn(run func(ctx context.Context) (int64, error)) *MockActressRepositoryInterface_Count_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CountFiltered provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) CountFiltered(ctx context.Context, filter string) (int64, error) {
+	ret := _mock.Called(ctx, filter)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountFiltered")
+	}
+
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (int64, error)); ok {
+		return returnFunc(ctx, filter)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) int64); ok {
+		r0 = returnFunc(ctx, filter)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, filter)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_CountFiltered_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountFiltered'
+type MockActressRepositoryInterface_CountFiltered_Call struct {
+	*mock.Call
+}
+
+// CountFiltered is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filter string
+func (_e *MockActressRepositoryInterface_Expecter) CountFiltered(ctx interface{}, filter interface{}) *MockActressRepositoryInterface_CountFiltered_Call {
+	return &MockActressRepositoryInterface_CountFiltered_Call{Call: _e.mock.On("CountFiltered", ctx, filter)}
+}
+
+func (_c *MockActressRepositoryInterface_CountFiltered_Call) Run(run func(ctx context.Context, filter string)) *MockActressRepositoryInterface_CountFiltered_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_CountFiltered_Call) Return(n int64, err error) *MockActressRepositoryInterface_CountFiltered_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_CountFiltered_Call) RunAndReturn(run func(ctx context.Context, filter string) (int64, error)) *MockActressRepositoryInterface_CountFiltered_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -133,7 +199,7 @@ type MockActressRepositoryInterface_CountSearch_Call struct {
 // CountSearch is a helper method to define mock.On call
 //   - ctx context.Context
 //   - query string
-func (_e *MockActressRepositoryInterface_Expecter) CountSearch(ctx any, query any) *MockActressRepositoryInterface_CountSearch_Call {
+func (_e *MockActressRepositoryInterface_Expecter) CountSearch(ctx interface{}, query interface{}) *MockActressRepositoryInterface_CountSearch_Call {
 	return &MockActressRepositoryInterface_CountSearch_Call{Call: _e.mock.On("CountSearch", ctx, query)}
 }
 
@@ -165,6 +231,78 @@ func (_c *MockActressRepositoryInterface_CountSearch_Call) RunAndReturn(run func
 	return _c
 }
 
+// CountSearchFiltered provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) CountSearchFiltered(ctx context.Context, query string, filter string) (int64, error) {
+	ret := _mock.Called(ctx, query, filter)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountSearchFiltered")
+	}
+
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (int64, error)); ok {
+		return returnFunc(ctx, query, filter)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) int64); ok {
+		r0 = returnFunc(ctx, query, filter)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, query, filter)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_CountSearchFiltered_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountSearchFiltered'
+type MockActressRepositoryInterface_CountSearchFiltered_Call struct {
+	*mock.Call
+}
+
+// CountSearchFiltered is a helper method to define mock.On call
+//   - ctx context.Context
+//   - query string
+//   - filter string
+func (_e *MockActressRepositoryInterface_Expecter) CountSearchFiltered(ctx interface{}, query interface{}, filter interface{}) *MockActressRepositoryInterface_CountSearchFiltered_Call {
+	return &MockActressRepositoryInterface_CountSearchFiltered_Call{Call: _e.mock.On("CountSearchFiltered", ctx, query, filter)}
+}
+
+func (_c *MockActressRepositoryInterface_CountSearchFiltered_Call) Run(run func(ctx context.Context, query string, filter string)) *MockActressRepositoryInterface_CountSearchFiltered_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_CountSearchFiltered_Call) Return(n int64, err error) *MockActressRepositoryInterface_CountSearchFiltered_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_CountSearchFiltered_Call) RunAndReturn(run func(ctx context.Context, query string, filter string) (int64, error)) *MockActressRepositoryInterface_CountSearchFiltered_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Create provides a mock function for the type MockActressRepositoryInterface
 func (_mock *MockActressRepositoryInterface) Create(ctx context.Context, actress *models.Actress) error {
 	ret := _mock.Called(ctx, actress)
@@ -190,7 +328,7 @@ type MockActressRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actress *models.Actress
-func (_e *MockActressRepositoryInterface_Expecter) Create(ctx any, actress any) *MockActressRepositoryInterface_Create_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Create(ctx interface{}, actress interface{}) *MockActressRepositoryInterface_Create_Call {
 	return &MockActressRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, actress)}
 }
 
@@ -247,7 +385,7 @@ type MockActressRepositoryInterface_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockActressRepositoryInterface_Expecter) Delete(ctx any, id any) *MockActressRepositoryInterface_Delete_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Delete(ctx interface{}, id interface{}) *MockActressRepositoryInterface_Delete_Call {
 	return &MockActressRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, id)}
 }
 
@@ -315,7 +453,7 @@ type MockActressRepositoryInterface_FindByDMMID_Call struct {
 // FindByDMMID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - dmmID int
-func (_e *MockActressRepositoryInterface_Expecter) FindByDMMID(ctx any, dmmID any) *MockActressRepositoryInterface_FindByDMMID_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByDMMID(ctx interface{}, dmmID interface{}) *MockActressRepositoryInterface_FindByDMMID_Call {
 	return &MockActressRepositoryInterface_FindByDMMID_Call{Call: _e.mock.On("FindByDMMID", ctx, dmmID)}
 }
 
@@ -384,7 +522,7 @@ type MockActressRepositoryInterface_FindByFirstNameLastName_Call struct {
 //   - ctx context.Context
 //   - firstName string
 //   - lastName string
-func (_e *MockActressRepositoryInterface_Expecter) FindByFirstNameLastName(ctx any, firstName any, lastName any) *MockActressRepositoryInterface_FindByFirstNameLastName_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByFirstNameLastName(ctx interface{}, firstName interface{}, lastName interface{}) *MockActressRepositoryInterface_FindByFirstNameLastName_Call {
 	return &MockActressRepositoryInterface_FindByFirstNameLastName_Call{Call: _e.mock.On("FindByFirstNameLastName", ctx, firstName, lastName)}
 }
 
@@ -457,7 +595,7 @@ type MockActressRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockActressRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockActressRepositoryInterface_FindByID_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockActressRepositoryInterface_FindByID_Call {
 	return &MockActressRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -525,7 +663,7 @@ type MockActressRepositoryInterface_FindByJapaneseName_Call struct {
 // FindByJapaneseName is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
-func (_e *MockActressRepositoryInterface_Expecter) FindByJapaneseName(ctx any, name any) *MockActressRepositoryInterface_FindByJapaneseName_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByJapaneseName(ctx interface{}, name interface{}) *MockActressRepositoryInterface_FindByJapaneseName_Call {
 	return &MockActressRepositoryInterface_FindByJapaneseName_Call{Call: _e.mock.On("FindByJapaneseName", ctx, name)}
 }
 
@@ -594,7 +732,7 @@ type MockActressRepositoryInterface_FindByJapaneseNameAndDMMID_Call struct {
 //   - ctx context.Context
 //   - name string
 //   - dmmID int
-func (_e *MockActressRepositoryInterface_Expecter) FindByJapaneseNameAndDMMID(ctx any, name any, dmmID any) *MockActressRepositoryInterface_FindByJapaneseNameAndDMMID_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByJapaneseNameAndDMMID(ctx interface{}, name interface{}, dmmID interface{}) *MockActressRepositoryInterface_FindByJapaneseNameAndDMMID_Call {
 	return &MockActressRepositoryInterface_FindByJapaneseNameAndDMMID_Call{Call: _e.mock.On("FindByJapaneseNameAndDMMID", ctx, name, dmmID)}
 }
 
@@ -656,7 +794,7 @@ type MockActressRepositoryInterface_FindOrCreate_Call struct {
 // FindOrCreate is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actress *models.Actress
-func (_e *MockActressRepositoryInterface_Expecter) FindOrCreate(ctx any, actress any) *MockActressRepositoryInterface_FindOrCreate_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindOrCreate(ctx interface{}, actress interface{}) *MockActressRepositoryInterface_FindOrCreate_Call {
 	return &MockActressRepositoryInterface_FindOrCreate_Call{Call: _e.mock.On("FindOrCreate", ctx, actress)}
 }
 
@@ -725,7 +863,7 @@ type MockActressRepositoryInterface_List_Call struct {
 //   - ctx context.Context
 //   - limit int
 //   - offset int
-func (_e *MockActressRepositoryInterface_Expecter) List(ctx any, limit any, offset any) *MockActressRepositoryInterface_List_Call {
+func (_e *MockActressRepositoryInterface_Expecter) List(ctx interface{}, limit interface{}, offset interface{}) *MockActressRepositoryInterface_List_Call {
 	return &MockActressRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx, limit, offset)}
 }
 
@@ -797,7 +935,7 @@ type MockActressRepositoryInterface_ListAll_Call struct {
 
 // ListAll is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockActressRepositoryInterface_Expecter) ListAll(ctx any) *MockActressRepositoryInterface_ListAll_Call {
+func (_e *MockActressRepositoryInterface_Expecter) ListAll(ctx interface{}) *MockActressRepositoryInterface_ListAll_Call {
 	return &MockActressRepositoryInterface_ListAll_Call{Call: _e.mock.On("ListAll", ctx)}
 }
 
@@ -820,6 +958,98 @@ func (_c *MockActressRepositoryInterface_ListAll_Call) Return(actresss []models.
 }
 
 func (_c *MockActressRepositoryInterface_ListAll_Call) RunAndReturn(run func(ctx context.Context) ([]models.Actress, error)) *MockActressRepositoryInterface_ListAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListFiltered provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) ListFiltered(ctx context.Context, filter string, limit int, offset int, sortBy string, sortOrder string) ([]models.Actress, error) {
+	ret := _mock.Called(ctx, filter, limit, offset, sortBy, sortOrder)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListFiltered")
+	}
+
+	var r0 []models.Actress
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, int, string, string) ([]models.Actress, error)); ok {
+		return returnFunc(ctx, filter, limit, offset, sortBy, sortOrder)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, int, string, string) []models.Actress); ok {
+		r0 = returnFunc(ctx, filter, limit, offset, sortBy, sortOrder)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.Actress)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int, int, string, string) error); ok {
+		r1 = returnFunc(ctx, filter, limit, offset, sortBy, sortOrder)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_ListFiltered_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListFiltered'
+type MockActressRepositoryInterface_ListFiltered_Call struct {
+	*mock.Call
+}
+
+// ListFiltered is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filter string
+//   - limit int
+//   - offset int
+//   - sortBy string
+//   - sortOrder string
+func (_e *MockActressRepositoryInterface_Expecter) ListFiltered(ctx interface{}, filter interface{}, limit interface{}, offset interface{}, sortBy interface{}, sortOrder interface{}) *MockActressRepositoryInterface_ListFiltered_Call {
+	return &MockActressRepositoryInterface_ListFiltered_Call{Call: _e.mock.On("ListFiltered", ctx, filter, limit, offset, sortBy, sortOrder)}
+}
+
+func (_c *MockActressRepositoryInterface_ListFiltered_Call) Run(run func(ctx context.Context, filter string, limit int, offset int, sortBy string, sortOrder string)) *MockActressRepositoryInterface_ListFiltered_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		var arg4 string
+		if args[4] != nil {
+			arg4 = args[4].(string)
+		}
+		var arg5 string
+		if args[5] != nil {
+			arg5 = args[5].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+			arg5,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_ListFiltered_Call) Return(actresss []models.Actress, err error) *MockActressRepositoryInterface_ListFiltered_Call {
+	_c.Call.Return(actresss, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_ListFiltered_Call) RunAndReturn(run func(ctx context.Context, filter string, limit int, offset int, sortBy string, sortOrder string) ([]models.Actress, error)) *MockActressRepositoryInterface_ListFiltered_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -863,7 +1093,7 @@ type MockActressRepositoryInterface_ListSorted_Call struct {
 //   - offset int
 //   - sortBy string
 //   - sortOrder string
-func (_e *MockActressRepositoryInterface_Expecter) ListSorted(ctx any, limit any, offset any, sortBy any, sortOrder any) *MockActressRepositoryInterface_ListSorted_Call {
+func (_e *MockActressRepositoryInterface_Expecter) ListSorted(ctx interface{}, limit interface{}, offset interface{}, sortBy interface{}, sortOrder interface{}) *MockActressRepositoryInterface_ListSorted_Call {
 	return &MockActressRepositoryInterface_ListSorted_Call{Call: _e.mock.On("ListSorted", ctx, limit, offset, sortBy, sortOrder)}
 }
 
@@ -948,7 +1178,7 @@ type MockActressRepositoryInterface_Merge_Call struct {
 //   - targetID uint
 //   - sourceID uint
 //   - resolutions map[string]string
-func (_e *MockActressRepositoryInterface_Expecter) Merge(ctx any, targetID any, sourceID any, resolutions any) *MockActressRepositoryInterface_Merge_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Merge(ctx interface{}, targetID interface{}, sourceID interface{}, resolutions interface{}) *MockActressRepositoryInterface_Merge_Call {
 	return &MockActressRepositoryInterface_Merge_Call{Call: _e.mock.On("Merge", ctx, targetID, sourceID, resolutions)}
 }
 
@@ -1027,7 +1257,7 @@ type MockActressRepositoryInterface_PreviewMerge_Call struct {
 //   - ctx context.Context
 //   - targetID uint
 //   - sourceID uint
-func (_e *MockActressRepositoryInterface_Expecter) PreviewMerge(ctx any, targetID any, sourceID any) *MockActressRepositoryInterface_PreviewMerge_Call {
+func (_e *MockActressRepositoryInterface_Expecter) PreviewMerge(ctx interface{}, targetID interface{}, sourceID interface{}) *MockActressRepositoryInterface_PreviewMerge_Call {
 	return &MockActressRepositoryInterface_PreviewMerge_Call{Call: _e.mock.On("PreviewMerge", ctx, targetID, sourceID)}
 }
 
@@ -1092,7 +1322,7 @@ type MockActressRepositoryInterface_RenameNameFields_Call struct {
 //   - firstName string
 //   - lastName string
 //   - japaneseName string
-func (_e *MockActressRepositoryInterface_Expecter) RenameNameFields(ctx any, id any, firstName any, lastName any, japaneseName any) *MockActressRepositoryInterface_RenameNameFields_Call {
+func (_e *MockActressRepositoryInterface_Expecter) RenameNameFields(ctx interface{}, id interface{}, firstName interface{}, lastName interface{}, japaneseName interface{}) *MockActressRepositoryInterface_RenameNameFields_Call {
 	return &MockActressRepositoryInterface_RenameNameFields_Call{Call: _e.mock.On("RenameNameFields", ctx, id, firstName, lastName, japaneseName)}
 }
 
@@ -1175,7 +1405,7 @@ type MockActressRepositoryInterface_Search_Call struct {
 // Search is a helper method to define mock.On call
 //   - ctx context.Context
 //   - query string
-func (_e *MockActressRepositoryInterface_Expecter) Search(ctx any, query any) *MockActressRepositoryInterface_Search_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Search(ctx interface{}, query interface{}) *MockActressRepositoryInterface_Search_Call {
 	return &MockActressRepositoryInterface_Search_Call{Call: _e.mock.On("Search", ctx, query)}
 }
 
@@ -1203,6 +1433,104 @@ func (_c *MockActressRepositoryInterface_Search_Call) Return(actresss []models.A
 }
 
 func (_c *MockActressRepositoryInterface_Search_Call) RunAndReturn(run func(ctx context.Context, query string) ([]models.Actress, error)) *MockActressRepositoryInterface_Search_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SearchFiltered provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) SearchFiltered(ctx context.Context, query string, filter string, limit int, offset int, sortBy string, sortOrder string) ([]models.Actress, error) {
+	ret := _mock.Called(ctx, query, filter, limit, offset, sortBy, sortOrder)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SearchFiltered")
+	}
+
+	var r0 []models.Actress
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, int, string, string) ([]models.Actress, error)); ok {
+		return returnFunc(ctx, query, filter, limit, offset, sortBy, sortOrder)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, int, string, string) []models.Actress); ok {
+		r0 = returnFunc(ctx, query, filter, limit, offset, sortBy, sortOrder)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.Actress)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, int, int, string, string) error); ok {
+		r1 = returnFunc(ctx, query, filter, limit, offset, sortBy, sortOrder)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_SearchFiltered_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SearchFiltered'
+type MockActressRepositoryInterface_SearchFiltered_Call struct {
+	*mock.Call
+}
+
+// SearchFiltered is a helper method to define mock.On call
+//   - ctx context.Context
+//   - query string
+//   - filter string
+//   - limit int
+//   - offset int
+//   - sortBy string
+//   - sortOrder string
+func (_e *MockActressRepositoryInterface_Expecter) SearchFiltered(ctx interface{}, query interface{}, filter interface{}, limit interface{}, offset interface{}, sortBy interface{}, sortOrder interface{}) *MockActressRepositoryInterface_SearchFiltered_Call {
+	return &MockActressRepositoryInterface_SearchFiltered_Call{Call: _e.mock.On("SearchFiltered", ctx, query, filter, limit, offset, sortBy, sortOrder)}
+}
+
+func (_c *MockActressRepositoryInterface_SearchFiltered_Call) Run(run func(ctx context.Context, query string, filter string, limit int, offset int, sortBy string, sortOrder string)) *MockActressRepositoryInterface_SearchFiltered_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		var arg4 int
+		if args[4] != nil {
+			arg4 = args[4].(int)
+		}
+		var arg5 string
+		if args[5] != nil {
+			arg5 = args[5].(string)
+		}
+		var arg6 string
+		if args[6] != nil {
+			arg6 = args[6].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+			arg5,
+			arg6,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_SearchFiltered_Call) Return(actresss []models.Actress, err error) *MockActressRepositoryInterface_SearchFiltered_Call {
+	_c.Call.Return(actresss, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_SearchFiltered_Call) RunAndReturn(run func(ctx context.Context, query string, filter string, limit int, offset int, sortBy string, sortOrder string) ([]models.Actress, error)) *MockActressRepositoryInterface_SearchFiltered_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1247,7 +1575,7 @@ type MockActressRepositoryInterface_SearchPagedSorted_Call struct {
 //   - offset int
 //   - sortBy string
 //   - sortOrder string
-func (_e *MockActressRepositoryInterface_Expecter) SearchPagedSorted(ctx any, query any, limit any, offset any, sortBy any, sortOrder any) *MockActressRepositoryInterface_SearchPagedSorted_Call {
+func (_e *MockActressRepositoryInterface_Expecter) SearchPagedSorted(ctx interface{}, query interface{}, limit interface{}, offset interface{}, sortBy interface{}, sortOrder interface{}) *MockActressRepositoryInterface_SearchPagedSorted_Call {
 	return &MockActressRepositoryInterface_SearchPagedSorted_Call{Call: _e.mock.On("SearchPagedSorted", ctx, query, limit, offset, sortBy, sortOrder)}
 }
 
@@ -1324,7 +1652,7 @@ type MockActressRepositoryInterface_Update_Call struct {
 // Update is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actress *models.Actress
-func (_e *MockActressRepositoryInterface_Expecter) Update(ctx any, actress any) *MockActressRepositoryInterface_Update_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Update(ctx interface{}, actress interface{}) *MockActressRepositoryInterface_Update_Call {
 	return &MockActressRepositoryInterface_Update_Call{Call: _e.mock.On("Update", ctx, actress)}
 }
 

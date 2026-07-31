@@ -55,6 +55,16 @@ type mockScraper struct {
 	enabled bool
 }
 
+type actressOnlyMockScraper struct {
+	*mockScraper
+}
+
+func (m *actressOnlyMockScraper) SupportsMovieSearch() bool { return false }
+
+func (m *actressOnlyMockScraper) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) models.ActressInfo {
+	return actress
+}
+
 func (m *mockScraper) Name() string {
 	return m.name
 }
@@ -268,6 +278,18 @@ func TestGetAvailableScrapers(t *testing.T) {
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
 				require.Len(t, resp.Scrapers, 2)
+			},
+		},
+		{
+			name: "actress metadata only scraper capabilities",
+			scrapers: []models.Scraper{
+				&actressOnlyMockScraper{mockScraper: &mockScraper{name: "minnanoav", enabled: true}},
+			},
+			expectedStatus: 200,
+			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
+				require.Len(t, resp.Scrapers, 1)
+				assert.False(t, resp.Scrapers[0].SupportsMovieSearch)
+				assert.True(t, resp.Scrapers[0].SupportsActressMetadata)
 			},
 		},
 		{

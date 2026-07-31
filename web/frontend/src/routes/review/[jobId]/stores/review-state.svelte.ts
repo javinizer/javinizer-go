@@ -2,12 +2,17 @@ import { onDestroy, onMount, untrack } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
-import { VIEW_URL_PARAM, viewModeToUrlParam as sharedViewModeToUrlParam, type ReviewViewMode } from '$lib/utils/review-tab-sync';
+import {
+	VIEW_URL_PARAM,
+	viewModeToUrlParam as sharedViewModeToUrlParam,
+	type ReviewViewMode,
+} from '$lib/utils/review-tab-sync';
 import type { Page } from '@sveltejs/kit';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
 import { BaseClient } from '$lib/api/clients/common';
 import { createConfigQuery } from '$lib/query/queries';
+import { movieSearchScraperNames, movieSearchScrapers } from '$lib/scraper-capabilities';
 import type {
 	BatchJobResponse,
 	FileResult,
@@ -353,52 +358,52 @@ export function createReviewState(pageStore: Page) {
 		// reuse a stale preview. queryFn captures the same value as the key.
 		const operationMode = getEffectiveOperationMode();
 		return {
-		queryKey: [
-			'organize-preview',
-			jobId,
-			currentResult?.result_id,
-			currentMovie?.id,
-			operationMode,
-			destinationPath,
-			organizeOperation,
-			skipNfo,
-			skipDownload,
-			editedMovieKey,
-		],
-		queryFn: () => {
-			const copyOnly = organizeOperation !== 'move';
-			const linkMode =
-				organizeOperation === 'hardlink'
-					? 'hard'
-					: organizeOperation === 'softlink'
-						? 'soft'
-						: undefined;
+			queryKey: [
+				'organize-preview',
+				jobId,
+				currentResult?.result_id,
+				currentMovie?.id,
+				operationMode,
+				destinationPath,
+				organizeOperation,
+				skipNfo,
+				skipDownload,
+				editedMovieKey,
+			],
+			queryFn: () => {
+				const copyOnly = organizeOperation !== 'move';
+				const linkMode =
+					organizeOperation === 'hardlink'
+						? 'hard'
+						: organizeOperation === 'softlink'
+							? 'soft'
+							: undefined;
 
-			const fp = currentResult?.file_path ?? '';
-			const isEdited = editedMovies.has(fp);
-			let movieOverride: Movie | undefined;
-			if (isEdited) {
-				movieOverride = buildMovieOverride(editedMovies.get(fp));
-			}
+				const fp = currentResult?.file_path ?? '';
+				const isEdited = editedMovies.has(fp);
+				let movieOverride: Movie | undefined;
+				if (isEdited) {
+					movieOverride = buildMovieOverride(editedMovies.get(fp));
+				}
 
-			return apiClient.previewOrganize(jobId, currentResult!.result_id, {
-				destination: destinationPath,
-				copy_only: copyOnly,
-				link_mode: linkMode,
-				operation_mode: operationMode as
-					| 'organize'
-					| 'in-place'
-					| 'in-place-norenamefolder'
-					| 'metadata-artwork'
-					| 'preview',
-				skip_nfo: skipNfo,
-				skip_download: skipDownload,
-				movie: movieOverride,
-			});
-		},
-		enabled: previewEnabled,
-		staleTime: 300,
-	};
+				return apiClient.previewOrganize(jobId, currentResult!.result_id, {
+					destination: destinationPath,
+					copy_only: copyOnly,
+					link_mode: linkMode,
+					operation_mode: operationMode as
+						| 'organize'
+						| 'in-place'
+						| 'in-place-norenamefolder'
+						| 'metadata-artwork'
+						| 'preview',
+					skip_nfo: skipNfo,
+					skip_download: skipDownload,
+					movie: movieOverride,
+				});
+			},
+			enabled: previewEnabled,
+			staleTime: 300,
+		};
 	});
 
 	let preview = $derived(previewQuery.data ?? null);
@@ -578,7 +583,7 @@ export function createReviewState(pageStore: Page) {
 		if (selectedMovieIds.size === 0) return;
 		if (availableScrapers.length === 0) {
 			try {
-				availableScrapers = await apiClient.getScrapers();
+				availableScrapers = movieSearchScrapers(await apiClient.getScrapers());
 			} catch {
 				toastStore.error(m.review_failed_to_load_scrapers());
 				return;
@@ -597,7 +602,8 @@ export function createReviewState(pageStore: Page) {
 
 	async function executeBulkRescrape() {
 		if (bulkRescrapeMovieIds.length === 0) return;
-		const selectedScrapers = rescrapeSelectedScrapers;
+		const selectedScrapers = movieSearchScraperNames(availableScrapers, rescrapeSelectedScrapers);
+		rescrapeSelectedScrapers = selectedScrapers;
 		if (selectedScrapers.length === 0) {
 			toastStore.error(m.review_select_at_least_one_scraper());
 			return;
@@ -869,7 +875,7 @@ export function createReviewState(pageStore: Page) {
 		toastSuccess: (message, duration) => toastStore.success(message, duration),
 		toastError: (message, duration) => toastStore.error(message, duration),
 		api: {
-			getScrapers: () => apiClient.getScrapers(),
+			getScrapers: async () => movieSearchScrapers(await apiClient.getScrapers()),
 			rescrapeBatchMovie: (nextJobId, resultId, req) =>
 				apiClient.rescrapeBatchMovie(nextJobId, resultId, req),
 		},
@@ -916,7 +922,9 @@ export function createReviewState(pageStore: Page) {
 		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg) => {
 			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg);
 		},
-		setCropApplying: (applying) => { cropApplying = applying; }
+		setCropApplying: (applying) => {
+			cropApplying = applying;
+		},
 	});
 
 	const reviewPageController = createReviewPageController({
@@ -988,7 +996,7 @@ export function createReviewState(pageStore: Page) {
 		bulkRescrapeMovieIds = [];
 		if (availableScrapers.length === 0) {
 			try {
-				availableScrapers = await apiClient.getScrapers();
+				availableScrapers = movieSearchScrapers(await apiClient.getScrapers());
 			} catch {
 				toastStore.error(m.review_failed_to_load_scrapers());
 				return;
@@ -1628,7 +1636,9 @@ export function createReviewState(pageStore: Page) {
 		},
 		posterFromUrlMutation: mutations.posterFromUrlMutation,
 		posterCropMutation: mutations.posterCropMutation,
-		get posterCropSaving() { return mutations.posterCropMutation.isPending || cropApplying; },
+		get posterCropSaving() {
+			return mutations.posterCropMutation.isPending || cropApplying;
+		},
 		bulkExcludeMutation: mutations.bulkExcludeMutation,
 		bulkRescrapeMutation: mutations.bulkRescrapeMutation,
 		resolvePosterUrl,
@@ -1641,8 +1651,12 @@ export function createReviewState(pageStore: Page) {
 		useScreenshotAsPoster,
 		useScreenshotAsCover,
 		saveAllEdits,
-		get isSavingEdits() { return mutations.saveEditsMutation.isPending; },
-		get editedMovieCount() { return editedMovies.size; },
+		get isSavingEdits() {
+			return mutations.saveEditsMutation.isPending;
+		},
+		get editedMovieCount() {
+			return editedMovies.size;
+		},
 		get selectedMovieIds() {
 			return selectedMovieIds;
 		},
