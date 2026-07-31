@@ -251,6 +251,8 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 	return cmd, nil
 }
 
+var runPostProcessScraped = postProcessScraped
+
 // postProcessScraped enriches the aggregated movie with actress DB data,
 // translation, and assembles the final ScrapeResult.
 func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, registry ScraperInstanceResolver, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, startTime time.Time) (*ScrapeResult, error) {
@@ -367,7 +369,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	}
 
 	// Phase 3: Post-process
-	result, err := postProcessScraped(ctx, scraped, results, aggResult, s.registry, s.cfg, s.translator, actressRepo, cmd, startTime)
+	result, err := runPostProcessScraped(ctx, scraped, results, aggResult, s.registry, s.cfg, s.translator, actressRepo, cmd, startTime)
 	if err != nil {
 		return nil, err
 	}

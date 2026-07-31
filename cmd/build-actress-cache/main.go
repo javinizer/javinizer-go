@@ -87,10 +87,12 @@ type options struct {
 	parameters    parameterMap
 }
 
+var exit = os.Exit
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exit(1)
 	}
 }
 

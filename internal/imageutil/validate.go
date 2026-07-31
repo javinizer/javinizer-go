@@ -22,12 +22,14 @@ import (
 // maxThumbnailValidationBytes ...
 const maxThumbnailValidationBytes = 2 * 1024 * 1024
 
+var validateRemoteImageWithClient = ValidateRemoteImageWithClient
+
 // ValidateRemoteImage ...
 func ValidateRemoteImage(ctx context.Context, rawURL string) error {
 	if err := ssrf.CheckURL(rawURL); err != nil {
 		return err
 	}
-	return ValidateRemoteImageWithClient(ctx, ssrf.NewSSRFSafeClient(30*time.Second), rawURL, config.DefaultUserAgent, httpclient.ResolveMediaReferer(rawURL, ""))
+	return validateRemoteImageWithClient(ctx, ssrf.NewSSRFSafeClient(30*time.Second), rawURL, config.DefaultUserAgent, httpclient.ResolveMediaReferer(rawURL, ""))
 }
 
 // ValidateRemoteImageWithSafeClient ...

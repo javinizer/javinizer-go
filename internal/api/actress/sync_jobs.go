@@ -104,19 +104,27 @@ func listActressSyncJobTasks(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
+var (
+	ensureSyncManager = func(rt *core.APIRuntime) *worker.ActressSyncManager { return rt.EnsureActressSyncManager() }
+	cancelSyncJob     = func(manager *worker.ActressSyncManager, id string) error { return manager.CancelJob(id) }
+	getSyncJob        = func(manager *worker.ActressSyncManager, id string) (*models.ActressSyncJob, error) {
+		return manager.GetJob(id)
+	}
+)
+
 func cancelActressSyncJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		manager := rt.EnsureActressSyncManager()
+		manager := ensureSyncManager(rt)
 		if manager == nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "actress sync manager is unavailable"})
 			return
 		}
 		id := c.Param("jobID")
-		if err := manager.CancelJob(id); err != nil {
+		if err := cancelSyncJob(manager, id); err != nil {
 			writeActressSyncError(c, err)
 			return
 		}
-		job, err := manager.GetJob(id)
+		job, err := getSyncJob(manager, id)
 		if err != nil {
 			writeActressSyncError(c, err)
 			return

@@ -3,6 +3,7 @@ module github.com/javinizer/javinizer-go
 go 1.26.5
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/Eyevinn/mp4ff v0.51.0
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/charmbracelet/bubbles v0.21.0

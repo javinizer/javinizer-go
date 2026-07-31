@@ -31,13 +31,15 @@ type Store struct {
 	path string
 }
 
+var openSQL = sql.Open
+
 // Open opens a read-only connection to the dump sidecar database. Returns an
 // error if the file does not exist or is not a valid dump database; callers
 // should treat that as "dump not available" and fall back to HTTP resolution.
 // Open ...
 func Open(path string) (*Store, error) {
 	dsn := fmt.Sprintf("file:%s?mode=ro&_busy_timeout=5000", path)
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := openSQL("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open dump db: %w", err)
 	}
