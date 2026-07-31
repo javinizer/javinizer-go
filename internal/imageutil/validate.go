@@ -39,6 +39,9 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 		return fmt.Errorf("image validator client is nil")
 	}
 	safeClient := *client
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		safeClient.Transport = ssrf.WrapTransportWithSSRFCheck(transport)
+	}
 	previousCheckRedirect := client.CheckRedirect
 	safeClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if err := ssrf.CheckURL(req.URL.String()); err != nil {

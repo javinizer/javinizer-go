@@ -67,7 +67,11 @@ func (m *ActressSyncManager) Start() {
 		return
 	}
 	jobs, err := m.repo.ListActiveJobs()
-	if err != nil || len(jobs) == 0 {
+	if err != nil {
+		logging.Warnf("Actress sync startup failed, will retry on next signal: %v", err)
+		return
+	}
+	if len(jobs) == 0 {
 		return
 	}
 	m.ctx, m.cancel = context.WithCancel(context.Background())
@@ -173,14 +177,17 @@ func (m *ActressSyncManager) CreateJob(ctx context.Context, req ActressSyncCreat
 		return nil, fmt.Errorf("scope must be missing or selected")
 	}
 	ids := uniqueActressIDs(req.ActressIDs)
+	var candidateMap map[uint]*models.Actress
 	if scope == "missing" {
 		candidates, err := m.deps.ActressRepo.ListSyncCandidates(ctx)
 		if err != nil {
 			return nil, err
 		}
 		ids = ids[:0]
-		for _, actress := range candidates {
-			ids = append(ids, actress.ID)
+		candidateMap = make(map[uint]*models.Actress, len(candidates))
+		for i := range candidates {
+			ids = append(ids, candidates[i].ID)
+			candidateMap[candidates[i].ID] = &candidates[i]
 		}
 	}
 	if scope == "selected" && len(ids) == 0 {
@@ -193,9 +200,16 @@ func (m *ActressSyncManager) CreateJob(ctx context.Context, req ActressSyncCreat
 	job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: scope, CreatedAt: now}
 	tasks := make([]models.ActressSyncTask, 0, len(ids))
 	for _, id := range ids {
-		actress, err := m.deps.ActressRepo.FindByID(ctx, id)
-		if err != nil {
-			return nil, err
+		var actress *models.Actress
+		var err error
+		if candidateMap != nil {
+			actress = candidateMap[id]
+		}
+		if actress == nil {
+			actress, err = m.deps.ActressRepo.FindByID(ctx, id)
+			if err != nil {
+				return nil, err
+			}
 		}
 		actressID := id
 		label := strings.TrimSpace(actress.FullName())
