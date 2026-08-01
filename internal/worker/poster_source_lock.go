@@ -21,9 +21,12 @@ var (
 // across the four paths that mutate the shared cached poster assets and the
 // movie's poster state together: the whole-movie PATCH handler
 // (internal/api/batch/movie_edit.go's updateBatchMovie), the field-
-// override path (jobEditorImpl.ApplyFieldOverride), the manual-crop endpoint
+// Override path (jobEditorImpl.ApplyFieldOverride), the manual-crop endpoint
 // (updateBatchMoviePosterCrop), and the poster-from-URL refresh endpoint
-// (updateBatchMoviePosterFromURL). Without it, two
+// (updateBatchMoviePosterFromURL). The override path takes this lock for
+// EVERY field key, not just poster sources: every override persists a
+// whole-movie clone, which must not interleave with a crop or source write
+// mid-flight (the clone would otherwise erase the other edit). Without it, two
 // concurrent source-changing edits can interleave — request A refreshes the
 // cached {movieID}-full.jpg from image A, request B refreshes from image B,
 // and B persists before A — leaving the job's final poster URL pointing at A

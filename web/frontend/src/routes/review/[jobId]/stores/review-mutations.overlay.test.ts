@@ -64,24 +64,37 @@ describe('overlayFieldOverride', () => {
 		},
 	);
 
-	it('poster_url override with the identical URL keeps poster_crop_bounds', () => {
+	it('poster_url re-select of the identical URL carries the server-kept bounds', () => {
+		// The server keeps a still-valid manual crop on an identical-source
+		// re-select; src (the field-override response movie) is authoritative,
+		// so the kept bounds arrive on the response and must land on the
+		// pending edit intact.
+		const kept = { x: 0, y: 0, width: 400, height: 600 };
 		const target = makeMovie({
 			poster_url: 'same-url',
-			poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
+			poster_crop_bounds: { ...kept },
 		});
-		overlayFieldOverride(target, 'poster_url', makeMovie({ poster_url: 'same-url' }));
-		expect(target.poster_crop_bounds).toEqual({ x: 0, y: 0, width: 400, height: 600 });
+		overlayFieldOverride(target, 'poster_url', makeMovie({ poster_url: 'same-url', poster_crop_bounds: { ...kept } }));
+		expect(target.poster_crop_bounds).toEqual(kept);
 	});
 
-	it('cover_url override keeps bounds when poster_url is set (cover unused by poster pipeline)', () => {
+	it('cover_url override behind an explicit poster carries the server-kept bounds', () => {
+		// Cover is unused by the poster pipeline when poster_url is set, so the
+		// server keeps the existing crop; the kept bounds arrive on the response
+		// movie and must survive onto the pending edit.
+		const kept = { x: 0, y: 0, width: 400, height: 600 };
 		const target = makeMovie({
 			poster_url: 'https://example.com/poster.jpg',
 			cover_url: 'old-cover',
-			poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
+			poster_crop_bounds: { ...kept },
 		});
-		overlayFieldOverride(target, 'cover_url', makeMovie({ cover_url: 'new-cover' }));
+		overlayFieldOverride(
+			target,
+			'cover_url',
+			makeMovie({ poster_url: 'https://example.com/poster.jpg', cover_url: 'new-cover', poster_crop_bounds: { ...kept } })
+		);
 		expect(target.cover_url).toBe('new-cover');
-		expect(target.poster_crop_bounds).toEqual({ x: 0, y: 0, width: 400, height: 600 });
+		expect(target.poster_crop_bounds).toEqual(kept);
 	});
 
 	it('cover_url override clears bounds when cover is the poster source (no poster_url)', () => {
@@ -108,5 +121,57 @@ describe('overlayFieldOverride', () => {
 		const src = makeMovie({ maker: 'New Maker', director: 'Src Director' });
 		overlayFieldOverride(target, 'maker', src);
 		expect(target.director).toBe('Orig Director');
+	});
+
+	// Finding A: a poster_url field override on a movie that already has a
+	// pending edit must overlay the COMPLETE server-returned poster state onto
+	// the edit entry. The backend regenerates cropped_poster_url and re-syncs
+	// should_crop_poster for the newly selected source; a Save that resends
+	// only the picked URL with the stale preview/intent organizes a landscape
+	// scraper poster uncropped (updateBatchMovie does not re-sync when the
+	// source URL is unchanged server-side).
+	it('poster_url override onto a pending edit carries the full server poster state', () => {
+		const target = makeMovie({
+			// Unrelated pending edits the user already made:
+			title: 'User Edited Title',
+			maker: 'User Edited Maker',
+			// Stale pre-override poster state:
+			poster_url: 'https://example.com/old-poster.jpg',
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=1',
+			should_crop_poster: true,
+			poster_crop_bounds: { x: 10, y: 10, width: 200, height: 300 },
+		});
+		const src = makeMovie({
+			// Server-synchronized poster state from the field-override response:
+			poster_url: 'https://dmm.example/new-poster.jpg',
+			cover_url: 'https://dmm.example/cover.jpg',
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+			should_crop_poster: false,
+			poster_crop_bounds: null,
+		});
+		overlayFieldOverride(target, 'poster_url', src);
+
+		expect(target.poster_url).toBe('https://dmm.example/new-poster.jpg');
+		expect(target.cover_url).toBe('https://dmm.example/cover.jpg');
+		// The pending edit must carry the regenerated preview URL:
+		expect(target.cropped_poster_url).toBe('/api/v1/temp/posters/job/ABC-001.jpg?v=2');
+		// ...and the re-synced crop intent:
+		expect(target.should_crop_poster).toBe(false);
+		// The server cleared the stale bounds when the source changed:
+		expect(target.poster_crop_bounds).toBeNull();
+		// Unrelated pending edits survive untouched:
+		expect(target.title).toBe('User Edited Title');
+		expect(target.maker).toBe('User Edited Maker');
+	});
+
+	it('cover_url override leaves an unrelated cover edit alone when the response omits cover_url', () => {
+		const target = makeMovie({
+			poster_url: 'https://example.com/poster.jpg',
+			cover_url: 'user-pending-cover',
+		});
+		const src = makeMovie({ poster_url: 'https://example.com/poster.jpg' });
+		delete src.cover_url;
+		overlayFieldOverride(target, 'cover_url', src);
+		expect(target.cover_url).toBe('user-pending-cover');
 	});
 });

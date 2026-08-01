@@ -456,8 +456,12 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // A per-resultID mutex serializes concurrent overrides on the same result so
 // the read-clone-mutate-write sequence cannot lose an earlier override, and a
 // shared per-(jobID, movieID) lock (AcquirePosterSourceLock) additionally
-// serializes the poster-source refresh+persist sequence against the
-// whole-movie PATCH handler.
+// serializes EVERY override's whole-movie persist against the manual-crop,
+// poster-from-URL, and whole-movie PATCH paths: every field override ends in
+// an UpdateMovie of a whole-movie clone, so even a title/maker override can
+// otherwise interleave with a manual crop, cloning the movie before the crop
+// persists its new bounds and then persisting the stale clone — silently
+// erasing the successful crop.
 //
 // A poster_url override — or a cover_url override when the movie has no
 // PosterURL (the downloader falls back to CoverURL as the poster source) —
@@ -478,29 +482,40 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
 
-	result, filePath, found := je.store.GetFileResultByResultID(resultID)
+	result, _, found := je.store.GetFileResultByResultID(resultID)
 	if !found || result == nil || result.Movie == nil {
 		return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
 	}
-	// Poster-source overrides refresh the cached poster assets before
-	// persisting (refreshOverriddenPosterSource below): serialize that
-	// snapshot→refresh/cleanup→UpdateMovie sequence against the whole-movie
-	// PATCH path (internal/api/batch/movie_edit.go's updateBatchMovie) via
-	// the shared per-(jobID, movieID) lock, so an interleaved pair cannot
-	// persist one request's URL while the cached -full.jpg is the other's
-	// image. Taken AFTER the per-resultID overrideMu — the PATCH path takes
-	// only this lock — so acquisition order is consistent and cannot
-	// deadlock. cover_url is included even behind an explicit poster URL
-	// (where the refresh is a no-op) so both paths always contend on the
-	// same key for poster-source fields.
-	if fieldKey == "poster_url" || fieldKey == "cover_url" {
-		movieID := result.Movie.ID
-		if movieID == "" {
-			movieID = result.FileMatchInfo.MovieID
-		}
-		releasePosterLock := AcquirePosterSourceLock(je.jobID, movieID)
-		defer releasePosterLock()
+	// the manual-crop, poster-from-URL, and whole-movie PATCH paths
+	// (internal/api/batch/movie_edit.go) via the shared per-(jobID, movieID)
+	// lock — for EVERY field key, not just poster sources. A non-source
+	// override that skips this lock can clone the movie before a concurrent
+	// crop persists its bounds and then UpdateMovie the stale whole-movie
+	// clone, silently erasing the successful crop. Poster-source overrides
+	// additionally refresh the cached poster assets before persisting
+	// (refreshOverriddenPosterSource below), which the same lock covers.
+	// Taken AFTER the per-resultID overrideMu — the PATCH/crop paths take
+	// only this lock — so acquisition order is consistent (overrideMu →
+	// poster-source lock → result-store locks) and cannot deadlock. The key
+	// is the same movie ID the temp poster cache and crop endpoints use
+	// (Movie.ID when set, FileMatchInfo.MovieID otherwise).
+	movieID := result.Movie.ID
+	if movieID == "" {
+		movieID = result.FileMatchInfo.MovieID
 	}
+	releasePosterLock := AcquirePosterSourceLock(je.jobID, movieID)
+	defer releasePosterLock()
+
+	// Re-read the result under the lock: a crop or source-changing edit may
+	// have persisted while this call waited on the lock, replacing the movie
+	// — cloning below from the pre-lock snapshot would lose that edit on the
+	// whole-movie write (GetFileResultByResultID returns a deep clone, so the
+	// pre-lock read is stale-but-safe, never concurrent).
+	freshResult, filePath, stillFound := je.store.GetFileResultByResultID(resultID)
+	if !stillFound || freshResult == nil || freshResult.Movie == nil {
+		return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
+	}
+	result = freshResult
 	prov := je.store.GetProvenance(filePath)
 	if prov == nil {
 		prov = &resultstore.ProvenanceData{}

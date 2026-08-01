@@ -64,25 +64,28 @@ export function overlayFieldOverride(target: Movie, field: string, src: Movie): 
 			target.release_year = src.release_year;
 			break;
 		case 'poster_url':
+		case 'cover_url':
 		case 'should_crop_poster': {
-			const old = (target as unknown as Record<string, unknown>)[field];
-			const next = (src as unknown as Record<string, unknown>)[field];
-			(target as unknown as Record<string, unknown>)[field] = next;
-			// Only invalidate when the source actually changed — re-selecting an
-			// identical value must keep a still-valid manual crop.
-			if (old !== next) {
-				target.poster_crop_bounds = null;
+			// Overlay the COMPLETE server-returned poster state, not just the
+			// picked field: a poster-source override regenerates the preview
+			// (cropped_poster_url) and re-syncs the crop intent
+			// (should_crop_poster) server-side (refreshOverriddenPosterSource +
+			// applyFieldOverride's source-change invalidation), and src — the
+			// field-override response movie — is authoritative for all of it.
+			// Copying only the selected URL would leave saveAllEdits resubmitting
+			// the stale pre-override preview URL / crop intent from the pending
+			// edit entry, and updateBatchMovie does not re-sync when the source
+			// URL itself is unchanged — a landscape scraper poster would then
+			// organize uncropped. Bounds are taken as returned: the server clears
+			// them when the effective source changed and keeps them on an
+			// identical-source re-select.
+			target.poster_url = src.poster_url;
+			if (src.cover_url !== undefined) {
+				target.cover_url = src.cover_url;
 			}
-			break;
-		}
-		case 'cover_url': {
-			// Cover only feeds the poster pipeline when no poster URL is set.
-			const coverIsPosterSource = !target.poster_url;
-			const oldCover = target.cover_url;
-			target.cover_url = src.cover_url;
-			if (coverIsPosterSource && oldCover !== src.cover_url) {
-				target.poster_crop_bounds = null;
-			}
+			target.cropped_poster_url = src.cropped_poster_url;
+			target.should_crop_poster = src.should_crop_poster;
+			target.poster_crop_bounds = src.poster_crop_bounds ?? null;
 			break;
 		}
 		default:
