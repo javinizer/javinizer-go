@@ -24,7 +24,10 @@ type Downloader struct {
 	// Manual-crop downloads stage through <dest>.full.tmp and rewrite dest —
 	// both must be serialized per destination or concurrent multipart apply
 	// workers with a part-less poster template race on the shared paths.
-	posterCropLocks sync.Map // destPath -> *sync.Mutex
+	// Entries carry a refcount so they can be evicted after use instead of
+	// accumulating one mutex per cropped destination for the process lifetime.
+	posterCropLocks      sync.Map // destPath -> *posterCropLock
+	posterCropLocksGuard sync.Mutex
 
 	// Name formatting resolved from config at construction time
 	actorFirstNameOrder bool // true = FirstName LastName, false = LastName FirstName

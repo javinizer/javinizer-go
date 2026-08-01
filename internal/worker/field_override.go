@@ -141,8 +141,10 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		movie.Screenshots = append([]string(nil), result.ScreenshotURL...)
 		setFieldSource("screenshot_urls")
 	case "poster_url":
-		movie.Poster.PosterURL = result.PosterURL
-		movie.Poster.CropBounds = nil // new source image invalidates a crop measured against the old one
+		if movie.Poster.PosterURL != result.PosterURL {
+			movie.Poster.PosterURL = result.PosterURL
+			movie.Poster.CropBounds = nil // new source image invalidates a crop measured against the old one
+		}
 		setFieldSource("poster_url")
 	case "cover_url":
 		// The cover only feeds the poster pipeline when no poster URL is set —
@@ -157,8 +159,10 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		movie.TrailerURL = result.TrailerURL
 		setFieldSource("trailer_url")
 	case "should_crop_poster":
-		movie.Poster.ShouldCropPoster = result.ShouldCropPoster
-		movie.Poster.CropBounds = nil // explicit re-pick of scraper auto-crop supersedes the manual crop
+		if movie.Poster.ShouldCropPoster != result.ShouldCropPoster {
+			movie.Poster.ShouldCropPoster = result.ShouldCropPoster
+			movie.Poster.CropBounds = nil // explicit re-pick of scraper auto-crop supersedes the manual crop
+		}
 		setFieldSource("should_crop_poster")
 	default:
 		return fmt.Errorf("unhandled field: %s", fieldKey)

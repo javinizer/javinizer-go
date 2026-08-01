@@ -65,10 +65,8 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// whole download+crop per destination — concurrent multipart workers share
 	// both the <dest>.full.tmp staging file and the destination itself.
 	if b := movie.Poster.CropBounds; b != nil {
-		mu, _ := d.posterCropLocks.LoadOrStore(destPath, &sync.Mutex{})
-		lock := mu.(*sync.Mutex)
-		lock.Lock()
-		defer lock.Unlock()
+		unlock := d.acquirePosterCropLock(destPath)
+		defer unlock()
 		return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
 			cropBounds := b
 			// The apply-time download can be the same image at a different
@@ -113,6 +111,37 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
 		return imageutil.CropPosterFromCover(d.fs, srcPath, outPath, d.config.MaxPosterHeight)
 	})
+}
+
+// posterCropLock is a reference-counted per-destination mutex.
+type posterCropLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// acquirePosterCropLock serializes poster-crop work on destPath and releases
+// (evicting the map entry) when the last holder returns.
+func (d *Downloader) acquirePosterCropLock(destPath string) func() {
+	d.posterCropLocksGuard.Lock()
+	v, _ := d.posterCropLocks.Load(destPath)
+	entry, ok := v.(*posterCropLock)
+	if !ok {
+		entry = &posterCropLock{}
+		d.posterCropLocks.Store(destPath, entry)
+	}
+	entry.refs++
+	d.posterCropLocksGuard.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		d.posterCropLocksGuard.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			d.posterCropLocks.Delete(destPath)
+		}
+		d.posterCropLocksGuard.Unlock()
+	}
 }
 
 // scaleCropBounds rescales an absolute preview rectangle to a re-downloaded

@@ -48,16 +48,30 @@ describe('overlayFieldOverride', () => {
 	});
 
 	it.each(['poster_url', 'should_crop_poster'])(
-		'%s override clears stale poster_crop_bounds',
+		'%s override clears stale poster_crop_bounds when the value changes',
 		(field) => {
 			const target = makeMovie({
 				poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
+				...(field === 'should_crop_poster' ? { should_crop_poster: false } : {}),
 			});
-			const src = makeMovie({ poster_url: 'new-poster', cover_url: 'new-cover' });
+			const src = makeMovie({
+				poster_url: 'new-poster',
+				cover_url: 'new-cover',
+				...(field === 'should_crop_poster' ? { should_crop_poster: true } : {}),
+			});
 			overlayFieldOverride(target, field, src);
 			expect(target.poster_crop_bounds).toBeNull();
 		},
 	);
+
+	it('poster_url override with the identical URL keeps poster_crop_bounds', () => {
+		const target = makeMovie({
+			poster_url: 'same-url',
+			poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
+		});
+		overlayFieldOverride(target, 'poster_url', makeMovie({ poster_url: 'same-url' }));
+		expect(target.poster_crop_bounds).toEqual({ x: 0, y: 0, width: 400, height: 600 });
+	});
 
 	it('cover_url override keeps bounds when poster_url is set (cover unused by poster pipeline)', () => {
 		const target = makeMovie({
