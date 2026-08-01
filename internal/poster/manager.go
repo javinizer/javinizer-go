@@ -55,6 +55,25 @@ type PosterManagerInterface interface {
 	// DownloadFromURL downloads an image from rawURL and creates both a
 	// full-size and a cropped poster file.
 	DownloadFromURL(ctx context.Context, jobID, posterID, rawURL, userAgent, referer string) (*cropResult, error)
+	// SnapshotAssets captures the cached full-size source and preview bytes.
+	SnapshotAssets(jobID, posterID string) (*AssetsSnapshot, error)
+	// RestoreAssets writes back a previously captured snapshot.
+	RestoreAssets(snap *AssetsSnapshot) error
+}
+
+// AssetsSnapshot captures the job's cached full-size poster source
+// ({tempDir}/posters/{jobID}/{posterID}-full.jpg) and preview ({posterID}.jpg)
+// so a caller can roll the filesystem back when a post-regeneration step
+// (e.g. job-state persistence) fails after a refresh already replaced them.
+// A false has* flag means the file did not exist at snapshot time;
+// RestoreAssets removes it to reproduce that absence.
+type AssetsSnapshot struct {
+	jobID      string
+	posterID   string
+	full       []byte
+	hasFull    bool
+	preview    []byte
+	hasPreview bool
 }
 
 // ssrfCheckFunc is the function signature for URL SSRF validation.
@@ -269,6 +288,79 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 		FullPath:    tempFullPath,
 		CroppedURL:  croppedURL,
 	}, nil
+}
+
+// SnapshotAssets reads the cached full-size source and preview assets for one
+// poster within a job's temp directory. Missing files are recorded as absent so
+// RestoreAssets can remove assets a failed refresh left behind. Read errors
+// other than not-exist abort the snapshot — the caller must not regenerate
+// against a cache state it cannot roll back.
+func (pm *PosterManager) SnapshotAssets(jobID, posterID string) (*AssetsSnapshot, error) {
+	if err := ValidateJobID(jobID); err != nil {
+		return nil, err
+	}
+	if err := validatePosterID(posterID); err != nil {
+		return nil, err
+	}
+	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
+	snap := &AssetsSnapshot{jobID: jobID, posterID: posterID}
+	for _, asset := range []struct {
+		name    string
+		data    *[]byte
+		present *bool
+	}{
+		{posterID + "-full.jpg", &snap.full, &snap.hasFull},
+		{posterID + ".jpg", &snap.preview, &snap.hasPreview},
+	} {
+		data, err := afero.ReadFile(pm.fs, filepath.Join(tempPosterDir, asset.name))
+		switch {
+		case err == nil:
+			*asset.data, *asset.present = data, true
+		case os.IsNotExist(err):
+			// Absent at snapshot time — restore will remove it again.
+		default:
+			return nil, fmt.Errorf("snapshot poster asset %s: %w", asset.name, err)
+		}
+	}
+	return snap, nil
+}
+
+// RestoreAssets writes back a previously captured snapshot. Assets absent at
+// snapshot time are removed (a failed refresh may have created them). A nil
+// snapshot is a no-op so callers can roll back unconditionally when the
+// generator had no manager.
+func (pm *PosterManager) RestoreAssets(snap *AssetsSnapshot) error {
+	if snap == nil {
+		return nil
+	}
+	if err := ValidateJobID(snap.jobID); err != nil {
+		return err
+	}
+	if err := validatePosterID(snap.posterID); err != nil {
+		return err
+	}
+	tempPosterDir := filepath.Join(pm.tempDir, "posters", snap.jobID)
+	for _, asset := range []struct {
+		name    string
+		data    []byte
+		present bool
+	}{
+		{snap.posterID + "-full.jpg", snap.full, snap.hasFull},
+		{snap.posterID + ".jpg", snap.preview, snap.hasPreview},
+	} {
+		finalPath := filepath.Join(tempPosterDir, asset.name)
+		if !asset.present {
+			_ = pm.fs.Remove(finalPath) // best-effort cleanup of the failed refresh's output
+			continue
+		}
+		if err := pm.fs.MkdirAll(tempPosterDir, configDirPermTemp); err != nil {
+			return fmt.Errorf("restore poster asset directory: %w", err)
+		}
+		if err := afero.WriteFile(pm.fs, finalPath, asset.data, 0o644); err != nil {
+			return fmt.Errorf("restore poster asset %s: %w", asset.name, err)
+		}
+	}
+	return nil
 }
 
 // validatePosterID ensures the posterID is a safe, non-empty filename

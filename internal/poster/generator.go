@@ -94,6 +94,28 @@ func (g *ScrapePosterGenerator) GeneratePoster(ctx context.Context, jobID string
 	return nil
 }
 
+// SnapshotPosterAssets captures the job's cached full-size poster source and
+// preview for movieID so a caller can roll the filesystem back when a
+// post-regeneration step (e.g. job-state persistence) fails after GeneratePoster
+// already replaced them. A generator without a manager has no assets: it
+// returns (nil, nil), and RestorePosterAssets on that snapshot is a no-op.
+func (g *ScrapePosterGenerator) SnapshotPosterAssets(jobID, movieID string) (*AssetsSnapshot, error) {
+	if g.manager == nil {
+		return nil, nil
+	}
+	return g.manager.SnapshotAssets(jobID, movieID)
+}
+
+// RestorePosterAssets writes back a snapshot taken by SnapshotPosterAssets.
+// Nil manager or nil snapshot restore nothing — pair with the (nil, nil)
+// snapshot contract above.
+func (g *ScrapePosterGenerator) RestorePosterAssets(snap *AssetsSnapshot) error {
+	if g.manager == nil || snap == nil {
+		return nil
+	}
+	return g.manager.RestoreAssets(snap)
+}
+
 // resolveReferer was removed — PosterManager.DownloadFromURL already performs
 // the same auto-derivation from the download URL when referer is empty.
 // Duplicating it here was redundant and meant both sites had to stay in sync.
