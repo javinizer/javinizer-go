@@ -556,7 +556,8 @@ TRIM(COALESCE(japanese_name,'')) = '' OR
 LOWER(COALESCE(thumb_url,'')) LIKE ? OR
 LOWER(COALESCE(thumb_url,'')) LIKE ?
 )) OR (dmm_id <= 0 AND (
-TRIM(COALESCE(japanese_name,'')) <> '' OR TRIM(COALESCE(aliases,'')) <> ''
+TRIM(COALESCE(japanese_name,'')) <> '' OR TRIM(COALESCE(aliases,'')) <> '' OR
+TRIM(COALESCE(first_name,'')) <> '' OR TRIM(COALESCE(last_name,'')) <> ''
 ))`, "%/mono/actjpgs/%", "%/mono/noimage/now_printing.jpg%").Order("id ASC").Find(&potential).Error
 	if err != nil {
 		return nil, err
@@ -564,7 +565,10 @@ TRIM(COALESCE(japanese_name,'')) <> '' OR TRIM(COALESCE(aliases,'')) <> ''
 	actresses := make([]models.Actress, 0, len(potential))
 	for _, actress := range potential {
 		if actress.DMMID <= 0 {
-			if strings.TrimSpace(actress.JapaneseName) != "" || strings.TrimSpace(actress.Aliases) != "" {
+			if strings.TrimSpace(actress.JapaneseName) != "" ||
+				strings.TrimSpace(actress.Aliases) != "" ||
+				strings.TrimSpace(actress.FirstName) != "" ||
+				strings.TrimSpace(actress.LastName) != "" {
 				actresses = append(actresses, actress)
 			}
 			continue

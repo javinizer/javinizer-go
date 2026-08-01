@@ -406,9 +406,13 @@ func TestListSyncCandidatesIncludesNamedMissingDMMActresses(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewActressRepository(db)
 	recoverable := &models.Actress{JapaneseName: "未解決女優"}
+	romanized := &models.Actress{FirstName: "Romanized", LastName: "Only"}
+	firstOnly := &models.Actress{FirstName: "FirstOnly"}
+	lastOnly := &models.Actress{LastName: "LastOnly"}
 	unnamed := &models.Actress{}
-	require.NoError(t, repo.Create(context.Background(), recoverable))
-	require.NoError(t, repo.Create(context.Background(), unnamed))
+	for _, actress := range []*models.Actress{recoverable, romanized, firstOnly, lastOnly, unnamed} {
+		require.NoError(t, repo.Create(context.Background(), actress))
+	}
 
 	candidates, err := repo.ListSyncCandidates(context.Background())
 	require.NoError(t, err)
@@ -417,6 +421,9 @@ func TestListSyncCandidatesIncludesNamedMissingDMMActresses(t *testing.T) {
 		ids = append(ids, candidate.ID)
 	}
 	require.Contains(t, ids, recoverable.ID)
+	require.Contains(t, ids, romanized.ID)
+	require.Contains(t, ids, firstOnly.ID)
+	require.Contains(t, ids, lastOnly.ID)
 	require.NotContains(t, ids, unnamed.ID)
 }
 
