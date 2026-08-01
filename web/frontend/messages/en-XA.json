@@ -1892,6 +1892,8 @@
   "browse_plan_rename_file_desc": "Rename videos without renaming their containing folders.",
   "browse_plan_leave_in_place": "Leave video files in place",
   "browse_plan_leave_in_place_desc": "Update metadata and artwork without moving or renaming videos.",
+   "browse_plan_metadata_artwork": "Metadata and artwork only",
+   "browse_plan_metadata_artwork_desc": "Write fresh scraper metadata and artwork without moving, renaming, or merging existing NFO data.",
   "browse_plan_nfo_output": "NFO output",
   "browse_plan_nfo_write": "Write NFO",
   "browse_plan_nfo_skip": "Skip NFO",

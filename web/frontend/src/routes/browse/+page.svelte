@@ -606,6 +606,7 @@
 		const plan = normalizeApplyPlan(applyPlan);
 		const legacy = projectLegacyPlan(plan);
 		const isUpdateMode = plan.video_operation === 'leave-in-place';
+		const applyPlanForRequest = plan.video_operation === 'metadata-artwork' ? undefined : plan;
 		scraping = true;
 		try {
 			const response = await apiClient.batchScrape({
@@ -613,7 +614,7 @@
 				strict: false,
 				force: forceRefresh,
 				...legacy,
-				apply_plan: plan,
+				apply_plan: applyPlanForRequest,
 				selected_scrapers: showScraperSelector ? selectedScrapers : undefined
 			});
 			startJob(response.job_id);

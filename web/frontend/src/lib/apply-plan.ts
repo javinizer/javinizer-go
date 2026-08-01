@@ -20,6 +20,7 @@ export function operationFromMode(mode?: OperationMode): VideoOperation | null {
 		case 'organize': return 'organize';
 		case 'in-place': return 'rename-in-place';
 		case 'in-place-norenamefolder': return 'rename-file';
+		case 'metadata-artwork': return 'metadata-artwork';
 		default: return null;
 	}
 }
@@ -88,7 +89,7 @@ export function setMergeStrategies(plan: BatchApplyPlan, scalar: ScalarMergeStra
 function validateApplyPlanEnums(plan: BatchApplyPlan): string[] {
 	const errors: string[] = [];
 	if (plan.version !== 1) errors.push('Unsupported apply plan version.');
-	if (!['organize', 'rename-in-place', 'rename-file', 'leave-in-place'].includes(plan.video_operation)) errors.push('Unsupported video operation.');
+	if (!['organize', 'rename-in-place', 'rename-file', 'leave-in-place', 'metadata-artwork'].includes(plan.video_operation)) errors.push('Unsupported video operation.');
 	if (!['write', 'skip'].includes(plan.nfo_output)) errors.push('Unsupported NFO output policy.');
 	if (!['missing', 'replace', 'skip'].includes(plan.media_policy)) errors.push('Unsupported media policy.');
 	if (plan.merge) {
@@ -115,7 +116,8 @@ export function projectLegacyPlan(plan: BatchApplyPlan): Pick<BatchScrapeRequest
 		organize: 'organize',
 		'rename-in-place': 'in-place',
 		'rename-file': 'in-place-norenamefolder',
-		'leave-in-place': 'metadata-artwork'
+		'leave-in-place': 'metadata-artwork',
+		'metadata-artwork': 'metadata-artwork'
 	};
 	return {
 		destination: normalized.destination,
@@ -131,7 +133,8 @@ const operationText: Record<VideoOperation, string> = {
 	organize: 'Organize videos into another location',
 	'rename-in-place': 'Rename videos and eligible dedicated folders in place',
 	'rename-file': 'Rename video files without renaming their folders',
-	'leave-in-place': 'Leave video files in place'
+	'leave-in-place': 'Leave video files in place',
+	'metadata-artwork': 'Update metadata and artwork only'
 };
 
 export function applyPlanSummary(plan: BatchApplyPlan): string[] {

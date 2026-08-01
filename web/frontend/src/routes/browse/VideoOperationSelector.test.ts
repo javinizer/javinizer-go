@@ -5,10 +5,11 @@ import componentSource from './VideoOperationSelector.svelte?raw';
 import browsePageSource from './+page.svelte?raw';
 
 describe('VideoOperationSelector', () => {
-	it('renders one described radio group with all four operations', () => {
+	it('renders one described radio group with all five operations', () => {
 		const { getByRole, getAllByRole, getByText } = render(VideoOperationSelector, { value: null });
 		expect(getByRole('group', { name: 'Video file operation' })).toBeTruthy();
-		expect(getAllByRole('radio')).toHaveLength(4);
+		expect(getAllByRole('radio')).toHaveLength(5);
+		expect(getByText('Metadata and artwork only')).toBeTruthy();
 		expect(getByText('Choose what happens to the selected video files. Metadata and media policies are configured separately.')).toBeTruthy();
 	});
 

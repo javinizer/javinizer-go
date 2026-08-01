@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
-	import { FolderOutput, FolderPen, FilePenLine, ShieldCheck } from 'lucide-svelte';
+	import { FolderOutput, FolderPen, FilePenLine, ShieldCheck, FileText } from 'lucide-svelte';
 	import type { VideoOperation } from '$lib/api/types';
 
 	let { value = $bindable<VideoOperation | null>(), errorId }: { value: VideoOperation | null; errorId?: string } = $props();
@@ -10,7 +10,8 @@
 		{ value: 'organize' as const, label: m.browse_plan_organize(), description: m.browse_plan_organize_desc(), icon: FolderOutput },
 		{ value: 'rename-in-place' as const, label: m.browse_plan_rename_in_place(), description: m.browse_plan_rename_in_place_desc(), icon: FolderPen },
 		{ value: 'rename-file' as const, label: m.browse_plan_rename_file(), description: m.browse_plan_rename_file_desc(), icon: FilePenLine },
-		{ value: 'leave-in-place' as const, label: m.browse_plan_leave_in_place(), description: m.browse_plan_leave_in_place_desc(), icon: ShieldCheck }
+		{ value: 'leave-in-place' as const, label: m.browse_plan_leave_in_place(), description: m.browse_plan_leave_in_place_desc(), icon: ShieldCheck },
+		{ value: 'metadata-artwork' as const, label: m.browse_plan_metadata_artwork(), description: m.browse_plan_metadata_artwork_desc(), icon: FileText }
 	];
 
 	function handleKeydown(event: KeyboardEvent, index: number) {
@@ -29,7 +30,7 @@
 <fieldset class="min-w-0 space-y-3" aria-describedby={describedBy}>
 	<legend class="text-sm font-semibold">{m.browse_plan_video_operation()}</legend>
 	<p id="video-operation-help" class="text-sm text-muted-foreground">{m.browse_plan_video_operation_desc()}</p>
-	<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+	<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
 		{#each options as option, index}
 			{@const selected = value === option.value}
 			<label class="group relative flex min-h-28 cursor-pointer flex-col gap-2.5 rounded-lg border p-3.5 transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 focus-within:ring-offset-background {selected ? 'border-primary-strong bg-primary-soft shadow-sm' : 'border-border bg-card hover:border-primary-soft hover:bg-accent-soft'}">

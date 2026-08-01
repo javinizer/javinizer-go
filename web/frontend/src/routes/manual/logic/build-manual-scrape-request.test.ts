@@ -7,6 +7,7 @@ import {
 	type ManualScrapeOptions
 } from './build-manual-scrape-request';
 import type { BatchScrapeRequest } from '$lib/api/types';
+import { defaultApplyPlan } from '$lib/apply-plan';
 
 describe('classifyInput', () => {
 	it('classifies empty/whitespace as auto (matcher on basename)', () => {
@@ -125,5 +126,14 @@ describe('buildManualScrapeRequest', () => {
 		const req = buildManualScrapeRequest([], opts);
 		expect(req.files).toEqual([]);
 		expect(req.manual_inputs).toBeUndefined();
+	});
+
+	it('keeps metadata-artwork as a legacy request without an apply plan', () => {
+		const req = buildManualScrapeRequest([{ filePath: '/a.mp4', input: '' }], {
+			apply_plan: defaultApplyPlan('metadata-artwork')
+		});
+		expect(req.operation_mode).toBe('metadata-artwork');
+		expect(req.update).toBe(false);
+		expect(req.apply_plan).toBeUndefined();
 	});
 });

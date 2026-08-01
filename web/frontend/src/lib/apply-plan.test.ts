@@ -17,7 +17,8 @@ describe('apply plan', () => {
 		['organize', 'organize', false],
 		['rename-in-place', 'in-place', false],
 		['rename-file', 'in-place-norenamefolder', false],
-		['leave-in-place', 'metadata-artwork', true]
+		['leave-in-place', 'metadata-artwork', true],
+		['metadata-artwork', 'metadata-artwork', false]
 	] as const)('projects %s', (operation, mode, update) => {
 		const plan = defaultApplyPlan(operation, operation === 'organize' ? '/dest' : '/stale');
 		expect(projectLegacyPlan(plan)).toMatchObject({ operation_mode: mode, update });
@@ -34,8 +35,8 @@ describe('apply plan', () => {
 		expect(validateApplyPlan(replacement)).toContain('Existing media can only be replaced when video files stay in place.');
 	});
 
-	it('does not initialize unsupported legacy modes', () => {
-		expect(initialApplyPlan('metadata-artwork')).toBeNull();
+	it('preserves metadata-artwork while rejecting preview', () => {
+		expect(initialApplyPlan('metadata-artwork')?.video_operation).toBe('metadata-artwork');
 		expect(initialApplyPlan('preview')).toBeNull();
 	});
 

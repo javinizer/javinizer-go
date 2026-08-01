@@ -125,6 +125,13 @@ describe('/browse action plan — decision workflow structure', () => {
 		expect(queryByText('Output Destination')).toBeNull();
 	});
 
+	it('offers metadata-artwork as a distinct non-merge operation', async () => {
+		const { findByRole, getByText, queryByText } = renderPage();
+		await fireEvent.click(await findByRole('radio', { name: /Metadata and artwork only/ }));
+		await waitFor(() => expect(getByText('Update metadata and artwork only')).toBeTruthy());
+		expect(queryByText('Existing metadata merge')).toBeNull();
+	});
+
 	it('drives NFO and media policies through native segmented radio groups', async () => {
 		const { findByRole, getByRole, getByText } = renderPage();
 		await findByRole('radio', { name: /Organize into another location/ });

@@ -64,7 +64,7 @@ export type OperationMode =
 	| 'metadata-artwork'
 	| 'preview';
 
-export type VideoOperation = 'organize' | 'rename-in-place' | 'rename-file' | 'leave-in-place';
+export type VideoOperation = 'organize' | 'rename-in-place' | 'rename-file' | 'leave-in-place' | 'metadata-artwork';
 export type NFOOutputPolicy = 'write' | 'skip';
 export type MediaPolicy = 'missing' | 'replace' | 'skip';
 export type ScalarMergeStrategy = 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
