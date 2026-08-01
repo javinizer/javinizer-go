@@ -33,7 +33,7 @@ describe('buildPendingScrapeSnapshot', () => {
 		const s = await loadStore();
 		const snap = s.buildPendingScrapeSnapshot({
 			files: ['/a.mp4'], browseMode: 'update', update: true,
-			effectiveOperationMode: 'in-place', scalarStrategy: 'prefer-scraper', arrayStrategy: 'replace',
+			effectiveOperationMode: 'organize', scalarStrategy: 'prefer-scraper', arrayStrategy: 'replace',
 			showScraperSelector: false, selectedScrapers: [], force: false
 		});
 		expect(snap.applyPlan).toMatchObject({ video_operation: 'leave-in-place', merge: { scalar_strategy: 'prefer-scraper', array_strategy: 'replace' } });

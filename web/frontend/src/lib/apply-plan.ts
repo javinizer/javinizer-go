@@ -167,20 +167,17 @@ export function migrateLegacyPlan(state: LegacyPlanState): { plan: BatchApplyPla
 		return { plan: null, warning: 'Apply settings changed; select an operation again.' };
 	}
 	const update = state.update ?? state.browseMode === 'update';
-	const operation = state.effectiveOperationMode ? operationFromMode(state.effectiveOperationMode) : null;
-	if (state.effectiveOperationMode && !operation) {
-		return { plan: null, warning: 'Legacy apply settings require a new operation selection.' };
-	}
 	if (update) {
-		if (state.effectiveOperationMode && state.effectiveOperationMode !== 'in-place') {
-			return { plan: null, warning: 'Legacy apply settings require a new operation selection.' };
-		}
 		const plan = defaultApplyPlan('leave-in-place');
 		if (plan.merge) {
 			plan.merge.scalar_strategy = state.scalarStrategy ?? 'prefer-nfo';
 			plan.merge.array_strategy = state.arrayStrategy ?? 'merge';
 		}
 		return { plan };
+	}
+	const operation = state.effectiveOperationMode ? operationFromMode(state.effectiveOperationMode) : null;
+	if (state.effectiveOperationMode && !operation) {
+		return { plan: null, warning: 'Legacy apply settings require a new operation selection.' };
 	}
 	if (!operation) return { plan: null, warning: 'Legacy apply settings require a new operation selection.' };
 	return { plan: defaultApplyPlan(operation, state.destination) };

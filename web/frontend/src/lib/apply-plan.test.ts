@@ -56,12 +56,12 @@ describe('apply plan', () => {
 		expect(validateApplyPlan(rename)).toEqual([]);
 	});
 
-	it('migrates compatible legacy state and rejects unsupported or contradictory state', () => {
+	it('migrates update snapshots regardless of stale mode and rejects contradictory state', () => {
 		expect(migrateLegacyPlan({ browseMode: 'update', update: true, effectiveOperationMode: 'in-place' }).plan?.video_operation).toBe('leave-in-place');
+		expect(migrateLegacyPlan({ browseMode: 'update', update: true, effectiveOperationMode: 'metadata-artwork' }).plan?.video_operation).toBe('leave-in-place');
+		expect(migrateLegacyPlan({ browseMode: 'update', update: true, effectiveOperationMode: 'organize' }).plan?.video_operation).toBe('leave-in-place');
 		expect(migrateLegacyPlan({ browseMode: 'scrape', update: false, effectiveOperationMode: 'preview' })).toMatchObject({ plan: null });
 		expect(migrateLegacyPlan({ browseMode: 'scrape', update: true, effectiveOperationMode: 'organize' })).toMatchObject({ plan: null });
-		expect(migrateLegacyPlan({ browseMode: 'update', update: true, effectiveOperationMode: 'metadata-artwork' })).toMatchObject({ plan: null });
-		expect(migrateLegacyPlan({ browseMode: 'update', update: true, effectiveOperationMode: 'organize' })).toMatchObject({ plan: null });
 	});
 
 	it('derives detailed and compact summaries from the same projection', () => {
