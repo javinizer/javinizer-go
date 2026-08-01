@@ -3,6 +3,7 @@ package downloader
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -77,6 +78,49 @@ func TestDownloadPoster_AppliesManualCropBounds(t *testing.T) {
 	assert.Equal(t, 600, b.Dy())
 	r, _, bl, _ := img.At(b.Min.X+b.Dx()/2, b.Min.Y+b.Dy()/2).RGBA()
 	assert.Greater(t, r, bl, "poster pixels must come from the manual (left/red) crop region")
+}
+
+// failOverwriteRenameFs reproduces Windows rename semantics: os.Rename refuses
+// to replace an existing destination.
+type failOverwriteRenameFs struct {
+	afero.Fs
+}
+
+func (f *failOverwriteRenameFs) Rename(oldPath, newPath string) error {
+	if _, err := f.Fs.Stat(newPath); err == nil {
+		return fmt.Errorf("rename %s %s: destination exists (windows semantics)", oldPath, newPath)
+	}
+	return f.Fs.Rename(oldPath, newPath)
+}
+
+func TestDownloadPoster_StaleBoundsKeepWholeReplacesExistingPoster(t *testing.T) {
+	srv := twoToneCoverServer(t)
+
+	fs := &failOverwriteRenameFs{Fs: afero.NewMemMapFs()}
+	tmpDir := "/out"
+	require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
+
+	// An organize/update run whose resolved poster already exists must still
+	// get the keep-whole replacement — not a rename failure.
+	existing := filepath.Join(tmpDir, "IPX-535-poster.jpg")
+	require.NoError(t, afero.WriteFile(fs, existing, []byte("old poster"), 0o644))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.ShouldCropPoster = false
+	movie.Poster.CropBounds = &models.CropBounds{X: 9000, Y: 0, Width: 400, Height: 600}
+
+	d := NewDownloader(http.DefaultClient, fs, &Config{
+		DownloadPoster:    true,
+		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+	}, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.NoError(t, err, "keep-whole fallback must replace an existing destination portably")
+	require.True(t, result.Downloaded)
+
+	got, readErr := afero.ReadFile(fs, existing)
+	require.NoError(t, readErr)
+	assert.NotEqual(t, "old poster", string(got), "old poster content must be replaced")
 }
 
 func TestDownloadPoster_BoundsCarryMaxPosterHeight(t *testing.T) {

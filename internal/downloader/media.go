@@ -84,6 +84,9 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 				// degrades to the default crop; a poster-grade source is kept
 				// whole rather than butchered by a wrong auto-crop.
 				logging.Warnf("stored crop bounds %+v invalid for poster of %s: %v - saving image uncropped", *b, movie.ID, err)
+				// Remove first: os.Rename refuses to replace an existing
+				// destination on non-Unix platforms.
+				_ = d.fs.Remove(destPath)
 				return d.fs.Rename(tempPath, destPath)
 			}
 			logging.Warnf("stored crop bounds %+v invalid for poster of %s: %v - falling back to default crop", *b, movie.ID, err)
