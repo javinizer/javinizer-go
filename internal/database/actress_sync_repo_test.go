@@ -255,7 +255,7 @@ func TestManualActressMergeCoalescesConflictingSyncTasks(t *testing.T) {
 			now := time.Now().UTC()
 			makeJob := func(actressID uint, status, scope, label string) (*models.ActressSyncJob, models.ActressSyncTask) {
 				job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: scope, CreatedAt: now}
-				task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actressID, Label: label, DedupeKey: fmt.Sprintf("actress:%d", actressID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+				task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actressID, Label: label, DedupeKey: fmt.Sprintf("actress:%d", actressID), Status: status, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
 				if status == models.ActressSyncTaskRunning {
 					job.Status = models.ActressSyncJobRunning
 					expires := now.Add(time.Hour)
