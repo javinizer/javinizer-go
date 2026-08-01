@@ -73,7 +73,7 @@
 	let pathInputValue = $state(untrack(() => initialData?.current_path ?? initialPath));
 	let skipInitialBrowse = untrack(() => initialData !== undefined);
 
-	untrack(() => {
+	$effect(() => {
 		if (!initialData) return;
 		const presentPaths = new Set(initialData.items.filter((i) => !i.is_dir).map((i) => i.path));
 		const normDir = (d: string): string => d.replace(/[\\/]+$/, '') || d;
@@ -85,8 +85,10 @@
 			(p) => !isChildOfCurrent(p) || presentPaths.has(p)
 		);
 		if (pruned.length !== externalSelectedFiles.length) {
-			externalSelectedFiles = pruned;
-			onFileSelect?.(externalSelectedFiles);
+			untrack(() => {
+				externalSelectedFiles = pruned;
+				onFileSelect?.(pruned);
+			});
 		}
 	});
 

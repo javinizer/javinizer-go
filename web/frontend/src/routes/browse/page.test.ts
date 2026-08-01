@@ -41,6 +41,10 @@ if (!window.matchMedia) {
 	window.matchMedia = (q: string) => ({ matches: false, media: q, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false });
 }
 const savedAnimate = window.Element.prototype.animate;
+const savedGetAnimations = window.Element.prototype.getAnimations;
+window.Element.prototype.getAnimations = function () {
+	return [];
+};
 window.Element.prototype.animate = function () {
 	return {
 		onfinish: null as ((this: unknown, ev: AnimationPlaybackEvent) => unknown) | null,
@@ -55,6 +59,7 @@ window.Element.prototype.animate = function () {
 
 afterAll(() => {
 	window.Element.prototype.animate = savedAnimate;
+	window.Element.prototype.getAnimations = savedGetAnimations;
 	(globalThis as { sessionStorage?: Storage }).sessionStorage = savedSession;
 	(globalThis as { localStorage?: Storage }).localStorage = savedLocal;
 });
@@ -424,5 +429,44 @@ describe('/browse — phantom selection pruning on refresh', () => {
 		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(2));
 		expect(getByText('deep.mp4')).toBeTruthy();
 		expect((getByRole('button', { name: /1 File/ }) as HTMLButtonElement).disabled).toBe(false);
+	});
+
+	it('prunes stale SSR selections after session state hydration', async () => {
+		sessionStorage.setItem(
+			STORAGE_KEY_SCRAPE_STATE,
+			JSON.stringify({
+				selectedFiles: ['/library/stale.mp4', '/library/kept.mp4'],
+				operationMode: 'scrape',
+				operationModeOverride: 'organize',
+				operationModeOverrideTouched: false,
+				forceRefresh: false,
+				showScraperSelector: false,
+				selectedScrapers: [],
+				selectedPreset: undefined,
+				scalarStrategy: 'prefer-nfo',
+				arrayStrategy: 'merge',
+				manualScrapeMode: false
+			})
+		);
+
+		const { findAllByText, queryByText, getByText } = renderPage({
+			data: {
+				initialPath: '/library',
+				initialBrowse: {
+					current_path: '/library',
+					parent_path: '',
+					items: [
+						{ name: 'kept.mp4', path: '/library/kept.mp4', is_dir: false, size: 0, mod_time: '2024-01-01T00:00:00Z' }
+					]
+				}
+			}
+		});
+
+		await findAllByText('kept.mp4');
+		await waitFor(() => {
+			expect(queryByText('stale.mp4')).toBeNull();
+			expect(getByText('1 File Selected for Scraping')).toBeTruthy();
+		});
+		expect(apiClient.browse).not.toHaveBeenCalled();
 	});
 });
