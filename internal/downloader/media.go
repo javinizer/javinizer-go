@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -120,14 +121,25 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 func (d *Downloader) downloadAndCropPoster(ctx context.Context, posterURL, destPath string, cropFn func(srcPath, outPath string) error) (*DownloadResult, error) {
 	tempPath := destPath + ".full.tmp"
 	cropTmpPath := destPath + ".crop.tmp"
-	_ = d.fs.Remove(tempPath)
-	_ = d.fs.Remove(cropTmpPath)
-
-	result, err := d.download(ctx, posterURL, tempPath, MediaTypePoster)
-	if err != nil || !result.Downloaded {
-		_ = d.fs.Remove(tempPath) // Clean up if exists
-		return result, err
+	// Stale staging files from an interrupted run must be cleared — if removal
+	// itself fails (permissions, Windows file locks), download() would mistake
+	// the stale stage for a completed download and silently skip the crop, so
+	// surface that as an error instead.
+	result := &DownloadResult{URL: posterURL, LocalPath: destPath, Type: MediaTypePoster}
+	for _, stale := range []string{tempPath, cropTmpPath} {
+		if rmErr := d.fs.Remove(stale); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+			result.Error = fmt.Errorf("failed to clear stale poster staging %s: %w", stale, rmErr)
+			result.Downloaded = false
+			return result, result.Error
+		}
 	}
+
+	dlResult, err := d.download(ctx, posterURL, tempPath, MediaTypePoster)
+	if err != nil || !dlResult.Downloaded {
+		_ = d.fs.Remove(tempPath) // Clean up if exists
+		return dlResult, err
+	}
+	result = dlResult
 
 	if err := cropFn(tempPath, cropTmpPath); err != nil {
 		_ = d.fs.Remove(tempPath)
@@ -138,14 +150,32 @@ func (d *Downloader) downloadAndCropPoster(ctx context.Context, posterURL, destP
 	}
 	_ = d.fs.Remove(tempPath)
 
-	// Install only a complete image: remove the destination first because
-	// os.Rename refuses to replace an existing file on non-Unix platforms.
-	_ = d.fs.Remove(destPath)
+	// Install only a complete image. Backup-and-rollback the existing
+	// destination is staged aside first so a failed install rename restores
+	// it instead of leaving the old poster destroyed.
+	backupPath := destPath + ".bak"
+	_ = d.fs.Remove(backupPath)
+	hadExisting := false
+	if _, statErr := d.fs.Stat(destPath); statErr == nil {
+		hadExisting = true
+		if mvErr := d.fs.Rename(destPath, backupPath); mvErr != nil {
+			_ = d.fs.Remove(cropTmpPath)
+			result.Error = fmt.Errorf("failed to stage existing poster aside: %w", mvErr)
+			result.Downloaded = false
+			return result, result.Error
+		}
+	}
 	if err := d.fs.Rename(cropTmpPath, destPath); err != nil {
+		if hadExisting {
+			_ = d.fs.Rename(backupPath, destPath)
+		}
 		_ = d.fs.Remove(cropTmpPath)
 		result.Error = fmt.Errorf("failed to install cropped poster: %w", err)
 		result.Downloaded = false
 		return result, result.Error
+	}
+	if hadExisting {
+		_ = d.fs.Remove(backupPath)
 	}
 
 	if info, err := d.fs.Stat(destPath); err == nil {
