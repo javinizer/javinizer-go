@@ -20,7 +20,7 @@ import {
 	type PosterPreviewOverride,
 	type PosterCropMetrics,
 } from '../review-utils';
-import { overlayFieldOverride, overlayPosterEdit, posterCropOverlayFromResponse, posterEditTargetFilePaths, type PosterEditOverlay } from './overlay-field-override';
+import { overlayFieldOverride, overlayPosterEdit, posterCropOverlayFromResponse, posterEditTargetFilePaths, applyFieldOverrideToEditedMovies, applyFieldOverrideToResults, type PosterEditOverlay } from './overlay-field-override';
 import { buildMovieToSave } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
@@ -349,6 +349,9 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 
 	// overlayFieldOverride is imported from ./overlay-field-override so it can be
 	// unit-tested independently (the .svelte.ts module can't export locals).
+	// applyFieldOverrideToResults / applyFieldOverrideToEditedMovies fan the
+	// override out to every part of the movie (server-side fanout reference:
+	// ApplyFieldOverride → FindFilePathsForMovieID).
 
 	const fieldOverrideMutation = createMutation(() => ({
 		mutationFn: async ({
@@ -367,33 +370,21 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			if (currentJob && data.movie) {
 				const updatedJob: BatchJobResponse = {
 					...currentJob,
-					results: { ...currentJob.results },
+					results: applyFieldOverrideToResults(currentJob.results ?? {}, resultId, data),
 				};
-				for (const [filePath, result] of Object.entries(updatedJob.results)) {
-					const r = result as FileResult;
-					if (r.result_id === resultId) {
-						updatedJob.results[filePath] = {
-							...r,
-							movie: data.movie,
-							field_sources: data.field_sources ?? r.field_sources,
-							actress_sources: data.actress_sources ?? r.actress_sources,
-						};
-					}
-				}
 				deps.skipJobSync();
 				deps.setJob(updatedJob);
 
-				// Overlay the overridden field onto any in-flight edit so a subsequent
-				// Save doesn't clobber the override (and unsaved edits to other fields survive).
-				const editedMovies = deps.getEditedMovies();
-				for (const [filePath, movie] of editedMovies) {
-					const editedResultId = currentJob.results?.[filePath]?.result_id;
-					if (editedResultId === resultId && data.movie) {
-						const merged: Movie = { ...movie };
-						overlayFieldOverride(merged, field, data.movie);
-						editedMovies.set(filePath, merged);
-					}
-				}
+				// Overlay the overridden field onto any in-flight edits for every
+				// part of the movie so a subsequent Save doesn't clobber the override
+				// (and unsaved edits to other fields survive per part).
+				applyFieldOverrideToEditedMovies(
+					deps.getEditedMovies(),
+					currentJob.results ?? {},
+					resultId,
+					field,
+					data.movie,
+				);
 			}
 			deps.toastSuccess(m.review_field_replaced({ field, source }));
 			void invalidateJobQueries();

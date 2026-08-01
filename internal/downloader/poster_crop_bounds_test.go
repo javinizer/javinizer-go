@@ -723,6 +723,53 @@ func TestDownloadPoster_TruncatedDownloadDoesNotShipAsPoster(t *testing.T) {
 	require.False(t, result.Downloaded)
 }
 
+// failInstallAndRestoreRenameFs simulates a sharing lock / permission error
+// that blocks BOTH the crop-stage install rename and the .bak rollback rename.
+type failInstallAndRestoreRenameFs struct {
+	afero.Fs
+}
+
+func (f *failInstallAndRestoreRenameFs) Rename(oldPath, newPath string) error {
+	if strings.HasSuffix(oldPath, ".crop.tmp") || strings.HasSuffix(oldPath, ".bak") {
+		return fmt.Errorf("forced rename failure (sharing lock)")
+	}
+	return f.Fs.Rename(oldPath, newPath)
+}
+
+func TestDownloadPoster_FailedInstallRestoreFailureSurfaces(t *testing.T) {
+	srv := twoToneCoverServer(t)
+
+	fs := &failInstallAndRestoreRenameFs{Fs: afero.NewMemMapFs()}
+	tmpDir := "/out"
+	require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
+
+	oldBytes := []byte("pre-existing valid poster")
+	dest := filepath.Join(tmpDir, "IPX-535-poster.jpg")
+	require.NoError(t, afero.WriteFile(fs.Fs, dest, oldBytes, 0o644))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	d := NewDownloader(http.DefaultClient, fs, &Config{
+		DownloadPoster:    true,
+		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+	}, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to install cropped poster")
+	assert.Contains(t, err.Error(), "poster rollback failed",
+		"a failed .bak restore must surface — the destination could not be recovered")
+	require.False(t, result.Downloaded)
+
+	exists, statErr := afero.Exists(fs, dest)
+	require.NoError(t, statErr)
+	assert.False(t, exists, "both renames failed: the destination is expectedly absent")
+	got, readErr := afero.ReadFile(fs.Fs, dest+".bak")
+	require.NoError(t, readErr, "the only surviving copy must remain stranded in .bak, not destroyed")
+	assert.Equal(t, oldBytes, got)
+}
+
 func TestDownloadPoster_ManualCropOverwritesExistingPoster(t *testing.T) {
 	srv := twoToneCoverServer(t)
 	tmpDir := t.TempDir()

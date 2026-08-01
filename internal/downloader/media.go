@@ -230,11 +230,13 @@ func (d *Downloader) downloadAndCropPoster(ctx context.Context, posterURL, destP
 		}
 	}
 	if err := d.fs.Rename(cropTmpPath, destPath); err != nil {
+		result.Error = fmt.Errorf("failed to install cropped poster: %w", err)
 		if hadExisting {
-			_ = d.fs.Rename(backupPath, destPath)
+			if restoreErr := d.fs.Rename(backupPath, destPath); restoreErr != nil {
+				result.Error = errors.Join(result.Error, fmt.Errorf("poster rollback failed: %w", restoreErr))
+			}
 		}
 		_ = d.fs.Remove(cropTmpPath)
-		result.Error = fmt.Errorf("failed to install cropped poster: %w", err)
 		result.Downloaded = false
 		return result, result.Error
 	}

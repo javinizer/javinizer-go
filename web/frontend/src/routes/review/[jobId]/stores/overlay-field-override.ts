@@ -1,4 +1,4 @@
-import type { Movie, PosterCropBounds, PosterCropResponse } from '$lib/api/types';
+import type { FieldOverrideResponse, FileResult, Movie, PosterCropBounds, PosterCropResponse } from '$lib/api/types';
 
 export interface PosterEditOverlay {
 	poster_url?: string;
@@ -47,6 +47,52 @@ export function overlayPosterEdit(movie: Movie, edit: PosterEditOverlay): Movie 
 		should_crop_poster: edit.should_crop_poster,
 		poster_crop_bounds: edit.poster_crop_bounds,
 	};
+}
+
+// The field-override endpoint applies the override to EVERY part of a
+// multipart movie server-side (ApplyFieldOverride iterates
+// FindFilePathsForMovieID), but the response carries only the edited part's
+// movie. applyFieldOverrideToResults mirrors that movie onto every result of
+// the same movie so sibling part entries never retain the pre-override state —
+// otherwise the next whole-movie Save resubmits a stale snapshot that
+// updateBatchMovie fans back across all parts, silently undoing the override.
+export function applyFieldOverrideToResults(
+	results: Record<string, FileResult>,
+	resultId: string,
+	response: FieldOverrideResponse,
+): Record<string, FileResult> {
+	if (!response.movie) return results;
+	const targets = new Set(posterEditTargetFilePaths(results, resultId));
+	const updated: Record<string, FileResult> = { ...results };
+	for (const [filePath, result] of Object.entries(updated)) {
+		if (!targets.has(filePath)) continue;
+		updated[filePath] = {
+			...result,
+			movie: response.movie,
+			field_sources: response.field_sources ?? result.field_sources,
+			actress_sources: response.actress_sources ?? result.actress_sources,
+		};
+	}
+	return updated;
+}
+
+// applyFieldOverrideToEditedMovies overlays ONLY the overridden field (plus
+// its synchronized poster state) onto pending edits for every part of the
+// movie — unrelated pending edits on sibling parts survive untouched.
+export function applyFieldOverrideToEditedMovies(
+	editedMovies: Map<string, Movie>,
+	results: Record<string, FileResult>,
+	resultId: string,
+	field: string,
+	src: Movie,
+): void {
+	const targets = new Set(posterEditTargetFilePaths(results, resultId));
+	for (const [filePath, movie] of editedMovies) {
+		if (!targets.has(filePath)) continue;
+		const merged: Movie = { ...movie };
+		overlayFieldOverride(merged, field, src);
+		editedMovies.set(filePath, merged);
+	}
 }
 
 export function overlayFieldOverride(target: Movie, field: string, src: Movie): void {
