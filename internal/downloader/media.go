@@ -4,11 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"image"
 	"path/filepath"
 	"sync"
-
-	"github.com/spf13/afero"
 
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -91,9 +88,9 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 				scraperWantedCrop = *movie.Poster.OriginalShouldCropPoster
 			}
 			if !scraperWantedCrop {
-				if probeErr := probeDecodableImage(d.fs, srcPath); probeErr != nil {
-					return fmt.Errorf("downloaded poster for %s is not a decodable image: %w", movie.ID, probeErr)
-				}
+				// No probe needed: geometry errors only surface after the image
+				// decoded successfully (CropPosterWithBounds decodes before
+				// validating bounds), so srcPath is known-good here.
 				logging.Warnf("stored crop bounds %+v invalid for poster of %s: %v - saving image uncropped", *b, movie.ID, err)
 				return d.fs.Rename(srcPath, outPath)
 			}
@@ -113,18 +110,6 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
 		return imageutil.CropPosterFromCover(d.fs, srcPath, outPath, d.config.MaxPosterHeight)
 	})
-}
-
-func probeDecodableImage(fs afero.Fs, path string) error {
-	f, err := fs.Open(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	// Full decode, not DecodeConfig: a header-valid but body-truncated image
-	// must not be renamed into place as the final poster.
-	_, _, err = image.Decode(f)
-	return err
 }
 
 // downloadAndCropPoster downloads posterURL to a staging file, applies cropFn

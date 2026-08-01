@@ -248,6 +248,63 @@ func (l *limitedWriteFile) Write(p []byte) (int, error) {
 	return n, err
 }
 
+func TestDownloadPoster_DownloadFailureInsideCropPipeline(t *testing.T) {
+	tmpDir := t.TempDir()
+	movie := createTestMovie()
+	movie.Poster.PosterURL = "http://127.0.0.1:1/never.jpg"
+	movie.Poster.ShouldCropPoster = false
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	d := newPosterTestDownloader(&Config{DownloadPoster: true})
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.Error(t, err, "a failed download inside the crop pipeline must fail the poster step")
+	require.False(t, result.Downloaded)
+
+	// No stale staging may survive behind.
+	entries, readErr := os.ReadDir(tmpDir)
+	require.NoError(t, readErr)
+	for _, e := range entries {
+		require.False(t, strings.Contains(e.Name(), "IPX-535-poster.jpg"), "stale stage left behind: %s", e.Name())
+	}
+}
+
+// failRenameFs forces failure when installing the crop stage to the final
+// destination (e.g. Windows rename-to-existing or cross-device moves).
+type failRenameFs struct {
+	afero.Fs
+}
+
+func (f *failRenameFs) Rename(oldPath, newPath string) error {
+	if strings.HasSuffix(oldPath, ".crop.tmp") {
+		return fmt.Errorf("forced install rename failure")
+	}
+	return f.Fs.Rename(oldPath, newPath)
+}
+
+func TestDownloadPoster_InstallRenameFailureSurfaces(t *testing.T) {
+	srv := twoToneCoverServer(t)
+
+	fs := &failRenameFs{Fs: afero.NewMemMapFs()}
+	tmpDir := "/out"
+	require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	d := NewDownloader(http.DefaultClient, fs, &Config{
+		DownloadPoster:    true,
+		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+	}, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.Error(t, err, "a failed install rename must surface as a poster failure")
+	require.False(t, result.Downloaded)
+
+	exists, statErr := afero.Exists(fs, filepath.Join(tmpDir, "IPX-535-poster.jpg.crop.tmp"))
+	require.NoError(t, statErr)
+	assert.False(t, exists, "crop stage must be cleaned up after a failed install")
+}
+
 func TestDownloadPoster_FailedCropLeavesExistingPosterIntact(t *testing.T) {
 	srv := twoToneCoverServer(t)
 
@@ -351,13 +408,6 @@ func TestDownloadPoster_TruncatedDownloadDoesNotShipAsPoster(t *testing.T) {
 	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
 	require.Error(t, err, "a header-valid but body-truncated image must not be renamed into place")
 	require.False(t, result.Downloaded)
-}
-
-func TestProbeDecodableImage_OpenError(t *testing.T) {
-	// A missing file must surface the open error (the caller then fails the
-	// poster step instead of renaming a phantom file into place).
-	err := probeDecodableImage(afero.NewMemMapFs(), "/does/not/exist.jpg")
-	require.Error(t, err)
 }
 
 func TestDownloadPoster_ManualCropOverwritesExistingPoster(t *testing.T) {
