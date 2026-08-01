@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -131,6 +132,59 @@ func TestDownloadPoster_TruncatedDownloadDoesNotShipAsPoster(t *testing.T) {
 	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
 	require.Error(t, err, "a header-valid but body-truncated image must not be renamed into place")
 	require.False(t, result.Downloaded)
+}
+
+func TestProbeDecodableImage_OpenError(t *testing.T) {
+	// A missing file must surface the open error (the caller then fails the
+	// poster step instead of renaming a phantom file into place).
+	err := probeDecodableImage(afero.NewMemMapFs(), "/does/not/exist.jpg")
+	require.Error(t, err)
+}
+
+func TestDownloadPoster_ManualCropOverwritesExistingPoster(t *testing.T) {
+	srv := twoToneCoverServer(t)
+	tmpDir := t.TempDir()
+
+	// A poster already on disk from a previous organize/update must be replaced
+	// by the user's explicit crop, not silently kept.
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "IPX-535-poster.jpg"), []byte("old poster"), 0o644))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.ShouldCropPoster = false
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	d := newPosterTestDownloader(&Config{DownloadPoster: true})
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.NoError(t, err)
+	require.True(t, result.Downloaded)
+
+	img := decodePosterImage(t, result.LocalPath)
+	b := img.Bounds()
+	assert.Equal(t, 400, b.Dx(), "existing poster must be replaced by the manual crop")
+	assert.Equal(t, 600, b.Dy())
+	r, _, bl, _ := img.At(b.Min.X+b.Dx()/2, b.Min.Y+b.Dy()/2).RGBA()
+	assert.Greater(t, r, bl)
+}
+
+func TestDownloadPoster_ExistingPosterWithoutBoundsStillSkipped(t *testing.T) {
+	srv := twoToneCoverServer(t)
+	tmpDir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "IPX-535-poster.jpg"), []byte("old poster"), 0o644))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.ShouldCropPoster = false
+
+	d := newPosterTestDownloader(&Config{DownloadPoster: true})
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.NoError(t, err)
+	require.False(t, result.Downloaded, "existing poster without manual bounds keeps the skip-existing behavior")
+
+	content, err := os.ReadFile(result.LocalPath)
+	require.NoError(t, err)
+	assert.Equal(t, "old poster", string(content))
 }
 
 func TestDownloadPoster_StaleCropBoundsOnPosterGradeSourceSaveWhole(t *testing.T) {

@@ -45,15 +45,19 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	tmplCtx := d.buildTemplateContext(movie, multipart)
 	destPath := d.pathResolver.ResolvePosterPath(movie, nil, true, tmplCtx, destDir)
 
-	// Check if poster already exists
-	if info, err := d.fs.Stat(destPath); err == nil {
-		// Already exists
-		return &DownloadResult{
-			Type:       MediaTypePoster,
-			LocalPath:  destPath,
-			Size:       info.Size(),
-			Downloaded: false,
-		}, nil
+	// Check if poster already exists. An explicit manual crop overrides this
+	// skip: the user just asked for a different poster, so the existing file
+	// must be replaced instead of kept.
+	if movie.Poster.CropBounds == nil {
+		if info, err := d.fs.Stat(destPath); err == nil {
+			// Already exists
+			return &DownloadResult{
+				Type:       MediaTypePoster,
+				LocalPath:  destPath,
+				Size:       info.Size(),
+				Downloaded: false,
+			}, nil
+		}
 	}
 
 	// A manual crop recorded in the review UI takes priority: reproduce the

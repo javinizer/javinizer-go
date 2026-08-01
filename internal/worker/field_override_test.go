@@ -122,6 +122,16 @@ func TestApplyFieldOverride_PosterSourceFieldsClearCropBounds(t *testing.T) {
 	}
 }
 
+func TestApplyFieldOverride_CoverOnlyChangeKeepsBoundsWhenPosterURLSet(t *testing.T) {
+	movie, prov := overrideFixture()
+	movie.Poster.PosterURL = "https://example.com/poster.jpg" // cover is not the poster source
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	require.NoError(t, applyFieldOverride(movie, prov, "cover_url", "dmm"))
+	assert.NotNil(t, movie.Poster.CropBounds,
+		"downloadPoster reads PosterURL when set — a cover-only override must not discard the crop")
+}
+
 func TestApplyFieldOverride_UnrelatedFieldKeepsCropBounds(t *testing.T) {
 	movie, prov := overrideFixture()
 	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}

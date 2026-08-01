@@ -145,8 +145,13 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		movie.Poster.CropBounds = nil // new source image invalidates a crop measured against the old one
 		setFieldSource("poster_url")
 	case "cover_url":
+		// The cover only feeds the poster pipeline when no poster URL is set —
+		// a fanart-only change must not discard a crop measured against the poster.
+		oldCover := movie.Poster.CoverURL
 		movie.Poster.CoverURL = result.CoverURL
-		movie.Poster.CropBounds = nil
+		if movie.Poster.PosterURL == "" && oldCover != result.CoverURL {
+			movie.Poster.CropBounds = nil
+		}
 		setFieldSource("cover_url")
 	case "trailer_url":
 		movie.TrailerURL = result.TrailerURL

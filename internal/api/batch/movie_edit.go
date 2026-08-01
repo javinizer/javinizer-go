@@ -90,7 +90,17 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// poster state directly and are unaffected).
 		if current.Movie != nil && movie.Poster.CropBounds != nil {
 			cm := current.Movie.Poster
-			if cm.PosterURL != movie.Poster.PosterURL || cm.CoverURL != movie.Poster.CoverURL || cm.ShouldCropPoster != movie.Poster.ShouldCropPoster {
+			// downloadPoster reads PosterURL ?? CoverURL — only those fields plus
+			// the crop decision can invalidate stored bounds; a fanart-only change
+			// (CoverURL while PosterURL is set) must not drop the user's crop.
+			oldSource, newSource := cm.PosterURL, movie.Poster.PosterURL
+			if oldSource == "" {
+				oldSource = cm.CoverURL
+			}
+			if newSource == "" {
+				newSource = movie.Poster.CoverURL
+			}
+			if oldSource != newSource || cm.ShouldCropPoster != movie.Poster.ShouldCropPoster {
 				movie.Poster.CropBounds = nil
 			}
 		}
@@ -118,6 +128,7 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				return
 			}
 		}
+		deps.GetJobStore().PersistJobByID(jobID)
 		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie)})
 	}
 }
@@ -193,6 +204,11 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
 			return
 		}
+
+		// Crop state lives only in the job envelope (CropBounds is deliberately
+		// not in the movies table) — persist immediately or a restart before
+		// Organize silently restores the pre-crop poster.
+		deps.GetJobStore().PersistJobByID(jobID)
 
 		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL}
 		if bounds != nil {
@@ -273,6 +289,7 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
 			return
 		}
+		deps.GetJobStore().PersistJobByID(jobID)
 
 		c.JSON(http.StatusOK, contracts.PosterFromURLResponse{
 			CroppedPosterURL: croppedURL,

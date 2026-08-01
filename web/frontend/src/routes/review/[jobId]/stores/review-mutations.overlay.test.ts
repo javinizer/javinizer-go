@@ -47,7 +47,7 @@ describe('overlayFieldOverride', () => {
 		expect(target.maker).toBe('New Maker');
 	});
 
-	it.each(['poster_url', 'cover_url', 'should_crop_poster'])(
+	it.each(['poster_url', 'should_crop_poster'])(
 		'%s override clears stale poster_crop_bounds',
 		(field) => {
 			const target = makeMovie({
@@ -58,6 +58,27 @@ describe('overlayFieldOverride', () => {
 			expect(target.poster_crop_bounds).toBeNull();
 		},
 	);
+
+	it('cover_url override keeps bounds when poster_url is set (cover unused by poster pipeline)', () => {
+		const target = makeMovie({
+			poster_url: 'https://example.com/poster.jpg',
+			cover_url: 'old-cover',
+			poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
+		});
+		overlayFieldOverride(target, 'cover_url', makeMovie({ cover_url: 'new-cover' }));
+		expect(target.cover_url).toBe('new-cover');
+		expect(target.poster_crop_bounds).toEqual({ x: 0, y: 0, width: 400, height: 600 });
+	});
+
+	it('cover_url override clears bounds when cover is the poster source (no poster_url)', () => {
+		const target = makeMovie({
+			poster_url: undefined,
+			cover_url: 'old-cover',
+			poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
+		});
+		overlayFieldOverride(target, 'cover_url', makeMovie({ cover_url: 'new-cover' }));
+		expect(target.poster_crop_bounds).toBeNull();
+	});
 
 	it('title override preserves poster_crop_bounds', () => {
 		const target = makeMovie({

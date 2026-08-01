@@ -64,12 +64,21 @@ export function overlayFieldOverride(target: Movie, field: string, src: Movie): 
 			target.release_year = src.release_year;
 			break;
 		case 'poster_url':
-		case 'cover_url':
 		case 'should_crop_poster':
 			(target as unknown as Record<string, unknown>)[field] =
 				(src as unknown as Record<string, unknown>)[field];
 			target.poster_crop_bounds = null;
 			break;
+		case 'cover_url': {
+			// Cover only feeds the poster pipeline when no poster URL is set.
+			const coverIsPosterSource = !target.poster_url;
+			const oldCover = target.cover_url;
+			target.cover_url = src.cover_url;
+			if (coverIsPosterSource && oldCover !== src.cover_url) {
+				target.poster_crop_bounds = null;
+			}
+			break;
+		}
 		default:
 			(target as unknown as Record<string, unknown>)[field] =
 				(src as unknown as Record<string, unknown>)[field];
