@@ -1,6 +1,7 @@
 package imageutil
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -79,6 +80,12 @@ func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string, maxPosterHei
 	return cropAndWritePoster(fs, img, posterPath, left, top, right, bottom, maxPosterHeight)
 }
 
+// ErrInvalidCropBounds marks crop-geometry validation failures (out of range
+// or degenerate rectangles) so callers can distinguish "the stored bounds no
+// longer fit this image" from I/O or decode failures, which must not be
+// silently recovered.
+var ErrInvalidCropBounds = errors.New("invalid crop bounds")
+
 // CropPosterWithBounds crops a cover image using explicit pixel bounds.
 // Bounds are in source-image pixels and must be within the image dimensions.
 // If maxPosterHeight > 0 and the cropped result exceeds it, the output is
@@ -90,12 +97,12 @@ func CropPosterWithBounds(fs afero.Fs, coverPath, posterPath string, left, top, 
 	}
 
 	if left < 0 || top < 0 || right > width || bottom > height {
-		return fmt.Errorf("crop bounds out of range: left=%d top=%d right=%d bottom=%d image=%dx%d",
-			left, top, right, bottom, width, height)
+		return fmt.Errorf("crop bounds out of range: left=%d top=%d right=%d bottom=%d image=%dx%d: %w",
+			left, top, right, bottom, width, height, ErrInvalidCropBounds)
 	}
 	if left >= right || top >= bottom {
-		return fmt.Errorf("invalid crop bounds: left=%d top=%d right=%d bottom=%d",
-			left, top, right, bottom)
+		return fmt.Errorf("invalid crop bounds shape: left=%d top=%d right=%d bottom=%d: %w",
+			left, top, right, bottom, ErrInvalidCropBounds)
 	}
 
 	return cropAndWritePoster(fs, img, posterPath, left, top, right, bottom, maxPosterHeight)

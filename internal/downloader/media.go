@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"path/filepath"
@@ -69,34 +70,35 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		lock := mu.(*sync.Mutex)
 		lock.Lock()
 		defer lock.Unlock()
-		return d.downloadAndCropPoster(ctx, posterURL, destPath, func(tempPath string) error {
-			err := imageutil.CropPosterWithBounds(d.fs, tempPath, destPath, b.X, b.Y, b.X+b.Width, b.Y+b.Height, b.MaxPosterHeight)
+		return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
+			err := imageutil.CropPosterWithBounds(d.fs, srcPath, outPath, b.X, b.Y, b.X+b.Width, b.Y+b.Height, b.MaxPosterHeight)
 			if err == nil {
 				return nil
 			}
+			// Only geometry failures fall back; decode/I/O errors must fail the step.
+			if !errors.Is(err, imageutil.ErrInvalidCropBounds) {
+				return err
+			}
+			// The bounds failure means the apply-time image does not match
+			// the proportions the user cropped against (e.g. CDN served a
+			// different resolution). OriginalShouldCropPoster (scrape-time
+			// snapshot) takes precedence over ShouldCropPoster, which the
+			// crop flow itself forced to false. A scraper-intended cover
+			// degrades to the default crop; a poster-grade source is kept
+			// whole rather than butchered by a wrong auto-crop.
 			scraperWantedCrop := movie.Poster.ShouldCropPoster
 			if movie.Poster.OriginalShouldCropPoster != nil {
 				scraperWantedCrop = *movie.Poster.OriginalShouldCropPoster
 			}
 			if !scraperWantedCrop {
-				if probeErr := probeDecodableImage(d.fs, tempPath); probeErr != nil {
+				if probeErr := probeDecodableImage(d.fs, srcPath); probeErr != nil {
 					return fmt.Errorf("downloaded poster for %s is not a decodable image: %w", movie.ID, probeErr)
 				}
-				// The bounds failure means the apply-time image does not match
-				// the proportions the user cropped against (e.g. CDN served a
-				// different resolution). OriginalShouldCropPoster (scrape-time
-				// snapshot) takes precedence over ShouldCropPoster, which the
-				// crop flow itself forced to false. A scraper-intended cover
-				// degrades to the default crop; a poster-grade source is kept
-				// whole rather than butchered by a wrong auto-crop.
 				logging.Warnf("stored crop bounds %+v invalid for poster of %s: %v - saving image uncropped", *b, movie.ID, err)
-				// Remove first: os.Rename refuses to replace an existing
-				// destination on non-Unix platforms.
-				_ = d.fs.Remove(destPath)
-				return d.fs.Rename(tempPath, destPath)
+				return d.fs.Rename(srcPath, outPath)
 			}
 			logging.Warnf("stored crop bounds %+v invalid for poster of %s: %v - falling back to default crop", *b, movie.ID, err)
-			return imageutil.CropPosterFromCover(d.fs, tempPath, destPath, d.config.MaxPosterHeight)
+			return imageutil.CropPosterFromCover(d.fs, srcPath, outPath, d.config.MaxPosterHeight)
 		})
 	}
 
@@ -108,8 +110,8 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	// Low-quality poster - download and crop from cover
-	return d.downloadAndCropPoster(ctx, posterURL, destPath, func(tempPath string) error {
-		return imageutil.CropPosterFromCover(d.fs, tempPath, destPath, d.config.MaxPosterHeight)
+	return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
+		return imageutil.CropPosterFromCover(d.fs, srcPath, outPath, d.config.MaxPosterHeight)
 	})
 }
 
@@ -125,28 +127,42 @@ func probeDecodableImage(fs afero.Fs, path string) error {
 	return err
 }
 
-// downloadAndCropPoster downloads posterURL to a temp file, applies cropFn to
-// produce destPath, and cleans up the temp file.
-func (d *Downloader) downloadAndCropPoster(ctx context.Context, posterURL, destPath string, cropFn func(tempPath string) error) (*DownloadResult, error) {
+// downloadAndCropPoster downloads posterURL to a staging file, applies cropFn
+// to produce a separate crop stage, and only then replaces destPath. Stale
+// staging files from an interrupted run are cleared up front so they cannot be
+// mistaken for a completed download; a failed crop never destroys a
+// pre-existing poster at destPath.
+func (d *Downloader) downloadAndCropPoster(ctx context.Context, posterURL, destPath string, cropFn func(srcPath, outPath string) error) (*DownloadResult, error) {
 	tempPath := destPath + ".full.tmp"
+	cropTmpPath := destPath + ".crop.tmp"
+	_ = d.fs.Remove(tempPath)
+	_ = d.fs.Remove(cropTmpPath)
+
 	result, err := d.download(ctx, posterURL, tempPath, MediaTypePoster)
 	if err != nil || !result.Downloaded {
 		_ = d.fs.Remove(tempPath) // Clean up if exists
 		return result, err
 	}
 
-	// Crop the poster from the downloaded image
-	if err := cropFn(tempPath); err != nil {
-		_ = d.fs.Remove(tempPath) // Clean up temp file
+	if err := cropFn(tempPath, cropTmpPath); err != nil {
+		_ = d.fs.Remove(tempPath)
+		_ = d.fs.Remove(cropTmpPath)
 		result.Error = fmt.Errorf("failed to crop poster: %w", err)
 		result.Downloaded = false
 		return result, result.Error
 	}
-
-	// Clean up the temporary full image
 	_ = d.fs.Remove(tempPath)
 
-	// Update result with final path and size
+	// Install only a complete image: remove the destination first because
+	// os.Rename refuses to replace an existing file on non-Unix platforms.
+	_ = d.fs.Remove(destPath)
+	if err := d.fs.Rename(cropTmpPath, destPath); err != nil {
+		_ = d.fs.Remove(cropTmpPath)
+		result.Error = fmt.Errorf("failed to install cropped poster: %w", err)
+		result.Downloaded = false
+		return result, result.Error
+	}
+
 	if info, err := d.fs.Stat(destPath); err == nil {
 		result.LocalPath = destPath
 		result.Size = info.Size()

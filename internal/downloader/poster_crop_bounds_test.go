@@ -189,6 +189,93 @@ func decodePosterImageFs(t *testing.T, fs afero.Fs, path string) image.Image {
 	return img
 }
 
+func TestDownloadPoster_StaleStagingTempDoesNotShortCircuitCrop(t *testing.T) {
+	srv := twoToneCoverServer(t)
+	tmpDir := t.TempDir()
+
+	// A crashed run can leave <dest>.full.tmp behind; d.download would mistake
+	// it for a completed download and the crop would never run.
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "IPX-535-poster.jpg.full.tmp"), []byte("stale stage"), 0o644))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	d := newPosterTestDownloader(&Config{DownloadPoster: true})
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.NoError(t, err)
+	require.True(t, result.Downloaded, "stale staging file must not short-circuit the manual crop")
+
+	img := decodePosterImage(t, result.LocalPath)
+	assert.Equal(t, 400, img.Bounds().Dx())
+	assert.Equal(t, 600, img.Bounds().Dy())
+}
+
+// ENOSPC fs: Create succeeds (truncating), then writes fail — simulates a disk
+// filling up mid-encode.
+type enospcFs struct {
+	afero.Fs
+	after int
+}
+
+func (f *enospcFs) Create(name string) (afero.File, error) {
+	base, err := f.Fs.Create(name)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasSuffix(name, "-poster.jpg") && !strings.HasSuffix(name, "-poster.jpg.crop.tmp") {
+		return base, nil
+	}
+	return &limitedWriteFile{File: base, remaining: f.after}, nil
+}
+
+type limitedWriteFile struct {
+	afero.File
+	remaining int
+}
+
+func (l *limitedWriteFile) Write(p []byte) (int, error) {
+	if len(p) > l.remaining {
+		var n int
+		if l.remaining > 0 {
+			n, _ = l.File.Write(p[:l.remaining])
+			l.remaining -= n
+		}
+		return n, fmt.Errorf("simulated ENOSPC")
+	}
+	n, err := l.File.Write(p)
+	l.remaining -= n
+	return n, err
+}
+
+func TestDownloadPoster_FailedCropLeavesExistingPosterIntact(t *testing.T) {
+	srv := twoToneCoverServer(t)
+
+	fs := &enospcFs{Fs: afero.NewMemMapFs(), after: 32}
+	tmpDir := "/out"
+	require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
+
+	oldBytes := []byte("pre-existing valid poster content")
+	dest := filepath.Join(tmpDir, "IPX-535-poster.jpg")
+	require.NoError(t, afero.WriteFile(fs.Fs, dest, oldBytes, 0o644))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	d := NewDownloader(http.DefaultClient, fs, &Config{
+		DownloadPoster:    true,
+		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+	}, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.Error(t, err, "failed write must surface as a poster failure")
+	require.False(t, result.Downloaded)
+
+	got, readErr := afero.ReadFile(fs.Fs, dest)
+	require.NoError(t, readErr)
+	assert.Equal(t, oldBytes, got, "a failed crop must not destroy the pre-existing poster")
+}
+
 func TestDownloadPoster_BoundsCarryMaxPosterHeight(t *testing.T) {
 	srv := twoToneCoverServer(t)
 	tmpDir := t.TempDir()
