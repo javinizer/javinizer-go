@@ -51,12 +51,24 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		URL:  posterURL,
 		Type: MediaTypePoster,
 	}
-	if overwriteExisting && dedup != nil {
-		if _, loaded := dedup.LoadOrStore(destPath, struct{}{}); loaded {
+	var reservation *downloadReservation
+	if overwriteExisting {
+		var skipped bool
+		var reservationErr error
+		reservation, skipped, reservationErr = acquireDownloadReservation(ctx, dedup, destPath)
+		if reservationErr != nil {
+			result.Error = reservationErr
+			result.Duration = time.Since(startTime)
+			return result, result.Error
+		}
+		if skipped {
 			result.Skipped = true
 			result.Duration = time.Since(startTime)
 			return result, nil
 		}
+		defer func() {
+			finishDownloadReservation(dedup, destPath, reservation, finalErr == nil)
+		}()
 	}
 
 	existed := false

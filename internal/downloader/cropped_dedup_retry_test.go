@@ -2,6 +2,8 @@ package downloader
 
 import (
 	"context"
+	"image"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -16,11 +18,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/organizer"
 )
 
-func TestDownloadPoster_DedupNonOwnerSkipsAfterCropOwnerFailure(t *testing.T) {
+func TestDownloadPoster_DedupNonOwnerRetriesAfterCropOwnerFailure(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		http.Error(w, "failed", http.StatusBadGateway)
+		if requests.Add(1) == 1 {
+			http.Error(w, "failed", http.StatusBadGateway)
+			return
+		}
+		img := image.NewRGBA(image.Rect(0, 0, 600, 400))
+		w.Header().Set("Content-Type", "image/jpeg")
+		require.NoError(t, jpeg.Encode(w, img, &jpeg.Options{Quality: 90}))
 	}))
 	defer server.Close()
 
@@ -34,7 +41,7 @@ func TestDownloadPoster_DedupNonOwnerSkipsAfterCropOwnerFailure(t *testing.T) {
 	assert.False(t, first.Downloaded)
 	second, secondErr := d.downloadPoster(context.Background(), movie, "/output", nil, true, dedup)
 	require.NoError(t, secondErr)
-	assert.True(t, second.Skipped)
-	assert.False(t, second.Downloaded)
-	assert.Equal(t, int32(1), requests.Load())
+	assert.False(t, second.Skipped)
+	assert.True(t, second.Downloaded)
+	assert.Equal(t, int32(2), requests.Load())
 }

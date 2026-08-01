@@ -31,12 +31,24 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		Downloaded: false,
 	}
 
-	if overwriteExisting && dedup != nil {
-		if _, loaded := dedup.LoadOrStore(destPath, struct{}{}); loaded {
+	var reservation *downloadReservation
+	if overwriteExisting {
+		var skipped bool
+		var reservationErr error
+		reservation, skipped, reservationErr = acquireDownloadReservation(ctx, dedup, destPath)
+		if reservationErr != nil {
+			result.Error = reservationErr
+			result.Duration = time.Since(startTime)
+			return result, result.Error
+		}
+		if skipped {
 			result.Skipped = true
 			result.Duration = time.Since(startTime)
 			return result, nil
 		}
+		defer func() {
+			finishDownloadReservation(dedup, destPath, reservation, finalErr == nil)
+		}()
 	}
 
 	if err := validateURLScheme(url); err != nil {
@@ -157,6 +169,46 @@ func resolveDownloadOptions(options []any) (bool, *sync.Map) {
 		}
 	}
 	return overwriteExisting, dedup
+}
+
+type downloadReservation struct {
+	done    chan struct{}
+	success bool
+}
+
+func acquireDownloadReservation(ctx context.Context, dedup *sync.Map, destPath string) (*downloadReservation, bool, error) {
+	if dedup == nil {
+		return nil, false, nil
+	}
+	for {
+		value, loaded := dedup.LoadOrStore(destPath, &downloadReservation{done: make(chan struct{})})
+		if !loaded {
+			return value.(*downloadReservation), false, nil
+		}
+		reservation, ok := value.(*downloadReservation)
+		if !ok {
+			return nil, true, nil
+		}
+		select {
+		case <-reservation.done:
+			if reservation.success {
+				return nil, true, nil
+			}
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		}
+	}
+}
+
+func finishDownloadReservation(dedup *sync.Map, destPath string, reservation *downloadReservation, success bool) {
+	if reservation == nil {
+		return
+	}
+	reservation.success = success
+	if !success {
+		dedup.Delete(destPath)
+	}
+	close(reservation.done)
 }
 
 func uniqueTempPath(destPath, suffix string) string {
