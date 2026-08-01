@@ -125,22 +125,28 @@
 
 	async function startSync(scope: 'missing' | 'selected') {
 		if (syncDestroyed || syncRestoring || syncStarting) return;
-		if (syncJob && !isActressSyncTerminal(syncJob)) {
+		if (scope === 'missing' && syncJob && !isActressSyncTerminal(syncJob)) {
 			showSyncModal = true;
 			if (!syncTimer) startPolling();
 			return;
 		}
 		syncStarting = true;
 		try {
-			if (await showNextSyncJob()) return;
+			if (scope === 'missing' && await showNextSyncJob()) return;
 			if (syncDestroyed) return;
-			if (syncJob && !isActressSyncTerminal(syncJob)) {
+			if (scope === 'missing' && syncJob && !isActressSyncTerminal(syncJob)) {
 				showSyncModal = true;
 				if (!syncTimer) startPolling();
 				return;
 			}
 			const response = await apiClient.createActressSyncJob({ scope, actress_ids: scope === 'selected' ? store.selectedIds : undefined });
 			if (syncDestroyed) return;
+			if (scope === 'selected' && syncJob && (!isActressSyncTerminal(syncJob) || syncQueue.length > 0)) {
+				mergeActiveSyncJobs([response.job]);
+				showSyncModal = true;
+				if (!syncTimer) startPolling();
+				return;
+			}
 			syncJob = response.job;
 			syncTasks = [];
 			showSyncModal = true;
