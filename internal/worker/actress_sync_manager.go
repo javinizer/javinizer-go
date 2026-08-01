@@ -284,6 +284,20 @@ func (m *ActressSyncManager) canonicalRetryPending() bool {
 	return time.Now().UnixNano() < m.canonicalRetryUntil.Load()
 }
 
+func mergeActressesWithSourceCallback(ctx context.Context, repo *database.ActressRepository, task *models.ActressSyncTask) func(uint, uint, models.Actress) (*database.ActressMergeResult, error) {
+	return func(targetID, sourceID uint, expectedSource models.Actress) (*database.ActressMergeResult, error) {
+		return mergeActressesWithSourceForTask(ctx, repo, task, targetID, sourceID, expectedSource)
+	}
+}
+
+func mergeActressesWithSourceForTask(ctx context.Context, repo *database.ActressRepository, task *models.ActressSyncTask, targetID, sourceID uint, expectedSource models.Actress) (*database.ActressMergeResult, error) {
+	merged, mergeErr := repo.MergeForSyncTaskWithSource(ctx, targetID, sourceID, nil, expectedSource, task.ID, task.LeaseToken)
+	if mergeErr == nil {
+		task.ActressID = &targetID
+	}
+	return merged, mergeErr
+}
+
 func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *models.ActressSyncTask, timeout time.Duration, registry *scraperutil.ScraperRegistry) {
 	defer m.wg.Done()
 	defer func() { m.active.Add(-1); m.signal() }()
@@ -313,13 +327,7 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 		Revalidate:         job.Scope == "selected",
 		PriorUpdatedFields: append([]string(nil), task.UpdatedFields...),
 
-		MergeActressesWithSource: func(targetID, sourceID uint, expectedSource models.Actress) (*database.ActressMergeResult, error) {
-			merged, mergeErr := m.deps.ActressRepo.MergeForSyncTaskWithSource(ctx, targetID, sourceID, nil, expectedSource, task.ID, task.LeaseToken)
-			if mergeErr == nil {
-				task.ActressID = &targetID
-			}
-			return merged, mergeErr
-		},
+		MergeActressesWithSource: mergeActressesWithSourceCallback(ctx, m.deps.ActressRepo, task),
 		MergeActressesWithTargetSource: func(targetID, sourceID uint, expectedTarget, expectedSource models.Actress) (*database.ActressMergeResult, error) {
 			merged, mergeErr := m.deps.ActressRepo.MergeForSyncTaskWithTargetAndSource(ctx, targetID, sourceID, nil, expectedTarget, expectedSource, task.ID, task.LeaseToken)
 			if mergeErr == nil {
