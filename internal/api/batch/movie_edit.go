@@ -73,6 +73,23 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		// Serialize the poster-source snapshot → refresh/cleanup → persist
+		// sequence below against the field-override path
+		// (jobEditorImpl.ApplyFieldOverride): an interleaved pair of
+		// concurrent source-changing edits can refresh the cached -full.jpg
+		// from one image while persisting the other's URL, leaving a
+		// subsequent manual crop measured against the wrong image. Held from
+		// here across the refresh, the multipart UpdateMovie loop (including
+		// compensation) and the final PersistJobByID; the deferred release
+		// covers every error/return path. Keyed on the same movie ID the
+		// temp poster cache and the override path use.
+		posterLockKey := current.FileMatchInfo.MovieID
+		if current.Movie != nil && current.Movie.ID != "" {
+			posterLockKey = current.Movie.ID
+		}
+		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterLockKey)
+		defer releasePosterLock()
+
 		// Convert once and re-derive display_title so a title edit is reflected
 		// immediately in persisted state and any client that renders display_title
 		// (grid cards, metadata headers) without waiting for organize. Title is

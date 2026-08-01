@@ -454,7 +454,10 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // envelope — the handler calls PersistJobByID after this method succeeds.
 // Raw ScraperResults round-trip through the envelope (json:"scraper_results").
 // A per-resultID mutex serializes concurrent overrides on the same result so
-// the read-clone-mutate-write sequence cannot lose an earlier override.
+// the read-clone-mutate-write sequence cannot lose an earlier override, and a
+// shared per-(jobID, movieID) lock (AcquirePosterSourceLock) additionally
+// serializes the poster-source refresh+persist sequence against the
+// whole-movie PATCH handler.
 //
 // A poster_url override — or a cover_url override when the movie has no
 // PosterURL (the downloader falls back to CoverURL as the poster source) —
@@ -478,6 +481,25 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	result, filePath, found := je.store.GetFileResultByResultID(resultID)
 	if !found || result == nil || result.Movie == nil {
 		return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
+	}
+	// Poster-source overrides refresh the cached poster assets before
+	// persisting (refreshOverriddenPosterSource below): serialize that
+	// snapshot→refresh/cleanup→UpdateMovie sequence against the whole-movie
+	// PATCH path (internal/api/batch/movie_edit.go's updateBatchMovie) via
+	// the shared per-(jobID, movieID) lock, so an interleaved pair cannot
+	// persist one request's URL while the cached -full.jpg is the other's
+	// image. Taken AFTER the per-resultID overrideMu — the PATCH path takes
+	// only this lock — so acquisition order is consistent and cannot
+	// deadlock. cover_url is included even behind an explicit poster URL
+	// (where the refresh is a no-op) so both paths always contend on the
+	// same key for poster-source fields.
+	if fieldKey == "poster_url" || fieldKey == "cover_url" {
+		movieID := result.Movie.ID
+		if movieID == "" {
+			movieID = result.FileMatchInfo.MovieID
+		}
+		releasePosterLock := AcquirePosterSourceLock(je.jobID, movieID)
+		defer releasePosterLock()
 	}
 	prov := je.store.GetProvenance(filePath)
 	if prov == nil {
