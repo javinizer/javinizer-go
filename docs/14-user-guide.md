@@ -104,7 +104,20 @@ The web UI (`javinizer web`) drives the batch workflows through a few routes:
 
 ### Browse (`/browse`)
 
-The primary scraping workspace (the **Scrape** item in the navigation; the post-login landing page is the dashboard at `/`). Select files, then build one explicit action plan. The operation never changes implicitly because a destination happens to match a source directory.\n\n| Video operation | Destination | NFO | Media | Existing metadata |\n|---|---|---|---|---|\n| **Organize into another location** | Required | Write or skip | Missing or skip | Scraper result |\n| **Rename in place** | Not used | Write or skip | Missing or skip | Scraper result |\n| **Rename video file only** | Not used | Write or skip | Missing or skip | Scraper result |\n| **Leave video files in place** | Not used | Write or skip | Missing, replace, or skip | Preset or custom scalar/array merge |\n\nThe “This operation will…” summary and sticky compact summary are generated from that same plan. A leave-in-place plan cannot skip both NFO and media because that would have no output; explicit rename operations may skip both sidecar outputs because renaming is still an effect.\n\n- **Provide IDs or URLs manually** carries the complete read-only plan to `/manual`; only per-file IDs/URLs, force refresh, and scraper selection remain editable there.\n- **Force refresh** controls scraper cache usage and does not change output policy.\n- **Manual scraper selection** controls scrape sources and does not change the apply plan.
+The primary scraping workspace (the **Scrape** item in the navigation; the post-login landing page is the dashboard at `/`). Select files, then build one explicit action plan. The operation never changes implicitly because a destination happens to match a source directory.
+
+| Video operation | Destination | NFO | Media | Existing metadata |
+|---|---|---|---|---|
+| **Organize into another location** | Required | Write or skip | Missing or skip | Scraper result |
+| **Rename in place** | Not used | Write or skip | Missing or skip | Scraper result |
+| **Rename video file only** | Not used | Write or skip | Missing or skip | Scraper result |
+| **Leave video files in place** | Not used | Write or skip | Missing, replace, or skip | Preset or custom scalar/array merge |
+
+The “This operation will…” summary and sticky compact summary are generated from that same plan. A leave-in-place plan cannot skip both NFO and media because that would have no output; explicit rename operations may skip both sidecar outputs because renaming is still an effect.
+
+- **Provide IDs or URLs manually** carries the complete read-only plan to `/manual`; only per-file IDs/URLs, force refresh, and scraper selection remain editable there.
+- **Force refresh** controls scraper cache usage and does not change output policy.
+- **Manual scraper selection** controls scrape sources and does not change the apply plan.
 
 ### Manual Scrape (`/manual`)
 
