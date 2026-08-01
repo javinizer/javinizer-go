@@ -12,10 +12,11 @@ import (
 )
 
 type testMetadataResolver struct {
-	name     string
-	enabled  bool
-	metadata models.ActressInfo
-	calls    int
+	name          string
+	enabled       bool
+	scrapeActress *bool
+	metadata      models.ActressInfo
+	calls         int
 }
 
 func (m *testMetadataResolver) Name() string { return m.name }
@@ -24,8 +25,13 @@ func (m *testMetadataResolver) Search(context.Context, string) (*models.ScraperR
 }
 func (m *testMetadataResolver) GetURL(context.Context, string) (string, error) { return "", nil }
 func (m *testMetadataResolver) IsEnabled() bool                                { return m.enabled }
-func (m *testMetadataResolver) Config() *models.ScraperSettings                { return nil }
-func (m *testMetadataResolver) Close() error                                   { return nil }
+func (m *testMetadataResolver) Config() *models.ScraperSettings {
+	if m.scrapeActress == nil {
+		return nil
+	}
+	return &models.ScraperSettings{ScrapeActress: m.scrapeActress}
+}
+func (m *testMetadataResolver) Close() error { return nil }
 func (m *testMetadataResolver) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) models.ActressInfo {
 	m.calls++
 	return m.metadata
@@ -81,6 +87,26 @@ func TestEnrichActressesFromResolversGatedByScrapeActress(t *testing.T) {
 
 	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg)
 	assert.Zero(t, enriched)
+}
+
+func TestEnrichActressesFromResolversHonorsPerScraperOptOut(t *testing.T) {
+	disabled := false
+	enabled := true
+	disabledResolver := &testMetadataResolver{
+		name: "disabled", enabled: true, scrapeActress: &disabled,
+		metadata: models.ActressInfo{DMMID: 1, FirstName: "Disabled"},
+	}
+	enabledResolver := &testMetadataResolver{
+		name: "enabled", enabled: true, scrapeActress: &enabled,
+		metadata: models.ActressInfo{DMMID: 1, FirstName: "Enabled"},
+	}
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 1}}}
+
+	enriched := enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(disabledResolver, enabledResolver), &Config{ScrapeActress: true})
+	assert.Equal(t, 1, enriched)
+	assert.Zero(t, disabledResolver.calls)
+	assert.Equal(t, 1, enabledResolver.calls)
+	assert.Equal(t, "Enabled", movie.Actresses[0].FirstName)
 }
 
 func TestEnrichActressesFromResolversRepairsKnownInvalidThumbnail(t *testing.T) {
@@ -215,5 +241,5 @@ func TestEnrichActressesFromResolversHonorsPriority(t *testing.T) {
 	require.Equal(t, "Minnano", selected.Actresses[0].FirstName)
 }
 func TestCollectMetadataResolversSkipsNilInstances(t *testing.T) {
-	require.Empty(t, collectMetadataResolvers(newTestRegistry(nil), []string{"missing"}))
+	require.Empty(t, collectMetadataResolvers(newTestRegistry(nil), []string{"missing"}, &Config{ScrapeActress: true}))
 }

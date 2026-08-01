@@ -188,7 +188,7 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 	if len(priorityOverride) > 0 && len(priorityOverride[0]) > 0 {
 		priority = priorityOverride[0]
 	}
-	resolvers := collectMetadataResolvers(registry, priority)
+	resolvers := collectMetadataResolvers(registry, priority, cfg)
 	if len(resolvers) == 0 {
 		return 0
 	}
@@ -247,7 +247,7 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 	return enriched
 }
 
-func collectMetadataResolvers(registry ScraperInstanceResolver, priority []string) []models.ActressMetadataResolver {
+func collectMetadataResolvers(registry ScraperInstanceResolver, priority []string, cfg *Config) []models.ActressMetadataResolver {
 	instances := registry.GetInstancesByPriorityForInput(priority, "")
 	seen := make(map[string]struct{}, len(instances))
 	for _, instance := range instances {
@@ -266,7 +266,7 @@ func collectMetadataResolvers(registry ScraperInstanceResolver, priority []strin
 	}
 	resolvers := make([]models.ActressMetadataResolver, 0, len(instances))
 	for _, s := range instances {
-		if s == nil || !s.IsEnabled() {
+		if s == nil || !s.IsEnabled() || !s.Config().ShouldScrapeActress(cfg.ScrapeActress) {
 			continue
 		}
 		if r, ok := s.(models.ActressMetadataResolver); ok {
