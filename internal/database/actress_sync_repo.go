@@ -451,7 +451,7 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 			return err
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, false); err != nil {
+			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, false, sourceJob.CancelRequested); err != nil {
 				return err
 			}
 			continue
@@ -465,7 +465,7 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 				return err
 			}
 			jobIDs[targetTask.JobID] = struct{}{}
-			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, false); err != nil {
+			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, false, sourceJob.CancelRequested); err != nil {
 				return err
 			}
 			continue
@@ -481,12 +481,12 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 				return err
 			}
 			jobIDs[targetTask.JobID] = struct{}{}
-			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, false); err != nil {
+			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, false, sourceJob.CancelRequested); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, true); err != nil {
+		if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, true, sourceJob.CancelRequested); err != nil {
 			return err
 		}
 	}
@@ -498,7 +498,7 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 	return nil
 }
 
-func migrateActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, actressID uint, deferred bool) error {
+func migrateActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, actressID uint, deferred, cancelRequested bool) error {
 	fields, _ := appendSyncTaskFields(task.UpdatedFields, []string{"merged_duplicate"})
 	key := fmt.Sprintf("actress:%d", actressID)
 	if deferred {
@@ -518,6 +518,13 @@ func migrateActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, ac
 		updates["heartbeat_at"] = nil
 		updates["lease_expires_at"] = nil
 		updates["attempts"] = gorm.Expr("CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END")
+		if cancelRequested {
+			updates["status"] = models.ActressSyncTaskCancelled
+			updates["stage"] = "completed"
+			updates["outcome"] = "cancelled"
+			updates["completed_at"] = time.Now().UTC()
+			updates["attempts"] = task.Attempts
+		}
 	}
 	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND actress_id = ? AND status IN ?", task.ID, *task.ActressID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Updates(updates)
 	return result.Error

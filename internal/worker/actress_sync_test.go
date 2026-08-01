@@ -273,6 +273,48 @@ func (s *mergeBlockingActressSyncScraper) IsEnabled() bool                 { ret
 func (s *mergeBlockingActressSyncScraper) Config() *models.ScraperSettings { return nil }
 func (s *mergeBlockingActressSyncScraper) Close() error                    { return nil }
 
+func TestActressSyncManagerCancelsMergedSourceAfterCancellation(t *testing.T) {
+	db, actressRepo, movieRepo, source := newActressSyncFixture(t, &models.Actress{DMMID: 42, JapaneseName: "source"})
+	target := &models.Actress{JapaneseName: "target"}
+	require.NoError(t, actressRepo.Create(context.Background(), target))
+	manager := NewActressSyncManager(ActressSyncManagerDeps{DB: db, ActressRepo: actressRepo, MovieRepo: movieRepo})
+	now := time.Now().UTC()
+	job := &models.ActressSyncJob{ID: "cancelled-merge-job", Status: models.ActressSyncJobPending, Scope: "missing", CreatedAt: now}
+	task := models.ActressSyncTask{ID: "cancelled-merge-task", JobID: job.ID, ActressID: &source.ID, Label: "source", DedupeKey: "actress:source", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	require.NoError(t, manager.repo.CreateJob(job, []models.ActressSyncTask{task}))
+	claimed, err := manager.repo.ClaimNext(manager.owner, now.Add(time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	scraper := &mergeBlockingActressSyncScraper{started: make(chan struct{}), release: make(chan struct{})}
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(scraper)
+	manager.active.Add(1)
+	manager.wg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		manager.runTask(claimed, time.Minute, registry)
+		close(done)
+	}()
+	<-scraper.started
+	require.NoError(t, manager.CancelJob(job.ID))
+	_, err = actressRepo.MergeWithSource(context.Background(), target.ID, source.ID, nil, models.Actress{})
+	require.NoError(t, err)
+	close(scraper.release)
+	<-done
+
+	stored, err := manager.repo.ListTasks(job.ID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, models.ActressSyncTaskCancelled, stored[0].Status)
+	require.Equal(t, "cancelled", stored[0].Outcome)
+	storedJob, err := manager.repo.FindJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncJobCancelled, storedJob.Status)
+	reclaimed, err := manager.repo.ClaimNext("reclaimer", now.Add(time.Hour))
+	require.NoError(t, err)
+	require.Nil(t, reclaimed)
+}
+
 func TestActressSyncManagerStopsUsingMergedSourceLease(t *testing.T) {
 	db, actressRepo, movieRepo, source := newActressSyncFixture(t, &models.Actress{DMMID: 42, JapaneseName: "source"})
 	target := &models.Actress{JapaneseName: "target"}

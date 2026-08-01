@@ -241,6 +241,37 @@ func TestManualActressMergeMigratesActiveSyncTasks(t *testing.T) {
 	}
 }
 
+func TestManualActressMergeCancelsMigratedTaskFromCancelledJob(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	actressRepo := NewActressRepository(db)
+	target := &models.Actress{JapaneseName: "target"}
+	source := &models.Actress{JapaneseName: "source"}
+	require.NoError(t, actressRepo.Create(context.Background(), target))
+	require.NoError(t, actressRepo.Create(context.Background(), source))
+	now := time.Now().UTC()
+	expires := now.Add(time.Hour)
+	job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobRunning, Scope: "missing", CancelRequested: true, CreatedAt: now}
+	task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &source.ID, Label: "source", DedupeKey: fmt.Sprintf("actress:%d", source.ID), Status: models.ActressSyncTaskRunning, Stage: "resolving", LeaseOwner: "owner", LeaseToken: "token", LeaseExpiresAt: &expires, Attempts: 1, Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	syncRepo := NewActressSyncRepository(db)
+	require.NoError(t, syncRepo.CreateJob(job, []models.ActressSyncTask{task}))
+
+	_, err := actressRepo.MergeWithSource(context.Background(), target.ID, source.ID, nil, models.Actress{})
+	require.NoError(t, err)
+
+	stored, err := syncRepo.ListTasks(job.ID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, models.ActressSyncTaskCancelled, stored[0].Status)
+	require.Equal(t, "cancelled", stored[0].Outcome)
+	require.Empty(t, stored[0].LeaseToken)
+	storedJob, err := syncRepo.FindJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncJobCancelled, storedJob.Status)
+	claimed, err := syncRepo.ClaimNext("reclaimer", now.Add(time.Hour))
+	require.NoError(t, err)
+	require.Nil(t, claimed)
+}
+
 func TestManualActressMergeCoalescesSelectedTaskWithDeferredTarget(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	actressRepo := NewActressRepository(db)

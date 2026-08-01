@@ -52,7 +52,7 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 
 	for _, resolverName := range scraperNames {
 		resolver, exists := s.registry.GetInstance(resolverName)
-		if !exists || resolver == nil {
+		if !exists || resolver == nil || !resolver.IsEnabled() {
 			continue
 		}
 		// Prefer the context-aware resolver so cancellation/timeouts reach the
