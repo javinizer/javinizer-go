@@ -1,5 +1,7 @@
 package contracts
 
+import "encoding/json"
+
 // ScrapeRequest represents the scrape request payload
 type ScrapeRequest struct {
 	ID               string   `json:"id" binding:"required" example:"IPX-535"`
@@ -48,6 +50,37 @@ type MoviesResponse struct {
 // UpdateMovieRequest represents the update movie request payload
 type UpdateMovieRequest struct {
 	Movie *MovieView `json:"movie" binding:"required"`
+	// PosterCropBoundsPresent records whether the raw body carried a
+	// poster_crop_bounds key on the movie object. Cached or external clients
+	// that predate the field omit it entirely; the batch edit handler must
+	// preserve the stored bounds in that case instead of treating omission as
+	// an explicit clear. Populated by UnmarshalJSON — never part of the wire
+	// shape itself.
+	PosterCropBoundsPresent bool `json:"-"`
+}
+
+// UnmarshalJSON decodes the request and records whether poster_crop_bounds
+// was present on the movie object (probe pattern, cf.
+// OutputConfig.UnmarshalJSON). Presence includes an explicit null — a
+// deliberate clear; only a wholly absent key counts as omitted.
+func (r *UpdateMovieRequest) UnmarshalJSON(data []byte) error {
+	type updateMovieRequest UpdateMovieRequest
+	var decoded updateMovieRequest
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	var probe struct {
+		Movie map[string]json.RawMessage `json:"movie"`
+	}
+	// The same bytes already decoded successfully above, so this cannot fail;
+	// a null or absent movie yields a nil map, which correctly reports the
+	// field as absent.
+	_ = json.Unmarshal(data, &probe)
+	_, decoded.PosterCropBoundsPresent = probe.Movie["poster_crop_bounds"]
+
+	*r = UpdateMovieRequest(decoded)
+	return nil
 }
 
 // PosterCropRequest represents manual poster crop coordinates in source-image pixels.

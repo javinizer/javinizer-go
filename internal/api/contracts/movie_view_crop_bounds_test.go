@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -37,4 +38,33 @@ func TestMovieView_CropBoundsRoundTrip(t *testing.T) {
 	nilView := MovieViewFromModel(&models.Movie{ContentID: "TEST-002"})
 	assert.Nil(t, nilView.PosterCropBounds)
 	assert.Nil(t, MovieViewToModel(nilView).Poster.CropBounds)
+}
+
+func TestUpdateMovieRequest_UnmarshalPosterCropBoundsPresence(t *testing.T) {
+	cases := []struct {
+		name        string
+		body        string
+		wantPresent bool
+		wantErr     bool
+	}{
+		{name: "field absent reports absent", body: `{"movie":{"id":"X-1","poster_url":"https://example.com/p.jpg"}}`, wantPresent: false},
+		{name: "explicit null reports present", body: `{"movie":{"id":"X-1","poster_crop_bounds":null}}`, wantPresent: true},
+		{name: "explicit value reports present", body: `{"movie":{"id":"X-1","poster_crop_bounds":{"x":1,"y":2,"width":3,"height":4}}}`, wantPresent: true},
+		{name: "null movie reports absent", body: `{"movie":null}`, wantPresent: false},
+		{name: "missing movie reports absent", body: `{}`, wantPresent: false},
+		{name: "undecodable movie errors", body: `{"movie":123}`, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var req UpdateMovieRequest
+			err := json.Unmarshal([]byte(tc.body), &req)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantPresent, req.PosterCropBoundsPresent)
+		})
+	}
 }

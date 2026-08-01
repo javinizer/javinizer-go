@@ -81,6 +81,18 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// factory is unavailable, fall back to DisplayTitle = Title, matching the
 		// canonical no-template/error degradation (display_title.go).
 		movie := contracts.MovieViewToModel(req.Movie)
+		// Whole-movie PATCHes from cached or external clients that predate
+		// poster_crop_bounds omit the field entirely; decoded as a nil pointer
+		// it would replace the stored bounds, and Organize would re-download
+		// the uncropped poster despite the source and crop decision being
+		// unchanged. Preserve the stored bounds only when the field was absent
+		// from the JSON — an explicit null remains a deliberate clear, per the
+		// pre-existing semantics for present fields. The copy avoids aliasing
+		// job state.
+		if !req.PosterCropBoundsPresent && current.Movie != nil && current.Movie.Poster.CropBounds != nil {
+			bounds := *current.Movie.Poster.CropBounds
+			movie.Poster.CropBounds = &bounds
+		}
 		if b := movie.Poster.CropBounds; b != nil && (b.X < 0 || b.Y < 0 || b.Width <= 0 || b.Height <= 0 || b.MaxPosterHeight < 0 || b.ImageWidth < 0 || b.ImageHeight < 0) {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid poster_crop_bounds: x/y must be >= 0 and width/height must be > 0"})
 			return
