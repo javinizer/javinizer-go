@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -121,6 +122,71 @@ func TestDownloadPoster_StaleBoundsKeepWholeReplacesExistingPoster(t *testing.T)
 	got, readErr := afero.ReadFile(fs, existing)
 	require.NoError(t, readErr)
 	assert.NotEqual(t, "old poster", string(got), "old poster content must be replaced")
+}
+
+func TestDownloadPoster_ManualCropConcurrentSameDestination(t *testing.T) {
+	// Multipart movies with a part-less poster template resolve one shared
+	// destPath; every part enters the crop branch concurrently. Both the
+	// shared <dest>.full.tmp staging file and the final write must be
+	// serialized — otherwise one worker deletes/renames the temp another is
+	// cropping.
+	for iter := 0; iter < 5; iter++ {
+		srv := twoToneCoverServer(t)
+		fs := afero.NewMemMapFs()
+		tmpDir := "/out"
+		require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
+
+		movie := func() *models.Movie {
+			m := createTestMovie()
+			m.Poster.PosterURL = srv.URL + "/cover.jpg"
+			m.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+			return m
+		}
+
+		d := NewDownloader(http.DefaultClient, fs, &Config{
+			DownloadPoster:    true,
+			MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+		}, nil)
+
+		const workers = 8
+		errs := make(chan error, workers)
+		var wg sync.WaitGroup
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				res, err := d.downloadPoster(context.Background(), movie(), tmpDir, nil)
+				if err != nil {
+					errs <- err
+					return
+				}
+				if !res.Downloaded {
+					errs <- fmt.Errorf("expected Downloaded=true")
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatalf("concurrent manual crop failed: %v", err)
+		}
+
+		img := decodePosterImageFs(t, fs, filepath.Join(tmpDir, "IPX-535-poster.jpg"))
+		b := img.Bounds()
+		require.Equal(t, 400, b.Dx())
+		require.Equal(t, 600, b.Dy())
+		srv.Close()
+	}
+}
+
+func decodePosterImageFs(t *testing.T, fs afero.Fs, path string) image.Image {
+	t.Helper()
+	f, err := fs.Open(path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	img, err := jpeg.Decode(f)
+	require.NoError(t, err)
+	return img
 }
 
 func TestDownloadPoster_BoundsCarryMaxPosterHeight(t *testing.T) {

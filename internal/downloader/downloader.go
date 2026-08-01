@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/spf13/afero"
@@ -19,6 +20,11 @@ type Downloader struct {
 	httpClient     httpclient.HTTPClient
 	templateEngine template.EngineInterface // Shared template engine (safe for concurrent use)
 	pathResolver   *MediaPathResolver       // Shared path resolver for consistent media naming
+
+	// Manual-crop downloads stage through <dest>.full.tmp and rewrite dest —
+	// both must be serialized per destination or concurrent multipart apply
+	// workers with a part-less poster template race on the shared paths.
+	posterCropLocks sync.Map // destPath -> *sync.Mutex
 
 	// Name formatting resolved from config at construction time
 	actorFirstNameOrder bool // true = FirstName LastName, false = LastName FirstName

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"path/filepath"
+	"sync"
 
 	"github.com/spf13/afero"
 
@@ -60,9 +61,14 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		}
 	}
 
-	// A manual crop recorded in the review UI takes priority: reproduce the
-	// user's exact crop on the freshly downloaded image.
+	// A manual crop recorded in the review UI takes priority: serialize the
+	// whole download+crop per destination — concurrent multipart workers share
+	// both the <dest>.full.tmp staging file and the destination itself.
 	if b := movie.Poster.CropBounds; b != nil {
+		mu, _ := d.posterCropLocks.LoadOrStore(destPath, &sync.Mutex{})
+		lock := mu.(*sync.Mutex)
+		lock.Lock()
+		defer lock.Unlock()
 		return d.downloadAndCropPoster(ctx, posterURL, destPath, func(tempPath string) error {
 			err := imageutil.CropPosterWithBounds(d.fs, tempPath, destPath, b.X, b.Y, b.X+b.Width, b.Y+b.Height, b.MaxPosterHeight)
 			if err == nil {
