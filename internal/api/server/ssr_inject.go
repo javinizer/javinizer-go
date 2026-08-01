@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 )
 
 const (
@@ -25,6 +26,32 @@ type ssrAuthStatus struct {
 type ssrState struct {
 	AuthStatus      *ssrAuthStatus  `json:"authStatus"`
 	BrowseBootstrap json.RawMessage `json:"browseBootstrap,omitempty"`
+}
+
+type browseBootstrapCookiePayload struct {
+	Version              *int            `json:"version"`
+	ApplyPlan            json.RawMessage `json:"applyPlan"`
+	PlanMigrationWarning *string         `json:"planMigrationWarning"`
+	InitialPath          *string         `json:"initialPath"`
+	DestinationPath      *string         `json:"destinationPath"`
+	ForceRefresh         *bool           `json:"forceRefresh"`
+	ShowScraperSelector  *bool           `json:"showScraperSelector"`
+	SelectedScrapers     *[]string       `json:"selectedScrapers"`
+	ManualScrapeMode     *bool           `json:"manualScrapeMode"`
+	PlanExpanded         *bool           `json:"planExpanded"`
+}
+
+type normalizedBrowseBootstrap struct {
+	Version              int             `json:"version"`
+	ApplyPlan            *applyplan.Plan `json:"applyPlan"`
+	PlanMigrationWarning *string         `json:"planMigrationWarning,omitempty"`
+	InitialPath          string          `json:"initialPath"`
+	DestinationPath      string          `json:"destinationPath"`
+	ForceRefresh         bool            `json:"forceRefresh"`
+	ShowScraperSelector  bool            `json:"showScraperSelector"`
+	SelectedScrapers     []string        `json:"selectedScrapers"`
+	ManualScrapeMode     bool            `json:"manualScrapeMode"`
+	PlanExpanded         bool            `json:"planExpanded"`
 }
 
 // injectSSRState injects a <script>window.__JAVINIZER_SSR__=...</script> tag
@@ -64,14 +91,42 @@ func decodeBrowseBootstrapCookie(raw string) (json.RawMessage, bool) {
 	if err != nil {
 		return nil, false
 	}
-	var bootstrap struct {
-		Version          float64   `json:"version"`
-		SelectedScrapers *[]string `json:"selectedScrapers"`
-	}
-	if err := json.Unmarshal([]byte(decoded), &bootstrap); err != nil || bootstrap.Version != 1 || bootstrap.SelectedScrapers == nil {
+	var bootstrap browseBootstrapCookiePayload
+	if err := json.Unmarshal([]byte(decoded), &bootstrap); err != nil ||
+		bootstrap.Version == nil || *bootstrap.Version != 1 ||
+		len(bootstrap.ApplyPlan) == 0 || bootstrap.InitialPath == nil ||
+		bootstrap.DestinationPath == nil || bootstrap.ForceRefresh == nil ||
+		bootstrap.ShowScraperSelector == nil || bootstrap.SelectedScrapers == nil ||
+		bootstrap.ManualScrapeMode == nil || bootstrap.PlanExpanded == nil {
 		return nil, false
 	}
-	return json.RawMessage(decoded), true
+	var plan *applyplan.Plan
+	if !bytes.Equal(bytes.TrimSpace(bootstrap.ApplyPlan), []byte("null")) {
+		var decodedPlan applyplan.Plan
+		if err := json.Unmarshal(bootstrap.ApplyPlan, &decodedPlan); err != nil {
+			return nil, false
+		}
+		plan, err = applyplan.Normalize(&decodedPlan)
+		if err != nil {
+			return nil, false
+		}
+	}
+	normalized, err := json.Marshal(normalizedBrowseBootstrap{
+		Version:              1,
+		ApplyPlan:            plan,
+		PlanMigrationWarning: bootstrap.PlanMigrationWarning,
+		InitialPath:          *bootstrap.InitialPath,
+		DestinationPath:      *bootstrap.DestinationPath,
+		ForceRefresh:         *bootstrap.ForceRefresh,
+		ShowScraperSelector:  *bootstrap.ShowScraperSelector,
+		SelectedScrapers:     *bootstrap.SelectedScrapers,
+		ManualScrapeMode:     *bootstrap.ManualScrapeMode,
+		PlanExpanded:         *bootstrap.PlanExpanded,
+	})
+	if err != nil {
+		return nil, false
+	}
+	return normalized, true
 }
 
 func resolveSSRAuth(rt *core.APIRuntime, c *gin.Context) *ssrAuthStatus {

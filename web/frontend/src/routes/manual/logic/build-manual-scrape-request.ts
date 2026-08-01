@@ -79,13 +79,12 @@ export function buildManualScrapeRequest(
 		scalar_strategy: opts.scalar_strategy,
 		array_strategy: opts.array_strategy
 	};
-	const applyPlan = plan?.video_operation === 'metadata-artwork' ? undefined : plan;
 	return {
 		files,
 		strict: false,
 		force: opts.force ?? false,
 		...legacy,
-		apply_plan: applyPlan,
+		apply_plan: plan,
 		selected_scrapers: opts.selected_scrapers,
 		manual_inputs: Object.keys(manual_inputs).length > 0 ? manual_inputs : undefined
 	};

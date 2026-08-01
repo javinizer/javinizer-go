@@ -229,7 +229,7 @@ export function createReviewState(pageStore: Page) {
 	let applyPreset = $state<'conservative' | 'gap-fill' | 'aggressive' | undefined>(undefined);
 	let hydratedApplyPlanJobId: string | null = null;
 	let activeApplyJobId: string | null = null;
-	let applyInvalid = $derived(isUpdateMode && skipNfo && skipDownload);
+	let applyInvalid = $derived((isUpdateMode || getEffectiveOperationMode() === 'metadata-artwork') && skipNfo && skipDownload);
 
 	let showImagePanelContent = $state(true);
 	let showAllPreviewScreenshots = $state(false);
@@ -408,7 +408,7 @@ export function createReviewState(pageStore: Page) {
 		if (planned === 'organize') return 'organize';
 		if (planned === 'rename-in-place') return 'in-place';
 		if (planned === 'rename-file') return 'in-place-norenamefolder';
-		if (planned === 'leave-in-place') return 'metadata-artwork';
+		if (planned === 'leave-in-place' || planned === 'metadata-artwork') return 'metadata-artwork';
 		const configured = job?.operation_mode_override || config?.output?.operation_mode || 'organize';
 		if (configured === 'organize') {
 			const srcDir = currentResult?.file_path

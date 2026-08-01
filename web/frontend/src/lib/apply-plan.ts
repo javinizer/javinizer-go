@@ -105,7 +105,7 @@ export function validateApplyPlan(plan: BatchApplyPlan | null): string[] {
 	const errors = validateApplyPlanEnums(plan);
 	if (plan.video_operation === 'organize' && !(plan.destination ?? '').trim()) errors.push('Choose an organization destination.');
 	if (plan.video_operation !== 'leave-in-place' && plan.media_policy === 'replace') errors.push('Existing media can only be replaced when video files stay in place.');
-	if (plan.video_operation === 'leave-in-place' && plan.nfo_output === 'skip' && plan.media_policy === 'skip') errors.push('Choose at least one metadata or media output.');
+	if ((plan.video_operation === 'leave-in-place' || plan.video_operation === 'metadata-artwork') && plan.nfo_output === 'skip' && plan.media_policy === 'skip') errors.push('Choose at least one metadata or media output.');
 	if (plan.video_operation === 'leave-in-place' && !plan.merge) errors.push('Choose an existing metadata merge policy.');
 	return errors;
 }

@@ -22,6 +22,8 @@ const (
 	VideoOperationRenameFile VideoOperation = "rename-file"
 	// VideoOperationLeaveInPlace .
 	VideoOperationLeaveInPlace VideoOperation = "leave-in-place"
+	// VideoOperationMetadataArtwork .
+	VideoOperationMetadataArtwork VideoOperation = "metadata-artwork"
 )
 
 // NFOOutput .
@@ -224,7 +226,7 @@ func Validate(plan *Plan) error {
 		return fmt.Errorf("unsupported apply plan version %d", plan.Version)
 	}
 	switch plan.VideoOperation {
-	case VideoOperationOrganize, VideoOperationRenameInPlace, VideoOperationRenameFile, VideoOperationLeaveInPlace:
+	case VideoOperationOrganize, VideoOperationRenameInPlace, VideoOperationRenameFile, VideoOperationLeaveInPlace, VideoOperationMetadataArtwork:
 	default:
 		return fmt.Errorf("invalid video operation %q", plan.VideoOperation)
 	}
@@ -246,10 +248,10 @@ func Validate(plan *Plan) error {
 	default:
 		return fmt.Errorf("invalid media policy %q", plan.MediaPolicy)
 	}
+	if (plan.VideoOperation == VideoOperationLeaveInPlace || plan.VideoOperation == VideoOperationMetadataArtwork) && plan.NFOOutput == NFOOutputSkip && plan.MediaPolicy == MediaPolicySkip {
+		return fmt.Errorf("%s plan would perform no output", plan.VideoOperation)
+	}
 	if plan.VideoOperation == VideoOperationLeaveInPlace {
-		if plan.NFOOutput == NFOOutputSkip && plan.MediaPolicy == MediaPolicySkip {
-			return fmt.Errorf("leave-in-place plan would perform no output")
-		}
 		if plan.Merge == nil {
 			return fmt.Errorf("merge policy is required for leave-in-place")
 		}
@@ -292,6 +294,8 @@ func Project(plan *Plan) (Projection, error) {
 	case VideoOperationLeaveInPlace:
 		projection.Update = true
 		projection.OperationMode = operationmode.OperationModeMetadataArtwork
+	case VideoOperationMetadataArtwork:
+		projection.OperationMode = operationmode.OperationModeMetadataArtwork
 	}
 	return projection, nil
 }
@@ -309,6 +313,8 @@ func FromLegacy(update bool, mode operationmode.OperationMode, destination strin
 			operation = VideoOperationRenameInPlace
 		case operationmode.OperationModeInPlaceNoRenameFolder:
 			operation = VideoOperationRenameFile
+		case operationmode.OperationModeMetadataArtwork:
+			operation = VideoOperationMetadataArtwork
 		default:
 			return nil, fmt.Errorf("legacy operation mode %q cannot be migrated", mode)
 		}

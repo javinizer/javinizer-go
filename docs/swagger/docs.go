@@ -6304,13 +6304,15 @@ const docTemplate = `{
                 "organize",
                 "rename-in-place",
                 "rename-file",
-                "leave-in-place"
+                "leave-in-place",
+                "metadata-artwork"
             ],
             "x-enum-varnames": [
                 "VideoOperationOrganize",
                 "VideoOperationRenameInPlace",
                 "VideoOperationRenameFile",
-                "VideoOperationLeaveInPlace"
+                "VideoOperationLeaveInPlace",
+                "VideoOperationMetadataArtwork"
             ]
         },
         "github_com_javinizer_javinizer-go_internal_config.APIConfig": {

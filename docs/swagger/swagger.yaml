@@ -1567,12 +1567,14 @@ definitions:
     - rename-in-place
     - rename-file
     - leave-in-place
+    - metadata-artwork
     type: string
     x-enum-varnames:
     - VideoOperationOrganize
     - VideoOperationRenameInPlace
     - VideoOperationRenameFile
     - VideoOperationLeaveInPlace
+    - VideoOperationMetadataArtwork
   github_com_javinizer_javinizer-go_internal_config.APIConfig:
     properties:
       security:

@@ -46,11 +46,15 @@ describe('apply plan', () => {
 		expect(setMergeStrategies(preset, 'prefer-nfo', 'merge').merge?.source_preset).toBeUndefined();
 	});
 
-	it('rejects only a true leave-in-place no-op', () => {
+	it('rejects no-op metadata-artwork and update plans', () => {
 		const update = defaultApplyPlan('leave-in-place');
 		update.nfo_output = 'skip';
 		update.media_policy = 'skip';
 		expect(validateApplyPlan(update)).toHaveLength(1);
+		const metadata = defaultApplyPlan('metadata-artwork');
+		metadata.nfo_output = 'skip';
+		metadata.media_policy = 'skip';
+		expect(validateApplyPlan(metadata)).toHaveLength(1);
 		const rename = defaultApplyPlan('rename-file');
 		rename.nfo_output = 'skip';
 		rename.media_policy = 'skip';

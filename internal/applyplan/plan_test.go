@@ -22,6 +22,7 @@ func TestNormalizeAndProject(t *testing.T) {
 		{"rename in place", Default(VideoOperationRenameInPlace, "/stale"), false, operationmode.OperationModeInPlace, "", true},
 		{"rename file", Default(VideoOperationRenameFile, "/stale"), false, operationmode.OperationModeInPlaceNoRenameFolder, "", true},
 		{"leave in place", Default(VideoOperationLeaveInPlace, "/stale"), true, operationmode.OperationModeMetadataArtwork, "", false},
+		{"metadata artwork", Default(VideoOperationMetadataArtwork, "/stale"), false, operationmode.OperationModeMetadataArtwork, "", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -35,6 +36,17 @@ func TestNormalizeAndProject(t *testing.T) {
 	}
 }
 
+func TestMetadataArtworkPoliciesProject(t *testing.T) {
+	plan := Default(VideoOperationMetadataArtwork, "")
+	plan.NFOOutput = NFOOutputSkip
+	projection, err := Project(plan)
+	require.NoError(t, err)
+	assert.False(t, projection.Update)
+	assert.Equal(t, operationmode.OperationModeMetadataArtwork, projection.OperationMode)
+	assert.True(t, projection.SkipNFO)
+	assert.False(t, projection.SkipDownload)
+}
+
 func TestValidationMatrix(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -45,6 +57,7 @@ func TestValidationMatrix(t *testing.T) {
 		{"organize destination required", Default(VideoOperationOrganize, ""), true},
 		{"rename outputs skipped remains valid", &Plan{Version: 1, VideoOperation: VideoOperationRenameFile, NFOOutput: NFOOutputSkip, MediaPolicy: MediaPolicySkip}, false},
 		{"leave no-op", &Plan{Version: 1, VideoOperation: VideoOperationLeaveInPlace, NFOOutput: NFOOutputSkip, MediaPolicy: MediaPolicySkip, Merge: &MergePolicy{ScalarStrategy: ScalarPreferNFO, ArrayStrategy: ArrayMerge}}, true},
+		{"metadata artwork no-op", &Plan{Version: 1, VideoOperation: VideoOperationMetadataArtwork, NFOOutput: NFOOutputSkip, MediaPolicy: MediaPolicySkip}, true},
 		{"replace organize", &Plan{Version: 1, VideoOperation: VideoOperationOrganize, Destination: "/dest", NFOOutput: NFOOutputWrite, MediaPolicy: MediaPolicyReplace}, true},
 		{"missing version", &Plan{VideoOperation: VideoOperationOrganize, Destination: "/dest", NFOOutput: NFOOutputWrite, MediaPolicy: MediaPolicyMissing}, true},
 		{"unknown version", &Plan{Version: 2, VideoOperation: VideoOperationOrganize, Destination: "/dest", NFOOutput: NFOOutputWrite, MediaPolicy: MediaPolicyMissing}, true},
@@ -187,6 +200,7 @@ func TestFromLegacy(t *testing.T) {
 		{"empty", "", VideoOperationOrganize},
 		{"in-place", operationmode.OperationModeInPlace, VideoOperationRenameInPlace},
 		{"rename-file", operationmode.OperationModeInPlaceNoRenameFolder, VideoOperationRenameFile},
+		{"metadata-artwork", operationmode.OperationModeMetadataArtwork, VideoOperationMetadataArtwork},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

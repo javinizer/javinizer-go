@@ -128,12 +128,12 @@ describe('buildManualScrapeRequest', () => {
 		expect(req.manual_inputs).toBeUndefined();
 	});
 
-	it('keeps metadata-artwork as a legacy request without an apply plan', () => {
-		const req = buildManualScrapeRequest([{ filePath: '/a.mp4', input: '' }], {
-			apply_plan: defaultApplyPlan('metadata-artwork')
-		});
+	it('preserves metadata-artwork output policies in the apply plan', () => {
+		const plan = defaultApplyPlan('metadata-artwork');
+		plan.nfo_output = 'skip';
+		const req = buildManualScrapeRequest([{ filePath: '/a.mp4', input: '' }], { apply_plan: plan });
 		expect(req.operation_mode).toBe('metadata-artwork');
 		expect(req.update).toBe(false);
-		expect(req.apply_plan).toBeUndefined();
+		expect(req.apply_plan).toMatchObject({ video_operation: 'metadata-artwork', nfo_output: 'skip', media_policy: 'missing' });
 	});
 });

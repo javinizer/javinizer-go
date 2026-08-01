@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestInjectSSRState_WithBrowseBootstrapCookie(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/browse", nil)
-	c.Request.AddCookie(&http.Cookie{Name: "javinizer_browse_bootstrap", Value: `%7B%22version%22%3A1%2C%22initialPath%22%3A%22%2Fvideos%22%2C%22selectedScrapers%22%3A%5B%5D%7D`})
+	c.Request.AddCookie(&http.Cookie{Name: "javinizer_browse_bootstrap", Value: url.QueryEscape(`{"version":1,"applyPlan":null,"initialPath":"/videos","destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`)})
 	html := []byte(`<html><head></head><body></body></html>`)
 	result := injectSSRState(html, rt, c)
 	marker := "window.__JAVINIZER_SSR__="
@@ -72,6 +73,8 @@ func TestInjectSSRState_InvalidBrowseBootstrapCookieIsIgnored(t *testing.T) {
 		{name: "malformed JSON", value: `%7B`},
 		{name: "wrong version", value: `%7B%22version%22%3A2%2C%22selectedScrapers%22%3A%5B%5D%7D`},
 		{name: "wrong selected scraper type", value: `%7B%22version%22%3A1%2C%22selectedScrapers%22%3A%5B1%5D%7D`},
+		{name: "wrong initial path type", value: url.QueryEscape(`{"version":1,"applyPlan":null,"initialPath":123,"destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`)},
+		{name: "wrong apply plan type", value: url.QueryEscape(`{"version":1,"applyPlan":123,"initialPath":"/videos","destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`)},
 		{name: "invalid escape", value: `%zz`},
 	}
 	for _, tt := range tests {
