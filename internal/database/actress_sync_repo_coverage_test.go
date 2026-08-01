@@ -451,6 +451,31 @@ func TestActressSyncDeferredReassignErrorBranches(t *testing.T) {
 		return db, NewActressSyncRepository(db), current, from, to
 	}
 
+	t.Run("migrates stronger deferred task", func(t *testing.T) {
+		db, repo, current, from, to := setup(t, false, true)
+		require.NoError(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID))
+		var migrated models.ActressSyncTask
+		require.NoError(t, db.Where("id <> ? AND actress_id = ?", current.ID, to.ID).First(&migrated).Error)
+		require.Equal(t, models.ActressSyncTaskPending, migrated.Status)
+		require.Equal(t, to.ID, *migrated.ActressID)
+		require.Equal(t, deferredActressSyncDedupeKey(to.ID, migrated.ID), migrated.DedupeKey)
+	})
+
+	t.Run("deferred job refresh error", func(t *testing.T) {
+		db, repo, current, from, to := setup(t, false, true)
+		var deferred models.ActressSyncTask
+		require.NoError(t, db.Where("id <> ? AND actress_id = ?", current.ID, from.ID).First(&deferred).Error)
+		require.NoError(t, db.Model(&models.ActressSyncJob{}).Where("id = ?", deferred.JobID).Update("scope", "missing").Error)
+		name := "coverage:deferred-refresh:" + uuid.NewString()
+		require.NoError(t, db.DB.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+			if tx.Statement.Table == "actress_sync_jobs" {
+				tx.AddError(errForcedActressCoverage)
+			}
+		}))
+		defer func() { require.NoError(t, db.DB.Callback().Update().Remove(name)) }()
+		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errForcedActressCoverage)
+	})
+
 	t.Run("conflict query error", func(t *testing.T) {
 		db, repo, current, from, to := setup(t, false, false)
 		remove := forceQueryErrorOnCall(t, db, 3)
@@ -458,21 +483,42 @@ func TestActressSyncDeferredReassignErrorBranches(t *testing.T) {
 		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errForcedActressCoverage)
 	})
 
-	t.Run("deferred task query error", func(t *testing.T) {
+	t.Run("deferred task list query error", func(t *testing.T) {
 		db, repo, current, from, to := setup(t, false, true)
 		remove := forceQueryErrorOnCall(t, db, 4)
 		defer remove()
 		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errForcedActressCoverage)
 	})
 
+	t.Run("deferred job lookup error", func(t *testing.T) {
+		db, repo, current, from, to := setup(t, false, true)
+		remove := forceQueryErrorOnCall(t, db, 5)
+		defer remove()
+		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errForcedActressCoverage)
+	})
+
 	t.Run("deferred task update error", func(t *testing.T) {
-		db, repo, current, from, to := setup(t, true, true)
+		db, repo, current, from, to := setup(t, false, true)
 		remove := forceUpdateError(t, db)
 		defer remove()
 		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errForcedActressCoverage)
 	})
 
 	t.Run("deferred task fenced update", func(t *testing.T) {
+		db, repo, current, from, to := setup(t, false, true)
+		remove := forceZeroRowsAfterUpdate(t, db)
+		defer remove()
+		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errActressSyncLeaseLost)
+	})
+
+	t.Run("coalesced task update error", func(t *testing.T) {
+		db, repo, current, from, to := setup(t, true, true)
+		remove := forceUpdateError(t, db)
+		defer remove()
+		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errForcedActressCoverage)
+	})
+
+	t.Run("coalesced task fenced update", func(t *testing.T) {
 		db, repo, current, from, to := setup(t, true, true)
 		remove := forceZeroRowsAfterUpdate(t, db)
 		defer remove()
@@ -510,8 +556,8 @@ func TestActressSyncReassignPreservesStrongerPendingSelection(t *testing.T) {
 	require.Equal(t, deferredActressSyncDedupeKey(to.ID, current.ID), storedCurrent.DedupeKey)
 	require.Equal(t, models.ActressSyncTaskRunning, storedCurrent.Status)
 	require.Equal(t, models.ActressSyncTaskPending, storedPending.Status)
-	require.Equal(t, to.ID, *storedDeferred.ActressID)
-	require.Equal(t, deferredActressSyncDedupeKey(to.ID, deferred.ID), storedDeferred.DedupeKey)
+	require.Equal(t, models.ActressSyncTaskSkipped, storedDeferred.Status)
+	require.Equal(t, []string{"coalesced_into_merged_task"}, storedDeferred.Messages)
 }
 
 func TestSourceFencedActressOperations(t *testing.T) {

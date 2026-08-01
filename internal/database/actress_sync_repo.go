@@ -438,6 +438,7 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 		return err
 	}
 	var conflict models.ActressSyncTask
+	holderPriority := actressSyncScopePriority(taskJob.Scope)
 	err := tx.Where("id <> ? AND dedupe_key = ? AND status IN ?", id, dedupeKey, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).First(&conflict).Error
 	if err == nil {
 		if conflict.Status == models.ActressSyncTaskRunning {
@@ -449,6 +450,7 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 		}
 		if actressSyncScopePriority(conflictJob.Scope) > actressSyncScopePriority(taskJob.Scope) {
 			currentDedupeKey = deferredActressSyncDedupeKey(actressID, id)
+			holderPriority = actressSyncScopePriority(conflictJob.Scope)
 		} else {
 			now := time.Now().UTC()
 			messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
@@ -469,6 +471,27 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 		return err
 	}
 	for _, deferredTask := range deferredTasks {
+		var deferredJob models.ActressSyncJob
+		if err := tx.First(&deferredJob, "id = ?", deferredTask.JobID).Error; err != nil {
+			return err
+		}
+		if actressSyncScopePriority(deferredJob.Scope) <= holderPriority {
+			now := time.Now().UTC()
+			messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
+			result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND actress_id = ?", deferredTask.ID, models.ActressSyncTaskPending, expectedActressID).Updates(map[string]any{
+				"status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
+			})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errActressSyncLeaseLost
+			}
+			if err := r.refreshJobTx(tx, deferredJob.ID, now); err != nil {
+				return err
+			}
+			continue
+		}
 		fields, _ := appendSyncTaskFields(deferredTask.UpdatedFields, []string{"merged_duplicate"})
 		result := tx.Model(&models.ActressSyncTask{}).
 			Where("id = ? AND status = ? AND actress_id = ?", deferredTask.ID, models.ActressSyncTaskPending, expectedActressID).
