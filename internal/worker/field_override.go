@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -193,26 +194,31 @@ func effectivePosterSource(posterURL, coverURL string) string {
 	return coverURL
 }
 
-// refreshOverriddenPosterSource regenerates the job's temporary full-size
-// poster ({tempDir}/posters/{jobID}/{movie.ID}-full.jpg) after a poster_url or
-// cover_url override changes the effective poster source. The review crop modal
-// and the poster-crop endpoint both key off that file: once the server
-// persists the overridden URL the client treats it as the current source and
-// skips its poster-from-url sync, so without this refresh a manual crop is
-// measured against the pre-override image while Organize downloads the
-// overridden one — recording bounds against the wrong coordinate space. This
-// covers cover_url overrides when the movie has no PosterURL, because the
-// downloader falls back to CoverURL as the poster source.
+// RefreshPosterAssets regenerates the job's temporary full-size poster
+// ({tempDir}/posters/{jobID}/{movie.ID}-full.jpg) after a poster-url or
+// cover-url change switches the effective poster source. Both callers that
+// persist such a change share it: the single-field override path
+// (refreshOverriddenPosterSource) and the whole-movie PATCH handler in the
+// API batch package. The review crop modal and the poster-crop endpoint both
+// key off that file: once the server persists the new URL the client treats
+// it as the current source and skips its poster-from-url sync, so without
+// this refresh a manual crop is measured against the pre-change image while
+// Organize downloads the persisted one — recording bounds against the wrong
+// coordinate space. This covers cover changes when the movie has no
+// PosterURL, because the downloader falls back to CoverURL as the poster
+// source. An unchanged effective source (or a cover change behind an
+// explicit poster URL) is a no-op: the existing full-size file is already
+// current. A nil gen (no poster infrastructure) skips the refresh.
 //
 // The returned rollback function restores the pre-refresh cached assets when
-// persistence of the overridden movie fails after regeneration succeeded —
+// the caller's surrounding persistence fails after regeneration succeeded —
 // otherwise the job would keep the old source URL while the crop endpoint
 // served the new image, and a subsequent crop would record bounds against the
 // wrong image. Its error surfaces a failed restore so the caller can report
 // the desync instead of swallowing it. rollback is nil when no refresh
 // happened or the generator cannot snapshot.
 //
-// Failure semantics mirror the poster-from-url endpoint: the override is
+// Failure semantics mirror the poster-from-url endpoint: the change is
 // rejected rather than persisting a source URL the crop endpoint cannot match
 // to the on-disk image. The underlying PosterManager downloads into a temp
 // file and replaces the existing -full.jpg only after the new image is fully
@@ -220,32 +226,40 @@ func effectivePosterSource(posterURL, coverURL string) string {
 // cleanup, so a failed refresh leaves a good cached file untouched. The
 // generator also rewrites the temp preview and stamps its URL on
 // movie.Poster.CroppedPosterURL, which the caller persists in the same
-// UpdateMovie call. editors without poster infrastructure (nil posterGen)
-// skip the refresh.
-func (je *jobEditorImpl) refreshOverriddenPosterSource(ctx context.Context, movie *models.Movie, oldPosterURL, oldCoverURL string) (func() error, error) {
+// UpdateMovie call.
+func RefreshPosterAssets(ctx context.Context, gen poster.PosterGenerator, jobID string, movie *models.Movie, oldPosterURL, oldCoverURL string) (func() error, error) {
 	if effectivePosterSource(movie.Poster.PosterURL, movie.Poster.CoverURL) == effectivePosterSource(oldPosterURL, oldCoverURL) {
 		return nil, nil // same image still feeds the poster pipeline; the existing full-size file is already current
 	}
-	if je.posterGen == nil {
+	if gen == nil {
 		return nil, nil
 	}
 	var rollback func() error
-	if snapshooter, ok := je.posterGen.(posterAssetSnapshooter); ok {
-		snap, err := snapshooter.SnapshotPosterAssets(je.jobID, movie.ID)
+	if snapshooter, ok := gen.(posterAssetSnapshooter); ok {
+		snap, err := snapshooter.SnapshotPosterAssets(jobID, movie.ID)
 		if err != nil {
-			return nil, fmt.Errorf("snapshot poster before field override: %w", err)
+			return nil, fmt.Errorf("snapshot poster before source change: %w", err)
 		}
 		rollback = func() error { return snapshooter.RestorePosterAssets(snap) }
 	}
-	if err := je.posterGen.GeneratePoster(ctx, je.jobID, movie); err != nil {
+	if err := gen.GeneratePoster(ctx, jobID, movie); err != nil {
 		if rollback != nil {
-			// Undo any post-swap damage so the cache matches the unchanged
-			// job state; the refresh error stays the primary diagnostic.
-			_ = rollback()
+			if rollbackErr := rollback(); rollbackErr != nil {
+				return nil, fmt.Errorf("refresh poster after source change: %w", errors.Join(err, fmt.Errorf("poster rollback failed: %w", rollbackErr)))
+			}
 		}
-		return nil, fmt.Errorf("refresh poster after field override: %w", err)
+		return nil, fmt.Errorf("refresh poster after source change: %w", err)
 	}
 	return rollback, nil
+}
+
+// refreshOverriddenPosterSource wires the field-override path into
+// RefreshPosterAssets: a poster_url override — or a cover_url override when
+// the movie has no PosterURL (the downloader falls back to CoverURL as the
+// poster source) — regenerates the temp full-size poster before the
+// overridden URLs are persisted.
+func (je *jobEditorImpl) refreshOverriddenPosterSource(ctx context.Context, movie *models.Movie, oldPosterURL, oldCoverURL string) (func() error, error) {
+	return RefreshPosterAssets(ctx, je.posterGen, je.jobID, movie, oldPosterURL, oldCoverURL)
 }
 
 // findScraperResult returns the first raw result whose Source matches, or nil.

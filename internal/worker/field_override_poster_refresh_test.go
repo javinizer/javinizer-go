@@ -131,12 +131,12 @@ func TestApplyFieldOverride_PosterURLRefreshInvocation(t *testing.T) {
 		{"identical URL leaves the current source alone", "poster_url", newURL, oldCover, &stubOverridePosterGen{}, nil, 0, "", "", 0},
 		{"non-poster override never regenerates", "maker", oldURL, oldCover, &stubOverridePosterGen{}, nil, 0, "", "", 0},
 		{"no generator wired skips regeneration", "poster_url", oldURL, oldCover, nil, nil, 0, "", "", 0},
-		{"regeneration failure rejects the override", "poster_url", oldURL, oldCover, &stubOverridePosterGen{err: errors.New("download failed")}, nil, 1, newURL, "refresh poster after field override", 0},
+		{"regeneration failure rejects the override", "poster_url", oldURL, oldCover, &stubOverridePosterGen{err: errors.New("download failed")}, nil, 1, newURL, "refresh poster after source change", 0},
 		{"cover_url with no poster regenerates from the cover", "cover_url", "", oldCover, &stubOverridePosterGen{}, nil, 1, "", "", 0},
 		{"cover_url behind an explicit poster leaves the cache alone", "cover_url", oldURL, oldCover, &stubOverridePosterGen{}, nil, 0, "", "", 0},
 		{"identical cover_url leaves the current source alone", "cover_url", "", newCover, &stubOverridePosterGen{}, nil, 0, "", "", 0},
-		{"snapshot failure rejects the override before regenerating", "poster_url", oldURL, oldCover, nil, &stubOverrideSnapshotter{snapErr: errors.New("fs gone")}, 0, "", "snapshot poster before field override", 0},
-		{"regeneration failure rolls back the snapshot", "poster_url", oldURL, oldCover, nil, &stubOverrideSnapshotter{stubOverridePosterGen: stubOverridePosterGen{err: errors.New("download failed")}}, 1, newURL, "refresh poster after field override", 1},
+		{"snapshot failure rejects the override before regenerating", "poster_url", oldURL, oldCover, nil, &stubOverrideSnapshotter{snapErr: errors.New("fs gone")}, 0, "", "snapshot poster before source change", 0},
+		{"regeneration failure rolls back the snapshot", "poster_url", oldURL, oldCover, nil, &stubOverrideSnapshotter{stubOverridePosterGen: stubOverridePosterGen{err: errors.New("download failed")}}, 1, newURL, "refresh poster after source change", 1},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -252,7 +252,7 @@ func TestApplyFieldOverride_PosterURLRefreshTempFiles(t *testing.T) {
 			field:             "poster_url",
 			currentPosterURL:  srv.URL + "/old.jpg",
 			overridePosterURL: srv.URL + "/broken.jpg",
-			wantErr:           "refresh poster after field override",
+			wantErr:           "refresh poster after source change",
 			wantFullSource:    oldJPEG, // new image never replaces a good cache entry
 		},
 		{
@@ -414,10 +414,36 @@ func TestApplyFieldOverride_RollbackFailureReportedWithNoPreexistingAssets(t *te
 	assert.Contains(t, err.Error(), "injected remove failure")
 }
 
-// TestApplyFieldOverride_RollbackFailureReported ensures a failed asset
-// restore is not swallowed: the persist error is still primary, and the
-// rollback failure is surfaced alongside it so the filesystem/job-state desync
-// is observable.
+// TestRefreshOverriddenPosterSource_GenerateAndRestoreFailures ensures a
+// failed asset restore inside the generation-error branch is not swallowed:
+// when GeneratePoster fails after replacing or removing cached assets, the
+// rollback is the only attempt to restore them, so its failure must surface
+// alongside the refresh error (same join style as the persist-failure
+// branch). Otherwise the cache could be absent/mismatched while only the
+// download error is reported.
+func TestRefreshOverriddenPosterSource_GenerateAndRestoreFailures(t *testing.T) {
+	generateErr := errors.New("generate failed")
+	restoreErr := errors.New("restore failed")
+	gen := &stubOverrideSnapshotter{
+		stubOverridePosterGen: stubOverridePosterGen{err: generateErr},
+		restoreErr:            restoreErr,
+	}
+	je, _, _ := overrideRefreshFixture(t, "https://old.example/poster.jpg", "", "dmm-poster-url", "")
+	je.posterGen = gen
+	movie := &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "dmm-poster-url"}}
+
+	_, err := je.refreshOverriddenPosterSource(context.Background(), movie, "https://old.example/poster.jpg", "")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, generateErr)
+	assert.ErrorIs(t, err, restoreErr)
+	assert.Contains(t, err.Error(), "refresh poster after source change")
+	assert.Contains(t, err.Error(), "generate failed")
+	assert.Contains(t, err.Error(), "poster rollback failed")
+	assert.Contains(t, err.Error(), "restore failed")
+	assert.Equal(t, 1, gen.restoreCalls)
+}
+
 func TestApplyFieldOverride_RollbackFailureReported(t *testing.T) {
 	gen := &stubOverrideSnapshotter{restoreErr: errors.New("restore broke")}
 	je, _, resultID := overrideRefreshFixture(t, "https://old.example/poster.jpg", "", "dmm-poster-url", "")

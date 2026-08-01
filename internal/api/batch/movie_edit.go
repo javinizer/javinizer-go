@@ -118,6 +118,26 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				movie.Poster.CropBounds = nil
 			}
 		}
+		// A whole-movie PATCH that changes the effective poster source (poster_url,
+		// or cover_url while no poster URL is set) must also regenerate the cached
+		// full-size poster before the new URLs are persisted: the review client
+		// treats the persisted URL as already synced and skips its poster-from-url
+		// call, so a missed refresh would let a subsequent manual crop measure the
+		// stale pre-PATCH -full.jpg while Organize downloads the new one. Shares
+		// the field-override path's machinery (worker.RefreshPosterAssets) with the
+		// same atomicity: snapshot before refresh, roll the cache back when the
+		// UpdateMovie persistence below fails, surface a failed rollback.
+		var rollback func() error
+		if current.Movie != nil {
+			cm := current.Movie.Poster
+			var refreshErr error
+			rollback, refreshErr = worker.RefreshPosterAssets(c.Request.Context(), rt.Snapshot().PosterGen(), jobID, movie, cm.PosterURL, cm.CoverURL)
+			if refreshErr != nil {
+				logging.Errorf("Failed to refresh poster source after whole-movie edit for result %s: %v", resultID, refreshErr)
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to refresh poster source: %v", refreshErr)})
+				return
+			}
+		}
 		movie.DisplayTitle = movie.Title
 		if snap := rt.Snapshot(); snap != nil {
 			if factory, fErr := snap.WorkflowFactory(); fErr == nil && factory != nil {
@@ -137,8 +157,19 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			err := job.UpdateMovie(c.Request.Context(), filePath, movie)
 
 			if err != nil {
+				errMsg := fmt.Sprintf("Failed to update movie: %v", err)
+				if rollback != nil {
+					// Persistence failed after the refresh replaced the cached
+					// poster assets: restore the pre-refresh cache so a subsequent
+					// crop measures the image the still-persisted source URL
+					// describes. A failed restore is surfaced, not swallowed
+					// (parity with the field-override path).
+					if rollbackErr := rollback(); rollbackErr != nil {
+						errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, rollbackErr)
+					}
+				}
 				logging.Errorf("Failed to update movie for %s: %v", filePath, err)
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update movie: %v", err)})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 				return
 			}
 		}

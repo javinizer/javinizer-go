@@ -21,6 +21,14 @@ import (
 func TestUpdateBatchMovie_PosterSourceChangeInvalidatesCropBounds(t *testing.T) {
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
+	// Source-changing PATCHes regenerate the cached poster (Finding A), which
+	// downloads the new URL — serve real images over a local server so those
+	// subtests still reach the persistence step. Unchanged-source subtests
+	// never trigger the refresh.
+	allowTestHTTPServerURL(t)
+	srv := newPatchPosterSourceServer(t)
+	chdirWorkDir(t)
+	oldURL, newURL := srv.URL+"/old.jpg", srv.URL+"/new.jpg"
 
 	setup := func(t *testing.T) (*core.APIDeps, *gin.Engine, string) {
 		cfg := config.DefaultConfig(nil, nil)
@@ -30,7 +38,7 @@ func TestUpdateBatchMovie_PosterSourceChangeInvalidatesCropBounds(t *testing.T) 
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/SRC-001.mp4", MovieID: "SRC-001"},
 			Status:        models.JobStatusCompleted,
 			Movie: &models.Movie{ID: "SRC-001", Title: "Src", Poster: models.PosterState{
-				PosterURL:        "https://example.com/a.jpg",
+				PosterURL:        oldURL,
 				CoverURL:         "https://example.com/a-cover.jpg",
 				ShouldCropPoster: false,
 				CropBounds:       &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600},
@@ -73,14 +81,14 @@ func TestUpdateBatchMovie_PosterSourceChangeInvalidatesCropBounds(t *testing.T) 
 
 	t.Run("poster_url change clears bounds", func(t *testing.T) {
 		deps, router, jobID := setup(t)
-		patch(t, router, jobID, "https://example.com/b.jpg", "https://example.com/a-cover.jpg", false, valid)
+		patch(t, router, jobID, newURL, "https://example.com/a-cover.jpg", false, valid)
 		assert.Nil(t, storedBounds(t, deps, jobID),
 			"a whole-movie PATCH that swaps the poster source must invalidate crop bounds measured against the old image")
 	})
 
 	t.Run("cover_url change with poster set preserves bounds", func(t *testing.T) {
 		deps, router, jobID := setup(t)
-		patch(t, router, jobID, "https://example.com/a.jpg", "https://example.com/b-cover.jpg", false, valid)
+		patch(t, router, jobID, oldURL, "https://example.com/b-cover.jpg", false, valid)
 		assert.NotNil(t, storedBounds(t, deps, jobID),
 			"downloadPoster never reads CoverURL while PosterURL is set — a cover-only edit must not drop the crop")
 	})
@@ -93,7 +101,7 @@ func TestUpdateBatchMovie_PosterSourceChangeInvalidatesCropBounds(t *testing.T) 
 			FileMatchInfo: models.FileMatchInfo{Path: "/path/to/SRC-002.mp4", MovieID: "SRC-002"},
 			Status:        models.JobStatusCompleted,
 			Movie: &models.Movie{ID: "SRC-002", Title: "Src", Poster: models.PosterState{
-				CoverURL:         "https://example.com/a-cover.jpg",
+				CoverURL:         oldURL,
 				ShouldCropPoster: false,
 				CropBounds:       &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600},
 			}},
@@ -102,7 +110,7 @@ func TestUpdateBatchMovie_PosterSourceChangeInvalidatesCropBounds(t *testing.T) 
 		router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
 
 		view := contracts.MovieViewFromModel(&models.Movie{ID: "SRC-002", Title: "Src", Poster: models.PosterState{
-			CoverURL:         "https://example.com/b-cover.jpg",
+			CoverURL:         newURL,
 			ShouldCropPoster: false,
 			CropBounds:       valid.ToModel(),
 		}})
@@ -123,13 +131,13 @@ func TestUpdateBatchMovie_PosterSourceChangeInvalidatesCropBounds(t *testing.T) 
 
 	t.Run("should_crop_poster change clears bounds", func(t *testing.T) {
 		deps, router, jobID := setup(t)
-		patch(t, router, jobID, "https://example.com/a.jpg", "https://example.com/a-cover.jpg", true, valid)
+		patch(t, router, jobID, oldURL, "https://example.com/a-cover.jpg", true, valid)
 		assert.Nil(t, storedBounds(t, deps, jobID))
 	})
 
 	t.Run("unchanged poster source preserves bounds", func(t *testing.T) {
 		deps, router, jobID := setup(t)
-		patch(t, router, jobID, "https://example.com/a.jpg", "https://example.com/a-cover.jpg", false, valid)
+		patch(t, router, jobID, oldURL, "https://example.com/a-cover.jpg", false, valid)
 		require.NotNil(t, storedBounds(t, deps, jobID),
 			"the review-page save-after-crop flow must keep the user's crop")
 		assert.Equal(t, contracts.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}, *valid)
