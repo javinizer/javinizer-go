@@ -42,7 +42,7 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 			for i := range tasks {
 				if tasks[i].ActressID != nil {
 					var conflict models.ActressSyncTask
-					lookupErr := tx.Where("actress_id = ? AND status IN ?", *tasks[i].ActressID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("created_at ASC, id ASC").First(&conflict).Error
+					lookupErr := tx.Table("actress_sync_tasks AS task").Select("task.*").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").Where("task.actress_id = ? AND task.status IN ?", *tasks[i].ActressID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("CASE WHEN job.scope = 'selected' THEN 0 ELSE 1 END, task.created_at ASC, task.id ASC").First(&conflict).Error
 					if lookupErr == nil {
 						var conflictJob models.ActressSyncJob
 						if lookupErr := tx.First(&conflictJob, "id = ?", conflict.JobID).Error; lookupErr != nil {
@@ -158,6 +158,7 @@ func (r *ActressSyncRepository) ClaimNext(owner string, leaseUntil time.Time) (*
 			now, token := time.Now().UTC(), uuid.NewString()
 			pendingTaskID := tx.Table("actress_sync_tasks AS task").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").
 				Where("task.status = ? AND task.attempts < ? AND job.cancel_requested = 0", models.ActressSyncTaskPending, actressSyncAttemptCap).
+				Where("NOT (task.actress_id IS NOT NULL AND EXISTS (SELECT 1 FROM actress_sync_tasks AS deferred WHERE deferred.id <> task.id AND deferred.actress_id = task.actress_id AND deferred.dedupe_key LIKE ? AND deferred.status = ?))", "%:deferred:%", models.ActressSyncTaskRunning).
 				Where("NOT (task.dedupe_key LIKE ? AND task.actress_id IS NOT NULL AND EXISTS (SELECT 1 FROM actress_sync_tasks AS canonical WHERE canonical.id <> task.id AND canonical.dedupe_key = ('actress:' || task.actress_id) AND canonical.status IN (?, ?)) )", "%:deferred:%", models.ActressSyncTaskPending, models.ActressSyncTaskRunning).
 				Order("task.created_at ASC, task.id ASC").Limit(1).Select("task.id")
 			res := tx.Model(&models.ActressSyncTask{}).Where("id IN (?)", pendingTaskID).Updates(map[string]any{
