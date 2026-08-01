@@ -136,11 +136,25 @@ func scaleCropBounds(b *models.CropBounds, newW, newH int) *models.CropBounds {
 func (d *Downloader) downloadAndCropPoster(ctx context.Context, posterURL, destPath string, cropFn func(srcPath, outPath string) error) (*DownloadResult, error) {
 	tempPath := destPath + ".full.tmp"
 	cropTmpPath := destPath + ".crop.tmp"
+	backupPath := destPath + ".bak"
+	// Recover a crashed previous replace FIRST: dest vanished after dest→.bak
+	// but the install never landed, leaving the only copy of the old poster in
+	// the backup. Any early failure below (download, crop) must find that old
+	// poster back in place, not discover the slot permanently empty.
+	result := &DownloadResult{URL: posterURL, LocalPath: destPath, Type: MediaTypePoster}
+	if _, statErr := d.fs.Stat(destPath); errors.Is(statErr, os.ErrNotExist) {
+		if _, bakErr := d.fs.Stat(backupPath); bakErr == nil {
+			if recErr := d.fs.Rename(backupPath, destPath); recErr != nil {
+				result.Error = fmt.Errorf("failed to recover interrupted poster backup %s: %w", backupPath, recErr)
+				result.Downloaded = false
+				return result, result.Error
+			}
+		}
+	}
 	// Stale staging files from an interrupted run must be cleared — if removal
 	// itself fails (permissions, Windows file locks), download() would mistake
 	// the stale stage for a completed download and silently skip the crop, so
 	// surface that as an error instead.
-	result := &DownloadResult{URL: posterURL, LocalPath: destPath, Type: MediaTypePoster}
 	for _, stale := range []string{tempPath, cropTmpPath} {
 		if rmErr := d.fs.Remove(stale); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 			result.Error = fmt.Errorf("failed to clear stale poster staging %s: %w", stale, rmErr)
@@ -167,21 +181,8 @@ func (d *Downloader) downloadAndCropPoster(ctx context.Context, posterURL, destP
 
 	// Install only a complete image. Backup-and-rollback the existing
 	// destination is staged aside first so a failed install rename restores
-	// it instead of leaving the old poster destroyed.
-	backupPath := destPath + ".bak"
-	// Recover an interrupted previous replace: dest vanished after dest→.bak
-	// but the install never landed, so the only copy of the old poster lives
-	// in the backup. Restore it before anything deletes that backup.
-	if _, statErr := d.fs.Stat(destPath); errors.Is(statErr, os.ErrNotExist) {
-		if _, bakErr := d.fs.Stat(backupPath); bakErr == nil {
-			if recErr := d.fs.Rename(backupPath, destPath); recErr != nil {
-				result.Error = fmt.Errorf("failed to recover interrupted poster backup %s: %w", backupPath, recErr)
-				result.Downloaded = false
-				_ = d.fs.Remove(cropTmpPath)
-				return result, result.Error
-			}
-		}
-	}
+	// it instead of leaving the old poster destroyed. (Backup recovery for a
+	// crashed previous replace runs before the download above.)
 	_ = d.fs.Remove(backupPath)
 	hadExisting := false
 	if _, statErr := d.fs.Stat(destPath); statErr == nil {
