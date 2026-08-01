@@ -226,7 +226,6 @@
 			<SettingsSection title={m.settings_metadata_priority_title()} description={m.settings_metadata_priority_desc()} defaultExpanded={false}>
 				<MetadataPriority
 					config={settings.settingsConfig}
-					movieScraperNames={scraper.scrapers.filter((item) => item.supportsMovieSearch).map((item) => item.name)}
 					onUpdate={(updatedConfig) => { settings.config = updatedConfig; }}
 				/>
 			</SettingsSection>

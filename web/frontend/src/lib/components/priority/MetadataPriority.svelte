@@ -24,11 +24,10 @@
 	interface Props {
 		config: SettingsConfig;
 		onUpdate: (config: SettingsConfig) => void;
-		movieScraperNames?: string[];
 		onScraperUsageQuery?: (scraperName: string) => { count: number; fields: string[] };
 	}
 
-	let { config, onUpdate, movieScraperNames, onScraperUsageQuery }: Props = $props();
+	let { config, onUpdate, onScraperUsageQuery }: Props = $props();
 
 	type PriorityMode = 'simple' | 'advanced';
 	let mode = $state<PriorityMode>('simple');
@@ -148,14 +147,8 @@
 
 	// Get list of enabled scrapers
 	// Filter priority list to only include enabled scrapers
-	function filterMovieScrapers(priority: string[]): string[] {
-		if (movieScraperNames === undefined) return priority;
-		const allowed = new Set(movieScraperNames);
-		return priority.filter((scraperName) => allowed.has(scraperName));
-	}
-
 	function filterEnabledScrapers(priority: string[]): string[] {
-		return filterMovieScrapers(priority).filter((scraperName) => {
+		return priority.filter((scraperName) => {
 			const scraperCfg = config?.scrapers?.[scraperName];
 			return (scraperCfg as ScraperSettings)?.enabled !== false;
 		});
@@ -179,7 +172,7 @@
 		if (stored && stored.length === 1 && stored[0] === SKIP_SENTINEL) {
 			editingPriority = [];
 		} else {
-			editingPriority = filterMovieScrapers(getFieldPriority(config, fieldKey));
+			editingPriority = [...getFieldPriority(config, fieldKey)];
 		}
 	}
 

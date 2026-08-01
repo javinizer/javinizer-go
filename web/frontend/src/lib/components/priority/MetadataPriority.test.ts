@@ -63,17 +63,16 @@ describe('MetadataPriority — header info icon', () => {
 		expect(container.textContent).not.toContain('Metadata priority modes');
 	});
 
-	it('excludes actress-only scrapers from global priority', () => {
+	it('preserves actress-only scrapers in global priority', () => {
 		const { container } = render(MetadataPriority, {
 			props: {
 				config: makeConfig(['r18dev', 'minnanoav']),
-				movieScraperNames: ['r18dev'],
 				onUpdate: () => {},
 			},
 		});
 
 		expect(container.textContent).toContain('R18.dev');
-		expect(container.textContent).not.toContain('minnanoav');
+		expect(container.textContent).toContain('minnanoav');
 	});
 
 	it('toggles the help popover open on click', async () => {

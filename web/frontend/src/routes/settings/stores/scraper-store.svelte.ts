@@ -86,23 +86,6 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 				scraperEnabledMap[scraper.name] = scraper.enabled;
 			});
 
-			const actressOnlyNames = new Set(
-				response.scrapers
-					.filter((scraper) => scraper.supports_movie_search === false)
-					.map((scraper) => scraper.name),
-			);
-			sc.priority = sc.priority.filter((name: string) => !actressOnlyNames.has(name));
-			if (cfg.metadata?.priority) {
-				for (const field of Object.keys(cfg.metadata.priority)) {
-					const priority = cfg.metadata.priority[field];
-					if (Array.isArray(priority)) {
-						cfg.metadata.priority[field] = priority.filter(
-							(name: string) => !actressOnlyNames.has(name),
-						);
-					}
-				}
-			}
-
 			const mergedOrder: string[] = [];
 			const seen = new Set<string>();
 
@@ -389,7 +372,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 		if (!config.scrapers) config.scrapers = {};
 		const sc = config.scrapers;
 
-		sc.priority = scrapers.filter((s) => s.supportsMovieSearch).map((s) => s.name);
+		sc.priority = scrapers.map((s) => s.name);
 
 		scrapers.forEach((scraper) => {
 			if (!sc[scraper.name]) sc[scraper.name] = {} as ScraperSettings;
