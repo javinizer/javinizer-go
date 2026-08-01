@@ -294,7 +294,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		var resp contracts.PosterCropResponse
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		require.NotNil(t, resp.PosterCropBounds, "non-legacy crops must echo the stored bounds")
-		assert.Equal(t, contracts.CropBounds{X: 200, Y: 0, Width: 472, Height: 600, MaxPosterHeight: 300}, *resp.PosterCropBounds)
+		assert.Equal(t, contracts.CropBounds{X: 200, Y: 0, Width: 472, Height: 600, MaxPosterHeight: 300, ImageWidth: 1000, ImageHeight: 600}, *resp.PosterCropBounds)
 		require.NotNil(t, result.Movie.Poster.CropBounds)
 		assert.Equal(t, 300, result.Movie.Poster.CropBounds.MaxPosterHeight, "request hop must store the effective max height for the apply phase")
 	})

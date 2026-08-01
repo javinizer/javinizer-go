@@ -109,6 +109,11 @@ export interface PosterCropBounds {
 	height: number;
 	/** Output height cap effective at crop time; 0/absent = no cap. */
 	max_poster_height?: number;
+	/** Source image dimensions the rectangle was measured against; 0/absent = unknown. */
+	image_width?: number;
+	image_height?: number;
+	/** Whether the cropped source was a cover (guides apply-time fallback). */
+	source_was_cover?: boolean;
 }
 
 export interface PosterFromURLRequest {

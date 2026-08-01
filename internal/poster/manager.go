@@ -40,6 +40,10 @@ type cropResult struct {
 	// Bounds from such a crop are in the cropped image's coordinate space and
 	// must not be reapplied to the full image during the apply phase.
 	UsedLegacySource bool
+	// SourceWidth/SourceHeight are the pixel dimensions of the image the crop
+	// was measured against (0 if unreadable — bounds store them as unknown).
+	SourceWidth  int
+	SourceHeight int
 }
 
 // PosterManagerInterface defines the contract for poster operations.
@@ -133,6 +137,10 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 		return nil, fmt.Errorf("crop failed: %w", err)
 	}
 
+	// A successful crop implies a decodable source; on the off chance the
+	// header read fails, record unknown dimensions (0 = apply unscaled).
+	srcW, srcH, _ := imageutil.ImageDimensionsFromFile(pm.fs, sourcePath)
+
 	croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg?v=%d", url.PathEscape(jobID), url.PathEscape(posterID), time.Now().UnixMilli())
 
 	return &cropResult{
@@ -140,6 +148,8 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 		FullPath:         sourcePath,
 		CroppedURL:       croppedURL,
 		UsedLegacySource: usedLegacySource,
+		SourceWidth:      srcW,
+		SourceHeight:     srcH,
 	}, nil
 }
 

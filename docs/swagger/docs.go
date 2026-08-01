@@ -4660,8 +4660,17 @@ const docTemplate = `{
                 "height": {
                     "type": "integer"
                 },
+                "image_height": {
+                    "type": "integer"
+                },
+                "image_width": {
+                    "type": "integer"
+                },
                 "max_poster_height": {
                     "type": "integer"
+                },
+                "source_was_cover": {
+                    "type": "boolean"
                 },
                 "width": {
                     "type": "integer"

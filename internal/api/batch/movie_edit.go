@@ -79,7 +79,7 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// factory is unavailable, fall back to DisplayTitle = Title, matching the
 		// canonical no-template/error degradation (display_title.go).
 		movie := contracts.MovieViewToModel(req.Movie)
-		if b := movie.Poster.CropBounds; b != nil && (b.X < 0 || b.Y < 0 || b.Width <= 0 || b.Height <= 0 || b.MaxPosterHeight < 0) {
+		if b := movie.Poster.CropBounds; b != nil && (b.X < 0 || b.Y < 0 || b.Width <= 0 || b.Height <= 0 || b.MaxPosterHeight < 0 || b.ImageWidth < 0 || b.ImageHeight < 0) {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid poster_crop_bounds: x/y must be >= 0 and width/height must be > 0"})
 			return
 		}
@@ -197,7 +197,15 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 
 		var bounds *models.CropBounds
 		if !cropResult.UsedLegacySource {
-			bounds = &models.CropBounds{X: req.X, Y: req.Y, Width: req.Width, Height: req.Height, MaxPosterHeight: maxPosterHeight}
+			bounds = &models.CropBounds{
+				X: req.X, Y: req.Y, Width: req.Width, Height: req.Height,
+				MaxPosterHeight: maxPosterHeight,
+				ImageWidth:      cropResult.SourceWidth,
+				ImageHeight:     cropResult.SourceHeight,
+			}
+			if result.Movie != nil {
+				bounds.SourceWasCover = result.Movie.Poster.ShouldCropPoster
+			}
 		}
 		if err := job.UpdatePosterCrop(movieID, croppedURL, bounds); err != nil {
 			logging.Errorf("Failed to update poster crop in job state for %s: %v", movieID, err)
@@ -212,7 +220,11 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 
 		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL}
 		if bounds != nil {
-			resp.PosterCropBounds = &contracts.CropBounds{X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height, MaxPosterHeight: bounds.MaxPosterHeight}
+			resp.PosterCropBounds = &contracts.CropBounds{
+				X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height,
+				MaxPosterHeight: bounds.MaxPosterHeight, ImageWidth: bounds.ImageWidth, ImageHeight: bounds.ImageHeight,
+				SourceWasCover: bounds.SourceWasCover,
+			}
 		}
 		c.JSON(http.StatusOK, resp)
 	}

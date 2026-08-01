@@ -457,6 +457,32 @@ func TestDownloadPoster_BackupRecoveryFailureFailsLoudly(t *testing.T) {
 	assert.Equal(t, oldBytes, got)
 }
 
+func TestDownloadPoster_BoundsScaleToResizedSource(t *testing.T) {
+	srv := twoToneCoverServer(t)
+	tmpDir := t.TempDir()
+
+	// The user cropped the preview at 2000x1200; Organize downloads the same
+	// image at 1000x600 — in-range after scaling, wrong region without it.
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{
+		X: 0, Y: 0, Width: 800, Height: 1200,
+		ImageWidth: 2000, ImageHeight: 1200, SourceWasCover: true,
+	}
+
+	d := newPosterTestDownloader(&Config{DownloadPoster: true})
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.NoError(t, err)
+	require.True(t, result.Downloaded)
+
+	img := decodePosterImage(t, result.LocalPath)
+	b := img.Bounds()
+	assert.Equal(t, 400, b.Dx(), "bounds must scale 0.5x to the downloaded resolution")
+	assert.Equal(t, 600, b.Dy())
+	r, _, bl, _ := img.At(b.Min.X+b.Dx()/2, b.Min.Y+b.Dy()/2).RGBA()
+	assert.Greater(t, r, bl, "scaled crop must land in the user's (left/red) region")
+}
+
 func TestDownloadPoster_InstallRenameFailureSurfaces(t *testing.T) {
 	srv := twoToneCoverServer(t)
 
@@ -656,12 +682,11 @@ func TestDownloadPoster_StaleCropBoundsFallBackToDefaultCrop(t *testing.T) {
 	srv := twoToneCoverServer(t)
 	tmpDir := t.TempDir()
 
-	scraperSaidCover := true
 	movie := createTestMovie()
 	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
 	movie.Poster.ShouldCropPoster = false // set by the manual crop itself
-	movie.Poster.OriginalShouldCropPoster = &scraperSaidCover
-	movie.Poster.CropBounds = &models.CropBounds{X: 9000, Y: 0, Width: 400, Height: 600}
+
+	movie.Poster.CropBounds = &models.CropBounds{X: 9000, Y: 0, Width: 400, Height: 600, SourceWasCover: true}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
 	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)

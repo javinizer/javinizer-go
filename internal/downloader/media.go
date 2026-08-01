@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -69,7 +70,16 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		lock.Lock()
 		defer lock.Unlock()
 		return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
-			err := imageutil.CropPosterWithBounds(d.fs, srcPath, outPath, b.X, b.Y, b.X+b.Width, b.Y+b.Height, b.MaxPosterHeight)
+			cropBounds := b
+			// The apply-time download can be the same image at a different
+			// resolution than the crop preview measured: scale the absolute
+			// rectangle so it tracks the same region.
+			if b.ImageWidth > 0 && b.ImageHeight > 0 {
+				if sw, sh, dimErr := imageutil.ImageDimensionsFromFile(d.fs, srcPath); dimErr == nil && (sw != b.ImageWidth || sh != b.ImageHeight) {
+					cropBounds = scaleCropBounds(b, sw, sh)
+				}
+			}
+			err := imageutil.CropPosterWithBounds(d.fs, srcPath, outPath, cropBounds.X, cropBounds.Y, cropBounds.X+cropBounds.Width, cropBounds.Y+cropBounds.Height, b.MaxPosterHeight)
 			if err == nil {
 				return nil
 			}
@@ -77,18 +87,10 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			if !errors.Is(err, imageutil.ErrInvalidCropBounds) {
 				return err
 			}
-			// The bounds failure means the apply-time image does not match
-			// the proportions the user cropped against (e.g. CDN served a
-			// different resolution). OriginalShouldCropPoster (scrape-time
-			// snapshot) takes precedence over ShouldCropPoster, which the
-			// crop flow itself forced to false. A scraper-intended cover
-			// degrades to the default crop; a poster-grade source is kept
-			// whole rather than butchered by a wrong auto-crop.
-			scraperWantedCrop := movie.Poster.ShouldCropPoster
-			if movie.Poster.OriginalShouldCropPoster != nil {
-				scraperWantedCrop = *movie.Poster.OriginalShouldCropPoster
-			}
-			if !scraperWantedCrop {
+			// The fallback intent belongs to the image the crop was measured
+			// on (recorded at crop time), not the scrape-time baseline: a
+			// poster-from-URL replacement must never degrade to an auto-crop.
+			if !b.SourceWasCover {
 				// No probe needed: geometry errors only surface after the image
 				// decoded successfully (CropPosterWithBounds decodes before
 				// validating bounds), so srcPath is known-good here.
@@ -111,6 +113,19 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
 		return imageutil.CropPosterFromCover(d.fs, srcPath, outPath, d.config.MaxPosterHeight)
 	})
+}
+
+// scaleCropBounds rescales an absolute preview rectangle to a re-downloaded
+// copy of the same image at a different resolution, preserving the region.
+func scaleCropBounds(b *models.CropBounds, newW, newH int) *models.CropBounds {
+	sx := float64(newW) / float64(b.ImageWidth)
+	sy := float64(newH) / float64(b.ImageHeight)
+	scaled := *b
+	scaled.X = max(int(math.Round(float64(b.X)*sx)), 0)
+	scaled.Y = max(int(math.Round(float64(b.Y)*sy)), 0)
+	scaled.Width = max(int(math.Round(float64(b.Width)*sx)), 1)
+	scaled.Height = max(int(math.Round(float64(b.Height)*sy)), 1)
+	return &scaled
 }
 
 // downloadAndCropPoster downloads posterURL to a staging file, applies cropFn

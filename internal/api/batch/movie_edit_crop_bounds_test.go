@@ -85,6 +85,47 @@ func TestUpdateBatchMoviePosterFromURL_SuccessClearsBoundsAndPersists(t *testing
 	}
 }
 
+func TestUpdateBatchMoviePosterFromURL_DownloadGenericErrorReturns500(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+
+	cleanup := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	})
+	t.Cleanup(cleanup)
+
+	workDir := t.TempDir()
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(workDir))
+	t.Cleanup(func() { _ = os.Chdir(originalWD) })
+
+	// Block the poster temp dir: a file (not directory) sits at the configured
+	// TempDir path, so MkdirAll fails with a generic (non-SSRF/non-download) error.
+	require.NoError(t, os.WriteFile("data", []byte("blocker"), 0o644))
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.TempDir = filepath.Join("data", "temp")
+	deps := createTestDeps(t, cfg, "")
+	job := createJobWithWF(deps, cfg, []string{"/path/to/G500-001.mp4"})
+	setJobResult(job, "/path/to/G500-001.mp4", &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/G500-001.mp4", MovieID: "G500-001"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "G500-001", Title: "G500"},
+	})
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(testkit.GetTestRuntime(deps)))
+
+	body, _ := json.Marshal(contracts.PosterFromURLRequest{URL: "https://example.com/poster.jpg"})
+	req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/G500-001/poster-from-url", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+}
+
 type fixedJobStore struct {
 	worker.JobStoreInterface
 	job worker.BatchJobInterface

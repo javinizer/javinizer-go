@@ -30,6 +30,17 @@ type CropBounds struct {
 	// made (0 = no cap). Stored with the bounds so Organize reproduces the
 	// exact previewed dimensions even if the configured default differs.
 	MaxPosterHeight int `json:"max_poster_height,omitempty"`
+	// ImageWidth/ImageHeight describe the source image the rectangle was
+	// measured against. Apply scales the rectangle when it downloads the same
+	// image at a different resolution (0 = unknown, apply unscaled).
+	ImageWidth  int `json:"image_width,omitempty"`
+	ImageHeight int `json:"image_height,omitempty"`
+	// SourceWasCover records whether the cropped source was a cover needing
+	// auto-crop at measurement time, so the geometry fallback degrades cover
+	// sources to the default crop and keeps poster-grade sources whole — the
+	// scrape-time baseline (OriginalShouldCropPoster) is wrong once the user
+	// replaced the poster image.
+	SourceWasCover bool `json:"source_was_cover,omitempty"`
 }
 
 // Clone returns a deep copy of the PosterState.
