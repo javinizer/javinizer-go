@@ -512,14 +512,22 @@ func TestApplyFieldOverride_PersistErrorWrapped(t *testing.T) {
 
 // TestApplyFieldOverride_PosterURLSyncsCropIntent pins Finding B at the
 // field-override path: when a poster_url override replaces the effective
-// poster source, ShouldCropPoster must be re-derived from the NEW source's
-// class. A cover-backed movie (ShouldCropPoster=true) that picks a
-// poster-grade URL must no longer carry the cover intent — otherwise
-// downloadPoster default-crops the new poster wholesale at Organize, and a
-// subsequent manual crop records CropBounds.SourceWasCover=true so the
-// apply-time geometry fallback degrades to the default cover crop instead of
-// keeping the poster whole (internal/downloader/media.go). The reverse
-// (clearing the override back to the cover) restores cover-backed semantics.
+// poster source, ShouldCropPoster must describe the NEW source. The
+// SELECTED source's own decision travels with its image: a source that
+// serves a landscape cover AS its poster (javdb/mgstage shape:
+// PosterURL == CoverURL, ShouldCropPoster=true) keeps its crop intent, so
+// the auto-cropped review preview and Organize's final poster agree. A
+// poster-grade source (intent=false) conversely clears a cover-backed
+// movie's stale intent — otherwise downloadPoster default-crops the new
+// poster wholesale at Organize, and a subsequent manual crop records
+// CropBounds.SourceWasCover=true so the apply-time geometry fallback
+// degrades to the default cover crop instead of keeping the poster whole
+// (internal/downloader/media.go). Only when the source's intent describes
+// a different image does the sync fall back to URL-field classification
+// (clearing the override back to the cover restores cover-backed
+// semantics). The cover_url cases pin the sibling fix: when the cover
+// becomes the effective poster source again, a manual crop's
+// ShouldCropPoster=false does not survive onto the new image.
 func TestApplyFieldOverride_PosterURLSyncsCropIntent(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -530,10 +538,11 @@ func TestApplyFieldOverride_PosterURLSyncsCropIntent(t *testing.T) {
 	}{
 		{
 			name: "cover-backed movie picking a poster-grade URL drops the cover intent",
-			setup: func(movie *models.Movie, _ *models.ScraperResult) {
+			setup: func(movie *models.Movie, dmm *models.ScraperResult) {
 				movie.Poster.PosterURL = ""
 				movie.Poster.CoverURL = "https://old.example/cover.jpg"
 				movie.Poster.ShouldCropPoster = true // cover-backed at scrape time
+				dmm.ShouldCropPoster = false         // the selected source serves a poster-grade image
 			},
 			field:      "poster_url",
 			wantCrop:   false,
@@ -541,13 +550,30 @@ func TestApplyFieldOverride_PosterURLSyncsCropIntent(t *testing.T) {
 		},
 		{
 			name: "stale cover intent on a poster swap is cleared",
-			setup: func(movie *models.Movie, _ *models.ScraperResult) {
+			setup: func(movie *models.Movie, dmm *models.ScraperResult) {
 				movie.Poster.PosterURL = "https://old.example/poster.jpg"
 				movie.Poster.CoverURL = "https://old.example/cover.jpg"
 				movie.Poster.ShouldCropPoster = true // stale: already describes a poster source
+				dmm.ShouldCropPoster = false
 			},
 			field:      "poster_url",
 			wantCrop:   false,
+			wantPoster: "dmm-poster-url",
+		},
+		{
+			// javdb/mgstage output shape: PosterURL is populated FROM the
+			// landscape CoverURL and flagged ShouldCropPoster=true. The intent
+			// must survive the override or Organize writes the landscape image
+			// whole while the review preview showed it cropped.
+			name: "cover-derived poster URL keeps the selected source's crop intent",
+			setup: func(movie *models.Movie, dmm *models.ScraperResult) {
+				movie.Poster.PosterURL = "https://old.example/poster.jpg"
+				movie.Poster.ShouldCropPoster = false
+				dmm.CoverURL = dmm.PosterURL // the selected source's poster IS its landscape cover
+				// dmm.ShouldCropPoster stays true (fixture default)
+			},
+			field:      "poster_url",
+			wantCrop:   true,
 			wantPoster: "dmm-poster-url",
 		},
 		{
@@ -602,6 +628,36 @@ func TestApplyFieldOverride_PosterURLSyncsCropIntent(t *testing.T) {
 				movie.Poster.PosterURL = ""
 				movie.Poster.CoverURL = "https://old.example/cover.jpg"
 				movie.Poster.ShouldCropPoster = true
+			},
+			field:      "cover_url",
+			wantCrop:   true,
+			wantPoster: "",
+		},
+		{
+			// The source's recorded intent describes its own poster URL, NOT
+			// the cover adopted here, so the URL-class fallback applies: the
+			// new cover feeds the poster pipeline and must be cropped.
+			name: "cover_url override after a manual crop re-establishes cover cropping",
+			setup: func(movie *models.Movie, dmm *models.ScraperResult) {
+				movie.Poster.PosterURL = ""
+				movie.Poster.CoverURL = "https://old.example/cover.jpg"
+				movie.Poster.ShouldCropPoster = false // the manual crop decision on the OLD cover
+				dmm.ShouldCropPoster = false          // describes dmm-poster-url, not the cover
+			},
+			field:      "cover_url",
+			wantCrop:   true,
+			wantPoster: "",
+		},
+		{
+			// mgstage shape: the selected source's poster IS its cover, so its
+			// crop intent describes the very image adopted here.
+			name: "cover_url override adopts the selected source's intent for the same image",
+			setup: func(movie *models.Movie, dmm *models.ScraperResult) {
+				movie.Poster.PosterURL = ""
+				movie.Poster.CoverURL = "https://old.example/cover.jpg"
+				movie.Poster.ShouldCropPoster = false // the manual crop decision on the OLD cover
+				dmm.PosterURL = dmm.CoverURL          // poster populated from the cover
+				// dmm.ShouldCropPoster stays true (fixture default)
 			},
 			field:      "cover_url",
 			wantCrop:   true,

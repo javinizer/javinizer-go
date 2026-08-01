@@ -356,9 +356,12 @@ func TestUpdateBatchMoviePosterCrop_PosterSourceLockReleasedOnAllPaths(t *testin
 	})
 }
 
-// TestUpdateBatchMovie_PosterSourceChangeSyncsCropIntent pins Finding B parity
+// TestUpdateBatchMovie_PosterSourceChangeSyncsCropIntent pins the intent sync
 // in the whole-movie PATCH path: when a PATCH replaces the effective poster
-// source, ShouldCropPoster is re-derived from the NEW source's class so a
+// source, ShouldCropPoster follows the NEW image. A recorded scraper source
+// whose own effective poster URL IS the adopted image contributes its raw
+// decision (javdb/mgstage populate PosterURL from a landscape CoverURL with
+// ShouldCropPoster=true); otherwise the URL-class fallback applies, so a
 // stale cover intent never survives onto a poster-grade image (it would be
 // recorded as CropBounds.SourceWasCover by a later manual crop, degrading the
 // apply-time geometry fallback to the default cover crop), and a cleared
@@ -447,6 +450,78 @@ func TestUpdateBatchMovie_PosterSourceChangeSyncsCropIntent(t *testing.T) {
 		stored := storedMovieResult(t, job, movieID)
 		require.NotNil(t, stored.Movie)
 		assert.False(t, stored.Movie.Poster.ShouldCropPoster)
+	})
+
+	t.Run("PATCH selecting a cover-derived poster URL adopts the recorded source intent", func(t *testing.T) {
+		const movieID = "SYN-005"
+		job, router := setup(t, movieID, models.PosterState{
+			PosterURL:        oldURL,
+			ShouldCropPoster: false, // poster-grade source currently feeds the pipeline
+		})
+		filePath := "/path/to/" + movieID + ".mp4"
+		// javdb/mgstage output shape: PosterURL is populated FROM the
+		// landscape CoverURL and flagged ShouldCropPoster=true (provenance
+		// carries the scraper's raw decision for the review source viewer).
+		job.ResultsWriter().SetProvenance(filePath, &resultstore.ProvenanceData{
+			ScraperResults: []*models.ScraperResult{
+				{Source: "javdb", PosterURL: newURL, CoverURL: newURL, ShouldCropPoster: true},
+				{Source: "dmm", PosterURL: "https://dmm.example/pl.jpg", ShouldCropPoster: false},
+			},
+		})
+		// The client resends a poster-grade flag alongside the selected source.
+		patch(t, router, job.GetID(), movieID, models.PosterState{
+			PosterURL: newURL, CoverURL: oldURL, ShouldCropPoster: false,
+		})
+
+		stored := storedMovieResult(t, job, movieID)
+		require.NotNil(t, stored.Movie)
+		assert.True(t, stored.Movie.Poster.ShouldCropPoster,
+			"the selected source's landscape poster keeps its crop intent — the temp preview is auto-cropped, so Organize must crop too")
+		assert.Nil(t, stored.Movie.Poster.CropBounds, "the source change still invalidates the old crop")
+	})
+
+	t.Run("recorded source intent is not leaked onto a different adopted image", func(t *testing.T) {
+		const movieID = "SYN-006"
+		job, router := setup(t, movieID, models.PosterState{
+			CoverURL:         oldURL,
+			ShouldCropPoster: true,
+		})
+		filePath := "/path/to/" + movieID + ".mp4"
+		// dmm's intent describes its OWN poster URL (pl.jpg); the PATCH adopts
+		// only its cover, so the URL-class fallback applies to the new image.
+		job.ResultsWriter().SetProvenance(filePath, &resultstore.ProvenanceData{
+			ScraperResults: []*models.ScraperResult{
+				{Source: "dmm", PosterURL: "https://dmm.example/pl.jpg", CoverURL: newURL, ShouldCropPoster: false},
+			},
+		})
+		patch(t, router, job.GetID(), movieID, models.PosterState{
+			PosterURL: "", CoverURL: newURL, ShouldCropPoster: false,
+		})
+
+		stored := storedMovieResult(t, job, movieID)
+		require.NotNil(t, stored.Movie)
+		assert.True(t, stored.Movie.Poster.ShouldCropPoster,
+			"the adopted cover feeds the poster pipeline — cover-backed fallback applies")
+	})
+
+	t.Run("cover_url PATCH after a manual crop re-establishes cover-backed intent", func(t *testing.T) {
+		const movieID = "SYN-007"
+		job, router := setup(t, movieID, models.PosterState{
+			CoverURL:         oldURL,
+			ShouldCropPoster: false, // the manual crop's decision on the OLD cover
+			CropBounds:       &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 400},
+		})
+		// No recorded provenance describes the new cover: the URL-class
+		// fallback must still restore cover-crop semantics.
+		patch(t, router, job.GetID(), movieID, models.PosterState{
+			PosterURL: "", CoverURL: newURL, ShouldCropPoster: false,
+		})
+
+		stored := storedMovieResult(t, job, movieID)
+		require.NotNil(t, stored.Movie)
+		assert.True(t, stored.Movie.Poster.ShouldCropPoster,
+			"the new cover is the effective poster source again — Organize must crop it")
+		assert.Nil(t, stored.Movie.Poster.CropBounds, "the source change invalidates the old manual crop")
 	})
 
 	t.Run("unchanged source keeps an explicit flag flip", func(t *testing.T) {

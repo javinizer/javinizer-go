@@ -79,3 +79,57 @@ func TestPosterState_SyncCropIntentWithSource(t *testing.T) {
 		}
 	})
 }
+
+// TestPosterState_SyncCropIntentWithSource_KnownSourceIntent pins the
+// intent-propagation half of the sync: a scraper ships ShouldCropPoster
+// paired with ITS OWN effective poster URL (javdb/mgstage set
+// PosterURL = CoverURL with true for a landscape cover), so when the movie's
+// new effective source is exactly that image, the source's decision travels
+// with it — the auto-cropped temp preview and Organize's final poster then
+// agree. An intent recorded against a DIFFERENT image is never inherited;
+// the URL-field fallback classifies the new source instead.
+func TestPosterState_SyncCropIntentWithSource_KnownSourceIntent(t *testing.T) {
+	t.Run("matching cover-derived source keeps crop intent true", func(t *testing.T) {
+		p := PosterState{PosterURL: "https://x/cover.jpg", CoverURL: "https://x/cover.jpg", ShouldCropPoster: false}
+		// javdb/mgstage shape: poster populated FROM the landscape cover.
+		src := &ScraperResult{PosterURL: "https://x/cover.jpg", CoverURL: "https://x/cover.jpg", ShouldCropPoster: true}
+		p.SyncCropIntentWithSource(src)
+		assert.True(t, p.ShouldCropPoster, "the selected source crops this very image; Organize must not write the landscape bytes whole")
+	})
+
+	t.Run("matching poster-grade source keeps crop intent false", func(t *testing.T) {
+		p := PosterState{PosterURL: "https://x/pl.jpg", ShouldCropPoster: true}
+		src := &ScraperResult{PosterURL: "https://x/pl.jpg", CoverURL: "https://x/cover.jpg", ShouldCropPoster: false}
+		p.SyncCropIntentWithSource(src)
+		assert.False(t, p.ShouldCropPoster, "the selected source says this poster-grade image is kept whole")
+	})
+
+	t.Run("source whose poster URL was NOT adopted does not leak its intent", func(t *testing.T) {
+		p := PosterState{CoverURL: "https://x/cover.jpg", ShouldCropPoster: false}
+		// The source's true intent describes its distinct poster URL; only its
+		// cover was adopted, so the fallback classifies the cover as needing crop.
+		src := &ScraperResult{PosterURL: "https://x/pl.jpg", CoverURL: "https://x/cover.jpg", ShouldCropPoster: true}
+		p.SyncCropIntentWithSource(src)
+		assert.True(t, p.ShouldCropPoster)
+	})
+
+	t.Run("intent against a different image does not shield a poster URL from the fallback", func(t *testing.T) {
+		p := PosterState{PosterURL: "https://x/new-poster.jpg", ShouldCropPoster: true}
+		src := &ScraperResult{PosterURL: "https://x/cover.jpg", CoverURL: "https://x/cover.jpg", ShouldCropPoster: true}
+		p.SyncCropIntentWithSource(src) // no recorded source describes the new poster URL
+		assert.False(t, p.ShouldCropPoster, "unknown intent falls back to poster-grade classification")
+	})
+
+	t.Run("source with no poster URL matches via its cover", func(t *testing.T) {
+		p := PosterState{CoverURL: "https://x/cover.jpg", ShouldCropPoster: false}
+		src := &ScraperResult{CoverURL: "https://x/cover.jpg", ShouldCropPoster: true}
+		p.SyncCropIntentWithSource(src)
+		assert.True(t, p.ShouldCropPoster)
+	})
+
+	t.Run("nil entries are skipped", func(t *testing.T) {
+		p := PosterState{PosterURL: "https://x/pl.jpg", ShouldCropPoster: true}
+		p.SyncCropIntentWithSource(nil, &ScraperResult{PosterURL: "https://x/other.jpg", ShouldCropPoster: true})
+		assert.False(t, p.ShouldCropPoster, "no matched source: poster-grade fallback applies")
+	})
+}

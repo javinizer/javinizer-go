@@ -44,10 +44,26 @@ type CropBounds struct {
 }
 
 // SyncCropIntentWithSource re-derives ShouldCropPoster from the class of the
-// effective poster source after a source-changing edit (a poster_url override
-// or a whole-movie PATCH that swaps the source — the downloader reads
-// PosterURL ?? CoverURL):
+// effective poster source after a source-changing edit (a poster_url/cover_url
+// override or a whole-movie PATCH that swaps the source — the downloader reads
+// PosterURL ?? CoverURL).
 //
+// sources carries the scraper results whose crop decisions are KNOWN to the
+// caller: the explicitly selected source at the field-override path, or every
+// recorded provenance source at the whole-movie PATCH path. A scraper ships
+// its ShouldCropPoster paired with its own effective poster URL — javdb
+// (internal/scraper/javdb) and mgstage (internal/scraper/mgstage) set
+// PosterURL = CoverURL with ShouldCropPoster=true because that "poster" is a
+// landscape cover needing the right-side crop. When a known source's effective
+// poster URL (its PosterURL ?? CoverURL) equals the movie's NEW effective
+// source, the scraper's crop decision travels with the image: the review
+// preview of that source is auto-cropped (temp previews are always cropped),
+// so Organize must crop the final poster too instead of writing the landscape
+// bytes whole. An intent recorded against a DIFFERENT image (e.g. the
+// source's distinct poster URL when only its cover was adopted) is not
+// inherited — the fallback below classifies the new source instead.
+//
+// Intent-unknown fallback (URL-field derived):
 //   - PosterURL set → a poster-grade image feeds the pipeline: false. Without
 //     this, a cover-backed movie's stale intent would make Organize
 //     default-crop the new poster wholesale, and a later manual crop would
@@ -64,10 +80,30 @@ type CropBounds struct {
 // Callers must invoke this ONLY when the effective source actually changed —
 // an unchanged source may carry a deliberate user crop decision (an explicit
 // should_crop_poster edit) that must not be clobbered.
-func (p *PosterState) SyncCropIntentWithSource() {
+func (p *PosterState) SyncCropIntentWithSource(sources ...*ScraperResult) {
+	effective := p.PosterURL
+	if effective == "" {
+		effective = p.CoverURL
+	}
+	if effective == "" {
+		return // the edit cleared the LAST source: leave the flag untouched
+	}
+	for _, r := range sources {
+		if r == nil {
+			continue
+		}
+		src := r.PosterURL
+		if src == "" {
+			src = r.CoverURL
+		}
+		if src == effective {
+			p.ShouldCropPoster = r.ShouldCropPoster
+			return
+		}
+	}
 	if p.PosterURL != "" {
 		p.ShouldCropPoster = false
-	} else if p.CoverURL != "" {
+	} else {
 		p.ShouldCropPoster = true
 	}
 }

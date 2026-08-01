@@ -18,9 +18,12 @@ var (
 
 // AcquirePosterSourceLock serializes the poster-source "snapshot old assets →
 // refresh/cleanup → persist movie" sequence for one (jobID, movieID) pair
-// across the two paths that perform it: the whole-movie PATCH handler
-// (internal/api/batch/movie_edit.go's updateBatchMovie) and the field-
-// override path (jobEditorImpl.ApplyFieldOverride). Without it, two
+// across the four paths that mutate the shared cached poster assets and the
+// movie's poster state together: the whole-movie PATCH handler
+// (internal/api/batch/movie_edit.go's updateBatchMovie), the field-
+// override path (jobEditorImpl.ApplyFieldOverride), the manual-crop endpoint
+// (updateBatchMoviePosterCrop), and the poster-from-URL refresh endpoint
+// (updateBatchMoviePosterFromURL). Without it, two
 // concurrent source-changing edits can interleave — request A refreshes the
 // cached {movieID}-full.jpg from image A, request B refreshes from image B,
 // and B persists before A — leaving the job's final poster URL pointing at A

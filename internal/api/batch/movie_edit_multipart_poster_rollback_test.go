@@ -121,6 +121,9 @@ func TestUpdateBatchMovie_MultipartPartialFailure(t *testing.T) {
 			mockJob := workermocks.NewMockBatchJobInterface(t)
 			mockJob.EXPECT().GetFileResultByResultID(movieID).Return(resultFor(0), partPaths[0], true)
 			mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return(partPaths)
+			// The source-changing PATCH looks up recorded provenance for the
+			// crop-intent sync; these parts contribute none.
+			mockJob.EXPECT().GetProvenance(mock.Anything).Return(nil)
 			if tt.lookupFailPart1 {
 				mockJob.EXPECT().GetMovieResult(partPaths[0]).Return(nil, assert.AnError)
 			} else {

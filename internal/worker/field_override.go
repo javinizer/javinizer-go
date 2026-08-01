@@ -147,16 +147,22 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		if movie.Poster.PosterURL != result.PosterURL {
 			movie.Poster.PosterURL = result.PosterURL
 			movie.Poster.CropBounds = nil // new source image invalidates a crop measured against the old one
-			// The auto-crop decision belongs to the image it described: a
-			// cover-backed movie that picks a poster-grade URL must not keep
-			// ShouldCropPoster=true — Organize would default-crop the new
-			// poster, and a later manual crop would record
-			// CropBounds.SourceWasCover=true, so an apply-time geometry
-			// failure would degrade to the default cover crop instead of
-			// keeping the poster whole. Clearing the URL falls the movie back
-			// to its cover, restoring cover-backed semantics. Parity with the
+			// The auto-crop decision belongs to the image it described — and the
+			// SELECTED source ships that decision paired with its own effective
+			// poster URL, so propagate it (sources like javdb/mgstage populate
+			// PosterURL from their landscape CoverURL WITH ShouldCropPoster=true;
+			// deriving intent from which URL field is populated would flip it to
+			// false and Organize would write the landscape image whole while the
+			// review preview showed it cropped). SyncCropIntentWithSource also
+			// covers the URL-field fallback: a cover-backed movie picking a
+			// poster-grade URL must not keep ShouldCropPoster=true — Organize
+			// would default-crop the new poster, and a later manual crop would
+			// record CropBounds.SourceWasCover=true, so an apply-time geometry
+			// failure would degrade to the default cover crop instead of keeping
+			// the poster whole. Clearing the URL falls the movie back to its
+			// cover, restoring cover-backed semantics. Parity with the
 			// whole-movie PATCH path (updateBatchMovie).
-			movie.Poster.SyncCropIntentWithSource()
+			movie.Poster.SyncCropIntentWithSource(result)
 		}
 		setFieldSource("poster_url")
 	case "cover_url":
@@ -166,6 +172,15 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		movie.Poster.CoverURL = result.CoverURL
 		if movie.Poster.PosterURL == "" && oldCover != result.CoverURL {
 			movie.Poster.CropBounds = nil
+			// The cover IS the effective poster source now: re-establish its
+			// crop intent. A manual crop on the previous cover left
+			// ShouldCropPoster=false; without the re-sync the refreshed preview
+			// shows the new cover auto-cropped while Organize, seeing neither
+			// bounds nor intent, would write the new landscape cover unchanged.
+			// The selected source's own decision (e.g. mgstage's true) wins when
+			// it describes this same image; otherwise the cover-backed fallback
+			// restores true.
+			movie.Poster.SyncCropIntentWithSource(result)
 		}
 		setFieldSource("cover_url")
 	case "trailer_url":

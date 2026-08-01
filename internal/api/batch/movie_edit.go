@@ -134,19 +134,34 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 			posterSourceChanged = oldSource != newSource
 			// The auto-crop decision the PATCH carried belongs to the image it
-			// described. When the effective source changed, re-derive it from
-			// the new source's class so a stale cover intent cannot survive onto
-			// a poster-grade image: the crop endpoint records ShouldCropPoster
-			// as CropBounds.SourceWasCover, and on an apply-time geometry
-			// failure the downloader degrades SourceWasCover=true bounds to the
-			// default cover crop instead of keeping the poster whole
+			// described. When the effective source changed, re-derive it: first
+			// from a KNOWN scraper source — the persisted provenance ScraperResults
+			// ship each source's ShouldCropPoster paired with that source's own
+			// effective poster URL, and scrapers like javdb/mgstage populate
+			// PosterURL from their landscape CoverURL WITH ShouldCropPoster=true,
+			// so a PATCH selecting such a source must keep the true intent
+			// (temp previews are always auto-cropped; without this, Organize
+			// would write the landscape image whole under a cropped preview).
+			// Only when no recorded source describes the new image does the
+			// URL-class fallback kick in, so a stale cover intent cannot survive
+			// onto a poster-grade image: the crop endpoint records
+			// ShouldCropPoster as CropBounds.SourceWasCover, and on an apply-time
+			// geometry failure the downloader degrades SourceWasCover=true bounds
+			// to the default cover crop instead of keeping the poster whole
 			// (internal/downloader/media.go). A cleared poster URL conversely
 			// regains cover-backed semantics. An unchanged source keeps the
 			// client-sent flag untouched — an explicit should_crop_poster flip
 			// with no source change is a deliberate decision. Parity with the
-			// field-override path (applyFieldOverride's poster_url case).
+			// field-override path (applyFieldOverride's poster_url/cover_url
+			// cases).
 			if posterSourceChanged {
-				movie.Poster.SyncCropIntentWithSource()
+				var sources []*models.ScraperResult
+				for _, fp := range filePaths {
+					if prov := job.GetProvenance(fp); prov != nil {
+						sources = append(sources, prov.ScraperResults...)
+					}
+				}
+				movie.Poster.SyncCropIntentWithSource(sources...)
 			}
 			if movie.Poster.CropBounds != nil &&
 				(posterSourceChanged || cm.ShouldCropPoster != movie.Poster.ShouldCropPoster) {
@@ -437,6 +452,24 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
+
+		// A poster-from-URL refresh mutates the same poster state as a manual
+		// crop or a source-changing PATCH/field override: DownloadFromURL
+		// replaces the shared {posterID}-full.jpg and preview, then
+		// UpdatePosterFromURL + PersistJobByID attach the new URL and clear
+		// any recorded crop bounds. Without the shared per-(job, movie) lock
+		// this sequence can interleave with those edits — e.g. a concurrent
+		// crop measures the pre-refresh -full.jpg yet persists after this
+		// request, attaching stale bounds to the new source. Held across the
+		// download, the state update, and the persistence; the deferred
+		// release covers every error/return path. posterID is the same key the
+		// crop endpoint, updateBatchMovie and ApplyFieldOverride use.
+		// Lock ordering: this endpoint acquires ONLY this lock (parity with
+		// updateBatchMoviePosterCrop/updateBatchMovie); ApplyFieldOverride
+		// takes overrideMu BEFORE it and no path reverses either order, so
+		// acquisition stays cycle-free.
+		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterID)
+		defer releasePosterLock()
 
 		// Snapshot so apiCfg (user-agent/referer) and the poster manager see the
 		// same reload epoch (issue #44).
