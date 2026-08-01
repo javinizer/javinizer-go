@@ -624,6 +624,29 @@ func TestSourceFencedActressOperations(t *testing.T) {
 	require.Equal(t, taskJob.ID, taskClaimed.JobID)
 }
 
+func TestMergeForSyncTaskWithTargetRejectsChangedTarget(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	target := &models.Actress{DMMID: 1201, JapaneseName: "target"}
+	source := &models.Actress{JapaneseName: "source"}
+	require.NoError(t, repo.Create(t.Context(), target))
+	require.NoError(t, repo.Create(t.Context(), source))
+	expectedTarget := *target
+	expectedSource := *source
+	syncRepo, _, _ := newActressSyncJobAndTask(t, db, &source.ID, "target-fence")
+	claimed, err := syncRepo.ClaimNext("target-fence-owner", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", target.ID).Update("japanese_name", "changed target").Error)
+	_, err = repo.MergeForSyncTaskWithTargetAndSource(t.Context(), target.ID, source.ID, nil, expectedTarget, expectedSource, claimed.ID, claimed.LeaseToken)
+	require.ErrorIs(t, err, ErrActressSyncIdentityChanged)
+	storedTarget, err := repo.FindByID(t.Context(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, "changed target", storedTarget.JapaneseName)
+	_, err = repo.FindByID(t.Context(), source.ID)
+	require.NoError(t, err)
+}
+
 func TestActressSyncFieldMergingAndMutationValidation(t *testing.T) {
 	require.Equal(t, []string{"first", "FIRST", "second"}, mergeSyncTaskFields([]string{" first ", ""}, []string{"first", "FIRST", "second"}))
 	db := newDatabaseTestDB(t)

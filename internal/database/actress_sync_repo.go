@@ -333,6 +333,11 @@ func (r *ActressRepository) MergeForSyncTask(ctx context.Context, targetID, sour
 
 // MergeForSyncTaskWithSource ...
 func (r *ActressRepository) MergeForSyncTaskWithSource(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, expectedSource models.Actress, taskID, leaseToken string) (*ActressMergeResult, error) {
+	return r.MergeForSyncTaskWithTargetAndSource(ctx, targetID, sourceID, resolutions, models.Actress{}, expectedSource, taskID, leaseToken)
+}
+
+// MergeForSyncTaskWithTargetAndSource ...
+func (r *ActressRepository) MergeForSyncTaskWithTargetAndSource(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, expectedTarget, expectedSource models.Actress, taskID, leaseToken string) (*ActressMergeResult, error) {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(leaseToken) == "" {
 		return nil, ErrInvalidLookup
 	}
@@ -341,7 +346,7 @@ func (r *ActressRepository) MergeForSyncTaskWithSource(ctx context.Context, targ
 		return nil, err
 	}
 	syncRepo := NewActressSyncRepository(r.GetDB())
-	return r.merger.executeMerge(ctx, plan, r.GetDB(), sourceIdentityPrecondition(expectedSource), func(tx *gorm.DB, canonicalID, duplicateID uint) error {
+	return r.merger.executeMerge(ctx, plan, r.GetDB(), targetAndSourceIdentityPrecondition(expectedTarget, expectedSource), func(tx *gorm.DB, canonicalID, duplicateID uint) error {
 		return syncRepo.reassignTaskActressTx(tx, taskID, leaseToken, canonicalID, duplicateID)
 	})
 }
@@ -353,6 +358,15 @@ func (r *ActressRepository) MergeWithSource(ctx context.Context, targetID, sourc
 		return nil, err
 	}
 	return r.merger.executeMerge(ctx, plan, r.GetDB(), sourceIdentityPrecondition(expectedSource), nil)
+}
+
+func targetAndSourceIdentityPrecondition(expectedTarget, expectedSource models.Actress) func(*gorm.DB, *models.Actress, *models.Actress) error {
+	return func(tx *gorm.DB, target, source *models.Actress) error {
+		if expectedTarget.ID > 0 && !cachedIdentitySourceMatches(expectedTarget, *target) {
+			return ErrActressSyncIdentityChanged
+		}
+		return sourceIdentityPrecondition(expectedSource)(tx, target, source)
+	}
 }
 
 func sourceIdentityPrecondition(expected models.Actress) func(*gorm.DB, *models.Actress, *models.Actress) error {

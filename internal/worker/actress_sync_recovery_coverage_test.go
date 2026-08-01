@@ -43,6 +43,40 @@ func TestRecoverMissingDMMIdentityBranches(t *testing.T) {
 		require.ErrorIs(t, err, callbackErr)
 	})
 
+	t.Run("source snapshot callback", func(t *testing.T) {
+		_, repo, movieRepo, target := newActressSyncFixture(t, &models.Actress{JapaneseName: "同名"})
+		canonical := &models.Actress{DMMID: 21, JapaneseName: "同名"}
+		require.NoError(t, repo.Create(context.Background(), canonical))
+		got, _, fields, err := recoverMissingDMMIdentity(context.Background(), target, repo, movieRepo, nil, nil, nil, linkedIdentityRecoveryOptions{
+			expectedSource: *target,
+			mergeActressesWithSource: func(targetID, sourceID uint, expectedSource models.Actress) (*database.ActressMergeResult, error) {
+				require.Equal(t, canonical.ID, targetID)
+				require.Equal(t, target.ID, expectedSource.ID)
+				return &database.ActressMergeResult{MergedActress: *canonical}, nil
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, canonical.ID, got.ID)
+		require.Equal(t, []string{"merged_duplicate"}, fields)
+	})
+
+	t.Run("target snapshot callback", func(t *testing.T) {
+		_, repo, movieRepo, target := newActressSyncFixture(t, &models.Actress{JapaneseName: "同名"})
+		canonical := &models.Actress{DMMID: 22, JapaneseName: "同名"}
+		require.NoError(t, repo.Create(context.Background(), canonical))
+		got, _, _, err := recoverMissingDMMIdentity(context.Background(), target, repo, movieRepo, nil, nil, nil, linkedIdentityRecoveryOptions{
+			expectedSource: *target,
+			mergeActressesWithTargetSource: func(targetID, sourceID uint, expectedTarget, expectedSource models.Actress) (*database.ActressMergeResult, error) {
+				require.Equal(t, canonical.ID, targetID)
+				require.Equal(t, canonical.ID, expectedTarget.ID)
+				require.Equal(t, target.ID, expectedSource.ID)
+				return &database.ActressMergeResult{MergedActress: *canonical}, nil
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, canonical.ID, got.ID)
+	})
+
 	for _, tc := range []struct {
 		name    string
 		assign  func(uint, int) (bool, error)

@@ -320,6 +320,13 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 			}
 			return merged, mergeErr
 		},
+		MergeActressesWithTargetSource: func(targetID, sourceID uint, expectedTarget, expectedSource models.Actress) (*database.ActressMergeResult, error) {
+			merged, mergeErr := m.deps.ActressRepo.MergeForSyncTaskWithTargetAndSource(ctx, targetID, sourceID, nil, expectedTarget, expectedSource, task.ID, task.LeaseToken)
+			if mergeErr == nil {
+				task.ActressID = &targetID
+			}
+			return merged, mergeErr
+		},
 		MergeCachedIdentityWithSource: func(targetID, sourceID uint, expectedDMMID int, expectedSource models.Actress) (*database.ActressMergeResult, error) {
 			merged, mergeErr := m.deps.ActressRepo.MergeCachedIdentityForSyncTaskWithSource(ctx, targetID, sourceID, expectedDMMID, expectedSource, task.ID, task.LeaseToken)
 			if mergeErr == nil {
