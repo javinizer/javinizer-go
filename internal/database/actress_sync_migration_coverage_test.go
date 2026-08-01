@@ -113,6 +113,13 @@ func TestMigrateActiveActressSyncTasksErrors(t *testing.T) {
 		})
 	}
 
+	t.Run("skip weaker target error", func(t *testing.T) {
+		db, _, _ := migrationTaskFixture(t, true, models.ActressSyncTaskPending, "selected", models.ActressSyncTaskPending, "missing")
+		remove := forceMigrationUpdateError(t, db, 1)
+		defer remove()
+		require.ErrorIs(t, migrateActiveActressSyncTasksTx(db.DB, 10, 20), errForcedActressCoverage)
+	})
+
 	t.Run("refresh job", func(t *testing.T) {
 		db, _, _ := migrationTaskFixture(t, true, models.ActressSyncTaskPending, "missing", models.ActressSyncTaskRunning, "selected")
 		remove := forceQueryErrorOnCall(t, db, 5)
