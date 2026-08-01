@@ -67,6 +67,15 @@ func TestScrapeMiss2_ResolveContentID_ResolverSuccess(t *testing.T) {
 	assert.Equal(t, "abc123", result)
 }
 
+func TestScrapeMiss2_ResolveContentID_SkipsNonResolverPriority(t *testing.T) {
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(&mockScraper{name: "actress-only", enabled: true})
+	registry.RegisterInstance(&cidResolverScraper{name: "mock-resolver", resolvedID: "abc123"})
+	s := &Scraper{registry: registry}
+	result := s.resolveContentID(context.Background(), "ABC-123", []string{"actress-only", "mock-resolver"})
+	assert.Equal(t, "abc123", result)
+}
+
 // --- queryAll: nil context gets background context ---
 
 func TestScrapeMiss2_QueryAll_NilContext(t *testing.T) {
