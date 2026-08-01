@@ -305,6 +305,7 @@ func TestUpdateBatchMovie_PosterRefreshRollbackOnPersistFailure(t *testing.T) {
 	mockJob := workermocks.NewMockBatchJobInterface(t)
 	mockJob.EXPECT().GetFileResultByResultID(movieID).Return(result, filePath, true)
 	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{filePath})
+	mockJob.EXPECT().GetMovieResult(filePath).Return(result, nil)
 	mockJob.EXPECT().UpdateMovie(mock.Anything, filePath, mock.Anything).Return(assert.AnError)
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 
@@ -369,6 +370,7 @@ func TestUpdateBatchMovie_PosterRefreshRollbackFailureSurfaced(t *testing.T) {
 	mockJob := workermocks.NewMockBatchJobInterface(t)
 	mockJob.EXPECT().GetFileResultByResultID(movieID).Return(result, filePath, true)
 	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{filePath})
+	mockJob.EXPECT().GetMovieResult(filePath).Return(result, nil)
 	mockJob.EXPECT().UpdateMovie(mock.Anything, filePath, mock.Anything).
 		Run(func(_ context.Context, _ string, _ *models.Movie) {
 			// Break the cache directory between refresh and rollback so

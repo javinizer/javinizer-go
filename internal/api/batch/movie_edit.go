@@ -152,26 +152,62 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// UpdateMovie now handles both DB persistence and in-memory
 		// update atomically. No need to call MovieRepo directly.
 
-		// Update ALL file parts for this movie ID (handles multi-part files like CD1, CD2, etc.)
+		// Update ALL file parts for this movie ID (handles multi-part files
+		// like CD1, CD2, etc.). There is no store-level transaction across
+		// parts, so the multipart update is made atomic by compensation: when
+		// a later part's UpdateMovie fails after an earlier one succeeded, the
+		// earlier parts are reverted (re-persisted through UpdateMovie with
+		// their pre-request stored movies) BEFORE the poster-cache rollback
+		// runs. Rolling the cache back while a part still holds the new poster
+		// source URL would desync job state from the cached -full.jpg: a retry
+		// routed through that part's resultID would see the persisted URL as
+		// unchanged, skip the asset refresh, and a subsequent manual crop would
+		// then be measured against the restored old image while Organize
+		// downloads the new source.
+		type updatedPart struct {
+			filePath string
+			original *models.Movie // pre-update stored movie, held for revert
+		}
+		var updated []updatedPart
+		var updateErr error
+		var updateFailPath string
 		for _, filePath := range filePaths {
-			err := job.UpdateMovie(c.Request.Context(), filePath, movie)
-
-			if err != nil {
-				errMsg := fmt.Sprintf("Failed to update movie: %v", err)
-				if rollback != nil {
-					// Persistence failed after the refresh replaced the cached
-					// poster assets: restore the pre-refresh cache so a subsequent
-					// crop measures the image the still-persisted source URL
-					// describes. A failed restore is surfaced, not swallowed
-					// (parity with the field-override path).
-					if rollbackErr := rollback(); rollbackErr != nil {
-						errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, rollbackErr)
-					}
-				}
-				logging.Errorf("Failed to update movie for %s: %v", filePath, err)
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
-				return
+			var original *models.Movie
+			if prev, gErr := job.GetMovieResult(filePath); gErr == nil && prev != nil {
+				original = prev.Movie
 			}
+			if err := job.UpdateMovie(c.Request.Context(), filePath, movie); err != nil {
+				updateErr, updateFailPath = err, filePath
+				break
+			}
+			updated = append(updated, updatedPart{filePath: filePath, original: original})
+		}
+		if updateErr != nil {
+			errMsg := fmt.Sprintf("Failed to update movie: %v", updateErr)
+			// Revert the parts already updated so no part keeps the new poster
+			// metadata that the poster-cache rollback below erases; a failed
+			// revert is surfaced alongside the primary error, not swallowed.
+			for _, part := range updated {
+				if part.original == nil {
+					continue
+				}
+				if revertErr := job.UpdateMovie(c.Request.Context(), part.filePath, part.original); revertErr != nil {
+					errMsg = fmt.Sprintf("%s (revert of part %s failed: %v)", errMsg, part.filePath, revertErr)
+				}
+			}
+			if rollback != nil {
+				// Persistence failed after the refresh replaced the cached
+				// poster assets: restore the pre-refresh cache so a subsequent
+				// crop measures the image the still-persisted source URL
+				// describes. A failed restore is surfaced, not swallowed
+				// (parity with the field-override path).
+				if rollbackErr := rollback(); rollbackErr != nil {
+					errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, rollbackErr)
+				}
+			}
+			logging.Errorf("Failed to update movie for %s: %v", updateFailPath, updateErr)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
+			return
 		}
 		deps.GetJobStore().PersistJobByID(jobID)
 		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie)})
