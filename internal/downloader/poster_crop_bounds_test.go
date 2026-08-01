@@ -343,6 +343,49 @@ func TestDownloadPoster_FailedInstallRestoresExistingPoster(t *testing.T) {
 	assert.Equal(t, oldBytes, got, "the old poster must be rolled back when the install rename fails")
 }
 
+// failBackupRenameFs refuses to stage the existing destination aside.
+type failBackupRenameFs struct {
+	afero.Fs
+}
+
+func (f *failBackupRenameFs) Rename(oldPath, newPath string) error {
+	if strings.HasSuffix(newPath, ".bak") {
+		return fmt.Errorf("forced backup rename failure")
+	}
+	return f.Fs.Rename(oldPath, newPath)
+}
+
+func TestDownloadPoster_BackupRenameFailureLeavesOldPosterIntact(t *testing.T) {
+	srv := twoToneCoverServer(t)
+
+	fs := &failBackupRenameFs{Fs: afero.NewMemMapFs()}
+	tmpDir := "/out"
+	require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
+
+	oldBytes := []byte("pre-existing valid poster")
+	dest := filepath.Join(tmpDir, "IPX-535-poster.jpg")
+	require.NoError(t, afero.WriteFile(fs.Fs, dest, oldBytes, 0o644))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	d := NewDownloader(http.DefaultClient, fs, &Config{
+		DownloadPoster:    true,
+		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+	}, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.Error(t, err)
+	require.False(t, result.Downloaded)
+
+	got, readErr := afero.ReadFile(fs.Fs, dest)
+	require.NoError(t, readErr)
+	assert.Equal(t, oldBytes, got, "failed backup must leave the old poster untouched")
+	exists, statErr := afero.Exists(fs, dest+".crop.tmp")
+	require.NoError(t, statErr)
+	assert.False(t, exists, "crop stage must be cleaned up")
+}
+
 func TestDownloadPoster_InstallRenameFailureSurfaces(t *testing.T) {
 	srv := twoToneCoverServer(t)
 
