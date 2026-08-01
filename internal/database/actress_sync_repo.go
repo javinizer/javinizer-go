@@ -433,6 +433,101 @@ func (r *ActressRepository) MergeCachedIdentityForSyncTaskWithSource(ctx context
 	})
 }
 
+func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) error {
+	var sourceTasks []models.ActressSyncTask
+	if err := tx.Where("actress_id = ? AND status IN ?", sourceID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("created_at ASC, id ASC").Find(&sourceTasks).Error; err != nil {
+		return err
+	}
+	jobIDs := make(map[string]struct{})
+	for _, sourceTask := range sourceTasks {
+		jobIDs[sourceTask.JobID] = struct{}{}
+		var sourceJob models.ActressSyncJob
+		if err := tx.First(&sourceJob, "id = ?", sourceTask.JobID).Error; err != nil {
+			return err
+		}
+		var targetTask models.ActressSyncTask
+		err := tx.Table("actress_sync_tasks AS task").Select("task.*").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").Where("task.actress_id = ? AND task.id <> ? AND task.status IN ?", actressID, sourceTask.ID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("task.created_at ASC, task.id ASC").First(&targetTask).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := moveActiveActressSyncTaskTx(tx, sourceTask, actressID, false); err != nil {
+				return err
+			}
+			continue
+		}
+		var targetJob models.ActressSyncJob
+		if err := tx.First(&targetJob, "id = ?", targetTask.JobID).Error; err != nil {
+			return err
+		}
+		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) >= actressSyncScopePriority(targetJob.Scope) && sourceTask.Status == models.ActressSyncTaskRunning {
+			if err := skipActiveActressSyncTaskTx(tx, targetTask); err != nil {
+				return err
+			}
+			jobIDs[targetTask.JobID] = struct{}{}
+			if err := moveActiveActressSyncTaskTx(tx, sourceTask, actressID, false); err != nil {
+				return err
+			}
+			continue
+		}
+		if sourceTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(targetJob.Scope) >= actressSyncScopePriority(sourceJob.Scope) {
+			if err := skipMergedActressSyncTaskTx(tx, sourceTask, actressID); err != nil {
+				return err
+			}
+			continue
+		}
+		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) > actressSyncScopePriority(targetJob.Scope) {
+			if err := skipActiveActressSyncTaskTx(tx, targetTask); err != nil {
+				return err
+			}
+			jobIDs[targetTask.JobID] = struct{}{}
+			if err := moveActiveActressSyncTaskTx(tx, sourceTask, actressID, false); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := moveActiveActressSyncTaskTx(tx, sourceTask, actressID, true); err != nil {
+			return err
+		}
+	}
+	for jobID := range jobIDs {
+		if err := (&ActressSyncRepository{}).refreshJobTx(tx, jobID, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func moveActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, actressID uint, deferred bool) error {
+	fields, _ := appendSyncTaskFields(task.UpdatedFields, []string{"merged_duplicate"})
+	key := fmt.Sprintf("actress:%d", actressID)
+	if deferred {
+		key = deferredActressSyncDedupeKey(actressID, task.ID)
+	}
+	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND actress_id = ? AND status IN ?", task.ID, *task.ActressID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Updates(map[string]any{
+		"actress_id": actressID, "dedupe_key": key, "updated_fields": fields,
+	})
+	return result.Error
+}
+
+func skipActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask) error {
+	now := time.Now().UTC()
+	messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
+	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", task.ID, models.ActressSyncTaskPending).Updates(map[string]any{
+		"status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
+	})
+	return result.Error
+}
+
+func skipMergedActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, actressID uint) error {
+	now := time.Now().UTC()
+	messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
+	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", task.ID, models.ActressSyncTaskPending).Updates(map[string]any{
+		"actress_id": actressID, "dedupe_key": fmt.Sprintf("actress:%d:merged:%s", actressID, task.ID), "status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
+	})
+	return result.Error
+}
+
 func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token string, actressID, expectedActressID uint) error {
 	leaseNow := time.Now().UTC()
 	var task models.ActressSyncTask

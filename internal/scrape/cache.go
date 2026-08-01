@@ -73,7 +73,7 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		needsPersistence = true
 	}
 	if s.registry != nil {
-		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg); enriched > 0 {
+		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg, cmd.PriorityOverride); enriched > 0 {
 			needsPersistence = true
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers after cache hit", enriched)
 		}

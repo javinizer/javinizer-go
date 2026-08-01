@@ -3,6 +3,7 @@ package scrape
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
@@ -179,6 +180,25 @@ func (r *stubInstanceResolver) Names() []string {
 	}
 	return names
 }
+func TestCachedAndFreshActressEnrichmentUseResolvedPriority(t *testing.T) {
+	dmm := &testMetadataResolver{name: "dmm", enabled: true, metadata: models.ActressInfo{DMMID: 77, FirstName: "DMM"}}
+	minnano := &testMetadataResolver{name: "minnanoav", enabled: true, metadata: models.ActressInfo{DMMID: 77, FirstName: "Minnano"}}
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(dmm)
+	registry.RegisterInstance(minnano)
+	cfg := &Config{ScrapeActress: true, ScrapersPriority: []string{"dmm", "minnanoav"}}
+	cached := &models.Movie{ContentID: "URL-123", Actresses: []models.Actress{{DMMID: 77}}}
+	movieRepo := &finalMovieRepo{movie: cached}
+	s := New(registry, nil, nil, movieRepo, nil, cfg, nil, nil)
+	result := s.tryCache(t.Context(), ScrapeCmd{MovieID: "URL-123", PriorityOverride: []string{"minnanoav", "dmm"}}, nil, time.Now())
+	require.NotNil(t, result)
+	require.Equal(t, "Minnano", result.Movie.Actresses[0].FirstName)
+
+	fresh := &models.Movie{Actresses: []models.Actress{{DMMID: 77}}}
+	require.Equal(t, 1, enrichActressesFromResolvers(t.Context(), fresh, registry, cfg, []string{"minnanoav", "dmm"}))
+	require.Equal(t, "Minnano", fresh.Actresses[0].FirstName)
+}
+
 func TestEnrichActressesFromResolversHonorsPriority(t *testing.T) {
 	dmm := &testMetadataResolver{name: "dmm", enabled: true, metadata: models.ActressInfo{DMMID: 77, FirstName: "DMM"}}
 	minnano := &testMetadataResolver{name: "minnanoav", enabled: true, metadata: models.ActressInfo{DMMID: 77, FirstName: "Minnano"}}

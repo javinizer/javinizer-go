@@ -191,6 +191,97 @@ func TestActressSyncRequeueTaskCancelsAfterJobCancellation(t *testing.T) {
 	require.Equal(t, models.ActressSyncJobCancelled, storedJob.Status)
 }
 
+func TestManualActressMergeMigratesActiveSyncTasks(t *testing.T) {
+	for _, status := range []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning} {
+		t.Run(status, func(t *testing.T) {
+			db := newDatabaseTestDB(t)
+			actressRepo := NewActressRepository(db)
+			target := &models.Actress{JapaneseName: "target"}
+			source := &models.Actress{JapaneseName: "source"}
+			require.NoError(t, actressRepo.Create(context.Background(), target))
+			require.NoError(t, actressRepo.Create(context.Background(), source))
+			now := time.Now().UTC()
+			job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "missing", CreatedAt: now}
+			task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &source.ID, Label: "source", DedupeKey: fmt.Sprintf("actress:%d", source.ID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+			syncRepo := NewActressSyncRepository(db)
+			require.NoError(t, syncRepo.CreateJob(job, []models.ActressSyncTask{task}))
+			if status == models.ActressSyncTaskRunning {
+				claimed, err := syncRepo.ClaimNext("manual-merge-test", now.Add(time.Hour))
+				require.NoError(t, err)
+				require.NotNil(t, claimed)
+				task = *claimed
+			}
+
+			_, err := actressRepo.MergeWithSource(context.Background(), target.ID, source.ID, nil, models.Actress{})
+			require.NoError(t, err)
+			_, err = actressRepo.FindByID(context.Background(), source.ID)
+			require.Error(t, err)
+			stored, err := syncRepo.ListTasks(job.ID)
+			require.NoError(t, err)
+			require.Len(t, stored, 1)
+			require.NotNil(t, stored[0].ActressID)
+			require.Equal(t, target.ID, *stored[0].ActressID)
+			require.Equal(t, status, stored[0].Status)
+			storedJob, err := syncRepo.FindJob(job.ID)
+			require.NoError(t, err)
+			require.Equal(t, 1, storedJob.TotalTasks)
+			require.Equal(t, 0, storedJob.Completed)
+		})
+	}
+}
+
+func TestManualActressMergeCoalescesConflictingSyncTasks(t *testing.T) {
+	cases := []struct {
+		name         string
+		sourceStatus string
+		targetStatus string
+		sourceScope  string
+		targetScope  string
+	}{
+		{"pending-pending", models.ActressSyncTaskPending, models.ActressSyncTaskPending, "selected", "missing"},
+		{"running-pending", models.ActressSyncTaskRunning, models.ActressSyncTaskPending, "selected", "missing"},
+		{"pending-running", models.ActressSyncTaskPending, models.ActressSyncTaskRunning, "selected", "missing"},
+		{"running-running", models.ActressSyncTaskRunning, models.ActressSyncTaskRunning, "selected", "missing"},
+		{"pending-selected", models.ActressSyncTaskPending, models.ActressSyncTaskPending, "missing", "selected"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newDatabaseTestDB(t)
+			actressRepo := NewActressRepository(db)
+			target := &models.Actress{JapaneseName: "target"}
+			source := &models.Actress{JapaneseName: "source"}
+			require.NoError(t, actressRepo.Create(context.Background(), target))
+			require.NoError(t, actressRepo.Create(context.Background(), source))
+			now := time.Now().UTC()
+			makeJob := func(actressID uint, status, scope, label string) (*models.ActressSyncJob, models.ActressSyncTask) {
+				job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: scope, CreatedAt: now}
+				task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actressID, Label: label, DedupeKey: fmt.Sprintf("actress:%d", actressID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+				if status == models.ActressSyncTaskRunning {
+					job.Status = models.ActressSyncJobRunning
+					expires := now.Add(time.Hour)
+					task.Stage, task.LeaseOwner, task.LeaseToken, task.LeaseExpiresAt = "resolving", "owner", uuid.NewString(), &expires
+				}
+				return job, task
+			}
+			sourceJob, sourceTask := makeJob(source.ID, tc.sourceStatus, tc.sourceScope, "source")
+			targetJob, targetTask := makeJob(target.ID, tc.targetStatus, tc.targetScope, "target")
+			require.NoError(t, db.Create(sourceJob).Error)
+			require.NoError(t, db.Create(targetJob).Error)
+			require.NoError(t, db.Create(&sourceTask).Error)
+			require.NoError(t, db.Create(&targetTask).Error)
+			_, err := actressRepo.MergeWithSource(context.Background(), target.ID, source.ID, nil, models.Actress{})
+			require.NoError(t, err)
+			var stored []models.ActressSyncTask
+			require.NoError(t, db.Find(&stored).Error)
+			require.Len(t, stored, 2)
+			for _, task := range stored {
+				require.NotNil(t, task.ActressID)
+				require.Equal(t, target.ID, *task.ActressID)
+			}
+		})
+	}
+}
+
 func TestActressSyncMergeIsLeaseFencedAndAtomic(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	actressRepo := NewActressRepository(db)
