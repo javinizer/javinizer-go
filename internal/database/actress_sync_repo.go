@@ -446,7 +446,7 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 			return err
 		}
 		var targetTask models.ActressSyncTask
-		err := tx.Table("actress_sync_tasks AS task").Select("task.*").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").Where("task.actress_id = ? AND task.id <> ? AND task.status IN ?", actressID, sourceTask.ID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("task.created_at ASC, task.id ASC").First(&targetTask).Error
+		err := tx.Table("actress_sync_tasks AS task").Select("task.*").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").Where("task.actress_id = ? AND task.id <> ? AND task.status IN ?", actressID, sourceTask.ID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("CASE WHEN job.scope = 'selected' THEN 0 ELSE 1 END, task.created_at ASC, task.id ASC").First(&targetTask).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}

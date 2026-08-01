@@ -241,6 +241,40 @@ func TestManualActressMergeMigratesActiveSyncTasks(t *testing.T) {
 	}
 }
 
+func TestManualActressMergeCoalescesSelectedTaskWithDeferredTarget(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	actressRepo := NewActressRepository(db)
+	target := &models.Actress{JapaneseName: "target"}
+	source := &models.Actress{JapaneseName: "source"}
+	require.NoError(t, actressRepo.Create(context.Background(), target))
+	require.NoError(t, actressRepo.Create(context.Background(), source))
+	now := time.Now().UTC()
+	expires := now.Add(time.Hour)
+	missingJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobRunning, Scope: "missing", CreatedAt: now}
+	selectedJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now.Add(time.Second)}
+	sourceTask := models.ActressSyncTask{ID: uuid.NewString(), JobID: selectedJob.ID, ActressID: &source.ID, Label: "source", DedupeKey: fmt.Sprintf("actress:%d", source.ID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now.Add(3 * time.Second)}
+	missingTask := models.ActressSyncTask{ID: uuid.NewString(), JobID: missingJob.ID, ActressID: &target.ID, Label: "missing", DedupeKey: fmt.Sprintf("actress:%d", target.ID), Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, LeaseOwner: "missing-worker", LeaseToken: "missing-token", LeaseExpiresAt: &expires, CreatedAt: now}
+	deferredTask := models.ActressSyncTask{ID: uuid.NewString(), JobID: selectedJob.ID, ActressID: &target.ID, Label: "deferred", DedupeKey: deferredActressSyncDedupeKey(target.ID, "deferred"), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now.Add(2 * time.Second)}
+	require.NoError(t, db.Create(missingJob).Error)
+	require.NoError(t, db.Create(selectedJob).Error)
+	require.NoError(t, db.Create(&sourceTask).Error)
+	require.NoError(t, db.Create(&missingTask).Error)
+	require.NoError(t, db.Create(&deferredTask).Error)
+
+	_, err := actressRepo.MergeWithSource(context.Background(), target.ID, source.ID, nil, models.Actress{})
+	require.NoError(t, err)
+
+	var storedSource, storedMissing, storedDeferred models.ActressSyncTask
+	require.NoError(t, db.First(&storedSource, "id = ?", sourceTask.ID).Error)
+	require.NoError(t, db.First(&storedMissing, "id = ?", missingTask.ID).Error)
+	require.NoError(t, db.First(&storedDeferred, "id = ?", deferredTask.ID).Error)
+	require.Equal(t, models.ActressSyncTaskSkipped, storedSource.Status)
+	require.Equal(t, fmt.Sprintf("actress:%d:merged:%s", target.ID, sourceTask.ID), storedSource.DedupeKey)
+	require.Equal(t, models.ActressSyncTaskRunning, storedMissing.Status)
+	require.Equal(t, models.ActressSyncTaskPending, storedDeferred.Status)
+	require.Equal(t, deferredActressSyncDedupeKey(target.ID, "deferred"), storedDeferred.DedupeKey)
+}
+
 func TestManualActressMergeCoalescesConflictingSyncTasks(t *testing.T) {
 	cases := []struct {
 		name         string
