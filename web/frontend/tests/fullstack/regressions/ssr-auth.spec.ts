@@ -13,7 +13,7 @@ test('Browse SSR matches persisted visual state before hydration', async ({ page
 	await page.goto('/browse');
 	await expect(page.getByRole('radio', { name: /Organize into another location/ })).toBeChecked();
 	await expect.poll(async () => (await page.context().cookies()).some((cookie) => cookie.name === 'javinizer_browse_bootstrap')).toBe(true);
-	const hydrated = page.waitForResponse((candidate) => candidate.url().includes('/api/v1/auth/status'));
+	const hydrated = page.waitForResponse((candidate) => candidate.url().includes('/api/v1/config'));
 	const response = await page.reload();
 	expect(response).not.toBeNull();
 	await hydrated;
