@@ -205,6 +205,25 @@ func TestScrape_CacheHit(t *testing.T) {
 	assert.Equal(t, "Cached Movie", result.Movie.Title)
 }
 
+func TestScrapeCacheHitPersistsDeterministicInvalidThumbnail(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.movieRepo.Upsert(context.Background(), &models.Movie{
+		ID: "CACHE-INVALID-THUMB", Title: "Cached Movie", Actresses: []models.Actress{{
+			DMMID: 19244, JapaneseName: "安倍亜沙美",
+			ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/invalid_no_ext",
+		}},
+	})
+	require.NoError(t, err)
+
+	result, err := f.build().Scrape(context.Background(), ScrapeCmd{MovieID: "CACHE-INVALID-THUMB"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Cached)
+	require.True(t, result.NeedsPersistence)
+	require.Len(t, result.Movie.Actresses, 1)
+	require.Empty(t, result.Movie.Actresses[0].ThumbURL)
+}
+
 func TestScrapeCacheHitEnrichesMissingActressMetadataAndPersistsSignal(t *testing.T) {
 	previousLookup := lookupBuiltinActress
 	lookupBuiltinActress = func(int, string, string, string) (actresscache.Record, bool) {
