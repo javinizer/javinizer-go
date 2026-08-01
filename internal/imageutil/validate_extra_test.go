@@ -85,7 +85,7 @@ func TestValidateRemoteImageWithSafeClientHonorsRedirectPolicy(t *testing.T) {
 		}),
 		CheckRedirect: func(*http.Request, []*http.Request) error { return policyErr },
 	}
-	err := ValidateRemoteImageWithSafeClient(t.Context(), client, "https://example.com/start", "agent", "")
+	err := ValidateRemoteImageWithSafeClient(t.Context(), client, "https://1.1.1.1/start", "agent", "")
 	require.ErrorIs(t, err, policyErr)
 }
 

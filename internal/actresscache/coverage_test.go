@@ -343,7 +343,7 @@ func TestFileWritersRejectInvalidDirectories(t *testing.T) {
 	require.NoError(t, os.WriteFile(bad, []byte("x"), 0o600))
 	assert.Error(t, WriteFile(filepath.Join(bad, "cache.json"), Cache{}))
 	assert.Error(t, WriteRuntimeFile(filepath.Join(bad, "cache.json.gz"), Cache{}))
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		return
 	}
 
