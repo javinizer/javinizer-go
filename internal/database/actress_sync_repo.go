@@ -492,21 +492,28 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 			}
 			continue
 		}
-		fields, _ := appendSyncTaskFields(deferredTask.UpdatedFields, []string{"merged_duplicate"})
-		result := tx.Model(&models.ActressSyncTask{}).
-			Where("id = ? AND status = ? AND actress_id = ?", deferredTask.ID, models.ActressSyncTaskPending, expectedActressID).
-			Updates(map[string]any{"actress_id": actressID, "dedupe_key": deferredActressSyncDedupeKey(actressID, deferredTask.ID), "updated_fields": fields})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return errActressSyncLeaseLost
+		if err := migrateActressSyncTaskTx(tx, deferredTask, actressID, expectedActressID); err != nil {
+			return err
 		}
 	}
 	fields, _ := appendSyncTaskFields(task.UpdatedFields, []string{"merged_duplicate"})
 	result := tx.Model(&models.ActressSyncTask{}).
 		Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ? AND actress_id = ?", id, models.ActressSyncTaskRunning, token, leaseNow, expectedActressID).
 		Updates(map[string]any{"actress_id": actressID, "dedupe_key": currentDedupeKey, "updated_fields": fields})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errActressSyncLeaseLost
+	}
+	return nil
+}
+
+func migrateActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, actressID, expectedActressID uint) error {
+	fields, _ := appendSyncTaskFields(task.UpdatedFields, []string{"merged_duplicate"})
+	result := tx.Model(&models.ActressSyncTask{}).
+		Where("id = ? AND status = ? AND actress_id = ?", task.ID, models.ActressSyncTaskPending, expectedActressID).
+		Updates(map[string]any{"actress_id": actressID, "dedupe_key": deferredActressSyncDedupeKey(actressID, task.ID), "updated_fields": fields})
 	if result.Error != nil {
 		return result.Error
 	}
