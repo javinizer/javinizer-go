@@ -292,6 +292,19 @@ func TestActressSyncRequeueTaskErrorBranches(t *testing.T) {
 	t.Run("refresh error", func(t *testing.T) {
 		db := newDatabaseTestDB(t)
 		repo, _, task := claimActressCoverageTask(t, db, nil)
+		name := "coverage:requeue-refresh:" + uuid.NewString()
+		require.NoError(t, db.DB.Callback().Update().After("gorm:update").Register(name, func(tx *gorm.DB) {
+			if tx.Statement.Table == "actress_sync_tasks" {
+				tx.AddError(tx.Exec("DROP TABLE actress_sync_jobs").Error)
+			}
+		}))
+		defer func() { require.NoError(t, db.DB.Callback().Update().Remove(name)) }()
+		require.Error(t, repo.RequeueTask(task, task.LeaseToken))
+	})
+
+	t.Run("job lookup error", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo, _, task := claimActressCoverageTask(t, db, nil)
 		require.NoError(t, db.Exec("DROP TABLE actress_sync_jobs").Error)
 		require.Error(t, repo.RequeueTask(task, task.LeaseToken))
 	})
