@@ -31,4 +31,8 @@ func TestImageDimensionsFromFile(t *testing.T) {
 
 	_, _, err = ImageDimensionsFromFile(fs, "/missing.jpg")
 	require.Error(t, err)
+
+	require.NoError(t, afero.WriteFile(fs, "/garbage.jpg", []byte("not an image"), 0o644))
+	_, _, err = ImageDimensionsFromFile(fs, "/garbage.jpg")
+	require.Error(t, err, "an undecodable file must surface as an error")
 }
