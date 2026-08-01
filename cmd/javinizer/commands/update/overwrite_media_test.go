@@ -16,3 +16,12 @@ func TestOverwriteExistingMediaFlag_DefaultsFalse(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, value)
 }
+
+func TestRun_RejectsOverwriteWhenDownloadsDisabled(t *testing.T) {
+	cmd := update.NewCommand()
+	require.NoError(t, cmd.Flags().Set("overwrite-existing-media", "true"))
+	require.NoError(t, cmd.Flags().Set("download", "false"))
+
+	err := update.Run(cmd, []string{t.TempDir()}, "")
+	assert.EqualError(t, err, "--overwrite-existing-media requires --download=true")
+}

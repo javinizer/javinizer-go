@@ -56,6 +56,9 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	forceOverwrite, _ := cmd.Flags().GetBool("force-overwrite")
 	preserveNFO, _ := cmd.Flags().GetBool("preserve-nfo")
 	overwriteExistingMedia, _ := cmd.Flags().GetBool("overwrite-existing-media")
+	if overwriteExistingMedia && !downloadMedia {
+		return fmt.Errorf("--overwrite-existing-media requires --download=true")
+	}
 	preset, _ := cmd.Flags().GetString("preset")
 	scalarStrategyStr, _ := cmd.Flags().GetString("scalar-strategy")
 	arrayStrategyStr, _ := cmd.Flags().GetString("array-strategy")
