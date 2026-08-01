@@ -357,6 +357,8 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 	t.Run("canonical contention requeues task", func(t *testing.T) {
 		db, repo, movies, duplicate := newActressSyncFixture(t, &models.Actress{JapaneseName: "同名"})
 		manager := NewActressSyncManager(ActressSyncManagerDeps{DB: db, ActressRepo: repo, MovieRepo: movies})
+		manager.retryDelay = time.Hour
+		t.Cleanup(manager.Stop)
 		canonical := &models.Actress{DMMID: 200, JapaneseName: "同名"}
 		require.NoError(t, repo.Create(context.Background(), canonical))
 		now := time.Now().UTC()
@@ -379,6 +381,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		require.Equal(t, models.ActressSyncTaskPending, byID[duplicateTask.ID].Status)
 		require.Zero(t, byID[duplicateTask.ID].Attempts)
 		require.Equal(t, models.ActressSyncTaskRunning, byID[canonicalTask.ID].Status)
+		require.True(t, manager.canonicalRetryPending())
 	})
 
 	t.Run("canonical contention requeue failure", func(t *testing.T) {

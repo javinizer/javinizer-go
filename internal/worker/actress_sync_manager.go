@@ -35,19 +35,20 @@ type ActressSyncCreateRequest struct {
 
 // ActressSyncManager ...
 type ActressSyncManager struct {
-	deps            ActressSyncManagerDeps
-	repo            *database.ActressSyncRepository
-	owner           string
-	mu              sync.Mutex
-	started         bool
-	retryTimer      *time.Timer
-	retryGeneration uint64
-	retryDelay      time.Duration
-	ctx             context.Context
-	cancel          context.CancelFunc
-	wg              sync.WaitGroup
-	wake            chan struct{}
-	active          atomic.Int32
+	deps                ActressSyncManagerDeps
+	repo                *database.ActressSyncRepository
+	owner               string
+	mu                  sync.Mutex
+	started             bool
+	retryTimer          *time.Timer
+	retryGeneration     uint64
+	canonicalRetryUntil atomic.Int64
+	retryDelay          time.Duration
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
+	wake                chan struct{}
+	active              atomic.Int32
 }
 
 // NewActressSyncManager ...
@@ -120,6 +121,7 @@ func (m *ActressSyncManager) Stop() {
 		m.retryTimer.Stop()
 		m.retryTimer = nil
 	}
+	m.canonicalRetryUntil.Store(0)
 	if !m.started {
 		return
 	}
@@ -155,7 +157,7 @@ func (m *ActressSyncManager) dispatch(ctx context.Context) {
 		case <-recovery.C:
 			_ = m.repo.RecoverExpiredLeases(time.Now().UTC())
 		}
-		for {
+		for !m.canonicalRetryPending() {
 			cfg, registry := m.runtimeSnapshot()
 			if int(m.active.Load()) >= m.maxWorkers(cfg) {
 				break
@@ -262,8 +264,24 @@ func (m *ActressSyncManager) requeueCanonicalTask(task *models.ActressSyncTask, 
 	}
 	if requeueErr := m.repo.RequeueTask(task, task.LeaseToken); requeueErr != nil {
 		logging.Warnf("Actress sync task requeue failed: %v", requeueErr)
+	} else {
+		m.scheduleCanonicalRetry()
 	}
 	return true
+}
+
+func (m *ActressSyncManager) scheduleCanonicalRetry() {
+	retryUntil := time.Now().Add(m.retryDelay).UnixNano()
+	for {
+		current := m.canonicalRetryUntil.Load()
+		if current >= retryUntil || m.canonicalRetryUntil.CompareAndSwap(current, retryUntil) {
+			return
+		}
+	}
+}
+
+func (m *ActressSyncManager) canonicalRetryPending() bool {
+	return time.Now().UnixNano() < m.canonicalRetryUntil.Load()
 }
 
 func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *models.ActressSyncTask, timeout time.Duration, registry *scraperutil.ScraperRegistry) {
