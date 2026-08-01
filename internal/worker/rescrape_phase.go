@@ -282,6 +282,29 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	var prov *resultstore.ProvenanceData
 	var movieResult *resultstore.MovieResult
 
+	// Serialize the rescrape's poster-asset replacement + result commit
+	// against the manual-crop, poster-from-URL, whole-movie PATCH, and
+	// field-override edit paths via the shared per-(jobID, movieID)
+	// poster-source lock. GeneratePoster rewrites the job's cached
+	// {movieID}-full.jpg for the rescraped movie; without this lock an
+	// overlapping manual crop can measure the newly scraped image while the
+	// job state still references the old source, and the crop's state write
+	// bumps the result revision, making the commit below lose its CAS —
+	// leaving new-image bounds attached to the old URL. Holding the lock from
+	// here through the commit also makes the revision and old-ID re-capture
+	// atomic with the commit: a crop can no longer interleave between capture
+	// and commit, so the CAS conflict now only surfaces for a lock-agnostic
+	// state write, where a clean Conflict status is the correct outcome.
+	// Keyed on the PRE-rescrape movie ID — the same key the crop/PATCH/
+	// override paths use for the file being rescraped; when the rescrape
+	// resolves a new ID, its freshly generated assets live under the new key,
+	// which no in-flight crop of this file can be racing (a crop of the OLD
+	// movie's assets takes this lock and is serialized). Lock ordering: the
+	// rescrape phase acquires ONLY this lock; the result-store locks inside
+	// GetCurrentMovieID/GetRevision/CommitResult are taken while it is held,
+	// and no path acquires the poster-source lock while holding one of those
+	// (the same cycle-free order overrideMu → poster-source lock → result-
+	// store locks that the other paths use).
 	posterLockID := lookup.OldMovieID
 	if posterLockID == "" && inputs.ResultMap != nil {
 		posterLockID = inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)

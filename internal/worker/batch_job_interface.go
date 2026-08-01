@@ -477,6 +477,24 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // succeeds as a cleanup: the cached assets are removed and the persisted
 // preview URL cleared, with the same snapshot rollback covering a persistence
 // failure afterwards.
+//
+// For a multipart movie the overridden movie is persisted to EVERY file part
+// returned by FindFilePathsForMovieID, mirroring updateBatchMovie's multipart
+// loop (internal/api/batch/movie_edit.go, compensation since c82b2677): the
+// poster refresh above replaces the movie-wide {movie.ID}-full.jpg that ALL
+// parts share, so persisting the new source only to the selected part would
+// leave a sibling holding the old source while sharing the refreshed crop
+// image — cropping that sibling would then measure the new image, fan its
+// bounds out to every part, and Organize would apply them to the sibling's
+// stale source. Every part receives the same clone, which applyFieldOverride
+// already ran through SyncCropIntentWithSource, so CropBounds/
+// ShouldCropPoster intent stays consistent across parts. Provenance fans out
+// with the movie so every part's review tooltip attributes the overridden
+// field to the chosen source. There is no store-level transaction across
+// parts, so a later part's persist failure compensates the earlier parts
+// (re-persisted with their pre-override movies) BEFORE the poster-cache
+// rollback runs — restoring the cache while a part still holds the new
+// source would desync job state from the -full.jpg all over again.
 func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 	mu, _ := je.overrideMu.LoadOrStore(resultID, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
