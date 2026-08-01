@@ -72,12 +72,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		}
 		return actressRepo.MergeCachedIdentityWithSource(ctx, targetID, sourceID, expectedDMMID, expectedSource)
 	}
-	assignDMMID := func(id uint, dmmID int) (bool, error) {
-		if len(options) > 0 && options[0].AssignDMMID != nil {
-			return options[0].AssignDMMID(id, dmmID)
-		}
-		return actressRepo.AssignDMMIDIfMissing(ctx, id, dmmID)
-	}
+
 	assignDMMIDWithSource := func(id uint, dmmID int, expectedSource models.Actress) (bool, error) {
 		if len(options) > 0 && options[0].AssignDMMIDWithSource != nil {
 			return options[0].AssignDMMIDWithSource(id, dmmID, expectedSource)
@@ -141,7 +136,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		case findErr != nil && !database.IsNotFound(findErr):
 			return false, findErr
 		default:
-			assigned, assignErr := assignDMMID(actress.ID, cacheMatch.DMMID)
+			assigned, assignErr := assignDMMIDWithSource(actress.ID, cacheMatch.DMMID, cachedSource)
 			if assignErr != nil {
 				if !database.IsUniqueConstraint(assignErr) {
 					return false, assignErr

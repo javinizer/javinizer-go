@@ -251,6 +251,25 @@ func TestLinkedIdentityRecoveryFencesSourceChanges(t *testing.T) {
 		_ = db
 	})
 
+	t.Run("cache assignment", func(t *testing.T) {
+		db, actressRepo, movieRepo, source := newActressSyncFixture(t, &models.Actress{JapaneseName: "cache fence"})
+		result, err := SyncActressMetadata(t.Context(), source.ID, actressRepo, movieRepo, nil, ActressSyncOptions{
+			LookupCache: func(int, string, string, string) (models.ActressInfo, bool) {
+				return models.ActressInfo{DMMID: 918, JapaneseName: "cache fence"}, true
+			},
+			AssignDMMIDWithSource: func(id uint, dmmID int, expectedSource models.Actress) (bool, error) {
+				require.NoError(t, actressRepo.RenameNameFields(t.Context(), id, "", "", "edited cache identity"))
+				return actressRepo.AssignDMMIDIfMissingWithSource(t.Context(), id, dmmID, expectedSource)
+			},
+		})
+		require.NoError(t, err)
+		require.Contains(t, result.Messages, "missing_dmm_id")
+		stored, err := actressRepo.FindByID(t.Context(), source.ID)
+		require.NoError(t, err)
+		require.Zero(t, stored.DMMID)
+		_ = db
+	})
+
 	t.Run("manager assignment", func(t *testing.T) {
 		db, actressRepo, movieRepo, source, registry := setup(t, &models.Actress{JapaneseName: "manager fence"}, 917)
 		manager, job := runActressSyncManagerTask(t, db, actressRepo, movieRepo, source.ID, registry)
