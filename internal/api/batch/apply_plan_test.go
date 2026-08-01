@@ -262,6 +262,9 @@ func TestResolveApplyConfigPlanAwareErrors(t *testing.T) {
 	_, err := resolveOrganizeApplyConfig(snapshot, factory, &stubControlledJob{status: statusWithPlan(t, applyplan.Default(applyplan.VideoOperationOrganize, "/dest"))}, organizeConflict)
 	assert.Error(t, err)
 
+	_, err = resolveOrganizeApplyConfig(snapshot, factory, &stubControlledJob{status: &worker.BatchJobStatus{}}, contracts.OrganizeRequest{OperationMode: "organize"})
+	assert.ErrorContains(t, err, "destination is required")
+
 	_, err = resolveOrganizeApplyConfig(snapshot, factory, &stubControlledJob{status: statusWithPlan(t, &applyplan.Plan{Version: 2, VideoOperation: applyplan.VideoOperationOrganize, Destination: "/dest"})}, contracts.OrganizeRequest{})
 	assert.Error(t, err)
 
