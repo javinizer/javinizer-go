@@ -255,6 +255,63 @@ func runActressSyncManagerTask(t *testing.T, db *database.DB, actressRepo *datab
 	return manager, job
 }
 
+type mergeBlockingActressSyncScraper struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *mergeBlockingActressSyncScraper) Name() string { return "dmm" }
+func (s *mergeBlockingActressSyncScraper) Search(context.Context, string) (*models.ScraperResult, error) {
+	s.started <- struct{}{}
+	<-s.release
+	return &models.ScraperResult{Actresses: []models.ActressInfo{{DMMID: 42, FirstName: "updated"}}}, nil
+}
+func (s *mergeBlockingActressSyncScraper) GetURL(context.Context, string) (string, error) {
+	return "", nil
+}
+func (s *mergeBlockingActressSyncScraper) IsEnabled() bool                 { return true }
+func (s *mergeBlockingActressSyncScraper) Config() *models.ScraperSettings { return nil }
+func (s *mergeBlockingActressSyncScraper) Close() error                    { return nil }
+
+func TestActressSyncManagerStopsUsingMergedSourceLease(t *testing.T) {
+	db, actressRepo, movieRepo, source := newActressSyncFixture(t, &models.Actress{DMMID: 42, JapaneseName: "source"})
+	target := &models.Actress{JapaneseName: "target"}
+	require.NoError(t, actressRepo.Create(context.Background(), target))
+	manager := NewActressSyncManager(ActressSyncManagerDeps{DB: db, ActressRepo: actressRepo, MovieRepo: movieRepo})
+	now := time.Now().UTC()
+	job := &models.ActressSyncJob{ID: "merge-source-job", Status: models.ActressSyncJobPending, Scope: "missing", CreatedAt: now}
+	task := models.ActressSyncTask{ID: "merge-source-task", JobID: job.ID, ActressID: &source.ID, Label: "source", DedupeKey: "actress:source", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	require.NoError(t, manager.repo.CreateJob(job, []models.ActressSyncTask{task}))
+	claimed, err := manager.repo.ClaimNext(manager.owner, now.Add(time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	scraper := &mergeBlockingActressSyncScraper{started: make(chan struct{}), release: make(chan struct{})}
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(scraper)
+	manager.active.Add(1)
+	manager.wg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		manager.runTask(claimed, time.Minute, registry)
+		close(done)
+	}()
+	<-scraper.started
+	_, err = actressRepo.MergeWithSource(context.Background(), target.ID, source.ID, nil, models.Actress{})
+	require.NoError(t, err)
+	close(scraper.release)
+	<-done
+
+	stored, err := manager.repo.ListTasks(job.ID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, models.ActressSyncTaskPending, stored[0].Status)
+	require.Equal(t, target.ID, *stored[0].ActressID)
+	reclaimed, err := manager.repo.ClaimNext("reclaimer", now.Add(time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, reclaimed)
+	require.Equal(t, target.ID, *reclaimed.ActressID)
+}
+
 type blockingActressSyncScraper struct {
 	calls chan struct{}
 }

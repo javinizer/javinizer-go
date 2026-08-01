@@ -221,7 +221,18 @@ func TestManualActressMergeMigratesActiveSyncTasks(t *testing.T) {
 			require.Len(t, stored, 1)
 			require.NotNil(t, stored[0].ActressID)
 			require.Equal(t, target.ID, *stored[0].ActressID)
-			require.Equal(t, status, stored[0].Status)
+			if status == models.ActressSyncTaskRunning {
+				require.Equal(t, models.ActressSyncTaskPending, stored[0].Status)
+				require.Empty(t, stored[0].LeaseToken)
+				require.Nil(t, stored[0].LeaseExpiresAt)
+				reclaimed, claimErr := syncRepo.ClaimNext("reclaimer", now.Add(time.Hour))
+				require.NoError(t, claimErr)
+				require.NotNil(t, reclaimed)
+				require.Equal(t, target.ID, *reclaimed.ActressID)
+				require.Error(t, syncRepo.Heartbeat(task.ID, task.LeaseToken, now.Add(time.Hour)))
+			} else {
+				require.Equal(t, status, stored[0].Status)
+			}
 			storedJob, err := syncRepo.FindJob(job.ID)
 			require.NoError(t, err)
 			require.Equal(t, 1, storedJob.TotalTasks)
