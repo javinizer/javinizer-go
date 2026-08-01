@@ -131,6 +131,26 @@ func (j *signaledBatchJob) GetFileResultByResultID(resultID string) (*resultstor
 	return result, path, found
 }
 
+// vanishingBatchJob answers the first GetFileResultByResultID with the real
+// result (signaling after it returns) and every subsequent one with
+// not-found — the window in which a concurrent delete removes the result
+// between the handler's pre-lock lookup and its post-lock re-read.
+type vanishingBatchJob struct {
+	worker.BatchJobInterface
+	firstLookup chan struct{}
+	once        sync.Once
+	calls       atomic.Int32
+}
+
+func (j *vanishingBatchJob) GetFileResultByResultID(resultID string) (*resultstore.MovieResult, string, bool) {
+	if j.calls.Add(1) > 1 {
+		return nil, "", false
+	}
+	result, path, found := j.BatchJobInterface.GetFileResultByResultID(resultID)
+	j.once.Do(func() { close(j.firstLookup) })
+	return result, path, found
+}
+
 // setupPosterRaceJob builds a real batch job with a completed result whose
 // poster source is /old.jpg, seeds the cached -full.jpg with the old image,
 // and returns the deps (whose job store owns the job — the router must be
@@ -199,6 +219,34 @@ func TestUpdateBatchMovie_ReReadsStateAfterWaitingForPosterLock(t *testing.T) {
 	preview, err := os.ReadFile(filepath.Join(tempPosterDir, movieID+".jpg"))
 	require.NoError(t, err)
 	assert.NotEqual(t, srv.images["/b.jpg"], preview)
+}
+
+// TestUpdateBatchMovie_Returns404WhenResultVanishesUnderPosterLock pins the
+// post-lock re-read guard: if the result is removed between the pre-lock
+// lookup and the re-read taken after AcquirePosterSourceLock unblocks, the
+// handler must answer 404 rather than edit stale state — and must still
+// release the lock.
+func TestUpdateBatchMovie_Returns404WhenResultVanishesUnderPosterLock(t *testing.T) {
+	srv := newPosterConcurrencyServer(t)
+	const movieID = "RACE-VANISH"
+	deps, job, _ := setupPosterRaceJob(t, srv, movieID)
+	jobIface, ok := deps.JobStore.GetBatchJob(job.GetID())
+	require.True(t, ok)
+
+	ready := make(chan struct{})
+	wrappedJob := &vanishingBatchJob{BatchJobInterface: jobIface, firstLookup: ready}
+	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: wrappedJob}
+	router := gin.New()
+	router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
+
+	release := worker.AcquirePosterSourceLock(job.GetID(), movieID)
+	result := make(chan int, 1)
+	go func() { result <- patchPosterURL(t, router, job.GetID(), movieID, srv.URL+"/a.jpg") }()
+	<-ready // pre-lock lookup done; PATCH now blocks on the poster lock
+	release()
+
+	require.Equal(t, http.StatusNotFound, <-result)
+	assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
 }
 
 // TestUpdateBatchMovie_ConcurrentPosterSourceChanges runs two concurrent
