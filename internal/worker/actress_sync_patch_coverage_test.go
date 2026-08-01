@@ -251,6 +251,18 @@ func TestLinkedIdentityRecoveryFencesSourceChanges(t *testing.T) {
 		_ = db
 	})
 
+	t.Run("manager assignment", func(t *testing.T) {
+		db, actressRepo, movieRepo, source, registry := setup(t, &models.Actress{JapaneseName: "manager fence"}, 917)
+		manager, job := runActressSyncManagerTask(t, db, actressRepo, movieRepo, source.ID, registry)
+		manager.Stop()
+		updated, err := actressRepo.FindByID(t.Context(), source.ID)
+		require.NoError(t, err)
+		require.Equal(t, 917, updated.DMMID)
+		tasks, err := manager.ListTasks(job.ID)
+		require.NoError(t, err)
+		require.Contains(t, tasks[0].UpdatedFields, "dmm_id")
+	})
+
 	t.Run("merge", func(t *testing.T) {
 		db, actressRepo, movieRepo, source, registry := setup(t, &models.Actress{JapaneseName: "merge fence"}, 916)
 		canonical := &models.Actress{DMMID: 916, JapaneseName: "merge fence"}
