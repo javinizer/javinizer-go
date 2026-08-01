@@ -78,3 +78,21 @@ func TestAcquireDownloadReservationHonorsCancellation(t *testing.T) {
 	assert.Nil(t, reservation)
 	finishDownloadReservation(dedup, path, owner, false)
 }
+
+func TestDownload_ReturnsReservationWaitCancellation(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	d := NewDownloader(http.DefaultClient, fs, &Config{}, nil)
+	dedup := &sync.Map{}
+	path := "/output/shared.jpg"
+	owner, skipped, err := acquireDownloadReservation(context.Background(), dedup, path)
+	require.NoError(t, err)
+	assert.False(t, skipped)
+	require.NotNil(t, owner)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := d.download(ctx, "https://example.com/shared.jpg", path, MediaTypeCover, true, dedup)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.ErrorIs(t, result.Error, context.Canceled)
+	finishDownloadReservation(dedup, path, owner, false)
+}

@@ -45,3 +45,38 @@ func TestDownloadPoster_DedupNonOwnerRetriesAfterCropOwnerFailure(t *testing.T) 
 	assert.True(t, second.Downloaded)
 	assert.Equal(t, int32(2), requests.Load())
 }
+
+func TestDownloadPoster_ReturnsReservationWaitCancellation(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	d := NewDownloader(http.DefaultClient, fs, &Config{DownloadPoster: true, MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"}}, nil)
+	movie := &models.Movie{ID: "TEST-CANCEL", Poster: models.PosterState{CoverURL: "https://example.com/cover.png", ShouldCropPoster: true}}
+	tmplCtx := d.buildTemplateContext(movie, nil)
+	path := d.pathResolver.ResolvePosterPath(movie, nil, true, tmplCtx, "/output")
+	dedup := &sync.Map{}
+	owner, skipped, err := acquireDownloadReservation(context.Background(), dedup, path)
+	require.NoError(t, err)
+	assert.False(t, skipped)
+	require.NotNil(t, owner)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := d.downloadPoster(ctx, movie, "/output", nil, true, dedup)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.ErrorIs(t, result.Error, context.Canceled)
+	finishDownloadReservation(dedup, path, owner, false)
+}
+
+func TestDownloadPoster_CroppedSkipsClaimedDestination(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	d := NewDownloader(http.DefaultClient, fs, &Config{DownloadPoster: true, MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"}}, nil)
+	movie := &models.Movie{ID: "TEST-SKIP", Poster: models.PosterState{CoverURL: "https://example.com/cover.png", ShouldCropPoster: true}}
+	tmplCtx := d.buildTemplateContext(movie, nil)
+	path := d.pathResolver.ResolvePosterPath(movie, nil, true, tmplCtx, "/output")
+	dedup := &sync.Map{}
+	dedup.Store(path, struct{}{})
+
+	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true, dedup)
+	require.NoError(t, err)
+	assert.True(t, result.Skipped)
+	assert.False(t, result.Downloaded)
+}
