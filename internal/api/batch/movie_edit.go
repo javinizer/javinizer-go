@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"fmt"
 
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
@@ -190,15 +192,14 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 
 		cropResult, err := snap.PosterManager().CropWithBounds(c.Request.Context(), jobID, posterID, req.X, req.Y, req.Width, req.Height, maxPosterHeight)
 		if err != nil {
+			if errors.Is(err, poster.ErrLegacyPreviewSource) {
+				// The full-size source is gone (legacy job): the crop box was
+				// measured on the already-cropped preview and cannot survive
+				// Organize, which re-downloads the full image.
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "full-size poster source unavailable for this older job; re-scrape the file or use poster-from-URL to enable manual cropping"})
+				return
+			}
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
-			return
-		}
-		if cropResult.UsedLegacySource {
-			// The full-size source is gone (legacy job): the crop box was
-			// measured on the already-cropped preview and cannot survive
-			// Organize, which re-downloads the full image. Reject instead of
-			// reporting a success the apply phase would silently discard.
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "full-size poster source unavailable for this older job; re-scrape the file or use poster-from-URL to enable manual cropping"})
 			return
 		}
 		croppedURL := cropResult.CroppedURL

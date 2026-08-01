@@ -170,11 +170,18 @@ func TestCropWithBounds_FallbackToNonFullPath(t *testing.T) {
 	posterDir := filepath.Join(pm.tempDir, "posters", "job1")
 	sourcePath := filepath.Join(posterDir, posterID+".jpg")
 	require.NoError(t, createTestJPEG(pm.fs, sourcePath, 200, 300))
+	orig, readErr := afero.ReadFile(pm.fs, sourcePath)
+	require.NoError(t, readErr)
 
-	result, err := pm.CropWithBounds(context.Background(), "job1", posterID, 0, 0, 100, 150, 500)
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(posterDir, posterID+".jpg"), result.FullPath)
-	assert.Contains(t, result.CroppedURL, "/api/v1/temp/posters/job1/ABC-123.jpg")
+	// Legacy preview-only jobs cannot support manual crops: typed rejection,
+	// and the preview must remain byte-identical (no write before rejection).
+	_, err := pm.CropWithBounds(context.Background(), "job1", posterID, 0, 0, 100, 150, 500)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrLegacyPreviewSource)
+
+	after, readErr := afero.ReadFile(pm.fs, sourcePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, orig, after)
 }
 
 func TestCropWithBounds_PrefersFullPath(t *testing.T) {

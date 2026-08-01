@@ -126,6 +126,63 @@ func TestUpdateBatchMoviePosterFromURL_DownloadGenericErrorReturns500(t *testing
 	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
 }
 
+func TestUpdateBatchMoviePosterFromURL_UpdateFailureReturns500(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+
+	cleanup := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	})
+	t.Cleanup(cleanup)
+
+	workDir := t.TempDir()
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(workDir))
+	t.Cleanup(func() { _ = os.Chdir(originalWD) })
+
+	img := image.NewRGBA(image.Rect(0, 0, 800, 500))
+	for y := 0; y < 500; y++ {
+		for x := 0; x < 800; x++ {
+			img.Set(x, y, color.RGBA{R: 90, G: 90, B: 90, A: 255})
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+
+	const movieID = "FURL-500"
+	result := &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/FURL-500.mp4", MovieID: movieID},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: movieID, Title: "Fail"},
+	}
+
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	mockJob.EXPECT().GetFileResultByResultID(movieID).Return(result, "/path/to/FURL-500.mp4", true)
+	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{"/path/to/FURL-500.mp4"})
+	mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
+	mockJob.EXPECT().UpdatePosterFromURL(mock.Anything, movieID, mock.Anything, mock.Anything).Return(assert.AnError)
+
+	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(testkit.GetTestRuntime(deps)))
+
+	body, _ := json.Marshal(contracts.PosterFromURLRequest{URL: srv.URL + "/poster.jpg"})
+	req := httptest.NewRequest(http.MethodPost, "/batch/job-any/results/"+movieID+"/poster-from-url", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+}
+
 type fixedJobStore struct {
 	worker.JobStoreInterface
 	job worker.BatchJobInterface

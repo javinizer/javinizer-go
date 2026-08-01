@@ -6,6 +6,7 @@ package poster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,11 @@ import (
 	"github.com/spf13/afero"
 )
 
+// ErrLegacyPreviewSource is returned when a manual crop targets a job whose
+// full-size poster source is gone and only the already-cropped preview image
+// remains; such crops cannot be reproduced at apply time and are rejected.
+var ErrLegacyPreviewSource = errors.New("full-size poster source missing (legacy job)")
+
 // maxPosterSize is the maximum allowed poster download size (50 MB).
 const maxPosterSize = 50 << 20
 
@@ -35,11 +41,6 @@ type cropResult struct {
 	FullPath string
 	// CroppedURL is the URL that serves the cropped poster via the API.
 	CroppedURL string
-	// UsedLegacySource is true when the crop ran against the already-cropped
-	// preview because the full-size source image was missing (legacy jobs).
-	// Bounds from such a crop are in the cropped image's coordinate space and
-	// must not be reapplied to the full image during the apply phase.
-	UsedLegacySource bool
 	// SourceWidth/SourceHeight are the pixel dimensions of the image the crop
 	// was measured against (0 if unreadable — bounds store them as unknown).
 	SourceWidth  int
@@ -107,14 +108,15 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
 	sourcePath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
 
-	// Fallback for older jobs where the full image was cleaned up.
-	usedLegacySource := false
+	// Older jobs may have lost the full image during temp cleanup; cropping
+	// their already-cropped preview would produce bounds in dead-end
+	// coordinate space that Organize cannot honor. Reject BEFORE writing
+	// anything so the API's rejection does not mutate the only preview.
 	if _, err := pm.fs.Stat(sourcePath); err != nil {
-		sourcePath = filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
-		usedLegacySource = true
-	}
-
-	if _, err := pm.fs.Stat(sourcePath); err != nil {
+		legacyPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+		if _, lerr := pm.fs.Stat(legacyPath); lerr == nil {
+			return nil, fmt.Errorf("%w", ErrLegacyPreviewSource)
+		}
 		return nil, fmt.Errorf("source poster not found for manual crop: %w", err)
 	}
 
@@ -144,12 +146,11 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg?v=%d", url.PathEscape(jobID), url.PathEscape(posterID), time.Now().UnixMilli())
 
 	return &cropResult{
-		CroppedPath:      croppedPath,
-		FullPath:         sourcePath,
-		CroppedURL:       croppedURL,
-		UsedLegacySource: usedLegacySource,
-		SourceWidth:      srcW,
-		SourceHeight:     srcH,
+		CroppedPath:  croppedPath,
+		FullPath:     sourcePath,
+		CroppedURL:   croppedURL,
+		SourceWidth:  srcW,
+		SourceHeight: srcH,
 	}, nil
 }
 

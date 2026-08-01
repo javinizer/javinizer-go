@@ -60,10 +60,19 @@ func TestMiss2_CropWithBounds_FallbackToNonFull(t *testing.T) {
 	// Only create the non-full version (simulates older jobs)
 	sourcePath := filepath.Join(posterDir, posterID+".jpg")
 	require.NoError(t, createTestJPEG(fs, sourcePath, 200, 300))
+	orig, readErr := afero.ReadFile(fs, sourcePath)
+	require.NoError(t, readErr)
 
-	result, err := pm.CropWithBounds(context.Background(), "job1", posterID, 0, 0, 100, 150, 500)
-	require.NoError(t, err)
-	assert.NotEmpty(t, result.CroppedPath)
+	// Legacy preview-only crops cannot survive Organize: the manual crop is a
+	// typed failure, and the only preview image must remain untouched (the
+	// earlier 400-after-crop flow rewrote the preview despite rejecting).
+	_, err := pm.CropWithBounds(context.Background(), "job1", posterID, 0, 0, 100, 150, 500)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrLegacyPreviewSource)
+
+	after, readErr := afero.ReadFile(fs, sourcePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, orig, after, "the legacy preview must not be mutated by a rejected crop")
 }
 
 // --- DownloadFromURL: close error on temp file (lines 194-196) ---
