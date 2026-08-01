@@ -59,6 +59,10 @@ type PosterManagerInterface interface {
 	SnapshotAssets(jobID, posterID string) (*AssetsSnapshot, error)
 	// RestoreAssets writes back a previously captured snapshot.
 	RestoreAssets(snap *AssetsSnapshot) error
+	// RemoveAssets deletes the cached full-size source and preview — the
+	// cleanup half of clearing the last poster source. Missing files are
+	// fine; other removal failures surface.
+	RemoveAssets(jobID, posterID string) error
 }
 
 // AssetsSnapshot captures the job's cached full-size poster source
@@ -364,6 +368,32 @@ func (pm *PosterManager) RestoreAssets(snap *AssetsSnapshot) error {
 		}
 	}
 	return restoreErr
+}
+
+// RemoveAssets deletes the cached full-size source and preview for a poster
+// that no longer has any source URL (both poster and cover cleared). It is
+// the filesystem half of intentionally removing the poster source: leaving a
+// stale -full.jpg behind would let a later manual crop measure an image no
+// persisted URL describes — the exact crop-vs-Organize desync class the
+// source-change refresh exists to prevent. Files already absent are not an
+// error; any other removal failure surfaces (joined across both assets) so
+// the caller can reject the edit instead of persisting a state it cannot
+// roll back.
+func (pm *PosterManager) RemoveAssets(jobID, posterID string) error {
+	if err := ValidateJobID(jobID); err != nil {
+		return err
+	}
+	if err := validatePosterID(posterID); err != nil {
+		return err
+	}
+	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
+	var removeErr error
+	for _, name := range []string{posterID + "-full.jpg", posterID + ".jpg"} {
+		if err := pm.fs.Remove(filepath.Join(tempPosterDir, name)); err != nil && !os.IsNotExist(err) {
+			removeErr = errors.Join(removeErr, fmt.Errorf("remove poster asset %s: %w", name, err))
+		}
+	}
+	return removeErr
 }
 
 // validatePosterID ensures the posterID is a safe, non-empty filename

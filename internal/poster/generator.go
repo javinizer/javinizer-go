@@ -116,6 +116,17 @@ func (g *ScrapePosterGenerator) RestorePosterAssets(snap *AssetsSnapshot) error 
 	return g.manager.RestoreAssets(snap)
 }
 
+// RemovePosterAssets deletes the job's cached full-size source and preview
+// for movieID — the cleanup half of an edit that cleared the last poster
+// source (GeneratePoster cannot regenerate without a URL). A generator
+// without a manager holds no assets: the removal is a no-op.
+func (g *ScrapePosterGenerator) RemovePosterAssets(jobID, movieID string) error {
+	if g.manager == nil {
+		return nil
+	}
+	return g.manager.RemoveAssets(jobID, movieID)
+}
+
 // resolveReferer was removed — PosterManager.DownloadFromURL already performs
 // the same auto-derivation from the download URL when referer is empty.
 // Duplicating it here was redundant and meant both sites had to stay in sync.

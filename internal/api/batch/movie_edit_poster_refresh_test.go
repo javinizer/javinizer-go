@@ -135,6 +135,7 @@ func TestUpdateBatchMovie_PosterSourceChangeRefreshesCachedAssets(t *testing.T) 
 		patchPosterURL  string
 		patchCoverURL   string
 		wantRefreshed   bool   // the PATCH switches the effective source to /new.jpg
+		wantRemoved     bool   // the PATCH clears the last source; the cache must be cleaned up
 		seeded          []byte // bytes seeded into -full.jpg before the PATCH (nil = oldJPEG)
 		wantCode        int    // 0 = http.StatusOK
 		wantErrContains string // asserted against the response body when set
@@ -179,6 +180,16 @@ func TestUpdateBatchMovie_PosterSourceChangeRefreshesCachedAssets(t *testing.T) 
 			wantErrContains: "Failed to refresh poster source",
 			wantBoundsKept:  true,
 		},
+		{
+			name:            "clearing the last poster source succeeds and removes the cached assets",
+			storedPosterURL: "OLD",
+			wantRemoved:     true, // an empty source must not keep a stale crop source on disk
+		},
+		{
+			name:           "clearing the last cover source behind no poster succeeds and removes the cached assets",
+			storedCoverURL: "OLD",
+			wantRemoved:    true,
+		},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -218,11 +229,15 @@ func TestUpdateBatchMovie_PosterSourceChangeRefreshesCachedAssets(t *testing.T) 
 			tempPosterDir := filepath.Join("data", "temp", "posters", job.GetID())
 			require.NoError(t, os.MkdirAll(tempPosterDir, 0o755))
 			fullPath := filepath.Join(tempPosterDir, movieID+"-full.jpg")
+			previewPath := filepath.Join(tempPosterDir, movieID+".jpg")
 			seeded := tt.seeded
 			if seeded == nil {
 				seeded = srv.oldJPEG
 			}
 			require.NoError(t, os.WriteFile(fullPath, seeded, 0o644))
+			if tt.wantRemoved {
+				require.NoError(t, os.WriteFile(previewPath, srv.oldJPEG, 0o644))
+			}
 
 			hitsBefore := srv.newHits
 
@@ -244,14 +259,22 @@ func TestUpdateBatchMovie_PosterSourceChangeRefreshesCachedAssets(t *testing.T) 
 				assert.Contains(t, rec.Body.String(), tt.wantErrContains)
 			}
 
-			wantFull := seeded
-			if tt.wantRefreshed {
-				wantFull = srv.newJPEG
+			if tt.wantRemoved {
+				for _, p := range []string{fullPath, previewPath} {
+					_, statErr := os.Stat(p)
+					assert.True(t, os.IsNotExist(statErr),
+						"%s must be removed when the last poster source is cleared", p)
+				}
+			} else {
+				wantFull := seeded
+				if tt.wantRefreshed {
+					wantFull = srv.newJPEG
+				}
+				content, readErr := os.ReadFile(fullPath)
+				require.NoError(t, readErr)
+				assert.True(t, bytes.Equal(wantFull, content),
+					"-full.jpg contents after PATCH = %x, want %x", content, wantFull)
 			}
-			content, readErr := os.ReadFile(fullPath)
-			require.NoError(t, readErr)
-			assert.True(t, bytes.Equal(wantFull, content),
-				"-full.jpg contents after PATCH = %x, want %x", content, wantFull)
 			assert.Equal(t, hitsBefore+tt.wantNewHits, srv.newHits,
 				"/new.jpg fetch count must match the refresh decision")
 
@@ -273,6 +296,71 @@ func TestUpdateBatchMovie_PosterSourceChangeRefreshesCachedAssets(t *testing.T) 
 			}
 		})
 	}
+}
+
+// TestUpdateBatchMovie_ClearLastSourceRollbackOnPersistFailure is the
+// cleanup twin of TestUpdateBatchMovie_PosterRefreshRollbackOnPersistFailure:
+// when a whole-movie PATCH clears the last poster source and the UpdateMovie
+// persistence then fails, the cleanup's snapshot rollback restores the
+// pre-edit -full.jpg and preview so the still-persisted source URL and the
+// cached crop image never diverge.
+func TestUpdateBatchMovie_ClearLastSourceRollbackOnPersistFailure(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	chdirWorkDir(t)
+
+	oldJPEG := posterRefreshJPEG(t, 800, 500, color.RGBA{R: 0xcc, A: 0xff})
+	oldPreview := posterRefreshJPEG(t, 80, 120, color.RGBA{G: 0x7f, A: 0xff})
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+
+	const movieID = "CLR-RBK"
+	filePath := "/path/to/" + movieID + ".mp4"
+	result := &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movieID},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{ID: movieID, Title: "ClearRollback", Poster: models.PosterState{
+			PosterURL:  "https://old.example/poster.jpg",
+			CropBounds: &models.CropBounds{X: 1, Y: 2, Width: 3, Height: 4},
+		}},
+	}
+
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	mockJob.EXPECT().GetFileResultByResultID(movieID).Return(result, filePath, true)
+	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{filePath})
+	mockJob.EXPECT().GetMovieResult(filePath).Return(result, nil)
+	mockJob.EXPECT().UpdateMovie(mock.Anything, filePath, mock.Anything).Return(assert.AnError)
+	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
+
+	const jobID = "job-any"
+	tempPosterDir := filepath.Join("data", "temp", "posters", jobID)
+	require.NoError(t, os.MkdirAll(tempPosterDir, 0o755))
+	fullPath := filepath.Join(tempPosterDir, movieID+"-full.jpg")
+	previewPath := filepath.Join(tempPosterDir, movieID+".jpg")
+	require.NoError(t, os.WriteFile(fullPath, oldJPEG, 0o644))
+	require.NoError(t, os.WriteFile(previewPath, oldPreview, 0o644))
+
+	router := gin.New()
+	router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
+	body := fmt.Sprintf(`{"movie":{"id":"%s","title":"ClearRollback","poster_url":""}}`, movieID)
+	req := httptest.NewRequest(http.MethodPatch, "/batch/"+jobID+"/results/"+movieID, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "Failed to update movie")
+	assert.NotContains(t, rec.Body.String(), "poster rollback failed")
+
+	full, err := os.ReadFile(fullPath)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(oldJPEG, full),
+		"-full.jpg must be restored when persistence fails, got %x want %x", full, oldJPEG)
+	preview, err := os.ReadFile(previewPath)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(oldPreview, preview),
+		"preview must be restored when persistence fails, got %x want %x", preview, oldPreview)
 }
 
 // TestUpdateBatchMovie_PosterRefreshRollbackOnPersistFailure guards the

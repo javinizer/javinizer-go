@@ -184,6 +184,15 @@ type posterAssetSnapshooter interface {
 	RestorePosterAssets(snap *poster.AssetsSnapshot) error
 }
 
+// posterAssetRemover is the optional cleanup capability of a
+// PosterGenerator: removing the job's cached -full.jpg/preview assets when an
+// edit clears the last poster source. Generators without it (test stubs)
+// hold no assets to clear, so cleanup degrades to clearing the in-memory
+// preview URL only.
+type posterAssetRemover interface {
+	RemovePosterAssets(jobID, movieID string) error
+}
+
 // effectivePosterSource mirrors ScrapePosterGenerator.GeneratePoster's download
 // source resolution: the poster URL when set, otherwise the cover URL. A
 // cover_url override changes the poster source only when no poster URL is set.
@@ -199,7 +208,21 @@ func effectivePosterSource(posterURL, coverURL string) string {
 // cover-url change switches the effective poster source. Both callers that
 // persist such a change share it: the single-field override path
 // (refreshOverriddenPosterSource) and the whole-movie PATCH handler in the
-// API batch package. The review crop modal and the poster-crop endpoint both
+// API batch package.
+//
+// When the edit clears the LAST poster source (no poster and no cover), the
+// effective new source is empty: regenerating would fail with "no poster or
+// cover URL available" and reject an otherwise valid edit. Instead the change
+// is treated as a successful cleanup — the cached -full.jpg/preview are
+// removed so a stale crop source cannot linger (an empty source paired with a
+// stale cache is the same desync class the refresh exists to prevent), and
+// movie.Poster.CroppedPosterURL is cleared in place so the state the caller
+// persists no longer points at the removed preview. The snapshot/rollback
+// machinery still wraps the cleanup, so a persistence failure afterwards
+// restores the pre-edit assets. Removal failures (other than file-absent)
+// reject the edit, mirroring the refresh-failure semantics below.
+//
+// The review crop modal and the poster-crop endpoint both
 // key off that file: once the server persists the new URL the client treats
 // it as the current source and skips its poster-from-url sync, so without
 // this refresh a manual crop is measured against the pre-change image while
@@ -228,7 +251,8 @@ func effectivePosterSource(posterURL, coverURL string) string {
 // movie.Poster.CroppedPosterURL, which the caller persists in the same
 // UpdateMovie call.
 func RefreshPosterAssets(ctx context.Context, gen poster.PosterGenerator, jobID string, movie *models.Movie, oldPosterURL, oldCoverURL string) (func() error, error) {
-	if effectivePosterSource(movie.Poster.PosterURL, movie.Poster.CoverURL) == effectivePosterSource(oldPosterURL, oldCoverURL) {
+	newSource := effectivePosterSource(movie.Poster.PosterURL, movie.Poster.CoverURL)
+	if newSource == effectivePosterSource(oldPosterURL, oldCoverURL) {
 		return nil, nil // same image still feeds the poster pipeline; the existing full-size file is already current
 	}
 	if gen == nil {
@@ -241,6 +265,27 @@ func RefreshPosterAssets(ctx context.Context, gen poster.PosterGenerator, jobID 
 			return nil, fmt.Errorf("snapshot poster before source change: %w", err)
 		}
 		rollback = func() error { return snapshooter.RestorePosterAssets(snap) }
+	}
+	if newSource == "" {
+		// The edit intentionally cleared the last poster source. This is a
+		// successful cleanup, not a regeneration: GeneratePoster would error
+		// with "no poster or cover URL available" and roll back the edit.
+		movie.Poster.CroppedPosterURL = "" // no preview remains without a source
+		remover, ok := gen.(posterAssetRemover)
+		if !ok {
+			return rollback, nil // generators without a manager hold no assets to clear
+		}
+		if err := remover.RemovePosterAssets(jobID, movie.ID); err != nil {
+			// Reject the edit (refresh-failure parity) and roll a partial
+			// removal back to the snapshot so the cache stays consistent.
+			if rollback != nil {
+				if rollbackErr := rollback(); rollbackErr != nil {
+					return nil, fmt.Errorf("clear poster cache after source removal: %w", errors.Join(err, fmt.Errorf("poster rollback failed: %w", rollbackErr)))
+				}
+			}
+			return nil, fmt.Errorf("clear poster cache after source removal: %w", err)
+		}
+		return rollback, nil
 	}
 	if err := gen.GeneratePoster(ctx, jobID, movie); err != nil {
 		if rollback != nil {

@@ -123,9 +123,12 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// full-size poster before the new URLs are persisted: the review client
 		// treats the persisted URL as already synced and skips its poster-from-url
 		// call, so a missed refresh would let a subsequent manual crop measure the
-		// stale pre-PATCH -full.jpg while Organize downloads the new one. Shares
-		// the field-override path's machinery (worker.RefreshPosterAssets) with the
-		// same atomicity: snapshot before refresh, roll the cache back when the
+		// stale pre-PATCH -full.jpg while Organize downloads the new one. A PATCH
+		// that instead clears the LAST source succeeds as a cleanup: the cached
+		// -full.jpg/preview are removed (regenerating from no URL would 500) so
+		// no stale crop source lingers. Shares the field-override path's
+		// machinery (worker.RefreshPosterAssets) with the same atomicity:
+		// snapshot before refresh/cleanup, roll the cache back when the
 		// UpdateMovie persistence below fails, surface a failed rollback.
 		var rollback func() error
 		if current.Movie != nil {

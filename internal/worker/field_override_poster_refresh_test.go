@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -49,13 +50,16 @@ func (s *stubOverridePosterGen) GeneratePoster(_ context.Context, jobID string, 
 }
 
 // stubOverrideSnapshotter additionally implements the rollback capability
-// (SnapshotPosterAssets/RestorePosterAssets) so tests can drive the
-// snapshot and rollback branches without a filesystem.
+// (SnapshotPosterAssets/RestorePosterAssets) and the cleanup capability
+// (RemovePosterAssets) so tests can drive the snapshot, rollback, and
+// cache-clearing branches without a filesystem.
 type stubOverrideSnapshotter struct {
 	stubOverridePosterGen
 	snapErr      error
 	restoreErr   error
 	restoreCalls int
+	removeErr    error
+	removeCalls  int
 }
 
 func (s *stubOverrideSnapshotter) SnapshotPosterAssets(_, _ string) (*poster.AssetsSnapshot, error) {
@@ -68,6 +72,11 @@ func (s *stubOverrideSnapshotter) SnapshotPosterAssets(_, _ string) (*poster.Ass
 func (s *stubOverrideSnapshotter) RestorePosterAssets(_ *poster.AssetsSnapshot) error {
 	s.restoreCalls++
 	return s.restoreErr
+}
+
+func (s *stubOverrideSnapshotter) RemovePosterAssets(_, _ string) error {
+	s.removeCalls++
+	return s.removeErr
 }
 
 // overrideRefreshFixture builds a jobEditorImpl over a single completed result
@@ -83,6 +92,9 @@ func overrideRefreshFixture(t *testing.T, currentPosterURL, currentCoverURL, ove
 	movie.Poster.PosterURL = currentPosterURL
 	movie.Poster.CoverURL = currentCoverURL
 	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 100, Height: 200}
+	// A persisted preview URL that predates the refresh/cleanup, so tests can
+	// prove the refresh overwrites it and the cleanup clears it.
+	movie.Poster.CroppedPosterURL = "stale-preview-url"
 	dmm := findScraperResult(prov.ScraperResults, "dmm")
 	dmm.PosterURL = overridePosterURL
 	dmm.CoverURL = overrideCoverURL
@@ -120,27 +132,35 @@ func TestApplyFieldOverride_PosterURLRefreshInvocation(t *testing.T) {
 		field         string
 		currentPoster string
 		currentCover  string
+		ovrPoster     string                   // poster URL the chosen source contributes
+		ovrCover      string                   // cover URL the chosen source contributes
 		gen           *stubOverridePosterGen   // nil = no poster infrastructure wired
-		snap          *stubOverrideSnapshotter // rollback-capable generator (takes precedence)
+		snap          *stubOverrideSnapshotter // rollback/cleanup-capable generator (takes precedence)
 		wantCalls     int
 		wantGenPoster string // PosterURL the generator was asked to regenerate from
 		wantErr       string
 		wantRestores  int
+		wantRemoves   int
 	}{
-		{"poster_url change regenerates the source", "poster_url", oldURL, oldCover, &stubOverridePosterGen{}, nil, 1, newURL, "", 0},
-		{"identical URL leaves the current source alone", "poster_url", newURL, oldCover, &stubOverridePosterGen{}, nil, 0, "", "", 0},
-		{"non-poster override never regenerates", "maker", oldURL, oldCover, &stubOverridePosterGen{}, nil, 0, "", "", 0},
-		{"no generator wired skips regeneration", "poster_url", oldURL, oldCover, nil, nil, 0, "", "", 0},
-		{"regeneration failure rejects the override", "poster_url", oldURL, oldCover, &stubOverridePosterGen{err: errors.New("download failed")}, nil, 1, newURL, "refresh poster after source change", 0},
-		{"cover_url with no poster regenerates from the cover", "cover_url", "", oldCover, &stubOverridePosterGen{}, nil, 1, "", "", 0},
-		{"cover_url behind an explicit poster leaves the cache alone", "cover_url", oldURL, oldCover, &stubOverridePosterGen{}, nil, 0, "", "", 0},
-		{"identical cover_url leaves the current source alone", "cover_url", "", newCover, &stubOverridePosterGen{}, nil, 0, "", "", 0},
-		{"snapshot failure rejects the override before regenerating", "poster_url", oldURL, oldCover, nil, &stubOverrideSnapshotter{snapErr: errors.New("fs gone")}, 0, "", "snapshot poster before source change", 0},
-		{"regeneration failure rolls back the snapshot", "poster_url", oldURL, oldCover, nil, &stubOverrideSnapshotter{stubOverridePosterGen: stubOverridePosterGen{err: errors.New("download failed")}}, 1, newURL, "refresh poster after source change", 1},
+		{"poster_url change regenerates the source", "poster_url", oldURL, oldCover, newURL, newCover, &stubOverridePosterGen{}, nil, 1, newURL, "", 0, 0},
+		{"identical URL leaves the current source alone", "poster_url", newURL, oldCover, newURL, newCover, &stubOverridePosterGen{}, nil, 0, "", "", 0, 0},
+		{"non-poster override never regenerates", "maker", oldURL, oldCover, newURL, newCover, &stubOverridePosterGen{}, nil, 0, "", "", 0, 0},
+		{"no generator wired skips regeneration", "poster_url", oldURL, oldCover, newURL, newCover, nil, nil, 0, "", "", 0, 0},
+		{"regeneration failure rejects the override", "poster_url", oldURL, oldCover, newURL, newCover, &stubOverridePosterGen{err: errors.New("download failed")}, nil, 1, newURL, "refresh poster after source change", 0, 0},
+		{"cover_url with no poster regenerates from the cover", "cover_url", "", oldCover, newURL, newCover, &stubOverridePosterGen{}, nil, 1, "", "", 0, 0},
+		{"cover_url behind an explicit poster leaves the cache alone", "cover_url", oldURL, oldCover, newURL, newCover, &stubOverridePosterGen{}, nil, 0, "", "", 0, 0},
+		{"identical cover_url leaves the current source alone", "cover_url", "", newCover, newURL, newCover, &stubOverridePosterGen{}, nil, 0, "", "", 0, 0},
+		{"both poster sources already empty is a no-op", "poster_url", "", "", "", "", &stubOverridePosterGen{}, nil, 0, "", "", 0, 0},
+		{"snapshot failure rejects the override before regenerating", "poster_url", oldURL, oldCover, newURL, newCover, nil, &stubOverrideSnapshotter{snapErr: errors.New("fs gone")}, 0, "", "snapshot poster before source change", 0, 0},
+		{"regeneration failure rolls back the snapshot", "poster_url", oldURL, oldCover, newURL, newCover, nil, &stubOverrideSnapshotter{stubOverridePosterGen: stubOverridePosterGen{err: errors.New("download failed")}}, 1, newURL, "refresh poster after source change", 1, 0},
+		{"clearing the last poster source cleans up instead of regenerating", "poster_url", oldURL, "", "", "", nil, &stubOverrideSnapshotter{}, 0, "", "", 0, 1},
+		{"clearing the cover behind no poster cleans up", "cover_url", "", oldCover, "", "", nil, &stubOverrideSnapshotter{}, 0, "", "", 0, 1},
+		{"clearing with a remover-less generator still clears the source", "poster_url", oldURL, "", "", "", &stubOverridePosterGen{}, nil, 0, "", "", 0, 0},
+		{"cleanup removal failure rejects the edit and rolls back", "poster_url", oldURL, "", "", "", nil, &stubOverrideSnapshotter{removeErr: errors.New("fs remove gone")}, 0, "", "clear poster cache after source removal", 1, 1},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			je, tracker, resultID := overrideRefreshFixture(t, tt.currentPoster, tt.currentCover, newURL, newCover)
+			je, tracker, resultID := overrideRefreshFixture(t, tt.currentPoster, tt.currentCover, tt.ovrPoster, tt.ovrCover)
 			var counter *stubOverridePosterGen
 			var snap *stubOverrideSnapshotter
 			if tt.snap != nil {
@@ -171,9 +191,9 @@ func TestApplyFieldOverride_PosterURLRefreshInvocation(t *testing.T) {
 				require.NotNil(t, updated)
 				switch tt.field {
 				case "poster_url":
-					assert.Equal(t, newURL, updated.Movie.Poster.PosterURL)
+					assert.Equal(t, tt.ovrPoster, updated.Movie.Poster.PosterURL)
 				case "cover_url":
-					assert.Equal(t, newCover, updated.Movie.Poster.CoverURL)
+					assert.Equal(t, tt.ovrCover, updated.Movie.Poster.CoverURL)
 				}
 			}
 
@@ -188,6 +208,7 @@ func TestApplyFieldOverride_PosterURLRefreshInvocation(t *testing.T) {
 			}
 			if snap != nil {
 				assert.Equal(t, tt.wantRestores, snap.restoreCalls)
+				assert.Equal(t, tt.wantRemoves, snap.removeCalls)
 			}
 		})
 	}
@@ -230,6 +251,7 @@ func TestApplyFieldOverride_PosterURLRefreshTempFiles(t *testing.T) {
 		overrideCoverURL  string
 		wantErr           string
 		wantRefresh       bool   // whether -full.jpg is expected to be regenerated
+		wantRemoved       bool   // whether the cached assets are expected to be cleaned up
 		wantFullSource    []byte // expected -full.jpg contents after the call
 	}{
 		{
@@ -272,6 +294,18 @@ func TestApplyFieldOverride_PosterURLRefreshTempFiles(t *testing.T) {
 			overrideCoverURL:  srv.URL + "/new.jpg",
 			wantFullSource:    oldJPEG, // PosterURL is the effective source; unchanged
 		},
+		{
+			name:             "clearing the last poster source removes the cached assets",
+			field:            "poster_url",
+			currentPosterURL: srv.URL + "/old.jpg",
+			wantRemoved:      true, // no regeneration: an empty source must not keep a stale crop source
+		},
+		{
+			name:            "clearing the cover behind no poster removes the cached assets",
+			field:           "cover_url",
+			currentCoverURL: srv.URL + "/old.jpg",
+			wantRemoved:     true,
+		},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -286,7 +320,11 @@ func TestApplyFieldOverride_PosterURLRefreshTempFiles(t *testing.T) {
 			tempPosterDir := filepath.Join("/tmp", "posters", "job1")
 			require.NoError(t, fs.MkdirAll(tempPosterDir, 0o755))
 			fullPath := filepath.Join(tempPosterDir, "ABC-001-full.jpg")
+			previewPath := filepath.Join(tempPosterDir, "ABC-001.jpg")
 			require.NoError(t, afero.WriteFile(fs, fullPath, oldJPEG, 0o644))
+			if tt.wantRemoved {
+				require.NoError(t, afero.WriteFile(fs, previewPath, oldJPEG, 0o644))
+			}
 
 			updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, tt.field, "dmm")
 			if tt.wantErr != "" {
@@ -312,8 +350,19 @@ func TestApplyFieldOverride_PosterURLRefreshTempFiles(t *testing.T) {
 					assert.Contains(t, updated.Movie.Poster.CroppedPosterURL,
 						"/api/v1/temp/posters/job1/ABC-001.jpg")
 				}
+				if tt.wantRemoved {
+					assert.Empty(t, updated.Movie.Poster.CroppedPosterURL,
+						"clearing the source must clear the preview URL from the persisted state")
+				}
 			}
 
+			if tt.wantRemoved {
+				for _, p := range []string{fullPath, previewPath} {
+					_, statErr := fs.Stat(p)
+					assert.True(t, os.IsNotExist(statErr), "%s must be removed when the last source is cleared", p)
+				}
+				return
+			}
 			content, readErr := afero.ReadFile(fs, fullPath)
 			require.NoError(t, readErr)
 			assert.True(t, bytes.Equal(tt.wantFullSource, content),
@@ -412,6 +461,83 @@ func TestApplyFieldOverride_RollbackFailureReportedWithNoPreexistingAssets(t *te
 	assert.Contains(t, err.Error(), "persist field override")
 	assert.Contains(t, err.Error(), "poster rollback failed")
 	assert.Contains(t, err.Error(), "injected remove failure")
+}
+
+// TestApplyFieldOverride_CleanupRollsBackWhenPersistFails is the cleanup twin
+// of TestApplyFieldOverride_RefreshRollsBackWhenPersistFails: clearing the
+// last poster source removes the cached assets, and when the following
+// UpdateMovie fails the snapshot rollback must restore BOTH the removed
+// -full.jpg/preview bytes AND leave the job's stored movie untouched (old
+// source URL, crop bounds, and preview URL).
+func TestApplyFieldOverride_CleanupRollsBackWhenPersistFails(t *testing.T) {
+	oldJPEG := encodeTestJPEG(t, 200, 300, color.RGBA{R: 0xcc, A: 0xff})
+	oldPreview := encodeTestJPEG(t, 50, 75, color.RGBA{G: 0x7f, A: 0xff})
+
+	fs := afero.NewMemMapFs()
+	pm := poster.NewPosterManager(fs, "/tmp", http.DefaultClient).WithSSRFCheck(func(_ string) error { return nil })
+	gen := poster.NewScrapePosterGenerator(pm, "", "")
+	je, tracker, resultID := overrideRefreshFixture(t, "https://old.example/poster.jpg", "", "", "")
+	je.posterGen = gen
+
+	// Persistence fails AFTER the cleanup removed the cached assets.
+	repo := mocks.NewMockMovieRepositoryInterface(t)
+	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
+	je.movieRepo = repo
+
+	tempPosterDir := filepath.Join("/tmp", "posters", "job1")
+	require.NoError(t, fs.MkdirAll(tempPosterDir, 0o755))
+	fullPath := filepath.Join(tempPosterDir, "ABC-001-full.jpg")
+	previewPath := filepath.Join(tempPosterDir, "ABC-001.jpg")
+	require.NoError(t, afero.WriteFile(fs, fullPath, oldJPEG, 0o644))
+	require.NoError(t, afero.WriteFile(fs, previewPath, oldPreview, 0o644))
+
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "persist field override")
+	assert.Nil(t, updated)
+
+	// Filesystem rolled back to the pre-cleanup bytes.
+	full, readErr := afero.ReadFile(fs, fullPath)
+	require.NoError(t, readErr)
+	assert.True(t, bytes.Equal(oldJPEG, full),
+		"-full.jpg must be restored when persistence fails, got %x want %x", full, oldJPEG)
+	preview, readErr := afero.ReadFile(fs, previewPath)
+	require.NoError(t, readErr)
+	assert.True(t, bytes.Equal(oldPreview, preview),
+		"preview must be restored when persistence fails, got %x want %x", preview, oldPreview)
+
+	// Job state intact: the clearing override was never persisted.
+	current, _, found := tracker.GetFileResultByResultID(resultID)
+	require.True(t, found)
+	assert.Equal(t, "https://old.example/poster.jpg", current.Movie.Poster.PosterURL)
+	assert.Equal(t, "", current.Movie.Poster.CoverURL)
+	assert.Equal(t, "stale-preview-url", current.Movie.Poster.CroppedPosterURL)
+	require.NotNil(t, current.Movie.Poster.CropBounds,
+		"a failed override must not discard the still-valid crop bounds")
+}
+
+// TestRefreshPosterAssets_CleanupRemoveAndRestoreFailures ensures a failed
+// asset restore inside the cleanup-error branch is not swallowed: when the
+// cache removal fails and the snapshot rollback also fails, both errors must
+// surface (same join style as the regeneration-error branch) so the resulting
+// cache/job-state mismatch is observable.
+func TestRefreshPosterAssets_CleanupRemoveAndRestoreFailures(t *testing.T) {
+	removeErr := errors.New("remove failed")
+	restoreErr := errors.New("restore failed")
+	gen := &stubOverrideSnapshotter{removeErr: removeErr, restoreErr: restoreErr}
+	movie := &models.Movie{ID: "ABC-001", Poster: models.PosterState{CroppedPosterURL: "stale-preview-url"}}
+
+	rollback, err := RefreshPosterAssets(context.Background(), gen, "job1", movie, "https://old.example/poster.jpg", "")
+
+	require.Error(t, err)
+	assert.Nil(t, rollback)
+	assert.ErrorIs(t, err, removeErr)
+	assert.ErrorIs(t, err, restoreErr)
+	assert.Contains(t, err.Error(), "clear poster cache after source removal")
+	assert.Contains(t, err.Error(), "poster rollback failed")
+	assert.Equal(t, 1, gen.removeCalls)
+	assert.Equal(t, 1, gen.restoreCalls)
+	assert.Empty(t, movie.Poster.CroppedPosterURL, "the preview URL is cleared as part of the cleanup attempt")
 }
 
 // TestRefreshOverriddenPosterSource_GenerateAndRestoreFailures ensures a

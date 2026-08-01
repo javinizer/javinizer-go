@@ -460,12 +460,16 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // PosterURL (the downloader falls back to CoverURL as the poster source) —
 // regenerates the temp full-size poster before persisting
 // (refreshOverriddenPosterSource) so a subsequent manual crop measures the
-// newly selected image, not the stale pre-override -full.jpg. As with the
+// newly selected image, not the stale pre-override -full.jpg. Clearing the
+// last source removes the cache instead of regenerating it. As with the
 // poster-from-url endpoint, a failed regeneration rejects the override rather
 // than persisting a source URL the crop endpoint cannot match to the on-disk
 // image, and when persistence itself fails after a successful regeneration,
 // the cached -full.jpg/preview assets are rolled back so filesystem and job
-// state never diverge.
+// state never diverge. An override that clears the LAST poster source instead
+// succeeds as a cleanup: the cached assets are removed and the persisted
+// preview URL cleared, with the same snapshot rollback covering a persistence
+// failure afterwards.
 func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 	mu, _ := je.overrideMu.LoadOrStore(resultID, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
