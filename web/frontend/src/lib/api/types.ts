@@ -107,6 +107,8 @@ export interface PosterCropBounds {
 	y: number;
 	width: number;
 	height: number;
+	/** Output height cap effective at crop time; 0/absent = no cap. */
+	max_poster_height?: number;
 }
 
 export interface PosterFromURLRequest {

@@ -186,4 +186,9 @@ func TestUpdateBatchMovie_CropBoundsValidation(t *testing.T) {
 		rec := patchMovie(nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	})
+
+	t.Run("rejects negative max_poster_height", func(t *testing.T) {
+		rec := patchMovie(&contracts.CropBounds{X: 0, Y: 0, Width: 100, Height: 100, MaxPosterHeight: -1})
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
 }

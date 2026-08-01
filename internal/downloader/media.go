@@ -64,7 +64,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// user's exact crop on the freshly downloaded image.
 	if b := movie.Poster.CropBounds; b != nil {
 		return d.downloadAndCropPoster(ctx, posterURL, destPath, func(tempPath string) error {
-			err := imageutil.CropPosterWithBounds(d.fs, tempPath, destPath, b.X, b.Y, b.X+b.Width, b.Y+b.Height, d.config.MaxPosterHeight)
+			err := imageutil.CropPosterWithBounds(d.fs, tempPath, destPath, b.X, b.Y, b.X+b.Width, b.Y+b.Height, b.MaxPosterHeight)
 			if err == nil {
 				return nil
 			}

@@ -176,10 +176,11 @@ func MovieViewToModel(v *MovieView) *models.Movie {
 // Mirrors models.CropBounds; per ADR-0007 persistence types stay out of the
 // API boundary.
 type CropBounds struct {
-	X      int `json:"x"`
-	Y      int `json:"y"`
-	Width  int `json:"width"`
-	Height int `json:"height"`
+	X               int `json:"x"`
+	Y               int `json:"y"`
+	Width           int `json:"width"`
+	Height          int `json:"height"`
+	MaxPosterHeight int `json:"max_poster_height,omitempty"`
 }
 
 // ToModel converts to the persistence-layer type; nil-safe.
@@ -187,14 +188,14 @@ func (b *CropBounds) ToModel() *models.CropBounds {
 	if b == nil {
 		return nil
 	}
-	return &models.CropBounds{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height}
+	return &models.CropBounds{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height, MaxPosterHeight: b.MaxPosterHeight}
 }
 
 func cropBoundsViewFromModel(b *models.CropBounds) *CropBounds {
 	if b == nil {
 		return nil
 	}
-	return &CropBounds{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height}
+	return &CropBounds{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height, MaxPosterHeight: b.MaxPosterHeight}
 }
 
 // MovieViewSliceFromModels maps a slice of Movies to MovieViews.

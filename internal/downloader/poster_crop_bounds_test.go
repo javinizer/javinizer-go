@@ -79,6 +79,28 @@ func TestDownloadPoster_AppliesManualCropBounds(t *testing.T) {
 	assert.Greater(t, r, bl, "poster pixels must come from the manual (left/red) crop region")
 }
 
+func TestDownloadPoster_BoundsCarryMaxPosterHeight(t *testing.T) {
+	srv := twoToneCoverServer(t)
+	tmpDir := t.TempDir()
+
+	// The crop preview honored an explicit 300px max height; Organize must
+	// produce the same output height instead of the config default (0 = uncapped).
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.ShouldCropPoster = false
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600, MaxPosterHeight: 300}
+
+	d := newPosterTestDownloader(&Config{DownloadPoster: true})
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.NoError(t, err)
+	require.True(t, result.Downloaded)
+
+	img := decodePosterImage(t, result.LocalPath)
+	b := img.Bounds()
+	assert.Equal(t, 300, b.Dy(), "the stored max poster height must be honored at apply")
+	assert.Equal(t, 200, b.Dx(), "aspect 400:600 scales to 200:300")
+}
+
 func TestDownloadPoster_UndecodableDownloadDoesNotShipAsPoster(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")

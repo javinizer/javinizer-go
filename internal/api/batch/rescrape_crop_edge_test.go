@@ -277,7 +277,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		require.NoError(t, os.MkdirAll(posterDir, 0o755))
 		writeJPEG(t, filepath.Join(posterDir, "ALT-001-full.jpg"), 1000, 600)
 
-		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/LEGACY-001/poster-crop", bytes.NewBufferString(`{"x":200,"y":0,"width":472,"height":600}`))
+		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/LEGACY-001/poster-crop", bytes.NewBufferString(`{"x":200,"y":0,"width":472,"height":600,"max_poster_height":300}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -294,6 +294,8 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		var resp contracts.PosterCropResponse
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		require.NotNil(t, resp.PosterCropBounds, "non-legacy crops must echo the stored bounds")
-		assert.Equal(t, contracts.CropBounds{X: 200, Y: 0, Width: 472, Height: 600}, *resp.PosterCropBounds)
+		assert.Equal(t, contracts.CropBounds{X: 200, Y: 0, Width: 472, Height: 600, MaxPosterHeight: 300}, *resp.PosterCropBounds)
+		require.NotNil(t, result.Movie.Poster.CropBounds)
+		assert.Equal(t, 300, result.Movie.Poster.CropBounds.MaxPosterHeight, "request hop must store the effective max height for the apply phase")
 	})
 }

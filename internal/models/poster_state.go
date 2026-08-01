@@ -26,6 +26,10 @@ type CropBounds struct {
 	Y      int `json:"y"`
 	Width  int `json:"width"`
 	Height int `json:"height"`
+	// MaxPosterHeight is the output height cap effective when the crop was
+	// made (0 = no cap). Stored with the bounds so Organize reproduces the
+	// exact previewed dimensions even if the configured default differs.
+	MaxPosterHeight int `json:"max_poster_height,omitempty"`
 }
 
 // Clone returns a deep copy of the PosterState.
