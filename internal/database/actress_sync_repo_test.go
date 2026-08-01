@@ -166,6 +166,31 @@ func TestActressSyncRequeueTaskRestoresPendingLease(t *testing.T) {
 	require.Equal(t, 1, reclaimed.Attempts)
 }
 
+func TestActressSyncRequeueTaskCancelsAfterJobCancellation(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	actress := &models.Actress{DMMID: 78, JapaneseName: "女優"}
+	require.NoError(t, NewActressRepository(db).Create(context.Background(), actress))
+	now := time.Now().UTC()
+	job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now}
+	task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actress.ID, Label: "cancel-requeue", DedupeKey: "actress:cancel-requeue", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	repo := NewActressSyncRepository(db)
+	require.NoError(t, repo.CreateJob(job, []models.ActressSyncTask{task}))
+	claimed, err := repo.ClaimNext("owner", now.Add(time.Minute))
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	require.NoError(t, repo.CancelJob(job.ID))
+	require.NoError(t, repo.RequeueTask(claimed, claimed.LeaseToken))
+
+	stored, err := repo.ListTasks(job.ID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, models.ActressSyncTaskCancelled, stored[0].Status)
+	require.Equal(t, "cancelled", stored[0].Outcome)
+	storedJob, err := repo.FindJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncJobCancelled, storedJob.Status)
+}
+
 func TestActressSyncMergeIsLeaseFencedAndAtomic(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	actressRepo := NewActressRepository(db)

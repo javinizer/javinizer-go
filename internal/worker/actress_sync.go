@@ -430,7 +430,24 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 	}
 	assigned, assignErr := assignDMMID(actress.ID, dmmID)
 	if assignErr != nil {
-		return nil, nil, nil, assignErr
+		if !database.IsUniqueConstraint(assignErr) {
+			return nil, nil, nil, assignErr
+		}
+		canonical, reloadErr := actressRepo.FindByDMMID(ctx, dmmID)
+		if reloadErr != nil {
+			return nil, nil, nil, fmt.Errorf("reload canonical actress after DMM ID assignment race: %w", reloadErr)
+		}
+		if canonical.ID == actress.ID {
+			return canonical, []models.ActressInfo{match}, []string{"dmm_id"}, nil
+		}
+		if !canMergeMissingDMMActress(actress, canonical) {
+			return nil, nil, nil, nil
+		}
+		merged, mergeErr := mergeActresses(canonical.ID, actress.ID)
+		if mergeErr != nil {
+			return nil, nil, nil, mergeErr
+		}
+		return &merged.MergedActress, []models.ActressInfo{match}, []string{"merged_duplicate"}, nil
 	}
 	if !assigned {
 		return nil, nil, nil, nil

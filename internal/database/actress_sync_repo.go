@@ -436,13 +436,25 @@ func (r *ActressSyncRepository) RequeueTask(task *models.ActressSyncTask, token 
 	return retryOnLocked(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
 			now := time.Now().UTC()
+			var job models.ActressSyncJob
+			if err := tx.First(&job, "id = ?", task.JobID).Error; err != nil {
+				return err
+			}
+			updates := map[string]any{
+				"status": models.ActressSyncTaskPending, "stage": "queued", "outcome": "", "error_message": "", "completed_at": nil,
+				"lease_owner": "", "lease_token": "", "heartbeat_at": nil, "lease_expires_at": nil,
+			}
+			if !job.CancelRequested {
+				updates["attempts"] = gorm.Expr("CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END")
+			} else {
+				updates["status"] = models.ActressSyncTaskCancelled
+				updates["stage"] = "completed"
+				updates["outcome"] = "cancelled"
+				updates["completed_at"] = now
+			}
 			result := tx.Model(&models.ActressSyncTask{}).
 				Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", task.ID, models.ActressSyncTaskRunning, token, now).
-				Updates(map[string]any{
-					"status": models.ActressSyncTaskPending, "stage": "queued", "outcome": "", "error_message": "", "completed_at": nil,
-					"lease_owner": "", "lease_token": "", "heartbeat_at": nil, "lease_expires_at": nil,
-					"attempts": gorm.Expr("CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END"),
-				})
+				Updates(updates)
 			if result.Error != nil {
 				return result.Error
 			}
@@ -452,18 +464,25 @@ func (r *ActressSyncRepository) RequeueTask(task *models.ActressSyncTask, token 
 			if err := r.refreshJobTx(tx, task.JobID, now); err != nil {
 				return err
 			}
-			task.Status = models.ActressSyncTaskPending
-			task.Stage = "queued"
-			task.Outcome = ""
+			if job.CancelRequested {
+				task.Status = models.ActressSyncTaskCancelled
+				task.Stage = "completed"
+				task.Outcome = "cancelled"
+				task.CompletedAt = &now
+			} else {
+				task.Status = models.ActressSyncTaskPending
+				task.Stage = "queued"
+				task.Outcome = ""
+				task.CompletedAt = nil
+				if task.Attempts > 0 {
+					task.Attempts--
+				}
+			}
 			task.ErrorMessage = ""
-			task.CompletedAt = nil
 			task.LeaseOwner = ""
 			task.LeaseToken = ""
 			task.HeartbeatAt = nil
 			task.LeaseExpiresAt = nil
-			if task.Attempts > 0 {
-				task.Attempts--
-			}
 			return nil
 		})
 	})

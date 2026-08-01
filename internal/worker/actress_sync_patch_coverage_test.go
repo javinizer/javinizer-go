@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 )
@@ -115,6 +116,107 @@ func TestLinkedActressCandidatesPatchBranches(t *testing.T) {
 	require.Error(t, err)
 	_, err = linkedActressMatches(context.Background(), closedRepo, actress.ID, 77, nil)
 	require.Error(t, err)
+}
+
+func TestLinkedIdentityAssignmentRaceMergesCanonicalActress(t *testing.T) {
+	uniqueErr := sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintUnique}
+	db, actressRepo, movieRepo, duplicate := newActressSyncFixture(t, &models.Actress{JapaneseName: "linked race"})
+	require.NoError(t, db.DB.Create(&models.Movie{ContentID: "linked-race", ID: "RACE-914", DisplayTitle: "Linked", SourceURL: "https://example.test/RACE-914"}).Error)
+	require.NoError(t, db.DB.Exec("INSERT INTO movie_actresses (movie_content_id, actress_id) VALUES (?, ?)", "linked-race", duplicate.ID).Error)
+	canonical := &models.Actress{DMMID: 914, JapaneseName: "linked race"}
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(&urlActressSyncScraper{
+		actressSyncScraper: actressSyncScraper{name: "dmm"},
+		canHandle:          true,
+		urlResult:          &models.ScraperResult{Actresses: []models.ActressInfo{{DMMID: 914, JapaneseName: "linked race"}}},
+	})
+
+	result, err := SyncActressMetadata(t.Context(), duplicate.ID, actressRepo, movieRepo, registry, ActressSyncOptions{
+		AssignDMMID: func(uint, int) (bool, error) {
+			require.NoError(t, actressRepo.Create(t.Context(), canonical))
+			return false, uniqueErr
+		},
+	})
+	require.NoError(t, err)
+	require.Contains(t, result.UpdatedFields, "merged_duplicate")
+	stored, err := actressRepo.FindByDMMID(t.Context(), 914)
+	require.NoError(t, err)
+	require.Equal(t, canonical.ID, stored.ID)
+	_, err = actressRepo.FindByID(t.Context(), duplicate.ID)
+	require.True(t, database.IsNotFound(err))
+}
+
+func TestLinkedIdentityAssignmentRaceBranches(t *testing.T) {
+	uniqueErr := sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintUnique}
+	setup := func(t *testing.T, source *models.Actress) (*database.DB, *database.ActressRepository, *database.MovieRepository, *models.Actress, *scraperutil.ScraperRegistry) {
+		t.Helper()
+		db, actressRepo, movieRepo, duplicate := newActressSyncFixture(t, source)
+		require.NoError(t, db.DB.Create(&models.Movie{ContentID: "linked-race", ID: "RACE-914", DisplayTitle: "Linked", SourceURL: "https://example.test/RACE-914"}).Error)
+		require.NoError(t, db.DB.Exec("INSERT INTO movie_actresses (movie_content_id, actress_id) VALUES (?, ?)", "linked-race", duplicate.ID).Error)
+		registry := scraperutil.NewScraperRegistry()
+		registry.RegisterInstance(&urlActressSyncScraper{
+			actressSyncScraper: actressSyncScraper{name: "dmm"},
+			canHandle:          true,
+			urlResult:          &models.ScraperResult{Actresses: []models.ActressInfo{{DMMID: 914, JapaneseName: "linked race"}}},
+		})
+		return db, actressRepo, movieRepo, duplicate, registry
+	}
+
+	t.Run("same source assigned concurrently", func(t *testing.T) {
+		_, actressRepo, movieRepo, duplicate, registry := setup(t, &models.Actress{JapaneseName: "linked race"})
+		result, err := SyncActressMetadata(t.Context(), duplicate.ID, actressRepo, movieRepo, registry, ActressSyncOptions{
+			AssignDMMID: func(id uint, dmmID int) (bool, error) {
+				assigned, assignErr := actressRepo.AssignDMMIDIfMissing(t.Context(), id, dmmID)
+				require.NoError(t, assignErr)
+				require.True(t, assigned)
+				return false, uniqueErr
+			},
+		})
+		require.NoError(t, err)
+		require.Contains(t, result.UpdatedFields, "dmm_id")
+	})
+
+	t.Run("canonical reload fails", func(t *testing.T) {
+		db, actressRepo, movieRepo, duplicate, registry := setup(t, &models.Actress{JapaneseName: "linked race"})
+		canonical := &models.Actress{DMMID: 914, JapaneseName: "linked race"}
+		_, err := SyncActressMetadata(t.Context(), duplicate.ID, actressRepo, movieRepo, registry, ActressSyncOptions{
+			AssignDMMID: func(uint, int) (bool, error) {
+				require.NoError(t, actressRepo.Create(t.Context(), canonical))
+				require.NoError(t, db.Close())
+				return false, uniqueErr
+			},
+		})
+		require.Error(t, err)
+	})
+
+	t.Run("incompatible canonical", func(t *testing.T) {
+		_, actressRepo, movieRepo, duplicate, registry := setup(t, &models.Actress{FirstName: "Source", JapaneseName: "linked race"})
+		canonical := &models.Actress{DMMID: 914, FirstName: "Other", JapaneseName: "linked race"}
+		result, err := SyncActressMetadata(t.Context(), duplicate.ID, actressRepo, movieRepo, registry, ActressSyncOptions{
+			AssignDMMID: func(uint, int) (bool, error) {
+				require.NoError(t, actressRepo.Create(t.Context(), canonical))
+				return false, uniqueErr
+			},
+		})
+		require.NoError(t, err)
+		require.Contains(t, result.Messages, "missing_dmm_id")
+	})
+
+	t.Run("merge fails", func(t *testing.T) {
+		mergeErr := errors.New("linked merge failure")
+		_, actressRepo, movieRepo, duplicate, registry := setup(t, &models.Actress{JapaneseName: "linked race"})
+		canonical := &models.Actress{DMMID: 914, JapaneseName: "linked race"}
+		_, err := SyncActressMetadata(t.Context(), duplicate.ID, actressRepo, movieRepo, registry, ActressSyncOptions{
+			AssignDMMID: func(uint, int) (bool, error) {
+				require.NoError(t, actressRepo.Create(t.Context(), canonical))
+				return false, uniqueErr
+			},
+			MergeActresses: func(uint, uint) (*database.ActressMergeResult, error) {
+				return nil, mergeErr
+			},
+		})
+		require.ErrorIs(t, err, mergeErr)
+	})
 }
 
 func TestSyncActressMetadataCallbackFailures(t *testing.T) {
