@@ -42,13 +42,13 @@ func TestActressSyncCreateJobConflictLookupErrors(t *testing.T) {
 
 	t.Run("active actress task lookup", func(t *testing.T) {
 		db := newDatabaseTestDB(t)
+		actress := &models.Actress{JapaneseName: "actress lookup"}
+		require.NoError(t, NewActressRepository(db).Create(context.Background(), actress))
 		repo := NewActressSyncRepository(db)
-		name := "coverage:create-actress-task-lookup:" + uuid.NewString()
-		require.NoError(t, db.DB.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) { tx.AddError(errForcedActressCoverage) }))
-		defer func() { require.NoError(t, db.DB.Callback().Query().Remove(name)) }()
-		actressID := uint(1)
+		remove := forceQueryErrorOnCall(t, db, 2)
+		defer remove()
 		job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: time.Now().UTC()}
-		task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actressID, Label: "selected", DedupeKey: "lookup:actress", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: time.Now().UTC()}
+		task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actress.ID, Label: "selected", DedupeKey: "lookup:actress", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: time.Now().UTC()}
 		require.ErrorIs(t, repo.CreateJob(job, []models.ActressSyncTask{task}), errForcedActressCoverage)
 	})
 
@@ -90,7 +90,7 @@ func TestActressSyncCreateJobConflictLookupErrors(t *testing.T) {
 		existing := models.ActressSyncTask{ID: uuid.NewString(), JobID: existingJob.ID, ActressID: &actress.ID, Label: "existing", DedupeKey: "lookup:active-job", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
 		require.NoError(t, db.Create(existingJob).Error)
 		require.NoError(t, db.Create(&existing).Error)
-		remove := forceQueryErrorOnCall(t, db, 2)
+		remove := forceQueryErrorOnCall(t, db, 3)
 		defer remove()
 		job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now.Add(time.Second)}
 		task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actress.ID, Label: "selected", DedupeKey: existing.DedupeKey, Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now.Add(time.Second)}
@@ -113,6 +113,18 @@ func forceDeferredClaimUpdate(t *testing.T, db *DB, zeroRows bool) func() {
 		tx.AddError(errForcedActressCoverage)
 	}))
 	return func() { require.NoError(t, db.DB.Callback().Update().Remove(name)) }
+}
+
+func TestActressSyncCreateJobRevalidatesActresses(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressSyncRepository(db)
+	now := time.Now().UTC()
+	job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now}
+	actressID := uint(999999)
+	task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actressID, Label: "stale", DedupeKey: "actress:stale", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	require.Error(t, repo.CreateJob(job, []models.ActressSyncTask{task}))
+	_, err := repo.FindJob(job.ID)
+	require.Error(t, err)
 }
 
 func TestActressSyncDeferredTaskReacquiresCanonicalKey(t *testing.T) {

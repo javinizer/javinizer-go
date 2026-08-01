@@ -41,6 +41,9 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 			}
 			for i := range tasks {
 				if tasks[i].ActressID != nil {
+					if err := tx.Select("id").First(&models.Actress{}, "id = ?", *tasks[i].ActressID).Error; err != nil {
+						return fmt.Errorf("validate actress %d: %w", *tasks[i].ActressID, err)
+					}
 					var conflict models.ActressSyncTask
 					lookupErr := tx.Table("actress_sync_tasks AS task").Select("task.*").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").Where("task.actress_id = ? AND task.status IN ?", *tasks[i].ActressID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("CASE WHEN job.scope = 'selected' THEN 0 ELSE 1 END, task.created_at ASC, task.id ASC").First(&conflict).Error
 					if lookupErr == nil {
