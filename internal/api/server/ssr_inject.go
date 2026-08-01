@@ -40,8 +40,8 @@ func injectSSRState(html []byte, rt *core.APIRuntime, c *gin.Context) []byte {
 	state := ssrState{AuthStatus: resolveSSRAuth(rt, c)}
 
 	if raw := readCookieValue(c, browseBootstrapCookie); raw != "" {
-		if decoded, decErr := url.QueryUnescape(raw); decErr == nil && json.Valid([]byte(decoded)) {
-			state.BrowseBootstrap = json.RawMessage(decoded)
+		if decoded, ok := decodeBrowseBootstrapCookie(raw); ok {
+			state.BrowseBootstrap = decoded
 		}
 	}
 
@@ -57,6 +57,21 @@ func injectSSRState(html []byte, rt *core.APIRuntime, c *gin.Context) []byte {
 	result = append(result, script...)
 	result = append(result, html[idx:]...)
 	return result
+}
+
+func decodeBrowseBootstrapCookie(raw string) (json.RawMessage, bool) {
+	decoded, err := url.QueryUnescape(raw)
+	if err != nil {
+		return nil, false
+	}
+	var bootstrap struct {
+		Version          float64   `json:"version"`
+		SelectedScrapers *[]string `json:"selectedScrapers"`
+	}
+	if err := json.Unmarshal([]byte(decoded), &bootstrap); err != nil || bootstrap.Version != 1 || bootstrap.SelectedScrapers == nil {
+		return nil, false
+	}
+	return json.RawMessage(decoded), true
 }
 
 func resolveSSRAuth(rt *core.APIRuntime, c *gin.Context) *ssrAuthStatus {

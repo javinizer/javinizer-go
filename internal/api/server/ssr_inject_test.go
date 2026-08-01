@@ -44,7 +44,7 @@ func TestInjectSSRState_WithBrowseBootstrapCookie(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/browse", nil)
-	c.Request.AddCookie(&http.Cookie{Name: "javinizer_browse_bootstrap", Value: `%7B%22version%22%3A1%2C%22initialPath%22%3A%22%2Fvideos%22%7D`})
+	c.Request.AddCookie(&http.Cookie{Name: "javinizer_browse_bootstrap", Value: `%7B%22version%22%3A1%2C%22initialPath%22%3A%22%2Fvideos%22%2C%22selectedScrapers%22%3A%5B%5D%7D`})
 	html := []byte(`<html><head></head><body></body></html>`)
 	result := injectSSRState(html, rt, c)
 	marker := "window.__JAVINIZER_SSR__="
@@ -61,6 +61,17 @@ func TestInjectSSRState_WithBrowseBootstrapCookie(t *testing.T) {
 	require.NoError(t, json.Unmarshal(result[idx+len(marker):jsonEnd], &state))
 	assert.NotNil(t, state.BrowseBootstrap)
 	assert.Contains(t, string(state.BrowseBootstrap), "/videos")
+}
+
+func TestInjectSSRState_InvalidBrowseBootstrapCookieIsIgnored(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rt := &core.APIRuntime{}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/browse", nil)
+	c.Request.AddCookie(&http.Cookie{Name: browseBootstrapCookie, Value: `%7B%22version%22%3A1%2C%22initialPath%22%3A%22%2Fvideos%22%7D`})
+	result := injectSSRState([]byte(`<html><head></head></html>`), rt, c)
+	assert.NotContains(t, string(result), `"browseBootstrap"`)
 }
 
 func TestInjectSSRState_NoHeadMarker_ReturnsOriginalHTML(t *testing.T) {
