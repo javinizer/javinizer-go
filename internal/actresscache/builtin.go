@@ -65,6 +65,7 @@ func Lookup(dmmID int, japaneseName, firstName, lastName string) (Record, bool) 
 		if index, ok := builtinIndex.byJP[name]; ok {
 			return runtimeRecordToRecord(builtinIndex.records[index]), true
 		}
+		return Record{}, false
 	}
 	if name := normalizeIdentity(firstName + " " + lastName); name != "" {
 		if index, ok := builtinIndex.byName[name]; ok {

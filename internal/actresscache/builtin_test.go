@@ -1,6 +1,8 @@
 package actresscache
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"testing"
 
@@ -30,6 +32,31 @@ func TestBuiltinLookupFindsGeneratedRecord(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 28262, record.DMMID)
 	assert.NotEmpty(t, record.ThumbURL)
+}
+
+func TestBuiltinLookupMissesRomanizedRecordWhenJapaneseIdentityDiffers(t *testing.T) {
+	originalData := builtinData
+	defer func() {
+		builtinData = originalData
+		resetBuiltinIndex()
+	}()
+	data, err := json.Marshal(RuntimeCache{SchemaVersion: RuntimeSchemaVersion, Records: []RuntimeRecord{{DMMID: 1, FirstName: "Same", LastName: "Name", JapaneseName: "別人"}}})
+	require.NoError(t, err)
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	_, err = writer.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	builtinData = compressed.Bytes()
+	resetBuiltinIndex()
+
+	_, ok := Lookup(0, "未収録", "Same", "Name")
+	assert.False(t, ok)
+	_, ok = Lookup(0, "", "", "")
+	assert.False(t, ok)
+	found, ok := Lookup(0, "", "Same", "Name")
+	require.True(t, ok)
+	assert.Equal(t, 1, found.DMMID)
 }
 
 func TestBuiltinLookupMissesEmptyPlaceholderCache(t *testing.T) {

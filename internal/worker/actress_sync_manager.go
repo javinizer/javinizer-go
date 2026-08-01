@@ -350,10 +350,14 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 		if runCtx.Err() != nil && errors.Is(err, context.Canceled) {
 			return
 		}
-		if m.requeueCanonicalTask(task, err) {
+		if errors.Is(err, database.ErrActressSyncStrongerPending) {
+			task.Status, task.Outcome, task.ErrorMessage = models.ActressSyncTaskSkipped, "deferred", ""
+			task.Messages = []string{"deferred_to_stronger_sync_task"}
+		} else if m.requeueCanonicalTask(task, err) {
 			return
+		} else {
+			task.Status, task.Outcome, task.ErrorMessage = models.ActressSyncTaskFailed, "failed", err.Error()
 		}
-		task.Status, task.Outcome, task.ErrorMessage = models.ActressSyncTaskFailed, "failed", err.Error()
 	} else {
 		task.Messages, task.UpdatedFields, task.Warning = result.Messages, result.UpdatedFields, result.Warning
 		switch {

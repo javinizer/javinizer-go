@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -302,6 +303,37 @@ func TestLinkedIdentityRecoveryFencesSourceChanges(t *testing.T) {
 		require.NoError(t, err)
 		_ = db
 	})
+}
+
+func TestActressSyncManagerDefersToStrongerPendingTask(t *testing.T) {
+	db, actressRepo, movieRepo, source := newActressSyncFixture(t, &models.Actress{JapaneseName: "defer stronger"})
+	canonical := &models.Actress{DMMID: 1402, JapaneseName: "defer stronger"}
+	require.NoError(t, actressRepo.Create(t.Context(), canonical))
+	manager := NewActressSyncManager(ActressSyncManagerDeps{DB: db, ActressRepo: actressRepo, MovieRepo: movieRepo})
+	now := time.Now().UTC()
+	missingJob := &models.ActressSyncJob{ID: "defer-missing-" + t.Name(), Status: models.ActressSyncJobRunning, Scope: "missing", CreatedAt: now}
+	selectedJob := &models.ActressSyncJob{ID: "defer-selected-" + t.Name(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now}
+	expires := now.Add(time.Hour)
+	current := models.ActressSyncTask{ID: "defer-current-" + t.Name(), JobID: missingJob.ID, ActressID: &source.ID, DedupeKey: "actress:" + fmt.Sprint(source.ID), Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, LeaseOwner: "owner", LeaseToken: "token", LeaseExpiresAt: &expires, CreatedAt: now}
+	pending := models.ActressSyncTask{ID: "defer-pending-" + t.Name(), JobID: selectedJob.ID, ActressID: &canonical.ID, DedupeKey: "actress:" + fmt.Sprint(canonical.ID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	require.NoError(t, db.Create(missingJob).Error)
+	require.NoError(t, db.Create(selectedJob).Error)
+	require.NoError(t, db.Create(&current).Error)
+	require.NoError(t, db.Create(&pending).Error)
+	manager.active.Add(1)
+	manager.wg.Add(1)
+	manager.runTaskWithContext(context.Background(), &current, 3*time.Second, scraperutil.NewScraperRegistry())
+	manager.Stop()
+
+	var storedCurrent, storedPending models.ActressSyncTask
+	require.NoError(t, db.First(&storedCurrent, "id = ?", current.ID).Error)
+	require.NoError(t, db.First(&storedPending, "id = ?", pending.ID).Error)
+	require.Equal(t, models.ActressSyncTaskSkipped, storedCurrent.Status)
+	require.Equal(t, "deferred", storedCurrent.Outcome)
+	require.Equal(t, []string{"deferred_to_stronger_sync_task"}, storedCurrent.Messages)
+	require.Equal(t, models.ActressSyncTaskPending, storedPending.Status)
+	_, err := actressRepo.FindByID(t.Context(), source.ID)
+	require.NoError(t, err)
 }
 
 func TestSyncActressMetadataCallbackFailures(t *testing.T) {

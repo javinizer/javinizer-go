@@ -26,6 +26,9 @@ var ErrActressSyncCanonicalTaskRunning = errors.New("canonical actress sync task
 // ErrActressSyncIdentityChanged ...
 var ErrActressSyncIdentityChanged = errors.New("actress sync identity changed during merge")
 
+// ErrActressSyncStrongerPending ...
+var ErrActressSyncStrongerPending = errors.New("stronger actress sync task is pending")
+
 // ActressSyncRepository ...
 type ActressSyncRepository struct{ db *DB }
 
@@ -371,6 +374,16 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 		if conflict.Status == models.ActressSyncTaskRunning {
 			return fmt.Errorf("%w: actress %d", ErrActressSyncCanonicalTaskRunning, actressID)
 		}
+		var taskJob, conflictJob models.ActressSyncJob
+		if err := tx.First(&taskJob, "id = ?", task.JobID).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&conflictJob, "id = ?", conflict.JobID).Error; err != nil {
+			return err
+		}
+		if actressSyncScopePriority(conflictJob.Scope) > actressSyncScopePriority(taskJob.Scope) {
+			return ErrActressSyncStrongerPending
+		}
 		now := time.Now().UTC()
 		messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
 		if err := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", conflict.ID, models.ActressSyncTaskPending).Updates(map[string]any{
@@ -395,6 +408,13 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 		return errActressSyncLeaseLost
 	}
 	return nil
+}
+
+func actressSyncScopePriority(scope string) int {
+	if strings.EqualFold(strings.TrimSpace(scope), "selected") {
+		return 2
+	}
+	return 1
 }
 
 func mergeSyncTaskFields(existing, additional []string) []string {
