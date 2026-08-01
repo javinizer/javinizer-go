@@ -45,7 +45,7 @@ func TestInjectSSRState_WithBrowseBootstrapCookie(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/browse", nil)
-	c.Request.AddCookie(&http.Cookie{Name: "javinizer_browse_bootstrap", Value: url.QueryEscape(`{"version":1,"applyPlan":null,"initialPath":"/videos","destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`)})
+	c.Request.AddCookie(&http.Cookie{Name: "javinizer_browse_bootstrap", Value: url.QueryEscape(`{"version":1,"applyPlan":{"version":1,"video_operation":"metadata-artwork","nfo_output":"skip","media_policy":"missing"},"initialPath":"/videos","destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`)})
 	html := []byte(`<html><head></head><body></body></html>`)
 	result := injectSSRState(html, rt, c)
 	marker := "window.__JAVINIZER_SSR__="
@@ -64,6 +64,12 @@ func TestInjectSSRState_WithBrowseBootstrapCookie(t *testing.T) {
 	assert.Contains(t, string(state.BrowseBootstrap), "/videos")
 }
 
+func TestDecodeBrowseBootstrapCookie_NullApplyPlan(t *testing.T) {
+	decoded, ok := decodeBrowseBootstrapCookie(url.QueryEscape(`{"version":1,"applyPlan":null,"initialPath":"/videos","destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`))
+	require.True(t, ok)
+	assert.Contains(t, string(decoded), `"applyPlan":null`)
+}
+
 func TestInjectSSRState_InvalidBrowseBootstrapCookieIsIgnored(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -75,6 +81,7 @@ func TestInjectSSRState_InvalidBrowseBootstrapCookieIsIgnored(t *testing.T) {
 		{name: "wrong selected scraper type", value: `%7B%22version%22%3A1%2C%22selectedScrapers%22%3A%5B1%5D%7D`},
 		{name: "wrong initial path type", value: url.QueryEscape(`{"version":1,"applyPlan":null,"initialPath":123,"destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`)},
 		{name: "wrong apply plan type", value: url.QueryEscape(`{"version":1,"applyPlan":123,"initialPath":"/videos","destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`)},
+		{name: "invalid apply plan", value: url.QueryEscape(`{"version":1,"applyPlan":{"version":1,"video_operation":"bad","nfo_output":"write","media_policy":"missing"},"initialPath":"/videos","destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`)},
 		{name: "invalid escape", value: `%zz`},
 	}
 	for _, tt := range tests {

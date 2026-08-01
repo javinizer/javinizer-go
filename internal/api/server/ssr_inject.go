@@ -111,7 +111,7 @@ func decodeBrowseBootstrapCookie(raw string) (json.RawMessage, bool) {
 			return nil, false
 		}
 	}
-	normalized, err := json.Marshal(normalizedBrowseBootstrap{
+	normalized, _ := json.Marshal(normalizedBrowseBootstrap{
 		Version:              1,
 		ApplyPlan:            plan,
 		PlanMigrationWarning: bootstrap.PlanMigrationWarning,
@@ -123,9 +123,6 @@ func decodeBrowseBootstrapCookie(raw string) (json.RawMessage, bool) {
 		ManualScrapeMode:     *bootstrap.ManualScrapeMode,
 		PlanExpanded:         *bootstrap.PlanExpanded,
 	})
-	if err != nil {
-		return nil, false
-	}
 	return normalized, true
 }
 
