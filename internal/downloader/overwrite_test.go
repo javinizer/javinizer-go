@@ -28,8 +28,12 @@ type statErrorFS struct {
 	err  error
 }
 
+func nativePath(path string) string {
+	return filepath.FromSlash(path)
+}
+
 func (f statErrorFS) Stat(name string) (os.FileInfo, error) {
-	if name == f.path {
+	if filepath.Clean(name) == filepath.Clean(nativePath(f.path)) {
 		return nil, f.err
 	}
 	return f.Fs.Stat(name)
@@ -77,7 +81,7 @@ func TestDownload_OverwriteExistingReplacesAndClassifies(t *testing.T) {
 	require.NotNil(t, coverResult)
 	assert.True(t, coverResult.Downloaded)
 	assert.True(t, coverResult.Replaced)
-	assert.Equal(t, []string{"/output/TEST-001-fanart.jpg"}, outcome.DownloadedPaths)
+	assert.Equal(t, []string{nativePath("/output/TEST-001-fanart.jpg")}, outcome.DownloadedPaths)
 	assert.Empty(t, outcome.CreatedPaths)
 }
 
@@ -189,7 +193,7 @@ func TestDownload_OverwriteCroppedCreatesAndRecordsCreatedPath(t *testing.T) {
 			PosterFormat: "<ID>-poster.jpg",
 		},
 	}, nil)
-	path := "/output/TEST-008-poster.jpg"
+	path := nativePath("/output/TEST-008-poster.jpg")
 	outcome, err := d.Download(context.Background(), DownloadCmd{
 		Movie: &models.Movie{
 			ID:     "TEST-008",
@@ -246,7 +250,7 @@ func TestDownload_OverwritePartialOutcomeSeparatesReplacedAndCreated(t *testing.
 	defer server.Close()
 
 	fs := afero.NewMemMapFs()
-	trailerPath := "/output/TEST-010-trailer.mp4"
+	trailerPath := nativePath("/output/TEST-010-trailer.mp4")
 	require.NoError(t, afero.WriteFile(fs, trailerPath, []byte("old trailer"), 0644))
 	d := NewDownloader(server.Client(), fs, &Config{
 		DownloadCover:       true,
@@ -274,8 +278,8 @@ func TestDownload_OverwritePartialOutcomeSeparatesReplacedAndCreated(t *testing.
 	require.NotNil(t, outcome)
 	assert.Contains(t, outcome.DownloadedPaths, trailerPath)
 	assert.NotContains(t, outcome.CreatedPaths, trailerPath)
-	assert.Contains(t, outcome.CreatedPaths, "/output/extrafanart/screenshot.jpg")
-	assert.Contains(t, outcome.DownloadedPaths, "/output/extrafanart/screenshot.jpg")
+	assert.Contains(t, outcome.CreatedPaths, nativePath("/output/extrafanart/screenshot.jpg"))
+	assert.Contains(t, outcome.DownloadedPaths, nativePath("/output/extrafanart/screenshot.jpg"))
 	got, readErr := afero.ReadFile(fs, trailerPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, []byte("/trailer.mp4"), got)
@@ -396,7 +400,7 @@ func TestDownloadPoster_OverwriteCroppedReplacesAndCleansTemps(t *testing.T) {
 	defer server.Close()
 
 	fs := afero.NewMemMapFs()
-	posterPath := "/output/TEST-003-poster.jpg"
+	posterPath := nativePath("/output/TEST-003-poster.jpg")
 	require.NoError(t, afero.WriteFile(fs, posterPath, []byte("old poster"), 0644))
 	d := NewDownloader(server.Client(), fs, &Config{
 		DownloadPoster:    true,
@@ -421,7 +425,7 @@ func TestDownloadPoster_OverwriteCropFailurePreservesExisting(t *testing.T) {
 	defer server.Close()
 
 	fs := afero.NewMemMapFs()
-	posterPath := "/output/TEST-004-poster.jpg"
+	posterPath := nativePath("/output/TEST-004-poster.jpg")
 	old := []byte("old poster")
 	require.NoError(t, afero.WriteFile(fs, posterPath, old, 0644))
 	d := NewDownloader(server.Client(), fs, &Config{DownloadPoster: true}, nil)
@@ -444,7 +448,7 @@ func TestDownload_OverwriteStatErrorDoesNotFetch(t *testing.T) {
 	defer server.Close()
 
 	base := afero.NewMemMapFs()
-	path := "/output/TEST-005-fanart.jpg"
+	path := nativePath("/output/TEST-005-fanart.jpg")
 	statErr := errors.New("permission denied")
 	fs := statErrorFS{Fs: base, path: path, err: statErr}
 	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)

@@ -46,7 +46,7 @@ func TestDownloadPoster_CroppedFilesystemBranches(t *testing.T) {
 
 	t.Run("existing without overwrite", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		path := "/output/POSTER-001-poster.jpg"
+		path := nativePath("/output/POSTER-001-poster.jpg")
 		require.NoError(t, afero.WriteFile(fs, path, []byte("existing"), 0644))
 		result, err := posterBranchDownloader(server.Client(), fs).downloadPoster(context.Background(), movie, "/output", nil)
 		require.NoError(t, err)
@@ -57,7 +57,7 @@ func TestDownloadPoster_CroppedFilesystemBranches(t *testing.T) {
 	t.Run("stat failure", func(t *testing.T) {
 		base := afero.NewMemMapFs()
 		statErr := errors.New("poster stat failed")
-		fs := statErrorFS{Fs: base, path: "/output/POSTER-001-poster.jpg", err: statErr}
+		fs := statErrorFS{Fs: base, path: nativePath("/output/POSTER-001-poster.jpg"), err: statErr}
 		result, err := posterBranchDownloader(server.Client(), fs).downloadPoster(context.Background(), movie, "/output", nil, true)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, statErr)
@@ -66,7 +66,7 @@ func TestDownloadPoster_CroppedFilesystemBranches(t *testing.T) {
 
 	t.Run("replace failure", func(t *testing.T) {
 		base := afero.NewMemMapFs()
-		path := "/output/POSTER-001-poster.jpg"
+		path := nativePath("/output/POSTER-001-poster.jpg")
 		require.NoError(t, afero.WriteFile(base, path, []byte("old"), 0644))
 		fs := rejectExistingRenameFS{Fs: base}
 		result, err := posterBranchDownloader(server.Client(), fs).downloadPoster(context.Background(), movie, "/output", nil, true)
