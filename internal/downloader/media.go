@@ -96,7 +96,9 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 				return d.fs.Rename(srcPath, outPath)
 			}
 			logging.Warnf("stored crop bounds %+v invalid for poster of %s: %v - falling back to default crop", *b, movie.ID, err)
-			return imageutil.CropPosterFromCover(d.fs, srcPath, outPath, d.config.MaxPosterHeight)
+			// Keep the crop-time max height: the preview the user approved was
+			// produced with it, and the configured value may have changed since.
+			return imageutil.CropPosterFromCover(d.fs, srcPath, outPath, b.MaxPosterHeight)
 		})
 	}
 

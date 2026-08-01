@@ -575,6 +575,25 @@ func TestDownloadPoster_ManualCropLockReleasedAfterUse(t *testing.T) {
 	assert.False(t, loaded, "per-destination lock must be evicted after the crop completes")
 }
 
+func TestDownloadPoster_StaleBoundsFallbackHonorsStoredHeight(t *testing.T) {
+	srv := twoToneCoverServer(t)
+	tmpDir := t.TempDir()
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{X: 9000, Y: 0, Width: 400, Height: 600, SourceWasCover: true, MaxPosterHeight: 300}
+
+	d := newPosterTestDownloader(&Config{DownloadPoster: true})
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.NoError(t, err)
+	require.True(t, result.Downloaded)
+
+	img := decodePosterImage(t, result.LocalPath)
+	b := img.Bounds()
+	assert.Equal(t, 300, b.Dy(), "the cover fallback must apply the crop-time stored max height")
+	assert.Less(t, b.Dx(), b.Dy())
+}
+
 func TestDownloadPoster_InstallRenameFailureSurfaces(t *testing.T) {
 	srv := twoToneCoverServer(t)
 
