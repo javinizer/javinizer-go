@@ -312,13 +312,7 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 	result, err := SyncActressMetadata(ctx, *task.ActressID, m.deps.ActressRepo, m.deps.MovieRepo, registry, ActressSyncOptions{
 		Revalidate:         job.Scope == "selected",
 		PriorUpdatedFields: append([]string(nil), task.UpdatedFields...),
-		MergeActresses: func(targetID, sourceID uint) (*database.ActressMergeResult, error) {
-			merged, mergeErr := m.deps.ActressRepo.MergeForSyncTask(ctx, targetID, sourceID, nil, task.ID, task.LeaseToken)
-			if mergeErr == nil {
-				task.ActressID = &targetID
-			}
-			return merged, mergeErr
-		},
+
 		MergeActressesWithSource: func(targetID, sourceID uint, expectedSource models.Actress) (*database.ActressMergeResult, error) {
 			merged, mergeErr := m.deps.ActressRepo.MergeForSyncTaskWithSource(ctx, targetID, sourceID, nil, expectedSource, task.ID, task.LeaseToken)
 			if mergeErr == nil {
@@ -333,9 +327,7 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 			}
 			return merged, mergeErr
 		},
-		AssignDMMID: func(id uint, dmmID int) (bool, error) {
-			return m.deps.ActressRepo.AssignDMMIDIfMissingForSyncTask(ctx, id, dmmID, task.ID, task.LeaseToken)
-		},
+
 		AssignDMMIDWithSource: func(id uint, dmmID int, expectedSource models.Actress) (bool, error) {
 			return m.deps.ActressRepo.AssignDMMIDIfMissingForSyncTaskWithSource(ctx, id, dmmID, expectedSource, task.ID, task.LeaseToken)
 		},
