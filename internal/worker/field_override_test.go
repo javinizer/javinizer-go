@@ -509,3 +509,119 @@ func TestApplyFieldOverride_PersistErrorWrapped(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist field override")
 }
+
+// TestApplyFieldOverride_PosterURLSyncsCropIntent pins Finding B at the
+// field-override path: when a poster_url override replaces the effective
+// poster source, ShouldCropPoster must be re-derived from the NEW source's
+// class. A cover-backed movie (ShouldCropPoster=true) that picks a
+// poster-grade URL must no longer carry the cover intent — otherwise
+// downloadPoster default-crops the new poster wholesale at Organize, and a
+// subsequent manual crop records CropBounds.SourceWasCover=true so the
+// apply-time geometry fallback degrades to the default cover crop instead of
+// keeping the poster whole (internal/downloader/media.go). The reverse
+// (clearing the override back to the cover) restores cover-backed semantics.
+func TestApplyFieldOverride_PosterURLSyncsCropIntent(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(movie *models.Movie, dmm *models.ScraperResult)
+		field      string
+		wantCrop   bool
+		wantPoster string // expected movie.Poster.PosterURL after the override
+	}{
+		{
+			name: "cover-backed movie picking a poster-grade URL drops the cover intent",
+			setup: func(movie *models.Movie, _ *models.ScraperResult) {
+				movie.Poster.PosterURL = ""
+				movie.Poster.CoverURL = "https://old.example/cover.jpg"
+				movie.Poster.ShouldCropPoster = true // cover-backed at scrape time
+			},
+			field:      "poster_url",
+			wantCrop:   false,
+			wantPoster: "dmm-poster-url",
+		},
+		{
+			name: "stale cover intent on a poster swap is cleared",
+			setup: func(movie *models.Movie, _ *models.ScraperResult) {
+				movie.Poster.PosterURL = "https://old.example/poster.jpg"
+				movie.Poster.CoverURL = "https://old.example/cover.jpg"
+				movie.Poster.ShouldCropPoster = true // stale: already describes a poster source
+			},
+			field:      "poster_url",
+			wantCrop:   false,
+			wantPoster: "dmm-poster-url",
+		},
+		{
+			name: "clearing the poster URL falls back to cover-backed semantics",
+			setup: func(movie *models.Movie, dmm *models.ScraperResult) {
+				movie.Poster.PosterURL = "https://old.example/poster.jpg"
+				movie.Poster.CoverURL = "https://old.example/cover.jpg"
+				movie.Poster.ShouldCropPoster = false
+				dmm.PosterURL = "" // the chosen source contributes no poster: back to the cover
+			},
+			field:      "poster_url",
+			wantCrop:   true,
+			wantPoster: "",
+		},
+		{
+			name: "clearing with neither URL leaves the intent untouched",
+			setup: func(movie *models.Movie, dmm *models.ScraperResult) {
+				movie.Poster.PosterURL = "https://old.example/poster.jpg"
+				movie.Poster.CoverURL = ""
+				movie.Poster.ShouldCropPoster = false
+				dmm.PosterURL = ""
+			},
+			field:      "poster_url",
+			wantCrop:   false,
+			wantPoster: "",
+		},
+		{
+			name: "identical poster URL is a no-op that keeps both bounds and intent",
+			setup: func(movie *models.Movie, _ *models.ScraperResult) {
+				movie.Poster.PosterURL = "dmm-poster-url" // equals the selected source's URL
+				movie.Poster.CoverURL = "https://old.example/cover.jpg"
+				movie.Poster.ShouldCropPoster = true // a deliberate decision must not be clobbered
+			},
+			field:      "poster_url",
+			wantCrop:   true,
+			wantPoster: "dmm-poster-url",
+		},
+		{
+			name: "cover_url override behind an explicit poster leaves the intent alone",
+			setup: func(movie *models.Movie, _ *models.ScraperResult) {
+				movie.Poster.PosterURL = "https://old.example/poster.jpg"
+				movie.Poster.CoverURL = "https://old.example/cover.jpg"
+				movie.Poster.ShouldCropPoster = false
+			},
+			field:      "cover_url",
+			wantCrop:   false,
+			wantPoster: "https://old.example/poster.jpg",
+		},
+		{
+			name: "cover_url override on a cover-backed movie keeps cover intent",
+			setup: func(movie *models.Movie, _ *models.ScraperResult) {
+				movie.Poster.PosterURL = ""
+				movie.Poster.CoverURL = "https://old.example/cover.jpg"
+				movie.Poster.ShouldCropPoster = true
+			},
+			field:      "cover_url",
+			wantCrop:   true,
+			wantPoster: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			movie, prov := overrideFixture()
+			dmm := findScraperResult(prov.ScraperResults, "dmm")
+			require.NotNil(t, dmm)
+			movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+			tc.setup(movie, dmm)
+
+			require.NoError(t, applyFieldOverride(movie, prov, tc.field, "dmm"))
+
+			assert.Equal(t, tc.wantPoster, movie.Poster.PosterURL)
+			assert.Equal(t, tc.wantCrop, movie.Poster.ShouldCropPoster,
+				"the crop intent must describe the effective poster source, not the pre-edit image")
+		})
+	}
+}

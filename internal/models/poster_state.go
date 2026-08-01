@@ -43,6 +43,35 @@ type CropBounds struct {
 	SourceWasCover bool `json:"source_was_cover,omitempty"`
 }
 
+// SyncCropIntentWithSource re-derives ShouldCropPoster from the class of the
+// effective poster source after a source-changing edit (a poster_url override
+// or a whole-movie PATCH that swaps the source — the downloader reads
+// PosterURL ?? CoverURL):
+//
+//   - PosterURL set → a poster-grade image feeds the pipeline: false. Without
+//     this, a cover-backed movie's stale intent would make Organize
+//     default-crop the new poster wholesale, and a later manual crop would
+//     wrongly record CropBounds.SourceWasCover=true — degrading the
+//     apply-time geometry fallback to the default cover crop
+//     (internal/downloader/media.go) instead of keeping the poster whole.
+//   - PosterURL empty while CoverURL is set → the cover feeds the pipeline
+//     again: true, matching the scraper's cover-backed semantics (a cleared
+//     poster override falls back to a source that needs the default crop).
+//   - Both empty → the edit cleared the LAST source (cleanup path): the flag
+//     is left untouched; nothing will be downloaded, and re-adding a source
+//     later re-derives it.
+//
+// Callers must invoke this ONLY when the effective source actually changed —
+// an unchanged source may carry a deliberate user crop decision (an explicit
+// should_crop_poster edit) that must not be clobbered.
+func (p *PosterState) SyncCropIntentWithSource() {
+	if p.PosterURL != "" {
+		p.ShouldCropPoster = false
+	} else if p.CoverURL != "" {
+		p.ShouldCropPoster = true
+	}
+}
+
 // Clone returns a deep copy of the PosterState.
 func (p PosterState) Clone() PosterState {
 	cp := p

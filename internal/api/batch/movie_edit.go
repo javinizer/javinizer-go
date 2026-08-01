@@ -119,11 +119,12 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// depth — the shipped client clears these itself via the overlay and
 		// field-override paths; the crop and poster-from-url endpoints manage
 		// poster state directly and are unaffected).
-		if current.Movie != nil && movie.Poster.CropBounds != nil {
+		// downloadPoster reads PosterURL ?? CoverURL — only those fields plus
+		// the crop decision can invalidate stored bounds; a fanart-only change
+		// (CoverURL while PosterURL is set) must not drop the user's crop.
+		posterSourceChanged := false
+		if current.Movie != nil {
 			cm := current.Movie.Poster
-			// downloadPoster reads PosterURL ?? CoverURL — only those fields plus
-			// the crop decision can invalidate stored bounds; a fanart-only change
-			// (CoverURL while PosterURL is set) must not drop the user's crop.
 			oldSource, newSource := cm.PosterURL, movie.Poster.PosterURL
 			if oldSource == "" {
 				oldSource = cm.CoverURL
@@ -131,7 +132,24 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			if newSource == "" {
 				newSource = movie.Poster.CoverURL
 			}
-			if oldSource != newSource || cm.ShouldCropPoster != movie.Poster.ShouldCropPoster {
+			posterSourceChanged = oldSource != newSource
+			// The auto-crop decision the PATCH carried belongs to the image it
+			// described. When the effective source changed, re-derive it from
+			// the new source's class so a stale cover intent cannot survive onto
+			// a poster-grade image: the crop endpoint records ShouldCropPoster
+			// as CropBounds.SourceWasCover, and on an apply-time geometry
+			// failure the downloader degrades SourceWasCover=true bounds to the
+			// default cover crop instead of keeping the poster whole
+			// (internal/downloader/media.go). A cleared poster URL conversely
+			// regains cover-backed semantics. An unchanged source keeps the
+			// client-sent flag untouched — an explicit should_crop_poster flip
+			// with no source change is a deliberate decision. Parity with the
+			// field-override path (applyFieldOverride's poster_url case).
+			if posterSourceChanged {
+				movie.Poster.SyncCropIntentWithSource()
+			}
+			if movie.Poster.CropBounds != nil &&
+				(posterSourceChanged || cm.ShouldCropPoster != movie.Poster.ShouldCropPoster) {
 				movie.Poster.CropBounds = nil
 			}
 		}
@@ -278,6 +296,38 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		if err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
+		}
+
+		// Serialize the crop against poster-source refreshes: CropWithBounds
+		// measures the cached {posterID}-full.jpg while UpdatePosterCrop +
+		// PersistJobByID attach the result to the movie. Without the shared
+		// per-(job, movie) lock, a concurrent whole-movie PATCH or poster-url
+		// field override can refresh the cache from image B and persist B's
+		// URL between this request's crop of image A and its state update —
+		// attaching A's preview and A-measured bounds to the movie now at B,
+		// so Organize crops the wrong region. Held across source resolution,
+		// the crop itself, the state update, and the persistence. posterID is
+		// the same key updateBatchMovie and ApplyFieldOverride use (Movie.ID
+		// when set, FileMatchInfo.MovieID otherwise). Conversely, a refresh
+		// that wins the race after this crop persisted clears these bounds via
+		// its source-change invalidation, and a refresh that finished first is
+		// accounted for via the post-lock re-read below.
+		// Lock ordering: this endpoint acquires ONLY this lock — no
+		// overrideMu, matching updateBatchMovie; ApplyFieldOverride takes its
+		// per-resultID overrideMu BEFORE this lock and no path reverses that.
+		// The store-internal locks inside UpdatePosterCrop/PersistJobByID are
+		// taken while this lock is held, but no path acquires this lock while
+		// holding one of those, so the acquisition order is cycle-free.
+		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterID)
+		defer releasePosterLock()
+
+		// Re-read the result under the lock: a source-changing edit may have
+		// persisted while this request waited, replacing the movie — and the
+		// crop-intent flags the SourceWasCover recording below reads — that
+		// the pre-lock lookup saw. Keep the pre-lock result on a miss: the
+		// state update degrades to a no-op for a vanished result either way.
+		if fresh, _, stillFound := job.GetFileResultByResultID(resultID); stillFound && fresh != nil {
+			result = fresh
 		}
 
 		// Resolve the max poster height: request-level override wins over the
