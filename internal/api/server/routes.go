@@ -212,6 +212,8 @@ func registerNoRouteHandler(router *gin.Engine, assets webUIAssets, rt *core.API
 				html := assets.indexHTML
 				if rt != nil {
 					html = injectSSRState(html, rt, c)
+					c.Header("Cache-Control", "private, no-store")
+					c.Writer.Header().Add("Vary", "Cookie")
 				}
 				c.Data(http.StatusOK, "text/html; charset=utf-8", html)
 				return
