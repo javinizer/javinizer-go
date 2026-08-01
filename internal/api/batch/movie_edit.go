@@ -193,24 +193,29 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
+		if cropResult.UsedLegacySource {
+			// The full-size source is gone (legacy job): the crop box was
+			// measured on the already-cropped preview and cannot survive
+			// Organize, which re-downloads the full image. Reject instead of
+			// reporting a success the apply phase would silently discard.
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "full-size poster source unavailable for this older job; re-scrape the file or use poster-from-URL to enable manual cropping"})
+			return
+		}
 		croppedURL := cropResult.CroppedURL
 
-		var bounds *models.CropBounds
-		if !cropResult.UsedLegacySource {
-			bounds = &models.CropBounds{
-				X: req.X, Y: req.Y, Width: req.Width, Height: req.Height,
-				MaxPosterHeight: maxPosterHeight,
-				ImageWidth:      cropResult.SourceWidth,
-				ImageHeight:     cropResult.SourceHeight,
-			}
-			if result.Movie != nil {
-				bounds.SourceWasCover = result.Movie.Poster.ShouldCropPoster
-				// Repeated crops re-measure the same source: the first crop
-				// already flipped ShouldCropPoster=false, so inherit the intent
-				// recorded with the existing bounds instead.
-				if !bounds.SourceWasCover && result.Movie.Poster.CropBounds != nil {
-					bounds.SourceWasCover = result.Movie.Poster.CropBounds.SourceWasCover
-				}
+		bounds := &models.CropBounds{
+			X: req.X, Y: req.Y, Width: req.Width, Height: req.Height,
+			MaxPosterHeight: maxPosterHeight,
+			ImageWidth:      cropResult.SourceWidth,
+			ImageHeight:     cropResult.SourceHeight,
+		}
+		if result.Movie != nil {
+			bounds.SourceWasCover = result.Movie.Poster.ShouldCropPoster
+			// Repeated crops re-measure the same source: the first crop
+			// already flipped ShouldCropPoster=false, so inherit the intent
+			// recorded with the existing bounds instead.
+			if !bounds.SourceWasCover && result.Movie.Poster.CropBounds != nil {
+				bounds.SourceWasCover = result.Movie.Poster.CropBounds.SourceWasCover
 			}
 		}
 		if err := job.UpdatePosterCrop(movieID, croppedURL, bounds); err != nil {
@@ -224,13 +229,13 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// Organize silently restores the pre-crop poster.
 		deps.GetJobStore().PersistJobByID(jobID)
 
-		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL}
-		if bounds != nil {
-			resp.PosterCropBounds = &contracts.CropBounds{
+		resp := contracts.PosterCropResponse{
+			CroppedPosterURL: croppedURL,
+			PosterCropBounds: &contracts.CropBounds{
 				X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height,
 				MaxPosterHeight: bounds.MaxPosterHeight, ImageWidth: bounds.ImageWidth, ImageHeight: bounds.ImageHeight,
 				SourceWasCover: bounds.SourceWasCover,
-			}
+			},
 		}
 		c.JSON(http.StatusOK, resp)
 	}

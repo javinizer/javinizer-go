@@ -233,7 +233,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		assert.Contains(t, rec.Body.String(), "invalid movie ID for poster operation")
 	})
 
-	t.Run("falls back to existing cropped image when full image is missing", func(t *testing.T) {
+	t.Run("rejects crops when the full-size source is missing (legacy job)", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-778.mp4"})
 		setJobResult(job, "/tmp/IPX-778.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-778.mp4", MovieID: "IPX-778"},
@@ -250,20 +250,14 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Contains(t, rec.Body.String(), "/api/v1/temp/posters/"+job.GetID()+"/IPX-778.jpg")
+		require.Equal(t, http.StatusBadRequest, rec.Code,
+			"a crop measured against the already-cropped legacy preview cannot survive Organize - it must be rejected instead of reporting a false success: %s", rec.Body.String())
 
 		status := job.GetStatus()
 		result := status.Results["/tmp/IPX-778.mp4"]
 		require.NotNil(t, result)
 		require.NotNil(t, result.Movie)
-		assert.Nil(t, result.Movie.Poster.CropBounds,
-			"a crop measured against the already-cropped legacy preview must not be stored - applying it to the full downloaded image at organize would miscrop")
-
-		var resp contracts.PosterCropResponse
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-		assert.Nil(t, resp.PosterCropBounds,
-			"the response must echo the effective (nil) bounds so the client overlay does not re-inject legacy-space bounds")
+		assert.Nil(t, result.Movie.Poster.CropBounds)
 	})
 
 	t.Run("repeated crops preserve cover-source intent", func(t *testing.T) {
