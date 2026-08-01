@@ -42,6 +42,7 @@ import { toastStore } from '$lib/stores/toast';
 
 const mod = await import('$lib/api/client');
 const apiClient = vi.mocked(mod.apiClient);
+const websocket = await import('$lib/stores/websocket');
 
 if (!Element.prototype.animate) {
 	Element.prototype.animate = function () {
@@ -166,6 +167,7 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		expect(getByText('Scrape')).toBeTruthy();
 		expect(getByText('admin · Logout')).toBeTruthy();
 		expect(queryByText('Checking authentication...')).toBeNull();
+		expect(websocket.websocketStore.connect).toHaveBeenCalledTimes(1);
 	});	it('shows no loading message for fast checks and reveals one only after 500ms', async () => {
 		vi.useFakeTimers();
 		try {
