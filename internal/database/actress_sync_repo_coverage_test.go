@@ -112,8 +112,8 @@ func TestActressSyncReassignRejectsWrongActressAndRunningConflict(t *testing.T) 
 	err = repo.reassignTaskActressTx(db.DB, claimed.ID, claimed.LeaseToken, second.ID, second.ID)
 	require.ErrorIs(t, err, errActressSyncLeaseLost)
 	err = repo.reassignTaskActressTx(db.DB, claimed.ID, claimed.LeaseToken, second.ID, first.ID)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "already has a running sync task")
+	require.ErrorIs(t, err, ErrActressSyncCanonicalTaskRunning)
+	require.Contains(t, err.Error(), "canonical actress sync task is already running")
 }
 
 func TestActressSyncFieldMergingAndMutationValidation(t *testing.T) {

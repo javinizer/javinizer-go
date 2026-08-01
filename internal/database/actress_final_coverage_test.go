@@ -272,6 +272,31 @@ func forceZeroRowsAfterUpdate(t *testing.T, db *DB) func() {
 	return func() { require.NoError(t, db.DB.Callback().Update().Remove(name)) }
 }
 
+func TestActressSyncRequeueTaskErrorBranches(t *testing.T) {
+	t.Run("update error", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo, _, task := claimActressCoverageTask(t, db, nil)
+		remove := forceUpdateError(t, db)
+		defer remove()
+		require.ErrorIs(t, repo.RequeueTask(task, task.LeaseToken), errForcedActressCoverage)
+	})
+
+	t.Run("fenced update", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo, _, task := claimActressCoverageTask(t, db, nil)
+		remove := forceZeroRowsAfterUpdate(t, db)
+		defer remove()
+		require.ErrorIs(t, repo.RequeueTask(task, task.LeaseToken), errActressSyncLeaseLost)
+	})
+
+	t.Run("refresh error", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo, _, task := claimActressCoverageTask(t, db, nil)
+		require.NoError(t, db.Exec("DROP TABLE actress_sync_jobs").Error)
+		require.Error(t, repo.RequeueTask(task, task.LeaseToken))
+	})
+}
+
 func TestActressSyncRepositoryInjectedDatabaseBranches(t *testing.T) {
 	t.Run("recovery initial query and refresh fail", func(t *testing.T) {
 		db := newDatabaseTestDB(t)

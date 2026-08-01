@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"sync/atomic"
@@ -351,6 +352,40 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		manager.wg.Add(1)
 		manager.runTaskWithContext(context.Background(), task, 3*time.Second, registry)
 		require.Contains(t, task.UpdatedFields, "thumb_url")
+	})
+
+	t.Run("canonical contention requeues task", func(t *testing.T) {
+		db, repo, movies, duplicate := newActressSyncFixture(t, &models.Actress{JapaneseName: "同名"})
+		manager := NewActressSyncManager(ActressSyncManagerDeps{DB: db, ActressRepo: repo, MovieRepo: movies})
+		canonical := &models.Actress{DMMID: 200, JapaneseName: "同名"}
+		require.NoError(t, repo.Create(context.Background(), canonical))
+		now := time.Now().UTC()
+		job := &models.ActressSyncJob{ID: "contention-job", Status: models.ActressSyncJobPending, Scope: "missing", CreatedAt: now}
+		duplicateID := duplicate.ID
+		canonicalTask := models.ActressSyncTask{ID: "canonical-task", JobID: job.ID, ActressID: &canonical.ID, Label: "canonical", DedupeKey: fmt.Sprintf("actress:%d", canonical.ID), Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, LeaseOwner: "other", LeaseToken: "canonical-token", CreatedAt: now}
+		expires := now.Add(time.Hour)
+		canonicalTask.LeaseExpiresAt = &expires
+		duplicateTask := models.ActressSyncTask{ID: "duplicate-task", JobID: job.ID, ActressID: &duplicateID, Label: "duplicate", DedupeKey: fmt.Sprintf("actress:%d", duplicateID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now.Add(time.Second)}
+		require.NoError(t, manager.repo.CreateJob(job, []models.ActressSyncTask{canonicalTask, duplicateTask}))
+		claimed, err := manager.repo.ClaimNext(manager.owner, now.Add(time.Minute))
+		require.NoError(t, err)
+		require.Equal(t, duplicateTask.ID, claimed.ID)
+		manager.active.Add(1)
+		manager.wg.Add(1)
+		manager.runTaskWithContext(context.Background(), claimed, 3*time.Second, scraperutil.NewScraperRegistry())
+		tasks, err := manager.repo.ListTasks(job.ID)
+		require.NoError(t, err)
+		byID := map[string]models.ActressSyncTask{tasks[0].ID: tasks[0], tasks[1].ID: tasks[1]}
+		require.Equal(t, models.ActressSyncTaskPending, byID[duplicateTask.ID].Status)
+		require.Zero(t, byID[duplicateTask.ID].Attempts)
+		require.Equal(t, models.ActressSyncTaskRunning, byID[canonicalTask.ID].Status)
+	})
+
+	t.Run("canonical contention requeue failure", func(t *testing.T) {
+		db, _, _, manager := newFinalManagerFixture(t, &models.Actress{JapaneseName: "同名"})
+		task := claimFinalTask(t, manager, 1, "requeue-failure", "missing")
+		require.NoError(t, db.Close())
+		require.True(t, manager.requeueCanonicalTask(task, database.ErrActressSyncCanonicalTaskRunning))
 	})
 
 	t.Run("task timeout records failure", func(t *testing.T) {

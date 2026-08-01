@@ -138,6 +138,34 @@ func TestActressSyncStaleLeaseTransitionsAreFenced(t *testing.T) {
 	require.WithinDuration(t, newExpiry, *current.LeaseExpiresAt, time.Second)
 }
 
+func TestActressSyncRequeueTaskRestoresPendingLease(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	actress := &models.Actress{DMMID: 77, JapaneseName: "女優"}
+	require.NoError(t, NewActressRepository(db).Create(context.Background(), actress))
+	now := time.Now().UTC()
+	job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now}
+	task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actress.ID, Label: "test", DedupeKey: "actress:requeue", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	repo := NewActressSyncRepository(db)
+	require.ErrorIs(t, repo.RequeueTask(nil, "token"), ErrInvalidLookup)
+	require.NoError(t, repo.CreateJob(job, []models.ActressSyncTask{task}))
+	claimed, err := repo.ClaimNext("owner", now.Add(time.Minute))
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	require.Equal(t, 1, claimed.Attempts)
+	require.NoError(t, repo.RequeueTask(claimed, claimed.LeaseToken))
+	stored, err := repo.ListTasks(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncTaskPending, stored[0].Status)
+	require.Equal(t, "queued", stored[0].Stage)
+	require.Zero(t, stored[0].Attempts)
+	require.Empty(t, stored[0].LeaseToken)
+	require.Nil(t, stored[0].LeaseExpiresAt)
+	reclaimed, err := repo.ClaimNext("owner-2", now.Add(time.Minute))
+	require.NoError(t, err)
+	require.NotNil(t, reclaimed)
+	require.Equal(t, 1, reclaimed.Attempts)
+}
+
 func TestActressSyncMergeIsLeaseFencedAndAtomic(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	actressRepo := NewActressRepository(db)

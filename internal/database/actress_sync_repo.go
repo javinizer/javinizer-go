@@ -20,6 +20,9 @@ const (
 
 var errActressSyncLeaseLost = errors.New("actress sync task lease lost")
 
+// ErrActressSyncCanonicalTaskRunning ...
+var ErrActressSyncCanonicalTaskRunning = errors.New("canonical actress sync task is already running")
+
 // ErrActressSyncIdentityChanged ...
 var ErrActressSyncIdentityChanged = errors.New("actress sync identity changed during merge")
 
@@ -321,7 +324,7 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 	err := tx.Where("id <> ? AND dedupe_key = ? AND status IN ?", id, dedupeKey, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).First(&conflict).Error
 	if err == nil {
 		if conflict.Status == models.ActressSyncTaskRunning {
-			return fmt.Errorf("canonical actress %d already has a running sync task", actressID)
+			return fmt.Errorf("%w: actress %d", ErrActressSyncCanonicalTaskRunning, actressID)
 		}
 		now := time.Now().UTC()
 		messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
@@ -397,6 +400,47 @@ func (r *ActressSyncRepository) UpdateStage(id, token, stage string) error {
 			return errActressSyncLeaseLost
 		}
 		return nil
+	})
+}
+
+// RequeueTask ...
+func (r *ActressSyncRepository) RequeueTask(task *models.ActressSyncTask, token string) error {
+	if task == nil {
+		return ErrInvalidLookup
+	}
+	return retryOnLocked(func() error {
+		return r.db.Transaction(func(tx *gorm.DB) error {
+			now := time.Now().UTC()
+			result := tx.Model(&models.ActressSyncTask{}).
+				Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", task.ID, models.ActressSyncTaskRunning, token, now).
+				Updates(map[string]any{
+					"status": models.ActressSyncTaskPending, "stage": "queued", "outcome": "", "error_message": "", "completed_at": nil,
+					"lease_owner": "", "lease_token": "", "heartbeat_at": nil, "lease_expires_at": nil,
+					"attempts": gorm.Expr("CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END"),
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errActressSyncLeaseLost
+			}
+			if err := r.refreshJobTx(tx, task.JobID, now); err != nil {
+				return err
+			}
+			task.Status = models.ActressSyncTaskPending
+			task.Stage = "queued"
+			task.Outcome = ""
+			task.ErrorMessage = ""
+			task.CompletedAt = nil
+			task.LeaseOwner = ""
+			task.LeaseToken = ""
+			task.HeartbeatAt = nil
+			task.LeaseExpiresAt = nil
+			if task.Attempts > 0 {
+				task.Attempts--
+			}
+			return nil
+		})
 	})
 }
 

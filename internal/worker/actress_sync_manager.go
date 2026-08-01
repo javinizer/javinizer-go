@@ -256,6 +256,16 @@ func (m *ActressSyncManager) CreateJob(ctx context.Context, req ActressSyncCreat
 	m.signal()
 	return job, nil
 }
+func (m *ActressSyncManager) requeueCanonicalTask(task *models.ActressSyncTask, err error) bool {
+	if !errors.Is(err, database.ErrActressSyncCanonicalTaskRunning) {
+		return false
+	}
+	if requeueErr := m.repo.RequeueTask(task, task.LeaseToken); requeueErr != nil {
+		logging.Warnf("Actress sync task requeue failed: %v", requeueErr)
+	}
+	return true
+}
+
 func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *models.ActressSyncTask, timeout time.Duration, registry *scraperutil.ScraperRegistry) {
 	defer m.wg.Done()
 	defer func() { m.active.Add(-1); m.signal() }()
@@ -318,6 +328,9 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 	})
 	if err != nil {
 		if runCtx.Err() != nil && errors.Is(err, context.Canceled) {
+			return
+		}
+		if m.requeueCanonicalTask(task, err) {
 			return
 		}
 		task.Status, task.Outcome, task.ErrorMessage = models.ActressSyncTaskFailed, "failed", err.Error()
