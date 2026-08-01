@@ -121,10 +121,14 @@ func scaleCropBounds(b *models.CropBounds, newW, newH int) *models.CropBounds {
 	sx := float64(newW) / float64(b.ImageWidth)
 	sy := float64(newH) / float64(b.ImageHeight)
 	scaled := *b
+	// Scale rectangle edges (not origin+size) so right/bottom-touching crops
+	// cannot overflow the resized image through independent rounding.
 	scaled.X = max(int(math.Round(float64(b.X)*sx)), 0)
 	scaled.Y = max(int(math.Round(float64(b.Y)*sy)), 0)
-	scaled.Width = max(int(math.Round(float64(b.Width)*sx)), 1)
-	scaled.Height = max(int(math.Round(float64(b.Height)*sy)), 1)
+	right := int(math.Round(float64(b.X+b.Width) * sx))
+	bottom := int(math.Round(float64(b.Y+b.Height) * sy))
+	scaled.Width = max(right-scaled.X, 1)
+	scaled.Height = max(bottom-scaled.Y, 1)
 	return &scaled
 }
 

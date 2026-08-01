@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -263,6 +264,41 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		assert.Nil(t, resp.PosterCropBounds,
 			"the response must echo the effective (nil) bounds so the client overlay does not re-inject legacy-space bounds")
+	})
+
+	t.Run("repeated crops preserve cover-source intent", func(t *testing.T) {
+		job := createJobWithWF(deps, cfg, []string{"/tmp/RE-100.mp4"})
+		setJobResult(job, "/tmp/RE-100.mp4", &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/RE-100.mp4", MovieID: "RE-100"},
+			Status:        models.JobStatusCompleted,
+			Movie: &models.Movie{ID: "RE-100", Title: "Repeat Crop", Poster: models.PosterState{
+				PosterURL:        "https://example.com/cover.jpg",
+				ShouldCropPoster: true,
+			}},
+		})
+
+		posterDir := filepath.Join("data", "temp", "posters", job.GetID())
+		require.NoError(t, os.MkdirAll(posterDir, 0o755))
+		writeJPEG(t, filepath.Join(posterDir, "RE-100-full.jpg"), 1000, 600)
+
+		post := func(x int) {
+			req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/RE-100/poster-crop",
+				bytes.NewBufferString(fmt.Sprintf(`{"x":%d,"y":0,"width":400,"height":600}`, x)))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		}
+		post(100)
+		post(120) // second crop: Must not inherit the post-crop ShouldCropPoster=false as source intent
+
+		status := job.GetStatus()
+		result := status.Results["/tmp/RE-100.mp4"]
+		require.NotNil(t, result)
+		require.NotNil(t, result.Movie)
+		require.NotNil(t, result.Movie.Poster.CropBounds)
+		assert.True(t, result.Movie.Poster.CropBounds.SourceWasCover,
+			"bounds re-measured on the same cover source must retain SourceWasCover=true")
 	})
 
 	t.Run("movie lookup fallback by data movie id", func(t *testing.T) {

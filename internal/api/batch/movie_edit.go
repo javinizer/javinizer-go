@@ -205,6 +205,12 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 			if result.Movie != nil {
 				bounds.SourceWasCover = result.Movie.Poster.ShouldCropPoster
+				// Repeated crops re-measure the same source: the first crop
+				// already flipped ShouldCropPoster=false, so inherit the intent
+				// recorded with the existing bounds instead.
+				if !bounds.SourceWasCover && result.Movie.Poster.CropBounds != nil {
+					bounds.SourceWasCover = result.Movie.Poster.CropBounds.SourceWasCover
+				}
 			}
 		}
 		if err := job.UpdatePosterCrop(movieID, croppedURL, bounds); err != nil {

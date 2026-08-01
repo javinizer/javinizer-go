@@ -509,6 +509,56 @@ func TestDownloadPoster_BoundsScaleToResizedSource(t *testing.T) {
 	assert.Greater(t, r, bl, "scaled crop must land in the user's (left/red) region")
 }
 
+func twoToneImage(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if x < w/2 {
+				img.Set(x, y, color.RGBA{R: 220, G: 30, B: 30, A: 255})
+			} else {
+				img.Set(x, y, color.RGBA{R: 30, G: 30, B: 220, A: 255})
+			}
+		}
+	}
+	return img
+}
+
+func imageServer(t *testing.T, img image.Image) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 95})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestDownloadPoster_ScaledBoundsTouchingEdgeDoNotOverflow(t *testing.T) {
+	srv := imageServer(t, twoToneImage(500, 300))
+	tmpDir := t.TempDir()
+
+	// Preview was measured at 1000x600 (x=333..1000 touches the right edge);
+	// organize downloads the same image at 500x300. Rounding origin and size
+	// independently overflows (167+334=501 > 500) and would fall back, losing
+	// the user's crop; edge-based scaling must yield width 333 (500-167).
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{
+		X: 333, Y: 0, Width: 667, Height: 600,
+		ImageWidth: 1000, ImageHeight: 600, SourceWasCover: true,
+	}
+
+	d := newPosterTestDownloader(&Config{DownloadPoster: true})
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.NoError(t, err)
+	require.True(t, result.Downloaded)
+
+	img := decodePosterImage(t, result.LocalPath)
+	b := img.Bounds()
+	assert.Equal(t, 333, b.Dx(), "edge-scaled crop must fit the resized image exactly")
+	assert.Equal(t, 300, b.Dy())
+}
+
 func TestDownloadPoster_InstallRenameFailureSurfaces(t *testing.T) {
 	srv := twoToneCoverServer(t)
 
