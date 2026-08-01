@@ -386,6 +386,77 @@ func TestDownloadPoster_BackupRenameFailureLeavesOldPosterIntact(t *testing.T) {
 	assert.False(t, exists, "crop stage must be cleaned up")
 }
 
+func TestDownloadPoster_InterruptedBackupRecoveredBeforeReplace(t *testing.T) {
+	srv := twoToneCoverServer(t)
+
+	// Previous run died after dest→.bak but before installing the crop: the
+	// only copy of the old poster lives in the backup. A failed install must
+	// roll back to it, never leave the slot empty.
+	fs := &failRenameFs{Fs: afero.NewMemMapFs()}
+	tmpDir := "/out"
+	require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
+
+	oldBytes := []byte("old poster survives only as backup")
+	dest := filepath.Join(tmpDir, "IPX-535-poster.jpg")
+	require.NoError(t, afero.WriteFile(fs.Fs, dest+".bak", oldBytes, 0o644))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	d := NewDownloader(http.DefaultClient, fs, &Config{
+		DownloadPoster:    true,
+		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+	}, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.Error(t, err, "install rename is forced to fail")
+	require.False(t, result.Downloaded)
+
+	got, readErr := afero.ReadFile(fs.Fs, dest)
+	require.NoError(t, readErr, "the backup must be recovered/rolled back — the slot must not end up empty")
+	assert.Equal(t, oldBytes, got)
+}
+
+// failRestoreRenameFs refuses the crash-recovery rename (.bak -> dest).
+type failRestoreRenameFs struct {
+	afero.Fs
+}
+
+func (f *failRestoreRenameFs) Rename(oldPath, newPath string) error {
+	if strings.HasSuffix(oldPath, ".bak") {
+		return fmt.Errorf("forced restore failure")
+	}
+	return f.Fs.Rename(oldPath, newPath)
+}
+
+func TestDownloadPoster_BackupRecoveryFailureFailsLoudly(t *testing.T) {
+	srv := twoToneCoverServer(t)
+
+	fs := &failRestoreRenameFs{Fs: afero.NewMemMapFs()}
+	tmpDir := "/out"
+	require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
+
+	oldBytes := []byte("only surviving poster bytes")
+	dest := filepath.Join(tmpDir, "IPX-535-poster.jpg")
+	require.NoError(t, afero.WriteFile(fs.Fs, dest+".bak", oldBytes, 0o644))
+
+	movie := createTestMovie()
+	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+
+	d := NewDownloader(http.DefaultClient, fs, &Config{
+		DownloadPoster:    true,
+		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+	}, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	require.Error(t, err, "a failed backup recovery must surface, not be overwritten silently")
+	require.False(t, result.Downloaded)
+
+	got, readErr := afero.ReadFile(fs.Fs, dest+".bak")
+	require.NoError(t, readErr, "the only surviving copy must not be destroyed")
+	assert.Equal(t, oldBytes, got)
+}
+
 func TestDownloadPoster_InstallRenameFailureSurfaces(t *testing.T) {
 	srv := twoToneCoverServer(t)
 

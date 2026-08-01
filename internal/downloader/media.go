@@ -154,6 +154,19 @@ func (d *Downloader) downloadAndCropPoster(ctx context.Context, posterURL, destP
 	// destination is staged aside first so a failed install rename restores
 	// it instead of leaving the old poster destroyed.
 	backupPath := destPath + ".bak"
+	// Recover an interrupted previous replace: dest vanished after dest→.bak
+	// but the install never landed, so the only copy of the old poster lives
+	// in the backup. Restore it before anything deletes that backup.
+	if _, statErr := d.fs.Stat(destPath); errors.Is(statErr, os.ErrNotExist) {
+		if _, bakErr := d.fs.Stat(backupPath); bakErr == nil {
+			if recErr := d.fs.Rename(backupPath, destPath); recErr != nil {
+				result.Error = fmt.Errorf("failed to recover interrupted poster backup %s: %w", backupPath, recErr)
+				result.Downloaded = false
+				_ = d.fs.Remove(cropTmpPath)
+				return result, result.Error
+			}
+		}
+	}
 	_ = d.fs.Remove(backupPath)
 	hadExisting := false
 	if _, statErr := d.fs.Stat(destPath); statErr == nil {
