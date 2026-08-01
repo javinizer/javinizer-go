@@ -534,15 +534,42 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 			return nil, nil, err
 		}
 	}
-	if err := je.UpdateMovie(ctx, filePath, movie); err != nil {
-		if rollback != nil {
-			if rollbackErr := rollback(); rollbackErr != nil {
-				return nil, nil, fmt.Errorf("persist field override: %w (poster rollback failed: %v)", err, rollbackErr)
-			}
-		}
-		return nil, nil, fmt.Errorf("persist field override: %w", err)
+	filePaths := je.store.FindFilePathsForMovieID(movieID)
+	if len(filePaths) == 0 {
+		filePaths = []string{filePath}
 	}
-	je.store.SetProvenance(filePath, prov)
+	type updatedPart struct {
+		filePath string
+		original *models.Movie
+	}
+	updatedParts := make([]updatedPart, 0, len(filePaths))
+	for _, partPath := range filePaths {
+		var original *models.Movie
+		if previous, getErr := je.store.GetMovieResult(partPath); getErr == nil && previous != nil {
+			original = previous.Movie
+		}
+		if updateErr := je.UpdateMovie(ctx, partPath, movie); updateErr != nil {
+			errMsg := fmt.Errorf("persist field override: %w", updateErr)
+			for _, part := range updatedParts {
+				if part.original == nil {
+					continue
+				}
+				if revertErr := je.UpdateMovie(ctx, part.filePath, part.original); revertErr != nil {
+					errMsg = fmt.Errorf("%w (revert of part %s failed: %v)", errMsg, part.filePath, revertErr)
+				}
+			}
+			if rollback != nil {
+				if rollbackErr := rollback(); rollbackErr != nil {
+					errMsg = fmt.Errorf("%w (poster rollback failed: %v)", errMsg, rollbackErr)
+				}
+			}
+			return nil, nil, errMsg
+		}
+		updatedParts = append(updatedParts, updatedPart{filePath: partPath, original: original})
+	}
+	for _, partPath := range filePaths {
+		je.store.SetProvenance(partPath, prov)
+	}
 	updated, _, _ := je.store.GetFileResultByResultID(resultID)
 	updatedProv := je.store.GetProvenance(filePath)
 	return updated, updatedProv, nil

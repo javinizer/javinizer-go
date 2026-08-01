@@ -18,12 +18,15 @@ var (
 
 // AcquirePosterSourceLock serializes the poster-source "snapshot old assets →
 // refresh/cleanup → persist movie" sequence for one (jobID, movieID) pair
-// across the four paths that mutate the shared cached poster assets and the
+// across the five paths that mutate the shared cached poster assets and the
 // movie's poster state together: the whole-movie PATCH handler
 // (internal/api/batch/movie_edit.go's updateBatchMovie), the field-
 // Override path (jobEditorImpl.ApplyFieldOverride), the manual-crop endpoint
-// (updateBatchMoviePosterCrop), and the poster-from-URL refresh endpoint
-// (updateBatchMoviePosterFromURL). The override path takes this lock for
+// (updateBatchMoviePosterCrop), the poster-from-URL refresh endpoint
+// (updateBatchMoviePosterFromURL), and the rescrape phase
+// (rescrapePhase.Rescrape, which replaces the shared -full.jpg via
+// GeneratePoster and commits the scraped result with a CAS revision — both
+// under this lock; see rescrape_phase.go). The override path takes this lock for
 // EVERY field key, not just poster sources: every override persists a
 // whole-movie clone, which must not interleave with a crop or source write
 // mid-flight (the clone would otherwise erase the other edit). Without it, two

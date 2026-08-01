@@ -282,6 +282,19 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	var prov *resultstore.ProvenanceData
 	var movieResult *resultstore.MovieResult
 
+	posterLockID := lookup.OldMovieID
+	if posterLockID == "" && inputs.ResultMap != nil {
+		posterLockID = inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
+	}
+	releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), posterLockID)
+	defer releasePosterLock()
+	if inputs.Finder != nil {
+		lookup.CapturedRevision = inputs.Finder.GetRevision(lookup.FilePath)
+	}
+	if inputs.ResultMap != nil {
+		lookup.OldMovieID = inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
+	}
+
 	lc := rescrapeLifecycle{inputs: inputs, lookup: lookup}
 
 	outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
