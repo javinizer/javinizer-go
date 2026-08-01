@@ -9,6 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
@@ -342,9 +343,15 @@ type jobEditorImpl struct {
 	store        resultstore.Store
 	lifecycle    *JobLifecycle
 	posterEditor *PosterEditor
-	movieRepo    database.MovieRepositoryInterface
-	actressRepo  database.ActressRepositoryInterface
-	overrideMu   sync.Map // resultID -> *sync.Mutex
+	// posterGen + jobID regenerate the job's temp full-size poster
+	// ({tempDir}/posters/{jobID}/{movie.ID}-full.jpg) when a poster_url
+	// override changes the source image — see refreshOverriddenPosterSource.
+	// posterGen may be nil for editors without poster infrastructure.
+	posterGen   poster.PosterGenerator
+	jobID       string
+	movieRepo   database.MovieRepositoryInterface
+	actressRepo database.ActressRepositoryInterface
+	overrideMu  sync.Map // resultID -> *sync.Mutex
 }
 
 func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie *models.Movie) error {
@@ -447,6 +454,13 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // Raw ScraperResults round-trip through the envelope (json:"scraper_results").
 // A per-resultID mutex serializes concurrent overrides on the same result so
 // the read-clone-mutate-write sequence cannot lose an earlier override.
+//
+// A poster_url override regenerates the temp full-size poster before
+// persisting (refreshOverriddenPosterSource) so a subsequent manual crop
+// measures the newly selected image, not the stale pre-override -full.jpg.
+// As with the poster-from-url endpoint, a failed regeneration rejects the
+// override rather than persisting a source URL the crop endpoint cannot match
+// to the on-disk image.
 func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 	mu, _ := je.overrideMu.LoadOrStore(resultID, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
@@ -461,8 +475,14 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 		prov = &resultstore.ProvenanceData{}
 	}
 	movie := result.Movie.Clone()
+	oldPosterURL := movie.Poster.PosterURL
 	if err := applyFieldOverride(movie, prov, fieldKey, source); err != nil {
 		return nil, nil, err
+	}
+	if fieldKey == "poster_url" {
+		if err := je.refreshOverriddenPosterSource(ctx, movie, oldPosterURL); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := je.UpdateMovie(ctx, filePath, movie); err != nil {
 		return nil, nil, fmt.Errorf("persist field override: %w", err)

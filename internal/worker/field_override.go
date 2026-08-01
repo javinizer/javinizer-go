@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -166,6 +167,37 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		setFieldSource("should_crop_poster")
 	default:
 		return fmt.Errorf("unhandled field: %s", fieldKey)
+	}
+	return nil
+}
+
+// refreshOverriddenPosterSource regenerates the job's temporary full-size
+// poster ({tempDir}/posters/{jobID}/{movie.ID}-full.jpg) after a poster_url
+// override. The review crop modal and the poster-crop endpoint both key off
+// that file: once the server persists the overridden URL the client treats it
+// as the current source and skips its poster-from-url sync, so without this
+// refresh a manual crop is measured against the pre-override image while
+// Organize downloads the overridden one — recording bounds against the wrong
+// coordinate space.
+//
+// Failure semantics mirror the poster-from-url endpoint: the override is
+// rejected rather than persisting a poster URL the crop endpoint cannot match
+// to the on-disk image. The underlying PosterManager downloads into a temp
+// file and replaces the existing -full.jpg only after the new image is fully
+// written, so a failed refresh leaves a good cached file untouched. The
+// generator also rewrites the temp preview and stamps its URL on
+// movie.Poster.CroppedPosterURL, which the caller persists in the same
+// UpdateMovie call. editors without poster infrastructure (nil posterGen)
+// skip the refresh.
+func (je *jobEditorImpl) refreshOverriddenPosterSource(ctx context.Context, movie *models.Movie, oldPosterURL string) error {
+	if movie.Poster.PosterURL == oldPosterURL {
+		return nil // re-picked the same image; the existing full-size file is already current
+	}
+	if je.posterGen == nil {
+		return nil
+	}
+	if err := je.posterGen.GeneratePoster(ctx, je.jobID, movie); err != nil {
+		return fmt.Errorf("refresh poster after field override: %w", err)
 	}
 	return nil
 }

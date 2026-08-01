@@ -267,6 +267,8 @@ func buildAdapters(job *BatchJob) *jobAdapters {
 			store:        job.results,
 			lifecycle:    job.lifecycle,
 			posterEditor: job.posterEditor,
+			posterGen:    job.deps.PosterGen,
+			jobID:        string(job.ID),
 			movieRepo:    job.deps.MovieRepo,
 			actressRepo:  job.deps.ActressRepo,
 		},
