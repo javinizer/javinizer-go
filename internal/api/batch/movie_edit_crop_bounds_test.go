@@ -3,11 +3,17 @@ package batch
 import (
 	"bytes"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
@@ -21,6 +27,63 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUpdateBatchMoviePosterFromURL_SuccessClearsBoundsAndPersists(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+
+	cleanup := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	})
+	t.Cleanup(cleanup)
+
+	workDir := t.TempDir()
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(workDir))
+	t.Cleanup(func() { _ = os.Chdir(originalWD) })
+
+	img := image.NewRGBA(image.Rect(0, 0, 800, 500))
+	for y := 0; y < 500; y++ {
+		for x := 0; x < 800; x++ {
+			img.Set(x, y, color.RGBA{R: 90, G: 90, B: 90, A: 255})
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+	job := createJobWithWF(deps, cfg, []string{"/path/to/FRU-001.mp4"})
+	setJobResult(job, "/path/to/FRU-001.mp4", &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/FRU-001.mp4", MovieID: "FRU-001"},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{ID: "FRU-001", Title: "From URL", Poster: models.PosterState{
+			PosterURL:  "https://example.com/old-poster.jpg",
+			CropBounds: &models.CropBounds{X: 1, Y: 2, Width: 3, Height: 4},
+		}},
+	})
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(testkit.GetTestRuntime(deps)))
+
+	body, _ := json.Marshal(contracts.PosterFromURLRequest{URL: srv.URL + "/poster.jpg"})
+	req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/FRU-001/poster-from-url", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	for _, r := range job.GetStatus().Results {
+		require.NotNil(t, r.Movie)
+		assert.Equal(t, srv.URL+"/poster.jpg", r.Movie.Poster.PosterURL)
+		assert.Nil(t, r.Movie.Poster.CropBounds, "replacing the poster image must invalidate stored crop bounds")
+	}
+}
 
 type fixedJobStore struct {
 	worker.JobStoreInterface
