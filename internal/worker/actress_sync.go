@@ -17,15 +17,16 @@ const maxActressSyncMovies = 5
 
 // ActressSyncOptions ...
 type ActressSyncOptions struct {
-	Revalidate          bool
-	ValidateThumbnail   func(context.Context, string) error
-	LookupCache         func(int, string, string, string) (models.ActressInfo, bool)
-	MergeActresses      func(uint, uint) (*database.ActressMergeResult, error)
-	MergeCachedIdentity func(uint, uint, int) (*database.ActressMergeResult, error)
-	AssignDMMID         func(uint, int) (bool, error)
-	FillMetadata        func(uint, int, models.ActressInfo) ([]string, error)
-	ReplaceThumbnail    func(uint, int, string, string) (bool, error)
-	PriorUpdatedFields  []string
+	Revalidate                    bool
+	ValidateThumbnail             func(context.Context, string) error
+	LookupCache                   func(int, string, string, string) (models.ActressInfo, bool)
+	MergeActresses                func(uint, uint) (*database.ActressMergeResult, error)
+	MergeCachedIdentity           func(uint, uint, int) (*database.ActressMergeResult, error)
+	MergeCachedIdentityWithSource func(uint, uint, int, models.Actress) (*database.ActressMergeResult, error)
+	AssignDMMID                   func(uint, int) (bool, error)
+	FillMetadata                  func(uint, int, models.ActressInfo) ([]string, error)
+	ReplaceThumbnail              func(uint, int, string, string) (bool, error)
+	PriorUpdatedFields            []string
 }
 
 // ActressSyncResult ...
@@ -53,14 +54,17 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		}
 		return actressRepo.Merge(ctx, targetID, sourceID, nil)
 	}
-	mergeCachedIdentity := func(targetID, sourceID uint, expectedDMMID int) (*database.ActressMergeResult, error) {
+	mergeCachedIdentity := func(targetID, sourceID uint, expectedDMMID int, expectedSource models.Actress) (*database.ActressMergeResult, error) {
+		if len(options) > 0 && options[0].MergeCachedIdentityWithSource != nil {
+			return options[0].MergeCachedIdentityWithSource(targetID, sourceID, expectedDMMID, expectedSource)
+		}
 		if len(options) > 0 && options[0].MergeCachedIdentity != nil {
 			return options[0].MergeCachedIdentity(targetID, sourceID, expectedDMMID)
 		}
 		if len(options) > 0 && options[0].MergeActresses != nil {
 			return options[0].MergeActresses(targetID, sourceID)
 		}
-		return actressRepo.MergeCachedIdentity(ctx, targetID, sourceID, expectedDMMID)
+		return actressRepo.MergeCachedIdentityWithSource(ctx, targetID, sourceID, expectedDMMID, expectedSource)
 	}
 	assignDMMID := func(id uint, dmmID int) (bool, error) {
 		if len(options) > 0 && options[0].AssignDMMID != nil {
@@ -92,6 +96,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	matches := make([]models.ActressInfo, 0)
 	scrapers := authoritativeActressScrapers(registry)
 	metadataScrapers := actressMetadataScrapers(registry)
+	cachedSource := *actress
 	cacheMatch, cacheHit := lookupActressCache(actress, lookupCache)
 	mergeCachedDuplicate := func(existing *models.Actress) (bool, error) {
 		if existing.ID == actress.ID {
@@ -102,7 +107,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			cacheHit = false
 			return false, nil
 		}
-		merged, mergeErr := mergeCachedIdentity(existing.ID, actress.ID, cacheMatch.DMMID)
+		merged, mergeErr := mergeCachedIdentity(existing.ID, actress.ID, cacheMatch.DMMID, cachedSource)
 		if mergeErr != nil {
 			return false, mergeErr
 		}

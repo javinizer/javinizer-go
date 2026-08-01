@@ -415,3 +415,19 @@ func TestMergeCachedIdentityPreconditions(t *testing.T) {
 		require.Equal(t, target.ID, merged.MergedActress.ID)
 	})
 }
+
+func TestMergeCachedIdentityRejectsChangedSourceIdentity(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	target := &models.Actress{DMMID: 1201, JapaneseName: "canonical"}
+	source := &models.Actress{JapaneseName: "duplicate"}
+	require.NoError(t, repo.Create(t.Context(), target))
+	require.NoError(t, repo.Create(t.Context(), source))
+	expectedSource := *source
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", source.ID).Update("japanese_name", "changed").Error)
+
+	_, err := repo.MergeCachedIdentityWithSource(t.Context(), target.ID, source.ID, target.DMMID, expectedSource)
+	require.ErrorIs(t, err, ErrActressSyncIdentityChanged)
+	_, err = repo.FindByID(t.Context(), source.ID)
+	require.NoError(t, err)
+}

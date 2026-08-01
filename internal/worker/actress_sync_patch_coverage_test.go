@@ -297,11 +297,11 @@ func TestCachedIdentityMergeRejectsConcurrentSourceAssignment(t *testing.T) {
 		LookupCache: func(int, string, string, string) (models.ActressInfo, bool) {
 			return models.ActressInfo{DMMID: 912, JapaneseName: "canonical", Aliases: []string{"duplicate"}}, true
 		},
-		MergeCachedIdentity: func(targetID, sourceID uint, expectedDMMID int) (*database.ActressMergeResult, error) {
+		MergeCachedIdentityWithSource: func(targetID, sourceID uint, expectedDMMID int, expectedSource models.Actress) (*database.ActressMergeResult, error) {
 			assigned, assignErr := actressRepo.AssignDMMIDIfMissing(t.Context(), sourceID, 913)
 			require.NoError(t, assignErr)
 			require.True(t, assigned)
-			return actressRepo.MergeCachedIdentity(t.Context(), targetID, sourceID, expectedDMMID)
+			return actressRepo.MergeCachedIdentityWithSource(t.Context(), targetID, sourceID, expectedDMMID, expectedSource)
 		},
 	})
 	require.ErrorIs(t, err, database.ErrActressSyncIdentityChanged)

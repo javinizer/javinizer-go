@@ -274,26 +274,51 @@ func (r *ActressRepository) MergeForSyncTask(ctx context.Context, targetID, sour
 	})
 }
 
-func cachedIdentityPrecondition(expectedDMMID int) func(*gorm.DB, *models.Actress, *models.Actress) error {
+func cachedIdentityPrecondition(expectedDMMID int, expectedSource models.Actress) func(*gorm.DB, *models.Actress, *models.Actress) error {
 	return func(_ *gorm.DB, target, source *models.Actress) error {
 		if expectedDMMID <= 0 || target.DMMID != expectedDMMID || source.DMMID > 0 {
+			return ErrActressSyncIdentityChanged
+		}
+		if expectedSource.ID > 0 && !cachedIdentitySourceMatches(expectedSource, *source) {
 			return ErrActressSyncIdentityChanged
 		}
 		return nil
 	}
 }
 
+func cachedIdentitySourceMatches(expected, actual models.Actress) bool {
+	return expected.ID == actual.ID &&
+		expected.DMMID == actual.DMMID &&
+		expected.FirstName == actual.FirstName &&
+		expected.LastName == actual.LastName &&
+		expected.JapaneseName == actual.JapaneseName &&
+		expected.ThumbURL == actual.ThumbURL &&
+		expected.Aliases == actual.Aliases &&
+		expected.CreatedAt.Equal(actual.CreatedAt) &&
+		expected.UpdatedAt.Equal(actual.UpdatedAt)
+}
+
 // MergeCachedIdentity ...
 func (r *ActressRepository) MergeCachedIdentity(ctx context.Context, targetID, sourceID uint, expectedDMMID int) (*ActressMergeResult, error) {
+	return r.MergeCachedIdentityWithSource(ctx, targetID, sourceID, expectedDMMID, models.Actress{})
+}
+
+// MergeCachedIdentityWithSource ...
+func (r *ActressRepository) MergeCachedIdentityWithSource(ctx context.Context, targetID, sourceID uint, expectedDMMID int, expectedSource models.Actress) (*ActressMergeResult, error) {
 	plan, err := r.merger.PlanMerge(ctx, targetID, sourceID, nil)
 	if err != nil {
 		return nil, err
 	}
-	return r.merger.executeMerge(ctx, plan, r.GetDB(), cachedIdentityPrecondition(expectedDMMID), nil)
+	return r.merger.executeMerge(ctx, plan, r.GetDB(), cachedIdentityPrecondition(expectedDMMID, expectedSource), nil)
 }
 
 // MergeCachedIdentityForSyncTask ...
 func (r *ActressRepository) MergeCachedIdentityForSyncTask(ctx context.Context, targetID, sourceID uint, expectedDMMID int, taskID, leaseToken string) (*ActressMergeResult, error) {
+	return r.MergeCachedIdentityForSyncTaskWithSource(ctx, targetID, sourceID, expectedDMMID, models.Actress{}, taskID, leaseToken)
+}
+
+// MergeCachedIdentityForSyncTaskWithSource ...
+func (r *ActressRepository) MergeCachedIdentityForSyncTaskWithSource(ctx context.Context, targetID, sourceID uint, expectedDMMID int, expectedSource models.Actress, taskID, leaseToken string) (*ActressMergeResult, error) {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(leaseToken) == "" {
 		return nil, ErrInvalidLookup
 	}
@@ -302,7 +327,7 @@ func (r *ActressRepository) MergeCachedIdentityForSyncTask(ctx context.Context, 
 		return nil, err
 	}
 	syncRepo := NewActressSyncRepository(r.GetDB())
-	return r.merger.executeMerge(ctx, plan, r.GetDB(), cachedIdentityPrecondition(expectedDMMID), func(tx *gorm.DB, canonicalID, duplicateID uint) error {
+	return r.merger.executeMerge(ctx, plan, r.GetDB(), cachedIdentityPrecondition(expectedDMMID, expectedSource), func(tx *gorm.DB, canonicalID, duplicateID uint) error {
 		return syncRepo.reassignTaskActressTx(tx, taskID, leaseToken, canonicalID, duplicateID)
 	})
 }
