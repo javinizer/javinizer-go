@@ -61,22 +61,8 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 						return lookupErr
 					}
 				}
-				if err := tx.Create(&tasks[i]).Error; err != nil {
-					if !strings.Contains(strings.ToLower(err.Error()), "unique") {
-						return err
-					}
-					var conflict models.ActressSyncTask
-					if lookupErr := tx.Where("dedupe_key = ? AND status IN ?", tasks[i].DedupeKey, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).First(&conflict).Error; lookupErr != nil {
-						return lookupErr
-					}
-					var conflictJob models.ActressSyncJob
-					if lookupErr := tx.First(&conflictJob, "id = ?", conflict.JobID).Error; lookupErr != nil {
-						return lookupErr
-					}
-					prepareActressSyncDuplicateTask(&tasks[i], job.Scope, conflictJob.Scope, time.Now().UTC())
-					if err := tx.Create(&tasks[i]).Error; err != nil {
-						return err
-					}
+				if err := createActressSyncTaskTx(tx, &tasks[i], job); err != nil {
+					return err
 				}
 			}
 			if err := r.refreshJobTx(tx, job.ID, time.Now().UTC()); err != nil {
@@ -93,6 +79,27 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 		*job = *fresh
 	}
 	return err
+}
+
+func createActressSyncTaskTx(tx *gorm.DB, task *models.ActressSyncTask, job *models.ActressSyncJob) error {
+	if err := tx.Create(task).Error; err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return err
+		}
+		var conflict models.ActressSyncTask
+		if lookupErr := tx.Where("dedupe_key = ? AND status IN ?", task.DedupeKey, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).First(&conflict).Error; lookupErr != nil {
+			return lookupErr
+		}
+		var conflictJob models.ActressSyncJob
+		if lookupErr := tx.First(&conflictJob, "id = ?", conflict.JobID).Error; lookupErr != nil {
+			return lookupErr
+		}
+		prepareActressSyncDuplicateTask(task, job.Scope, conflictJob.Scope, time.Now().UTC())
+		if err := tx.Create(task).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *ActressSyncRepository) pruneTerminalJobsTx(tx *gorm.DB) error {
