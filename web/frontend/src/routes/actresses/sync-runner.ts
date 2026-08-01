@@ -32,13 +32,13 @@ export async function loadActiveActressSyncJobs(client: ActressSyncSnapshotClien
 }
 
 export function orderActiveActressSyncJobs(jobs: ActressSyncJob[]) {
-	return { current: jobs.at(-1) ?? null, queued: jobs.slice(0, -1).reverse() };
+	return { current: jobs[0] ?? null, queued: jobs.slice(1) };
 }
 
 export function mergeActiveActressSyncJobs(current: ActressSyncJob | null, queued: ActressSyncJob[], active: ActressSyncJob[]) {
 	const known = new Set([current?.id, ...queued.map((job) => job.id)]);
-	const additions = [...active].reverse().filter((job) => !known.has(job.id));
-	return [...additions, ...queued];
+	const additions = active.filter((job) => !known.has(job.id));
+	return [...queued, ...additions];
 }
 
 export function buildActressSyncSummary(

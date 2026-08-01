@@ -71,7 +71,7 @@ describe('actress sync summary', () => {
 		expect(snapshot).toEqual({ job: terminalJob, tasks: [diagnostic] });
 	});
 
-	it('selects the newest active job and handles an empty queue', async () => {
+	it('selects the oldest active job and handles an empty queue', async () => {
 		const newer = { ...job, id: 'newer' };
 		const client = {
 			async getActressSyncJob() { return { job }; },
@@ -80,10 +80,10 @@ describe('actress sync summary', () => {
 		};
 		const active = await loadActiveActressSyncJobs(client);
 		expect(active).toEqual([job, newer]);
-		expect(orderActiveActressSyncJobs(active)).toEqual({ current: newer, queued: [job] });
+		expect(orderActiveActressSyncJobs(active)).toEqual({ current: job, queued: [newer] });
 		expect(orderActiveActressSyncJobs([])).toEqual({ current: null, queued: [] });
 		const concurrent = { ...job, id: 'concurrent' };
-		expect(mergeActiveActressSyncJobs(newer, [job], [job, concurrent])).toEqual([concurrent, job]);
+		expect(mergeActiveActressSyncJobs(job, [newer], [job, newer, concurrent])).toEqual([newer, concurrent]);
 	});
 
 	it('recognizes durable terminal states', () => {
