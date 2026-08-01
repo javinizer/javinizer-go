@@ -21,9 +21,11 @@ type ActressSyncOptions struct {
 	ValidateThumbnail             func(context.Context, string) error
 	LookupCache                   func(int, string, string, string) (models.ActressInfo, bool)
 	MergeActresses                func(uint, uint) (*database.ActressMergeResult, error)
+	MergeActressesWithSource      func(uint, uint, models.Actress) (*database.ActressMergeResult, error)
 	MergeCachedIdentity           func(uint, uint, int) (*database.ActressMergeResult, error)
 	MergeCachedIdentityWithSource func(uint, uint, int, models.Actress) (*database.ActressMergeResult, error)
 	AssignDMMID                   func(uint, int) (bool, error)
+	AssignDMMIDWithSource         func(uint, int, models.Actress) (bool, error)
 	FillMetadata                  func(uint, int, models.ActressInfo) ([]string, error)
 	ReplaceThumbnail              func(uint, int, string, string) (bool, error)
 	PriorUpdatedFields            []string
@@ -48,11 +50,15 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	if len(options) > 0 {
 		result.UpdatedFields = append(result.UpdatedFields, options[0].PriorUpdatedFields...)
 	}
-	mergeActresses := func(targetID, sourceID uint) (*database.ActressMergeResult, error) {
+
+	mergeActressesWithSource := func(targetID, sourceID uint, expectedSource models.Actress) (*database.ActressMergeResult, error) {
+		if len(options) > 0 && options[0].MergeActressesWithSource != nil {
+			return options[0].MergeActressesWithSource(targetID, sourceID, expectedSource)
+		}
 		if len(options) > 0 && options[0].MergeActresses != nil {
 			return options[0].MergeActresses(targetID, sourceID)
 		}
-		return actressRepo.Merge(ctx, targetID, sourceID, nil)
+		return actressRepo.MergeWithSource(ctx, targetID, sourceID, nil, expectedSource)
 	}
 	mergeCachedIdentity := func(targetID, sourceID uint, expectedDMMID int, expectedSource models.Actress) (*database.ActressMergeResult, error) {
 		if len(options) > 0 && options[0].MergeCachedIdentityWithSource != nil {
@@ -71,6 +77,15 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			return options[0].AssignDMMID(id, dmmID)
 		}
 		return actressRepo.AssignDMMIDIfMissing(ctx, id, dmmID)
+	}
+	assignDMMIDWithSource := func(id uint, dmmID int, expectedSource models.Actress) (bool, error) {
+		if len(options) > 0 && options[0].AssignDMMIDWithSource != nil {
+			return options[0].AssignDMMIDWithSource(id, dmmID, expectedSource)
+		}
+		if len(options) > 0 && options[0].AssignDMMID != nil {
+			return options[0].AssignDMMID(id, dmmID)
+		}
+		return actressRepo.AssignDMMIDIfMissingWithSource(ctx, id, dmmID, expectedSource)
 	}
 	fillMetadata := func(id uint, dmmID int, info models.ActressInfo) ([]string, error) {
 		if len(options) > 0 && options[0].FillMetadata != nil {
@@ -155,7 +170,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		}
 	}
 	if actress.DMMID <= 0 {
-		recovered, recoveredMatches, recoveredFields, recoverErr := recoverMissingDMMIdentity(ctx, actress, actressRepo, movieRepo, scrapers, mergeActresses, assignDMMID)
+		recovered, recoveredMatches, recoveredFields, recoverErr := recoverMissingDMMIdentity(ctx, actress, actressRepo, movieRepo, scrapers, nil, nil, linkedIdentityRecoveryOptions{expectedSource: cachedSource, mergeActressesWithSource: mergeActressesWithSource, assignDMMIDWithSource: assignDMMIDWithSource})
 		if recoverErr != nil {
 			return nil, recoverErr
 		}
@@ -368,8 +383,34 @@ func authoritativeActressScrapers(registry scraperutil.ScraperInstancesInterface
 	return result
 }
 
+type linkedIdentityRecoveryOptions struct {
+	expectedSource           models.Actress
+	mergeActressesWithSource func(uint, uint, models.Actress) (*database.ActressMergeResult, error)
+	assignDMMIDWithSource    func(uint, int, models.Actress) (bool, error)
+}
+
 // recoverMissingDMMIdentity ...
-func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, actressRepo *database.ActressRepository, movieRepo *database.MovieRepository, scrapers []models.Scraper, mergeActresses func(uint, uint) (*database.ActressMergeResult, error), assignDMMID func(uint, int) (bool, error)) (*models.Actress, []models.ActressInfo, []string, error) {
+func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, actressRepo *database.ActressRepository, movieRepo *database.MovieRepository, scrapers []models.Scraper, mergeActresses func(uint, uint) (*database.ActressMergeResult, error), assignDMMID func(uint, int) (bool, error), sourceOptions ...linkedIdentityRecoveryOptions) (*models.Actress, []models.ActressInfo, []string, error) {
+	expectedSource := models.Actress{}
+	var mergeActressesWithSource func(uint, uint, models.Actress) (*database.ActressMergeResult, error)
+	var assignDMMIDWithSource func(uint, int, models.Actress) (bool, error)
+	if len(sourceOptions) > 0 {
+		expectedSource = sourceOptions[0].expectedSource
+		mergeActressesWithSource = sourceOptions[0].mergeActressesWithSource
+		assignDMMIDWithSource = sourceOptions[0].assignDMMIDWithSource
+	}
+	merge := func(targetID, sourceID uint) (*database.ActressMergeResult, error) {
+		if mergeActressesWithSource != nil {
+			return mergeActressesWithSource(targetID, sourceID, expectedSource)
+		}
+		return mergeActresses(targetID, sourceID)
+	}
+	assign := func(id uint, dmmID int) (bool, error) {
+		if assignDMMIDWithSource != nil {
+			return assignDMMIDWithSource(id, dmmID, expectedSource)
+		}
+		return assignDMMID(id, dmmID)
+	}
 	names := actressIdentityNames(actress)
 	canonicalByID := make(map[uint]*models.Actress)
 	for _, name := range names {
@@ -389,7 +430,7 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 	}
 	if len(canonicalByID) == 1 {
 		for _, canonical := range canonicalByID {
-			merged, err := mergeActresses(canonical.ID, actress.ID)
+			merged, err := merge(canonical.ID, actress.ID)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -419,7 +460,7 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 		if !canMergeMissingDMMActress(actress, existing) {
 			return nil, nil, nil, nil
 		}
-		merged, mergeErr := mergeActresses(existing.ID, actress.ID)
+		merged, mergeErr := merge(existing.ID, actress.ID)
 		if mergeErr != nil {
 			return nil, nil, nil, mergeErr
 		}
@@ -428,7 +469,7 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 	if findErr != nil && !database.IsNotFound(findErr) {
 		return nil, nil, nil, findErr
 	}
-	assigned, assignErr := assignDMMID(actress.ID, dmmID)
+	assigned, assignErr := assign(actress.ID, dmmID)
 	if assignErr != nil {
 		if !database.IsUniqueConstraint(assignErr) {
 			return nil, nil, nil, assignErr
@@ -443,7 +484,7 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 		if !canMergeMissingDMMActress(actress, canonical) {
 			return nil, nil, nil, nil
 		}
-		merged, mergeErr := mergeActresses(canonical.ID, actress.ID)
+		merged, mergeErr := merge(canonical.ID, actress.ID)
 		if mergeErr != nil {
 			return nil, nil, nil, mergeErr
 		}

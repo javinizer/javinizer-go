@@ -219,6 +219,60 @@ func TestLinkedIdentityAssignmentRaceBranches(t *testing.T) {
 	})
 }
 
+func TestLinkedIdentityRecoveryFencesSourceChanges(t *testing.T) {
+	uniqueErr := sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintUnique}
+	setup := func(t *testing.T, source *models.Actress, dmmID int) (*database.DB, *database.ActressRepository, *database.MovieRepository, *models.Actress, *scraperutil.ScraperRegistry) {
+		t.Helper()
+		db, actressRepo, movieRepo, duplicate := newActressSyncFixture(t, source)
+		require.NoError(t, db.DB.Create(&models.Movie{ContentID: "linked-fence", ID: "FENCE-1", DisplayTitle: "Linked", SourceURL: "https://example.test/FENCE-1"}).Error)
+		require.NoError(t, db.DB.Exec("INSERT INTO movie_actresses (movie_content_id, actress_id) VALUES (?, ?)", "linked-fence", duplicate.ID).Error)
+		registry := scraperutil.NewScraperRegistry()
+		registry.RegisterInstance(&urlActressSyncScraper{
+			actressSyncScraper: actressSyncScraper{name: "dmm"},
+			canHandle:          true,
+			urlResult:          &models.ScraperResult{Actresses: []models.ActressInfo{{DMMID: dmmID, JapaneseName: source.JapaneseName}}},
+		})
+		return db, actressRepo, movieRepo, duplicate, registry
+	}
+
+	t.Run("assignment", func(t *testing.T) {
+		db, actressRepo, movieRepo, source, registry := setup(t, &models.Actress{JapaneseName: "assignment fence"}, 915)
+		result, err := SyncActressMetadata(t.Context(), source.ID, actressRepo, movieRepo, registry, ActressSyncOptions{
+			AssignDMMIDWithSource: func(id uint, dmmID int, expectedSource models.Actress) (bool, error) {
+				require.NoError(t, actressRepo.RenameNameFields(t.Context(), id, "", "", "edited identity"))
+				return actressRepo.AssignDMMIDIfMissingWithSource(t.Context(), id, dmmID, expectedSource)
+			},
+		})
+		require.NoError(t, err)
+		require.Contains(t, result.Messages, "missing_dmm_id")
+		stored, err := actressRepo.FindByID(t.Context(), source.ID)
+		require.NoError(t, err)
+		require.Zero(t, stored.DMMID)
+		_ = db
+	})
+
+	t.Run("merge", func(t *testing.T) {
+		db, actressRepo, movieRepo, source, registry := setup(t, &models.Actress{JapaneseName: "merge fence"}, 916)
+		canonical := &models.Actress{DMMID: 916, JapaneseName: "merge fence"}
+		_, err := SyncActressMetadata(t.Context(), source.ID, actressRepo, movieRepo, registry, ActressSyncOptions{
+			AssignDMMIDWithSource: func(uint, int, models.Actress) (bool, error) {
+				require.NoError(t, actressRepo.Create(t.Context(), canonical))
+				require.NoError(t, actressRepo.RenameNameFields(t.Context(), source.ID, "", "", "edited identity"))
+				return false, uniqueErr
+			},
+			MergeActressesWithSource: func(targetID, sourceID uint, expectedSource models.Actress) (*database.ActressMergeResult, error) {
+				return actressRepo.MergeWithSource(t.Context(), targetID, sourceID, nil, expectedSource)
+			},
+		})
+		require.ErrorIs(t, err, database.ErrActressSyncIdentityChanged)
+		_, err = actressRepo.FindByID(t.Context(), source.ID)
+		require.NoError(t, err)
+		_, err = actressRepo.FindByID(t.Context(), canonical.ID)
+		require.NoError(t, err)
+		_ = db
+	})
+}
+
 func TestSyncActressMetadataCallbackFailures(t *testing.T) {
 	callbackErr := errors.New("callback failure")
 

@@ -261,6 +261,11 @@ func (r *ActressSyncRepository) ReleaseOwnerLeases(owner string) error {
 
 // MergeForSyncTask ...
 func (r *ActressRepository) MergeForSyncTask(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, taskID, leaseToken string) (*ActressMergeResult, error) {
+	return r.MergeForSyncTaskWithSource(ctx, targetID, sourceID, resolutions, models.Actress{}, taskID, leaseToken)
+}
+
+// MergeForSyncTaskWithSource ...
+func (r *ActressRepository) MergeForSyncTaskWithSource(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, expectedSource models.Actress, taskID, leaseToken string) (*ActressMergeResult, error) {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(leaseToken) == "" {
 		return nil, ErrInvalidLookup
 	}
@@ -269,9 +274,27 @@ func (r *ActressRepository) MergeForSyncTask(ctx context.Context, targetID, sour
 		return nil, err
 	}
 	syncRepo := NewActressSyncRepository(r.GetDB())
-	return r.merger.executeMerge(ctx, plan, r.GetDB(), nil, func(tx *gorm.DB, canonicalID, duplicateID uint) error {
+	return r.merger.executeMerge(ctx, plan, r.GetDB(), sourceIdentityPrecondition(expectedSource), func(tx *gorm.DB, canonicalID, duplicateID uint) error {
 		return syncRepo.reassignTaskActressTx(tx, taskID, leaseToken, canonicalID, duplicateID)
 	})
+}
+
+// MergeWithSource ...
+func (r *ActressRepository) MergeWithSource(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, expectedSource models.Actress) (*ActressMergeResult, error) {
+	plan, err := r.merger.PlanMerge(ctx, targetID, sourceID, resolutions)
+	if err != nil {
+		return nil, err
+	}
+	return r.merger.executeMerge(ctx, plan, r.GetDB(), sourceIdentityPrecondition(expectedSource), nil)
+}
+
+func sourceIdentityPrecondition(expected models.Actress) func(*gorm.DB, *models.Actress, *models.Actress) error {
+	return func(_ *gorm.DB, _, source *models.Actress) error {
+		if expected.ID > 0 && !cachedIdentitySourceMatches(expected, *source) {
+			return ErrActressSyncIdentityChanged
+		}
+		return nil
+	}
 }
 
 func cachedIdentityPrecondition(expectedDMMID int, expectedSource models.Actress) func(*gorm.DB, *models.Actress, *models.Actress) error {
@@ -279,10 +302,7 @@ func cachedIdentityPrecondition(expectedDMMID int, expectedSource models.Actress
 		if expectedDMMID <= 0 || target.DMMID != expectedDMMID || source.DMMID > 0 {
 			return ErrActressSyncIdentityChanged
 		}
-		if expectedSource.ID > 0 && !cachedIdentitySourceMatches(expectedSource, *source) {
-			return ErrActressSyncIdentityChanged
-		}
-		return nil
+		return sourceIdentityPrecondition(expectedSource)(nil, target, source)
 	}
 }
 
@@ -781,15 +801,25 @@ func recordSyncTaskFieldsTx(tx *gorm.DB, taskID, leaseToken string, additional [
 
 // AssignDMMIDIfMissing ...
 func (r *ActressRepository) AssignDMMIDIfMissing(ctx context.Context, id uint, dmmID int) (bool, error) {
-	return r.assignDMMIDIfMissing(ctx, id, dmmID, "", "")
+	return r.assignDMMIDIfMissing(ctx, id, dmmID, models.Actress{}, "", "")
 }
 
 // AssignDMMIDIfMissingForSyncTask ...
 func (r *ActressRepository) AssignDMMIDIfMissingForSyncTask(ctx context.Context, id uint, dmmID int, taskID, leaseToken string) (bool, error) {
-	return r.assignDMMIDIfMissing(ctx, id, dmmID, taskID, leaseToken)
+	return r.assignDMMIDIfMissing(ctx, id, dmmID, models.Actress{}, taskID, leaseToken)
 }
 
-func (r *ActressRepository) assignDMMIDIfMissing(ctx context.Context, id uint, dmmID int, taskID, leaseToken string) (bool, error) {
+// AssignDMMIDIfMissingWithSource ...
+func (r *ActressRepository) AssignDMMIDIfMissingWithSource(ctx context.Context, id uint, dmmID int, expectedSource models.Actress) (bool, error) {
+	return r.assignDMMIDIfMissing(ctx, id, dmmID, expectedSource, "", "")
+}
+
+// AssignDMMIDIfMissingForSyncTaskWithSource ...
+func (r *ActressRepository) AssignDMMIDIfMissingForSyncTaskWithSource(ctx context.Context, id uint, dmmID int, expectedSource models.Actress, taskID, leaseToken string) (bool, error) {
+	return r.assignDMMIDIfMissing(ctx, id, dmmID, expectedSource, taskID, leaseToken)
+}
+
+func (r *ActressRepository) assignDMMIDIfMissing(ctx context.Context, id uint, dmmID int, expectedSource models.Actress, taskID, leaseToken string) (bool, error) {
 	if id == 0 || dmmID <= 0 {
 		return false, ErrInvalidLookup
 	}
@@ -800,7 +830,11 @@ func (r *ActressRepository) assignDMMIDIfMissing(ctx context.Context, id uint, d
 			if err := ensureSyncTaskLeaseTx(tx, taskID, leaseToken); err != nil {
 				return err
 			}
-			result := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = 0", id).Update("dmm_id", dmmID)
+			query := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = 0", id)
+			if expectedSource.ID > 0 {
+				query = query.Where("first_name = ? AND last_name = ? AND japanese_name = ? AND thumb_url = ? AND aliases = ?", expectedSource.FirstName, expectedSource.LastName, expectedSource.JapaneseName, expectedSource.ThumbURL, expectedSource.Aliases)
+			}
+			result := query.Update("dmm_id", dmmID)
 			if result.Error != nil {
 				return result.Error
 			}

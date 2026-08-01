@@ -319,6 +319,13 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 			}
 			return merged, mergeErr
 		},
+		MergeActressesWithSource: func(targetID, sourceID uint, expectedSource models.Actress) (*database.ActressMergeResult, error) {
+			merged, mergeErr := m.deps.ActressRepo.MergeForSyncTaskWithSource(ctx, targetID, sourceID, nil, expectedSource, task.ID, task.LeaseToken)
+			if mergeErr == nil {
+				task.ActressID = &targetID
+			}
+			return merged, mergeErr
+		},
 		MergeCachedIdentityWithSource: func(targetID, sourceID uint, expectedDMMID int, expectedSource models.Actress) (*database.ActressMergeResult, error) {
 			merged, mergeErr := m.deps.ActressRepo.MergeCachedIdentityForSyncTaskWithSource(ctx, targetID, sourceID, expectedDMMID, expectedSource, task.ID, task.LeaseToken)
 			if mergeErr == nil {
@@ -328,6 +335,9 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 		},
 		AssignDMMID: func(id uint, dmmID int) (bool, error) {
 			return m.deps.ActressRepo.AssignDMMIDIfMissingForSyncTask(ctx, id, dmmID, task.ID, task.LeaseToken)
+		},
+		AssignDMMIDWithSource: func(id uint, dmmID int, expectedSource models.Actress) (bool, error) {
+			return m.deps.ActressRepo.AssignDMMIDIfMissingForSyncTaskWithSource(ctx, id, dmmID, expectedSource, task.ID, task.LeaseToken)
 		},
 		FillMetadata: func(id uint, dmmID int, info models.ActressInfo) ([]string, error) {
 			return m.deps.ActressRepo.FillBlankMetadataForSyncTask(ctx, id, dmmID, info, task.ID, task.LeaseToken)

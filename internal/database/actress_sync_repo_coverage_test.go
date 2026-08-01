@@ -116,6 +116,70 @@ func TestActressSyncReassignRejectsWrongActressAndRunningConflict(t *testing.T) 
 	require.Contains(t, err.Error(), "canonical actress sync task is already running")
 }
 
+func TestSourceFencedActressOperations(t *testing.T) {
+	ctx := context.Background()
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+
+	source := &models.Actress{JapaneseName: "source"}
+	require.NoError(t, repo.Create(ctx, source))
+	expected := *source
+	assigned, err := repo.AssignDMMIDIfMissingWithSource(ctx, source.ID, 1301, expected)
+	require.NoError(t, err)
+	require.True(t, assigned)
+
+	stale := &models.Actress{JapaneseName: "stale"}
+	require.NoError(t, repo.Create(ctx, stale))
+	staleExpected := *stale
+	require.NoError(t, db.Model(stale).Update("japanese_name", "edited").Error)
+	assigned, err = repo.AssignDMMIDIfMissingWithSource(ctx, stale.ID, 1302, staleExpected)
+	require.NoError(t, err)
+	require.False(t, assigned)
+
+	taskSource := &models.Actress{JapaneseName: "task source"}
+	require.NoError(t, repo.Create(ctx, taskSource))
+	taskExpected := *taskSource
+	syncRepo, _, _ := newActressSyncJobAndTask(t, db, &taskSource.ID, "source-fenced-task")
+	claimed, err := syncRepo.ClaimNext("source-fenced-owner", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	assigned, err = repo.AssignDMMIDIfMissingForSyncTaskWithSource(ctx, taskSource.ID, 1303, taskExpected, claimed.ID, claimed.LeaseToken)
+	require.NoError(t, err)
+	require.True(t, assigned)
+
+	target := &models.Actress{DMMID: 1304, JapaneseName: "target"}
+	mergeSource := &models.Actress{JapaneseName: "merge source"}
+	require.NoError(t, repo.Create(ctx, target))
+	require.NoError(t, repo.Create(ctx, mergeSource))
+	mergeExpected := *mergeSource
+	require.NoError(t, db.Model(mergeSource).Update("japanese_name", "edited merge source").Error)
+	_, err = repo.MergeWithSource(ctx, 0, mergeSource.ID, nil, mergeExpected)
+	require.Error(t, err)
+	_, err = repo.MergeWithSource(ctx, target.ID, mergeSource.ID, nil, mergeExpected)
+	require.ErrorIs(t, err, ErrActressSyncIdentityChanged)
+
+	matchingTarget := &models.Actress{DMMID: 1306, JapaneseName: "matching target"}
+	matchingSource := &models.Actress{JapaneseName: "matching source"}
+	require.NoError(t, repo.Create(ctx, matchingTarget))
+	require.NoError(t, repo.Create(ctx, matchingSource))
+	_, err = repo.MergeWithSource(ctx, matchingTarget.ID, matchingSource.ID, nil, *matchingSource)
+	require.NoError(t, err)
+
+	taskTarget := &models.Actress{DMMID: 1305, JapaneseName: "task target"}
+	taskMergeSource := &models.Actress{JapaneseName: "task merge source"}
+	require.NoError(t, repo.Create(ctx, taskTarget))
+	require.NoError(t, repo.Create(ctx, taskMergeSource))
+	taskMergeExpected := *taskMergeSource
+	taskSyncRepo, taskJob, _ := newActressSyncJobAndTask(t, db, &taskMergeSource.ID, "source-fenced-merge-task")
+	taskClaimed, err := taskSyncRepo.ClaimNext("source-fenced-merge-owner", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, taskClaimed)
+	require.NoError(t, db.Model(taskMergeSource).Update("japanese_name", "edited task merge source").Error)
+	_, err = repo.MergeForSyncTaskWithSource(ctx, taskTarget.ID, taskMergeSource.ID, nil, taskMergeExpected, taskClaimed.ID, taskClaimed.LeaseToken)
+	require.ErrorIs(t, err, ErrActressSyncIdentityChanged)
+	require.Equal(t, taskJob.ID, taskClaimed.JobID)
+}
+
 func TestActressSyncFieldMergingAndMutationValidation(t *testing.T) {
 	require.Equal(t, []string{"first", "FIRST", "second"}, mergeSyncTaskFields([]string{" first ", ""}, []string{"first", "FIRST", "second"}))
 	db := newDatabaseTestDB(t)
