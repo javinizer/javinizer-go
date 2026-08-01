@@ -309,3 +309,20 @@ func TestCachedIdentityMergeRejectsConcurrentSourceAssignment(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 913, stored.DMMID)
 }
+
+func TestCachedIdentityMergeUsesLegacyCallback(t *testing.T) {
+	boom := errors.New("legacy merge")
+	_, actressRepo, movieRepo, source := newActressSyncFixture(t, &models.Actress{JapaneseName: "duplicate"})
+	canonical := &models.Actress{DMMID: 913, JapaneseName: "canonical"}
+	require.NoError(t, actressRepo.Create(t.Context(), canonical))
+
+	_, err := SyncActressMetadata(t.Context(), source.ID, actressRepo, movieRepo, nil, ActressSyncOptions{
+		LookupCache: func(int, string, string, string) (models.ActressInfo, bool) {
+			return models.ActressInfo{DMMID: 913, JapaneseName: "canonical", Aliases: []string{"duplicate"}}, true
+		},
+		MergeCachedIdentity: func(uint, uint, int) (*database.ActressMergeResult, error) {
+			return nil, boom
+		},
+	})
+	require.ErrorIs(t, err, boom)
+}
