@@ -66,7 +66,8 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		current, filePaths, found := lookupResultByResultID(job, resultID)
+		current, _, found := lookupResultByResultID(job, resultID)
+		var filePaths []string
 
 		if !found {
 			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
@@ -89,6 +90,13 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterLockKey)
 		defer releasePosterLock()
+
+		freshCurrent, freshFilePaths, freshFound := lookupResultByResultID(job, resultID)
+		if !freshFound {
+			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
+			return
+		}
+		current, filePaths = freshCurrent, freshFilePaths
 
 		// Convert once and re-derive display_title so a title edit is reflected
 		// immediately in persisted state and any client that renders display_title

@@ -2,6 +2,7 @@ package batch
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image/color"
 	"net"
@@ -118,6 +119,18 @@ func assertPosterSourceLockFreeAPI(t *testing.T, jobID, movieID string) {
 	}
 }
 
+type signaledBatchJob struct {
+	worker.BatchJobInterface
+	firstLookup chan struct{}
+	once        sync.Once
+}
+
+func (j *signaledBatchJob) GetFileResultByResultID(resultID string) (*resultstore.MovieResult, string, bool) {
+	result, path, found := j.BatchJobInterface.GetFileResultByResultID(resultID)
+	j.once.Do(func() { close(j.firstLookup) })
+	return result, path, found
+}
+
 // setupPosterRaceJob builds a real batch job with a completed result whose
 // poster source is /old.jpg, seeds the cached -full.jpg with the old image,
 // and returns the deps (whose job store owns the job — the router must be
@@ -150,6 +163,42 @@ func setupPosterRaceJob(t *testing.T, srv *posterConcurrencyServer, movieID stri
 	fullPath := filepath.Join(tempPosterDir, movieID+"-full.jpg")
 	require.NoError(t, os.WriteFile(fullPath, srv.images["/old.jpg"], 0o644))
 	return deps, job, fullPath
+}
+
+func TestUpdateBatchMovie_ReReadsStateAfterWaitingForPosterLock(t *testing.T) {
+	srv := newPosterConcurrencyServer(t)
+	const movieID = "RACE-STALE"
+	deps, job, fullPath := setupPosterRaceJob(t, srv, movieID)
+	jobIface, ok := deps.JobStore.GetBatchJob(job.GetID())
+	require.True(t, ok)
+
+	ready := make(chan struct{})
+	wrappedJob := &signaledBatchJob{BatchJobInterface: jobIface, firstLookup: ready}
+	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: wrappedJob}
+	router := gin.New()
+	router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
+
+	release := worker.AcquirePosterSourceLock(job.GetID(), movieID)
+	result := make(chan int, 1)
+	go func() { result <- patchPosterURL(t, router, job.GetID(), movieID, srv.URL+"/old.jpg") }()
+	<-ready
+
+	newURL := srv.URL + "/b.jpg"
+	require.NoError(t, jobIface.UpdatePosterFromURL(context.Background(), movieID, newURL, newURL))
+	tempPosterDir := filepath.Dir(fullPath)
+	require.NoError(t, os.WriteFile(fullPath, srv.images["/b.jpg"], 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tempPosterDir, movieID+".jpg"), srv.images["/b.jpg"], 0o644))
+	release()
+
+	require.Equal(t, http.StatusOK, <-result)
+	current := storedMovieResult(t, job, movieID)
+	require.Equal(t, srv.URL+"/old.jpg", current.Movie.Poster.PosterURL)
+	full, err := os.ReadFile(fullPath)
+	require.NoError(t, err)
+	require.Equal(t, srv.images["/old.jpg"], full)
+	preview, err := os.ReadFile(filepath.Join(tempPosterDir, movieID+".jpg"))
+	require.NoError(t, err)
+	assert.NotEqual(t, srv.images["/b.jpg"], preview)
 }
 
 // TestUpdateBatchMovie_ConcurrentPosterSourceChanges runs two concurrent
