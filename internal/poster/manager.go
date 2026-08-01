@@ -340,6 +340,7 @@ func (pm *PosterManager) RestoreAssets(snap *AssetsSnapshot) error {
 		return err
 	}
 	tempPosterDir := filepath.Join(pm.tempDir, "posters", snap.jobID)
+	var restoreErr error
 	for _, asset := range []struct {
 		name    string
 		data    []byte
@@ -350,17 +351,19 @@ func (pm *PosterManager) RestoreAssets(snap *AssetsSnapshot) error {
 	} {
 		finalPath := filepath.Join(tempPosterDir, asset.name)
 		if !asset.present {
-			_ = pm.fs.Remove(finalPath) // best-effort cleanup of the failed refresh's output
+			if err := pm.fs.Remove(finalPath); err != nil && !os.IsNotExist(err) {
+				restoreErr = errors.Join(restoreErr, fmt.Errorf("remove poster asset %s: %w", asset.name, err))
+			}
 			continue
 		}
 		if err := pm.fs.MkdirAll(tempPosterDir, configDirPermTemp); err != nil {
-			return fmt.Errorf("restore poster asset directory: %w", err)
+			return errors.Join(restoreErr, fmt.Errorf("restore poster asset directory: %w", err))
 		}
 		if err := afero.WriteFile(pm.fs, finalPath, asset.data, 0o644); err != nil {
-			return fmt.Errorf("restore poster asset %s: %w", asset.name, err)
+			return errors.Join(restoreErr, fmt.Errorf("restore poster asset %s: %w", asset.name, err))
 		}
 	}
-	return nil
+	return restoreErr
 }
 
 // validatePosterID ensures the posterID is a safe, non-empty filename

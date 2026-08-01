@@ -24,6 +24,14 @@ import (
 
 // stubOverridePosterGen records GeneratePoster invocations so tests can
 // observe the refresh decision without touching a filesystem.
+type failingRemoveFs struct {
+	afero.Fs
+}
+
+func (f *failingRemoveFs) Remove(string) error {
+	return errors.New("injected remove failure")
+}
+
 type stubOverridePosterGen struct {
 	calls     int
 	jobID     string
@@ -381,6 +389,29 @@ func TestApplyFieldOverride_RefreshRollsBackWhenPersistFails(t *testing.T) {
 	assert.Equal(t, "", current.Movie.Poster.CoverURL)
 	require.NotNil(t, current.Movie.Poster.CropBounds,
 		"a failed override must not discard the still-valid crop bounds")
+}
+
+func TestApplyFieldOverride_RollbackFailureReportedWithNoPreexistingAssets(t *testing.T) {
+	jpeg := encodeTestJPEG(t, 200, 300, color.RGBA{B: 0xaa, A: 0xff})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(jpeg)
+	}))
+	defer srv.Close()
+
+	fs := &failingRemoveFs{Fs: afero.NewMemMapFs()}
+	pm := poster.NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	je, _, resultID := overrideRefreshFixture(t, "old-poster", "", srv.URL, "")
+	je.posterGen = poster.NewScrapePosterGenerator(pm, "", "")
+	repo := mocks.NewMockMovieRepositoryInterface(t)
+	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
+	je.movieRepo = repo
+
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "persist field override")
+	assert.Contains(t, err.Error(), "poster rollback failed")
+	assert.Contains(t, err.Error(), "injected remove failure")
 }
 
 // TestApplyFieldOverride_RollbackFailureReported ensures a failed asset

@@ -19,6 +19,7 @@ type errFS struct {
 	failOpen     bool
 	failOpenFile bool
 	failMkdirAll bool
+	failRemove   bool
 }
 
 func (e *errFS) Open(name string) (afero.File, error) {
@@ -40,6 +41,13 @@ func (e *errFS) MkdirAll(path string, perm os.FileMode) error {
 		return errors.New("injected mkdirall failure")
 	}
 	return e.Fs.MkdirAll(path, perm)
+}
+
+func (e *errFS) Remove(name string) error {
+	if e.failRemove {
+		return errors.New("injected remove failure")
+	}
+	return e.Fs.Remove(name)
 }
 
 const (
@@ -124,6 +132,17 @@ func TestSnapshotAssets_ReadErrorAborts(t *testing.T) {
 	_, err := pm.SnapshotAssets(snapJobID, snapID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "snapshot poster asset")
+}
+
+func TestRestoreAssets_RemoveFailures(t *testing.T) {
+	fs := &errFS{Fs: afero.NewMemMapFs(), failRemove: true}
+	pm := NewPosterManager(fs, "/tmp", http.DefaultClient)
+	snap := &AssetsSnapshot{jobID: snapJobID, posterID: snapID}
+
+	err := pm.RestoreAssets(snap)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remove poster asset")
+	assert.Contains(t, err.Error(), "injected remove failure")
 }
 
 func TestRestoreAssets_WriteFailures(t *testing.T) {
