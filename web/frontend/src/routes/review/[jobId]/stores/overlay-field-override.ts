@@ -64,33 +64,28 @@ export function overlayFieldOverride(target: Movie, field: string, src: Movie): 
 			target.release_year = src.release_year;
 			break;
 		case 'poster_url':
-		case 'cover_url':
-		case 'should_crop_poster': {
-			// Overlay the COMPLETE server-returned poster state, not just the
-			// picked field: a poster-source override regenerates the preview
-			// (cropped_poster_url) and re-syncs the crop intent
-			// (should_crop_poster) server-side (refreshOverriddenPosterSource +
-			// applyFieldOverride's source-change invalidation), and src — the
-			// field-override response movie — is authoritative for all of it.
-			// Copying only the selected URL would leave saveAllEdits resubmitting
-			// the stale pre-override preview URL / crop intent from the pending
-			// edit entry, and updateBatchMovie does not re-sync when the source
-			// URL itself is unchanged — a landscape scraper poster would then
-			// organize uncropped. Bounds are taken as returned: the server clears
-			// them when the effective source changed and keeps them on an
-			// identical-source re-select.
+		case 'cover_url': {
 			target.poster_url = src.poster_url;
-			if (src.cover_url !== undefined) {
-				target.cover_url = src.cover_url;
-			}
-			target.cropped_poster_url = src.cropped_poster_url;
-			target.should_crop_poster = src.should_crop_poster;
+			if (src.cover_url !== undefined) target.cover_url = src.cover_url;
+			if (src.cropped_poster_url !== undefined) target.cropped_poster_url = src.cropped_poster_url;
+			if (src.should_crop_poster !== undefined) target.should_crop_poster = src.should_crop_poster;
+			// NOT guarded on !== undefined: the server omits poster_crop_bounds
+			// when CLEARED (omitempty on *CropBounds), so an absent key means "the
+			// source changed; old bounds are obsolete" and must clear to null —
+			// leaving the stale pending bounds would resubmit them on Save.
 			target.poster_crop_bounds = src.poster_crop_bounds ?? null;
 			break;
 		}
+		case 'should_crop_poster': {
+			const old = target.should_crop_poster;
+			target.should_crop_poster = src.should_crop_poster;
+			if (old !== src.should_crop_poster) target.poster_crop_bounds = null;
+			break;
+		}
 		default:
-			(target as unknown as Record<string, unknown>)[field] =
-				(src as unknown as Record<string, unknown>)[field];
+			(target as unknown as Record<string, unknown>)[field] = (
+				src as unknown as Record<string, unknown>
+			)[field];
 			break;
 	}
 }

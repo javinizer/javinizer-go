@@ -57,12 +57,46 @@ describe('overlayFieldOverride', () => {
 			const src = makeMovie({
 				poster_url: 'new-poster',
 				cover_url: 'new-cover',
+				poster_crop_bounds: null,
 				...(field === 'should_crop_poster' ? { should_crop_poster: true } : {}),
 			});
 			overlayFieldOverride(target, field, src);
 			expect(target.poster_crop_bounds).toBeNull();
 		},
 	);
+
+	it('poster_url override whose response OMITS poster_crop_bounds clears stale bounds to null', () => {
+		// The server omits poster_crop_bounds when it cleared them (omitempty
+		// on *CropBounds in internal/api/contracts/movie_view.go). An absent
+		// key on a source override therefore means "source changed; old bounds
+		// obsolete", and the pending entry must end up with null — not keep
+		// the stale pre-override bounds, or Save would resubmit them.
+		const target = makeMovie({
+			poster_url: 'https://example.com/old-poster.jpg',
+			poster_crop_bounds: { x: 10, y: 10, width: 200, height: 300 },
+		});
+		const src = makeMovie({
+			poster_url: 'https://dmm.example/new-poster.jpg',
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+			should_crop_poster: false,
+		});
+		delete src.poster_crop_bounds;
+		overlayFieldOverride(target, 'poster_url', src);
+		expect(target.poster_crop_bounds).toBeNull();
+	});
+
+	it('poster_url override with explicit poster_crop_bounds:null in the response clears stale bounds', () => {
+		const target = makeMovie({
+			poster_url: 'https://example.com/old-poster.jpg',
+			poster_crop_bounds: { x: 10, y: 10, width: 200, height: 300 },
+		});
+		const src = makeMovie({
+			poster_url: 'https://dmm.example/new-poster.jpg',
+			poster_crop_bounds: null,
+		});
+		overlayFieldOverride(target, 'poster_url', src);
+		expect(target.poster_crop_bounds).toBeNull();
+	});
 
 	it('poster_url re-select of the identical URL carries the server-kept bounds', () => {
 		// The server keeps a still-valid manual crop on an identical-source
@@ -74,7 +108,11 @@ describe('overlayFieldOverride', () => {
 			poster_url: 'same-url',
 			poster_crop_bounds: { ...kept },
 		});
-		overlayFieldOverride(target, 'poster_url', makeMovie({ poster_url: 'same-url', poster_crop_bounds: { ...kept } }));
+		overlayFieldOverride(
+			target,
+			'poster_url',
+			makeMovie({ poster_url: 'same-url', poster_crop_bounds: { ...kept } }),
+		);
 		expect(target.poster_crop_bounds).toEqual(kept);
 	});
 
@@ -91,7 +129,11 @@ describe('overlayFieldOverride', () => {
 		overlayFieldOverride(
 			target,
 			'cover_url',
-			makeMovie({ poster_url: 'https://example.com/poster.jpg', cover_url: 'new-cover', poster_crop_bounds: { ...kept } })
+			makeMovie({
+				poster_url: 'https://example.com/poster.jpg',
+				cover_url: 'new-cover',
+				poster_crop_bounds: { ...kept },
+			}),
 		);
 		expect(target.cover_url).toBe('new-cover');
 		expect(target.poster_crop_bounds).toEqual(kept);
@@ -103,7 +145,11 @@ describe('overlayFieldOverride', () => {
 			cover_url: 'old-cover',
 			poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
 		});
-		overlayFieldOverride(target, 'cover_url', makeMovie({ cover_url: 'new-cover' }));
+		overlayFieldOverride(
+			target,
+			'cover_url',
+			makeMovie({ cover_url: 'new-cover', poster_crop_bounds: null }),
+		);
 		expect(target.poster_crop_bounds).toBeNull();
 	});
 
