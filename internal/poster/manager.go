@@ -35,6 +35,11 @@ type cropResult struct {
 	FullPath string
 	// CroppedURL is the URL that serves the cropped poster via the API.
 	CroppedURL string
+	// UsedLegacySource is true when the crop ran against the already-cropped
+	// preview because the full-size source image was missing (legacy jobs).
+	// Bounds from such a crop are in the cropped image's coordinate space and
+	// must not be reapplied to the full image during the apply phase.
+	UsedLegacySource bool
 }
 
 // PosterManagerInterface defines the contract for poster operations.
@@ -99,8 +104,10 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	sourcePath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
 
 	// Fallback for older jobs where the full image was cleaned up.
+	usedLegacySource := false
 	if _, err := pm.fs.Stat(sourcePath); err != nil {
 		sourcePath = filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+		usedLegacySource = true
 	}
 
 	if _, err := pm.fs.Stat(sourcePath); err != nil {
@@ -129,9 +136,10 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg?v=%d", url.PathEscape(jobID), url.PathEscape(posterID), time.Now().UnixMilli())
 
 	return &cropResult{
-		CroppedPath: croppedPath,
-		FullPath:    sourcePath,
-		CroppedURL:  croppedURL,
+		CroppedPath:      croppedPath,
+		FullPath:         sourcePath,
+		CroppedURL:       croppedURL,
+		UsedLegacySource: usedLegacySource,
 	}, nil
 }
 

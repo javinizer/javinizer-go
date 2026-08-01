@@ -711,6 +711,7 @@ export function createReviewState(pageStore: Page) {
 				...currentMovie,
 				cropped_poster_url: original.cropped_poster_url,
 				should_crop_poster: original.should_crop_poster,
+				poster_crop_bounds: null,
 			});
 			clearPosterPreviewOverride();
 		}

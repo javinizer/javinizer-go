@@ -109,6 +109,26 @@ func TestApplyFieldOverride_SynthesizedSourceFallback(t *testing.T) {
 	assert.Equal(t, "scraper", prov.FieldSources["maker"])
 }
 
+func TestApplyFieldOverride_PosterSourceFieldsClearCropBounds(t *testing.T) {
+	for _, field := range []string{"poster_url", "cover_url", "should_crop_poster"} {
+		t.Run(field, func(t *testing.T) {
+			movie, prov := overrideFixture()
+			movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+			err := applyFieldOverride(movie, prov, field, "dmm")
+			require.NoError(t, err)
+			assert.Nil(t, movie.Poster.CropBounds,
+				"overriding %s changes the poster source/decision; stale bounds would silently miscrop the new image at apply", field)
+		})
+	}
+}
+
+func TestApplyFieldOverride_UnrelatedFieldKeepsCropBounds(t *testing.T) {
+	movie, prov := overrideFixture()
+	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+	require.NoError(t, applyFieldOverride(movie, prov, "title", "javlibrary"))
+	require.NotNil(t, movie.Poster.CropBounds, "non-poster overrides must not discard the user's crop")
+}
+
 func overrideFixture() (*models.Movie, *resultstore.ProvenanceData) {
 	dmmDate := time.Date(2021, 6, 1, 0, 0, 0, 0, time.UTC)
 	prov := &resultstore.ProvenanceData{

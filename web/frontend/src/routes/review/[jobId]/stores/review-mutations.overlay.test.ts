@@ -47,6 +47,27 @@ describe('overlayFieldOverride', () => {
 		expect(target.maker).toBe('New Maker');
 	});
 
+	it.each(['poster_url', 'cover_url', 'should_crop_poster'])(
+		'%s override clears stale poster_crop_bounds',
+		(field) => {
+			const target = makeMovie({
+				poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
+			});
+			const src = makeMovie({ poster_url: 'new-poster', cover_url: 'new-cover' });
+			overlayFieldOverride(target, field, src);
+			expect(target.poster_crop_bounds).toBeNull();
+		},
+	);
+
+	it('title override preserves poster_crop_bounds', () => {
+		const target = makeMovie({
+			poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
+		});
+		const src = makeMovie({ title: 'New Title', display_title: 'New Title' });
+		overlayFieldOverride(target, 'title', src);
+		expect(target.poster_crop_bounds).toEqual({ x: 0, y: 0, width: 400, height: 600 });
+	});
+
 	it('unrelated fields on target are preserved when overriding maker', () => {
 		const target = makeMovie({ director: 'Orig Director', maker: 'Orig Maker' });
 		const src = makeMovie({ maker: 'New Maker', director: 'Src Director' });

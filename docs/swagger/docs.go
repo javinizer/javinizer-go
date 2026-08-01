@@ -4654,6 +4654,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.CropBounds": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer"
+                },
+                "width": {
+                    "type": "integer"
+                },
+                "x": {
+                    "type": "integer"
+                },
+                "y": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.DataSource": {
             "type": "object",
             "properties": {
@@ -5148,6 +5165,9 @@ const docTemplate = `{
                 "original_title": {
                     "type": "string",
                     "example": "美人"
+                },
+                "poster_crop_bounds": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.CropBounds"
                 },
                 "poster_url": {
                     "description": "Poster / cover (flattened from PosterState — no custom marshaler needed)",
@@ -5656,6 +5676,9 @@ const docTemplate = `{
             "properties": {
                 "cropped_poster_url": {
                     "type": "string"
+                },
+                "poster_crop_bounds": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.CropBounds"
                 }
             }
         },

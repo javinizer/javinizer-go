@@ -251,6 +251,18 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		assert.Contains(t, rec.Body.String(), "/api/v1/temp/posters/"+job.GetID()+"/IPX-778.jpg")
+
+		status := job.GetStatus()
+		result := status.Results["/tmp/IPX-778.mp4"]
+		require.NotNil(t, result)
+		require.NotNil(t, result.Movie)
+		assert.Nil(t, result.Movie.Poster.CropBounds,
+			"a crop measured against the already-cropped legacy preview must not be stored - applying it to the full downloaded image at organize would miscrop")
+
+		var resp contracts.PosterCropResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Nil(t, resp.PosterCropBounds,
+			"the response must echo the effective (nil) bounds so the client overlay does not re-inject legacy-space bounds")
 	})
 
 	t.Run("movie lookup fallback by data movie id", func(t *testing.T) {
@@ -278,5 +290,10 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		assert.Equal(t, "ALT-001", result.FileMatchInfo.MovieID)
 		assert.Contains(t, result.Movie.Poster.CroppedPosterURL, "/api/v1/temp/posters/"+job.GetID()+"/ALT-001.jpg")
 		assert.False(t, result.Movie.Poster.ShouldCropPoster)
+
+		var resp contracts.PosterCropResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.NotNil(t, resp.PosterCropBounds, "non-legacy crops must echo the stored bounds")
+		assert.Equal(t, contracts.CropBounds{X: 200, Y: 0, Width: 472, Height: 600}, *resp.PosterCropBounds)
 	})
 }

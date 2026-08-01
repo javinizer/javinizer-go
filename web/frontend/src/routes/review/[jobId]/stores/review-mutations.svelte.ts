@@ -20,7 +20,7 @@ import {
 	type PosterPreviewOverride,
 	type PosterCropMetrics,
 } from '../review-utils';
-import { overlayFieldOverride } from './overlay-field-override';
+import { overlayFieldOverride, overlayPosterEdit, posterCropOverlayFromResponse, posterEditTargetFilePaths, type PosterEditOverlay } from './overlay-field-override';
 import { buildMovieToSave } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
@@ -89,47 +89,52 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		]);
 	}
 
+	// Overlay a poster edit (manual crop / poster-from-URL) onto the job
+	// results AND any in-flight editedMovies entries for the same result, so a
+	// subsequent whole-movie Save (organizeAll → saveAllEdits → buildMovieToSave
+	// sends every field) cannot clobber the server-side crop state with a stale
+	// pre-edit snapshot.
+	function applyPosterEditToState(resultId: string, edit: PosterEditOverlay) {
+		const currentJob = deps.getJob();
+		if (!currentJob) return;
+
+		// Server-side poster edits fan out to every file of the movie
+		// (PosterEditor iterates FindFilePathsForMovieID) — mirror that here so
+		// multi-part siblings never hold stale poster state.
+		const targets = new Set(posterEditTargetFilePaths(currentJob.results ?? {}, resultId));
+
+		const updatedJob: BatchJobResponse = {
+			...currentJob,
+			results: { ...currentJob.results },
+		};
+		for (const [filePath, result] of Object.entries(updatedJob.results)) {
+			const r = result as FileResult;
+			if (targets.has(filePath) && r.movie) {
+				updatedJob.results[filePath] = { ...r, movie: overlayPosterEdit(r.movie, edit) };
+			}
+		}
+		deps.skipJobSync();
+		deps.setJob(updatedJob);
+
+		const editedMovies = deps.getEditedMovies();
+		for (const [filePath, movie] of editedMovies) {
+			if (targets.has(filePath)) {
+				editedMovies.set(filePath, overlayPosterEdit(movie, edit));
+			}
+		}
+	}
+
 	const posterFromUrlMutation = createMutation(() => ({
 		mutationFn: async ({ resultId, url }: { resultId: string; url: string }) => {
 			return deps.updateBatchMoviePosterFromURL(deps.getJobId(), resultId, { url });
 		},
 		onSuccess: (data: PosterFromURLResponse, { resultId }) => {
-			const currentJob = deps.getJob();
-			if (currentJob) {
-				const updatedJob: BatchJobResponse = {
-					...currentJob,
-					results: { ...currentJob.results },
-				};
-				for (const [filePath, result] of Object.entries(updatedJob.results)) {
-					const r = result as FileResult;
-					if (r.result_id === resultId && r.movie) {
-						updatedJob.results[filePath] = {
-							...r,
-							movie: {
-								...r.movie,
-								poster_url: data.poster_url,
-								cropped_poster_url: data.cropped_poster_url,
-								should_crop_poster: false,
-							},
-						};
-					}
-				}
-				deps.skipJobSync();
-				deps.setJob(updatedJob);
-
-				const editedMovies = deps.getEditedMovies();
-				for (const [filePath, movie] of editedMovies) {
-					const editedResultId = currentJob.results?.[filePath]?.result_id;
-					if (editedResultId === resultId) {
-						editedMovies.set(filePath, {
-							...movie,
-							poster_url: data.poster_url,
-							cropped_poster_url: data.cropped_poster_url,
-							should_crop_poster: false,
-						});
-					}
-				}
-			}
+			applyPosterEditToState(resultId, {
+				poster_url: data.poster_url,
+				cropped_poster_url: data.cropped_poster_url,
+				should_crop_poster: false,
+				poster_crop_bounds: null,
+			});
 
 			const currentResult = deps.getCurrentResult();
 			if (currentResult) {
@@ -233,7 +238,9 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		}) => {
 			return deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight);
 		},
-		onSuccess: (response: PosterCropResponse) => {
+		onSuccess: (response: PosterCropResponse, { resultId }) => {
+			applyPosterEditToState(resultId, posterCropOverlayFromResponse(response));
+
 			const currentResultVal = deps.getCurrentResult();
 			if (currentResultVal) {
 				deps.getPosterPreviewOverrides().set(currentResultVal.file_path, {

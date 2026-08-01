@@ -275,6 +275,16 @@ func MergeMovieMetadataWithOptions(scraped, nfo *models.Movie, scalarStrategy Me
 		fm.recordScraper("CroppedPosterURL")
 	}
 
+	// CropBounds: runtime-only manual-crop state — never stored in NFO, always
+	// taken from scraper/job state like CroppedPosterURL above.
+	if scraped.Poster.CropBounds != nil {
+		b := *scraped.Poster.CropBounds
+		merged.Poster.CropBounds = &b
+		fm.recordScraper("CropBounds")
+	} else {
+		fm.recordEmpty("CropBounds")
+	}
+
 	// Merge int scalar fields using spec-driven loop via fieldMerger
 	for _, spec := range intMergeSpecs {
 		spec.setM(merged, mergeScalarFieldViaMerger(fm, spec.name, spec.getS(scraped), spec.getN(nfo), scalarStrategy, spec.isEmpty))

@@ -3,7 +3,10 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"image"
 	"path/filepath"
+
+	"github.com/spf13/afero"
 
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -53,6 +56,37 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		}, nil
 	}
 
+	// A manual crop recorded in the review UI takes priority: reproduce the
+	// user's exact crop on the freshly downloaded image.
+	if b := movie.Poster.CropBounds; b != nil {
+		return d.downloadAndCropPoster(ctx, posterURL, destPath, func(tempPath string) error {
+			err := imageutil.CropPosterWithBounds(d.fs, tempPath, destPath, b.X, b.Y, b.X+b.Width, b.Y+b.Height, d.config.MaxPosterHeight)
+			if err == nil {
+				return nil
+			}
+			scraperWantedCrop := movie.Poster.ShouldCropPoster
+			if movie.Poster.OriginalShouldCropPoster != nil {
+				scraperWantedCrop = *movie.Poster.OriginalShouldCropPoster
+			}
+			if !scraperWantedCrop {
+				if probeErr := probeDecodableImage(d.fs, tempPath); probeErr != nil {
+					return fmt.Errorf("downloaded poster for %s is not a decodable image: %w", movie.ID, probeErr)
+				}
+				// The bounds failure means the apply-time image does not match
+				// the proportions the user cropped against (e.g. CDN served a
+				// different resolution). OriginalShouldCropPoster (scrape-time
+				// snapshot) takes precedence over ShouldCropPoster, which the
+				// crop flow itself forced to false. A scraper-intended cover
+				// degrades to the default crop; a poster-grade source is kept
+				// whole rather than butchered by a wrong auto-crop.
+				logging.Warnf("stored crop bounds %+v invalid for poster of %s: %v - saving image uncropped", *b, movie.ID, err)
+				return d.fs.Rename(tempPath, destPath)
+			}
+			logging.Warnf("stored crop bounds %+v invalid for poster of %s: %v - falling back to default crop", *b, movie.ID, err)
+			return imageutil.CropPosterFromCover(d.fs, tempPath, destPath, d.config.MaxPosterHeight)
+		})
+	}
+
 	// Check if we need to crop the poster or use it directly
 	if !movie.Poster.ShouldCropPoster {
 		// High-quality poster - download directly without cropping
@@ -61,6 +95,26 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	// Low-quality poster - download and crop from cover
+	return d.downloadAndCropPoster(ctx, posterURL, destPath, func(tempPath string) error {
+		return imageutil.CropPosterFromCover(d.fs, tempPath, destPath, d.config.MaxPosterHeight)
+	})
+}
+
+func probeDecodableImage(fs afero.Fs, path string) error {
+	f, err := fs.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	// Full decode, not DecodeConfig: a header-valid but body-truncated image
+	// must not be renamed into place as the final poster.
+	_, _, err = image.Decode(f)
+	return err
+}
+
+// downloadAndCropPoster downloads posterURL to a temp file, applies cropFn to
+// produce destPath, and cleans up the temp file.
+func (d *Downloader) downloadAndCropPoster(ctx context.Context, posterURL, destPath string, cropFn func(tempPath string) error) (*DownloadResult, error) {
 	tempPath := destPath + ".full.tmp"
 	result, err := d.download(ctx, posterURL, tempPath, MediaTypePoster)
 	if err != nil || !result.Downloaded {
@@ -69,7 +123,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	// Crop the poster from the downloaded image
-	if err := imageutil.CropPosterFromCover(d.fs, tempPath, destPath, d.config.MaxPosterHeight); err != nil {
+	if err := cropFn(tempPath); err != nil {
 		_ = d.fs.Remove(tempPath) // Clean up temp file
 		result.Error = fmt.Errorf("failed to crop poster: %w", err)
 		result.Downloaded = false

@@ -589,6 +589,26 @@ func TestIsFieldEmpty_OriginalShouldCropPoster(t *testing.T) {
 	})
 }
 
+func TestMergeMovieMetadataWithOptions_CropBoundsAlwaysFromScraper(t *testing.T) {
+	now := time.Now()
+	bounds := &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+	scraped := &models.Movie{
+		ID: "IPX-001", Title: "T",
+		Poster:    models.PosterState{CropBounds: bounds},
+		UpdatedAt: now,
+	}
+	nfo := &models.Movie{
+		ID: "IPX-001", Title: "T",
+		UpdatedAt: now,
+	}
+
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
+	require.NoError(t, err)
+	require.NotNil(t, result.Merged.Poster.CropBounds,
+		"manual crop bounds must survive NFO merge so apply can reproduce the user's crop")
+	assert.Equal(t, *bounds, *result.Merged.Poster.CropBounds)
+}
+
 func TestMergeMovieMetadataWithOptions_CroppedPosterURLAlwaysFromScraper(t *testing.T) {
 	now := time.Now()
 	scraped := &models.Movie{

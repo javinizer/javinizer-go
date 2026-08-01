@@ -580,7 +580,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", CroppedPosterURL: "original-crop.jpg", ShouldCropPoster: true}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg", nil)
 		require.NoError(t, err)
 
 		result := job.snap().Results["/tmp/ABC-001.mp4"]
@@ -592,6 +592,49 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 		assert.False(t, result.Movie.Poster.ShouldCropPoster)
 	})
 
+	t.Run("stores manual crop bounds for the apply phase", func(t *testing.T) {
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
+		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
+		job.SetResultDirect("/tmp/ABC-001.mp4", &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", ShouldCropPoster: true}},
+		})
+
+		bounds := &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg", bounds)
+		require.NoError(t, err)
+
+		result := job.snap().Results["/tmp/ABC-001.mp4"]
+		require.NotNil(t, result.Movie.Poster.CropBounds, "manual crop bounds must be stored so the apply phase can reproduce the user's crop")
+		assert.Equal(t, *bounds, *result.Movie.Poster.CropBounds)
+		assert.False(t, result.Movie.Poster.ShouldCropPoster)
+
+		// Stored bounds must be a copy, not an alias of the caller's struct.
+		bounds.X = 999
+		assert.Equal(t, 0, result.Movie.Poster.CropBounds.X)
+	})
+
+	t.Run("UpdatePosterFromURL clears manual crop bounds", func(t *testing.T) {
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
+		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
+		job.SetResultDirect("/tmp/ABC-001.mp4", &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
+			Status:        models.JobStatusCompleted,
+			Movie: &models.Movie{ID: "ABC-001", Poster: models.PosterState{
+				PosterURL:  "original.jpg",
+				CropBounds: &models.CropBounds{X: 1, Y: 2, Width: 3, Height: 4},
+			}},
+		})
+
+		err := job.posterEditor.UpdatePosterFromURL(context.Background(), "ABC-001", "new-poster.jpg", "new-crop.jpg")
+		require.NoError(t, err)
+
+		result := job.snap().Results["/tmp/ABC-001.mp4"]
+		assert.Nil(t, result.Movie.Poster.CropBounds,
+			"a replacement poster image invalidates the previous crop bounds")
+	})
+
 	t.Run("does not overwrite backup on second crop", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
@@ -601,9 +644,9 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", ShouldCropPoster: true}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop1.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop1.jpg", nil)
 		require.NoError(t, err)
-		err = job.posterEditor.UpdatePosterCrop("ABC-001", "crop2.jpg")
+		err = job.posterEditor.UpdatePosterCrop("ABC-001", "crop2.jpg", nil)
 		require.NoError(t, err)
 
 		result := job.snap().Results["/tmp/ABC-001.mp4"]
@@ -623,7 +666,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg"}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg", nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, "new-crop.jpg", job.snap().Results["/tmp/ABC-001-cd1.mp4"].Movie.Poster.CroppedPosterURL)
@@ -638,7 +681,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         nil,
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg", nil)
 		require.NoError(t, err)
 	})
 
@@ -650,7 +693,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg", ShouldCropPoster: true}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg", nil)
 		require.NoError(t, err)
 
 		result := job.snap().Results["/tmp/ABC-001.mp4"]

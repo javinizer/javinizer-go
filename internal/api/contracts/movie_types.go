@@ -61,9 +61,13 @@ type PosterCropRequest struct {
 	MaxPosterHeight *int `json:"max_poster_height,omitempty" binding:"omitempty,min=0"`
 }
 
-// PosterCropResponse returns the updated temp cropped poster URL.
+// PosterCropResponse returns the updated temp cropped poster URL and the
+// crop bounds actually stored server-side (nil when the crop ran against a
+// legacy already-cropped preview and the bounds were deliberately dropped,
+// so clients must not overlay the requested bounds in that case).
 type PosterCropResponse struct {
-	CroppedPosterURL string `json:"cropped_poster_url"`
+	CroppedPosterURL string      `json:"cropped_poster_url"`
+	PosterCropBounds *CropBounds `json:"poster_crop_bounds,omitempty"`
 }
 
 // PosterFromURLRequest represents a request to download a poster from a URL.

@@ -42,14 +42,15 @@ type MovieView struct {
 	RatingWarning string     `json:"rating_warning,omitempty"`
 
 	// Poster / cover (flattened from PosterState — no custom marshaler needed)
-	PosterURL                string `json:"poster_url"`
-	CoverURL                 string `json:"cover_url"`
-	CroppedPosterURL         string `json:"cropped_poster_url"`
-	ShouldCropPoster         bool   `json:"should_crop_poster"`
-	OriginalPosterURL        string `json:"original_poster_url"`
-	OriginalCroppedPosterURL string `json:"original_cropped_poster_url"`
-	OriginalShouldCropPoster *bool  `json:"original_should_crop_poster"`
-	OriginalCoverURL         string `json:"original_cover_url"`
+	PosterURL                string      `json:"poster_url"`
+	CoverURL                 string      `json:"cover_url"`
+	CroppedPosterURL         string      `json:"cropped_poster_url"`
+	ShouldCropPoster         bool        `json:"should_crop_poster"`
+	OriginalPosterURL        string      `json:"original_poster_url"`
+	OriginalCroppedPosterURL string      `json:"original_cropped_poster_url"`
+	OriginalShouldCropPoster *bool       `json:"original_should_crop_poster"`
+	OriginalCoverURL         string      `json:"original_cover_url"`
+	PosterCropBounds         *CropBounds `json:"poster_crop_bounds,omitempty"`
 
 	// Media
 	TrailerURL       string   `json:"trailer_url"`
@@ -106,6 +107,7 @@ func MovieViewFromModel(m *models.Movie) *MovieView {
 		OriginalCroppedPosterURL: m.Poster.OriginalCroppedPosterURL,
 		OriginalShouldCropPoster: m.Poster.OriginalShouldCropPoster,
 		OriginalCoverURL:         m.Poster.OriginalCoverURL,
+		PosterCropBounds:         cropBoundsViewFromModel(m.Poster.CropBounds),
 		TrailerURL:               m.TrailerURL,
 		OriginalFileName:         m.OriginalFileName,
 		Screenshots:              m.Screenshots,
@@ -165,8 +167,34 @@ func MovieViewToModel(v *MovieView) *models.Movie {
 		OriginalCroppedPosterURL: v.OriginalCroppedPosterURL,
 		OriginalShouldCropPoster: v.OriginalShouldCropPoster,
 		OriginalCoverURL:         v.OriginalCoverURL,
+		CropBounds:               v.PosterCropBounds.ToModel(),
 	}
 	return m
+}
+
+// CropBounds is the API wire shape of a manual poster crop region (pixels).
+// Mirrors models.CropBounds; per ADR-0007 persistence types stay out of the
+// API boundary.
+type CropBounds struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+// ToModel converts to the persistence-layer type; nil-safe.
+func (b *CropBounds) ToModel() *models.CropBounds {
+	if b == nil {
+		return nil
+	}
+	return &models.CropBounds{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height}
+}
+
+func cropBoundsViewFromModel(b *models.CropBounds) *CropBounds {
+	if b == nil {
+		return nil
+	}
+	return &CropBounds{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height}
 }
 
 // MovieViewSliceFromModels maps a slice of Movies to MovieViews.

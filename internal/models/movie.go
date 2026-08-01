@@ -295,14 +295,15 @@ func (m *Movie) Clone() *Movie {
 func (m Movie) MarshalJSON() ([]byte, error) {
 	type Alias Movie
 	aux := &struct {
-		PosterURL                string `json:"poster_url"`
-		CoverURL                 string `json:"cover_url"`
-		CroppedPosterURL         string `json:"cropped_poster_url"`
-		ShouldCropPoster         bool   `json:"should_crop_poster"`
-		OriginalPosterURL        string `json:"original_poster_url"`
-		OriginalCroppedPosterURL string `json:"original_cropped_poster_url"`
-		OriginalShouldCropPoster *bool  `json:"original_should_crop_poster"`
-		OriginalCoverURL         string `json:"original_cover_url"`
+		PosterURL                string      `json:"poster_url"`
+		CoverURL                 string      `json:"cover_url"`
+		CroppedPosterURL         string      `json:"cropped_poster_url"`
+		ShouldCropPoster         bool        `json:"should_crop_poster"`
+		OriginalPosterURL        string      `json:"original_poster_url"`
+		OriginalCroppedPosterURL string      `json:"original_cropped_poster_url"`
+		OriginalShouldCropPoster *bool       `json:"original_should_crop_poster"`
+		OriginalCoverURL         string      `json:"original_cover_url"`
+		CropBounds               *CropBounds `json:"poster_crop_bounds,omitempty"`
 		*Alias
 	}{
 		PosterURL:                m.Poster.PosterURL,
@@ -313,6 +314,7 @@ func (m Movie) MarshalJSON() ([]byte, error) {
 		OriginalCroppedPosterURL: m.Poster.OriginalCroppedPosterURL,
 		OriginalShouldCropPoster: m.Poster.OriginalShouldCropPoster,
 		OriginalCoverURL:         m.Poster.OriginalCoverURL,
+		CropBounds:               m.Poster.CropBounds,
 		Alias:                    (*Alias)(&m),
 	}
 	return json.Marshal(aux)
@@ -323,14 +325,15 @@ func (m Movie) MarshalJSON() ([]byte, error) {
 func (m *Movie) UnmarshalJSON(data []byte) error {
 	type Alias Movie
 	aux := &struct {
-		PosterURL                string `json:"poster_url"`
-		CoverURL                 string `json:"cover_url"`
-		CroppedPosterURL         string `json:"cropped_poster_url"`
-		ShouldCropPoster         bool   `json:"should_crop_poster"`
-		OriginalPosterURL        string `json:"original_poster_url"`
-		OriginalCroppedPosterURL string `json:"original_cropped_poster_url"`
-		OriginalShouldCropPoster *bool  `json:"original_should_crop_poster"`
-		OriginalCoverURL         string `json:"original_cover_url"`
+		PosterURL                string      `json:"poster_url"`
+		CoverURL                 string      `json:"cover_url"`
+		CroppedPosterURL         string      `json:"cropped_poster_url"`
+		ShouldCropPoster         bool        `json:"should_crop_poster"`
+		OriginalPosterURL        string      `json:"original_poster_url"`
+		OriginalCroppedPosterURL string      `json:"original_cropped_poster_url"`
+		OriginalShouldCropPoster *bool       `json:"original_should_crop_poster"`
+		OriginalCoverURL         string      `json:"original_cover_url"`
+		CropBounds               *CropBounds `json:"poster_crop_bounds,omitempty"`
 		*Alias
 	}{
 		Alias: (*Alias)(m),
@@ -347,6 +350,7 @@ func (m *Movie) UnmarshalJSON(data []byte) error {
 		OriginalCroppedPosterURL: aux.OriginalCroppedPosterURL,
 		OriginalShouldCropPoster: aux.OriginalShouldCropPoster,
 		OriginalCoverURL:         aux.OriginalCoverURL,
+		CropBounds:               aux.CropBounds,
 	}
 	return nil
 }

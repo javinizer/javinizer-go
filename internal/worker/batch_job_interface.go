@@ -150,7 +150,7 @@ type JobReader interface {
 type JobEditor interface {
 	UpdateMovie(ctx context.Context, filePath string, movie *models.Movie) error
 	ExcludeFile(filePath string)
-	UpdatePosterCrop(movieID string, croppedURL string) error
+	UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds) error
 	UpdatePosterFromURL(ctx context.Context, movieID string, posterURL string, croppedURL string) error
 
 	// ApplyFieldOverride cherry-picks a single field's value from the named
@@ -422,8 +422,8 @@ func (je *jobEditorImpl) ExcludeFile(filePath string) {
 	}
 }
 
-func (je *jobEditorImpl) UpdatePosterCrop(movieID string, croppedURL string) error {
-	return je.posterEditor.UpdatePosterCrop(movieID, croppedURL)
+func (je *jobEditorImpl) UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds) error {
+	return je.posterEditor.UpdatePosterCrop(movieID, croppedURL, bounds)
 }
 
 func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string, posterURL string, croppedURL string) error {

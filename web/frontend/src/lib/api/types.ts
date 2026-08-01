@@ -98,6 +98,15 @@ export interface PosterCropRequest {
 
 export interface PosterCropResponse {
 	cropped_poster_url: string;
+	/** Bounds the server actually stored; absent/null for legacy-source crops. */
+	poster_crop_bounds?: PosterCropBounds | null;
+}
+
+export interface PosterCropBounds {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
 }
 
 export interface PosterFromURLRequest {
@@ -437,6 +446,7 @@ export interface Movie {
 	original_cropped_poster_url?: string;
 	original_should_crop_poster?: boolean | null;
 	original_cover_url?: string;
+	poster_crop_bounds?: PosterCropBounds | null;
 	screenshot_urls?: string[];
 	trailer_url?: string;
 	original_filename?: string;

@@ -37,7 +37,10 @@ func NewPosterEditor(lookup resultstore.ResultReadFacade, updater resultstore.Re
 }
 
 // UpdatePosterCrop updates the cropped poster URL for all files matching movieID.
-func (pe *PosterEditor) UpdatePosterCrop(movieID string, croppedURL string) error {
+// bounds holds the user's manual crop region (source-image pixels); it is stored
+// on the movie so the apply phase can reproduce the exact crop on the final
+// on-disk poster instead of falling back to the default auto-crop.
+func (pe *PosterEditor) UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds) error {
 	filePaths := pe.lookup.FindFilePathsForMovieID(movieID)
 	for _, filePath := range filePaths {
 		err := pe.updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
@@ -48,6 +51,11 @@ func (pe *PosterEditor) UpdatePosterCrop(movieID string, croppedURL string) erro
 			backupPosterOriginals(movie)
 			movie.Poster.CroppedPosterURL = croppedURL
 			movie.Poster.ShouldCropPoster = false
+			movie.Poster.CropBounds = nil
+			if bounds != nil {
+				b := *bounds
+				movie.Poster.CropBounds = &b
+			}
 			current.Movie = movie
 			current.FileMatchInfo.MovieID = movie.ID
 			return current, nil
@@ -74,6 +82,7 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 			movie.Poster.PosterURL = posterURL
 			movie.Poster.CroppedPosterURL = croppedURL
 			movie.Poster.ShouldCropPoster = false
+			movie.Poster.CropBounds = nil
 			current.Movie = movie
 			current.FileMatchInfo.MovieID = movie.ID
 			return current, nil

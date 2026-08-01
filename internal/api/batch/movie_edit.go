@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
@@ -63,7 +64,7 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		_, filePaths, found := lookupResultByResultID(job, resultID)
+		current, filePaths, found := lookupResultByResultID(job, resultID)
 
 		if !found {
 			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
@@ -78,6 +79,21 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// factory is unavailable, fall back to DisplayTitle = Title, matching the
 		// canonical no-template/error degradation (display_title.go).
 		movie := contracts.MovieViewToModel(req.Movie)
+		if b := movie.Poster.CropBounds; b != nil && (b.X < 0 || b.Y < 0 || b.Width <= 0 || b.Height <= 0) {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid poster_crop_bounds: x/y must be >= 0 and width/height must be > 0"})
+			return
+		}
+		// A whole-movie PATCH that changes the poster source or crop decision
+		// invalidates bounds measured against the previous image (defense in
+		// depth — the shipped client clears these itself via the overlay and
+		// field-override paths; the crop and poster-from-url endpoints manage
+		// poster state directly and are unaffected).
+		if current.Movie != nil && movie.Poster.CropBounds != nil {
+			cm := current.Movie.Poster
+			if cm.PosterURL != movie.Poster.PosterURL || cm.CoverURL != movie.Poster.CoverURL || cm.ShouldCropPoster != movie.Poster.ShouldCropPoster {
+				movie.Poster.CropBounds = nil
+			}
+		}
 		movie.DisplayTitle = movie.Title
 		if snap := rt.Snapshot(); snap != nil {
 			if factory, fErr := snap.WorkflowFactory(); fErr == nil && factory != nil {
@@ -168,13 +184,21 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		croppedURL := cropResult.CroppedURL
 
-		if err := job.UpdatePosterCrop(movieID, croppedURL); err != nil {
+		var bounds *models.CropBounds
+		if !cropResult.UsedLegacySource {
+			bounds = &models.CropBounds{X: req.X, Y: req.Y, Width: req.Width, Height: req.Height}
+		}
+		if err := job.UpdatePosterCrop(movieID, croppedURL, bounds); err != nil {
 			logging.Errorf("Failed to update poster crop in job state for %s: %v", movieID, err)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
 			return
 		}
 
-		c.JSON(http.StatusOK, contracts.PosterCropResponse{CroppedPosterURL: croppedURL})
+		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL}
+		if bounds != nil {
+			resp.PosterCropBounds = &contracts.CropBounds{X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height}
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
