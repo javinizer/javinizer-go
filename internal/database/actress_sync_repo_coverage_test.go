@@ -23,6 +23,85 @@ func newActressSyncJobAndTask(t *testing.T, db *DB, actressID *uint, key string)
 	return repo, job, task
 }
 
+func TestActressSyncCreateJobConflictLookupErrors(t *testing.T) {
+	t.Run("active task lookup", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewActressSyncRepository(db)
+		now := time.Now().UTC()
+		existingJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "missing", CreatedAt: now}
+		existingTask := models.ActressSyncTask{ID: uuid.NewString(), JobID: existingJob.ID, Label: "existing", DedupeKey: "lookup:task", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+		require.NoError(t, repo.CreateJob(existingJob, []models.ActressSyncTask{existingTask}))
+		name := "coverage:create-task-lookup:" + uuid.NewString()
+		require.NoError(t, db.DB.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) { tx.AddError(errForcedActressCoverage) }))
+		defer func() { require.NoError(t, db.DB.Callback().Query().Remove(name)) }()
+		job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now.Add(time.Second)}
+		task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: existingTask.ActressID, Label: "selected", DedupeKey: existingTask.DedupeKey, Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now.Add(time.Second)}
+		require.ErrorIs(t, repo.CreateJob(job, []models.ActressSyncTask{task}), errForcedActressCoverage)
+	})
+
+	t.Run("conflict job lookup", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewActressSyncRepository(db)
+		now := time.Now().UTC()
+		existing := models.ActressSyncTask{ID: uuid.NewString(), JobID: "missing-job", Label: "existing", DedupeKey: "lookup:job", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+		require.NoError(t, db.Create(&existing).Error)
+		job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now.Add(time.Second)}
+		task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, Label: "selected", DedupeKey: existing.DedupeKey, Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now.Add(time.Second)}
+		require.Error(t, repo.CreateJob(job, []models.ActressSyncTask{task}))
+	})
+}
+
+func TestActressSyncTaskViews(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	now := time.Now().UTC()
+	job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobRunning, Scope: "missing", CreatedAt: now}
+	require.NoError(t, db.Create(job).Error)
+	started := now.Add(time.Second)
+	completed := now.Add(2 * time.Second)
+	tasks := []models.ActressSyncTask{
+		{ID: uuid.NewString(), JobID: job.ID, Label: "running", DedupeKey: "view:running", Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, StartedAt: &started, CreatedAt: now},
+		{ID: uuid.NewString(), JobID: job.ID, Label: "pending", DedupeKey: "view:pending", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now},
+		{ID: uuid.NewString(), JobID: job.ID, Label: "skipped", DedupeKey: "view:skipped", Status: models.ActressSyncTaskSkipped, Stage: "completed", Messages: []string{}, UpdatedFields: []string{}, CompletedAt: &completed, CreatedAt: now},
+		{ID: uuid.NewString(), JobID: job.ID, Label: "failed", DedupeKey: "view:failed", Status: models.ActressSyncTaskFailed, Stage: "completed", Messages: []string{}, UpdatedFields: []string{}, CompletedAt: &completed, CreatedAt: now.Add(time.Second)},
+		{ID: uuid.NewString(), JobID: job.ID, Label: "completed", DedupeKey: "view:completed", Status: models.ActressSyncTaskCompleted, Stage: "completed", Messages: []string{}, UpdatedFields: []string{}, CompletedAt: &completed, CreatedAt: now.Add(2 * time.Second)},
+	}
+	require.NoError(t, db.Create(&tasks).Error)
+	repo := NewActressSyncRepository(db)
+	running, err := repo.ListRunningTasks(job.ID)
+	require.NoError(t, err)
+	require.Len(t, running, 1)
+	require.Equal(t, "running", running[0].Label)
+	diagnostics, err := repo.ListDiagnosticTasks(job.ID, 1)
+	require.NoError(t, err)
+	require.Len(t, diagnostics, 1)
+	require.Equal(t, "failed", diagnostics[0].Label)
+	diagnostics, err = repo.ListDiagnosticTasks(job.ID, 0)
+	require.NoError(t, err)
+	require.Len(t, diagnostics, 2)
+}
+
+func TestActressSyncCreateJobPreservesSelectedDuplicate(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	actressRepo := NewActressRepository(db)
+	actress := &models.Actress{JapaneseName: "selected duplicate"}
+	require.NoError(t, actressRepo.Create(context.Background(), actress))
+	now := time.Now().UTC()
+	dedupeKey := fmt.Sprintf("actress:%d", actress.ID)
+	missingJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "missing", CreatedAt: now}
+	missingTask := models.ActressSyncTask{ID: uuid.NewString(), JobID: missingJob.ID, ActressID: &actress.ID, DedupeKey: dedupeKey, Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	repo := NewActressSyncRepository(db)
+	require.NoError(t, repo.CreateJob(missingJob, []models.ActressSyncTask{missingTask}))
+	selectedJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now.Add(time.Second)}
+	selectedTask := models.ActressSyncTask{ID: uuid.NewString(), JobID: selectedJob.ID, ActressID: &actress.ID, DedupeKey: dedupeKey, Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now.Add(time.Second)}
+	require.NoError(t, repo.CreateJob(selectedJob, []models.ActressSyncTask{selectedTask}))
+	stored, err := repo.ListTasks(selectedJob.ID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, models.ActressSyncTaskPending, stored[0].Status)
+	require.Equal(t, deferredActressSyncDedupeKey(actress.ID, selectedTask.ID), stored[0].DedupeKey)
+	require.Equal(t, []string{"deferred_to_stronger_sync_task"}, stored[0].Messages)
+}
+
 func TestActressSyncCreateJobCoalescesDuplicateActiveTasks(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	now := time.Now().UTC()
@@ -162,6 +241,63 @@ func TestActressSyncReassignJobScopeErrors(t *testing.T) {
 	})
 }
 
+func TestActressSyncDeferredReassignErrorBranches(t *testing.T) {
+	setup := func(t *testing.T, withConflict, withDeferred bool) (*DB, *ActressSyncRepository, models.ActressSyncTask, models.Actress, models.Actress) {
+		t.Helper()
+		db := newDatabaseTestDB(t)
+		actressRepo := NewActressRepository(db)
+		from := models.Actress{JapaneseName: "deferred from"}
+		to := models.Actress{DMMID: 1501, JapaneseName: "deferred to"}
+		require.NoError(t, actressRepo.Create(context.Background(), &from))
+		require.NoError(t, actressRepo.Create(context.Background(), &to))
+		now := time.Now().UTC()
+		missingJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobRunning, Scope: "missing", CreatedAt: now}
+		selectedJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now}
+		expires := now.Add(time.Hour)
+		current := models.ActressSyncTask{ID: uuid.NewString(), JobID: missingJob.ID, ActressID: &from.ID, DedupeKey: fmt.Sprintf("actress:%d", from.ID), Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, LeaseOwner: "owner", LeaseToken: "token", LeaseExpiresAt: &expires, CreatedAt: now}
+		require.NoError(t, db.Create(missingJob).Error)
+		require.NoError(t, db.Create(selectedJob).Error)
+		require.NoError(t, db.Create(&current).Error)
+		if withConflict {
+			conflict := models.ActressSyncTask{ID: uuid.NewString(), JobID: selectedJob.ID, ActressID: &to.ID, DedupeKey: fmt.Sprintf("actress:%d", to.ID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+			require.NoError(t, db.Create(&conflict).Error)
+		}
+		if withDeferred {
+			deferred := models.ActressSyncTask{ID: uuid.NewString(), JobID: selectedJob.ID, ActressID: &from.ID, DedupeKey: deferredActressSyncDedupeKey(from.ID, "source"), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+			require.NoError(t, db.Create(&deferred).Error)
+		}
+		return db, NewActressSyncRepository(db), current, from, to
+	}
+
+	t.Run("conflict query error", func(t *testing.T) {
+		db, repo, current, from, to := setup(t, false, false)
+		remove := forceQueryErrorOnCall(t, db, 3)
+		defer remove()
+		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errForcedActressCoverage)
+	})
+
+	t.Run("deferred task query error", func(t *testing.T) {
+		db, repo, current, from, to := setup(t, false, true)
+		remove := forceQueryErrorOnCall(t, db, 4)
+		defer remove()
+		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errForcedActressCoverage)
+	})
+
+	t.Run("deferred task update error", func(t *testing.T) {
+		db, repo, current, from, to := setup(t, true, true)
+		remove := forceUpdateError(t, db)
+		defer remove()
+		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errForcedActressCoverage)
+	})
+
+	t.Run("deferred task fenced update", func(t *testing.T) {
+		db, repo, current, from, to := setup(t, true, true)
+		remove := forceZeroRowsAfterUpdate(t, db)
+		defer remove()
+		require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), errActressSyncLeaseLost)
+	})
+}
+
 func TestActressSyncReassignPreservesStrongerPendingSelection(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	actressRepo := NewActressRepository(db)
@@ -175,19 +311,25 @@ func TestActressSyncReassignPreservesStrongerPendingSelection(t *testing.T) {
 	expires := now.Add(time.Hour)
 	current := models.ActressSyncTask{ID: uuid.NewString(), JobID: missingJob.ID, ActressID: &from.ID, DedupeKey: fmt.Sprintf("actress:%d", from.ID), Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, LeaseOwner: "owner", LeaseToken: "token", LeaseExpiresAt: &expires, CreatedAt: now}
 	pending := models.ActressSyncTask{ID: uuid.NewString(), JobID: selectedJob.ID, ActressID: &to.ID, DedupeKey: fmt.Sprintf("actress:%d", to.ID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	deferred := models.ActressSyncTask{ID: uuid.NewString(), JobID: selectedJob.ID, ActressID: &from.ID, DedupeKey: deferredActressSyncDedupeKey(from.ID, "selected"), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
 	require.NoError(t, db.Create(missingJob).Error)
 	require.NoError(t, db.Create(selectedJob).Error)
 	require.NoError(t, db.Create(&current).Error)
 	require.NoError(t, db.Create(&pending).Error)
+	require.NoError(t, db.Create(&deferred).Error)
 
 	repo := NewActressSyncRepository(db)
-	require.ErrorIs(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID), ErrActressSyncStrongerPending)
-	var storedCurrent, storedPending models.ActressSyncTask
+	require.NoError(t, repo.reassignTaskActressTx(db.DB, current.ID, current.LeaseToken, to.ID, from.ID))
+	var storedCurrent, storedPending, storedDeferred models.ActressSyncTask
 	require.NoError(t, db.First(&storedCurrent, "id = ?", current.ID).Error)
 	require.NoError(t, db.First(&storedPending, "id = ?", pending.ID).Error)
-	require.Equal(t, from.ID, *storedCurrent.ActressID)
+	require.NoError(t, db.First(&storedDeferred, "id = ?", deferred.ID).Error)
+	require.Equal(t, to.ID, *storedCurrent.ActressID)
+	require.Equal(t, deferredActressSyncDedupeKey(to.ID, current.ID), storedCurrent.DedupeKey)
 	require.Equal(t, models.ActressSyncTaskRunning, storedCurrent.Status)
 	require.Equal(t, models.ActressSyncTaskPending, storedPending.Status)
+	require.Equal(t, to.ID, *storedDeferred.ActressID)
+	require.Equal(t, deferredActressSyncDedupeKey(to.ID, deferred.ID), storedDeferred.DedupeKey)
 }
 
 func TestSourceFencedActressOperations(t *testing.T) {

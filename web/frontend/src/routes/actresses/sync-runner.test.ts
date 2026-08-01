@@ -51,11 +51,24 @@ describe('actress sync summary', () => {
 		const active = task('active', 'running');
 		const snapshot = await loadActressSyncSnapshot({
 			async getActressSyncJob(jobID) { calls.push(`job:${jobID}`); jobLoaded = true; return { job }; },
-			async listActressSyncJobTasks(jobID) { expect(jobLoaded).toBe(true); calls.push(`tasks:${jobID}`); return { tasks: [active] }; },
+			async listActressSyncJobTasks(jobID, view) { expect(jobLoaded).toBe(true); calls.push(`tasks:${jobID}:${view}`); return { tasks: [active] }; },
 			async listActiveActressSyncJobs() { return { jobs: [job] }; },
 		}, job.id);
-		expect(calls).toEqual(['job:job', 'tasks:job']);
+		expect(calls).toEqual(['job:job', 'tasks:job:active']);
 		expect(snapshot).toEqual({ job, tasks: [active] });
+	});
+
+	it('loads bounded diagnostics after a job reaches a terminal state', async () => {
+		const terminalJob = { ...job, status: 'completed' as const };
+		const diagnostic = task('diagnostic', 'failed');
+		let requestedView = '';
+		const snapshot = await loadActressSyncSnapshot({
+			async getActressSyncJob() { return { job: terminalJob }; },
+			async listActressSyncJobTasks(_jobID, view) { requestedView = view ?? ''; return { tasks: [diagnostic] }; },
+			async listActiveActressSyncJobs() { return { jobs: [] }; },
+		}, terminalJob.id);
+		expect(requestedView).toBe('diagnostics');
+		expect(snapshot).toEqual({ job: terminalJob, tasks: [diagnostic] });
 	});
 
 	it('selects the newest active job and handles an empty queue', async () => {

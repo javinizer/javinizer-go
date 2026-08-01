@@ -250,8 +250,8 @@ class APIClient {
 	async getActressSyncJob(jobID: string) {
 		return this.actresses.getActressSyncJob(jobID);
 	}
-	async listActressSyncJobTasks(jobID: string) {
-		return this.actresses.listActressSyncJobTasks(jobID);
+	async listActressSyncJobTasks(jobID: string, view?: 'active' | 'diagnostics') {
+		return this.actresses.listActressSyncJobTasks(jobID, view);
 	}
 	async cancelActressSyncJob(jobID: string) {
 		return this.actresses.cancelActressSyncJob(jobID);

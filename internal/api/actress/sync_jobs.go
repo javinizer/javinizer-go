@@ -95,7 +95,17 @@ func listActressSyncJobTasks(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "actress sync manager is unavailable"})
 			return
 		}
-		tasks, err := manager.ListTasks(c.Param("jobID"))
+		jobID := c.Param("jobID")
+		var tasks []models.ActressSyncTask
+		var err error
+		switch c.Query("view") {
+		case "active":
+			tasks, err = manager.ListRunningTasks(jobID)
+		case "diagnostics":
+			tasks, err = manager.ListDiagnosticTasks(jobID, 100)
+		default:
+			tasks, err = manager.ListTasks(jobID)
+		}
 		if err != nil {
 			writeActressSyncError(c, err)
 			return

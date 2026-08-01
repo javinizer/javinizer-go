@@ -26,9 +26,6 @@ var ErrActressSyncCanonicalTaskRunning = errors.New("canonical actress sync task
 // ErrActressSyncIdentityChanged ...
 var ErrActressSyncIdentityChanged = errors.New("actress sync identity changed during merge")
 
-// ErrActressSyncStrongerPending ...
-var ErrActressSyncStrongerPending = errors.New("stronger actress sync task is pending")
-
 // ActressSyncRepository ...
 type ActressSyncRepository struct{ db *DB }
 
@@ -47,11 +44,24 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 					if !strings.Contains(strings.ToLower(err.Error()), "unique") {
 						return err
 					}
-					now := time.Now().UTC()
-					tasks[i].Status, tasks[i].Stage, tasks[i].Outcome = models.ActressSyncTaskSkipped, "completed", "skipped"
-					tasks[i].Messages = []string{"duplicate_active_task"}
-					tasks[i].CompletedAt = &now
-					tasks[i].DedupeKey += ":duplicate:" + tasks[i].ID
+					var conflict models.ActressSyncTask
+					if lookupErr := tx.Where("dedupe_key = ? AND status IN ?", tasks[i].DedupeKey, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).First(&conflict).Error; lookupErr != nil {
+						return lookupErr
+					}
+					var conflictJob models.ActressSyncJob
+					if lookupErr := tx.First(&conflictJob, "id = ?", conflict.JobID).Error; lookupErr != nil {
+						return lookupErr
+					}
+					if tasks[i].ActressID != nil && actressSyncScopePriority(job.Scope) > actressSyncScopePriority(conflictJob.Scope) {
+						tasks[i].DedupeKey = deferredActressSyncDedupeKey(*tasks[i].ActressID, tasks[i].ID)
+						tasks[i].Messages = []string{"deferred_to_stronger_sync_task"}
+					} else {
+						now := time.Now().UTC()
+						tasks[i].Status, tasks[i].Stage, tasks[i].Outcome = models.ActressSyncTaskSkipped, "completed", "skipped"
+						tasks[i].Messages = []string{"duplicate_active_task"}
+						tasks[i].CompletedAt = &now
+						tasks[i].DedupeKey += ":duplicate:" + tasks[i].ID
+					}
 					if err := tx.Create(&tasks[i]).Error; err != nil {
 						return err
 					}
@@ -110,6 +120,24 @@ func (r *ActressSyncRepository) ListActiveJobs() ([]models.ActressSyncJob, error
 func (r *ActressSyncRepository) ListTasks(jobID string) ([]models.ActressSyncTask, error) {
 	tasks := make([]models.ActressSyncTask, 0)
 	err := r.db.Where("job_id = ?", jobID).Order("created_at ASC, id ASC").Find(&tasks).Error
+	return tasks, err
+}
+
+// ListRunningTasks returns currently running tasks for a sync job.
+func (r *ActressSyncRepository) ListRunningTasks(jobID string) ([]models.ActressSyncTask, error) {
+	tasks := make([]models.ActressSyncTask, 0)
+	err := r.db.Where("job_id = ? AND status = ?", jobID, models.ActressSyncTaskRunning).Order("started_at ASC, id ASC").Find(&tasks).Error
+	return tasks, err
+}
+
+// ListDiagnosticTasks returns a bounded terminal-task diagnostic history for a sync job.
+func (r *ActressSyncRepository) ListDiagnosticTasks(jobID string, limit int) ([]models.ActressSyncTask, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	tasks := make([]models.ActressSyncTask, 0)
+	err := r.db.Where("job_id = ? AND (status IN ? OR TRIM(COALESCE(warning, '')) <> '' OR TRIM(COALESCE(error_message, '')) <> '')", jobID, []string{models.ActressSyncTaskSkipped, models.ActressSyncTaskConflict, models.ActressSyncTaskFailed, models.ActressSyncTaskCancelled}).
+		Order("completed_at DESC, created_at DESC, id DESC").Limit(limit).Find(&tasks).Error
 	return tasks, err
 }
 
@@ -368,39 +396,58 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 		return errActressSyncLeaseLost
 	}
 	dedupeKey := fmt.Sprintf("actress:%d", actressID)
+	currentDedupeKey := dedupeKey
+	var taskJob models.ActressSyncJob
+	if err := tx.First(&taskJob, "id = ?", task.JobID).Error; err != nil {
+		return err
+	}
 	var conflict models.ActressSyncTask
 	err := tx.Where("id <> ? AND dedupe_key = ? AND status IN ?", id, dedupeKey, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).First(&conflict).Error
 	if err == nil {
 		if conflict.Status == models.ActressSyncTaskRunning {
 			return fmt.Errorf("%w: actress %d", ErrActressSyncCanonicalTaskRunning, actressID)
 		}
-		var taskJob, conflictJob models.ActressSyncJob
-		if err := tx.First(&taskJob, "id = ?", task.JobID).Error; err != nil {
-			return err
-		}
+		var conflictJob models.ActressSyncJob
 		if err := tx.First(&conflictJob, "id = ?", conflict.JobID).Error; err != nil {
 			return err
 		}
 		if actressSyncScopePriority(conflictJob.Scope) > actressSyncScopePriority(taskJob.Scope) {
-			return ErrActressSyncStrongerPending
-		}
-		now := time.Now().UTC()
-		messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
-		if err := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", conflict.ID, models.ActressSyncTaskPending).Updates(map[string]any{
-			"status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
-		}).Error; err != nil {
-			return err
-		}
-		if err := r.refreshJobTx(tx, conflict.JobID, now); err != nil {
-			return err
+			currentDedupeKey = deferredActressSyncDedupeKey(actressID, id)
+		} else {
+			now := time.Now().UTC()
+			messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
+			if err := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", conflict.ID, models.ActressSyncTaskPending).Updates(map[string]any{
+				"status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
+			}).Error; err != nil {
+				return err
+			}
+			if err := r.refreshJobTx(tx, conflict.JobID, now); err != nil {
+				return err
+			}
 		}
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
+	var deferredTasks []models.ActressSyncTask
+	if err := tx.Where("id <> ? AND actress_id = ? AND status = ?", id, expectedActressID, models.ActressSyncTaskPending).Find(&deferredTasks).Error; err != nil {
+		return err
+	}
+	for _, deferredTask := range deferredTasks {
+		fields, _ := appendSyncTaskFields(deferredTask.UpdatedFields, []string{"merged_duplicate"})
+		result := tx.Model(&models.ActressSyncTask{}).
+			Where("id = ? AND status = ? AND actress_id = ?", deferredTask.ID, models.ActressSyncTaskPending, expectedActressID).
+			Updates(map[string]any{"actress_id": actressID, "dedupe_key": deferredActressSyncDedupeKey(actressID, deferredTask.ID), "updated_fields": fields})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errActressSyncLeaseLost
+		}
+	}
 	fields, _ := appendSyncTaskFields(task.UpdatedFields, []string{"merged_duplicate"})
 	result := tx.Model(&models.ActressSyncTask{}).
 		Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ? AND actress_id = ?", id, models.ActressSyncTaskRunning, token, leaseNow, expectedActressID).
-		Updates(map[string]any{"actress_id": actressID, "dedupe_key": dedupeKey, "updated_fields": fields})
+		Updates(map[string]any{"actress_id": actressID, "dedupe_key": currentDedupeKey, "updated_fields": fields})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -415,6 +462,10 @@ func actressSyncScopePriority(scope string) int {
 		return 2
 	}
 	return 1
+}
+
+func deferredActressSyncDedupeKey(actressID uint, taskID string) string {
+	return fmt.Sprintf("actress:%d:deferred:%s", actressID, taskID)
 }
 
 func mergeSyncTaskFields(existing, additional []string) []string {

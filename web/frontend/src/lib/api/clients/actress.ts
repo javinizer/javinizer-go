@@ -57,8 +57,9 @@ export class ActressClient extends BaseClient {
 		return this.request<ActressSyncJobResponse>(`/api/v1/actresses/sync-jobs/${jobID}`);
 	}
 
-	async listActressSyncJobTasks(jobID: string): Promise<ActressSyncTasksResponse> {
-		return this.request<ActressSyncTasksResponse>(`/api/v1/actresses/sync-jobs/${jobID}/tasks`);
+	async listActressSyncJobTasks(jobID: string, view?: 'active' | 'diagnostics'): Promise<ActressSyncTasksResponse> {
+		const query = view ? `?view=${view}` : '';
+		return this.request<ActressSyncTasksResponse>(`/api/v1/actresses/sync-jobs/${jobID}/tasks${query}`);
 	}
 
 	async cancelActressSyncJob(jobID: string): Promise<ActressSyncJobResponse> {

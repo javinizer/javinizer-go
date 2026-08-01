@@ -305,17 +305,17 @@ func TestLinkedIdentityRecoveryFencesSourceChanges(t *testing.T) {
 	})
 }
 
-func TestActressSyncManagerDefersToStrongerPendingTask(t *testing.T) {
-	db, actressRepo, movieRepo, source := newActressSyncFixture(t, &models.Actress{JapaneseName: "defer stronger"})
-	canonical := &models.Actress{DMMID: 1402, JapaneseName: "defer stronger"}
+func TestActressSyncManagerMergesWithStrongerPendingTask(t *testing.T) {
+	db, actressRepo, movieRepo, source := newActressSyncFixture(t, &models.Actress{JapaneseName: "merge stronger"})
+	canonical := &models.Actress{DMMID: 1402, JapaneseName: "merge stronger"}
 	require.NoError(t, actressRepo.Create(t.Context(), canonical))
 	manager := NewActressSyncManager(ActressSyncManagerDeps{DB: db, ActressRepo: actressRepo, MovieRepo: movieRepo})
 	now := time.Now().UTC()
-	missingJob := &models.ActressSyncJob{ID: "defer-missing-" + t.Name(), Status: models.ActressSyncJobRunning, Scope: "missing", CreatedAt: now}
-	selectedJob := &models.ActressSyncJob{ID: "defer-selected-" + t.Name(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now}
+	missingJob := &models.ActressSyncJob{ID: "merge-missing-" + t.Name(), Status: models.ActressSyncJobRunning, Scope: "missing", CreatedAt: now}
+	selectedJob := &models.ActressSyncJob{ID: "merge-selected-" + t.Name(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now}
 	expires := now.Add(time.Hour)
-	current := models.ActressSyncTask{ID: "defer-current-" + t.Name(), JobID: missingJob.ID, ActressID: &source.ID, DedupeKey: "actress:" + fmt.Sprint(source.ID), Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, LeaseOwner: "owner", LeaseToken: "token", LeaseExpiresAt: &expires, CreatedAt: now}
-	pending := models.ActressSyncTask{ID: "defer-pending-" + t.Name(), JobID: selectedJob.ID, ActressID: &canonical.ID, DedupeKey: "actress:" + fmt.Sprint(canonical.ID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	current := models.ActressSyncTask{ID: "merge-current-" + t.Name(), JobID: missingJob.ID, ActressID: &source.ID, DedupeKey: "actress:" + fmt.Sprint(source.ID), Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, LeaseOwner: "owner", LeaseToken: "token", LeaseExpiresAt: &expires, CreatedAt: now}
+	pending := models.ActressSyncTask{ID: "merge-pending-" + t.Name(), JobID: selectedJob.ID, ActressID: &canonical.ID, DedupeKey: "actress:" + fmt.Sprint(canonical.ID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
 	require.NoError(t, db.Create(missingJob).Error)
 	require.NoError(t, db.Create(selectedJob).Error)
 	require.NoError(t, db.Create(&current).Error)
@@ -328,12 +328,36 @@ func TestActressSyncManagerDefersToStrongerPendingTask(t *testing.T) {
 	var storedCurrent, storedPending models.ActressSyncTask
 	require.NoError(t, db.First(&storedCurrent, "id = ?", current.ID).Error)
 	require.NoError(t, db.First(&storedPending, "id = ?", pending.ID).Error)
-	require.Equal(t, models.ActressSyncTaskSkipped, storedCurrent.Status)
-	require.Equal(t, "deferred", storedCurrent.Outcome)
-	require.Equal(t, []string{"deferred_to_stronger_sync_task"}, storedCurrent.Messages)
+	require.Equal(t, models.ActressSyncTaskCompleted, storedCurrent.Status)
+	require.Equal(t, fmt.Sprintf("actress:%d:deferred:%s", canonical.ID, current.ID), storedCurrent.DedupeKey)
 	require.Equal(t, models.ActressSyncTaskPending, storedPending.Status)
 	_, err := actressRepo.FindByID(t.Context(), source.ID)
+	require.Error(t, err)
+	_, err = actressRepo.FindByID(t.Context(), canonical.ID)
 	require.NoError(t, err)
+}
+
+func TestActressSyncManagerTaskViews(t *testing.T) {
+	db, actressRepo, movieRepo, _ := newActressSyncFixture(t, &models.Actress{DMMID: 1601, JapaneseName: "task views"})
+	manager := NewActressSyncManager(ActressSyncManagerDeps{DB: db, ActressRepo: actressRepo, MovieRepo: movieRepo})
+	now := time.Now().UTC()
+	job := &models.ActressSyncJob{ID: "task-views-" + t.Name(), Status: models.ActressSyncJobRunning, Scope: "missing", CreatedAt: now}
+	require.NoError(t, db.Create(job).Error)
+	started := now.Add(time.Second)
+	completed := now.Add(2 * time.Second)
+	tasks := []models.ActressSyncTask{
+		{ID: "task-views-running-" + t.Name(), JobID: job.ID, Label: "running", DedupeKey: "task-views:running:" + t.Name(), Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, StartedAt: &started, CreatedAt: now},
+		{ID: "task-views-failed-" + t.Name(), JobID: job.ID, Label: "failed", DedupeKey: "task-views:failed:" + t.Name(), Status: models.ActressSyncTaskFailed, Stage: "completed", Messages: []string{}, UpdatedFields: []string{}, CompletedAt: &completed, CreatedAt: now},
+	}
+	require.NoError(t, db.Create(&tasks).Error)
+	running, err := manager.ListRunningTasks(job.ID)
+	require.NoError(t, err)
+	require.Len(t, running, 1)
+	diagnostics, err := manager.ListDiagnosticTasks(job.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, diagnostics, 1)
+	require.Error(t, func() error { _, err := manager.ListRunningTasks("missing"); return err }())
+	require.Error(t, func() error { _, err := manager.ListDiagnosticTasks("missing", 10); return err }())
 }
 
 func TestSyncActressMetadataCallbackFailures(t *testing.T) {

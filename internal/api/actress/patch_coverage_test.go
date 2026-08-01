@@ -103,6 +103,36 @@ func TestSyncJobHandlerLifecycle(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestSyncJobTaskViews(t *testing.T) {
+	db, _, _ := setupActressTestDB(t)
+	repos := db.Repositories()
+	coreDeps, err := commandutil.NewDependenciesWithOptions(config.DefaultConfig(nil, nil), &commandutil.DependenciesOptions{DB: db, ScraperRegistry: scraperutil.NewScraperRegistry()})
+	require.NoError(t, err)
+	rt := core.NewAPIRuntime(&core.APIDeps{CoreDeps: coreDeps, Repos: repos})
+	t.Cleanup(rt.Shutdown)
+	now := time.Now().UTC()
+	job := &models.ActressSyncJob{ID: "task-view-job", Status: models.ActressSyncJobRunning, Scope: "missing", CreatedAt: now}
+	require.NoError(t, db.Create(job).Error)
+	started := now.Add(time.Second)
+	completed := now.Add(2 * time.Second)
+	tasks := []models.ActressSyncTask{
+		{ID: "task-view-running", JobID: job.ID, Label: "running", DedupeKey: "view:running", Status: models.ActressSyncTaskRunning, Stage: "resolving", Messages: []string{}, UpdatedFields: []string{}, StartedAt: &started, CreatedAt: now},
+		{ID: "task-view-failed", JobID: job.ID, Label: "failed", DedupeKey: "view:failed", Status: models.ActressSyncTaskFailed, Stage: "completed", Messages: []string{}, UpdatedFields: []string{}, CompletedAt: &completed, CreatedAt: now},
+	}
+	require.NoError(t, db.Create(&tasks).Error)
+	router := gin.New()
+	router.GET("/jobs/:jobID/tasks", listActressSyncJobTasks(rt))
+	for _, view := range []string{"active", "diagnostics"} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/jobs/"+job.ID+"/tasks?view="+view, nil))
+		require.Equal(t, http.StatusOK, response.Code)
+		var body actressSyncTasksResponse
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.Len(t, body.Tasks, 1)
+		require.Equal(t, map[string]string{"active": "running", "diagnostics": "failed"}[view], body.Tasks[0].Label)
+	}
+}
+
 func TestSyncHandlersReportRepositoryErrors(t *testing.T) {
 	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:"})
 	require.NoError(t, err)
