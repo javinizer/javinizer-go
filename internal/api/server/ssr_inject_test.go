@@ -64,14 +64,34 @@ func TestInjectSSRState_WithBrowseBootstrapCookie(t *testing.T) {
 }
 
 func TestInjectSSRState_InvalidBrowseBootstrapCookieIsIgnored(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rt := &core.APIRuntime{}
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/browse", nil)
-	c.Request.AddCookie(&http.Cookie{Name: browseBootstrapCookie, Value: `%7B%22version%22%3A1%2C%22initialPath%22%3A%22%2Fvideos%22%7D`})
-	result := injectSSRState([]byte(`<html><head></head></html>`), rt, c)
-	assert.NotContains(t, string(result), `"browseBootstrap"`)
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "missing selected scrapers", value: `%7B%22version%22%3A1%2C%22initialPath%22%3A%22%2Fvideos%22%7D`},
+		{name: "malformed JSON", value: `%7B`},
+		{name: "wrong version", value: `%7B%22version%22%3A2%2C%22selectedScrapers%22%3A%5B%5D%7D`},
+		{name: "wrong selected scraper type", value: `%7B%22version%22%3A1%2C%22selectedScrapers%22%3A%5B1%5D%7D`},
+		{name: "invalid escape", value: `%zz`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rt := &core.APIRuntime{}
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/browse", nil)
+			c.Request.Header.Set("Cookie", browseBootstrapCookie+"="+tt.value)
+			result := injectSSRState([]byte(`<html><head></head></html>`), rt, c)
+			assert.NotContains(t, string(result), `"browseBootstrap"`)
+		})
+	}
+}
+
+func TestDecodeBrowseBootstrapCookie_InvalidEscape(t *testing.T) {
+	decoded, ok := decodeBrowseBootstrapCookie("%zz")
+	assert.Nil(t, decoded)
+	assert.False(t, ok)
 }
 
 func TestInjectSSRState_NoHeadMarker_ReturnsOriginalHTML(t *testing.T) {
