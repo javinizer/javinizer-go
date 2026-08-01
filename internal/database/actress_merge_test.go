@@ -344,6 +344,32 @@ func TestNonEmptyString(t *testing.T) {
 	assert.False(t, nonEmptyString("   "))
 }
 
+func TestExecuteMergeMigratesActiveSourceTasks(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	ctx := context.Background()
+	target := &models.Actress{JapaneseName: "target"}
+	source := &models.Actress{JapaneseName: "source"}
+	require.NoError(t, repo.Create(ctx, target))
+	require.NoError(t, repo.Create(ctx, source))
+
+	syncRepo := NewActressSyncRepository(db)
+	job := &models.ActressSyncJob{ID: "merge-task-job", Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: time.Now().UTC()}
+	task := models.ActressSyncTask{ID: "merge-task", JobID: job.ID, ActressID: &source.ID, Label: "source", DedupeKey: "source", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: time.Now().UTC()}
+	require.NoError(t, syncRepo.CreateJob(job, []models.ActressSyncTask{task}))
+
+	plan, err := repo.merger.PlanMerge(ctx, target.ID, source.ID, nil)
+	require.NoError(t, err)
+	_, err = repo.merger.ExecuteMerge(ctx, plan, db)
+	require.NoError(t, err)
+
+	tasks, err := syncRepo.ListTasks(job.ID)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.NotNil(t, tasks[0].ActressID)
+	require.Equal(t, target.ID, *tasks[0].ActressID)
+}
+
 func TestExecuteMergeRecomputesCurrentTargetValues(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewActressRepository(db)
