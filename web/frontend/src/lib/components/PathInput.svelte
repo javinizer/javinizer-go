@@ -200,6 +200,8 @@
 				selectSuggestion(displayedSuggestions[activeIndex]);
 				return;
 			}
+			focused = false;
+			clearSuggestions();
 			onnavigate?.(value.trim());
 		} else if (e.key === 'Escape') {
 			if (escapeValue !== undefined) value = escapeValue;

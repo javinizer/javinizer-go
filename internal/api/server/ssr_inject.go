@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
-	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 const (
@@ -46,11 +45,7 @@ func injectSSRState(html []byte, rt *core.APIRuntime, c *gin.Context) []byte {
 		}
 	}
 
-	payload, err := json.Marshal(state)
-	if err != nil {
-		logging.Warnf("SSR inject: failed to marshal state: %v", err)
-		return html
-	}
+	payload, _ := json.Marshal(state)
 
 	script := []byte("<script>window.__JAVINIZER_SSR__=" + string(payload) + ";</script>")
 	idx := bytes.Index(html, []byte(ssrInjectMarker))

@@ -175,6 +175,16 @@ func TestPreviewOrchImpl_Execute_BasicPreview(t *testing.T) {
 	assert.Equal(t, "ABC-123", result.FolderName)
 	assert.Equal(t, "ABC-123", result.FileName)
 	assert.NotEmpty(t, result.VideoFiles)
+
+	orch.previewCfg.NFOEnabled = false
+	_, err = orch.Execute(context.Background(), PreviewCmd{
+		Movie:         &models.Movie{ID: "ABC-123", Title: "Test Movie"},
+		FileResults:   []models.FileMatchInfo{{Path: "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4", MovieID: "ABC-123"}},
+		Destination:   "/output",
+		OperationMode: operationmode.OperationModeOrganize,
+		ForceNFO:      true,
+	})
+	require.NoError(t, err)
 }
 
 func TestPreviewOrchImpl_Execute_InPlaceNoRenameWithEmptySourcePath(t *testing.T) {

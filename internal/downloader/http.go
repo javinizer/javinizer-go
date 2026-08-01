@@ -109,12 +109,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	tempPath, err := uniqueTempPath(destPath, "tmp")
-	if err != nil {
-		result.Error = fmt.Errorf("failed to create temporary path: %w", err)
-		result.Duration = time.Since(startTime)
-		return result, result.Error
-	}
+	tempPath := uniqueTempPath(destPath, "tmp")
 	outFile, err := d.fs.Create(tempPath)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create file: %w", err)
@@ -164,12 +159,10 @@ func resolveDownloadOptions(options []any) (bool, *sync.Map) {
 	return overwriteExisting, dedup
 }
 
-func uniqueTempPath(destPath, suffix string) (string, error) {
+func uniqueTempPath(destPath, suffix string) string {
 	buf := make([]byte, 8)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return destPath + "." + hex.EncodeToString(buf) + "." + suffix, nil
+	_, _ = rand.Read(buf)
+	return destPath + "." + hex.EncodeToString(buf) + "." + suffix
 }
 
 // retryableOperation wraps an attempt function with retry logic for transient errors.

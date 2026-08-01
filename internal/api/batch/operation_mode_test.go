@@ -43,7 +43,7 @@ func TestOrganizeJob_OperationMode(t *testing.T) {
 			operationMode:  "preview",
 			configMode:     "organize",
 			expectedStatus: 400,
-			expectedError:  "preview mode should use the preview endpoint",
+			expectedError:  "Preview mode should use the preview endpoint",
 		},
 		{
 			name:           "invalid operation mode returns 400",

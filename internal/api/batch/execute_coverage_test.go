@@ -144,7 +144,7 @@ func TestOrganizeJob_PreviewModeRejected(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 400, w.Code)
-	assert.Contains(t, w.Body.String(), "preview mode")
+	assert.Contains(t, w.Body.String(), "Preview mode")
 }
 
 func TestPreviewOrganize_PreviewDirAllowed(t *testing.T) {

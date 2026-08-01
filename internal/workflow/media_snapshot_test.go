@@ -183,3 +183,19 @@ func TestActressNamesMatchSupportsReversedRomanizedNames(t *testing.T) {
 	))
 	assert.False(t, actressNamesMatch(models.Actress{FirstName: "Yui"}, models.Actress{LastName: "Hatano"}))
 }
+
+func TestSnapshotOverlayNilInputs(t *testing.T) {
+	assert.Nil(t, snapshotScrapedMedia(nil))
+	var snapshot *scrapedMediaSnapshot
+	assert.Nil(t, snapshot.overlay(nil))
+	movie := &models.Movie{ID: "TEST-004", Title: "Existing"}
+	assert.Equal(t, movie, snapshot.overlay(movie))
+}
+
+func TestOverlayActressThumbsUsesRomanizedFallback(t *testing.T) {
+	merged := []models.Actress{{FirstName: "Yui", LastName: "Hatano"}}
+	scraped := []models.Actress{{FirstName: "Hatano", LastName: "Yui", ThumbURL: "romanized"}}
+	result := overlayActressThumbs(merged, scraped)
+	require.Len(t, result, 1)
+	assert.Equal(t, "romanized", result[0].ThumbURL)
+}

@@ -76,6 +76,22 @@ func TestListJobsUseCase_HappyPath(t *testing.T) {
 	assert.Equal(t, int64(0), out.Jobs[1].RevertedCount)
 }
 
+func TestListJobsUseCase_MalformedPersistedApplyPlanWarnsAndContinues(t *testing.T) {
+	jobRepo := mocks.NewMockJobRepositoryInterface(t)
+	opRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	deps := newTestAPIDeps(t, jobRepo, opRepo)
+	rawPlan := "{"
+	jobRepo.On("List", mock.Anything).Return([]models.Job{{ID: "bad-plan", ApplyPlan: &rawPlan}}, nil)
+	opRepo.On("CountByBatchJobIDs", mock.Anything, []string{"bad-plan"}).Return(map[string]int64{}, nil)
+	opRepo.On("CountRevertedByBatchJobIDs", mock.Anything, []string{"bad-plan"}).Return(map[string]int64{}, nil)
+
+	out, err := ListJobsUseCase(context.Background(), deps, ListJobsInput{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, out.Jobs, 1)
+	assert.Equal(t, "bad-plan", out.Jobs[0].ID)
+	assert.Nil(t, out.Jobs[0].ApplyPlan)
+}
+
 func TestListJobsUseCase_EmptyJobList(t *testing.T) {
 	jobRepo := mocks.NewMockJobRepositoryInterface(t)
 	opRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)

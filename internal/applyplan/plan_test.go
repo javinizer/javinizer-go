@@ -88,3 +88,114 @@ func TestClone(t *testing.T) {
 	clone.Merge.ScalarStrategy = ScalarPreferScraper
 	assert.Equal(t, ScalarPreferNFO, plan.Merge.ScalarStrategy)
 }
+
+func TestPresetStrategies(t *testing.T) {
+	tests := []struct {
+		name    string
+		preset  Preset
+		scalar  ScalarStrategy
+		array   ArrayStrategy
+		wantErr bool
+	}{
+		{"conservative", PresetConservative, ScalarPreserveExisting, ArrayMerge, false},
+		{"gap-fill", PresetGapFill, ScalarFillMissingOnly, ArrayMerge, false},
+		{"aggressive", PresetAggressive, ScalarPreferScraper, ArrayReplace, false},
+		{"unknown", Preset("unknown"), "", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scalar, array, err := PresetStrategies(tc.preset)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.scalar, scalar)
+			assert.Equal(t, tc.array, array)
+		})
+	}
+}
+
+func TestNormalizeDefaults(t *testing.T) {
+	got, err := Normalize(nil)
+	require.NoError(t, err)
+	assert.Nil(t, got)
+
+	got, err = Normalize(&Plan{Version: Version1, VideoOperation: VideoOperationLeaveInPlace})
+	require.NoError(t, err)
+	assert.Equal(t, NFOOutputWrite, got.NFOOutput)
+	assert.Equal(t, MediaPolicyMissing, got.MediaPolicy)
+	assert.Equal(t, ScalarPreferNFO, got.Merge.ScalarStrategy)
+	assert.Equal(t, ArrayMerge, got.Merge.ArrayStrategy)
+
+	got, err = Normalize(&Plan{Version: Version1, VideoOperation: VideoOperationLeaveInPlace, Merge: &MergePolicy{}})
+	require.NoError(t, err)
+	assert.Equal(t, ScalarPreferNFO, got.Merge.ScalarStrategy)
+	assert.Equal(t, ArrayMerge, got.Merge.ArrayStrategy)
+
+	got, err = Normalize(&Plan{Version: Version1, VideoOperation: VideoOperationRenameFile, Destination: "  /stale  "})
+	require.NoError(t, err)
+	assert.Empty(t, got.Destination)
+	assert.Equal(t, NFOOutputWrite, got.NFOOutput)
+	assert.Equal(t, MediaPolicyMissing, got.MediaPolicy)
+
+	invalidPreset := Default(VideoOperationLeaveInPlace, "")
+	invalidPreset.Merge.SourcePreset = Preset("unknown")
+	_, err = Normalize(invalidPreset)
+	assert.Error(t, err)
+}
+
+func TestValidateBranches(t *testing.T) {
+	tests := []struct {
+		name string
+		plan *Plan
+	}{
+		{"nil", nil},
+		{"destination on non-organize", &Plan{Version: Version1, VideoOperation: VideoOperationRenameFile, Destination: "/dest", NFOOutput: NFOOutputWrite, MediaPolicy: MediaPolicyMissing}},
+		{"invalid nfo", &Plan{Version: Version1, VideoOperation: VideoOperationOrganize, Destination: "/dest", NFOOutput: "bad", MediaPolicy: MediaPolicyMissing}},
+		{"invalid media", &Plan{Version: Version1, VideoOperation: VideoOperationOrganize, Destination: "/dest", NFOOutput: NFOOutputWrite, MediaPolicy: "bad"}},
+		{"leave without merge", &Plan{Version: Version1, VideoOperation: VideoOperationLeaveInPlace, NFOOutput: NFOOutputWrite, MediaPolicy: MediaPolicyMissing}},
+		{"invalid scalar", &Plan{Version: Version1, VideoOperation: VideoOperationLeaveInPlace, NFOOutput: NFOOutputWrite, MediaPolicy: MediaPolicyMissing, Merge: &MergePolicy{ScalarStrategy: "bad", ArrayStrategy: ArrayMerge}}},
+		{"invalid array", &Plan{Version: Version1, VideoOperation: VideoOperationLeaveInPlace, NFOOutput: NFOOutputWrite, MediaPolicy: MediaPolicyMissing, Merge: &MergePolicy{ScalarStrategy: ScalarPreferNFO, ArrayStrategy: "bad"}}},
+		{"merge on organize", &Plan{Version: Version1, VideoOperation: VideoOperationOrganize, Destination: "/dest", NFOOutput: NFOOutputWrite, MediaPolicy: MediaPolicyMissing, Merge: &MergePolicy{ScalarStrategy: ScalarPreferNFO, ArrayStrategy: ArrayMerge}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Error(t, Validate(tc.plan))
+		})
+	}
+}
+
+func TestProjectInvalidPlan(t *testing.T) {
+	_, err := Project(&Plan{Version: Version1, VideoOperation: "bad"})
+	assert.Error(t, err)
+}
+
+func TestFromLegacy(t *testing.T) {
+	got, err := FromLegacy(true, "", "ignored", ScalarFillMissingOnly, ArrayReplace)
+	require.NoError(t, err)
+	assert.Equal(t, VideoOperationLeaveInPlace, got.VideoOperation)
+	assert.Equal(t, ScalarFillMissingOnly, got.Merge.ScalarStrategy)
+	assert.Equal(t, ArrayReplace, got.Merge.ArrayStrategy)
+
+	cases := []struct {
+		name string
+		mode operationmode.OperationMode
+		want VideoOperation
+	}{
+		{"organize", operationmode.OperationModeOrganize, VideoOperationOrganize},
+		{"empty", "", VideoOperationOrganize},
+		{"in-place", operationmode.OperationModeInPlace, VideoOperationRenameInPlace},
+		{"rename-file", operationmode.OperationModeInPlaceNoRenameFolder, VideoOperationRenameFile},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := FromLegacy(false, tc.mode, "/dest", "", "")
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.VideoOperation)
+		})
+	}
+
+	_, err = FromLegacy(false, operationmode.OperationModePreview, "", "", "")
+	assert.Error(t, err)
+}

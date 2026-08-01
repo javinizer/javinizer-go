@@ -15,8 +15,7 @@ import type { Download, Page } from '@playwright/test';
 import { test, expect } from '@playwright/test';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createReadStream } from 'node:fs';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -31,7 +30,7 @@ async function downloadContent(download: Download) {
 	const tmpDir = await mkdtemp(join(tmpdir(), 'pw-dl-'));
 	const outPath = join(tmpDir, 'download');
 	await download.saveAs(outPath);
-	return createReadStream(outPath);
+	return readFile(outPath);
 }
 
 test.describe('Genre Replacement Import/Export (UI)', () => {
@@ -66,7 +65,7 @@ test.describe('Genre Replacement Import/Export (UI)', () => {
 
 	test('import via UI file upload creates genre replacements', async ({ page }) => {
 		await page.goto('/genres');
-		await page.waitForLoadState('domcontentloaded');
+		await page.waitForLoadState('networkidle');
 
 		page.on('dialog', async (dialog) => {
 			await dialog.accept();
@@ -86,7 +85,7 @@ test.describe('Genre Replacement Import/Export (UI)', () => {
 
 	test('export triggers download', async ({ page }) => {
 		await page.goto('/genres');
-		await page.waitForLoadState('domcontentloaded');
+		await page.waitForLoadState('networkidle');
 
 		const exportBtn = page.getByRole('button', { name: 'Export' }).first();
 		if (await exportBtn.isVisible().catch(() => false)) {
@@ -96,7 +95,7 @@ test.describe('Genre Replacement Import/Export (UI)', () => {
 			expect(fileName).toMatch(/genre/);
 
 			const content = await downloadContent(download);
-			const data = JSON.parse((content as any).read().toString());
+			const data = JSON.parse(content.toString());
 			expect(Array.isArray(data)).toBeTruthy();
 		}
 	});
@@ -132,7 +131,7 @@ test.describe('Actress Import/Export via UI', () => {
 
 	test('import via UI file upload creates actress', async ({ page }) => {
 		await page.goto('/actresses');
-		await page.waitForLoadState('domcontentloaded');
+		await page.waitForLoadState('networkidle');
 
 		page.on('dialog', async (dialog) => {
 			await dialog.accept();
@@ -157,7 +156,7 @@ test.describe('Actress Import/Export via UI', () => {
 
 	test('export triggers download', async ({ page }) => {
 		await page.goto('/actresses');
-		await page.waitForLoadState('domcontentloaded');
+		await page.waitForLoadState('networkidle');
 
 		const exportBtn = page.getByRole('button', { name: 'Export' }).first();
 		if (await exportBtn.isVisible().catch(() => false)) {
@@ -167,7 +166,7 @@ test.describe('Actress Import/Export via UI', () => {
 			expect(fileName).toMatch(/actresses/);
 
 			const content = await downloadContent(download);
-			const data = JSON.parse((content as any).read().toString());
+			const data = JSON.parse(content.toString());
 			expect(Array.isArray(data)).toBeTruthy();
 		}
 	});
@@ -194,7 +193,7 @@ test.describe('Word Replacement Import/Export via UI', () => {
 
 	test('import via UI file upload creates word replacements', async ({ page }) => {
 		await page.goto('/words');
-		await page.waitForLoadState('domcontentloaded');
+		await page.waitForLoadState('networkidle');
 
 		page.on('dialog', async (dialog) => {
 			await dialog.accept();
@@ -219,7 +218,7 @@ test.describe('Word Replacement Import/Export via UI', () => {
 
 	test('export triggers download', async ({ page }) => {
 		await page.goto('/words');
-		await page.waitForLoadState('domcontentloaded');
+		await page.waitForLoadState('networkidle');
 
 		const exportBtn = page.getByRole('button', { name: 'Export' }).first();
 		if (await exportBtn.isVisible().catch(() => false)) {
@@ -229,7 +228,7 @@ test.describe('Word Replacement Import/Export via UI', () => {
 			expect(fileName).toMatch(/word/);
 
 			const content = await downloadContent(download);
-			const data = JSON.parse((content as any).read().toString());
+			const data = JSON.parse(content.toString());
 			expect(Array.isArray(data)).toBeTruthy();
 		}
 	});
@@ -238,7 +237,7 @@ test.describe('Word Replacement Import/Export via UI', () => {
 test.describe('Invalid JSON Import', () => {
 	test('uploading invalid JSON shows error toast', async ({ page }) => {
 		await page.goto('/words');
-		await page.waitForLoadState('domcontentloaded');
+		await page.waitForLoadState('networkidle');
 
 		const importBtn = page.getByRole('button', { name: 'Import' }).first();
 		if (await importBtn.isVisible().catch(() => false)) {

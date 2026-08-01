@@ -138,7 +138,7 @@
 		// login/setup screens are localized. Reconciliation with the configured
 		// ui.language happens after the config loads (see configQuery effect).
 		void bootstrapLocale();
-		refreshAuthStatus();
+		if (!initialAuthStatus) void refreshAuthStatus();
 	});
 
 	// Reconcile the interface locale with the configured ui.language once the

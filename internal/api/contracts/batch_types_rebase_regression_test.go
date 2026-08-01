@@ -211,6 +211,46 @@ func TestBatchFileResult_EmptyResultID(t *testing.T) {
 //
 // Regression: /jobs page thumbnails not showing because the legacy "data" field
 // was not mapped to "movie", causing poster URLs to be lost in the API response.
+func TestRequestPresenceUnmarshalErrors(t *testing.T) {
+	var scrape BatchScrapeRequest
+	assert.Error(t, scrape.UnmarshalJSON([]byte(`{"files":`)))
+
+	var update UpdateRequest
+	assert.Error(t, update.UnmarshalJSON([]byte(`{"preset":`)))
+
+	var organize OrganizeRequest
+	assert.Error(t, organize.UnmarshalJSON([]byte(`{"destination":`)))
+
+	var preview OrganizePreviewRequest
+	assert.Error(t, preview.UnmarshalJSON([]byte(`{"destination":`)))
+
+	assert.Nil(t, presentJSONFields([]byte(`{`)))
+}
+
+func TestBatchScrapeRequestPresenceIgnoresNull(t *testing.T) {
+	var req BatchScrapeRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"files":[],"destination":null,"update":false}`), &req))
+	assert.False(t, req.Has("destination"))
+	assert.True(t, req.Has("update"))
+}
+
+func TestRequestUnmarshalValidForms(t *testing.T) {
+	var update UpdateRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"preset":"aggressive"}`), &update))
+	assert.True(t, update.Has("preset"))
+	assert.Equal(t, "aggressive", update.Preset)
+
+	var organize OrganizeRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"destination":"/output"}`), &organize))
+	assert.True(t, organize.Has("destination"))
+	assert.Equal(t, "/output", organize.Destination)
+
+	var preview OrganizePreviewRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"destination":"/output"}`), &preview))
+	assert.True(t, preview.Has("destination"))
+	assert.Equal(t, "/output", preview.Destination)
+}
+
 func TestBatchFileResult_LegacyDataField_PosterURLRoundTrip(t *testing.T) {
 	t.Parallel()
 

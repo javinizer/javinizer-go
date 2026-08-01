@@ -47,6 +47,11 @@ const DASHBOARD_HEADING = 'Javinizer Control Center';
 const USERNAME = 'admin';
 const PASSWORD = 'adminpassword123';
 
+async function gotoRootAndWaitForHydration(page: Page): Promise<void> {
+	await page.goto('/');
+	await page.waitForLoadState('networkidle');
+}
+
 test.describe('Auth UI: login + logout against the real e2emock backend', () => {
 	test('unauthenticated visit renders the login screen (not the app)', async ({
 		page,
@@ -56,7 +61,7 @@ test.describe('Auth UI: login + logout against the real e2emock backend', () => 
 		// Navigate to the root. The layout's onMount calls refreshAuthStatus
 		// → GET /api/v1/auth/status. With no cookie, authenticated=false +
 		// initialized=true → the "Login Required" screen renders.
-		await page.goto('/');
+		await gotoRootAndWaitForHydration(page);
 		await expect(page.getByRole('heading', { name: LOGIN_HEADING })).toBeVisible({
 			timeout: 15_000,
 		});
@@ -76,7 +81,7 @@ test.describe('Auth UI: login + logout against the real e2emock backend', () => 
 	}: {
 		page: Page;
 	}) => {
-		await page.goto('/');
+		await gotoRootAndWaitForHydration(page);
 		await expect(page.getByRole('heading', { name: LOGIN_HEADING })).toBeVisible({
 			timeout: 15_000,
 		});
@@ -109,7 +114,7 @@ test.describe('Auth UI: login + logout against the real e2emock backend', () => 
 	}: {
 		page: Page;
 	}) => {
-		await page.goto('/');
+		await gotoRootAndWaitForHydration(page);
 		await expect(page.getByRole('heading', { name: LOGIN_HEADING })).toBeVisible({
 			timeout: 15_000,
 		});
@@ -139,7 +144,7 @@ test.describe('Auth UI: login + logout against the real e2emock backend', () => 
 		request: APIRequestContext;
 	}) => {
 		// ── 1. Log in via the UI (reuse the valid-login flow) ────────────
-		await page.goto('/');
+		await gotoRootAndWaitForHydration(page);
 		await expect(page.getByRole('heading', { name: LOGIN_HEADING })).toBeVisible({
 			timeout: 15_000,
 		});

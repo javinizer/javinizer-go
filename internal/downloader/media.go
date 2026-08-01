@@ -78,18 +78,10 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		return result, nil
 	}
 
-	fullPath, err := uniqueTempPath(destPath, "full.tmp")
-	if err != nil {
-		result.Error = fmt.Errorf("failed to create temporary path: %w", err)
-		result.Duration = time.Since(startTime)
-		return result, result.Error
-	}
+	fullPath := uniqueTempPath(destPath, "full.tmp")
 	defer func() { _ = d.fs.Remove(fullPath) }()
 
 	fullResult, err := d.download(ctx, posterURL, fullPath, MediaTypePoster, overwriteExisting, nil)
-	if fullResult == nil {
-		fullResult = result
-	}
 	fullResult.LocalPath = ""
 	if err != nil || !fullResult.Downloaded {
 		fullResult.Downloaded = false
@@ -98,14 +90,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		return fullResult, err
 	}
 
-	cropPath, err := uniqueTempPath(destPath, "crop.tmp")
-	if err != nil {
-		fullResult.Error = fmt.Errorf("failed to create crop temporary path: %w", err)
-		fullResult.Downloaded = false
-		fullResult.Replaced = false
-		fullResult.Duration = time.Since(startTime)
-		return fullResult, fullResult.Error
-	}
+	cropPath := uniqueTempPath(destPath, "crop.tmp")
 	defer func() { _ = d.fs.Remove(cropPath) }()
 
 	if err := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight); err != nil {
@@ -159,9 +144,6 @@ func (d *Downloader) downloadExtrafanart(ctx context.Context, movie *models.Movi
 		}
 		destPath := filepath.Join(extrafanartDir, screenshotNames[i])
 		result, err := d.download(ctx, url, destPath, MediaTypeExtrafanart, overwriteExisting, dedup)
-		if result == nil {
-			result = &DownloadResult{URL: url, LocalPath: destPath, Type: MediaTypeExtrafanart}
-		}
 		if err != nil {
 			result.Error = err
 		}
@@ -222,9 +204,6 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 		destPath := filepath.Join(actressDir, filename)
 
 		result, err := d.download(ctx, actress.ThumbURL, destPath, MediaTypeActress, overwriteExisting, dedup)
-		if result == nil {
-			result = &DownloadResult{URL: actress.ThumbURL, LocalPath: destPath, Type: MediaTypeActress}
-		}
 		if err != nil {
 			result.Error = err
 		}

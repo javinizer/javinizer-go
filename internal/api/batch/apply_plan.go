@@ -31,10 +31,7 @@ func normalizeScrapePlan(input StartScrapeInput) (*applyplan.Plan, applyplan.Pro
 	if err != nil {
 		return nil, applyplan.Projection{}, err
 	}
-	projection, err := applyplan.Project(plan)
-	if err != nil {
-		return nil, applyplan.Projection{}, err
-	}
+	projection, _ := applyplan.Project(plan)
 	m := input.MirrorPresence
 	if m.updatePresent && input.Update != nil && *input.Update != projection.Update {
 		return nil, applyplan.Projection{}, fmt.Errorf("update contradicts apply plan")

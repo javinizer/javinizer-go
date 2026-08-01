@@ -6,9 +6,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/auth"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,4 +72,60 @@ func TestInjectSSRState_NoHeadMarker_ReturnsOriginalHTML(t *testing.T) {
 	html := []byte(`<html><body>no head marker</body></html>`)
 	result := injectSSRState(html, rt, c)
 	assert.Equal(t, html, result)
+}
+
+func TestResolveSSRAuth_NilRuntime(t *testing.T) {
+	assert.Nil(t, resolveSSRAuth(nil, nil))
+}
+
+func TestInjectSSRState_UninitializedAuthManager(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := config.DefaultConfig(nil, nil)
+	configFile := t.TempDir() + "/config.yaml"
+	deps := createTestDeps(t, cfg, configFile)
+	manager, err := auth.NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	deps.Auth = manager
+	rt := core.NewAPIRuntime(deps)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/browse", nil)
+	result := injectSSRState([]byte(`<html><head></head></html>`), rt, c)
+	assert.Contains(t, string(result), `"initialized":false`)
+	assert.Contains(t, string(result), `"authenticated":false`)
+}
+
+func TestInjectSSRState_InitializedAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := config.DefaultConfig(nil, nil)
+	configFile := t.TempDir() + "/config.yaml"
+	deps := createTestDeps(t, cfg, configFile)
+	manager, err := auth.NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	require.NoError(t, manager.Setup("admin", "password123"))
+	deps.Auth = manager
+	rt := core.NewAPIRuntime(deps)
+
+	newContext := func(cookie string) *gin.Context {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/browse", nil)
+		if cookie != "" {
+			c.Request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: cookie})
+		}
+		return c
+	}
+
+	unauthenticated := injectSSRState([]byte(`<html><head></head></html>`), rt, newContext(""))
+	assert.Contains(t, string(unauthenticated), `"initialized":true`)
+	assert.Contains(t, string(unauthenticated), `"authenticated":false`)
+
+	invalid := injectSSRState([]byte(`<html><head></head></html>`), rt, newContext("invalid-session"))
+	assert.Contains(t, string(invalid), `"authenticated":false`)
+
+	sessionID, err := manager.Login("admin", "password123", false)
+	require.NoError(t, err)
+	authenticated := injectSSRState([]byte(`<html><head></head></html>`), rt, newContext(sessionID))
+	assert.Contains(t, string(authenticated), `"authenticated":true`)
+	assert.Contains(t, string(authenticated), `"username":"admin"`)
 }

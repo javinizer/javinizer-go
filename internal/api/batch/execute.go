@@ -94,7 +94,9 @@ func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 			if errors.Is(resolveErr, ErrApplyEndpointConflict) {
 				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: resolveErr.Error()})
 			} else if resolveErr.Error() == "access denied to requested directory" {
-				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: resolveErr.Error()})
+				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "Access denied to requested directory"})
+			} else if resolveErr.Error() == "preview mode should use the preview endpoint, not organize" {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Preview mode should use the preview endpoint, not organize"})
 			} else {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: resolveErr.Error()})
 			}
@@ -233,11 +235,7 @@ func previewOrganize(rt *core.APIRuntime) gin.HandlerFunc {
 					c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 					return
 				}
-				projection, err := applyplan.Project(effectiveApply.Plan)
-				if err != nil {
-					c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
-					return
-				}
+				projection, _ := applyplan.Project(effectiveApply.Plan)
 				operationInput = string(projection.OperationMode)
 				destination = projection.Destination
 				skipNFO = projection.SkipNFO
@@ -266,7 +264,7 @@ func previewOrganize(rt *core.APIRuntime) gin.HandlerFunc {
 				return
 			}
 			if !isDirAllowed(deps.GetFs(), destination, secCfg) {
-				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "access denied to requested directory"})
+				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "Access denied to requested directory"})
 				return
 			}
 		}

@@ -50,10 +50,7 @@ func resolveOrganizeApplyConfig(
 		if err != nil {
 			return worker.ApplyPhaseConfig{}, err
 		}
-		projection, err := applyplan.Project(effective.Plan)
-		if err != nil {
-			return worker.ApplyPhaseConfig{}, err
-		}
+		projection, _ := applyplan.Project(effective.Plan)
 		destination = projection.Destination
 		operationInput = string(projection.OperationMode)
 		skipNFO = projection.SkipNFO
@@ -153,10 +150,7 @@ func resolveUpdateApplyConfig(
 		if err != nil {
 			return worker.ApplyPhaseConfig{}, err
 		}
-		projection, err := applyplan.Project(effective.Plan)
-		if err != nil {
-			return worker.ApplyPhaseConfig{}, err
-		}
+		projection, _ := applyplan.Project(effective.Plan)
 		mergeOpts := legacyMergeOptions(effective.Plan)
 		mergeOpts.ForceOverwrite = effective.MergeOverride == applyplan.MergeOverrideForceOverwrite
 		mergeOpts.PreserveNFO = effective.MergeOverride == applyplan.MergeOverridePreserveNFO

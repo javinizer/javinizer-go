@@ -101,7 +101,7 @@ test.describe('/browse → launch scrape → /review/[jobId]', () => {
 		// ("1 File Selected for Scraping") also contains the substring, so
 		// match exactly to disambiguate. Asserting this pins that the click
 		// actually toggled selection state (vs. e.g. a bubbling bug).
-		await expect(page.getByText('1 file selected', { exact: true })).toBeVisible({
+		await expect(page.getByRole('heading', { name: '1 File Selected for Scraping' })).toBeVisible({
 			timeout: 5_000,
 		});
 

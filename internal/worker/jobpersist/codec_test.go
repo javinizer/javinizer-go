@@ -293,3 +293,27 @@ func TestEncode_MarshalFileMatchInfoError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to marshal file match info")
 }
+
+func TestEncode_ApplyPlanErrors(t *testing.T) {
+	_, err := Encode(Snapshot{
+		ID:        "invalid-plan",
+		ApplyPlan: &applyplan.Plan{Version: 2},
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid apply plan")
+
+	original := MarshalFn
+	callCount := 0
+	MarshalFn = func(v any) ([]byte, error) {
+		callCount++
+		if callCount == 5 {
+			return nil, fmt.Errorf("marshal error")
+		}
+		return json.Marshal(v)
+	}
+	defer func() { MarshalFn = original }()
+
+	_, err = Encode(Snapshot{ID: "apply-plan-marshal", ApplyPlan: applyplan.Default(applyplan.VideoOperationLeaveInPlace, "")})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal apply plan")
+}

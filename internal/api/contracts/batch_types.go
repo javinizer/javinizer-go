@@ -32,17 +32,9 @@ func (r *BatchScrapeRequest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
+	raw := presentJSONFields(data)
 	*r = BatchScrapeRequest(decoded)
-	r.present = make(map[string]bool, len(raw))
-	for key, value := range raw {
-		if string(value) != "null" {
-			r.present[key] = true
-		}
-	}
+	r.present = raw
 	return nil
 }
 

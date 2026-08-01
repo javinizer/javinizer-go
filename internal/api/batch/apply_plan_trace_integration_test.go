@@ -19,6 +19,24 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 )
 
+func TestStartScrapeUseCase_InvalidPlanAndDeniedDestination(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	root := t.TempDir()
+	cfg.API.Security.AllowedDirectories = []string{root}
+	deps := createTestDeps(t, cfg, "")
+	rt := testkit.GetTestRuntime(deps)
+
+	_, err := StartScrapeUseCase(context.Background(), rt, StartScrapeInput{
+		ApplyPlan: &applyplan.Plan{Version: 2},
+	})
+	assert.ErrorContains(t, err, "invalid apply plan")
+
+	_, err = StartScrapeUseCase(context.Background(), rt, StartScrapeInput{
+		ApplyPlan: applyplan.Default(applyplan.VideoOperationOrganize, "/outside"),
+	})
+	assert.ErrorContains(t, err, "access denied")
+}
+
 func TestApplyPlanTrace_RequestPersistenceAndEffectiveConfig(t *testing.T) {
 	tests := []struct {
 		name          string

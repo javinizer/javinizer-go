@@ -3,11 +3,14 @@
 package downloader
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/afero"
 	"golang.org/x/sys/windows"
 )
+
+var errReplaceUnsupported = errors.New("replace existing destination unsupported")
 
 func replaceFile(fs afero.Fs, src, dst string) error {
 	if _, ok := fs.(*afero.OsFs); ok {

@@ -173,3 +173,117 @@ func TestEffectiveEndpointOperationContradiction(t *testing.T) {
 	_, err := effectiveFromOverrides(base, &contracts.ReviewApplyOverrides{OperationMode: stringPtr("in-place-norenamefolder")})
 	assert.ErrorContains(t, err, "contradicts")
 }
+
+func TestNormalizeScrapePlanErrorBranches(t *testing.T) {
+	assert.Equal(t, string(applyplan.ArrayMerge), arrayName(true))
+	assert.Equal(t, string(applyplan.ArrayReplace), arrayName(false))
+	assert.Empty(t, legacyMergeOptions(nil))
+	assert.Empty(t, legacyMergeOptions(applyplan.Default(applyplan.VideoOperationRenameFile, "")))
+
+	_, _, err := normalizeScrapePlan(StartScrapeInput{ApplyPlan: &applyplan.Plan{Version: 2}})
+	assert.Error(t, err)
+
+	organize := applyplan.Default(applyplan.VideoOperationOrganize, "/dest")
+	_, _, err = normalizeScrapePlan(StartScrapeInput{
+		ApplyPlan: organize, Destination: "/other",
+		MirrorPresence: planMirrors{destinationPresent: true},
+	})
+	assert.ErrorContains(t, err, "destination contradicts")
+
+	leave := applyplan.Default(applyplan.VideoOperationLeaveInPlace, "")
+	cases := []struct {
+		name  string
+		input StartScrapeInput
+	}{
+		{"operation", StartScrapeInput{ApplyPlan: leave, OperationMode: "bad", MirrorPresence: planMirrors{operationPresent: true}}},
+		{"preset", StartScrapeInput{ApplyPlan: leave, Preset: "bad", MirrorPresence: planMirrors{presetPresent: true}}},
+		{"preset mismatch", StartScrapeInput{ApplyPlan: leave, Preset: "aggressive", MirrorPresence: planMirrors{presetPresent: true}}},
+		{"scalar", StartScrapeInput{ApplyPlan: leave, ScalarStrategy: "bad", MirrorPresence: planMirrors{scalarPresent: true}}},
+		{"array", StartScrapeInput{ApplyPlan: leave, ArrayStrategy: "bad", MirrorPresence: planMirrors{arrayPresent: true}}},
+		{"array mismatch", StartScrapeInput{ApplyPlan: leave, ArrayStrategy: "replace", MirrorPresence: planMirrors{arrayPresent: true}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := normalizeScrapePlan(tc.input)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestEffectiveFromOverridesAdditionalBranches(t *testing.T) {
+	effective, err := effectiveFromOverrides(nil, nil)
+	require.NoError(t, err)
+	assert.Nil(t, effective)
+
+	base := applyplan.Default(applyplan.VideoOperationLeaveInPlace, "")
+	effective, err = effectiveFromOverrides(base, nil)
+	require.NoError(t, err)
+	assert.Equal(t, base, effective.Plan)
+
+	rename := applyplan.Default(applyplan.VideoOperationRenameFile, "")
+	effective, err = effectiveFromOverrides(rename, &contracts.ReviewApplyOverrides{Destination: stringPtr("/ignored")})
+	require.NoError(t, err)
+	assert.Empty(t, effective.Plan.Destination)
+
+	_, err = effectiveFromOverrides(base, &contracts.ReviewApplyOverrides{OperationMode: stringPtr("bad")})
+	assert.Error(t, err)
+
+	effective, err = effectiveFromOverrides(base, &contracts.ReviewApplyOverrides{SkipDownload: boolPtr(true)})
+	require.NoError(t, err)
+	assert.Equal(t, applyplan.MediaPolicySkip, effective.Plan.MediaPolicy)
+
+	effective, err = effectiveFromOverrides(base, &contracts.ReviewApplyOverrides{OverwriteExistingMedia: boolPtr(true)})
+	require.NoError(t, err)
+	assert.Equal(t, applyplan.MediaPolicyReplace, effective.Plan.MediaPolicy)
+
+	_, err = effectiveFromOverrides(base, &contracts.ReviewApplyOverrides{Preset: stringPtr("bad")})
+	assert.Error(t, err)
+
+	effective, err = effectiveFromOverrides(base, &contracts.ReviewApplyOverrides{Preset: stringPtr("aggressive")})
+	require.NoError(t, err)
+	assert.Equal(t, applyplan.ScalarPreferScraper, effective.Plan.Merge.ScalarStrategy)
+	assert.Equal(t, applyplan.ArrayReplace, effective.Plan.Merge.ArrayStrategy)
+
+	effective, err = effectiveFromOverrides(base, &contracts.ReviewApplyOverrides{ScalarStrategy: stringPtr("prefer-scraper"), ArrayStrategy: stringPtr("replace")})
+	require.NoError(t, err)
+	assert.Equal(t, applyplan.ScalarPreferScraper, effective.Plan.Merge.ScalarStrategy)
+	assert.Equal(t, applyplan.ArrayReplace, effective.Plan.Merge.ArrayStrategy)
+
+	_, err = effectiveFromOverrides(&applyplan.Plan{Version: 2}, &contracts.ReviewApplyOverrides{})
+	assert.Error(t, err)
+}
+
+func TestResolveApplyConfigPlanAwareErrors(t *testing.T) {
+	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
+	snapshot := core.NewSnapshotForTesting(core.NewAPIRuntime(nil), core.APIConfig{})
+
+	var organizeConflict contracts.OrganizeRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"destination":"/top","overrides":{"destination":"/nested"}}`), &organizeConflict))
+	_, err := resolveOrganizeApplyConfig(snapshot, factory, &stubControlledJob{status: statusWithPlan(t, applyplan.Default(applyplan.VideoOperationOrganize, "/dest"))}, organizeConflict)
+	assert.Error(t, err)
+
+	_, err = resolveOrganizeApplyConfig(snapshot, factory, &stubControlledJob{status: statusWithPlan(t, &applyplan.Plan{Version: 2, VideoOperation: applyplan.VideoOperationOrganize, Destination: "/dest"})}, contracts.OrganizeRequest{})
+	assert.Error(t, err)
+
+	_, err = resolveOrganizeApplyConfig(snapshot, factory, &stubControlledJob{status: statusWithPlan(t, applyplan.Default(applyplan.VideoOperationRenameFile, ""))}, contracts.OrganizeRequest{Overrides: &contracts.ReviewApplyOverrides{ForceOverwrite: boolPtr(true)}})
+	assert.Error(t, err)
+
+	var updateConflict contracts.UpdateRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"preset":"aggressive","overrides":{"preset":"gap-fill"}}`), &updateConflict))
+	_, err = resolveUpdateApplyConfig(snapshot, factory, &stubControlledJob{status: &worker.BatchJobStatus{}}, updateConflict)
+	assert.Error(t, err)
+	_, err = resolveUpdateApplyConfig(snapshot, factory, &stubControlledJob{status: statusWithPlan(t, applyplan.Default(applyplan.VideoOperationLeaveInPlace, ""))}, updateConflict)
+	assert.Error(t, err)
+
+	_, err = resolveUpdateApplyConfig(snapshot, factory, &stubControlledJob{status: statusWithPlan(t, &applyplan.Plan{Version: 2, VideoOperation: applyplan.VideoOperationLeaveInPlace})}, contracts.UpdateRequest{})
+	assert.Error(t, err)
+
+	_, err = resolveUpdateApplyConfig(snapshot, factory, &stubControlledJob{status: &worker.BatchJobStatus{}}, contracts.UpdateRequest{Overrides: &contracts.ReviewApplyOverrides{ScalarStrategy: stringPtr("bad")}})
+	assert.Error(t, err)
+
+	_, err = resolveUpdateApplyConfig(snapshot, factory, &stubControlledJob{status: &worker.BatchJobStatus{}}, contracts.UpdateRequest{Overrides: &contracts.ReviewApplyOverrides{ForceOverwrite: boolPtr(true), PreserveNFO: boolPtr(true)}})
+	assert.Error(t, err)
+
+	_, err = resolveUpdateApplyConfig(snapshot, factory, &stubControlledJob{status: &worker.BatchJobStatus{}}, contracts.UpdateRequest{Overrides: &contracts.ReviewApplyOverrides{SkipDownload: boolPtr(true), OverwriteExistingMedia: boolPtr(true)}})
+	assert.Error(t, err)
+}

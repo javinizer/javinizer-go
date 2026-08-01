@@ -78,7 +78,7 @@ test.describe('/manual scrape: manual ID override flows through to the scraped r
 		// Toggle the "Manual Scrape" checkbox by clicking its label text.
 		// The <label> wraps the checkbox + the "Manual Scrape" span, so
 		// clicking the text flips the bound manualScrapeMode state.
-		await page.getByText('Manual Scrape', { exact: true }).click();
+		await page.getByRole('checkbox', { name: /Provide IDs or URLs manually/i }).check();
 
 		// The action button's label switches from "Scrape N File(s)" to
 		// "Continue to manual review" when manualScrapeMode is on. Asserting
@@ -96,7 +96,7 @@ test.describe('/manual scrape: manual ID override flows through to the scraped r
 			timeout: 10_000,
 		});
 		await fixtureRow.click();
-		await expect(page.getByText('1 file selected', { exact: true })).toBeVisible({
+		await expect(page.getByRole('heading', { name: '1 File Selected for Scraping' })).toBeVisible({
 			timeout: 5_000,
 		});
 

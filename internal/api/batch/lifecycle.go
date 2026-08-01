@@ -50,7 +50,7 @@ func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 			dir := filepath.Dir(filePath)
 			if !isDirAllowed(deps.GetFs(), dir, secCfg) {
 				// Security: Don't leak directory paths in error messages
-				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "access denied to requested directory"})
+				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "Access denied to requested directory"})
 				return
 			}
 		}
