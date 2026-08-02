@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -361,7 +362,9 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	}
 	if needsLinkedActressFallback(actress, matches, deterministic) {
 		linkedMatches, linkedErr := linkedActressMatches(ctx, movieRepo, actress.ID, actress.DMMID, scrapers)
-		if linkedErr != nil {
+		if linkedErr != nil && len(linkedMatches) == 0 {
+			// All identity lookups failed transiently (timeout/HTTP) — surface
+			// it so the task fails for retry instead of terminal missing_dmm_id.
 			return nil, linkedErr
 		}
 		for _, linkedMatch := range linkedMatches {
@@ -772,6 +775,7 @@ func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepos
 		return nil, err
 	}
 	candidates := make([]sourcedActressMatch, 0)
+	var searchErrs []error
 	for _, movie := range movies {
 		for _, scraper := range scrapers {
 			// scraped ...
@@ -788,14 +792,18 @@ func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepos
 				}
 				scraped, err = scraper.Search(ctx, query)
 			}
-			if err == nil && scraped != nil {
+			if err != nil {
+				searchErrs = append(searchErrs, fmt.Errorf("%s: %w", strings.ToLower(strings.TrimSpace(scraper.Name())), err))
+				continue
+			}
+			if scraped != nil {
 				for _, result := range scraped.Actresses {
 					candidates = append(candidates, sourcedActressMatch{info: result, source: strings.ToLower(strings.TrimSpace(scraper.Name()))})
 				}
 			}
 		}
 	}
-	return candidates, nil
+	return candidates, errors.Join(searchErrs...)
 }
 
 // needsLinkedActressFallback ...

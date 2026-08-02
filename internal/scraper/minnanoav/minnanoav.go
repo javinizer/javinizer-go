@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -174,6 +175,9 @@ func (s *scraper) searchActress(ctx context.Context, name string) (string, strin
 		Get(searchURL)
 	if err != nil {
 		return "", "", fmt.Errorf("minnanoav search failed: %w", err)
+	}
+	if resp.StatusCode() < http.StatusOK || resp.StatusCode() >= http.StatusMultipleChoices {
+		return "", "", fmt.Errorf("minnanoav search: unexpected status %s", resp.Status())
 	}
 	finalURL := ""
 	if resp.RawResponse != nil && resp.RawResponse.Request != nil && resp.RawResponse.Request.URL != nil {

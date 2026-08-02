@@ -46,7 +46,9 @@ func TestFindActorIDByName(t *testing.T) {
 		rateLimiter: ratelimit.NewLimiter(0),
 		settings:    models.ScraperSettings{Enabled: true},
 	}
-	require.Equal(t, "ZX", scraper.findActorID(context.Background(), "安倍亜沙美"))
+	actorID, findErr := scraper.findActorID(context.Background(), "安倍亜沙美")
+	require.NoError(t, findErr)
+	require.Equal(t, "ZX", actorID)
 }
 
 func TestResolveActressMetadataFromActorProfile(t *testing.T) {

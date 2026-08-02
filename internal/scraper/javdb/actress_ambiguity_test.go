@@ -13,11 +13,15 @@ func TestFindActorIDRejectsAmbiguousNames(t *testing.T) {
 	s := actorTestScraper(&staticRoundTripper{responses: map[string]string{
 		"https://javdb.test/actors?locale=en&search=name": `<a href="/actors/AA" title="name"></a><a href="/actors/BB">name</a>`,
 	}})
-	require.Empty(t, s.findActorID(context.Background(), "name"))
+	ambiguous, ambErr := s.findActorID(context.Background(), "name")
+	require.NoError(t, ambErr)
+	require.Empty(t, ambiguous)
 
 	// Repeated links to the SAME actor ID remain resolvable.
 	s.client.SetTransport(&staticRoundTripper{responses: map[string]string{
 		"https://javdb.test/actors?locale=en&search=name": `<a href="/actors/AA" title="name"></a><a href="/actors/AA">name</a>`,
 	}})
-	require.Equal(t, "AA", s.findActorID(context.Background(), "name"))
+	single, singleErr := s.findActorID(context.Background(), "name")
+	require.NoError(t, singleErr)
+	require.Equal(t, "AA", single)
 }

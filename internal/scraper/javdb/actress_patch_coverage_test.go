@@ -80,22 +80,28 @@ func TestResolveActressMetadataCoversFailureAndFallbackPaths(t *testing.T) {
 
 func TestFindActorIDCoversInputFetchParseAndCandidateBranches(t *testing.T) {
 	s := actorTestScraper(&staticRoundTripper{})
-	require.Empty(t, s.findActorID(context.Background(), " \n "))
+	blankID, blankErr := s.findActorID(context.Background(), " \n ")
+	require.NoError(t, blankErr)
+	require.Empty(t, blankID)
 
 	s.client.SetTransport(&errorRoundTripper{err: errors.New("fetch")})
-	require.Empty(t, s.findActorID(context.Background(), "name"))
+	_, fetchErr := s.findActorID(context.Background(), "name")
+	require.Error(t, fetchErr, "search request failures must surface")
 
 	oldParser := parseActressProfileHTML
 	parseActressProfileHTML = func(string) (*goquery.Document, error) { return nil, errors.New("parse") }
 	t.Cleanup(func() { parseActressProfileHTML = oldParser })
 	s.client.SetTransport(&staticRoundTripper{responses: map[string]string{"https://javdb.test/actors?locale=en&search=name": "body"}})
-	require.Empty(t, s.findActorID(context.Background(), "name"))
+	_, parseErr := s.findActorID(context.Background(), "name")
+	require.Error(t, parseErr, "search-page parse failure must surface")
 
 	parseActressProfileHTML = oldParser
 	s.client.SetTransport(&staticRoundTripper{responses: map[string]string{
 		"https://javdb.test/actors?locale=en&search=name": `<a href="/actors/NO"></a><a href="/actors/NO">other</a><a href="/movies/1">name</a><a href="/actors/ZX" title="name"></a>`,
 	}})
-	require.Equal(t, "ZX", s.findActorID(context.Background(), "name"))
+	foundID, foundErr := s.findActorID(context.Background(), "name")
+	require.NoError(t, foundErr)
+	require.Equal(t, "ZX", foundID)
 }
 
 func TestJavDBActorAvatarParsingRejectsMalformedVariants(t *testing.T) {

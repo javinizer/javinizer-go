@@ -272,7 +272,11 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 
 	actorID := javdbActorIDFromAvatarURL(actress.ThumbURL)
 	if actorID == "" {
-		actorID = s.findActorID(ctx, actress.JapaneseName)
+		var findErr error
+		actorID, findErr = s.findActorID(ctx, actress.JapaneseName)
+		if findErr != nil {
+			return metadata, findErr
+		}
 	}
 	if actorID == "" {
 		return metadata, nil
@@ -300,19 +304,19 @@ func (s *scraper) ActressFields() []string {
 	return []string{"actress_japanese_name", "actress_url"}
 }
 
-func (s *scraper) findActorID(ctx context.Context, name string) string {
+func (s *scraper) findActorID(ctx context.Context, name string) (string, error) {
 	name = scraperutil.CleanString(name)
 	if name == "" {
-		return ""
+		return "", nil
 	}
 	searchURL := fmt.Sprintf("%s/actors?locale=en&search=%s", strings.TrimRight(s.baseURL, "/"), url.QueryEscape(name))
 	html, err := s.fetchPageCtx(ctx, searchURL)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	doc, err := parseActressProfileHTML(html)
 	if err != nil {
-		return ""
+		return "", err
 	}
 
 	var actorID string
@@ -343,9 +347,9 @@ func (s *scraper) findActorID(ctx context.Context, name string) string {
 	})
 	if ambiguous {
 		logging.Debugf("JavDB: actor search for %q produced multiple distinct IDs, skipping", name)
-		return ""
+		return "", nil
 	}
-	return actorID
+	return actorID, nil
 }
 
 // isJavDBVideoCode checks if an ID looks like a JavDB video code
