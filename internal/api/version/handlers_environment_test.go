@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -179,6 +180,40 @@ func TestVersionStatus_PrereleaseCommandsDocker(t *testing.T) {
 	require.Len(t, resp.UpgradeCommands, 1)
 	assert.Equal(t, "docker_pull", resp.UpgradeCommands[0].Key)
 	assert.Equal(t, "docker pull ghcr.io/javinizer/javinizer-go:v9.9.9-rc1", resp.UpgradeCommands[0].Command)
+}
+
+func TestDetectInstallMethod(t *testing.T) {
+	t.Cleanup(func() {
+		osExecutable = os.Executable
+		evalSymlinks = filepath.EvalSymlinks
+	})
+
+	t.Run("executable resolution failure falls back to manual", func(t *testing.T) {
+		osExecutable = func() (string, error) { return "", assert.AnError }
+		assert.Equal(t, "manual", detectInstallMethod())
+	})
+
+	t.Run("symlink resolution failure uses the raw path", func(t *testing.T) {
+		osExecutable = func() (string, error) { return "/usr/local/bin/javinizer", nil }
+		evalSymlinks = func(string) (string, error) { return "", assert.AnError }
+		assert.Equal(t, "manual", detectInstallMethod())
+	})
+
+	t.Run("resolved Cellar path reports homebrew", func(t *testing.T) {
+		osExecutable = func() (string, error) { return "/usr/local/bin/javinizer", nil }
+		evalSymlinks = func(string) (string, error) { return "/opt/homebrew/Cellar/javinizer/1.4.0/bin/javinizer", nil }
+		assert.Equal(t, "homebrew", detectInstallMethod())
+	})
+
+	t.Run("resolved scoop path reports scoop", func(t *testing.T) {
+		// DetectInstallMethod applies filepath.ToSlash — use the already-slashed
+		// form; separator conversion depends on the test host OS.
+		osExecutable = func() (string, error) { return "C:/Users/x/bin/javinizer.exe", nil }
+		evalSymlinks = func(string) (string, error) {
+			return "C:/Users/x/scoop/apps/javinizer/current/javinizer.exe", nil
+		}
+		assert.Equal(t, "scoop", detectInstallMethod())
+	})
 }
 
 // TestVersionStatus_InstallEnvironmentDefaultCLI confirms an uninitialized

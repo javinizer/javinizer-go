@@ -45,17 +45,25 @@ type VersionStatusResponse struct {
 	Error           string                  `json:"error,omitempty"` // Error message if any
 }
 
+// Test seams: os.Executable's failure mode is unreachable without them, and
+// EvalSymlinks' error fallback likewise — leaving those branches uncovered
+// costs codecov/patch points on every version-handler change.
+var (
+	osExecutable = os.Executable
+	evalSymlinks = filepath.EvalSymlinks
+)
+
 // detectInstallMethod resolves HOW this binary was installed (the resolved
 // executable path lands inside Homebrew's Cellar / Scoop's apps dir for
 // package-managed installs). The prerelease hand-off to brew/scoop cannot
 // deliver prereleases, so command generation needs the method, not just the
 // OS.
 func detectInstallMethod() string {
-	exe, err := os.Executable()
+	exe, err := osExecutable()
 	if err != nil {
 		return "manual"
 	}
-	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+	if resolved, rerr := evalSymlinks(exe); rerr == nil {
 		exe = resolved
 	}
 	return update.DetectInstallMethod(exe).String()
