@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,12 +40,49 @@ func (e *HTTPError) IsTransient() bool {
 
 // Fetcher ...
 type Fetcher struct {
+	// AllowPrivateHosts disables the default SSRF guard that rejects
+	// loopback/private/link-local fetch and redirect targets. Opt-in for
+	// trusted local mirrors; leave unset for remote-driven URLs.
+	AllowPrivateHosts bool
+
 	client     *http.Client
 	delay      time.Duration
 	hostDelays map[string]time.Duration
 	mu         sync.Mutex
 	limiters   map[string]*ratelimit.Limiter
 	userAgent  string
+}
+
+// BlockedFetchError rejects requests or redirects targeting internal network
+// hosts, so remote-supplied URLs cannot smuggle SSRF probes (loopback,
+// private networks, cloud metadata endpoints) through the cache builder.
+type BlockedFetchError struct {
+	URL string
+}
+
+// Error ...
+func (e *BlockedFetchError) Error() string {
+	return fmt.Sprintf("refusing to fetch internal address: %s", e.URL)
+}
+
+// isBlockedFetchHost reports whether host is localhost or a non-public IP
+// literal. Hostnames are not resolved here (lexical guard only); public
+// source hosts are hardcoded while payload URLs are checked at the initial
+// request and at every redirect hop.
+func isBlockedFetchHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if i := strings.LastIndex(host, "%"); i >= 0 { // IPv6 zone, e.g. fe80::1%eth0
+		host = host[:i]
+	}
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
 }
 
 // NewFetcher ...
@@ -70,6 +108,9 @@ func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgen
 	clientCopy := *client
 	previousCheckRedirect := client.CheckRedirect
 	clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !fetcher.AllowPrivateHosts && isBlockedFetchHost(req.URL.Hostname()) {
+			return &BlockedFetchError{URL: req.URL.String()}
+		}
 		if err := fetcher.limiterForHost(req.URL.Hostname()).Wait(req.Context()); err != nil {
 			return err
 		}
@@ -97,6 +138,9 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, nil, err
+	}
+	if !f.AllowPrivateHosts && isBlockedFetchHost(req.URL.Hostname()) {
+		return nil, nil, &BlockedFetchError{URL: rawURL}
 	}
 	req.Header.Set("User-Agent", f.userAgent)
 	req.Header.Set("Accept", accept)

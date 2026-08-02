@@ -141,7 +141,7 @@ func TestCollectHandlesProfileParseFailures(t *testing.T) {
 	t.Run("recorder cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		err := New().Collect(ctx, actresscache.SourceOptions{Fetcher: newFetcher(), RecordFailure: func(actresscache.Candidate, error) error { cancel(); return nil }}, func(actresscache.Candidate) error { return nil })
-		require.NoError(t, err)
+		require.ErrorIs(t, err, context.Canceled)
 	})
 }
 
@@ -168,7 +168,7 @@ func TestCollectStopsAfterCanceledProfileFailure(t *testing.T) {
 		Fetcher:       actresscache.NewFetcher(client, 0, "test"),
 		RecordFailure: func(actresscache.Candidate, error) error { failures++; return nil },
 	}, func(actresscache.Candidate) error { return nil })
-	require.NoError(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 1, failures)
 }
 

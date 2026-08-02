@@ -67,24 +67,25 @@ func (p *parameterMap) Set(value string) error {
 }
 
 type options struct {
-	sources       stringList
-	output        string
-	auditOutput   string
-	state         string
-	sitemap       string
-	r18devDump    string
-	legacyCSV     string
-	workers       int
-	delay         time.Duration
-	imageDelay    time.Duration
-	timeout       time.Duration
-	limit         int
-	minDimension  int
-	maxImageBytes int64
-	userAgent     string
-	refresh       bool
-	listSources   bool
-	parameters    parameterMap
+	sources           stringList
+	output            string
+	auditOutput       string
+	state             string
+	sitemap           string
+	r18devDump        string
+	legacyCSV         string
+	workers           int
+	delay             time.Duration
+	imageDelay        time.Duration
+	timeout           time.Duration
+	limit             int
+	minDimension      int
+	maxImageBytes     int64
+	userAgent         string
+	refresh           bool
+	listSources       bool
+	allowPrivateHosts bool
+	parameters        parameterMap
 }
 
 var exit = os.Exit
@@ -131,6 +132,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	flags.BoolVar(&opts.refresh, "refresh", false, "Re-fetch candidates already successful in state")
 	flags.Var(&opts.parameters, "option", "Source-specific option in key=value form; repeat as needed")
 	flags.BoolVar(&opts.listSources, "list-sources", false, "List registered sources and exit")
+	flags.BoolVar(&opts.allowPrivateHosts, "allow-private-hosts", false, "Allow fetches to loopback/private/link-local hosts (e.g. a local test mirror); off by default to block SSRF")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -187,6 +189,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fetcher := actresscache.NewFetcherWithHostDelays(client, opts.delay, opts.userAgent, map[string]time.Duration{
 		"pics.dmm.co.jp": opts.imageDelay,
 	})
+	fetcher.AllowPrivateHosts = opts.allowPrivateHosts
 	parameters := make(parameterMap, len(opts.parameters)+1)
 	for key, value := range opts.parameters {
 		parameters[key] = value

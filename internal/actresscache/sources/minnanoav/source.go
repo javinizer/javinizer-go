@@ -167,6 +167,12 @@ enqueue:
 	}
 	close(jobs)
 	wg.Wait()
+	if sourceErr == nil && ctx.Err() != nil {
+		// A cancelled crawl produced a partial listing; reporting completion
+		// would let the builder prune unvisited records and publish a
+		// truncated cache.
+		sourceErr = ctx.Err()
+	}
 	if sourceErr == nil && options.MarkComplete != nil {
 		options.MarkComplete()
 	}

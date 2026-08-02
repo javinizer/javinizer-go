@@ -34,10 +34,13 @@ type ActressSyncCreateRequest struct {
 }
 
 // trackedSyncTask records an in-flight sync task so per-job cancellation can
-// abort its context before the lease expires.
+// abort its context before the lease expires. cancelled marks tasks aborted
+// by CancelJob, so their completion settles as cancelled regardless of what
+// outcome the sync path reported.
 type trackedSyncTask struct {
-	jobID  string
-	cancel context.CancelFunc
+	jobID     string
+	cancel    context.CancelFunc
+	cancelled bool
 }
 
 // ActressSyncManager ...
@@ -56,23 +59,20 @@ type ActressSyncManager struct {
 	wg                  sync.WaitGroup
 	wake                chan struct{}
 	active              atomic.Int32
-	// taskMu guards runningTasks/cancelledJobs; it is separate from mu
-	// because Stop holds mu across wg.Wait while task goroutines still
-	// need to unregister themselves.
-	taskMu        sync.Mutex
-	runningTasks  map[string]trackedSyncTask
-	cancelledJobs map[string]bool
+	// taskMu guards runningTasks; it is separate from mu because Stop holds
+	// mu across wg.Wait while task goroutines still need to unregister.
+	taskMu       sync.Mutex
+	runningTasks map[string]trackedSyncTask
 }
 
 // NewActressSyncManager ...
 func NewActressSyncManager(deps ActressSyncManagerDeps) *ActressSyncManager {
 	m := &ActressSyncManager{
-		deps:          deps,
-		owner:         uuid.NewString(),
-		wake:          make(chan struct{}, 1),
-		retryDelay:    time.Second,
-		runningTasks:  make(map[string]trackedSyncTask),
-		cancelledJobs: make(map[string]bool),
+		deps:         deps,
+		owner:        uuid.NewString(),
+		wake:         make(chan struct{}, 1),
+		retryDelay:   time.Second,
+		runningTasks: make(map[string]trackedSyncTask),
 	}
 	if deps.DB != nil {
 		m.repo = database.NewActressSyncRepository(deps.DB)
@@ -183,25 +183,26 @@ func (m *ActressSyncManager) dispatch(ctx context.Context) {
 				break
 			}
 			timeout := m.taskTimeout(cfg)
+			// Claim and register under the same taskMu hold: CancelJob commits
+			// the DB flag before sweeping, so a task claimed just before a
+			// cancel commit is seen by the sweep, and ClaimNext filters jobs
+			// whose cancel already committed. No task can slip between.
+			m.taskMu.Lock()
 			task, err := m.repo.ClaimNext(m.owner, time.Now().UTC().Add(timeout+30*time.Second))
 			if err != nil {
+				m.taskMu.Unlock()
 				logging.Warnf("Actress sync claim failed: %v", err)
 				break
 			}
 			if task == nil {
+				m.taskMu.Unlock()
 				break
 			}
+			taskCtx, taskCancel := context.WithCancel(ctx)
+			m.runningTasks[task.ID] = trackedSyncTask{jobID: task.JobID, cancel: taskCancel}
+			m.taskMu.Unlock()
 			m.active.Add(1)
 			m.wg.Add(1)
-			taskCtx, taskCancel := context.WithCancel(ctx)
-			m.taskMu.Lock()
-			m.runningTasks[task.ID] = trackedSyncTask{jobID: task.JobID, cancel: taskCancel}
-			cancelRequested := m.cancelledJobs[task.JobID]
-			m.taskMu.Unlock()
-			if cancelRequested {
-				// The job was cancelled between claim and registration.
-				taskCancel()
-			}
 			go func() {
 				defer m.untrackTask(task.ID)
 				m.runTaskWithContext(taskCtx, task, timeout, cfg, registry)
@@ -398,20 +399,31 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 			return models.ActressInfo{DMMID: record.DMMID, FirstName: record.FirstName, LastName: record.LastName, JapaneseName: record.JapaneseName, ThumbURL: record.ThumbURL, Aliases: record.Aliases}, true
 		},
 	})
-	if err != nil {
-		if runCtx.Err() != nil && errors.Is(err, context.Canceled) {
-			if m.isJobCancelled(task.JobID) {
-				// The job was cancelled: complete the task now instead of
-				// letting its lease linger until expiry, which would leave
-				// the job stuck in a non-terminal state until recovery.
-				task.Status, task.Outcome = models.ActressSyncTaskCancelled, "cancelled"
-				task.ErrorMessage = ""
-				if completeErr := m.repo.CompleteTask(task, task.LeaseToken); completeErr != nil {
-					logging.Warnf("Actress sync cancel completion failed: %v", completeErr)
-				}
+	// Task cancellation and timeout supersede whatever the sync path
+	// reported: scrapers may swallow context errors and return a benign
+	// outcome (e.g. "missing_dmm_id") that would otherwise be persisted as
+	// skipped, hiding the interruption.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		switch {
+		case m.isTaskCancelled(task.ID):
+			task.Status, task.Outcome = models.ActressSyncTaskCancelled, "cancelled"
+			task.ErrorMessage = ""
+		case errors.Is(ctxErr, context.DeadlineExceeded):
+			task.Status, task.Outcome = models.ActressSyncTaskFailed, "failed"
+			task.ErrorMessage = fmt.Sprintf("actress sync timed out after %s", timeout)
+		default:
+			if err != nil {
+				// Manager shutdown: keep the lease so recovery can requeue.
+				return
 			}
-			return
+			// The sync committed before shutdown; persist its outcome below.
 		}
+		if completeErr := m.repo.CompleteTask(task, task.LeaseToken); completeErr != nil {
+			logging.Warnf("Actress sync settle completion failed: %v", completeErr)
+		}
+		return
+	}
+	if err != nil {
 		if m.requeueCanonicalTask(task, err) {
 			return
 		}
@@ -498,10 +510,11 @@ func (m *ActressSyncManager) CancelJob(id string) error {
 		return err
 	}
 	m.taskMu.Lock()
-	m.cancelledJobs[id] = true
-	for _, entry := range m.runningTasks {
+	for taskID, entry := range m.runningTasks {
 		if entry.jobID == id {
+			entry.cancelled = true
 			entry.cancel()
+			m.runningTasks[taskID] = entry
 		}
 	}
 	m.taskMu.Unlock()
@@ -521,12 +534,12 @@ func (m *ActressSyncManager) untrackTask(id string) {
 	}
 }
 
-// isJobCancelled reports whether job cancellation was requested through this
-// manager instance.
-func (m *ActressSyncManager) isJobCancelled(jobID string) bool {
+// isTaskCancelled reports whether a running task was aborted by a job
+// cancellation through this manager instance.
+func (m *ActressSyncManager) isTaskCancelled(taskID string) bool {
 	m.taskMu.Lock()
 	defer m.taskMu.Unlock()
-	return m.cancelledJobs[jobID]
+	return m.runningTasks[taskID].cancelled
 }
 
 // uniqueActressIDs ...

@@ -35,7 +35,7 @@ func TestCancelJobCancelsRunningTask(t *testing.T) {
 
 	require.NoError(t, manager.CancelJob(job.ID))
 	require.ErrorIs(t, taskCtx.Err(), context.Canceled)
-	require.True(t, manager.isJobCancelled(job.ID))
+	require.True(t, manager.isTaskCancelled("task-1"))
 
 	var stored models.ActressSyncJob
 	require.NoError(t, db.First(&stored, "id = ?", job.ID).Error)

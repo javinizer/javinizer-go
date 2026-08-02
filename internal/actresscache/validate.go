@@ -63,6 +63,10 @@ func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, min
 			}
 			return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: statusErr.Error()}
 		}
+		var blockedErr *BlockedFetchError
+		if errors.As(err, &blockedErr) {
+			return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: blockedErr.Error()}
+		}
 		return ThumbnailValidation{}, err
 	}
 	mediaType, _, err := mime.ParseMediaType(headers.Get("Content-Type"))

@@ -48,7 +48,7 @@ func TestRunBuildsLegacyCacheAndAudit(t *testing.T) {
 		"--source", "legacy-jvthumbs", "--legacy-csv", csvPath,
 		"--output", output, "--audit-output", audit, "--state", state,
 		"--min-dimension", "1", "--delay", "0", "--image-delay", "0",
-		"--workers", "1", "--option", "custom=value",
+		"--workers", "1", "--option", "custom=value", "--allow-private-hosts",
 	}, &stdout, &stderr)
 	require.NoError(t, err, stderr.String())
 	assert.FileExists(t, output)
