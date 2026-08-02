@@ -370,7 +370,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			if (currentJob && data.movie) {
 				const updatedJob: BatchJobResponse = {
 					...currentJob,
-					results: applyFieldOverrideToResults(currentJob.results ?? {}, resultId, data),
+					results: applyFieldOverrideToResults(currentJob.results ?? {}, resultId, field, data),
 				};
 				deps.skipJobSync();
 				deps.setJob(updatedJob);

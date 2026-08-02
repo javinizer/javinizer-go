@@ -52,28 +52,55 @@ export function overlayPosterEdit(movie: Movie, edit: PosterEditOverlay): Movie 
 // The field-override endpoint applies the override to EVERY part of a
 // multipart movie server-side (ApplyFieldOverride iterates
 // FindFilePathsForMovieID), but the response carries only the edited part's
-// movie. applyFieldOverrideToResults mirrors that movie onto every result of
-// the same movie so sibling part entries never retain the pre-override state —
-// otherwise the next whole-movie Save resubmits a stale snapshot that
-// updateBatchMovie fans back across all parts, silently undoing the override.
+// movie — which includes per-part identity fields such as original_filename.
+// applyFieldOverrideToResults therefore mirrors the backend fan-out
+// (mergeOverrideOntoPart in internal/worker/field_override.go): the SELECTED
+// result takes response.movie wholesale, while each SIBLING result keeps its
+// own movie and receives ONLY the overridden field's new value plus the
+// synchronized poster state. Cloning response.movie onto siblings would
+// corrupt their per-part fields (e.g. original_filename); the next
+// whole-movie Save would then resubmit that corrupted snapshot as a
+// deliberate change that updateBatchMovie fans across every part.
 export function applyFieldOverrideToResults(
 	results: Record<string, FileResult>,
 	resultId: string,
+	field: string,
 	response: FieldOverrideResponse,
 ): Record<string, FileResult> {
 	if (!response.movie) return results;
+	const src = response.movie;
 	const targets = new Set(posterEditTargetFilePaths(results, resultId));
 	const updated: Record<string, FileResult> = { ...results };
 	for (const [filePath, result] of Object.entries(updated)) {
 		if (!targets.has(filePath)) continue;
+		let movie = src;
+		if (result.result_id !== resultId && result.movie) {
+			const merged: Movie = { ...result.movie };
+			overlayFieldOverride(merged, field, src);
+			overlayPosterState(merged, src);
+			movie = merged;
+		}
 		updated[filePath] = {
 			...result,
-			movie: response.movie,
+			movie,
 			field_sources: response.field_sources ?? result.field_sources,
 			actress_sources: response.actress_sources ?? result.actress_sources,
 		};
 	}
 	return updated;
+}
+
+// overlayPosterState mirrors the backend's wholesale Poster struct clone:
+// the cached poster assets an override refreshes are movie-wide (every part
+// shares {movie.ID}-full.jpg), so poster identity — unlike file identity —
+// must stay identical across parts. An absent poster_crop_bounds key means
+// "cleared" (omitempty), so it falls back to null rather than surviving stale.
+function overlayPosterState(target: Movie, src: Movie): void {
+	target.poster_url = src.poster_url;
+	target.cover_url = src.cover_url;
+	target.cropped_poster_url = src.cropped_poster_url;
+	target.should_crop_poster = src.should_crop_poster;
+	target.poster_crop_bounds = src.poster_crop_bounds ?? null;
 }
 
 // applyFieldOverrideToEditedMovies overlays ONLY the overridden field (plus
