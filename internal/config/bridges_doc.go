@@ -82,6 +82,7 @@
 //	cfg.Metadata.NFO.Feature.IncludeTrailer         → nfo
 //	cfg.Metadata.NFO.Feature.PerFile                → api/core, nfo, workflow
 //	cfg.Metadata.Priority                    → aggregator
+//	cfg.Metadata.Priority.Fields             → scrape
 //	cfg.Metadata.NFO.Format.RatingSource           → nfo
 //	cfg.Metadata.RequiredFields              → aggregator
 //	cfg.Metadata.NFO.Extra.Tag                    → nfo

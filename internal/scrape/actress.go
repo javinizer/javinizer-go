@@ -195,17 +195,63 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 	if len(resolvers) == 0 {
 		return 0
 	}
+	// Resolution blends from every resolver in the chain, so per-field picks
+	// must follow the configured actress priority rather than iteration order:
+	// resolvers differ in capability (e.g. JavDB only carries Japanese names),
+	// and positional order could otherwise promote a lower-ranked source.
+	actressRank := actressFieldRanker(cfg.ActressFieldPriority, priority)
 	enriched := 0
+	// Best remaining rank for each loop position, letting the blend break as
+	// soon as no later resolver can improve on the picks already made.
+	suffixBestRank := make([]int, len(resolvers)+1)
+	suffixBestRank[len(resolvers)] = int(^uint(0) >> 1)
+	for i := len(resolvers) - 1; i >= 0; i-- {
+		rank := actressRank(resolverName(resolvers[i]))
+		if suffixBestRank[i+1] < rank {
+			suffixBestRank[i] = suffixBestRank[i+1]
+		} else {
+			suffixBestRank[i] = rank
+		}
+	}
 	for i := range scraped.Actresses {
 		actress := &scraped.Actresses[i]
 		if !actressNeedsMetadata(*actress) {
 			continue
 		}
-		actressEnriched := false
-		for _, resolver := range resolvers {
-			if !actressNeedsMetadata(*actress) {
-				break
+		needed := make([]string, 0, 4)
+		picks := map[string]*actressFieldPick{
+			"actress_first_name":    {},
+			"actress_last_name":     {},
+			"actress_japanese_name": {},
+			"actress_url":           {},
+		}
+		needsThumb := actressThumbNeedsResolution(actress.ThumbURL)
+		if needsThumb {
+			needed = append(needed, "actress_url")
+		}
+		if actress.FirstName == "" {
+			needed = append(needed, "actress_first_name")
+		}
+		if actress.LastName == "" {
+			needed = append(needed, "actress_last_name")
+		}
+		if actress.JapaneseName == "" {
+			needed = append(needed, "actress_japanese_name")
+		}
+		allSet := func() (bool, int) {
+			worst := -1
+			for _, field := range needed {
+				p := picks[field]
+				if !p.set {
+					return false, 0
+				}
+				if p.rank > worst {
+					worst = p.rank
+				}
 			}
+			return true, worst
+		}
+		for idx, resolver := range resolvers {
 			metadata := resolver.ResolveActressMetadata(ctx, models.ActressInfo{
 				DMMID:        actress.DMMID,
 				FirstName:    actress.FirstName,
@@ -216,35 +262,56 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			if metadata.DMMID != actress.DMMID && actress.DMMID > 0 {
 				continue
 			}
-			resolverFilled := false
+			name := resolverName(resolver)
+			rank := actressRank(name)
+			pick := func(field, value string) {
+				value = strings.TrimSpace(value)
+				if value == "" || !models.ResolverSupportsActressField(resolver, field) {
+					return
+				}
+				p := picks[field]
+				if !p.set || rank < p.rank {
+					p.value, p.rank, p.set = value, rank, true
+				}
+			}
 			thumbnail := strings.TrimSpace(metadata.ThumbURL)
-			if actressThumbNeedsResolution(actress.ThumbURL) && thumbnail != "" && !models.IsKnownInvalidDMMActressThumbnail(thumbnail) {
+			if needsThumb && thumbnail != "" && !models.IsKnownInvalidDMMActressThumbnail(thumbnail) && models.ResolverSupportsActressField(resolver, "actress_url") {
 				if err := validateResolverActressThumbnail(ctx, resolver, cfg.ValidateActressThumbnail, thumbnail); err != nil {
 					logging.Debugf("Rejected resolver actress thumbnail %s: %v", thumbnail, err)
 				} else {
-					actress.ThumbURL = thumbnail
-					resolverFilled = true
+					p := picks["actress_url"]
+					if !p.set || rank < p.rank {
+						p.value, p.rank, p.set = thumbnail, rank, true
+					}
 				}
 			}
-			if actress.FirstName == "" && metadata.FirstName != "" {
-				actress.FirstName = metadata.FirstName
-				resolverFilled = true
+			pick("actress_first_name", metadata.FirstName)
+			pick("actress_last_name", metadata.LastName)
+			pick("actress_japanese_name", metadata.JapaneseName)
+			if done, worst := allSet(); done && suffixBestRank[idx+1] >= worst {
+				break // no remaining resolver can improve the picks
 			}
-			if actress.LastName == "" && metadata.LastName != "" {
-				actress.LastName = metadata.LastName
-				resolverFilled = true
-			}
-			if actress.JapaneseName == "" && metadata.JapaneseName != "" {
-				actress.JapaneseName = metadata.JapaneseName
-				resolverFilled = true
-			}
-			if resolverFilled {
-				actressEnriched = true
-				logging.Debugf("Enriched actress %s from resolver %s", actress.FullName(), resolverName(resolver))
-			}
+		}
+		actressEnriched := false
+		if needsThumb && picks["actress_url"].set {
+			actress.ThumbURL = picks["actress_url"].value
+			actressEnriched = true
+		}
+		if actress.FirstName == "" && picks["actress_first_name"].set {
+			actress.FirstName = picks["actress_first_name"].value
+			actressEnriched = true
+		}
+		if actress.LastName == "" && picks["actress_last_name"].set {
+			actress.LastName = picks["actress_last_name"].value
+			actressEnriched = true
+		}
+		if actress.JapaneseName == "" && picks["actress_japanese_name"].set {
+			actress.JapaneseName = picks["actress_japanese_name"].value
+			actressEnriched = true
 		}
 		if actressEnriched {
 			enriched++
+			logging.Debugf("Enriched actress %s from resolvers", actress.FullName())
 		}
 	}
 	return enriched
@@ -277,6 +344,42 @@ func collectMetadataResolvers(registry ScraperInstanceResolver, priority []strin
 		}
 	}
 	return resolvers
+}
+
+// actressFieldPick records the best-ranked value offered for one field.
+type actressFieldPick struct {
+	value string
+	rank  int
+	set   bool
+}
+
+// actressFieldRanker ranks scrapers by the configured actress field priority,
+// falling back to the global scraper priority; unknown names rank last.
+func actressFieldRanker(fieldPriority, global []string) func(string) int {
+	index := make(map[string]int, len(fieldPriority)+len(global))
+	seed := func(list []string, offset int) int {
+		added := 0
+		for _, name := range list {
+			key := strings.ToLower(strings.TrimSpace(name))
+			if key == "" {
+				continue
+			}
+			if _, ok := index[key]; !ok {
+				index[key] = offset + added
+				added++
+			}
+		}
+		return added
+	}
+	offset := seed(fieldPriority, 0)
+	seed(global, offset)
+	fallback := offset + len(global)
+	return func(name string) int {
+		if rank, ok := index[strings.ToLower(strings.TrimSpace(name))]; ok {
+			return rank
+		}
+		return fallback
+	}
 }
 
 func resolverName(r models.ActressMetadataResolver) string {

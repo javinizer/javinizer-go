@@ -371,7 +371,7 @@ func TestActressSyncManagerRevalidatesSelectedCompleteActress(t *testing.T) {
 	registry.RegisterInstance(resolver)
 	manager, job := runActressSyncManagerTask(t, db, actressRepo, movieRepo, actress.ID, registry)
 
-	tasks, err := manager.ListTasks(job.ID)
+	tasks, err := manager.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, 1, resolver.calls)
@@ -514,7 +514,7 @@ func TestActressSyncManagerSelectedUsesCacheAliasForMissingDMM(t *testing.T) {
 	require.NoError(t, actressRepo.Create(context.Background(), duplicate))
 
 	manager, job := runActressSyncManagerTask(t, db, actressRepo, movieRepo, duplicate.ID, scraperutil.NewScraperRegistry())
-	tasks, err := manager.ListTasks(job.ID)
+	tasks, err := manager.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, models.ActressSyncTaskCompleted, tasks[0].Status)
@@ -539,7 +539,7 @@ func TestActressSyncManagerQueuesMissingDMMForCanonicalRecovery(t *testing.T) {
 	require.NoError(t, actressRepo.Create(context.Background(), duplicate))
 
 	manager, job := runActressSyncManagerTask(t, db, actressRepo, movieRepo, duplicate.ID, scraperutil.NewScraperRegistry())
-	tasks, err := manager.ListTasks(job.ID)
+	tasks, err := manager.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, models.ActressSyncTaskCompleted, tasks[0].Status)

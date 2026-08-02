@@ -2,6 +2,7 @@ package actress
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -123,7 +124,8 @@ func getActressSyncJob(rt *core.APIRuntime) gin.HandlerFunc {
 // @Tags actress
 // @Produce json
 // @Param jobID path string true "Sync job ID"
-// @Param view query string false "Task view: 'active' or 'diagnostics' (default: all tasks)"
+// @Param view query string false "Task view: 'active' or 'diagnostics' (default: bounded all-tasks list)"
+// @Param limit query int false "Max tasks for the default view (1-1000; default 500)" default(500)
 // @Success 200 {object} actressSyncTasksResponse
 // @Failure 404 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse
@@ -144,7 +146,13 @@ func listActressSyncJobTasks(rt *core.APIRuntime) gin.HandlerFunc {
 		case "diagnostics":
 			tasks, err = manager.ListDiagnosticTasks(jobID, 100)
 		default:
-			tasks, err = manager.ListTasks(jobID)
+			limit := 0
+			if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+				if parsed, convErr := strconv.Atoi(raw); convErr == nil {
+					limit = parsed
+				}
+			}
+			tasks, err = manager.ListTasks(jobID, limit)
 		}
 		if err != nil {
 			writeActressSyncError(c, err)

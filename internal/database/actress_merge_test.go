@@ -363,7 +363,7 @@ func TestExecuteMergeMigratesActiveSourceTasks(t *testing.T) {
 	_, err = repo.merger.ExecuteMerge(ctx, plan, db)
 	require.NoError(t, err)
 
-	tasks, err := syncRepo.ListTasks(job.ID)
+	tasks, err := syncRepo.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.NotNil(t, tasks[0].ActressID)

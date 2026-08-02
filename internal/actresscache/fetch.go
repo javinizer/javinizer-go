@@ -55,6 +55,10 @@ type Fetcher struct {
 	// proxyFunc mirrors the wrapped transport's proxy configuration so lookup
 	// failures can fail closed when a proxy would resolve targets remotely.
 	proxyFunc func(*http.Request) (*url.URL, error)
+	// proxyHost is the configured proxy's hostname; it is trusted
+	// infrastructure and exempt from the dial-time pin (targets are validated
+	// by name at the request layer instead).
+	proxyHost string
 
 	client     *http.Client
 	delay      time.Duration
@@ -244,6 +248,11 @@ func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgen
 		fetcher.resolveTargets = true
 		guarded := transport.Clone()
 		fetcher.proxyFunc = guarded.Proxy
+		if guarded.Proxy != nil {
+			if proxyURL, err := guarded.Proxy(&http.Request{URL: &url.URL{Scheme: "https", Host: "dial-probe.invalid"}}); err == nil && proxyURL != nil {
+				fetcher.proxyHost = strings.ToLower(proxyURL.Hostname())
+			}
+		}
 		fallback := guarded.DialContext
 		if fallback == nil {
 			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
@@ -251,6 +260,11 @@ func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgen
 		}
 		guarded.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if fetcher.AllowPrivateHosts {
+				return fallback(ctx, network, addr)
+			}
+			if host, _, splitErr := net.SplitHostPort(addr); splitErr == nil && fetcher.proxyHost != "" && strings.EqualFold(host, fetcher.proxyHost) {
+				// The configured proxy itself (often a private corporate address)
+				// is dialed to reach public targets already vetted at the request layer.
 				return fallback(ctx, network, addr)
 			}
 			return guardedDialContext(ctx, network, addr, fallback)

@@ -14,6 +14,7 @@ export interface ScraperItem {
 	displayName: string;
 	expanded: boolean;
 	supportsMovieSearch: boolean;
+	supportsActressMetadata: boolean;
 	options: ScraperOption[];
 }
 
@@ -120,6 +121,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 					displayName: scraperDisplayNames[name] || name,
 					expanded: false,
 					supportsMovieSearch: scraperInfo?.supports_movie_search !== false,
+				supportsActressMetadata: scraperInfo?.supports_actress_metadata === true,
 					options: scraperOptionsMap[name] || [],
 				};
 			});
@@ -151,6 +153,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 				displayName: name,
 				expanded: false,
 				supportsMovieSearch: true,
+				supportsActressMetadata: false,
 				options: [],
 			}));
 			scrapers = deps.refreshLocalProxyProfileChoices(scrapers);

@@ -308,7 +308,7 @@ func TestActressSyncManagerCreateJobFinalBranches(t *testing.T) {
 		job, err := manager.CreateJob(context.Background(), ActressSyncCreateRequest{Scope: "selected", ActressIDs: []uint{actress.ID}})
 		require.NoError(t, err)
 		t.Cleanup(manager.Stop)
-		tasks, err := manager.repo.ListTasks(job.ID)
+		tasks, err := manager.repo.ListTasks(job.ID, 0)
 		require.NoError(t, err)
 		require.Equal(t, "#"+strconv.FormatUint(uint64(actress.ID), 10), tasks[0].Label)
 	})
@@ -375,7 +375,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		manager.active.Add(1)
 		manager.wg.Add(1)
 		manager.runTaskWithContext(context.Background(), claimed, 3*time.Second, nil, scraperutil.NewScraperRegistry())
-		tasks, err := manager.repo.ListTasks(job.ID)
+		tasks, err := manager.repo.ListTasks(job.ID, 0)
 		require.NoError(t, err)
 		byID := map[string]models.ActressSyncTask{tasks[0].ID: tasks[0], tasks[1].ID: tasks[1]}
 		require.Equal(t, models.ActressSyncTaskPending, byID[duplicateTask.ID].Status)

@@ -295,6 +295,11 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 	return metadata
 }
 
+// ActressFields ... JavDB actor profiles carry the Japanese name and avatar only.
+func (s *scraper) ActressFields() []string {
+	return []string{"actress_japanese_name", "actress_url"}
+}
+
 func (s *scraper) findActorID(ctx context.Context, name string) string {
 	name = scraperutil.CleanString(name)
 	if name == "" {

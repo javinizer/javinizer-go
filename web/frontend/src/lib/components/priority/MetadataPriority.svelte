@@ -17,6 +17,7 @@
 		getFieldStatus,
 		applyEnabledReorderToFull,
 		buildFieldPriorityOverride,
+		filterFieldEligibleScrapers,
 		SKIP_SENTINEL
 	} from './priority';
 	import { formatScraperName } from './scraperNames';
@@ -25,9 +26,11 @@
 		config: SettingsConfig;
 		onUpdate: (config: SettingsConfig) => void;
 		onScraperUsageQuery?: (scraperName: string) => { count: number; fields: string[] };
+		/** Scrapers that resolve actress metadata but never movie metadata. */
+		actressOnlyScrapers?: ReadonlySet<string>;
 	}
 
-	let { config, onUpdate, onScraperUsageQuery }: Props = $props();
+	let { config, onUpdate, onScraperUsageQuery, actressOnlyScrapers }: Props = $props();
 
 	type PriorityMode = 'simple' | 'advanced';
 	let mode = $state<PriorityMode>('simple');
@@ -256,7 +259,11 @@
 	// editing list, filtered to only enabled scrapers.
 	const availableScrapersToAdd = $derived(
 		editingField
-			? filterEnabledScrapers(getGlobalPriority(config)).filter((s) => !editingPriority.includes(s))
+			? filterFieldEligibleScrapers(
+					editingField,
+					filterEnabledScrapers(getGlobalPriority(config)).filter((s) => !editingPriority.includes(s)),
+					actressOnlyScrapers,
+				)
 			: []
 	);
 

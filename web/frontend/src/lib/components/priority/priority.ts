@@ -10,6 +10,23 @@ import type { SettingsConfig } from '$lib/api/types';
  */
 export const SKIP_SENTINEL = '__skip__';
 
+// ACTRESS_FIELD_KEY is the metadata field actress resolvers contribute to.
+export const ACTRESS_FIELD_KEY = 'actress';
+
+// Actress-only resolvers (supports_actress_metadata && !supports_movie_search)
+// can never produce a movie scrape result, so offering them for movie fields
+// would configure a field that always resolves empty.
+export function filterFieldEligibleScrapers(
+	fieldKey: string,
+	names: string[],
+	actressOnlyScrapers?: ReadonlySet<string>,
+): string[] {
+	if (fieldKey === ACTRESS_FIELD_KEY || !actressOnlyScrapers || actressOnlyScrapers.size === 0) {
+		return names;
+	}
+	return names.filter((name) => !actressOnlyScrapers.has(name));
+}
+
 /** Whether a stored override list is the skip sentinel (`["__skip__"]`). */
 export function isSkipSentinel(list: string[]): boolean {
 	return list.length === 1 && list[0] === SKIP_SENTINEL;

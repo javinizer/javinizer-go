@@ -6,6 +6,7 @@ import {
 	getFieldStatus,
 	buildFieldPriorityOverride,
 	applyEnabledReorderToFull,
+	filterFieldEligibleScrapers,
 	SKIP_SENTINEL,
 	isSkipSentinel,
 } from './priority';
@@ -364,5 +365,20 @@ describe('priority: editor data flow preserves disabled scrapers through reorder
 		const saved = buildFieldPriorityOverride(config, 'series', editingPriority);
 		expect(saved.series).toEqual(['dmm', 'r18dev', 'javbus']);
 		expect(saved.series).toContain('javbus'); // disabled scraper preserved
+	});
+});
+
+describe('filterFieldEligibleScrapers', () => {
+	const actressOnly = new Set(['minnanoav']);
+	const names = ['dmm', 'minnanoav', 'javdb'];
+
+	it('keeps actress-only resolvers available for the actress field only', () => {
+		expect(filterFieldEligibleScrapers('actress', names, actressOnly)).toEqual(names);
+		expect(filterFieldEligibleScrapers('title', names, actressOnly)).toEqual(['dmm', 'javdb']);
+	});
+
+	it('passes through when no actress-only set is provided or it is empty', () => {
+		expect(filterFieldEligibleScrapers('title', names, undefined)).toEqual(names);
+		expect(filterFieldEligibleScrapers('title', names, new Set())).toEqual(names);
 	});
 });

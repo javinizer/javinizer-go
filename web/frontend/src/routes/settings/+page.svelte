@@ -227,6 +227,7 @@
 				<MetadataPriority
 					config={settings.settingsConfig}
 					onUpdate={(updatedConfig) => { settings.config = updatedConfig; }}
+					actressOnlyScrapers={new Set(scraper.scrapers.filter((s) => !s.supportsMovieSearch && s.supportsActressMetadata).map((s) => s.name))}
 				/>
 			</SettingsSection>
 

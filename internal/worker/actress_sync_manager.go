@@ -367,13 +367,18 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 		return
 	}
 	scrapeActress := true
+	var scrapersPriority, actressFieldPriority []string
 	if cfg != nil {
 		scrapeActress = cfg.Scrapers.ScrapeActress
+		scrapersPriority = append(scrapersPriority, cfg.Scrapers.Priority...)
+		actressFieldPriority = append(actressFieldPriority, cfg.Metadata.Priority.Fields["actress"]...)
 	}
 	result, err := SyncActressMetadata(ctx, *task.ActressID, m.deps.ActressRepo, m.deps.MovieRepo, registry, ActressSyncOptions{
-		Revalidate:         job.Scope == "selected",
-		PriorUpdatedFields: append([]string(nil), task.UpdatedFields...),
-		ScrapeActress:      &scrapeActress,
+		Revalidate:           job.Scope == "selected",
+		PriorUpdatedFields:   append([]string(nil), task.UpdatedFields...),
+		ScrapeActress:        &scrapeActress,
+		ScrapersPriority:     scrapersPriority,
+		ActressFieldPriority: actressFieldPriority,
 
 		MergeActressesWithSource: mergeActressesWithSourceCallback(ctx, m.deps.ActressRepo, task),
 		MergeActressesWithTargetSource: func(targetID, sourceID uint, expectedTarget, expectedSource models.Actress) (*database.ActressMergeResult, error) {
@@ -495,11 +500,11 @@ func (m *ActressSyncManager) ListActiveJobs() ([]models.ActressSyncJob, error) {
 }
 
 // ListTasks ...
-func (m *ActressSyncManager) ListTasks(id string) ([]models.ActressSyncTask, error) {
+func (m *ActressSyncManager) ListTasks(id string, limit int) ([]models.ActressSyncTask, error) {
 	if _, err := m.repo.FindJob(id); err != nil {
 		return nil, err
 	}
-	return m.repo.ListTasks(id)
+	return m.repo.ListTasks(id, limit)
 }
 
 // ListRunningTasks returns currently running tasks for a sync job.

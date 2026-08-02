@@ -135,10 +135,20 @@ func (r *ActressSyncRepository) ListActiveJobs() ([]models.ActressSyncJob, error
 	return jobs, err
 }
 
+const (
+	// listTasksDefaultLimit bounds the default all-tasks view so a huge sync
+	// job cannot force an unbounded read + JSON payload.
+	listTasksDefaultLimit = 500
+	listTasksMaxLimit     = 1000
+)
+
 // ListTasks ...
-func (r *ActressSyncRepository) ListTasks(jobID string) ([]models.ActressSyncTask, error) {
+func (r *ActressSyncRepository) ListTasks(jobID string, limit int) ([]models.ActressSyncTask, error) {
+	if limit <= 0 || limit > listTasksMaxLimit {
+		limit = listTasksDefaultLimit
+	}
 	tasks := make([]models.ActressSyncTask, 0)
-	err := r.db.Where("job_id = ?", jobID).Order("created_at ASC, id ASC").Find(&tasks).Error
+	err := r.db.Where("job_id = ?", jobID).Order("created_at ASC, id ASC").Limit(limit).Find(&tasks).Error
 	return tasks, err
 }
 

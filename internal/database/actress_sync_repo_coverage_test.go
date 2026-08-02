@@ -146,7 +146,7 @@ func TestActressSyncDeferredTaskReacquiresCanonicalKey(t *testing.T) {
 		job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now.Add(time.Second)}
 		task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actress.ID, Label: "duplicate", DedupeKey: fmt.Sprintf("actress:%d", actress.ID), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now.Add(time.Second)}
 		require.NoError(t, repo.CreateJob(job, []models.ActressSyncTask{task}))
-		stored, err := repo.ListTasks(job.ID)
+		stored, err := repo.ListTasks(job.ID, 0)
 		require.NoError(t, err)
 		require.Len(t, stored, 1)
 		require.Equal(t, models.ActressSyncTaskSkipped, stored[0].Status)
@@ -276,7 +276,7 @@ func TestActressSyncCreateJobPreservesSelectedDuplicate(t *testing.T) {
 	selectedJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now.Add(time.Second)}
 	selectedTask := models.ActressSyncTask{ID: uuid.NewString(), JobID: selectedJob.ID, ActressID: &actress.ID, DedupeKey: dedupeKey, Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now.Add(time.Second)}
 	require.NoError(t, repo.CreateJob(selectedJob, []models.ActressSyncTask{selectedTask}))
-	stored, err := repo.ListTasks(selectedJob.ID)
+	stored, err := repo.ListTasks(selectedJob.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	require.Equal(t, models.ActressSyncTaskPending, stored[0].Status)
@@ -295,7 +295,7 @@ func TestActressSyncCreateJobCoalescesDuplicateActiveTasks(t *testing.T) {
 	}
 	repo := NewActressSyncRepository(db)
 	require.NoError(t, repo.CreateJob(job, tasks))
-	stored, err := repo.ListTasks(job.ID)
+	stored, err := repo.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, stored, 2)
 	require.Equal(t, models.ActressSyncTaskSkipped, stored[1].Status)
@@ -334,7 +334,7 @@ func TestActressSyncClaimAndLeaseTransitionBranches(t *testing.T) {
 				require.NoError(t, db.Model(&models.ActressSyncJob{}).Where("id = ?", job.ID).Update("cancel_requested", true).Error)
 			}
 			require.NoError(t, syncRepo.RecoverExpiredLeases(time.Now().UTC()))
-			stored, listErr := syncRepo.ListTasks(job.ID)
+			stored, listErr := syncRepo.ListTasks(job.ID, 0)
 			require.NoError(t, listErr)
 			require.Equal(t, tc.wantStatus, stored[0].Status)
 		})
@@ -348,7 +348,7 @@ func TestActressSyncReleaseOwnerAttemptCapAndStaleCompletion(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.Model(&models.ActressSyncTask{}).Where("id = ?", claimed.ID).Update("attempts", actressSyncAttemptCap).Error)
 	require.NoError(t, repo.ReleaseOwnerLeases("cap-owner"))
-	tasks, err := repo.ListTasks(job.ID)
+	tasks, err := repo.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Equal(t, models.ActressSyncTaskFailed, tasks[0].Status)
 	require.Equal(t, "attempt_cap_reached", tasks[0].ErrorMessage)

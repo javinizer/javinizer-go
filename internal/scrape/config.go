@@ -11,7 +11,10 @@ import (
 
 // Config holds the subset of application configuration needed by the Scrape seam.
 type Config struct {
-	ScrapersPriority         []string
+	ScrapersPriority []string
+	// ActressFieldPriority ranks scrapers for actress metadata picks — the
+	// metadata priority "actress" field list; empty inherits ScrapersPriority.
+	ActressFieldPriority     []string
 	TranslationEnabled       bool
 	TranslationSettingsHash  string
 	TranslationTargetLang    string
@@ -99,8 +102,8 @@ func (a *translationAdapter) Translate(ctx context.Context, movie *models.Movie)
 
 // ConfigFromAppConfig extracts Scrape-relevant fields from the application config.
 //
-// Config-bridge reads: cfg.Scrapers.Priority, cfg.Metadata.Translation.Enabled,
-// cfg.Metadata.Translation.TargetLanguage, cfg.Metadata.Translation.SettingsHash(),
+// Config-bridge reads: cfg.Scrapers.Priority, cfg.Metadata.Priority.Fields,
+// cfg.Metadata.Translation.Enabled, cfg.Metadata.Translation.TargetLanguage, cfg.Metadata.Translation.SettingsHash(),
 // cfg.Metadata.ActressDatabase.Enabled, cfg.Scrapers.ScrapeActress,
 // cfg.Scrapers.UserAgent, cfg.Scrapers.Referer, cfg.System.TempDir
 func ConfigFromAppConfig(cfg *config.Config) *Config {
@@ -109,6 +112,7 @@ func ConfigFromAppConfig(cfg *config.Config) *Config {
 	}
 	c := &Config{
 		ScrapersPriority:         cfg.Scrapers.Priority,
+		ActressFieldPriority:     append([]string(nil), cfg.Metadata.Priority.Fields["actress"]...),
 		TranslationEnabled:       cfg.Metadata.Translation.Enabled,
 		TranslationTargetLang:    cfg.Metadata.Translation.TargetLanguage,
 		ActressDBEnabled:         cfg.Metadata.ActressDatabase.Enabled,

@@ -243,6 +243,33 @@ type ActressMetadataResolver interface {
 	ResolveActressMetadata(ctx context.Context, actress ActressInfo) ActressInfo
 }
 
+// ActressFieldCapable may be implemented by an ActressMetadataResolver to
+// advertise which actress metadata fields it can supply (actress,
+// actress_japanese_name, actress_first_name, actress_last_name, actress_url).
+// Resolvers that do not implement it are treated as capable of every field.
+type ActressFieldCapable interface {
+	ActressFields() []string
+}
+
+// ResolverSupportsActressField reports whether r advertises support for an
+// actress metadata field; non-declarers are treated as fully capable.
+func ResolverSupportsActressField(r any, field string) bool {
+	capable, ok := r.(ActressFieldCapable)
+	if !ok {
+		return true
+	}
+	fields := capable.ActressFields()
+	if len(fields) == 0 {
+		return true
+	}
+	for _, f := range fields {
+		if f == field {
+			return true
+		}
+	}
+	return false
+}
+
 // MovieSearchCapable ...
 type MovieSearchCapable interface {
 	SupportsMovieSearch() bool

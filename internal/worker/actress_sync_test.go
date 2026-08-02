@@ -188,7 +188,7 @@ func TestActressSyncManagerPersistsConflictWithoutMutation(t *testing.T) {
 	registry.RegisterInstance(&actressSyncScraper{name: "r18dev", result: &models.ScraperResult{Actresses: []models.ActressInfo{{DMMID: 42, FirstName: "Other", JapaneseName: "名前", ThumbURL: "thumb"}}}})
 	manager, job := runActressSyncManagerTask(t, db, actressRepo, movieRepo, actress.ID, registry)
 
-	tasks, err := manager.ListTasks(job.ID)
+	tasks, err := manager.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, models.ActressSyncTaskConflict, tasks[0].Status)
@@ -212,7 +212,7 @@ func TestActressSyncManagerPersistsPartialMetadataWarning(t *testing.T) {
 	registry.RegisterInstance(&actressSyncScraper{result: &models.ScraperResult{Actresses: []models.ActressInfo{{DMMID: 42, ThumbURL: "thumb"}}}})
 	manager, job := runActressSyncManagerTask(t, db, actressRepo, movieRepo, actress.ID, registry)
 
-	tasks, err := manager.ListTasks(job.ID)
+	tasks, err := manager.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, models.ActressSyncTaskCompleted, tasks[0].Status)
@@ -304,7 +304,7 @@ func TestActressSyncManagerCancelsMergedSourceAfterCancellation(t *testing.T) {
 	close(scraper.release)
 	<-done
 
-	stored, err := manager.repo.ListTasks(job.ID)
+	stored, err := manager.repo.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	require.Equal(t, models.ActressSyncTaskCancelled, stored[0].Status)
@@ -345,7 +345,7 @@ func TestActressSyncManagerStopsUsingMergedSourceLease(t *testing.T) {
 	close(scraper.release)
 	<-done
 
-	stored, err := manager.repo.ListTasks(job.ID)
+	stored, err := manager.repo.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	require.Equal(t, models.ActressSyncTaskPending, stored[0].Status)
@@ -397,7 +397,7 @@ func TestActressSyncManagerStopReleasesAndCancelsInFlightTask(t *testing.T) {
 	}
 
 	manager.Stop()
-	tasks, err := manager.ListTasks(job.ID)
+	tasks, err := manager.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, models.ActressSyncTaskPending, tasks[0].Status)
@@ -413,7 +413,7 @@ func TestActressSyncManagerStopReleasesAndCancelsInFlightTask(t *testing.T) {
 	require.NoError(t, manager.CancelJob(job.ID))
 	manager.Stop()
 
-	tasks, err = manager.ListTasks(job.ID)
+	tasks, err = manager.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Equal(t, models.ActressSyncTaskCancelled, tasks[0].Status)
 	fresh, err := manager.GetJob(job.ID)

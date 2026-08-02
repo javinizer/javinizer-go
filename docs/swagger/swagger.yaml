@@ -3665,10 +3665,16 @@ paths:
         name: jobID
         required: true
         type: string
-      - description: 'Task view: ''active'' or ''diagnostics'' (default: all tasks)'
+      - description: 'Task view: ''active'' or ''diagnostics'' (default: bounded all-tasks
+          list)'
         in: query
         name: view
         type: string
+      - default: 500
+        description: Max tasks for the default view (1-1000; default 500)
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:

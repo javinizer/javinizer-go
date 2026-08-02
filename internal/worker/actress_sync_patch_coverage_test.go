@@ -62,8 +62,8 @@ func TestActressSyncPatchHelpers(t *testing.T) {
 		javdb := &actressSyncScraper{name: "javdb"}
 		other := &actressSyncScraper{name: "other"}
 		set := &fixedScraperSet{enabled: []models.Scraper{nil, dmm, javdb, other}}
-		require.Equal(t, []models.Scraper{dmm}, authoritativeActressScrapers(set, true))
-		require.Equal(t, []models.Scraper{dmm, javdb}, actressMetadataScrapers(set, true))
+		require.Equal(t, []models.Scraper{dmm}, authoritativeActressScrapers(set, true, nil))
+		require.Equal(t, []models.Scraper{dmm, javdb}, actressMetadataScrapers(set, true, nil))
 	})
 
 	t.Run("scraper actress opt-outs", func(t *testing.T) {
@@ -72,10 +72,10 @@ func TestActressSyncPatchHelpers(t *testing.T) {
 		r18In := &optOutActressSyncScraper{actressSyncScraper{name: "r18dev"}, &enabled}
 		plain := &actressSyncScraper{name: "minnanoav"}
 		set := &fixedScraperSet{enabled: []models.Scraper{dmmOut, r18In, plain}}
-		require.Equal(t, []models.Scraper{r18In}, authoritativeActressScrapers(set, true))
-		require.Equal(t, []models.Scraper{r18In, plain}, actressMetadataScrapers(set, true))
-		require.Equal(t, []models.Scraper{r18In}, authoritativeActressScrapers(set, false))
-		require.Equal(t, []models.Scraper{r18In}, actressMetadataScrapers(set, false))
+		require.Equal(t, []models.Scraper{r18In}, authoritativeActressScrapers(set, true, nil))
+		require.Equal(t, []models.Scraper{r18In, plain}, actressMetadataScrapers(set, true, nil))
+		require.Equal(t, []models.Scraper{r18In}, authoritativeActressScrapers(set, false, nil))
+		require.Equal(t, []models.Scraper{r18In}, actressMetadataScrapers(set, false, nil))
 	})
 
 	t.Run("cache lookup and aliases", func(t *testing.T) {
@@ -299,7 +299,7 @@ func TestLinkedIdentityRecoveryFencesSourceChanges(t *testing.T) {
 		updated, err := actressRepo.FindByID(t.Context(), source.ID)
 		require.NoError(t, err)
 		require.Equal(t, 917, updated.DMMID)
-		tasks, err := manager.ListTasks(job.ID)
+		tasks, err := manager.ListTasks(job.ID, 0)
 		require.NoError(t, err)
 		require.Contains(t, tasks[0].UpdatedFields, "dmm_id")
 	})
@@ -490,7 +490,7 @@ func TestActressSyncManagerPatchBranches(t *testing.T) {
 	manager.Stop()
 	manager.Stop()
 
-	_, err = manager.ListTasks("missing")
+	_, err = manager.ListTasks("missing", 0)
 	require.Error(t, err)
 	require.Error(t, manager.CancelJob("missing"))
 

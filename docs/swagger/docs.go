@@ -547,8 +547,15 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Task view: 'active' or 'diagnostics' (default: all tasks)",
+                        "description": "Task view: 'active' or 'diagnostics' (default: bounded all-tasks list)",
                         "name": "view",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 500,
+                        "description": "Max tasks for the default view (1-1000; default 500)",
+                        "name": "limit",
                         "in": "query"
                     }
                 ],

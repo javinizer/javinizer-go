@@ -526,6 +526,12 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 
 var _ models.ActressThumbnailResolver = (*scraper)(nil)
 var _ models.ActressMetadataResolver = (*scraper)(nil)
+var _ models.ActressFieldCapable = (*scraper)(nil)
+
+// ActressFields ... DMM actress profiles carry all name variants and thumbnails.
+func (s *scraper) ActressFields() []string {
+	return []string{"actress", "actress_japanese_name", "actress_first_name", "actress_last_name", "actress_url"}
+}
 
 func (s *scraper) fetchActressMetadataDoc(ctx context.Context, dmmID int) *goquery.Document {
 	profileURL := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)

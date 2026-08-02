@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -31,6 +32,13 @@ type ActressSyncOptions struct {
 	ReplaceThumbnail               func(uint, int, string, string) (bool, error)
 	PriorUpdatedFields             []string
 	ScrapeActress                  *bool
+	// ScrapersPriority orders scrapers for sync decisions (user-configured
+	// global scraper priority); empty keeps registry order.
+	ScrapersPriority []string
+	// ActressFieldPriority ranks sources for actress metadata and thumbnail
+	// picks (metadata priority "actress" list); empty falls back to
+	// ScrapersPriority, then to the legacy source-quality order.
+	ActressFieldPriority []string
 }
 
 // ActressSyncResult ...
@@ -113,11 +121,17 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	}
 	matches := make([]models.ActressInfo, 0)
 	scrapeActress := true
+	var scrapersPriority, actressFieldPriority []string
 	if len(options) > 0 && options[0].ScrapeActress != nil {
 		scrapeActress = *options[0].ScrapeActress
 	}
-	scrapers := authoritativeActressScrapers(registry, scrapeActress)
-	metadataScrapers := actressMetadataScrapers(registry, scrapeActress)
+	if len(options) > 0 {
+		scrapersPriority = append(scrapersPriority, options[0].ScrapersPriority...)
+		actressFieldPriority = append(actressFieldPriority, options[0].ActressFieldPriority...)
+	}
+	scrapers := authoritativeActressScrapers(registry, scrapeActress, scrapersPriority)
+	metadataScrapers := actressMetadataScrapers(registry, scrapeActress, scrapersPriority)
+	thumbnailRank := actressSyncThumbnailRank(actressFieldPriority, scrapersPriority)
 	cachedSource := *actress
 	cacheMatch, cacheHit := lookupActressCache(actress, lookupCache)
 	mergeCachedDuplicate := func(existing *models.Actress) (bool, error) {
@@ -260,8 +274,8 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 				}
 				if metadata.DMMID == actress.DMMID {
 					matches = append(matches, metadata)
-					if strings.TrimSpace(metadata.ThumbURL) != "" && !models.IsKnownInvalidDMMActressThumbnail(metadata.ThumbURL) {
-						priority := actressThumbnailSourcePriority(name)
+					if strings.TrimSpace(metadata.ThumbURL) != "" && !models.IsKnownInvalidDMMActressThumbnail(metadata.ThumbURL) && models.ResolverSupportsActressField(scraper, "actress_url") {
+						priority := thumbnailRank(name)
 						if priority < preferredThumbnailPriority {
 							preferredThumbnail = strings.TrimSpace(metadata.ThumbURL)
 							preferredThumbnailSource = name
@@ -285,7 +299,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 				}
 				if thumbnail != "" && !models.IsKnownInvalidDMMActressThumbnail(thumbnail) {
 					matches = append(matches, models.ActressInfo{DMMID: actress.DMMID, ThumbURL: thumbnail})
-					priority := actressThumbnailSourcePriority(name)
+					priority := thumbnailRank(name)
 					if priority < preferredThumbnailPriority {
 						preferredThumbnail = thumbnail
 						preferredThumbnailSource = name
@@ -373,7 +387,7 @@ func validateActressThumbnail(ctx context.Context, scraper models.Scraper, fallb
 }
 
 // authoritativeActressScrapers ...
-func authoritativeActressScrapers(registry scraperutil.ScraperInstancesInterface, scrapeActress bool) []models.Scraper {
+func authoritativeActressScrapers(registry scraperutil.ScraperInstancesInterface, scrapeActress bool, priority []string) []models.Scraper {
 	if registry == nil {
 		return nil
 	}
@@ -387,7 +401,39 @@ func authoritativeActressScrapers(registry scraperutil.ScraperInstancesInterface
 			result = append(result, scraper)
 		}
 	}
-	return result
+	return orderScrapersByConfiguredPriority(result, priority)
+}
+
+// orderScrapersByConfiguredPriority stably sorts named scrapers to the front
+// in configured priority order; unlisted scrapers keep registry order after.
+func orderScrapersByConfiguredPriority(scrapers []models.Scraper, priority []string) []models.Scraper {
+	if len(priority) == 0 || len(scrapers) < 2 {
+		return scrapers
+	}
+	rank := make(map[string]int, len(priority))
+	for i, name := range priority {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			continue
+		}
+		if _, ok := rank[key]; !ok {
+			rank[key] = i
+		}
+	}
+	ordered := append([]models.Scraper(nil), scrapers...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		iv, iok := rank[strings.ToLower(strings.TrimSpace(ordered[i].Name()))]
+		jv, jok := rank[strings.ToLower(strings.TrimSpace(ordered[j].Name()))]
+		switch {
+		case iok && jok:
+			return iv < jv
+		case iok:
+			return true
+		default:
+			return false
+		}
+	})
+	return ordered
 }
 
 type linkedIdentityRecoveryOptions struct {
@@ -731,7 +777,7 @@ func linkedActressMatches(ctx context.Context, movieRepo *database.MovieReposito
 }
 
 // actressMetadataScrapers ...
-func actressMetadataScrapers(registry scraperutil.ScraperInstancesInterface, scrapeActress bool) []models.Scraper {
+func actressMetadataScrapers(registry scraperutil.ScraperInstancesInterface, scrapeActress bool, priority []string) []models.Scraper {
 	if registry == nil {
 		return nil
 	}
@@ -745,7 +791,7 @@ func actressMetadataScrapers(registry scraperutil.ScraperInstancesInterface, scr
 			result = append(result, scraper)
 		}
 	}
-	return result
+	return orderScrapersByConfiguredPriority(result, priority)
 }
 
 // linkedActressMovies ...
@@ -789,6 +835,37 @@ func resolveActressInfo(actress *models.Actress, matches []models.ActressInfo) (
 		}
 	}
 	return candidate, conflict
+}
+
+// actressSyncThumbnailRank positions thumbnail sources by the configured
+// actress field priority, then the global scraper priority, and finally the
+// legacy source-quality order for sources neither list mentions.
+func actressSyncThumbnailRank(fieldPriority, global []string) func(string) int {
+	index := make(map[string]int, len(fieldPriority)+len(global))
+	seed := func(list []string, offset int) int {
+		added := 0
+		for _, name := range list {
+			key := strings.ToLower(strings.TrimSpace(name))
+			if key == "" {
+				continue
+			}
+			if _, ok := index[key]; !ok {
+				index[key] = offset + added
+				added++
+			}
+		}
+		return added
+	}
+	offset := seed(fieldPriority, 0)
+	seed(global, offset)
+	base := offset + len(global)
+	return func(name string) int {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if rank, ok := index[key]; ok {
+			return rank
+		}
+		return base + actressThumbnailSourcePriority(key)
+	}
 }
 
 // actressThumbnailSourcePriority ...

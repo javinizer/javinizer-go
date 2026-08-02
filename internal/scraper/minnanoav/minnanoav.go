@@ -114,6 +114,13 @@ func (s *scraper) GetURL(_ context.Context, _ string) (string, error) {
 }
 
 // ResolveActressMetadata ...
+var _ models.ActressFieldCapable = (*scraper)(nil)
+
+// ActressFields ... MinnanoAV actress profiles carry names and thumbnails.
+func (s *scraper) ActressFields() []string {
+	return []string{"actress", "actress_japanese_name", "actress_first_name", "actress_last_name", "actress_url"}
+}
+
 func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.ActressInfo) models.ActressInfo {
 	metadata := models.ActressInfo{DMMID: actress.DMMID}
 	if !s.enabled {
