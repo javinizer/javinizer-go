@@ -384,6 +384,31 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		lookup.OldMovieID = inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
 	}
 
+	// Job-scope envelope serialization (Codex P2: bulk rescrape workers each
+	// persist the WHOLE job envelope while peers commit other movies under
+	// their own poster locks — without it, worker A's persist durably
+	// captures worker B's just-committed state, and when B's persist then
+	// fails and B rolls back, the durable envelope still contains B's
+	// rejected rescrape). The closure acquires the per-job envelope lock
+	// just before the CAS commit; this function-scope deferred release holds
+	// it through the provenance write, the envelope persist, AND any
+	// persist-failure rollback below, so every persisted envelope is
+	// pair-wise complete: persisted-before-commit can never contain the
+	// commit (it's inside the window), persisted-after-failure contains only
+	// the rolled-back state (the rollback is inside too). Nil when the
+	// closure never reached the commit (failed scrape, cancellation) — those
+	// paths committed nothing and persist nothing.
+	// Lock ordering (see AcquireJobEnvelopeLock): this mutex nests INSIDE the
+	// poster-source lock(s) already held above; the deferred release runs
+	// BEFORE the deferred poster-lock releases (LIFO), preserving
+	// poster lock(s) → envelope lock acquisition order in reverse.
+	var releaseEnvelopeLock func()
+	defer func() {
+		if releaseEnvelopeLock != nil {
+			releaseEnvelopeLock()
+		}
+	}()
+
 	// The rollback legs are declared before the lifecycle so its failure
 	// cleanup (below) can consult the destination rollback the scrape closure
 	// arms mid-flight.
@@ -640,6 +665,16 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		if err := ctx.Err(); err != nil {
 			return nil, movieResult, err
 		}
+
+		// Acquire the job-scope envelope lock for the commit→persist window
+		// (see the declaration above for the full rationale): the commit makes
+		// this movie's rescraped state visible to ANY other worker's
+		// whole-envelope persist, so from here through the persist — and the
+		// rollback, if it fails — must be serialized per job. Bulk-rescrape
+		// workers for other movie IDs block here until this worker's window
+		// closes; scrapes and poster generation stay parallel (only the
+		// commit-onward tail serializes).
+		releaseEnvelopeLock = AcquireJobEnvelopeLock(inputs.JobID.String())
 
 		// Commit result
 		outcome, commitErr := p.CompleteRescrape(inputs, lookup.FilePath, movieResult, lookup.CapturedRevision, newMovieID, lookup.OldMovieID)

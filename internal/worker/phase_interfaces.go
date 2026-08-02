@@ -176,15 +176,20 @@ type rescrapePhaseInputs struct {
 	// the same critical section as the poster-state mutations it durably
 	// records; a failure rolls memory, provenance, and the poster caches back
 	// before the locks are released (no other poster-state writer can
-	// interleave). Nil means "no envelope persistence wiring" (standalone
-	// jobs, tests): the phase skips persist+rollback exactly like the
-	// pre-hoist non-API flow.
+	// interleave). Because the persist captures the WHOLE envelope while
+	// bulk-rescrape peers commit other movies concurrently, the phase also
+	// holds the per-job envelope lock (AcquireJobEnvelopeLock) from the CAS
+	// commit through this call and any rollback — see its doc for the
+	// serialization invariant. Nil means "no envelope persistence wiring"
+	// (standalone jobs, tests): the phase skips persist+rollback exactly like
+	// the pre-hoist non-API flow.
 	//
 	// Lock ordering: the persist's SQLite write runs while the poster-source
-	// lock(s) are held; the locks it touches internally (result-store snapshots
-	// via snapshotForPersist, the job mutex, and the repository's own locks)
-	// are leaf-level relative to the poster-source lock — no path takes a
-	// poster-source lock while holding any of them, so no cycle.
+	// lock(s) and the job envelope lock are held; the locks it touches
+	// internally (result-store snapshots via snapshotForPersist, the job
+	// mutex, and the repository's own locks) are leaf-level relative to both
+	// — no path takes a poster-source or envelope lock while holding any of
+	// them, so no cycle.
 	PersistEnvelope func() error
 
 	Finder      resultstore.FileFinder // for FindFileForMovieID and GetRevision

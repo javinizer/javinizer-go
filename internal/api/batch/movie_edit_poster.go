@@ -137,6 +137,24 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			maxPosterHeight = *req.MaxPosterHeight
 		}
 
+		// Snapshot the cached assets BEFORE CropWithBounds overwrites the
+		// preview ({posterID}.jpg) so a failed envelope persist below can
+		// restore the pre-crop cache — parity with the poster-from-URL
+		// endpoint and the whole-movie PATCH refresh path (the AssetsSnapshot
+		// machinery captures full+preview). Without it the revert keeps the
+		// persisted movie at its old bounds+intent while the shared preview
+		// file shows the REJECTED crop: an uncached reload displays the
+		// rejected crop while Organize applies the old/default one. Snapshot
+		// failures reject the request — never crop against a cache state the
+		// request cannot roll back (manager.SnapshotAssets documents the same
+		// covenant).
+		assetSnap, snapErr := snap.PosterManager().SnapshotAssets(jobID, posterID)
+		if snapErr != nil {
+			logging.Errorf("Failed to snapshot poster assets before manual crop for %s: %v", posterID, snapErr)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to snapshot poster assets: %v", snapErr)})
+			return
+		}
+
 		cropResult, err := snap.PosterManager().CropWithBounds(c.Request.Context(), jobID, posterID, req.X, req.Y, req.Width, req.Height, maxPosterHeight)
 		if err != nil {
 			if errors.Is(err, poster.ErrLegacyPreviewSource) {
@@ -196,15 +214,24 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// it. Surface the failure as a 5xx (the upsert failure is also recorded
 		// on the job's PersistError, unchanged) — and revert the in-memory crop
 		// per part, so memory matches the unpersisted envelope instead of
-		// letting Organize apply bounds a restart would drop (F7). The
-		// poster-source lock is still held (deferred above), so the revert is
-		// serialized with the same edits the crop itself was.
+		// letting Organize apply bounds a restart would drop (F7) — and the
+		// pre-crop cache bytes come back (the CropWithBounds-overwritten
+		// preview would otherwise keep showing the rejected crop while the
+		// reverted movie applies the old bounds, Codex P2). The part reverts
+		// run before the cache restore so no in-memory result references the
+		// rejected crop while the cache flips back (the same ordering the
+		// poster-from-URL compensate documents). The poster-source lock is
+		// still held (deferred above), so the revert is serialized with the
+		// same edits the crop itself was.
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
 			errMsg := fmt.Sprintf("Failed to persist job state: %v", perr)
 			for fp, orig := range origMovies {
 				if revertErr := job.UpdateMovie(c.Request.Context(), fp, orig); revertErr != nil {
 					errMsg = fmt.Sprintf("%s (revert of part %s failed: %v)", errMsg, fp, revertErr)
 				}
+			}
+			if restoreErr := snap.PosterManager().RestoreAssets(assetSnap); restoreErr != nil {
+				errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, restoreErr)
 			}
 			logging.Errorf("Failed to persist poster crop for job %s: %v", jobID, perr)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
