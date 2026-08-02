@@ -124,6 +124,13 @@ func TestReconstructBatchJob_PersistFn(t *testing.T) {
 		assert.Equal(t, int32(1), mockRepo.upsertCalled.Load(), "persistFn should call persistToDatabase which calls jobRepo.Upsert")
 		assert.Equal(t, job.ID.String(), mockRepo.getLastJobID())
 	}
+
+	// The error-returning envelope persist must be wired too — the rescrape
+	// phase's and field-override editor's critical sections build on it.
+	require.NotNil(t, reconstructed.deps.PersistErrFn, "reconstructed job must have persistErrFn")
+	require.NoError(t, reconstructed.deps.PersistErrFn())
+	assert.Equal(t, int32(2), mockRepo.upsertCalled.Load(), "persistErrFn should call persistence.PersistJob which calls jobRepo.Upsert")
+	assert.Equal(t, job.ID.String(), mockRepo.getLastJobID())
 }
 
 // TestReconstructBatchJob_PersistJobByIDPersistsResults tests that PersistJobByID

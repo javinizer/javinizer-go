@@ -118,6 +118,39 @@ func TestUpdatePosterFromURL_CropIntentDerivation(t *testing.T) {
 			"an intent recorded against a DIFFERENT image is never inherited")
 	})
 
+	t.Run("nil provenance entries are skipped before a matching source", func(t *testing.T) {
+		// A nil entry must not short-circuit the scan: the intent of the
+		// matching source AFTER it still wins (prior is poster-grade, so the
+		// fallback alone would answer false).
+		job := setup(t,
+			models.PosterState{PosterURL: "https://example.com/old-poster.jpg", ShouldCropPoster: false},
+			&resultstore.ProvenanceData{ScraperResults: []*models.ScraperResult{
+				nil,
+				{Source: "javdb", PosterURL: newURL, CoverURL: newURL, ShouldCropPoster: true},
+			}},
+		)
+		p := applyAndRead(t, job, newURL)
+		assert.True(t, p.ShouldCropPoster,
+			"the scan must continue past nil entries and adopt the matching source's intent")
+	})
+
+	t.Run("provenance source without PosterURL falls back to CoverURL for matching", func(t *testing.T) {
+		// Sources that only carry a cover URL still participate: the new URL
+		// equals the source's CoverURL, and that source ships the image whole
+		// (ShouldCropPoster=false). An absent prior would otherwise default to
+		// the cover-crop intent.
+		job := setup(t,
+			models.PosterState{},
+			&resultstore.ProvenanceData{ScraperResults: []*models.ScraperResult{
+				{Source: "dmm", PosterURL: "", CoverURL: "https://example.com/cover.jpg", ShouldCropPoster: false},
+			}},
+		)
+		p := applyAndRead(t, job, "https://example.com/cover.jpg")
+		assert.False(t, p.ShouldCropPoster,
+			"the matched source's intact-image intent travels with its CoverURL")
+		assert.Equal(t, "https://example.com/cover.jpg", p.PosterURL)
+	})
+
 	t.Run("reset-to-baseline is a fixed point for cover-class sources", func(t *testing.T) {
 		// resetPoster routes the restore through poster-from-URL with the
 		// baseline URL: a cover-class (javdb-style) baseline must come back
