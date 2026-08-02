@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	workermocks "github.com/javinizer/javinizer-go/internal/mocks/worker"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -261,4 +262,77 @@ func TestUpdateBatchMovie_MultipartSuccessRefreshesCacheOnce(t *testing.T) {
 		assert.Equal(t, srv.URL+"/new.jpg", result.Movie.Poster.PosterURL,
 			"every part persists the new source URL so job state and cache stay in sync")
 	}
+}
+
+// TestUpdateBatchMovie_MultipartPreservesPerPartOriginalFileName pins the
+// PATCH-side sibling of the override fan-out fix: OriginalFileName is
+// per-part (populated from each part's FileMatchInfo, read by template
+// contexts for <FILENAME>/the NFO original path), so a whole-movie PATCH
+// that merely round-trips the SELECTED part's file name must not relabel the
+// sibling parts with it. A name that DIFFERS from the selection's stored
+// value is a deliberate whole-movie rename and fans out to every part.
+func TestUpdateBatchMovie_MultipartPreservesPerPartOriginalFileName(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	chdirWorkDir(t)
+
+	const movieID = "MPFN-001"
+	cd1, cd2 := "/path/to/"+movieID+"-cd1.mp4", "/path/to/"+movieID+"-cd2.mp4"
+
+	setup := func(t *testing.T) (*worker.BatchJob, *gin.Engine) {
+		t.Helper()
+		cfg := config.DefaultConfig(nil, nil)
+		deps := createTestDeps(t, cfg, "")
+		job := createJobWithWF(deps, cfg, []string{cd1, cd2})
+		for path, name := range map[string]string{cd1: movieID + "-cd1.mp4", cd2: movieID + "-cd2.mp4"} {
+			resID := "res-cd1"
+			if path == cd2 {
+				resID = "res-cd2"
+			}
+			setJobResult(job, path, &resultstore.MovieResult{
+				ResultID:      resID,
+				FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movieID},
+				Status:        models.JobStatusCompleted,
+				Movie:         &models.Movie{ID: movieID, Title: "Multipart", OriginalFileName: name},
+			})
+		}
+		router := gin.New()
+		router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
+		return job, router
+	}
+	// patch edits the movie THROUGH PART 1's result (res-cd1) — the review page
+	// round-trips the displayed (selected) part's file name.
+	patch := func(t *testing.T, router *gin.Engine, jobID, originalFileName string) {
+		t.Helper()
+		body := fmt.Sprintf(`{"movie":{"id":%q,"title":"Renamed","original_filename":%q}}`, movieID, originalFileName)
+		req := httptest.NewRequest(http.MethodPatch, "/batch/"+jobID+"/results/res-cd1", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	}
+	storedName := func(t *testing.T, job *worker.BatchJob, filePath string) string {
+		t.Helper()
+		result := job.GetStatus().Results[filePath]
+		require.NotNil(t, result, "result for part %s", filePath)
+		require.NotNil(t, result.Movie)
+		return result.Movie.OriginalFileName
+	}
+
+	t.Run("round-tripped selection file name: each part keeps its own", func(t *testing.T) {
+		job, router := setup(t)
+		patch(t, router, job.GetID(), movieID+"-cd1.mp4") // the selected part's stored name
+		assert.Equal(t, movieID+"-cd1.mp4", storedName(t, job, cd1))
+		assert.Equal(t, movieID+"-cd2.mp4", storedName(t, job, cd2),
+			"a wholesale fan-out would stamp CD1's file name onto CD2 and misrender its templates")
+		assert.Equal(t, "Renamed", job.GetStatus().Results[cd2].Movie.Title,
+			"whole-movie fields still converge on every part")
+	})
+
+	t.Run("changed file name: deliberate rename applied to every part", func(t *testing.T) {
+		job, router := setup(t)
+		patch(t, router, job.GetID(), "renamed.mp4") // differs from the selection's stored name
+		assert.Equal(t, "renamed.mp4", storedName(t, job, cd1))
+		assert.Equal(t, "renamed.mp4", storedName(t, job, cd2))
+	})
 }

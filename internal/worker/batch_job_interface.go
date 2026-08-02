@@ -486,11 +486,14 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // leave a sibling holding the old source while sharing the refreshed crop
 // image — cropping that sibling would then measure the new image, fan its
 // bounds out to every part, and Organize would apply them to the sibling's
-// stale source. Every part receives the same clone, which applyFieldOverride
-// already ran through SyncCropIntentWithSource, so CropBounds/
-// ShouldCropPoster intent stays consistent across parts. Provenance fans out
-// with the movie so every part's review tooltip attributes the overridden
-// field to the chosen source. There is no store-level transaction across
+// stale source. Each sibling instead receives its OWN stored movie with
+// only the overridden field merged in (mergeOverrideOntoPart) plus the
+// selected part's poster state (source URLs, cleared CropBounds, synced
+// ShouldCropPoster intent, refreshed CroppedPosterURL) — per-part,
+// FileMatchInfo-derived identity fields such as OriginalFileName survive
+// the fan-out instead of being stamped with the selected part's values.
+// Provenance fans out with the movie so every part's review tooltip
+// attributes the overridden field to the chosen source. There is no store-level transaction across
 // parts, so a later part's persist failure compensates the earlier parts
 // (re-persisted with their pre-override movies) BEFORE the poster-cache
 // rollback runs — restoring the cache while a part still holds the new
@@ -556,24 +559,28 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	if len(filePaths) == 0 {
 		filePaths = []string{filePath}
 	}
-	type updatedPart struct {
-		filePath string
-		original *models.Movie
+	// Fan out PER PART (planMultipartOverride): each sibling's persisted
+	// movie is its OWN stored snapshot with only the overridden field and
+	// the synchronized poster state merged in (mergeOverrideOntoPart) —
+	// never a wholesale clone of the selected part's movie. Sibling parts
+	// carry distinct FileMatchInfo-derived identity fields (notably
+	// OriginalFileName, which template contexts read for <FILENAME>/the NFO
+	// original path); stamping CD1's values onto CD2 would render the
+	// sibling's templates with the wrong source file.
+	planned, err := je.planMultipartOverride(filePaths, movie, prov, fieldKey, source)
+	if err != nil {
+		return nil, nil, err
 	}
-	updatedParts := make([]updatedPart, 0, len(filePaths))
-	for _, partPath := range filePaths {
-		var original *models.Movie
-		if previous, getErr := je.store.GetMovieResult(partPath); getErr == nil && previous != nil {
-			original = previous.Movie
-		}
-		if updateErr := je.UpdateMovie(ctx, partPath, movie); updateErr != nil {
+	updatedParts := make([]overridePartWrite, 0, len(planned))
+	for _, part := range planned {
+		if updateErr := je.UpdateMovie(ctx, part.filePath, part.movie); updateErr != nil {
 			errMsg := fmt.Errorf("persist field override: %w", updateErr)
-			for _, part := range updatedParts {
-				if part.original == nil {
+			for _, done := range updatedParts {
+				if done.original == nil {
 					continue
 				}
-				if revertErr := je.UpdateMovie(ctx, part.filePath, part.original); revertErr != nil {
-					errMsg = fmt.Errorf("%w (revert of part %s failed: %v)", errMsg, part.filePath, revertErr)
+				if revertErr := je.UpdateMovie(ctx, done.filePath, done.original); revertErr != nil {
+					errMsg = fmt.Errorf("%w (revert of part %s failed: %v)", errMsg, done.filePath, revertErr)
 				}
 			}
 			if rollback != nil {
@@ -583,7 +590,7 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 			}
 			return nil, nil, errMsg
 		}
-		updatedParts = append(updatedParts, updatedPart{filePath: partPath, original: original})
+		updatedParts = append(updatedParts, part)
 	}
 	for _, partPath := range filePaths {
 		je.store.SetProvenance(partPath, prov)
@@ -591,6 +598,41 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	updated, _, _ := je.store.GetFileResultByResultID(resultID)
 	updatedProv := je.store.GetProvenance(filePath)
 	return updated, updatedProv, nil
+}
+
+// overridePartWrite plans one part of the ApplyFieldOverride multipart
+// fan-out: the per-part merged movie to persist and the part's pre-override
+// snapshot held for compensation.
+type overridePartWrite struct {
+	filePath string
+	original *models.Movie // pre-override stored movie, held for revert
+	movie    *models.Movie // per-part merged movie to persist
+}
+
+// planMultipartOverride builds every part's fan-out write BEFORE any
+// persistence, so a merge failure aborts the override cleanly instead of
+// stranding earlier parts on compensated state. A part whose stored
+// snapshot vanished (nil original) keeps the wholesale clone of the
+// selected part's movie: no per-part identity remains to preserve, and its
+// compensation step is skipped for the same reason.
+func (je *jobEditorImpl) planMultipartOverride(filePaths []string, movie *models.Movie, prov *resultstore.ProvenanceData, fieldKey, source string) ([]overridePartWrite, error) {
+	planned := make([]overridePartWrite, 0, len(filePaths))
+	for _, partPath := range filePaths {
+		var original *models.Movie
+		if previous, getErr := je.store.GetMovieResult(partPath); getErr == nil && previous != nil {
+			original = previous.Movie
+		}
+		partMovie := movie
+		if original != nil {
+			merged, mergeErr := mergeOverrideOntoPart(original, movie, prov, fieldKey, source)
+			if mergeErr != nil {
+				return nil, fmt.Errorf("merge field override onto part %s: %w", partPath, mergeErr)
+			}
+			partMovie = merged
+		}
+		planned = append(planned, overridePartWrite{filePath: partPath, original: original, movie: partMovie})
+	}
+	return planned, nil
 }
 
 // editableJobAdapter satisfies EditableJob by composing jobReaderImpl,

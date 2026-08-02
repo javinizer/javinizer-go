@@ -237,7 +237,24 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			if prev, gErr := job.GetMovieResult(filePath); gErr == nil && prev != nil {
 				original = prev.Movie
 			}
-			if err := job.UpdateMovie(c.Request.Context(), filePath, movie); err != nil {
+			// OriginalFileName is per-part: it is populated from each part's
+			// own FileMatchInfo (scrapeResultToMovieResult) and read by
+			// template contexts (<FILENAME>/the NFO original path). A
+			// whole-movie PATCH round-trips the SELECTED part's value; fanning
+			// it out unchanged would relabel every sibling part with that file
+			// name (CD1's onto CD2). Preserve each part's stored value whenever
+			// the request merely carries the selection's current name — a
+			// request value that differs from the selection's stored name is a
+			// deliberate whole-movie rename and is applied to all parts.
+			// (Sibling parity with ApplyFieldOverride's per-part merge.)
+			partMovie := movie
+			if current.Movie != nil && original != nil &&
+				movie.OriginalFileName == current.Movie.OriginalFileName &&
+				original.OriginalFileName != movie.OriginalFileName {
+				partMovie = movie.Clone()
+				partMovie.OriginalFileName = original.OriginalFileName
+			}
+			if err := job.UpdateMovie(c.Request.Context(), filePath, partMovie); err != nil {
 				updateErr, updateFailPath = err, filePath
 				break
 			}
@@ -342,15 +359,48 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// taken while this lock is held, but no path acquires this lock while
 		// holding one of those, so the acquisition order is cycle-free.
 		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterID)
-		defer releasePosterLock()
+		defer func() { releasePosterLock() }()
 
 		// Re-read the result under the lock: a source-changing edit may have
 		// persisted while this request waited, replacing the movie — and the
 		// crop-intent flags the SourceWasCover recording below reads — that
 		// the pre-lock lookup saw. Keep the pre-lock result on a miss: the
 		// state update degrades to a no-op for a vanished result either way.
-		if fresh, _, stillFound := job.GetFileResultByResultID(resultID); stillFound && fresh != nil {
-			result = fresh
+		//
+		// That edit can also RE-KEY the result: a rescrape that corrected the
+		// match from movie A to movie B holds (or held) A's lock and commits
+		// the result with FileMatchInfo.MovieID/Movie.ID = B. Refreshing only
+		// the result here would leave this request cropping A's cached source
+		// and calling UpdatePosterCrop(A, ...) — hitting every result still at
+		// A — while returning success for B. So BOTH the movie ID and the
+		// poster lock key are re-resolved from the post-lock state; when the
+		// key changed, A's lock is released and B's acquired, then the result
+		// is re-read once more under B (it may have been re-keyed yet again by
+		// the writer that released B). The release-then-acquire handoff never
+		// holds two poster-source locks at once, so it introduces no lock-
+		// ordering cycle (the order stays: overrideMu → ONE poster-source
+		// lock → result-store locks), and the loop converges because each
+		// re-acquisition waits behind a writer whose re-key is already
+		// committed.
+		for {
+			if fresh, _, stillFound := job.GetFileResultByResultID(resultID); stillFound && fresh != nil {
+				result = fresh
+			}
+			resolvedMovieID := result.FileMatchInfo.MovieID
+			resolvedPosterID, resolveErr := resolvePosterID(job, resolvedMovieID)
+			if resolveErr != nil {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: resolveErr.Error()})
+				return
+			}
+			if resolvedPosterID == posterID {
+				movieID = resolvedMovieID
+				break
+			}
+			// movieID is (re-)resolved from the result on every
+			// iteration, so only the lock key carries across here.
+			releasePosterLock()
+			posterID = resolvedPosterID
+			releasePosterLock = worker.AcquirePosterSourceLock(jobID, posterID)
 		}
 
 		// Resolve the max poster height: request-level override wins over the

@@ -39,6 +39,10 @@ type stubOverridePosterGen struct {
 	movieID   string
 	posterURL string
 	err       error
+	// stampCroppedURL, when non-empty, mimics the real generator stamping the
+	// refreshed preview URL onto movie.Poster.CroppedPosterURL, so fan-out
+	// tests can prove the refreshed preview reaches every part.
+	stampCroppedURL string
 }
 
 func (s *stubOverridePosterGen) GeneratePoster(_ context.Context, jobID string, movie *models.Movie) error {
@@ -46,6 +50,9 @@ func (s *stubOverridePosterGen) GeneratePoster(_ context.Context, jobID string, 
 	s.jobID = jobID
 	s.movieID = movie.ID
 	s.posterURL = movie.Poster.PosterURL
+	if s.stampCroppedURL != "" {
+		movie.Poster.CroppedPosterURL = s.stampCroppedURL
+	}
 	return s.err
 }
 

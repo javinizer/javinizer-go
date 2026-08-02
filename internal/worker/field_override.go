@@ -198,6 +198,31 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 	return nil
 }
 
+// mergeOverrideOntoPart rebuilds a MULTIPART sibling's movie for the
+// ApplyFieldOverride fan-out (Codex: "preserve per-part fields during
+// override fan-out"). The same single-field override is applied to the
+// SIBLING'S OWN stored movie — so per-part identity fields survive:
+// OriginalFileName is populated from each part's own FileMatchInfo
+// (scrapeResultToMovieResult) and read by template contexts for
+// <FILENAME>/the NFO original path (internal/template/context.go), so a
+// wholesale clone of the selected part would render CD2's templates with
+// CD1's filename. The selected part's poster state is then mirrored
+// wholesale via a clone (source URLs, cleared CropBounds, synced
+// ShouldCropPoster intent, refreshed CroppedPosterURL): the cached poster
+// assets the override refreshed are movie-wide — every part shares
+// {movie.ID}-full.jpg — so poster identity, unlike file identity, must stay
+// identical across parts. prov is the shared fan-out provenance; applying
+// the same override to it again is idempotent (setFieldSource writes the
+// same key/value; rebuildActressSources deterministically rebuilds).
+func mergeOverrideOntoPart(partMovie, selected *models.Movie, prov *resultstore.ProvenanceData, fieldKey, source string) (*models.Movie, error) {
+	merged := partMovie.Clone()
+	if err := applyFieldOverride(merged, prov, fieldKey, source); err != nil {
+		return nil, err
+	}
+	merged.Poster = selected.Poster.Clone()
+	return merged, nil
+}
+
 // posterAssetSnapshooter is the optional rollback capability of a
 // PosterGenerator: the concrete ScrapePosterGenerator snapshots the job's
 // cached -full.jpg/preview assets before a refresh so a failed persistence
