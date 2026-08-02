@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/coverage"
 )
@@ -15,10 +16,10 @@ func main() {
 	osExit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-type analyzeProfileFn func(path string) (coverage.Summary, error)
+type analyzeProfileFn func(path string, opts coverage.ReportOptions) (coverage.Summary, error)
 
 func run(args []string, stdout, stderr io.Writer) int {
-	return runWithAnalyze(args, stdout, stderr, coverage.AnalyzeProfile)
+	return runWithAnalyze(args, stdout, stderr, coverage.AnalyzeProfileWithOptions)
 }
 
 func runWithAnalyze(args []string, stdout, stderr io.Writer, analyze analyzeProfileFn) int {
@@ -43,7 +44,20 @@ func runWithAnalyze(args []string, stdout, stderr io.Writer, analyze analyzeProf
 		return runPatchCheck(profilePath, baseRef, minCoverage, stdout, stderr)
 	}
 
-	summary, err := analyze(profilePath)
+	// Codecov applies codecov.yml's ignore list to PROJECT coverage too —
+	// load it here as well (patch mode below already does) so the local
+	// project percentage reports the same number Codecov will upload.
+	reportOpts := coverage.ReportOptions{}
+	if repoRoot, werr := osGetwd(); werr == nil {
+		if ig, ierr := loadCodecovIgnore(repoRoot); ierr == nil && len(ig) > 0 {
+			if mp, merr := modulePrefix(repoRoot); merr == nil {
+				reportOpts.IgnoreGlobs = ig
+				reportOpts.ModulePrefix = mp
+			}
+		}
+	}
+
+	summary, err := analyze(profilePath, reportOpts)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 2
@@ -86,6 +100,11 @@ func runWithAnalyze(args []string, stdout, stderr io.Writer, analyze analyzeProf
 	if _, err := fmt.Fprintf(stdout, "Statement Coverage %.2f%% (%d covered, %d total)\n",
 		summary.Statement.Percent, summary.Statement.Covered, summary.Statement.Total); err != nil {
 		return 2
+	}
+	if len(reportOpts.IgnoreGlobs) > 0 {
+		if _, err := fmt.Fprintf(stdout, "Ignored Globs:     %s (codecov.yml)\n", strings.Join(reportOpts.IgnoreGlobs, ", ")); err != nil {
+			return 2
+		}
 	}
 	if _, err := fmt.Fprintf(stdout, "Metric Details:    %s\n", selectedDetails); err != nil {
 		return 2

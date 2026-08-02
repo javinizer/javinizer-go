@@ -18,7 +18,7 @@ example.go:5.1,5.8 1 2
 other.go:10.1,10.4 1 0
 `)
 
-	summary, err := analyze(profile)
+	summary, err := analyze(profile, ReportOptions{})
 	if err != nil {
 		t.Fatalf("analyze() error = %v", err)
 	}
@@ -53,7 +53,7 @@ other.go:10.1,10.4 1 0
 func TestAnalyzeRejectsInvalidHeader(t *testing.T) {
 	t.Parallel()
 
-	_, err := analyze(strings.NewReader("not-a-profile\n"))
+	_, err := analyze(strings.NewReader("not-a-profile\n"), ReportOptions{})
 	if err == nil {
 		t.Fatal("analyze() error = nil, want error")
 	}
@@ -125,11 +125,47 @@ example.go:1,1.10 1 1
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := analyze(strings.NewReader(tt.profile))
+			_, err := analyze(strings.NewReader(tt.profile), ReportOptions{})
 			if err == nil {
 				t.Fatal("analyze() error = nil, want error")
 			}
 		})
+	}
+}
+
+func TestAnalyze_IgnoreGlobs(t *testing.T) {
+	t.Parallel()
+
+	// Two files: one covered, one fully missed. With docs/swagger ignored, the
+	// missed file must not drag down the Codecov-style line percentage — this
+	// is the project-mode parity Codecov applies via its ignore: list.
+	mkProfile := func() *strings.Reader {
+		return strings.NewReader("mode: atomic\n" +
+			"github.com/javinizer/javinizer-go/internal/x/ok.go:4.1,6.1 2 1\n" +
+			"github.com/javinizer/javinizer-go/docs/swagger/docs.go:10.1,12.1 2 0\n")
+	}
+
+	plain, err := analyze(mkProfile(), ReportOptions{})
+	if err != nil {
+		t.Fatalf("analyze() error = %v", err)
+	}
+	if plain.Line.Percent >= 100 {
+		t.Fatalf("without ignores, line coverage = %.2f, want < 100 (missed swagger file counted)", plain.Line.Percent)
+	}
+
+	filtered, err := analyze(mkProfile(), ReportOptions{
+		IgnoreGlobs:  []string{"docs/swagger/**"},
+		ModulePrefix: "github.com/javinizer/javinizer-go/",
+	})
+	if err != nil {
+		t.Fatalf("analyze() error = %v", err)
+	}
+	if filtered.Line.Percent != 100 || filtered.Line.Total != 3 {
+		t.Fatalf("with ignores, line coverage = %.2f%% (%d lines), want 100%% over 3 lines",
+			filtered.Line.Percent, filtered.Line.Total)
+	}
+	if filtered.Statement.Total != 2 {
+		t.Fatalf("with ignores, statements total = %d, want 2 (swagger excluded)", filtered.Statement.Total)
 	}
 }
 

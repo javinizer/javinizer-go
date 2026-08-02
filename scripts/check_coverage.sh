@@ -5,6 +5,14 @@
 #   min_coverage: Minimum required coverage percentage (default: 75)
 #   coverage_profile: Path to coverage profile (default: coverage.out)
 #
+# Thresholds in play (do not confuse):
+#   75  — CI hard floor on project line coverage (.github/workflows/test.yml)
+#   90  — 'make test-coverage' aspirational project target
+#   80  — codecov.yml PATCH floor (new/changed lines), enforced by
+#         'make coverage-patch-check' / the codecov/patch CI check
+#   100 — PR-completion bar used by the resolve-pr workflow:
+#         'make coverage-patch-strict'
+#
 # Exit codes:
 #   0 - Coverage meets or exceeds threshold
 #   1 - Coverage below threshold

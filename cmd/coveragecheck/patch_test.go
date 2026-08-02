@@ -376,7 +376,7 @@ func TestRunWithAnalyze_PatchFlag(t *testing.T) {
 		exitCode := runWithAnalyze(
 			[]string{"--patch", "--profile", profilePath},
 			&stdout, &stderr,
-			func(string) (coverage.Summary, error) {
+			func(string, coverage.ReportOptions) (coverage.Summary, error) {
 				t.Fatal("analyze should not be called in patch mode")
 				return coverage.Summary{}, nil
 			},
@@ -411,7 +411,7 @@ func TestRunWithAnalyze_PatchFlag(t *testing.T) {
 		exitCode := runWithAnalyze(
 			[]string{"--patch", "--profile", profilePath, "--base", "develop"},
 			&stdout, &stderr,
-			func(string) (coverage.Summary, error) { return coverage.Summary{}, nil },
+			func(string, coverage.ReportOptions) (coverage.Summary, error) { return coverage.Summary{}, nil },
 		)
 
 		if exitCode != 0 {
