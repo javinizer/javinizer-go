@@ -58,5 +58,16 @@ export default defineConfig({
 		cwd: FRONTEND_DIR,
 		reuseExistingServer: !process.env.CI,
 		timeout: 60_000,
+		env: {
+			...process.env,
+			// Keep the suite hermetic: +layout.server.ts SSR-fetches
+			// ${JAVINIZER_SSR_API_URL||http://127.0.0.1:8765}/api/v1/auth/status.
+			// If a real backend happens to run on :8765 on the dev machine, the
+			// SSR load succeeds server-side (page.route can't intercept it) and
+			// the app boots "unauthenticated", ignoring the spec's mocked
+			// /api/v1/auth/status. Point the SSR fetch at a dead port so it falls
+			// back to the client-side onMount refresh, which the mocks DO catch.
+			JAVINIZER_SSR_API_URL: 'http://127.0.0.1:59999',
+		},
 	},
 });

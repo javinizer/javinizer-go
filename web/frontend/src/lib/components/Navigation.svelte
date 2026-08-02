@@ -83,7 +83,7 @@
 			</a>
 
 			<!-- Nav Links -->
-			<div class="min-w-0 flex items-center">
+			<div class="min-w-0 flex items-center gap-1">
 				<div class="min-w-0 flex items-center gap-1 overflow-x-auto">
 				{#each navItems as item}
 					{@const Icon = item.icon}
@@ -99,15 +99,21 @@
 					</a>
 				{/each}
 
+				</div>
+
 				<!-- Update available indicator (hidden when up-to-date / disabled).
 				Browser-only: UpdateIndicator uses TanStack Query (useQueryClient),
 				which requires a QueryClientProvider. The SSR branch of +layout.svelte
 				renders Navigation without a provider, so mounting this during SSR
 				would throw. The indicator is an interactive, API-polling widget with
-				no SSR value, so gating on `browser` is the correct fix. -->
+				no SSR value, so gating on `browser` is the correct fix.
+				The fixed-size grid cell reserves the slot pre-hydration (no layout
+				shift) and MUST stay OUTSIDE the overflow-x-auto scroll container
+				above: a non-visible overflow-x makes overflow-y compute to auto, so
+				the indicator's absolute popover would be clipped into the nav's
+				scroll area and render "inline" instead of overlaying the page. -->
 				<div class="grid h-10 w-10 shrink-0 place-items-center">
 					{#if browser}<UpdateIndicator />{/if}
-				</div>
 				</div>
 
 				<!-- Settings & Logs dropdown -->
