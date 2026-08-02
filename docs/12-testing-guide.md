@@ -1318,18 +1318,20 @@ chmod +x .git/hooks/pre-commit
 
 ### What the Hook Checks
 
-`scripts/pre-commit.sample` runs 8 checks, after a guard that blocks `.planning/` from being committed:
+`scripts/pre-commit.sample` runs 8 checks scoped to the staged change, after a guard that blocks `.planning/` from being committed. Because the checks validate the working tree, the hook also refuses to run when anything checked is staged but the tree still has unstaged/untracked changes under checked paths (e.g. partial `git add -p` staging) — stage everything, delete the offending untracked paths, or `git stash --all --keep-index` (the `--all` matters for ignored `web/dist` build artifacts) first:
 
 1. **Code formatting** (`[1/8]`) - `gofmt -l .`; fails if any file is unformatted (run `make fmt` to fix)
-2. **golangci-lint** (`[2/8]`) - runs `golangci-lint run ./...` if installed at v2.4.0+ (warns and skips otherwise)
-3. **go vet** (`[3/8]`) - `go vet ./...`
-4. **Fast unit tests** (`[4/8]`) - `go test -short -timeout=60s ./...`
-5. **Build verification** (`[5/8]`) - `go build ./cmd/javinizer`
-6. **Swagger documentation** (`[6/8]`) - runs `make swagger` and fails if `docs/swagger/` is out of date
+2. **golangci-lint** (`[2/8]`) - runs `golangci-lint run` on packages with staged/deleted `.go` files if installed at v2.4.0+ (warns and skips otherwise); a staged `.golangci.yml` escalates to a full-repository run
+3. **go vet** (`[3/8]`) - `go vet` on packages with staged/deleted `.go` files; full repo when `go.mod`/`go.sum` changed
+4. **Fast unit tests** (`[4/8]`) - `go test -short -timeout=60s` on packages owning staged/deleted `.go` files, fixtures, or embedded assets, plus every package that (test-)imports them (a breaking API change otherwise passes while consumers' test binaries stop compiling); the full `./...` suite when module files, shared fixtures, or binary-unreachable helper packages (e.g. `internal/mocks`, `internal/testutil`) change (skipped with `PRE_COMMIT_FAST=1`). Deleting a package that surviving code still imports blocks the commit outright (the hook lists the importers); deleting an unreferenced package runs the build only
+5. **Build verification** (`[5/8]`) - `go build ./cmd/javinizer` when `.go` files, `go.mod`/`go.sum`, or Go-consumed assets (fixtures, `go:embed` targets) are staged
+6. **Swagger documentation** (`[6/8]`) - runs `make swagger` and fails if `docs/swagger/` is out of date (only when `internal/`, `cmd/`, or `docs/swagger/` files are staged)
 7. **Frontend formatting** (`[7/8]`) - `prettier --check` on staged frontend files (skipped if no frontend files are staged or `node_modules` is absent)
-8. **Frontend type check** (`[8/8]`) - `svelte-check --threshold error` (only when `web/frontend/src/` files changed)
+8. **Frontend type check** (`[8/8]`) - `svelte-check --threshold error` (only when `web/frontend/src/` files changed; skipped with `PRE_COMMIT_FAST=1`)
 
-> Checks 7 and 8 run only when frontend files are staged, and checks 2, 6, 7, and 8 degrade gracefully (warn/skip) if the required tooling is not installed locally.
+> Checks 2–4 run only on packages containing staged or deleted `.go` files — a cross-directory rename checks both the source and destination package, and staged fixtures/embeds map to their owning package. Checks 7 and 8 run only when frontend files are staged, and checks 2, 6, 7, and 8 degrade gracefully (warn/skip) if the required tooling is not installed locally. Set `PRE_COMMIT_FAST=1` to skip checks 4 and 8 for a faster pass.
+
+Modifying the hook? Run `make test-hook` to validate the staged-file scoping matrix (renames, deletions, fixtures, embeds, reverse dependents).
 
 ### Bypassing the Hook
 

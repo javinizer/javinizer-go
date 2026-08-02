@@ -7,6 +7,9 @@
 # For a fast pass (skip the full unit tests + svelte-check; keeps gofmt,
 # lint, vet, build scoped to changed packages): PRE_COMMIT_FAST=1 git commit
 #
+# Modifying this hook? Run the staged-file scoping regression matrix:
+# scripts/test-pre-commit-scoping.sh (or: make test-hook)
+#
 # Design note: every expensive check is scoped to the STAGED change. The
 # previous version ran gofmt/golangci-lint/go vet/`go test -short ./...` on
 # the whole repo plus a swagger regeneration on every commit — several
@@ -15,6 +18,11 @@
 
 set -e
 
+# Neutralize local Go workspaces: go.work is git-ignored, so a developer's
+# workspace replace directives would silently alter module resolution for
+# the classification, vet, tests, and build below — the hook must validate
+# exactly what CI checks out. GOWORK=off pins module mode.
+export GOWORK=off
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -25,12 +33,66 @@ NC='\033[0m' # No Color
 FORBIDDEN_PATHS=".planning/"
 START=$SECONDS
 
-for path in $FORBIDDEN_PATHS; do
-    if git diff --cached --name-only | grep -q "^${path}"; then
-        echo -e "${RED}✗ Blocked: ${path} must not be committed (found in staged files)${NC}"
-        exit 1
-    fi
-done
+# Index snapshot FIRST, before every index read below: the live index is
+# read many times during classification, and a concurrent `git add` landing
+# mid-analysis would mix snapshots (early reads stale, later reads new).
+# Re-verified immediately after classification and again before success; any
+# drift refuses the commit. A failing write-tree means an unmergeable index
+# (conflict state).
+# write-tree takes the index lock, so a concurrent git add can make a
+# single attempt fail transiently — retry for ~1s before refusing. A refusal
+# after that means a genuinely unmergeable index (conflict state) or a
+# hostile lock holder.
+snapshot_index() {
+    local tree _i
+    for _i in $(seq 1 20); do
+        if tree=$(git write-tree 2>/dev/null); then
+            printf '%s\n' "$tree"
+            return 0
+        fi
+        sleep 0.05
+    done
+    return 1
+}
+if ! INITIAL_INDEX_TREE=$(snapshot_index); then
+    echo -e "${RED}✗ Cannot snapshot the index (git write-tree kept failing — lock contention${NC}"
+    echo -e "${RED}  or unresolved conflicts). Retry, or resolve conflicts first.${NC}"
+    exit 1
+fi
+
+# Forbidden paths. NUL-delimited: plain --name-only C-quotes non-ASCII/
+# control characters with a leading ", which invisible-prefixes anchored
+# path matching; process substitution keeps the exit effective in this shell.
+while IFS= read -r -d '' p; do
+    for path in $FORBIDDEN_PATHS; do
+        case "$p" in
+            "$path"*)
+                echo -e "${RED}✗ Blocked: ${path} must not be committed (found in staged files)${NC}"
+                exit 1
+                ;;
+        esac
+    done
+done < <(git diff --cached --name-only -z)
+
+# Staged workspace files are never committable here: go.work is git-ignored
+# (a personal local workspace), the hook itself runs with GOWORK=off, and a
+# broken workspace would fail CI where GOWORK is not disabled. Refuse a
+# force-staged (git add -f) workspace file.
+WORKSPACE_STAGED=""
+while IFS= read -r -d '' p; do
+    case "$p" in
+        go.work|go.work.sum)
+            WORKSPACE_STAGED="$WORKSPACE_STAGED
+$p" ;;
+    esac
+done < <(git diff --cached --name-only -z)
+if [ -n "$WORKSPACE_STAGED" ]; then
+    echo -e "${RED}✗ go.work files must not be committed (git-ignored personal workspace):${NC}"
+    # shellcheck disable=SC2086 # one path per line is the intent
+    printf '  %s\n' $WORKSPACE_STAGED
+    echo -e "${YELLOW}Unstage with: git rm --cached go.work go.work.sum${NC}"
+    exit 1
+fi
 
 # Golangci-lint configuration
 GOLANGCI_LINT="${HOME}/go/bin/golangci-lint"
@@ -39,18 +101,404 @@ REQUIRED_VERSION_MINOR=4
 
 # ---------------------------------------------------------------------------
 # Staged-file scoping
-# STAGED_GO: added/copied/modified/renamed .go files (deletions excluded — a
-# deleted file cannot break formatting/lint and its package is linted via a
-# surviving sibling).
-STAGED_GO=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' || true)
-# Unique package patterns (./internal/api/...) for the staged Go files.
-GO_PKGS=""
-if [ -n "$STAGED_GO" ]; then
-    GO_PKGS=$(echo "$STAGED_GO" | xargs -n1 dirname | sort -u | sed 's|^|./|; s|$|/...|')
-fi
+# STAGED_GO: added/copied/modified .go files. --no-renames reports a rename
+# as destination-add + source-delete (rename detection would name only the
+# destination, silently sparing the source package which just lost a
+# declaration), so a cross-directory move is checked on both sides: the
+# destination lands here, the source in DELETED_GO.
+STAGED_GO=$(git diff --cached --name-only --no-renames --diff-filter=ACMRT -- '*.go' || true)
+# DELETED_GO: deleted .go files (also rename sources, per --no-renames).
+# Removing a declaration can break surviving siblings (unused symbols) and
+# dependents (missing references), so the deleted file's package still
+# needs lint/vet/tests/build.
+DELETED_GO=$(git diff --cached --name-only --no-renames --diff-filter=D -- '*.go' || true)
+# MODULE_CHANGED: staged go.mod/go.sum edits — an invalid dependency update
+# matches no .go pathspec yet breaks the build, so it forces at least the
+# build check below.
+MODULE_CHANGED=$(git diff --cached --name-only -- go.mod go.sum || true)
+# LINT_CONFIG: staged golangci-lint configuration — rule/config edits apply
+# repository-wide, so check 2 escalates from linting staged packages to a
+# full-repository run.
+LINT_CONFIG=$(git diff --cached --name-only -- .golangci.yml .golangci.yaml || true)
+# Unique package directories for the staged + deleted Go files. Built from
+# NUL-delimited git output via read -d '' and ${f%/*} — piping paths through
+# xargs/dirname mangles valid filenames containing quotes (e.g.
+# web/foo'bar.go) and the resulting empty list would silently disable EVERY
+# scoped check.
+GO_DIRS=$({
+    git diff --cached --name-only -z --no-renames --diff-filter=ACMRT -- '*.go'
+    git diff --cached --name-only -z --no-renames --diff-filter=D -- '*.go'
+} | while IFS= read -r -d '' f; do
+        d=${f%/*}
+        [ "$d" = "$f" ] && d=.
+        printf '%s\n' "$d"
+    done | sort -u)
+# Exact package patterns (./internal/api) for lint/vet/test scoping —
+# descendant subpackages are distinct packages intentionally NOT swept
+# (breakage propagation flows through the reverse-dependency closure),
+# restricted to directories that still exist.
+GO_PKGS=$(printf '%s\n' "$GO_DIRS" | while IFS= read -r d; do
+        if [ -d "$d" ]; then
+            if [ "$d" = . ]; then printf './...\n'; else printf './%s\n' "$d"; fi
+        fi
+    done)
+# DROPPED_DIRS: directories that no longer exist (whole-package deletion).
+# Nothing remains to lint/vet/test there — but surviving packages may still
+# import the vanished package, and if it lived outside the binary graph
+# (internal/api/testkit is the canonical example) even the build cannot see
+# the breakage. The FULL_SUITE logic below resolves this; unresolvable
+# deletions fail closed.
+DROPPED_DIRS=$(printf '%s\n' "$GO_DIRS" | while IFS= read -r d; do
+        if [ ! -d "$d" ]; then printf '%s\n' "$d"; fi
+    done)
 # Swagger output documents internal/** handler annotations; regen is only
-# meaningful when those (or the docs themselves) are staged.
-API_CHANGED=$(git diff --cached --name-only | grep -cE '^(internal|cmd)/' || true)
+# meaningful when those (or the generated docs themselves — e.g. a stray
+# hand-edit of docs/swagger) are staged.
+API_CHANGED=0
+while IFS= read -r -d '' p; do
+    case "$p" in
+        internal/*|cmd/*|docs/swagger/*|Makefile) API_CHANGED=$((API_CHANGED+1)) ;;
+    esac
+done < <(git diff --cached --name-only -z --no-renames)
+# Non-Go inputs consumed by Go packages (testdata/** fixtures, go:embed
+# assets like *.sql migrations, locales/*.json, config.yaml.example): these
+# never match a *.go pathspec, yet a bad fixture edit fails `go test` and a
+# deleted embed fails `go build`. Map each staged non-.go path to the
+# nearest ancestor directory containing .go files (per-package fixtures land
+# on their owning package); paths with no such ancestor (the shared
+# repo-root testdata/) force the full test suite via ASSET_FULL.
+ASSET_PKGS=""
+ASSET_FULL=""
+# STATIC_PKGS: explicit cross-directory mappings, added to the scoped tests
+# verbatim and intentionally EXCLUDED from reverse-dependency expansion —
+# internal/config is imported nearly everywhere, yet only its own tests read
+# configs/, so expansion would degenerate into a permanent full suite.
+STATIC_PKGS=""
+# EMBED_PKGS: ancestor-mapped packages whose assets are consumed through the
+# import graph — reverse-dependency expansion applies to these.
+EMBED_PKGS=""
+while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    # Cross-directory consumers the ancestor walk cannot express: top-level
+    # configs/ examples are read by internal/config tests (drift guards).
+    case "$p" in
+        configs/*)
+            STATIC_PKGS="$STATIC_PKGS
+./internal/config"
+            continue
+            ;;
+    esac
+    d=$p mapped=""
+    while [ "$d" != "${d%/*}" ]; do
+        d=${d%/*}
+        [ "$d" = testdata ] && break
+        if ls "$d"/*.go >/dev/null 2>&1; then mapped=$d; break; fi
+    done
+    if [ -n "$mapped" ]; then
+        case "$p" in
+            # testdata/ is per-package-private by Go convention — consumers
+            # never read another package's fixtures, so the owning package's
+            # tests suffice (no reverse-dependency expansion).
+            */testdata/*)
+                ASSET_PKGS="$ASSET_PKGS
+./$mapped"
+                ;;
+            # Everything else is consumed via the import graph (go:embed
+            # targets, adjacent assets), so owners feed the reverse scan.
+            *)
+                EMBED_PKGS="$EMBED_PKGS
+./$mapped"
+                ;;
+        esac
+    else
+        ASSET_FULL=1
+    fi
+done <<EOF
+$(git diff --cached --name-only --no-renames --diff-filter=ACMRTD -- testdata internal cmd web/dist docs/swagger configs ':!*.go' || true)
+EOF
+# The ancestor walk maps web/dist and docs/swagger to their embedding
+# packages (web/embed.go and docs/swagger/embed.go) — keep the pathspec list
+# in sync with the repo's go:embed directives.
+#
+# FULL_SUITE: changes that must run the FULL short test suite instead of
+# the scoped one —
+#   * go.mod/go.sum edits (test-only/auxiliary deps break invisibly),
+#   * shared fixtures with no owning package (ASSET_FULL),
+#   * packages unreachable from the ./cmd/javinizer binary (internal/mocks,
+#     internal/testutil, e2e helpers): the build check cannot compile them,
+#     yet other packages' test files import them, so a breaking helper
+#     change passes scoped tests while those test binaries stop compiling,
+#   * whole-package deletions still referenced by survivors (checked below),
+#   * ANY go list failure: without -e, go list OMITS erroneous packages
+#     while still printing healthy ones, so partial output must be treated
+#     exactly like empty output — fail closed rather than silently scope.
+# Import paths never contain spaces, so space-joined matching is safe here.
+FULL_SUITE=""
+if [ -n "$MODULE_CHANGED" ] || [ -n "$ASSET_FULL" ]; then
+    FULL_SUITE=1
+fi
+# Emptied-package pruning (filesystem side): a directory whose last .go
+# file was deleted but which still exists (README, fixtures, subdirectories)
+# has nothing left to lint/vet/test — route it through the dangling-
+# reference gate like a physically deleted package and drop its pattern.
+# Done WITHOUT go list because an exact-pattern go list ERRORS on such
+# directories (only /... wildcards merely warn), and errors are reserved for
+# genuine breakage below.
+if [ -n "$GO_DIRS" ]; then
+    RESOLVED_PKGS=""
+    for d in $GO_DIRS; do
+        [ -d "$d" ] || continue
+        if ! ls "$d"/*.go >/dev/null 2>&1; then
+            DROPPED_DIRS="$DROPPED_DIRS
+$d"
+            continue
+        fi
+        if [ "$d" = . ]; then
+            RESOLVED_PKGS="$RESOLVED_PKGS
+./..."
+        else
+            RESOLVED_PKGS="$RESOLVED_PKGS
+./$d"
+        fi
+    done
+    GO_PKGS=$(printf '%s\n' "$RESOLVED_PKGS" | sed '/^$/d')
+fi
+# STAGED_IMPS: import paths of the staged packages — staged Go packages
+# PLUS ancestor-mapped embed/asset owners (an edited migration/locale/embed
+# breaks the CONSUMERS of its package's API, so those packages feed the
+# reverse scan below). STATIC_PKGS is deliberately not included (see above).
+# Resolution is PER PATTERN with tolerated enumeration-empty outcomes —
+# 'no Go files in', 'matched no packages', and 'build constraints exclude
+# all Go files in' (fully build-tag-excluded directories, e.g. windows-only
+# files on macOS) — which are PRUNED from the
+# check lists. Every other failure is an inconsistent staged snapshot
+# (broken imports, syntax errors) and hard-blocks loudly: a pruned pattern
+# must never silently evade the checks (PRE_COMMIT_FAST=1 would even skip
+# the fail-closed full suite).
+MODULE=$(go list -m 2>/dev/null || true)
+if [ -z "$MODULE" ] && [ -n "$GO_DIRS$EMBED_PKGS$DROPPED_DIRS" ]; then
+    # Without the module path no import-path reasoning is possible at all.
+    FULL_SUITE=1
+fi
+STAGED_IMPS=""
+if [ -n "$GO_PKGS" ] || [ -n "$EMBED_PKGS" ]; then
+    GOLIST_ERR=$(mktemp)
+    PRUNED=""
+    for pat in $GO_PKGS $EMBED_PKGS; do
+        if out=$(go list "$pat" 2>"$GOLIST_ERR"); then
+            STAGED_IMPS="$STAGED_IMPS
+$out"
+        elif head -1 "$GOLIST_ERR" | grep -Eq 'no Go files in|matched no packages|build constraints exclude all Go files in'; then
+            PRUNED="$PRUNED
+$pat"
+        else
+            echo -e "${RED}✗ Cannot resolve staged packages (go list failed):${NC}"
+            cat "$GOLIST_ERR"
+            rm -f "$GOLIST_ERR"
+            echo -e "${YELLOW}Fix the compile/import errors (or unstage these files) and retry.${NC}"
+            exit 1
+        fi
+    done
+    rm -f "$GOLIST_ERR"
+    STAGED_IMPS=$(printf '%s\n' "$STAGED_IMPS" | sed '/^$/d')
+    for pp in $PRUNED; do
+        GO_PKGS=$(printf '%s\n' "$GO_PKGS" | { grep -vxF "$pp" || true; })
+        EMBED_PKGS=$(printf '%s\n' "$EMBED_PKGS" | { grep -vxF "$pp" || true; })
+    done
+fi
+SIMPS=" $(printf '%s\n' "$STAGED_IMPS" | tr '\n' ' ') "
+if [ -z "$FULL_SUITE" ] && [ -n "$STAGED_IMPS" ]; then
+    GOLIST_ERR=$(mktemp)
+    if ! BINARY_GRAPH=$(go list -deps ./cmd/javinizer 2>"$GOLIST_ERR"); then
+        echo -e "${RED}✗ Cannot resolve the ./cmd/javinizer dependency graph (go list -deps failed):${NC}"
+        cat "$GOLIST_ERR"
+        rm -f "$GOLIST_ERR"
+        echo -e "${YELLOW}Fix the errors above (or unstage the offending files) and retry.${NC}"
+        exit 1
+    fi
+    rm -f "$GOLIST_ERR"
+    BINARY_GRAPH=" $(printf '%s\n' "$BINARY_GRAPH" | tr '\n' ' ') "
+    for imp in $STAGED_IMPS; do
+        case "$BINARY_GRAPH" in
+            *" $imp "*) ;;
+            *) FULL_SUITE=1; break ;;
+        esac
+    done
+fi
+# REV_PKGS: transitive reverse dependents of the staged packages, over
+# REGULAR and test imports alike. A breaking API change passes the
+# producer's own tests and the binary build (which compiles neither _test.go
+# files nor auxiliary commands like cmd/javinizer-e2e) while consumers' test
+# binaries stop compiling; re-export indirections (internal/models aliasing
+# internal/scraperconfig types) push breakage a second hop out. Iterate to
+# the fixpoint: every package importing a member joins the member set.
+# The edges block serves two different purposes with different gating:
+#   A) dangling-reference validation for deleted/emptied packages (DROPPED_DIRS)
+#      — snapshot INTEGRITY: must ALWAYS run, even when FULL_SUITE is already
+#      set (e.g. a go.mod edit staged alongside a package deletion), because
+#      PRE_COMMIT_FAST=1 otherwise lets dangling imports slip through.
+#   B) reverse-dependency closure for live staged packages — pure coverage
+#      heuristic, skipped once FULL_SUITE already escalated.
+REV_PKGS=""
+if [ -n "$DROPPED_DIRS" ] || { [ -z "$FULL_SUITE" ] && [ -n "$STAGED_IMPS" ]; }; then
+    GOLIST_ERR=$(mktemp)
+    if TEST_EDGES=$(go list -f '{{.ImportPath}} {{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>"$GOLIST_ERR") && [ -n "$MODULE" ]; then
+        rm -f "$GOLIST_ERR"
+        EDGES_PAD=" $(printf '%s\n' "$TEST_EDGES" | tr '\n' ' ') "
+        # Dangling references to vanished/emptied packages are a hard block:
+        # the staged snapshot itself is inconsistent (something still imports
+        # the deleted package), so no test run — full or fast — can validate
+        # it. This is the deletion counterpart of the go list hard-fail above.
+        for dd in $DROPPED_DIRS; do
+            dimp=$MODULE/$dd
+            [ "$dd" = . ] && dimp=$MODULE
+            case "$EDGES_PAD" in
+                *" $dimp "*)
+                    echo -e "${RED}✗ Staged deletion of package '$dd' — these packages still import it:${NC}"
+                    printf '%s\n' "$TEST_EDGES" | grep -F " $dimp" | cut -d' ' -f1 | sed 's|^|  |'
+                    echo -e "${YELLOW}Update or remove the importers before deleting the package.${NC}"
+                    exit 1
+                    ;;
+            esac
+        done
+        if [ -z "$FULL_SUITE" ] && [ -n "$STAGED_IMPS" ]; then
+            ADDED=1
+            while [ "$ADDED" -eq 1 ]; do
+                ADDED=0
+                while IFS= read -r edge; do
+                    pkg=${edge%% *}
+                    case "$SIMPS" in *" $pkg "*) continue ;; esac
+                    for tok in ${edge#* }; do
+                        case "$SIMPS" in
+                            *" $tok "*)
+                                SIMPS="$SIMPS$pkg "
+                                ADDED=1
+                                break
+                                ;;
+                        esac
+                    done
+                done <<EOF
+$TEST_EDGES
+EOF
+            done
+            for imp in $SIMPS; do
+                if [ "$imp" = "$MODULE" ]; then
+                    REV_PKGS="$REV_PKGS
+./..."
+                else
+                    REV_PKGS="$REV_PKGS
+./${imp#"$MODULE"/}"
+                fi
+            done
+        fi
+    else
+        # Hard block: the package graph cannot be enumerated, so reverse-
+        # dependency and dangling-reference reasoning is impossible. This is
+        # an inconsistent repository snapshot (e.g. a staged deletion still
+        # imported elsewhere) — show the real error instead of degrading to
+        # a suite that PRE_COMMIT_FAST=1 could then skip.
+        echo -e "${RED}✗ Cannot enumerate the package graph (go list ./... failed):${NC}"
+        cat "$GOLIST_ERR"
+        rm -f "$GOLIST_ERR"
+        echo -e "${YELLOW}Fix the errors above (or unstage the offending files) and retry.${NC}"
+        exit 1
+    fi
+fi
+# TEST_PKGS: everything the scoped test check should cover (lint/vet keep
+# the narrower GO_PKGS — assets and test consumers are not lint targets).
+# shellcheck disable=SC2086 # word-splitting the pattern lists is intended
+TEST_PKGS=$(printf '%s\n' $GO_PKGS $ASSET_PKGS $EMBED_PKGS $STATIC_PKGS $REV_PKGS | sed '/^$/d' | sort -u)
+# SHOULD_BUILD: single source of truth for the check-5 trigger, composed
+# here (inside the classified block) so the regression matrix can assert the
+# exact value the hook consumes. Triggers: staged/deleted Go files
+# (STAGED_GO/DELETED_GO/GO_PKGS), module changes, Go-consumed assets.
+SHOULD_BUILD=""
+if [ -n "$GO_PKGS$STAGED_GO$DELETED_GO$MODULE_CHANGED$ASSET_PKGS$EMBED_PKGS$ASSET_FULL" ]; then
+    SHOULD_BUILD=1
+fi
+# Frontend triggers live here too so the matrix can assert them.
+# FRONTEND_FMT_FILES: staged frontend files prettier can parse (check 7).
+# --diff-filter=d excludes deletions (a staged delete of a TS file must not
+# trip prettier); *.svelte is excluded because Prettier ignores it at the
+# config level (svelte-check covers it — see web/frontend/.prettierignore).
+FRONTEND_FMT_FILES=""
+while IFS= read -r -d '' p; do
+    case "$p" in
+        web/frontend/*.ts|web/frontend/*.js|web/frontend/*.cjs|web/frontend/*.mjs|\
+        web/frontend/*.json|web/frontend/*.css|web/frontend/*.html|web/frontend/*.md|\
+        web/frontend/*.yaml|web/frontend/*.yml)
+            FRONTEND_FMT_FILES="$FRONTEND_FMT_FILES
+$p" ;;
+    esac
+done < <(git diff --cached --name-only -z --no-renames --diff-filter=d)
+FRONTEND_FMT_FILES=$(printf '%s\n' "$FRONTEND_FMT_FILES" | sed '/^$/d')
+# FRONTEND_CHANGED: count of staged files under web/frontend/src/ (check 8).
+# --no-renames keeps a rename OUT of src/ visible via its deletion side.
+FRONTEND_CHANGED=0
+while IFS= read -r -d '' p; do
+    case "$p" in
+        web/frontend/src/*) FRONTEND_CHANGED=$((FRONTEND_CHANGED+1)) ;;
+    esac
+done < <(git diff --cached --name-only -z --no-renames)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Index/tree consistency guard. Every check below validates the WORKING TREE
+# (vet/test/build/go list all read files from disk), so the tree must equal
+# the staged snapshot the commit will actually contain — cross-package
+# contamination otherwise lets an unstaged caller fix mask a staged API
+# break. Rule: once anything checked is staged, NO unstaged OR untracked
+# change (including staged-deleted paths recreated on disk, which
+# 'git diff --name-only' cannot see and which get their own probe below) may
+# exist under the checked pathspecs. Refuse rather than vouch for a state we
+# never ran.
+GUARD_PATHSPEC=(-- '*.go' go.mod go.sum testdata internal cmd web/dist docs/swagger configs web/frontend .golangci.yml .golangci.yaml Makefile)
+check_tree_consistency() {
+    STAGED_SET=$(git diff --cached --name-only --no-renames -- "${GUARD_PATHSPEC[@]}" | sort || true)
+    CONFLICT=""
+    while IFS= read -r -d '' f; do
+        if [ -n "$f" ] && [ -e "$f" ]; then
+            CONFLICT="$CONFLICT
+$f"
+        fi
+    done < <(git diff --cached --name-only -z --no-renames --diff-filter=D -- "${GUARD_PATHSPEC[@]}" || true)
+    if [ -n "$STAGED_SET" ]; then
+        UNSTAGED=$( { git diff --name-only -- "${GUARD_PATHSPEC[@]}"
+                      git ls-files --others --exclude-standard -- "${GUARD_PATHSPEC[@]}"
+                      # Embed roots contain git-IGNORED files still compiled
+                      # into the binary (//go:embed all:dist) — an ignored
+                      # artifact can mask a staged deletion, so scan them too.
+                      git ls-files --others --ignored --exclude-standard -- web/dist '*.syso'; } | sort -u || true)
+        if [ -n "$UNSTAGED" ]; then
+            CONFLICT="$CONFLICT
+$UNSTAGED"
+        fi
+    fi
+    [ -z "$CONFLICT" ]
+}
+report_tree_conflict() {
+    echo -e "${RED}✗ $1 — the hook validates the working tree, which must match${NC}"
+    echo -e "${RED}  the staged snapshot exactly. Offending paths:${NC}"
+    # shellcheck disable=SC2086 # one path per line is the intent
+    printf '  %s\n' $CONFLICT
+echo -e "${YELLOW}Stage fixable changes (git add -A), delete the offending untracked/ignored"
+    echo -e "paths, or stash everything (git stash --all --keep-index -- the --all is"
+    echo -e "required for ignored web/dist build artifacts), then retry.${NC}"
+}
+# Drift across the classification window: the analysis above read the index
+# many times; if it changed mid-analysis the computed scope may be a mix of
+# two snapshots. Refuse — the retry re-reads a single consistent one.
+POST_CLASSIFICATION_TREE=$(snapshot_index || true)
+if [ "$POST_CLASSIFICATION_TREE" != "$INITIAL_INDEX_TREE" ]; then
+    echo -e "${RED}✗ The staged content changed during scope analysis (another process${NC}"
+    echo -e "${RED}  ran git add); the computed check scope may be inconsistent.${NC}"
+    echo -e "${YELLOW}Retry the commit — the re-run analyzes a single snapshot.${NC}"
+    exit 1
+fi
+if ! check_tree_consistency; then
+    report_tree_conflict "Working tree contains unstaged/untracked changes under checked paths"
+    exit 1
+fi
 # ---------------------------------------------------------------------------
 
 echo -e "${BLUE}Running pre-commit checks...${NC}"
@@ -103,13 +551,20 @@ fi
 echo -e "${GREEN}✓ Code formatting OK${NC}"
 echo ""
 
-# Check 2: golangci-lint (changed packages only)
-if [ -n "$GO_PKGS" ]; then
-    echo -e "${BLUE}[2/8] Running golangci-lint (staged packages)...${NC}"
+# Check 2: golangci-lint (changed packages only — full repo when the linter
+# configuration itself is staged, since config applies repository-wide)
+LINT_PKGS=$GO_PKGS
+LINT_SCOPE="staged packages"
+if [ -n "$LINT_CONFIG" ]; then
+    LINT_PKGS="./..."
+    LINT_SCOPE="full repo — lint config staged"
+fi
+if [ -n "$LINT_PKGS" ]; then
+    echo -e "${BLUE}[2/8] Running golangci-lint ($LINT_SCOPE)...${NC}"
     if [[ -x "$GOLANGCI_LINT" ]] && check_golangci_lint_version; then
         echo -e "${BLUE}  Using golangci-lint from $GOLANGCI_LINT${NC}"
-        # shellcheck disable=SC2086 # word-splitting GO_PKGS is intentional
-        if ! "$GOLANGCI_LINT" run $GO_PKGS 2>&1; then
+        # shellcheck disable=SC2086 # word-splitting LINT_PKGS is intentional
+        if ! "$GOLANGCI_LINT" run $LINT_PKGS 2>&1; then
             echo -e "${RED}✗ golangci-lint found issues${NC}"
             exit 1
         fi
@@ -127,8 +582,19 @@ else
 fi
 echo ""
 
-# Check 3: Go vet (changed packages only)
-if [ -n "$GO_PKGS" ]; then
+# Check 3: Go vet. Scoped to changed packages normally; a staged go.mod/
+# go.sum runs it repository-wide — the go directive and dependency versions
+# shift vet's analysis (e.g. stdversion diagnostics) even when build/tests
+# still pass.
+if [ -n "$MODULE_CHANGED" ]; then
+    # checked FIRST: module+Go mixed staging must not collapse to scoped vet
+    echo -e "${BLUE}[3/8] Running go vet (all packages — module files staged)...${NC}"
+    if ! go vet ./... 2>&1; then
+        echo -e "${RED}✗ go vet found issues${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ go vet passed${NC}"
+elif [ -n "$GO_PKGS" ]; then
     echo -e "${BLUE}[3/8] Running go vet (staged packages)...${NC}"
     # shellcheck disable=SC2086 # word-splitting GO_PKGS is intentional
     if ! go vet $GO_PKGS 2>&1; then
@@ -137,32 +603,44 @@ if [ -n "$GO_PKGS" ]; then
     fi
     echo -e "${GREEN}✓ go vet passed${NC}"
 else
-    echo -e "${BLUE}[3/8] go vet${NC} (skipped — no staged Go files)"
+    echo -e "${BLUE}[3/8] go vet${NC} (skipped — no staged Go or module files)"
 fi
 echo ""
 
-# Check 4: Fast unit tests (changed packages only; the full suite takes
-# minutes — it belongs in pre-push, not pre-commit)
-if [ -n "$GO_PKGS" ] && [ -z "${PRE_COMMIT_FAST:-}" ]; then
-    echo -e "${BLUE}[4/8] Running fast unit tests (staged packages)...${NC}"
-    # Increase timeout to 60s for the fast test pass
-    # shellcheck disable=SC2086 # word-splitting GO_PKGS is intentional
-    if ! go test -short -timeout=60s $GO_PKGS 2>&1; then
+# Check 4: Fast unit tests. Normally scoped to touched packages (the full
+# suite takes minutes); FULL_SUITE changes (module files, shared fixtures,
+# binary-unreachable helper packages — see scoping block) run the FULL short
+# suite because scoped testing cannot see the breakage they cause.
+if [ -n "$FULL_SUITE" ] && [ -z "${PRE_COMMIT_FAST:-}" ]; then
+    echo -e "${BLUE}[4/8] Running fast unit tests (full suite — module/shared/helper change)...${NC}"
+    if ! go test -short -timeout=60s ./... 2>&1; then
         echo -e "${RED}✗ Tests failed${NC}"
         exit 1
     fi
     echo -e "${GREEN}✓ Tests passed${NC}"
-elif [ -z "$GO_PKGS" ]; then
-    echo -e "${BLUE}[4/8] unit tests${NC} (skipped — no staged Go files)"
+elif [ -n "$TEST_PKGS" ] && [ -z "${PRE_COMMIT_FAST:-}" ]; then
+    echo -e "${BLUE}[4/8] Running fast unit tests (staged packages)...${NC}"
+    # Increase timeout to 60s for the fast test pass
+    # shellcheck disable=SC2086 # word-splitting TEST_PKGS is intentional
+    if ! go test -short -timeout=60s $TEST_PKGS 2>&1; then
+        echo -e "${RED}✗ Tests failed${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Tests passed${NC}"
+elif [ -z "$TEST_PKGS" ] && [ -z "$FULL_SUITE" ]; then
+    echo -e "${BLUE}[4/8] unit tests${NC} (skipped — no staged Go or module inputs)"
 else
     echo -e "${BLUE}[4/8] unit tests${NC} (skipped — PRE_COMMIT_FAST=1)"
 fi
 echo ""
 
-# Check 5: Build verification (only when Go files staged; with a warm build
-# cache this is a few seconds and catches cross-package breakage the scoped
-# checks miss)
-if [ -n "$GO_PKGS" ]; then
+# Check 5: Build verification (with a warm build cache this is a few
+# seconds and catches cross-package breakage the scoped checks miss).
+# Triggers beyond staged Go files: DELETED_GO (deleting a package's last
+# file empties GO_PKGS while dependents may still reference it),
+# MODULE_CHANGED (dependency updates), ASSET_PKGS/ASSET_FULL (a deleted or
+# renamed go:embed target fails compilation).
+if [ -n "$SHOULD_BUILD" ]; then
     echo -e "${BLUE}[5/8] Verifying build...${NC}"
     if ! go build -o /tmp/javinizer-test ./cmd/javinizer 2>&1; then
         echo -e "${RED}✗ Build failed${NC}"
@@ -171,7 +649,7 @@ if [ -n "$GO_PKGS" ]; then
     rm -f /tmp/javinizer-test
     echo -e "${GREEN}✓ Build successful${NC}"
 else
-    echo -e "${BLUE}[5/8] build${NC} (skipped — no staged Go files)"
+    echo -e "${BLUE}[5/8] build${NC} (skipped — no staged Go or module files)"
 fi
 echo ""
 
@@ -205,13 +683,8 @@ else
 fi
 echo ""
 
-# Check 7: Frontend Prettier formatting (only staged frontend files)
-# Collect staged frontend files that prettier can parse. Excludes deletions
-# (diff-filter=d) so a staged delete of a TS file doesn't trip prettier.
-# *.svelte is Prettier-ignored at the config level (svelte-check covers it)
-# — see web/frontend/.prettierignore.
-FRONTEND_FMT_FILES=$(git diff --cached --name-only --diff-filter=d \
-    | grep -E '^web/frontend/.*\.(ts|js|cjs|mjs|json|css|html|md|yaml|yml)$' || true)
+# Check 7: Frontend Prettier formatting (FRONTEND_FMT_FILES is computed in
+# the classification block above)
 if [ -n "$FRONTEND_FMT_FILES" ]; then
     echo -e "${BLUE}[7/8] Checking frontend formatting (prettier)...${NC}"
     if [ -d "web/frontend/node_modules" ]; then
@@ -235,9 +708,9 @@ else
 fi
 echo ""
 
-# Check 8: Frontend type checking (only if frontend src files changed;
-# svelte-check costs ~1 minute, so honor PRE_COMMIT_FAST here)
-FRONTEND_CHANGED=$(git diff --cached --name-only | grep -c "^web/frontend/src/" || true)
+# Check 8: Frontend type checking (FRONTEND_CHANGED is computed in the
+# classification block above; svelte-check costs ~1 minute, so honor
+# PRE_COMMIT_FAST here)
 if [ "$FRONTEND_CHANGED" -gt 0 ] && [ -z "${PRE_COMMIT_FAST:-}" ]; then
     echo -e "${BLUE}[8/8] Running frontend type check (svelte-check)...${NC}"
     if [ -d "web/frontend/node_modules" ]; then
@@ -255,6 +728,33 @@ else
     echo -e "${BLUE}[8/8] Frontend type check${NC} (skipped — PRE_COMMIT_FAST=1)"
 fi
 echo ""
+
+# Post-check consistency re-verification: the checks above took long enough
+# that an editor (or another process) could have mutated the tree mid-run,
+# leaving the up-front guard's verdict stale (TOCTOU) — the checks would
+# have validated content that differs from what gets committed. Never vouch
+# for a snapshot we did not just re-verify.
+# Residual, accepted: a change-then-restore (ABA) race inside the validation
+# window still evades both guards, and no hook can close the gap between its
+# own exit and git consuming the index. Fully closing it would require
+# running every check against an immutable index snapshot, which breaks
+# checks that depend on untracked working-tree state (frontend node_modules,
+# swagger regen-diff) — a poor trade for a developer-aid guard whose threat
+# model is accidental edits, not adversarial timing (which --no-verify
+# already makes moot).
+if ! check_tree_consistency; then
+    report_tree_conflict "Working tree changed while the checks were running"
+    exit 1
+fi
+# Index drift: a concurrent git add leaves tree==index but with staged
+# content the classification and checks never saw.
+FINAL_INDEX_TREE=$(snapshot_index || true)
+if [ "$FINAL_INDEX_TREE" != "$POST_CLASSIFICATION_TREE" ]; then
+    echo -e "${RED}✗ The staged content changed while the checks were running (another${NC}"
+    echo -e "${RED}  process ran git add); the new inputs were never validated.${NC}"
+    echo -e "${YELLOW}Retry the commit — the re-run validates the new snapshot.${NC}"
+    exit 1
+fi
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}All pre-commit checks passed!${NC} ($((SECONDS - START))s)"

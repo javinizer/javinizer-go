@@ -1,4 +1,4 @@
-.PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
+.PHONY: help build run run-api run-api-dev test test-short test-race test-hook test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
 .PHONY: coverage coverage-fast coverage-html coverage-check coverage-pkg coverage-patch coverage-patch-check coverage-func ci ci-full config-drift config-sync check-import-guard check-mocks i18n-check simulate-ci
 .PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-frontend test-e2e-field-drop test-e2e-cli test-e2e-live test-coverage
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
@@ -24,6 +24,7 @@ help:
 	@echo "Testing:"
 	@echo "  make test               - Run all tests with verbose output"
 	@echo "  make test-short         - Run fast tests only (for pre-commit)"
+	@echo "  make test-hook          - Run pre-commit hook scoping regression tests"
 	@echo "  make test-race          - Run race detector on concurrent packages"
 	@echo "  make test-verbose       - Run tests with verbose output and count=1"
 	@echo "  make bench              - Run benchmarks"
@@ -140,6 +141,10 @@ test:
 test-short:
 	go test -short ./...
 
+# Run pre-commit hook scoping regression tests (temp git repo matrix)
+test-hook:
+	bash scripts/test-pre-commit-scoping.sh
+
 # Run tests with race detector (critical for concurrent code)
 test-race:
 	@echo "Running race detector on concurrent packages..."
@@ -228,7 +233,7 @@ check-no-hardcoded-timeouts:
 	@./scripts/check_no_hardcoded_timeouts.sh
 
 # Run full CI test suite
-ci: vet lint vuln coverage-check test-race config-drift check-import-guard check-mocks i18n-check check-no-hardcoded-timeouts
+ci: vet lint vuln coverage-check test-race test-hook config-drift check-import-guard check-mocks i18n-check check-no-hardcoded-timeouts
 	@echo "All CI checks passed!"
 
 # Run full CI suite including frontend tests

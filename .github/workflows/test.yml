@@ -132,6 +132,9 @@ jobs:
     - name: Run go vet
       run: make vet
 
+    - name: Run pre-commit hook scoping regression matrix
+      run: make test-hook
+
     - name: Check internal/api file size guardrail
       run: ./scripts/check_api_file_size.sh 700 internal/api
 

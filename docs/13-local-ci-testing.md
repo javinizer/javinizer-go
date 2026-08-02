@@ -226,20 +226,22 @@ make test-short
 
 ### Before Committing
 
-The pre-commit hook (`scripts/pre-commit.sample`) runs **8 checks** and blocks forbidden paths (e.g. local-only planning dirs) from being committed:
+The pre-commit hook (`scripts/pre-commit.sample`) runs **8 checks** and blocks forbidden paths (e.g. local-only planning dirs) from being committed. Since the checks validate the working tree, it also refuses to run when anything checked is staged but the tree still has unstaged/untracked changes under checked paths (e.g. partial `git add -p` staging) — stage everything, delete the offending untracked paths, or `git stash --all --keep-index` (the `--all` matters for ignored `web/dist` build artifacts) first:
 
-| # | Check | Command |
-|---|-------|---------|
-| 1 | Go formatting | `gofmt -l .` |
-| 2 | golangci-lint | `$HOME/go/bin/golangci-lint run ./...` (≥ v2.4.0; skipped if not installed) |
-| 3 | go vet | `go vet ./...` |
-| 4 | Fast unit tests | `go test -short -timeout=60s ./...` |
-| 5 | Build verification | `go build -o /tmp/javinizer-test ./cmd/javinizer` |
-| 6 | Swagger docs | `make swagger` then `git diff --quiet -- docs/swagger/` (regen must be committed) |
+| # | Check | Command / trigger |
+|---|-------|-------------------|
+| 1 | Go formatting | `gofmt -l .` (whole repo — ~1s) |
+| 2 | golangci-lint | `golangci-lint run <pkgs>` on packages with staged/deleted `.go` files (≥ v2.4.0; skipped if not installed); full repo when `.golangci.yml` is staged |
+| 3 | go vet | `go vet <pkgs>` on packages with staged/deleted `.go` files; full repo when `go.mod`/`go.sum` changed |
+| 4 | Fast unit tests | `go test -short -timeout=60s <pkgs>` on packages owning staged/deleted `.go` files or fixtures, plus their reverse (test-)dependents; the full `./...` suite for module/shared/helper changes. Referenced package deletions hard-block; unreferenced ones run the build only (skipped with `PRE_COMMIT_FAST=1`) |
+| 5 | Build verification | `go build -o /tmp/javinizer-test ./cmd/javinizer` when `.go` files, `go.mod`/`go.sum`, or Go-consumed assets (fixtures, `go:embed` targets) are staged |
+| 6 | Swagger docs | `make swagger` then `git diff --quiet -- docs/swagger/` when `internal/`, `cmd/`, or `docs/swagger/` files are staged (regen must be committed) |
 | 7 | Frontend formatting | `npx prettier --check` on staged `web/frontend/**` files (skipped without `node_modules`) |
-| 8 | Frontend types | `npx svelte-check --threshold error` when `web/frontend/src/` changes |
+| 8 | Frontend types | `npx svelte-check --threshold error` when `web/frontend/src/` changes (skipped with `PRE_COMMIT_FAST=1`) |
 
-Checks 7–8 only run when staged frontend files are present; checks 2, 6, 7, and 8 degrade gracefully (skip with a warning) if their tooling isn't installed.
+Checks 2–4 are scoped to the staged change: only packages containing staged or deleted `.go` files are linted, vetted, and tested (a cross-directory rename checks both the source and destination package). Staged fixtures/embeds map to their owning package. The full short suite runs instead when module files, shared repo-root fixtures, or binary-unreachable helper packages (e.g. `internal/mocks`, `internal/testutil`) change, since scoped checks cannot see that breakage. Checks 7–8 only run when staged frontend files are present; checks 2, 6, 7, and 8 degrade gracefully (skip with a warning) if their tooling isn't installed. For a faster pass, `PRE_COMMIT_FAST=1 git commit` skips checks 4 and 8.
+
+Modifying the hook? Run `make test-hook` to validate the staged-file scoping matrix (renames, deletions, fixtures, embeds, reverse dependents).
 
 To bypass (use sparingly):
 ```bash
