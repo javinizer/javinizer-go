@@ -4,8 +4,10 @@
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { Plus, RefreshCw, Download, Upload, Loader2 } from 'lucide-svelte';
 	import { apiClient } from '$lib/api/client';
-	import type { Actress, ActressUpsertRequest, ImportResponse } from '$lib/api/types';
+	import type { ActressUpsertRequest, ImportResponse } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
+	import { confirmDialog } from '$lib/stores/dialog.svelte';
+	import { saveJsonFile } from '$lib/utils/download';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { createActressStore } from './stores/actress-store.svelte';
@@ -30,18 +32,15 @@
 	let importFile = $state<HTMLInputElement | null>(null);
 
 	const exportMutation = createMutation(() => ({
-		mutationFn: () => apiClient.exportActresses(),
-		onSuccess: async (data: Actress[]) => {
-			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = 'actresses.json';
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			URL.revokeObjectURL(url);
-			toastStore.success(m.actresses_exported({ count: data.length }), 3000);
+		mutationFn: async () => {
+			const data = await apiClient.exportActresses();
+			const result = await saveJsonFile('actresses.json', data);
+			return { count: data.length, saved: result.saved, path: result.path };
+		},
+		onSuccess: (res) => {
+			if (!res.saved) return;
+			const msg = m.actresses_exported({ count: res.count });
+			toastStore.success(res.path ? `${msg} — ${res.path}` : msg, 3000);
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || m.actresses_export_failed(), 4000);
@@ -85,7 +84,7 @@
 				return;
 			}
 
-			if (!confirm(m.actresses_import_confirm({ count: actresses.length }))) return;
+			if (!(await confirmDialog(m.actresses_import(), m.actresses_import_confirm({ count: actresses.length })))) return;
 
 			importMutation.mutate({ actresses });
 		} catch (err) {

@@ -2504,7 +2504,7 @@
       }
     }
   ],
-  "words_import_defaults_confirm": "Import default word replacements too? Click OK to include defaults, Cancel to skip them.",
+  "words_import_defaults_confirm": "Import default word replacements too? Click Confirm to include defaults, Cancel to skip them.",
   "words_import_failed": "Failed to import word replacements",
   "words_invalid_json": "Invalid JSON file: {error}",
   "words_load_failed": "Failed to load word replacements: {error}",

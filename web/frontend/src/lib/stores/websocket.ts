@@ -3,6 +3,7 @@ import { browser } from '$app/environment';
 import type { ProgressMessage } from '$lib/api/types';
 import { toastStore } from '$lib/stores/toast';
 import { BaseClient } from '$lib/api/clients/common';
+import { isDesktopApp } from '$lib/utils/desktop';
 
 // Build WebSocket URL dynamically from browser location.
 // In the browser (dev server / Docker), the SPA and API are same-origin, so
@@ -11,12 +12,6 @@ import { BaseClient } from '$lib/api/clients/common';
 // same-origin WS URL through the reverse proxy; instead it fetches the direct
 // WS URL (ws://localhost:PORT/ws/progress) from GET /desktop/runtime, which
 // the desktop reverse proxy serves without forwarding.
-
-function isDesktopApp(): boolean {
-	if (!browser) return false;
-	if (location.protocol === 'wails:') return true;
-	return location.hostname === 'wails.localhost';
-}
 
 function sameOriginWebSocketURL(): string {
 	// Replace http/https with ws/wss and append the WebSocket path.

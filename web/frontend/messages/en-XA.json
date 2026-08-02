@@ -1843,7 +1843,7 @@
       }
     }
   ],
-  "words_import_defaults_confirm": "[ Ímpört dëfåült wörd rëplåçëmëñts töö? Çlíçk ÖK tö íñçlüdë dëfåülts, Çåñçël tö skíp thëm. ]",
+  "words_import_defaults_confirm": "[ Ímpört dëfåült wörd rëplåçëmëñts töö? Çlíçk Çöñfírm tö íñçlüdë dëfåülts, Çåñçël tö skíp thëm. ]",
   "words_import_failed": "[ Fåílëd tö ímpört wörd rëplåçëmëñts ]",
   "words_invalid_json": "[ Íñvålíd JŠÖÑ fílë: {error} ]",
   "words_load_failed": "[ Fåílëd tö löåd wörd rëplåçëmëñts: {error} ]",

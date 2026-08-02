@@ -1,10 +1,14 @@
 package desktop
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path/filepath"
+	"strings"
 )
 
 // newReverseProxyHandler forwards every request from the Wails internal
@@ -27,7 +31,7 @@ import (
 // upgrader override that accepts the cross-origin webview.
 //
 //nolint:unused // referenced only by app.go, which is //go:build desktop
-func newReverseProxyHandler(target string) http.Handler {
+func newReverseProxyHandler(target string, saveFile SaveFileFunc) http.Handler {
 	parsed, err := url.Parse(target)
 	if err != nil {
 		// target is always "http://127.0.0.1:%d" (see ServerInstance.BaseURL),
@@ -57,6 +61,10 @@ func newReverseProxyHandler(target string) http.Handler {
 			_ = json.NewEncoder(w).Encode(map[string]string{"ws_url": wsURL})
 			return
 		}
+		if r.Method == http.MethodPost && r.URL.Path == "/desktop/save-file" {
+			handleSaveFile(w, r, saveFile)
+			return
+		}
 		proxy.ServeHTTP(w, r)
 	})
 }
@@ -80,6 +88,83 @@ func rewriteSessionCookies(resp *http.Response) error {
 		c.Secure = false
 		c.Domain = ""
 		resp.Header.Add("Set-Cookie", c.String())
+	}
+	return nil
+}
+
+// SaveFileFunc shows a native "save file" dialog with filename as the
+// default name and, if the user confirms, writes content to the chosen path.
+// It returns the path actually written, or ("", nil) when the user cancels.
+// The desktop build wires this to wailsruntime.SaveFileDialog (save_dialog.go):
+// anchor[download] blob downloads are silently dropped by the desktop webviews
+// (on macOS Wails wires no WKDownloadDelegate), so exports routed through the
+// frontend go to this native path instead.
+type SaveFileFunc func(ctx context.Context, filename string, content []byte) (string, error)
+
+//nolint:unused // reached only via newReverseProxyHandler, which is //go:build desktop
+type saveFileRequest struct {
+	Filename string `json:"filename"`
+	Content  string `json:"content"`
+}
+
+//nolint:unused // reached only via newReverseProxyHandler, which is //go:build desktop
+type saveFileResponse struct {
+	Saved bool   `json:"saved"`
+	Path  string `json:"path,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// maxSaveFileBytes caps export payloads; replacement lists and actress
+// exports are a few hundred KB at most.
+//
+//nolint:unused // reached only via newReverseProxyHandler, which is //go:build desktop
+const maxSaveFileBytes = 32 << 20
+
+// handleSaveFile backs POST /desktop/save-file: the webview asks the desktop
+// shell to persist an export through a native save dialog. The filename comes
+// from the webview, so it is validated down to a bare name before the dialog
+// or any write can see it.
+//
+//nolint:unused // reached only via newReverseProxyHandler, which is //go:build desktop
+func handleSaveFile(w http.ResponseWriter, r *http.Request, saveFile SaveFileFunc) {
+	writeErr := func(status int, msg string) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(saveFileResponse{Error: msg})
+	}
+	if saveFile == nil {
+		writeErr(http.StatusNotFound, "desktop: save-file is not available")
+		return
+	}
+	var req saveFileRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSaveFileBytes)).Decode(&req); err != nil {
+		writeErr(http.StatusBadRequest, fmt.Sprintf("desktop: invalid save-file request: %v", err))
+		return
+	}
+	if err := validateSaveFilename(req.Filename); err != nil {
+		writeErr(http.StatusBadRequest, fmt.Sprintf("desktop: invalid filename: %v", err))
+		return
+	}
+	path, err := saveFile(r.Context(), req.Filename, []byte(req.Content))
+	if err != nil {
+		writeErr(http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(saveFileResponse{Saved: path != "", Path: path})
+}
+
+// validateSaveFilename rejects empty names and anything with path components:
+// the webview controls this string, and neither the dialog nor the write may
+// escape to an attacker-chosen path.
+//
+//nolint:unused // reached only via newReverseProxyHandler, which is //go:build desktop
+func validateSaveFilename(name string) error {
+	if name == "" {
+		return fmt.Errorf("filename must not be empty")
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) || filepath.Base(name) != name {
+		return fmt.Errorf("filename must not contain path components: %q", name)
 	}
 	return nil
 }

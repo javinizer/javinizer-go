@@ -2504,7 +2504,7 @@
       }
     }
   ],
-  "words_import_defaults_confirm": "デフォルトの単語置換もインポートしますか? OK でデフォルトを含める、キャンセルでスキップ。",
+  "words_import_defaults_confirm": "デフォルトの単語置換もインポートしますか? Confirm でデフォルトを含める、キャンセルでスキップ。",
   "words_import_failed": "単語置換のインポートに失敗しました",
   "words_invalid_json": "無効な JSON ファイル: {error}",
   "words_load_failed": "単語置換の読み込みに失敗しました: {error}",
