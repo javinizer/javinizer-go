@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -92,6 +93,41 @@ func TestFetcherBlocksCGNATMetadataRange(t *testing.T) {
 	_, _, err := fetcher.Get(context.Background(), "http://100.100.100.200/latest/meta-data", "*/*", 1024)
 	var blockedErr *BlockedFetchError
 	require.ErrorAs(t, err, &blockedErr)
+}
+
+func TestFetcherFailsClosedForUnresolvableProxiedHost(t *testing.T) {
+	prev := lookupIP
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		return nil, errors.New("dns down")
+	}
+	defer func() { lookupIP = prev }()
+
+	proxyTransport := &http.Transport{Proxy: func(*http.Request) (*url.URL, error) {
+		return url.Parse("http://proxy.corp.example:3128")
+	}}
+	fetcher := NewFetcher(&http.Client{Transport: proxyTransport}, 0, "test")
+	_, _, err := fetcher.Get(context.Background(), "https://unresolvable.invalid/x", "*/*", 1024)
+	var blockedErr *BlockedFetchError
+	require.ErrorAs(t, err, &blockedErr)
+}
+
+func TestFetcherToleratesLookupFailureWithoutProxy(t *testing.T) {
+	prev := lookupIP
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		return nil, errors.New("dns down")
+	}
+	defer func() { lookupIP = prev }()
+
+	called := false
+	client := &http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("ok")), Request: req}, nil
+	})}
+	fetcher := NewFetcher(client, 0, "test")
+	body, _, err := fetcher.Get(context.Background(), "https://brand-new.example/file", "*/*", 1024)
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, "ok", string(body))
 }
 
 func TestFetcherBlocksRedirectToInternalHost(t *testing.T) {

@@ -956,12 +956,14 @@ func (r *ActressRepository) fillBlankMetadata(ctx context.Context, id uint, dmmI
 	if before.DMMID <= 0 || before.DMMID != dmmID || source.DMMID != dmmID {
 		return nil, ErrInvalidLookup
 	}
-	updates := map[string]any{
-		"japanese_name": gorm.Expr("CASE WHEN TRIM(COALESCE(japanese_name,'')) = '' THEN ? ELSE japanese_name END", strings.TrimSpace(source.JapaneseName)),
-		"first_name":    gorm.Expr("CASE WHEN TRIM(COALESCE(first_name,'')) = '' THEN ? ELSE first_name END", strings.TrimSpace(source.FirstName)),
-		"last_name":     gorm.Expr("CASE WHEN TRIM(COALESCE(last_name,'')) = '' THEN ? ELSE last_name END", strings.TrimSpace(source.LastName)),
-	}
 	sourceThumb := strings.TrimSpace(source.ThumbURL)
+	nameSources := []struct {
+		column, value string
+	}{
+		{"japanese_name", strings.TrimSpace(source.JapaneseName)},
+		{"first_name", strings.TrimSpace(source.FirstName)},
+		{"last_name", strings.TrimSpace(source.LastName)},
+	}
 	fields := make([]string, 0, 4)
 	if err := retryOnLocked(func() error {
 		fields = fields[:0]
@@ -969,17 +971,47 @@ func (r *ActressRepository) fillBlankMetadata(ctx context.Context, id uint, dmmI
 			if err := ensureSyncTaskLeaseTx(tx, taskID, leaseToken); err != nil {
 				return err
 			}
-			if err := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = ?", id, dmmID).Updates(updates).Error; err != nil {
+			// Decide from values read inside the transaction: a snapshot taken
+			// before it may be stale (a user could have filled a blank field
+			// meanwhile), which would also misattribute that user's edit to
+			// this sync in the recorded updated fields.
+			var current models.Actress
+			if err := tx.First(&current, "id = ? AND dmm_id = ?", id, dmmID).Error; err != nil {
 				return err
+			}
+			updates := map[string]any{}
+			for _, nf := range nameSources {
+				switch nf.column {
+				case "japanese_name":
+					if strings.TrimSpace(current.JapaneseName) == "" && nf.value != "" {
+						updates[nf.column] = nf.value
+					}
+				case "first_name":
+					if strings.TrimSpace(current.FirstName) == "" && nf.value != "" {
+						updates[nf.column] = nf.value
+					}
+				case "last_name":
+					if strings.TrimSpace(current.LastName) == "" && nf.value != "" {
+						updates[nf.column] = nf.value
+					}
+				}
+			}
+			// Skip the write entirely when nothing can change: an all-no-op
+			// update still bumps updated_at and spuriously invalidates
+			// timestamp-fenced merge previews.
+			if len(updates) > 0 {
+				if err := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = ?", id, dmmID).Updates(updates).Error; err != nil {
+					return err
+				}
 			}
 			thumbUpdated := false
 			if sourceThumb != "" && !models.IsKnownInvalidDMMActressThumbnail(sourceThumb) {
 				query := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = ?", id, dmmID)
 				switch {
-				case strings.TrimSpace(before.ThumbURL) == "":
+				case strings.TrimSpace(current.ThumbURL) == "":
 					query = query.Where("TRIM(COALESCE(thumb_url,'')) = ''")
-				case models.IsKnownInvalidDMMActressThumbnail(before.ThumbURL):
-					query = query.Where("thumb_url = ?", before.ThumbURL)
+				case models.IsKnownInvalidDMMActressThumbnail(current.ThumbURL):
+					query = query.Where("thumb_url = ?", current.ThumbURL)
 				default:
 					query = nil
 				}
@@ -991,21 +1023,13 @@ func (r *ActressRepository) fillBlankMetadata(ctx context.Context, id uint, dmmI
 					thumbUpdated = result.RowsAffected == 1
 				}
 			}
-			var after models.Actress
-			if err := tx.First(&after, "id = ?", id).Error; err != nil {
-				return err
-			}
-			if thumbUpdated && strings.TrimSpace(after.ThumbURL) != "" {
+			if thumbUpdated {
 				fields = append(fields, "thumb_url")
 			}
-			if strings.TrimSpace(before.JapaneseName) == "" && strings.TrimSpace(after.JapaneseName) != "" {
-				fields = append(fields, "japanese_name")
-			}
-			if strings.TrimSpace(before.FirstName) == "" && strings.TrimSpace(after.FirstName) != "" {
-				fields = append(fields, "first_name")
-			}
-			if strings.TrimSpace(before.LastName) == "" && strings.TrimSpace(after.LastName) != "" {
-				fields = append(fields, "last_name")
+			for _, nf := range nameSources {
+				if _, ok := updates[nf.column]; ok {
+					fields = append(fields, nf.column)
+				}
 			}
 			return recordSyncTaskFieldsTx(tx, taskID, leaseToken, fields)
 		})

@@ -181,7 +181,10 @@ func actressThumbNeedsResolution(thumbURL string) bool {
 }
 
 func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, registry ScraperInstanceResolver, cfg *Config, priorityOverride ...[]string) int {
-	if cfg == nil || !cfg.ScrapeActress || scraped == nil || registry == nil {
+	// cfg.ScrapeActress is only the global default here: collectMetadataResolvers
+	// applies per-scraper overrides, so a global false with a scraper-specific
+	// true still enriches (documented three-state behavior).
+	if cfg == nil || scraped == nil || registry == nil {
 		return 0
 	}
 	priority := cfg.ScrapersPriority

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +52,9 @@ type Fetcher struct {
 	// transport is a real HTTP transport that dials (possibly via proxy);
 	// custom transports control their own connections.
 	resolveTargets bool
+	// proxyFunc mirrors the wrapped transport's proxy configuration so lookup
+	// failures can fail closed when a proxy would resolve targets remotely.
+	proxyFunc func(*http.Request) (*url.URL, error)
 
 	client     *http.Client
 	delay      time.Duration
@@ -127,6 +131,16 @@ func isBlockedIP(ip net.IP) bool {
 	return false
 }
 
+// viaProxy reports whether fetches to host would traverse a configured
+// HTTP(S) proxy (which resolves the target remotely).
+func (f *Fetcher) viaProxy(host string) bool {
+	if f.proxyFunc == nil {
+		return false
+	}
+	proxyURL, err := f.proxyFunc(&http.Request{URL: &url.URL{Scheme: "https", Host: host}})
+	return err == nil && proxyURL != nil
+}
+
 // checkFetchTarget validates the request host lexically and — when the
 // fetcher drives a real dialing transport — resolves hostnames locally: with
 // an HTTP(S) proxy configured the transport only ever dials the proxy
@@ -140,9 +154,14 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, host string) error {
 		return nil
 	}
 	ips, err := lookupIP(ctx, "ip", host)
-	//nolint:nilerr // unresolvable hosts fail at dial time anyway; only a
-	// successful resolution to an internal range is blocked here.
 	if err != nil || len(ips) == 0 {
+		if f.viaProxy(host) {
+			// A proxy resolves the hostname remotely, so dial-time checks
+			// cannot see the real target: fail closed when local resolution
+			// cannot prove the host is public.
+			return &BlockedFetchError{URL: host}
+		}
+		//nolint:nilerr // no proxy: dial surfaces DNS errors authoritatively.
 		return nil
 	}
 	for _, ip := range ips {
@@ -180,7 +199,17 @@ func guardedDialContext(ctx context.Context, network, addr string, fallback func
 			return nil, &BlockedFetchError{URL: addr}
 		}
 	}
-	return fallback(ctx, network, net.JoinHostPort(ips[0].String(), port))
+	// Try every resolved address: dual-stack/multi-address hosts must not
+	// fail just because the first answer is unreachable.
+	var dialErr error
+	for _, ip := range ips {
+		conn, err := fallback(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		dialErr = err
+	}
+	return nil, dialErr
 }
 
 // NewFetcher ...
@@ -214,6 +243,7 @@ func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgen
 	if ok {
 		fetcher.resolveTargets = true
 		guarded := transport.Clone()
+		fetcher.proxyFunc = guarded.Proxy
 		fallback := guarded.DialContext
 		if fallback == nil {
 			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}

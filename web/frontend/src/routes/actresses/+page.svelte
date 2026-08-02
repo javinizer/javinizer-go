@@ -97,6 +97,9 @@
 				syncRestoring = true;
 				try {
 					await refreshActiveSyncQueue();
+				} catch {
+					// Best-effort queue refresh; the advance below must still run,
+					// otherwise queued jobs stay hidden until the next user action.
 				} finally {
 					if (!syncDestroyed) syncRestoring = false;
 				}
