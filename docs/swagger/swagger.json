@@ -5711,6 +5711,10 @@
                 },
                 "poster_url": {
                     "type": "string"
+                },
+                "should_crop_poster": {
+                    "description": "ShouldCropPoster is the crop intent the server derived for the new\nimage (PosterEditor.cropIntentAfterPosterFromURL): the temp preview is\nalways auto-cropped, so clients MUST overlay this exact value or a later\nwhole-movie Save would resubmit a false that Organize treats as\ndeliberate, desyncing preview (cropped) from apply (uncropped).",
+                    "type": "boolean"
                 }
             }
         },

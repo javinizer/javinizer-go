@@ -123,6 +123,14 @@ export interface PosterFromURLRequest {
 export interface PosterFromURLResponse {
 	cropped_poster_url: string;
 	poster_url: string;
+	/**
+	 * Crop intent the server derived for the new image (mirrors
+	 * cropIntentAfterPosterFromURL): the temp preview is auto-cropped, so this
+	 * must be overlaid verbatim — hard-coding false would let a later whole-movie
+	 * Save resubmit it as a deliberate intent and Organize would skip the default
+	 * crop the preview already showed.
+	 */
+	should_crop_poster: boolean;
 }
 
 export interface ScraperRating {

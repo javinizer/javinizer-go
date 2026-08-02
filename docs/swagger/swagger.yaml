@@ -1159,6 +1159,14 @@ definitions:
         type: string
       poster_url:
         type: string
+      should_crop_poster:
+        description: |-
+          ShouldCropPoster is the crop intent the server derived for the new
+          image (PosterEditor.cropIntentAfterPosterFromURL): the temp preview is
+          always auto-cropped, so clients MUST overlay this exact value or a later
+          whole-movie Save would resubmit a false that Organize treats as
+          deliberate, desyncing preview (cropped) from apply (uncropped).
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ProxyTestRequest:
     properties:

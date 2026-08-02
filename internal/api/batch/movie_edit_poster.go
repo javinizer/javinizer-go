@@ -407,9 +407,21 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		// Read the crop intent back from the post-update job state (still under
+		// the poster-source lock): UpdatePosterFromURL derives ShouldCropPoster
+		// from the PRIOR effective source / provenance, so the server — not the
+		// request — owns the value. The client overlays it verbatim; omitting it
+		// would let the client default to false and a later whole-movie Save
+		// would resubmit that false while poster_source is unchanged, which
+		// updateBatchMovie treats as a deliberate crop-intent edit.
+		shouldCrop := false
+		if updated, _, stillFound := job.GetFileResultByResultID(resultID); stillFound && updated != nil && updated.Movie != nil {
+			shouldCrop = updated.Movie.Poster.ShouldCropPoster
+		}
 		c.JSON(http.StatusOK, contracts.PosterFromURLResponse{
 			CroppedPosterURL: croppedURL,
 			PosterURL:        req.URL,
+			ShouldCropPoster: shouldCrop,
 		})
 	}
 }

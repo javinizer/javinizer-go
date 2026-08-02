@@ -84,6 +84,8 @@ interface Harness {
 	mutations: ReturnType<typeof createReviewMutations>;
 	posterPreviewOverrides: Map<string, PosterPreviewOverride>;
 	posterCropStates: Map<string, PosterCropState>;
+	editedMovies: Map<string, Movie>;
+	skipJobSync: ReturnType<typeof vi.fn>;
 	job: { current: BatchJobResponse };
 	// Flipping this simulates the user navigating to another movie mid-flight.
 	currentResult: { current: FileResult };
@@ -110,6 +112,7 @@ function makeHarness(): Harness {
 	const posterPreviewOverrides = new Map<string, PosterPreviewOverride>();
 	const posterCropStates = new Map<string, PosterCropState>();
 	const editedMovies = new Map<string, Movie>();
+	const skipJobSync = vi.fn();
 	const toastSuccess = vi.fn();
 	const toastError = vi.fn();
 	const setShowPosterCropModal = vi.fn();
@@ -151,7 +154,7 @@ function makeHarness(): Harness {
 		setJob: (next) => {
 			job.current = next;
 		},
-		skipJobSync: noop,
+		skipJobSync,
 		clearEditStorage: noop,
 		clearEditedMovies: noop,
 		clearPosterPreviewOverrides: noop,
@@ -186,6 +189,8 @@ function makeHarness(): Harness {
 		mutations,
 		posterPreviewOverrides,
 		posterCropStates,
+		editedMovies,
+		skipJobSync,
 		job,
 		currentResult,
 		toastSuccess,
@@ -218,6 +223,7 @@ describe('review-mutations — mid-flight navigation keys poster state by the RE
 		pending.resolve({
 			poster_url: 'https://example.com/new-poster.jpg',
 			cropped_poster_url: '/api/v1/temp/posters/job-1/AAA-001.jpg',
+			should_crop_poster: false,
 		});
 		await done;
 
@@ -274,5 +280,101 @@ describe('review-mutations — mid-flight navigation keys poster state by the RE
 		const movieA = (h.job.current.results![FILE_A] as FileResult).movie!;
 		expect(movieA.cropped_poster_url).toBe('/api/v1/temp/posters/job-1/AAA-001.jpg');
 		expect(movieA.poster_crop_bounds).toEqual({ x: 10, y: 20, width: 300, height: 450 });
+	});
+});
+describe('review-mutations — poster-from-URL adopts the SERVER-DERIVED crop intent', () => {
+	beforeEach(() => {
+		createdMutations.length = 0;
+	});
+
+	it('pending-edit overlay adopts should_crop_poster=true from the server (the audit-7 regression)', async () => {
+		// Regression: the poster-from-URL temp preview is ALWAYS auto-cropped
+		// server-side, and a cover-backed prior source derives
+		// ShouldCropPoster=true, so Organize will default-crop the downloaded
+		// image. Hard-coding should_crop_poster:false here would land a false
+		// on the pending edit; a later whole-movie Save resends it with an
+		// unchanged poster_source, which updateBatchMovie treats as deliberate
+		// — Organize downloads the image WHOLE while the preview showed it
+		// cropped. The overlay must adopt data.should_crop_poster verbatim.
+		const h = makeHarness();
+		// A pending edit exists (e.g. user edited the title) with the
+		// movie's pre-URL poster state.
+		h.editedMovies.set(FILE_A, {
+			...makeMovie('AAA-001'),
+			title: 'User Edited Title',
+			poster_url: 'https://example.com/old-cover.jpg',
+			cropped_poster_url: '/api/v1/temp/posters/job-1/AAA-001.jpg?v=1',
+			should_crop_poster: false,
+		});
+
+		h.api.updateBatchMoviePosterFromURL.mockResolvedValue({
+			poster_url: 'https://example.com/new-cover.jpg',
+			cropped_poster_url: '/api/v1/temp/posters/job-1/AAA-001.jpg?v=2',
+			should_crop_poster: true,
+		});
+		await h.mutations.applyPosterFromUrlAsync('res-A', 'https://example.com/new-cover.jpg');
+
+		// Pending edit adopts the server intent; unrelated edits survive.
+		const pending = h.editedMovies.get(FILE_A)!;
+		expect(pending.should_crop_poster).toBe(true);
+		expect(pending.poster_url).toBe('https://example.com/new-cover.jpg');
+		expect(pending.cropped_poster_url).toBe('/api/v1/temp/posters/job-1/AAA-001.jpg?v=2');
+		expect(pending.poster_crop_bounds).toBeNull();
+		expect(pending.title).toBe('User Edited Title');
+
+		// Non-pending job state reflects the same server value.
+		const movieA = (h.job.current.results![FILE_A] as FileResult).movie!;
+		expect(movieA.should_crop_poster).toBe(true);
+		expect(movieA.poster_url).toBe('https://example.com/new-cover.jpg');
+
+		// skipJobSync must fire BEFORE setJob so the job-sync watcher cannot
+		// clobber the just-overlaid state with a stale server snapshot.
+		expect(h.skipJobSync).toHaveBeenCalled();
+	});
+
+	it('non-pending job state adopts should_crop_poster=false for a poster-grade prior', async () => {
+		const h = makeHarness();
+		h.api.updateBatchMoviePosterFromURL.mockResolvedValue({
+			poster_url: 'https://example.com/explicit-poster.jpg',
+			cropped_poster_url: '/api/v1/temp/posters/job-1/AAA-001.jpg?v=2',
+			should_crop_poster: false,
+		});
+		await h.mutations.applyPosterFromUrlAsync('res-A', 'https://example.com/explicit-poster.jpg');
+
+		const movieA = (h.job.current.results![FILE_A] as FileResult).movie!;
+		expect(movieA.should_crop_poster).toBe(false);
+		expect(movieA.poster_crop_bounds).toBeNull();
+	});
+
+	it('resetPoster route (applyPosterFromUrl with the baseline URL) carries the restored server intent', async () => {
+		// The restore-to-baseline half of the reset flow routes through the
+		// same mutation: review-state.resetPoster calls
+		// mutations.applyPosterFromUrl(resultId, baseline.poster_url). The
+		// server re-derives the intent for the restored image
+		// (cropIntentAfterPosterFromURL — Reset stays a fixed point), and the
+		// overlay must carry THAT value, not a stale pre-reset one.
+		const h = makeHarness();
+		h.editedMovies.set(FILE_A, {
+			...makeMovie('AAA-001'),
+			poster_url: 'https://example.com/drifted-url.jpg',
+			should_crop_poster: false,
+		});
+
+		h.api.updateBatchMoviePosterFromURL.mockResolvedValue({
+			// Server restored the scraped baseline and re-derived its intent.
+			poster_url: 'https://example.com/baseline-cover.jpg',
+			cropped_poster_url: '/api/v1/temp/posters/job-1/AAA-001.jpg?v=3',
+			should_crop_poster: true,
+		});
+		// Same entry point resetPoster uses on the URL-changed branch.
+		await h.mutations.applyPosterFromUrlAsync('res-A', 'https://example.com/baseline-cover.jpg');
+
+		const pending = h.editedMovies.get(FILE_A)!;
+		expect(pending.poster_url).toBe('https://example.com/baseline-cover.jpg');
+		expect(pending.should_crop_poster).toBe(true);
+
+		const movieA = (h.job.current.results![FILE_A] as FileResult).movie!;
+		expect(movieA.should_crop_poster).toBe(true);
+		expect(movieA.poster_url).toBe('https://example.com/baseline-cover.jpg');
 	});
 });

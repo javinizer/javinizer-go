@@ -142,10 +142,18 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			return deps.updateBatchMoviePosterFromURL(deps.getJobId(), resultId, { url });
 		},
 		onSuccess: (data: PosterFromURLResponse, { resultId }) => {
+			// should_crop_poster comes from the SERVER (derived in
+			// PosterEditor.cropIntentAfterPosterFromURL from the prior effective
+			// source / provenance), NOT hard-coded: the temp preview is always
+			// auto-cropped, so overlaying false for a cover-backed prior would
+			// desync Organize's default crop from the preview — and a later
+			// whole-movie Save would resubmit the false as a deliberate edit.
+			// The reset-poster flow routes through this mutation too, so it
+			// inherits the same server-derived intent for the restored URL.
 			applyPosterEditToState(resultId, {
 				poster_url: data.poster_url,
 				cropped_poster_url: data.cropped_poster_url,
-				should_crop_poster: false,
+				should_crop_poster: data.should_crop_poster,
 				poster_crop_bounds: null,
 			});
 

@@ -112,6 +112,12 @@ type PosterFromURLRequest struct {
 type PosterFromURLResponse struct {
 	CroppedPosterURL string `json:"cropped_poster_url"`
 	PosterURL        string `json:"poster_url"`
+	// ShouldCropPoster is the crop intent the server derived for the new
+	// image (PosterEditor.cropIntentAfterPosterFromURL): the temp preview is
+	// always auto-cropped, so clients MUST overlay this exact value or a later
+	// whole-movie Save would resubmit a false that Organize treats as
+	// deliberate, desyncing preview (cropped) from apply (uncropped).
+	ShouldCropPoster bool `json:"should_crop_poster"`
 }
 
 // NFOComparisonRequest represents a request to compare NFO with scraped data
