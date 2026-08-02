@@ -24,3 +24,44 @@ func TestResolverEnrichmentPerScraperOverrideBeatsGlobal(t *testing.T) {
 	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), movie2, newTestRegistry(muted), &Config{ScrapeActress: true}))
 	assert.Equal(t, 0, muted.calls)
 }
+
+// A non-empty actress field override restricts enrichment to the named
+// resolvers exclusively, and the skip sentinel suppresses it entirely.
+func TestResolverEnrichmentActressFieldOverrideIsExclusive(t *testing.T) {
+	first := &testMetadataResolver{name: "dmm", enabled: true, metadata: models.ActressInfo{DMMID: 7, FirstName: "DmmName"}}
+	second := &testMetadataResolver{name: "minnanoav", enabled: true, metadata: models.ActressInfo{DMMID: 7, FirstName: "MinnanoName"}}
+
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
+	excl := &Config{ScrapeActress: true, ActressFieldPriority: []string{"minnanoav"}}
+	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(first, second), excl))
+	assert.Equal(t, "MinnanoName", movie.Actresses[0].FirstName)
+	assert.Equal(t, 0, first.calls, "override-unlisted resolver must not run")
+
+	movie2 := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
+	skip := &Config{ScrapeActress: true, ActressFieldPriority: []string{"__skip__"}}
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), movie2, newTestRegistry(first), skip))
+	assert.Equal(t, 0, first.calls)
+}
+
+type recordingMetadataResolver struct {
+	*testMetadataResolver
+	lastInput models.ActressInfo
+}
+
+func (r *recordingMetadataResolver) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) models.ActressInfo {
+	r.lastInput = actress
+	return r.metadata
+}
+
+// Each resolver must see values discovered by earlier ones: a name-keyed
+// resolver can only contribute once another source found the Japanese name.
+func TestResolverEnrichmentThreadsEarlierDiscoveries(t *testing.T) {
+	discoverer := &testMetadataResolver{name: "dmm", enabled: true, metadata: models.ActressInfo{DMMID: 7, JapaneseName: "発見"}}
+	recorder := &recordingMetadataResolver{testMetadataResolver: &testMetadataResolver{
+		name: "minnanoav", enabled: true, metadata: models.ActressInfo{DMMID: 7, FirstName: "Filled"},
+	}}
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
+	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(discoverer, recorder), &Config{ScrapeActress: true}))
+	assert.Equal(t, "発見", recorder.lastInput.JapaneseName)
+	assert.Equal(t, "Filled", movie.Actresses[0].FirstName)
+}

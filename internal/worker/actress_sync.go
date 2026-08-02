@@ -119,7 +119,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		validateThumbnail = options[0].ValidateThumbnail
 		lookupCache = options[0].LookupCache
 	}
-	matches := make([]models.ActressInfo, 0)
+	matches := make([]rankedActressMatch, 0)
 	scrapeActress := true
 	var scrapersPriority, actressFieldPriority []string
 	if len(options) > 0 && options[0].ScrapeActress != nil {
@@ -132,6 +132,19 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	scrapers := authoritativeActressScrapers(registry, scrapeActress, scrapersPriority)
 	metadataScrapers := actressMetadataScrapers(registry, scrapeActress, scrapersPriority)
 	thumbnailRank := actressSyncThumbnailRank(actressFieldPriority, scrapersPriority)
+	// A non-empty actress field override means "consult these exclusively";
+	// the skip sentinel suppresses resolver-driven metadata resolution.
+	if actressSyncSkipSentinel(actressFieldPriority) {
+		metadataScrapers = nil
+	} else if len(actressFieldPriority) > 0 {
+		metadataScrapers = restrictScrapersByPriorityNames(metadataScrapers, actressFieldPriority)
+	}
+	// With any configured priority, name/thumbnail picks resolve
+	// deterministically to the best-ranked source instead of conflicting.
+	deterministic := len(actressFieldPriority) > 0 || len(scrapersPriority) > 0
+	appendMatch := func(info models.ActressInfo, source string) {
+		matches = append(matches, rankedActressMatch{info: info, rank: thumbnailRank(source)})
+	}
 	cachedSource := *actress
 	cacheMatch, cacheHit := lookupActressCache(actress, lookupCache)
 	mergeCachedDuplicate := func(existing *models.Actress) (bool, error) {
@@ -209,7 +222,9 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			return result, nil
 		}
 		actress = recovered
-		matches = append(matches, recoveredMatches...)
+		for _, recoveredMatch := range recoveredMatches {
+			appendMatch(recoveredMatch, "")
+		}
 		result.UpdatedFields = append(result.UpdatedFields, recoveredFields...)
 	}
 	if !revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID {
@@ -273,7 +288,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 					logging.Debugf("Actress sync: %s returned fields for DMM ID %d: %s", name, actress.DMMID, strings.Join(fields, ", "))
 				}
 				if metadata.DMMID == actress.DMMID {
-					matches = append(matches, metadata)
+					appendMatch(metadata, name)
 					if strings.TrimSpace(metadata.ThumbURL) != "" && !models.IsKnownInvalidDMMActressThumbnail(metadata.ThumbURL) && models.ResolverSupportsActressField(scraper, "actress_url") {
 						priority := thumbnailRank(name)
 						if priority < preferredThumbnailPriority {
@@ -298,7 +313,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 					}
 				}
 				if thumbnail != "" && !models.IsKnownInvalidDMMActressThumbnail(thumbnail) {
-					matches = append(matches, models.ActressInfo{DMMID: actress.DMMID, ThumbURL: thumbnail})
+					appendMatch(models.ActressInfo{DMMID: actress.DMMID, ThumbURL: thumbnail}, name)
 					priority := thumbnailRank(name)
 					if priority < preferredThumbnailPriority {
 						preferredThumbnail = thumbnail
@@ -311,21 +326,24 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	}
 	if revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID {
 		if fallback := cacheFallbackMatch(actress, matches, cacheMatch); len(actressInfoFields(fallback)) > 0 {
-			matches = append(matches, fallback)
+			// The runtime cache is built from DMM-sourced data.
+			appendMatch(fallback, "dmm")
 		}
 	}
-	if needsLinkedActressFallback(actress, matches) {
+	if needsLinkedActressFallback(actress, matches, deterministic) {
 		linkedMatches, linkedErr := linkedActressMatches(ctx, movieRepo, actress.ID, actress.DMMID, scrapers)
 		if linkedErr != nil {
 			return nil, linkedErr
 		}
-		matches = append(matches, linkedMatches...)
+		for _, linkedMatch := range linkedMatches {
+			appendMatch(linkedMatch, "")
+		}
 	}
 
 	if preferredThumbnail != "" {
 		logging.Debugf("Actress sync: selected %s thumbnail for DMM ID %d", preferredThumbnailSource, actress.DMMID)
 	}
-	candidate, conflict := resolveActressInfo(actress, matches)
+	candidate, conflict := resolveActressInfo(actress, matches, deterministic)
 	if preferredThumbnail != "" && (actressThumbnailNeedsResolution(actress.ThumbURL) || (revalidate && scraperThumbnailCanRefresh(actress.ThumbURL))) {
 		candidate.ThumbURL = preferredThumbnail
 	}
@@ -625,11 +643,11 @@ func hasJapaneseText(s string) bool {
 }
 
 // cacheFallbackMatch ...
-func cacheFallbackMatch(actress *models.Actress, matches []models.ActressInfo, cached models.ActressInfo) models.ActressInfo {
+func cacheFallbackMatch(actress *models.Actress, matches []rankedActressMatch, cached models.ActressInfo) models.ActressInfo {
 	fallback := models.ActressInfo{DMMID: cached.DMMID}
 	hasValue := func(value func(models.ActressInfo) string) bool {
 		for _, match := range matches {
-			if match.DMMID == cached.DMMID && strings.TrimSpace(value(match)) != "" {
+			if match.info.DMMID == cached.DMMID && strings.TrimSpace(value(match.info)) != "" {
 				return true
 			}
 		}
@@ -737,11 +755,11 @@ func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepos
 }
 
 // needsLinkedActressFallback ...
-func needsLinkedActressFallback(actress *models.Actress, matches []models.ActressInfo) bool {
+func needsLinkedActressFallback(actress *models.Actress, matches []rankedActressMatch, deterministic bool) bool {
 	if actress == nil || actress.DMMID <= 0 {
 		return false
 	}
-	candidate, conflict := resolveActressInfo(actress, matches)
+	candidate, conflict := resolveActressInfo(actress, matches, deterministic)
 	if conflict {
 		return false
 	}
@@ -807,10 +825,20 @@ func linkedActressMovies(ctx context.Context, repo *database.MovieRepository, ac
 	return movies, nil
 }
 
+// rankedActressMatch attaches a source rank to a resolved candidate, so
+// configured priorities can resolve picks deterministically.
+type rankedActressMatch struct {
+	info models.ActressInfo
+	rank int
+}
+
 // resolveActressInfo ...
-func resolveActressInfo(actress *models.Actress, matches []models.ActressInfo) (models.ActressInfo, bool) {
+func resolveActressInfo(actress *models.Actress, matches []rankedActressMatch, deterministic bool) (models.ActressInfo, bool) {
 	if actress == nil {
 		return models.ActressInfo{}, false
+	}
+	if deterministic {
+		return resolveActressInfoByRank(actress, matches)
 	}
 	candidate := models.ActressInfo{DMMID: actress.DMMID}
 	japaneseNames := map[string]struct{}{}
@@ -818,23 +846,96 @@ func resolveActressInfo(actress *models.Actress, matches []models.ActressInfo) (
 	lastNames := map[string]struct{}{}
 	conflict := false
 	for _, match := range matches {
-		if match.DMMID != actress.DMMID {
+		if match.info.DMMID != actress.DMMID {
 			continue
 		}
-		if actressThumbnailNeedsResolution(actress.ThumbURL) && candidate.ThumbURL == "" && !models.IsKnownInvalidDMMActressThumbnail(match.ThumbURL) {
-			candidate.ThumbURL = strings.TrimSpace(match.ThumbURL)
+		if actressThumbnailNeedsResolution(actress.ThumbURL) && candidate.ThumbURL == "" && !models.IsKnownInvalidDMMActressThumbnail(match.info.ThumbURL) {
+			candidate.ThumbURL = strings.TrimSpace(match.info.ThumbURL)
 		}
 		if strings.TrimSpace(actress.JapaneseName) == "" {
-			conflict = mergeActressValue(&candidate.JapaneseName, match.JapaneseName, japaneseNames) || conflict
+			conflict = mergeActressValue(&candidate.JapaneseName, match.info.JapaneseName, japaneseNames) || conflict
 		}
 		if strings.TrimSpace(actress.FirstName) == "" {
-			conflict = mergeActressValue(&candidate.FirstName, match.FirstName, firstNames) || conflict
+			conflict = mergeActressValue(&candidate.FirstName, match.info.FirstName, firstNames) || conflict
 		}
 		if strings.TrimSpace(actress.LastName) == "" {
-			conflict = mergeActressValue(&candidate.LastName, match.LastName, lastNames) || conflict
+			conflict = mergeActressValue(&candidate.LastName, match.info.LastName, lastNames) || conflict
 		}
 	}
 	return candidate, conflict
+}
+
+// resolveActressInfoByRank resolves each field to the best-ranked (most
+// preferred) configured source. Differing values from lower-priority sources
+// neither override nor conflict; only same-rank disagreements stay ambiguous.
+func resolveActressInfoByRank(actress *models.Actress, matches []rankedActressMatch) (models.ActressInfo, bool) {
+	candidate := models.ActressInfo{DMMID: actress.DMMID}
+	conflict := false
+	maxRank := int(^uint(0) >> 1)
+	resolveField := func(dst *string, blank bool, get func(models.ActressInfo) string) {
+		if !blank {
+			return
+		}
+		best, bestRank := "", maxRank
+		tie := false
+		for _, match := range matches {
+			value := strings.TrimSpace(get(match.info))
+			if match.info.DMMID != actress.DMMID || value == "" || match.rank > bestRank {
+				continue
+			}
+			if match.rank < bestRank {
+				best, bestRank, tie = value, match.rank, false
+			} else if value != best {
+				tie = true
+			}
+		}
+		if best != "" {
+			*dst = best
+			conflict = conflict || tie
+		}
+	}
+	resolveField(&candidate.FirstName, strings.TrimSpace(actress.FirstName) == "", func(info models.ActressInfo) string { return info.FirstName })
+	resolveField(&candidate.LastName, strings.TrimSpace(actress.LastName) == "", func(info models.ActressInfo) string { return info.LastName })
+	resolveField(&candidate.JapaneseName, strings.TrimSpace(actress.JapaneseName) == "", func(info models.ActressInfo) string { return info.JapaneseName })
+	if actressThumbnailNeedsResolution(actress.ThumbURL) {
+		best, bestRank := "", maxRank
+		for _, match := range matches {
+			value := strings.TrimSpace(match.info.ThumbURL)
+			if match.info.DMMID != actress.DMMID || value == "" || models.IsKnownInvalidDMMActressThumbnail(value) || match.rank >= bestRank {
+				continue
+			}
+			best, bestRank = value, match.rank
+		}
+		candidate.ThumbURL = best
+	}
+	return candidate, conflict
+}
+
+// actressSyncSkipSentinel reports whether the priority list is the
+// deliberate-suppression marker ("["__skip__"]" from the settings UI).
+func actressSyncSkipSentinel(priority []string) bool {
+	return len(priority) == 1 && strings.EqualFold(strings.TrimSpace(priority[0]), "__skip__")
+}
+
+// restrictScrapersByPriorityNames keeps only scrapers named in priority:
+// a non-empty field override means "consult these, exclusively".
+func restrictScrapersByPriorityNames(scrapers []models.Scraper, priority []string) []models.Scraper {
+	allowed := make(map[string]struct{}, len(priority))
+	for _, name := range priority {
+		if key := strings.ToLower(strings.TrimSpace(name)); key != "" {
+			allowed[key] = struct{}{}
+		}
+	}
+	out := make([]models.Scraper, 0, len(scrapers))
+	for _, scraper := range scrapers {
+		if scraper == nil {
+			continue
+		}
+		if _, ok := allowed[strings.ToLower(strings.TrimSpace(scraper.Name()))]; ok {
+			out = append(out, scraper)
+		}
+	}
+	return out
 }
 
 // actressSyncThumbnailRank positions thumbnail sources by the configured
@@ -913,23 +1014,23 @@ func actressInfoFields(info models.ActressInfo) []string {
 }
 
 // actressMetadataVerified ...
-func actressMetadataVerified(actress *models.Actress, matches []models.ActressInfo) bool {
+func actressMetadataVerified(actress *models.Actress, matches []rankedActressMatch) bool {
 	if actress == nil {
 		return false
 	}
 	for _, match := range matches {
-		if match.DMMID != actress.DMMID {
+		if match.info.DMMID != actress.DMMID {
 			continue
 		}
-		if strings.TrimSpace(match.JapaneseName) != "" && strings.TrimSpace(match.JapaneseName) == strings.TrimSpace(actress.JapaneseName) {
+		if strings.TrimSpace(match.info.JapaneseName) != "" && strings.TrimSpace(match.info.JapaneseName) == strings.TrimSpace(actress.JapaneseName) {
 			return true
 		}
-		if strings.TrimSpace(match.FirstName) != "" && strings.TrimSpace(match.LastName) != "" &&
-			strings.EqualFold(strings.TrimSpace(match.FirstName), strings.TrimSpace(actress.FirstName)) &&
-			strings.EqualFold(strings.TrimSpace(match.LastName), strings.TrimSpace(actress.LastName)) {
+		if strings.TrimSpace(match.info.FirstName) != "" && strings.TrimSpace(match.info.LastName) != "" &&
+			strings.EqualFold(strings.TrimSpace(match.info.FirstName), strings.TrimSpace(actress.FirstName)) &&
+			strings.EqualFold(strings.TrimSpace(match.info.LastName), strings.TrimSpace(actress.LastName)) {
 			return true
 		}
-		if strings.TrimSpace(match.ThumbURL) != "" && strings.TrimSpace(match.ThumbURL) == strings.TrimSpace(actress.ThumbURL) {
+		if strings.TrimSpace(match.info.ThumbURL) != "" && strings.TrimSpace(match.info.ThumbURL) == strings.TrimSpace(actress.ThumbURL) {
 			return true
 		}
 	}

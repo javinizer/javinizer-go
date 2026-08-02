@@ -175,7 +175,7 @@
 		if (stored && stored.length === 1 && stored[0] === SKIP_SENTINEL) {
 			editingPriority = [];
 		} else {
-			editingPriority = [...getFieldPriority(config, fieldKey)];
+			editingPriority = filterFieldEligibleScrapers(fieldKey, [...getFieldPriority(config, fieldKey)], actressOnlyScrapers);
 		}
 	}
 
@@ -241,7 +241,7 @@
 
 	// Shortcut: add every global scraper not already in the field's list.
 	function addAllScrapers() {
-		const global = getGlobalPriority(config);
+		const global = filterFieldEligibleScrapers(editingField ?? '', getGlobalPriority(config), actressOnlyScrapers);
 		const present = new Set(editingPriority);
 		editingPriority = [...editingPriority, ...global.filter((s) => !present.has(s))];
 	}

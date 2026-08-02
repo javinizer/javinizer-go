@@ -14,14 +14,16 @@ export const SKIP_SENTINEL = '__skip__';
 export const ACTRESS_FIELD_KEY = 'actress';
 
 // Actress-only resolvers (supports_actress_metadata && !supports_movie_search)
-// can never produce a movie scrape result, so offering them for movie fields
-// would configure a field that always resolves empty.
+// never produce a movie scrape result — not even a cast list — so they are
+// not valid sources for ANY metadata-field override (an override consulting
+// only them would always resolve empty, including the actress field).
 export function filterFieldEligibleScrapers(
 	fieldKey: string,
 	names: string[],
 	actressOnlyScrapers?: ReadonlySet<string>,
 ): string[] {
-	if (fieldKey === ACTRESS_FIELD_KEY || !actressOnlyScrapers || actressOnlyScrapers.size === 0) {
+	void fieldKey; // kept in the signature for call-site clarity
+	if (!actressOnlyScrapers || actressOnlyScrapers.size === 0) {
 		return names;
 	}
 	return names.filter((name) => !actressOnlyScrapers.has(name));

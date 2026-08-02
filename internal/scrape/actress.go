@@ -195,6 +195,27 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 	if len(resolvers) == 0 {
 		return 0
 	}
+	// A non-empty actress field priority means "consult these, exclusively";
+	// the skip sentinel suppresses actress enrichment outright.
+	if len(cfg.ActressFieldPriority) == 1 && strings.EqualFold(strings.TrimSpace(cfg.ActressFieldPriority[0]), "__skip__") {
+		return 0
+	}
+	if len(cfg.ActressFieldPriority) > 0 {
+		allowed := make(map[string]struct{}, len(cfg.ActressFieldPriority))
+		for _, name := range cfg.ActressFieldPriority {
+			allowed[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+		}
+		filtered := resolvers[:0]
+		for _, resolver := range resolvers {
+			if _, ok := allowed[strings.ToLower(resolverName(resolver))]; ok {
+				filtered = append(filtered, resolver)
+			}
+		}
+		resolvers = filtered
+		if len(resolvers) == 0 {
+			return 0
+		}
+	}
 	// Resolution blends from every resolver in the chain, so per-field picks
 	// must follow the configured actress priority rather than iteration order:
 	// resolvers differ in capability (e.g. JavDB only carries Japanese names),
@@ -252,12 +273,15 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			return true, worst
 		}
 		for idx, resolver := range resolvers {
+			// Each resolver sees the best-known values so far, not the raw
+			// actress: an earlier source may have discovered the Japanese name
+			// a name-keyed source (MinnanoAV/JavDB) needs to contribute.
 			metadata := resolver.ResolveActressMetadata(ctx, models.ActressInfo{
 				DMMID:        actress.DMMID,
-				FirstName:    actress.FirstName,
-				LastName:     actress.LastName,
-				JapaneseName: actress.JapaneseName,
-				ThumbURL:     actress.ThumbURL,
+				FirstName:    firstNonBlank(actress.FirstName, picks["actress_first_name"].value),
+				LastName:     firstNonBlank(actress.LastName, picks["actress_last_name"].value),
+				JapaneseName: firstNonBlank(actress.JapaneseName, picks["actress_japanese_name"].value),
+				ThumbURL:     firstNonBlank(actress.ThumbURL, picks["actress_url"].value),
 			})
 			if metadata.DMMID != actress.DMMID && actress.DMMID > 0 {
 				continue
@@ -344,6 +368,16 @@ func collectMetadataResolvers(registry ScraperInstanceResolver, priority []strin
 		}
 	}
 	return resolvers
+}
+
+// firstNonBlank returns the first value that is not just whitespace.
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // actressFieldPick records the best-ranked value offered for one field.

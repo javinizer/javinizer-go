@@ -372,8 +372,8 @@ describe('filterFieldEligibleScrapers', () => {
 	const actressOnly = new Set(['minnanoav']);
 	const names = ['dmm', 'minnanoav', 'javdb'];
 
-	it('keeps actress-only resolvers available for the actress field only', () => {
-		expect(filterFieldEligibleScrapers('actress', names, actressOnly)).toEqual(names);
+	it('excludes actress-only resolvers from every field, including actress', () => {
+		expect(filterFieldEligibleScrapers('actress', names, actressOnly)).toEqual(['dmm', 'javdb']);
 		expect(filterFieldEligibleScrapers('title', names, actressOnly)).toEqual(['dmm', 'javdb']);
 	});
 

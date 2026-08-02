@@ -14,36 +14,36 @@ func TestActressMetadataVerified_NilActress(t *testing.T) {
 func TestActressMetadataVerified_NoMatches(t *testing.T) {
 	actress := &models.Actress{DMMID: 1}
 	assert.False(t, actressMetadataVerified(actress, nil))
-	assert.False(t, actressMetadataVerified(actress, []models.ActressInfo{}))
+	assert.False(t, actressMetadataVerified(actress, rankActressMatches()))
 }
 
 func TestActressMetadataVerified_DifferentDMMID(t *testing.T) {
 	actress := &models.Actress{DMMID: 1}
-	matches := []models.ActressInfo{{DMMID: 2}}
+	matches := rankActressMatches(models.ActressInfo{DMMID: 2})
 	assert.False(t, actressMetadataVerified(actress, matches))
 }
 
 func TestActressMetadataVerified_JapaneseNameMatch(t *testing.T) {
 	actress := &models.Actress{DMMID: 1, JapaneseName: "テスト"}
-	matches := []models.ActressInfo{{DMMID: 1, JapaneseName: "テスト"}}
+	matches := rankActressMatches(models.ActressInfo{DMMID: 1, JapaneseName: "テスト"})
 	assert.True(t, actressMetadataVerified(actress, matches))
 }
 
 func TestActressMetadataVerified_FirstLastNameMatch(t *testing.T) {
 	actress := &models.Actress{DMMID: 1, FirstName: "Test", LastName: "Actor"}
-	matches := []models.ActressInfo{{DMMID: 1, FirstName: "test", LastName: "actor"}}
+	matches := rankActressMatches(models.ActressInfo{DMMID: 1, FirstName: "test", LastName: "actor"})
 	assert.True(t, actressMetadataVerified(actress, matches))
 }
 
 func TestActressMetadataVerified_ThumbURLMatch(t *testing.T) {
 	actress := &models.Actress{DMMID: 1, ThumbURL: "https://example.com/img.jpg"}
-	matches := []models.ActressInfo{{DMMID: 1, ThumbURL: "https://example.com/img.jpg"}}
+	matches := rankActressMatches(models.ActressInfo{DMMID: 1, ThumbURL: "https://example.com/img.jpg"})
 	assert.True(t, actressMetadataVerified(actress, matches))
 }
 
 func TestActressMetadataVerified_NoFieldMatch(t *testing.T) {
 	actress := &models.Actress{DMMID: 1, JapaneseName: "テスト", FirstName: "Test", LastName: "Actor"}
-	matches := []models.ActressInfo{{DMMID: 1, JapaneseName: "別人", FirstName: "Other", LastName: "Name"}}
+	matches := rankActressMatches(models.ActressInfo{DMMID: 1, JapaneseName: "別人", FirstName: "Other", LastName: "Name"})
 	assert.False(t, actressMetadataVerified(actress, matches))
 }
 
@@ -146,12 +146,12 @@ func TestCacheFallbackMatch(t *testing.T) {
 func TestCacheFallbackMatch_WithExistingMatches(t *testing.T) {
 	actress := &models.Actress{DMMID: 1}
 	cached := models.ActressInfo{DMMID: 1, FirstName: "Test"}
-	matches := []models.ActressInfo{{DMMID: 1, FirstName: "Existing"}}
+	matches := rankActressMatches(models.ActressInfo{DMMID: 1, FirstName: "Existing"})
 	result := cacheFallbackMatch(actress, matches, cached)
 	assert.Equal(t, "", result.FirstName)
 }
 
 func TestNeedsLinkedActressFallback(t *testing.T) {
-	assert.False(t, needsLinkedActressFallback(&models.Actress{DMMID: 1, JapaneseName: "テスト", FirstName: "Test", LastName: "Actor", ThumbURL: "https://example.com/img.jpg"}, []models.ActressInfo{{DMMID: 1}}))
-	assert.True(t, needsLinkedActressFallback(&models.Actress{DMMID: 1, JapaneseName: "", FirstName: "", LastName: "", ThumbURL: ""}, []models.ActressInfo{}))
+	assert.False(t, needsLinkedActressFallback(&models.Actress{DMMID: 1, JapaneseName: "テスト", FirstName: "Test", LastName: "Actor", ThumbURL: "https://example.com/img.jpg"}, rankActressMatches(models.ActressInfo{DMMID: 1}), false))
+	assert.True(t, needsLinkedActressFallback(&models.Actress{DMMID: 1, JapaneseName: "", FirstName: "", LastName: "", ThumbURL: ""}, rankActressMatches(), false))
 }

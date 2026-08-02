@@ -96,14 +96,14 @@ func TestActressSyncPatchHelpers(t *testing.T) {
 	})
 
 	t.Run("fallback and resolving", func(t *testing.T) {
-		require.False(t, needsLinkedActressFallback(nil, nil))
-		require.False(t, needsLinkedActressFallback(&models.Actress{}, nil))
+		require.False(t, needsLinkedActressFallback(nil, nil, false))
+		require.False(t, needsLinkedActressFallback(&models.Actress{}, nil, false))
 		actress := &models.Actress{DMMID: 1}
-		require.False(t, needsLinkedActressFallback(actress, []models.ActressInfo{{DMMID: 1, FirstName: "A"}, {DMMID: 1, FirstName: "B"}}))
-		candidate, conflict := resolveActressInfo(nil, nil)
+		require.False(t, needsLinkedActressFallback(actress, rankActressMatches(models.ActressInfo{DMMID: 1, FirstName: "A"}, models.ActressInfo{DMMID: 1, FirstName: "B"}), false))
+		candidate, conflict := resolveActressInfo(nil, nil, false)
 		require.False(t, conflict)
 		require.Empty(t, candidate)
-		candidate, conflict = resolveActressInfo(&models.Actress{DMMID: 1}, []models.ActressInfo{{DMMID: 2, FirstName: "wrong"}, {DMMID: 1, FirstName: "right"}})
+		candidate, conflict = resolveActressInfo(&models.Actress{DMMID: 1}, rankActressMatches(models.ActressInfo{DMMID: 2, FirstName: "wrong"}, models.ActressInfo{DMMID: 1, FirstName: "right"}), false)
 		require.False(t, conflict)
 		require.Equal(t, "right", candidate.FirstName)
 	})
