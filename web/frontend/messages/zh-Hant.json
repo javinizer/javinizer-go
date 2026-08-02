@@ -1201,6 +1201,7 @@
   "priority_add_all": "全部新增",
   "priority_add_all_aria": "將所有刮削器新增至此欄位",
   "priority_add_scraper_aria": "將 {name} 新增至此次欄位",
+  "priority_actress_only_not_sole": "僅女優中繼資料解析器不能作為 actress 欄位的唯一來源——請新增可擷取影片的刮削器以取得演員清單",
   "priority_all_disabled": "所有刮削器已停用 — 此欄位將為空",
   "priority_aria_mode_help": "優先順序模式說明",
   "priority_aria_move_down": "下移",

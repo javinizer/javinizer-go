@@ -872,6 +872,7 @@
   "priority_add_all": "[ Ådd åll ]",
   "priority_add_all_aria": "[ Ådd åll sçråpërs tö thís fíëld ]",
   "priority_add_scraper_aria": "[ Ådd {name} tö thís fíëld ]",
+  "priority_actress_only_not_sole": "[ Åçtrëss rësölvërs çåñ't bë thë öñly söùrçës för thë åçtrëss fíëld — ådd å mövíë-çåpåblë sçråpër sö thë çåst çåñ bë fëtçhëd ]",
   "priority_all_disabled": "[ Åll sçråpërs dísåblëd — fíëld wíll bë ëmpty ]",
   "priority_aria_mode_help": "[ Príöríty mödë hëlp ]",
   "priority_aria_move_down": "[ Mövë döwñ ]",

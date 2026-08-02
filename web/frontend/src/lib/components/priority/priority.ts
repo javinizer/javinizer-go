@@ -14,19 +14,27 @@ export const SKIP_SENTINEL = '__skip__';
 export const ACTRESS_FIELD_KEY = 'actress';
 
 // Actress-only resolvers (supports_actress_metadata && !supports_movie_search)
-// never produce a movie scrape result — not even a cast list — so they are
-// not valid sources for ANY metadata-field override (an override consulting
-// only them would always resolve empty, including the actress field).
+// never produce movie results or a cast list, so they are not valid sources
+// for movie-field overrides. For the actress field they stay addable so their
+// enrichment ranking can be configured — but an actress override made up
+// solely of them would leave aggregation with no cast producer, which
+// isExclusivelyActressOnly rejects at save time (see MetadataPriority).
 export function filterFieldEligibleScrapers(
 	fieldKey: string,
 	names: string[],
 	actressOnlyScrapers?: ReadonlySet<string>,
 ): string[] {
-	void fieldKey; // kept in the signature for call-site clarity
-	if (!actressOnlyScrapers || actressOnlyScrapers.size === 0) {
+	if (fieldKey === ACTRESS_FIELD_KEY || !actressOnlyScrapers || actressOnlyScrapers.size === 0) {
 		return names;
 	}
 	return names.filter((name) => !actressOnlyScrapers.has(name));
+}
+
+// isExclusivelyActressOnly reports that every configured source is an
+// actress-only resolver: aggregation would have no movie scraper to produce
+// the cast for enrichment to work on.
+export function isExclusivelyActressOnly(names: string[], actressOnlyScrapers?: ReadonlySet<string>): boolean {
+	return names.length > 0 && !!actressOnlyScrapers && names.every((name) => actressOnlyScrapers.has(name));
 }
 
 /** Whether a stored override list is the skip sentinel (`["__skip__"]`). */

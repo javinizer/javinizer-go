@@ -1201,6 +1201,7 @@
   "priority_add_all": "Add all",
   "priority_add_all_aria": "Add all scrapers to this field",
   "priority_add_scraper_aria": "Add {name} to this field",
+  "priority_actress_only_not_sole": "Actress resolvers can't be the only sources for the actress field — add a movie-capable scraper so the cast can be fetched",
   "priority_all_disabled": "All scrapers disabled — field will be empty",
   "priority_aria_mode_help": "Priority mode help",
   "priority_aria_move_down": "Move down",

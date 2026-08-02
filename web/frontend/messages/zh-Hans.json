@@ -1201,6 +1201,7 @@
   "priority_add_all": "全部添加",
   "priority_add_all_aria": "将所有刮削器添加到此字段",
   "priority_add_scraper_aria": "将 {name} 添加到此字段",
+  "priority_actress_only_not_sole": "仅女优元数据解析器不能作为 actress 字段的唯一来源——请添加可获取影片的刮削器以获取演员列表",
   "priority_all_disabled": "所有刮削器已禁用 — 该字段将为空",
   "priority_aria_mode_help": "优先级模式帮助",
   "priority_aria_move_down": "下移",

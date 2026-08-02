@@ -1201,6 +1201,7 @@
   "priority_add_all": "すべて追加",
   "priority_add_all_aria": "このフィールドにすべてのスクレーパーを追加",
   "priority_add_scraper_aria": "{name} をこのフィールドに追加",
+  "priority_actress_only_not_sole": "女優専用リゾルバーを actress フィールドの唯一のソースにすることはできません。キャストを取得できる動画対応スクレイパーを追加してください",
   "priority_all_disabled": "すべてのスクレーパーが無効 — フィールドは空になります",
   "priority_aria_mode_help": "優先度モードのヘルプ",
   "priority_aria_move_down": "下へ移動",

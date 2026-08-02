@@ -65,3 +65,64 @@ func TestResolverEnrichmentThreadsEarlierDiscoveries(t *testing.T) {
 	assert.Equal(t, "発見", recorder.lastInput.JapaneseName)
 	assert.Equal(t, "Filled", movie.Actresses[0].FirstName)
 }
+
+// priorityFilteringResolver mirrors the production instance store: priority
+// selects the named instances, while GetAllInstances exposes every one.
+type priorityFilteringResolver struct {
+	instances []models.Scraper
+}
+
+func (r *priorityFilteringResolver) GetInstance(name string) (models.Scraper, bool) {
+	for _, s := range r.instances {
+		if s.Name() == name {
+			return s, true
+		}
+	}
+	return nil, false
+}
+
+func (r *priorityFilteringResolver) GetInstancesByPriorityForInput(priority []string, _ string) []models.Scraper {
+	if len(priority) == 0 {
+		return r.instances
+	}
+	order := make(map[string]int, len(priority))
+	for i, name := range priority {
+		order[name] = i
+	}
+	out := make([]models.Scraper, 0, len(priority))
+	for _, s := range r.instances {
+		if _, ok := order[s.Name()]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (r *priorityFilteringResolver) GetAllInstances() []models.Scraper { return r.instances }
+
+func (r *priorityFilteringResolver) Names() []string {
+	names := make([]string, 0, len(r.instances))
+	for _, s := range r.instances {
+		names = append(names, s.Name())
+	}
+	return names
+}
+
+func TestCollectMetadataResolversExplicitSelectionIsExclusive(t *testing.T) {
+	first := &testMetadataResolver{name: "dmm", enabled: true}
+	second := &testMetadataResolver{name: "minnanoav", enabled: true}
+	registry := &priorityFilteringResolver{instances: []models.Scraper{first, second}}
+
+	both := collectMetadataResolvers(registry, []string{"dmm"}, &Config{ScrapeActress: true}, false)
+	assert.Len(t, both, 2, "default list appends remaining registered resolvers")
+	only := collectMetadataResolvers(registry, []string{"dmm"}, &Config{ScrapeActress: true}, true)
+	assert.Len(t, only, 1, "explicit selection must not pull in other resolvers")
+
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
+	first.metadata = models.ActressInfo{DMMID: 7, FirstName: "ViaDmm"}
+	second.metadata = models.ActressInfo{DMMID: 7, FirstName: "ViaMinnanoAV"}
+	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, &Config{ScrapeActress: true}, []string{"dmm"})
+	assert.Equal(t, 1, enriched)
+	assert.Equal(t, "ViaDmm", movie.Actresses[0].FirstName)
+	assert.Equal(t, 0, second.calls)
+}

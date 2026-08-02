@@ -5,6 +5,7 @@
 	import { X, Info } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { confirmDialog } from '$lib/stores/dialog.svelte';
+	import { toastStore } from '$lib/stores/toast';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
 	import DraggableList from './DraggableList.svelte';
@@ -18,6 +19,8 @@
 		applyEnabledReorderToFull,
 		buildFieldPriorityOverride,
 		filterFieldEligibleScrapers,
+		isExclusivelyActressOnly,
+		ACTRESS_FIELD_KEY,
 		SKIP_SENTINEL
 	} from './priority';
 	import { formatScraperName } from './scraperNames';
@@ -187,6 +190,13 @@
 		if (!editingField) return;
 
 		if (!config.metadata) config.metadata = {};
+
+		// An actress override made up solely of actress-only resolvers would
+		// leave aggregation with no scraper able to produce the cast; refuse.
+		if (editingField === ACTRESS_FIELD_KEY && isExclusivelyActressOnly(editingPriority, actressOnlyScrapers)) {
+			toastStore.error(m.priority_actress_only_not_sole());
+			return;
+		}
 
 		// Mark this field as touched
 		touchedFields.add(editingField);

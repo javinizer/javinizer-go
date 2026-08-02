@@ -191,7 +191,7 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 	if len(priorityOverride) > 0 && len(priorityOverride[0]) > 0 {
 		priority = priorityOverride[0]
 	}
-	resolvers := collectMetadataResolvers(registry, priority, cfg)
+	resolvers := collectMetadataResolvers(registry, priority, cfg, len(priorityOverride) > 0 && len(priorityOverride[0]) > 0)
 	if len(resolvers) == 0 {
 		return 0
 	}
@@ -341,7 +341,10 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 	return enriched
 }
 
-func collectMetadataResolvers(registry ScraperInstanceResolver, priority []string, cfg *Config) []models.ActressMetadataResolver {
+// collectMetadataResolvers returns enabled actress-capable resolvers in
+// priority order. exclusive=true (an explicit scraper selection) consults
+// only the named instances instead of appending every registered resolver.
+func collectMetadataResolvers(registry ScraperInstanceResolver, priority []string, cfg *Config, exclusive bool) []models.ActressMetadataResolver {
 	instances := registry.GetInstancesByPriorityForInput(priority, "")
 	seen := make(map[string]struct{}, len(instances))
 	for _, instance := range instances {
@@ -349,14 +352,16 @@ func collectMetadataResolvers(registry ScraperInstanceResolver, priority []strin
 			seen[instance.Name()] = struct{}{}
 		}
 	}
-	for _, instance := range registry.GetAllInstances() {
-		if instance == nil {
-			continue
+	if !exclusive {
+		for _, instance := range registry.GetAllInstances() {
+			if instance == nil {
+				continue
+			}
+			if _, ok := seen[instance.Name()]; ok {
+				continue
+			}
+			instances = append(instances, instance)
 		}
-		if _, ok := seen[instance.Name()]; ok {
-			continue
-		}
-		instances = append(instances, instance)
 	}
 	resolvers := make([]models.ActressMetadataResolver, 0, len(instances))
 	for _, s := range instances {

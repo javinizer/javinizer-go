@@ -20,6 +20,10 @@ const (
 
 var errActressSyncLeaseLost = errors.New("actress sync task lease lost")
 
+// errActressSyncJobCancelled fences task-scoped mutations against a parent
+// job whose cancellation committed while its lease is still valid.
+var errActressSyncJobCancelled = errors.New("actress sync job cancellation requested")
+
 // ErrActressSyncCanonicalTaskRunning ...
 var ErrActressSyncCanonicalTaskRunning = errors.New("canonical actress sync task is already running")
 
@@ -1092,12 +1096,22 @@ func ensureSyncTaskLeaseTx(tx *gorm.DB, taskID, leaseToken string) error {
 	if strings.TrimSpace(taskID) == "" {
 		return nil
 	}
-	var count int64
-	if err := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", taskID, models.ActressSyncTaskRunning, leaseToken, time.Now().UTC()).Count(&count).Error; err != nil {
+	var task models.ActressSyncTask
+	if err := tx.Select("job_id").Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", taskID, models.ActressSyncTaskRunning, leaseToken, time.Now().UTC()).First(&task).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errActressSyncLeaseLost
+		}
 		return err
 	}
-	if count != 1 {
-		return errActressSyncLeaseLost
+	// Fence on parent-job cancellation: a task-scoped mutation must not
+	// commit after the job was cancelled, even while its lease stays valid
+	// and the worker has not yet observed the cancelled context.
+	var cancelled int64
+	if err := tx.Model(&models.ActressSyncJob{}).Where("id = ? AND cancel_requested = 1", task.JobID).Count(&cancelled).Error; err != nil {
+		return err
+	}
+	if cancelled == 1 {
+		return errActressSyncJobCancelled
 	}
 	return nil
 }

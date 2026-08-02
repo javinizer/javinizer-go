@@ -7,6 +7,7 @@ import {
 	buildFieldPriorityOverride,
 	applyEnabledReorderToFull,
 	filterFieldEligibleScrapers,
+	isExclusivelyActressOnly,
 	SKIP_SENTINEL,
 	isSkipSentinel,
 } from './priority';
@@ -372,13 +373,24 @@ describe('filterFieldEligibleScrapers', () => {
 	const actressOnly = new Set(['minnanoav']);
 	const names = ['dmm', 'minnanoav', 'javdb'];
 
-	it('excludes actress-only resolvers from every field, including actress', () => {
-		expect(filterFieldEligibleScrapers('actress', names, actressOnly)).toEqual(['dmm', 'javdb']);
+	it('excludes actress-only resolvers from movie fields but keeps them for actress', () => {
+		expect(filterFieldEligibleScrapers('actress', names, actressOnly)).toEqual(names);
 		expect(filterFieldEligibleScrapers('title', names, actressOnly)).toEqual(['dmm', 'javdb']);
 	});
 
 	it('passes through when no actress-only set is provided or it is empty', () => {
 		expect(filterFieldEligibleScrapers('title', names, undefined)).toEqual(names);
 		expect(filterFieldEligibleScrapers('title', names, new Set())).toEqual(names);
+	});
+});
+
+describe('isExclusivelyActressOnly', () => {
+	const actressOnly = new Set(['minnanoav']);
+
+	it('detects an all-actress-only override and allows mixed/empty ones', () => {
+		expect(isExclusivelyActressOnly(['minnanoav'], actressOnly)).toBe(true);
+		expect(isExclusivelyActressOnly(['dmm', 'minnanoav'], actressOnly)).toBe(false);
+		expect(isExclusivelyActressOnly([], actressOnly)).toBe(false);
+		expect(isExclusivelyActressOnly(['minnanoav'], undefined)).toBe(false);
 	});
 });

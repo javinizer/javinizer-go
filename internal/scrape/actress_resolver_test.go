@@ -241,5 +241,5 @@ func TestEnrichActressesFromResolversHonorsPriority(t *testing.T) {
 	require.Equal(t, "Minnano", selected.Actresses[0].FirstName)
 }
 func TestCollectMetadataResolversSkipsNilInstances(t *testing.T) {
-	require.Empty(t, collectMetadataResolvers(newTestRegistry(nil), []string{"missing"}, &Config{ScrapeActress: true}))
+	require.Empty(t, collectMetadataResolvers(newTestRegistry(nil), []string{"missing"}, &Config{ScrapeActress: true}, false))
 }
