@@ -137,11 +137,17 @@ func isBlockedIP(ip net.IP) bool {
 
 // viaProxy reports whether fetches to host would traverse a configured
 // HTTP(S) proxy (which resolves the target remotely).
-func (f *Fetcher) viaProxy(host string) bool {
+func (f *Fetcher) viaProxy(scheme, host string) bool {
 	if f.proxyFunc == nil {
 		return false
 	}
-	proxyURL, err := f.proxyFunc(&http.Request{URL: &url.URL{Scheme: "https", Host: host}})
+	if scheme == "" {
+		scheme = "https"
+	}
+	// Probe with the request's own scheme: HTTP_PROXY and HTTPS_PROXY are
+	// configured independently, so an HTTP thumbnail URL must not be judged
+	// by the HTTPS route.
+	proxyURL, err := f.proxyFunc(&http.Request{URL: &url.URL{Scheme: scheme, Host: host}})
 	return err == nil && proxyURL != nil
 }
 
@@ -150,7 +156,7 @@ func (f *Fetcher) viaProxy(host string) bool {
 // an HTTP(S) proxy configured the transport only ever dials the proxy
 // address, so pinning there cannot see the real target. Custom transports
 // make their own connections and skip resolution.
-func (f *Fetcher) checkFetchTarget(ctx context.Context, host string) error {
+func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host string) error {
 	if isBlockedFetchHost(host) {
 		return &BlockedFetchError{URL: host}
 	}
@@ -159,7 +165,7 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, host string) error {
 	}
 	ips, err := lookupIP(ctx, "ip", host)
 	if err != nil || len(ips) == 0 {
-		if f.viaProxy(host) {
+		if f.viaProxy(scheme, host) {
 			// A proxy resolves the hostname remotely, so dial-time checks
 			// cannot see the real target: fail closed when local resolution
 			// cannot prove the host is public.
@@ -285,7 +291,7 @@ func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgen
 			return errors.New("stopped after 10 redirects")
 		}
 		if !fetcher.AllowPrivateHosts {
-			if err := fetcher.checkFetchTarget(req.Context(), req.URL.Hostname()); err != nil {
+			if err := fetcher.checkFetchTarget(req.Context(), req.URL.Scheme, req.URL.Hostname()); err != nil {
 				return err
 			}
 		}
@@ -318,7 +324,7 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 		return nil, nil, err
 	}
 	if !f.AllowPrivateHosts {
-		if err := f.checkFetchTarget(requestCtx, req.URL.Hostname()); err != nil {
+		if err := f.checkFetchTarget(requestCtx, req.URL.Scheme, req.URL.Hostname()); err != nil {
 			return nil, nil, err
 		}
 	}

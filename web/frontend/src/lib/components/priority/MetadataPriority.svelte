@@ -175,7 +175,10 @@
 		if (stored && stored.length === 1 && stored[0] === SKIP_SENTINEL) {
 			editingPriority = [];
 		} else {
-			editingPriority = filterFieldEligibleScrapers(fieldKey, [...getFieldPriority(config, fieldKey)], actressOnlyScrapers);
+			// Use the stored/derived list verbatim: filtering actress-only resolvers
+		// here would silently narrow their enrichment role on a plain save.
+		// New entries are constrained by the eligible-only chips and Add all.
+		editingPriority = [...getFieldPriority(config, fieldKey)];
 		}
 	}
 

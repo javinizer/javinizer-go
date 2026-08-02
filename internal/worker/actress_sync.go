@@ -336,7 +336,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			return nil, linkedErr
 		}
 		for _, linkedMatch := range linkedMatches {
-			appendMatch(linkedMatch, "")
+			appendMatch(linkedMatch.info, linkedMatch.source)
 		}
 	}
 
@@ -523,8 +523,8 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 	}
 	matchesByDMM := make(map[int]models.ActressInfo)
 	for _, candidate := range candidates {
-		if candidate.DMMID > 0 && identityNameMatches(names, candidate.JapaneseName) {
-			matchesByDMM[candidate.DMMID] = candidate
+		if candidate.info.DMMID > 0 && identityNameMatches(names, candidate.info.JapaneseName) {
+			matchesByDMM[candidate.info.DMMID] = candidate.info
 		}
 	}
 	if len(matchesByDMM) != 1 {
@@ -723,13 +723,20 @@ func canMergeMissingDMMActress(target, canonical *models.Actress) bool {
 		compatible(target.ThumbURL, canonical.ThumbURL)
 }
 
+// sourcedActressMatch remembers which scraper produced a linked-movie
+// candidate so configured priorities still apply to fallback resolution.
+type sourcedActressMatch struct {
+	info   models.ActressInfo
+	source string
+}
+
 // linkedActressCandidates ...
-func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepository, actressID uint, scrapers []models.Scraper) ([]models.ActressInfo, error) {
+func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepository, actressID uint, scrapers []models.Scraper) ([]sourcedActressMatch, error) {
 	movies, err := linkedActressMovies(ctx, movieRepo, actressID)
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]models.ActressInfo, 0)
+	candidates := make([]sourcedActressMatch, 0)
 	for _, movie := range movies {
 		for _, scraper := range scrapers {
 			// scraped ...
@@ -747,7 +754,9 @@ func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepos
 				scraped, err = scraper.Search(ctx, query)
 			}
 			if err == nil && scraped != nil {
-				candidates = append(candidates, scraped.Actresses...)
+				for _, result := range scraped.Actresses {
+					candidates = append(candidates, sourcedActressMatch{info: result, source: strings.ToLower(strings.TrimSpace(scraper.Name()))})
+				}
 			}
 		}
 	}
@@ -780,14 +789,14 @@ func needsLinkedActressFallback(actress *models.Actress, matches []rankedActress
 }
 
 // linkedActressMatches ...
-func linkedActressMatches(ctx context.Context, movieRepo *database.MovieRepository, actressID uint, dmmID int, scrapers []models.Scraper) ([]models.ActressInfo, error) {
+func linkedActressMatches(ctx context.Context, movieRepo *database.MovieRepository, actressID uint, dmmID int, scrapers []models.Scraper) ([]sourcedActressMatch, error) {
 	candidates, err := linkedActressCandidates(ctx, movieRepo, actressID, scrapers)
 	if err != nil {
 		return nil, err
 	}
-	matches := make([]models.ActressInfo, 0)
+	matches := make([]sourcedActressMatch, 0)
 	for _, candidate := range candidates {
-		if candidate.DMMID == dmmID {
+		if candidate.info.DMMID == dmmID {
 			matches = append(matches, candidate)
 		}
 	}
