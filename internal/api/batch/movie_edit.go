@@ -74,52 +74,112 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// concurrent source-changing edits can refresh the cached -full.jpg
 		// from one image while persisting the other's URL, leaving a
 		// subsequent manual crop measured against the wrong image. Held from
-		// here across the refresh, the multipart UpdateMovie loop (including
-		// compensation) and the final PersistJobByID; the deferred release
-		// covers every error/return path and always releases whichever key
-		// was LAST acquired (the convergence loop below can hand the lock
-		// off to a re-keyed movie). Keyed on the same movie ID the temp
-		// poster cache and the override path use.
+		// here across the asset migration/refresh, the multipart UpdateMovie
+		// loop (including compensation) and the final PersistJobByID; the
+		// deferred release covers every error/return path and always
+		// releases whichever key was LAST acquired (the convergence loop
+		// below can hand the lock off to a re-keyed movie) plus the
+		// rename-destination lock (a request that RENAMES the movie ID holds
+		// the lexical key pair for the whole edit — see below).
+		movie := contracts.MovieViewToModel(req.Movie)
+		var renameTarget string
+		var destRelease func()
 		posterLockKey := posterLockKeyFor(current)
 		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterLockKey)
-		defer func() { releasePosterLock() }()
-
-		// Post-lock convergence loop — the same shape as
-		// updateBatchMoviePosterCrop / updateBatchMoviePosterFromURL (see
-		// their comments for the full rationale): the writer this request
-		// waited behind can REPLACE or RE-KEY the result (a rescrape
-		// committing a corrected match moves FileMatchInfo.MovieID/Movie.ID
-		// from A to B). Refreshing only current/filePaths while still
-		// holding A's lock would let the poster refresh and the whole-movie
-		// writes below interleave with a crop, poster-from-URL, or field
-		// override holding B's lock — pairing a freshly refreshed cache or
-		// newly stored movie state with a writer that believes it owns the
-		// key. So the lock key is re-resolved from the fresh post-lock
-		// result on every iteration; an invalid re-resolved ID is rejected
-		// (same validation as resolvePosterID) with the deferred release
-		// freeing the acquired key; when the key changed, the old key's lock
-		// is released BEFORE the new one is acquired (never two
-		// poster-source locks at once) and the result is re-read under the
-		// new lock — it may have been re-keyed yet again by the writer that
-		// released it. The loop converges because each re-acquisition waits
-		// behind a writer whose re-key is already committed.
-		for {
-			freshCurrent, freshFilePaths, freshFound := lookupResultByResultID(job, resultID)
-			if !freshFound {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
-				return
+		defer func() {
+			if destRelease != nil {
+				destRelease()
 			}
-			current, filePaths = freshCurrent, freshFilePaths
-			resolvedKey := posterLockKeyFor(current)
-			if !validPosterLockKey(resolvedKey) {
+			releasePosterLock()
+		}()
+
+		for {
+			// Post-lock convergence loop — the same shape as
+			// updateBatchMoviePosterCrop / updateBatchMoviePosterFromURL (see
+			// their comments for the full rationale): the writer this request
+			// waited behind can REPLACE or RE-KEY the result (a rescrape
+			// committing a corrected match moves FileMatchInfo.MovieID/Movie.ID
+			// from A to B). Refreshing only current/filePaths while still
+			// holding A's lock would let the poster refresh and the whole-movie
+			// writes below interleave with a crop, poster-from-URL, or field
+			// override holding B's lock — pairing a freshly refreshed cache or
+			// newly stored movie state with a writer that believes it owns the
+			// key. So the lock key is re-resolved from the fresh post-lock
+			// result on every iteration; an invalid re-resolved ID is rejected
+			// (same validation as resolvePosterID) with the deferred release
+			// freeing the acquired key; when the key changed, the old key's lock
+			// is released BEFORE the new one is acquired (never two
+			// poster-source locks at once) and the result is re-read under the
+			// new lock — it may have been re-keyed yet again by the writer that
+			// released it. The loop converges because each re-acquisition waits
+			// behind a writer whose re-key is already committed.
+			for {
+				freshCurrent, freshFilePaths, freshFound := lookupResultByResultID(job, resultID)
+				if !freshFound {
+					c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
+					return
+				}
+				current, filePaths = freshCurrent, freshFilePaths
+				resolvedKey := posterLockKeyFor(current)
+				if !validPosterLockKey(resolvedKey) {
+					c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: errInvalidMovieIDForPoster.Error()})
+					return
+				}
+				if resolvedKey == posterLockKey {
+					break
+				}
+				releasePosterLock()
+				posterLockKey = resolvedKey
+				releasePosterLock = worker.AcquirePosterSourceLock(jobID, posterLockKey)
+			}
+
+			// A whole-movie PATCH can RENAME the movie ID: the request's
+			// movie.ID becomes the effective key the temp poster cache and
+			// every crop/preview lookup resolve, so the migration below
+			// (MovePosterAssets A→B) and any source refresh must run under
+			// BOTH keys' locks — holding only the converged old key would let
+			// the new key's crop/edit writers interleave with the move.
+			// Mirrors the id-override path's lexical pair rule
+			// (jobEditorImpl.ApplyFieldOverride): when the destination sorts
+			// AFTER the held key it stacks directly on top — the held key
+			// keeps the converged state stable, so no re-read gap exists;
+			// when it sorts BEFORE, the held key is released first, both are
+			// acquired in order, and the result is re-verified (an edit could
+			// have landed — and re-keyed the result — in the gap; on a change
+			// BOTH locks are dropped and pairing reconverges).
+			renameKey := movie.ID
+			if renameKey == "" || renameKey == posterLockKey {
+				break
+			}
+			if !validPosterLockKey(renameKey) {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: errInvalidMovieIDForPoster.Error()})
 				return
 			}
-			if resolvedKey == posterLockKey {
+			if renameKey > posterLockKey {
+				destRelease = worker.AcquirePosterSourceLock(jobID, renameKey)
+				renameTarget = renameKey
 				break
 			}
+			originKey := posterLockKey
 			releasePosterLock()
-			posterLockKey = resolvedKey
+			destRelease = worker.AcquirePosterSourceLock(jobID, renameKey)
+			releasePosterLock = worker.AcquirePosterSourceLock(jobID, originKey)
+			verify, verifyPaths, verifyFound := lookupResultByResultID(job, resultID)
+			if !verifyFound {
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
+				return
+			}
+			if posterLockKeyFor(verify) == originKey {
+				current, filePaths = verify, verifyPaths
+				renameTarget = renameKey
+				break
+			}
+			// The gap re-keyed the result: drop the pair and reconverge (the
+			// inner loop re-validates and re-resolves below).
+			destRelease()
+			destRelease = nil
+			releasePosterLock()
+			posterLockKey = posterLockKeyFor(verify)
 			releasePosterLock = worker.AcquirePosterSourceLock(jobID, posterLockKey)
 		}
 
@@ -130,7 +190,6 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// cannot reintroduce the title-doubling bug this PR fixes. If the workflow
 		// factory is unavailable, fall back to DisplayTitle = Title, matching the
 		// canonical no-template/error degradation (display_title.go).
-		movie := contracts.MovieViewToModel(req.Movie)
 		// Whole-movie PATCHes from cached or external clients that predate
 		// poster_crop_bounds omit the field entirely; decoded as a nil pointer
 		// it would replace the stored bounds, and Organize would re-download
@@ -224,20 +283,40 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// edge): persisting a PATCHed-in source without the cache would
 		// otherwise leave the reviewer cropping the stale/none image while
 		// Organize downloads the new one. The old effective source is empty
-		// then, so any posted source regenerates from scratch. Deliberately NOT
-		// covered (documented, not fixed): a PATCH that RENAMES the movie ID
-		// regenerates the cache under the NEW id but leaves the old id's
-		// {oldID}-full.jpg/preview orphaned in the temp cache — they expire
-		// with the job's temp cleanup.
+		// then, so any posted source regenerates from scratch. A PATCH that
+		// RENAMES the movie ID additionally MIGRATES the cached poster assets
+		// old→new under BOTH keys' locks (worker.MigratePosterCacheAssets,
+		// mirroring the id-override path) and re-points the persisted
+		// CroppedPosterURL/OriginalCroppedPosterURL to the new key — the
+		// refresh below alone would leave the old key's
+		// {oldID}-full.jpg/preview orphaned while every crop/preview lookup
+		// resolves the new key. A failed refresh afterwards reverses the
+		// migration best-effort before the edit is rejected.
 		var rollback func() error
 		var oldPosterURL, oldCoverURL string
 		if current.Movie != nil {
 			oldPosterURL, oldCoverURL = current.Movie.Poster.PosterURL, current.Movie.Poster.CoverURL
 		}
+		var moveAssetsBack func() error
+		if renameTarget != "" {
+			back, moveErr := worker.MigratePosterCacheAssets(rt.Snapshot().PosterGen(), jobID, posterLockKey, renameTarget)
+			if moveErr != nil {
+				logging.Errorf("Failed to migrate poster assets for renamed movie edit on result %s: %v", resultID, moveErr)
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to migrate poster assets: %v", moveErr)})
+				return
+			}
+			moveAssetsBack = back
+			movie.Poster.CroppedPosterURL = worker.RewritePosterIDInPreviewURL(movie.Poster.CroppedPosterURL, posterLockKey, renameTarget)
+			movie.Poster.OriginalCroppedPosterURL = worker.RewritePosterIDInPreviewURL(movie.Poster.OriginalCroppedPosterURL, posterLockKey, renameTarget)
+		}
 		rollback, refreshErr := worker.RefreshPosterAssets(c.Request.Context(), rt.Snapshot().PosterGen(), jobID, movie, oldPosterURL, oldCoverURL)
 		if refreshErr != nil {
-			logging.Errorf("Failed to refresh poster source after whole-movie edit for result %s: %v", resultID, refreshErr)
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to refresh poster source: %v", refreshErr)})
+			// The rename migration already ran: reverse the completed legs so
+			// the old key is not left empty while the (rejected) edit keeps
+			// the persisted state at the old movie ID.
+			errMsg := compensateMoveBack(moveAssetsBack, fmt.Sprintf("Failed to refresh poster source: %v", refreshErr))
+			logging.Errorf("Failed to refresh poster source after whole-movie edit for result %s: %s", resultID, errMsg)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 		movie.DisplayTitle = movie.Title
@@ -323,7 +402,10 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 					errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, rollbackErr)
 				}
 			}
-			return errMsg
+			// Asset moves run LAST: after a rename the cache rollback restored
+			// the new key's post-move snapshot, and this moves those assets
+			// back to the old key — no part holds the renamed state anymore.
+			return compensateMoveBack(moveAssetsBack, errMsg)
 		}
 		if updateErr != nil {
 			errMsg := compensateEdit(fmt.Sprintf("Failed to update movie: %v", updateErr))
@@ -346,6 +428,19 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie)})
 	}
+}
+
+// compensateMoveBack appends the rename-migration reversal to a PATCH
+// failure message. moveAssetsBack is nil for non-rename edits; a failed
+// reversal rides along on the message instead of being swallowed.
+func compensateMoveBack(moveAssetsBack func() error, errMsg string) string {
+	if moveAssetsBack == nil {
+		return errMsg
+	}
+	if backErr := moveAssetsBack(); backErr != nil {
+		return fmt.Sprintf("%s (poster asset move-back failed: %v)", errMsg, backErr)
+	}
+	return errMsg
 }
 
 // previewDisplayTitle godoc

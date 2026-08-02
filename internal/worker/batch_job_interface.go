@@ -374,11 +374,18 @@ type jobEditorImpl struct {
 	// cover_url override changes the effective poster source image — see
 	// refreshOverriddenPosterSource.
 	// posterGen may be nil for editors without poster infrastructure.
-	posterGen   poster.PosterGenerator
-	jobID       string
-	movieRepo   database.MovieRepositoryInterface
-	actressRepo database.ActressRepositoryInterface
-	overrideMu  sync.Map // resultID -> *sync.Mutex
+	posterGen poster.PosterGenerator
+	jobID     string
+	// planOverrideFn, when non-nil, replaces planMultipartOverride as the
+	// multipart fan-out planner. Test-only seam (nil in production): no
+	// stored-state combination makes an "id"-rekey merge fail naturally —
+	// every part's merge re-applies the override against the SAME provenance
+	// clone that already satisfied the selected part — so a deterministic
+	// plan-failure-after-asset-move test injects it here.
+	planOverrideFn func(filePaths []string, movie *models.Movie, prov *resultstore.ProvenanceData, fieldKey, source string) ([]overridePartWrite, error)
+	movieRepo      database.MovieRepositoryInterface
+	actressRepo    database.ActressRepositoryInterface
+	overrideMu     sync.Map // resultID -> *sync.Mutex
 	// persistEnvelope persists the whole job envelope with an error return
 	// (wired from BatchJobDeps.PersistErrFn). ApplyFieldOverride invokes it
 	// INSIDE the poster-source-lock critical section, after the fan-out
@@ -701,19 +708,38 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	// P3-6: an "id" override re-keyed the movie — migrate the cached poster
 	// assets from the old key to the new one UNDER BOTH held locks, or they
 	// are orphaned at the old key while every crop/preview lookup resolves
-	// the new one. The preview URL embedded in the persisted movie carries
-	// the posterID path segment, so it is re-pointed too. Generators without
-	// a manager (test stubs) hold no assets: the move degrades to the URL
-	// rewrite only.
+	// the new one. The preview URLs embedded in the persisted movie
+	// (CroppedPosterURL AND OriginalCroppedPosterURL — the poster reset
+	// flow reads the latter) carry the posterID path segment, so BOTH are
+	// re-pointed. A failed move is reversed immediately
+	// (MigratePosterCacheAssets): MoveAssets joins per-asset-leg errors
+	// instead of short-circuiting, so one leg may have completed. Generators
+	// without a manager (test stubs) hold no assets: the move degrades to
+	// the URL rewrite only.
 	var moveAssetsBack func() error
 	if destKey != "" {
-		if mover, ok := je.posterGen.(posterAssetMover); ok && mover != nil {
-			if moveErr := mover.MovePosterAssets(je.jobID, movieID, destKey); moveErr != nil {
-				return nil, nil, fmt.Errorf("migrate poster assets to re-keyed movie %s: %w", destKey, moveErr)
-			}
-			moveAssetsBack = func() error { return mover.MovePosterAssets(je.jobID, destKey, movieID) }
+		var moveErr error
+		moveAssetsBack, moveErr = MigratePosterCacheAssets(je.posterGen, je.jobID, movieID, destKey)
+		if moveErr != nil {
+			return nil, nil, moveErr
 		}
-		movie.Poster.CroppedPosterURL = rewritePosterIDInPreviewURL(movie.Poster.CroppedPosterURL, movieID, destKey)
+		movie.Poster.CroppedPosterURL = RewritePosterIDInPreviewURL(movie.Poster.CroppedPosterURL, movieID, destKey)
+		movie.Poster.OriginalCroppedPosterURL = RewritePosterIDInPreviewURL(movie.Poster.OriginalCroppedPosterURL, movieID, destKey)
+	}
+	// compensateMove reverses the completed A→B asset migration (when one
+	// was performed) and MUST be invoked on every error return past this
+	// point — an aborted override must never leave the origin's assets
+	// stranded at the destination key while the persisted state still
+	// resolves the old one. A failed reversal rides along on the error
+	// instead of being swallowed.
+	compensateMove := func(err error) error {
+		if moveAssetsBack == nil {
+			return err
+		}
+		if backErr := moveAssetsBack(); backErr != nil {
+			return fmt.Errorf("%w (poster asset move-back failed: %w)", err, backErr)
+		}
+		return err
 	}
 
 	var rollback func() error
@@ -721,7 +747,7 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 		var err error
 		rollback, err = je.refreshOverriddenPosterSource(ctx, movie, oldPosterURL, oldCoverURL)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, compensateMove(err)
 		}
 	}
 	filePaths := je.store.FindFilePathsForMovieID(movieID)
@@ -736,9 +762,16 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	// OriginalFileName, which template contexts read for <FILENAME>/the NFO
 	// original path); stamping CD1's values onto CD2 would render the
 	// sibling's templates with the wrong source file.
-	planned, err := je.planMultipartOverride(filePaths, movie, prov, fieldKey, source)
+	planFn := je.planOverrideFn
+	if planFn == nil {
+		planFn = je.planMultipartOverride
+	}
+	planned, err := planFn(filePaths, movie, prov, fieldKey, source)
 	if err != nil {
-		return nil, nil, err
+		// The id-rekey asset migration already ran: reverse it BEFORE
+		// returning so the rejected override never strands the origin's
+		// assets at the destination key (compensateMove).
+		return nil, nil, compensateMove(err)
 	}
 	updatedParts := make([]overridePartWrite, 0, len(planned))
 	for _, part := range planned {
@@ -757,11 +790,7 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 					errMsg = fmt.Errorf("%w (poster rollback failed: %v)", errMsg, rollbackErr)
 				}
 			}
-			if moveAssetsBack != nil {
-				if moveBackErr := moveAssetsBack(); moveBackErr != nil {
-					errMsg = fmt.Errorf("%w (poster asset move-back failed: %v)", errMsg, moveBackErr)
-				}
-			}
+			errMsg = compensateMove(errMsg)
 			return nil, nil, errMsg
 		}
 		updatedParts = append(updatedParts, part)

@@ -187,10 +187,15 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 			Job:       jobResponse,
 		}
 		if result.PersistErr != nil {
-			// The per-file rescrapes committed (Results stay authoritative), but
-			// the envelope did not persist: surface a clear failure signal — an
-			// error status WITH the per-file results — instead of acking state a
-			// restart would resurrect against the rescraped poster images.
+			// A movie whose in-critical-section envelope persist failed no
+			// longer commits: the phase already rolled that movie's
+			// memory/provenance/cache back under its own poster-source locks,
+			// and its Results entry reports RescrapeStatusFailed with the
+			// persist detail (processBulkRescrapeMovie).
+			// result.PersistErr joins those per-movie failures — answer 500
+			// WITH the per-file results so the failure (and which movies
+			// reverted to pre-rescrape state) is explicit instead of a 200
+			// that would read a rollback as success.
 			resp.PersistError = result.PersistErr.Error()
 			respStatus = http.StatusInternalServerError
 		}

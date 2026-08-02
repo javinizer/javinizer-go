@@ -15,10 +15,11 @@ import (
 
 // idRekeyFixture builds a jobEditorImpl with a REAL poster manager over an
 // in-memory fs (both poster assets present at the OLD movie key), a single
-// completed result for oldID carrying a temp preview URL filed under that
-// key, and provenance whose "dmm" source contributed a DIFFERENT movie ID.
-// The returned fs and old-key paths let the test assert the cache migration
-// byte-for-byte.
+// completed result for oldID carrying temp preview URLs filed under that
+// key (CroppedPosterURL AND OriginalCroppedPosterURL — the poster reset
+// flow reads the latter), and provenance whose "dmm" source contributed a
+// DIFFERENT movie ID. The returned fs and old-key paths let the test
+// assert the cache migration byte-for-byte.
 func idRekeyFixture(t *testing.T, jobID, oldID, newID string) (*jobEditorImpl, *resultstore.ResultTracker, afero.Fs, string, string, string) {
 	t.Helper()
 	filePath := "/source/" + oldID + ".mp4"
@@ -31,8 +32,9 @@ func idRekeyFixture(t *testing.T, jobID, oldID, newID string) (*jobEditorImpl, *
 			ID:    oldID,
 			Title: "Old Title",
 			Poster: models.PosterState{
-				PosterURL:        "https://old.invalid/poster.jpg",
-				CroppedPosterURL: "/api/v1/temp/posters/" + jobID + "/" + oldID + ".jpg?v=111",
+				PosterURL:                "https://old.invalid/poster.jpg",
+				CroppedPosterURL:         "/api/v1/temp/posters/" + jobID + "/" + oldID + ".jpg?v=111",
+				OriginalCroppedPosterURL: "/api/v1/temp/posters/" + jobID + "/" + oldID + ".jpg?v=orig7",
 			},
 		},
 	})
@@ -83,6 +85,9 @@ func TestApplyFieldOverride_IDRekeyMigratesPosterAssets(t *testing.T) {
 	assert.Equal(t, newID, updated.Movie.ID, "the override adopted the source's movie ID")
 	assert.Equal(t, "/api/v1/temp/posters/"+jobID+"/"+newID+".jpg?v=111",
 		updated.Movie.Poster.CroppedPosterURL, "the preview URL follows the new key")
+	assert.Equal(t, "/api/v1/temp/posters/"+jobID+"/"+newID+".jpg?v=orig7",
+		updated.Movie.Poster.OriginalCroppedPosterURL,
+		"the ORIGINAL preview URL follows the new key too — staling it would 404 the poster reset flow")
 
 	// Old key freed, new key has the bytes.
 	full, ok := fileContents(t, fs, "/temp/posters/"+jobID+"/"+newID+"-full.jpg")
@@ -127,6 +132,8 @@ func TestApplyFieldOverride_IDRekeyPersistFailureMovesAssetsBack(t *testing.T) {
 	assert.Equal(t, oldID, restored.Movie.ID)
 	assert.Equal(t, "/api/v1/temp/posters/"+jobID+"/"+oldID+".jpg?v=111",
 		restored.Movie.Poster.CroppedPosterURL, "the preview URL reverts with the movie")
+	assert.Equal(t, "/api/v1/temp/posters/"+jobID+"/"+oldID+".jpg?v=orig7",
+		restored.Movie.Poster.OriginalCroppedPosterURL, "the original preview URL reverts too")
 
 	// …and the assets moved BACK to the old key; the new key is freed.
 	full, ok := fileContents(t, fs, oldFull)
@@ -177,38 +184,65 @@ func TestApplyFieldOverride_IDRekeyWithoutAssetMoverDegradesToStateOnly(t *testi
 }
 
 // TestRewritePosterIDInPreviewURL pins the URL rewrite helper: only the file
-// name segment under the old key is re-pointed; unrelated or empty URLs are
-// untouched.
+// name segment under the old key of a RELATIVE /api/v1/temp/posters/ URL is
+// re-pointed; unrelated or empty URLs are untouched. F3: the match is
+// anchored to the temp-preview prefix, so a scraper-provided URL that merely
+// ENDS with {oldID}.jpg is never rewritten (the reset flow would otherwise
+// lose the remote source).
 func TestRewritePosterIDInPreviewURL(t *testing.T) {
 	assert.Equal(t,
 		"/api/v1/temp/posters/job-1/NEW-1.jpg?v=42",
-		rewritePosterIDInPreviewURL("/api/v1/temp/posters/job-1/OLD-1.jpg?v=42", "OLD-1", "NEW-1"))
-	assert.Equal(t, "", rewritePosterIDInPreviewURL("", "OLD-1", "NEW-1"))
-	assert.Equal(t, "https://cdn.example/x.jpg", rewritePosterIDInPreviewURL("https://cdn.example/x.jpg", "OLD-1", "NEW-1"),
+		RewritePosterIDInPreviewURL("/api/v1/temp/posters/job-1/OLD-1.jpg?v=42", "OLD-1", "NEW-1"))
+	assert.Equal(t, "", RewritePosterIDInPreviewURL("", "OLD-1", "NEW-1"))
+	assert.Equal(t, "https://cdn.example/x.jpg", RewritePosterIDInPreviewURL("https://cdn.example/x.jpg", "OLD-1", "NEW-1"),
 		"a URL not filed under the old key is untouched")
 	assert.Equal(t,
 		"/api/v1/temp/posters/job-1/OLD-1.jpg?v=42",
-		rewritePosterIDInPreviewURL("/api/v1/temp/posters/job-1/OLD-1.jpg?v=42", "OLD-1", ""),
+		RewritePosterIDInPreviewURL("/api/v1/temp/posters/job-1/OLD-1.jpg?v=42", "OLD-1", ""),
 		"an empty new ID leaves the URL alone")
 	assert.Equal(t,
 		"/api/v1/temp/posters/job-1/OLD-1-thumb.jpg",
-		rewritePosterIDInPreviewURL("/api/v1/temp/posters/job-1/OLD-1-thumb.jpg", "OLD-1", "NEW-1"),
+		RewritePosterIDInPreviewURL("/api/v1/temp/posters/job-1/OLD-1-thumb.jpg", "OLD-1", "NEW-1"),
 		"a prefix look-alike filename is not rewritten — only the exact {id}.jpg segment")
+	// F3 anchoring: the match must require the /api/v1/temp/posters/ prefix on
+	// the path portion of a relative URL.
+	assert.Equal(t,
+		"https://pics.example.co/st/OLD-1.jpg",
+		RewritePosterIDInPreviewURL("https://pics.example.co/st/OLD-1.jpg", "OLD-1", "NEW-1"),
+		"a scraper URL that merely ends with {oldID}.jpg is remote content, not a cache key — untouched")
+	assert.Equal(t,
+		"https://mirror.example/api/v1/temp/posters/job-1/OLD-1.jpg",
+		RewritePosterIDInPreviewURL("https://mirror.example/api/v1/temp/posters/job-1/OLD-1.jpg", "OLD-1", "NEW-1"),
+		"an absolute URL embedding the temp prefix under another host is untouched")
+	assert.Equal(t,
+		"/images/OLD-1.jpg",
+		RewritePosterIDInPreviewURL("/images/OLD-1.jpg", "OLD-1", "NEW-1"),
+		"a relative URL outside the temp preview namespace is untouched")
+	assert.Equal(t,
+		"/api/v1/temp/posters/job-1/x.jpg?v=/OLD-1.jpg",
+		RewritePosterIDInPreviewURL("/api/v1/temp/posters/job-1/x.jpg?v=/OLD-1.jpg", "OLD-1", "NEW-1"),
+		"a look-alike segment in the query string is never consulted")
 }
 
 // moverStubGen is a poster generator with the move capability whose
-// MovePosterAssets records (from,to) pairs and fails the failAt-th call
-// (1-based, 0 = never) — used to drive the id-rekey forward-move and
-// move-back compensation legs deterministically.
+// MovePosterAssets records (from,to) pairs and fails deterministically:
+// failAt fails exactly the failAt-th call (1-based, 0 = never); failFrom
+// fails every call from failFrom onward. Used to drive the id-rekey
+// forward-move, the immediate partial-move reversal, and the move-back
+// compensation legs deterministically.
 type moverStubGen struct {
 	recordingPosterGen
-	calls   [][2]string
-	failAt  int
-	failErr error
+	calls    [][2]string
+	failAt   int
+	failFrom int
+	failErr  error
 }
 
 func (g *moverStubGen) MovePosterAssets(_, fromID, toID string) error {
 	g.calls = append(g.calls, [2]string{fromID, toID})
+	if g.failFrom > 0 && len(g.calls) >= g.failFrom {
+		return g.failErr
+	}
 	if g.failAt > 0 && g.failAt == len(g.calls) {
 		return g.failErr
 	}
@@ -216,35 +250,62 @@ func (g *moverStubGen) MovePosterAssets(_, fromID, toID string) error {
 }
 
 // TestApplyFieldOverride_IDRekeyMoveFailureRejectsOverride pins the forward
-// half of P3-6: when the asset migration itself fails, the override is
+// half of P3-6 plus F1(b): when the asset migration fails, the override is
 // REJECTED before any part is persisted — the stored movie, the preview URL,
-// and the store indexing stay at the old key.
+// and the store indexing stay at the old key — and the completed legs of a
+// PARTIAL move (MoveAssets joins per-leg errors instead of short-circuiting)
+// are reversed best-effort IMMEDIATELY, so a rejected override never strands
+// the origin's assets at the destination key.
 func TestApplyFieldOverride_IDRekeyMoveFailureRejectsOverride(t *testing.T) {
 	const (
 		jobID = "job-idmovefail"
 		oldID = "ORIG-ID7"
 		newID = "DMM-NEW7"
 	)
-	je, tracker, fs, filePath, oldFull, _ := idRekeyFixture(t, jobID, oldID, newID)
-	gen := &moverStubGen{failAt: 1, failErr: errors.New("fs jammed")}
-	je.posterGen = gen
 
-	_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "migrate poster assets to re-keyed movie "+newID)
-	assert.Contains(t, err.Error(), "fs jammed")
-	assert.Equal(t, [][2]string{{oldID, newID}}, gen.calls,
-		"only the forward move was attempted — the override aborted before persisting")
+	t.Run("partial move legs reversed immediately", func(t *testing.T) {
+		je, tracker, fs, filePath, oldFull, _ := idRekeyFixture(t, jobID, oldID, newID)
+		gen := &moverStubGen{failAt: 1, failErr: errors.New("fs jammed")}
+		je.posterGen = gen
 
-	stored, getErr := tracker.GetMovieResult(filePath)
-	require.NoError(t, getErr)
-	require.NotNil(t, stored.Movie)
-	assert.Equal(t, oldID, stored.Movie.ID, "the stored movie is untouched when the migration rejects")
-	assert.Equal(t, oldID, tracker.GetCurrentMovieID(filePath))
-	_, ok := fileContents(t, fs, oldFull)
-	assert.True(t, ok, "the fs assets were untouched (the failing stub mover wrote nothing)")
-	assertPosterSourceLockFree(t, jobID, oldID)
-	assertPosterSourceLockFree(t, jobID, newID)
+		_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "migrate poster assets to re-keyed movie "+newID)
+		assert.Contains(t, err.Error(), "fs jammed")
+		assert.NotContains(t, err.Error(), "partial move reversal failed",
+			"the immediate reversal succeeded, so no reversal failure rides along")
+		assert.Equal(t, [][2]string{{oldID, newID}, {newID, oldID}}, gen.calls,
+			"the forward failure triggers the immediate best-effort reversal of completed legs")
+
+		stored, getErr := tracker.GetMovieResult(filePath)
+		require.NoError(t, getErr)
+		require.NotNil(t, stored.Movie)
+		assert.Equal(t, oldID, stored.Movie.ID, "the stored movie is untouched when the migration rejects")
+		assert.Equal(t, oldID, tracker.GetCurrentMovieID(filePath))
+		_, ok := fileContents(t, fs, oldFull)
+		assert.True(t, ok, "the fs assets were untouched (the failing stub mover wrote nothing)")
+		assertPosterSourceLockFree(t, jobID, oldID)
+		assertPosterSourceLockFree(t, jobID, newID)
+	})
+
+	t.Run("reversal failure is joined onto the error", func(t *testing.T) {
+		je, tracker, _, filePath, _, _ := idRekeyFixture(t, jobID, oldID, newID)
+		gen := &moverStubGen{failFrom: 1, failErr: errors.New("fs jammed")}
+		je.posterGen = gen
+
+		_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "migrate poster assets to re-keyed movie "+newID)
+		assert.Contains(t, err.Error(), "partial move reversal failed",
+			"a failed immediate reversal must surface, not be swallowed")
+		assert.Equal(t, [][2]string{{oldID, newID}, {newID, oldID}}, gen.calls)
+
+		stored, getErr := tracker.GetMovieResult(filePath)
+		require.NoError(t, getErr)
+		assert.Equal(t, oldID, stored.Movie.ID, "the stored movie is untouched either way")
+		assertPosterSourceLockFree(t, jobID, oldID)
+		assertPosterSourceLockFree(t, jobID, newID)
+	})
 }
 
 // TestApplyFieldOverride_IDRekeyFanoutFailureMovesAssetsBack pins the
@@ -392,4 +453,78 @@ func TestApplyFieldOverride_PersistFailureMoveBackError(t *testing.T) {
 	restored, getErr := tracker.GetMovieResult(filePath)
 	require.NoError(t, getErr)
 	assert.Equal(t, oldID, restored.Movie.ID, "memory still reverts when the move-back fails")
+}
+
+// TestApplyFieldOverride_IDRekeyPlanFailureMovesAssetsBack pins F1(a): when
+// the multipart fan-out planner fails AFTER the id-rekey asset migration
+// already completed, the assets must be moved BACK to the origin key before
+// the override rejects — otherwise they are stranded at the destination key
+// while the persisted state still resolves the old one (and a destination
+// key owned by another result would serve this movie's images to its
+// crop/preview lookups). No stored-state combination makes an id-rekey
+// merge fail naturally (every part merges against the same provenance
+// envelope the selected part already validated), so the planner failure is
+// injected through the planOverrideFn seam.
+func TestApplyFieldOverride_IDRekeyPlanFailureMovesAssetsBack(t *testing.T) {
+	const (
+		jobID = "job-idplanfail"
+		oldID = "ORIG-ID4"
+		newID = "DMM-NEW4"
+	)
+	planErr := errors.New("planner exploded")
+
+	t.Run("assets return to origin, destination key left empty", func(t *testing.T) {
+		je, tracker, fs, filePath, oldFull, oldPreview := idRekeyFixture(t, jobID, oldID, newID)
+		je.planOverrideFn = func(_ []string, _ *models.Movie, _ *resultstore.ProvenanceData, _, _ string) ([]overridePartWrite, error) {
+			return nil, planErr
+		}
+
+		_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, planErr)
+		assert.NotContains(t, err.Error(), "move-back",
+			"the move-back succeeded, so no reversal failure rides along")
+
+		// Origin restored byte-for-byte; the destination key holds NOTHING —
+		// nothing may remain filed under the new key when state stays at A.
+		full, ok := fileContents(t, fs, oldFull)
+		require.True(t, ok, "the full-size asset must be back at the old key")
+		assert.Equal(t, "old-full-bytes", full)
+		preview, ok := fileContents(t, fs, oldPreview)
+		require.True(t, ok)
+		assert.Equal(t, "old-preview-bytes", preview)
+		_, ok = fileContents(t, fs, "/temp/posters/"+jobID+"/"+newID+"-full.jpg")
+		assert.False(t, ok, "the new key must not keep stranded assets after the rejected override")
+		_, ok = fileContents(t, fs, "/temp/posters/"+jobID+"/"+newID+".jpg")
+		assert.False(t, ok)
+
+		// The persisted state never moved: still the old key, old preview URLs.
+		stored, getErr := tracker.GetMovieResult(filePath)
+		require.NoError(t, getErr)
+		require.NotNil(t, stored.Movie)
+		assert.Equal(t, oldID, stored.Movie.ID)
+		assert.Equal(t, "/api/v1/temp/posters/"+jobID+"/"+oldID+".jpg?v=111",
+			stored.Movie.Poster.CroppedPosterURL)
+		assert.Equal(t, oldID, tracker.GetCurrentMovieID(filePath))
+		assertPosterSourceLockFree(t, jobID, oldID)
+		assertPosterSourceLockFree(t, jobID, newID)
+	})
+
+	t.Run("move-back failure is surfaced with the plan error", func(t *testing.T) {
+		je, _, _, _, _, _ := idRekeyFixture(t, jobID, oldID, newID)
+		gen := &moverStubGen{failFrom: 2, failErr: errors.New("restore jammed")}
+		je.posterGen = gen
+		je.planOverrideFn = func(_ []string, _ *models.Movie, _ *resultstore.ProvenanceData, _, _ string) ([]overridePartWrite, error) {
+			return nil, planErr
+		}
+
+		_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, planErr)
+		assert.Contains(t, err.Error(), "poster asset move-back failed: restore jammed",
+			"a failed plan-failure move-back must surface, not be swallowed")
+		assert.Equal(t, [][2]string{{oldID, newID}, {newID, oldID}}, gen.calls)
+		assertPosterSourceLockFree(t, jobID, oldID)
+		assertPosterSourceLockFree(t, jobID, newID)
+	})
 }

@@ -270,21 +270,71 @@ type posterAssetMover interface {
 	MovePosterAssets(jobID, fromMovieID, toMovieID string) error
 }
 
-// rewritePosterIDInPreviewURL re-points a temp preview poster URL
+// RewritePosterIDInPreviewURL re-points a temp preview poster URL
 // (/api/v1/temp/posters/{jobID}/{posterID}.jpg?...) from oldID to newID when
-// an "id" override re-keys the movie: the asset move (posterAssetMover)
-// renames the files, so the persisted preview URL must name the new key or
-// the review preview 404s. Only the "{oldID}.jpg" path segment is rewritten;
-// a URL not filed under the old key (or an empty one) is returned unchanged.
-func rewritePosterIDInPreviewURL(raw, oldID, newID string) string {
+// a re-key (the field-override "id" fan-out, the whole-movie PATCH rename)
+// moves the cached assets: the posterAssetMover renames the files, so the
+// persisted preview URL must name the new key or the review preview 404s.
+//
+// The match is ANCHORED to the /api/v1/temp/posters/ prefix on the path
+// portion of a RELATIVE URL, and only the final "{oldID}.jpg" path segment is
+// rewritten: a scraper-provided URL that merely ENDS with {oldID}.jpg (e.g.
+// https://cdn.example/OLD-1.jpg, or an absolute URL that embeds the temp
+// prefix under another host) names a remote asset, not this server's temp
+// cache key, and stays untouched — rewriting it would break the poster reset
+// flow, which downloads the ORIGINAL URL. The query string is carried over
+// verbatim and never consulted for the match.
+func RewritePosterIDInPreviewURL(raw, oldID, newID string) string {
+	const tempPreviewPrefix = "/api/v1/temp/posters/"
 	if raw == "" || oldID == "" || newID == "" || oldID == newID {
 		return raw
 	}
-	needle := "/" + url.PathEscape(oldID) + ".jpg"
-	if !strings.Contains(raw, needle) {
+	pathPart, query, hasQuery := strings.Cut(raw, "?")
+	if !strings.HasPrefix(pathPart, tempPreviewPrefix) {
 		return raw
 	}
-	return strings.Replace(raw, needle, "/"+url.PathEscape(newID)+".jpg", 1)
+	needle := "/" + url.PathEscape(oldID) + ".jpg"
+	if !strings.HasSuffix(pathPart, needle) {
+		return raw
+	}
+	out := strings.TrimSuffix(pathPart, needle) + "/" + url.PathEscape(newID) + ".jpg"
+	if hasQuery {
+		out += "?" + query
+	}
+	return out
+}
+
+// MigratePosterCacheAssets re-keys the job's cached poster assets
+// ({tempDir}/posters/{jobID}/{fromKey}-full.jpg + {fromKey}.jpg) from fromKey
+// to toKey through the generator's move capability (posterAssetMover), and
+// returns the reversal closure for caller-side compensation. The caller holds
+// BOTH keys' poster-source locks in lexical order across the move.
+//
+// A forward-move FAILURE is reversed immediately, best-effort, before this
+// function returns: PosterManager.MoveAssets runs per-asset renames and JOINS
+// errors across legs instead of short-circuiting, so a reported failure can
+// still have completed one leg — and each per-asset rename is individually
+// reversible. Leaving a completed leg in place would strand the origin's
+// assets under the destination key, where crop/preview lookups for that key
+// (possibly owned by another result whose files the completed leg
+// destructively replaced) would serve the wrong movie's image. A failed
+// reversal is joined onto the surfaced error instead of being swallowed.
+//
+// A generator without the move capability (test stubs, nil) holds no assets:
+// the call degrades to (nil, nil) — the re-key is then state-only.
+func MigratePosterCacheAssets(gen poster.PosterGenerator, jobID, fromKey, toKey string) (moveBack func() error, err error) {
+	mover, ok := gen.(posterAssetMover)
+	if !ok {
+		return nil, nil
+	}
+	if moveErr := mover.MovePosterAssets(jobID, fromKey, toKey); moveErr != nil {
+		errMsg := fmt.Errorf("migrate poster assets to re-keyed movie %s: %w", toKey, moveErr)
+		if reverseErr := mover.MovePosterAssets(jobID, toKey, fromKey); reverseErr != nil {
+			errMsg = fmt.Errorf("%w (partial move reversal failed: %w)", errMsg, reverseErr)
+		}
+		return nil, errMsg
+	}
+	return func() error { return mover.MovePosterAssets(jobID, toKey, fromKey) }, nil
 }
 
 // effectivePosterSource mirrors ScrapePosterGenerator.GeneratePoster's download
