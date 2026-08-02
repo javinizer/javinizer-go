@@ -428,6 +428,9 @@ type ScraperSettings struct {
 
 	enabledDecoded  bool `yaml:"-" json:"-"`
 	enabledExplicit bool `yaml:"-" json:"-"`
+
+	rateLimitDecoded  bool `yaml:"-" json:"-"`
+	rateLimitExplicit bool `yaml:"-" json:"-"`
 }
 
 // MarshalYAML preserves the full unified scraper settings shape so config
@@ -576,6 +579,21 @@ func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
 func (s *ScraperSettings) SetEnabledPresence(explicit bool) {
 	s.enabledDecoded = true
 	s.enabledExplicit = explicit
+}
+
+// SetRateLimitPresence records whether the `rate_limit` key was present when
+// decoding a scraper entry (including the deprecated request_delay alias).
+// Programmatic literals must not call it.
+func (s *ScraperSettings) SetRateLimitPresence(explicit bool) {
+	s.rateLimitDecoded = true
+	s.rateLimitExplicit = explicit
+}
+
+// RateLimitIsExplicit reports whether rate_limit was explicitly configured,
+// letting scrapers honor an intentional 0 (no delay) while still defaulting
+// an omitted key.
+func (s *ScraperSettings) RateLimitIsExplicit() bool {
+	return s != nil && s.rateLimitDecoded && s.rateLimitExplicit
 }
 
 // MergeEnabledDefault inherits defaults.Enabled when s was decoded with an

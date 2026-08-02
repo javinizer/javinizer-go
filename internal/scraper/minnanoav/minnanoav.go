@@ -46,7 +46,12 @@ func newScraperWithClient(settings *models.ScraperSettings, client *resty.Client
 		baseURL = defaultBaseURL
 	}
 	rateLimit := settings.RateLimit
-	if rateLimit <= 0 {
+	if rateLimit < 0 {
+		rateLimit = 0
+	}
+	if rateLimit == 0 && !settings.RateLimitIsExplicit() {
+		// Omitted: keep the conservative 1s crawl default; an explicitly
+		// configured rate_limit: 0 means no delay (documented contract).
 		rateLimit = 1000
 	}
 	return &scraper{

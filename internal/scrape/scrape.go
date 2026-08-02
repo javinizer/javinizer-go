@@ -255,7 +255,7 @@ var runPostProcessScraped = postProcessScraped
 
 // postProcessScraped enriches the aggregated movie with actress DB data,
 // translation, and assembles the final ScrapeResult.
-func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, registry ScraperInstanceResolver, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, startTime time.Time) (*ScrapeResult, error) {
+func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, registry ScraperInstanceResolver, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, explicitSelection bool, startTime time.Time) (*ScrapeResult, error) {
 	var fieldSources map[string]string
 	var resolvedPriorities map[string][]string
 	if aggResult != nil {
@@ -283,7 +283,7 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		// default global priority list must not make them exclusive, or
 		// actress-only resolvers absent from it would never run.
 		var resolverOverride []string
-		if len(cmd.SelectedScrapers) > 0 || len(cmd.PriorityOverride) > 0 {
+		if explicitSelection {
 			resolverOverride = resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, cfg)
 		}
 		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg, resolverOverride); enriched > 0 {
@@ -325,6 +325,11 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 0, "Starting...")
 
 	// Phase 1: Resolve input
+	// Capture caller-supplied selections before resolveScrapeInput can
+	// synthesize PriorityOverride from URL parsing; synthesized overrides
+	// must not make actress enrichment exclusive later.
+	explicitSelection := len(cmd.SelectedScrapers) > 0 || len(cmd.PriorityOverride) > 0
+
 	cmd, err := resolveScrapeInput(ctx, cmd, s.registry, s.cfg)
 	if err != nil {
 		return nil, err
@@ -376,7 +381,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	}
 
 	// Phase 3: Post-process
-	result, err := runPostProcessScraped(ctx, scraped, results, aggResult, s.registry, s.cfg, s.translator, actressRepo, cmd, startTime)
+	result, err := runPostProcessScraped(ctx, scraped, results, aggResult, s.registry, s.cfg, s.translator, actressRepo, cmd, explicitSelection, startTime)
 	if err != nil {
 		return nil, err
 	}

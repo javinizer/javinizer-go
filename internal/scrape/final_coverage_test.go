@@ -170,7 +170,7 @@ func TestPostProcessAllOptionalEnrichmentsAndTranslation(t *testing.T) {
 	}
 	translator := &finalTranslator{}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 1}, {DMMID: 2}}}
-	result, err := postProcessScraped(t.Context(), movie, nil, nil, nil, &Config{ActressDBEnabled: true, TranslationEnabled: true}, translator, &finalScrapeActressRepo{}, ScrapeCmd{}, time.Now())
+	result, err := postProcessScraped(t.Context(), movie, nil, nil, nil, &Config{ActressDBEnabled: true, TranslationEnabled: true}, translator, &finalScrapeActressRepo{}, ScrapeCmd{}, false, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, 1, translator.calls)
 	assert.Equal(t, "BuiltIn", result.Movie.Actresses[1].FirstName)
@@ -199,7 +199,7 @@ func TestScrapeNilContextAggregationErrorFallbackAndPostProcessError(t *testing.
 	assert.Equal(t, "mapped", result.Movie.ContentID)
 
 	oldPostProcess := runPostProcessScraped
-	runPostProcessScraped = func(context.Context, *models.Movie, []*models.ScraperResult, *aggregator.AggregateResult, ScraperInstanceResolver, *Config, Translator, database.ActressRepositoryInterface, ScrapeCmd, time.Time) (*ScrapeResult, error) {
+	runPostProcessScraped = func(context.Context, *models.Movie, []*models.ScraperResult, *aggregator.AggregateResult, ScraperInstanceResolver, *Config, Translator, database.ActressRepositoryInterface, ScrapeCmd, bool, time.Time) (*ScrapeResult, error) {
 		return nil, errors.New("post-process failed")
 	}
 	_, err = engine.Scrape(t.Context(), ScrapeCmd{MovieID: "original", ForceRefresh: true})
