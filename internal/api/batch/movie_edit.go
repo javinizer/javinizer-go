@@ -76,21 +76,52 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// subsequent manual crop measured against the wrong image. Held from
 		// here across the refresh, the multipart UpdateMovie loop (including
 		// compensation) and the final PersistJobByID; the deferred release
-		// covers every error/return path. Keyed on the same movie ID the
-		// temp poster cache and the override path use.
-		posterLockKey := current.FileMatchInfo.MovieID
-		if current.Movie != nil && current.Movie.ID != "" {
-			posterLockKey = current.Movie.ID
-		}
+		// covers every error/return path and always releases whichever key
+		// was LAST acquired (the convergence loop below can hand the lock
+		// off to a re-keyed movie). Keyed on the same movie ID the temp
+		// poster cache and the override path use.
+		posterLockKey := posterLockKeyFor(current)
 		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterLockKey)
-		defer releasePosterLock()
+		defer func() { releasePosterLock() }()
 
-		freshCurrent, freshFilePaths, freshFound := lookupResultByResultID(job, resultID)
-		if !freshFound {
-			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
-			return
+		// Post-lock convergence loop — the same shape as
+		// updateBatchMoviePosterCrop / updateBatchMoviePosterFromURL (see
+		// their comments for the full rationale): the writer this request
+		// waited behind can REPLACE or RE-KEY the result (a rescrape
+		// committing a corrected match moves FileMatchInfo.MovieID/Movie.ID
+		// from A to B). Refreshing only current/filePaths while still
+		// holding A's lock would let the poster refresh and the whole-movie
+		// writes below interleave with a crop, poster-from-URL, or field
+		// override holding B's lock — pairing a freshly refreshed cache or
+		// newly stored movie state with a writer that believes it owns the
+		// key. So the lock key is re-resolved from the fresh post-lock
+		// result on every iteration; an invalid re-resolved ID is rejected
+		// (same validation as resolvePosterID) with the deferred release
+		// freeing the acquired key; when the key changed, the old key's lock
+		// is released BEFORE the new one is acquired (never two
+		// poster-source locks at once) and the result is re-read under the
+		// new lock — it may have been re-keyed yet again by the writer that
+		// released it. The loop converges because each re-acquisition waits
+		// behind a writer whose re-key is already committed.
+		for {
+			freshCurrent, freshFilePaths, freshFound := lookupResultByResultID(job, resultID)
+			if !freshFound {
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
+				return
+			}
+			current, filePaths = freshCurrent, freshFilePaths
+			resolvedKey := posterLockKeyFor(current)
+			if !validPosterLockKey(resolvedKey) {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: errInvalidMovieIDForPoster.Error()})
+				return
+			}
+			if resolvedKey == posterLockKey {
+				break
+			}
+			releasePosterLock()
+			posterLockKey = resolvedKey
+			releasePosterLock = worker.AcquirePosterSourceLock(jobID, posterLockKey)
 		}
-		current, filePaths = freshCurrent, freshFilePaths
 
 		// Convert once and re-derive display_title so a title edit is reflected
 		// immediately in persisted state and any client that renders display_title

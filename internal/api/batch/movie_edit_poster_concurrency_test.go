@@ -76,8 +76,17 @@ func newPosterConcurrencyServer(t *testing.T) *posterConcurrencyServer {
 // returns the HTTP status code.
 func patchPosterURL(t *testing.T, router *gin.Engine, jobID, movieID, posterURL string) int {
 	t.Helper()
-	body := fmt.Sprintf(`{"movie":{"id":"%s","title":"Race","poster_url":%q,"cover_url":""}}`, movieID, posterURL)
-	req := httptest.NewRequest(http.MethodPatch, "/batch/"+jobID+"/results/"+movieID, bytes.NewBufferString(body))
+	return patchWholeMovie(t, router, jobID, movieID, movieID, posterURL)
+}
+
+// patchWholeMovie issues one whole-movie PATCH against resultID carrying a
+// movie with the given ID and poster URL, and returns the HTTP status code.
+// Splitting resultID from movieID lets the rekey tests PATCH a result whose
+// stored movie identity moved between the pre-lock lookup and the edit.
+func patchWholeMovie(t *testing.T, router *gin.Engine, jobID, resultID, movieID, posterURL string) int {
+	t.Helper()
+	body := fmt.Sprintf(`{"movie":{"id":%q,"title":"Race","poster_url":%q,"cover_url":""}}`, movieID, posterURL)
+	req := httptest.NewRequest(http.MethodPatch, "/batch/"+jobID+"/results/"+resultID, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

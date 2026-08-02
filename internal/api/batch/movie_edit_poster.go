@@ -324,6 +324,11 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
+// errInvalidMovieIDForPoster is the rejection shared by every endpoint that
+// resolves a poster-operation key from job state (pre-lock resolution and the
+// post-lock convergence re-resolution alike).
+var errInvalidMovieIDForPoster = errors.New("invalid movie ID for poster operation")
+
 // resolvePosterID resolves the effective poster identifier for a movie within a
 // batch job. It starts with the URL parameter movieID, then looks up the movie
 // result to use the canonical Movie.ID if available. Returns an error if the
@@ -334,8 +339,27 @@ func resolvePosterID(lookup resultstore.MovieLookup, movieID string) (string, er
 	if movieResult != nil && movieResult.Movie != nil && movieResult.Movie.ID != "" {
 		posterID = movieResult.Movie.ID
 	}
-	if posterID != filepath.Base(posterID) || posterID == "" || posterID == "." {
-		return "", fmt.Errorf("invalid movie ID for poster operation")
+	if !validPosterLockKey(posterID) {
+		return "", errInvalidMovieIDForPoster
 	}
 	return posterID, nil
+}
+
+// posterLockKeyFor derives the shared poster-source lock key for a stored movie
+// result: Movie.ID when set, FileMatchInfo.MovieID otherwise — the same
+// precedence the temp poster cache and the override path key on, and the key
+// updateBatchMovie's convergence loop re-resolves from fresh post-lock state.
+func posterLockKeyFor(result *resultstore.MovieResult) string {
+	key := result.FileMatchInfo.MovieID
+	if result.Movie != nil && result.Movie.ID != "" {
+		key = result.Movie.ID
+	}
+	return key
+}
+
+// validPosterLockKey is the safe-filename validation (path traversal check)
+// shared by resolvePosterID and the post-lock re-resolved keys: the poster
+// cache paths are built from this key, so it must be a plain file name.
+func validPosterLockKey(posterID string) bool {
+	return posterID == filepath.Base(posterID) && posterID != "" && posterID != "."
 }
