@@ -474,6 +474,12 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 			return err
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// The winner lookup skips cancel-requested jobs, but a still-running
+			// task of such a job holds the canonical dedupe key; migrating onto
+			// it would violate the unique index and roll back the whole merge.
+			if supErr := supersedeCancelledDedupeHolderTx(tx, actressID, sourceTask.ID); supErr != nil {
+				return supErr
+			}
 			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, false, sourceJob.CancelRequested); err != nil {
 				return err
 			}
@@ -519,6 +525,26 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 		}
 	}
 	return nil
+}
+
+// supersedeCancelledDedupeHolderTx frees the canonical dedupe key held by a
+// task whose job was cancelled: the key must be reusable for migrations that
+// run during the cancellation window.
+func supersedeCancelledDedupeHolderTx(tx *gorm.DB, canonicalActressID uint, excludeTaskID string) error {
+	var holder models.ActressSyncTask
+	err := tx.Table("actress_sync_tasks AS task").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").
+		Where("task.actress_id = ? AND task.id <> ? AND task.dedupe_key = ? AND task.status IN ? AND job.cancel_requested = 1",
+			canonicalActressID, excludeTaskID, fmt.Sprintf("actress:%d", canonicalActressID), []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).
+		First(&holder).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Model(&models.ActressSyncTask{}).
+		Where("id = ? AND status IN ?", holder.ID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).
+		Update("dedupe_key", fmt.Sprintf("actress:%d:superseded:%s", canonicalActressID, holder.ID)).Error
 }
 
 func migrateActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, actressID uint, deferred, cancelRequested bool) error {
@@ -953,11 +979,13 @@ TRIM(COALESCE(thumb_url,'')) = '' OR
 TRIM(COALESCE(japanese_name,'')) = '' OR
 (TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = '') OR
 LOWER(COALESCE(thumb_url,'')) LIKE ? OR
-LOWER(COALESCE(thumb_url,'')) LIKE ?
+(LOWER(COALESCE(thumb_url,'')) LIKE ? AND
+ SUBSTR(LOWER(COALESCE(thumb_url,'')), -1) <> '/' AND
+ INSTR(SUBSTR(LOWER(COALESCE(thumb_url,'')), INSTR(LOWER(COALESCE(thumb_url,'')), '/mono/actjpgs/') + 14), '.') = 0)
 )) OR (dmm_id <= 0 AND (
 TRIM(COALESCE(japanese_name,'')) <> '' OR TRIM(COALESCE(aliases,'')) <> '' OR
 TRIM(COALESCE(first_name,'')) <> '' OR TRIM(COALESCE(last_name,'')) <> ''
-))`, "%/mono/actjpgs/%", "%/mono/noimage/now_printing.jpg%").Order("id ASC").Find(&potential).Error
+))`, "%/mono/noimage/now_printing.jpg%", "%/mono/actjpgs/%").Order("id ASC").Find(&potential).Error
 	if err != nil {
 		return nil, err
 	}

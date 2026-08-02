@@ -619,6 +619,32 @@ func TestListSyncCandidatesIncludesNamedMissingDMMActresses(t *testing.T) {
 	require.NotContains(t, ids, unnamed.ID)
 }
 
+func TestListSyncCandidatesMatchesOnlyPlaceholderThumbs(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	ctx := context.Background()
+
+	// Complete: must be excluded — a valid .jpg DMM thumb is not a placeholder.
+	complete := &models.Actress{DMMID: 1, JapaneseName: "完全", FirstName: "Full", LastName: "Name", ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/valid.jpg"}
+	// Extensionless actjpgs placeholder: must match without SQL-side discard.
+	extensionless := &models.Actress{DMMID: 2, JapaneseName: "不足", FirstName: "Miss", LastName: "Ing", ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/placeholder"}
+	// now_printing placeholder: must match.
+	nowPrinting := &models.Actress{DMMID: 3, JapaneseName: "印刷中", FirstName: "Now", LastName: "Print", ThumbURL: "https://pics.dmm.co.jp/mono/noimage/now_printing.jpg"}
+	for _, actress := range []*models.Actress{complete, extensionless, nowPrinting} {
+		require.NoError(t, repo.Create(ctx, actress))
+	}
+
+	candidates, err := repo.ListSyncCandidates(ctx)
+	require.NoError(t, err)
+	ids := make([]uint, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.ID)
+	}
+	require.NotContains(t, ids, complete.ID)
+	require.Contains(t, ids, extensionless.ID)
+	require.Contains(t, ids, nowPrinting.ID)
+}
+
 func TestFindAllByJapaneseNameReturnsEveryDMMBackedMatch(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewActressRepository(db)

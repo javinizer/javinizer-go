@@ -277,6 +277,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 				}
 				metadata := resolver.ResolveActressMetadata(ctx, sourceInput)
 				if metadata.DMMID == actress.DMMID {
+					metadata = filterActressResolverFields(scraper, metadata)
 					if strings.TrimSpace(known.JapaneseName) == "" {
 						known.JapaneseName = strings.TrimSpace(metadata.JapaneseName)
 					}
@@ -837,6 +838,26 @@ func actressMetadataScrapers(registry scraperutil.ScraperInstancesInterface, scr
 		}
 	}
 	return orderScrapersByConfiguredPriority(result, priority)
+}
+
+// filterActressResolverFields clears fields the resolver does not advertise
+// via models.ActressFieldCapable, so an actress profile that (for instance)
+// only carries a Japanese name and avatar cannot overwrite first/last names.
+// Undeclared resolvers keep all their fields.
+func filterActressResolverFields(scraper models.Scraper, info models.ActressInfo) models.ActressInfo {
+	if !models.ResolverSupportsActressField(scraper, "actress_japanese_name") {
+		info.JapaneseName = ""
+	}
+	if !models.ResolverSupportsActressField(scraper, "actress_first_name") {
+		info.FirstName = ""
+	}
+	if !models.ResolverSupportsActressField(scraper, "actress_last_name") {
+		info.LastName = ""
+	}
+	if !models.ResolverSupportsActressField(scraper, "actress_url") {
+		info.ThumbURL = ""
+	}
+	return info
 }
 
 // linkedActressMovies ...
