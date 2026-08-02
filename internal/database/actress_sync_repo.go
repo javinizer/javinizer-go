@@ -489,7 +489,7 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 		if err := tx.First(&targetJob, "id = ?", targetTask.JobID).Error; err != nil {
 			return err
 		}
-		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) >= actressSyncScopePriority(targetJob.Scope) && sourceTask.Status == models.ActressSyncTaskRunning {
+		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) >= actressSyncScopePriority(targetJob.Scope) && sourceTask.Status == models.ActressSyncTaskRunning && !sourceJob.CancelRequested {
 			if err := skipActiveActressSyncTaskTx(tx, targetTask); err != nil {
 				return err
 			}
@@ -505,7 +505,9 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 			}
 			continue
 		}
-		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) > actressSyncScopePriority(targetJob.Scope) {
+		// A cancel-requested source must not displace the pending winner: its
+		// migration would settle as cancelled, leaving nothing runnable.
+		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) > actressSyncScopePriority(targetJob.Scope) && !sourceJob.CancelRequested {
 			if err := skipActiveActressSyncTaskTx(tx, targetTask); err != nil {
 				return err
 			}

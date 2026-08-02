@@ -174,3 +174,51 @@ func TestCreateJobSupersedesCancelRequestedConflict(t *testing.T) {
 	require.NoError(t, db.First(&storedOld, "id = ?", oldTask.ID).Error)
 	require.Contains(t, storedOld.DedupeKey, ":superseded:")
 }
+
+// A cancelling running source must not displace the pending canonical
+// winner: keep the winner runnable and migrate the cancelled source aside.
+func TestMergeMigrationKeepsCanonicalWinnerDuringCancel(t *testing.T) {
+	db, err := New(&Config{Type: "sqlite", DSN: ":memory:"})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	t.Cleanup(func() { _ = db.Close() })
+
+	source := &models.Actress{JapaneseName: "source"}
+	canonical := &models.Actress{JapaneseName: "canonical"}
+	require.NoError(t, db.Create(source).Error)
+	require.NoError(t, db.Create(canonical).Error)
+
+	leaseUntil := time.Now().UTC().Add(time.Minute)
+	srcJob := models.ActressSyncJob{ID: "job-src", Status: models.ActressSyncJobRunning, Scope: "selected", CancelRequested: true}
+	require.NoError(t, db.Create(&srcJob).Error)
+	srcTask := models.ActressSyncTask{
+		ID: "task-src", JobID: srcJob.ID, Label: "source", DedupeKey: "actress:" + strconv.FormatUint(uint64(source.ID), 10),
+		Status: models.ActressSyncTaskRunning, Stage: "running",
+		Messages: []string{}, UpdatedFields: []string{},
+		ActressID: &source.ID, LeaseToken: "tok-src", LeaseExpiresAt: &leaseUntil,
+	}
+	require.NoError(t, db.Create(&srcTask).Error)
+
+	winnerJob := models.ActressSyncJob{ID: "job-winner", Status: models.ActressSyncJobPending, Scope: "missing"}
+	require.NoError(t, db.Create(&winnerJob).Error)
+	winnerTask := models.ActressSyncTask{
+		ID: "task-winner", JobID: winnerJob.ID, Label: "canonical", DedupeKey: "actress:" + strconv.FormatUint(uint64(canonical.ID), 10),
+		Status: models.ActressSyncTaskPending, Stage: "queued",
+		Messages: []string{}, UpdatedFields: []string{},
+		ActressID: &canonical.ID,
+	}
+	require.NoError(t, db.Create(&winnerTask).Error)
+
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return migrateActiveActressSyncTasksTx(tx, canonical.ID, source.ID)
+	}))
+
+	var winner models.ActressSyncTask
+	require.NoError(t, db.First(&winner, "id = ?", winnerTask.ID).Error)
+	require.Equal(t, models.ActressSyncTaskPending, winner.Status, "canonical winner must stay runnable")
+
+	var migrated models.ActressSyncTask
+	require.NoError(t, db.First(&migrated, "id = ?", srcTask.ID).Error)
+	require.Equal(t, models.ActressSyncTaskCancelled, migrated.Status)
+	require.Contains(t, migrated.DedupeKey, ":deferred:")
+}

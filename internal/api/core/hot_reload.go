@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -104,6 +105,40 @@ func (r *APIRuntime) prepareReload(cfg *config.Config, resolver models.ScraperCo
 	return nil
 }
 
+// actressOnlyPriorityWarning reports a config-warning message when the
+// actress-field override is satisfied only by actress-only resolvers: the
+// config could never aggregate a cast for them to enrich. Hot-reload and
+// cold-start share this path so a YAML-authored misconfig is loud at boot
+// even though the API save path hard-rejects it.
+func actressOnlyPriorityWarning(reg *scraperutil.ScraperRegistry, cfg *config.Config) string {
+	if reg == nil || cfg == nil {
+		return ""
+	}
+	override, ok := cfg.Metadata.Priority.Fields["actress"]
+	if !ok || len(override) == 0 {
+		return ""
+	}
+	if len(override) == 1 && strings.EqualFold(strings.TrimSpace(override[0]), "__skip__") {
+		return ""
+	}
+	recognized, capable := false, false
+	for _, name := range override {
+		inst, found := reg.GetInstance(strings.ToLower(strings.TrimSpace(name)))
+		if !found || inst == nil {
+			continue
+		}
+		recognized = true
+		if c, ok := inst.(models.MovieSearchCapable); !ok || c.SupportsMovieSearch() {
+			capable = true
+			break
+		}
+	}
+	if recognized && !capable {
+		return fmt.Sprintf("metadata.priority.actress = [%s]: every listed scraper resolves actress metadata but never produces movie results; no cast can be aggregated — add a movie-capable scraper", strings.Join(override, ", "))
+	}
+	return ""
+}
+
 func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.ScraperRegistry) error {
 	r18DumpLookup, r18DumpCloser, dumpErr := commandutil.OpenR18DevDumpLookup(cfg)
 	if dumpErr != nil {
@@ -113,6 +148,10 @@ func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.Scr
 		logging.Warnf("%v", dumpErr)
 	}
 	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
+	if warning := actressOnlyPriorityWarning(newRegistry, cfg); warning != "" {
+		logging.Warnf("%s", warning)
+		cfg.Warnings = append(cfg.Warnings, config.ConfigWarning{Field: "actress", Scrapers: cfg.Metadata.Priority.Fields["actress"], Message: warning})
+	}
 	if err != nil {
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()
