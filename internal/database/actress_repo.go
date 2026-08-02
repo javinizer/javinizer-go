@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"gorm.io/gorm"
 )
 
 // ActressRepository persists and queries actress records, providing CRUD,
@@ -76,9 +77,32 @@ func (r *ActressRepository) FindByID(ctx context.Context, id uint) (*models.Actr
 	return r.BaseRepository.FindByID(ctx, id)
 }
 
-// Delete removes the actress with the given primary key.
+// Delete removes the actress and clears sync-task references explicitly:
+// production SQLite connections run with foreign-keys enforcement off, so the
+// migration's ON DELETE actions never fire; pending/running tasks are
+// cancelled first so they cannot complete against a deleted subject, then all
+// references are nulled so later reads cannot dereference a deleted actress.
 func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
-	return r.BaseRepository.Delete(ctx, id)
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		if err := tx.Model(&models.ActressSyncTask{}).
+			Where("actress_id = ? AND status IN ?", id, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).
+			Updates(map[string]any{
+				"status": models.ActressSyncTaskCancelled, "stage": "completed", "outcome": "cancelled",
+				"error_message": "actress_deleted", "completed_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.ActressSyncTask{}).Where("actress_id = ?", id).Update("actress_id", nil).Error; err != nil {
+			return err
+		}
+		// Delete inside the transaction — BaseRepository.Delete would take a
+		// separate connection from the pool and deadlock on writer-locked SQLite.
+		if err := tx.Delete(&models.Actress{}, id).Error; err != nil {
+			return wrapDBErr("delete", fmt.Sprintf("actress %v", id), err)
+		}
+		return nil
+	})
 }
 
 // Count returns the total number of actress records.

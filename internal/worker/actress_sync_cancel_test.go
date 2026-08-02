@@ -30,7 +30,7 @@ func TestCancelJobCancelsRunningTask(t *testing.T) {
 	taskCtx, taskCancel := context.WithCancel(context.Background())
 	defer taskCancel()
 	manager.taskMu.Lock()
-	manager.runningTasks["task-1"] = trackedSyncTask{jobID: job.ID, cancel: taskCancel}
+	manager.runningTasks["task-1"] = []trackedSyncTask{{jobID: job.ID, cancel: taskCancel}}
 	manager.taskMu.Unlock()
 
 	require.NoError(t, manager.CancelJob(job.ID))
@@ -45,15 +45,16 @@ func TestCancelJobCancelsRunningTask(t *testing.T) {
 	// ID must keep its entry (and its live context).
 	manager.taskMu.Lock()
 	newerCtx, newerCancel := context.WithCancel(context.Background())
-	manager.runningTasks["task-1"] = trackedSyncTask{jobID: job.ID, cancel: newerCancel, run: 2}
+	manager.runningTasks["task-1"] = []trackedSyncTask{{jobID: job.ID, cancel: newerCancel, run: 2}}
 	manager.taskMu.Unlock()
 	manager.untrackTask("task-1", 1)
 	require.NoError(t, newerCtx.Err())
 	manager.taskMu.Lock()
-	entry, ok := manager.runningTasks["task-1"]
+	runs, ok := manager.runningTasks["task-1"]
 	manager.taskMu.Unlock()
 	require.True(t, ok)
-	require.Equal(t, uint64(2), entry.run)
+	require.Len(t, runs, 1)
+	require.Equal(t, uint64(2), runs[0].run)
 	newerCancel()
 	manager.untrackTask("task-1", 2)
 	manager.untrackTask("unknown", 3)

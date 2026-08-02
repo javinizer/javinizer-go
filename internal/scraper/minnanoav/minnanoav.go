@@ -87,7 +87,19 @@ func buildClient(settings *models.ScraperSettings, globalProxy *models.ProxyConf
 	if ua := strings.TrimSpace(settings.UserAgent); ua != "" {
 		client.SetHeader("User-Agent", ua)
 	}
-	client.SetRedirectPolicy(resty.FlexibleRedirectPolicy(5))
+	// Search/resolves may only ever land on MinnanoAV itself: a spoofed or
+	// compromised page must not redirect the backend to loopback, private,
+	// or cloud-metadata endpoints (SSRF), and chains stay bounded.
+	client.SetRedirectPolicy(resty.RedirectPolicyFunc(func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("minnanoav: stopped after 5 redirects")
+		}
+		host := strings.ToLower(req.URL.Hostname())
+		if host == "minnano-av.com" || strings.HasSuffix(host, ".minnano-av.com") {
+			return nil
+		}
+		return fmt.Errorf("minnanoav: refusing redirect to %s", req.URL.Redacted())
+	}))
 	return client
 }
 

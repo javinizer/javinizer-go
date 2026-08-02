@@ -65,9 +65,12 @@ type ActressSyncManager struct {
 	active              atomic.Int32
 	// taskMu guards runningTasks; it is separate from mu because Stop holds
 	// mu across wg.Wait while task goroutines still need to unregister.
-	taskMu       sync.Mutex
-	taskRunSeq   uint64
-	runningTasks map[string]trackedSyncTask
+	taskMu     sync.Mutex
+	taskRunSeq uint64
+	// runningTasks maps a task ID to ALL in-flight runs for that task: a
+	// merge can requeue a task under its old ID while the original run is
+	// still executing, and cancelling the job must abort every one of them.
+	runningTasks map[string][]trackedSyncTask
 }
 
 // NewActressSyncManager ...
@@ -77,7 +80,7 @@ func NewActressSyncManager(deps ActressSyncManagerDeps) *ActressSyncManager {
 		owner:        uuid.NewString(),
 		wake:         make(chan struct{}, 1),
 		retryDelay:   time.Second,
-		runningTasks: make(map[string]trackedSyncTask),
+		runningTasks: make(map[string][]trackedSyncTask),
 	}
 	if deps.DB != nil {
 		m.repo = database.NewActressSyncRepository(deps.DB)
@@ -183,6 +186,10 @@ func (m *ActressSyncManager) dispatch(ctx context.Context) {
 			_ = m.repo.RecoverExpiredLeases(time.Now().UTC())
 		}
 		for !m.canonicalRetryPending() {
+			if ctx.Err() != nil {
+				// A wake racing Stop must not claim more tasks after shutdown.
+				break
+			}
 			cfg, registry := m.runtimeSnapshot()
 			if int(m.active.Load()) >= m.maxWorkers(cfg) {
 				break
@@ -206,7 +213,7 @@ func (m *ActressSyncManager) dispatch(ctx context.Context) {
 			taskCtx, taskCancel := context.WithCancel(ctx)
 			run := m.taskRunSeq + 1
 			m.taskRunSeq = run
-			m.runningTasks[task.ID] = trackedSyncTask{jobID: task.JobID, cancel: taskCancel, run: run}
+			m.runningTasks[task.ID] = append(m.runningTasks[task.ID], trackedSyncTask{jobID: task.JobID, cancel: taskCancel, run: run})
 			m.taskMu.Unlock()
 			m.active.Add(1)
 			m.wg.Add(1)
@@ -529,12 +536,14 @@ func (m *ActressSyncManager) CancelJob(id string) error {
 		return err
 	}
 	m.taskMu.Lock()
-	for taskID, entry := range m.runningTasks {
-		if entry.jobID == id {
-			entry.cancelled = true
-			entry.cancel()
-			m.runningTasks[taskID] = entry
+	for taskID, runs := range m.runningTasks {
+		for i := range runs {
+			if runs[i].jobID == id {
+				runs[i].cancelled = true
+				runs[i].cancel()
+			}
 		}
+		m.runningTasks[taskID] = runs
 	}
 	m.taskMu.Unlock()
 	m.signal()
@@ -546,8 +555,17 @@ func (m *ActressSyncManager) CancelJob(id string) error {
 // the entry, and removing it would cancel the retry's context.
 func (m *ActressSyncManager) untrackTask(id string, run uint64) {
 	m.taskMu.Lock()
-	if entry, ok := m.runningTasks[id]; ok && entry.run == run {
+	runs := m.runningTasks[id]
+	kept := runs[:0]
+	for _, entry := range runs {
+		if entry.run != run {
+			kept = append(kept, entry)
+		}
+	}
+	if len(kept) == 0 {
 		delete(m.runningTasks, id)
+	} else {
+		m.runningTasks[id] = kept
 	}
 	m.taskMu.Unlock()
 }
@@ -557,7 +575,12 @@ func (m *ActressSyncManager) untrackTask(id string, run uint64) {
 func (m *ActressSyncManager) isTaskCancelled(taskID string) bool {
 	m.taskMu.Lock()
 	defer m.taskMu.Unlock()
-	return m.runningTasks[taskID].cancelled
+	for _, entry := range m.runningTasks[taskID] {
+		if entry.cancelled {
+			return true
+		}
+	}
+	return false
 }
 
 // uniqueActressIDs ...

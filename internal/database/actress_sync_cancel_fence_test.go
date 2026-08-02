@@ -221,4 +221,48 @@ func TestMergeMigrationKeepsCanonicalWinnerDuringCancel(t *testing.T) {
 	require.NoError(t, db.First(&migrated, "id = ?", srcTask.ID).Error)
 	require.Equal(t, models.ActressSyncTaskCancelled, migrated.Status)
 	require.Contains(t, migrated.DedupeKey, ":deferred:")
+} // Deleting an actress cancels her in-flight sync tasks and detaches the
+// terminal ones; SQLite FK enforcement is off in production, so rows holding
+// the reference would otherwise dangle.
+func TestActressDeleteCancelsAndDetachesSyncTasks(t *testing.T) {
+	db, err := New(&Config{Type: "sqlite", DSN: ":memory:"})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	t.Cleanup(func() { _ = db.Close() })
+
+	actress := &models.Actress{JapaneseName: "delete me"}
+	require.NoError(t, NewActressRepository(db).Create(context.Background(), actress))
+
+	job := models.ActressSyncJob{ID: "job-del", Status: models.ActressSyncJobRunning, Scope: "missing"}
+	require.NoError(t, db.Create(&job).Error)
+	leaseUntil := time.Now().UTC().Add(time.Minute)
+	canonicalKey := "actress:" + strconv.FormatUint(uint64(actress.ID), 10)
+	live := models.ActressSyncTask{
+		ID: "task-live", JobID: job.ID, Label: "live", DedupeKey: canonicalKey,
+		Status: models.ActressSyncTaskRunning, Stage: "running",
+		Messages: []string{}, UpdatedFields: []string{},
+		ActressID: &actress.ID, LeaseToken: "tok-live", LeaseExpiresAt: &leaseUntil,
+	}
+	doneAt := time.Now().UTC()
+	terminal := models.ActressSyncTask{
+		ID: "task-done", JobID: job.ID, Label: "done", DedupeKey: canonicalKey + ":done",
+		Status: models.ActressSyncTaskCompleted, Stage: "completed", Outcome: "updated",
+		Messages: []string{}, UpdatedFields: []string{},
+		ActressID: &actress.ID, CompletedAt: &doneAt,
+	}
+	require.NoError(t, db.Create(&live).Error)
+	require.NoError(t, db.Create(&terminal).Error)
+
+	require.NoError(t, NewActressRepository(db).Delete(context.Background(), actress.ID))
+
+	var storedLive models.ActressSyncTask
+	require.NoError(t, db.First(&storedLive, "id = ?", live.ID).Error)
+	require.Equal(t, models.ActressSyncTaskCancelled, storedLive.Status)
+	require.Equal(t, "actress_deleted", storedLive.ErrorMessage)
+	require.Nil(t, storedLive.ActressID)
+
+	var storedTerminal models.ActressSyncTask
+	require.NoError(t, db.First(&storedTerminal, "id = ?", terminal.ID).Error)
+	require.Equal(t, models.ActressSyncTaskCompleted, storedTerminal.Status)
+	require.Nil(t, storedTerminal.ActressID)
 }
