@@ -4131,9 +4131,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "source_id",
-                "source_updated_at",
-                "target_id",
-                "target_updated_at"
+                "target_id"
             ],
             "properties": {
                 "resolutions": {
@@ -4158,6 +4156,7 @@ const docTemplate = `{
                     "example": 12
                 },
                 "target_updated_at": {
+                    "description": "TargetUpdatedAt/SourceUpdatedAt fence the merge against concurrent edits\nobserved in a merge preview. They are optional for backward compatibility:\nomitting them performs an unfenced merge (pre-versioning behavior).",
                     "type": "string"
                 }
             }

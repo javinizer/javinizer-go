@@ -44,6 +44,9 @@ type ActressRepositoryInterface interface {
 	Delete(ctx context.Context, id uint) error
 	PreviewMerge(ctx context.Context, targetID, sourceID uint) (*ActressMergePreview, error)
 	Merge(ctx context.Context, targetID, sourceID uint, resolutions map[string]string) (*ActressMergeResult, error)
+	// MergeWithVersions merges like Merge and additionally fences on the
+	// actresses' updated_at timestamps; zero timestamps skip the fence.
+	MergeWithVersions(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, targetUpdatedAt, sourceUpdatedAt time.Time) (*ActressMergeResult, error)
 }
 
 // GenreTranslationRepositoryInterface defines the contract for genre translation operations

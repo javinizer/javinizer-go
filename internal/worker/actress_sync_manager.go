@@ -33,6 +33,13 @@ type ActressSyncCreateRequest struct {
 	ActressIDs []uint `json:"actress_ids"`
 }
 
+// trackedSyncTask records an in-flight sync task so per-job cancellation can
+// abort its context before the lease expires.
+type trackedSyncTask struct {
+	jobID  string
+	cancel context.CancelFunc
+}
+
 // ActressSyncManager ...
 type ActressSyncManager struct {
 	deps                ActressSyncManagerDeps
@@ -49,11 +56,24 @@ type ActressSyncManager struct {
 	wg                  sync.WaitGroup
 	wake                chan struct{}
 	active              atomic.Int32
+	// taskMu guards runningTasks/cancelledJobs; it is separate from mu
+	// because Stop holds mu across wg.Wait while task goroutines still
+	// need to unregister themselves.
+	taskMu        sync.Mutex
+	runningTasks  map[string]trackedSyncTask
+	cancelledJobs map[string]bool
 }
 
 // NewActressSyncManager ...
 func NewActressSyncManager(deps ActressSyncManagerDeps) *ActressSyncManager {
-	m := &ActressSyncManager{deps: deps, owner: uuid.NewString(), wake: make(chan struct{}, 1), retryDelay: time.Second}
+	m := &ActressSyncManager{
+		deps:          deps,
+		owner:         uuid.NewString(),
+		wake:          make(chan struct{}, 1),
+		retryDelay:    time.Second,
+		runningTasks:  make(map[string]trackedSyncTask),
+		cancelledJobs: make(map[string]bool),
+	}
 	if deps.DB != nil {
 		m.repo = database.NewActressSyncRepository(deps.DB)
 	}
@@ -173,7 +193,19 @@ func (m *ActressSyncManager) dispatch(ctx context.Context) {
 			}
 			m.active.Add(1)
 			m.wg.Add(1)
-			go m.runTaskWithContext(ctx, task, timeout, cfg, registry)
+			taskCtx, taskCancel := context.WithCancel(ctx)
+			m.taskMu.Lock()
+			m.runningTasks[task.ID] = trackedSyncTask{jobID: task.JobID, cancel: taskCancel}
+			cancelRequested := m.cancelledJobs[task.JobID]
+			m.taskMu.Unlock()
+			if cancelRequested {
+				// The job was cancelled between claim and registration.
+				taskCancel()
+			}
+			go func() {
+				defer m.untrackTask(task.ID)
+				m.runTaskWithContext(taskCtx, task, timeout, cfg, registry)
+			}()
 		}
 	}
 }
@@ -368,6 +400,16 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 	})
 	if err != nil {
 		if runCtx.Err() != nil && errors.Is(err, context.Canceled) {
+			if m.isJobCancelled(task.JobID) {
+				// The job was cancelled: complete the task now instead of
+				// letting its lease linger until expiry, which would leave
+				// the job stuck in a non-terminal state until recovery.
+				task.Status, task.Outcome = models.ActressSyncTaskCancelled, "cancelled"
+				task.ErrorMessage = ""
+				if completeErr := m.repo.CompleteTask(task, task.LeaseToken); completeErr != nil {
+					logging.Warnf("Actress sync cancel completion failed: %v", completeErr)
+				}
+			}
 			return
 		}
 		if m.requeueCanonicalTask(task, err) {
@@ -455,8 +497,36 @@ func (m *ActressSyncManager) CancelJob(id string) error {
 	if err := m.repo.CancelJob(id); err != nil {
 		return err
 	}
+	m.taskMu.Lock()
+	m.cancelledJobs[id] = true
+	for _, entry := range m.runningTasks {
+		if entry.jobID == id {
+			entry.cancel()
+		}
+	}
+	m.taskMu.Unlock()
 	m.signal()
 	return nil
+}
+
+// untrackTask drops a finished task from the cancellation registry and
+// releases its context.
+func (m *ActressSyncManager) untrackTask(id string) {
+	m.taskMu.Lock()
+	entry, ok := m.runningTasks[id]
+	delete(m.runningTasks, id)
+	m.taskMu.Unlock()
+	if ok {
+		entry.cancel()
+	}
+}
+
+// isJobCancelled reports whether job cancellation was requested through this
+// manager instance.
+func (m *ActressSyncManager) isJobCancelled(jobID string) bool {
+	m.taskMu.Lock()
+	defer m.taskMu.Unlock()
+	return m.cancelledJobs[jobID]
 }
 
 // uniqueActressIDs ...

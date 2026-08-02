@@ -31,6 +31,12 @@ func (e *ThumbnailRejectedError) Error() string {
 	return "thumbnail rejected: " + e.Reason
 }
 
+// MaxThumbnailPixels bounds decoded thumbnail dimensions. The response byte
+// limit only caps the compressed payload; a tiny, highly compressed image can
+// declare enormous dimensions and make image.Decode allocate the full pixel
+// buffer, so the header dimensions are checked before decoding.
+const MaxThumbnailPixels = 100_000_000
+
 // ValidateThumbnail ...
 func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, minDimension int, maxBytes int64) (ThumbnailValidation, error) {
 	rawURL = strings.TrimSpace(rawURL)
@@ -63,14 +69,24 @@ func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, min
 	if err != nil || !strings.HasPrefix(strings.ToLower(mediaType), "image/") {
 		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("content type is %q", headers.Get("Content-Type"))}
 	}
+	header, _, err := image.DecodeConfig(bytes.NewReader(body))
+	if err != nil {
+		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("image decode failed: %v", err)}
+	}
+	if header.Width <= 0 || header.Height <= 0 {
+		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("image reports invalid dimensions %dx%d", header.Width, header.Height)}
+	}
+	if int64(header.Width)*int64(header.Height) > MaxThumbnailPixels {
+		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("dimensions %dx%d exceed the %d pixel decoder limit", header.Width, header.Height, MaxThumbnailPixels)}
+	}
+	if minDimension > 0 && (header.Width < minDimension || header.Height < minDimension) {
+		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("dimensions are %dx%d, minimum is %d", header.Width, header.Height, minDimension)}
+	}
 	decoded, format, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
 		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("image decode failed: %v", err)}
 	}
 	bounds := decoded.Bounds()
-	if minDimension > 0 && (bounds.Dx() < minDimension || bounds.Dy() < minDimension) {
-		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("dimensions are %dx%d, minimum is %d", bounds.Dx(), bounds.Dy(), minDimension)}
-	}
 	digest := sha256.Sum256(body)
 	return ThumbnailValidation{
 		CheckedAt: time.Now().UTC().Format(time.RFC3339),

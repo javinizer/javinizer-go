@@ -47,12 +47,14 @@ function clearStoredSession(): void {
 // message. It extends Error so existing `instanceof Error` checks keep working.
 export class ApiError extends Error {
 	code?: string;
+	status?: number;
 	params?: Record<string, unknown> | null;
 
-	constructor(message: string, code?: string, params?: Record<string, unknown> | null) {
+	constructor(message: string, code?: string, params?: Record<string, unknown> | null, status?: number) {
 		super(message);
 		this.name = 'ApiError';
 		this.code = code;
+		this.status = status;
 		this.params = params;
 	}
 }
@@ -103,7 +105,7 @@ export class BaseClient {
 			const error: ErrorResponse = await response.json().catch(() => ({
 				error: `HTTP ${response.status}: ${response.statusText}`,
 			}));
-			throw new ApiError(error.error || 'API request failed', error.code, error.params);
+			throw new ApiError(error.error || 'API request failed', error.code, error.params, response.status);
 		}
 
 		const text = await response.text();

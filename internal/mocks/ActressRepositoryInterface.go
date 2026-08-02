@@ -6,6 +6,7 @@ package mocks
 
 import (
 	"context"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -1216,6 +1217,98 @@ func (_c *MockActressRepositoryInterface_Merge_Call) Return(actressMergeResult *
 }
 
 func (_c *MockActressRepositoryInterface_Merge_Call) RunAndReturn(run func(ctx context.Context, targetID uint, sourceID uint, resolutions map[string]string) (*database.ActressMergeResult, error)) *MockActressRepositoryInterface_Merge_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MergeWithVersions provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) MergeWithVersions(ctx context.Context, targetID uint, sourceID uint, resolutions map[string]string, targetUpdatedAt time.Time, sourceUpdatedAt time.Time) (*database.ActressMergeResult, error) {
+	ret := _mock.Called(ctx, targetID, sourceID, resolutions, targetUpdatedAt, sourceUpdatedAt)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MergeWithVersions")
+	}
+
+	var r0 *database.ActressMergeResult
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, uint, map[string]string, time.Time, time.Time) (*database.ActressMergeResult, error)); ok {
+		return returnFunc(ctx, targetID, sourceID, resolutions, targetUpdatedAt, sourceUpdatedAt)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, uint, map[string]string, time.Time, time.Time) *database.ActressMergeResult); ok {
+		r0 = returnFunc(ctx, targetID, sourceID, resolutions, targetUpdatedAt, sourceUpdatedAt)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*database.ActressMergeResult)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint, uint, map[string]string, time.Time, time.Time) error); ok {
+		r1 = returnFunc(ctx, targetID, sourceID, resolutions, targetUpdatedAt, sourceUpdatedAt)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_MergeWithVersions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MergeWithVersions'
+type MockActressRepositoryInterface_MergeWithVersions_Call struct {
+	*mock.Call
+}
+
+// MergeWithVersions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - targetID uint
+//   - sourceID uint
+//   - resolutions map[string]string
+//   - targetUpdatedAt time.Time
+//   - sourceUpdatedAt time.Time
+func (_e *MockActressRepositoryInterface_Expecter) MergeWithVersions(ctx any, targetID any, sourceID any, resolutions any, targetUpdatedAt any, sourceUpdatedAt any) *MockActressRepositoryInterface_MergeWithVersions_Call {
+	return &MockActressRepositoryInterface_MergeWithVersions_Call{Call: _e.mock.On("MergeWithVersions", ctx, targetID, sourceID, resolutions, targetUpdatedAt, sourceUpdatedAt)}
+}
+
+func (_c *MockActressRepositoryInterface_MergeWithVersions_Call) Run(run func(ctx context.Context, targetID uint, sourceID uint, resolutions map[string]string, targetUpdatedAt time.Time, sourceUpdatedAt time.Time)) *MockActressRepositoryInterface_MergeWithVersions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 uint
+		if args[2] != nil {
+			arg2 = args[2].(uint)
+		}
+		var arg3 map[string]string
+		if args[3] != nil {
+			arg3 = args[3].(map[string]string)
+		}
+		var arg4 time.Time
+		if args[4] != nil {
+			arg4 = args[4].(time.Time)
+		}
+		var arg5 time.Time
+		if args[5] != nil {
+			arg5 = args[5].(time.Time)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+			arg5,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_MergeWithVersions_Call) Return(actressMergeResult *database.ActressMergeResult, err error) *MockActressRepositoryInterface_MergeWithVersions_Call {
+	_c.Call.Return(actressMergeResult, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_MergeWithVersions_Call) RunAndReturn(run func(ctx context.Context, targetID uint, sourceID uint, resolutions map[string]string, targetUpdatedAt time.Time, sourceUpdatedAt time.Time) (*database.ActressMergeResult, error)) *MockActressRepositoryInterface_MergeWithVersions_Call {
 	_c.Call.Return(run)
 	return _c
 }

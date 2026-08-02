@@ -18,7 +18,7 @@
 	import ActressMergeModal from './components/ActressMergeModal.svelte';
 	import ActressPagination from './components/ActressPagination.svelte';
 	import ActressSyncModal from './components/ActressSyncModal.svelte';
-	import { isActressSyncTerminal, loadActressSyncSnapshot, loadActiveActressSyncJobs, mergeActiveActressSyncJobs, orderActiveActressSyncJobs } from './sync-runner';
+	import { appendActressSyncJob, isActressSyncJobNotFound, isActressSyncTerminal, loadActressSyncSnapshot, loadActiveActressSyncJobs, mergeActiveActressSyncJobs, orderActiveActressSyncJobs } from './sync-runner';
 	import * as m from '$lib/paraglide/messages';
 	import { createConfigQuery } from '$lib/query/queries';
 
@@ -107,6 +107,16 @@
 			}
 		} catch (error) {
 			if (syncDestroyed || !syncJob || syncJob.id !== currentJob.id) return;
+			if (isActressSyncJobNotFound(error)) {
+				// The job was pruned server-side (retention) — drop it and move
+				// on to the next queued job instead of polling a deleted ID.
+				stopPolling();
+				syncJob = null;
+				syncTasks = [];
+				showSyncModal = false;
+				void showNextSyncJob();
+				return;
+			}
 			if (!syncPollFailureShown) {
 				syncPollFailureShown = true;
 				toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
@@ -142,7 +152,7 @@
 			const response = await apiClient.createActressSyncJob({ scope, actress_ids: scope === 'selected' ? store.selectedIds : undefined });
 			if (syncDestroyed) return;
 			if (scope === 'selected' && syncJob && (!isActressSyncTerminal(syncJob) || syncQueue.length > 0)) {
-				mergeActiveSyncJobs([response.job]);
+				syncQueue = appendActressSyncJob(syncJob, syncQueue, response.job);
 				showSyncModal = true;
 				if (!syncTimer) startPolling();
 				return;

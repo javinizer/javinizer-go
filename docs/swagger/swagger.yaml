@@ -62,12 +62,14 @@ definitions:
         example: 12
         type: integer
       target_updated_at:
+        description: |-
+          TargetUpdatedAt/SourceUpdatedAt fence the merge against concurrent edits
+          observed in a merge preview. They are optional for backward compatibility:
+          omitting them performs an unfenced merge (pre-versioning behavior).
         type: string
     required:
     - source_id
-    - source_updated_at
     - target_id
-    - target_updated_at
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeResponse:
     properties:

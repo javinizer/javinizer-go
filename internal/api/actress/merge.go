@@ -1,10 +1,8 @@
 package actress
 
 import (
-	"context"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -103,14 +101,7 @@ func mergeActresses(deps ActressDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-		versionedRepo, ok := deps.ActressRepo.(interface {
-			MergeWithVersions(context.Context, uint, uint, map[string]string, time.Time, time.Time) (*database.ActressMergeResult, error)
-		})
-		if !ok {
-			core.RespondInternalError(c, errors.New("actress repository does not support versioned merges"))
-			return
-		}
-		result, err := versionedRepo.MergeWithVersions(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions, req.TargetUpdatedAt, req.SourceUpdatedAt)
+		result, err := deps.ActressRepo.MergeWithVersions(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions, req.TargetUpdatedAt, req.SourceUpdatedAt)
 		if err != nil {
 			writeActressMergeError(c, err)
 			return

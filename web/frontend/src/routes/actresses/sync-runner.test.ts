@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActressSyncJob, ActressSyncTask } from '$lib/api/types';
-import { buildActressSyncSummary, isActressSyncTerminal, loadActressSyncSnapshot, loadActiveActressSyncJobs, mergeActiveActressSyncJobs, orderActiveActressSyncJobs } from './sync-runner';
+import { appendActressSyncJob, buildActressSyncSummary, isActressSyncJobNotFound, isActressSyncTerminal, loadActressSyncSnapshot, loadActiveActressSyncJobs, mergeActiveActressSyncJobs, orderActiveActressSyncJobs } from './sync-runner';
 
 const job: ActressSyncJob = {
 	id: 'job',
@@ -84,6 +84,28 @@ describe('actress sync summary', () => {
 		expect(orderActiveActressSyncJobs([])).toEqual({ current: null, queued: [] });
 		const concurrent = { ...job, id: 'concurrent' };
 		expect(mergeActiveActressSyncJobs(job, [newer], [job, newer, concurrent])).toEqual([newer, concurrent]);
+	});
+
+	it('drops queued jobs that vanished from the server list', () => {
+		const stale = { ...job, id: 'stale' };
+		const keptJob = { ...job, id: 'kept' };
+		const added = { ...job, id: 'added' };
+		expect(mergeActiveActressSyncJobs(job, [stale, keptJob], [job, keptJob, added])).toEqual([keptJob, added]);
+	});
+
+	it('appends a locally created job without reconciling the queue', () => {
+		const queued = { ...job, id: 'queued' };
+		const created = { ...job, id: 'created' };
+		expect(appendActressSyncJob(job, [queued], created)).toEqual([queued, created]);
+		expect(appendActressSyncJob(job, [queued], queued)).toEqual([queued]);
+		expect(appendActressSyncJob(job, [queued], job)).toEqual([queued]);
+	});
+
+	it('detects a deleted job from 404 poll failures', () => {
+		expect(isActressSyncJobNotFound({ status: 404 })).toBe(true);
+		expect(isActressSyncJobNotFound({ status: 500 })).toBe(false);
+		expect(isActressSyncJobNotFound(new Error('boom'))).toBe(false);
+		expect(isActressSyncJobNotFound(null)).toBe(false);
 	});
 
 	it('recognizes durable terminal states', () => {
