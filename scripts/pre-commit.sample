@@ -4,6 +4,14 @@
 #
 # Installation: cp scripts/pre-commit.sample .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 # To skip this hook temporarily: git commit --no-verify
+# For a fast pass (skip the full unit tests + svelte-check; keeps gofmt,
+# lint, vet, build scoped to changed packages): PRE_COMMIT_FAST=1 git commit
+#
+# Design note: every expensive check is scoped to the STAGED change. The
+# previous version ran gofmt/golangci-lint/go vet/`go test -short ./...` on
+# the whole repo plus a swagger regeneration on every commit — several
+# minutes even for a docs-only change (a full test run alone takes minutes,
+# and svelte-check costs ~1 minute on this codebase).
 
 set -e
 
@@ -15,6 +23,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 FORBIDDEN_PATHS=".planning/"
+START=$SECONDS
 
 for path in $FORBIDDEN_PATHS; do
     if git diff --cached --name-only | grep -q "^${path}"; then
@@ -28,7 +37,24 @@ GOLANGCI_LINT="${HOME}/go/bin/golangci-lint"
 REQUIRED_VERSION_MAJOR=2
 REQUIRED_VERSION_MINOR=4
 
+# ---------------------------------------------------------------------------
+# Staged-file scoping
+# STAGED_GO: added/copied/modified/renamed .go files (deletions excluded — a
+# deleted file cannot break formatting/lint and its package is linted via a
+# surviving sibling).
+STAGED_GO=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' || true)
+# Unique package patterns (./internal/api/...) for the staged Go files.
+GO_PKGS=""
+if [ -n "$STAGED_GO" ]; then
+    GO_PKGS=$(echo "$STAGED_GO" | xargs -n1 dirname | sort -u | sed 's|^|./|; s|$|/...|')
+fi
+# Swagger output documents internal/** handler annotations; regen is only
+# meaningful when those (or the docs themselves) are staged.
+API_CHANGED=$(git diff --cached --name-only | grep -cE '^(internal|cmd)/' || true)
+# ---------------------------------------------------------------------------
+
 echo -e "${BLUE}Running pre-commit checks...${NC}"
+[ -n "${PRE_COMMIT_FAST:-}" ] && echo -e "${YELLOW}PRE_COMMIT_FAST=1 — skipping unit tests and svelte-check${NC}"
 echo ""
 
 # Function to check golangci-lint version
@@ -64,7 +90,8 @@ check_golangci_lint_version() {
     return 1
 }
 
-# Check 1: Go formatting
+# Check 1: Go formatting (whole-repo gofmt is ~1s; keep it global — a repo-
+# wide format issue breaks CI regardless of what was staged)
 echo -e "${BLUE}[1/8] Checking code formatting...${NC}"
 UNFORMATTED=$(gofmt -l . 2>&1)
 if [ -n "$UNFORMATTED" ]; then
@@ -76,73 +103,106 @@ fi
 echo -e "${GREEN}✓ Code formatting OK${NC}"
 echo ""
 
-# Check 2: golangci-lint
-echo -e "${BLUE}[2/8] Running golangci-lint...${NC}"
-if [[ -x "$GOLANGCI_LINT" ]] && check_golangci_lint_version; then
-    echo -e "${BLUE}  Using golangci-lint from $GOLANGCI_LINT${NC}"
-    if ! "$GOLANGCI_LINT" run ./... 2>&1; then
-        echo -e "${RED}✗ golangci-lint found issues${NC}"
+# Check 2: golangci-lint (changed packages only)
+if [ -n "$GO_PKGS" ]; then
+    echo -e "${BLUE}[2/8] Running golangci-lint (staged packages)...${NC}"
+    if [[ -x "$GOLANGCI_LINT" ]] && check_golangci_lint_version; then
+        echo -e "${BLUE}  Using golangci-lint from $GOLANGCI_LINT${NC}"
+        # shellcheck disable=SC2086 # word-splitting GO_PKGS is intentional
+        if ! "$GOLANGCI_LINT" run $GO_PKGS 2>&1; then
+            echo -e "${RED}✗ golangci-lint found issues${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✓ golangci-lint passed${NC}"
+    else
+        echo -e "${YELLOW}⚠ golangci-lint not installed or version too old (skipping)${NC}"
+        echo -e "${YELLOW}  Required: >=${REQUIRED_VERSION_MAJOR}.${REQUIRED_VERSION_MINOR}.0${NC}"
+        if [[ -x "$GOLANGCI_LINT" ]]; then
+            echo -e "${YELLOW}  Current: $("$GOLANGCI_LINT" version 2>&1 | head -1)${NC}"
+        fi
+        echo -e "${YELLOW}  Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${REQUIRED_VERSION_MAJOR}.x${NC}"
+    fi
+else
+    echo -e "${BLUE}[2/8] golangci-lint${NC} (skipped — no staged Go files)"
+fi
+echo ""
+
+# Check 3: Go vet (changed packages only)
+if [ -n "$GO_PKGS" ]; then
+    echo -e "${BLUE}[3/8] Running go vet (staged packages)...${NC}"
+    # shellcheck disable=SC2086 # word-splitting GO_PKGS is intentional
+    if ! go vet $GO_PKGS 2>&1; then
+        echo -e "${RED}✗ go vet found issues${NC}"
         exit 1
     fi
-    echo -e "${GREEN}✓ golangci-lint passed${NC}"
+    echo -e "${GREEN}✓ go vet passed${NC}"
 else
-    echo -e "${YELLOW}⚠ golangci-lint not installed or version too old (skipping)${NC}"
-    echo -e "${YELLOW}  Required: >=${REQUIRED_VERSION_MAJOR}.${REQUIRED_VERSION_MINOR}.0${NC}"
-    if [[ -x "$GOLANGCI_LINT" ]]; then
-        echo -e "${YELLOW}  Current: $("$GOLANGCI_LINT" version 2>&1 | head -1)${NC}"
+    echo -e "${BLUE}[3/8] go vet${NC} (skipped — no staged Go files)"
+fi
+echo ""
+
+# Check 4: Fast unit tests (changed packages only; the full suite takes
+# minutes — it belongs in pre-push, not pre-commit)
+if [ -n "$GO_PKGS" ] && [ -z "${PRE_COMMIT_FAST:-}" ]; then
+    echo -e "${BLUE}[4/8] Running fast unit tests (staged packages)...${NC}"
+    # Increase timeout to 60s for the fast test pass
+    # shellcheck disable=SC2086 # word-splitting GO_PKGS is intentional
+    if ! go test -short -timeout=60s $GO_PKGS 2>&1; then
+        echo -e "${RED}✗ Tests failed${NC}"
+        exit 1
     fi
-    echo -e "${YELLOW}  Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${REQUIRED_VERSION_MAJOR}.x${NC}"
+    echo -e "${GREEN}✓ Tests passed${NC}"
+elif [ -z "$GO_PKGS" ]; then
+    echo -e "${BLUE}[4/8] unit tests${NC} (skipped — no staged Go files)"
+else
+    echo -e "${BLUE}[4/8] unit tests${NC} (skipped — PRE_COMMIT_FAST=1)"
 fi
 echo ""
 
-# Check 3: Go vet
-echo -e "${BLUE}[3/8] Running go vet...${NC}"
-if ! go vet ./... 2>&1; then
-    echo -e "${RED}✗ go vet found issues${NC}"
-    exit 1
+# Check 5: Build verification (only when Go files staged; with a warm build
+# cache this is a few seconds and catches cross-package breakage the scoped
+# checks miss)
+if [ -n "$GO_PKGS" ]; then
+    echo -e "${BLUE}[5/8] Verifying build...${NC}"
+    if ! go build -o /tmp/javinizer-test ./cmd/javinizer 2>&1; then
+        echo -e "${RED}✗ Build failed${NC}"
+        exit 1
+    fi
+    rm -f /tmp/javinizer-test
+    echo -e "${GREEN}✓ Build successful${NC}"
+else
+    echo -e "${BLUE}[5/8] build${NC} (skipped — no staged Go files)"
 fi
-echo -e "${GREEN}✓ go vet passed${NC}"
 echo ""
 
-# Check 4: Fast unit tests (skip flaky network tests)
-echo -e "${BLUE}[4/8] Running fast unit tests...${NC}"
-# Increase timeout to 60s for the fast test pass
-if ! go test -short -timeout=60s ./... 2>&1; then
-    echo -e "${RED}✗ Tests failed${NC}"
-    exit 1
+# Check 6: Swagger documentation (only when internal/ or cmd/ files staged —
+# the generated docs reflect handler annotations; a data-only or frontend
+# commit cannot drift them)
+if [ "$API_CHANGED" -gt 0 ]; then
+    echo -e "${BLUE}[6/8] Checking Swagger documentation...${NC}"
+    if ! command -v swag &> /dev/null && ! (export PATH="$PATH:$(go env GOPATH)/bin" && command -v swag &> /dev/null); then
+        # Never go-install during a commit — a network fetch in a hook is
+        # worse than a skipped doc check (CI regenerates + fails loudly).
+        echo -e "${YELLOW}⚠ swag not installed, skipping swagger check${NC}"
+        echo -e "${YELLOW}  Install: go install github.com/swaggo/swag/cmd/swag@latest${NC}"
+    else
+        export PATH=$PATH:$(go env GOPATH)/bin
+        if ! make swagger &> /dev/null; then
+            echo -e "${RED}✗ Swagger generation failed${NC}"
+            exit 1
+        fi
+        if ! git diff --quiet -- docs/swagger/; then
+            echo -e "${RED}✗ Swagger documentation is out of date${NC}"
+            echo -e "${YELLOW}Run 'make swagger' and commit the changes${NC}"
+            echo ""
+            git status docs/swagger/
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Swagger documentation up to date${NC}"
+    fi
+else
+    echo -e "${BLUE}[6/8] swagger docs${NC} (skipped — no staged internal/cmd files)"
 fi
-echo -e "${GREEN}✓ Tests passed${NC}"
-echo ""
-
-# Check 5: Build verification
-echo -e "${BLUE}[5/8] Verifying build...${NC}"
-if ! go build -o /tmp/javinizer-test ./cmd/javinizer 2>&1; then
-    echo -e "${RED}✗ Build failed${NC}"
-    exit 1
-fi
-rm -f /tmp/javinizer-test
-echo -e "${GREEN}✓ Build successful${NC}"
-echo ""
-
-# Check 6: Swagger documentation
-echo -e "${BLUE}[6/8] Checking Swagger documentation...${NC}"
-if ! command -v swag &> /dev/null; then
-    echo -e "${YELLOW}⚠️  swag not installed, installing...${NC}"
-    go install github.com/swaggo/swag/cmd/swag@latest
-fi
-export PATH=$PATH:$(go env GOPATH)/bin
-if ! make swagger &> /dev/null; then
-    echo -e "${RED}✗ Swagger generation failed${NC}"
-    exit 1
-fi
-if ! git diff --quiet -- docs/swagger/; then
-    echo -e "${RED}✗ Swagger documentation is out of date${NC}"
-    echo -e "${YELLOW}Run 'make swagger' and commit the changes${NC}"
-    echo ""
-    git status docs/swagger/
-    exit 1
-fi
-echo -e "${GREEN}✓ Swagger documentation up to date${NC}"
 echo ""
 
 # Check 7: Frontend Prettier formatting (only staged frontend files)
@@ -175,9 +235,10 @@ else
 fi
 echo ""
 
-# Check 8: Frontend type checking (only if frontend src files changed)
+# Check 8: Frontend type checking (only if frontend src files changed;
+# svelte-check costs ~1 minute, so honor PRE_COMMIT_FAST here)
 FRONTEND_CHANGED=$(git diff --cached --name-only | grep -c "^web/frontend/src/" || true)
-if [ "$FRONTEND_CHANGED" -gt 0 ]; then
+if [ "$FRONTEND_CHANGED" -gt 0 ] && [ -z "${PRE_COMMIT_FAST:-}" ]; then
     echo -e "${BLUE}[8/8] Running frontend type check (svelte-check)...${NC}"
     if [ -d "web/frontend/node_modules" ]; then
         if ! (cd web/frontend && npx svelte-check --threshold error) 2>&1; then
@@ -188,17 +249,19 @@ if [ "$FRONTEND_CHANGED" -gt 0 ]; then
     else
         echo -e "${YELLOW}⚠ Frontend dependencies not installed, skipping type check${NC}"
     fi
-else
+elif [ "$FRONTEND_CHANGED" -eq 0 ]; then
     echo -e "${BLUE}[8/8] Frontend type check${NC} (skipped — no frontend changes)"
+else
+    echo -e "${BLUE}[8/8] Frontend type check${NC} (skipped — PRE_COMMIT_FAST=1)"
 fi
 echo ""
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}All pre-commit checks passed!${NC}"
+echo -e "${GREEN}All pre-commit checks passed!${NC} ($((SECONDS - START))s)"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo -e "${YELLOW}Tip: Run 'make swagger' if you modified handler files${NC}"
 echo -e "${YELLOW}Tip: Run 'make coverage-check' before pushing to ensure coverage threshold is met${NC}"
 echo -e "${YELLOW}Tip: Run 'cd web/frontend && npm run format' before staging frontend changes${NC}"
+echo -e "${YELLOW}Tip: PRE_COMMIT_FAST=1 git commit skips unit tests and svelte-check${NC}"
 
 exit 0
