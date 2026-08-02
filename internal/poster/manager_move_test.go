@@ -2,6 +2,7 @@ package poster
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -15,7 +16,7 @@ func moveFixture(t *testing.T) (*PosterManager, afero.Fs, string) {
 	t.Helper()
 	fs := afero.NewMemMapFs()
 	pm := NewPosterManager(fs, "/temp", nil)
-	dir := "/temp/posters/job-move"
+	dir := filepath.Join("/temp", "posters", "job-move")
 	require.NoError(t, afero.WriteFile(fs, dir+"/OLD-1-full.jpg", []byte("full-bytes"), 0o644))
 	require.NoError(t, afero.WriteFile(fs, dir+"/OLD-1.jpg", []byte("preview-bytes"), 0o644))
 	return pm, fs, dir
@@ -70,7 +71,7 @@ func TestMoveAssets_NoAssetsIsNoOp(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	pm := NewPosterManager(fs, "/temp", nil)
 	require.NoError(t, pm.MoveAssets("job-move", "NOPE-1", "NOPE-2"))
-	entries, err := afero.ReadDir(fs, "/temp/posters/job-move")
+	entries, err := afero.ReadDir(fs, filepath.Join("/temp", "posters", "job-move"))
 	assert.Error(t, err, "no directory materialized for a fully-absent pair")
 	_ = entries
 }
@@ -146,7 +147,7 @@ func (f *moveFailFs) Rename(oldname, newname string) error {
 func moveFailFixture(t *testing.T) (fs *moveFailFs, dir string) {
 	t.Helper()
 	base := afero.NewMemMapFs()
-	dir = "/temp/posters/job-move"
+	dir = filepath.Join("/temp", "posters", "job-move")
 	require.NoError(t, afero.WriteFile(base, dir+"/OLD-1-full.jpg", []byte("full-bytes"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/OLD-1.jpg", []byte("preview-bytes"), 0o644))
 	return &moveFailFs{Fs: base}, dir
@@ -159,7 +160,7 @@ func moveFailFixture(t *testing.T) (fs *moveFailFs, dir string) {
 func TestMoveAssets_ErrorBranches(t *testing.T) {
 	t.Run("stat failure", func(t *testing.T) {
 		fs, dir := moveFailFixture(t)
-		fs.statErr = map[string]error{dir + "/OLD-1-full.jpg": os.ErrPermission}
+		fs.statErr = map[string]error{filepath.Join(dir, "OLD-1-full.jpg"): os.ErrPermission}
 		pm := NewPosterManager(fs, "/temp", nil)
 		err := pm.MoveAssets("job-move", "OLD-1", "NEW-2")
 		require.Error(t, err)
@@ -184,7 +185,7 @@ func TestMoveAssets_ErrorBranches(t *testing.T) {
 	t.Run("destination replace failure", func(t *testing.T) {
 		fs, dir := moveFailFixture(t)
 		require.NoError(t, afero.WriteFile(fs.Fs, dir+"/NEW-2-full.jpg", []byte("stale"), 0o644))
-		fs.removeErr = map[string]error{dir + "/NEW-2-full.jpg": os.ErrPermission}
+		fs.removeErr = map[string]error{filepath.Join(dir, "NEW-2-full.jpg"): os.ErrPermission}
 		pm := NewPosterManager(fs, "/temp", nil)
 		err := pm.MoveAssets("job-move", "OLD-1", "NEW-2")
 		require.Error(t, err)
@@ -205,7 +206,7 @@ func TestMoveAssets_ErrorBranches(t *testing.T) {
 		fs, dir := moveFailFixture(t)
 		// Source full asset absent; the stale destination removal fails.
 		require.NoError(t, fs.Fs.Remove(dir+"/OLD-1-full.jpg"))
-		fs.removeErr = map[string]error{dir + "/NEW-2-full.jpg": os.ErrPermission}
+		fs.removeErr = map[string]error{filepath.Join(dir, "NEW-2-full.jpg"): os.ErrPermission}
 		pm := NewPosterManager(fs, "/temp", nil)
 		err := pm.MoveAssets("job-move", "OLD-1", "NEW-2")
 		require.Error(t, err)

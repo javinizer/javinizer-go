@@ -2,6 +2,7 @@ package worker
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/poster"
@@ -55,7 +56,7 @@ func (f *migrateFailFs) OpenFile(name string, flag int, perm os.FileMode) (afero
 func migrateFixture(t *testing.T, fs afero.Fs) (poster.PosterGenerator, string) {
 	t.Helper()
 	const jobID = "job-migrate"
-	dir := "/temp/posters/" + jobID
+	dir := filepath.Join("/temp", "posters", jobID)
 	require.NoError(t, afero.WriteFile(fs, dir+"/OLD-1-full.jpg", []byte("origin-full"), 0o644))
 	require.NoError(t, afero.WriteFile(fs, dir+"/OLD-1.jpg", []byte("origin-preview"), 0o644))
 	return poster.NewScrapePosterGenerator(poster.NewPosterManager(fs, "/temp", nil), "", ""), dir
@@ -93,7 +94,7 @@ func TestMigratePosterCacheAssets_BlockedDestinationPreservesOrigin(t *testing.T
 	require.NoError(t, afero.WriteFile(base, dir+"/NEW-2-full.jpg", []byte("foreign-full"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/NEW-2.jpg", []byte("foreign-preview"), 0o644))
 	fs := &migrateFailFs{Fs: base, removeErr: map[string]error{
-		dir + "/NEW-2-full.jpg": &os.PathError{Op: "remove", Path: dir + "/NEW-2-full.jpg", Err: os.ErrExist},
+		filepath.Join(dir, "NEW-2-full.jpg"): &os.PathError{Op: "remove", Path: filepath.Join(dir, "NEW-2-full.jpg"), Err: os.ErrExist},
 	}}
 	gen = poster.NewScrapePosterGenerator(poster.NewPosterManager(fs, "/temp", nil), "", "")
 
@@ -132,7 +133,7 @@ func TestMigratePosterCacheAssets_PartialMoveRestoresCompletedLegOnly(t *testing
 		base := afero.NewMemMapFs()
 		_, dir := migrateFixture(t, base)
 		fs := &migrateFailFs{Fs: base, renameErr: map[string]error{
-			dir + "/OLD-1.jpg": os.ErrPermission,
+			filepath.Join(dir, "OLD-1.jpg"): os.ErrPermission,
 		}}
 		gen := poster.NewScrapePosterGenerator(poster.NewPosterManager(fs, "/temp", nil), "", "")
 
@@ -157,8 +158,8 @@ func TestMigratePosterCacheAssets_PartialMoveRestoresCompletedLegOnly(t *testing
 		base := afero.NewMemMapFs()
 		_, dir := migrateFixture(t, base)
 		fs := &migrateFailFs{Fs: base, renameErr: map[string]error{
-			dir + "/OLD-1-full.jpg": os.ErrPermission,
-			dir + "/OLD-1.jpg":      os.ErrPermission,
+			filepath.Join(dir, "OLD-1-full.jpg"): os.ErrPermission,
+			filepath.Join(dir, "OLD-1.jpg"):      os.ErrPermission,
 		}}
 		gen := poster.NewScrapePosterGenerator(poster.NewPosterManager(fs, "/temp", nil), "", "")
 
@@ -186,11 +187,11 @@ func TestMigratePosterCacheAssets_ReversalFailureSurfacedHonestly(t *testing.T) 
 	fs := &migrateFailFs{
 		Fs: base,
 		removeErr: map[string]error{
-			dir + "/NEW-2-full.jpg": os.ErrPermission, // forward leg 1 blocked at the destination
+			filepath.Join(dir, "NEW-2-full.jpg"): os.ErrPermission, // forward leg 1 blocked at the destination
 		},
 		writeErrOn: true,
 		writeErr: map[string]error{
-			dir + "/NEW-2-full.jpg": os.ErrPermission, // the snapshot reversal cannot displace it either
+			filepath.Join(dir, "NEW-2-full.jpg"): os.ErrPermission, // the snapshot reversal cannot displace it either
 		},
 	}
 	gen = poster.NewScrapePosterGenerator(poster.NewPosterManager(fs, "/temp", nil), "", "")
