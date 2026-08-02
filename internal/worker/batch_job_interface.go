@@ -711,11 +711,12 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	// the new one. The preview URLs embedded in the persisted movie
 	// (CroppedPosterURL AND OriginalCroppedPosterURL — the poster reset
 	// flow reads the latter) carry the posterID path segment, so BOTH are
-	// re-pointed. A failed move is reversed immediately
-	// (MigratePosterCacheAssets): MoveAssets joins per-asset-leg errors
-	// instead of short-circuiting, so one leg may have completed. Generators
-	// without a manager (test stubs) hold no assets: the move degrades to
-	// the URL rewrite only.
+	// re-pointed. A failed move is reversed immediately by
+	// MigratePosterCacheAssets via both keys' pre-move SNAPSHOTS (MoveAssets
+	// joins per-asset-leg errors instead of short-circuiting, so one leg may
+	// have completed; its normalizing semantics make a reversed re-key
+	// destructive). Generators without a manager (test stubs) hold no assets:
+	// the move degrades to the URL rewrite only.
 	var moveAssetsBack func() error
 	if destKey != "" {
 		var moveErr error

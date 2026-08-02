@@ -224,18 +224,23 @@ func TestRewritePosterIDInPreviewURL(t *testing.T) {
 		"a look-alike segment in the query string is never consulted")
 }
 
-// moverStubGen is a poster generator with the move capability whose
-// MovePosterAssets records (from,to) pairs and fails deterministically:
-// failAt fails exactly the failAt-th call (1-based, 0 = never); failFrom
-// fails every call from failFrom onward. Used to drive the id-rekey
-// forward-move, the immediate partial-move reversal, and the move-back
-// compensation legs deterministically.
+// moverStubGen is a poster generator with the move AND snapshot
+// capabilities. MovePosterAssets records (from,to) pairs and fails
+// deterministically: failAt fails exactly the failAt-th call (1-based, 0 =
+// never); failFrom fails every call from failFrom onward. Snapshots succeed
+// (no assets held) unless snapshotErr names the movieID whose snapshot
+// fails; restores are counted and can fail via restoreErr. Used to drive the
+// id-rekey forward-move, the immediate snapshot-based partial-move reversal,
+// and the move-back compensation legs deterministically.
 type moverStubGen struct {
 	recordingPosterGen
-	calls    [][2]string
-	failAt   int
-	failFrom int
-	failErr  error
+	calls       [][2]string
+	snapshotErr map[string]error
+	restores    int
+	restoreErr  error
+	failAt      int
+	failFrom    int
+	failErr     error
 }
 
 func (g *moverStubGen) MovePosterAssets(_, fromID, toID string) error {
@@ -249,13 +254,49 @@ func (g *moverStubGen) MovePosterAssets(_, fromID, toID string) error {
 	return nil
 }
 
+// SnapshotPosterAssets satisfies posterAssetSnapshooter so the migration
+// preflights; a nil snapshot mirrors a generator whose manager holds no
+// assets for the key.
+func (g *moverStubGen) SnapshotPosterAssets(_, movieID string) (*poster.AssetsSnapshot, error) {
+	if err, ok := g.snapshotErr[movieID]; ok {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// RestorePosterAssets records the immediate reversal (two restores per
+// failed forward move: destination first, then origin) and can fail it.
+func (g *moverStubGen) RestorePosterAssets(_ *poster.AssetsSnapshot) error {
+	g.restores++
+	return g.restoreErr
+}
+
+// moverOnlyStubGen has the move capability WITHOUT the snapshot capability:
+// MigratePosterCacheAssets cannot preflight it, so a forward failure must be
+// left in place and reported, never reversed via the hazardous opposite
+// re-key.
+type moverOnlyStubGen struct {
+	recordingPosterGen
+	calls   [][2]string
+	failErr error
+}
+
+func (g *moverOnlyStubGen) MovePosterAssets(_, fromID, toID string) error {
+	g.calls = append(g.calls, [2]string{fromID, toID})
+	if g.failErr != nil && len(g.calls) == 1 {
+		return g.failErr
+	}
+	return nil
+}
+
 // TestApplyFieldOverride_IDRekeyMoveFailureRejectsOverride pins the forward
-// half of P3-6 plus F1(b): when the asset migration fails, the override is
-// REJECTED before any part is persisted — the stored movie, the preview URL,
-// and the store indexing stay at the old key — and the completed legs of a
-// PARTIAL move (MoveAssets joins per-leg errors instead of short-circuiting)
-// are reversed best-effort IMMEDIATELY, so a rejected override never strands
-// the origin's assets at the destination key.
+// half of P3-6 together with the audit-5 F1 reversal contract: when the
+// asset migration fails, the override is REJECTED before any part is
+// persisted — the stored movie, the preview URL, and the store indexing
+// stay at the old key — and the possibly-partial move (MoveAssets joins
+// per-leg errors instead of short-circuiting) is reversed IMMEDIATELY by
+// replaying BOTH keys' pre-move snapshots (destination first, then origin),
+// never by a hazardous opposite re-key.
 func TestApplyFieldOverride_IDRekeyMoveFailureRejectsOverride(t *testing.T) {
 	const (
 		jobID = "job-idmovefail"
@@ -263,7 +304,7 @@ func TestApplyFieldOverride_IDRekeyMoveFailureRejectsOverride(t *testing.T) {
 		newID = "DMM-NEW7"
 	)
 
-	t.Run("partial move legs reversed immediately", func(t *testing.T) {
+	t.Run("partial move legs reversed immediately via snapshots", func(t *testing.T) {
 		je, tracker, fs, filePath, oldFull, _ := idRekeyFixture(t, jobID, oldID, newID)
 		gen := &moverStubGen{failAt: 1, failErr: errors.New("fs jammed")}
 		je.posterGen = gen
@@ -274,8 +315,10 @@ func TestApplyFieldOverride_IDRekeyMoveFailureRejectsOverride(t *testing.T) {
 		assert.Contains(t, err.Error(), "fs jammed")
 		assert.NotContains(t, err.Error(), "partial move reversal failed",
 			"the immediate reversal succeeded, so no reversal failure rides along")
-		assert.Equal(t, [][2]string{{oldID, newID}, {newID, oldID}}, gen.calls,
-			"the forward failure triggers the immediate best-effort reversal of completed legs")
+		assert.Equal(t, [][2]string{{oldID, newID}}, gen.calls,
+			"F1: the forward failure is compensated WITHOUT an opposite re-key call")
+		assert.Equal(t, 2, gen.restores,
+			"the reversal replays the destination snapshot, then the origin one")
 
 		stored, getErr := tracker.GetMovieResult(filePath)
 		require.NoError(t, getErr)
@@ -290,7 +333,7 @@ func TestApplyFieldOverride_IDRekeyMoveFailureRejectsOverride(t *testing.T) {
 
 	t.Run("reversal failure is joined onto the error", func(t *testing.T) {
 		je, tracker, _, filePath, _, _ := idRekeyFixture(t, jobID, oldID, newID)
-		gen := &moverStubGen{failFrom: 1, failErr: errors.New("fs jammed")}
+		gen := &moverStubGen{failAt: 1, failErr: errors.New("fs jammed"), restoreErr: errors.New("restore jammed")}
 		je.posterGen = gen
 
 		_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
@@ -298,11 +341,82 @@ func TestApplyFieldOverride_IDRekeyMoveFailureRejectsOverride(t *testing.T) {
 		assert.Contains(t, err.Error(), "migrate poster assets to re-keyed movie "+newID)
 		assert.Contains(t, err.Error(), "partial move reversal failed",
 			"a failed immediate reversal must surface, not be swallowed")
-		assert.Equal(t, [][2]string{{oldID, newID}, {newID, oldID}}, gen.calls)
+		assert.Contains(t, err.Error(), "restore jammed")
+		assert.Equal(t, [][2]string{{oldID, newID}}, gen.calls)
+		assert.Equal(t, 2, gen.restores, "both snapshot restores are attempted even when they fail")
 
 		stored, getErr := tracker.GetMovieResult(filePath)
 		require.NoError(t, getErr)
 		assert.Equal(t, oldID, stored.Movie.ID, "the stored movie is untouched either way")
+		assertPosterSourceLockFree(t, jobID, oldID)
+		assertPosterSourceLockFree(t, jobID, newID)
+	})
+
+	t.Run("snapshot failure fails closed before the move", func(t *testing.T) {
+		t.Run("origin", func(t *testing.T) {
+			je, tracker, fs, filePath, oldFull, oldPreview := idRekeyFixture(t, jobID, oldID, newID)
+			gen := &moverStubGen{snapshotErr: map[string]error{oldID: errors.New("snapshot jammed")}}
+			je.posterGen = gen
+
+			_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "snapshot origin poster assets before re-key")
+			assert.Contains(t, err.Error(), "snapshot jammed")
+			assert.Empty(t, gen.calls,
+				"a move against an un-capturable pre-state has no honest reversal — it must not start")
+
+			stored, getErr := tracker.GetMovieResult(filePath)
+			require.NoError(t, getErr)
+			assert.Equal(t, oldID, stored.Movie.ID, "the stored movie is untouched when the preflight rejects")
+			assert.Equal(t, oldID, tracker.GetCurrentMovieID(filePath))
+			full, ok := fileContents(t, fs, oldFull)
+			require.True(t, ok)
+			assert.Equal(t, "old-full-bytes", full)
+			preview, ok := fileContents(t, fs, oldPreview)
+			require.True(t, ok)
+			assert.Equal(t, "old-preview-bytes", preview)
+			assertPosterSourceLockFree(t, jobID, oldID)
+			assertPosterSourceLockFree(t, jobID, newID)
+		})
+
+		t.Run("destination", func(t *testing.T) {
+			je, _, fs, _, oldFull, oldPreview := idRekeyFixture(t, jobID, oldID, newID)
+			gen := &moverStubGen{snapshotErr: map[string]error{newID: errors.New("snapshot jammed")}}
+			je.posterGen = gen
+
+			_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "snapshot destination poster assets before re-key")
+			assert.Contains(t, err.Error(), "snapshot jammed")
+			assert.Empty(t, gen.calls, "the move must not start without a destination pre-state")
+
+			full, ok := fileContents(t, fs, oldFull)
+			require.True(t, ok)
+			assert.Equal(t, "old-full-bytes", full)
+			preview, ok := fileContents(t, fs, oldPreview)
+			require.True(t, ok)
+			assert.Equal(t, "old-preview-bytes", preview)
+			assertPosterSourceLockFree(t, jobID, oldID)
+			assertPosterSourceLockFree(t, jobID, newID)
+		})
+	})
+
+	t.Run("mover without snapshot capability is not reversed unsafely", func(t *testing.T) {
+		je, tracker, _, filePath, _, _ := idRekeyFixture(t, jobID, oldID, newID)
+		gen := &moverOnlyStubGen{failErr: errors.New("fs jammed")}
+		je.posterGen = gen
+
+		_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "migrate poster assets to re-keyed movie "+newID)
+		assert.Contains(t, err.Error(), "no asset snapshot capability",
+			"without pre-move snapshots a possibly partial move is reported, not reverse-re-keyed")
+		assert.Equal(t, [][2]string{{oldID, newID}}, gen.calls,
+			"the forward move ran once and NO hazardous opposite re-key was attempted")
+
+		stored, getErr := tracker.GetMovieResult(filePath)
+		require.NoError(t, getErr)
+		assert.Equal(t, oldID, stored.Movie.ID, "the stored movie is untouched")
 		assertPosterSourceLockFree(t, jobID, oldID)
 		assertPosterSourceLockFree(t, jobID, newID)
 	})

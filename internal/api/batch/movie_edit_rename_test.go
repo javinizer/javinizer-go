@@ -345,11 +345,16 @@ func TestUpdateBatchMovie_RenameRefreshFailureReversesMove(t *testing.T) {
 	assertPosterSourceLockFreeAPI(t, jobID, newID)
 }
 
-// TestUpdateBatchMovie_RenameMigrationFailureRejectsEdit pins the forward
-// failure: when the A→B migration cannot complete (here the old key owns no
-// full-size asset and the new key's stale destination is a non-empty
-// directory that cannot be dropped), the edit is rejected with 500 BEFORE
-// any part is persisted.
+// TestUpdateBatchMovie_RenameMigrationFailureRejectsEdit pins the audit-5
+// F1 fix end-to-end over the REAL filesystem: the destination key is
+// blocked by foreign content that cannot be displaced (a NON-EMPTY
+// DIRECTORY filed under the destination's full-size asset name). The
+// migration goes through worker.MigratePosterCacheAssets, whose fail-closed
+// preflight snapshot sees the un-capturable blocker and REJECTS the edit
+// with 500 BEFORE any move leg or persist runs. Crucially, the blocker is
+// never relocated onto the origin key (the pre-fix reversed re-key renamed
+// exactly this directory onto {oldID}-full.jpg while reporting success),
+// and the origin's own assets survive byte-for-byte.
 func TestUpdateBatchMovie_RenameMigrationFailureRejectsEdit(t *testing.T) {
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
@@ -370,6 +375,10 @@ func TestUpdateBatchMovie_RenameMigrationFailureRejectsEdit(t *testing.T) {
 	})
 	jobID := job.GetID()
 	posterDir := filepath.Join("data", "temp", "posters", jobID)
+	// The origin owns real assets whose survival the fix guarantees.
+	previewBytes := seedRenameCache(t, posterDir, oldID, srv.oldJPEG)
+	oldFull := filepath.Join(posterDir, oldID+"-full.jpg")
+	oldPreview := filepath.Join(posterDir, oldID+".jpg")
 	// Stale destination that cannot be dropped: a NON-EMPTY directory.
 	blockerDir := filepath.Join(posterDir, newID+"-full.jpg")
 	require.NoError(t, os.MkdirAll(blockerDir, 0o755))
@@ -381,13 +390,24 @@ func TestUpdateBatchMovie_RenameMigrationFailureRejectsEdit(t *testing.T) {
 	code, body := patchRenameMovie(router, jobID, oldID, renamed)
 	require.Equal(t, http.StatusInternalServerError, code, body)
 	assert.Contains(t, body, "Failed to migrate poster assets")
-	assert.NotContains(t, body, "partial move reversal failed",
-		"the immediate reversal of the failed migration succeeded")
+	assert.Contains(t, body, "snapshot destination poster assets before re-key",
+		"the fail-closed preflight names why the migration cannot start honestly")
 
-	// Best-effort reversal semantics, honestly documented: the old key owned
-	// no assets, so nothing of value was lost; the offending stale directory
-	// was relocated back onto the old key's name.
-	assertPathAbsent(t, blockerDir)
+	// The foreign blocker stays exactly where it was — NOTHING is relocated
+	// onto the origin key (pre-fix the reversed re-key renamed this directory
+	// onto {oldID}-full.jpg and reported success).
+	marker, err := os.ReadFile(filepath.Join(blockerDir, "marker"))
+	require.NoError(t, err, "the blocker directory must still exist at the destination key")
+	assert.Equal(t, "stale", string(marker))
+	// The origin's full-size bytes SURVIVE as the regular files the edit
+	// found, byte-for-byte.
+	full, err := os.ReadFile(oldFull)
+	require.NoError(t, err, "the origin's full-size asset must survive")
+	assert.Equal(t, srv.oldJPEG, full)
+	preview, err := os.ReadFile(oldPreview)
+	require.NoError(t, err)
+	assert.Equal(t, previewBytes, preview)
+	// Nothing new materialized at either key beyond the seeder + blocker.
 	res := storedMovieResultByPath(t, job, filePath)
 	require.NotNil(t, res.Movie)
 	assert.Equal(t, oldID, res.Movie.ID, "the stored movie is untouched when the migration rejects")

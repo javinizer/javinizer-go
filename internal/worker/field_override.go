@@ -311,25 +311,79 @@ func RewritePosterIDInPreviewURL(raw, oldID, newID string) string {
 // BOTH keys' poster-source locks in lexical order across the move.
 //
 // A forward-move FAILURE is reversed immediately, best-effort, before this
-// function returns: PosterManager.MoveAssets runs per-asset renames and JOINS
-// errors across legs instead of short-circuiting, so a reported failure can
-// still have completed one leg — and each per-asset rename is individually
-// reversible. Leaving a completed leg in place would strand the origin's
-// assets under the destination key, where crop/preview lookups for that key
-// (possibly owned by another result whose files the completed leg
-// destructively replaced) would serve the wrong movie's image. A failed
-// reversal is joined onto the surfaced error instead of being swallowed.
+// function returns — but the reversal is SNAPSHOT-BASED, never a reversed
+// re-key. PosterManager.MoveAssets is state-NORMALIZING, not bidirectional:
+// per leg it removes the destination BEFORE renaming, and an absent-source
+// leg DELETES the destination counterpart (rekey-direction semantics: the new
+// key must not carry an image no persisted state produced). When the forward
+// move fails ON a leg before its rename (a non-empty-directory blocker at the
+// destination, rename EPERM/EROFS, ...), applying those semantics backwards
+// via a second, opposite MovePosterAssets call puts the origin's SURVIVING
+// file on the reverse call's destination side — where the absent-source
+// branch can delete it — and puts the foreign blocker on the reverse call's
+// source side, where it can be renamed ONTO the origin key while the call
+// reports success. Both silently destroy the origin's assets.
+//
+// So when the generator exposes posterAssetSnapshooter, the pre-move state of
+// BOTH keys is captured BEFORE the move (fail-closed: a snapshot failure
+// rejects the migration without touching anything, because a move against an
+// un-capturable pre-state has no honest reversal — a directory filed under a
+// destination asset name belongs to exactly that blocker class). A reported
+// forward failure then replays the snapshots through RestorePosterAssets:
+//
+//   - the ORIGIN snapshot rewrites the origin's exact pre-move bytes. The
+//     forward move never CREATES a from-key file, so anything absent at
+//     snapshot time is still absent: RestoreAssets' absent-leg removal finds
+//     nothing to remove and can never delete the origin's surviving file
+//     (the property MoveAssets' absent-source branch lacks, because there the
+//     absent file is on the re-key direction's source side);
+//   - the DESTINATION snapshot removes files the completed legs relocated in
+//     (absent pre-move ⇒ removed on restore) and rewrites FROM MEMORY any
+//     foreign content a completed leg destructively replaced — a blocker is
+//     never relocated onto the origin key, and a leg the forward move never
+//     touched is untouched on both sides;
+//   - a reversal failure (e.g. foreign destination content that cannot be
+//     cleanly displaced again) is joined onto the surfaced error instead of
+//     being swallowed.
+//
+// The returned moveBack closure for a SUCCESSFUL move compensates a later
+// persist/plan failure and still uses an opposite MovePosterAssets call: a
+// FULLY completed A→B move leaves the origin key empty at every leg, so the
+// reverse move's absent-source legs can only hit already-absent files and
+// its rename legs invert the completed ones 1:1 — the one direction where
+// MoveAssets' normalizing semantics are a true inverse. (Foreign destination
+// bytes the forward move legitimately replaced are defined away by the
+// re-key itself, so no closure could resurrect them.)
 //
 // A generator without the move capability (test stubs, nil) holds no assets:
-// the call degrades to (nil, nil) — the re-key is then state-only.
+// the call degrades to (nil, nil) — the re-key is then state-only. A mover
+// WITHOUT the snapshot capability cannot preflight: a forward failure leaves
+// the possibly-partial move in place and says so on the error, instead of
+// running the hazardous reverse re-key.
 func MigratePosterCacheAssets(gen poster.PosterGenerator, jobID, fromKey, toKey string) (moveBack func() error, err error) {
 	mover, ok := gen.(posterAssetMover)
 	if !ok {
 		return nil, nil
 	}
+	var originSnap, destSnap *poster.AssetsSnapshot
+	snapshooter, reversible := gen.(posterAssetSnapshooter)
+	if reversible {
+		if originSnap, err = snapshooter.SnapshotPosterAssets(jobID, fromKey); err != nil {
+			return nil, fmt.Errorf("migrate poster assets to re-keyed movie %s: snapshot origin poster assets before re-key from %s: %w", toKey, fromKey, err)
+		}
+		if destSnap, err = snapshooter.SnapshotPosterAssets(jobID, toKey); err != nil {
+			return nil, fmt.Errorf("migrate poster assets to re-keyed movie %s: snapshot destination poster assets before re-key: %w", toKey, err)
+		}
+	}
 	if moveErr := mover.MovePosterAssets(jobID, fromKey, toKey); moveErr != nil {
 		errMsg := fmt.Errorf("migrate poster assets to re-keyed movie %s: %w", toKey, moveErr)
-		if reverseErr := mover.MovePosterAssets(jobID, toKey, fromKey); reverseErr != nil {
+		if !reversible {
+			return nil, fmt.Errorf("%w (no asset snapshot capability: a possibly partial move was left in place rather than reversed unsafely)", errMsg)
+		}
+		if reverseErr := errors.Join(
+			snapshooter.RestorePosterAssets(destSnap),
+			snapshooter.RestorePosterAssets(originSnap),
+		); reverseErr != nil {
 			errMsg = fmt.Errorf("%w (partial move reversal failed: %w)", errMsg, reverseErr)
 		}
 		return nil, errMsg
