@@ -527,6 +527,14 @@ func (m *ActressSyncManager) ListTasks(id string, limit int) ([]models.ActressSy
 	return m.repo.ListTasks(id, limit)
 }
 
+// CountTasks returns the unbounded task count for the given view.
+func (m *ActressSyncManager) CountTasks(id, view string) (int64, error) {
+	if _, err := m.repo.FindJob(id); err != nil {
+		return 0, err
+	}
+	return m.repo.CountTasks(id, view)
+}
+
 // ListRunningTasks returns currently running tasks for a sync job.
 func (m *ActressSyncManager) ListRunningTasks(id string) ([]models.ActressSyncTask, error) {
 	if _, err := m.repo.FindJob(id); err != nil {

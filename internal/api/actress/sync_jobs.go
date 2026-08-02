@@ -138,9 +138,10 @@ func listActressSyncJobTasks(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 		jobID := c.Param("jobID")
+		view := c.Query("view")
 		var tasks []models.ActressSyncTask
 		var err error
-		switch c.Query("view") {
+		switch view {
 		case "active":
 			tasks, err = manager.ListRunningTasks(jobID)
 		case "diagnostics":
@@ -158,7 +159,12 @@ func listActressSyncJobTasks(rt *core.APIRuntime) gin.HandlerFunc {
 			writeActressSyncError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, actressSyncTasksResponse{Tasks: tasks, Total: len(tasks)})
+		total, err := manager.CountTasks(jobID, view)
+		if err != nil {
+			writeActressSyncError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, actressSyncTasksResponse{Tasks: tasks, Total: int(total)})
 	}
 }
 

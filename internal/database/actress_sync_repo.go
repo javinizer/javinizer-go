@@ -183,6 +183,22 @@ func (r *ActressSyncRepository) ListDiagnosticTasks(jobID string, limit int) ([]
 	return tasks, err
 }
 
+// CountTasks returns the real (unbounded) number of tasks for a job matching
+// the given view: "" counts all, "active" counts running, "diagnostics"
+// mirrors ListDiagnosticTasks' filter.
+func (r *ActressSyncRepository) CountTasks(jobID, view string) (int64, error) {
+	query := r.db.Model(&models.ActressSyncTask{}).Where("job_id = ?", jobID)
+	switch view {
+	case "active":
+		query = query.Where("status = ?", models.ActressSyncTaskRunning)
+	case "diagnostics":
+		query = query.Where("status IN ? OR TRIM(COALESCE(warning, '')) <> '' OR TRIM(COALESCE(error_message, '')) <> ''", []string{models.ActressSyncTaskSkipped, models.ActressSyncTaskConflict, models.ActressSyncTaskFailed, models.ActressSyncTaskCancelled})
+	}
+	var count int64
+	err := query.Count(&count).Error
+	return count, err
+}
+
 // ClaimNext ...
 func (r *ActressSyncRepository) ClaimNext(owner string, leaseUntil time.Time) (*models.ActressSyncTask, error) {
 	var claimed models.ActressSyncTask
@@ -493,6 +509,20 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 		// only safe when the winner actually holds that key — a deferred
 		// holder does not, and the running canonical holder would collide.
 		winnerHoldsCanonical := targetTask.DedupeKey == fmt.Sprintf("actress:%d", actressID)
+		if isDeferredActressSyncDedupeKey(targetTask.DedupeKey) {
+			// The deferred task already queues this actress for its canonical
+			// run; migrating the source too would duplicate that work later.
+			if sourceTask.Status == models.ActressSyncTaskPending {
+				if err := skipMergedActressSyncTaskTx(tx, sourceTask, actressID); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, true, true); err != nil {
+				return err
+			}
+			continue
+		}
 		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) >= actressSyncScopePriority(targetJob.Scope) && sourceTask.Status == models.ActressSyncTaskRunning && !sourceJob.CancelRequested && winnerHoldsCanonical {
 			if err := skipActiveActressSyncTaskTx(tx, targetTask); err != nil {
 				return err

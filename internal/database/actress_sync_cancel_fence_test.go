@@ -271,3 +271,50 @@ func TestActressDeleteCancelsAndDetachesSyncTasks(t *testing.T) {
 	require.Equal(t, models.ActressSyncJobCompleted, storedJob.Status, "job aggregates must settle once its tasks cancel")
 	require.Equal(t, 1, storedJob.Cancelled)
 }
+
+// With a deferred task queued on the target, a pending duplicate must not be
+// silently migrated into a second deferred run.
+func TestMergeWinnerDeferredAbsorbsPendingSource(t *testing.T) {
+	db, err := New(&Config{Type: "sqlite", DSN: ":memory:"})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	t.Cleanup(func() { _ = db.Close() })
+
+	canonical := &models.Actress{JapaneseName: "canonical"}
+	source := &models.Actress{JapaneseName: "source"}
+	require.NoError(t, db.Create(canonical).Error)
+	require.NoError(t, db.Create(source).Error)
+
+	// Winner: pending task whose key was deferred after a stronger-scope
+	// occupation — canonical key is free but the win is already queued.
+	syncJob := models.ActressSyncJob{ID: "job-winner-dup", Status: models.ActressSyncJobRunning, Scope: "selected"}
+	require.NoError(t, db.Create(&syncJob).Error)
+	winnerTask := models.ActressSyncTask{
+		ID: "task-winner-dup", JobID: syncJob.ID, Label: "canonical",
+		DedupeKey: deferredActressSyncDedupeKey(canonical.ID, "task-winner-dup"),
+		Status:    models.ActressSyncTaskPending, Stage: "queued",
+		Messages: []string{}, UpdatedFields: []string{}, ActressID: &canonical.ID,
+	}
+	require.NoError(t, db.Create(&winnerTask).Error)
+
+	srcJob := models.ActressSyncJob{ID: "job-src-dup", Status: models.ActressSyncJobPending, Scope: "selected"}
+	require.NoError(t, db.Create(&srcJob).Error)
+	srcTask := models.ActressSyncTask{
+		ID: "task-src-dup", JobID: srcJob.ID, Label: "source",
+		DedupeKey: "actress:" + strconv.FormatUint(uint64(source.ID), 10),
+		Status:    models.ActressSyncTaskPending, Stage: "queued",
+		Messages: []string{}, UpdatedFields: []string{}, ActressID: &source.ID,
+	}
+	require.NoError(t, db.Create(&srcTask).Error)
+
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return migrateActiveActressSyncTasksTx(tx, canonical.ID, source.ID)
+	}))
+
+	var storedSrc, storedWinner models.ActressSyncTask
+	require.NoError(t, db.First(&storedSrc, "id = ?", srcTask.ID).Error)
+	require.NoError(t, db.First(&storedWinner, "id = ?", winnerTask.ID).Error)
+	require.Equal(t, models.ActressSyncTaskSkipped, storedSrc.Status, "incoming duplicate must not queue a second sync")
+	require.Equal(t, deferredActressSyncDedupeKey(canonical.ID, "task-winner-dup"), storedWinner.DedupeKey)
+	require.Equal(t, models.ActressSyncTaskPending, storedWinner.Status)
+}

@@ -561,7 +561,7 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 	}
 	matchesByDMM := make(map[int]models.ActressInfo)
 	for _, candidate := range candidates {
-		if candidate.info.DMMID > 0 && identityNameMatches(names, candidate.info.JapaneseName) {
+		if candidate.info.DMMID > 0 && identityCandidateMatches(names, candidate.info) {
 			matchesByDMM[candidate.info.DMMID] = candidate.info
 		}
 	}
@@ -732,7 +732,47 @@ func actressIdentityNames(actress *models.Actress) []string {
 			names = append(names, name)
 		}
 	}
+	// Romanized-only actresses (to whom ListSyncCandidates explicitly admits
+	// no-DMM-ID rows with only first/last names) still need linked-movie
+	// recovery to match: add both orders of the romanized full name.
+	firstName := strings.TrimSpace(actress.FirstName)
+	lastName := strings.TrimSpace(actress.LastName)
+	switch {
+	case firstName != "" && lastName != "":
+		names = appendDedupLower(names, firstName+" "+lastName)
+		names = appendDedupLower(names, lastName+" "+firstName)
+	case firstName != "":
+		names = appendDedupLower(names, firstName)
+	case lastName != "":
+		names = appendDedupLower(names, lastName)
+	}
 	return names
+}
+
+func appendDedupLower(names []string, value string) []string {
+	value = strings.TrimSpace(value)
+	for _, existing := range names {
+		if strings.EqualFold(existing, value) {
+			return names
+		}
+	}
+	return append(names, value)
+}
+
+// identityCandidateMatches reports whether a linked-movie result matches any
+// known actress identity, checking the Japanese name first, then both
+// orderings of the romanized full name.
+func identityCandidateMatches(names []string, candidate models.ActressInfo) bool {
+	if identityNameMatches(names, candidate.JapaneseName) {
+		return true
+	}
+	firstName := strings.TrimSpace(candidate.FirstName)
+	lastName := strings.TrimSpace(candidate.LastName)
+	if firstName != "" && lastName != "" {
+		return identityNameMatches(names, firstName+" "+lastName) ||
+			identityNameMatches(names, lastName+" "+firstName)
+	}
+	return false
 }
 
 // identityNameMatches ...

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -80,4 +81,45 @@ func TestCreateJobSkipsMergedAwayActresses(t *testing.T) {
 
 	_, err = manager.CreateJob(context.Background(), ActressSyncCreateRequest{Scope: "selected", ActressIDs: []uint{999998, 999999}})
 	require.Error(t, err)
+}
+
+// CountTasks mirrors the task lists: view=active counts running, view=
+// diagnostics counts the diagnostic set.
+func TestManagerCountTasks(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:"})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	t.Cleanup(func() { _ = db.Close() })
+	manager := NewActressSyncManager(ActressSyncManagerDeps{DB: db, ActressRepo: database.NewActressRepository(db), MovieRepo: database.NewMovieRepository(db)})
+
+	job := models.ActressSyncJob{ID: "job-count", Status: models.ActressSyncJobRunning, Scope: "missing"}
+	require.NoError(t, db.Create(&job).Error)
+	leaseUntil := time.Now().UTC().Add(time.Minute)
+	mk := func(id, status, stage, outcome, warning string) models.ActressSyncTask {
+		return models.ActressSyncTask{
+			ID: id, JobID: job.ID, Label: id, DedupeKey: id, Status: status, Stage: stage,
+			Messages: []string{}, UpdatedFields: []string{}, Warning: warning,
+		}
+	}
+	running := mk("t-run", models.ActressSyncTaskRunning, "running", "", "")
+	running.LeaseToken = "tok"
+	running.LeaseExpiresAt = &leaseUntil
+	done := time.Now()
+	success := mk("t-ok", models.ActressSyncTaskCompleted, "completed", "updated", "")
+	success.CompletedAt = &done
+	flagged := mk("t-warn", models.ActressSyncTaskCompleted, "completed", "updated", "slow")
+	flagged.CompletedAt = &done
+	for _, task := range []*models.ActressSyncTask{&running, &success, &flagged} {
+		require.NoError(t, db.Create(task).Error)
+	}
+
+	total, err := manager.CountTasks(job.ID, "")
+	require.NoError(t, err)
+	require.Equal(t, int64(3), total)
+	active, err := manager.CountTasks(job.ID, "active")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), active)
+	diag, err := manager.CountTasks(job.ID, "diagnostics")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), diag, "warning-bearing tasks only")
 }
