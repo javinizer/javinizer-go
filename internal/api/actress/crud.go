@@ -98,6 +98,7 @@ func parseActressID(c *gin.Context) (uint, bool) {
 // @Param limit query int false "Max results" default(50)
 // @Param offset query int false "Skip results" default(0)
 // @Param include_translations query string false "Language code to include translations for (e.g., 'en')"
+// @Param filter query string false "Filter actresses: missing_dmm, has_dmm, missing_thumbnail, missing_japanese_name, japanese_name_only, missing_metadata"
 // @Success 200 {object} actressesResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse

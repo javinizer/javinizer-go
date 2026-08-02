@@ -35,15 +35,16 @@ export function orderActiveActressSyncJobs(jobs: ActressSyncJob[]) {
 	return { current: jobs[0] ?? null, queued: jobs.slice(1) };
 }
 
-// mergeActiveActressSyncJobs reconciles the local queue against the server's
-// authoritative active list: queued jobs the server no longer knows (finished,
-// pruned by retention) are dropped so polling never settles on a deleted job.
+// mergeActiveActressSyncJobs keeps locally queued jobs and appends new
+// server-active discoveries. Queued entries may be absent from the active
+// snapshot simply because they finished while another job was displayed;
+// they must survive reconciliation so their final state is shown. Jobs
+// actually pruned server-side are dropped when advancing surfaces a 404
+// (see +page.svelte pollSyncJob).
 export function mergeActiveActressSyncJobs(current: ActressSyncJob | null, queued: ActressSyncJob[], active: ActressSyncJob[]) {
 	const known = new Set([current?.id, ...queued.map((job) => job.id)]);
-	const activeIDs = new Set(active.map((job) => job.id));
-	const kept = queued.filter((job) => activeIDs.has(job.id));
 	const additions = active.filter((job) => !known.has(job.id));
-	return [...kept, ...additions];
+	return [...queued, ...additions];
 }
 
 // appendActressSyncJob enqueues a job known to exist (e.g. just created) when

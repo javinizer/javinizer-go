@@ -408,20 +408,23 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 		case m.isTaskCancelled(task.ID):
 			task.Status, task.Outcome = models.ActressSyncTaskCancelled, "cancelled"
 			task.ErrorMessage = ""
+			if completeErr := m.repo.CompleteTask(task, task.LeaseToken); completeErr != nil {
+				logging.Warnf("Actress sync settle completion failed: %v", completeErr)
+			}
+			return
 		case errors.Is(ctxErr, context.DeadlineExceeded):
 			task.Status, task.Outcome = models.ActressSyncTaskFailed, "failed"
 			task.ErrorMessage = fmt.Sprintf("actress sync timed out after %s", timeout)
-		default:
-			if err != nil {
-				// Manager shutdown: keep the lease so recovery can requeue.
-				return
+			if completeErr := m.repo.CompleteTask(task, task.LeaseToken); completeErr != nil {
+				logging.Warnf("Actress sync settle completion failed: %v", completeErr)
 			}
-			// The sync committed before shutdown; persist its outcome below.
+			return
+		case err != nil:
+			// Manager shutdown mid-run: keep the lease so recovery requeues it.
+			return
 		}
-		if completeErr := m.repo.CompleteTask(task, task.LeaseToken); completeErr != nil {
-			logging.Warnf("Actress sync settle completion failed: %v", completeErr)
-		}
-		return
+		// err == nil and not job-cancelled: the sync committed its work before
+		// the manager stopped; fall through to persist its truthful outcome.
 	}
 	if err != nil {
 		if m.requeueCanonicalTask(task, err) {

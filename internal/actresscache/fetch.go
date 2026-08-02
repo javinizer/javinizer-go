@@ -2,6 +2,7 @@ package actresscache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -82,7 +83,42 @@ func isBlockedFetchHost(host string) bool {
 	if ip == nil {
 		return false
 	}
+	return isBlockedIP(ip)
+}
+
+// isBlockedIP reports whether ip is a non-public address.
+func isBlockedIP(ip net.IP) bool {
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
+}
+
+// lookupIP resolves dial hostnames; replaced in tests.
+var lookupIP = net.DefaultResolver.LookupIP
+
+// guardedDialContext resolves addr's host and dials only the resolved
+// address, so a hostname pointing at a private/loopback/link-local IP —
+// including via DNS rebinding between a pre-check and connect — is rejected
+// before any connection leaves the process.
+func guardedDialContext(ctx context.Context, network, addr string, fallback func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	if isBlockedFetchHost(host) {
+		return nil, &BlockedFetchError{URL: addr}
+	}
+	ips, err := lookupIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("fetch target %s resolved to no addresses", host)
+	}
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			return nil, &BlockedFetchError{URL: addr}
+		}
+	}
+	return fallback(ctx, network, net.JoinHostPort(ips[0].String(), port))
 }
 
 // NewFetcher ...
@@ -106,8 +142,33 @@ func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgen
 		userAgent:  userAgent,
 	}
 	clientCopy := *client
+	// Pin fetches to resolved public addresses at the transport level when
+	// the caller uses a standard transport; custom transports stay untouched.
+	transport, ok := clientCopy.Transport.(*http.Transport)
+	if !ok && clientCopy.Transport == nil {
+		transport = http.DefaultTransport.(*http.Transport)
+		ok = transport != nil
+	}
+	if ok {
+		guarded := transport.Clone()
+		fallback := guarded.DialContext
+		if fallback == nil {
+			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+			fallback = dialer.DialContext
+		}
+		guarded.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if fetcher.AllowPrivateHosts {
+				return fallback(ctx, network, addr)
+			}
+			return guardedDialContext(ctx, network, addr, fallback)
+		}
+		clientCopy.Transport = guarded
+	}
 	previousCheckRedirect := client.CheckRedirect
 	clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
 		if !fetcher.AllowPrivateHosts && isBlockedFetchHost(req.URL.Hostname()) {
 			return &BlockedFetchError{URL: req.URL.String()}
 		}

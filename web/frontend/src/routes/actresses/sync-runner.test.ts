@@ -86,11 +86,14 @@ describe('actress sync summary', () => {
 		expect(mergeActiveActressSyncJobs(job, [newer], [job, newer, concurrent])).toEqual([newer, concurrent]);
 	});
 
-	it('drops queued jobs that vanished from the server list', () => {
-		const stale = { ...job, id: 'stale' };
+	it('retains queued jobs absent from the active snapshot until displayed', () => {
+		// A queued job that finished while another is displayed leaves the
+		// server's active-only list but must survive reconciliation; pruned
+		// jobs are dropped via the 404 path when the queue advances to them.
+		const finished = { ...job, id: 'finished' };
 		const keptJob = { ...job, id: 'kept' };
 		const added = { ...job, id: 'added' };
-		expect(mergeActiveActressSyncJobs(job, [stale, keptJob], [job, keptJob, added])).toEqual([keptJob, added]);
+		expect(mergeActiveActressSyncJobs(job, [finished, keptJob], [job, keptJob, added])).toEqual([finished, keptJob, added]);
 	});
 
 	it('appends a locally created job without reconciling the queue', () => {

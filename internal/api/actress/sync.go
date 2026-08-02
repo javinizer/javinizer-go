@@ -16,6 +16,14 @@ type actressSyncCandidatesResponse struct {
 	Total     int              `json:"total"`
 }
 
+// listActressSyncCandidates handles GET /api/v1/actresses/sync-candidates.
+// @Summary List actresses eligible for metadata sync
+// @Description Return actresses that have a DMM ID but lack thumbnail, Japanese name, or romanized name metadata.
+// @Tags actress
+// @Produce json
+// @Success 200 {object} actressSyncCandidatesResponse
+// @Failure 500 {object} contracts.ErrorResponse
+// @Router /api/v1/actresses/sync-candidates [get]
 func listActressSyncCandidates(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if rt == nil || rt.Deps() == nil || rt.Deps().CoreDeps == nil || rt.Deps().CoreDeps.DB == nil {

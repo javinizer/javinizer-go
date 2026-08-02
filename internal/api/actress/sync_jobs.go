@@ -23,6 +23,17 @@ type actressSyncTasksResponse struct {
 	Total int                      `json:"total"`
 }
 
+// createActressSyncJob handles POST /api/v1/actresses/sync-jobs.
+// @Summary Start an actress metadata sync job
+// @Description Queue a background sync job over actresses with missing metadata ("missing") or explicit IDs ("selected").
+// @Tags actress
+// @Accept json
+// @Produce json
+// @Param request body worker.ActressSyncCreateRequest true "Sync job request"
+// @Success 202 {object} actressSyncJobResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
+// @Router /api/v1/actresses/sync-jobs [post]
 func createActressSyncJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req worker.ActressSyncCreateRequest
@@ -56,6 +67,14 @@ func createActressSyncJob(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
+// listActiveActressSyncJobs handles GET /api/v1/actresses/sync-jobs/active.
+// @Summary List active actress sync jobs
+// @Description Return pending and running actress sync jobs, oldest first.
+// @Tags actress
+// @Produce json
+// @Success 200 {object} actressSyncJobsResponse
+// @Failure 500 {object} contracts.ErrorResponse
+// @Router /api/v1/actresses/sync-jobs/active [get]
 func listActiveActressSyncJobs(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		manager := rt.EnsureActressSyncManager()
@@ -72,6 +91,16 @@ func listActiveActressSyncJobs(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
+// getActressSyncJob handles GET /api/v1/actresses/sync-jobs/{jobID}.
+// @Summary Get an actress sync job
+// @Description Return a single actress sync job with its aggregate counters.
+// @Tags actress
+// @Produce json
+// @Param jobID path string true "Sync job ID"
+// @Success 200 {object} actressSyncJobResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
+// @Router /api/v1/actresses/sync-jobs/{jobID} [get]
 func getActressSyncJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		manager := rt.EnsureActressSyncManager()
@@ -88,6 +117,17 @@ func getActressSyncJob(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
+// listActressSyncJobTasks handles GET /api/v1/actresses/sync-jobs/{jobID}/tasks.
+// @Summary List actress sync job tasks
+// @Description List tasks of a sync job: all by default, only running tasks with view=active, or the bounded terminal diagnostics with view=diagnostics.
+// @Tags actress
+// @Produce json
+// @Param jobID path string true "Sync job ID"
+// @Param view query string false "Task view: 'active' or 'diagnostics' (default: all tasks)"
+// @Success 200 {object} actressSyncTasksResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
+// @Router /api/v1/actresses/sync-jobs/{jobID}/tasks [get]
 func listActressSyncJobTasks(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		manager := rt.EnsureActressSyncManager()
@@ -122,6 +162,16 @@ var (
 	}
 )
 
+// cancelActressSyncJob handles POST /api/v1/actresses/sync-jobs/{jobID}/cancel.
+// @Summary Request cancellation of an actress sync job
+// @Description Mark the job cancelled: pending tasks are cancelled and running tasks are aborted.
+// @Tags actress
+// @Produce json
+// @Param jobID path string true "Sync job ID"
+// @Success 200 {object} actressSyncJobResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
+// @Router /api/v1/actresses/sync-jobs/{jobID}/cancel [post]
 func cancelActressSyncJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		manager := ensureSyncManager(rt)
