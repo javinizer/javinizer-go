@@ -41,7 +41,20 @@ func TestCancelJobCancelsRunningTask(t *testing.T) {
 	require.NoError(t, db.First(&stored, "id = ?", job.ID).Error)
 	require.True(t, stored.CancelRequested)
 
-	// untrackTask tolerates entries already drained by the cancellation sweep.
-	manager.untrackTask("task-1")
-	manager.untrackTask("unknown")
+	// untrack tolerates stale runs: a retry re-registered under the same task
+	// ID must keep its entry (and its live context).
+	manager.taskMu.Lock()
+	newerCtx, newerCancel := context.WithCancel(context.Background())
+	manager.runningTasks["task-1"] = trackedSyncTask{jobID: job.ID, cancel: newerCancel, run: 2}
+	manager.taskMu.Unlock()
+	manager.untrackTask("task-1", 1)
+	require.NoError(t, newerCtx.Err())
+	manager.taskMu.Lock()
+	entry, ok := manager.runningTasks["task-1"]
+	manager.taskMu.Unlock()
+	require.True(t, ok)
+	require.Equal(t, uint64(2), entry.run)
+	newerCancel()
+	manager.untrackTask("task-1", 2)
+	manager.untrackTask("unknown", 3)
 }

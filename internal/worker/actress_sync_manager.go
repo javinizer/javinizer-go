@@ -41,6 +41,10 @@ type trackedSyncTask struct {
 	jobID     string
 	cancel    context.CancelFunc
 	cancelled bool
+	// run identifies this particular registration: a requeue can register a
+	// retry under the same task ID before the original goroutine exits, and
+	// only the owning registration may remove (never cancel) that entry.
+	run uint64
 }
 
 // ActressSyncManager ...
@@ -62,6 +66,7 @@ type ActressSyncManager struct {
 	// taskMu guards runningTasks; it is separate from mu because Stop holds
 	// mu across wg.Wait while task goroutines still need to unregister.
 	taskMu       sync.Mutex
+	taskRunSeq   uint64
 	runningTasks map[string]trackedSyncTask
 }
 
@@ -199,12 +204,17 @@ func (m *ActressSyncManager) dispatch(ctx context.Context) {
 				break
 			}
 			taskCtx, taskCancel := context.WithCancel(ctx)
-			m.runningTasks[task.ID] = trackedSyncTask{jobID: task.JobID, cancel: taskCancel}
+			run := m.taskRunSeq + 1
+			m.taskRunSeq = run
+			m.runningTasks[task.ID] = trackedSyncTask{jobID: task.JobID, cancel: taskCancel, run: run}
 			m.taskMu.Unlock()
 			m.active.Add(1)
 			m.wg.Add(1)
 			go func() {
-				defer m.untrackTask(task.ID)
+				defer func() {
+					taskCancel()
+					m.untrackTask(task.ID, run)
+				}()
 				m.runTaskWithContext(taskCtx, task, timeout, cfg, registry)
 			}()
 		}
@@ -525,16 +535,15 @@ func (m *ActressSyncManager) CancelJob(id string) error {
 	return nil
 }
 
-// untrackTask drops a finished task from the cancellation registry and
-// releases its context.
-func (m *ActressSyncManager) untrackTask(id string) {
+// untrackTask drops a finished run from the cancellation registry. run must
+// match the current registration: a retried task may already have replaced
+// the entry, and removing it would cancel the retry's context.
+func (m *ActressSyncManager) untrackTask(id string, run uint64) {
 	m.taskMu.Lock()
-	entry, ok := m.runningTasks[id]
-	delete(m.runningTasks, id)
-	m.taskMu.Unlock()
-	if ok {
-		entry.cancel()
+	if entry, ok := m.runningTasks[id]; ok && entry.run == run {
+		delete(m.runningTasks, id)
 	}
+	m.taskMu.Unlock()
 }
 
 // isTaskCancelled reports whether a running task was aborted by a job

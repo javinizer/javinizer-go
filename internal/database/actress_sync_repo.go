@@ -805,6 +805,15 @@ func (r *ActressSyncRepository) CompleteTask(task *models.ActressSyncTask, token
 				}
 				return err
 			}
+			var job models.ActressSyncJob
+			if err := tx.Select("cancel_requested").First(&job, "id = ?", task.JobID).Error; err != nil {
+				return err
+			}
+			if job.CancelRequested && task.Status != models.ActressSyncTaskCancelled {
+				// Cancellation committed after the task finished: fence inside the
+				// same transaction so it never settles as completed/skipped/failed.
+				task.Status, task.Outcome, task.ErrorMessage = models.ActressSyncTaskCancelled, "cancelled", ""
+			}
 			mergedFields := mergeSyncTaskFields(current.UpdatedFields, task.UpdatedFields)
 			if task.Status == models.ActressSyncTaskFailed && len(mergedFields) > 0 {
 				task.Status = models.ActressSyncTaskCompleted

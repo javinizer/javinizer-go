@@ -46,6 +46,12 @@ type Fetcher struct {
 	// trusted local mirrors; leave unset for remote-driven URLs.
 	AllowPrivateHosts bool
 
+	// resolveTargets enables DNS validation of fetch-target hostnames at the
+	// request/redirect layer. It is only meaningful when the underlying
+	// transport is a real HTTP transport that dials (possibly via proxy);
+	// custom transports control their own connections.
+	resolveTargets bool
+
 	client     *http.Client
 	delay      time.Duration
 	hostDelays map[string]time.Duration
@@ -66,29 +72,85 @@ func (e *BlockedFetchError) Error() string {
 	return fmt.Sprintf("refusing to fetch internal address: %s", e.URL)
 }
 
+// blockedCIDRs are special-use ranges not covered by net.IP classification
+// that still route to internal infrastructure: CGNAT (hosts cloud metadata
+// IPs like 100.100.100.200), IETF protocol assignments, benchmark ranges,
+// and reserved space.
+var blockedCIDRs = mustCIDRs("100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4")
+
+func mustCIDRs(cidrs ...string) []*net.IPNet {
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		_, block, err := net.ParseCIDR(c)
+		if err != nil {
+			panic(fmt.Sprintf("invalid built-in CIDR %q: %v", c, err))
+		}
+		out = append(out, block)
+	}
+	return out
+}
+
+// hostIPLiteral parses host as an IP literal, tolerating IPv6 zones and
+// bracketed forms; returns nil for hostnames.
+func hostIPLiteral(host string) net.IP {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if i := strings.LastIndex(host, "%"); i >= 0 { // IPv6 zone, e.g. fe80::1%eth0
+		host = host[:i]
+	}
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	return net.ParseIP(host)
+}
+
 // isBlockedFetchHost reports whether host is localhost or a non-public IP
-// literal. Hostnames are not resolved here (lexical guard only); public
-// source hosts are hardcoded while payload URLs are checked at the initial
-// request and at every redirect hop.
+// literal. Hostnames are not resolved here.
 func isBlockedFetchHost(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
 	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
-	if i := strings.LastIndex(host, "%"); i >= 0 { // IPv6 zone, e.g. fe80::1%eth0
-		host = host[:i]
+	if ip := hostIPLiteral(host); ip != nil {
+		return isBlockedIP(ip)
 	}
-	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return isBlockedIP(ip)
+	return false
 }
 
-// isBlockedIP reports whether ip is a non-public address.
+// isBlockedIP reports whether ip is a non-public or special-use address.
 func isBlockedIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return true
+	}
+	for _, cidr := range blockedCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkFetchTarget validates the request host lexically and — when the
+// fetcher drives a real dialing transport — resolves hostnames locally: with
+// an HTTP(S) proxy configured the transport only ever dials the proxy
+// address, so pinning there cannot see the real target. Custom transports
+// make their own connections and skip resolution.
+func (f *Fetcher) checkFetchTarget(ctx context.Context, host string) error {
+	if isBlockedFetchHost(host) {
+		return &BlockedFetchError{URL: host}
+	}
+	if !f.resolveTargets || hostIPLiteral(host) != nil {
+		return nil
+	}
+	ips, err := lookupIP(ctx, "ip", host)
+	//nolint:nilerr // unresolvable hosts fail at dial time anyway; only a
+	// successful resolution to an internal range is blocked here.
+	if err != nil || len(ips) == 0 {
+		return nil
+	}
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			return &BlockedFetchError{URL: host}
+		}
+	}
+	return nil
 }
 
 // lookupIP resolves dial hostnames; replaced in tests.
@@ -150,6 +212,7 @@ func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgen
 		ok = transport != nil
 	}
 	if ok {
+		fetcher.resolveTargets = true
 		guarded := transport.Clone()
 		fallback := guarded.DialContext
 		if fallback == nil {
@@ -169,8 +232,10 @@ func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgen
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
-		if !fetcher.AllowPrivateHosts && isBlockedFetchHost(req.URL.Hostname()) {
-			return &BlockedFetchError{URL: req.URL.String()}
+		if !fetcher.AllowPrivateHosts {
+			if err := fetcher.checkFetchTarget(req.Context(), req.URL.Hostname()); err != nil {
+				return err
+			}
 		}
 		if err := fetcher.limiterForHost(req.URL.Hostname()).Wait(req.Context()); err != nil {
 			return err
@@ -200,8 +265,10 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 	if err != nil {
 		return nil, nil, err
 	}
-	if !f.AllowPrivateHosts && isBlockedFetchHost(req.URL.Hostname()) {
-		return nil, nil, &BlockedFetchError{URL: rawURL}
+	if !f.AllowPrivateHosts {
+		if err := f.checkFetchTarget(requestCtx, req.URL.Hostname()); err != nil {
+			return nil, nil, err
+		}
 	}
 	req.Header.Set("User-Agent", f.userAgent)
 	req.Header.Set("Accept", accept)

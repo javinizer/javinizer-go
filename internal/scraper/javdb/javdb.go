@@ -311,6 +311,7 @@ func (s *scraper) findActorID(ctx context.Context, name string) string {
 	}
 
 	var actorID string
+	ambiguous := false
 	doc.Find("a[href]").EachWithBreak(func(_ int, link *goquery.Selection) bool {
 		linkName := scraperutil.CleanString(link.Text())
 		if linkName == "" {
@@ -319,9 +320,26 @@ func (s *scraper) findActorID(ctx context.Context, name string) string {
 		if linkName != name {
 			return true
 		}
-		actorID = javdbActorIDFromLink(link)
-		return actorID == ""
+		candidate := javdbActorIDFromLink(link)
+		if candidate == "" {
+			return true
+		}
+		if actorID == "" {
+			actorID = candidate
+			return true
+		}
+		if candidate != actorID {
+			// Multiple distinct actor profiles share this exact name; picking
+			// either could attach an unrelated identity to the actress.
+			ambiguous = true
+			return false
+		}
+		return true // duplicate of the same ID — keep scanning for distinct ones
 	})
+	if ambiguous {
+		logging.Debugf("JavDB: actor search for %q produced multiple distinct IDs, skipping", name)
+		return ""
+	}
 	return actorID
 }
 

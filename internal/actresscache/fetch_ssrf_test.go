@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -36,6 +37,61 @@ func TestFetcherBlocksInternalHosts(t *testing.T) {
 		require.Truef(t, errors.As(err, &blockedErr), "expected BlockedFetchError for %s, got %v", u, err)
 	}
 	assert.False(t, called, "no blocked request should reach the network")
+}
+
+func TestFetcherBlocksHostnameResolvingToPrivateIP(t *testing.T) {
+	prev := lookupIP
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if host == "metadata.evil" {
+			return []net.IP{net.ParseIP("169.254.169.254")}, nil
+		}
+		return prev(context.Background(), "ip", host)
+	}
+	defer func() { lookupIP = prev }()
+
+	called := false
+	client := &http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/plain"}}, Body: io.NopCloser(strings.NewReader("ok")), Request: req}, nil
+	})}
+	fetcher := NewFetcher(client, 0, "test")
+	fetcher.resolveTargets = true // custom transport test: force DNS validation
+	_, _, err := fetcher.Get(context.Background(), "https://metadata.evil/leak", "*/*", 1024)
+	var blockedErr *BlockedFetchError
+	require.ErrorAs(t, err, &blockedErr)
+	assert.False(t, called)
+}
+
+func TestFetcherAllowsPrivateHostsWhenOptedIn(t *testing.T) {
+	client := &http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: io.NopCloser(strings.NewReader("ok")), Request: req}, nil
+	})}
+	fetcher := NewFetcher(client, 0, "test")
+	fetcher.AllowPrivateHosts = true
+	body, _, err := fetcher.Get(context.Background(), "http://127.0.0.1:8080/thumb.png", "*/*", 1024)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", string(body))
+}
+
+func TestFetcherCapsRedirectChains(t *testing.T) {
+	client := &http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": []string{"/loop"}}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+	})}
+	fetcher := NewFetcher(client, 0, "test")
+	fetcher.AllowPrivateHosts = true // exercise the redirect cap, not the SSRF guard
+	_, _, err := fetcher.Get(context.Background(), "http://127.0.0.1/loop", "*/*", 1024)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "stopped after 10 redirects")
+}
+
+func TestFetcherBlocksCGNATMetadataRange(t *testing.T) {
+	client := &http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+	})}
+	fetcher := NewFetcher(client, 0, "test")
+	_, _, err := fetcher.Get(context.Background(), "http://100.100.100.200/latest/meta-data", "*/*", 1024)
+	var blockedErr *BlockedFetchError
+	require.ErrorAs(t, err, &blockedErr)
 }
 
 func TestFetcherBlocksRedirectToInternalHost(t *testing.T) {
