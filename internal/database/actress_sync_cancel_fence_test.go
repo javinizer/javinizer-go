@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -129,4 +130,47 @@ func TestReassignTaskActressFencesCancelledJob(t *testing.T) {
 		return syncRepo.reassignTaskActressTx(tx, task.ID, task.LeaseToken, target.ID, source.ID)
 	})
 	require.ErrorIs(t, err, errActressSyncJobCancelled)
+}
+
+// A cancel-requested running task must not block a fresh request for the same
+// actress: its dedupe key is superseded so the new task stays runnable.
+func TestCreateJobSupersedesCancelRequestedConflict(t *testing.T) {
+	db, err := New(&Config{Type: "sqlite", DSN: ":memory:"})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	t.Cleanup(func() { _ = db.Close() })
+	repo := NewActressSyncRepository(db)
+
+	actress := &models.Actress{JapaneseName: "retry me"}
+	require.NoError(t, db.Create(actress).Error)
+	canonical := "actress:" + strconv.FormatUint(uint64(actress.ID), 10)
+
+	oldJob := models.ActressSyncJob{ID: "job-cancelling", Status: models.ActressSyncJobRunning, Scope: "missing", CancelRequested: true}
+	require.NoError(t, db.Create(&oldJob).Error)
+	leaseUntil := time.Now().UTC().Add(time.Minute)
+	oldTask := models.ActressSyncTask{
+		ID: "task-old", JobID: oldJob.ID, Label: "retry me", DedupeKey: canonical,
+		Status: models.ActressSyncTaskRunning, Stage: "running",
+		Messages: []string{}, UpdatedFields: []string{},
+		ActressID: &actress.ID, LeaseToken: "tok-old", LeaseExpiresAt: &leaseUntil,
+	}
+	require.NoError(t, db.Create(&oldTask).Error)
+
+	newJob := models.ActressSyncJob{ID: "job-retry", Status: models.ActressSyncJobPending, Scope: "missing"}
+	newTask := models.ActressSyncTask{
+		ID: "task-new", JobID: newJob.ID, Label: "retry me", DedupeKey: canonical,
+		Status: models.ActressSyncTaskPending, Stage: "queued",
+		Messages: []string{}, UpdatedFields: []string{},
+		ActressID: &actress.ID,
+	}
+	require.NoError(t, repo.CreateJob(&newJob, []models.ActressSyncTask{newTask}))
+
+	var storedNew models.ActressSyncTask
+	require.NoError(t, db.First(&storedNew, "id = ?", newTask.ID).Error)
+	require.Equal(t, models.ActressSyncTaskPending, storedNew.Status)
+	require.Equal(t, canonical, storedNew.DedupeKey)
+
+	var storedOld models.ActressSyncTask
+	require.NoError(t, db.First(&storedOld, "id = ?", oldTask.ID).Error)
+	require.Contains(t, storedOld.DedupeKey, ":superseded:")
 }

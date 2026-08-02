@@ -49,7 +49,7 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 						return fmt.Errorf("validate actress %d: %w", *tasks[i].ActressID, err)
 					}
 					var conflict models.ActressSyncTask
-					lookupErr := tx.Table("actress_sync_tasks AS task").Select("task.*").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").Where("task.actress_id = ? AND task.status IN ?", *tasks[i].ActressID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("CASE WHEN job.scope = 'selected' THEN 0 ELSE 1 END, task.created_at ASC, task.id ASC").First(&conflict).Error
+					lookupErr := tx.Table("actress_sync_tasks AS task").Select("task.*").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").Where("task.actress_id = ? AND task.status IN ? AND job.cancel_requested = 0", *tasks[i].ActressID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("CASE WHEN job.scope = 'selected' THEN 0 ELSE 1 END, task.created_at ASC, task.id ASC").First(&conflict).Error
 					if lookupErr == nil {
 						var conflictJob models.ActressSyncJob
 						if lookupErr := tx.First(&conflictJob, "id = ?", conflict.JobID).Error; lookupErr != nil {
@@ -97,6 +97,15 @@ func createActressSyncTaskTx(tx *gorm.DB, task *models.ActressSyncTask, job *mod
 		var conflictJob models.ActressSyncJob
 		if lookupErr := tx.First(&conflictJob, "id = ?", conflict.JobID).Error; lookupErr != nil {
 			return lookupErr
+		}
+		if conflictJob.CancelRequested {
+			// The existing task's job is being cancelled: supersede it so the
+			// fresh request stays runnable, instead of skipping the duplicate
+			// and leaving nothing to run.
+			if updErr := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", conflict.ID, models.ActressSyncTaskRunning).Update("dedupe_key", fmt.Sprintf("actress:%d:superseded:%s", actressIDOrZero(conflict.ActressID), conflict.ID)).Error; updErr != nil {
+				return updErr
+			}
+			return tx.Create(task).Error
 		}
 		prepareActressSyncDuplicateTask(task, job.Scope, conflictJob.Scope, time.Now().UTC())
 		if err := tx.Create(task).Error; err != nil {
@@ -460,7 +469,7 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 			return err
 		}
 		var targetTask models.ActressSyncTask
-		err := tx.Table("actress_sync_tasks AS task").Select("task.*").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").Where("task.actress_id = ? AND task.id <> ? AND task.status IN ?", actressID, sourceTask.ID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("CASE WHEN job.scope = 'selected' THEN 0 ELSE 1 END, task.created_at ASC, task.id ASC").First(&targetTask).Error
+		err := tx.Table("actress_sync_tasks AS task").Select("task.*").Joins("JOIN actress_sync_jobs AS job ON job.id = task.job_id").Where("task.actress_id = ? AND task.id <> ? AND task.status IN ? AND job.cancel_requested = 0", actressID, sourceTask.ID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Order("CASE WHEN job.scope = 'selected' THEN 0 ELSE 1 END, task.created_at ASC, task.id ASC").First(&targetTask).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
@@ -865,6 +874,14 @@ func (r *ActressSyncRepository) CompleteTask(task *models.ActressSyncTask, token
 			return r.refreshJobTx(tx, task.JobID, now)
 		})
 	})
+}
+
+// actressIDOrZero dereferences an optional actress reference for diagnostics.
+func actressIDOrZero(id *uint) uint {
+	if id == nil {
+		return 0
+	}
+	return *id
 }
 
 // CancelJob ...

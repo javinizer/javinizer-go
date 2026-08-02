@@ -266,6 +266,7 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 			}
 			ss.SetEnabledPresence(scraperYAMLHasEnabledKey(valNode))
+			ss.SetRateLimitPresence(scraperYAMLHasKey(valNode, "rate_limit") || scraperYAMLHasKey(valNode, "request_delay"))
 
 			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
 			// Walk the node content to find alias keys and apply them if the canonical
@@ -313,11 +314,15 @@ func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.Scraper
 }
 
 func scraperYAMLHasEnabledKey(valNode *yaml.Node) bool {
+	return scraperYAMLHasKey(valNode, "enabled")
+}
+
+func scraperYAMLHasKey(valNode *yaml.Node, key string) bool {
 	if valNode == nil || valNode.Kind != yaml.MappingNode {
 		return false
 	}
 	for i := 0; i+1 < len(valNode.Content); i += 2 {
-		if valNode.Content[i].Value == "enabled" {
+		if valNode.Content[i].Value == key {
 			return true
 		}
 	}

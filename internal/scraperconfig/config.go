@@ -445,7 +445,12 @@ func (s *ScraperSettings) MarshalYAML() (interface{}, error) {
 	result["enabled"] = s.Enabled
 	result["language"] = s.Language
 	result["timeout"] = s.Timeout
-	result["rate_limit"] = s.RateLimit
+	// Emit rate_limit only when set or explicitly zeroed: an omitted key must
+	// re-merge defaults on next load instead of persisting a synthesized zero
+	// as an explicit no-throttle override.
+	if s.RateLimit != 0 || s.RateLimitIsExplicit() {
+		result["rate_limit"] = s.RateLimit
+	}
 	result["retry_count"] = s.RetryCount
 	result["user_agent"] = s.UserAgent
 	if s.Proxy != nil {
