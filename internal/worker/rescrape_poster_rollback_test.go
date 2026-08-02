@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -481,6 +484,319 @@ func TestRescrapePhase_Rescrape_PersistFailureStateRollbackErrorSurfaced(t *test
 	require.NotNil(t, prov)
 	assert.Equal(t, "old-source", prov.FieldSources["title"])
 	assert.Equal(t, 1, gen.restores, "the cache leg still runs")
+}
+
+// staleRevisionFinder wraps a FileFinder reporting a permanently-stale
+// revision so CompleteRescrape's CAS check conflicts deterministically —
+// the lock-agnostic state-write race the Conflict status exists for.
+type staleRevisionFinder struct{ resultstore.FileFinder }
+
+func (staleRevisionFinder) GetRevision(string) uint64 { return 0 }
+
+// fsBackedRescrapePosterGen is a poster generator whose GeneratePoster writes
+// DETERMINISTIC placeholder assets directly (no network) while
+// snapshot/restore go through the REAL PosterManager, so the rescrape
+// failure-cleanup contract is pinned byte-for-byte: did the bystander's
+// pre-generation bytes actually come back?
+type fsBackedRescrapePosterGen struct {
+	manager    *poster.PosterManager
+	fs         afero.Fs
+	tempDir    string
+	onGenerate func(movieID string) // runs BEFORE the assets are replaced
+	generated  []string
+	snapshots  []string
+	restores   int
+}
+
+func (g *fsBackedRescrapePosterGen) GeneratePoster(_ context.Context, jobID string, movie *models.Movie) error {
+	g.generated = append(g.generated, movie.ID)
+	if g.onGenerate != nil {
+		g.onGenerate(movie.ID)
+	}
+	dir := filepath.Join(g.tempDir, "posters", jobID)
+	if err := g.fs.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if err := afero.WriteFile(g.fs, filepath.Join(dir, movie.ID+"-full.jpg"), []byte("fresh:"+movie.ID+":full"), 0o644); err != nil {
+		return err
+	}
+	return afero.WriteFile(g.fs, filepath.Join(dir, movie.ID+".jpg"), []byte("fresh:"+movie.ID+":preview"), 0o644)
+}
+
+func (g *fsBackedRescrapePosterGen) SnapshotPosterAssets(jobID, movieID string) (*poster.AssetsSnapshot, error) {
+	g.snapshots = append(g.snapshots, movieID)
+	return g.manager.SnapshotAssets(jobID, movieID)
+}
+
+func (g *fsBackedRescrapePosterGen) RestorePosterAssets(snap *poster.AssetsSnapshot) error {
+	g.restores++
+	return g.manager.RestoreAssets(snap)
+}
+
+// TestRescrapePhase_Rescrape_FailureCleanupRestoresBystanderDestinationAssets
+// pins audit-6's second site: a rekeying rescrape (A→B) where ANOTHER result
+// (the bystander, fileB) already owns movie ID B fails AFTER GeneratePoster
+// replaced B's shared assets — the commit CAS-conflicts (stale revision) or
+// the job's context is cancelled post-generation. withRescrapeStatus's
+// failure cleanup must REPLAY the captured pre-generation destination
+// snapshot instead of blanket-deleting B's files: under the old delete the
+// bystander's persisted preview URL was left pointing at files that no
+// longer exist. Origin A's snapshot is armed but never replayed here (the
+// origin's assets are deleted only by the SUCCESS path's orphan cleanup), so
+// no leg double-runs.
+func TestRescrapePhase_Rescrape_FailureCleanupRestoresBystanderDestinationAssets(t *testing.T) {
+	const (
+		jobID   = "job-bys-clean"
+		movieA  = "BYS-ORIG"
+		movieB  = "BYS-ZDEST"
+		tempDir = "/temp"
+	)
+	fileA := "/source/bys-a.mp4"
+	fileB := "/source/bys-b.mp4"
+	bystanderPreviewURL := "/api/v1/temp/posters/" + jobID + "/" + movieB + ".jpg?v=77"
+
+	setup := func(t *testing.T, finder resultstore.FileFinder) (*fsBackedRescrapePosterGen, *resultstore.ResultTracker, rescrapePhaseInputs) {
+		t.Helper()
+		tracker := resultstore.New(2, []string{fileA, fileB})
+		tracker.UpdateFileResult(fileA, &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: fileA, MovieID: movieA},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: movieA, Title: "Old A", Poster: models.PosterState{PosterURL: "https://old.invalid/a.jpg"}},
+		})
+		tracker.UpdateFileResult(fileB, &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: fileB, MovieID: movieB},
+			Status:        models.JobStatusCompleted,
+			Movie: &models.Movie{ID: movieB, Title: "Bystander B", Poster: models.PosterState{
+				PosterURL:        "https://old.invalid/b.jpg",
+				CroppedPosterURL: bystanderPreviewURL,
+			}},
+		})
+		fs := afero.NewMemMapFs()
+		dir := filepath.Join(tempDir, "posters", jobID)
+		require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, movieA+"-full.jpg"), []byte("orig:a:full"), 0o644))
+		require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, movieA+".jpg"), []byte("orig:a:preview"), 0o644))
+		require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, movieB+"-full.jpg"), []byte("bystander:b:full"), 0o644))
+		require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, movieB+".jpg"), []byte("bystander:b:preview"), 0o644))
+		gen := &fsBackedRescrapePosterGen{
+			manager: poster.NewPosterManager(fs, tempDir, nil),
+			fs:      fs,
+			tempDir: tempDir,
+		}
+		wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+			Movie: &models.Movie{ID: movieB, Title: "Corrected", Poster: models.PosterState{PosterURL: "https://new.invalid/b.jpg"}},
+		}}
+		inputs := rescrapePhaseInputs{
+			JobID:     models.JobID(jobID),
+			WF:        wf,
+			PosterGen: gen,
+			ResultMap: tracker,
+			Finder:    finder,
+			Lifecycle: &stubLifecycle{},
+			Fs:        fs,
+			TempDir:   tempDir,
+		}
+		return gen, tracker.(*resultstore.ResultTracker), inputs
+	}
+
+	assertBystanderAndOriginIntact := func(t *testing.T, gen *fsBackedRescrapePosterGen, tracker *resultstore.ResultTracker) {
+		t.Helper()
+		dir := filepath.Join(tempDir, "posters", jobID)
+		for name, want := range map[string]string{
+			movieB + "-full.jpg": "bystander:b:full",
+			movieB + ".jpg":      "bystander:b:preview",
+		} {
+			data, err := afero.ReadFile(gen.fs, filepath.Join(dir, name))
+			require.NoError(t, err, "%s must have been restored, not deleted — the bystander's preview URL (%s) still names it", name, bystanderPreviewURL)
+			assert.Equal(t, want, string(data), "the bystander's pre-generation bytes came back byte-for-byte")
+		}
+		for name, want := range map[string]string{
+			movieA + "-full.jpg": "orig:a:full",
+			movieA + ".jpg":      "orig:a:preview",
+		} {
+			data, err := afero.ReadFile(gen.fs, filepath.Join(dir, name))
+			require.NoError(t, err, "the origin's assets are untouched on failure paths")
+			assert.Equal(t, want, string(data))
+		}
+
+		assert.Equal(t, []string{movieB}, gen.generated, "generation ran onto the destination key")
+		assert.Equal(t, []string{movieB, movieA}, gen.snapshots,
+			"the destination snapshot precedes generation; the origin snapshot rides along (armed, unused)")
+		assert.Equal(t, 1, gen.restores,
+			"only the destination snapshot replays — the origin leg must not double-run a leg that never deleted anything")
+
+		// The failed rescrape committed nothing: both stored results stand.
+		finalB, err := tracker.GetMovieResult(fileB)
+		require.NoError(t, err)
+		require.NotNil(t, finalB.Movie)
+		assert.Equal(t, movieB, finalB.Movie.ID)
+		assert.Equal(t, bystanderPreviewURL, finalB.Movie.Poster.CroppedPosterURL,
+			"the bystander's persisted preview URL is again backed by real bytes")
+		finalA, err := tracker.GetMovieResult(fileA)
+		require.NoError(t, err)
+		assert.Equal(t, movieA, finalA.Movie.ID)
+
+		assertPosterSourceLockFree(t, jobID, movieA)
+		assertPosterSourceLockFree(t, jobID, movieB)
+	}
+
+	t.Run("commit CAS conflict", func(t *testing.T) {
+		gen, tracker, inputs := setup(t, &staleRevisionFinder{FileFinder: resultstore.New(0, nil)})
+		// The stale finder reports revision 0 while the real store sits at
+		// revision 1 — the commit conflicts deterministically.
+		outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: movieA, FilePath: fileA})
+		require.NoError(t, err)
+		require.NotNil(t, outcome)
+		assert.Equal(t, models.RescrapeStatusConflict, outcome.Status)
+		assert.NoError(t, outcome.PersistErr)
+		assertBystanderAndOriginIntact(t, gen, tracker)
+	})
+
+	t.Run("post-generation cancellation", func(t *testing.T) {
+		gen, tracker, inputs := setup(t, resultstore.New(0, nil))
+		ctx, cancel := context.WithCancel(context.Background())
+		gen.onGenerate = func(string) { cancel() }
+		defer cancel()
+
+		outcome, err := NewRescrapePhase().Rescrape(ctx, inputs, RescrapeCmd{MovieID: movieA, FilePath: fileA})
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, outcome)
+		assertBystanderAndOriginIntact(t, gen, tracker)
+	})
+}
+
+// TestRescrapePhase_Rescrape_FailureCleanupRestoreErrorWarnsNotFails pins
+// the degraded leg of the F-new failure cleanup: when the destination
+// snapshot replay ITSELF fails, the rescrape's Conflict outcome still
+// stands — the restore failure is logged as a warning (the cleanup owns no
+// error channel), never turned into a second failure.
+func TestRescrapePhase_Rescrape_FailureCleanupRestoreErrorWarnsNotFails(t *testing.T) {
+	const (
+		movieA = "WRN-ORIG"
+		movieB = "WRN-ZDEST"
+	)
+	fileA := "/source/wrn-a.mp4"
+	tracker := resultstore.New(1, []string{fileA})
+	tracker.UpdateFileResult(fileA, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: fileA, MovieID: movieA},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: movieA, Title: "Old A", Poster: models.PosterState{PosterURL: "https://old.invalid/a.jpg"}},
+	})
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Movie: &models.Movie{ID: movieB, Title: "Corrected", Poster: models.PosterState{PosterURL: "https://new.invalid/b.jpg"}},
+	}}
+	gen := &snapshotStubPosterGen{restoreErr: errors.New("restore exploded")}
+	inputs := rescrapePhaseInputs{
+		JobID:     models.NewJobID(),
+		WF:        wf,
+		PosterGen: gen,
+		ResultMap: tracker,
+		Finder:    &staleRevisionFinder{FileFinder: tracker},
+		Lifecycle: &stubLifecycle{},
+	}
+
+	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: movieA, FilePath: fileA})
+	require.NoError(t, err, "a failed failure-cleanup restore is logged, not surfaced as a rescrape error")
+	require.NotNil(t, outcome)
+	assert.Equal(t, models.RescrapeStatusConflict, outcome.Status)
+	assert.Equal(t, []string{movieB, movieA}, gen.snapshotIDs, "both snapshots were armed")
+	assert.Equal(t, 1, gen.restores, "the destination replay was the leg attempted during failure cleanup")
+}
+
+// TestWithRescrapeStatus_FailurePosterRewind pins the rewiring seams of
+// withRescrapeStatus directly: the wired failureCleanup replaces the blanket
+// delete, the delete stays as the no-hook fallback, and both failure sites
+// err and Gone/Conflict/Failed still audit through HistoryRepo.
+func TestWithRescrapeStatus_FailurePosterRewind(t *testing.T) {
+	newLifecycle := func(inputs rescrapePhaseInputs) rescrapeLifecycle {
+		return rescrapeLifecycle{
+			inputs: inputs,
+			lookup: &resultstore.FileLookupResult{FilePath: "/src/wrs.mp4", OldMovieID: "WRS-OLD"},
+		}
+	}
+	boom := errors.New("boom")
+
+	t.Run("nil outcome with no error passes through untouched", func(t *testing.T) {
+		lc := newLifecycle(rescrapePhaseInputs{JobID: "job-wrs-nil"})
+		outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
+			return nil, nil, nil
+		})
+		require.NoError(t, err)
+		assert.Nil(t, outcome, "no cleanup, no audit — a nil outcome is a pass-through")
+	})
+
+	t.Run("no failureCleanup falls back to deleting the destination assets", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		dir := filepath.Join("/temp", "posters", "job-wrs-fb")
+		full := filepath.Join(dir, "WRS-1-full.jpg")
+		preview := filepath.Join(dir, "WRS-1.jpg")
+		require.NoError(t, afero.WriteFile(fs, full, []byte("f"), 0o644))
+		require.NoError(t, afero.WriteFile(fs, preview, []byte("p"), 0o644))
+		lc := newLifecycle(rescrapePhaseInputs{JobID: "job-wrs-fb", Fs: fs, TempDir: "/temp"})
+		movieResult := &resultstore.MovieResult{Movie: &models.Movie{ID: "WRS-1"}}
+
+		outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
+			return nil, movieResult, boom
+		})
+		require.ErrorIs(t, err, boom)
+		assert.Nil(t, outcome)
+		for _, p := range []string{full, preview} {
+			_, statErr := fs.Stat(p)
+			assert.True(t, os.IsNotExist(statErr), "%s must be deleted by the fallback cleanup", p)
+		}
+	})
+
+	t.Run("wired failureCleanup replaces the delete on a failed outcome", func(t *testing.T) {
+		var cleaned *models.Movie
+		lc := newLifecycle(rescrapePhaseInputs{JobID: "job-wrs-hook"})
+		lc.failureCleanup = func(m *models.Movie) { cleaned = m }
+		movieResult := &resultstore.MovieResult{Movie: &models.Movie{ID: "WRS-2"}}
+
+		outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
+			return &RescrapeResult{Status: models.RescrapeStatusFailed, Error: "nope"}, movieResult, nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, models.RescrapeStatusFailed, outcome.Status)
+		require.NotNil(t, cleaned, "the wired cleanup received the failed rescrape's movie")
+		assert.Equal(t, "WRS-2", cleaned.ID)
+	})
+
+	t.Run("error path audits the failed movie's ID", func(t *testing.T) {
+		repo := &failingHistoryRepo{err: boom}
+		lc := newLifecycle(rescrapePhaseInputs{JobID: "job-wrs-aud1", HistoryRepo: repo})
+		movieResult := &resultstore.MovieResult{Movie: &models.Movie{ID: "WRS-3"}}
+
+		_, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
+			return nil, movieResult, boom
+		})
+		require.ErrorIs(t, err, boom)
+		assert.Equal(t, 1, repo.callCount, "the audit ran (log-and-continue on a failing repo)")
+	})
+
+	t.Run("failed outcome audits with the movie's ID and the explicit message", func(t *testing.T) {
+		repo := &failingHistoryRepo{err: boom}
+		lc := newLifecycle(rescrapePhaseInputs{JobID: "job-wrs-aud2", HistoryRepo: repo})
+		movieResult := &resultstore.MovieResult{Movie: &models.Movie{ID: "WRS-4"}}
+
+		outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
+			return &RescrapeResult{Status: models.RescrapeStatusFailed, Error: "explicit boom"}, movieResult, nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, models.RescrapeStatusFailed, outcome.Status)
+		assert.Equal(t, 1, repo.callCount)
+	})
+
+	t.Run("gone outcome audits the lookup's old movie ID with a synthetic message", func(t *testing.T) {
+		repo := &failingHistoryRepo{err: boom}
+		lc := newLifecycle(rescrapePhaseInputs{JobID: "job-wrs-aud3", HistoryRepo: repo})
+
+		outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
+			return &RescrapeResult{Status: models.RescrapeStatusGone}, nil, nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, models.RescrapeStatusGone, outcome.Status)
+		assert.Equal(t, 1, repo.callCount,
+			"auditRescapeFailure ran with lookup.OldMovieID and the synthetic 'rescrape gone' message")
+	})
 }
 
 // getResultFailStore hides GetMovieResult so the phase cannot capture a

@@ -424,8 +424,10 @@ func TestApplyFieldOverride_IDRekeyMoveFailureRejectsOverride(t *testing.T) {
 
 // TestApplyFieldOverride_IDRekeyFanoutFailureMovesAssetsBack pins the
 // fan-out-failure compensation half: a part persist failure AFTER the
-// successful forward move moves the assets back and, when the move-back
-// itself fails, says so on the surfaced error.
+// successful forward move rewinds the assets and, when the rewind itself
+// fails, says so on the surfaced error. With a snapshot-capable generator
+// the rewind is a pure snapshot replay (destination, then origin — no
+// opposite re-key call), per audit-6 F-new.
 func TestApplyFieldOverride_IDRekeyFanoutFailureMovesAssetsBack(t *testing.T) {
 	const (
 		jobID = "job-idfanoutfail"
@@ -452,22 +454,25 @@ func TestApplyFieldOverride_IDRekeyFanoutFailureMovesAssetsBack(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "persist field override: disk full")
 		assert.NotContains(t, err.Error(), "move-back")
-		assert.Equal(t, [][2]string{{oldID, newID}, {newID, oldID}}, gen.calls,
-			"the compensation moves the assets back to the origin key")
+		assert.Equal(t, [][2]string{{oldID, newID}}, gen.calls,
+			"F-new: the compensation is a snapshot replay — NO opposite re-key call")
+		assert.Equal(t, 2, gen.restores,
+			"both pre-move snapshots replay: destination first, then origin")
 		assert.Equal(t, oldID, tracker.GetCurrentMovieID(filePath))
 	})
 
 	t.Run("move-back failure is surfaced", func(t *testing.T) {
 		je, _, _ := newFixture(t)
-		gen := &moverStubGen{failAt: 2, failErr: errors.New("restore jammed")}
+		gen := &moverStubGen{restoreErr: errors.New("restore jammed")}
 		je.posterGen = gen
 
 		_, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "persist field override: disk full")
 		assert.Contains(t, err.Error(), "poster asset move-back failed: restore jammed",
-			"a failed move-back rides along instead of being swallowed")
-		assert.Equal(t, [][2]string{{oldID, newID}, {newID, oldID}}, gen.calls)
+			"a failed snapshot replay rides along instead of being swallowed")
+		assert.Equal(t, [][2]string{{oldID, newID}}, gen.calls)
+		assert.Equal(t, 2, gen.restores, "both snapshot restores are attempted even when they fail")
 	})
 }
 
@@ -544,8 +549,8 @@ func TestApplyFieldOverride_PersistFailureRevertErrorAndNilProvenance(t *testing
 }
 
 // TestApplyFieldOverride_PersistFailureMoveBackError pins the last asset leg
-// of the persist-failure compensation: a failed move-back joins the surfaced
-// error while the state/provenance reverts still complete.
+// of the persist-failure compensation: a failed snapshot replay joins the
+// surfaced error while the state/provenance reverts still complete.
 func TestApplyFieldOverride_PersistFailureMoveBackError(t *testing.T) {
 	const (
 		jobID = "job-idmovebackfail"
@@ -553,7 +558,7 @@ func TestApplyFieldOverride_PersistFailureMoveBackError(t *testing.T) {
 		newID = "DMM-NEW5"
 	)
 	je, tracker, _, filePath, _, _ := idRekeyFixture(t, jobID, oldID, newID)
-	gen := &moverStubGen{failAt: 2, failErr: errors.New("restore jammed")}
+	gen := &moverStubGen{restoreErr: errors.New("restore jammed")}
 	je.posterGen = gen
 	je.persistEnvelope = func() error { return errIDRekeyPersist }
 
@@ -562,7 +567,9 @@ func TestApplyFieldOverride_PersistFailureMoveBackError(t *testing.T) {
 	assert.ErrorIs(t, err, ErrEnvelopePersist)
 	assert.Contains(t, err.Error(), "override revert failed")
 	assert.Contains(t, err.Error(), "poster asset move-back failed: restore jammed")
-	assert.Equal(t, [][2]string{{oldID, newID}, {newID, oldID}}, gen.calls)
+	assert.Equal(t, [][2]string{{oldID, newID}}, gen.calls,
+		"F-new: the compensation replays snapshots — no opposite re-key")
+	assert.Equal(t, 2, gen.restores)
 
 	restored, getErr := tracker.GetMovieResult(filePath)
 	require.NoError(t, getErr)
@@ -626,7 +633,7 @@ func TestApplyFieldOverride_IDRekeyPlanFailureMovesAssetsBack(t *testing.T) {
 
 	t.Run("move-back failure is surfaced with the plan error", func(t *testing.T) {
 		je, _, _, _, _, _ := idRekeyFixture(t, jobID, oldID, newID)
-		gen := &moverStubGen{failFrom: 2, failErr: errors.New("restore jammed")}
+		gen := &moverStubGen{restoreErr: errors.New("restore jammed")}
 		je.posterGen = gen
 		je.planOverrideFn = func(_ []string, _ *models.Movie, _ *resultstore.ProvenanceData, _, _ string) ([]overridePartWrite, error) {
 			return nil, planErr
@@ -636,8 +643,10 @@ func TestApplyFieldOverride_IDRekeyPlanFailureMovesAssetsBack(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, planErr)
 		assert.Contains(t, err.Error(), "poster asset move-back failed: restore jammed",
-			"a failed plan-failure move-back must surface, not be swallowed")
-		assert.Equal(t, [][2]string{{oldID, newID}, {newID, oldID}}, gen.calls)
+			"a failed plan-failure snapshot replay must surface, not be swallowed")
+		assert.Equal(t, [][2]string{{oldID, newID}}, gen.calls,
+			"F-new: the compensation replays snapshots — no opposite re-key")
+		assert.Equal(t, 2, gen.restores)
 		assertPosterSourceLockFree(t, jobID, oldID)
 		assertPosterSourceLockFree(t, jobID, newID)
 	})

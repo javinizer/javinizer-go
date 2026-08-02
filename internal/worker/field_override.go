@@ -346,20 +346,35 @@ func RewritePosterIDInPreviewURL(raw, oldID, newID string) string {
 //     cleanly displaced again) is joined onto the surfaced error instead of
 //     being swallowed.
 //
-// The returned moveBack closure for a SUCCESSFUL move compensates a later
-// persist/plan failure and still uses an opposite MovePosterAssets call: a
-// FULLY completed A→B move leaves the origin key empty at every leg, so the
-// reverse move's absent-source legs can only hit already-absent files and
-// its rename legs invert the completed ones 1:1 — the one direction where
-// MoveAssets' normalizing semantics are a true inverse. (Foreign destination
-// bytes the forward move legitimately replaced are defined away by the
-// re-key itself, so no closure could resurrect them.)
+// The returned moveBack closure compensates a later persist/plan failure of
+// a SUCCESSFUL move, and its make-up depends on the snapshot arm:
+//
+//   - WITH both pre-move snapshots captured (the fail-closed path above),
+//     the closure is a PURE SNAPSHOT REPLAY —
+//     errors.Join(RestorePosterAssets(destSnap),
+//     RestorePosterAssets(originSnap)) — a true inverse with NO move
+//     operation. This matters because a completed forward move is
+//     DESTRUCTIVE at the destination: it replaces any foreign bytes filed
+//     under the destination key (a bystander movie's assets the re-key
+//     adopts), and no reversed re-key could ever resurrect them — but the
+//     destination snapshot is still in scope here, so compensation restores
+//     the destination's pre-move bytes to the destination key AND the
+//     origin's pre-move bytes to the origin key, exactly;
+//   - WITHOUT the snapshot capability the reverse MovePosterAssets re-key
+//     is the only safe option: a FULLY completed A→B move leaves the origin
+//     key empty at every leg, so the reverse move's absent-source legs can
+//     only hit already-absent files and its rename legs invert the
+//     completed ones 1:1 — the one direction where MoveAssets' normalizing
+//     semantics are a true inverse. Foreign destination bytes the forward
+//     move legitimately replaced are then unrecoverable by construction
+//     (nothing captured them).
 //
 // A generator without the move capability (test stubs, nil) holds no assets:
 // the call degrades to (nil, nil) — the re-key is then state-only. A mover
 // WITHOUT the snapshot capability cannot preflight: a forward failure leaves
 // the possibly-partial move in place and says so on the error, instead of
-// running the hazardous reverse re-key.
+// running the hazardous reverse re-key; its success-path compensation
+// likewise falls back to the reverse re-key (the second arm above).
 func MigratePosterCacheAssets(gen poster.PosterGenerator, jobID, fromKey, toKey string) (moveBack func() error, err error) {
 	mover, ok := gen.(posterAssetMover)
 	if !ok {
@@ -388,6 +403,21 @@ func MigratePosterCacheAssets(gen poster.PosterGenerator, jobID, fromKey, toKey 
 		}
 		return nil, errMsg
 	}
+	if reversible {
+		// Snapshot arm: pure snapshot replay, the true inverse of the
+		// completed move (see the doc block above). Destination first, then
+		// origin — the same order as the failure reversal, so a partially
+		// writable filesystem degrades identically in both directions.
+		return func() error {
+			return errors.Join(
+				snapshooter.RestorePosterAssets(destSnap),
+				snapshooter.RestorePosterAssets(originSnap),
+			)
+		}, nil
+	}
+	// No-snapshot arm: the reverse re-key is the only safe option — with no
+	// captured pre-state there is nothing to replay, and a FULLY completed
+	// move is the one state a reversed MoveAssets inverts 1:1.
 	return func() error { return mover.MovePosterAssets(jobID, toKey, fromKey) }, nil
 }
 

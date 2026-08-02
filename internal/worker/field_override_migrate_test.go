@@ -210,11 +210,17 @@ func TestMigratePosterCacheAssets_ReversalFailureSurfacedHonestly(t *testing.T) 
 	assertFileBytes(t, fs, dir+"/OLD-1.jpg", "origin-preview")
 }
 
-// TestMigratePosterCacheAssets_SuccessReturnsMoveBack pins the success
-// contract: the forward migration completes and the compensation closure
-// (a later persist/plan failure) moves the assets back to the origin key —
-// the one direction where MoveAssets' normalizing semantics invert a FULLY
-// completed move 1:1.
+// TestMigratePosterCacheAssets_SuccessReturnsMoveBack pins the strong
+// success contract (audit-6 F-new): the forward migration completes and the
+// compensation closure (a later persist/plan failure) replays BOTH pre-move
+// snapshots — destination first, then origin — instead of running a
+// reversed MovePosterAssets re-key. With no foreign content at either key
+// the replay's end state is the one the reverse re-key also produced:
+// origin bytes back at the origin key, the destination key empty. (Where
+// the mechanisms DIFFER — bystander bytes the completed move destroyed at
+// the destination — is pinned by
+// TestMigratePosterCacheAssets_SuccessMoveBackRestoresBystanderDestination:
+// only the snapshot replay can resurrect them.)
 func TestMigratePosterCacheAssets_SuccessReturnsMoveBack(t *testing.T) {
 	base := afero.NewMemMapFs()
 	gen, dir := migrateFixture(t, base)
@@ -231,6 +237,61 @@ func TestMigratePosterCacheAssets_SuccessReturnsMoveBack(t *testing.T) {
 	assertFileBytes(t, base, dir+"/OLD-1.jpg", "origin-preview")
 	assertFileGone(t, base, dir+"/NEW-2-full.jpg")
 	assertFileGone(t, base, dir+"/NEW-2.jpg")
+}
+
+// TestMigratePosterCacheAssets_SuccessMoveBackRestoresBystanderDestination
+// pins the audit-6 F-new fix: the destination key carried a BYSTANDER's
+// bytes before the re-key, and the fully completed forward move
+// destructively replaced them (MoveAssets removes the destination before
+// renaming over it). The compensation closure — built from the pre-move
+// snapshots because the real generator exposes the snapshot capability —
+// must resurrect the bystander's exact bytes at the destination key AND
+// restore the origin bytes at the origin key. Under the pre-fix reverse
+// re-key the bystander bytes were lost for good: the reverse move lands the
+// origin files back on the origin key but can only DELETE the relocated
+// files at the destination, never recreate content it never captured.
+func TestMigratePosterCacheAssets_SuccessMoveBackRestoresBystanderDestination(t *testing.T) {
+	base := afero.NewMemMapFs()
+	gen, dir := migrateFixture(t, base)
+	// A bystander movie owns the destination key before the re-key.
+	require.NoError(t, afero.WriteFile(base, dir+"/NEW-2-full.jpg", []byte("bystander-full"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/NEW-2.jpg", []byte("bystander-preview"), 0o644))
+
+	back, err := MigratePosterCacheAssets(gen, "job-migrate", "OLD-1", "NEW-2")
+	require.NoError(t, err)
+	require.NotNil(t, back)
+	// The completed move adopted the bystander's key: the origin bytes are
+	// filed under it now, and the bystander bytes were destroyed in place.
+	assertFileBytes(t, base, dir+"/NEW-2-full.jpg", "origin-full")
+	assertFileBytes(t, base, dir+"/NEW-2.jpg", "origin-preview")
+	assertFileGone(t, base, dir+"/OLD-1-full.jpg")
+	assertFileGone(t, base, dir+"/OLD-1.jpg")
+
+	require.NoError(t, back(), "compensation replays both pre-move snapshots")
+	// The bystander's bytes are resurrected at the destination key…
+	assertFileBytes(t, base, dir+"/NEW-2-full.jpg", "bystander-full")
+	assertFileBytes(t, base, dir+"/NEW-2.jpg", "bystander-preview")
+	// …and the origin's bytes are back at the origin key.
+	assertFileBytes(t, base, dir+"/OLD-1-full.jpg", "origin-full")
+	assertFileBytes(t, base, dir+"/OLD-1.jpg", "origin-preview")
+}
+
+// TestMigratePosterCacheAssets_NoSnapshotCompensationFallsBackToReverseRekey
+// pins the no-snapshot arm of the success contract: a mover WITHOUT the
+// snapshot capability cannot replay a state it never captured, so its
+// compensation degrades to the reverse MovePosterAssets re-key — the one
+// direction where MoveAssets inverts a FULLY completed move 1:1 (the origin
+// key is empty at every leg, so the absent-source branches cannot delete
+// anything real).
+func TestMigratePosterCacheAssets_NoSnapshotCompensationFallsBackToReverseRekey(t *testing.T) {
+	gen := &moverOnlyStubGen{}
+	back, err := MigratePosterCacheAssets(gen, "job-migrate", "OLD-1", "NEW-2")
+	require.NoError(t, err)
+	require.NotNil(t, back, "a mover-only generator still gets the reverse re-key compensation")
+
+	require.NoError(t, back())
+	assert.Equal(t, [][2]string{{"OLD-1", "NEW-2"}, {"NEW-2", "OLD-1"}}, gen.calls,
+		"forward move, then the reverse re-key — the only safe compensation without snapshots")
 }
 
 // TestMigratePosterCacheAssets_NoMoverDegrades pins the state-only degrade:

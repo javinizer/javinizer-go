@@ -154,12 +154,26 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 type rescrapeLifecycle struct {
 	inputs rescrapePhaseInputs
 	lookup *resultstore.FileLookupResult
+	// failureCleanup, when non-nil, performs the failure-path poster-asset
+	// cleanup in place of the blanket CleanupMoviePosters delete. Rescrape
+	// wires it to replay the captured destination (pre-generation) snapshot
+	// when one exists, so a failed leg that re-keyed onto a bystander's key
+	// restores the bystander's bytes instead of deleting them, and the
+	// destination rollback is never lost after being armed; the blanket
+	// delete then runs only when no snapshot could be captured (no
+	// generation ran, or a snapshot-less/failed snapshot degrade).
+	failureCleanup func(movie *models.Movie)
 }
 
 // withRescrapeStatus executes fn within a rescrape status-transition wrapper.
-// If fn returns an error, or the outcome is Gone/Conflict/Failed, poster
-// cleanup is performed automatically (rollback). On success, orphaned poster
-// paths are cleaned up instead.
+// If fn returns an error, or the outcome is Gone/Conflict/Failed, the poster
+// assets the failed rescrape touched are rewound (rollback): the destination
+// key's pre-generation snapshot is replayed when one was captured — restoring
+// the bystander's or pre-rescrape bytes GeneratePoster replaced, and removing
+// freshly generated files at a brand-new key (RestoreAssets deletes files
+// absent from the snapshot) — otherwise the destination assets are deleted
+// outright (the pre-existing degrade for snapshot-less generators). On
+// success, orphaned poster paths are cleaned up instead.
 func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resultstore.MovieResult, error)) (*RescrapeResult, error) {
 	outcome, movieResult, err := fn()
 	cleanupMovie := func() *models.Movie {
@@ -168,8 +182,16 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 		}
 		return nil
 	}
+	rewindFailurePosters := func() {
+		movie := cleanupMovie()
+		if lc.failureCleanup != nil {
+			lc.failureCleanup(movie)
+			return
+		}
+		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, movie)
+	}
 	if err != nil {
-		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+		rewindFailurePosters()
 		if lc.inputs.HistoryRepo != nil {
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
@@ -185,7 +207,7 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 	}
 	switch outcome.Status {
 	case models.RescrapeStatusGone, models.RescrapeStatusConflict, models.RescrapeStatusFailed:
-		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+		rewindFailurePosters()
 		if lc.inputs.HistoryRepo != nil {
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
@@ -362,8 +384,9 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		lookup.OldMovieID = inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
 	}
 
-	lc := rescrapeLifecycle{inputs: inputs, lookup: lookup}
-
+	// The rollback legs are declared before the lifecycle so its failure
+	// cleanup (below) can consult the destination rollback the scrape closure
+	// arms mid-flight.
 	var posterCacheRollback func() error
 	var originCacheRollback func() error
 	var preRescrapeResult *resultstore.MovieResult
@@ -373,6 +396,44 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	// envelope-persist failure can SAY what it could not restore (P3-7's
 	// degraded-rollback visibility).
 	var degradedRollback []string
+
+	lc := rescrapeLifecycle{inputs: inputs, lookup: lookup}
+	lc.failureCleanup = func(movie *models.Movie) {
+		// F-new: a failure cleanup must not DELETE the destination key's
+		// assets when the pre-generation snapshot was captured — replay the
+		// snapshot instead. The failed leg's GeneratePoster already replaced
+		// the destination key's files, and a wholesale delete would then:
+		//  - on a rekey-onto-bystander (A→B where ANOTHER result uses B):
+		//    leave the bystander's persisted preview URL pointing at files
+		//    that no longer exist — the captured destination rollback is
+		//    exactly those pre-generation bytes, replaying it restores them;
+		//  - on a same-key rescrape (destination == old ID): the failed
+		//    commit leaves the store at the pre-rescrape state, so the
+		//    pre-generation assets — not a dangling delete — are the
+		//    consistent cache;
+		//  - on a brand-new destination key: the snapshot is empty and
+		//    RestoreAssets removes the freshly generated files — the same
+		//    end state the delete produced.
+		// The origin key's assets are never wound back here: the SUCCESS
+		// path's orphan cleanup is the only leg that deletes them, so on
+		// failure the origin is trivially untouched and re-keyed-onto files
+		// still resolve. The rollback is consumed (never double-run): the
+		// persist-failure rollback below and this cleanup are mutually
+		// exclusive (only a Success outcome reaches the persist), and the
+		// nil-out pins that contract if this ever changes.
+		// Degrade: no PosterGen, a generator without the snapshot capability,
+		// or a failed snapshot (degradedRollback records it) falls back to
+		// the blanket delete — the pre-existing semantics.
+		if posterCacheRollback != nil {
+			rb := posterCacheRollback
+			posterCacheRollback = nil
+			if rbErr := rb(); rbErr != nil {
+				logging.Warnf("[rescrape] Failed to restore destination poster cache during failure cleanup for job %s: %v", inputs.JobID.String(), rbErr)
+			}
+			return
+		}
+		CleanupMoviePosters(inputs.Fs, inputs.TempDir, inputs.JobID, movie)
+	}
 	outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
 		// Scrape
 		scrapeResult, meta, scrapeErr := p.ScrapeSingle(ctx, inputs, lookup.FilePath, scrapeCmd)
