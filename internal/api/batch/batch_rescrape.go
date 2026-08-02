@@ -20,7 +20,9 @@ const bulkRescrapeMaxMovies = 100
 
 // bulkRescrapePool runs the bulk rescrape worker pool. It accepts a job,
 // movie IDs, request parameters, a batch job factory, and a progress
-// broadcast function, and returns per-movie results.
+// broadcast function, and returns per-movie results plus the poster-cache
+// rollback of every successful rescrape (for the caller's envelope
+// persist-failure compensation order — run them all before reporting).
 func bulkRescrapePool(
 	ctx context.Context,
 	job worker.BatchJobInterface,
@@ -28,15 +30,17 @@ func bulkRescrapePool(
 	req *contracts.BatchRescrapeRequest,
 	factory worker.BatchJobFactoryInterface,
 	progressFn func(movieID string, result *contracts.BulkRescrapeMovieResult, progress float64),
-) []contracts.BulkRescrapeMovieResult {
+) ([]contracts.BulkRescrapeMovieResult, []func() error) {
 	type rescrapeMovieResult struct {
-		movieID string
-		result  *contracts.BulkRescrapeMovieResult
+		movieID  string
+		result   *contracts.BulkRescrapeMovieResult
+		rollback func() error // nil unless the rescrape succeeded with a snapshot
 	}
 
 	var mu sync.Mutex
 	var completedCount int
 	results := make([]contracts.BulkRescrapeMovieResult, 0, len(movieIDs))
+	rollbacks := make([]func() error, 0, len(movieIDs))
 
 	movieChan := make(chan string, len(movieIDs))
 	resultChan := make(chan rescrapeMovieResult, len(movieIDs))
@@ -65,8 +69,8 @@ func bulkRescrapePool(
 			}()
 			for movieID := range movieChan {
 				currentMovieID = movieID
-				r := processBulkRescrapeMovie(ctx, movieID, job, req, factory)
-				resultChan <- rescrapeMovieResult{movieID: movieID, result: r}
+				r, rollback := processBulkRescrapeMovie(ctx, movieID, job, req, factory)
+				resultChan <- rescrapeMovieResult{movieID: movieID, result: r, rollback: rollback}
 			}
 		}()
 	}
@@ -83,6 +87,9 @@ func bulkRescrapePool(
 
 	for mr := range resultChan {
 		mu.Lock()
+		if mr.rollback != nil {
+			rollbacks = append(rollbacks, mr.rollback)
+		}
 		results = append(results, *mr.result)
 		completedCount++
 		if progressFn != nil {
@@ -91,7 +98,7 @@ func bulkRescrapePool(
 		mu.Unlock()
 	}
 
-	return results
+	return results, rollbacks
 }
 
 func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
@@ -170,23 +177,37 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 
 		jobResponse := buildBatchJobResponse(result.JobStatus)
 
-		c.JSON(http.StatusOK, contracts.BulkRescrapeResponse{
+		respStatus := http.StatusOK
+		resp := contracts.BulkRescrapeResponse{
 			Results:   result.Results,
 			Succeeded: result.Succeeded,
 			Failed:    result.Failed,
 			Job:       jobResponse,
-		})
+		}
+		if result.PersistErr != nil {
+			// The per-file rescrapes committed (Results stay authoritative), but
+			// the envelope did not persist: surface a clear failure signal — an
+			// error status WITH the per-file results — instead of acking state a
+			// restart would resurrect against the rescraped poster images.
+			resp.PersistError = result.PersistErr.Error()
+			respStatus = http.StatusInternalServerError
+		}
+		c.JSON(respStatus, resp)
 	}
 }
 
-func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.BatchJobInterface, req *contracts.BatchRescrapeRequest, factory worker.BatchJobFactoryInterface) *contracts.BulkRescrapeMovieResult {
+// processBulkRescrapeMovie rescrapes one movie. On success it also returns
+// the rescrape's poster-cache rollback (nil for stub jobs / missing
+// snapshots) so the caller can undo the asset replacement when the final
+// job-envelope persist fails.
+func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.BatchJobInterface, req *contracts.BatchRescrapeRequest, factory worker.BatchJobFactoryInterface) (*contracts.BulkRescrapeMovieResult, func() error) {
 	mergeOpts, mergeEnabled, mergeErr := resolveRescrapeMergeOptions(req)
 	if mergeErr != nil {
 		return &contracts.BulkRescrapeMovieResult{
 			MovieID: movieID,
 			Status:  models.RescrapeStatusFailed,
 			Error:   fmt.Sprintf("invalid merge options: %v", mergeErr),
-		}
+		}, nil
 	}
 	cmd := factory.NewRescrapeCmd(
 		movieID,
@@ -203,7 +224,7 @@ func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.Ba
 			MovieID: movieID,
 			Status:  models.RescrapeStatusFailed,
 			Error:   fmt.Sprintf("Rescrape failed: %v", err),
-		}
+		}, nil
 	}
 
 	if result.Status == models.RescrapeStatusGone {
@@ -211,7 +232,7 @@ func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.Ba
 			MovieID: movieID,
 			Status:  models.RescrapeStatusFailed,
 			Error:   "Job was deleted during rescrape",
-		}
+		}, nil
 	}
 
 	if result.Status == models.RescrapeStatusConflict {
@@ -219,7 +240,7 @@ func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.Ba
 			MovieID: movieID,
 			Status:  models.RescrapeStatusFailed,
 			Error:   "Concurrent rescrape conflict",
-		}
+		}, nil
 	}
 
 	if result.Status == models.RescrapeStatusFailed {
@@ -227,12 +248,12 @@ func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.Ba
 			MovieID: movieID,
 			Status:  models.RescrapeStatusFailed,
 			Error:   result.Error,
-		}
+		}, nil
 	}
 
 	return &contracts.BulkRescrapeMovieResult{
 		MovieID: movieID,
 		Status:  models.RescrapeStatusSuccess,
 		Movie:   contracts.MovieViewFromModel(result.Movie),
-	}
+	}, result.PosterCacheRollback
 }

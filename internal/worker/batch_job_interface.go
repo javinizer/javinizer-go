@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -125,6 +126,16 @@ type RescrapeResult struct {
 	Error            string                  // Human-readable error for "failed" status
 	OrphanedMovieIDs []string                // IDs that became orphaned during rescrape cleanup
 	FilePath         string                  // File path that was rescraped (for provenance propagation)
+	// PosterCacheRollback, set only on success when the poster generator
+	// supports asset snapshots, restores the job's temp poster cache to its
+	// pre-GeneratePoster state. GeneratePoster replaces {movieID}-full.jpg
+	// BEFORE the commit; when the caller's post-commit envelope persist
+	// fails, a restart would resurrect pre-rescrape job state against the
+	// rescraped image — invoke this to undo the asset replacement (parity
+	// with RefreshPosterAssets' snapshot/rollback). The snapshot is taken
+	// while the rescrape's poster-source lock(s) are held, so nothing can
+	// interleave between snapshot, asset replacement, and commit.
+	PosterCacheRollback func() error
 }
 
 // ---------------------------------------------------------------------------
@@ -157,8 +168,16 @@ type JobEditor interface {
 	// ApplyFieldOverride cherry-picks a single field's value from the named
 	// scraper source's raw results and applies it to the movie, updating
 	// provenance attribution. Mirrors the original Javinizer "Replace" button.
-	// Returns the updated MovieResult and ProvenanceData (both clones).
-	ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)
+	// Returns the updated MovieResult and ProvenanceData (both clones), plus
+	// a compensation function the caller MUST invoke when its follow-up
+	// job-envelope persist fails: it reverts every persisted part to its
+	// pre-override movie, restores the pre-override provenance fan-out, and
+	// rolls any poster-cache refresh back — otherwise a restart
+	// (reconstructBatchJob reads only the envelope) resurrects pre-override
+	// state against a cache that holds the refreshed image. Nil when there is
+	// nothing to compensate (all error paths already compensate internally).
+	// Compensation failures are surfaced via its returned error (errors.Join).
+	ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, func() error, error)
 }
 
 // PhaseController provides phase execution and dependency-wiring operations
@@ -502,14 +521,21 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // (re-persisted with their pre-override movies) BEFORE the poster-cache
 // rollback runs — restoring the cache while a part still holds the new
 // source would desync job state from the -full.jpg all over again.
-func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+//
+// The caller persists the job envelope AFTER this method returns
+// (PersistJobByID). If THAT fails, the same rollback discipline applies
+// through the returned compensation function: parts revert to their
+// pre-override movies, the pre-override provenance is restored, and the
+// poster cache rolls back — a restart must never resurrect pre-override
+// job state against a refreshed cache.
+func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, func() error, error) {
 	mu, _ := je.overrideMu.LoadOrStore(resultID, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
 
 	result, _, found := je.store.GetFileResultByResultID(resultID)
 	if !found || result == nil || result.Movie == nil {
-		return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
+		return nil, nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
 	}
 	// the manual-crop, poster-from-URL, and whole-movie PATCH paths
 	// (internal/api/batch/movie_edit.go) via the shared per-(jobID, movieID)
@@ -555,7 +581,7 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 		freshResult, fp, stillFound := je.store.GetFileResultByResultID(resultID)
 		if !stillFound || freshResult == nil || freshResult.Movie == nil {
 			releasePosterLock()
-			return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
+			return nil, nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
 		}
 		result = freshResult
 		filePath = fp
@@ -576,14 +602,14 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	oldPosterURL := movie.Poster.PosterURL
 	oldCoverURL := movie.Poster.CoverURL
 	if err := applyFieldOverride(movie, prov, fieldKey, source); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var rollback func() error
 	if fieldKey == "poster_url" || fieldKey == "cover_url" {
 		var err error
 		rollback, err = je.refreshOverriddenPosterSource(ctx, movie, oldPosterURL, oldCoverURL)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	filePaths := je.store.FindFilePathsForMovieID(movieID)
@@ -600,7 +626,7 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	// sibling's templates with the wrong source file.
 	planned, err := je.planMultipartOverride(filePaths, movie, prov, fieldKey, source)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	updatedParts := make([]overridePartWrite, 0, len(planned))
 	for _, part := range planned {
@@ -619,16 +645,57 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 					errMsg = fmt.Errorf("%w (poster rollback failed: %v)", errMsg, rollbackErr)
 				}
 			}
-			return nil, nil, errMsg
+			return nil, nil, nil, errMsg
 		}
 		updatedParts = append(updatedParts, part)
+	}
+	// Snapshot the pre-override provenance of every part BEFORE the fan-out,
+	// so a caller-side envelope-persist failure compensation can restore the
+	// recorded attribution without having mutated its own working clone.
+	origProvenance := make(map[string]*resultstore.ProvenanceData, len(filePaths))
+	for _, partPath := range filePaths {
+		origProvenance[partPath] = je.store.GetProvenance(partPath)
 	}
 	for _, partPath := range filePaths {
 		je.store.SetProvenance(partPath, prov)
 	}
 	updated, _, _ := je.store.GetFileResultByResultID(resultID)
 	updatedProv := je.store.GetProvenance(filePath)
-	return updated, updatedProv, nil
+
+	// The compensation the caller runs when its envelope persist fails AFTER
+	// this method returned successfully: revert every persisted part to its
+	// pre-override movie (mirroring the UpdateMovie-failure compensation), then
+	// restore the pre-override provenance attribution, then roll the poster
+	// cache back. Order matters: cache restore runs LAST so no part still
+	// holds the new source URL while the cache flips back to the old image.
+	// Callers must serialize compensation with any retry of their own (the
+	// poster-source lock is NOT held here).
+	compensate := func() error {
+		var errs []error
+		for _, part := range updatedParts {
+			if part.original == nil {
+				continue
+			}
+			if revertErr := je.UpdateMovie(ctx, part.filePath, part.original); revertErr != nil {
+				errs = append(errs, fmt.Errorf("revert of part %s failed: %w", part.filePath, revertErr))
+			}
+		}
+		for partPath, orig := range origProvenance {
+			if orig == nil {
+				// Provenance cannot be UNSET through the store; only real
+				// pre-override snapshots are restored.
+				continue
+			}
+			je.store.SetProvenance(partPath, orig)
+		}
+		if rollback != nil {
+			if rollbackErr := rollback(); rollbackErr != nil {
+				errs = append(errs, fmt.Errorf("poster rollback failed: %w", rollbackErr))
+			}
+		}
+		return errors.Join(errs...)
+	}
+	return updated, updatedProv, compensate, nil
 }
 
 // overridePartWrite plans one part of the ApplyFieldOverride multipart

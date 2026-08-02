@@ -303,6 +303,47 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		// same reload epoch (issue #44).
 		snap := rt.Snapshot()
 		batchCfg := snap.APIConfig().BatchConfig()
+
+		// Snapshot the cached assets BEFORE DownloadFromURL replaces them so a
+		// later state-update or envelope-persist failure can restore the
+		// pre-download cache (parity with RefreshPosterAssets'
+		// snapshot/rollback): without it a failed persist leaves restart-
+		// reconstructed (pre-URL) state pointing at a cache that holds the new
+		// image. Snapshot failures reject the request — the caller must not
+		// regenerate against a cache state it cannot roll back
+		// (manager.SnapshotAssets documents the same covenant).
+		assetSnap, snapErr := snap.PosterManager().SnapshotAssets(jobID, posterID)
+		if snapErr != nil {
+			logging.Errorf("Failed to snapshot poster assets before poster-from-URL for %s: %v", posterID, snapErr)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to snapshot poster assets: %v", snapErr)})
+			return
+		}
+
+		// Capture the pre-request per-part movies for compensation: a failure
+		// after the download reverts the in-memory fan-out (mirroring the
+		// whole-movie PATCH compensation) before the cache restore runs, so no
+		// part keeps the new poster URL while the cache holds the old image.
+		origMovies := make(map[string]*models.Movie)
+		for _, fp := range job.FindFilePathsForMovieID(movieID) {
+			if prev, gErr := job.GetMovieResult(fp); gErr == nil && prev != nil {
+				origMovies[fp] = prev.Movie
+			}
+		}
+		compensate := func(errMsg string) string {
+			for fp, orig := range origMovies {
+				if orig == nil {
+					continue
+				}
+				if revertErr := job.UpdateMovie(c.Request.Context(), fp, orig); revertErr != nil {
+					errMsg = fmt.Sprintf("%s (revert of part %s failed: %v)", errMsg, fp, revertErr)
+				}
+			}
+			if restoreErr := snap.PosterManager().RestoreAssets(assetSnap); restoreErr != nil {
+				errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, restoreErr)
+			}
+			return errMsg
+		}
+
 		posterResult, err := snap.PosterManager().DownloadFromURL(c.Request.Context(), jobID, posterID, req.URL, batchCfg.ScraperUserAgent, batchCfg.ScraperReferer)
 		if err != nil {
 			if strings.Contains(err.Error(), "SSRF") || strings.Contains(err.Error(), "invalid URL") {
@@ -319,16 +360,24 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		// UpdatePosterFromURL handles both DB persistence and
 		// in-memory update. No need to call MovieRepo directly.
 		if err := job.UpdatePosterFromURL(c.Request.Context(), movieID, req.URL, croppedURL); err != nil {
+			// The state update failed after the download already replaced the
+			// cached assets: restore them so the still-old job state and the
+			// cache keep describing the same image.
+			errMsg := compensate(fmt.Sprintf("Failed to update job state: %v", err))
 			logging.Errorf("Failed to update poster from URL in job state for %s: %v", movieID, err)
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 		// Same swallowed-persist class as the crop endpoint: the URL/bounds
 		// change lives in the job envelope, so a failed persist must surface as
-		// a 5xx instead of a false 200 ack.
+		// a 5xx instead of a false 200 ack — and the in-memory result must
+		// revert with the cache restored (compensate), otherwise a restart
+		// would resurrect pre-download job state while the cache holds the
+		// downloaded image.
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
+			errMsg := compensate(fmt.Sprintf("Failed to persist job state: %v", perr))
 			logging.Errorf("Failed to persist poster-from-URL for job %s: %v", jobID, perr)
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to persist job state: %v", perr)})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 

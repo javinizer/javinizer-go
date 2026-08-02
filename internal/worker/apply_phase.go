@@ -271,14 +271,44 @@ func interpretApplyResult(
 		// failed-apply row loses its movie payload and /review/[jobId] can't
 		// render the movie card / poster preview. Same dropped-on-failure-path
 		// pattern fixed for FileMatchInfo in commit 6249de64.
-		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
-			FileMatchInfo: afc.Match,
-			Movie:         movie,
-			Status:        fileStatus,
-			Error:         errMsg,
-			StartedAt:     startTime,
-			EndedAt:       &now,
+		// Preserve the LIVE result's poster state on the apply-failure write-back
+		// too: the snapshot `movie` pre-dates any crop/source edit taken while
+		// the organize ran, and UpdateFileResult would replace the whole result
+		// with it — silently erasing a mid-organize manual crop. The atomic
+		// read-modify-write merges the live poster fields onto the snapshot
+		// under the store lock; if the result vanished mid-apply (atomic update
+		// errors), fall back to the legacy wholesale write so the failure
+		// status is still recorded.
+		writeErr := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+			var merged *models.Movie
+			if movie != nil {
+				merged = movie.Clone()
+				mergeLivePosterState(merged, current.Movie)
+			}
+			return &resultstore.MovieResult{
+				// UpdateFileResult preserved ResultID on wholesale writes;
+				// the atomic callback must carry it over explicitly or review
+				// lookups keyed by result_id break for failed applies.
+				ResultID:      current.ResultID,
+				FileMatchInfo: afc.Match,
+				Movie:         merged,
+				Status:        fileStatus,
+				Error:         errMsg,
+				StartedAt:     startTime,
+				EndedAt:       &now,
+			}, nil
 		})
+		if writeErr != nil {
+			logging.Warnf("Failed to atomically update movie result for %s after apply failure: %v", filePath, writeErr)
+			inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
+				FileMatchInfo: afc.Match,
+				Movie:         movie,
+				Status:        fileStatus,
+				Error:         errMsg,
+				StartedAt:     startTime,
+				EndedAt:       &now,
+			})
+		}
 		if isCancelled {
 			if result != nil && result.OrganizeResult != nil {
 				auditOrganizeSuccess(inputs, movie, filePath, result, cfg)
@@ -322,7 +352,13 @@ func interpretApplyResult(
 
 	if result != nil && result.Movie != nil {
 		if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-			current.Movie = result.Movie.Clone()
+			// Write the pipeline-updated movie back, but let the LIVE result's
+			// poster state win: a manual crop (or poster-from-URL / source edit)
+			// taken while this file was being organized must not be clobbered by
+			// the apply-start snapshot result.Movie was cloned from.
+			next := result.Movie.Clone()
+			mergeLivePosterState(next, current.Movie)
+			current.Movie = next
 			return current, nil
 		}); err != nil {
 			logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err)
@@ -440,5 +476,41 @@ func trackApplyResults(inputs applyPhaseInputs, outcomes []applyFileOutcome, org
 		if o.Panic && !o.Cancelled && !inputs.OrganizeSkipped {
 			auditOrganizePanic(inputs, o)
 		}
+	}
+}
+
+// mergeLivePosterState overlays the LIVE result's poster identity onto a
+// write-back movie that was cloned from an older pipeline snapshot — the
+// apply-phase write-backs (apply-start snapshot; F-C) and the scrape persist
+// pool's DB round-trip (F-D; CropBounds is gorm:"-", so the saved movie lost
+// the runtime-only bounds). A manual crop, poster-from-URL, or source edit
+// that landed while the pipeline ran must not be erased by a stale-snapshot
+// write-back: the apply-phase callers read `live` inside the store's
+// AtomicUpdateFileResult callback, so the merge is atomic with every other
+// result-store poster mutation and needs no additional lock.
+//
+// Only the mutable poster fields move: the effective source pair
+// (PosterURL ?? CoverURL — the downloader's resolution), the recorded crop
+// decision (ShouldCropPoster), the carried CropBounds, and the cached preview
+// URL (CroppedPosterURL). Everything else on dst (organized/merged pipeline
+// output: titles, paths, genres...) is authoritative and never regressed.
+// The Original* baseline group is also left to dst/pipeline semantics.
+//
+// Lock ordering: this function takes NO poster-source lock — apply callers
+// hold none of these locks, and the two-lock rule reserves multi-lock
+// acquisition for the rescrape rekey path.
+func mergeLivePosterState(dst, live *models.Movie) {
+	if dst == nil || live == nil {
+		return
+	}
+	dst.Poster.PosterURL = live.Poster.PosterURL
+	dst.Poster.CoverURL = live.Poster.CoverURL
+	dst.Poster.ShouldCropPoster = live.Poster.ShouldCropPoster
+	dst.Poster.CroppedPosterURL = live.Poster.CroppedPosterURL
+	if live.Poster.CropBounds != nil {
+		b := *live.Poster.CropBounds
+		dst.Poster.CropBounds = &b
+	} else {
+		dst.Poster.CropBounds = nil
 	}
 }

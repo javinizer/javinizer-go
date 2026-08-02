@@ -124,6 +124,19 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		}
 	}
 
+	// Resolve the file path a poster mutation targeted from the REQUEST's
+	// resultId. onSuccess must NOT read the CURRENT result: the user may have
+	// navigated to another movie while the request was in flight, and keying
+	// the preview override / crop state off the current result would land that
+	// state under the wrong movie's file_path (applyPosterEditToState already
+	// keys off the request's resultId for the same reason).
+	function filePathForResultId(resultId: string): string | undefined {
+		for (const [filePath, r] of Object.entries(deps.getJob()?.results ?? {})) {
+			if ((r as FileResult).result_id === resultId) return filePath;
+		}
+		return undefined;
+	}
+
 	const posterFromUrlMutation = createMutation(() => ({
 		mutationFn: async ({ resultId, url }: { resultId: string; url: string }) => {
 			return deps.updateBatchMoviePosterFromURL(deps.getJobId(), resultId, { url });
@@ -136,9 +149,9 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				poster_crop_bounds: null,
 			});
 
-			const currentResult = deps.getCurrentResult();
-			if (currentResult) {
-				deps.getPosterPreviewOverrides().set(currentResult.file_path, {
+			const targetFilePath = filePathForResultId(resultId);
+			if (targetFilePath) {
+				deps.getPosterPreviewOverrides().set(targetFilePath, {
 					url: data.cropped_poster_url,
 					version: Date.now(),
 				});
@@ -241,9 +254,9 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		onSuccess: (response: PosterCropResponse, { resultId }) => {
 			applyPosterEditToState(resultId, posterCropOverlayFromResponse(response));
 
-			const currentResultVal = deps.getCurrentResult();
-			if (currentResultVal) {
-				deps.getPosterPreviewOverrides().set(currentResultVal.file_path, {
+			const targetFilePath = filePathForResultId(resultId);
+			if (targetFilePath) {
+				deps.getPosterPreviewOverrides().set(targetFilePath, {
 					url: response.cropped_poster_url,
 					version: Date.now(),
 				});
@@ -253,7 +266,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				if (cropMetricsVal && cropBoxVal) {
 					deps
 						.getPosterCropStates()
-						.set(currentResultVal.file_path, normalizeCropBox(cropBoxVal, cropMetricsVal));
+						.set(targetFilePath, normalizeCropBox(cropBoxVal, cropMetricsVal));
 				}
 			}
 

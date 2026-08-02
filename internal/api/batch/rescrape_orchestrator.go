@@ -49,8 +49,10 @@ func NewRescrapeOrchestrator(deps RescrapeDeps) *RescrapeOrchestrator {
 
 // JobPersistencer persists a job by ID after rescrape.
 // The rescrape results are already committed at this point, so a persist
-// failure is logged (and recorded as the job's PersistError) rather than
-// failing the rescrape itself.
+// failure rolls the replaced poster caches back (via the rescrape result's
+// PosterCacheRollback) and is surfaced on the orchestrator results
+// (PersistErr) instead of being acked as success — a restart would
+// otherwise resurrect pre-rescrape state against the rescraped images.
 type JobPersistencer interface {
 	PersistJobByID(id string) error
 }
@@ -71,12 +73,22 @@ type RescrapeResult struct {
 	Failed    int
 	Results   []contracts.BulkRescrapeMovieResult
 	JobStatus *worker.BatchJobStatus
+	// PersistErr is non-nil when the post-commit job-envelope persist failed.
+	// The per-file rescrapes already committed (Results are valid); PersistErr
+	// tells the caller the envelope no longer matches them, so it can surface
+	// a failure signal instead of acking state a restart would resurrect
+	// alongside the rescraped poster images.
+	PersistErr error
 }
 
 // SingleRescrapeResult contains the outcome of a single-movie rescrape.
 type SingleRescrapeResult struct {
 	RescrapeResult *worker.RescrapeResult
 	JobID          string
+	// PersistErr is non-nil when the post-commit job-envelope persist failed
+	// (see RescrapeResult.PersistErr). The rescrape's poster cache was
+	// already rolled back to the pre-rescrape assets when possible.
+	PersistErr error
 }
 
 // Rescrape performs a single-movie rescrape: resolve job → set workflow → execute.
@@ -118,7 +130,23 @@ func (o *RescrapeOrchestrator) Rescrape(ctx context.Context, jobID, movieID, fil
 	}
 
 	if perr := o.persist.PersistJobByID(jobID); perr != nil {
+		// Restart (reconstructBatchJob reads only the envelope) would
+		// resurrect pre-rescrape job state while the temp poster cache still
+		// holds the rescraped image: roll the cache back so both sides of the
+		// restart agree, and surface the failure to the caller instead of
+		// warn-only acking it.
+		persistErr := fmt.Errorf("rescrape committed but job state persist failed: %w", perr)
+		if result != nil && result.PosterCacheRollback != nil {
+			if rbErr := result.PosterCacheRollback(); rbErr != nil {
+				persistErr = fmt.Errorf("%w (poster rollback failed: %v)", persistErr, rbErr)
+			}
+		}
 		logging.Warnf("rescrape for job %s committed but job envelope persist failed: %v", jobID, perr)
+		return &SingleRescrapeResult{
+			RescrapeResult: result,
+			JobID:          jobID,
+			PersistErr:     persistErr,
+		}, nil
 	}
 
 	return &SingleRescrapeResult{
@@ -181,9 +209,19 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 		}
 	}
 
-	results := bulkRescrapePool(workCtx, job, movieIDs, req, o.factory, progressFn)
+	results, posterRollbacks := bulkRescrapePool(workCtx, job, movieIDs, req, o.factory, progressFn)
 
+	var persistErr error
 	if perr := o.persist.PersistJobByID(jobID); perr != nil {
+		// Same restore-then-surface discipline as the single rescrape: every
+		// successful per-movie rescrape replaced its shared poster assets,
+		// so roll each back before reporting.
+		persistErr = fmt.Errorf("bulk rescrape committed but job state persist failed: %w", perr)
+		for _, rollback := range posterRollbacks {
+			if rbErr := rollback(); rbErr != nil {
+				persistErr = fmt.Errorf("%w (poster rollback failed: %v)", persistErr, rbErr)
+			}
+		}
 		logging.Warnf("bulk rescrape for job %s committed but job envelope persist failed: %v", jobID, perr)
 	}
 
@@ -202,10 +240,11 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 	logging.Infof("Bulk rescrape complete for job %s: %d succeeded, %d failed", jobID, succeeded, failed)
 
 	return &RescrapeResult{
-		Succeeded: succeeded,
-		Failed:    failed,
-		Results:   results,
-		JobStatus: updatedStatus,
+		Succeeded:  succeeded,
+		Failed:     failed,
+		Results:    results,
+		JobStatus:  updatedStatus,
+		PersistErr: persistErr,
 	}, nil
 }
 

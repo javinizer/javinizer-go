@@ -201,6 +201,11 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				movie.Poster.CropBounds = nil
 			}
 		}
+		// Nil-movie edge (F-G): with no stored movie there is no prior crop intent
+		// or stored bounds to invalidate, so the intent-sync / bounds-invalidation
+		// block above is deliberately skipped and the client-sent ShouldCropPoster
+		// stands; the cache refresh below is NOT skipped — a first-time PATCHed
+		// source must still populate the poster cache.
 		// A whole-movie PATCH that changes the effective poster source (poster_url,
 		// or cover_url while no poster URL is set) must also regenerate the cached
 		// full-size poster before the new URLs are persisted: the review client
@@ -212,17 +217,28 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// no stale crop source lingers. Shares the field-override path's
 		// machinery (worker.RefreshPosterAssets) with the same atomicity:
 		// snapshot before refresh/cleanup, roll the cache back when the
-		// UpdateMovie persistence below fails, surface a failed rollback.
+		// UpdateMovie or envelope persistence below fails, surface a failed
+		// rollback.
+		//
+		// This runs even when the stored result has NO movie yet (the nil-movie
+		// edge): persisting a PATCHed-in source without the cache would
+		// otherwise leave the reviewer cropping the stale/none image while
+		// Organize downloads the new one. The old effective source is empty
+		// then, so any posted source regenerates from scratch. Deliberately NOT
+		// covered (documented, not fixed): a PATCH that RENAMES the movie ID
+		// regenerates the cache under the NEW id but leaves the old id's
+		// {oldID}-full.jpg/preview orphaned in the temp cache — they expire
+		// with the job's temp cleanup.
 		var rollback func() error
+		var oldPosterURL, oldCoverURL string
 		if current.Movie != nil {
-			cm := current.Movie.Poster
-			var refreshErr error
-			rollback, refreshErr = worker.RefreshPosterAssets(c.Request.Context(), rt.Snapshot().PosterGen(), jobID, movie, cm.PosterURL, cm.CoverURL)
-			if refreshErr != nil {
-				logging.Errorf("Failed to refresh poster source after whole-movie edit for result %s: %v", resultID, refreshErr)
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to refresh poster source: %v", refreshErr)})
-				return
-			}
+			oldPosterURL, oldCoverURL = current.Movie.Poster.PosterURL, current.Movie.Poster.CoverURL
+		}
+		rollback, refreshErr := worker.RefreshPosterAssets(c.Request.Context(), rt.Snapshot().PosterGen(), jobID, movie, oldPosterURL, oldCoverURL)
+		if refreshErr != nil {
+			logging.Errorf("Failed to refresh poster source after whole-movie edit for result %s: %v", resultID, refreshErr)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to refresh poster source: %v", refreshErr)})
+			return
 		}
 		movie.DisplayTitle = movie.Title
 		if snap := rt.Snapshot(); snap != nil {
@@ -285,11 +301,15 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 			updated = append(updated, updatedPart{filePath: filePath, original: original})
 		}
-		if updateErr != nil {
-			errMsg := fmt.Sprintf("Failed to update movie: %v", updateErr)
-			// Revert the parts already updated so no part keeps the new poster
-			// metadata that the poster-cache rollback below erases; a failed
-			// revert is surfaced alongside the primary error, not swallowed.
+		// compensateEdit reverts every part already updated in this request and
+		// rolls the refreshed poster cache back, in that order: restoring the
+		// cache while a part still holds the new poster source URL would desync
+		// job state from the cached -full.jpg. Every failure is surfaced in the
+		// returned message, never swallowed. Shared by the UpdateMovie-failure
+		// branch and the envelope-persist-failure branch — the latter can
+		// strand the exact same divergence on restart (reconstructBatchJob reads
+		// only the envelope).
+		compensateEdit := func(errMsg string) string {
 			for _, part := range updated {
 				if part.original == nil {
 					continue
@@ -299,25 +319,29 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				}
 			}
 			if rollback != nil {
-				// Persistence failed after the refresh replaced the cached
-				// poster assets: restore the pre-refresh cache so a subsequent
-				// crop measures the image the still-persisted source URL
-				// describes. A failed restore is surfaced, not swallowed
-				// (parity with the field-override path).
 				if rollbackErr := rollback(); rollbackErr != nil {
 					errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, rollbackErr)
 				}
 			}
+			return errMsg
+		}
+		if updateErr != nil {
+			errMsg := compensateEdit(fmt.Sprintf("Failed to update movie: %v", updateErr))
 			logging.Errorf("Failed to update movie for %s: %v", updateFailPath, updateErr)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 		// A failed envelope persist is surfaced, not swallowed: in-memory edits
 		// that never reach the database would be silently dropped by a restart
-		// while the client believes they succeeded.
+		// while the client believes they succeeded. The same compensation as the
+		// UpdateMovie-failure branch keeps restart state coherent: the in-memory
+		// parts revert to their pre-request movies and a successful poster
+		// refresh rolls back, so the envelope the restart reconstructs and the
+		// poster cache describe the same image.
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
+			errMsg := compensateEdit(fmt.Sprintf("Failed to persist job state: %v", perr))
 			logging.Errorf("Failed to persist movie edit for job %s: %v", jobID, perr)
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to persist job state: %v", perr)})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie)})

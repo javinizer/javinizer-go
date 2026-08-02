@@ -128,6 +128,37 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 		expect(log.calls).not.toContain('crop');
 	});
 
+	it('pre-syncs via poster-from-URL when the server poster_url is EMPTY (cover-backed movie with unsaved poster_url edit)', async () => {
+		// Cover-backed movie: server-side poster_url is empty, the user pasted
+		// a new URL client-side. openPosterCropModal already shows the edited
+		// URL via the image proxy, so applyPosterCrop must pre-sync that URL to
+		// {movieId}-full.jpg BEFORE cropping — otherwise the backend crops the
+		// COVER with bounds measured on the edited image, and discarding the
+		// pending edit would leave wrong bounds attached to the cover.
+		const { controller, log } = makeController({
+			editedPosterUrl: 'https://dmm/jacket-full.jpg',
+			serverPosterUrl: ''
+		});
+
+		await controller.applyPosterCrop();
+
+		expect(log.applyPosterFromUrlAsync).toHaveBeenCalledWith('res-1', 'https://dmm/jacket-full.jpg');
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledTimes(1);
+		expect(log.calls).toEqual(['applying:true', 'persist', 'crop', 'applying:false']);
+	});
+
+	it('still skips the pre-sync when neither server nor edited poster_url is set (no edit at all)', async () => {
+		const { controller, log } = makeController({
+			editedPosterUrl: '',
+			serverPosterUrl: ''
+		});
+
+		await controller.applyPosterCrop();
+
+		expect(log.applyPosterFromUrlAsync).not.toHaveBeenCalled();
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledTimes(1);
+	});
+
 	it('passes maxPosterHeight through to the crop mutation', async () => {
 		const sameUrl = 'https://dmm/poster.jpg';
 		const { controller, log } = makeController({
@@ -167,13 +198,15 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 		BaseClient.setSessionID(null);
 	});
 
-	function makeCropController() {
+	function makeCropController(opts: { editedPosterUrl?: string; serverPosterUrl?: string } = {}) {
 		BaseClient.setSessionID('sid-abc');
 		const setCropSourceURL = vi.fn();
+		const editedPosterUrl = opts.editedPosterUrl ?? 'https://dmm/poster-GOOD-001.jpg';
+		const serverPosterUrl = opts.serverPosterUrl ?? editedPosterUrl;
 		const movie: Movie = {
 			id: 'GOOD-001',
 			title: 'Test Movie',
-			poster_url: 'https://dmm/poster-GOOD-001.jpg',
+			poster_url: editedPosterUrl,
 		};
 		const result: FileResult = {
 			result_id: 'res-1',
@@ -184,7 +217,7 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 			is_multi_part: false,
 			part_number: 0,
 			part_suffix: '',
-			movie: { id: 'GOOD-001', title: 'Test Movie', poster_url: 'https://dmm/poster-GOOD-001.jpg' },
+			movie: { id: 'GOOD-001', title: 'Test Movie', poster_url: serverPosterUrl },
 		};
 		const controller = createPosterCropController({
 			getBrowser: () => true,
@@ -238,5 +271,25 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 		// A regression producing ?session=...?v=12345 (two '?') would fail
 		// both this assertion and the at-most-one-? assertion above.
 		expect(url, 'session + v params must be joined with &, not a duplicated ?').toMatch(/[?&]v=12345/);
+	});
+
+	it('measures the crop on the EDITED URL (via the image proxy) when the server poster_url is empty (cover-backed movie with unsaved edit)', () => {
+		// Consistency with applyPosterCrop: the modal shows the edited image
+		// even though the server-side poster_url is EMPTY (cover-backed), and
+		// applyPosterCrop pre-syncs that same URL before cropping — the crop
+		// bounds are measured and applied against the same image.
+		const { controller, setCropSourceURL } = makeCropController({
+			editedPosterUrl: 'https://dmm/jacket-new.jpg',
+			serverPosterUrl: '',
+		});
+		controller.openPosterCropModal();
+
+		expect(setCropSourceURL).toHaveBeenCalledTimes(1);
+		const url = setCropSourceURL.mock.calls[0][0] as string;
+		expect(url).toContain(
+			`/api/v1/temp/image?url=${encodeURIComponent('https://dmm/jacket-new.jpg')}`,
+		);
+		expect(url).not.toContain('/posters/job-1/GOOD-001-full.jpg');
+		expect(url).toContain('session=sid-abc');
 	});
 });

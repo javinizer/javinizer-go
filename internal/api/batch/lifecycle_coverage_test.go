@@ -184,7 +184,7 @@ func TestProcessBulkRescrapeMovie_Error(t *testing.T) {
 	job := &stubControlledJob{rescrapeErr: fmt.Errorf("scrape error")}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Contains(t, result.Error, "Rescrape failed")
@@ -195,7 +195,7 @@ func TestProcessBulkRescrapeMovie_GoneStatus(t *testing.T) {
 	job := &stubControlledJob{rescrapeResult: &worker.RescrapeResult{Status: models.RescrapeStatusGone}}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Contains(t, result.Error, "deleted during rescrape")
@@ -206,7 +206,7 @@ func TestProcessBulkRescrapeMovie_ConflictStatus(t *testing.T) {
 	job := &stubControlledJob{rescrapeResult: &worker.RescrapeResult{Status: models.RescrapeStatusConflict}}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Contains(t, result.Error, "Concurrent rescrape conflict")
@@ -217,7 +217,7 @@ func TestProcessBulkRescrapeMovie_FailedStatus(t *testing.T) {
 	job := &stubControlledJob{rescrapeResult: &worker.RescrapeResult{Status: models.RescrapeStatusFailed, Error: "no scraper results"}}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Equal(t, "no scraper results", result.Error)
@@ -229,7 +229,7 @@ func TestProcessBulkRescrapeMovie_SuccessStatus(t *testing.T) {
 	job := &stubControlledJob{rescrapeResult: &worker.RescrapeResult{Status: models.RescrapeStatusSuccess, Movie: movie}}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusSuccess, result.Status)
 	assert.Equal(t, "ABC-123", result.Movie.ID)
@@ -281,7 +281,7 @@ func (s *stubControlledJob) UpdatePosterCrop(string, string, *models.CropBounds)
 func (s *stubControlledJob) UpdatePosterFromURL(context.Context, string, string, string) error {
 	return nil
 }
-func (s *stubControlledJob) ApplyFieldOverride(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
-	return nil, nil, nil
+func (s *stubControlledJob) ApplyFieldOverride(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, func() error, error) {
+	return nil, nil, nil, nil
 }
 func (s *stubControlledJob) GetProvenance(string) *resultstore.ProvenanceData { return nil }

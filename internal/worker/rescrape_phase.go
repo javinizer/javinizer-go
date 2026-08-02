@@ -338,6 +338,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 
 	lc := rescrapeLifecycle{inputs: inputs, lookup: lookup}
 
+	var posterCacheRollback func() error
 	outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
 		// Scrape
 		scrapeResult, meta, scrapeErr := p.ScrapeSingle(ctx, inputs, lookup.FilePath, scrapeCmd)
@@ -476,7 +477,25 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// Organize applies those coordinates to the wrong image. Generating
 		// from the reconciled movie keeps the cache image == the effective
 		// source the committed movie references.
+		//
+		// Snapshot the cached assets BEFORE the replacement so a post-commit
+		// envelope-persist failure can restore them (RescrapeResult.
+		// PosterCacheRollback — parity with RefreshPosterAssets'
+		// snapshot/rollback): a restart would otherwise resurrect the
+		// pre-rescrape job state against the freshly generated image. Taken
+		// while the poster-source lock(s) are still held, so no crop/edit can
+		// interleave between the snapshot and the replacement. A snapshot
+		// failure degrades to no-rollback (logged) rather than rejecting the
+		// rescrape: poster generation itself is already best-effort below.
 		if inputs.PosterGen != nil && movieResult.Movie != nil {
+			if snapshooter, ok := inputs.PosterGen.(posterAssetSnapshooter); ok {
+				snap, snapErr := snapshooter.SnapshotPosterAssets(inputs.JobID.String(), movieResult.Movie.ID)
+				if snapErr != nil {
+					logging.Warnf("[rescrape] Failed to snapshot poster assets for %s before generation (no persist-failure rollback): %v", movieResult.Movie.ID, snapErr)
+				} else {
+					posterCacheRollback = func() error { return snapshooter.RestorePosterAssets(snap) }
+				}
+			}
 			if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
 				s := posterErr.Error()
 				movieResult.PosterError = &s
@@ -505,6 +524,12 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	// Attach provenance and file path on success
 	if outcome.Status == models.RescrapeStatusSuccess {
 		replaceRescrapeResult(outcome, lookup.FilePath, movieResult, prov)
+		// The persist-failure rollback travels to the orchestrator only on
+		// success — failure/gone/conflict outcomes already unwound the
+		// generated assets via withRescrapeStatus's cleanup, so restoring the
+		// snapshot there would resurrect assets the cleanup deliberately
+		// removed.
+		outcome.PosterCacheRollback = posterCacheRollback
 	}
 
 	return outcome, nil

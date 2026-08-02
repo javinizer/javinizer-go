@@ -245,8 +245,16 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			// poster that still lives server-side. Without this, the crop modal
 			// shows the edited URL (via the image proxy) but the backend would
 			// crop the original scraped image, reverting the preview.
+			//
+			// The server poster_url may be EMPTY (cover-backed movie) while the
+			// edited URL is set: pre-sync anyway. poster-from-URL handles an
+			// empty prior source (it replaces {movieId}-full.jpg wholesale and
+			// returns the same { cropped_poster_url, poster_url } shape as the
+			// non-cover path), and openPosterCropModal already shows the edited
+			// URL in this case — skipping the sync would crop the cover with
+			// bounds measured on the edited image.
 			const serverPosterUrl = currentResult.movie?.poster_url;
-			if (currentMovie.poster_url && serverPosterUrl && currentMovie.poster_url !== serverPosterUrl) {
+			if (currentMovie.poster_url && currentMovie.poster_url !== serverPosterUrl) {
 				await deps.applyPosterFromUrlAsync(currentResult.result_id, currentMovie.poster_url);
 			}
 

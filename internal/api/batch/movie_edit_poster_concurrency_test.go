@@ -339,7 +339,7 @@ func TestUpdateBatchMovie_PosterSourceChangeSerializesWithFieldOverride(t *testi
 	go func() { defer wg.Done(); patchCode <- patchPosterURL(t, router, job.GetID(), movieID, urlA) }()
 	go func() {
 		defer wg.Done()
-		_, _, err := jobIface.ApplyFieldOverride(t.Context(), movieID, "poster_url", "dmm")
+		_, _, _, err := jobIface.ApplyFieldOverride(t.Context(), movieID, "poster_url", "dmm")
 		overrideErr <- err
 	}()
 	wg.Wait()

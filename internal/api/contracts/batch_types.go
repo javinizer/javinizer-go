@@ -172,6 +172,10 @@ type BulkRescrapeResponse struct {
 	Succeeded int                       `json:"succeeded"`
 	Failed    int                       `json:"failed"`
 	Job       *BatchJobResponse         `json:"job"`
+	// PersistError is set when the rescrapes committed but the job-envelope
+	// persist failed afterwards (the response then also carries an HTTP 500);
+	// the per-file Results remain authoritative for what was committed.
+	PersistError string `json:"persist_error,omitempty"`
 }
 
 // ExistingNFOResponse is the lazy-loaded existing-NFO comparison for a single

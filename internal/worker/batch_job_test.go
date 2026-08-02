@@ -720,7 +720,9 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 		assert.Equal(t, "old-poster.jpg", result.Movie.Poster.OriginalPosterURL)
 		assert.Equal(t, "new-poster.jpg", result.Movie.Poster.PosterURL)
 		assert.Equal(t, "new-crop.jpg", result.Movie.Poster.CroppedPosterURL)
-		assert.False(t, result.Movie.Poster.ShouldCropPoster)
+		// Intent-line derivation: prior ShouldCropPoster=true marks the old source
+		// cover-class, so the replacement keeps the cover-crop intent.
+		assert.True(t, result.Movie.Poster.ShouldCropPoster)
 		require.NotNil(t, result.Movie.Poster.OriginalShouldCropPoster)
 		assert.True(t, *result.Movie.Poster.OriginalShouldCropPoster)
 	})

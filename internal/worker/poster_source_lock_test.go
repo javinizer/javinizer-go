@@ -118,7 +118,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 
 	t.Run("result not found never touches the lock", func(t *testing.T) {
 		je, _ := newFixture()
-		_, _, err := je.ApplyFieldOverride(context.Background(), "res-missing", "poster_url", "dmm")
+		_, _, _, err := je.ApplyFieldOverride(context.Background(), "res-missing", "poster_url", "dmm")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
 		assertPosterSourceLockFree(t, "job1", "ABC-001")
@@ -126,7 +126,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 
 	t.Run("unknown source releases the lock", func(t *testing.T) {
 		je, resultID := newFixture()
-		_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "nosuch")
+		_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "nosuch")
 		require.Error(t, err)
 		assertPosterSourceLockFree(t, "job1", "ABC-001")
 	})
@@ -134,7 +134,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 	t.Run("refresh failure releases the lock", func(t *testing.T) {
 		je, resultID := newFixture()
 		je.posterGen = &stubOverridePosterGen{err: errors.New("download failed")}
-		_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+		_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "refresh poster after source change")
 		assertPosterSourceLockFree(t, "job1", "ABC-001")
@@ -146,7 +146,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 		repo := mocks.NewMockMovieRepositoryInterface(t)
 		repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
 		je.movieRepo = repo
-		_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+		_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "persist field override")
 		assertPosterSourceLockFree(t, "job1", "ABC-001")
@@ -155,7 +155,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 	t.Run("successful poster_url override releases the lock", func(t *testing.T) {
 		je, resultID := newFixture()
 		je.posterGen = &stubOverridePosterGen{}
-		updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+		updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 		require.NoError(t, err)
 		require.NotNil(t, updated)
 		assert.Equal(t, newPoster, updated.Movie.Poster.PosterURL)
@@ -164,7 +164,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 
 	t.Run("cover_url override behind an explicit poster releases the lock", func(t *testing.T) {
 		je, resultID := newFixture()
-		updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "cover_url", "dmm")
+		updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "cover_url", "dmm")
 		require.NoError(t, err)
 		require.NotNil(t, updated)
 		assert.Equal(t, newCover, updated.Movie.Poster.CoverURL)
@@ -187,7 +187,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 		tracker.SetProvenance(filePath, prov)
 
 		je := &jobEditorImpl{store: tracker, jobID: "job-empty", posterGen: &stubOverridePosterGen{}}
-		updated, _, err := je.ApplyFieldOverride(context.Background(), "res-empty-id", "poster_url", "dmm")
+		updated, _, _, err := je.ApplyFieldOverride(context.Background(), "res-empty-id", "poster_url", "dmm")
 		require.NoError(t, err)
 		require.NotNil(t, updated)
 		assert.Equal(t, newPoster, updated.Movie.Poster.PosterURL)
@@ -196,7 +196,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 
 	t.Run("successful non-source override releases the lock", func(t *testing.T) {
 		je, resultID := newFixture()
-		updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
+		updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
 		require.NoError(t, err)
 		require.NotNil(t, updated)
 		assert.Equal(t, "DMM Studio", updated.Movie.Maker)
@@ -208,7 +208,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 		repo := mocks.NewMockMovieRepositoryInterface(t)
 		repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
 		je.movieRepo = repo
-		_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
+		_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "persist field override")
 		assertPosterSourceLockFree(t, "job1", "ABC-001")
@@ -220,7 +220,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 		// re-read misses: the result went away while this call waited on the
 		// shared per-(job, movie) lock.
 		je.store = &vanishingResultStore{Store: store, resultID: resultID, vanishOn: 2}
-		_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
+		_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
 		assertPosterSourceLockFree(t, "job1", "ABC-001")
@@ -235,7 +235,7 @@ func TestApplyFieldOverride_PosterSourceLockReleasedOnAllPaths(t *testing.T) {
 		release := AcquirePosterSourceLock("job1", "ABC-001")
 		done := make(chan error, 1)
 		go func() {
-			_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
+			_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
 			done <- err
 		}()
 		select {
@@ -313,7 +313,7 @@ func TestApplyFieldOverride_NonSourceOverrideSerializesWithManualCrop(t *testing
 			// Head start for the crop goroutine to win AcquirePosterSourceLock
 			// first — the deterministic pre-fix interleave.
 			time.Sleep(time.Millisecond)
-			_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
+			_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
 			overrideErr <- err
 		}()
 		wg.Wait()

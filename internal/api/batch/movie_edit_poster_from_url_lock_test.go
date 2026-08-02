@@ -175,6 +175,11 @@ func TestUpdateBatchMoviePosterFromURL_PosterSourceLockReleasedOnAllPaths(t *tes
 		mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
 		mockJob.EXPECT().UpdatePosterFromURL(mock.Anything, movieID, mock.Anything, mock.Anything).
 			Return(assert.AnError)
+		// The F-A compensation (pre-request capture + revert) still runs under
+		// the lock; it must complete (and release) even when the state update
+		// itself failed.
+		mockJob.EXPECT().GetMovieResult(filePath).Return(result, nil)
+		mockJob.EXPECT().UpdateMovie(mock.Anything, filePath, mock.Anything).Return(nil)
 		deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 
 		require.Equal(t, http.StatusInternalServerError,

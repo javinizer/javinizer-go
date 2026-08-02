@@ -623,10 +623,19 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	// Refresh the in-memory movie with the DB-saved version (DB-assigned IDs,
 	// normalized associations) and flip Persisted. AtomicUpdateFileResult clones
 	// under lock, so no shared-pointer mutation leaks to readers.
+	//
+	// The DB round-trip LOSES every interleaved poster edit: CropBounds is
+	// gorm:"-" (envelope-only) and a crop / field override / poster-from-URL
+	// that landed while this file's persist queued would be overwritten by the
+	// scrape-time clone. Merge the LIVE result's poster state onto the saved
+	// movie instead of wholesale replacement (mergeLivePosterState — same fix
+	// class as the apply-phase write-backs).
 	_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		current.Persisted = true
 		if saved != nil {
-			current.Movie = saved.Clone()
+			next := saved.Clone()
+			mergeLivePosterState(next, current.Movie)
+			current.Movie = next
 		}
 		return current, nil
 	})

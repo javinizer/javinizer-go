@@ -72,6 +72,13 @@ func (pe *PosterEditor) UpdatePosterCrop(movieID string, croppedURL string, boun
 // DB persistence is best-effort: failures are logged but do not propagate to the caller.
 func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string, posterURL string, croppedURL string) error {
 	filePaths := pe.lookup.FindFilePathsForMovieID(movieID)
+	// Provenance must be read BEFORE the atomic callbacks: they run under the
+	// store's write lock, and GetProvenance would re-enter it (see the
+	// ResultUpdater.AtomicUpdateFileResult contract).
+	provByPath := make(map[string]*resultstore.ProvenanceData, len(filePaths))
+	for _, filePath := range filePaths {
+		provByPath[filePath] = pe.lookup.GetProvenance(filePath)
+	}
 	for _, filePath := range filePaths {
 		err := pe.updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			if current.Movie == nil {
@@ -79,9 +86,10 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 			}
 			movie := current.Movie.Clone()
 			backupPosterOriginals(movie)
+			priorPoster := movie.Poster.Clone()
 			movie.Poster.PosterURL = posterURL
 			movie.Poster.CroppedPosterURL = croppedURL
-			movie.Poster.ShouldCropPoster = false
+			movie.Poster.ShouldCropPoster = cropIntentAfterPosterFromURL(priorPoster, posterURL, provByPath[filePath])
 			movie.Poster.CropBounds = nil
 			current.Movie = movie
 			current.FileMatchInfo.MovieID = movie.ID
@@ -112,6 +120,48 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 	}
 
 	return nil
+}
+
+// cropIntentAfterPosterFromURL derives ShouldCropPoster for a poster-from-URL
+// replacement. The temp preview DownloadFromURL serves is ALWAYS auto-cropped
+// (CropPosterFromCover: right-side crop for landscape covers, center 2:3 for
+// portrait images), while Organize's apply-time downloadPoster gates its
+// default cover-crop on ShouldCropPoster — so the flag must describe how the
+// DOWNLOADED image is meant to conclude, or the review preview (cropped) and
+// Organize (whole image, or default-cropped) disagree. The flag also doubles
+// as CropBounds.SourceWasCover for a later manual crop measured on this
+// image, driving the apply-time geometry fallback in the downloader
+// (internal/downloader/media.go), and resetPoster routes restore-to-baseline
+// through this endpoint — re-deriving the intent keeps Reset a fixed point
+// instead of drifting ShouldCropPoster away from the recorded baseline.
+//
+// Semantics mirror PosterState.SyncCropIntentWithSource: a KNOWN provenance
+// source whose own effective poster URL equals the new URL ships its crop
+// decision paired with that very image (javdb/mgstage set PosterURL =
+// landscape CoverURL with ShouldCropPoster=true), so that intent wins.
+// Without a known source, the class of the PRIOR effective source decides:
+// keep false only when the prior source was poster-grade (an explicit
+// PosterURL already recorded as not needing the default crop — a
+// poster-grade replacement assumes the user picked another poster-grade
+// image); a cover-backed or absent prior source defaults to true so the
+// auto-cropped preview and Organize's default cover-crop stay aligned.
+func cropIntentAfterPosterFromURL(prior models.PosterState, newURL string, prov *resultstore.ProvenanceData) bool {
+	if prov != nil {
+		for _, r := range prov.ScraperResults {
+			if r == nil {
+				continue
+			}
+			src := r.PosterURL
+			if src == "" {
+				src = r.CoverURL
+			}
+			if src == newURL {
+				return r.ShouldCropPoster
+			}
+		}
+	}
+	priorPosterGrade := prior.PosterURL != "" && !prior.ShouldCropPoster
+	return !priorPosterGrade
 }
 
 // backupPosterOriginals preserves the original poster URLs before they are overwritten.

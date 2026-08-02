@@ -169,6 +169,10 @@ func TestUpdateBatchMoviePosterFromURL_UpdateFailureReturns500(t *testing.T) {
 	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{"/path/to/FURL-500.mp4"})
 	mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
 	mockJob.EXPECT().UpdatePosterFromURL(mock.Anything, movieID, mock.Anything, mock.Anything).Return(assert.AnError)
+	// F-A compensation on the state-update failure: pre-request movies are
+	// captured per part and the revert runs before the cache restore.
+	mockJob.EXPECT().GetMovieResult("/path/to/FURL-500.mp4").Return(result, nil)
+	mockJob.EXPECT().UpdateMovie(mock.Anything, "/path/to/FURL-500.mp4", mock.Anything).Return(nil)
 
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 

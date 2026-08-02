@@ -68,7 +68,11 @@ func TestUpdatePosterFromURL_Miss2_WithMovieResult(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://example.com/new-poster.jpg", result.Movie.Poster.PosterURL)
 	assert.Equal(t, "https://example.com/new-cropped.jpg", result.Movie.Poster.CroppedPosterURL)
-	assert.False(t, result.Movie.Poster.ShouldCropPoster)
+	// Intent-line derivation (cropIntentAfterPosterFromURL): the prior source was
+	// cover-CLASS (PosterURL set but ShouldCropPoster=true, the javdb/mgstage
+	// landscape-cover shape), so the replacement keeps the cover-crop intent — the
+	// auto-cropped preview and Organize's default cover-crop agree.
+	assert.True(t, result.Movie.Poster.ShouldCropPoster)
 }
 
 // --- backupPosterOriginals: already backed up ---

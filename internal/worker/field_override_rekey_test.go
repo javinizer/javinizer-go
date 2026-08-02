@@ -87,7 +87,7 @@ func TestApplyFieldOverride_ReResolvesMovieIDAfterRekeyUnderLock(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
+		_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
 		done <- err
 	}()
 
@@ -188,7 +188,7 @@ func TestApplyFieldOverride_UnchangedMovieIDHoldsSingleLock(t *testing.T) {
 	releaseA := AcquirePosterSourceLock(jobID, movieA)
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
+		_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
 		done <- err
 	}()
 	select {

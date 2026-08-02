@@ -92,7 +92,7 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		result, prov, err := job.ApplyFieldOverride(c.Request.Context(), resultID, req.Field, req.Source)
+		result, prov, compensate, err := job.ApplyFieldOverride(c.Request.Context(), resultID, req.Field, req.Source)
 		if err != nil {
 			status := http.StatusBadRequest
 			if strings.Contains(err.Error(), "not found") {
@@ -105,9 +105,20 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 
 		// The overridden state lives only in the job envelope: surface a failed
 		// persist instead of acknowledging an override a restart would drop.
+		// The same failure after a poster-source refresh used to strand the
+		// divergence permanently (restart state vs. refreshed cache), so the
+		// compensation captured by ApplyFieldOverride reverts the in-memory
+		// parts and rolls the cache back; its failures surface alongside the
+		// persist error, not swallowed.
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
+			errMsg := fmt.Sprintf("Failed to persist job state: %v", perr)
+			if compensate != nil {
+				if compErr := compensate(); compErr != nil {
+					errMsg = fmt.Sprintf("%s (override revert failed: %v)", errMsg, compErr)
+				}
+			}
 			logging.Errorf("Failed to persist field override for job %s: %v", jobID, perr)
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to persist job state: %v", perr)})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 
