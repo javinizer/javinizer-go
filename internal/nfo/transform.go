@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/template"
 )
 
 // nfoRating captures a resolved rating for NFO generation.
@@ -59,11 +61,11 @@ func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movi
 	trailerURL := g.resolveTrailer(movie)
 	fi := g.resolveStreamDetails(ctx, videoFilePath)
 	originalPath := g.resolveOriginalPath(movie)
-	tagline := g.resolveTagline()
+	tagline := g.resolveTagline(ctx, movie)
 	credits := g.resolveCredits()
 
 	// Tag merging: actress-as-tag + caller tags + config tags, deduplicated
-	tagList := g.mergeTags(actors, tags)
+	tagList := g.mergeTags(ctx, movie, actors, tags)
 
 	return nfoInput{
 		id:            movie.ID,
@@ -180,9 +182,46 @@ func (g *Generator) resolveOriginalPath(movie *models.Movie) string {
 	return ""
 }
 
-// resolveTagline returns the configured tagline.
-func (g *Generator) resolveTagline() string {
-	return g.config.Tagline
+// resolveTagline renders the configured tagline against the movie. The docs
+// and Web UI have always advertised template-tag support (custom tagline
+// template), but until now the string was written verbatim — reported as #184.
+// Static text (no '<') and literal '<' sequences the tag pattern cannot match
+// pass through unchanged; template errors drop the tagline with a warning
+// rather than fail the whole NFO for an optional field.
+func (g *Generator) resolveTagline(ctx context.Context, movie *models.Movie) string {
+	return g.renderConfiguredText(ctx, movie, "tagline", g.config.Tagline)
+}
+
+// movieTemplateContext builds the template context for configured text fields
+// (tagline, custom tags), threading the actress-rendering options so that
+// <ACTORS>/<ACTRESSES> resolve identically to folder/file/display-title
+// templates.
+func (g *Generator) movieTemplateContext(movie *models.Movie) *template.Context {
+	ctx := template.NewContextFromMovie(movie)
+	ctx.GroupActress = g.config.GroupActress
+	ctx.GroupActressMin = g.config.GroupActressMin
+	ctx.GroupActressName = g.config.GroupActressName
+	ctx.GroupUnknownActressName = g.config.GroupUnknownActressName
+	ctx.UnknownActressMode = g.config.UnknownActressMode
+	ctx.FirstNameOrder = g.config.FirstNameOrder
+	ctx.ActressLanguageJa = g.config.ActressLanguageJA
+	ctx.ActressDelimiter = g.config.ActressDelimiter
+	return ctx
+}
+
+// renderConfiguredText expands a configured text field when it references
+// template tags; static text is returned byte-identical without touching the
+// engine. Returns "" (caller omits the value) on template error.
+func (g *Generator) renderConfiguredText(ctx context.Context, movie *models.Movie, label, tmpl string) string {
+	if tmpl == "" || !strings.Contains(tmpl, "<") || movie == nil {
+		return tmpl
+	}
+	rendered, err := g.templateEngine.ExecuteWithContext(ctx, tmpl, g.movieTemplateContext(movie))
+	if err != nil {
+		logging.Warnf("nfo: dropping %s %q: template error: %v", label, tmpl, err)
+		return ""
+	}
+	return rendered
 }
 
 // resolveCredits returns the configured credits as a comma-separated string.
@@ -254,7 +293,7 @@ func (g *Generator) buildActors(movieActresses []models.Actress) []actor {
 
 // mergeTags combines actress-as-tag entries, caller-provided tags, and config tags,
 // deduplicating by name.
-func (g *Generator) mergeTags(actors []actor, callerTags []string) []string {
+func (g *Generator) mergeTags(ctx context.Context, movie *models.Movie, actors []actor, callerTags []string) []string {
 	var tags []string
 	tagSet := make(map[string]bool)
 
@@ -275,14 +314,14 @@ func (g *Generator) mergeTags(actors []actor, callerTags []string) []string {
 		}
 	}
 
-	// Caller-provided tags
+	// Caller-provided tags (template-expanded, e.g. "<ID>")
 	for _, tag := range callerTags {
-		addTag(tag)
+		addTag(g.renderConfiguredText(ctx, movie, "tag", tag))
 	}
 
-	// Config tags
+	// Config tags (template-expanded — the Web UI advertises them as templates)
 	for _, tag := range g.config.Tag {
-		addTag(tag)
+		addTag(g.renderConfiguredText(ctx, movie, "tag", tag))
 	}
 
 	return tags
