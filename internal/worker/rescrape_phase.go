@@ -434,20 +434,6 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			}
 		}
 
-		// Poster generation
-		if inputs.PosterGen != nil && movieResult.Movie != nil {
-			if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
-				s := posterErr.Error()
-				movieResult.PosterError = &s
-			}
-			movieResult.PosterGenerated = true
-		}
-
-		// Re-check after poster generation before committing.
-		if err := ctx.Err(); err != nil {
-			return nil, movieResult, err
-		}
-
 		// Honor the caller's merge policy (preset/scalar_strategy/array_strategy).
 		// When MergeEnabled is set and an existing result is present, merge the
 		// freshly scraped Movie into the existing one via the same NFO merge
@@ -478,6 +464,29 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			// fields. Without this, Reset would have no target until the first
 			// manual edit snapshotted it lazily.
 			establishScrapedBaseline(movieResult.Movie, movieResult.Movie)
+		}
+
+		// Poster generation runs AFTER reconciliation, on the FINAL merged
+		// movie — never on the raw scrape. A merge-enabled rescrape can retain
+		// the existing effective poster source (e.g. PosterURL P kept because
+		// the scraper returned only a new CoverURL C): generating from the raw
+		// scraped movie would populate the shared {movieID}-full.jpg/preview
+		// with C while the committed movie still references P, so a subsequent
+		// manual crop is measured against C yet persisted alongside P and
+		// Organize applies those coordinates to the wrong image. Generating
+		// from the reconciled movie keeps the cache image == the effective
+		// source the committed movie references.
+		if inputs.PosterGen != nil && movieResult.Movie != nil {
+			if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
+				s := posterErr.Error()
+				movieResult.PosterError = &s
+			}
+			movieResult.PosterGenerated = true
+		}
+
+		// Re-check after poster generation before committing.
+		if err := ctx.Err(); err != nil {
+			return nil, movieResult, err
 		}
 
 		// Commit result

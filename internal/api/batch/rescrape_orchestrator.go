@@ -48,8 +48,11 @@ func NewRescrapeOrchestrator(deps RescrapeDeps) *RescrapeOrchestrator {
 }
 
 // JobPersistencer persists a job by ID after rescrape.
+// The rescrape results are already committed at this point, so a persist
+// failure is logged (and recorded as the job's PersistError) rather than
+// failing the rescrape itself.
 type JobPersistencer interface {
-	PersistJobByID(id string)
+	PersistJobByID(id string) error
 }
 
 // ProgressBroadcaster broadcasts rescrape progress via WebSocket.
@@ -114,7 +117,9 @@ func (o *RescrapeOrchestrator) Rescrape(ctx context.Context, jobID, movieID, fil
 		return nil, err
 	}
 
-	o.persist.PersistJobByID(jobID)
+	if perr := o.persist.PersistJobByID(jobID); perr != nil {
+		logging.Warnf("rescrape for job %s committed but job envelope persist failed: %v", jobID, perr)
+	}
 
 	return &SingleRescrapeResult{
 		RescrapeResult: result,
@@ -178,7 +183,9 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 
 	results := bulkRescrapePool(workCtx, job, movieIDs, req, o.factory, progressFn)
 
-	o.persist.PersistJobByID(jobID)
+	if perr := o.persist.PersistJobByID(jobID); perr != nil {
+		logging.Warnf("bulk rescrape for job %s committed but job envelope persist failed: %v", jobID, perr)
+	}
 
 	succeeded := 0
 	failed := 0

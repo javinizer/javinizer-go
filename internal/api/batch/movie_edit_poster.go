@@ -174,8 +174,16 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 
 		// Crop state lives only in the job envelope (CropBounds is deliberately
 		// not in the movies table) — persist immediately or a restart before
-		// Organize silently restores the pre-crop poster.
-		deps.GetJobStore().PersistJobByID(jobID)
+		// Organize silently restores the pre-crop poster. A failed persist must
+		// NOT be acknowledged as success: the crop exists only in memory, so the
+		// client would believe the crop is durable while a restart silently drops
+		// it. Surface the failure as a 5xx (the upsert failure is also recorded
+		// on the job's PersistError, unchanged).
+		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
+			logging.Errorf("Failed to persist poster crop for job %s: %v", jobID, perr)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to persist job state: %v", perr)})
+			return
+		}
 
 		resp := contracts.PosterCropResponse{
 			CroppedPosterURL: croppedURL,
@@ -315,7 +323,14 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
 			return
 		}
-		deps.GetJobStore().PersistJobByID(jobID)
+		// Same swallowed-persist class as the crop endpoint: the URL/bounds
+		// change lives in the job envelope, so a failed persist must surface as
+		// a 5xx instead of a false 200 ack.
+		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
+			logging.Errorf("Failed to persist poster-from-URL for job %s: %v", jobID, perr)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to persist job state: %v", perr)})
+			return
+		}
 
 		c.JSON(http.StatusOK, contracts.PosterFromURLResponse{
 			CroppedPosterURL: croppedURL,

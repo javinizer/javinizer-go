@@ -61,13 +61,17 @@ type JobStoreInterface interface {
 	DeleteJob(id string) error
 
 	// PersistJob saves a job to the database.
-	PersistJob(job *BatchJob)
+	// Returns the persistence error on failure (also recorded as the job's
+	// PersistError) so callers can surface — rather than acknowledge — a
+	// failed persist.
+	PersistJob(job *BatchJob) error
 
 	// PersistJobByID persists a job by its ID.
 	// The store holds the concrete *BatchJob internally, so callers that only
 	// have a composite (EditableJob, ControlledJob) can persist without
-	// a type assertion. No-op if the job is not found in the store.
-	PersistJobByID(id string)
+	// a type assertion. No-op (nil) if the job is not found in the store.
+	// Returns the persistence error on failure.
+	PersistJobByID(id string) error
 
 	// ListJobs returns thread-safe snapshots of all jobs.
 	// Returns read-only BatchJobStatus snapshots.

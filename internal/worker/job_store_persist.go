@@ -102,7 +102,7 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		fsCaseCache:         fscase.NewFSCaseCache(s.fs),
 	}
 
-	wireJobDeps(batchJob, s.movieRepo, s.actressRepo, s.historyRepo, func() { s.persistence.PersistJob(batchJob) })
+	wireJobDeps(batchJob, s.movieRepo, s.actressRepo, s.historyRepo, func() { _ = s.persistence.PersistJob(batchJob) })
 
 	batchJob.mu.Lock()
 	if s.reconMatcher != nil {

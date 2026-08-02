@@ -40,7 +40,9 @@ func prepareAndLaunchApply(
 	go func() {
 		if err := job.StartApply(rt.ServerCtx(), applyOpts); err != nil {
 			logging.Errorf("BatchJob.StartApply failed: %v", err)
-			rt.Deps().GetJobStore().PersistJobByID(job.GetID())
+			if perr := rt.Deps().GetJobStore().PersistJobByID(job.GetID()); perr != nil {
+				logging.Errorf("failed to persist job %s after StartApply error: %v", job.GetID(), perr)
+			}
 			return
 		}
 

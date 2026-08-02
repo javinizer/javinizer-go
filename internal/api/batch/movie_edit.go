@@ -312,7 +312,14 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
-		deps.GetJobStore().PersistJobByID(jobID)
+		// A failed envelope persist is surfaced, not swallowed: in-memory edits
+		// that never reach the database would be silently dropped by a restart
+		// while the client believes they succeeded.
+		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
+			logging.Errorf("Failed to persist movie edit for job %s: %v", jobID, perr)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to persist job state: %v", perr)})
+			return
+		}
 		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie)})
 	}
 }

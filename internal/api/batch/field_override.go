@@ -103,7 +103,13 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		deps.GetJobStore().PersistJobByID(jobID)
+		// The overridden state lives only in the job envelope: surface a failed
+		// persist instead of acknowledging an override a restart would drop.
+		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
+			logging.Errorf("Failed to persist field override for job %s: %v", jobID, perr)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to persist job state: %v", perr)})
+			return
+		}
 
 		var movieView *contracts.MovieView
 		if result != nil && result.Movie != nil {

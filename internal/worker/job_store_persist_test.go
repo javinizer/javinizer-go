@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -20,14 +21,16 @@ type mockJobRepoForPersist struct {
 	upsertCalled atomic.Int32
 	mu           sync.Mutex
 	lastJobID    string
+	upsertErr    error // non-nil simulates a repository upsert failure
 }
 
 func (m *mockJobRepoForPersist) Upsert(_ context.Context, job *models.Job) error {
 	m.upsertCalled.Add(1)
 	m.mu.Lock()
 	m.lastJobID = job.ID
+	err := m.upsertErr
 	m.mu.Unlock()
-	return nil
+	return err
 }
 
 func (m *mockJobRepoForPersist) getLastJobID() string {
@@ -177,4 +180,64 @@ func TestReconstructBatchJob_PersistJobByIDPersistsResults(t *testing.T) {
 
 	// Verify the underlying DB repo was called
 	assert.Equal(t, int32(1), mockRepo.upsertCalled.Load(), "PersistJobByID on reconstructed job should trigger DB upsert")
+}
+
+// TestJobStore_PersistJobByID_ReturnsUpsertError pins the Codex P2 finding
+// "report failed crop-envelope persistence": the store must propagate the
+// repository upsert failure (instead of only recording it as PersistError)
+// so HTTP handlers cannot acknowledge an update a restart would silently
+// drop. The failure is still recorded on the job's PersistError as before.
+func TestJobStore_PersistJobByID_ReturnsUpsertError(t *testing.T) {
+	t.Parallel()
+
+	mockRepo := &mockJobRepoForPersist{upsertErr: errors.New("database is locked")}
+	jq := NewJobStore(mockRepo, nil, nil, t.TempDir(), nil, nil)
+	job := jq.CreateJobBatch([]string{"/path/file1.mp4"})
+
+	err := jq.PersistJobByID(job.ID.String())
+	require.Error(t, err, "PersistJobByID must surface the repository upsert failure")
+	assert.ErrorContains(t, err, "database is locked")
+	assert.Contains(t, job.GetPersistError(), "upsert failed",
+		"the failure is still recorded as the job's PersistError")
+	assert.Contains(t, job.GetPersistError(), "database is locked")
+
+	// PersistJob (the concrete-job variant) propagates the same way.
+	assert.Error(t, jq.PersistJob(job))
+}
+
+// TestJobStore_PersistJobByID_SuccessClearsPersistErrorAndReturnsNil keeps the
+// happy path pinned: a successful persist returns nil AND clears a previously
+// recorded PersistError, so a transient failure does not stick forever.
+func TestJobStore_PersistJobByID_SuccessClearsPersistErrorAndReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	mockRepo := &mockJobRepoForPersist{upsertErr: errors.New("transient")}
+	jq := NewJobStore(mockRepo, nil, nil, t.TempDir(), nil, nil)
+	job := jq.CreateJobBatch([]string{"/path/file1.mp4"})
+	require.Error(t, jq.PersistJobByID(job.ID.String()))
+	require.NotEmpty(t, job.GetPersistError())
+
+	mockRepo.mu.Lock()
+	mockRepo.upsertErr = nil
+	mockRepo.mu.Unlock()
+
+	require.NoError(t, jq.PersistJobByID(job.ID.String()))
+	assert.Empty(t, job.GetPersistError(), "a successful persist clears the prior PersistError")
+}
+
+// TestJobStore_PersistJob_DeletedJobIsSkipped keeps persistToDatabase's
+// skip-deleted branch at 100%: a job marked deleted is not upserted and the
+// persist reports nil (nothing was attempted).
+func TestJobStore_PersistJob_DeletedJobIsSkipped(t *testing.T) {
+	t.Parallel()
+
+	mockRepo := &mockJobRepoForPersist{}
+	jq := NewJobStore(mockRepo, nil, nil, t.TempDir(), nil, nil)
+	job := jq.CreateJobBatch([]string{"/path/file1.mp4"})
+	mockRepo.upsertCalled.Store(0)
+
+	job.lifecycle.markDeleted()
+	require.NoError(t, jq.PersistJob(job), "a deleted job is skipped, not an error")
+	require.NoError(t, jq.PersistJobByID(job.ID.String()))
+	assert.Equal(t, int32(0), mockRepo.upsertCalled.Load(), "deleted jobs must not be upserted")
 }

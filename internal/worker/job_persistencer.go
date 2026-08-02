@@ -19,10 +19,13 @@ import (
 // GetBatchFileOpRepo(). See architecture-review.md candidate #1.
 type JobPersistencer interface {
 	// PersistJob persists a concrete *BatchJob to the database.
-	PersistJob(job *BatchJob)
+	// Returns the repository error on failure (also recorded as the job's
+	// PersistError) so callers can surface a failed persist instead of
+	// acknowledging an update that a restart would silently drop.
+	PersistJob(job *BatchJob) error
 
 	// PersistJobByID persists a job by its ID (no-op if not found).
-	PersistJobByID(id string)
+	PersistJobByID(id string) error
 
 	// DeleteJobFromDB deletes a job from the database.
 	DeleteJobFromDB(id string) error
@@ -45,8 +48,8 @@ func NewNoopJobPersistence() JobPersistencer {
 // Used by NewInMemoryJobStore where database persistence is not needed.
 type noopJobPersistence struct{}
 
-func (noopJobPersistence) PersistJob(_ *BatchJob)                           {}
-func (noopJobPersistence) PersistJobByID(_ string)                          {}
+func (noopJobPersistence) PersistJob(_ *BatchJob) error                     { return nil }
+func (noopJobPersistence) PersistJobByID(_ string) error                    { return nil }
 func (noopJobPersistence) DeleteJobFromDB(_ string) error                   { return nil }
 func (noopJobPersistence) LoadJobs(_ context.Context) ([]models.Job, error) { return nil, nil }
 func (noopJobPersistence) UpsertJob(_ *models.Job) error                    { return nil }
@@ -65,17 +68,18 @@ type dbJobPersistence struct {
 	jobRepo database.JobRepositoryInterface
 }
 
-func (p *dbJobPersistence) PersistJob(job *BatchJob) {
-	persistToDatabase(p.jobRepo, job)
+func (p *dbJobPersistence) PersistJob(job *BatchJob) error {
+	return persistToDatabase(p.jobRepo, job)
 }
 
-func (p *dbJobPersistence) PersistJobByID(id string) {
+func (p *dbJobPersistence) PersistJobByID(id string) error {
 	// dbJobPersistence only holds the job repo, not the store's id→*BatchJob
 	// map, so it cannot resolve a job by ID. ID→job resolution lives in
 	// JobStore.PersistJobByID (which looks up s.jobs then calls PersistJob).
 	// Rather than silently dropping the update, report the inability to persist
 	// so callers using the JobPersistencer contract get a signal.
 	logging.Warnf("dbJobPersistence.PersistJobByID(%s) cannot resolve job by ID without the store map; update not persisted", id)
+	return fmt.Errorf("cannot persist job %s by ID: store map not available", id)
 }
 
 func (p *dbJobPersistence) DeleteJobFromDB(id string) error {
@@ -101,20 +105,26 @@ func (p *dbJobPersistence) UpsertJob(dbJob *models.Job) error {
 }
 
 // persistToDatabase saves a BatchJob to the database via the job repository.
-func persistToDatabase(jobRepo database.JobRepositoryInterface, job *BatchJob) {
+// Returns the upsert error (nil for nil-repo, deleted-job, or success paths);
+// the same failure is recorded as the job's PersistError, and a success
+// clears it — so the synchronous return and GetPersistError stay in lockstep.
+func persistToDatabase(jobRepo database.JobRepositoryInterface, job *BatchJob) error {
 	if jobRepo == nil {
-		return
+		return nil
 	}
 
 	dbJob, ok := snapshotForPersist(job)
 	if !ok {
-		return
+		return nil
 	}
 
 	var persistMsg string
 	if err := jobRepo.Upsert(context.Background(), dbJob); err != nil {
 		logging.Warnf("Failed to upsert job %s in database: %v", job.ID.String(), err)
 		persistMsg = fmt.Sprintf("upsert failed: %v", err)
+		job.controller.SetPersistError(persistMsg)
+		return err
 	}
 	job.controller.SetPersistError(persistMsg)
+	return nil
 }

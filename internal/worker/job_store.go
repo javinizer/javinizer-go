@@ -212,7 +212,7 @@ func (s *JobStore) recoverOrphanedJobs() {
 		job.lifecycle.mu.Unlock()
 
 		job.lifecycle.MarkFailed()
-		s.persistence.PersistJob(job)
+		_ = s.persistence.PersistJob(job)
 		recovered++
 		logging.Warnf("Recovered orphaned job %s (was %s, marked failed)", id, status)
 	}
@@ -325,7 +325,7 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 	}
 
 	// Set persistFn after job is constructed so the closure captures the correct pointer
-	job.deps.PersistFn = func() { s.persistence.PersistJob(job) }
+	job.deps.PersistFn = func() { _ = s.persistence.PersistJob(job) }
 
 	// Fallback: if JobConfig didn't provide these repos, use JobStore's
 	if job.deps.BatchFileOpRepo == nil {
@@ -345,7 +345,7 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 	s.jobs[job.ID] = job
 	s.mu.Unlock()
 
-	s.persistence.PersistJob(job)
+	_ = s.persistence.PersistJob(job)
 
 	return job
 }
@@ -503,22 +503,25 @@ func (s *JobStore) DeleteJob(id string) error {
 // this is the public persistence method. The former PersistManagedJob
 // is removed because it type-asserted to *BatchJob internally — callers that hold
 // a composite should use PersistJobByID instead.
-func (s *JobStore) PersistJob(job *BatchJob) {
-	s.persistence.PersistJob(job)
+func (s *JobStore) PersistJob(job *BatchJob) error {
+	return s.persistence.PersistJob(job)
 }
 
 // PersistJobByID persists a job by its ID.
 // callers that hold a composite (EditableJob, ControlledJob)
 // use this instead of PersistJob — no type assertion needed. The store holds
 // the concrete *BatchJob internally. No-op if the job is not found.
-func (s *JobStore) PersistJobByID(id string) {
+// Returns the persistence error on failure (also recorded as the job's
+// PersistError) so HTTP handlers can surface a failed persist instead of
+// acknowledging state a restart would silently drop.
+func (s *JobStore) PersistJobByID(id string) error {
 	s.mu.RLock()
 	job, ok := s.jobs[models.JobID(id)]
 	s.mu.RUnlock()
 	if !ok {
-		return
+		return nil
 	}
-	s.persistence.PersistJob(job)
+	return s.persistence.PersistJob(job)
 }
 
 // ListJobs returns thread-safe snapshots of all jobs
