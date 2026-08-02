@@ -506,13 +506,16 @@ func (s *scraper) ResolveActressThumbnail(ctx context.Context, actress models.Ac
 	return s.tryActressThumbURLs(ctx, actress.FirstName, actress.LastName, actress.DMMID)
 }
 
-func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.ActressInfo) models.ActressInfo {
+func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.ActressInfo) (models.ActressInfo, error) {
 	if actress.DMMID <= 0 {
-		return models.ActressInfo{}
+		return models.ActressInfo{}, nil
 	}
-	profileDoc := s.fetchActressMetadataDoc(ctx, actress.DMMID)
+	profileDoc, err := s.fetchActressMetadataDocErr(ctx, actress.DMMID)
+	if err != nil {
+		return models.ActressInfo{DMMID: actress.DMMID}, err
+	}
 	if profileDoc == nil {
-		return models.ActressInfo{DMMID: actress.DMMID}
+		return models.ActressInfo{DMMID: actress.DMMID}, nil
 	}
 	metadata := extractActressProfileMetadata(profileDoc, actress.DMMID)
 	if metadata.JapaneseName == "" {
@@ -521,7 +524,7 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 	if actress.ThumbURL == "" || models.IsKnownInvalidDMMActressThumbnail(actress.ThumbURL) {
 		metadata.ThumbURL = s.tryActressThumbURLsWithProfileDoc(ctx, actress.FirstName, actress.LastName, actress.DMMID, profileDoc)
 	}
-	return metadata
+	return metadata, nil
 }
 
 var _ models.ActressThumbnailResolver = (*scraper)(nil)
@@ -533,39 +536,52 @@ func (s *scraper) ActressFields() []string {
 	return []string{"actress", "actress_japanese_name", "actress_first_name", "actress_last_name", "actress_url"}
 }
 
-func (s *scraper) fetchActressMetadataDoc(ctx context.Context, dmmID int) *goquery.Document {
+// fetchActressMetadataDocErr surfaces transient failures so the resolver
+// contract can distinguish "no better data" from "lookup failed".
+func (s *scraper) fetchActressMetadataDocErr(ctx context.Context, dmmID int) (*goquery.Document, error) {
 	profileURL := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)
 	if s.useBrowser {
 		bodyHTML, err := fetchActressPageWithBrowser(ctx, profileURL, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
 		if err != nil {
-			logging.Debugf("DMM: Failed to fetch actress profile in browser for ID %d: %v", dmmID, err)
-			return nil
+			return nil, err
 		}
 		doc, err := parseActressPageHTML(bodyHTML)
 		if err != nil {
-			return nil
+			return nil, err
 		}
-		return doc
+		return doc, nil
 	}
-	return s.fetchActressPageDoc(ctx, dmmID)
+	return s.fetchActressPageDocErr(ctx, dmmID)
 }
 
+// fetchActressPageDoc keeps its silent-failure shape for non-resolver
+// callers; resolver flows use fetchActressPageDocErr.
 func (s *scraper) fetchActressPageDoc(ctx context.Context, dmmID int) *goquery.Document {
-	profileURL := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)
-	if err := s.rateLimiter.Wait(ctx); err != nil {
-		logging.Debugf("DMM: Rate limit wait failed for actress page: %v", err)
-		return nil
-	}
-	resp, err := s.client.R().SetContext(ctx).Get(profileURL)
-	if err != nil || resp.StatusCode() != http.StatusOK {
-		logging.Debugf("DMM: Failed to fetch actress page for ID %d", dmmID)
-		return nil
-	}
-	doc, err := parseActressPageHTML(resp.String())
+	doc, err := s.fetchActressPageDocErr(ctx, dmmID)
 	if err != nil {
+		logging.Debugf("DMM: Failed to fetch actress page for ID %d: %v", dmmID, err)
 		return nil
 	}
 	return doc
+}
+
+func (s *scraper) fetchActressPageDocErr(ctx context.Context, dmmID int) (*goquery.Document, error) {
+	profileURL := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)
+	if err := s.rateLimiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+	resp, err := s.client.R().SetContext(ctx).Get(profileURL)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("DMM actress page %d: HTTP %s", dmmID, resp.Status())
+	}
+	doc, err := parseActressPageHTML(resp.String())
+	if err != nil {
+		return nil, err
+	}
+	return doc, nil
 }
 
 func extractActressProfileMetadata(doc *goquery.Document, dmmID int) models.ActressInfo {

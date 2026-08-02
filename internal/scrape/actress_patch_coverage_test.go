@@ -100,8 +100,8 @@ func TestResolverEnrichmentSkipsReplacementValidationForExistingThumbnail(t *tes
 
 type unnamedMetadataResolver struct{}
 
-func (unnamedMetadataResolver) ResolveActressMetadata(context.Context, models.ActressInfo) models.ActressInfo {
-	return models.ActressInfo{}
+func (unnamedMetadataResolver) ResolveActressMetadata(context.Context, models.ActressInfo) (models.ActressInfo, error) {
+	return models.ActressInfo{}, nil
 }
 
 func TestFilterMovieScrapersSkipsNil(t *testing.T) {

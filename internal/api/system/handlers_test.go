@@ -61,8 +61,8 @@ type actressOnlyMockScraper struct {
 
 func (m *actressOnlyMockScraper) SupportsMovieSearch() bool { return false }
 
-func (m *actressOnlyMockScraper) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) models.ActressInfo {
-	return actress
+func (m *actressOnlyMockScraper) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) (models.ActressInfo, error) {
+	return actress, nil
 }
 
 func (m *mockScraper) Name() string {

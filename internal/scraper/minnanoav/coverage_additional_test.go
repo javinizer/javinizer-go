@@ -51,7 +51,8 @@ func TestResolveActressMetadataRejectsExcessivelyNestedHTML(t *testing.T) {
 	}))
 	s := newScraperWithClient(&models.ScraperSettings{Enabled: true, BaseURL: "https://www.minnano-av.test"}, client)
 
-	got := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 8, JapaneseName: "花子"})
+	got, err := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 8, JapaneseName: "花子"})
+	assert.Error(t, err, "HTML depth-overflow must surface as an error")
 	assert.Equal(t, models.ActressInfo{DMMID: 8}, got)
 }
 
@@ -63,16 +64,22 @@ func TestParseActressProfileRejectsExcessivelyNestedHTML(t *testing.T) {
 func TestResolveActressMetadataEarlyReturns(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
 		s := newScraperWithClient(&models.ScraperSettings{}, resty.New())
-		assert.Equal(t, models.ActressInfo{DMMID: 3}, s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 3, JapaneseName: "花子"}))
+		got3, err3 := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 3, JapaneseName: "花子"})
+		assert.NoError(t, err3)
+		assert.Equal(t, models.ActressInfo{DMMID: 3}, got3)
 	})
 	t.Run("blank name", func(t *testing.T) {
 		s := newScraperWithClient(&models.ScraperSettings{Enabled: true}, resty.New())
-		assert.Equal(t, models.ActressInfo{DMMID: 4}, s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 4, JapaneseName: "  "}))
+		got4, err4 := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 4, JapaneseName: "  "})
+		assert.NoError(t, err4)
+		assert.Equal(t, models.ActressInfo{DMMID: 4}, got4)
 	})
 	t.Run("search error", func(t *testing.T) {
 		client := resty.New().SetTransport(roundTripperFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("offline") }))
 		s := newScraperWithClient(&models.ScraperSettings{Enabled: true, BaseURL: "https://www.minnano-av.test"}, client)
-		assert.Equal(t, models.ActressInfo{DMMID: 5}, s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 5, JapaneseName: "花子"}))
+		got5, err5 := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 5, JapaneseName: "花子"})
+		assert.Error(t, err5, "transport failure must surface as an error")
+		assert.Equal(t, models.ActressInfo{DMMID: 5}, got5)
 	})
 	t.Run("different profile", func(t *testing.T) {
 		client := resty.New().SetTransport(roundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -81,7 +88,9 @@ func TestResolveActressMetadataEarlyReturns(t *testing.T) {
 			return response(profileRequest, http.StatusOK, `<h1>別人<span>べつじん / Betsu Jin</span></h1>`, nil), nil
 		}))
 		s := newScraperWithClient(&models.ScraperSettings{Enabled: true, BaseURL: "https://www.minnano-av.test"}, client)
-		assert.Equal(t, models.ActressInfo{DMMID: 6}, s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 6, JapaneseName: "花子"}))
+		got6, err6 := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 6, JapaneseName: "花子"})
+		assert.NoError(t, err6)
+		assert.Equal(t, models.ActressInfo{DMMID: 6}, got6)
 	})
 }
 

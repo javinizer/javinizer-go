@@ -276,13 +276,17 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			// Each resolver sees the best-known values so far, not the raw
 			// actress: an earlier source may have discovered the Japanese name
 			// a name-keyed source (MinnanoAV/JavDB) needs to contribute.
-			metadata := resolver.ResolveActressMetadata(ctx, models.ActressInfo{
+			metadata, resolverErr := resolver.ResolveActressMetadata(ctx, models.ActressInfo{
 				DMMID:        actress.DMMID,
 				FirstName:    firstNonBlank(actress.FirstName, picks["actress_first_name"].value),
 				LastName:     firstNonBlank(actress.LastName, picks["actress_last_name"].value),
 				JapaneseName: firstNonBlank(actress.JapaneseName, picks["actress_japanese_name"].value),
 				ThumbURL:     firstNonBlank(actress.ThumbURL, picks["actress_url"].value),
 			})
+			if resolverErr != nil {
+				logging.Debugf("Resolver %s failed for actress %s: %v", resolverName(resolver), actress.FullName(), resolverErr)
+				continue
+			}
 			if metadata.DMMID != actress.DMMID && actress.DMMID > 0 {
 				continue
 			}

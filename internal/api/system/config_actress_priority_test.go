@@ -24,8 +24,8 @@ func (s *actressOnlyScraper) IsEnabled() bool                                { r
 func (s *actressOnlyScraper) Config() *models.ScraperSettings                { return &models.ScraperSettings{} }
 func (s *actressOnlyScraper) Close() error                                   { return nil }
 func (s *actressOnlyScraper) SupportsMovieSearch() bool                      { return false }
-func (s *actressOnlyScraper) ResolveActressMetadata(context.Context, models.ActressInfo) models.ActressInfo {
-	return models.ActressInfo{}
+func (s *actressOnlyScraper) ResolveActressMetadata(context.Context, models.ActressInfo) (models.ActressInfo, error) {
+	return models.ActressInfo{}, nil
 }
 
 type movieScraper struct{ actressOnlyScraper }

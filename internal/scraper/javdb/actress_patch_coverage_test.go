@@ -45,15 +45,20 @@ func TestResolveActressMetadataCoversFailureAndFallbackPaths(t *testing.T) {
 	input := models.ActressInfo{DMMID: 7, JapaneseName: "安倍亜沙美"}
 	disabled := actorTestScraper(&staticRoundTripper{})
 	disabled.enabled = false
-	require.Equal(t, models.ActressInfo{DMMID: 7}, disabled.ResolveActressMetadata(context.Background(), input))
+	got, gotErr := disabled.ResolveActressMetadata(context.Background(), input)
+	require.NoError(t, gotErr)
+	require.Equal(t, models.ActressInfo{DMMID: 7}, got)
 
 	missing := actorTestScraper(&staticRoundTripper{responses: map[string]string{
 		"https://javdb.test/actors?locale=en&search=%E5%AE%89%E5%80%8D%E4%BA%9C%E6%B2%99%E7%BE%8E": `<a href="/actors/NO">Other</a>`,
 	}})
-	require.Equal(t, models.ActressInfo{DMMID: 7}, missing.ResolveActressMetadata(context.Background(), input))
+	gotMiss, errMiss := missing.ResolveActressMetadata(context.Background(), input)
+	require.NoError(t, errMiss)
+	require.Equal(t, models.ActressInfo{DMMID: 7}, gotMiss)
 
 	failed := actorTestScraper(&errorRoundTripper{err: errors.New("fetch")})
-	require.Equal(t, models.ActressInfo{DMMID: 7}, failed.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"}))
+	_, failedErr := failed.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"})
+	require.Error(t, failedErr)
 
 	oldParser := parseActressProfileHTML
 	parseActressProfileHTML = func(string) (*goquery.Document, error) { return nil, errors.New("parse") }
@@ -61,13 +66,15 @@ func TestResolveActressMetadataCoversFailureAndFallbackPaths(t *testing.T) {
 	parseFailed := actorTestScraper(&staticRoundTripper{responses: map[string]string{
 		"https://javdb.test/actors/ZX?locale=en": "profile",
 	}})
-	require.Equal(t, models.ActressInfo{DMMID: 7}, parseFailed.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"}))
+	_, parseErr := parseFailed.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"})
+	require.Error(t, parseErr)
 
 	parseActressProfileHTML = oldParser
 	fallback := actorTestScraper(&staticRoundTripper{responses: map[string]string{
 		"https://javdb.test/actors/ZX?locale=en": `<html><body><img src="https://c0.jdbstatic.com/avatars/zx/ZX.jpg"></body></html>`,
 	}})
-	got := fallback.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, JapaneseName: " 安倍亜沙美 ", ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"})
+	got, fallbackErr := fallback.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, JapaneseName: " 安倍亜沙美 ", ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"})
+	require.NoError(t, fallbackErr)
 	require.Equal(t, "安倍亜沙美", got.JapaneseName)
 }
 

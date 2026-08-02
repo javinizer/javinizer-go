@@ -48,9 +48,9 @@ type recordingMetadataResolver struct {
 	lastInput models.ActressInfo
 }
 
-func (r *recordingMetadataResolver) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) models.ActressInfo {
+func (r *recordingMetadataResolver) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) (models.ActressInfo, error) {
 	r.lastInput = actress
-	return r.metadata
+	return r.metadata, nil
 }
 
 // Each resolver must see values discovered by earlier ones: a name-keyed

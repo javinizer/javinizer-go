@@ -268,6 +268,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	// stored actress: DMM may surface the Japanese name a name-keyed source
 	// (MinnanoAV/JavDB) needs to contribute its remaining fields.
 	known := resolverInput
+	var resolverFailures []string
 	if revalidate || actressNeedsMetadata(actress) {
 		for _, scraper := range metadataScrapers {
 			name := strings.ToLower(strings.TrimSpace(scraper.Name()))
@@ -277,7 +278,14 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 				if name != "javdb" {
 					sourceInput.ThumbURL = ""
 				}
-				metadata := resolver.ResolveActressMetadata(ctx, sourceInput)
+				metadata, resolverErr := resolver.ResolveActressMetadata(ctx, sourceInput)
+				if resolverErr != nil {
+					// A transient resolver failure must surface in the report —
+					// pretending the lookup verified nothing mislabels it as skipped.
+					logging.Warnf("Actress sync: %s failed for DMM ID %d: %v", name, actress.DMMID, resolverErr)
+					resolverFailures = append(resolverFailures, name)
+					continue
+				}
 				if metadata.DMMID == actress.DMMID {
 					metadata = filterActressResolverFields(scraper, metadata)
 					if strings.TrimSpace(known.JapaneseName) == "" {
@@ -387,6 +395,12 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		}
 	}
 	result.UpdatedFields = append(result.UpdatedFields, fields...)
+	if len(resolverFailures) > 0 {
+		result.Messages = append(result.Messages, "resolver_error:"+strings.Join(resolverFailures, ","))
+		if result.Warning == "" {
+			result.Warning = "resolver_error: " + strings.Join(resolverFailures, ",")
+		}
+	}
 	if len(fields) == 0 {
 		if len(result.UpdatedFields) > 0 {
 			return result, nil

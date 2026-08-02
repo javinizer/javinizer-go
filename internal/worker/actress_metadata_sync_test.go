@@ -42,10 +42,10 @@ func (s *metadataOnlyActressScraper) Config() *models.ScraperSettings {
 	return &models.ScraperSettings{ScrapeActress: s.scrapeActress}
 }
 func (s *metadataOnlyActressScraper) Close() error { return nil }
-func (s *metadataOnlyActressScraper) ResolveActressMetadata(_ context.Context, input models.ActressInfo) models.ActressInfo {
+func (s *metadataOnlyActressScraper) ResolveActressMetadata(_ context.Context, input models.ActressInfo) (models.ActressInfo, error) {
 	s.calls++
 	s.lastInput = input
-	return s.info
+	return s.info, nil
 }
 
 func TestSyncActressMetadataHonorsPerScraperActressOptOut(t *testing.T) {

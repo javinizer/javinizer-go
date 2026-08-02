@@ -264,10 +264,10 @@ var parseActressProfileHTML = func(bodyHTML string) (*goquery.Document, error) {
 	return goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
 }
 
-func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.ActressInfo) models.ActressInfo {
+func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.ActressInfo) (models.ActressInfo, error) {
 	metadata := models.ActressInfo{DMMID: actress.DMMID}
 	if !s.enabled {
-		return metadata
+		return metadata, nil
 	}
 
 	actorID := javdbActorIDFromAvatarURL(actress.ThumbURL)
@@ -275,24 +275,24 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 		actorID = s.findActorID(ctx, actress.JapaneseName)
 	}
 	if actorID == "" {
-		return metadata
+		return metadata, nil
 	}
 
 	profileURL := fmt.Sprintf("%s/actors/%s?locale=en", strings.TrimRight(s.baseURL, "/"), url.PathEscape(actorID))
 	html, err := s.fetchPageCtx(ctx, profileURL)
 	if err != nil {
-		return metadata
+		return metadata, err
 	}
 	doc, err := parseActressProfileHTML(html)
 	if err != nil {
-		return metadata
+		return metadata, err
 	}
 
 	metadata = extractJavDBActorMetadata(doc, actress.DMMID, actorID)
 	if metadata.JapaneseName == "" {
 		metadata.JapaneseName = strings.TrimSpace(actress.JapaneseName)
 	}
-	return metadata
+	return metadata, nil
 }
 
 // ActressFields ... JavDB actor profiles carry the Japanese name and avatar only.

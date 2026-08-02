@@ -33,7 +33,8 @@ func TestResolveActressMetadataMatchesAliasAndKeepsRequestedDMMID(t *testing.T) 
 	}))
 
 	s := newScraperWithClient(&models.ScraperSettings{Enabled: true, BaseURL: "https://www.minnano-av.test"}, client)
-	got := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 19244, JapaneseName: "安倍亜沙美"})
+	got, err := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 19244, JapaneseName: "安倍亜沙美"})
+	require.NoError(t, err)
 
 	require.Equal(t, models.ActressInfo{
 		DMMID:        19244,
@@ -51,7 +52,8 @@ func TestResolveActressMetadataRejectsUnverifiedSearchResult(t *testing.T) {
 	}))
 	s := newScraperWithClient(&models.ScraperSettings{Enabled: true, BaseURL: "https://www.minnano-av.test"}, client)
 
-	got := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, JapaneseName: "別人"})
+	got, err := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, JapaneseName: "別人"})
+	require.NoError(t, err)
 	require.Equal(t, models.ActressInfo{DMMID: 7}, got)
 }
 
@@ -72,7 +74,8 @@ func TestResolveActressMetadataMatchesPrimaryNameViaH1(t *testing.T) {
 	}))
 
 	s := newScraperWithClient(&models.ScraperSettings{Enabled: true, BaseURL: "https://www.minnano-av.test"}, client)
-	got := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 28262, JapaneseName: "安部麻沙美"})
+	got, err := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 28262, JapaneseName: "安部麻沙美"})
+	require.NoError(t, err)
 
 	require.Equal(t, "安部麻沙美", got.JapaneseName)
 	require.Equal(t, "Masami", got.FirstName)

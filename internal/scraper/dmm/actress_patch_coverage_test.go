@@ -106,13 +106,18 @@ func TestResolveActressThumbnailAndMetadataBranches(t *testing.T) {
 
 	require.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/a.jpg", s.ResolveActressThumbnail(context.Background(), models.ActressInfo{ThumbURL: "//pics.dmm.co.jp/mono/actjpgs/a.jpg"}))
 	require.Empty(t, s.ResolveActressThumbnail(context.Background(), models.ActressInfo{}))
-	require.Empty(t, s.ResolveActressMetadata(context.Background(), models.ActressInfo{}))
-	require.Equal(t, models.ActressInfo{DMMID: 9}, s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 9}))
+	gotEmpty, errEmpty := s.ResolveActressMetadata(context.Background(), models.ActressInfo{})
+	require.NoError(t, errEmpty)
+	require.Empty(t, gotEmpty)
+	gotNine, errNine := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 9})
+	require.Error(t, errNine, "a 404 profile fetch must surface instead of masquerading as resolved")
+	require.Equal(t, models.ActressInfo{DMMID: 9}, gotNine)
 
 	s.client.SetTransport(actressRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return actressResponse(req, http.StatusOK, []byte(`<h1 class="list-title"><span class="bold">Yui Hatanoの商品一覧</span></h1>`)), nil
 	}))
-	got := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 9, JapaneseName: "fallback", ThumbURL: "keep.jpg"})
+	got, err := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 9, JapaneseName: "fallback", ThumbURL: "keep.jpg"})
+	require.NoError(t, err)
 	require.Equal(t, "Yui", got.FirstName)
 	require.Equal(t, "Hatano", got.LastName)
 	require.Empty(t, got.ThumbURL)
@@ -120,9 +125,10 @@ func TestResolveActressThumbnailAndMetadataBranches(t *testing.T) {
 	s.client.SetTransport(actressRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return actressResponse(req, http.StatusOK, []byte(`<h1 class="list-title"></h1>`)), nil
 	}))
-	got = s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 10, JapaneseName: "fallback", ThumbURL: "keep.jpg"})
+	got, err = s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 10, JapaneseName: "fallback", ThumbURL: "keep.jpg"})
+	require.NoError(t, err)
 	require.Equal(t, "fallback", got.JapaneseName)
-	got = s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 10, JapaneseName: "fallback"})
+	got, err = s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 10, JapaneseName: "fallback"})
 	require.Equal(t, "fallback", got.JapaneseName)
 }
 
@@ -146,14 +152,17 @@ func TestFetchActressDocumentsBrowserAndHTTPFailures(t *testing.T) {
 	doc, err := s.fetchActressStreamingDoc(context.Background(), "https://video.dmm.co.jp/ok")
 	require.NoError(t, err)
 	require.Equal(t, "ok", doc.Find("title").Text())
-	require.NotNil(t, s.fetchActressMetadataDoc(context.Background(), 7))
+	metaDoc, metaErr := s.fetchActressMetadataDocErr(context.Background(), 7)
+	require.NoError(t, metaErr)
+	require.NotNil(t, metaDoc)
 
 	fetchActressPageWithBrowser = func(context.Context, string, int, *models.ProxyProfile, func(string) string, afero.Fs) (string, error) {
 		return "", errors.New("browser")
 	}
 	_, err = s.fetchActressStreamingDoc(context.Background(), "https://video.dmm.co.jp/error")
 	require.ErrorContains(t, err, "browser")
-	require.Nil(t, s.fetchActressMetadataDoc(context.Background(), 7))
+	_, browserErr := s.fetchActressMetadataDocErr(context.Background(), 7)
+	require.Error(t, browserErr)
 
 	fetchActressPageWithBrowser = func(context.Context, string, int, *models.ProxyProfile, func(string) string, afero.Fs) (string, error) {
 		return "bad", nil
@@ -161,7 +170,8 @@ func TestFetchActressDocumentsBrowserAndHTTPFailures(t *testing.T) {
 	parseActressPageHTML = func(string) (*goquery.Document, error) { return nil, errors.New("parse") }
 	_, err = s.fetchActressStreamingDoc(context.Background(), "https://video.dmm.co.jp/parse")
 	require.ErrorContains(t, err, "parse")
-	require.Nil(t, s.fetchActressMetadataDoc(context.Background(), 7))
+	_, parseErr := s.fetchActressMetadataDocErr(context.Background(), 7)
+	require.Error(t, parseErr)
 
 	s.useBrowser = false
 	parseActressPageHTML = oldParse

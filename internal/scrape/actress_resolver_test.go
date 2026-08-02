@@ -32,9 +32,9 @@ func (m *testMetadataResolver) Config() *models.ScraperSettings {
 	return &models.ScraperSettings{ScrapeActress: m.scrapeActress}
 }
 func (m *testMetadataResolver) Close() error { return nil }
-func (m *testMetadataResolver) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) models.ActressInfo {
+func (m *testMetadataResolver) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) (models.ActressInfo, error) {
 	m.calls++
-	return m.metadata
+	return m.metadata, nil
 }
 
 func TestEnrichActressesFromResolversFillsBlankFields(t *testing.T) {

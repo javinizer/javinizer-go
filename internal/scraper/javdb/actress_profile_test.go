@@ -63,8 +63,9 @@ func TestResolveActressMetadataFromActorProfile(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	got := scraper.ResolveActressMetadata(context.Background(), models.ActressInfo{
+	got, gotErr := scraper.ResolveActressMetadata(context.Background(), models.ActressInfo{
 		DMMID: 19244, JapaneseName: "安倍亜沙美", ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg",
 	})
+	require.NoError(t, gotErr)
 	require.Equal(t, models.ActressInfo{DMMID: 19244, JapaneseName: "安倍亜沙美", ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"}, got)
 }

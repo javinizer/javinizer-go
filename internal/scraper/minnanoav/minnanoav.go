@@ -126,26 +126,29 @@ func (s *scraper) ActressFields() []string {
 	return []string{"actress", "actress_japanese_name", "actress_first_name", "actress_last_name", "actress_url"}
 }
 
-func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.ActressInfo) models.ActressInfo {
+func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.ActressInfo) (models.ActressInfo, error) {
 	metadata := models.ActressInfo{DMMID: actress.DMMID}
 	if !s.enabled {
-		return metadata
+		return metadata, nil
 	}
 	name := scraperutil.CleanString(actress.JapaneseName)
 	if name == "" {
-		return metadata
+		return metadata, nil
 	}
 	pageURL, html, err := s.searchActress(ctx, name)
-	if err != nil || html == "" {
-		return metadata
+	if err != nil {
+		return metadata, err
+	}
+	if html == "" {
+		return metadata, nil
 	}
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		return metadata
+		return metadata, fmt.Errorf("parse actress page: %w", err)
 	}
 	parsed := parseActressPage(doc, pageURL)
 	if !parsed.containsName(name) {
-		return metadata
+		return metadata, nil
 	}
 	logging.Debugf("MinnanoAV: matched actress %s at %s", name, pageURL)
 	romaji := parsed.romajiForName(name)
@@ -157,7 +160,7 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 	}
 	metadata.JapaneseName = name
 	metadata.ThumbURL = stripQuery(parsed.thumbURL)
-	return metadata
+	return metadata, nil
 }
 
 func (s *scraper) searchActress(ctx context.Context, name string) (string, string, error) {

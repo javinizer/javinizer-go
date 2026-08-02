@@ -239,8 +239,14 @@ type ActressThumbnailResolver interface {
 }
 
 // ActressMetadataResolver ...
+//
+// ResolveActressMetadata returns partial metadata on success. An empty result
+// with a nil error means "no better data for this actress". A non-nil error
+// means the lookup failed transiently (timeout, HTTP failure, parse error) —
+// callers must surface it as a task warning instead of treating the actress
+// as verifiably resolved, otherwise cache-miss syncs masquerade as skipped.
 type ActressMetadataResolver interface {
-	ResolveActressMetadata(ctx context.Context, actress ActressInfo) ActressInfo
+	ResolveActressMetadata(ctx context.Context, actress ActressInfo) (ActressInfo, error)
 }
 
 // ActressFieldCapable may be implemented by an ActressMetadataResolver to

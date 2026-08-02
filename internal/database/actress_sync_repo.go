@@ -489,7 +489,11 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 		if err := tx.First(&targetJob, "id = ?", targetTask.JobID).Error; err != nil {
 			return err
 		}
-		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) >= actressSyncScopePriority(targetJob.Scope) && sourceTask.Status == models.ActressSyncTaskRunning && !sourceJob.CancelRequested {
+		// Skipping a winner to migrate the source onto the canonical key is
+		// only safe when the winner actually holds that key — a deferred
+		// holder does not, and the running canonical holder would collide.
+		winnerHoldsCanonical := targetTask.DedupeKey == fmt.Sprintf("actress:%d", actressID)
+		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) >= actressSyncScopePriority(targetJob.Scope) && sourceTask.Status == models.ActressSyncTaskRunning && !sourceJob.CancelRequested && winnerHoldsCanonical {
 			if err := skipActiveActressSyncTaskTx(tx, targetTask); err != nil {
 				return err
 			}
@@ -507,7 +511,7 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 		}
 		// A cancel-requested source must not displace the pending winner: its
 		// migration would settle as cancelled, leaving nothing runnable.
-		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) > actressSyncScopePriority(targetJob.Scope) && !sourceJob.CancelRequested {
+		if targetTask.Status == models.ActressSyncTaskPending && actressSyncScopePriority(sourceJob.Scope) > actressSyncScopePriority(targetJob.Scope) && !sourceJob.CancelRequested && winnerHoldsCanonical {
 			if err := skipActiveActressSyncTaskTx(tx, targetTask); err != nil {
 				return err
 			}

@@ -26,11 +26,11 @@ func TestDMMResolveActressThumbnailNil(t *testing.T) {
 func TestDMMResolveActressMetadataNil(t *testing.T) {
 	defer func() { _ = recover() }()
 	var s *scraper
-	_ = s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 1})
+	_, _ = s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 1})
 }
 
 func TestDMMFetchActressMetadataDoc(t *testing.T) {
 	defer func() { _ = recover() }()
 	s := &scraper{enabled: true, settings: models.ScraperSettings{Enabled: true}}
-	_ = s.fetchActressMetadataDoc(context.Background(), 1)
+	_, _ = s.fetchActressMetadataDocErr(context.Background(), 1)
 }
