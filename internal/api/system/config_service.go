@@ -3,6 +3,7 @@ package system
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -107,6 +108,10 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 		return &validationError{message: "Invalid configuration: " + err.Error()}
 	}
 
+	if err := validateActressPriorityCapability(s.deps, runtimeCfg); err != nil {
+		return &validationError{message: err.Error()}
+	}
+
 	ctx, err := config.BuildSparseSaveContextWithScrapers(s.scraperNames(), s.scraperDefaults())
 	if err != nil {
 		return &validationError{message: err.Error()}
@@ -134,6 +139,43 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 
 	logging.Info("Configuration updated and reloaded successfully")
 	s.rt.SetInitialConfigs(runtimeCfg, newCfg)
+	return nil
+}
+
+// validateActressPriorityCapability rejects metadata.priority.actress
+// overrides whose every listed scraper resolves actress metadata but never
+// produces movie results: aggregation would have no cast-producing source,
+// so the actress field would always be empty. It applies to config-file and
+// API edits alike since the UI guard cannot stop either.
+func validateActressPriorityCapability(deps *core.APIDeps, cfg *config.Config) error {
+	if deps == nil || deps.CoreDeps == nil || deps.CoreDeps.ScraperRegistry == nil {
+		return nil
+	}
+	if cfg == nil {
+		return nil
+	}
+	override, ok := cfg.Metadata.Priority.Fields["actress"]
+	if !ok || len(override) == 0 {
+		return nil
+	}
+	if len(override) == 1 && strings.EqualFold(strings.TrimSpace(override[0]), "__skip__") {
+		return nil
+	}
+	movieCapable, recognized := false, false
+	for _, name := range override {
+		scraper, found := deps.CoreDeps.ScraperRegistry.GetInstance(strings.ToLower(strings.TrimSpace(name)))
+		if !found || scraper == nil {
+			continue
+		}
+		recognized = true
+		if supportsMovieSearch(scraper) {
+			movieCapable = true
+			break
+		}
+	}
+	if recognized && !movieCapable {
+		return fmt.Errorf("metadata.priority.actress = [%s]: every listed scraper resolves actress metadata but never produces movie results, so aggregation would have no cast to resolve — add a movie-capable scraper", strings.Join(override, ", "))
+	}
 	return nil
 }
 

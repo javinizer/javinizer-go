@@ -122,16 +122,22 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 // applyJSONAliases handles deprecated JSON aliases request_delay→rate_limit
 // and max_retries→retry_count.
 func (s *ScrapersConfig) applyJSONAliases(raw map[string]json.RawMessage, ss *models.ScraperSettings) {
-	if rd, ok := raw["request_delay"]; ok && ss.RateLimit == 0 {
-		var v int
-		if err := json.Unmarshal(rd, &v); err == nil {
-			ss.RateLimit = v
+	// Aliases apply only when the canonical key is absent — an explicit
+	// rate_limit: 0 must not be overwritten by a legacy request_delay.
+	if rd, ok := raw["request_delay"]; ok {
+		if _, canonical := raw["rate_limit"]; !canonical {
+			var v int
+			if err := json.Unmarshal(rd, &v); err == nil {
+				ss.RateLimit = v
+			}
 		}
 	}
-	if mr, ok := raw["max_retries"]; ok && ss.RetryCount == 0 {
-		var v int
-		if err := json.Unmarshal(mr, &v); err == nil {
-			ss.RetryCount = v
+	if mr, ok := raw["max_retries"]; ok {
+		if _, canonical := raw["retry_count"]; !canonical {
+			var v int
+			if err := json.Unmarshal(mr, &v); err == nil {
+				ss.RetryCount = v
+			}
 		}
 	}
 }

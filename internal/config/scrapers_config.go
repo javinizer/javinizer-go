@@ -288,22 +288,26 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 
 // applyYAMLAliases handles deprecated YAML aliases request_delay→rate_limit
 // and max_retries→retry_count in a scraper entry's value node.
+// Aliases apply only when the canonical key is absent — an explicit
+// rate_limit: 0 must not be overwritten by a legacy request_delay.
 func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.ScraperSettings) {
 	if valNode.Kind != yaml.MappingNode {
 		return
 	}
+	hasCanonicalRateLimit := scraperYAMLHasKey(valNode, "rate_limit")
+	hasCanonicalRetryCount := scraperYAMLHasKey(valNode, "retry_count")
 	for i := 0; i < len(valNode.Content); i += 2 {
 		k := valNode.Content[i].Value
 		switch k {
 		case "request_delay":
-			if ss.RateLimit == 0 {
+			if !hasCanonicalRateLimit {
 				var v int
 				if err := valNode.Content[i+1].Decode(&v); err == nil {
 					ss.RateLimit = v
 				}
 			}
 		case "max_retries":
-			if ss.RetryCount == 0 {
+			if !hasCanonicalRetryCount {
 				var v int
 				if err := valNode.Content[i+1].Decode(&v); err == nil {
 					ss.RetryCount = v

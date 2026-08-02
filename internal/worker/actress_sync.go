@@ -136,8 +136,10 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	// the skip sentinel suppresses resolver-driven metadata resolution.
 	if actressSyncSkipSentinel(actressFieldPriority) {
 		metadataScrapers = nil
+		scrapers = nil
 	} else if len(actressFieldPriority) > 0 {
 		metadataScrapers = restrictScrapersByPriorityNames(metadataScrapers, actressFieldPriority)
+		scrapers = restrictScrapersByPriorityNames(scrapers, actressFieldPriority)
 	}
 	// With any configured priority, name/thumbnail picks resolve
 	// deterministically to the best-ranked source instead of conflicting.
