@@ -362,9 +362,9 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	}
 	if needsLinkedActressFallback(actress, matches, deterministic) {
 		linkedMatches, linkedErr := linkedActressMatches(ctx, movieRepo, actress.ID, actress.DMMID, scrapers)
-		if linkedErr != nil && len(linkedMatches) == 0 {
-			// All identity lookups failed transiently (timeout/HTTP) — surface
-			// it so the task fails for retry instead of terminal missing_dmm_id.
+		if linkedErr != nil {
+			// Identity lookups failed transiently (e.g. scraper timeout);
+			// task must fail for retry instead of terminal missing_dmm_id.
 			return nil, linkedErr
 		}
 		for _, linkedMatch := range linkedMatches {
@@ -793,6 +793,11 @@ func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepos
 				scraped, err = scraper.Search(ctx, query)
 			}
 			if err != nil {
+				// An ordinary catalog miss is data, not an outage: filtering it
+				// out keeps only genuine transient failures for the retry path.
+				if se, ok := models.AsScraperError(err); ok && se.Kind == models.ScraperErrorKindNotFound {
+					continue
+				}
 				searchErrs = append(searchErrs, fmt.Errorf("%s: %w", strings.ToLower(strings.TrimSpace(scraper.Name())), err))
 				continue
 			}
@@ -803,7 +808,14 @@ func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepos
 			}
 		}
 	}
-	return candidates, errors.Join(searchErrs...)
+	if joined := errors.Join(searchErrs...); joined != nil {
+		if len(candidates) == 0 {
+			return nil, joined
+		}
+		// Partial failures with usable matches: degrade gracefully.
+		logging.Debugf("Actress sync: linked-movie identity used %d candidates despite scraper failures: %v", len(candidates), joined)
+	}
+	return candidates, nil
 }
 
 // needsLinkedActressFallback ...
