@@ -242,6 +242,59 @@ func TestDownload_DeclaredTextPlainBodyDoesNotReplaceExisting(t *testing.T) {
 	assert.Equal(t, []byte("old bytes"), got, "existing media must be preserved byte-for-byte")
 }
 
+// truncatingTransport fabricates the one truncation shape net/http insists
+// wouldn't happen: a response whose DECLARED Content-Length exceeds what the
+// body actually yields, with the body ending cleanly (0, io.EOF) instead of
+// an unexpected-EOF read error. The stock transport enforces declared length
+// itself, so this branch is only reachable through non-enforcing/custom
+// transports — e.g. proxy chains that rewrite bodies — and losing media to
+// it is exactly what the guard exists to prevent.
+type truncatingTransport struct{}
+
+type shortCleanBody struct {
+	payload []byte
+	done    bool
+}
+
+func (b *shortCleanBody) Read(p []byte) (int, error) {
+	if b.done {
+		return 0, io.EOF
+	}
+	b.done = true
+	return copy(p, b.payload), nil
+}
+
+func (b *shortCleanBody) Close() error { return nil }
+
+func (t truncatingTransport) RoundTrip(_ *http.Request) (*http.Response, error) {
+	return &http.Response{
+		Status:        "200 OK",
+		StatusCode:    http.StatusOK,
+		Header:        make(http.Header),
+		ContentLength: 1000, // declared 1000 bytes…
+		Body:          &shortCleanBody{payload: []byte("short")},
+	}, nil
+}
+
+func TestDownload_DeclaredLengthMismatchDoesNotReplaceExisting(t *testing.T) {
+	// …but the body yields 5. Under a custom (non-enforcing) transport this
+	// must be refused BEFORE replaceFile — otherwise valid artwork is swapped
+	// for a truncated payload with a success report.
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/output/TEST-001-fanart.jpg", []byte("old bytes"), 0644))
+	d := NewDownloader(&http.Client{Transport: truncatingTransport{}}, fs, &Config{DownloadCover: true}, nil)
+	_, err := d.Download(context.Background(), DownloadCmd{
+		Movie:                  &models.Movie{ID: "TEST-001", Poster: models.PosterState{CoverURL: "http://unit.test/cover.jpg"}},
+		DestDir:                "/output",
+		OverwriteExistingMedia: true,
+	})
+	require.Error(t, err)
+
+	got, readErr := afero.ReadFile(fs, "/output/TEST-001-fanart.jpg")
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte("old bytes"), got, "existing media must be preserved byte-for-byte")
+}
+
 func TestDownload_OverwriteFalseKeepsExisting(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
