@@ -252,7 +252,44 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		// takes overrideMu BEFORE it and no path reverses either order, so
 		// acquisition stays cycle-free.
 		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterID)
-		defer releasePosterLock()
+		defer func() { releasePosterLock() }()
+
+		// Re-resolve under the lock — the same convergence loop as
+		// updateBatchMoviePosterCrop (see its comment for the full rationale):
+		// a source-changing edit that waited ahead of this request can REPLACE
+		// or RE-KEY the result (a rescrape committing a corrected match moves
+		// FileMatchInfo.MovieID/Movie.ID from A to B). Refreshing only the
+		// result would leave this request downloading into A's
+		// {posterID}-full.jpg cache and calling UpdatePosterFromURL(A, ...) —
+		// modifying the results still at A while returning success for B. So
+		// BOTH the movie ID and the lock key are re-resolved from the
+		// post-lock state; when the key changed, A's lock is released and B's
+		// acquired (release-before-acquire — never two poster-source locks,
+		// per the two-lock rule in worker.AcquirePosterSourceLock), then the
+		// result is re-read once more under B. The loop converges because each
+		// re-acquisition waits behind a writer whose re-key is already
+		// committed. On a miss the pre-lock result is kept: the state update
+		// degrades to a no-op for a vanished result either way.
+		for {
+			if fresh, _, stillFound := job.GetFileResultByResultID(resultID); stillFound && fresh != nil {
+				result = fresh
+			}
+			resolvedMovieID := result.FileMatchInfo.MovieID
+			resolvedPosterID, resolveErr := resolvePosterID(job, resolvedMovieID)
+			if resolveErr != nil {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: resolveErr.Error()})
+				return
+			}
+			if resolvedPosterID == posterID {
+				movieID = resolvedMovieID
+				break
+			}
+			// movieID is (re-)resolved from the result on every
+			// iteration, so only the lock key carries across here.
+			releasePosterLock()
+			posterID = resolvedPosterID
+			releasePosterLock = worker.AcquirePosterSourceLock(jobID, posterID)
+		}
 
 		// Snapshot so apiCfg (user-agent/referer) and the poster manager see the
 		// same reload epoch (issue #44).
