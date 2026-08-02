@@ -336,7 +336,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		task := claimFinalTask(t, manager, actress.ID, "assign-run", "selected")
 		manager.active.Add(1)
 		manager.wg.Add(1)
-		manager.runTaskWithContext(context.Background(), task, 3*time.Second, scraperutil.NewScraperRegistry())
+		manager.runTaskWithContext(context.Background(), task, 3*time.Second, nil, scraperutil.NewScraperRegistry())
 		require.Contains(t, task.UpdatedFields, "dmm_id")
 	})
 
@@ -350,7 +350,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		task := claimFinalTask(t, manager, actress.ID, "replace-run", "selected")
 		manager.active.Add(1)
 		manager.wg.Add(1)
-		manager.runTaskWithContext(context.Background(), task, 3*time.Second, registry)
+		manager.runTaskWithContext(context.Background(), task, 3*time.Second, nil, registry)
 		require.Contains(t, task.UpdatedFields, "thumb_url")
 	})
 
@@ -374,7 +374,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		require.Equal(t, duplicateTask.ID, claimed.ID)
 		manager.active.Add(1)
 		manager.wg.Add(1)
-		manager.runTaskWithContext(context.Background(), claimed, 3*time.Second, scraperutil.NewScraperRegistry())
+		manager.runTaskWithContext(context.Background(), claimed, 3*time.Second, nil, scraperutil.NewScraperRegistry())
 		tasks, err := manager.repo.ListTasks(job.ID)
 		require.NoError(t, err)
 		byID := map[string]models.ActressSyncTask{tasks[0].ID: tasks[0], tasks[1].ID: tasks[1]}
@@ -403,7 +403,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		}))
 		manager.active.Add(1)
 		manager.wg.Add(1)
-		manager.runTaskWithContext(context.Background(), task, 10*time.Millisecond, scraperutil.NewScraperRegistry())
+		manager.runTaskWithContext(context.Background(), task, 10*time.Millisecond, nil, scraperutil.NewScraperRegistry())
 		require.Equal(t, models.ActressSyncTaskFailed, task.Status)
 	})
 
@@ -416,7 +416,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		cancel()
 		manager.active.Add(1)
 		manager.wg.Add(1)
-		manager.runTaskWithContext(ctx, task, time.Second, nil)
+		manager.runTaskWithContext(ctx, task, time.Second, nil, nil)
 		require.Equal(t, models.ActressSyncTaskRunning, task.Status)
 	})
 
@@ -427,7 +427,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		task := claimFinalTask(t, manager, actress.ID, "skipped-run", "selected")
 		manager.active.Add(1)
 		manager.wg.Add(1)
-		manager.runTaskWithContext(context.Background(), task, time.Second, scraperutil.NewScraperRegistry())
+		manager.runTaskWithContext(context.Background(), task, time.Second, nil, scraperutil.NewScraperRegistry())
 		require.Equal(t, models.ActressSyncTaskSkipped, task.Status)
 	})
 
@@ -439,7 +439,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		task.LeaseToken = "wrong-token"
 		manager.active.Add(1)
 		manager.wg.Add(1)
-		manager.runTaskWithContext(context.Background(), task, time.Second, scraperutil.NewScraperRegistry())
+		manager.runTaskWithContext(context.Background(), task, time.Second, nil, scraperutil.NewScraperRegistry())
 		require.Equal(t, models.ActressSyncTaskSkipped, task.Status)
 	})
 }

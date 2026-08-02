@@ -27,6 +27,15 @@ func (s *fixedScraperSet) GetInstancesByPriorityForInput([]string, string) []mod
 	return s.enabled
 }
 
+type optOutActressSyncScraper struct {
+	actressSyncScraper
+	scrapeActress *bool
+}
+
+func (s *optOutActressSyncScraper) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{ScrapeActress: s.scrapeActress}
+}
+
 type urlActressSyncScraper struct {
 	actressSyncScraper
 	canHandle bool
@@ -53,8 +62,20 @@ func TestActressSyncPatchHelpers(t *testing.T) {
 		javdb := &actressSyncScraper{name: "javdb"}
 		other := &actressSyncScraper{name: "other"}
 		set := &fixedScraperSet{enabled: []models.Scraper{nil, dmm, javdb, other}}
-		require.Equal(t, []models.Scraper{dmm}, authoritativeActressScrapers(set))
-		require.Equal(t, []models.Scraper{dmm, javdb}, actressMetadataScrapers(set))
+		require.Equal(t, []models.Scraper{dmm}, authoritativeActressScrapers(set, true))
+		require.Equal(t, []models.Scraper{dmm, javdb}, actressMetadataScrapers(set, true))
+	})
+
+	t.Run("scraper actress opt-outs", func(t *testing.T) {
+		disabled, enabled := false, true
+		dmmOut := &optOutActressSyncScraper{actressSyncScraper{name: "dmm"}, &disabled}
+		r18In := &optOutActressSyncScraper{actressSyncScraper{name: "r18dev"}, &enabled}
+		plain := &actressSyncScraper{name: "minnanoav"}
+		set := &fixedScraperSet{enabled: []models.Scraper{dmmOut, r18In, plain}}
+		require.Equal(t, []models.Scraper{r18In}, authoritativeActressScrapers(set, true))
+		require.Equal(t, []models.Scraper{r18In, plain}, actressMetadataScrapers(set, true))
+		require.Equal(t, []models.Scraper{r18In}, authoritativeActressScrapers(set, false))
+		require.Equal(t, []models.Scraper{r18In}, actressMetadataScrapers(set, false))
 	})
 
 	t.Run("cache lookup and aliases", func(t *testing.T) {
@@ -322,7 +343,7 @@ func TestActressSyncManagerMergesWithStrongerPendingTask(t *testing.T) {
 	require.NoError(t, db.Create(&pending).Error)
 	manager.active.Add(1)
 	manager.wg.Add(1)
-	manager.runTaskWithContext(context.Background(), &current, 3*time.Second, scraperutil.NewScraperRegistry())
+	manager.runTaskWithContext(context.Background(), &current, 3*time.Second, nil, scraperutil.NewScraperRegistry())
 	manager.Stop()
 
 	var storedCurrent, storedPending models.ActressSyncTask
@@ -444,6 +465,7 @@ func TestActressSyncManagerPatchBranches(t *testing.T) {
 	require.Nil(t, runtimeRegistry)
 	require.Equal(t, 5, manager.maxWorkers(nil))
 	cfg := &config.Config{}
+	cfg.Scrapers.ScrapeActress = true
 	cfg.Performance.MaxWorkers = 3
 	require.Equal(t, 3, manager.maxWorkers(cfg))
 

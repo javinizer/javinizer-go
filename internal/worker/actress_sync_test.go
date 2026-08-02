@@ -120,6 +120,7 @@ func TestActressSyncManagerUsesBuiltinCacheForMissingScope(t *testing.T) {
 	registry := scraperutil.NewScraperRegistry()
 	registry.RegisterInstance(resolver)
 	cfg := &config.Config{}
+	cfg.Scrapers.ScrapeActress = true
 	cfg.Performance.MaxWorkers = 1
 	cfg.Scrapers.RequestTimeoutSeconds = 2
 	manager := NewActressSyncManager(ActressSyncManagerDeps{
@@ -153,6 +154,7 @@ func TestActressSyncManagerUsesSingleSnapshotEpochPerTask(t *testing.T) {
 	registry.RegisterInstance(&actressSyncScraper{result: &models.ScraperResult{Actresses: []models.ActressInfo{{DMMID: 42, ThumbURL: "thumb"}}}})
 	emptyRegistry := scraperutil.NewScraperRegistry()
 	cfg := &config.Config{}
+	cfg.Scrapers.ScrapeActress = true
 	cfg.Performance.MaxWorkers = 1
 	cfg.Scrapers.RequestTimeoutSeconds = 2
 	var snapshots atomic.Int32
@@ -378,6 +380,7 @@ func TestActressSyncManagerStopReleasesAndCancelsInFlightTask(t *testing.T) {
 	registry := scraperutil.NewScraperRegistry()
 	registry.RegisterInstance(blocking)
 	cfg := &config.Config{}
+	cfg.Scrapers.ScrapeActress = true
 	cfg.Performance.MaxWorkers = 1
 	manager := NewActressSyncManager(ActressSyncManagerDeps{
 		DB: db, ActressRepo: actressRepo, MovieRepo: movieRepo,

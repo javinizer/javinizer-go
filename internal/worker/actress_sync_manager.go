@@ -173,7 +173,7 @@ func (m *ActressSyncManager) dispatch(ctx context.Context) {
 			}
 			m.active.Add(1)
 			m.wg.Add(1)
-			go m.runTaskWithContext(ctx, task, timeout, registry)
+			go m.runTaskWithContext(ctx, task, timeout, cfg, registry)
 		}
 	}
 }
@@ -298,7 +298,7 @@ func mergeActressesWithSourceForTask(ctx context.Context, repo *database.Actress
 	return merged, mergeErr
 }
 
-func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *models.ActressSyncTask, timeout time.Duration, registry *scraperutil.ScraperRegistry) {
+func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *models.ActressSyncTask, timeout time.Duration, cfg *config.Config, registry *scraperutil.ScraperRegistry) {
 	defer m.wg.Done()
 	defer func() { m.active.Add(-1); m.signal() }()
 	ctx, cancel := context.WithTimeout(runCtx, timeout)
@@ -323,9 +323,14 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 		_ = m.repo.CompleteTask(task, task.LeaseToken)
 		return
 	}
+	scrapeActress := true
+	if cfg != nil {
+		scrapeActress = cfg.Scrapers.ScrapeActress
+	}
 	result, err := SyncActressMetadata(ctx, *task.ActressID, m.deps.ActressRepo, m.deps.MovieRepo, registry, ActressSyncOptions{
 		Revalidate:         job.Scope == "selected",
 		PriorUpdatedFields: append([]string(nil), task.UpdatedFields...),
+		ScrapeActress:      &scrapeActress,
 
 		MergeActressesWithSource: mergeActressesWithSourceCallback(ctx, m.deps.ActressRepo, task),
 		MergeActressesWithTargetSource: func(targetID, sourceID uint, expectedTarget, expectedSource models.Actress) (*database.ActressMergeResult, error) {
@@ -479,5 +484,6 @@ func (m *ActressSyncManager) runTask(task *models.ActressSyncTask, timeout time.
 	if runCtx == nil {
 		runCtx = context.Background()
 	}
-	m.runTaskWithContext(runCtx, task, timeout, registry)
+	cfg, _ := m.runtimeSnapshot()
+	m.runTaskWithContext(runCtx, task, timeout, cfg, registry)
 }

@@ -84,12 +84,12 @@ func TestScraperThumbnailCanRefresh(t *testing.T) {
 
 func TestAuthoritativeActressScrapers(t *testing.T) {
 	// Test with nil interface
-	result := authoritativeActressScrapers(nil)
+	result := authoritativeActressScrapers(nil, true)
 	assert.Empty(t, result)
 }
 
 func TestActressMetadataScrapers(t *testing.T) {
-	result := actressMetadataScrapers(nil)
+	result := actressMetadataScrapers(nil, true)
 	assert.Empty(t, result)
 }
 

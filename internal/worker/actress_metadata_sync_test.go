@@ -14,12 +14,13 @@ import (
 )
 
 type metadataOnlyActressScraper struct {
-	name         string
-	calls        int
-	searchCalls  int
-	searchResult *models.ScraperResult
-	info         models.ActressInfo
-	lastInput    models.ActressInfo
+	name          string
+	calls         int
+	searchCalls   int
+	searchResult  *models.ScraperResult
+	info          models.ActressInfo
+	lastInput     models.ActressInfo
+	scrapeActress *bool
 }
 
 func (s *metadataOnlyActressScraper) Name() string {
@@ -34,12 +35,46 @@ func (s *metadataOnlyActressScraper) Search(_ context.Context, _ string) (*model
 }
 func (s *metadataOnlyActressScraper) GetURL(context.Context, string) (string, error) { return "", nil }
 func (s *metadataOnlyActressScraper) IsEnabled() bool                                { return true }
-func (s *metadataOnlyActressScraper) Config() *models.ScraperSettings                { return nil }
-func (s *metadataOnlyActressScraper) Close() error                                   { return nil }
+func (s *metadataOnlyActressScraper) Config() *models.ScraperSettings {
+	if s.scrapeActress == nil {
+		return nil
+	}
+	return &models.ScraperSettings{ScrapeActress: s.scrapeActress}
+}
+func (s *metadataOnlyActressScraper) Close() error { return nil }
 func (s *metadataOnlyActressScraper) ResolveActressMetadata(_ context.Context, input models.ActressInfo) models.ActressInfo {
 	s.calls++
 	s.lastInput = input
 	return s.info
+}
+
+func TestSyncActressMetadataHonorsPerScraperActressOptOut(t *testing.T) {
+	disabled, enabled := false, true
+	_, actressRepo, movieRepo, actress := newActressSyncFixture(t, &models.Actress{DMMID: 943, JapaneseName: "今井絵理"})
+	resolver := &metadataOnlyActressScraper{name: "dmm", info: models.ActressInfo{DMMID: 943, FirstName: "Eri"}, scrapeActress: &disabled}
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(resolver)
+
+	result, err := SyncActressMetadata(context.Background(), actress.ID, actressRepo, movieRepo, registry)
+	require.NoError(t, err)
+	require.Zero(t, resolver.calls)
+	require.Empty(t, result.UpdatedFields)
+
+	globalOff := false
+	result, err = SyncActressMetadata(context.Background(), actress.ID, actressRepo, movieRepo, registry, ActressSyncOptions{
+		ScrapeActress: &globalOff,
+	})
+	require.NoError(t, err)
+	require.Zero(t, resolver.calls)
+	require.Empty(t, result.UpdatedFields)
+
+	resolver.scrapeActress = &enabled
+	result, err = SyncActressMetadata(context.Background(), actress.ID, actressRepo, movieRepo, registry, ActressSyncOptions{
+		ScrapeActress: &globalOff,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, resolver.calls)
+	require.Contains(t, result.UpdatedFields, "first_name")
 }
 
 func TestSyncActressMetadataMergesCacheAliasIntoExistingDMMActress(t *testing.T) {

@@ -30,6 +30,7 @@ type ActressSyncOptions struct {
 	FillMetadata                   func(uint, int, models.ActressInfo) ([]string, error)
 	ReplaceThumbnail               func(uint, int, string, string) (bool, error)
 	PriorUpdatedFields             []string
+	ScrapeActress                  *bool
 }
 
 // ActressSyncResult ...
@@ -111,8 +112,12 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		lookupCache = options[0].LookupCache
 	}
 	matches := make([]models.ActressInfo, 0)
-	scrapers := authoritativeActressScrapers(registry)
-	metadataScrapers := actressMetadataScrapers(registry)
+	scrapeActress := true
+	if len(options) > 0 && options[0].ScrapeActress != nil {
+		scrapeActress = *options[0].ScrapeActress
+	}
+	scrapers := authoritativeActressScrapers(registry, scrapeActress)
+	metadataScrapers := actressMetadataScrapers(registry, scrapeActress)
 	cachedSource := *actress
 	cacheMatch, cacheHit := lookupActressCache(actress, lookupCache)
 	mergeCachedDuplicate := func(existing *models.Actress) (bool, error) {
@@ -368,13 +373,13 @@ func validateActressThumbnail(ctx context.Context, scraper models.Scraper, fallb
 }
 
 // authoritativeActressScrapers ...
-func authoritativeActressScrapers(registry scraperutil.ScraperInstancesInterface) []models.Scraper {
+func authoritativeActressScrapers(registry scraperutil.ScraperInstancesInterface, scrapeActress bool) []models.Scraper {
 	if registry == nil {
 		return nil
 	}
 	result := make([]models.Scraper, 0, 2)
 	for _, scraper := range registry.GetEnabledInstances() {
-		if scraper == nil {
+		if scraper == nil || !scraper.Config().ShouldScrapeActress(scrapeActress) {
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(scraper.Name())) {
@@ -726,13 +731,13 @@ func linkedActressMatches(ctx context.Context, movieRepo *database.MovieReposito
 }
 
 // actressMetadataScrapers ...
-func actressMetadataScrapers(registry scraperutil.ScraperInstancesInterface) []models.Scraper {
+func actressMetadataScrapers(registry scraperutil.ScraperInstancesInterface, scrapeActress bool) []models.Scraper {
 	if registry == nil {
 		return nil
 	}
 	result := make([]models.Scraper, 0, 3)
 	for _, scraper := range registry.GetEnabledInstances() {
-		if scraper == nil {
+		if scraper == nil || !scraper.Config().ShouldScrapeActress(scrapeActress) {
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(scraper.Name())) {
