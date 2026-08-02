@@ -93,3 +93,40 @@ func TestEnsureSyncTaskLeaseFencesCancelledJob(t *testing.T) {
 	// Empty task IDs (non-task callers) stay exempt.
 	require.NoError(t, ensureSyncTaskLeaseTx(db.DB, "", ""))
 }
+
+// The task-scoped merge/coalesce path must also refuse post-cancel commits.
+func TestReassignTaskActressFencesCancelledJob(t *testing.T) {
+	db, err := New(&Config{Type: "sqlite", DSN: ":memory:"})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	t.Cleanup(func() { _ = db.Close() })
+
+	job := models.ActressSyncJob{ID: "job-merge-fence", Status: models.ActressSyncJobRunning, Scope: "missing", CancelRequested: true}
+	require.NoError(t, db.Create(&job).Error)
+	source := &models.Actress{JapaneseName: "merge source"}
+	target := &models.Actress{JapaneseName: "merge target"}
+	require.NoError(t, db.Create(source).Error)
+	require.NoError(t, db.Create(target).Error)
+
+	leaseUntil := time.Now().UTC().Add(time.Minute)
+	task := models.ActressSyncTask{
+		ID:             "task-merge-fence",
+		JobID:          job.ID,
+		Label:          "task-merge-fence",
+		DedupeKey:      "task-merge-fence",
+		Status:         models.ActressSyncTaskRunning,
+		Stage:          "running",
+		Messages:       []string{},
+		UpdatedFields:  []string{},
+		ActressID:      &source.ID,
+		LeaseToken:     "tok-merge-fence",
+		LeaseExpiresAt: &leaseUntil,
+	}
+	require.NoError(t, db.Create(&task).Error)
+
+	syncRepo := NewActressSyncRepository(db)
+	err = db.Transaction(func(tx *gorm.DB) error {
+		return syncRepo.reassignTaskActressTx(tx, task.ID, task.LeaseToken, target.ID, source.ID)
+	})
+	require.ErrorIs(t, err, errActressSyncJobCancelled)
+}

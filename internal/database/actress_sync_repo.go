@@ -580,6 +580,11 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 	if err := tx.First(&taskJob, "id = ?", task.JobID).Error; err != nil {
 		return err
 	}
+	if taskJob.CancelRequested {
+		// Fence on job cancellation here too: lease validity alone must not
+		// allow post-cancel commits from the task-scoped merge paths.
+		return errActressSyncJobCancelled
+	}
 	var conflict models.ActressSyncTask
 	holderPriority := actressSyncScopePriority(taskJob.Scope)
 	err := tx.Where("id <> ? AND dedupe_key = ? AND status IN ?", id, dedupeKey, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).First(&conflict).Error

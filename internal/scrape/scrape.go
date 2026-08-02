@@ -279,7 +279,14 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	}
 
 	if registry != nil {
-		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg, resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, cfg)); enriched > 0 {
+		// Only an explicit selection restricts enrichment resolvers; the
+		// default global priority list must not make them exclusive, or
+		// actress-only resolvers absent from it would never run.
+		var resolverOverride []string
+		if len(cmd.SelectedScrapers) > 0 || len(cmd.PriorityOverride) > 0 {
+			resolverOverride = resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, cfg)
+		}
+		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg, resolverOverride); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers", enriched)
 		}
 	}
