@@ -356,6 +356,11 @@ func interpretApplyResult(
 			// poster state win: a manual crop (or poster-from-URL / source edit)
 			// taken while this file was being organized must not be clobbered by
 			// the apply-start snapshot result.Movie was cloned from.
+			// Design note: the physical poster file just written on disk came
+			// from that apply-start snapshot's source — merging the live poster
+			// identity here updates the ENVELOPE only; it does not retro-crop
+			// the written file. A subsequent re-organize picks up the new
+			// (live) source and reproduces the crop from it.
 			next := result.Movie.Clone()
 			mergeLivePosterState(next, current.Movie)
 			current.Movie = next
@@ -501,6 +506,17 @@ func trackApplyResults(inputs applyPhaseInputs, outcomes []applyFileOutcome, org
 // acquisition for the rescrape rekey path.
 func mergeLivePosterState(dst, live *models.Movie) {
 	if dst == nil || live == nil {
+		return
+	}
+	// Identity guard: a mid-flight edit can RE-KEY the live result (a
+	// rescrape or whole-movie edit committing a corrected match rewrites
+	// Movie.ID from A to B while a pipeline write-back cloned from A's
+	// snapshot is still in flight). Merging B's poster identity onto A's
+	// write-back would build a franken-movie — A's metadata wearing B's
+	// poster — so on mismatch skip the merge and let the write-back carry
+	// its own (snapshot) poster identity.
+	if live.ID != dst.ID {
+		logging.Debugf("mergeLivePosterState: skipping live poster merge — live movie %q != write-back %q (mid-flight rekey)", live.ID, dst.ID)
 		return
 	}
 	dst.Poster.PosterURL = live.Poster.PosterURL

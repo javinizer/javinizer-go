@@ -209,6 +209,32 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 	return outcome, nil
 }
 
+// chainRollbacks fuses optional rollback steps into one: nil steps are
+// dropped, the survivors run in the given order, and errors join without
+// short-circuiting (every step attempts its restore even if an earlier one
+// failed). Returns nil when no step survived so callers can distinguish
+// "nothing to roll back" from a no-op.
+func chainRollbacks(steps ...func() error) func() error {
+	run := make([]func() error, 0, len(steps))
+	for _, step := range steps {
+		if step != nil {
+			run = append(run, step)
+		}
+	}
+	if len(run) == 0 {
+		return nil
+	}
+	return func() error {
+		var errs []error
+		for _, step := range run {
+			if err := step(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return errors.Join(errs...)
+	}
+}
+
 // replaceRescrapeResult attaches provenance metadata and file path to the
 // rescrape outcome. Separated from the status-transition logic so that
 // withRescrapeStatus stays focused on cleanup/rollback.
@@ -339,6 +365,8 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	lc := rescrapeLifecycle{inputs: inputs, lookup: lookup}
 
 	var posterCacheRollback func() error
+	var originCacheRollback func() error
+	var preRescrapeResult *resultstore.MovieResult
 	outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
 		// Scrape
 		scrapeResult, meta, scrapeErr := p.ScrapeSingle(ctx, inputs, lookup.FilePath, scrapeCmd)
@@ -435,6 +463,20 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			}
 		}
 
+		// Snapshot the pre-rescrape in-memory MovieResult NOW — poster
+		// lock(s) held, AFTER any re-lock re-capture — so the caller's
+		// envelope-persist-failure path can restore memory to match the cache
+		// rollback and the unpersisted envelope (F1). GetMovieResult returns a
+		// clone, so the merge/commit below cannot alias the snapshot, and the
+		// CAS commit replaces exactly this state. A read miss degrades to no
+		// state rollback (nothing coherent to restore to), same as a failed
+		// asset snapshot degrading to no cache rollback.
+		if inputs.ResultMap != nil {
+			if pre, preErr := inputs.ResultMap.GetMovieResult(lookup.FilePath); preErr == nil {
+				preRescrapeResult = pre
+			}
+		}
+
 		// Honor the caller's merge policy (preset/scalar_strategy/array_strategy).
 		// When MergeEnabled is set and an existing result is present, merge the
 		// freshly scraped Movie into the existing one via the same NFO merge
@@ -495,6 +537,24 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 				} else {
 					posterCacheRollback = func() error { return snapshooter.RestorePosterAssets(snap) }
 				}
+				// Rekeying rescrape (A→B): withRescrapeStatus's success-path
+				// orphan cleanup DELETES origin A's poster assets after the commit
+				// — before the caller's envelope persist — so the destination
+				// snapshot alone cannot recover them. Snapshot A's assets too,
+				// under the same held locks, and include their restore in the
+				// rollback (F2). Deferring the cleanup to after the persist was
+				// the alternative; it was rejected because callers that never
+				// persist an envelope (non-API flows) would then leak the orphan
+				// assets permanently. A snapshot taken for an origin that turns
+				// out NOT orphaned is harmless: its restore rewrites identical
+				// bytes and the rollback only runs on persist failure.
+				if lookup.OldMovieID != "" && lookup.OldMovieID != movieResult.Movie.ID {
+					if originSnap, originErr := snapshooter.SnapshotPosterAssets(inputs.JobID.String(), lookup.OldMovieID); originErr != nil {
+						logging.Warnf("[rescrape] Failed to snapshot origin poster assets for %s before generation (no persist-failure rollback): %v", lookup.OldMovieID, originErr)
+					} else {
+						originCacheRollback = func() error { return snapshooter.RestorePosterAssets(originSnap) }
+					}
+				}
 			}
 			if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
 				s := posterErr.Error()
@@ -524,12 +584,33 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	// Attach provenance and file path on success
 	if outcome.Status == models.RescrapeStatusSuccess {
 		replaceRescrapeResult(outcome, lookup.FilePath, movieResult, prov)
-		// The persist-failure rollback travels to the orchestrator only on
+		// The persist-failure rollbacks travel to the orchestrator only on
 		// success — failure/gone/conflict outcomes already unwound the
 		// generated assets via withRescrapeStatus's cleanup, so restoring the
-		// snapshot there would resurrect assets the cleanup deliberately
-		// removed.
-		outcome.PosterCacheRollback = posterCacheRollback
+		// snapshots there would resurrect assets the cleanup deliberately
+		// removed. The cache rollback restores the destination's
+		// pre-generation assets first, then the rekeyed origin's pre-cleanup
+		// assets (F2); the state rollback restores the in-memory MovieResult
+		// (F1) and degrades to nil when no snapshot was captured or the
+		// result store cannot be written back through (stub accessors).
+		outcome.PosterCacheRollback = chainRollbacks(posterCacheRollback, originCacheRollback)
+		if preRescrapeResult != nil {
+			if updater, ok := inputs.ResultMap.(resultstore.ResultUpdater); ok {
+				snap := preRescrapeResult
+				filePath := lookup.FilePath
+				outcome.ResultStateRollback = func() error {
+					// AtomicUpdateFileResult re-indexes any rekey back to the
+					// origin movie ID and bumps the revision, so a subsequent CAS
+					// writer is unaffected by the restore itself. The update
+					// closure MUST NOT call store methods (it runs under the
+					// store lock); the snapshot was cloned at capture time and is
+					// re-cloned here so repeat invocations stay pristine.
+					return updater.AtomicUpdateFileResult(filePath, func(_ *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+						return snap.Clone(), nil
+					})
+				}
+			}
+		}
 	}
 
 	return outcome, nil

@@ -2,6 +2,7 @@ package batch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -255,5 +256,32 @@ func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.Ba
 		MovieID: movieID,
 		Status:  models.RescrapeStatusSuccess,
 		Movie:   contracts.MovieViewFromModel(result.Movie),
-	}, result.PosterCacheRollback
+	}, combineRescrapeRollbacks(result.ResultStateRollback, result.PosterCacheRollback)
+}
+
+// combineRescrapeRollbacks fuses a successful rescrape's two persist-failure
+// compensations into one step: the in-memory MovieResult restore runs FIRST
+// and the poster-cache restore LAST — the part-revert-then-cache ordering the
+// override and PATCH compensations document, so no in-memory result still
+// references the rescraped state while the cache flips back. Every step
+// attempts its restore even if an earlier step failed. Returns nil when both
+// are nil so bulkRescrapePool records no empty step.
+func combineRescrapeRollbacks(state, cache func() error) func() error {
+	if state == nil && cache == nil {
+		return nil
+	}
+	return func() error {
+		var errs []error
+		if state != nil {
+			if err := state(); err != nil {
+				errs = append(errs, fmt.Errorf("state rollback failed: %w", err))
+			}
+		}
+		if cache != nil {
+			if err := cache(); err != nil {
+				errs = append(errs, fmt.Errorf("poster rollback failed: %w", err))
+			}
+		}
+		return errors.Join(errs...)
+	}
 }

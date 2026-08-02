@@ -215,3 +215,42 @@ func TestMergeLivePosterState_NilGuards(t *testing.T) {
 	assert.Equal(t, "b", dst2.Poster.PosterURL)
 	assert.Nil(t, dst2.Poster.CropBounds, "live state without bounds must clear the snapshot's stale bounds")
 }
+
+// TestMergeLivePosterState_SkipsIdentityMismatch pins F5's guard: when the
+// live result was re-keyed mid-pipeline (a rescrape/PATCH committed a
+// corrected match, moving Movie.ID from A to B) while the pipeline write-back
+// was cloned from A's snapshot, the merge must NOT blend B's poster identity
+// into A's movie — that franken-movie would attach B's source/crop to A's
+// metadata. On mismatch the write-back keeps its own snapshot poster state.
+func TestMergeLivePosterState_SkipsIdentityMismatch(t *testing.T) {
+	dst := &models.Movie{ID: "AAA-111", Title: "Snapshot A", Poster: models.PosterState{
+		PosterURL:        "https://a.example/poster.jpg",
+		CoverURL:         "https://a.example/cover.jpg",
+		ShouldCropPoster: true,
+		CroppedPosterURL: "/a-preview.jpg?v=1",
+		CropBounds:       &models.CropBounds{X: 1, Y: 2, Width: 3, Height: 4},
+	}}
+	live := &models.Movie{ID: "BBB-222", Title: "Live B", Poster: models.PosterState{
+		PosterURL:        "https://b.example/poster.jpg",
+		CoverURL:         "https://b.example/cover.jpg",
+		ShouldCropPoster: false,
+		CroppedPosterURL: "/b-preview.jpg?v=9",
+		CropBounds:       &models.CropBounds{X: 9, Y: 9, Width: 9, Height: 9},
+	}}
+
+	mergeLivePosterState(dst, live)
+
+	assert.Equal(t, "https://a.example/poster.jpg", dst.Poster.PosterURL,
+		"a rekeyed live result must not override the write-back's poster source")
+	assert.Equal(t, "https://a.example/cover.jpg", dst.Poster.CoverURL)
+	assert.True(t, dst.Poster.ShouldCropPoster)
+	assert.Equal(t, "/a-preview.jpg?v=1", dst.Poster.CroppedPosterURL)
+	require.NotNil(t, dst.Poster.CropBounds)
+	assert.Equal(t, models.CropBounds{X: 1, Y: 2, Width: 3, Height: 4}, *dst.Poster.CropBounds)
+	assert.Equal(t, "Snapshot A", dst.Title)
+
+	// Same-identity merges still happen (the normal mid-pipeline edit case).
+	live.ID = "AAA-111"
+	mergeLivePosterState(dst, live)
+	assert.Equal(t, "https://b.example/poster.jpg", dst.Poster.PosterURL)
+}

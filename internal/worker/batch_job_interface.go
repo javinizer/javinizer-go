@@ -128,14 +128,32 @@ type RescrapeResult struct {
 	FilePath         string                  // File path that was rescraped (for provenance propagation)
 	// PosterCacheRollback, set only on success when the poster generator
 	// supports asset snapshots, restores the job's temp poster cache to its
-	// pre-GeneratePoster state. GeneratePoster replaces {movieID}-full.jpg
+	// pre-rescrape state. GeneratePoster replaces {movieID}-full.jpg
 	// BEFORE the commit; when the caller's post-commit envelope persist
 	// fails, a restart would resurrect pre-rescrape job state against the
 	// rescraped image — invoke this to undo the asset replacement (parity
 	// with RefreshPosterAssets' snapshot/rollback). The snapshot is taken
 	// while the rescrape's poster-source lock(s) are held, so nothing can
 	// interleave between snapshot, asset replacement, and commit.
+	//
+	// On a rekeying rescrape (A→B) the rollback also covers the ORIGIN A's
+	// assets: the success-path orphan cleanup deleted them before the
+	// caller's envelope persist, so a persist-failure restore must recreate
+	// them or the rolled-back (pre-rescrape) state would reference deleted
+	// files (F2).
 	PosterCacheRollback func() error
+	// ResultStateRollback, set only on success when the pre-rescrape
+	// MovieResult could be snapshotted and the result store supports
+	// write-back, restores the rescraped file's in-memory MovieResult to
+	// that snapshot (revision still moves forward, so later CAS writers
+	// are unaffected). The snapshot is cloned under the poster-source
+	// lock at the commit-capture point, so it is exactly the state the
+	// CAS commit replaced. Invoke this BEFORE PosterCacheRollback on the
+	// envelope-persist-failure path — the same part-revert-then-cache
+	// ordering the override compensation documents — so in-memory state,
+	// temp cache, and the restart-restorable envelope all converge back
+	// to pre-rescrape instead of only the cache rolling back (F1).
+	ResultStateRollback func() error
 }
 
 // ---------------------------------------------------------------------------
@@ -668,8 +686,11 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	// restore the pre-override provenance attribution, then roll the poster
 	// cache back. Order matters: cache restore runs LAST so no part still
 	// holds the new source URL while the cache flips back to the old image.
-	// Callers must serialize compensation with any retry of their own (the
-	// poster-source lock is NOT held here).
+	// The poster-source lock is NOT held here — the handler re-acquires it
+	// (keyed on the movie ID of the returned result, the key this method
+	// converged on and persisted under) around its envelope persist +
+	// compensation pair, so a crop/source edit cannot land between this
+	// method's release and the revert and be silently erased by it (F3).
 	compensate := func() error {
 		var errs []error
 		for _, part := range updatedParts {

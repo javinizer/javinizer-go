@@ -3,6 +3,7 @@ package batch
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -195,4 +196,110 @@ func TestOverrideBatchMovieField_UnsupportedField(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	assert.Equal(t, 400, w.Code)
+}
+
+// TestOverrideBatchMovieField_CompensateRunsUnderPosterLock pins F3: the
+// envelope persist + persist-failure compensation pair runs while re-holding
+// the poster-source lock that ApplyFieldOverride released, keyed on the
+// RETURNED result's movie ID (the key ApplyFieldOverride persisted under).
+//
+// Deterministic interleave: the persist hook blocks INSIDE the critical
+// section, then a competing edit (probe) tries to take the same lock. Under
+// the fix the probe can only acquire after persist+compensate complete, so it
+// observes the fully-compensated (pre-override) state; without the lock it
+// would acquire immediately and observe the uncompensated override.
+func TestOverrideBatchMovieField_CompensateRunsUnderPosterLock(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	chdirWorkDir(t)
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+
+	persistStarted := make(chan struct{})
+	persistRelease := make(chan struct{})
+	// The store's synchronous createJob persist would otherwise trip the
+	// blocking hook during setup: only the armed hook (the handler attempt)
+	// blocks.
+	armed := make(chan struct{})
+	deps.JobStore = newFailingPersistJobStoreWithHook(t, cfg, func() {
+		select {
+		case <-armed:
+		default:
+			return
+		}
+		select {
+		case <-persistStarted:
+		default:
+			close(persistStarted)
+		}
+		<-persistRelease
+	})
+
+	filePath := "/path/to/IPX-535.mp4"
+	const resultID = "IPX-535"
+	job := deps.JobStore.CreateJobBatch([]string{filePath})
+	setJobResult(job, filePath, &resultstore.MovieResult{
+		ResultID:      resultID,
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: resultID},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: resultID, ContentID: resultID, Title: "Aggregated", Maker: "AggregatedMaker"},
+		StartedAt:     time.Now(),
+	})
+	job.ResultsWriter().SetProvenance(filePath, &resultstore.ProvenanceData{
+		FieldSources: map[string]string{"maker": "r18dev"},
+		ScraperResults: []*models.ScraperResult{
+			{Source: "r18dev", Maker: "R18Maker", Title: "R18Title"},
+			{Source: "dmm", Maker: "DMMMaker", Title: "DMMTitle"},
+		},
+	})
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/field-override", overrideBatchMovieField(testkit.GetTestRuntime(deps)))
+	body, _ := json.Marshal(contracts.FieldOverrideRequest{Field: "maker", Source: "dmm"})
+	req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/"+resultID+"/field-override", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	close(armed)
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		router.ServeHTTP(rec, req)
+	}()
+
+	<-persistStarted // the handler is inside the persist → holding the lock (F3)
+
+	// Probe: a competing edit over the same (jobID, movieID) poster-source
+	// lock. Whatever it observes must be the state AFTER the handler's whole
+	// persist+compensate critical section.
+	probeObserved := make(chan string, 1)
+	go func() {
+		release := worker.AcquirePosterSourceLock(job.GetID(), resultID)
+		defer release()
+		if r, _, found := job.Results().GetFileResultByResultID(resultID); found && r.Movie != nil {
+			probeObserved <- r.Movie.Maker
+		} else {
+			probeObserved <- "<missing>"
+		}
+	}()
+
+	close(persistRelease)
+	<-handlerDone
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "body: %s", rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "Failed to persist job state")
+
+	assert.Equal(t, "AggregatedMaker", <-probeObserved,
+		"the probe runs only after the compensation reverted the override — the lock covers persist+compensate")
+
+	// Final state is fully compensated: the movie and the provenance
+	// attribution are back to the pre-override values.
+	stored := storedMovieResult(t, job, resultID)
+	require.NotNil(t, stored.Movie)
+	assert.Equal(t, "AggregatedMaker", stored.Movie.Maker)
+	prov := job.Results().GetProvenance(filePath)
+	require.NotNil(t, prov)
+	assert.Equal(t, "r18dev", prov.FieldSources["maker"], "the pre-override provenance attribution is restored")
+	assertPosterSourceLockFreeAPI(t, job.GetID(), resultID)
 }

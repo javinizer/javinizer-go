@@ -126,7 +126,8 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			// The rescrape committed in memory but the envelope did not persist:
 			// a restart would resurrect the pre-rescrape job state against the
 			// rescraped poster image, so surface the failure instead of acking
-			// it (the poster cache was already rolled back by the orchestrator).
+			// it (the in-memory result AND the poster cache were already restored
+			// to the pre-rescrape state by the orchestrator).
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: rescrapeResult.PersistErr.Error()})
 			return
 		}

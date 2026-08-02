@@ -219,6 +219,9 @@ func TestUpdateBatchMoviePosterCrop_UpdateFailureReturns500(t *testing.T) {
 	mockJob.EXPECT().GetFileResultByResultID(movieID).Return(result, "/path/to/FAIL-001.mp4", true)
 	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{"/path/to/FAIL-001.mp4"})
 	mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
+	// The pre-crop per-part snapshot (F7 compensation capture) reads the part
+	// once before the failing UpdatePosterCrop; the revert loop never runs.
+	mockJob.EXPECT().GetMovieResult("/path/to/FAIL-001.mp4").Return(result, nil).Maybe()
 	mockJob.EXPECT().UpdatePosterCrop(movieID, mock.Anything, mock.Anything).Return(assert.AnError)
 
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}

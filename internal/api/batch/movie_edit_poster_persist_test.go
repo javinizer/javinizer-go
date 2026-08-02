@@ -25,6 +25,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
+	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -59,7 +60,9 @@ func assertPersistFailed500(t *testing.T, rec *httptest.ResponseRecorder, job *w
 // finding "report failed crop-envelope persistence": CropBounds live ONLY in
 // the job envelope (not the movies table), so a 200 on a failed envelope
 // persist means a restart silently loses the crop the client thinks
-// succeeded. The endpoint must surface the failure as a 5xx.
+// succeeded. The endpoint must surface the failure as a 5xx — and (F7) revert
+// the in-memory crop, so memory matches the unpersisted envelope instead of
+// letting Organize apply bounds a restart would drop.
 func TestUpdateBatchMoviePosterCrop_PersistFailureReturns500(t *testing.T) {
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
@@ -75,7 +78,12 @@ func TestUpdateBatchMoviePosterCrop_PersistFailureReturns500(t *testing.T) {
 	setJobResult(job, filePath, &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movieID},
 		Status:        models.JobStatusCompleted,
-		Movie:         &models.Movie{ID: movieID, Title: "Crop Persist"},
+		// Pre-crop state worth restoring: an uncropped preview URL and the
+		// recorded cover-crop intent.
+		Movie: &models.Movie{ID: movieID, Title: "Crop Persist", Poster: models.PosterState{
+			CroppedPosterURL: "/api/v1/temp/posters/pre-crop.jpg",
+			ShouldCropPoster: true,
+		}},
 	})
 	seedCropFullPoster(t, job.GetID(), movieID)
 
@@ -85,8 +93,115 @@ func TestUpdateBatchMoviePosterCrop_PersistFailureReturns500(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, code, "body: %s", rec.Body.String())
 	assertPersistFailed500(t, rec, job)
 
-	// The in-memory edit happened (the crop is applied before persisting) —
-	// the 500 tells the client it is NOT durable; nothing claims otherwise.
+	// F7: the in-memory crop is reverted EXACTLY — preview URL, recorded crop
+	// intent, and bounds return to the pre-crop values (replaying
+	// UpdatePosterCrop with the old bounds could not restore
+	// ShouldCropPoster=true; the per-part whole-movie revert can).
+	stored := storedMovieResult(t, job, movieID)
+	require.NotNil(t, stored.Movie)
+	assert.Equal(t, "/api/v1/temp/posters/pre-crop.jpg", stored.Movie.Poster.CroppedPosterURL,
+		"the crop's preview URL must be reverted to the pre-crop value")
+	assert.True(t, stored.Movie.Poster.ShouldCropPoster,
+		"the pre-crop crop intent must be restored")
+	assert.Nil(t, stored.Movie.Poster.CropBounds,
+		"the failed crop's bounds must not survive in memory")
+	assert.Empty(t, stored.Movie.Poster.OriginalPosterURL,
+		"the lazy Original* backup stamped by the reverted crop is rolled back too")
+	assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
+}
+
+// TestUpdateBatchMoviePosterCrop_PersistFailureRestoresRecordedBounds pins the
+// revert-what-was-recorded half of F7: a re-crop against a previously cropped
+// movie fails to persist, so the ORIGINAL recorded bounds (and their
+// SourceWasCover) must survive in memory — not the new crop's.
+func TestUpdateBatchMoviePosterCrop_PersistFailureRestoresRecordedBounds(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	chdirWorkDir(t)
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+	deps.JobStore = newFailingPersistJobStore(t, cfg)
+
+	const movieID = "CPER-002"
+	filePath := "/path/to/CPER-002.mp4"
+	priorBounds := &models.CropBounds{X: 5, Y: 6, Width: 70, Height: 80, ImageWidth: 1000, ImageHeight: 600, SourceWasCover: true}
+	job := createJobWithWF(deps, cfg, []string{filePath})
+	setJobResult(job, filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movieID},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{ID: movieID, Title: "Recrop Persist", Poster: models.PosterState{
+			CroppedPosterURL: "/api/v1/temp/posters/first-crop.jpg",
+			ShouldCropPoster: false, // the first crop already consumed the intent
+			CropBounds:       priorBounds,
+		}},
+	})
+	seedCropFullPoster(t, job.GetID(), movieID)
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(testkit.GetTestRuntime(deps)))
+	code, rec := postPosterCrop(router, job.GetID(), movieID)
+	require.Equal(t, http.StatusInternalServerError, code, "body: %s", rec.Body.String())
+
+	stored := storedMovieResult(t, job, movieID)
+	require.NotNil(t, stored.Movie)
+	require.NotNil(t, stored.Movie.Poster.CropBounds,
+		"the previously recorded bounds must be restored, not the failed re-crop's")
+	assert.Equal(t, *priorBounds, *stored.Movie.Poster.CropBounds)
+	assert.Equal(t, "/api/v1/temp/posters/first-crop.jpg", stored.Movie.Poster.CroppedPosterURL)
+	assert.False(t, stored.Movie.Poster.ShouldCropPoster)
+	assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
+}
+
+// TestUpdateBatchMoviePosterCrop_PersistFailureRevertFailureSurfaced covers
+// the degenerate corner of F7: the envelope persist fails AND reverting a
+// part fails (movies-table upsert broken) — the revert failure rides the 500
+// message alongside the persist error instead of being swallowed.
+func TestUpdateBatchMoviePosterCrop_PersistFailureRevertFailureSurfaced(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	chdirWorkDir(t)
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+	deps.JobStore = newFailingPersistJobStore(t, cfg)
+
+	movieRepo := dbmocks.NewMockMovieRepositoryInterface(t)
+	movieRepo.EXPECT().Upsert(mock.Anything, mock.Anything).Return(nil, errors.New("movies table gone"))
+
+	fc, _ := workflow.NewFactoryConfigFromRepos(cfg, deps.CoreDeps.ScraperRegistry, deps.CoreDeps.DB.Repositories())
+	factory, ferr := workflow.NewWorkflowFactory(fc)
+	require.NoError(t, ferr)
+	wf, ferr := factory.NewWorkflow("")
+	require.NoError(t, ferr)
+
+	const movieID = "CPER-003"
+	filePath := "/path/to/CPER-003.mp4"
+	job := deps.JobStore.CreateJobBatch([]string{filePath}, &worker.JobConfig{
+		BatchJobDeps: worker.BatchJobDeps{
+			WF:        wf,
+			MovieRepo: movieRepo,
+			BatchCfg: worker.BatchJobConfig{
+				MaxWorkers:      cfg.Performance.MaxWorkers,
+				WorkerTimeout:   time.Duration(cfg.Performance.WorkerTimeout) * time.Second,
+				ScraperPriority: cfg.Scrapers.Priority,
+			},
+		},
+	})
+	setJobResult(job, filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movieID},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: movieID, Title: "Revert Fail"},
+	})
+	seedCropFullPoster(t, job.GetID(), movieID)
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(testkit.GetTestRuntime(deps)))
+	code, rec := postPosterCrop(router, job.GetID(), movieID)
+	require.Equal(t, http.StatusInternalServerError, code, "body: %s", rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "revert of part",
+		"the failed in-memory revert must surface alongside the persist error")
+	assert.Contains(t, rec.Body.String(), "movies table gone")
 	assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker"
 
 	"github.com/gin-gonic/gin"
 )
@@ -110,6 +111,25 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 		// compensation captured by ApplyFieldOverride reverts the in-memory
 		// parts and rolls the cache back; its failures surface alongside the
 		// persist error, not swallowed.
+		//
+		// Cover the persist + compensation pair with the poster-source lock
+		// ApplyFieldOverride already released. Re-keying hazard: the lock key
+		// is derived from the RETURNED result — ApplyFieldOverride re-resolves
+		// the movie ID under the lock and persists the parts under that final
+		// key, so a key computed from pre-call state could serialize against
+		// nothing (F3). Ordering INSIDE the critical section: persist first,
+		// compensate only on failure. Without the lock, a manual crop (or
+		// source edit) landing in the gap would persist its own state after
+		// the override's whole-movie writes and then be silently erased when
+		// the compensation reverts those parts to their pre-override movies.
+		// Lock ordering: only this lock is taken here — no overrideMu, no
+		// second poster-source lock — matching updateBatchMoviePosterCrop.
+		compensateLockKey := ""
+		if result != nil {
+			compensateLockKey = posterLockKeyFor(result)
+		}
+		releaseCompensateLock := worker.AcquirePosterSourceLock(jobID, compensateLockKey)
+		defer releaseCompensateLock()
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
 			errMsg := fmt.Sprintf("Failed to persist job state: %v", perr)
 			if compensate != nil {

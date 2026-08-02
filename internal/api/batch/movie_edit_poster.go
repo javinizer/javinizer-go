@@ -166,6 +166,22 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				bounds.SourceWasCover = result.Movie.Poster.CropBounds.SourceWasCover
 			}
 		}
+		// Snapshot every part's pre-crop movie so a failed envelope persist can
+		// revert the in-memory crop EXACTLY. UpdatePosterCrop mutates three
+		// things per part (CroppedPosterURL preview, ShouldCropPoster=false,
+		// CropBounds) and may lazily stamp the Original* backup baseline, so a
+		// revert must restore the whole pre-crop movie per part — replaying
+		// UpdatePosterCrop with the old bounds would leave ShouldCropPoster at
+		// false even when the pre-crop intent was true. Mirrored from the
+		// poster-from-URL compensation below. GetMovieResult clones, so the
+		// atomic crop update cannot alias these.
+		origMovies := make(map[string]*models.Movie)
+		for _, fp := range job.FindFilePathsForMovieID(movieID) {
+			if prev, gErr := job.GetMovieResult(fp); gErr == nil && prev != nil && prev.Movie != nil {
+				origMovies[fp] = prev.Movie
+			}
+		}
+
 		if err := job.UpdatePosterCrop(movieID, croppedURL, bounds); err != nil {
 			logging.Errorf("Failed to update poster crop in job state for %s: %v", movieID, err)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
@@ -178,10 +194,20 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// NOT be acknowledged as success: the crop exists only in memory, so the
 		// client would believe the crop is durable while a restart silently drops
 		// it. Surface the failure as a 5xx (the upsert failure is also recorded
-		// on the job's PersistError, unchanged).
+		// on the job's PersistError, unchanged) — and revert the in-memory crop
+		// per part, so memory matches the unpersisted envelope instead of
+		// letting Organize apply bounds a restart would drop (F7). The
+		// poster-source lock is still held (deferred above), so the revert is
+		// serialized with the same edits the crop itself was.
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
+			errMsg := fmt.Sprintf("Failed to persist job state: %v", perr)
+			for fp, orig := range origMovies {
+				if revertErr := job.UpdateMovie(c.Request.Context(), fp, orig); revertErr != nil {
+					errMsg = fmt.Sprintf("%s (revert of part %s failed: %v)", errMsg, fp, revertErr)
+				}
+			}
 			logging.Errorf("Failed to persist poster crop for job %s: %v", jobID, perr)
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to persist job state: %v", perr)})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 

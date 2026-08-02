@@ -318,6 +318,7 @@ func TestUpdateBatchMoviePosterCrop_PosterSourceLockReleasedOnAllPaths(t *testin
 		mockJob.EXPECT().GetFileResultByResultID(movieID).Return(result, "/path/to/CFL-001.mp4", true).Twice()
 		mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{"/path/to/CFL-001.mp4"})
 		mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
+		mockJob.EXPECT().GetMovieResult("/path/to/CFL-001.mp4").Return(result, nil).Maybe()
 		mockJob.EXPECT().UpdatePosterCrop(movieID, mock.Anything, mock.Anything).Return(assert.AnError)
 		deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 		seedFullPoster(t, jobID, movieID)
@@ -345,6 +346,7 @@ func TestUpdateBatchMoviePosterCrop_PosterSourceLockReleasedOnAllPaths(t *testin
 		mockJob.EXPECT().GetFileResultByResultID(movieID).Return(nil, "", false).Once()
 		mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{"/path/to/CVN-001.mp4"})
 		mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
+		mockJob.EXPECT().GetMovieResult("/path/to/CVN-001.mp4").Return(result, nil).Maybe()
 		mockJob.EXPECT().UpdatePosterCrop(movieID, mock.Anything, mock.MatchedBy(func(b *models.CropBounds) bool {
 			return b != nil && b.SourceWasCover
 		})).Return(nil)
