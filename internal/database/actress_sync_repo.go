@@ -518,7 +518,9 @@ func migrateActiveActressSyncTasksTx(tx *gorm.DB, actressID, sourceID uint) erro
 				}
 				continue
 			}
-			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, true, true); err != nil {
+			// Report truthfully: the source's job was not necessarily cancelled —
+			// the running task is deferred (requeued), not marked cancelled.
+			if err := migrateActiveActressSyncTaskTx(tx, sourceTask, actressID, true, sourceJob.CancelRequested); err != nil {
 				return err
 			}
 			continue

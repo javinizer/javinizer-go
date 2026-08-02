@@ -159,10 +159,11 @@ func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.Scr
 		logging.Warnf("%v", dumpErr)
 	}
 	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
-	for _, warning := range actressOnlyPriorityWarnings(newRegistry, cfg) {
+	warnings := actressOnlyPriorityWarnings(newRegistry, cfg)
+	for _, warning := range warnings {
 		logging.Warnf("%s", warning.Message)
 	}
-	cfg.Warnings = append(cfg.Warnings, actressOnlyPriorityWarnings(newRegistry, cfg)...)
+	cfg.Warnings = append(cfg.Warnings, warnings...)
 	if err != nil {
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()
