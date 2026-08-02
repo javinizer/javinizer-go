@@ -34,8 +34,10 @@ func (e *ThumbnailRejectedError) Error() string {
 // MaxThumbnailPixels bounds decoded thumbnail dimensions. The response byte
 // limit only caps the compressed payload; a tiny, highly compressed image can
 // declare enormous dimensions and make image.Decode allocate the full pixel
-// buffer, so the header dimensions are checked before decoding.
-const MaxThumbnailPixels = 100_000_000
+// buffer, so the header dimensions are checked before decoding. 20 MP covers
+// real actress photos (≈4600×4600 or 5472×3648) comfortably while keeping a
+// decoded RGBA frame ≈80MB, safe with parallel validation workers.
+const MaxThumbnailPixels = 20_000_000
 
 // ValidateThumbnail ...
 func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, minDimension int, maxBytes int64) (ThumbnailValidation, error) {

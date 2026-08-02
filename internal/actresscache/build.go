@@ -466,7 +466,12 @@ func compatibleGroup(group candidateGroup, candidate Candidate) bool {
 				return false
 			}
 		}
-		return true
+		if len(group.dmmIDs) > 0 {
+			return true
+		}
+		// No DMM anchor in the group: fall through to the name-conflict checks
+		// so a romanized-name-only match cannot collapse actresses with
+		// conflicting Japanese names onto this DMM identity.
 	}
 	candidateJapaneseName := normalizeIdentity(candidate.JapaneseName)
 	if candidateJapaneseName == "" {

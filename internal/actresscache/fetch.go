@@ -83,8 +83,15 @@ func (e *BlockedFetchError) Error() string {
 // blockedCIDRs are special-use ranges not covered by net.IP classification
 // that still route to internal infrastructure: CGNAT (hosts cloud metadata
 // IPs like 100.100.100.200), IETF protocol assignments, benchmark ranges,
-// and reserved space.
-var blockedCIDRs = mustCIDRs("100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4")
+// reserved space, IPv6 transition (6to4 embeds a public IPv4 that may route
+// internally via relay), site-local, and documentation prefixes.
+var blockedCIDRs = mustCIDRs(
+	"100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4",
+	// 6to4 and Teredo tunnel through anycast relays to the embedded IPv4
+	// address, dodging every IPv4-range check; site-local and documentation
+	// space must not be dialed either.
+	"2002::/16", "2001::/32", "fec0::/10", "2001:db8::/32",
+)
 
 func mustCIDRs(cidrs ...string) []*net.IPNet {
 	out := make([]*net.IPNet, 0, len(cidrs))

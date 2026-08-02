@@ -165,13 +165,24 @@ func TestMergeCandidatesBridgesCompatibleGroups(t *testing.T) {
 	candidate := func(key, jp string, dmmID, rank int, aliases ...string) rankedCandidate {
 		return rankedCandidate{rank: rank, candidate: ValidatedCandidate{Candidate: Candidate{Key: key, Source: "test", DMMID: dmmID, JapaneseName: jp, Aliases: aliases, ThumbURL: "thumb"}}}
 	}
+
+	// Same-name bridge still merges the two groups onto the DMM identity.
 	records := mergeCandidates([]rankedCandidate{
+		candidate("one", "中", 0, 0, "alias-one"),
+		candidate("two", "中", 0, 0, "alias-two"),
+		candidate("bridge", "中", 1, 1, "alias-one", "alias-two"),
+	})
+	require.Len(t, records, 1)
+	assert.Len(t, records[0].Sources, 3)
+
+	// A DMM-backed bridge whose own name conflicts must not collapse different
+	// actresses onto that identity just because romanized aliases overlap.
+	conflicting := mergeCandidates([]rankedCandidate{
 		candidate("one", "一", 0, 0, "alias-one"),
 		candidate("two", "二", 0, 0, "alias-two"),
 		candidate("bridge", "三", 1, 1, "alias-one", "alias-two"),
 	})
-	require.Len(t, records, 1)
-	assert.Len(t, records[0].Sources, 3)
+	require.Len(t, conflicting, 3)
 }
 
 func TestMergeCandidateGroupCarriesDMMIDs(t *testing.T) {
