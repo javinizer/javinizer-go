@@ -76,6 +76,14 @@ package sub
 func S() int { return 1 }
 EOF
 printf 'export const x = 1;\n' > web/frontend/src/app.ts
+# vanish: package whose last tracked .go file can be staged-deleted while an
+# ignored sibling (local_*) remains — exercises the deleted-dirs guard union
+mkdir -p internal/vanish
+cat > internal/vanish/v.go <<'EOF'
+package vanish
+
+func V() int { return 1 }
+EOF
 cat > internal/orphan/o.go <<'EOF'
 package orphan
 
@@ -417,9 +425,9 @@ check_blocked "empty referenced pkg (hard block)" "still import"
 
 # --- end-to-end: execute the hook itself (index/tree guard lives outside
 # the classified block, so classification probes cannot reach it) -----------
-check_hook() { # name expected_exit [grep-pattern]
+check_hook() { # name expected_exit [grep-pattern]; set PCFAST= (empty) to run the FULL hook
   local name=$1 want=$2 pat=${3:-} got
-  if PRE_COMMIT_FAST=1 bash "$HOOK" >hook.out 2>&1; then got=0; else got=$?; fi
+  if PRE_COMMIT_FAST=${PCFAST-1} bash "$HOOK" >hook.out 2>&1; then got=0; else got=$?; fi
   if [ "$got" = "$want" ] && { [ -z "$pat" ] || grep -q -- "$pat" hook.out; }; then
     PASS=$((PASS+1)); echo "ok   - $name"
   else
@@ -499,6 +507,51 @@ check_hook "e2e: ignored .go inside .worktrees/ does not block" 0
 reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 mkdir -p .tmprepro; printf 'package main\n\nfunc main() {}\n' > .tmprepro/repro.go
 check_hook "e2e: ignored .go inside scratch tree does not block" 0
+
+# create-side masking: a brand-new package whose ONLY .go file is
+# ignored+untracked — a staged import of it compiles locally but cannot on CI
+reset; mkdir -p internal/ghost
+printf 'package ghost\n\nfunc G() int { return 1 }\n' > internal/ghost/local_g.go
+printf 'package foo\n\nimport (\n\t"fmt"\n\n\t_ "probe.local/x/internal/ghost"\n)\n\nfunc Foo() int { fmt.Println(1); return 1 }\n' > internal/foo/a.go
+gofmt -w internal/foo/a.go; git add internal/foo/a.go
+check_hook "e2e: ignored-only new package masked (create side)" 1 "local_g.go"
+
+# same, at the MODULE ROOT: go list reports {{.Dir}} == $PWD exactly, so the
+# root package must normalise to '.' for the guard to see it
+reset; printf 'package x\n\nfunc RootGhost() int { return 1 }\n' > local_root.go
+printf 'package foo\n\nimport (\n\t"fmt"\n\n\t_ "probe.local/x"\n)\n\nfunc Foo() int { fmt.Println(1); return 1 }\n' > internal/foo/a.go
+gofmt -w internal/foo/a.go; git add internal/foo/a.go
+check_hook "e2e: ignored-only module-root package masked" 1 "local_root.go"
+git reset -q --hard HEAD >/dev/null 2>&1; rm -f local_root.go
+
+# regex-hostile checkout path: whole scratch copied under a [bracket] dir —
+# the prefix strip must not fail open there either
+reset
+BRK="$(dirname "$WORK")/br[ack]et"
+rm -rf "$BRK"; cp -R "$WORK" "$BRK"
+cd "$BRK" || exit 2
+gofmt_w() { gofmt -w "$1"; }
+mkdir -p internal/ghost
+printf 'package ghost\n\nfunc G() int { return 1 }\n' > internal/ghost/local_g.go
+printf 'package x\n\nfunc RootGhost() int { return 1 }\n' > local_root.go
+printf 'package foo\n\nimport (\n\t"fmt"\n\n\t_ "probe.local/x"\n\t_ "probe.local/x/internal/ghost"\n)\n\nfunc Foo() int { fmt.Println(1); return 1 }\n' > internal/foo/a.go
+gofmt_w internal/foo/a.go; git add internal/foo/a.go
+if PRE_COMMIT_FAST=1 bash "$HOOK" >hook.out 2>&1; then brk_rc=0; else brk_rc=$?; fi
+if [ "$brk_rc" -eq 1 ] && grep -q local_g.go hook.out && grep -q local_root.go hook.out; then
+  PASS=$((PASS+1)); echo "ok   - e2e: bracketed checkout path — both ghost masks blocked"
+else FAIL=$((FAIL+1)); echo "FAIL - e2e: bracketed path regressed (rc=$brk_rc)"; tail -5 hook.out; fi
+cd "$WORK" || exit 2; rm -rf "$BRK"
+git reset -q --hard HEAD >/dev/null 2>&1; rm -f local_root.go
+git reset -q --hard HEAD >/dev/null 2>&1; rm -rf internal/ghost
+
+# full (non-FAST) run: the scoped test invocation genuinely executes tests
+reset; printf '\n// full run\n' >> internal/foo/a.go; git add internal/foo/a.go
+PCFAST= check_hook "e2e: non-FAST run executes scoped tests" 0 "Running fast unit tests"
+
+# last tracked .go staged-deleted, ignored sibling remains -> must still block
+reset; printf 'package vanish\n\nfunc Ghost() int { return 1 }\n' > internal/vanish/local_ghost.go
+git rm -q internal/vanish/v.go
+check_hook "e2e: ignored .go masks fully-deleted package" 1 "local_ghost.go"
 
 reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf 'package bar\n\nfunc Brand() int { return 5 }\n' > internal/bar/new.go

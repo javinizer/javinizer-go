@@ -252,7 +252,7 @@ fi
 # genuine breakage below.
 if [ -n "$GO_DIRS" ]; then
     RESOLVED_PKGS=""
-    for d in $GO_DIRS; do
+    for d in $GO_DIRS; do  # word-splitting is safe: importable Go dirs cannot contain spaces
         [ -d "$d" ] || continue
         if ! ls "$d"/*.go >/dev/null 2>&1; then
             DROPPED_DIRS="$DROPPED_DIRS
@@ -492,7 +492,38 @@ $f"
             -- web/dist \
             '*.syso' '*.go' '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' \
             '*.s' '*.S' '*.sx' '*.m' '*.f' '*.F' '*.for' '*.f90' '*.swig' '*.swigcxx' || true)
-        PKG_DIRS=" $(git ls-files '*.go' | while IFS= read -r g; do printf '%s\n' "${g%/*}"; done | sort -u | tr '\n' ' ') "
+        # Package dirs = union of THREE sources, because each alone leaks a
+        # masking hole:
+        #   * dirs whose .go files are staged for deletion (they vanish from
+        #     ls-files while ignored siblings still compile in the tree),
+        #   * dirs the TOOLCHAIN currently sees (go list -f {{.Dir}} ./...) —
+        #     a brand-new package whose .go files are ALL ignored+untracked is
+        #     invisible to both git views but compiles in the tree, letting a
+        #     staged import of it pass locally and fail CI. go list skips
+        #     dot/underscore/testdata dirs, so scratch trees stay immune.
+        PKG_DIRS=$( {
+            {
+                git ls-files '*.go'
+                git diff --cached --name-only --no-renames --diff-filter=D -- '*.go'
+            } | while IFS= read -r g; do
+                    d=${g%/*}; [ "$d" = "$g" ] && d=.; printf '%s\n' "$d"
+                done
+            # Prefix-strip WITHOUT regex: an
+            # interpolated pwd containing BRE metacharacters (dots are harmless,
+            # but [ ] * \ in a checkout path) would fail sed and fail open.
+            root=$(pwd)
+            go list -f '{{.Dir}}' ./... 2>/dev/null | while IFS= read -r abs; do
+                # if/elif instead of case: bash 3.2 (stock macOS) mis-parses
+                # case patterns inside command substitutions this deep.
+                if [ "$abs" = "$root" ]; then
+                    printf '.\n'
+                elif [ "${abs#"$root"/}" != "$abs" ]; then
+                    printf '%s\n' "${abs#"$root"/}"
+                fi
+            done || true
+        } | sort -u | tr '\n' ' ' )
+        # pad with spaces so case-matching ' "$d" ' is exact-token safe
+        PKG_DIRS=" $PKG_DIRS "
         IGNORED_KEPT=""
         while IFS= read -r raw; do
             [ -n "$raw" ] || continue
