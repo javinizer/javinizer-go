@@ -28,7 +28,7 @@ git init -q
 git config user.email test@example.invalid
 git config user.name test
 git config commit.gpgsign false
-printf '/web/dist/ignored/\n*.syso\n' > .gitignore
+printf '/web/dist/ignored/\n*.syso\nlocal_*.go\n*.log\n.worktrees/\n.scratch/\n.tmprepro/\n.planning/\n' > .gitignore
 mkdir -p internal/foo internal/bar internal/shared internal/consumer internal/legacy internal/orphan \
          internal/tagged \
          internal/dual_unref internal/dual_ref internal/tree/sub web/frontend/src \
@@ -242,6 +242,17 @@ C4="./cmd/e2e${nl}./cmd/javinizer${nl}./internal/consumer${nl}./internal/foo"
 reset; printf '\n// x\n' >> internal/foo/a.go; git add internal/foo/a.go
 check "modified .go (regular+test rev deps)" "./internal/foo|$C4||1|yes" "$(probe)"
 
+# lint/vet scope includes reverse dependents (consumer-only diagnostics)
+reset; printf '\n// x2\n' >> internal/foo/a.go; git add internal/foo/a.go
+ck=$( { unset STAGED_GO DELETED_GO MODULE_CHANGED API_CHANGED GO_DIRS GO_PKGS \
+      DROPPED_DIRS ASSET_PKGS ASSET_FULL EMBED_PKGS STATIC_PKGS FULL_SUITE \
+      STAGED_IMPS REV_PKGS TEST_PKGS LINT_CONFIG LINT_PKGS LINT_SCOPE SHOULD_BUILD \
+      FRONTEND_CHANGED FRONTEND_FMT_FILES CHECK_PKGS
+  # shellcheck disable=SC2016 # sed pattern must match the hook's literal $(
+  eval "$(sed -n '/^STAGED_GO=$(git/,/^# ---------------------------------------------------------------------------$/p' "$HOOK")"
+  printf '%s' "$CHECK_PKGS"; } )
+check "lint/vet scope includes reverse dependents" "$C4" "$ck"
+
 # C-quoted unicode paths must not evade anchored matchers (API_CHANGED et al.)
 reset; printf 'package foo\n\nfunc U() int { return 4 }\n' > "internal/foo/注釈.go"; git add "internal/foo/注釈.go"
 check "unicode .go filename" "./internal/foo|$C4||1|yes" "$(probe)"
@@ -314,6 +325,12 @@ reset; mkdir -p internal/tagged
 printf '//go:build windows\n\npackage tagged\n\nfunc W() int { return 1 }\n' > internal/tagged/t.go; git add internal/tagged/t.go
 check "tag-excluded package pruned quietly" "|||1|yes" "$(probe)"
 
+# live -> tag-excluded producer with consumers: package enumeration breaks
+# (its importer no longer resolves), so this must hard-block, not prune
+reset; printf '//go:build windows\n\npackage tree\n\nfunc T() int { return 1 }\n' > internal/tree/parent.go
+git add internal/tree/parent.go
+check_blocked "live->excluded producer with consumers (hard block)" "Cannot enumerate"
+
 # frontend rename out of src/ must still count (rename detection shows only
 # the destination without --no-renames)
 reset; git mv web/frontend/src/app.ts web/frontend/app.ts
@@ -331,6 +348,22 @@ check "embed-type asset -> pkg + consumers" "|$C4||1|yes" "$(probe)"
 
 reset; printf '<html2/>\n' > web/dist/index.html; git add web/dist/index.html
 check "web/dist asset -> pkg + binary" "|./cmd/javinizer${nl}./web||0|yes" "$(probe)"
+
+# cgo/toolchain source in a Go package dir outside the scanned roots:
+# an unsupported .c in a Go package dir must never silently pass: the
+# owning package joins resolution and go list rejects it loudly
+reset; rm -f web/rogue.c 2>/dev/null; printf 'int rogue(void) { return 0; }\n' > web/rogue.c; git add web/rogue.c
+check_blocked "cgo source outside scanned roots (hard block)" "C source files not allowed"
+
+# full Go-recognized toolchain extension set (covering *.m here as the
+# outside-root representative; all share one pathspec row per class)
+reset; rm -f web/rogue.c 2>/dev/null; printf '@interface Rogue\n@end\n' > web/rogue.m; git add web/rogue.m
+check_blocked "objc source outside scanned roots (hard block)" "Cannot resolve staged packages"
+
+# C++ header-only input: headers are pure data to go list (no hard block),
+# but must map to the owning package so its checks run
+reset; rm -f web/rogue.m 2>/dev/null; printf '#pragma once\n' > web/rogue.hpp; git add web/rogue.hpp
+check "header-only input outside scanned roots -> web pkg" "|./cmd/javinizer${nl}./web||0|yes" "$(probe)"
 
 reset; printf 'more: true\n' >> configs/config.yaml.example; git add configs/config.yaml.example
 check "configs example -> internal/config (static)" "|./internal/config||0|no" "$(probe)"
@@ -413,12 +446,17 @@ check_hook "e2e: ignored web/dist artifact masks staged deletion" 1 "Offending p
 reset
 check_hook "e2e: empty stage passes" 0
 
-reset; mkdir -p .planning; printf 'x\n' > ".planning/秘.txt"; git add ".planning/秘.txt"
+reset; mkdir -p .planning; printf 'x\n' > ".planning/秘.txt"; git add -f ".planning/秘.txt"
 check_hook "e2e: unicode forbidden path blocked" 1 "Blocked"
 
 reset; printf 'go 1.21\n\nuse .\n' > go.work; git add -f go.work
 check_hook "e2e: force-staged go.work refused" 1 "go.work"
-rm -f go.work
+
+# a previously-TRACKED workspace file must be removable (deletion != staging)
+reset; printf 'go 1.21\n\nuse .\n' > go.work; git add -f go.work; git -c commit.gpgsign=false commit -qm 'track go.work (fixture)'
+git rm -q --cached go.work
+check_hook "e2e: staged deletion of tracked go.work allowed" 0
+git reset -q --hard HEAD >/dev/null; git rm -q --cached go.work 2>/dev/null; reset
 
 reset; printf '\n// staged A\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf '\n// unstaged B\n' >> internal/bar/c.go
@@ -428,16 +466,39 @@ reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf '# touched\n' >> Makefile
 check_hook "e2e: unstaged Makefile change blocked" 1 "Offending paths"
 
+reset; printf '.text\n.globl broken\nbroken:\n\t.badop\n' > internal/foo/x.s; git add internal/foo/x.s
+printf '.text\n.globl broken\nbroken:\n\tRET\n' > internal/foo/x.s
+check_hook "e2e: partial staging of toolchain source blocked" 1 "x.s"
+
 reset; printf '\n' >> go.mod; git add go.mod
-check_hook "e2e: module change runs full go vet (even under FAST)" 0 "all packages — module files"
+check_hook "e2e: module change runs full go vet (even under FAST)" 0 "all packages — module/shared-input change"
 
 reset; printf '\n' >> go.mod; printf '\n// mixed\n' >> internal/foo/a.go
 git add go.mod internal/foo/a.go
-check_hook "e2e: mixed module+Go still runs full go vet" 0 "all packages — module files"
+check_hook "e2e: mixed module+Go still runs full go vet" 0 "all packages — module/shared-input change"
+
+reset; printf 'f2\n' >> testdata/x.txt; git add testdata/x.txt
+check_hook "e2e: shared fixture escalates lint/vet to full repo" 0 "all packages — module/shared-input change"
 
 reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf 'syso\n' > internal/foo/x.syso
 check_hook "e2e: ignored *.syso build input blocked" 1 "x.syso"
+
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+printf 'package foo\n\nfunc Local() int { return 1 }\n' > internal/foo/local_extra.go
+check_hook "e2e: ignored *.go masked symbol blocked" 1 "local_extra.go"
+
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+printf 'noise\n' > internal/foo/run.log
+check_hook "e2e: harmless ignored runtime artifact does not block" 0
+
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+mkdir -p .worktrees/wt; printf 'package wt\n' > .worktrees/wt/x.go
+check_hook "e2e: ignored .go inside .worktrees/ does not block" 0
+
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+mkdir -p .tmprepro; printf 'package main\n\nfunc main() {}\n' > .tmprepro/repro.go
+check_hook "e2e: ignored .go inside scratch tree does not block" 0
 
 reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf 'package bar\n\nfunc Brand() int { return 5 }\n' > internal/bar/new.go
@@ -462,8 +523,9 @@ rm -f go.work
 # long past the pre-check guard) and is never restored, so the post-check
 # recheck MUST observe it — no fixed-sleep race. Either way rc must be 1.
 reset; printf '\n// staged for toctou\n' >> internal/foo/a.go; git add internal/foo/a.go
+: > hook.out   # no stale markers from earlier scenarios
 ( seen=""
-  for _ in $(seq 1 200); do grep -qF '[3/8]' hook.out 2>/dev/null && { seen=1; break; }; sleep 0.05; done
+  for ((_p = 0; _p < 200; _p++)); do grep -qF '[3/8]' hook.out 2>/dev/null && { seen=1; break; }; sleep 0.05; done
   # Deterministic barrier: mutate ONLY after observing the hook's [3/8]
   # checkpoint; if it never appeared, the test must fail as inconclusive,
   # never silently pass or race the finished hook.
@@ -474,18 +536,24 @@ if PRE_COMMIT_FAST=1 bash "$HOOK" >hook.out 2>&1; then toctou_rc=0; else toctou_
 watcher_rc=0; wait "$watcher" || watcher_rc=$?
 if [ "$watcher_rc" -ne 0 ]; then
   FAIL=$((FAIL+1)); echo "FAIL - e2e: TOCTOU checkpoint never observed (inconclusive)"
-elif [ "$toctou_rc" -eq 1 ]; then PASS=$((PASS+1)); echo "ok   - e2e: mid-run mutation blocked (TOCTOU recheck)"
+elif [ "$toctou_rc" -eq 1 ] && grep -q "changed while the checks were running" hook.out; then
+  PASS=$((PASS+1)); echo "ok   - e2e: mid-run mutation blocked (TOCTOU recheck)"
 else FAIL=$((FAIL+1)); echo "FAIL - e2e: mid-run mutation escaped (rc=$toctou_rc)"; tail -5 hook.out; fi
 
 # Index drift: mid-run edit AND git add — the tree matches the index at the
 # end, but the staged content was never classified/tested.
 reset; printf '\n// staged for index-drift\n' >> internal/foo/a.go; git add internal/foo/a.go
-( for _ in $(seq 1 200); do grep -qF '[3/8]' hook.out 2>/dev/null && break; sleep 0.05; done
+: > hook.out   # no stale markers from earlier scenarios
+( seen=""
+  for ((_p = 0; _p < 200; _p++)); do grep -qF '[3/8]' hook.out 2>/dev/null && { seen=1; break; }; sleep 0.05; done
+  [ -n "$seen" ] || exit 2
   printf '\n// staged mid-run\n' >> internal/foo/a.go; git add internal/foo/a.go ) &
 watcher=$!
 if PRE_COMMIT_FAST=1 bash "$HOOK" >hook.out 2>&1; then drift_rc=0; else drift_rc=$?; fi
-wait "$watcher"
-if [ "$drift_rc" -eq 1 ] && grep -q "never validated" hook.out; then
+watcher_rc=0; wait "$watcher" || watcher_rc=$?
+if [ "$watcher_rc" -ne 0 ]; then
+  FAIL=$((FAIL+1)); echo "FAIL - e2e: index-drift checkpoint never observed (inconclusive)"
+elif [ "$drift_rc" -eq 1 ] && grep -q "never validated" hook.out; then
   PASS=$((PASS+1)); echo "ok   - e2e: mid-run git add blocked (index drift)"
 else FAIL=$((FAIL+1)); echo "FAIL - e2e: mid-run git add escaped (rc=$drift_rc)"; tail -5 hook.out; fi
 
@@ -495,6 +563,7 @@ else FAIL=$((FAIL+1)); echo "FAIL - e2e: mid-run git add escaped (rc=$drift_rc)"
 # and tree-consistency) against adds every ~20ms, an all-clean sweep is
 # practically impossible; refusal may come from any comparator.
 reset; printf '\n// staged for spam\n' >> internal/foo/a.go; git add internal/foo/a.go
+: > hook.out   # no stale markers from earlier scenarios
 : > spam.count
 ( i=0
   while ! grep -qE 'checks passed|✗' hook.out 2>/dev/null; do

@@ -287,8 +287,9 @@ Published tags are determined by release type:
 
 CI is defined in `.github/workflows/test.yml` and runs 9 jobs in parallel on
 every push and pull request. The local gate `make ci` mirrors the Go-side
-checks: `vet`, `lint`, `vuln`, `coverage-check`, `test-race`, `config-drift`,
-`check-import-guard`, and `check-mocks`. Run `make ci-full` to also run the
+checks: `vet`, `lint`, `vuln`, `coverage-check`, `test-race`, `test-hook`,
+`config-drift`, `check-import-guard`, `check-mocks`, `i18n-check`, and
+`check-no-hardcoded-timeouts`. Run `make ci-full` to also run the
 frontend suite (`make web-test`), or `make simulate-ci` to replay the GitHub
 Actions jobs locally.
 

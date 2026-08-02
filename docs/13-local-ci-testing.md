@@ -92,10 +92,10 @@ make simulate-ci
 make ci
 ```
 
-**What it runs** — the `ci` target in the `Makefile` declares **8 prerequisites**:
+**What it runs** — the `ci` target in the `Makefile` declares **11 prerequisites**:
 
 ```makefile
-ci: vet lint vuln coverage-check test-race config-drift check-import-guard check-mocks
+ci: vet lint vuln coverage-check test-race test-hook config-drift check-import-guard check-mocks i18n-check check-no-hardcoded-timeouts
 ```
 
 | # | Target | What it enforces |
@@ -108,6 +108,9 @@ ci: vet lint vuln coverage-check test-race config-drift check-import-guard check
 | 6 | `config-drift` | `./scripts/validate-config-sync.sh` — defaults stay in sync with `configs/config.yaml.example` |
 | 7 | `check-import-guard` | `./scripts/check_import_guard.sh` — `internal/models` must not import `internal/config` |
 | 8 | `check-mocks` | regenerates mockery mocks; fails if `internal/mocks/` is out of date |
+| 9 | `test-hook` | `scripts/test-pre-commit-scoping.sh` — 50+ case staged-file scoping regression matrix for the pre-commit hook |
+| 10 | `i18n-check` | frontend Paraglide + TUI go-i18n catalog validation |
+| 11 | `check-no-hardcoded-timeouts` | guard against hardcoded timeout literals |
 
 > **Frontend:** `make ci` does **not** run frontend tests. Use `make ci-full` (= `ci` + `web-test`) to add the Vitest suite. The `fullstack-e2e` job is not part of either target — run it explicitly with `make test-e2e-fullstack`.
 
@@ -231,11 +234,11 @@ The pre-commit hook (`scripts/pre-commit.sample`) runs **8 checks** and blocks f
 | # | Check | Command / trigger |
 |---|-------|-------------------|
 | 1 | Go formatting | `gofmt -l .` (whole repo — ~1s) |
-| 2 | golangci-lint | `golangci-lint run <pkgs>` on packages with staged/deleted `.go` files (≥ v2.4.0; skipped if not installed); full repo when `.golangci.yml` is staged |
-| 3 | go vet | `go vet <pkgs>` on packages with staged/deleted `.go` files; full repo when `go.mod`/`go.sum` changed |
+| 2 | golangci-lint | `golangci-lint run <pkgs>` on packages with staged/deleted `.go` files plus reverse dependents (≥ v2.4.0; skipped if not installed); full repo when `.golangci.yml` is staged or a full-suite trigger fires (module files, shared fixtures, binary-unreachable helpers) |
+| 3 | go vet | `go vet <pkgs>` on packages with staged/deleted `.go` files plus reverse dependents; full repo for full-suite triggers (module files, shared fixtures, binary-unreachable helpers) |
 | 4 | Fast unit tests | `go test -short -timeout=60s <pkgs>` on packages owning staged/deleted `.go` files or fixtures, plus their reverse (test-)dependents; the full `./...` suite for module/shared/helper changes. Referenced package deletions hard-block; unreferenced ones run the build only (skipped with `PRE_COMMIT_FAST=1`) |
 | 5 | Build verification | `go build -o /tmp/javinizer-test ./cmd/javinizer` when `.go` files, `go.mod`/`go.sum`, or Go-consumed assets (fixtures, `go:embed` targets) are staged |
-| 6 | Swagger docs | `make swagger` then `git diff --quiet -- docs/swagger/` when `internal/`, `cmd/`, or `docs/swagger/` files are staged (regen must be committed) |
+| 6 | Swagger docs | `make swagger` then `git diff --quiet -- docs/swagger/` when `internal/`, `cmd/`, `docs/swagger/`, or `Makefile` files are staged (regen must be committed) |
 | 7 | Frontend formatting | `npx prettier --check` on staged `web/frontend/**` files (skipped without `node_modules`) |
 | 8 | Frontend types | `npx svelte-check --threshold error` when `web/frontend/src/` changes (skipped with `PRE_COMMIT_FAST=1`) |
 

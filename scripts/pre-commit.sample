@@ -45,7 +45,8 @@ START=$SECONDS
 # hostile lock holder.
 snapshot_index() {
     local tree _i
-    for _i in $(seq 1 20); do
+    # bash arithmetic loop — no external seq dependency
+    for ((_i = 0; _i < 20; _i++)); do
         if tree=$(git write-tree 2>/dev/null); then
             printf '%s\n' "$tree"
             return 0
@@ -79,13 +80,15 @@ done < <(git diff --cached --name-only -z)
 # broken workspace would fail CI where GOWORK is not disabled. Refuse a
 # force-staged (git add -f) workspace file.
 WORKSPACE_STAGED=""
+# --diff-filter=d excludes deletions: removing a previously-tracked
+# workspace file is exactly the commit we must NOT refuse.
 while IFS= read -r -d '' p; do
     case "$p" in
         go.work|go.work.sum)
             WORKSPACE_STAGED="$WORKSPACE_STAGED
 $p" ;;
     esac
-done < <(git diff --cached --name-only -z)
+done < <(git diff --cached --name-only -z --diff-filter=d)
 if [ -n "$WORKSPACE_STAGED" ]; then
     echo -e "${RED}✗ go.work files must not be committed (git-ignored personal workspace):${NC}"
     # shellcheck disable=SC2086 # one path per line is the intent
@@ -161,7 +164,10 @@ while IFS= read -r -d '' p; do
     esac
 done < <(git diff --cached --name-only -z --no-renames)
 # Non-Go inputs consumed by Go packages (testdata/** fixtures, go:embed
-# assets like *.sql migrations, locales/*.json, config.yaml.example): these
+# assets like *.sql migrations, locales/*.json, config.yaml.example) plus
+# cgo/linker inputs (.c/.s/.h/.syso…) anywhere — e.g. staging web/bad.c
+# makes the existing web package uncompilable while matching no .go rule.
+# These
 # never match a *.go pathspec, yet a bad fixture edit fails `go test` and a
 # deleted embed fails `go build`. Map each staged non-.go path to the
 # nearest ancestor directory containing .go files (per-package fixtures land
@@ -214,7 +220,7 @@ while IFS= read -r p; do
         ASSET_FULL=1
     fi
 done <<EOF
-$(git diff --cached --name-only --no-renames --diff-filter=ACMRTD -- testdata internal cmd web/dist docs/swagger configs ':!*.go' || true)
+$(git diff --cached --name-only --no-renames --diff-filter=ACMRTD -- testdata internal cmd web/dist docs/swagger configs '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' '*.s' '*.S' '*.sx' '*.syso' '*.m' '*.f' '*.F' '*.for' '*.f90' '*.swig' '*.swigcxx' ':!*.go' || true)
 EOF
 # The ancestor walk maps web/dist and docs/swagger to their embedding
 # packages (web/embed.go and docs/swagger/embed.go) — keep the pathspec list
@@ -291,6 +297,14 @@ $out"
         elif head -1 "$GOLIST_ERR" | grep -Eq 'no Go files in|matched no packages|build constraints exclude all Go files in'; then
             PRUNED="$PRUNED
 $pat"
+            # A package that WAS live and became enumeration-empty via the
+            # staged edit (e.g. an added build constraint) is deletion-
+            # equivalent — its consumers must pass dangling-import validation.
+            case "${pat#./}" in
+                .) ;;
+                *) DROPPED_DIRS="$DROPPED_DIRS
+${pat#./}" ;;
+            esac
         else
             echo -e "${RED}✗ Cannot resolve staged packages (go list failed):${NC}"
             cat "$GOLIST_ERR"
@@ -408,6 +422,12 @@ fi
 # the narrower GO_PKGS — assets and test consumers are not lint targets).
 # shellcheck disable=SC2086 # word-splitting the pattern lists is intended
 TEST_PKGS=$(printf '%s\n' $GO_PKGS $ASSET_PKGS $EMBED_PKGS $STATIC_PKGS $REV_PKGS | sed '/^$/d' | sort -u)
+# CHECK_PKGS: lint/vet scope. Producers alone are NOT enough — a change can
+# create consumer-only diagnostics that still compile (adding a mutex to an
+# exported type trips vet copylocks in consumers; staticcheck deprecation
+# notices fire at use sites), so reverse dependents join the analysis scope.
+# shellcheck disable=SC2086 # word-splitting the pattern lists is intended
+CHECK_PKGS=$(printf '%s\n' $GO_PKGS $REV_PKGS | sed '/^$/d' | sort -u)
 # SHOULD_BUILD: single source of truth for the check-5 trigger, composed
 # here (inside the classified block) so the regression matrix can assert the
 # exact value the hook consumes. Triggers: staged/deleted Go files
@@ -452,7 +472,8 @@ done < <(git diff --cached --name-only -z --no-renames)
 # 'git diff --name-only' cannot see and which get their own probe below) may
 # exist under the checked pathspecs. Refuse rather than vouch for a state we
 # never ran.
-GUARD_PATHSPEC=(-- '*.go' go.mod go.sum testdata internal cmd web/dist docs/swagger configs web/frontend .golangci.yml .golangci.yaml Makefile)
+GUARD_PATHSPEC=(-- '*.go' go.mod go.sum testdata internal cmd web/dist docs/swagger configs web/frontend .golangci.yml .golangci.yaml Makefile
+                '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' '*.s' '*.S' '*.sx' '*.syso' '*.m' '*.f' '*.F' '*.for' '*.f90' '*.swig' '*.swigcxx')
 check_tree_consistency() {
     STAGED_SET=$(git diff --cached --name-only --no-renames -- "${GUARD_PATHSPEC[@]}" | sort || true)
     CONFLICT=""
@@ -463,12 +484,35 @@ $f"
         fi
     done < <(git diff --cached --name-only -z --no-renames --diff-filter=D -- "${GUARD_PATHSPEC[@]}" || true)
     if [ -n "$STAGED_SET" ]; then
+        # Ignored compile inputs count only inside an ACTUAL Go package
+        # directory (one holding tracked .go files) or under an embed root —
+        # precise and immune to ignored scratch trees (.planning/, .tmprepro/,
+        # node_modules/, .worktrees/, …) with no exclusion list to maintain.
+        IGNORED_RAW=$(git ls-files --others --ignored --exclude-standard \
+            -- web/dist \
+            '*.syso' '*.go' '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' \
+            '*.s' '*.S' '*.sx' '*.m' '*.f' '*.F' '*.for' '*.f90' '*.swig' '*.swigcxx' || true)
+        PKG_DIRS=" $(git ls-files '*.go' | while IFS= read -r g; do printf '%s\n' "${g%/*}"; done | sort -u | tr '\n' ' ') "
+        IGNORED_KEPT=""
+        while IFS= read -r raw; do
+            [ -n "$raw" ] || continue
+            case "$raw" in
+                web/dist/*)
+                    IGNORED_KEPT="$IGNORED_KEPT
+$raw" ;;
+                *)
+                    rd=${raw%/*}; [ "$rd" = "$raw" ] && rd=.
+                    case "$PKG_DIRS" in
+                        *" $rd "*) IGNORED_KEPT="$IGNORED_KEPT
+$raw" ;;
+                    esac ;;
+            esac
+        done <<FILTER_EOF
+$IGNORED_RAW
+FILTER_EOF
         UNSTAGED=$( { git diff --name-only -- "${GUARD_PATHSPEC[@]}"
                       git ls-files --others --exclude-standard -- "${GUARD_PATHSPEC[@]}"
-                      # Embed roots contain git-IGNORED files still compiled
-                      # into the binary (//go:embed all:dist) — an ignored
-                      # artifact can mask a staged deletion, so scan them too.
-                      git ls-files --others --ignored --exclude-standard -- web/dist '*.syso'; } | sort -u || true)
+                      printf '%s\n' "$IGNORED_KEPT"; } | sort -u || true)
         if [ -n "$UNSTAGED" ]; then
             CONFLICT="$CONFLICT
 $UNSTAGED"
@@ -482,8 +526,9 @@ report_tree_conflict() {
     # shellcheck disable=SC2086 # one path per line is the intent
     printf '  %s\n' $CONFLICT
 echo -e "${YELLOW}Stage fixable changes (git add -A), delete the offending untracked/ignored"
-    echo -e "paths, or stash everything (git stash --all --keep-index -- the --all is"
-    echo -e "required for ignored web/dist build artifacts), then retry.${NC}"
+    echo -e "paths, or stash everything: git stash --all --keep-index"
+    echo -e "(the --all flag is required to include ignored web/dist build artifacts)."
+    echo -e "Then retry the commit.${NC}"
 }
 # Drift across the classification window: the analysis above read the index
 # many times; if it changed mid-analysis the computed scope may be a mix of
@@ -553,11 +598,12 @@ echo ""
 
 # Check 2: golangci-lint (changed packages only — full repo when the linter
 # configuration itself is staged, since config applies repository-wide)
-LINT_PKGS=$GO_PKGS
-LINT_SCOPE="staged packages"
-if [ -n "$LINT_CONFIG" ]; then
+LINT_PKGS=$CHECK_PKGS
+LINT_SCOPE="staged packages + reverse dependents"
+if [ -n "$LINT_CONFIG" ] || [ -n "$FULL_SUITE" ]; then
     LINT_PKGS="./..."
     LINT_SCOPE="full repo — lint config staged"
+    [ -z "$LINT_CONFIG" ] && LINT_SCOPE="full repo — module/shared-input change"
 fi
 if [ -n "$LINT_PKGS" ]; then
     echo -e "${BLUE}[2/8] Running golangci-lint ($LINT_SCOPE)...${NC}"
@@ -586,18 +632,18 @@ echo ""
 # go.sum runs it repository-wide — the go directive and dependency versions
 # shift vet's analysis (e.g. stdversion diagnostics) even when build/tests
 # still pass.
-if [ -n "$MODULE_CHANGED" ]; then
+if [ -n "$MODULE_CHANGED" ] || [ -n "$FULL_SUITE" ]; then
     # checked FIRST: module+Go mixed staging must not collapse to scoped vet
-    echo -e "${BLUE}[3/8] Running go vet (all packages — module files staged)...${NC}"
+    echo -e "${BLUE}[3/8] Running go vet (all packages — module/shared-input change)...${NC}"
     if ! go vet ./... 2>&1; then
         echo -e "${RED}✗ go vet found issues${NC}"
         exit 1
     fi
     echo -e "${GREEN}✓ go vet passed${NC}"
-elif [ -n "$GO_PKGS" ]; then
-    echo -e "${BLUE}[3/8] Running go vet (staged packages)...${NC}"
-    # shellcheck disable=SC2086 # word-splitting GO_PKGS is intentional
-    if ! go vet $GO_PKGS 2>&1; then
+elif [ -n "$CHECK_PKGS" ]; then
+    echo -e "${BLUE}[3/8] Running go vet (staged packages + reverse dependents)...${NC}"
+    # shellcheck disable=SC2086 # word-splitting CHECK_PKGS is intentional
+    if ! go vet $CHECK_PKGS 2>&1; then
         echo -e "${RED}✗ go vet found issues${NC}"
         exit 1
     fi
