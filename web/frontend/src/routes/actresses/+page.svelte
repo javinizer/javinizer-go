@@ -62,7 +62,16 @@
 
 	async function advanceSyncJob() {
 		if (syncDestroyed) return false;
-		if (syncQueue.length === 0) await refreshActiveSyncQueue();
+		if (syncQueue.length === 0) {
+			try {
+				await refreshActiveSyncQueue();
+			} catch (error) {
+				// Fire-and-forget callers (showNextSyncJob) need a visible failure;
+				// without it the next server-side job would stay hidden silently.
+				if (!syncDestroyed) toastStore.error(error instanceof Error ? error.message : m.actresses_sync_load_failed());
+				return false;
+			}
+		}
 		if (syncDestroyed) return false;
 		const [next, ...remaining] = syncQueue;
 		if (!next) return false;

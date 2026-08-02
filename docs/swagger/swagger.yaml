@@ -3552,8 +3552,9 @@ paths:
       - actress
   /api/v1/actresses/sync-candidates:
     get:
-      description: Return actresses that have a DMM ID but lack thumbnail, Japanese
-        name, or romanized name metadata.
+      description: Return actresses with a DMM ID that lack thumbnail, Japanese name,
+        or romanized names, plus named actresses without a DMM ID pending identity
+        resolution.
       produces:
       - application/json
       responses:

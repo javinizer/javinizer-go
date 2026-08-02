@@ -18,7 +18,7 @@ type actressSyncCandidatesResponse struct {
 
 // listActressSyncCandidates handles GET /api/v1/actresses/sync-candidates.
 // @Summary List actresses eligible for metadata sync
-// @Description Return actresses that have a DMM ID but lack thumbnail, Japanese name, or romanized name metadata.
+// @Description Return actresses with a DMM ID that lack thumbnail, Japanese name, or romanized names, plus named actresses without a DMM ID pending identity resolution.
 // @Tags actress
 // @Produce json
 // @Success 200 {object} actressSyncCandidatesResponse

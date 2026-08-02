@@ -429,12 +429,13 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 				logging.Warnf("Actress sync settle completion failed: %v", completeErr)
 			}
 			return
-		case err != nil:
-			// Manager shutdown mid-run: keep the lease so recovery requeues it.
+		default:
+			// Manager shutdown: never persist an outcome here — cancellation
+			// may have been swallowed into a benign result (e.g. skipped with
+			// "missing_dmm_id"). Keep the lease so startup recovery requeues
+			// the task and it runs to a truthful outcome after restart.
 			return
 		}
-		// err == nil and not job-cancelled: the sync committed its work before
-		// the manager stopped; fall through to persist its truthful outcome.
 	}
 	if err != nil {
 		if m.requeueCanonicalTask(task, err) {
