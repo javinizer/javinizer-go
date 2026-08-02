@@ -85,6 +85,10 @@ func (r *ActressRepository) FindByID(ctx context.Context, id uint) (*models.Actr
 func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
+		var jobIDs []string
+		if err := tx.Model(&models.ActressSyncTask{}).Distinct().Where("actress_id = ? AND status IN ?", id, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Pluck("job_id", &jobIDs).Error; err != nil {
+			return err
+		}
 		if err := tx.Model(&models.ActressSyncTask{}).
 			Where("actress_id = ? AND status IN ?", id, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).
 			Updates(map[string]any{
@@ -92,6 +96,14 @@ func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 				"error_message": "actress_deleted", "completed_at": now,
 			}).Error; err != nil {
 			return err
+		}
+		// Refresh the parent jobs affected by the per-task cancellations,
+		// otherwise a job whose every task just cancelled stays "running".
+		syncRepo := NewActressSyncRepository(r.GetDB())
+		for _, jobID := range jobIDs {
+			if err := syncRepo.refreshJobTx(tx, jobID, now); err != nil {
+				return err
+			}
 		}
 		if err := tx.Model(&models.ActressSyncTask{}).Where("actress_id = ?", id).Update("actress_id", nil).Error; err != nil {
 			return err

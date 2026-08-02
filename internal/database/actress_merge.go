@@ -387,6 +387,14 @@ func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *D
 			if err := tx.Delete(&models.Actress{}, sourceID).Error; err != nil {
 				return wrapDBErr("delete", fmt.Sprintf("merge source actress %d", sourceID), err)
 			}
+			// Production SQLite runs with foreign_keys off, so the migration's
+			// ON DELETE SET NULL never fires for already-terminal tasks:
+			// re-anchor them explicitly instead of leaving dangling references.
+			if err := tx.Model(&models.ActressSyncTask{}).
+				Where("actress_id = ?", sourceID).
+				Update("actress_id", targetID).Error; err != nil {
+				return wrapDBErr("merge", fmt.Sprintf("actress sync task references from %d to %d", sourceID, targetID), err)
+			}
 			return nil
 		})
 	})

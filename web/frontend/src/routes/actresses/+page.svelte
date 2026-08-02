@@ -78,6 +78,7 @@
 		syncQueue = remaining;
 		syncJob = next;
 		syncTasks = [];
+		syncPollFailureShown = false; // reset per job, else a prior poll error mutes the next job's toasts
 		showSyncModal = true;
 		startPolling();
 		return true;

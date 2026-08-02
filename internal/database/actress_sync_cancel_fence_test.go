@@ -265,4 +265,9 @@ func TestActressDeleteCancelsAndDetachesSyncTasks(t *testing.T) {
 	require.NoError(t, db.First(&storedTerminal, "id = ?", terminal.ID).Error)
 	require.Equal(t, models.ActressSyncTaskCompleted, storedTerminal.Status)
 	require.Nil(t, storedTerminal.ActressID)
+
+	var storedJob models.ActressSyncJob
+	require.NoError(t, db.First(&storedJob, "id = ?", job.ID).Error)
+	require.Equal(t, models.ActressSyncJobCompleted, storedJob.Status, "job aggregates must settle once its tasks cancel")
+	require.Equal(t, 1, storedJob.Cancelled)
 }
