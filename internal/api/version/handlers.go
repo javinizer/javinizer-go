@@ -3,6 +3,9 @@ package version
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -32,7 +35,30 @@ type VersionStatusResponse struct {
 	// `javinizer upgrade` command for cli) so the frontend doesn't have to
 	// hardcode the image ref or rebuild steps per environment.
 	UpgradeInstructions string `json:"upgrade_instructions,omitempty"`
-	Error               string `json:"error,omitempty"` // Error message if any
+	// UpgradeCommands breaks the guidance into discrete, paste-ready command
+	// lines per install method (cli_binary / homebrew / scoop / docker_pull /
+	// docker_compose) so the UI can render one copy button per command instead
+	// of copying the prose blob. Homebrew is only listed on darwin/linux hosts
+	// and Scoop on windows hosts (no OS offers both). Empty for desktop
+	// (in-app upgrade only).
+	UpgradeCommands []system.UpgradeCommand `json:"upgrade_commands,omitempty"`
+	Error           string                  `json:"error,omitempty"` // Error message if any
+}
+
+// detectInstallMethod resolves HOW this binary was installed (the resolved
+// executable path lands inside Homebrew's Cellar / Scoop's apps dir for
+// package-managed installs). The prerelease hand-off to brew/scoop cannot
+// deliver prereleases, so command generation needs the method, not just the
+// OS.
+func detectInstallMethod() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "manual"
+	}
+	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+		exe = resolved
+	}
+	return update.DetectInstallMethod(exe).String()
 }
 
 // applyEnvironment stamps the response with the detected install environment
@@ -43,6 +69,9 @@ type VersionStatusResponse struct {
 func applyEnvironment(response *VersionStatusResponse, env system.Environment) {
 	response.InstallEnvironment = string(env)
 	response.UpgradeInstructions = system.UpgradeInstructions(env)
+	// Baseline command set (stable release); handlers whose state path learns
+	// the announced release re-stamp this with the real prerelease flag.
+	response.UpgradeCommands = system.UpgradeCommands(env, runtime.GOOS, false, "", detectInstallMethod())
 }
 
 // versionStatus godoc
@@ -70,13 +99,14 @@ func versionStatus(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 		// Load cached state using service
 		state, err := service.GetStatus(c.Request.Context())
 
+		env := deps.InstallEnvironment()
 		response := &VersionStatusResponse{
 			Current:   currentVer,
 			Commit:    commit,
 			BuildDate: buildDate,
 			Source:    string(update.UpdateSourceCached),
 		}
-		applyEnvironment(response, deps.InstallEnvironment())
+		applyEnvironment(response, env)
 
 		if err != nil {
 			response.Error = err.Error()
@@ -111,6 +141,11 @@ func versionStatus(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 		response.CheckedAt = state.CheckedAt
 		response.Source = string(state.Source)
 
+		// Regenerate commands once the announced release is known: a
+		// prerelease swaps the CLI row to `javinizer upgrade --prerelease`
+		// and drops the stable-only package-manager rows.
+		response.UpgradeCommands = system.UpgradeCommands(env, runtime.GOOS, response.Prerelease, response.Latest, detectInstallMethod())
+
 		if state.Error != "" {
 			response.Error = state.Error
 		}
@@ -142,6 +177,7 @@ func versionCheck(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 
 		state, err := service.ForceCheck(ctx)
 
+		env := deps.InstallEnvironment()
 		response := &VersionStatusResponse{
 			Current:    version.Short(),
 			Commit:     version.Commit,
@@ -149,7 +185,7 @@ func versionCheck(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 			Latest:     "",
 			Prerelease: false,
 		}
-		applyEnvironment(response, deps.InstallEnvironment())
+		applyEnvironment(response, env)
 
 		if err != nil {
 			response.Source = string(update.UpdateSourceError)
@@ -176,6 +212,7 @@ func versionCheck(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 		response.UpdateAvailable = state.Available
 		response.CheckedAt = state.CheckedAt
 
+		response.UpgradeCommands = system.UpgradeCommands(env, runtime.GOOS, response.Prerelease, response.Latest, detectInstallMethod())
 		c.JSON(http.StatusOK, response)
 	}
 }

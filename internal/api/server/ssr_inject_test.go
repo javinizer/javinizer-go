@@ -65,7 +65,9 @@ func TestInjectSSRState_WithBrowseBootstrapCookie(t *testing.T) {
 }
 
 func TestDecodeBrowseBootstrapCookie_NullApplyPlan(t *testing.T) {
-	decoded, ok := decodeBrowseBootstrapCookie(url.QueryEscape(`{"version":1,"applyPlan":null,"initialPath":"/videos","destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`))
+	// Input arrives already URL-decoded via gin's Context.Cookie() — pass the
+	// JSON body directly (the old double-decode contract used QueryEscape).
+	decoded, ok := decodeBrowseBootstrapCookie(`{"version":1,"applyPlan":null,"initialPath":"/videos","destinationPath":"/videos","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`)
 	require.True(t, ok)
 	assert.Contains(t, string(decoded), `"applyPlan":null`)
 }
@@ -98,10 +100,31 @@ func TestInjectSSRState_InvalidBrowseBootstrapCookieIsIgnored(t *testing.T) {
 	}
 }
 
-func TestDecodeBrowseBootstrapCookie_InvalidEscape(t *testing.T) {
+func TestDecodeBrowseBootstrapCookie_InvalidInput(t *testing.T) {
+	// Not JSON at all (post-decode junk) must be rejected, not crash.
 	decoded, ok := decodeBrowseBootstrapCookie("%zz")
 	assert.Nil(t, decoded)
 	assert.False(t, ok)
+}
+
+func TestInjectSSRState_BrowseBootstrapPreservesPlusAndPercentPaths(t *testing.T) {
+	// Regression: the cookie value must be URL-decoded EXACTLY ONCE. Gin's
+	// Context.Cookie() already unescapes; a second QueryUnescape turned
+	// "/media/A+B" into "/media/A B" and mis-decoded literal "%" sequences —
+	// production reloads then hydrated a different browse/destination path
+	// than the user left.
+	gin.SetMode(gin.TestMode)
+	rt := &core.APIRuntime{}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodGet, "/browse", nil)
+	payload := `{"version":1,"applyPlan":null,"initialPath":"/media/A+B/50%done","destinationPath":"/out/C+D","forceRefresh":false,"showScraperSelector":false,"selectedScrapers":[],"manualScrapeMode":false,"planExpanded":true}`
+	req.Header.Set("Cookie", browseBootstrapCookie+"="+url.QueryEscape(payload))
+	c.Request = req
+
+	result := string(injectSSRState([]byte(`<html><head></head></html>`), rt, c))
+	assert.Contains(t, result, `"initialPath":"/media/A+B/50%done"`)
+	assert.Contains(t, result, `"destinationPath":"/out/C+D"`)
 }
 
 func TestInjectSSRState_NoHeadMarker_ReturnsOriginalHTML(t *testing.T) {

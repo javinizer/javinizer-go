@@ -981,6 +981,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
+                    },
+                    "409": {
+                        "description": "Persisted update plan must go through the update endpoint",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -1618,6 +1624,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Persisted organize plan must go through the organize endpoint",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -7987,6 +7999,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_system.UpgradeCommand": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_updater.State": {
             "type": "string",
             "enum": [
@@ -8664,6 +8687,13 @@ const docTemplate = `{
                 "update_available": {
                     "description": "Whether an update is available",
                     "type": "boolean"
+                },
+                "upgrade_commands": {
+                    "description": "UpgradeCommands breaks the guidance into discrete, paste-ready command\nlines per install method (cli_binary / homebrew / scoop / docker_pull /\ndocker_compose) so the UI can render one copy button per command instead\nof copying the prose blob. Homebrew is only listed on darwin/linux hosts\nand Scoop on windows hosts (no OS offers both). Empty for desktop\n(in-app upgrade only).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_system.UpgradeCommand"
+                    }
                 },
                 "upgrade_instructions": {
                     "description": "UpgradeInstructions carries environment-specific guidance verbatim (e.g.\nthe ` + "`" + `docker pull` + "`" + ` command for docker, the releases URL for desktop, the\n` + "`" + `javinizer upgrade` + "`" + ` command for cli) so the frontend doesn't have to\nhardcode the image ref or rebuild steps per environment.",

@@ -110,7 +110,7 @@ describe('/manual tracer', () => {
 			}
 		}));
 		const updateRender = renderPage();
-		expect(updateRender.getByText('Existing metadata: prefer-scraper, arrays replace')).toBeTruthy();
+		expect(updateRender.getByText('Existing metadata: Prefer Scraped, arrays Replace')).toBeTruthy();
 	});
 
 	it('removes the row from the batch and the request when "Remove from batch" is clicked (#4.8a)', async () => {

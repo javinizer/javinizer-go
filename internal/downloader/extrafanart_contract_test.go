@@ -25,6 +25,7 @@ import (
 // nil override (what sort produces post-fix), extrafanart downloads.
 func TestDownload_ExtrafanartNilOverrideRespectsConfig(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("screenshot"))
 	}))
@@ -76,6 +77,7 @@ func TestDownload_ExtrafanartNilOverrideRespectsConfig(t *testing.T) {
 // --no-extrafanart flag), not the unset-flag path.
 func TestDownload_ExtrafanartExplicitFalseOverridesConfig(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("screenshot"))
 	}))

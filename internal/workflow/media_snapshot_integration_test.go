@@ -176,6 +176,7 @@ func runActressOverwriteFixture(t *testing.T, actorXML string, fresh []models.Ac
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested = append(requested, r.URL.Path)
 		if strings.HasPrefix(r.URL.Path, "/fresh-") {
+			w.Header().Set("Content-Type", "application/octet-stream")
 			_, _ = w.Write([]byte("fresh actress bytes"))
 			return
 		}
@@ -230,6 +231,7 @@ func TestApply_OverwriteExistingMediaUsesFreshScrapedCoverAfterNFOMerge(t *testi
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested = append(requested, r.URL.Path)
 		if r.URL.Path == "/fresh-cover.jpg" {
+			w.Header().Set("Content-Type", "application/octet-stream")
 			_, _ = w.Write([]byte("fresh cover bytes"))
 			return
 		}

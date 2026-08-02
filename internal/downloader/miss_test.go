@@ -18,6 +18,7 @@ import (
 
 func TestDo_ProxyProfileEmptyURL_FallsBackToDirect(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -40,6 +41,7 @@ func TestDo_ProxyProfileEmptyURL_FallsBackToDirect(t *testing.T) {
 func TestDo_WithProxyResolverMatch(t *testing.T) {
 	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// This is the proxy — forward to target
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("proxied"))
 	}))
@@ -183,6 +185,7 @@ func TestDownload_RequestCreationFailure(t *testing.T) {
 func TestDownload_WriteAndCloseSuccess(t *testing.T) {
 	content := []byte("downloaded content")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(content)
 	}))
@@ -207,6 +210,7 @@ func TestDownload_WriteAndCloseSuccess(t *testing.T) {
 
 func TestDownload_CreateFileFailure_Miss(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("content"))
 	}))
@@ -229,6 +233,7 @@ func TestDownload_ConfiguredUserAgent(t *testing.T) {
 	var receivedUA string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("data"))
 	}))

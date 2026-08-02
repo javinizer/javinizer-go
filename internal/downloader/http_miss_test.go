@@ -151,6 +151,7 @@ func TestDownload_FollowsRedirects(t *testing.T) {
 			http.Redirect(w, r, "/final", http.StatusFound)
 			return
 		}
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(finalContent)
 	}))
@@ -178,6 +179,7 @@ func TestDownload_DefaultUserAgentWhenNotConfigured(t *testing.T) {
 		// Go's net/http sets a default User-Agent (e.g. "Go-http-client/1.1")
 		// when none is explicitly set in the request.
 		receivedUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("data"))
 	}))
@@ -271,6 +273,7 @@ func TestIsRetryableError_GenericError(t *testing.T) {
 func TestDownloadWithRetry_NegativeMaxRetries(t *testing.T) {
 	// Negative maxRetries should be treated as 0 (no retries)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -329,6 +332,7 @@ func TestDownloadWithRetry_SuccessOnRetry(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable) // 503 = retryable
 			return
 		}
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("success"))
 	}))

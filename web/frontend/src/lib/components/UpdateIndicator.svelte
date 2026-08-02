@@ -3,14 +3,14 @@
 	import { formatDateTime } from '$lib/i18n/format';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
-	import { onDestroy } from 'svelte';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { ArrowUpCircle, RefreshCw, ChevronDown, Container, Monitor, Terminal, Copy, Check } from 'lucide-svelte';
+	import { ArrowUpCircle, RefreshCw, Container, Monitor, Terminal } from 'lucide-svelte';
 	import { createVersionStatusQuery } from '$lib/query/queries';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
 	import type { VersionStatusResponse } from '$lib/api/types';
 	import UpgradeAction from '$lib/components/UpgradeAction.svelte';
+	import UpgradeCommandList from '$lib/components/UpgradeCommandList.svelte';
 
 	const queryClient = useQueryClient();
 	const versionQuery = $derived(createVersionStatusQuery());
@@ -80,30 +80,6 @@
 	}
 
 	const checking = $derived(checkMutation.isPending);
-
-	// Copy-to-clipboard for the upgrade instructions: docker/CLI users get a
-	// multi-line command they can paste into a terminal. Shows a check-mark
-	// confirmation for ~1.5s then reverts to the copy icon.
-	let copiedInstructions = $state(false);
-	let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-	onDestroy(() => {
-		if (copyResetTimer) clearTimeout(copyResetTimer);
-	});
-	async function handleCopyInstructions(event: MouseEvent) {
-		event.stopPropagation();
-		const text = status?.upgrade_instructions;
-		if (!text) return;
-		try {
-			await navigator.clipboard.writeText(text);
-			copiedInstructions = true;
-			if (copyResetTimer) clearTimeout(copyResetTimer);
-			copyResetTimer = setTimeout(() => (copiedInstructions = false), 1500);
-		} catch {
-			// clipboard unavailable (non-secure context) — surface it so the user
-			// knows to select the command text manually instead.
-			toastStore.error(m.update_clipboard_failed());
-		}
-	}
 
 	// Environment label + icon for the "running in" badge. The backend classifies
 	// docker/desktop/cli so the notification can tell a Docker user to `docker pull`
@@ -190,41 +166,21 @@
 					</div>
 				</div>
 
-				{#if status?.upgrade_instructions && status?.install_environment !== 'desktop' && status?.install_environment !== 'docker'}
-					<!-- Backend-provided, environment-specific guidance: CLI users see
-					`javinizer upgrade`. Rendered verbatim (pre-wrap) so the indented
-					commands stay readable. Desktop is excluded here: the "Update &
-					restart" button below IS the self-upgrade, so a text block restating
-					"click the button" (plus a long GitHub-download fallback) is
-					redundant and noisy. Docker is excluded too: a user who ran
-					`docker run` already knows to `docker pull` — the "View release"
-					button covers the changelog. The API still returns guidance for
-					the CLI `javinizer upgrade` handoff path
-					(internal/update/upgrade.go), which has no button to defer to. -->
-					<div
-						class="mt-2 rounded-md bg-muted/60 border border-border overflow-hidden max-w-full"
-					>
-						<div class="flex items-center justify-between px-2 py-1 border-b border-border bg-muted">
-							<span class="font-mono text-[10px] text-muted-foreground select-none">sh</span>
-							<button
-								type="button"
-								onclick={handleCopyInstructions}
-								title={m.update_copy_command()}
-								class="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-							>
-								{#if copiedInstructions}
-									<Check class="h-3 w-3 text-emerald-500" />
-									<span class="text-emerald-500">{m.update_copied()}</span>
-								{:else}
-									<Copy class="h-3 w-3" />
-									<span>{m.update_copy()}</span>
-								{/if}
-							</button>
-						</div>
-						<pre
-							class="block w-full max-w-full px-2.5 py-1.5 text-[11px] leading-relaxed font-mono whitespace-pre overflow-x-auto text-muted-foreground"
-						>{status.upgrade_instructions}</pre
-						>
+				{#if status?.upgrade_commands?.length && status?.install_environment !== 'desktop'}
+					<!-- Backend-provided, environment-aware command rows: each row is
+					a complete, paste-ready command with its OWN copy button — the
+					structured replacement for the old `sh`-labeled prose blob that
+					couldn't actually be pasted into a terminal. Desktop is excluded:
+					the "Update & restart" button below IS the self-upgrade (the API
+					also returns no commands for it). Docker now gets pull/compose
+					rows: the earlier "docker users already know" hiding made sense
+					for noisy prose, but discrete copyable commands are terse enough
+					to earn their space. -->
+					<p class="mt-2 text-[11px] text-muted-foreground">
+						{status.install_environment === 'docker' ? m.update_cmd_lead_docker() : m.update_cmd_lead_cli()}
+					</p>
+					<div class="mt-1">
+						<UpgradeCommandList commands={status.upgrade_commands} />
 					</div>
 				{/if}
 

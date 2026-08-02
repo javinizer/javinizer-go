@@ -65,6 +65,7 @@ func prepareAndLaunchApply(
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
+// @Failure 409 {object} contracts.ErrorResponse "Persisted update plan must go through the update endpoint"
 // @Router /api/v1/batch/{id}/organize [post]
 func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -118,6 +119,7 @@ func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
+// @Failure 409 {object} contracts.ErrorResponse "Persisted organize plan must go through the organize endpoint"
 // @Router /api/v1/batch/{id}/update [post]
 func updateBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {

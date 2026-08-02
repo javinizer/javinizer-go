@@ -21,6 +21,7 @@ func TestDownload_DedupNonOwnerRetriesAfterOwnerFailure(t *testing.T) {
 			http.Error(w, "failed", http.StatusBadGateway)
 			return
 		}
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("retry success"))
 	}))
 	defer server.Close()

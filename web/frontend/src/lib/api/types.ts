@@ -64,10 +64,19 @@ export type OperationMode =
 	| 'metadata-artwork'
 	| 'preview';
 
-export type VideoOperation = 'organize' | 'rename-in-place' | 'rename-file' | 'leave-in-place' | 'metadata-artwork';
+export type VideoOperation =
+	| 'organize'
+	| 'rename-in-place'
+	| 'rename-file'
+	| 'leave-in-place'
+	| 'metadata-artwork';
 export type NFOOutputPolicy = 'write' | 'skip';
 export type MediaPolicy = 'missing' | 'replace' | 'skip';
-export type ScalarMergeStrategy = 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
+export type ScalarMergeStrategy =
+	| 'prefer-nfo'
+	| 'prefer-scraper'
+	| 'preserve-existing'
+	| 'fill-missing-only';
 export type ArrayMergeStrategy = 'merge' | 'replace';
 export type MergePreset = 'conservative' | 'gap-fill' | 'aggressive';
 
@@ -311,12 +320,7 @@ export interface BatchScrapeResponse {
 	job_id: string;
 }
 
-export type ScraperErrorKind =
-	| 'not_found'
-	| 'unavailable'
-	| 'rate_limited'
-	| 'blocked'
-	| 'unknown';
+export type ScraperErrorKind = 'not_found' | 'unavailable' | 'rate_limited' | 'blocked' | 'unknown';
 
 export interface FileResult {
 	result_id: string;
@@ -1300,6 +1304,13 @@ export interface DeleteEventsResponse {
 	message: string;
 }
 
+// One copy-pasteable upgrade command plus a stable semantic key the UI maps
+// to a localized label (mirrors internal/system.UpgradeCommand).
+export interface UpgradeCommand {
+	key: string;
+	command: string;
+}
+
 export interface VersionStatusResponse {
 	current: string;
 	latest: string;
@@ -1309,6 +1320,7 @@ export interface VersionStatusResponse {
 	source: string;
 	install_environment: 'docker' | 'desktop' | 'cli';
 	upgrade_instructions?: string;
+	upgrade_commands?: UpgradeCommand[];
 	error?: string;
 }
 

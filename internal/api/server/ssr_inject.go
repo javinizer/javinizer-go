@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"encoding/json"
-	"net/url"
 
 	"github.com/gin-gonic/gin"
 
@@ -86,13 +85,15 @@ func injectSSRState(html []byte, rt *core.APIRuntime, c *gin.Context) []byte {
 	return result
 }
 
+// decodeBrowseBootstrapCookie parses the browse-bootstrap cookie body. The
+// input must ALREADY be URL-decoded: readCookieValue pulls the value through
+// gin's Context.Cookie(), which runs url.QueryUnescape internally. Unescaping
+// a second time would corrupt legitimate paths — "/media/A+B" would become
+// "/media/A B", and literal percent sequences could mis-decode or
+// invalidate the cookie entirely.
 func decodeBrowseBootstrapCookie(raw string) (json.RawMessage, bool) {
-	decoded, err := url.QueryUnescape(raw)
-	if err != nil {
-		return nil, false
-	}
 	var bootstrap browseBootstrapCookiePayload
-	if err := json.Unmarshal([]byte(decoded), &bootstrap); err != nil ||
+	if err := json.Unmarshal([]byte(raw), &bootstrap); err != nil ||
 		bootstrap.Version == nil || *bootstrap.Version != 1 ||
 		len(bootstrap.ApplyPlan) == 0 || bootstrap.InitialPath == nil ||
 		bootstrap.DestinationPath == nil || bootstrap.ForceRefresh == nil ||
@@ -106,10 +107,11 @@ func decodeBrowseBootstrapCookie(raw string) (json.RawMessage, bool) {
 		if err := json.Unmarshal(bootstrap.ApplyPlan, &decodedPlan); err != nil {
 			return nil, false
 		}
-		plan, err = applyplan.Normalize(&decodedPlan)
-		if err != nil {
+		normalizedPlan, nerr := applyplan.Normalize(&decodedPlan)
+		if nerr != nil {
 			return nil, false
 		}
+		plan = normalizedPlan
 	}
 	normalized, _ := json.Marshal(normalizedBrowseBootstrap{
 		Version:              1,

@@ -143,13 +143,14 @@ test.describe('Update indicator: real update.Service + real GitHub API → nav i
 
 			// The e2e backend reports install_environment="cli" (cmd/javinizer-e2e
 			// never calls SetInstallEnvironment, so CoreDeps defaults to CLI).
-			// For non-desktop envs the backend-provided upgrade_instructions <pre>
-			// MUST render (the `install_environment !== 'desktop'` guard hides it
-			// only for desktop, where the in-app "Update & restart" button IS the
-			// self-upgrade). Pin the guard's non-desktop branch: instructions visible.
-			const instructionsPre = popover.locator('pre');
-			await expect(instructionsPre).toBeVisible();
-			await expect(instructionsPre).toContainText('javinizer upgrade');
+			// Pin the CLI upgrade surface: structured, paste-ready command rows
+			// (one per install method, each with its own copy button) — NOT the
+			// old prose <pre> blob disguised as an `sh` snippet.
+			const cliRow = popover.locator('[data-upgrade-command="cli_binary"]');
+			await expect(cliRow).toBeVisible();
+			await expect(cliRow).toContainText('javinizer upgrade');
+			await expect(cliRow.getByRole('button', { name: /copy/i })).toBeVisible();
+			await expect(popover.locator('pre')).toHaveCount(0);
 
 			// Non-desktop env offers the releases link, NOT the in-app self-upgrade
 			// button. Pin the env-based CTA: "Update & restart" is desktop-only.

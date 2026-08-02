@@ -28,7 +28,7 @@
 	import { Play, FolderOutput, FolderOpen, FileEdit, FileText, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X, Scan, FileX, Download, Replace, ImageOff, ListChecks, CircleAlert, TriangleAlert } from 'lucide-svelte';
 	import type { Scraper, FileInfo, Config, BrowseResponse } from '$lib/api/types';
 	import type { BatchApplyPlan, MediaPolicy, MergePreset, NFOOutputPolicy, OperationMode, ScalarMergeStrategy, ArrayMergeStrategy, VideoOperation } from '$lib/api/types';
-	import { applyPlanSummary, applyPreset as applyPlanPreset, defaultApplyPlan, initialApplyPlan, migrateLegacyPlan, normalizeApplyPlan, projectLegacyPlan, setMergeStrategies, validateApplyPlan } from '$lib/apply-plan';
+	import { applyPlanSummary, applyPreset as applyPlanPreset, arrayStrategyLabel, defaultApplyPlan, initialApplyPlan, migrateLegacyPlan, normalizeApplyPlan, projectLegacyPlan, scalarStrategyLabel, setMergeStrategies, validateApplyPlan } from '$lib/apply-plan';
 	import { BrowseBootstrapCookie, encodeBrowseBootstrap, type BrowseBootstrap } from '$lib/browse-bootstrap';
 
 	let { data = {} }: { data?: { browseBootstrap?: BrowseBootstrap | null; initialPath?: string; initialBrowse?: BrowseResponse | null } } = $props();
@@ -187,7 +187,7 @@
 					planMigrationWarning = saved.planMigrationWarning;
 				} catch {
 					applyPlan = null;
-					planMigrationWarning = 'Saved apply settings are unsupported; select an operation again.';
+					planMigrationWarning = m.apply_plan_warn_saved_unsupported();
 				}
 				selectedVideoOperation = applyPlan?.video_operation ?? null;
 				if (applyPlan?.video_operation === 'organize') destinationPath = applyPlan.destination ?? '';
@@ -411,9 +411,9 @@
 		];
 	});
 	const presetChoices = [
-		{ value: 'conservative' as MergePreset, name: m.browse_plan_preset_conservative(), desc: m.browse_preset_conservative_desc(), mapping: 'preserve-existing · merge' },
-		{ value: 'gap-fill' as MergePreset, name: m.browse_plan_preset_gap_fill(), desc: m.browse_preset_gap_fill_desc(), mapping: 'fill-missing-only · merge' },
-		{ value: 'aggressive' as MergePreset, name: m.browse_plan_preset_aggressive(), desc: m.browse_preset_aggressive_desc(), mapping: 'prefer-scraper · replace' }
+		{ value: 'conservative' as MergePreset, name: m.browse_plan_preset_conservative(), desc: m.browse_preset_conservative_desc(), mapping: `${scalarStrategyLabel('preserve-existing')} · ${arrayStrategyLabel('merge')}` },
+		{ value: 'gap-fill' as MergePreset, name: m.browse_plan_preset_gap_fill(), desc: m.browse_preset_gap_fill_desc(), mapping: `${scalarStrategyLabel('fill-missing-only')} · ${arrayStrategyLabel('merge')}` },
+		{ value: 'aggressive' as MergePreset, name: m.browse_plan_preset_aggressive(), desc: m.browse_preset_aggressive_desc(), mapping: `${scalarStrategyLabel('prefer-scraper')} · ${arrayStrategyLabel('replace')}` }
 	];
 
 	function getSettingsOperationMode(): OperationMode {

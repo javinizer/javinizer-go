@@ -1,5 +1,6 @@
 import type { BatchApplyPlan, MergePreset, OperationMode, ScalarMergeStrategy, ArrayMergeStrategy } from '$lib/api/types';
 import { migrateLegacyPlan, normalizePersistedApplyPlan } from '$lib/apply-plan';
+import * as m from '$lib/paraglide/messages';
 
 export interface PendingScrape {
 	version?: 2;
@@ -42,7 +43,7 @@ function migrate(value: PendingScrape | LegacyPendingScrape): PendingScrape {
 		try {
 			return { ...value, applyPlan: value.applyPlan ? normalizePersistedApplyPlan(value.applyPlan) : null };
 		} catch {
-			return { ...value, applyPlan: null, migrationWarning: 'Saved apply settings are unsupported; select an operation again.' };
+			return { ...value, applyPlan: null, migrationWarning: m.apply_plan_warn_saved_unsupported() };
 		}
 	}
 	const legacy = value as LegacyPendingScrape;

@@ -123,6 +123,7 @@ func TestApplyPhase_MultipartSharedMediaDownloadsOnce(t *testing.T) {
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
+				w.Header().Set("Content-Type", "application/octet-stream")
 				_, _ = w.Write(tc.body)
 			}))
 			defer server.Close()

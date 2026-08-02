@@ -182,6 +182,7 @@ func TestDownloadPoster_CropFailure(t *testing.T) {
 	// When cropping fails, we get an error result
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Send very small data that won't be a valid image for cropping
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("not an image"))
 	}))
@@ -277,6 +278,7 @@ func TestDownloadTrailer_NoTrailerURL(t *testing.T) {
 
 func TestDownloadTrailer_DefaultExtensionWhenNoExt(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("fake video data"))
 	}))
@@ -326,6 +328,7 @@ func TestDownloadExtrafanart_NoScreenshots(t *testing.T) {
 
 func TestDownloadExtrafanart_ContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("img"))
 	}))
@@ -644,6 +647,7 @@ func TestDownloadPoster_FallbackFilename(t *testing.T) {
 
 func TestDownloadTrailer_FallbackFilename(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("fake trailer"))
 	}))

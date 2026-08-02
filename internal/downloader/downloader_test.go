@@ -89,6 +89,7 @@ func createTestMovie() *models.Movie {
 func TestDownloader_DownloadCover(t *testing.T) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("fake image data"))
 	}))
@@ -198,6 +199,7 @@ func TestDownloader_DownloadCover_AlreadyExists(t *testing.T) {
 
 func TestDownloader_DownloadExtrafanart(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("screenshot data"))
 	}))
@@ -250,6 +252,7 @@ func TestDownloader_DownloadExtrafanart(t *testing.T) {
 
 func TestDownloader_DownloadTrailer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("fake video data"))
 	}))
@@ -295,6 +298,7 @@ func TestDownloader_DownloadTrailer(t *testing.T) {
 
 func TestDownloader_DownloadActressImages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("actress image"))
 	}))
@@ -370,6 +374,7 @@ func TestDownloader_Download_BadStatusCode(t *testing.T) {
 func TestDownloader_DownloadAll_MultiPartFilenames(t *testing.T) {
 	// Test that multipart templates produce correct filenames
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("fake image data"))
 	}))
@@ -430,6 +435,7 @@ func TestDownloader_DownloadAll_MultiPartFilenames(t *testing.T) {
 func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 	// Set up mock HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("fake image data"))
 	}))
@@ -522,6 +528,7 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 
 func TestDownloader_DownloadAll(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("test data"))
 	}))
@@ -799,6 +806,7 @@ func TestDownloader_DownloadExtrafanart_PartialFailure(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("screenshot data"))
 	}))
@@ -1020,6 +1028,7 @@ func TestDownload_WithValidContext_Succeeds(t *testing.T) {
 
 func TestDownloader_DownloadActressImages_SkipEmptyThumbURL(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("actress image"))
 	}))
@@ -1114,6 +1123,7 @@ func TestDownloader_Download_Timeout(t *testing.T) {
 	// Create a server that delays response
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("data"))
 	}))
@@ -1152,6 +1162,7 @@ func TestDownloader_Download_WithUserAgent(t *testing.T) {
 	userAgent := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userAgent = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("data"))
 	}))
@@ -2015,6 +2026,7 @@ func TestDownloader_DownloadPoster_WithCropping(t *testing.T) {
 
 func TestDownloader_DownloadActressImages_WithNFOConfig(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("actress image"))
 	}))

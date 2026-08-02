@@ -54,6 +54,14 @@ function makeStatus(overrides: Partial<VersionStatusResponse> = {}): VersionStat
 		checked_at: '2026-06-27T23:21:20Z',
 		source: 'fresh',
 		install_environment: 'cli',
+		// Mirrors the real API on a macOS/Linux host: Homebrew only makes
+		// sense there; Windows hosts get a Scoop row instead (the backend
+		// gates the package-manager row on runtime.GOOS — no host offers
+		// both). Docker/desktop fixtures override this per test.
+		upgrade_commands: [
+			{ key: 'cli_binary', command: 'javinizer upgrade' },
+			{ key: 'homebrew', command: 'brew upgrade javinizer' },
+		],
 		...overrides,
 	};
 }
@@ -140,16 +148,100 @@ describe('UpdateIndicator', () => {
 		});
 	});
 
-	it('hides the upgrade-instructions command block for Docker users (they know to docker pull)', async () => {
-		// Product decision: a Docker user who ran `docker run` already knows to
-		// `docker pull` — the command block is noise. The "View release" button
-		// covers the changelog. The environment badge still labels the install
-		// type so the user knows why no self-upgrade button is offered.
+	it('renders one labeled row per CLI install method, each with its own copy button', async () => {
+		const { container } = renderWithClient(makeStatus());
+		let button: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			button = container.querySelector('button[aria-label="Update available"]');
+			expect(button).toBeTruthy();
+		});
+		await fireEvent.click(button!);
+
+		await waitFor(() => {
+			const rows = container.querySelectorAll('[data-upgrade-command]');
+			expect(rows.length).toBe(2);
+			const keys = Array.from(rows).map((row) => row.getAttribute('data-upgrade-command'));
+			expect(keys).toEqual(['cli_binary', 'homebrew']);
+			// Each row carries its own copy affordance, labeled with its command.
+			const copyButtons = container.querySelectorAll(
+				'[data-upgrade-command] button[aria-label^="Copy"]',
+			);
+			expect(copyButtons.length).toBe(2);
+			// The prose blob and its fake `sh` header are gone.
+			expect(container.querySelector('pre')).toBeNull();
+			expect(container.textContent).toContain('Update with one of these commands');
+		});
+	});
+
+	it("copies exactly the clicked row's command (not the whole guidance)", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, 'clipboard', {
+			value: { writeText },
+			configurable: true,
+		});
+		const { container } = renderWithClient(makeStatus());
+		let button: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			button = container.querySelector('button[aria-label="Update available"]');
+			expect(button).toBeTruthy();
+		});
+		await fireEvent.click(button!);
+
+		let copyButton: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			copyButton = container.querySelector('[data-upgrade-command="homebrew"] button');
+			expect(copyButton).toBeTruthy();
+		});
+		await fireEvent.click(copyButton!);
+
+		await waitFor(() => {
+			expect(writeText).toHaveBeenCalledTimes(1);
+			expect(writeText).toHaveBeenCalledWith('brew upgrade javinizer');
+		});
+		// Swap to the check icon confirms the copy landed.
+		await waitFor(() => {
+			expect(copyButton!.querySelector('svg.text-emerald-500')).toBeTruthy();
+		});
+	});
+
+	it('toasts instead of crashing when the clipboard is unavailable', async () => {
+		Object.defineProperty(navigator, 'clipboard', {
+			value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+			configurable: true,
+		});
+		const errorSpy = vi.spyOn(toastStore, 'error');
+		const { container } = renderWithClient(makeStatus());
+		let button: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			button = container.querySelector('button[aria-label="Update available"]');
+			expect(button).toBeTruthy();
+		});
+		await fireEvent.click(button!);
+
+		let copyButton: HTMLButtonElement | null = null;
+		await waitFor(() => {
+			copyButton = container.querySelector('[data-upgrade-command="cli_binary"] button');
+			expect(copyButton).toBeTruthy();
+		});
+		await fireEvent.click(copyButton!);
+
+		await waitFor(() => {
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('clipboard'));
+		});
+	});
+
+	it('shows pull + compose command rows for Docker installs', async () => {
+		// Docker guidance used to be hidden entirely ("docker users already
+		// know to docker pull") because the old UI rendered it as a noisy prose
+		// blob. As discrete, copyable command rows it earns its space: what you
+		// copy is exactly what you paste.
 		const { container } = renderWithClient(
 			makeStatus({
 				install_environment: 'docker',
-				upgrade_instructions:
-					'Running in Docker. Pull the latest image and recreate the container:\n  docker pull ghcr.io/javinizer/javinizer-go:latest',
+				upgrade_commands: [
+					{ key: 'docker_pull', command: 'docker pull ghcr.io/javinizer/javinizer-go:latest' },
+					{ key: 'docker_compose', command: 'docker compose pull && docker compose up -d' },
+				],
 				prerelease: false,
 				latest: 'v1.1.0',
 			}),
@@ -164,9 +256,14 @@ describe('UpdateIndicator', () => {
 		await waitFor(() => {
 			// Environment badge still labels the install type.
 			expect(container.textContent).toContain('Running in Docker');
-			// The command block must NOT render for Docker users.
-			expect(container.textContent).not.toContain('docker pull ghcr.io/javinizer/javinizer-go');
-			expect(container.textContent).not.toContain('Pull the latest image');
+			const pullRow = container.querySelector('[data-upgrade-command="docker_pull"]');
+			const composeRow = container.querySelector('[data-upgrade-command="docker_compose"]');
+			expect(pullRow).toBeTruthy();
+			expect(composeRow).toBeTruthy();
+			expect(pullRow!.textContent).toContain('docker pull ghcr.io/javinizer/javinizer-go:latest');
+			expect(composeRow!.textContent).toContain('docker compose pull && docker compose up -d');
+			// No prose instructions block / no fake shell snippet.
+			expect(container.querySelector('pre')).toBeNull();
 		});
 	});
 
@@ -200,8 +297,13 @@ describe('UpdateIndicator', () => {
 
 		let checkButton: HTMLButtonElement | null = null;
 		await waitFor(() => {
-			// The popover's "Check again" button is the one WITHOUT the update aria-label.
-			checkButton = container.querySelector('button:not([aria-label="Update available"])');
+			// Pin by label: with per-row copy buttons also in the popover, the
+			// old "first button without the aria-label" heuristic no longer
+			// lands on "Check again".
+			checkButton =
+				Array.from(container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find(
+					(b) => b.textContent?.includes('Check again'),
+				) ?? null;
 			expect(checkButton).toBeTruthy();
 		});
 		await fireEvent.click(checkButton!);
@@ -243,6 +345,8 @@ describe('UpdateIndicator', () => {
 			expect(upgradeBtn).toBeTruthy();
 			expect(container.textContent).toContain('Update & restart');
 			expect(container.querySelector('a[href*="releases"]')).toBeNull();
+			// No terminal commands for desktop: the button IS the self-upgrade.
+			expect(container.querySelector('[data-upgrade-commands]')).toBeNull();
 		});
 	});
 

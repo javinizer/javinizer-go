@@ -54,6 +54,7 @@ func TestDownload_OverwriteExistingReplacesAndClassifies(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("new bytes"))
 	}))
 	defer server.Close()
@@ -85,10 +86,167 @@ func TestDownload_OverwriteExistingReplacesAndClassifies(t *testing.T) {
 	assert.Empty(t, outcome.CreatedPaths)
 }
 
+func TestDownload_EmptyBodyDoesNotReplaceExisting(t *testing.T) {
+	// P0 regression: a successful HTTP response with an EMPTY body made
+	// io.Copy return (0, nil), after which replaceFile overwrote the existing
+	// artwork with a zero-byte file and reported success. With
+	// overwrite_existing_media enabled, a transient CDN/proxy hiccup could
+	// therefore destroy valid media.
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		// Explicitly 200 OK with no body.
+	}))
+	defer server.Close()
+
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/output/TEST-001-fanart.jpg", []byte("old bytes"), 0644))
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+	outcome, err := d.Download(context.Background(), DownloadCmd{
+		Movie:                  &models.Movie{ID: "TEST-001", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg"}},
+		DestDir:                "/output",
+		OverwriteExistingMedia: true,
+	})
+	require.Error(t, err, "an empty 200 body must fail the download, not silently succeed")
+
+	// The existing media must be preserved byte-for-byte.
+	got, readErr := afero.ReadFile(fs, "/output/TEST-001-fanart.jpg")
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte("old bytes"), got)
+
+	var coverResult *DownloadResult
+	for i := range outcome.Results {
+		if outcome.Results[i].Type == MediaTypeCover {
+			coverResult = &outcome.Results[i]
+		}
+	}
+	require.NotNil(t, coverResult)
+	assert.False(t, coverResult.Downloaded)
+	assert.False(t, coverResult.Replaced, "nothing may be reported replaced when the body was empty")
+	require.Error(t, coverResult.Error)
+	assert.Contains(t, coverResult.Error.Error(), "0 bytes")
+}
+
+func TestDownload_HTMLChallengePageDoesNotReplaceExisting(t *testing.T) {
+	// P0 regression: an auth-challenge/proxy-error HTML page returns 200 OK
+	// — before the validation guard it would atomically replace valid
+	// artwork with markup and report success.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("<!DOCTYPE html><html><body>Verify you are human</body></html>"))
+	}))
+	defer server.Close()
+
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/output/TEST-001-fanart.jpg", []byte("old bytes"), 0644))
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+	_, err := d.Download(context.Background(), DownloadCmd{
+		Movie:                  &models.Movie{ID: "TEST-001", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg"}},
+		DestDir:                "/output",
+		OverwriteExistingMedia: true,
+	})
+	require.Error(t, err)
+
+	got, readErr := afero.ReadFile(fs, "/output/TEST-001-fanart.jpg")
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte("old bytes"), got, "existing media must be preserved byte-for-byte")
+}
+
+func TestDownload_JSONErrorBodyDoesNotReplaceExisting(t *testing.T) {
+	// Same class as the HTML challenge: a JSON error payload (CDN/proxy
+	// replies with 200 + {"error": ...}) must not overwrite valid media.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte(`{"error": "rate limited"}`))
+	}))
+	defer server.Close()
+
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/output/TEST-001-fanart.jpg", []byte("old bytes"), 0644))
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+	_, err := d.Download(context.Background(), DownloadCmd{
+		Movie:                  &models.Movie{ID: "TEST-001", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg"}},
+		DestDir:                "/output",
+		OverwriteExistingMedia: true,
+	})
+	require.Error(t, err)
+
+	got, readErr := afero.ReadFile(fs, "/output/TEST-001-fanart.jpg")
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte("old bytes"), got, "existing media must be preserved byte-for-byte")
+}
+
+func TestDownload_XMLErrorDocumentDoesNotReplaceExisting(t *testing.T) {
+	// P0 regression: an S3-style XML error document returns 200 OK with no
+	// DOCTYPE/html marker and no `<?xml` declaration — it slipped past the
+	// HTML/JSON checks and would overwrite valid artwork. Both the declared
+	// Content-Type and an undeclared <Error> body must be rejected.
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		body        string
+	}{
+		{"declared application/xml", "application/xml", "<Error><Code>AccessDenied</Code></Error>"},
+		{"undeclared XML error body", "", "<Error><Code>NoSuchKey</Code></Error>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.contentType != "" {
+					w.Header().Set("Content-Type", tc.contentType)
+				}
+				w.Header().Set("Content-Type", "application/octet-stream")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			fs := afero.NewMemMapFs()
+			require.NoError(t, afero.WriteFile(fs, "/output/TEST-001-fanart.jpg", []byte("old bytes"), 0644))
+			d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+			_, err := d.Download(context.Background(), DownloadCmd{
+				Movie:                  &models.Movie{ID: "TEST-001", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg"}},
+				DestDir:                "/output",
+				OverwriteExistingMedia: true,
+			})
+			require.Error(t, err)
+
+			got, readErr := afero.ReadFile(fs, "/output/TEST-001-fanart.jpg")
+			require.NoError(t, readErr)
+			assert.Equal(t, []byte("old bytes"), got, "existing media must be preserved byte-for-byte")
+		})
+	}
+}
+
+func TestDownload_DeclaredTextPlainBodyDoesNotReplaceExisting(t *testing.T) {
+	// P0 regression: a proxy/upstream answering 200 + "text/plain" with a
+	// prose error body ("rate limit exceeded") slipped past the HTML/JSON/XML
+	// checks and would replace valid artwork with text.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("rate limit exceeded"))
+	}))
+	defer server.Close()
+
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/output/TEST-001-fanart.jpg", []byte("old bytes"), 0644))
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+	_, err := d.Download(context.Background(), DownloadCmd{
+		Movie:                  &models.Movie{ID: "TEST-001", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg"}},
+		DestDir:                "/output",
+		OverwriteExistingMedia: true,
+	})
+	require.Error(t, err)
+
+	got, readErr := afero.ReadFile(fs, "/output/TEST-001-fanart.jpg")
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte("old bytes"), got, "existing media must be preserved byte-for-byte")
+}
+
 func TestDownload_OverwriteFalseKeepsExisting(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("new bytes"))
 	}))
 	defer server.Close()
@@ -110,6 +268,7 @@ func TestDownload_OverwriteReplacesEachEnabledMediaType(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte(r.URL.Path))
 	}))
 	defer server.Close()
@@ -242,6 +401,7 @@ func TestDownload_OverwritePartialOutcomeSeparatesReplacedAndCreated(t *testing.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/trailer.mp4", "/screenshot.jpg":
+			w.Header().Set("Content-Type", "application/octet-stream")
 			_, _ = w.Write([]byte(r.URL.Path))
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -289,6 +449,7 @@ func TestDownload_DedupSkippedCriticalMediaIsNotPartialFailure(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("unexpected"))
 	}))
 	defer server.Close()
@@ -315,6 +476,7 @@ func TestDownload_OverwritePartTwoDownloadsActressWhenItIsOnlyPart(t *testing.T)
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("new actress"))
 	}))
 	defer server.Close()
@@ -341,6 +503,7 @@ func TestDownloadPoster_OverwriteDirectReplacesExisting(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("new poster"))
 	}))
 	defer server.Close()
@@ -420,6 +583,7 @@ func TestDownloadPoster_OverwriteCroppedReplacesAndCleansTemps(t *testing.T) {
 
 func TestDownloadPoster_OverwriteCropFailurePreservesExisting(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("not an image"))
 	}))
 	defer server.Close()
@@ -443,6 +607,7 @@ func TestDownload_OverwriteStatErrorDoesNotFetch(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("unexpected"))
 	}))
 	defer server.Close()
@@ -461,6 +626,7 @@ func TestDownload_OverwriteStatErrorDoesNotFetch(t *testing.T) {
 
 func TestDownload_OverwriteReplaceFailurePreservesExisting(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("new bytes"))
 	}))
 	defer server.Close()
@@ -484,6 +650,7 @@ func TestDownload_DedupSharedDestinationClaimsOnce(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("shared bytes"))
 	}))
 	defer server.Close()

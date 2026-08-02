@@ -179,13 +179,13 @@
 	async function submit() {
 		if (!snapshot || submitting) return;
 		if (!snapshot.applyPlan) {
-			errorMsg = snapshot.migrationWarning ?? 'Select an operation on Browse before continuing.';
+			errorMsg = snapshot.migrationWarning ?? m.manual_plan_required();
 			return;
 		}
 		try {
 			normalizePersistedApplyPlan(snapshot.applyPlan);
 		} catch (error) {
-			errorMsg = error instanceof Error ? error.message : 'Select an operation on Browse before continuing.';
+			errorMsg = error instanceof Error ? error.message : m.manual_plan_required();
 			return;
 		}
 		submitting = true;
@@ -246,13 +246,13 @@
 				{/if}
 				<div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
 					<div>
-						<p class="text-xs text-muted-foreground mb-2">Apply plan from Browse (read-only)</p>
+						<p class="text-xs text-muted-foreground mb-2">{m.manual_plan_title()}</p>
 						{#if planSummary.length > 0}
 							<ul class="space-y-1 text-sm">
 								{#each planSummary as line}<li class="flex gap-2"><span aria-hidden="true">•</span><span class="min-w-0 break-words">{line}</span></li>{/each}
 							</ul>
 						{:else}
-							<p class="text-sm text-destructive">Return to Browse and select an operation.</p>
+							<p class="text-sm text-destructive">{m.manual_return_to_browse()}</p>
 						{/if}
 					</div>
 					<div class="flex flex-wrap items-end gap-4">

@@ -2746,6 +2746,13 @@ definitions:
       username:
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_system.UpgradeCommand:
+    properties:
+      command:
+        type: string
+      key:
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_updater.State:
     enum:
     - idle
@@ -3204,6 +3211,17 @@ definitions:
       update_available:
         description: Whether an update is available
         type: boolean
+      upgrade_commands:
+        description: |-
+          UpgradeCommands breaks the guidance into discrete, paste-ready command
+          lines per install method (cli_binary / homebrew / scoop / docker_pull /
+          docker_compose) so the UI can render one copy button per command instead
+          of copying the prose blob. Homebrew is only listed on darwin/linux hosts
+          and Scoop on windows hosts (no OS offers both). Empty for desktop
+          (in-app upgrade only).
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_system.UpgradeCommand'
+        type: array
       upgrade_instructions:
         description: |-
           UpgradeInstructions carries environment-specific guidance verbatim (e.g.
@@ -3845,6 +3863,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Persisted update plan must go through the update endpoint
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Organize batch job files
       tags:
       - web
@@ -4284,6 +4306,10 @@ paths:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Persisted organize plan must go through the organize endpoint
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update batch job files
