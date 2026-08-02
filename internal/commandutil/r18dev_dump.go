@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -60,7 +61,7 @@ func OpenR18DevDumpLookup(cfg *config.Config) (models.R18DevDumpLookup, io.Close
 	// Ref-count the handle so hot-reload can swap in a new dump without
 	// closing the one in-flight queries still reference: Close only releases
 	// SQLite once the last lookup drains; late callers degrade to HTTP.
-	dump := &refCountedDumpLookup{inner: store, closer: store}
+	dump := &refCountedDumpLookup{inner: store, closer: store, drainedCh: make(chan struct{})}
 	return dump, dump, nil
 }
 
@@ -69,9 +70,11 @@ type refCountedDumpLookup struct {
 	inner  models.R18DevDumpLookup
 	closer io.Closer
 
-	mu     sync.Mutex
-	closed bool
-	active int
+	mu        sync.Mutex
+	closed    bool
+	closedOut bool
+	active    int
+	drainedCh chan struct{}
 }
 
 func (r *refCountedDumpLookup) acquire() bool {
@@ -87,23 +90,48 @@ func (r *refCountedDumpLookup) acquire() bool {
 func (r *refCountedDumpLookup) release() {
 	r.mu.Lock()
 	r.active--
-	drained := r.closed && r.active == 0
-	r.mu.Unlock()
-	if drained {
-		_ = r.closer.Close()
+	if r.closed && r.active == 0 {
+		select {
+		case <-r.drainedCh:
+		default:
+			close(r.drainedCh)
+		}
 	}
+	r.mu.Unlock()
 }
 
-// Close marks the dump retired; the handle is released once the last
-// in-flight lookup drains (immediately when idle).
+// dumpDrainTimeout bounds how long Close waits for in-flight lookups.
+// Local SQLite lookups complete in milliseconds; the bound only guards
+// against a wedged query stalling reload/import/clear paths, which on
+// Windows cannot rename or delete the file while the handle is open.
+const dumpDrainTimeout = 10 * time.Second
+
+// Close retires the dump and waits for in-flight lookups to drain so
+// callers that immediately rename/delete the file (dump import, clear) are
+// safe. After dumpDrainTimeout the handle is closed regardless.
 func (r *refCountedDumpLookup) Close() error {
 	r.mu.Lock()
-	r.closed = true
-	drained := r.active == 0
-	r.mu.Unlock()
-	if !drained {
+	if r.closedOut {
+		r.mu.Unlock()
 		return nil
 	}
+	r.closed = true
+	idle := r.active == 0
+	r.mu.Unlock()
+	if !idle {
+		select {
+		case <-r.drainedCh:
+		case <-time.After(dumpDrainTimeout):
+			logging.Warnf("R18.dev dump lookup: closing after %s with lookups still in flight", dumpDrainTimeout)
+		}
+	}
+	r.mu.Lock()
+	if r.closedOut {
+		r.mu.Unlock()
+		return nil
+	}
+	r.closedOut = true
+	r.mu.Unlock()
 	return r.closer.Close()
 }
 

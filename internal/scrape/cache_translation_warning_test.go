@@ -102,7 +102,7 @@ func TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning(t *tes
 	}
 	s := New(nil, nil, database.NewActressRepository(db), movieRepo, nil, scrapeCfg, translator, nil)
 
-	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "ABC-001"}, nil, time.Now())
+	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "ABC-001"}, nil, false, time.Now())
 
 	require.NotNil(t, result, "cache hit should return a non-nil ScrapeResult")
 	require.False(t, result.NeedsPersistence == false && result.TranslationWarning == "",

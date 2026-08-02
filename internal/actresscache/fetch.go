@@ -156,6 +156,14 @@ func (f *Fetcher) viaProxy(scheme, host string) bool {
 // an HTTP(S) proxy configured the transport only ever dials the proxy
 // address, so pinning there cannot see the real target. Custom transports
 // make their own connections and skip resolution.
+//
+// Residual limitation (accepted, documented): when a proxy is in use the
+// proxy performs the final resolution, so a hostname that is public in the
+// local resolver view but private from the proxy's vantage point still
+// passes. This is inherent to proxying — the proxy operator is part of the
+// deployment's trust boundary — and the guard remains aimed at the common
+// cases: literal/private targets and locally-resolvable internal names are
+// rejected even under a proxy, and unresolvable names fail closed.
 func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host string) error {
 	if isBlockedFetchHost(host) {
 		return &BlockedFetchError{URL: host}

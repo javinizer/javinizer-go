@@ -57,7 +57,7 @@ func (f *fakeDumpStore) isClosed() bool {
 func TestRefCountedDumpLookupDrainsInFlightQueries(t *testing.T) {
 	release := make(chan struct{})
 	store := &fakeDumpStore{release: release, movie: &models.DumpMovie{}}
-	dump := &refCountedDumpLookup{inner: store, closer: store}
+	dump := &refCountedDumpLookup{inner: store, closer: store, drainedCh: make(chan struct{})}
 
 	done := make(chan error, 1)
 	go func() {
@@ -75,14 +75,18 @@ func TestRefCountedDumpLookupDrainsInFlightQueries(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	require.NoError(t, dump.Close())
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- dump.Close() }()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close returned before drain: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
 	require.False(t, store.isClosed(), "Close must wait for the in-flight query")
 
 	close(release)
 	require.NoError(t, <-done)
-	for i := 0; i < 200 && !store.isClosed(); i++ {
-		time.Sleep(5 * time.Millisecond)
-	}
+	require.NoError(t, <-closeDone)
 	require.True(t, store.isClosed(), "the drain should close the store")
 
 	_, err := dump.LookupByDVDID(context.Background(), "IPX-535")
@@ -91,7 +95,7 @@ func TestRefCountedDumpLookupDrainsInFlightQueries(t *testing.T) {
 
 func TestRefCountedDumpLookupClosesWhenIdle(t *testing.T) {
 	store := &fakeDumpStore{}
-	dump := &refCountedDumpLookup{inner: store, closer: store}
+	dump := &refCountedDumpLookup{inner: store, closer: store, drainedCh: make(chan struct{})}
 	require.NoError(t, dump.Close())
 	require.True(t, store.isClosed())
 	require.Equal(t, 1, store.closeCalls)

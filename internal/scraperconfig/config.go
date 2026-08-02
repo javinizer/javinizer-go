@@ -551,7 +551,9 @@ func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
 	if defaults.APIKey != "" && s.APIKey == "" {
 		s.APIKey = defaults.APIKey
 	}
-	if defaults.RateLimit != 0 && s.RateLimit == 0 {
+	if defaults.RateLimit != 0 && s.RateLimit == 0 && !s.RateLimitIsExplicit() {
+		// An explicitly configured rate_limit: 0 means "no delay"; only fill
+		// the default when the key was omitted entirely.
 		s.RateLimit = defaults.RateLimit
 	}
 	if defaults.Timeout != 0 && s.Timeout == 0 {

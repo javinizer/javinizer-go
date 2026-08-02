@@ -108,7 +108,7 @@ func TestTryCacheValidTranslationAndBothEnrichmentSources(t *testing.T) {
 		Actresses:    []models.Actress{{DMMID: 1}, {DMMID: 2}},
 	}
 	s := New(nil, nil, nil, &finalMovieRepo{movie: cached}, nil, &Config{TranslationEnabled: true, TranslationTargetLang: "en", TranslationSettingsHash: "same", ActressDBEnabled: true}, nil, nil)
-	result := s.tryCache(t.Context(), ScrapeCmd{MovieID: "CACHE-1"}, &finalScrapeActressRepo{}, time.Now())
+	result := s.tryCache(t.Context(), ScrapeCmd{MovieID: "CACHE-1"}, &finalScrapeActressRepo{}, false, time.Now())
 	require.NotNil(t, result)
 	assert.Equal(t, "https://db.example/thumb.jpg", result.Movie.Actresses[0].ThumbURL)
 	assert.Equal(t, "BuiltIn", result.Movie.Actresses[1].FirstName)

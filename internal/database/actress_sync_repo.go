@@ -547,8 +547,16 @@ func migrateActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, ac
 func skipActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask) error {
 	now := time.Now().UTC()
 	messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
+	// Free the canonical dedupe key: the running task replacing this winner is
+	// migrated onto it next, and a lingering key on this skipped row would trip
+	// the unique index and roll back the whole merge.
+	actressIDRef := uint(0)
+	if task.ActressID != nil {
+		actressIDRef = *task.ActressID
+	}
 	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", task.ID, models.ActressSyncTaskPending).Updates(map[string]any{
 		"status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
+		"dedupe_key": fmt.Sprintf("actress:%d:skipped:%s", actressIDRef, task.ID),
 	})
 	return result.Error
 }

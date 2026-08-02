@@ -343,7 +343,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	skipCache := cmd.ForceRefresh || len(cmd.SelectedScrapers) > 0
 
 	if !skipCache {
-		result := s.tryCache(ctx, cmd, actressRepo, startTime)
+		result := s.tryCache(ctx, cmd, actressRepo, explicitSelection, startTime)
 		if result != nil {
 			progress.FromContext(ctx).Report(progress.ProgressStepScrape, 1, "Found in cache")
 			return result, nil

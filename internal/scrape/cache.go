@@ -15,7 +15,7 @@ import (
 // Poster generation is intentionally NOT triggered for cache hits — the poster
 // already exists on disk from the original scrape, and re-generating it would
 // be redundant (posters are keyed by movie ID + format, not translation hash).
-func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo database.ActressRepositoryInterface, startTime time.Time) *ScrapeResult {
+func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo database.ActressRepositoryInterface, explicitSelection bool, startTime time.Time) *ScrapeResult {
 	if s.movieRepo == nil {
 		return nil
 	}
@@ -73,7 +73,11 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		needsPersistence = true
 	}
 	if s.registry != nil {
-		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg, cmd.PriorityOverride); enriched > 0 {
+		var resolverOverride []string
+		if explicitSelection {
+			resolverOverride = resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, s.cfg)
+		}
+		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg, resolverOverride); enriched > 0 {
 			needsPersistence = true
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers after cache hit", enriched)
 		}

@@ -216,7 +216,7 @@ func TestCachedAndFreshActressEnrichmentUseResolvedPriority(t *testing.T) {
 	cached := &models.Movie{ContentID: "URL-123", Actresses: []models.Actress{{DMMID: 77}}}
 	movieRepo := &finalMovieRepo{movie: cached}
 	s := New(registry, nil, nil, movieRepo, nil, cfg, nil, nil)
-	result := s.tryCache(t.Context(), ScrapeCmd{MovieID: "URL-123", PriorityOverride: []string{"minnanoav", "dmm"}}, nil, time.Now())
+	result := s.tryCache(t.Context(), ScrapeCmd{MovieID: "URL-123", PriorityOverride: []string{"minnanoav", "dmm"}}, nil, true, time.Now())
 	require.NotNil(t, result)
 	require.Equal(t, "Minnano", result.Movie.Actresses[0].FirstName)
 

@@ -262,16 +262,34 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	preferredThumbnail := ""
 	preferredThumbnailSource := ""
 	preferredThumbnailPriority := int(^uint(0) >> 1)
+	// Each resolver sees values discovered by earlier sources, not just the
+	// stored actress: DMM may surface the Japanese name a name-keyed source
+	// (MinnanoAV/JavDB) needs to contribute its remaining fields.
+	known := resolverInput
 	if revalidate || actressNeedsMetadata(actress) {
 		for _, scraper := range metadataScrapers {
 			name := strings.ToLower(strings.TrimSpace(scraper.Name()))
 			if resolver, ok := scraper.(models.ActressMetadataResolver); ok {
 				logging.Debugf("Actress sync: resolving DMM ID %d with %s", actress.DMMID, name)
-				sourceInput := resolverInput
+				sourceInput := known
 				if name != "javdb" {
 					sourceInput.ThumbURL = ""
 				}
 				metadata := resolver.ResolveActressMetadata(ctx, sourceInput)
+				if metadata.DMMID == actress.DMMID {
+					if strings.TrimSpace(known.JapaneseName) == "" {
+						known.JapaneseName = strings.TrimSpace(metadata.JapaneseName)
+					}
+					if strings.TrimSpace(known.FirstName) == "" {
+						known.FirstName = strings.TrimSpace(metadata.FirstName)
+					}
+					if strings.TrimSpace(known.LastName) == "" {
+						known.LastName = strings.TrimSpace(metadata.LastName)
+					}
+					if strings.TrimSpace(known.ThumbURL) == "" {
+						known.ThumbURL = strings.TrimSpace(metadata.ThumbURL)
+					}
+				}
 				if !revalidate && !actressThumbnailNeedsResolution(actress.ThumbURL) {
 					metadata.ThumbURL = ""
 				}
