@@ -681,3 +681,60 @@ func TestApplyFieldOverride_PosterURLSyncsCropIntent(t *testing.T) {
 		})
 	}
 }
+
+// TestApplyFieldOverride_PosterURLEqualToEffectiveCoverKeepsCrop pins the
+// effective-source comparison at the model level (Codex: "preserve crops when
+// the effective source is unchanged"): a cover-backed movie (PosterURL == "")
+// whose CoverURL is U gains NO new image when the selected source's PosterURL
+// is also U — the downloader resolves PosterURL ?? CoverURL to the same bytes
+// and RefreshPosterAssets no-ops — so an approved manual crop measured
+// against that image must survive, and the deliberate crop intent must not be
+// re-derived from the selected source.
+func TestApplyFieldOverride_PosterURLEqualToEffectiveCoverKeepsCrop(t *testing.T) {
+	const coverU = "https://shared.example/cover.jpg"
+	movie, prov := overrideFixture()
+	movie.Poster.PosterURL = ""
+	movie.Poster.CoverURL = coverU
+	movie.Poster.ShouldCropPoster = false // the user's approved manual crop on this very image
+	movie.Poster.CropBounds = &models.CropBounds{X: 10, Y: 10, Width: 400, Height: 600, SourceWasCover: true}
+	dmm := findScraperResult(prov.ScraperResults, "dmm")
+	require.NotNil(t, dmm)
+	dmm.PosterURL = coverU      // the raw PosterURL changes ("" → U) but the effective source does not (U → U)
+	dmm.ShouldCropPoster = true // the source's decision must NOT clobber the user's approved-crop intent
+
+	require.NoError(t, applyFieldOverride(movie, prov, "poster_url", "dmm"))
+
+	assert.Equal(t, coverU, movie.Poster.PosterURL)
+	require.NotNil(t, movie.Poster.CropBounds,
+		"effective source unchanged (U→U): clearing the bounds would desync the cropped preview from Organize")
+	assert.True(t, movie.Poster.CropBounds.SourceWasCover)
+	assert.False(t, movie.Poster.ShouldCropPoster,
+		"SyncCropIntentWithSource must only run when the effective source actually changed")
+	assert.Equal(t, "dmm", prov.FieldSources["poster_url"])
+}
+
+// TestApplyFieldOverride_PosterURLChangesEffectiveCoverClearsCrop is the
+// companion guard: a cover-backed movie that picks a DIFFERENT image as its
+// poster URL really did change the effective source (U → V), so the
+// cover-measured crop is invalidated and the intent re-derived.
+func TestApplyFieldOverride_PosterURLChangesEffectiveCoverClearsCrop(t *testing.T) {
+	const coverU = "https://shared.example/cover.jpg"
+	const newPoster = "https://new.example/poster.jpg"
+	movie, prov := overrideFixture()
+	movie.Poster.PosterURL = ""
+	movie.Poster.CoverURL = coverU
+	movie.Poster.ShouldCropPoster = false
+	movie.Poster.CropBounds = &models.CropBounds{X: 10, Y: 10, Width: 400, Height: 600, SourceWasCover: true}
+	dmm := findScraperResult(prov.ScraperResults, "dmm")
+	require.NotNil(t, dmm)
+	dmm.PosterURL = newPoster // a genuinely different image feeds the pipeline now
+	// dmm.ShouldCropPoster stays true (fixture default) and describes this URL.
+
+	require.NoError(t, applyFieldOverride(movie, prov, "poster_url", "dmm"))
+
+	assert.Equal(t, newPoster, movie.Poster.PosterURL)
+	assert.Nil(t, movie.Poster.CropBounds,
+		"a crop measured against the cover cannot survive onto a different image")
+	assert.True(t, movie.Poster.ShouldCropPoster,
+		"the selected source's own crop intent travels with its image")
+}

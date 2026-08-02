@@ -605,3 +605,65 @@ func encodeTestJPEG(t *testing.T, w, h int, c color.RGBA) []byte {
 	require.NoError(t, jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}))
 	return buf.Bytes()
 }
+
+// TestApplyFieldOverride_CoverBackedSameEffectiveSourceSkipsRefreshAndKeepsCrop
+// pins the FULL override-path behavior for the cover-backed U→U case (Codex:
+// "preserve crops when the effective source is unchanged"): with PosterURL ==
+// "" and CoverURL == U, selecting a source whose PosterURL is also U must not
+// regenerate the poster cache (RefreshPosterAssets already no-ops on the
+// effective source), must not clear the approved manual crop, and must not
+// re-derive the crop intent — otherwise the review preview stays cropped
+// while Organize discards the approved bounds for the scraper's intent.
+func TestApplyFieldOverride_CoverBackedSameEffectiveSourceSkipsRefreshAndKeepsCrop(t *testing.T) {
+	const coverU = "https://shared.example/cover.jpg"
+	je, tracker, resultID := overrideRefreshFixture(t, "", coverU, coverU, "dmm-cover-url")
+	gen := &stubOverridePosterGen{}
+	je.posterGen = gen
+	// A manual crop approved against the cover: the crop endpoint flipped
+	// ShouldCropPoster=false and recorded SourceWasCover=true.
+	require.NoError(t, tracker.AtomicUpdateFileResult("test.mp4", func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+		current.Movie.Poster.ShouldCropPoster = false
+		current.Movie.Poster.CropBounds.SourceWasCover = true
+		return current, nil
+	}))
+
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, 0, gen.calls,
+		"unchanged effective source: the poster cache refresh must no-op (parity with RefreshPosterAssets)")
+	assert.Equal(t, coverU, updated.Movie.Poster.PosterURL)
+	require.NotNil(t, updated.Movie.Poster.CropBounds,
+		"the approved manual crop must survive a raw PosterURL change that leaves the effective source untouched")
+	assert.True(t, updated.Movie.Poster.CropBounds.SourceWasCover)
+	assert.False(t, updated.Movie.Poster.ShouldCropPoster)
+
+	final, _, found := tracker.GetFileResultByResultID(resultID)
+	require.True(t, found)
+	require.NotNil(t, final.Movie.Poster.CropBounds,
+		"the preserved bounds must survive the persist round-trip")
+	assert.True(t, final.Movie.Poster.CropBounds.SourceWasCover)
+}
+
+// TestApplyFieldOverride_CoverBackedTruePosterChangeRefreshesAndClearsCrop is
+// the companion guard at the override-path level: a cover-backed movie that
+// picks a DIFFERENT poster URL really changed the effective source, so the
+// cache refresh runs and the old cover-measured crop is invalidated.
+func TestApplyFieldOverride_CoverBackedTruePosterChangeRefreshesAndClearsCrop(t *testing.T) {
+	const coverU = "https://shared.example/cover.jpg"
+	const newPoster = "https://new.example/poster.jpg"
+	je, _, resultID := overrideRefreshFixture(t, "", coverU, newPoster, "")
+	gen := &stubOverridePosterGen{}
+	je.posterGen = gen
+
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, newPoster, updated.Movie.Poster.PosterURL)
+	assert.Equal(t, 1, gen.calls,
+		"the effective source really changed (cover → poster): the refresh must regenerate")
+	assert.Nil(t, updated.Movie.Poster.CropBounds,
+		"a crop measured against the cover cannot survive onto a different image")
+	assert.True(t, updated.Movie.Poster.ShouldCropPoster,
+		"the selected source's own crop intent travels with its image")
+}

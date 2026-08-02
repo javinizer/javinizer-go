@@ -297,20 +297,38 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	// state write, where a clean Conflict status is the correct outcome.
 	// Keyed on the PRE-rescrape movie ID — the same key the crop/PATCH/
 	// override paths use for the file being rescraped; when the rescrape
-	// resolves a new ID, its freshly generated assets live under the new key,
-	// which no in-flight crop of this file can be racing (a crop of the OLD
-	// movie's assets takes this lock and is serialized). Lock ordering: the
-	// rescrape phase acquires ONLY this lock; the result-store locks inside
-	// GetCurrentMovieID/GetRevision/CommitResult are taken while it is held,
-	// and no path acquires the poster-source lock while holding one of those
-	// (the same cycle-free order overrideMu → poster-source lock → result-
-	// store locks that the other paths use).
+	// resolves a new ID, its freshly generated assets live under the new key —
+	// and when ANOTHER result already uses that ID, the rescrape additionally
+	// acquires the DESTINATION key once the scrape returns (see the
+	// destination lock block inside the closure) so a crop or source edit on
+	// the existing destination result cannot interleave with the asset
+	// replacement. Lock ordering: the result-store locks inside
+	// GetCurrentMovieID/GetRevision/CommitResult are taken while the poster
+	// lock(s) are held, and no path acquires a poster-source lock while
+	// holding one of those (the same cycle-free order overrideMu →
+	// poster-source lock(s) → result-store locks that the other paths use);
+	// when this path holds TWO poster locks they are taken in lexical key
+	// order so opposite-direction rescrapes cannot deadlock.
 	posterLockID := lookup.OldMovieID
 	if posterLockID == "" && inputs.ResultMap != nil {
 		posterLockID = inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
 	}
 	releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), posterLockID)
-	defer releasePosterLock()
+	// Closure form: the destination-lock handoff inside the scrape closure
+	// may release and RE-ACQUIRE the origin lock mid-flight (reassigning
+	// releasePosterLock) — a deferred call of the original value would
+	// double-release the first acquisition and leak the second.
+	defer func() { releasePosterLock() }()
+	// releaseDestPosterLock, when set, holds the DESTINATION movie ID's
+	// poster-source lock for a rekeying (A→B) rescrape; see the destination
+	// lock block inside the scrape closure. Held through withRescrapeStatus
+	// so the failure/success poster cleanup is covered too.
+	var releaseDestPosterLock func()
+	defer func() {
+		if releaseDestPosterLock != nil {
+			releaseDestPosterLock()
+		}
+	}()
 	if inputs.Finder != nil {
 		lookup.CapturedRevision = inputs.Finder.GetRevision(lookup.FilePath)
 	}
@@ -368,6 +386,54 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			return nil, movieResult, err
 		}
 
+		// The destination movie ID is known once the scrape completed (the
+		// merge below preserves the scraped movie's ID).
+		newMovieID := movieResult.FileMatchInfo.MovieID
+		if movieResult.Movie != nil && movieResult.Movie.ID != "" {
+			newMovieID = movieResult.Movie.ID
+		}
+
+		// A rekeying rescrape (A→B) where ANOTHER result already uses B
+		// replaces B's shared assets too: GeneratePoster below rewrites the
+		// job's cached {B}-full.jpg/preview, which a simultaneous crop or
+		// source edit on the existing B result mutates while holding only B's
+		// poster-source lock. Holding just the origin (A) lock lets the two
+		// interleave — the crop records bounds measured against the rescraped
+		// image while B's stored URL still names the previous source. So once
+		// the destination ID is known, acquire B's lock as well and hold it
+		// across the asset replacement and the commit (it releases with the
+		// outer deferred cleanup, covering withRescrapeStatus's rollback too).
+		//
+		// Deadlock safety: this is the ONLY path that may hold two
+		// poster-source locks at once — every other path holds at most one
+		// (the crop and override re-resolve loops release before
+		// re-acquiring) — so taking the pair in a stable order makes a lock
+		// cycle impossible. Keys are acquired in lexical movie-ID order (the
+		// shared jobID prefix on the composite key cancels): when B sorts
+		// after the held origin key, B is acquired directly on top of A; when
+		// B sorts BEFORE A, A is released first, then B and A are acquired in
+		// order, and the origin-side under-lock state (revision, OldMovieID)
+		// is re-captured again because an A-side edit could have landed in
+		// the gap. Two opposite-direction rescrapes (A→B while B→A) therefore
+		// cannot deadlock: whichever acquired its origin first is also the
+		// one allowed to take the other key first.
+		if newMovieID != "" && newMovieID != posterLockID {
+			jobID := inputs.JobID.String()
+			if posterLockID < newMovieID {
+				releaseDestPosterLock = AcquirePosterSourceLock(jobID, newMovieID)
+			} else {
+				releasePosterLock()
+				releaseDestPosterLock = AcquirePosterSourceLock(jobID, newMovieID)
+				releasePosterLock = AcquirePosterSourceLock(jobID, posterLockID)
+				if inputs.Finder != nil {
+					lookup.CapturedRevision = inputs.Finder.GetRevision(lookup.FilePath)
+				}
+				if inputs.ResultMap != nil {
+					lookup.OldMovieID = inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
+				}
+			}
+		}
+
 		// Poster generation
 		if inputs.PosterGen != nil && movieResult.Movie != nil {
 			if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
@@ -380,11 +446,6 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// Re-check after poster generation before committing.
 		if err := ctx.Err(); err != nil {
 			return nil, movieResult, err
-		}
-
-		newMovieID := movieResult.FileMatchInfo.MovieID
-		if movieResult.Movie != nil && movieResult.Movie.ID != "" {
-			newMovieID = movieResult.Movie.ID
 		}
 
 		// Honor the caller's merge policy (preset/scalar_strategy/array_strategy).

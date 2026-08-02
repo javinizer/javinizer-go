@@ -461,7 +461,11 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // an UpdateMovie of a whole-movie clone, so even a title/maker override can
 // otherwise interleave with a manual crop, cloning the movie before the crop
 // persists its new bounds and then persisting the stale clone — silently
-// erasing the successful crop.
+// erasing the successful crop. The lock key is re-resolved from the result
+// under the lock — a rescrape may have re-keyed the result to a new movie ID
+// while this call waited — and on a change the old key's lock is released
+// BEFORE the destination's is acquired, so this path never holds two poster
+// locks at once (see the re-resolution loop below).
 //
 // A poster_url override — or a cover_url override when the movie has no
 // PosterURL (the downloader falls back to CoverURL as the poster source) —
@@ -520,23 +524,50 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	// poster-source lock → result-store locks) and cannot deadlock. The key
 	// is the same movie ID the temp poster cache and crop endpoints use
 	// (Movie.ID when set, FileMatchInfo.MovieID otherwise).
-	movieID := result.Movie.ID
-	if movieID == "" {
-		movieID = result.FileMatchInfo.MovieID
-	}
+	movieID := posterLockKeyForMovieResult(result)
 	releasePosterLock := AcquirePosterSourceLock(je.jobID, movieID)
-	defer releasePosterLock()
 
 	// Re-read the result under the lock: a crop or source-changing edit may
 	// have persisted while this call waited on the lock, replacing the movie
 	// — cloning below from the pre-lock snapshot would lose that edit on the
 	// whole-movie write (GetFileResultByResultID returns a deep clone, so the
 	// pre-lock read is stale-but-safe, never concurrent).
-	freshResult, filePath, stillFound := je.store.GetFileResultByResultID(resultID)
-	if !stillFound || freshResult == nil || freshResult.Movie == nil {
-		return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
+	//
+	// That edit can also RE-KEY the result mid-wait: a rescrape that
+	// corrected the match from movie A to movie B holds A's lock and commits
+	// the result with Movie.ID/FileMatchInfo.MovieID = B. Planning from the
+	// stale pre-lock ID would fan B's overridden movie out over the results
+	// STILL indexed at A — copying B's poster state and metadata onto
+	// unrelated movies — while B's own family is skipped, and every persist
+	// would run under A's lock, unserialized against B's crop/edit paths. So
+	// BOTH the movie ID and the lock key are re-resolved from the post-lock
+	// read, mirroring the crop endpoint's convergence loop
+	// (internal/api/batch/movie_edit_poster.go's updateBatchMoviePosterCrop):
+	// when the ID changed, the OLD lock is released BEFORE the destination's
+	// is acquired — this path never holds two poster-source locks at once,
+	// preserving the cycle-free order overrideMu → ONE poster-source lock →
+	// result-store locks — and the result is re-read once more under the new
+	// lock (the writer that released it may have re-keyed the result yet
+	// again). The loop converges because each re-acquisition waits behind a
+	// writer whose re-key is already committed.
+	var filePath string
+	for {
+		freshResult, fp, stillFound := je.store.GetFileResultByResultID(resultID)
+		if !stillFound || freshResult == nil || freshResult.Movie == nil {
+			releasePosterLock()
+			return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
+		}
+		result = freshResult
+		filePath = fp
+		resolvedID := posterLockKeyForMovieResult(result)
+		if resolvedID == movieID {
+			break
+		}
+		releasePosterLock()
+		movieID = resolvedID
+		releasePosterLock = AcquirePosterSourceLock(je.jobID, movieID)
 	}
-	result = freshResult
+	defer releasePosterLock()
 	prov := je.store.GetProvenance(filePath)
 	if prov == nil {
 		prov = &resultstore.ProvenanceData{}
@@ -633,6 +664,19 @@ func (je *jobEditorImpl) planMultipartOverride(filePaths []string, movie *models
 		planned = append(planned, overridePartWrite{filePath: partPath, original: original, movie: partMovie})
 	}
 	return planned, nil
+}
+
+// posterLockKeyForMovieResult derives the shared per-(jobID, movieID)
+// poster-source lock key for a stored result: Movie.ID when set,
+// FileMatchInfo.MovieID otherwise — the same key the temp poster cache and
+// the crop/PATCH/poster-from-URL endpoints use. Callers must guarantee
+// result.Movie is non-nil.
+func posterLockKeyForMovieResult(result *resultstore.MovieResult) string {
+	movieID := result.Movie.ID
+	if movieID == "" {
+		movieID = result.FileMatchInfo.MovieID
+	}
+	return movieID
 }
 
 // editableJobAdapter satisfies EditableJob by composing jobReaderImpl,

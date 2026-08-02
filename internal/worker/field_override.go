@@ -144,25 +144,40 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		movie.Screenshots = append([]string(nil), result.ScreenshotURL...)
 		setFieldSource("screenshot_urls")
 	case "poster_url":
+		// Bounds invalidation and crop-intent re-derivation key off the
+		// EFFECTIVE poster source (PosterURL ?? CoverURL — the downloader's own
+		// resolution, mirrored by RefreshPosterAssets's no-op comparison), not
+		// the raw PosterURL field: a cover-backed movie (PosterURL == "") whose
+		// CoverURL is U gains NO new image when the selected source's PosterURL
+		// is also U — the downloader feeds the pipeline the same bytes and the
+		// asset refresh no-ops, so an approved manual crop measured against
+		// that image stays valid and must survive. Clearing it would leave the
+		// review preview cropped while Organize applies the scraper's crop
+		// intent instead of the user's bounds. SyncCropIntentWithSource's own
+		// contract likewise demands an actually-changed effective source (an
+		// unchanged one may carry a deliberate user crop decision).
+		oldEffective := effectivePosterSource(movie.Poster.PosterURL, movie.Poster.CoverURL)
 		if movie.Poster.PosterURL != result.PosterURL {
 			movie.Poster.PosterURL = result.PosterURL
-			movie.Poster.CropBounds = nil // new source image invalidates a crop measured against the old one
-			// The auto-crop decision belongs to the image it described — and the
-			// SELECTED source ships that decision paired with its own effective
-			// poster URL, so propagate it (sources like javdb/mgstage populate
-			// PosterURL from their landscape CoverURL WITH ShouldCropPoster=true;
-			// deriving intent from which URL field is populated would flip it to
-			// false and Organize would write the landscape image whole while the
-			// review preview showed it cropped). SyncCropIntentWithSource also
-			// covers the URL-field fallback: a cover-backed movie picking a
-			// poster-grade URL must not keep ShouldCropPoster=true — Organize
-			// would default-crop the new poster, and a later manual crop would
-			// record CropBounds.SourceWasCover=true, so an apply-time geometry
-			// failure would degrade to the default cover crop instead of keeping
-			// the poster whole. Clearing the URL falls the movie back to its
-			// cover, restoring cover-backed semantics. Parity with the
-			// whole-movie PATCH path (updateBatchMovie).
-			movie.Poster.SyncCropIntentWithSource(result)
+			if effectivePosterSource(movie.Poster.PosterURL, movie.Poster.CoverURL) != oldEffective {
+				movie.Poster.CropBounds = nil // new source image invalidates a crop measured against the old one
+				// The auto-crop decision belongs to the image it described — and the
+				// SELECTED source ships that decision paired with its own effective
+				// poster URL, so propagate it (sources like javdb/mgstage populate
+				// PosterURL from their landscape CoverURL WITH ShouldCropPoster=true;
+				// deriving intent from which URL field is populated would flip it to
+				// false and Organize would write the landscape image whole while the
+				// review preview showed it cropped). SyncCropIntentWithSource also
+				// covers the URL-field fallback: a cover-backed movie picking a
+				// poster-grade URL must not keep ShouldCropPoster=true — Organize
+				// would default-crop the new poster, and a later manual crop would
+				// record CropBounds.SourceWasCover=true, so an apply-time geometry
+				// failure would degrade to the default cover crop instead of keeping
+				// the poster whole. Clearing the URL falls the movie back to its
+				// cover, restoring cover-backed semantics. Parity with the
+				// whole-movie PATCH path (updateBatchMovie).
+				movie.Poster.SyncCropIntentWithSource(result)
+			}
 		}
 		setFieldSource("poster_url")
 	case "cover_url":

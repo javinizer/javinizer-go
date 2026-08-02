@@ -43,6 +43,14 @@ var (
 // refresh+persist sequence (including any multipart loop and compensation).
 // Lock ordering: ApplyFieldOverride takes its per-resultID overrideMu BEFORE
 // this lock and no path reverses that order, so the two cannot deadlock.
+// Two-lock rule: paths that re-resolve their key under the lock (the crop
+// endpoint in internal/api/batch/movie_edit_poster.go and ApplyFieldOverride)
+// RELEASE the old key before acquiring the destination key, so they never
+// hold two of these locks at once. The only path permitted to hold two is
+// rescrapePhase.Rescrape on an A→B rekey, which takes the (origin,
+// destination) pair in lexical key order — releasing and re-acquiring the
+// origin when the destination sorts first — so opposite-direction rescrapes
+// cannot deadlock.
 //
 // The returned function releases the lock exactly once and evicts the map
 // entry when the last holder returns, so the map never grows unboundedly.
