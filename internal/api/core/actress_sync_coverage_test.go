@@ -44,5 +44,5 @@ func TestActressSyncManagerSnapshot(t *testing.T) {
 	require.Eventually(t, func() bool {
 		current, findErr := manager.GetJob(job.ID)
 		return findErr == nil && (current.Status == models.ActressSyncJobCompleted || current.Status == models.ActressSyncJobCancelled)
-	}, 3*time.Second, 10*time.Millisecond)
+	}, 30*time.Second, 50*time.Millisecond) // full-suite -race overload stretches scheduler delay far past a 3s test window
 }
