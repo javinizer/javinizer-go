@@ -3,6 +3,7 @@ package system
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -108,7 +109,7 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 		return &validationError{message: "Invalid configuration: " + err.Error()}
 	}
 
-	if err := validateActressPriorityCapability(s.deps, runtimeCfg); err != nil {
+	if err := validatePriorityFieldCapabilities(s.deps, runtimeCfg); err != nil {
 		return &validationError{message: err.Error()}
 	}
 
@@ -147,34 +148,45 @@ func (s *ConfigUpdateService) ValidateAndApply(oldCfg *config.Config, newCfg *co
 // produces movie results: aggregation would have no cast-producing source,
 // so the actress field would always be empty. It applies to config-file and
 // API edits alike since the UI guard cannot stop either.
-func validateActressPriorityCapability(deps *core.APIDeps, cfg *config.Config) error {
-	if deps == nil || deps.CoreDeps == nil || deps.CoreDeps.ScraperRegistry == nil {
+func validatePriorityFieldCapabilities(deps *core.APIDeps, cfg *config.Config) error {
+	if deps == nil || deps.CoreDeps == nil || deps.CoreDeps.ScraperRegistry == nil || cfg == nil {
 		return nil
 	}
-	if cfg == nil {
-		return nil
+	fields := make([]string, 0, len(cfg.Metadata.Priority.Fields))
+	for field := range cfg.Metadata.Priority.Fields {
+		fields = append(fields, field)
 	}
-	override, ok := cfg.Metadata.Priority.Fields["actress"]
-	if !ok || len(override) == 0 {
-		return nil
-	}
-	if len(override) == 1 && strings.EqualFold(strings.TrimSpace(override[0]), "__skip__") {
-		return nil
-	}
-	movieCapable, recognized := false, false
-	for _, name := range override {
-		scraper, found := deps.CoreDeps.ScraperRegistry.GetInstance(strings.ToLower(strings.TrimSpace(name)))
-		if !found || scraper == nil {
+	sort.Strings(fields)
+	for _, field := range fields {
+		override := cfg.Metadata.Priority.Fields[field]
+		if len(override) == 0 {
 			continue
 		}
-		recognized = true
-		if supportsMovieSearch(scraper) {
-			movieCapable = true
-			break
+		if len(override) == 1 && strings.EqualFold(strings.TrimSpace(override[0]), "__skip__") {
+			continue
 		}
-	}
-	if recognized && !movieCapable {
-		return fmt.Errorf("metadata.priority.actress = [%s]: every listed scraper resolves actress metadata but never produces movie results, so aggregation would have no cast to resolve — add a movie-capable scraper", strings.Join(override, ", "))
+		movieCapable, recognized := false, false
+		for _, name := range override {
+			scraper, found := deps.CoreDeps.ScraperRegistry.GetInstance(strings.ToLower(strings.TrimSpace(name)))
+			if !found || scraper == nil {
+				continue
+			}
+			recognized = true
+			if supportsMovieSearch(scraper) {
+				movieCapable = true
+				break
+			}
+		}
+		if !recognized || movieCapable {
+			continue
+		}
+		if field == "actress" {
+			return fmt.Errorf("metadata.priority.actress = [%s]: every listed scraper resolves actress metadata but never produces movie results, so aggregation would have no cast to resolve — add a movie-capable scraper", strings.Join(override, ", "))
+		}
+		// Actress-only resolvers are invalid in any non-actress override: the
+		// field can never gain data from them (documented v1 exclusivity would
+		// otherwise silently yield an empty field).
+		return fmt.Errorf("metadata.priority.%s = [%s]: listed scrapers resolve actress metadata only and can never produce this field", field, strings.Join(override, ", "))
 	}
 	return nil
 }

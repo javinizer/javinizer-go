@@ -172,6 +172,7 @@
 			}
 			syncJob = response.job;
 			syncTasks = [];
+			syncPollFailureShown = false; // new job may fail independently of the previous one
 			showSyncModal = true;
 			startPolling();
 		} catch (error) {
@@ -215,6 +216,7 @@
 			const ordered = orderActiveActressSyncJobs(jobs);
 			syncJob = ordered.current;
 			syncQueue = ordered.queued;
+			syncPollFailureShown = false;
 			if (syncJob) {
 				showSyncModal = true;
 				startPolling();

@@ -46,8 +46,8 @@ func TestValidateActressPriorityCapability(t *testing.T) {
 		return cfg
 	}
 
-	require.Error(t, validateActressPriorityCapability(deps, priority([]string{"minnanoav"})))
-	require.NoError(t, validateActressPriorityCapability(deps, priority([]string{"minnanoav", "dmm"})))
-	require.NoError(t, validateActressPriorityCapability(deps, priority([]string{"__skip__"})))
-	require.NoError(t, validateActressPriorityCapability(deps, priority([]string{"unknown-only"})))
+	require.Error(t, validatePriorityFieldCapabilities(deps, priority([]string{"minnanoav"})))
+	require.NoError(t, validatePriorityFieldCapabilities(deps, priority([]string{"minnanoav", "dmm"})))
+	require.NoError(t, validatePriorityFieldCapabilities(deps, priority([]string{"__skip__"})))
+	require.NoError(t, validatePriorityFieldCapabilities(deps, priority([]string{"unknown-only"})))
 }

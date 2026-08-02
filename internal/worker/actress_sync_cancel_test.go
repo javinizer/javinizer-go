@@ -59,3 +59,25 @@ func TestCancelJobCancelsRunningTask(t *testing.T) {
 	manager.untrackTask("task-1", 2)
 	manager.untrackTask("unknown", 3)
 }
+
+// Stale selections from merge-deleted actresses must not reject the whole job.
+func TestCreateJobSkipsMergedAwayActresses(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:"})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	t.Cleanup(func() { _ = db.Close() })
+	repo := database.NewActressRepository(db)
+	valid := &models.Actress{JapaneseName: "still here"}
+	require.NoError(t, repo.Create(context.Background(), valid))
+	manager := NewActressSyncManager(ActressSyncManagerDeps{DB: db, ActressRepo: repo, MovieRepo: database.NewMovieRepository(db)})
+
+	job, err := manager.CreateJob(context.Background(), ActressSyncCreateRequest{Scope: "selected", ActressIDs: []uint{valid.ID, 999999}})
+	require.NoError(t, err)
+	tasks, err := manager.ListTasks(job.ID, 0)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, models.ActressSyncTaskPending, tasks[0].Status)
+
+	_, err = manager.CreateJob(context.Background(), ActressSyncCreateRequest{Scope: "selected", ActressIDs: []uint{999998, 999999}})
+	require.Error(t, err)
+}

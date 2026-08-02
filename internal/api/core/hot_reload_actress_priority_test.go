@@ -31,11 +31,16 @@ func TestActressOnlyPriorityWarning(t *testing.T) {
 	registry.RegisterInstance(&noMovieSearchStub{name: "minnanoav"})
 
 	cfg := config.DefaultConfig(nil, nil)
-	require.Empty(t, actressOnlyPriorityWarning(registry, cfg))
+	require.Empty(t, actressOnlyPriorityWarnings(registry, cfg))
 	cfg.Metadata.Priority.Fields = map[string][]string{"actress": {"minnanoav"}}
-	require.NotEmpty(t, actressOnlyPriorityWarning(registry, cfg))
+	require.NotEmpty(t, actressOnlyPriorityWarnings(registry, cfg))
 	cfg.Metadata.Priority.Fields["actress"] = []string{"__skip__"}
-	require.Empty(t, actressOnlyPriorityWarning(registry, cfg))
-	require.Empty(t, actressOnlyPriorityWarning(nil, cfg))
-	require.Empty(t, actressOnlyPriorityWarning(registry, nil))
+	require.Empty(t, actressOnlyPriorityWarnings(registry, cfg))
+	require.Empty(t, actressOnlyPriorityWarnings(nil, cfg))
+	require.Empty(t, actressOnlyPriorityWarnings(registry, nil))
+	// Non-actress fields reject an actress-only sole override too.
+	cfg.Metadata.Priority.Fields = map[string][]string{"title": {"minnanoav"}}
+	warnings := actressOnlyPriorityWarnings(registry, cfg)
+	require.NotEmpty(t, warnings)
+	require.Equal(t, "title", warnings[0].Field)
 }

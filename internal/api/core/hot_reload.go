@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
@@ -105,38 +106,48 @@ func (r *APIRuntime) prepareReload(cfg *config.Config, resolver models.ScraperCo
 	return nil
 }
 
-// actressOnlyPriorityWarning reports a config-warning message when the
-// actress-field override is satisfied only by actress-only resolvers: the
-// config could never aggregate a cast for them to enrich. Hot-reload and
-// cold-start share this path so a YAML-authored misconfig is loud at boot
-// even though the API save path hard-rejects it.
-func actressOnlyPriorityWarning(reg *scraperutil.ScraperRegistry, cfg *config.Config) string {
+// actressOnlyPriorityWarnings reports per-field config warnings when a
+// field's override is satisfied only by actress-only resolvers. For the
+// actress field that means no cast can ever be aggregated for them to
+// enrich; for any other field it can never gain data from them. YAML-authored
+// configs skip API save-time validation, so boot/reload reports them loudly.
+func actressOnlyPriorityWarnings(reg *scraperutil.ScraperRegistry, cfg *config.Config) []config.ConfigWarning {
 	if reg == nil || cfg == nil {
-		return ""
+		return nil
 	}
-	override, ok := cfg.Metadata.Priority.Fields["actress"]
-	if !ok || len(override) == 0 {
-		return ""
+	fields := make([]string, 0, len(cfg.Metadata.Priority.Fields))
+	for field := range cfg.Metadata.Priority.Fields {
+		fields = append(fields, field)
 	}
-	if len(override) == 1 && strings.EqualFold(strings.TrimSpace(override[0]), "__skip__") {
-		return ""
-	}
-	recognized, capable := false, false
-	for _, name := range override {
-		inst, found := reg.GetInstance(strings.ToLower(strings.TrimSpace(name)))
-		if !found || inst == nil {
+	sort.Strings(fields)
+	var warnings []config.ConfigWarning
+	for _, field := range fields {
+		override := cfg.Metadata.Priority.Fields[field]
+		if len(override) == 0 {
 			continue
 		}
-		recognized = true
-		if c, ok := inst.(models.MovieSearchCapable); !ok || c.SupportsMovieSearch() {
-			capable = true
-			break
+		if len(override) == 1 && strings.EqualFold(strings.TrimSpace(override[0]), "__skip__") {
+			continue
 		}
+		recognized, capable := false, false
+		for _, name := range override {
+			inst, found := reg.GetInstance(strings.ToLower(strings.TrimSpace(name)))
+			if !found || inst == nil {
+				continue
+			}
+			recognized = true
+			if c, ok := inst.(models.MovieSearchCapable); !ok || c.SupportsMovieSearch() {
+				capable = true
+				break
+			}
+		}
+		if !recognized || capable {
+			continue
+		}
+		msg := fmt.Sprintf("metadata.priority.%s = [%s]: every listed scraper resolves actress metadata but never produces movie results; the field can never gain data from them — add a movie-capable scraper", field, strings.Join(override, ", "))
+		warnings = append(warnings, config.ConfigWarning{Field: field, Scrapers: override, Message: msg})
 	}
-	if recognized && !capable {
-		return fmt.Sprintf("metadata.priority.actress = [%s]: every listed scraper resolves actress metadata but never produces movie results; no cast can be aggregated — add a movie-capable scraper", strings.Join(override, ", "))
-	}
-	return ""
+	return warnings
 }
 
 func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.ScraperRegistry) error {
@@ -148,10 +159,10 @@ func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.Scr
 		logging.Warnf("%v", dumpErr)
 	}
 	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
-	if warning := actressOnlyPriorityWarning(newRegistry, cfg); warning != "" {
-		logging.Warnf("%s", warning)
-		cfg.Warnings = append(cfg.Warnings, config.ConfigWarning{Field: "actress", Scrapers: cfg.Metadata.Priority.Fields["actress"], Message: warning})
+	for _, warning := range actressOnlyPriorityWarnings(newRegistry, cfg) {
+		logging.Warnf("%s", warning.Message)
 	}
+	cfg.Warnings = append(cfg.Warnings, actressOnlyPriorityWarnings(newRegistry, cfg)...)
 	if err != nil {
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()

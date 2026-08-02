@@ -281,6 +281,7 @@ func (m *ActressSyncManager) CreateJob(ctx context.Context, req ActressSyncCreat
 	now := time.Now().UTC()
 	job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: scope, CreatedAt: now}
 	tasks := make([]models.ActressSyncTask, 0, len(ids))
+	skipped := 0
 	for _, id := range ids {
 		var actress *models.Actress
 		var err error
@@ -290,6 +291,12 @@ func (m *ActressSyncManager) CreateJob(ctx context.Context, req ActressSyncCreat
 		if actress == nil {
 			actress, err = m.deps.ActressRepo.FindByID(ctx, id)
 			if err != nil {
+				// Stale client selections appear after sync merges delete
+				// duplicates; skip them instead of rejecting the whole job.
+				if database.IsNotFound(err) {
+					skipped++
+					continue
+				}
 				return nil, err
 			}
 		}
@@ -300,6 +307,12 @@ func (m *ActressSyncManager) CreateJob(ctx context.Context, req ActressSyncCreat
 		}
 		task := models.ActressSyncTask{ID: uuid.NewString(), JobID: job.ID, ActressID: &actressID, Label: label, DedupeKey: fmt.Sprintf("actress:%d", id), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
 		tasks = append(tasks, task)
+	}
+	if skipped > 0 {
+		logging.Infof("Actress sync: skipped %d actress(es) already merged away by an earlier sync", skipped)
+	}
+	if len(tasks) == 0 {
+		return nil, fmt.Errorf("no actresses require metadata sync")
 	}
 	if err := m.repo.CreateJob(job, tasks); err != nil {
 		return nil, err
