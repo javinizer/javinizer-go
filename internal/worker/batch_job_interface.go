@@ -176,7 +176,8 @@ type PhaseController interface {
 	// Returns an error if the job cannot start (e.g., missing workflow dependency).
 	StartApply(ctx context.Context, cfg ApplyPhaseConfig) error
 
-	// Wait blocks until the job reaches a terminal state and returns any error.
+	// Wait blocks until the running phase has fully settled (goroutine
+	// returned, including deferred persistence) and returns any error.
 	Wait() error
 
 	// Rescrape re-scrapes a single movie within the job.

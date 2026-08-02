@@ -236,6 +236,11 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.A
 		if rtState != nil {
 			rtState.Shutdown()
 		}
+		// Signal server-ctx cancellation and JOIN handler-launched background
+		// phase goroutines before the db.Close() cleanup (registered earlier,
+		// so it runs next under LIFO) and t.TempDir()'s RemoveAll — Windows
+		// refuses to delete open files. See drainBackgroundTasks.
+		drainBackgroundTasks(t, rt, backgroundTaskDrainBudget)
 		runtimeMap.Delete(deps)
 	})
 
@@ -423,4 +428,39 @@ func allSidecarsRemoved(sidecars []string) bool {
 		}
 	}
 	return true
+}
+
+// backgroundTaskDrainBudget caps how long drainBackgroundTasks waits during
+// test teardown. rt.Shutdown() cancels the server context first, so phases
+// that honor it wind down in milliseconds; the budget only guards paths that
+// ignore the cancellation signal (teardown logs and proceeds via
+// waitForFileRelease rather than failing).
+const backgroundTaskDrainBudget = 30 * time.Second
+
+// drainBackgroundTasks cancels the server context and waits for
+// handler-launched background goroutines (batch phase runners tracked via
+// rt.TrackBackgroundTask) to return, so no in-flight phase still holds SQLite
+// handles when db.Close() and t.TempDir()'s RemoveAll run. Handlers such as
+// updateBatchJob/organizeJob (via prepareAndLaunchApply) and StartBatchScrape
+// respond 200 while their phase runs in the background, so tests exercising
+// those success paths otherwise reach teardown mid-phase and Windows CI fails
+// RemoveAll with "test.db ... being used by another process"
+// (e.g. TestMiss7_UpdateBatchJob_ZeroContentLength).
+//
+// Why track goroutines rather than poll job status (per PR review): a
+// just-launched goroutine may not have marked its job Running yet, and the
+// apply phase sets its terminal lifecycle status BEFORE its deferred
+// persistence executes — so a status snapshot can claim "nothing running"
+// with DB writes still ahead in both directions. Joining the goroutines
+// provably ends all DB writes first. waitForFileRelease stays as post-Close
+// fallback for OS handle-release lag.
+func drainBackgroundTasks(t *testing.T, rt *core.APIRuntime, budget time.Duration) {
+	t.Helper()
+	if rt == nil {
+		return
+	}
+	rt.Shutdown() // cancel ServerCtx so in-flight phases wind down promptly
+	if !rt.WaitBackgroundTasks(budget) {
+		t.Logf("drainBackgroundTasks: tracked background task(s) still running after %s; proceeding with teardown", budget)
+	}
 }

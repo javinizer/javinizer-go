@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -25,7 +26,25 @@ func (r *APIRuntime) ServerCtx() context.Context {
 // Shutdown stops background goroutines and releases resources.
 // Should be called on API server shutdown for clean termination.
 func (r *APIRuntime) Shutdown() {
+	// Force the lazy init first: goroutines launched via ServerCtx() write
+	// serverCancel inside the Once, and only a Do() return establishes the
+	// happens-before edge that makes reading serverCancel here race-free
+	// (previously a shutdown racing a lazy ServerCtx() init was a data race).
+	r.ServerCtx()
 	if r.serverCancel != nil {
 		r.serverCancel()
 	}
+}
+
+// TrackBackgroundTask delegates to the runtime state — implemented there to
+// keep runtime_manager.go within the API file-size budget. See
+// (*RuntimeState).TrackBackgroundTask.
+func (r *APIRuntime) TrackBackgroundTask() (done func()) {
+	return r.GetRuntime().TrackBackgroundTask()
+}
+
+// WaitBackgroundTasks delegates to the runtime state. See
+// (*RuntimeState).WaitBackgroundTasks.
+func (r *APIRuntime) WaitBackgroundTasks(timeout time.Duration) bool {
+	return r.GetRuntime().WaitBackgroundTasks(timeout)
 }

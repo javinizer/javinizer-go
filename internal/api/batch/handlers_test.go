@@ -1839,6 +1839,8 @@ func TestJobStateMachineTransitions(t *testing.T) {
 
 		// Simulate retry - MarkStarted should clear OrganizedAt
 		setJobStatus(job, models.JobStatusRunning)
+		// restore terminal status after this subtest (setup-only Running state)
+		defer setJobStatus(job, models.JobStatusCompleted)
 
 		// Verify OrganizedAt is cleared
 		snap2 := job.GetStatus()

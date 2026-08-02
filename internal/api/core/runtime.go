@@ -30,6 +30,11 @@ type RuntimeState struct {
 	// wait and receive the cached result. Separate from mu to avoid holding
 	// a write lock across the potentially slow createFn() call.
 	posterMgrCreateMu sync.Mutex
+
+	// bgTasksWg tracks handler-launched background goroutines (batch phase
+	// runners) so graceful shutdown and test teardown can join them instead of
+	// racing their final writes. See TrackBackgroundTask/WaitBackgroundTasks.
+	bgTasksWg sync.WaitGroup
 }
 
 // NewRuntimeState creates an initialized runtime container.
@@ -85,6 +90,47 @@ func (r *RuntimeState) WebSocketHub() *ws.Hub {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.wsHub
+}
+
+// TrackBackgroundTask registers a handler-launched background goroutine (e.g.
+// the batch phase runners in prepareAndLaunchApply / StartBatchScrape) and
+// returns its release function, which the caller MUST invoke (typically
+// deferred at the top of the goroutine) when the goroutine returns.
+//
+// Combined with Shutdown + WaitBackgroundTasks this lets teardown actually
+// JOIN background phase goroutines instead of inferring liveness from job
+// status, which is wrong in both directions: a just-launched goroutine has
+// not marked its job Running yet, and phases set the terminal lifecycle
+// status before their deferred persistence executes.
+//
+// Precondition: do not launch new tasks concurrently with an in-flight
+// WaitBackgroundTasks — sync.WaitGroup forbids Add racing Wait when the
+// counter is zero (behavior unspecified). Only teardown drains wait today,
+// after all handler launches have ceased; if production ever waits, handler
+// launches must first be gated (e.g. by a shutting-down flag).
+func (r *RuntimeState) TrackBackgroundTask() (done func()) {
+	r.bgTasksWg.Add(1)
+	return r.bgTasksWg.Done
+}
+
+// WaitBackgroundTasks blocks until every tracked background goroutine has
+// returned or the timeout elapses, reporting whether all tasks finished.
+//
+// sync.WaitGroup has no timeout/query API, so the wait runs on a helper
+// goroutine; on timeout that helper stays parked on Wait until the tasks
+// eventually finish, stranding only this cheap goroutine, never the caller.
+func (r *RuntimeState) WaitBackgroundTasks(timeout time.Duration) bool {
+	settled := make(chan struct{})
+	go func() {
+		r.bgTasksWg.Wait()
+		close(settled)
+	}()
+	select {
+	case <-settled:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 // SetWebSocketUpgrader configures the WebSocket upgrader.

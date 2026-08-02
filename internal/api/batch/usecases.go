@@ -136,6 +136,18 @@ type StartScrapeInput struct {
 	ManualInputs     map[string]string
 }
 
+// launchJobScrape starts the scrape phase and logs a launch failure. The
+// error arm is unreachable from StartScrapeUseCase's launch context (fresh
+// Pending job, factory-built workflow), so it lives behind a helper that
+// tests can call with a job in the wrong state.
+func launchJobScrape(pc worker.PhaseController, ctx context.Context, files []string, cfg worker.ScrapePhaseConfig) error {
+	err := pc.StartScrape(ctx, files, cfg)
+	if err != nil {
+		logging.Errorf("BatchJob.StartScrape failed: %v", err)
+	}
+	return err
+}
+
 // StartScrapeOutput holds the result of starting a batch scrape job.
 type StartScrapeOutput struct {
 	JobID string
@@ -221,9 +233,17 @@ func StartScrapeUseCase(
 	scrapeOpts.OnFileScraped = makeScrapeFileScrapedBroadcaster(job, scrapeSink)
 	scrapeOpts.OnFileScrapeFailed = makeScrapeFileFailedBroadcaster(job, scrapeSink)
 	scrapeOpts.OnScrapeStepProgress = makeScrapeStepProgressBroadcaster(job, scrapeSink)
+	// Track before launching so teardown can join the scrape end-to-end:
+	// StartScrape itself returns after launching the inner phase goroutine,
+	// so the tracked goroutine must additionally Wait() — which joins the
+	// phase's full return, including its deferred persistence (phaseDone).
+	done := rt.TrackBackgroundTask()
 	go func() {
-		if err := job.StartScrape(rt.ServerCtx(), allFiles, scrapeOpts); err != nil {
-			logging.Errorf("BatchJob.StartScrape failed: %v", err)
+		defer done()
+		if err := launchJobScrape(job, rt.ServerCtx(), allFiles, scrapeOpts); err == nil {
+			if err := job.Wait(); err != nil {
+				logging.Warnf("scrape job %s Wait() returned: %v", job.GetID(), err)
+			}
 		}
 	}()
 

@@ -97,6 +97,7 @@ func TestOrganizeJob_RunningJobRejected(t *testing.T) {
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/batch/:id/organize", organizeJob(testkit.GetTestRuntime(deps)))

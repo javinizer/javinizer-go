@@ -174,6 +174,60 @@ func TestRun_ProjectModeAppliesCodecovIgnores(t *testing.T) {
 	assert.Contains(t, stdout.String(), "Coverage check PASSED")
 }
 
+func TestRun_ProjectModeWarnsOnGetwdError(t *testing.T) {
+	dir := t.TempDir()
+	profilePath := dir + "/coverage.out"
+	require.NoError(t, os.WriteFile(profilePath, []byte(
+		"mode: atomic\n"+
+			"github.com/javinizer/javinizer-go/internal/x/ok.go:4.1,6.1 2 1\n"), 0o644))
+
+	origGetwd := osGetwd
+	t.Cleanup(func() { osGetwd = origGetwd })
+	osGetwd = func() (string, error) { return "", errors.New("cwd unavailable") }
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"--profile", profilePath, "--min", "1"}, &stdout, &stderr)
+	require.Equal(t, 0, exitCode)
+	assert.Contains(t, stderr.String(), "Warning: cannot determine repo root")
+}
+
+func TestRun_ProjectModeWarnsOnMalformedCodecovYml(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/go.mod", []byte("module github.com/javinizer/javinizer-go\n"), 0o644))
+	require.NoError(t, os.WriteFile(dir+"/codecov.yml", []byte("coverage:\n  status: [unclosed\n"), 0o644))
+	profilePath := dir + "/coverage.out"
+	require.NoError(t, os.WriteFile(profilePath, []byte(
+		"mode: atomic\n"+
+			"github.com/javinizer/javinizer-go/internal/x/ok.go:4.1,6.1 2 1\n"), 0o644))
+
+	origGetwd := osGetwd
+	t.Cleanup(func() { osGetwd = origGetwd })
+	osGetwd = func() (string, error) { return dir, nil }
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"--profile", profilePath, "--min", "1"}, &stdout, &stderr)
+	require.Equal(t, 0, exitCode)
+	assert.Contains(t, stderr.String(), "Warning: cannot load codecov ignore rules")
+}
+
+func TestRun_ProjectModeWarnsOnMissingGoMod(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/codecov.yml", []byte("ignore:\n  - \"docs/**\"\n"), 0o644))
+	profilePath := dir + "/coverage.out"
+	require.NoError(t, os.WriteFile(profilePath, []byte(
+		"mode: atomic\n"+
+			"github.com/javinizer/javinizer-go/internal/x/ok.go:4.1,6.1 2 1\n"), 0o644))
+
+	origGetwd := osGetwd
+	t.Cleanup(func() { osGetwd = origGetwd })
+	osGetwd = func() (string, error) { return dir, nil }
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"--profile", profilePath, "--min", "1"}, &stdout, &stderr)
+	require.Equal(t, 0, exitCode)
+	assert.Contains(t, stderr.String(), "Warning: cannot resolve module prefix")
+}
+
 func TestRun_Wrapper(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

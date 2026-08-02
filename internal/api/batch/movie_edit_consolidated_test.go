@@ -254,6 +254,7 @@ func TestBatchRescrapeMovies_RunningJobRejected(t *testing.T) {
 
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-001.mp4"})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/batch/:id/movies/batch-rescrape", batchRescrapeMovies(testkit.GetTestRuntime(deps)))

@@ -169,12 +169,16 @@ coverage:
 	tmp=$$(mktemp); \
 	go test -covermode=atomic -coverprofile=coverage.out -coverpkg=$$(echo $$pkgs | tr ' ' ',') -count=1 $$pkgs >$$tmp 2>&1; status=$$?; \
 	awk '/^(ok|github|--- FAIL|FAIL|panic)/ { print; fflush() }' $$tmp; \
-	rm -f $$tmp; \
 	if [ $$status -ne 0 ]; then \
+		echo ""; \
+		echo "--- full test output (run failed; the filtered summary above hides assertion details) ---" >&2; \
+		cat $$tmp; \
+		rm -f $$tmp; \
 		echo ""; \
 		echo "✗ Coverage test run failed (exit $$status) — coverage.out is PARTIAL and would report phantom misses" >&2; \
 		exit $$status; \
-	fi
+	fi; \
+	rm -f $$tmp
 	@echo ""
 	@go run ./cmd/coveragecheck --metric line --profile coverage.out 2>/dev/null
 

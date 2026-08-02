@@ -47,13 +47,19 @@ func runWithAnalyze(args []string, stdout, stderr io.Writer, analyze analyzeProf
 	// Codecov applies codecov.yml's ignore list to PROJECT coverage too —
 	// load it here as well (patch mode below already does) so the local
 	// project percentage reports the same number Codecov will upload.
+	// Warn loudly on partial setup failure: silently skipping ignores makes
+	// the local number diverge from Codecov with no explanation.
 	reportOpts := coverage.ReportOptions{}
-	if repoRoot, werr := osGetwd(); werr == nil {
-		if ig, ierr := loadCodecovIgnore(repoRoot); ierr == nil && len(ig) > 0 {
-			if mp, merr := modulePrefix(repoRoot); merr == nil {
-				reportOpts.IgnoreGlobs = ig
-				reportOpts.ModulePrefix = mp
-			}
+	if repoRoot, werr := osGetwd(); werr != nil {
+		_, _ = fmt.Fprintf(stderr, "Warning: cannot determine repo root (%v) — Codecov ignore rules skipped; project percentage may diverge from Codecov\n", werr)
+	} else if ig, ierr := loadCodecovIgnore(repoRoot); ierr != nil {
+		_, _ = fmt.Fprintf(stderr, "Warning: cannot load codecov ignore rules (%v) — project percentage may diverge from Codecov\n", ierr)
+	} else if len(ig) > 0 {
+		if mp, merr := modulePrefix(repoRoot); merr != nil {
+			_, _ = fmt.Fprintf(stderr, "Warning: cannot resolve module prefix (%v) — Codecov ignore rules skipped; project percentage may diverge from Codecov\n", merr)
+		} else {
+			reportOpts.IgnoreGlobs = ig
+			reportOpts.ModulePrefix = mp
 		}
 	}
 

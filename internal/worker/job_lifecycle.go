@@ -18,9 +18,16 @@ type JobLifecycle struct {
 	OrganizedAt *time.Time
 	RevertedAt  *time.Time
 	done        chan struct{}
-	CancelFunc  context.CancelFunc
-	deleted     bool
-	cancelled   bool // prevents double-invocation of cancelFunc in cancelAndMarkCancelled
+	// phaseDone closes only when the phase goroutine fully RETURNS — after
+	// Run's deferred persistence, unlike done, which terminal Mark* calls close
+	// mid-Run. Wait() prefers phaseDone so callers join the phase (all DB
+	// writes finished), not merely observe its terminal status. nil when no
+	// phase is running (fresh/reconstructed jobs), in which case Wait falls
+	// back to done. Created alongside done by markStarted.
+	phaseDone  chan struct{}
+	CancelFunc context.CancelFunc
+	deleted    bool
+	cancelled  bool // prevents double-invocation of cancelFunc in cancelAndMarkCancelled
 
 	// markCompletedFn is a callback set by BatchJob during construction.
 	// MarkCompleted crosses the lifecycle/results boundary

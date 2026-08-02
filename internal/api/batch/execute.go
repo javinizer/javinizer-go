@@ -37,7 +37,12 @@ func prepareAndLaunchApply(
 	// Per DEEP-6: set WF on the job's deps before calling StartApply.
 	job.SetWorkflow(wf)
 
+	// Track before launching so teardown can join this goroutine (and with it
+	// the apply phase's deferred persistence) instead of inferring completion
+	// from job status.
+	done := rt.TrackBackgroundTask()
 	go func() {
+		defer done()
 		if err := job.StartApply(rt.ServerCtx(), applyOpts); err != nil {
 			logging.Errorf("BatchJob.StartApply failed: %v", err)
 			rt.Deps().GetJobStore().PersistJobByID(job.GetID())

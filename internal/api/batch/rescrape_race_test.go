@@ -132,6 +132,7 @@ func TestRescrapeBatchMovie_JobLifecycleRace(t *testing.T) {
 
 		// Manually set job status to running (simulating active scrape)
 		setJobStatus(job, models.JobStatusRunning)
+		defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 		body, err := json.Marshal(contracts.BatchRescrapeRequest{
 			SelectedScrapers:  []string{"stub-no-poster"},
