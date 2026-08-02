@@ -103,6 +103,9 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 	}
 
 	wireJobDeps(batchJob, s.movieRepo, s.actressRepo, s.historyRepo, func() { _ = s.persistence.PersistJob(batchJob) })
+	// Error-returning envelope persist for the rescrape phase's and field-
+	// override editor's critical sections (see BatchJobDeps.PersistErrFn).
+	batchJob.deps.PersistErrFn = func() error { return s.persistence.PersistJob(batchJob) }
 
 	batchJob.mu.Lock()
 	if s.reconMatcher != nil {

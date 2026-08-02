@@ -38,7 +38,17 @@ type BatchJobDeps struct {
 	HistoryRepo     database.HistoryRepositoryInterface            // History repository
 	Emitter         eventlog.EventEmitter                          // Event emission for audit trail
 	PersistFn       func()                                         // Callback to persist job state to database
-	Logger          logging.Logger                                 // Structured logger seam; defaults to GlobalLogger() when nil
+	// PersistErrFn is the error-returning half of PersistFn: it persists the
+	// whole job envelope and reports failure (also recorded as the job's
+	// PersistError) so that failure-AWARE critical sections can roll back
+	// instead of acking state a restart would resurrect. The rescrape phase
+	// (rescrapePhaseInputs.PersistEnvelope) and the field-override editor
+	// (jobEditorImpl.persistEnvelope) call it while holding the poster-source
+	// lock(s), making the envelope persist part of those critical sections.
+	// Nil for standalone jobs: those paths then skip the in-section persist
+	// entirely (their caller owns persistence, as before).
+	PersistErrFn func() error
+	Logger       logging.Logger // Structured logger seam; defaults to GlobalLogger() when nil
 }
 
 // NewBatchJobDeps constructs a BatchJobDeps with the three core dependencies

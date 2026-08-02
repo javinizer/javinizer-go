@@ -168,6 +168,25 @@ type rescrapePhaseInputs struct {
 	// additional dependencies for full rescrape sequence
 	HistoryRepo database.HistoryRepositoryInterface
 
+	// PersistEnvelope persists the whole job envelope with an error return
+	// (wired from BatchJobDeps.PersistErrFn — JobStore.PersistJob semantics:
+	// the failure is also recorded as the job's PersistError). The rescrape
+	// phase invokes it INSIDE its poster-source-lock critical section, after
+	// the CAS commit and provenance propagation, so the persist is part of
+	// the same critical section as the poster-state mutations it durably
+	// records; a failure rolls memory, provenance, and the poster caches back
+	// before the locks are released (no other poster-state writer can
+	// interleave). Nil means "no envelope persistence wiring" (standalone
+	// jobs, tests): the phase skips persist+rollback exactly like the
+	// pre-hoist non-API flow.
+	//
+	// Lock ordering: the persist's SQLite write runs while the poster-source
+	// lock(s) are held; the locks it touches internally (result-store snapshots
+	// via snapshotForPersist, the job mutex, and the repository's own locks)
+	// are leaf-level relative to the poster-source lock — no path takes a
+	// poster-source lock while holding any of them, so no cycle.
+	PersistEnvelope func() error
+
 	Finder      resultstore.FileFinder // for FindFileForMovieID and GetRevision
 	Fs          afero.Fs               // for poster cleanup
 	TempDir     string                 // for poster cleanup paths

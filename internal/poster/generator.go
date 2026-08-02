@@ -116,6 +116,18 @@ func (g *ScrapePosterGenerator) RestorePosterAssets(snap *AssetsSnapshot) error 
 	return g.manager.RestoreAssets(snap)
 }
 
+// MovePosterAssets re-keys the job's cached poster assets from one movie ID
+// to another. The field-override "id" fan-out adopts a new movie ID; without
+// this the cache would be orphaned at the OLD key (the persisted preview URL
+// and every crop lookup key off the NEW one). A nil manager holds no assets
+// to move. The caller holds BOTH keys' poster-source locks in lexical order.
+func (g *ScrapePosterGenerator) MovePosterAssets(jobID, fromMovieID, toMovieID string) error {
+	if g.manager == nil {
+		return nil
+	}
+	return g.manager.MoveAssets(jobID, fromMovieID, toMovieID)
+}
+
 // RemovePosterAssets deletes the job's cached full-size source and preview
 // for movieID — the cleanup half of an edit that cleared the last poster
 // source (GeneratePoster cannot regenerate without a URL). A generator

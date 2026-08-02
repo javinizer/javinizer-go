@@ -126,35 +126,24 @@ type RescrapeResult struct {
 	Error            string                  // Human-readable error for "failed" status
 	OrphanedMovieIDs []string                // IDs that became orphaned during rescrape cleanup
 	FilePath         string                  // File path that was rescraped (for provenance propagation)
-	// PosterCacheRollback, set only on success when the poster generator
-	// supports asset snapshots, restores the job's temp poster cache to its
-	// pre-rescrape state. GeneratePoster replaces {movieID}-full.jpg
-	// BEFORE the commit; when the caller's post-commit envelope persist
-	// fails, a restart would resurrect pre-rescrape job state against the
-	// rescraped image — invoke this to undo the asset replacement (parity
-	// with RefreshPosterAssets' snapshot/rollback). The snapshot is taken
-	// while the rescrape's poster-source lock(s) are held, so nothing can
-	// interleave between snapshot, asset replacement, and commit.
-	//
-	// On a rekeying rescrape (A→B) the rollback also covers the ORIGIN A's
-	// assets: the success-path orphan cleanup deleted them before the
-	// caller's envelope persist, so a persist-failure restore must recreate
-	// them or the rolled-back (pre-rescrape) state would reference deleted
-	// files (F2).
-	PosterCacheRollback func() error
-	// ResultStateRollback, set only on success when the pre-rescrape
-	// MovieResult could be snapshotted and the result store supports
-	// write-back, restores the rescraped file's in-memory MovieResult to
-	// that snapshot (revision still moves forward, so later CAS writers
-	// are unaffected). The snapshot is cloned under the poster-source
-	// lock at the commit-capture point, so it is exactly the state the
-	// CAS commit replaced. Invoke this BEFORE PosterCacheRollback on the
-	// envelope-persist-failure path — the same part-revert-then-cache
-	// ordering the override compensation documents — so in-memory state,
-	// temp cache, and the restart-restorable envelope all converge back
-	// to pre-rescrape instead of only the cache rolling back (F1).
-	ResultStateRollback func() error
+	// PersistErr is non-nil when the in-critical-section envelope persist
+	// failed (rescrapePhaseInputs.PersistEnvelope fired inside the phase's
+	// poster-source locks). The phase already rolled everything back — the
+	// in-memory MovieResult + provenance (P2-4/F1) and the replaced poster
+	// caches, including a rekeyed origin's cleaned-up assets (F2) — before
+	// releasing the locks, so memory, cache, and the unpersisted envelope
+	// all converged back to the pre-rescrape state before any other
+	// poster-state writer could interleave. Callers must surface this
+	// instead of acking success a restart would contradict. A degraded
+	// rollback (a pre-generation asset snapshot failed) is noted on the
+	// error text.
+	PersistErr error
 }
+
+// ErrEnvelopePersist marks failures of the in-critical-section job-envelope
+// persist (field-override editor, rescrape phase) so API handlers can map
+// them to 5xx instead of treating them as request-shaped 4xx errors.
+var ErrEnvelopePersist = errors.New("job envelope persist failed")
 
 // ---------------------------------------------------------------------------
 // Atomic sub-interfaces
@@ -186,16 +175,16 @@ type JobEditor interface {
 	// ApplyFieldOverride cherry-picks a single field's value from the named
 	// scraper source's raw results and applies it to the movie, updating
 	// provenance attribution. Mirrors the original Javinizer "Replace" button.
-	// Returns the updated MovieResult and ProvenanceData (both clones), plus
-	// a compensation function the caller MUST invoke when its follow-up
-	// job-envelope persist fails: it reverts every persisted part to its
-	// pre-override movie, restores the pre-override provenance fan-out, and
-	// rolls any poster-cache refresh back — otherwise a restart
-	// (reconstructBatchJob reads only the envelope) resurrects pre-override
-	// state against a cache that holds the refreshed image. Nil when there is
-	// nothing to compensate (all error paths already compensate internally).
-	// Compensation failures are surfaced via its returned error (errors.Join).
-	ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, func() error, error)
+	// Returns the updated MovieResult and ProvenanceData (both clones).
+	// The whole sequence — re-keyed fan-out persists, provenance fan-out,
+	// any poster-asset migration/refresh, and the job-envelope persist —
+	// runs atomically under the poster-source lock the editor already holds:
+	// a failed envelope persist is compensated (parts reverted, provenance
+	// restored, cache rolled back, assets moved back) BEFORE the lock
+	// releases, and the error wraps ErrEnvelopePersist so the caller can map
+	// it to 5xx. A restart can therefore never resurrect pre-override state
+	// against a cache holding refreshed assets.
+	ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)
 }
 
 // PhaseController provides phase execution and dependency-wiring operations
@@ -390,6 +379,22 @@ type jobEditorImpl struct {
 	movieRepo   database.MovieRepositoryInterface
 	actressRepo database.ActressRepositoryInterface
 	overrideMu  sync.Map // resultID -> *sync.Mutex
+	// persistEnvelope persists the whole job envelope with an error return
+	// (wired from BatchJobDeps.PersistErrFn). ApplyFieldOverride invokes it
+	// INSIDE the poster-source-lock critical section, after the fan-out
+	// persists and the provenance fan-out, so a failure is compensated —
+	// parts reverted, provenance restored, poster cache rolled back,
+	// re-keyed assets moved back — before the lock releases: there is NO
+	// release→re-acquire gap a crop or source edit could land in and be
+	// silently erased by the compensation (the old handler-side F3 window).
+	// Nil for editors without envelope persistence (standalone jobs, tests):
+	// the in-section persist is skipped, matching the pre-hoist non-API flow.
+	//
+	// Lock ordering: the SQLite write runs while the poster-source lock is
+	// held; its internal locks (result-store snapshots, job mutex, repo
+	// locks) are leaf-level — no path acquires a poster-source lock while
+	// holding them — so no cycle.
+	persistEnvelope func() error
 }
 
 func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie *models.Movie) error {
@@ -540,20 +545,30 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // rollback runs — restoring the cache while a part still holds the new
 // source would desync job state from the -full.jpg all over again.
 //
-// The caller persists the job envelope AFTER this method returns
-// (PersistJobByID). If THAT fails, the same rollback discipline applies
-// through the returned compensation function: parts revert to their
-// pre-override movies, the pre-override provenance is restored, and the
-// poster cache rolls back — a restart must never resurrect pre-override
-// job state against a refreshed cache.
-func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, func() error, error) {
+// An "id" override RE-KEYS the movie (Movie.ID is set from the selected
+// source's raw result): the destination key's poster-source lock joins the
+// critical section in lexical pair order (the second two-lock exception,
+// alongside the rescrape A→B pair — see AcquirePosterSourceLock's doc), and
+// the cached poster assets are migrated from the old key to the new one
+// (P3-6) so the cache is not orphaned at the old key while every
+// crop/preview lookup resolves the new one; the persisted preview URL is
+// re-pointed as well.
+//
+// The job-envelope persist is part of THIS critical section (P1-2): it
+// runs under the same held lock via jobEditorImpl.persistEnvelope, and a
+// failure is compensated in place — parts revert to their pre-override
+// movies, the pre-override provenance is restored, the poster cache rolls
+// back, and re-keyed assets move back — a restart must never resurrect
+// pre-override job state against a refreshed cache, and no other
+// poster-state writer can interleave with the revert.
+func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 	mu, _ := je.overrideMu.LoadOrStore(resultID, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
 
 	result, _, found := je.store.GetFileResultByResultID(resultID)
 	if !found || result == nil || result.Movie == nil {
-		return nil, nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
+		return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
 	}
 	// the manual-crop, poster-from-URL, and whole-movie PATCH paths
 	// (internal/api/batch/movie_edit.go) via the shared per-(jobID, movieID)
@@ -588,46 +603,125 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	// read, mirroring the crop endpoint's convergence loop
 	// (internal/api/batch/movie_edit_poster.go's updateBatchMoviePosterCrop):
 	// when the ID changed, the OLD lock is released BEFORE the destination's
-	// is acquired — this path never holds two poster-source locks at once,
-	// preserving the cycle-free order overrideMu → ONE poster-source lock →
-	// result-store locks — and the result is re-read once more under the new
-	// lock (the writer that released it may have re-keyed the result yet
-	// again). The loop converges because each re-acquisition waits behind a
-	// writer whose re-key is already committed.
-	var filePath string
-	for {
-		freshResult, fp, stillFound := je.store.GetFileResultByResultID(resultID)
-		if !stillFound || freshResult == nil || freshResult.Movie == nil {
-			releasePosterLock()
-			return nil, nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
+	// is acquired. This path holds two poster-source locks only for the
+	// "id"-override rekey below (destination pair in lexical order, mirroring
+	// rescrapePhase.Rescrape's A→B rule); every other override converges on
+	// ONE lock, preserving the cycle-free order overrideMu → poster-source
+	// lock(s) → result-store locks. The loop converges because each
+	// re-acquisition waits behind a writer whose re-key is already committed.
+	//
+	// releaseDestPosterLock/destKey: the DESTINATION movie ID's poster-source
+	// lock for an "id" override (A→B) — the cached poster assets move from
+	// A's key to B's (P3-6), so B's crop/edit writers must serialize with
+	// this operation too. Acquired in lexical key order: when B sorts after
+	// the held origin key, B stacks directly on top; when B sorts BEFORE A,
+	// A is released first, then B and A are acquired in order, and the plan
+	// is re-derived (the outer for loop restarts) because an A-side edit
+	// could have landed in the gap. Deferred in closure form because the
+	// variable is reassigned by the handoff; a stale destination lock (origin
+	// key changed again or the re-derived override no longer rekeys) is
+	// released immediately instead.
+	var releaseDestPosterLock func()
+	destKey := ""
+	dropDestLock := func() {
+		if releaseDestPosterLock != nil {
+			releaseDestPosterLock()
+			releaseDestPosterLock = nil
+			destKey = ""
 		}
-		result = freshResult
-		filePath = fp
-		resolvedID := posterLockKeyForMovieResult(result)
-		if resolvedID == movieID {
+	}
+	defer dropDestLock()
+
+	var filePath string
+	var movie *models.Movie
+	var prov *resultstore.ProvenanceData
+	var oldPosterURL, oldCoverURL string
+	for {
+		for {
+			freshResult, fp, stillFound := je.store.GetFileResultByResultID(resultID)
+			if !stillFound || freshResult == nil || freshResult.Movie == nil {
+				releasePosterLock()
+				return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
+			}
+			result = freshResult
+			filePath = fp
+			resolvedID := posterLockKeyForMovieResult(result)
+			if resolvedID == movieID {
+				break
+			}
+			releasePosterLock()
+			movieID = resolvedID
+			releasePosterLock = AcquirePosterSourceLock(je.jobID, movieID)
+			// The origin key changed: any destination lock being held is now a
+			// stale (and possibly order-violating) pair member — drop it and
+			// let this pass re-derive the destination.
+			dropDestLock()
+		}
+
+		prov = je.store.GetProvenance(filePath)
+		if prov == nil {
+			prov = &resultstore.ProvenanceData{}
+		}
+		movie = result.Movie.Clone()
+		oldPosterURL = movie.Poster.PosterURL
+		oldCoverURL = movie.Poster.CoverURL
+		if err := applyFieldOverride(movie, prov, fieldKey, source); err != nil {
+			releasePosterLock()
+			return nil, nil, err
+		}
+
+		// Only an "id" override re-keys the movie. When it does, the
+		// DESTINATION key's lock joins the critical section (lexical pair);
+		// applyFieldOverride is deterministic for a fixed (result, prov,
+		// source), so re-running it after the lexical re-acquisition yields
+		// the same newID unless the underlying state changed — which the
+		// convergence loop above then re-checks.
+		newID := movie.ID
+		if fieldKey != "id" || newID == "" || newID == movieID {
+			dropDestLock() // stale destination from a prior pass; no rekey now
 			break
 		}
+		if releaseDestPosterLock != nil && destKey == newID {
+			break // destination pair already held from an earlier pass
+		}
+		if newID > movieID {
+			dropDestLock()
+			releaseDestPosterLock = AcquirePosterSourceLock(je.jobID, newID)
+			destKey = newID
+			break
+		}
+		dropDestLock()
 		releasePosterLock()
-		movieID = resolvedID
+		releaseDestPosterLock = AcquirePosterSourceLock(je.jobID, newID)
+		destKey = newID
 		releasePosterLock = AcquirePosterSourceLock(je.jobID, movieID)
 	}
 	defer releasePosterLock()
-	prov := je.store.GetProvenance(filePath)
-	if prov == nil {
-		prov = &resultstore.ProvenanceData{}
+
+	// P3-6: an "id" override re-keyed the movie — migrate the cached poster
+	// assets from the old key to the new one UNDER BOTH held locks, or they
+	// are orphaned at the old key while every crop/preview lookup resolves
+	// the new one. The preview URL embedded in the persisted movie carries
+	// the posterID path segment, so it is re-pointed too. Generators without
+	// a manager (test stubs) hold no assets: the move degrades to the URL
+	// rewrite only.
+	var moveAssetsBack func() error
+	if destKey != "" {
+		if mover, ok := je.posterGen.(posterAssetMover); ok && mover != nil {
+			if moveErr := mover.MovePosterAssets(je.jobID, movieID, destKey); moveErr != nil {
+				return nil, nil, fmt.Errorf("migrate poster assets to re-keyed movie %s: %w", destKey, moveErr)
+			}
+			moveAssetsBack = func() error { return mover.MovePosterAssets(je.jobID, destKey, movieID) }
+		}
+		movie.Poster.CroppedPosterURL = rewritePosterIDInPreviewURL(movie.Poster.CroppedPosterURL, movieID, destKey)
 	}
-	movie := result.Movie.Clone()
-	oldPosterURL := movie.Poster.PosterURL
-	oldCoverURL := movie.Poster.CoverURL
-	if err := applyFieldOverride(movie, prov, fieldKey, source); err != nil {
-		return nil, nil, nil, err
-	}
+
 	var rollback func() error
 	if fieldKey == "poster_url" || fieldKey == "cover_url" {
 		var err error
 		rollback, err = je.refreshOverriddenPosterSource(ctx, movie, oldPosterURL, oldCoverURL)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 	}
 	filePaths := je.store.FindFilePathsForMovieID(movieID)
@@ -644,7 +738,7 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	// sibling's templates with the wrong source file.
 	planned, err := je.planMultipartOverride(filePaths, movie, prov, fieldKey, source)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	updatedParts := make([]overridePartWrite, 0, len(planned))
 	for _, part := range planned {
@@ -663,12 +757,17 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 					errMsg = fmt.Errorf("%w (poster rollback failed: %v)", errMsg, rollbackErr)
 				}
 			}
-			return nil, nil, nil, errMsg
+			if moveAssetsBack != nil {
+				if moveBackErr := moveAssetsBack(); moveBackErr != nil {
+					errMsg = fmt.Errorf("%w (poster asset move-back failed: %v)", errMsg, moveBackErr)
+				}
+			}
+			return nil, nil, errMsg
 		}
 		updatedParts = append(updatedParts, part)
 	}
 	// Snapshot the pre-override provenance of every part BEFORE the fan-out,
-	// so a caller-side envelope-persist failure compensation can restore the
+	// so the envelope-persist-failure compensation below can restore the
 	// recorded attribution without having mutated its own working clone.
 	origProvenance := make(map[string]*resultstore.ProvenanceData, len(filePaths))
 	for _, partPath := range filePaths {
@@ -680,43 +779,55 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	updated, _, _ := je.store.GetFileResultByResultID(resultID)
 	updatedProv := je.store.GetProvenance(filePath)
 
-	// The compensation the caller runs when its envelope persist fails AFTER
-	// this method returned successfully: revert every persisted part to its
-	// pre-override movie (mirroring the UpdateMovie-failure compensation), then
-	// restore the pre-override provenance attribution, then roll the poster
-	// cache back. Order matters: cache restore runs LAST so no part still
-	// holds the new source URL while the cache flips back to the old image.
-	// The poster-source lock is NOT held here — the handler re-acquires it
-	// (keyed on the movie ID of the returned result, the key this method
-	// converged on and persisted under) around its envelope persist +
-	// compensation pair, so a crop/source edit cannot land between this
-	// method's release and the revert and be silently erased by it (F3).
-	compensate := func() error {
-		var errs []error
-		for _, part := range updatedParts {
-			if part.original == nil {
-				continue
+	// The envelope persist runs HERE, inside the poster-source lock critical
+	// section (P1-2): a failure is compensated BEFORE the lock releases —
+	// revert every persisted part to its pre-override movie, restore the
+	// pre-override provenance attribution, roll the poster cache back, then
+	// move the re-keyed assets back. There is no release→re-acquire gap for
+	// a crop/source edit to land in and be silently erased by the revert
+	// (the old handler-side F3 window is closed by construction). Order
+	// matters: asset restores run LAST so no part still holds the new state
+	// while the cache/keys flip back. Compensation failures ride along with
+	// the persist error (errors.Join) instead of being swallowed. A nil
+	// persistEnvelope (standalone jobs, tests) skips the in-section persist
+	// exactly like the pre-hoist non-API flow.
+	if je.persistEnvelope != nil {
+		if perr := je.persistEnvelope(); perr != nil {
+			errMsg := fmt.Errorf("failed to persist job state after field override: %w: %w", ErrEnvelopePersist, perr)
+			var errs []error
+			for _, part := range updatedParts {
+				if part.original == nil {
+					continue
+				}
+				if revertErr := je.UpdateMovie(ctx, part.filePath, part.original); revertErr != nil {
+					errs = append(errs, fmt.Errorf("revert of part %s failed: %w", part.filePath, revertErr))
+				}
 			}
-			if revertErr := je.UpdateMovie(ctx, part.filePath, part.original); revertErr != nil {
-				errs = append(errs, fmt.Errorf("revert of part %s failed: %w", part.filePath, revertErr))
+			for partPath, orig := range origProvenance {
+				if orig == nil {
+					// Provenance cannot be UNSET through the store; only real
+					// pre-override snapshots are restored.
+					continue
+				}
+				je.store.SetProvenance(partPath, orig)
 			}
+			if rollback != nil {
+				if rollbackErr := rollback(); rollbackErr != nil {
+					errs = append(errs, fmt.Errorf("poster rollback failed: %w", rollbackErr))
+				}
+			}
+			if moveAssetsBack != nil {
+				if moveBackErr := moveAssetsBack(); moveBackErr != nil {
+					errs = append(errs, fmt.Errorf("poster asset move-back failed: %w", moveBackErr))
+				}
+			}
+			if compErr := errors.Join(errs...); compErr != nil {
+				errMsg = fmt.Errorf("%w (override revert failed: %v)", errMsg, compErr)
+			}
+			return nil, nil, errMsg
 		}
-		for partPath, orig := range origProvenance {
-			if orig == nil {
-				// Provenance cannot be UNSET through the store; only real
-				// pre-override snapshots are restored.
-				continue
-			}
-			je.store.SetProvenance(partPath, orig)
-		}
-		if rollback != nil {
-			if rollbackErr := rollback(); rollbackErr != nil {
-				errs = append(errs, fmt.Errorf("poster rollback failed: %w", rollbackErr))
-			}
-		}
-		return errors.Join(errs...)
 	}
-	return updated, updatedProv, compensate, nil
+	return updated, updatedProv, nil
 }
 
 // overridePartWrite plans one part of the ApplyFieldOverride multipart

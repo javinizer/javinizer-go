@@ -198,16 +198,16 @@ func TestOverrideBatchMovieField_UnsupportedField(t *testing.T) {
 	assert.Equal(t, 400, w.Code)
 }
 
-// TestOverrideBatchMovieField_CompensateRunsUnderPosterLock pins F3: the
-// envelope persist + persist-failure compensation pair runs while re-holding
-// the poster-source lock that ApplyFieldOverride released, keyed on the
-// RETURNED result's movie ID (the key ApplyFieldOverride persisted under).
+// TestOverrideBatchMovieField_CompensateRunsUnderPosterLock pins P1-2
+// (F3 evolution): the envelope persist + persist-failure compensation pair
+// runs INSIDE ApplyFieldOverride's poster-source lock — there is no
+// release→re-acquire gap left for a competing edit to land in.
 //
 // Deterministic interleave: the persist hook blocks INSIDE the critical
-// section, then a competing edit (probe) tries to take the same lock. Under
-// the fix the probe can only acquire after persist+compensate complete, so it
-// observes the fully-compensated (pre-override) state; without the lock it
-// would acquire immediately and observe the uncompensated override.
+// section, then a competing edit (probe) tries to take the same lock. The
+// probe can only acquire after persist+compensate complete, so it observes
+// the fully-compensated (pre-override) state; without the lock it would
+// acquire immediately and observe the uncompensated override.
 func TestOverrideBatchMovieField_CompensateRunsUnderPosterLock(t *testing.T) {
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
@@ -288,7 +288,7 @@ func TestOverrideBatchMovieField_CompensateRunsUnderPosterLock(t *testing.T) {
 	<-handlerDone
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code, "body: %s", rec.Body.String())
-	assert.Contains(t, rec.Body.String(), "Failed to persist job state")
+	assert.Contains(t, rec.Body.String(), "failed to persist job state")
 
 	assert.Equal(t, "AggregatedMaker", <-probeObserved,
 		"the probe runs only after the compensation reverted the override — the lock covers persist+compensate")

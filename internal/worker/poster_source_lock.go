@@ -41,16 +41,33 @@ var (
 // lock is package-level so the API handlers and every job's editor contend on
 // the same instance for a given key. Callers must hold it across the whole
 // refresh+persist sequence (including any multipart loop and compensation).
+//
+// Invariant: NO poster-state mutation happens outside this lock. That
+// includes the job-envelope persist after the rescrape commit and the
+// field-override fan-out: rescrapePhase.Rescrape and ApplyFieldOverride
+// invoke the error-returning envelope persist (BatchJobDeps.PersistErrFn)
+// INSIDE their critical sections, and compensate rollbacks there, so a
+// failed persist is reverted before any other writer can interleave. The
+// persist's own locks (result-store snapshots, job mutex, SQLite/repo
+// locks) are leaf-level relative to this lock — nothing acquires a
+// poster-source lock while holding one of them — so the SQLite write under
+// the lock cannot cycle. The pipeline write-backs that touch poster fields
+// (apply-phase success/failure/panic, the scrape persist pool's DB
+// round-trip) also take this lock around their atomic result updates,
+// keyed on the LIVE result's movie ID, and skip the movie write entirely
+// when the live identity was re-keyed mid-flight.
+//
 // Lock ordering: ApplyFieldOverride takes its per-resultID overrideMu BEFORE
 // this lock and no path reverses that order, so the two cannot deadlock.
 // Two-lock rule: paths that re-resolve their key under the lock (the crop
-// endpoint in internal/api/batch/movie_edit_poster.go and ApplyFieldOverride)
-// RELEASE the old key before acquiring the destination key, so they never
-// hold two of these locks at once. The only path permitted to hold two is
-// rescrapePhase.Rescrape on an A→B rekey, which takes the (origin,
-// destination) pair in lexical key order — releasing and re-acquiring the
-// origin when the destination sorts first — so opposite-direction rescrapes
-// cannot deadlock.
+// endpoint in internal/api/batch/movie_edit_poster.go and the non-"id"
+// ApplyFieldOverride convergence) RELEASE the old key before acquiring the
+// destination key, so they never hold two of these locks at once. Two paths
+// are permitted to hold a (origin, destination) PAIR, always in lexical key
+// order so opposing operations cannot deadlock, releasing and re-acquiring
+// the origin when the destination sorts first: rescrapePhase.Rescrape on an
+// A→B rekey, and ApplyFieldOverride's "id" override (which migrates the
+// cached poster assets from the old key to the new one under both locks).
 //
 // The returned function releases the lock exactly once and evicts the map
 // entry when the last holder returns, so the map never grows unboundedly.

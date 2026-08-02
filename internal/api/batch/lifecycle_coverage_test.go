@@ -281,7 +281,7 @@ func (s *stubControlledJob) UpdatePosterCrop(string, string, *models.CropBounds)
 func (s *stubControlledJob) UpdatePosterFromURL(context.Context, string, string, string) error {
 	return nil
 }
-func (s *stubControlledJob) ApplyFieldOverride(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, func() error, error) {
-	return nil, nil, nil, nil
+func (s *stubControlledJob) ApplyFieldOverride(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+	return nil, nil, nil
 }
 func (s *stubControlledJob) GetProvenance(string) *resultstore.ProvenanceData { return nil }

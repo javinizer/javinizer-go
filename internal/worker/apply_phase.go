@@ -266,25 +266,40 @@ func interpretApplyResult(
 		// Main's process_organize.go returned early on organizeErr WITHOUT
 		// mutating the per-file FileResult, so the Movie that the scrape
 		// phase populated survived for inspection/retry on failed-apply rows.
-		// UpdateFileResult replaces the whole struct (preserving only ResultID
-		// + Revision), so without Movie set here, the API response for the
-		// failed-apply row loses its movie payload and /review/[jobId] can't
-		// render the movie card / poster preview. Same dropped-on-failure-path
-		// pattern fixed for FileMatchInfo in commit 6249de64.
-		// Preserve the LIVE result's poster state on the apply-failure write-back
-		// too: the snapshot `movie` pre-dates any crop/source edit taken while
-		// the organize ran, and UpdateFileResult would replace the whole result
-		// with it — silently erasing a mid-organize manual crop. The atomic
-		// read-modify-write merges the live poster fields onto the snapshot
-		// under the store lock; if the result vanished mid-apply (atomic update
+		//
+		// Preserve the LIVE result's poster state on the apply-failure
+		// write-back too: the snapshot `movie` pre-dates any crop/source edit
+		// taken while the organize ran, and replacing the whole result with
+		// it would silently erase a mid-organize manual crop. The write
+		// therefore runs UNDER the live movie's poster-source lock (so no
+		// crop/edit can interleave between the key resolution and the write)
+		// and the atomic read-modify-write merges the live poster fields
+		// onto the snapshot under the store lock. On an identity mismatch —
+		// a mid-apply edit RE-KEYED the live result (P2-5) — the write-back
+		// updates only the non-movie fields the pipeline owns
+		// (status/error/timestamps) and keeps the live movie wholesale:
+		// stamping A's snapshot over B's live movie would build a
+		// franken-result. If the result vanished mid-apply (atomic update
 		// errors), fall back to the legacy wholesale write so the failure
-		// status is still recorded.
+		// status is still recorded (nothing live remains to clobber).
+		snapshotID := ""
+		if movie != nil {
+			snapshotID = movie.ID
+		}
+		releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, filePath, snapshotID))
 		writeErr := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-			var merged *models.Movie
-			if movie != nil {
-				merged = movie.Clone()
-				mergeLivePosterState(merged, current.Movie)
+			if movie == nil || (current.Movie != nil && current.Movie.ID != movie.ID) {
+				// Identity mismatch (mid-apply rekey) or no snapshot movie: do
+				// NOT overwrite the live movie. Only pipeline-owned non-movie
+				// fields move.
+				current.Status = fileStatus
+				current.Error = errMsg
+				current.StartedAt = startTime
+				current.EndedAt = &now
+				return current, nil
 			}
+			merged := movie.Clone()
+			mergeLivePosterState(merged, current.Movie)
 			return &resultstore.MovieResult{
 				// UpdateFileResult preserved ResultID on wholesale writes;
 				// the atomic callback must carry it over explicitly or review
@@ -298,6 +313,7 @@ func interpretApplyResult(
 				EndedAt:       &now,
 			}, nil
 		})
+		releasePosterLock()
 		if writeErr != nil {
 			logging.Warnf("Failed to atomically update movie result for %s after apply failure: %v", filePath, writeErr)
 			inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
@@ -351,16 +367,25 @@ func interpretApplyResult(
 	}
 
 	if result != nil && result.Movie != nil {
+		releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, filePath, result.Movie.ID))
 		if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			// Write the pipeline-updated movie back, but let the LIVE result's
 			// poster state win: a manual crop (or poster-from-URL / source edit)
 			// taken while this file was being organized must not be clobbered by
-			// the apply-start snapshot result.Movie was cloned from.
+			// the apply-start snapshot result.Movie was cloned from — and an
+			// edit that RE-KEYED the result mid-apply (live identity differs)
+			// keeps its whole movie: the write-back touches nothing (P2-5).
+			// Holding the live key's poster-source lock makes the key resolution
+			// and the write one critical section against crop/edit writers.
 			// Design note: the physical poster file just written on disk came
 			// from that apply-start snapshot's source — merging the live poster
 			// identity here updates the ENVELOPE only; it does not retro-crop
 			// the written file. A subsequent re-organize picks up the new
 			// (live) source and reproduces the crop from it.
+			if current.Movie != nil && current.Movie.ID != result.Movie.ID {
+				logging.Debugf("apply write-back skipped for %s — live movie %q re-keyed away from pipeline movie %q", filePath, current.Movie.ID, result.Movie.ID)
+				return current, nil
+			}
 			next := result.Movie.Clone()
 			mergeLivePosterState(next, current.Movie)
 			current.Movie = next
@@ -368,6 +393,7 @@ func interpretApplyResult(
 		}); err != nil {
 			logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err)
 		}
+		releasePosterLock()
 		outcome.Movie = result.Movie
 	}
 
@@ -426,6 +452,7 @@ func applyFile(
 	}
 
 	rc := recoveryContext{
+		jobID:    inputs.JobID,
 		filePath: filePath,
 		// Preserve the existing FileMatchInfo (incl. IsMultiPart / PartNumber /
 		// PartSuffix set by the earlier discovery/scrape phases) on the panic
@@ -482,6 +509,24 @@ func trackApplyResults(inputs applyPhaseInputs, outcomes []applyFileOutcome, org
 			auditOrganizePanic(inputs, o)
 		}
 	}
+}
+
+// liveWritebackLockKey resolves the poster-source lock key a pipeline
+// write-back must serialize under: the LIVE result's movie ID when readable
+// through the updater (a mid-flight edit may have re-keyed the result since
+// the pipeline's snapshot — the write-back would otherwise hold a lock that
+// serializes against NOTHING the live movie's writers take) with the
+// snapshot's ID as fallback for updater seams without read access (test
+// stubs) or results without a movie. Callers then hold the lock across the
+// atomic update and re-check identity inside it (both merge call sites
+// guard on live-vs-write-back ID mismatch and keep the live movie then).
+func liveWritebackLockKey(updater resultstore.ResultUpdater, filePath, snapshotID string) string {
+	if reader, ok := updater.(resultstore.ResultMapAccessor); ok {
+		if live, err := reader.GetMovieResult(filePath); err == nil && live != nil && live.Movie != nil && live.Movie.ID != "" {
+			return live.Movie.ID
+		}
+	}
+	return snapshotID
 }
 
 // mergeLivePosterState overlays the LIVE result's poster identity onto a

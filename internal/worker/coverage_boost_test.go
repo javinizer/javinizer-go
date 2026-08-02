@@ -316,6 +316,9 @@ func TestJobStore_setDepsFromConfig(t *testing.T) {
 				BatchCfg:  BatchJobConfig{MaxWorkers: 3},
 				Emitter:   mockEmitter,
 				PersistFn: persistFn,
+				PersistErrFn: func() error {
+					return assert.AnError
+				},
 			},
 		}
 		job.controller.setDepsFromConfig(cfg)
@@ -324,6 +327,13 @@ func TestJobStore_setDepsFromConfig(t *testing.T) {
 		assert.Equal(t, 3, job.deps.BatchCfg.MaxWorkers)
 		assert.Equal(t, mockEmitter, job.deps.Emitter)
 		assert.NotNil(t, job.deps.PersistFn)
+		require.NotNil(t, job.deps.PersistErrFn)
+		assert.ErrorIs(t, job.deps.PersistErrFn(), assert.AnError)
+		// buildRescrapeInputs forwards it to the phase's critical-section
+		// envelope persist.
+		inputs := job.controller.buildRescrapeInputs(wf, job.controller.resolveBatchCfg())
+		require.NotNil(t, inputs.PersistEnvelope)
+		assert.ErrorIs(t, inputs.PersistEnvelope(), assert.AnError)
 	})
 
 	t.Run("replaces BatchCfg when new config has fields", func(t *testing.T) {

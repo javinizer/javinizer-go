@@ -43,7 +43,7 @@ func (_m *MockBatchJobInterface) EXPECT() *MockBatchJobInterface_Expecter {
 }
 
 // ApplyFieldOverride provides a mock function for the type MockBatchJobInterface
-func (_mock *MockBatchJobInterface) ApplyFieldOverride(ctx context.Context, resultID string, fieldKey string, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, func() error, error) {
+func (_mock *MockBatchJobInterface) ApplyFieldOverride(ctx context.Context, resultID string, fieldKey string, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 	ret := _mock.Called(ctx, resultID, fieldKey, source)
 
 	if len(ret) == 0 {
@@ -52,9 +52,8 @@ func (_mock *MockBatchJobInterface) ApplyFieldOverride(ctx context.Context, resu
 
 	var r0 *resultstore.MovieResult
 	var r1 *resultstore.ProvenanceData
-	var r2 func() error
-	var r3 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, func() error, error)); ok {
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)); ok {
 		return returnFunc(ctx, resultID, fieldKey, source)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) *resultstore.MovieResult); ok {
@@ -71,19 +70,12 @@ func (_mock *MockBatchJobInterface) ApplyFieldOverride(ctx context.Context, resu
 			r1 = ret.Get(1).(*resultstore.ProvenanceData)
 		}
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, string) func() error); ok {
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, string) error); ok {
 		r2 = returnFunc(ctx, resultID, fieldKey, source)
 	} else {
-		if ret.Get(2) != nil {
-			r2 = ret.Get(2).(func() error)
-		}
+		r2 = ret.Error(2)
 	}
-	if returnFunc, ok := ret.Get(3).(func(context.Context, string, string, string) error); ok {
-		r3 = returnFunc(ctx, resultID, fieldKey, source)
-	} else {
-		r3 = ret.Error(3)
-	}
-	return r0, r1, r2, r3
+	return r0, r1, r2
 }
 
 // MockBatchJobInterface_ApplyFieldOverride_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyFieldOverride'
@@ -128,12 +120,12 @@ func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) Run(run func(ctx contex
 	return _c
 }
 
-func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) Return(movieResult *resultstore.MovieResult, provenanceData *resultstore.ProvenanceData, fn func() error, err error) *MockBatchJobInterface_ApplyFieldOverride_Call {
-	_c.Call.Return(movieResult, provenanceData, fn, err)
+func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) Return(movieResult *resultstore.MovieResult, provenanceData *resultstore.ProvenanceData, err error) *MockBatchJobInterface_ApplyFieldOverride_Call {
+	_c.Call.Return(movieResult, provenanceData, err)
 	return _c
 }
 
-func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) RunAndReturn(run func(ctx context.Context, resultID string, fieldKey string, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, func() error, error)) *MockBatchJobInterface_ApplyFieldOverride_Call {
+func (_c *MockBatchJobInterface_ApplyFieldOverride_Call) RunAndReturn(run func(ctx context.Context, resultID string, fieldKey string, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)) *MockBatchJobInterface_ApplyFieldOverride_Call {
 	_c.Call.Return(run)
 	return _c
 }

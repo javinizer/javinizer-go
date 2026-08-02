@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/poster"
@@ -76,97 +78,67 @@ func rescrapePhaseTestInputs(t *testing.T, wf *stubRescrapeWorkflow, gen *snapsh
 	}, tracker.(*resultstore.ResultTracker), filePath
 }
 
-// TestRescrapePhase_Rescrape_AttachesPosterCacheRollbackOnSuccess pins F-B's
-// worker half: GeneratePoster replaces {movieID}-full.jpg BEFORE the commit,
-// so the successful outcome must carry a snapshot-based rollback the caller
-// can invoke when its post-commit envelope persist fails. The snapshot is
-// taken before generation, and invoking the rollback restores via
-// RestorePosterAssets.
-func TestRescrapePhase_Rescrape_AttachesPosterCacheRollbackOnSuccess(t *testing.T) {
+// TestRescrapePhase_Rescrape_PersistRunsUnderHeldLocks pins P1-1's core move:
+// the job-envelope persist is part of the rescrape's poster-source-lock
+// critical section. A probe contending on the SAME (job, movie) key while
+// the persist runs must block until the phase returns — and observe the
+// fully post-persist state afterwards.
+func TestRescrapePhase_Rescrape_PersistRunsUnderHeldLocks(t *testing.T) {
 	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
-		Movie: &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
+		Movie:        &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
+		FieldSources: map[string]string{"title": "stub"},
 	}}
 	gen := &snapshotStubPosterGen{}
-	inputs, _, filePath := rescrapePhaseTestInputs(t, wf, gen)
+	inputs, tracker, filePath := rescrapePhaseTestInputs(t, wf, gen)
+
+	persistRan := make(chan struct{})
+	probeAcquired := make(chan struct{})
+	probeDone := make(chan struct{})
+	inputs.PersistEnvelope = func() error {
+		// A concurrent writer contending on the same key while the persist
+		// executes must NOT acquire until the phase's locks are released.
+		go func() {
+			defer close(probeDone)
+			release := AcquirePosterSourceLock(inputs.JobID.String(), "RBK-001")
+			defer release()
+			close(probeAcquired)
+		}()
+		close(persistRan)
+		select {
+		case <-probeAcquired:
+			t.Error("probe acquired the poster-source lock while the phase still held it")
+		case <-time.After(50 * time.Millisecond):
+		}
+		return nil
+	}
 
 	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
+	assert.NoError(t, outcome.PersistErr)
+	<-persistRan
+	<-probeAcquired // the probe could only acquire after the phase released
+	<-probeDone
 
-	assert.Equal(t, 1, gen.snapshots, "the cache must be snapshotted before GeneratePoster replaces it")
+	assert.Equal(t, 1, gen.snapshots, "the cache is snapshotted before GeneratePoster replaces it")
 	assert.Equal(t, 1, gen.generated)
-	require.NotNil(t, outcome.PosterCacheRollback,
-		"a successful rescrape must carry its pre-generation cache snapshot for the envelope-persist failure path")
-
-	require.NoError(t, outcome.PosterCacheRollback())
-	assert.Equal(t, 1, gen.restores, "the rollback restores the pre-generation assets")
-}
-
-// TestRescrapePhase_Rescrape_NoRollbackWithoutSnapshooter pins the degrade:
-// a generator without the snapshot capability (test-stub style) leaves the
-// rollback nil — the persist-failure path then restores nothing (same
-// contract as RefreshPosterAssets with a non-snapshotting generator).
-func TestRescrapePhase_Rescrape_NoRollbackWithoutSnapshooter(t *testing.T) {
-	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
-		Movie: &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
-	}}
-	inputs, _, filePath := rescrapePhaseTestInputs(t, wf, nil)
-	inputs.PosterGen = &recordingPosterGen{} // no snapshot/restore methods
-
-	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
+	assert.Equal(t, 0, gen.restores, "a successful persist never rolls back")
+	committed, err := tracker.GetMovieResult(filePath)
 	require.NoError(t, err)
-	require.NotNil(t, outcome)
-	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
-	assert.Nil(t, outcome.PosterCacheRollback)
+	assert.Equal(t, "New", committed.Movie.Title, "the committed state stands")
+	// Provenance propagated to the store BEFORE the persist (it rides the
+	// envelope) — moved into the phase from jobController.Rescrape.
+	prov := tracker.GetProvenance(filePath)
+	require.NotNil(t, prov)
+	assert.Equal(t, "stub", prov.FieldSources["title"])
 }
 
-// TestRescrapePhase_Rescrape_SnapshotFailureDegradesToNoRollback ensures a
-// snapshot failure does not reject an otherwise successful rescrape (poster
-// generation itself is already best-effort): the outcome carries no rollback.
-func TestRescrapePhase_Rescrape_SnapshotFailureDegradesToNoRollback(t *testing.T) {
-	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
-		Movie: &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
-	}}
-	gen := &snapshotStubPosterGen{snapshotErr: errors.New("disk gone")}
-	inputs, _, filePath := rescrapePhaseTestInputs(t, wf, gen)
-
-	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
-	require.NoError(t, err)
-	require.NotNil(t, outcome)
-	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
-	assert.Equal(t, 1, gen.generated, "the rescrape still generates posters after a snapshot failure")
-	assert.Nil(t, outcome.PosterCacheRollback,
-		"a failed snapshot means nothing can be restored — no rollback is attached")
-}
-
-// TestRescrapePhase_Rescrape_FailedRescrapeCarriesNoRollback pins the failure
-// half: non-success outcomes already unwind the generated assets via
-// withRescrapeStatus's cleanup, so attaching the snapshot restore there
-// would resurrect assets the cleanup deliberately removed.
-func TestRescrapePhase_Rescrape_FailedRescrapeCarriesNoRollback(t *testing.T) {
-	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
-		Status:  scrape.StatusFailed,
-		Message: "no results",
-	}}
-	gen := &snapshotStubPosterGen{}
-	inputs, _, filePath := rescrapePhaseTestInputs(t, wf, gen)
-
-	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
-	require.NoError(t, err)
-	require.NotNil(t, outcome)
-	require.Equal(t, models.RescrapeStatusFailed, outcome.Status)
-	assert.Equal(t, 0, gen.snapshots, "a failed scrape never reaches poster generation")
-	assert.Nil(t, outcome.PosterCacheRollback)
-}
-
-// TestRescrapePhase_Rescrape_AttachesResultStateRollbackOnSuccess pins F1's
-// worker half: the pre-rescrape MovieResult is snapshotted (cloned) under the
-// poster lock at the commit-capture point, so a post-commit envelope persist
-// failure can restore the in-memory result to the exact state the CAS commit
-// replaced — memory then converges with the cache rollback and the
-// unpersisted envelope.
-func TestRescrapePhase_Rescrape_AttachesResultStateRollbackOnSuccess(t *testing.T) {
+// TestRescrapePhase_Rescrape_NoPersistFnKeepsPreHoistFlow pins the degrade:
+// without an envelope-persist seam (standalone jobs, tests), the phase
+// persists nothing and reports no failure — exactly the pre-hoist non-API
+// flow.
+func TestRescrapePhase_Rescrape_NoPersistFnKeepsPreHoistFlow(t *testing.T) {
 	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
 		Movie: &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
 	}}
@@ -175,75 +147,86 @@ func TestRescrapePhase_Rescrape_AttachesResultStateRollbackOnSuccess(t *testing.
 
 	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
 	require.NoError(t, err)
+	require.NotNil(t, outcome)
 	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
-
+	assert.NoError(t, outcome.PersistErr)
+	assert.Equal(t, 1, gen.snapshots)
+	assert.Equal(t, 0, gen.restores, "with no persist there is nothing to roll back")
 	committed, err := tracker.GetMovieResult(filePath)
 	require.NoError(t, err)
-	require.Equal(t, "New", committed.Movie.Title, "the commit landed before the persist-failure rollback runs")
+	assert.Equal(t, "New", committed.Movie.Title)
+}
 
-	require.NotNil(t, outcome.ResultStateRollback,
-		"a successful rescrape must carry its pre-rescrape in-memory snapshot for the envelope-persist failure path")
-	require.NoError(t, outcome.ResultStateRollback())
+// TestRescrapePhase_Rescrape_PersistFailureRollsBackEverythingUnderLock pins
+// the rollback half: a failed in-section persist restores the in-memory
+// MovieResult AND the pre-rescrape provenance (P2-4) AND the replaced poster
+// cache — all before the phase's locks release. A probe holding the same key
+// afterwards observes the fully pre-rescrape state, never an interleaved
+// half-revert.
+func TestRescrapePhase_Rescrape_PersistFailureRollsBackEverythingUnderLock(t *testing.T) {
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Movie:        &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
+		FieldSources: map[string]string{"title": "stub"},
+	}}
+	gen := &snapshotStubPosterGen{}
+	inputs, tracker, filePath := rescrapePhaseTestInputs(t, wf, gen)
+	preProv := &resultstore.ProvenanceData{FieldSources: map[string]string{"title": "old-source"}}
+	tracker.SetProvenance(filePath, preProv)
+
+	// A probe contending on the same (job, movie) key from inside the
+	// persist: it can only acquire AFTER the phase released its locks, so
+	// whatever it observes must be the fully-rolled-back (pre-rescrape)
+	// state — never an interleaved half-revert.
+	probeObservedTitle := make(chan string, 1)
+	probeDone := make(chan struct{})
+	inputs.PersistEnvelope = func() error {
+		go func() {
+			defer close(probeDone)
+			release := AcquirePosterSourceLock(inputs.JobID.String(), "RBK-001")
+			defer release()
+			if live, getErr := tracker.GetMovieResult(filePath); getErr == nil && live.Movie != nil {
+				probeObservedTitle <- live.Movie.Title
+			} else {
+				probeObservedTitle <- "<missing>"
+			}
+		}()
+		return errors.New("job repository unavailable")
+	}
+
+	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
+	require.NoError(t, err)
+	<-probeDone
+	assert.Equal(t, "Old", <-probeObservedTitle,
+		"the contending probe sees only the fully pre-rescrape state — the whole rollback completed under the held locks before release")
+	require.NotNil(t, outcome)
+	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
+	require.Error(t, outcome.PersistErr, "the in-section persist failure must surface on the outcome")
+	assert.Contains(t, outcome.PersistErr.Error(), "job repository unavailable")
+	assert.NotContains(t, outcome.PersistErr.Error(), "degraded", "every rollback leg is armed here")
 
 	restored, err := tracker.GetMovieResult(filePath)
 	require.NoError(t, err)
 	require.NotNil(t, restored.Movie)
-	assert.Equal(t, "Old", restored.Movie.Title, "memory must converge back to the pre-rescrape state")
+	assert.Equal(t, "Old", restored.Movie.Title, "F1: memory converges back to the pre-rescrape state")
 	assert.Equal(t, "https://old.invalid/poster.jpg", restored.Movie.Poster.PosterURL)
-	assert.Equal(t, "RBK-001", restored.FileMatchInfo.MovieID)
-	assert.Greater(t, restored.Revision, committed.Revision,
-		"the restore is a normal store write: the revision moves forward, so later CAS writers are unaffected")
 
-	// Repeat invocation stays pristine (the closure re-clones the snapshot).
-	require.NoError(t, outcome.ResultStateRollback())
-	again, err := tracker.GetMovieResult(filePath)
-	require.NoError(t, err)
-	assert.Equal(t, "Old", again.Movie.Title)
+	gotProv := tracker.GetProvenance(filePath)
+	require.NotNil(t, gotProv)
+	assert.Equal(t, "old-source", gotProv.FieldSources["title"],
+		"P2-4: provenance is restored to the pre-rescrape attribution")
+
+	assert.Equal(t, 1, gen.restores, "the destination cache leg restores the pre-generation assets")
 }
 
-// TestRescrapePhase_Rescrape_StateRollbackDegradesForReadOnlyStore pins the
-// degrade: a ResultMap without the write-back capability (a stub accessor)
-// leaves the state rollback nil — the cache rollback is unaffected.
-func TestRescrapePhase_Rescrape_StateRollbackDegradesForReadOnlyStore(t *testing.T) {
-	const filePath = "/source/rbk-ro.mp4"
-	stub := newStubResultMap()
-	stub.results[filePath] = &resultstore.MovieResult{
-		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "RBK-RO"},
-		Status:        models.JobStatusCompleted,
-		Movie:         &models.Movie{ID: "RBK-RO", Title: "Old"},
-	}
-	stub.matchInfo[filePath] = models.FileMatchInfo{Path: filePath, MovieID: "RBK-RO"}
-	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
-		Movie: &models.Movie{ID: "RBK-RO", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
-	}}
-	gen := &snapshotStubPosterGen{}
-	inputs := rescrapePhaseInputs{
-		JobID:     models.NewJobID(),
-		WF:        wf,
-		PosterGen: gen,
-		ResultMap: stub,
-		Finder:    resultstore.New(0, nil), // cmd.FilePath is set — only GetRevision is used
-		Lifecycle: &stubLifecycle{},
-	}
-
-	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-RO", FilePath: filePath})
-	require.NoError(t, err)
-	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
-	assert.Nil(t, outcome.ResultStateRollback,
-		"a store that cannot be written back through cannot restore in-memory state")
-	assert.NotNil(t, outcome.PosterCacheRollback, "the asset rollback is independent of the store write-back capability")
-}
-
-// TestRescrapePhase_Rescrape_RekeyRollbackRestoresOriginAssets pins F2: a
-// rekeying rescrape (A→B) snapshots BOTH the destination's pre-generation
-// assets and origin A's pre-cleanup assets — withRescrapeStatus's success-path
-// orphan cleanup deletes A's assets after the commit, before the caller's
-// envelope persist, so the rollback must be able to recreate them.
-func TestRescrapePhase_Rescrape_RekeyRollbackRestoresOriginAssets(t *testing.T) {
+// TestRescrapePhase_Rescrape_PersistFailureRekeyRestoresOriginToo pins F2
+// under the in-section persist: a rekeying rescrape (A→B) whose envelope
+// persist fails restores the destination's pre-generation assets AND origin
+// A's pre-cleanup assets (withRescrapeStatus's orphan cleanup deleted them
+// before the persist), and re-keys memory back to A.
+func TestRescrapePhase_Rescrape_PersistFailureRekeyRestoresOriginToo(t *testing.T) {
 	const (
-		movieA = "RBK-ORIG"
-		movieB = "RBK-ZDEST" // sorts after the origin: the no-swap lock path
-
+		movieA   = "RBK-ORIG"
+		movieB   = "RBK-ZDEST" // sorts after the origin: the no-swap lock path
 		filePath = "/source/rbk-rekey.mp4"
 	)
 	tracker := resultstore.New(1, []string{filePath})
@@ -264,38 +247,61 @@ func TestRescrapePhase_Rescrape_RekeyRollbackRestoresOriginAssets(t *testing.T) 
 		Finder:    tracker,
 		Lifecycle: &stubLifecycle{},
 	}
+	var persistCalls atomic.Int32
+	inputs.PersistEnvelope = func() error {
+		persistCalls.Add(1)
+		return errors.New("job repository unavailable")
+	}
 
 	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: movieA, FilePath: filePath})
 	require.NoError(t, err)
 	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
+	require.Error(t, outcome.PersistErr)
+	assert.Equal(t, int32(1), persistCalls.Load(), "the persist ran once, inside the phase")
 
-	require.Equal(t, movieB, tracker.GetCurrentMovieID(filePath), "the rekey committed")
-	assert.Contains(t, outcome.OrphanedMovieIDs, movieA)
-	assert.Equal(t, []string{movieB, movieA}, gen.snapshotIDs,
-		"the destination snapshot is taken before generation, the origin snapshot alongside it")
-
-	// The in-memory rollback re-keys the store entry back to the origin.
-	require.NoError(t, outcome.ResultStateRollback())
 	assert.Equal(t, movieA, tracker.GetCurrentMovieID(filePath),
 		"F1 on a rekey: memory converges back to the pre-rescrape identity")
 	restored, err := tracker.GetMovieResult(filePath)
 	require.NoError(t, err)
 	assert.Equal(t, "Old A", restored.Movie.Title)
 
-	// The cache rollback restores BOTH asset sets: the destination's
-	// pre-generation assets and the origin's pre-cleanup assets.
-	require.NoError(t, outcome.PosterCacheRollback())
-	require.Equal(t, 2, gen.restores, "origin A's deleted assets must be recoverable too (F2)")
+	assert.Equal(t, []string{movieB, movieA}, gen.snapshotIDs,
+		"the destination snapshot precedes generation; the origin snapshot rides along")
+	assert.Equal(t, 2, gen.restores,
+		"F2: origin A's deleted assets must be recoverable too")
 	assert.ElementsMatch(t, gen.snaps, gen.restored,
-		"every snapshot taken (destination + origin) is restored by the composed rollback")
+		"every snapshot taken (destination + origin) is restored by the cache leg")
 }
 
-// TestRescrapePhase_Rescrape_RekeyOriginSnapshotFailureDegrades pins F2's
-// degrade: when the ORIGIN A's asset snapshot fails on a rekeying rescrape,
-// the rescrape still succeeds (snapshot failure never rejects), and the
-// rollback restores only the destination's assets — nothing claims origin A
-// can be recovered.
-func TestRescrapePhase_Rescrape_RekeyOriginSnapshotFailureDegrades(t *testing.T) {
+// TestRescrapePhase_Rescrape_PersistFailureNotesDegradedRollback pins P3-7:
+// when the destination asset snapshot fails (so the cache leg cannot be
+// armed), the surfaced persist error must SAY the rollback is degraded
+// instead of silently implying a full revert.
+func TestRescrapePhase_Rescrape_PersistFailureNotesDegradedRollback(t *testing.T) {
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Movie: &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
+	}}
+	gen := &snapshotStubPosterGen{snapshotErr: errors.New("disk gone")}
+	inputs, _, filePath := rescrapePhaseTestInputs(t, wf, gen)
+	inputs.PersistEnvelope = func() error { return errors.New("job repository unavailable") }
+
+	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
+	require.NoError(t, err)
+	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
+	require.Error(t, outcome.PersistErr)
+	assert.Contains(t, outcome.PersistErr.Error(), "job repository unavailable")
+	assert.Contains(t, outcome.PersistErr.Error(), "degraded rollback")
+	assert.Contains(t, outcome.PersistErr.Error(), "destination poster cache rollback unavailable",
+		"the un-armable cache leg must be called out on the surfaced error")
+	assert.Equal(t, 1, gen.generated, "the rescrape itself still ran (snapshot failure never rejects)")
+	assert.Equal(t, 0, gen.restores, "the failed snapshot means no cache leg could run")
+}
+
+// TestRescrapePhase_Rescrape_PersistFailureRekeyOriginSnapshotDegrade pins
+// the rekey half of P3-7: the ORIGIN snapshot failure degrades only its own
+// leg — the destination cache still restores and the error names the missing
+// origin leg.
+func TestRescrapePhase_Rescrape_PersistFailureRekeyOriginSnapshotDegrade(t *testing.T) {
 	const (
 		movieA   = "RBK-ORIG"
 		movieB   = "RBK-ZDEST"
@@ -319,20 +325,101 @@ func TestRescrapePhase_Rescrape_RekeyOriginSnapshotFailureDegrades(t *testing.T)
 		Finder:    tracker,
 		Lifecycle: &stubLifecycle{},
 	}
+	inputs.PersistEnvelope = func() error { return errors.New("job repository unavailable") }
 
 	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: movieA, FilePath: filePath})
 	require.NoError(t, err)
 	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
-	assert.Equal(t, []string{movieB, movieA}, gen.snapshotIDs,
-		"both snapshots are attempted")
+	require.Error(t, outcome.PersistErr)
+	assert.Equal(t, []string{movieB, movieA}, gen.snapshotIDs, "both snapshots are attempted")
+	assert.Equal(t, 1, gen.restores, "only the destination snapshot could be restored")
+	assert.Contains(t, outcome.PersistErr.Error(), "origin poster cache rollback unavailable",
+		"the un-armable ORIGIN leg is named on the surfaced error")
+	assert.Equal(t, movieA, tracker.GetCurrentMovieID(filePath),
+		"memory still re-keys back despite the degraded cache leg")
+}
 
-	require.NotNil(t, outcome.PosterCacheRollback)
-	require.NoError(t, outcome.PosterCacheRollback())
-	assert.Equal(t, 1, gen.restores, "only the destination snapshot can be restored")
+// TestRescrapePhase_Rescrape_PersistFailureReadOnlyStoreNotesDegradation pins
+// the state-leg degrade: a ResultMap without write-back capability (stub
+// accessor) still rolls the cache back, and the surfaced error notes the
+// in-memory state could not be restored.
+func TestRescrapePhase_Rescrape_PersistFailureReadOnlyStoreNotesDegradation(t *testing.T) {
+	const filePath = "/source/rbk-ro.mp4"
+	stub := newStubResultMap()
+	stub.results[filePath] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "RBK-RO"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "RBK-RO", Title: "Old"},
+	}
+	stub.matchInfo[filePath] = models.FileMatchInfo{Path: filePath, MovieID: "RBK-RO"}
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Movie: &models.Movie{ID: "RBK-RO", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
+	}}
+	gen := &snapshotStubPosterGen{}
+	inputs := rescrapePhaseInputs{
+		JobID:     models.NewJobID(),
+		WF:        wf,
+		PosterGen: gen,
+		ResultMap: stub,
+		Finder:    resultstore.New(0, nil), // cmd.FilePath is set — only GetRevision is used
+		Lifecycle: &stubLifecycle{},
+	}
+	inputs.PersistEnvelope = func() error { return errors.New("job repository unavailable") }
 
-	// The in-memory restore is independent of the asset snapshots.
-	require.NoError(t, outcome.ResultStateRollback())
-	assert.Equal(t, movieA, tracker.GetCurrentMovieID(filePath))
+	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-RO", FilePath: filePath})
+	require.NoError(t, err)
+	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
+	require.Error(t, outcome.PersistErr)
+	assert.Contains(t, outcome.PersistErr.Error(), "in-memory state and provenance rollback unavailable",
+		"the un-armable state leg must be noted (P3-7)")
+	assert.Equal(t, 1, gen.restores, "the asset rollback is independent of the store write-back capability")
+}
+
+// TestRescrapePhase_Rescrape_FailedScrapeNeverPersists pins the failure half:
+// non-success outcomes already unwind the generated assets via
+// withRescrapeStatus's cleanup and must NOT touch the envelope persist.
+func TestRescrapePhase_Rescrape_FailedScrapeNeverPersists(t *testing.T) {
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Status:  scrape.StatusFailed,
+		Message: "no results",
+	}}
+	gen := &snapshotStubPosterGen{}
+	inputs, _, filePath := rescrapePhaseTestInputs(t, wf, gen)
+	var persistCalls atomic.Int32
+	inputs.PersistEnvelope = func() error {
+		persistCalls.Add(1)
+		return nil
+	}
+
+	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
+	require.NoError(t, err)
+	require.NotNil(t, outcome)
+	require.Equal(t, models.RescrapeStatusFailed, outcome.Status)
+	assert.NoError(t, outcome.PersistErr)
+	assert.Equal(t, 0, gen.snapshots, "a failed scrape never reaches poster generation")
+	assert.Equal(t, int32(0), persistCalls.Load(), "a failed rescrape never persists the envelope")
+}
+
+// TestRescrapePhase_Rescrape_PersistFailureCacheRollbackErrorSurfaced pins
+// the error channel of the in-section cache leg: a failed restore rides
+// along on the surfaced persist error while the memory restore still runs.
+func TestRescrapePhase_Rescrape_PersistFailureCacheRollbackErrorSurfaced(t *testing.T) {
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Movie: &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
+	}}
+	gen := &snapshotStubPosterGen{restoreErr: errors.New("restore exploded")}
+	inputs, tracker, filePath := rescrapePhaseTestInputs(t, wf, gen)
+	inputs.PersistEnvelope = func() error { return errors.New("job repository unavailable") }
+
+	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
+	require.NoError(t, err)
+	require.Error(t, outcome.PersistErr)
+	assert.Contains(t, outcome.PersistErr.Error(), "job repository unavailable")
+	assert.Contains(t, outcome.PersistErr.Error(), "poster rollback failed: restore exploded")
+
+	restored, err := tracker.GetMovieResult(filePath)
+	require.NoError(t, err)
+	assert.Equal(t, "Old", restored.Movie.Title, "the memory leg still runs when the cache leg fails")
 }
 
 // TestChainRollbacks pins the fusion helper: nil steps drop out (nil when all
@@ -353,4 +440,78 @@ func TestChainRollbacks(t *testing.T) {
 	require.ErrorIs(t, err, errFirst)
 	assert.Equal(t, []string{"first", "second"}, ran,
 		"every step attempts its restore even after an earlier failure")
+}
+
+// atomicRollbackFailStore delegates every call to a real tracker except
+// AtomicUpdateFileResult, which fails — driving the persist-failure state
+// leg's restore error deterministically.
+type atomicRollbackFailStore struct {
+	resultstore.Store
+	err error
+}
+
+func (s *atomicRollbackFailStore) AtomicUpdateFileResult(string, func(*resultstore.MovieResult) (*resultstore.MovieResult, error)) error {
+	return s.err
+}
+
+// TestRescrapePhase_Rescrape_PersistFailureStateRollbackErrorSurfaced flows
+// an in-memory restore failure to the surfaced persist error while
+// provenance restore and the cache leg still run.
+func TestRescrapePhase_Rescrape_PersistFailureStateRollbackErrorSurfaced(t *testing.T) {
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Movie:        &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
+		FieldSources: map[string]string{"title": "stub"},
+	}}
+	gen := &snapshotStubPosterGen{}
+	inputs, tracker, filePath := rescrapePhaseTestInputs(t, wf, gen)
+	tracker.SetProvenance(filePath, &resultstore.ProvenanceData{FieldSources: map[string]string{"title": "old-source"}})
+	inputs.ResultMap = &atomicRollbackFailStore{Store: tracker, err: errors.New("state store jammed")}
+	inputs.PersistEnvelope = func() error { return errors.New("job repository unavailable") }
+
+	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
+	require.NoError(t, err)
+	require.Error(t, outcome.PersistErr)
+	assert.Contains(t, outcome.PersistErr.Error(), "job repository unavailable")
+	assert.Contains(t, outcome.PersistErr.Error(), "state rollback failed: state store jammed",
+		"a failed in-memory restore surfaces alongside the persist error")
+
+	// The provenance leg still ran (delegated store) — restored to the
+	// pre-rescrape attribution even though the MovieResult restore failed.
+	prov := tracker.GetProvenance(filePath)
+	require.NotNil(t, prov)
+	assert.Equal(t, "old-source", prov.FieldSources["title"])
+	assert.Equal(t, 1, gen.restores, "the cache leg still runs")
+}
+
+// getResultFailStore hides GetMovieResult so the phase cannot capture a
+// pre-rescrape in-memory snapshot (the no-snapshot degrade leg).
+type getResultFailStore struct{ resultstore.Store }
+
+func (getResultFailStore) GetMovieResult(string) (*resultstore.MovieResult, error) {
+	return nil, errors.New("read gone")
+}
+
+// TestRescrapePhase_Rescrape_PersistFailureNoSnapshotDegrade pins the
+// state-leg degrade when NO snapshot could be captured: the cache leg still
+// restores and the surfaced error names the un-armable state leg (P3-7).
+func TestRescrapePhase_Rescrape_PersistFailureNoSnapshotDegrade(t *testing.T) {
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Movie: &models.Movie{ID: "RBK-001", Title: "New", Poster: models.PosterState{PosterURL: "https://new.invalid/poster.jpg"}},
+	}}
+	gen := &snapshotStubPosterGen{}
+	inputs, tracker, filePath := rescrapePhaseTestInputs(t, wf, gen)
+	inputs.ResultMap = &getResultFailStore{Store: tracker}
+	inputs.PersistEnvelope = func() error { return errors.New("job repository unavailable") }
+
+	outcome, err := NewRescrapePhase().Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "RBK-001", FilePath: filePath})
+	require.NoError(t, err)
+	require.Error(t, outcome.PersistErr)
+	assert.Contains(t, outcome.PersistErr.Error(), "no pre-rescrape snapshot captured",
+		"the un-armable state leg must be named (P3-7)")
+	assert.Contains(t, outcome.PersistErr.Error(), "degraded rollback")
+	assert.Equal(t, 1, gen.restores, "the cache leg still restores")
+
+	current, err := tracker.GetMovieResult(filePath)
+	require.NoError(t, err)
+	assert.Equal(t, "New", current.Movie.Title, "memory stays rescraped — the degrade is reported, not hidden")
 }

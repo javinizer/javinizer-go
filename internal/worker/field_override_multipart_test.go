@@ -111,7 +111,7 @@ func TestApplyFieldOverride_MultipartPosterOverrideSyncsAllParts(t *testing.T) {
 	gen := &stubOverridePosterGen{stampCroppedURL: "fresh-preview-url"}
 	je.posterGen = gen
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.NoError(t, err)
 	require.NotNil(t, updated)
 
@@ -157,7 +157,7 @@ func TestApplyFieldOverride_MultipartPosterOverrideSyncsAllParts(t *testing.T) {
 func TestApplyFieldOverride_MultipartTitleOverridePreservesPerPartIdentity(t *testing.T) {
 	je, tracker, resultID, part1, part2 := multipartOverrideFixture(t, "TTL-001", "https://old.example/poster.jpg", "", false)
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "title", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "title", "dmm")
 	require.NoError(t, err)
 	require.NotNil(t, updated)
 	assert.Equal(t, "DMM Title", updated.Movie.Title)
@@ -229,7 +229,7 @@ func TestApplyFieldOverride_MultipartCoverOverrideSyncsAllParts(t *testing.T) {
 	gen := &stubOverridePosterGen{}
 	je.posterGen = gen
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "cover_url", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "cover_url", "dmm")
 	require.NoError(t, err)
 	require.NotNil(t, updated)
 
@@ -267,7 +267,7 @@ func TestApplyFieldOverride_MultipartPersistFailureCompensatesAndRollsBack(t *te
 	}
 	je.store = failedStore
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.Error(t, err)
 	assert.Nil(t, updated)
 	assert.Contains(t, err.Error(), "persist field override")
@@ -310,7 +310,7 @@ func TestApplyFieldOverride_MultipartPersistFailureSkipsRevertWithoutOriginal(t 
 	}
 	je.store = failedStore
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.Error(t, err)
 	assert.Nil(t, updated)
 	assert.Contains(t, err.Error(), "persist field override")
@@ -351,7 +351,7 @@ func TestApplyFieldOverride_MultipartRevertFailureSurfaced(t *testing.T) {
 	}
 	je.store = failedStore
 
-	_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist field override")
 	assert.Contains(t, err.Error(), "revert of part")
@@ -427,7 +427,7 @@ func TestApplyFieldOverride_MultipartMergeFailureAbortsBeforePersist(t *testing.
 	}
 	je := &jobEditorImpl{store: tracker, jobID: "job-mrg"}
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), "res-mrg-1", "title", "scraper")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), "res-mrg-1", "title", "scraper")
 	require.Error(t, err)
 	assert.Nil(t, updated)
 	assert.Contains(t, err.Error(), "merge field override onto part")
@@ -453,7 +453,7 @@ func TestApplyFieldOverride_UnindexedMovieIDFallsBackToSelectedPath(t *testing.T
 	je.jobID = "job-noidx"
 	je.posterGen = &stubOverridePosterGen{}
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.NoError(t, err)
 	require.NotNil(t, updated)
 	assert.Equal(t, "dmm-poster-url", updated.Movie.Poster.PosterURL)
@@ -463,25 +463,29 @@ func TestApplyFieldOverride_UnindexedMovieIDFallsBackToSelectedPath(t *testing.T
 	assertPosterSourceLockFree(t, "job-noidx", "ABC-001")
 }
 
-// TestApplyFieldOverride_EnvelopeCompensationRevertsPartsCacheAndProvenance
-// pins F-A's worker half: the compensation function returned on success is
-// what the API handler runs when ITS envelope persist (PersistJobByID) fails
-// afterwards. It must revert BOTH parts to their pre-override movies, restore
-// the refresh snapshot, and restore the pre-override provenance — mirroring
-// the UpdateMovie-failure compensation but driven by the caller.
-func TestApplyFieldOverride_EnvelopeCompensationRevertsPartsCacheAndProvenance(t *testing.T) {
+// TestApplyFieldOverride_EnvelopePersistFailureCompensatesUnderLock pins
+// P1-2's worker half: the envelope persist runs INSIDE ApplyFieldOverride's
+// poster-source lock, and a failure is compensated in place — BOTH parts
+// revert to their pre-override movies, the pre-override provenance fan-out
+// is restored, and the refresh snapshot rolls back — BEFORE the lock
+// releases. The error wraps ErrEnvelopePersist so the handler maps it to
+// 5xx.
+func TestApplyFieldOverride_EnvelopePersistFailureCompensatesUnderLock(t *testing.T) {
 	je, tracker, resultID, part1, part2 := multipartOverrideFixture(t, "AUD-007", "https://old.example/poster.jpg", "", false)
 	gen := &stubOverrideSnapshotter{}
 	je.posterGen = gen
+	persistCalls := 0
+	je.persistEnvelope = func() error {
+		persistCalls++
+		return errors.New("job repository unavailable")
+	}
 
-	updated, _, compensate, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
-	require.NoError(t, err)
-	require.NotNil(t, updated)
-	require.NotNil(t, compensate, "a successful override must hand its caller the envelope-persist compensation")
-	assert.Equal(t, "dmm-poster-url", updated.Movie.Poster.PosterURL, "sanity: the override applied")
-
-	// The handler would run compensation only when PersistJobByID fails.
-	require.NoError(t, compensate())
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	require.Error(t, err, "a failed in-section persist must not ack the override")
+	assert.ErrorIs(t, err, ErrEnvelopePersist)
+	assert.Contains(t, err.Error(), "job repository unavailable")
+	assert.Nil(t, updated)
+	assert.Equal(t, 1, persistCalls, "the persist ran inside the critical section")
 
 	for _, fp := range []string{part1, part2} {
 		res, getErr := tracker.GetMovieResult(fp)
@@ -496,24 +500,26 @@ func TestApplyFieldOverride_EnvelopeCompensationRevertsPartsCacheAndProvenance(t
 			"part %s: the override attribution must not survive the compensation", fp)
 	}
 	assert.Equal(t, 1, gen.restoreCalls, "the refreshed cache must be rolled back")
+	assertPosterSourceLockFree(t, "job-mp", "AUD-007")
 }
 
 // TestApplyFieldOverride_EnvelopeCompensationRollbackFailureSurfaced pins the
-// error channel of the same closure: a failed cache restore must be reported
-// (joined) while the part revert still runs to completion.
+// error channel of the in-section compensation: a failed cache restore must
+// be reported (riding along on the persist error) while the part revert
+// still runs to completion.
 func TestApplyFieldOverride_EnvelopeCompensationRollbackFailureSurfaced(t *testing.T) {
 	je, tracker, resultID, part1, part2 := multipartOverrideFixture(t, "AUD-008", "https://old.example/poster.jpg", "", false)
 	gen := &stubOverrideSnapshotter{restoreErr: errors.New("restore exploded")}
 	je.posterGen = gen
+	je.persistEnvelope = func() error { return errors.New("job repository unavailable") }
 
-	updated, _, compensate, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
-	require.NoError(t, err)
-	require.NotNil(t, updated)
-	require.NotNil(t, compensate)
-
-	compErr := compensate()
-	require.Error(t, compErr, "a failed cache restore must surface, not be swallowed")
-	assert.Contains(t, compErr.Error(), "poster rollback failed: restore exploded")
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrEnvelopePersist)
+	assert.Contains(t, err.Error(), "job repository unavailable")
+	assert.Contains(t, err.Error(), "override revert failed")
+	assert.Contains(t, err.Error(), "poster rollback failed: restore exploded",
+		"a failed cache restore must surface, not be swallowed")
 
 	for _, fp := range []string{part1, part2} {
 		res, getErr := tracker.GetMovieResult(fp)
@@ -521,4 +527,34 @@ func TestApplyFieldOverride_EnvelopeCompensationRollbackFailureSurfaced(t *testi
 		assert.Equal(t, "https://old.example/poster.jpg", res.Movie.Poster.PosterURL,
 			"part %s still reverts even when the cache restore fails", fp)
 	}
+}
+
+// TestApplyFieldOverride_EnvelopePersistFailureSkipsRevertWithoutOriginal
+// pins the compensation's nil-original skip: a part whose pre-override
+// snapshot could not be read keeps the wholesale clone (there is no
+// per-part identity to revert TO), and the persist-failure compensation
+// reverts only the parts that HAVE originals.
+func TestApplyFieldOverride_EnvelopePersistFailureSkipsRevertWithoutOriginal(t *testing.T) {
+	je, tracker, resultID, part1, part2 := multipartOverrideFixture(t, "AUD-009", "https://old.example/poster.jpg", "", false)
+	gen := &stubOverrideSnapshotter{}
+	je.posterGen = gen
+	je.store = &overrideFailStore{Store: tracker, lookupErrPath: part2}
+	je.persistEnvelope = func() error { return errors.New("job repository unavailable") }
+
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrEnvelopePersist)
+	assert.NotContains(t, err.Error(), "override revert failed",
+		"the nil-original part is skipped, not error-reported, during compensation")
+
+	res1, getErr := tracker.GetMovieResult(part1)
+	require.NoError(t, getErr)
+	assert.Equal(t, "https://old.example/poster.jpg", res1.Movie.Poster.PosterURL,
+		"part1 (original snapshot present) is reverted")
+	res2, getErr := tracker.GetMovieResult(part2)
+	require.NoError(t, getErr)
+	require.NotNil(t, res2.Movie)
+	assert.Equal(t, "dmm-poster-url", res2.Movie.Poster.PosterURL,
+		"part2 (no original snapshot) keeps the wholesale clone — there is nothing to revert to")
+	assertPosterSourceLockFree(t, "job-mp", "AUD-009")
 }

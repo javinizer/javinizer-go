@@ -2,7 +2,6 @@ package batch
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -21,9 +20,12 @@ const bulkRescrapeMaxMovies = 100
 
 // bulkRescrapePool runs the bulk rescrape worker pool. It accepts a job,
 // movie IDs, request parameters, a batch job factory, and a progress
-// broadcast function, and returns per-movie results plus the poster-cache
-// rollback of every successful rescrape (for the caller's envelope
-// persist-failure compensation order — run them all before reporting).
+// broadcast function, and returns per-movie results plus each movie's
+// envelope-persist failure (nil per movie on success). Every movie's mint
+// persisted its envelope INSIDE its own poster-source locks — a failed
+// persist already rolled that movie's memory/provenance/cache back in the
+// phase, so there is no cross-movie rollback to schedule here; the
+// persistErrs only feed the caller's failure signal.
 func bulkRescrapePool(
 	ctx context.Context,
 	job worker.BatchJobInterface,
@@ -31,17 +33,17 @@ func bulkRescrapePool(
 	req *contracts.BatchRescrapeRequest,
 	factory worker.BatchJobFactoryInterface,
 	progressFn func(movieID string, result *contracts.BulkRescrapeMovieResult, progress float64),
-) ([]contracts.BulkRescrapeMovieResult, []func() error) {
+) ([]contracts.BulkRescrapeMovieResult, []error) {
 	type rescrapeMovieResult struct {
-		movieID  string
-		result   *contracts.BulkRescrapeMovieResult
-		rollback func() error // nil unless the rescrape succeeded with a snapshot
+		movieID    string
+		result     *contracts.BulkRescrapeMovieResult
+		persistErr error // non-nil when the movie's in-phase envelope persist failed
 	}
 
 	var mu sync.Mutex
 	var completedCount int
 	results := make([]contracts.BulkRescrapeMovieResult, 0, len(movieIDs))
-	rollbacks := make([]func() error, 0, len(movieIDs))
+	persistErrs := make([]error, 0, len(movieIDs))
 
 	movieChan := make(chan string, len(movieIDs))
 	resultChan := make(chan rescrapeMovieResult, len(movieIDs))
@@ -70,8 +72,8 @@ func bulkRescrapePool(
 			}()
 			for movieID := range movieChan {
 				currentMovieID = movieID
-				r, rollback := processBulkRescrapeMovie(ctx, movieID, job, req, factory)
-				resultChan <- rescrapeMovieResult{movieID: movieID, result: r, rollback: rollback}
+				r, persistErr := processBulkRescrapeMovie(ctx, movieID, job, req, factory)
+				resultChan <- rescrapeMovieResult{movieID: movieID, result: r, persistErr: persistErr}
 			}
 		}()
 	}
@@ -88,8 +90,8 @@ func bulkRescrapePool(
 
 	for mr := range resultChan {
 		mu.Lock()
-		if mr.rollback != nil {
-			rollbacks = append(rollbacks, mr.rollback)
+		if mr.persistErr != nil {
+			persistErrs = append(persistErrs, mr.persistErr)
 		}
 		results = append(results, *mr.result)
 		completedCount++
@@ -99,7 +101,7 @@ func bulkRescrapePool(
 		mu.Unlock()
 	}
 
-	return results, rollbacks
+	return results, persistErrs
 }
 
 func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
@@ -165,7 +167,6 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 			JobStore:  deps.GetJobStore(),
 			WfFactory: &apiWorkflowFactory{snap: rtSnap},
 			Factory:   factory,
-			Persist:   deps.GetJobStore(),
 			Broadcast: &runtimeStateBroadcaster{rs: rt.GetRuntime()},
 			ServerCtx: rt.ServerCtx(),
 		})
@@ -197,11 +198,13 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
-// processBulkRescrapeMovie rescrapes one movie. On success it also returns
-// the rescrape's poster-cache rollback (nil for stub jobs / missing
-// snapshots) so the caller can undo the asset replacement when the final
-// job-envelope persist fails.
-func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.BatchJobInterface, req *contracts.BatchRescrapeRequest, factory worker.BatchJobFactoryInterface) (*contracts.BulkRescrapeMovieResult, func() error) {
+// processBulkRescrapeMovie rescrapes one movie. The second return is the
+// movie's in-critical-section envelope-persist failure, if any (the phase
+// already rolled this movie's memory/provenance/cache back under its own
+// locks): such a movie reports RescrapeStatusFailed with the persist
+// detail, because its in-memory state reverted to pre-rescrape — acking
+// success would misreport what a restart reproduces.
+func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.BatchJobInterface, req *contracts.BatchRescrapeRequest, factory worker.BatchJobFactoryInterface) (*contracts.BulkRescrapeMovieResult, error) {
 	mergeOpts, mergeEnabled, mergeErr := resolveRescrapeMergeOptions(req)
 	if mergeErr != nil {
 		return &contracts.BulkRescrapeMovieResult{
@@ -252,36 +255,20 @@ func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.Ba
 		}, nil
 	}
 
+	if result.PersistErr != nil {
+		// The phase rolled this movie's state back under its held locks; the
+		// movie's CURRENT state is pre-rescrape, so report failure (with the
+		// persist detail) rather than a success the envelope contradicts.
+		return &contracts.BulkRescrapeMovieResult{
+			MovieID: movieID,
+			Status:  models.RescrapeStatusFailed,
+			Error:   result.PersistErr.Error(),
+		}, result.PersistErr
+	}
+
 	return &contracts.BulkRescrapeMovieResult{
 		MovieID: movieID,
 		Status:  models.RescrapeStatusSuccess,
 		Movie:   contracts.MovieViewFromModel(result.Movie),
-	}, combineRescrapeRollbacks(result.ResultStateRollback, result.PosterCacheRollback)
-}
-
-// combineRescrapeRollbacks fuses a successful rescrape's two persist-failure
-// compensations into one step: the in-memory MovieResult restore runs FIRST
-// and the poster-cache restore LAST — the part-revert-then-cache ordering the
-// override and PATCH compensations document, so no in-memory result still
-// references the rescraped state while the cache flips back. Every step
-// attempts its restore even if an earlier step failed. Returns nil when both
-// are nil so bulkRescrapePool records no empty step.
-func combineRescrapeRollbacks(state, cache func() error) func() error {
-	if state == nil && cache == nil {
-		return nil
-	}
-	return func() error {
-		var errs []error
-		if state != nil {
-			if err := state(); err != nil {
-				errs = append(errs, fmt.Errorf("state rollback failed: %w", err))
-			}
-		}
-		if cache != nil {
-			if err := cache(); err != nil {
-				errs = append(errs, fmt.Errorf("poster rollback failed: %w", err))
-			}
-		}
-		return errors.Join(errs...)
-	}
+	}, nil
 }

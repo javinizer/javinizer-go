@@ -399,6 +399,7 @@ func scrapeFile(
 	startTime := time.Now()
 
 	rc := recoveryContext{
+		jobID:     inputs.JobID,
 		filePath:  filePath,
 		fmi:       fmi,
 		updater:   inputs.Updater,
@@ -629,16 +630,26 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	// that landed while this file's persist queued would be overwritten by the
 	// scrape-time clone. Merge the LIVE result's poster state onto the saved
 	// movie instead of wholesale replacement (mergeLivePosterState — same fix
-	// class as the apply-phase write-backs).
+	// class as the apply-phase write-backs), UNDER the live movie's
+	// poster-source lock so no crop/edit interleaves between the key
+	// resolution and the write; on an identity mismatch (the live result was
+	// re-keyed mid-persist) the live movie is kept wholesale — Persisted is
+	// pipeline-owned and still moves.
+	releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, o.FilePath, o.MovieID))
 	_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		current.Persisted = true
 		if saved != nil {
 			next := saved.Clone()
-			mergeLivePosterState(next, current.Movie)
-			current.Movie = next
+			if current.Movie != nil && current.Movie.ID != next.ID {
+				logging.Debugf("scrape persist write-back skipped movie for %s — live movie %q re-keyed away from scraped movie %q", o.FilePath, current.Movie.ID, next.ID)
+			} else {
+				mergeLivePosterState(next, current.Movie)
+				current.Movie = next
+			}
 		}
 		return current, nil
 	})
+	releasePosterLock()
 	movieID := o.MovieID
 	if saved != nil {
 		movieID = saved.ID

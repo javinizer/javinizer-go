@@ -2,6 +2,7 @@ package batch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
@@ -20,7 +21,6 @@ type RescrapeOrchestrator struct {
 	jobStore  worker.JobStoreInterface
 	wfFactory WorkflowFactory
 	factory   worker.BatchJobFactoryInterface
-	persist   JobPersistencer
 	broadcast ProgressBroadcaster
 	serverCtx context.Context
 }
@@ -30,7 +30,6 @@ type RescrapeDeps struct {
 	JobStore  worker.JobStoreInterface
 	WfFactory WorkflowFactory
 	Factory   worker.BatchJobFactoryInterface
-	Persist   JobPersistencer
 	Broadcast ProgressBroadcaster
 	ServerCtx context.Context
 }
@@ -41,21 +40,9 @@ func NewRescrapeOrchestrator(deps RescrapeDeps) *RescrapeOrchestrator {
 		jobStore:  deps.JobStore,
 		wfFactory: deps.WfFactory,
 		factory:   deps.Factory,
-		persist:   deps.Persist,
 		broadcast: deps.Broadcast,
 		serverCtx: deps.ServerCtx,
 	}
-}
-
-// JobPersistencer persists a job by ID after rescrape.
-// The rescrape results are already committed at this point, so a persist
-// failure restores the in-memory MovieResult and rolls the replaced poster
-// caches back (via the rescrape result's ResultStateRollback +
-// PosterCacheRollback) and is surfaced on the orchestrator results
-// (PersistErr) instead of being acked as success — a restart would
-// otherwise resurrect pre-rescrape state against the rescraped images.
-type JobPersistencer interface {
-	PersistJobByID(id string) error
 }
 
 // ProgressBroadcaster broadcasts rescrape progress via WebSocket.
@@ -74,10 +61,11 @@ type RescrapeResult struct {
 	Failed    int
 	Results   []contracts.BulkRescrapeMovieResult
 	JobStatus *worker.BatchJobStatus
-	// PersistErr is non-nil when the post-commit job-envelope persist failed.
-	// The per-file rescrapes already committed (Results are valid); PersistErr
-	// tells the caller the envelope no longer matches them, so it can surface
-	// a failure signal instead of acking state a restart would resurrect
+	// PersistErr is non-nil when at least one movie's in-critical-section
+	// job-envelope persist failed (each such movie already rolled itself back
+	// INSIDE its own poster-source locks and reports RescrapeStatusFailed).
+	// It joins the per-movie persist errors so the caller can surface a
+	// failure signal instead of acking state a restart would resurrect
 	// alongside the rescraped poster images.
 	PersistErr error
 }
@@ -86,10 +74,11 @@ type RescrapeResult struct {
 type SingleRescrapeResult struct {
 	RescrapeResult *worker.RescrapeResult
 	JobID          string
-	// PersistErr is non-nil when the post-commit job-envelope persist failed
-	// (see RescrapeResult.PersistErr). The rescrape's in-memory result and
-	// poster cache were already restored to the pre-rescrape state when
-	// possible.
+	// PersistErr mirrors worker.RescrapeResult.PersistErr: non-nil when the
+	// in-critical-section job-envelope persist failed. The phase already
+	// restored the in-memory MovieResult, the provenance, and the poster
+	// caches to the pre-rescrape state (degraded legs are noted on the
+	// error text) before releasing its locks.
 	PersistErr error
 }
 
@@ -131,38 +120,17 @@ func (o *RescrapeOrchestrator) Rescrape(ctx context.Context, jobID, movieID, fil
 		return nil, err
 	}
 
-	if perr := o.persist.PersistJobByID(jobID); perr != nil {
-		// Restart (reconstructBatchJob reads only the envelope) would
-		// resurrect pre-rescrape job state while the result store and the
-		// temp poster cache still hold the rescraped state: restore ALL of it
-		// — in-memory MovieResult first, then the poster assets (the
-		// part-revert-then-cache ordering the override compensation
-		// documents, so no in-memory result still references the rescraped
-		// state while the cache flips back) — and surface the failure to the
-		// caller instead of warn-only acking it.
-		persistErr := fmt.Errorf("rescrape committed but job state persist failed: %w", perr)
-		if result != nil && result.ResultStateRollback != nil {
-			if rbErr := result.ResultStateRollback(); rbErr != nil {
-				persistErr = fmt.Errorf("%w (state rollback failed: %v)", persistErr, rbErr)
-			}
-		}
-		if result != nil && result.PosterCacheRollback != nil {
-			if rbErr := result.PosterCacheRollback(); rbErr != nil {
-				persistErr = fmt.Errorf("%w (poster rollback failed: %v)", persistErr, rbErr)
-			}
-		}
-		logging.Warnf("rescrape for job %s committed but job envelope persist failed: %v", jobID, perr)
-		return &SingleRescrapeResult{
-			RescrapeResult: result,
-			JobID:          jobID,
-			PersistErr:     persistErr,
-		}, nil
-	}
-
-	return &SingleRescrapeResult{
+	// The envelope persist already happened INSIDE the rescrape phase's
+	// poster-source-lock critical section (with memory+provenance+cache
+	// rollback on failure); the orchestrator only surfaces the outcome.
+	out := &SingleRescrapeResult{
 		RescrapeResult: result,
 		JobID:          jobID,
-	}, nil
+	}
+	if result != nil {
+		out.PersistErr = result.PersistErr
+	}
+	return out, nil
 }
 
 // BulkRescrape performs a bulk rescrape for multiple movies in a job.
@@ -219,24 +187,18 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 		}
 	}
 
-	results, posterRollbacks := bulkRescrapePool(workCtx, job, movieIDs, req, o.factory, progressFn)
+	results, persistErrs := bulkRescrapePool(workCtx, job, movieIDs, req, o.factory, progressFn)
 
+	// Each movie's mint already persisted its envelope INSIDE its own
+	// poster-source locks (rescrapePhase.Rescrape — no orchestrator-side
+	// persist or combined rollback remains, so the LIFO-replay machinery is
+	// gone too: a movie whose persist failed rolled back under its own locks
+	// and reports RescrapeStatusFailed; movies sharing a destination key
+	// serialize on it anyway). Aggregate the per-movie persist failures for
+	// the caller's failure signal.
 	var persistErr error
-	if perr := o.persist.PersistJobByID(jobID); perr != nil {
-		// Same restore-then-surface discipline as the single rescrape: every
-		// successful per-movie rescrape replaced its in-memory result and
-		// shared poster assets, so roll each back before reporting. Replay
-		// LIFO: the rollbacks were appended in per-movie COMPLETION order
-		// (bulkRescrapePool), so reversing undoes the batch newest-first —
-		// the mirror of the commit order, keeping every intermediate
-		// memory/cache pair a state the batch actually passed through.
-		persistErr = fmt.Errorf("bulk rescrape committed but job state persist failed: %w", perr)
-		for i := len(posterRollbacks) - 1; i >= 0; i-- {
-			if rbErr := posterRollbacks[i](); rbErr != nil {
-				persistErr = fmt.Errorf("%w (poster rollback failed: %v)", persistErr, rbErr)
-			}
-		}
-		logging.Warnf("bulk rescrape for job %s committed but job envelope persist failed: %v", jobID, perr)
+	if len(persistErrs) > 0 {
+		persistErr = fmt.Errorf("bulk rescrape: job state persist failed for %d movie(s): %w", len(persistErrs), errors.Join(persistErrs...))
 	}
 
 	succeeded := 0

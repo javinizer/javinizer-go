@@ -21,6 +21,7 @@ type recoverableOutcome interface {
 // It decouples the recovery logic from the specific phase inputs, so both
 // applyFile and scrapeFile can share it.
 type recoveryContext struct {
+	jobID     models.JobID
 	filePath  string
 	fmi       models.FileMatchInfo
 	movie     *models.Movie // optional: prior scrape-phase Movie to preserve on apply panic (mirrors fix in interpretApplyResult's err branch)
@@ -50,25 +51,51 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 			logging.Errorf("Worker panic %s: %v", rc.filePath, panicErr)
 
 			now := time.Now()
-			mr := &resultstore.MovieResult{
-				FileMatchInfo: rc.fmi,
-				Status:        models.JobStatusFailed,
-				Error:         panicErr.Error(),
-			}
+			// The panic write-back is a poster-state mutation like the
+			// apply-failure write-back: the carried movie is an in-flight
+			// snapshot, so a wholesale UpdateFileResult would erase a
+			// crop/source edit — or a re-keyed live movie — that landed while
+			// the worker ran. Take the LIVE movie's poster-source lock and only
+			// merge the carried movie when identities match; the live movie
+			// (and its FileMatchInfo) survive otherwise, and the pipeline-owned
+			// status/error/timestamps still move. The legacy wholesale write
+			// remains only for a vanished result (nothing live to clobber).
+			snapshotID := ""
 			if rc.movie != nil {
-				// Preserve the prior scrape-phase Movie on the apply panic path —
-				// mirrors interpretApplyResult's err-branch fix. Without this,
-				// /review/[jobId] failed-apply rows lose their movie payload
-				// (UpdateFileResult replaces the whole struct, preserving only
-				// ResultID + Revision). Same field-drop-on-failure-path pattern
-				// fixed for FileMatchInfo/timestamps in commit 6249de64.
-				mr.Movie = rc.movie
+				snapshotID = rc.movie.ID
 			}
-			if !rc.startTime.IsZero() {
-				mr.StartedAt = rc.startTime
-				mr.EndedAt = &now
+			releasePosterLock := AcquirePosterSourceLock(rc.jobID.String(), liveWritebackLockKey(rc.updater, rc.filePath, snapshotID))
+			writeErr := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+				current.Status = models.JobStatusFailed
+				current.Error = panicErr.Error()
+				if !rc.startTime.IsZero() {
+					current.StartedAt = rc.startTime
+					current.EndedAt = &now
+				}
+				// Preserve the prior scrape-phase Movie on the apply panic path
+				// (mirrors interpretApplyResult's err-branch fix), merging the
+				// live poster state — and only when identities match (P2-5).
+				if rc.movie != nil && (current.Movie == nil || current.Movie.ID == rc.movie.ID) {
+					merged := rc.movie.Clone()
+					mergeLivePosterState(merged, current.Movie)
+					current.Movie = merged
+				}
+				return current, nil
+			})
+			if writeErr != nil {
+				mr := &resultstore.MovieResult{
+					FileMatchInfo: rc.fmi,
+					Status:        models.JobStatusFailed,
+					Error:         panicErr.Error(),
+					Movie:         rc.movie,
+				}
+				if !rc.startTime.IsZero() {
+					mr.StartedAt = rc.startTime
+					mr.EndedAt = &now
+				}
+				rc.updater.UpdateFileResult(rc.filePath, mr)
 			}
-			rc.updater.UpdateFileResult(rc.filePath, mr)
+			releasePosterLock()
 
 			if rc.broadcast != nil {
 				rc.broadcast(panicErr.Error())

@@ -95,7 +95,6 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			JobStore:  rt.Deps().GetJobStore(),
 			WfFactory: &apiWorkflowFactory{snap: snap},
 			Factory:   factory,
-			Persist:   rt.Deps().GetJobStore(),
 			Broadcast: nil, // no progress broadcast for single rescrape
 			ServerCtx: rt.ServerCtx(),
 		})

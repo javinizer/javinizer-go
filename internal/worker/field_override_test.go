@@ -343,12 +343,12 @@ func TestApplyFieldOverride_ConcurrentDifferentFieldsSameResult(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-ready
-			_, _, _, errs[0] = je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
+			_, _, errs[0] = je.ApplyFieldOverride(context.Background(), resultID, "maker", "dmm")
 		}()
 		go func() {
 			defer wg.Done()
 			<-ready
-			_, _, _, errs[1] = je.ApplyFieldOverride(context.Background(), resultID, "title", "r18dev")
+			_, _, errs[1] = je.ApplyFieldOverride(context.Background(), resultID, "title", "r18dev")
 		}()
 		close(ready)
 		wg.Wait()
@@ -437,7 +437,7 @@ func TestRebuildActressSources_EmptyListClears(t *testing.T) {
 func TestApplyFieldOverride_ResultNotFound(t *testing.T) {
 	tracker := resultstore.New(1, []string{"x.mp4"})
 	je := &jobEditorImpl{store: tracker}
-	_, _, _, err := je.ApplyFieldOverride(context.Background(), "nope", "maker", "dmm")
+	_, _, err := je.ApplyFieldOverride(context.Background(), "nope", "maker", "dmm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -452,7 +452,7 @@ func TestApplyFieldOverride_BogusSourceErrors(t *testing.T) {
 	})
 	tracker.SetProvenance(filePath, prov)
 	je := &jobEditorImpl{store: tracker}
-	_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "nonexistent-source")
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "nonexistent-source")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "did not contribute")
 }
@@ -466,7 +466,7 @@ func TestApplyFieldOverride_NilProvenanceUsesSynthesizedFallback(t *testing.T) {
 		ResultID: resultID, FileMatchInfo: models.FileMatchInfo{Path: filePath}, Movie: movie, Status: models.JobStatusCompleted,
 	})
 	je := &jobEditorImpl{store: tracker}
-	res, prov, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "scraper")
+	res, prov, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "scraper")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	require.NotNil(t, prov)
@@ -505,7 +505,7 @@ func TestApplyFieldOverride_PersistErrorWrapped(t *testing.T) {
 	repo := mocks.NewMockMovieRepositoryInterface(t)
 	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
 	je := &jobEditorImpl{store: tracker, movieRepo: repo}
-	_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "scraper")
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "maker", "scraper")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist field override")
 }

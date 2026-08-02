@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -21,7 +20,6 @@ import (
 	workermocks "github.com/javinizer/javinizer-go/internal/mocks/worker"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/poster"
-	ws "github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -30,19 +28,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-// failingEnvelopePersist implements the orchestrator's JobPersistencer seam
-// with an always-failing upsert, pinning that a persist failure is now
-// SURFACED on the orchestrator result (PersistErr) — with the committed
-// per-file results retained — instead of warn-only. The poster cache was
-// already rolled back (PosterCacheRollback) so a restart cannot resurrect
-// pre-rescrape state against the rescraped image.
-type failingEnvelopePersist struct {
-	err   error
-	calls int
-}
-
-func (f *failingEnvelopePersist) PersistJobByID(string) error { f.calls++; return f.err }
 
 // stubWfFactory resolves any job to a fixed (nil-ok) workflow.
 type stubWfFactory struct{ err error }
@@ -68,114 +53,90 @@ func (stubRescrapeCmdFactory) NewRescrapeCmd(movieID, filePath, manualSearchInpu
 	}
 }
 
-func TestRescrapeOrchestrator_Rescrape_PersistFailureSurfacesAndRollsBack(t *testing.T) {
+// TestRescrapeOrchestrator_Rescrape_PersistFailureSurfaced pins P1-1's
+// orchestrator half: the envelope persist (and its rollback) ran INSIDE the
+// rescrape phase's critical section, so the orchestrator performs NO persist
+// and NO rollback of its own — it only surfaces the phase's PersistErr,
+// keeping the committed result shape for the caller.
+func TestRescrapeOrchestrator_Rescrape_PersistFailureSurfaced(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	rollbackCalls := 0
+	persistErr := errors.New("rescrape committed but job state persist failed: job repository unavailable")
 	mockJob := workermocks.NewMockBatchJobInterface(t)
 	mockJob.EXPECT().SetWorkflow(mock.Anything)
 	mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(
 		&worker.RescrapeResult{
-			Status: models.RescrapeStatusSuccess,
-			PosterCacheRollback: func() error {
-				rollbackCalls++
-				return nil
-			},
+			Status:     models.RescrapeStatusSuccess,
+			PersistErr: persistErr,
 		}, nil)
 
-	persist := &failingEnvelopePersist{err: errors.New("job repository unavailable")}
 	orch := NewRescrapeOrchestrator(RescrapeDeps{
 		JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
 		WfFactory: stubWfFactory{},
 		Factory:   stubRescrapeCmdFactory{},
-		Persist:   persist,
 		ServerCtx: context.Background(),
 	})
 
 	result, err := orch.Rescrape(context.Background(), "job-1", "MOV-1", "/f.mp4", &contracts.BatchRescrapeRequest{})
 	require.NoError(t, err, "the rescrape itself committed — the envelope persist is a separate failure")
 	require.NotNil(t, result)
-	require.Error(t, result.PersistErr,
-		"a committed-but-unpersisted rescrape must surface the persist failure, not ack it")
-	assert.Contains(t, result.PersistErr.Error(), "job repository unavailable")
-	assert.Equal(t, 1, persist.calls, "the orchestrator must attempt the persist")
-	assert.Equal(t, 1, rollbackCalls, "the poster cache must be rolled back to the pre-rescrape assets")
+	assert.ErrorIs(t, result.PersistErr, persistErr,
+		"the phase's persist failure is surfaced verbatim, not re-run or rolled back here")
 	require.NotNil(t, result.RescrapeResult)
 	assert.Equal(t, models.RescrapeStatusSuccess, result.RescrapeResult.Status,
 		"the committed rescrape result is retained even though the persist failed")
 	assert.Equal(t, "job-1", result.JobID)
 }
 
-func TestRescrapeOrchestrator_Rescrape_PersistFailureRollbackFailureSurfaced(t *testing.T) {
+// TestRescrapeOrchestrator_BulkRescrape_PersistFailureSurfacedPerMovie pins
+// the bulk aggregation: a movie whose in-phase envelope persist failed
+// reports RescrapeStatusFailed (its state reverted to pre-rescrape), and the
+// batch-level PersistErr joins the per-movie failures so the handler can
+// answer 500 with the detail.
+func TestRescrapeOrchestrator_BulkRescrape_PersistFailureSurfacedPerMovie(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
 	mockJob := workermocks.NewMockBatchJobInterface(t)
 	mockJob.EXPECT().SetWorkflow(mock.Anything)
-	mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(
-		&worker.RescrapeResult{
-			Status: models.RescrapeStatusSuccess,
-			PosterCacheRollback: func() error {
-				return errors.New("restore exploded")
-			},
-		}, nil)
-
-	persist := &failingEnvelopePersist{err: errors.New("job repository unavailable")}
-	orch := NewRescrapeOrchestrator(RescrapeDeps{
-		JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
-		WfFactory: stubWfFactory{},
-		Factory:   stubRescrapeCmdFactory{},
-		Persist:   persist,
-		ServerCtx: context.Background(),
-	})
-
-	result, err := orch.Rescrape(context.Background(), "job-1", "MOV-1", "/f.mp4", &contracts.BatchRescrapeRequest{})
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Error(t, result.PersistErr)
-	// The persist error stays primary; the rollback failure is surfaced
-	// alongside it, not swallowed (parity with the PATCH/override paths).
-	assert.Contains(t, result.PersistErr.Error(), "job repository unavailable")
-	assert.Contains(t, result.PersistErr.Error(), "poster rollback failed: restore exploded")
-}
-
-func TestRescrapeOrchestrator_BulkRescrape_PersistFailureSurfacesAndRollsBack(t *testing.T) {
-	cfg := &config.Config{}
-	deps := createTestDeps(t, cfg, "")
-
-	rollbackCalls := 0
-	mockJob := workermocks.NewMockBatchJobInterface(t)
-	mockJob.EXPECT().SetWorkflow(mock.Anything)
-	mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(
-		&worker.RescrapeResult{
-			Status: models.RescrapeStatusSuccess,
-			PosterCacheRollback: func() error {
-				rollbackCalls++
-				return nil
-			},
-		}, nil)
+	mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, cmd worker.RescrapeCmd) (*worker.RescrapeResult, error) {
+			out := &worker.RescrapeResult{Status: models.RescrapeStatusSuccess}
+			if cmd.MovieID == "M2" {
+				out.PersistErr = errors.New("job repository unavailable")
+			}
+			return out, nil
+		})
 	mockJob.EXPECT().GetStatus().Return(&worker.BatchJobStatus{})
 
-	persist := &failingEnvelopePersist{err: errors.New("job repository unavailable")}
 	orch := NewRescrapeOrchestrator(RescrapeDeps{
 		JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
 		WfFactory: stubWfFactory{},
 		Factory:   stubRescrapeCmdFactory{},
-		Persist:   persist,
 		ServerCtx: context.Background(),
 	})
 
-	result, err := orch.BulkRescrape(context.Background(), "job-1", []string{"MOV-1"}, &contracts.BatchRescrapeRequest{})
+	result, err := orch.BulkRescrape(context.Background(), "job-1", []string{"M1", "M2"}, &contracts.BatchRescrapeRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	assert.Equal(t, 1, persist.calls)
-	assert.Equal(t, 1, result.Succeeded, "the committed rescrape stays counted")
-	require.Error(t, result.PersistErr, "the bulk persist failure must surface on the result")
+	require.Error(t, result.PersistErr, "the per-movie persist failure must surface on the batch result")
 	assert.Contains(t, result.PersistErr.Error(), "job repository unavailable")
-	assert.Equal(t, 1, rollbackCalls, "every successful rescrape's poster cache is rolled back")
-	require.Len(t, result.Results, 1, "per-file results are retained alongside the persist failure")
-	assert.Equal(t, models.RescrapeStatusSuccess, result.Results[0].Status)
+	assert.Equal(t, 1, result.Succeeded, "the genuinely persisted movie stays counted")
+	assert.Equal(t, 1, result.Failed, "the rolled-back movie counts as failed — its state is pre-rescrape")
+	require.Len(t, result.Results, 2, "per-file results are retained")
+	byMovie := map[string]models.RescrapeStatus{}
+	var persistResultErr string
+	for _, r := range result.Results {
+		byMovie[r.MovieID] = r.Status
+		if r.MovieID == "M2" {
+			persistResultErr = r.Error
+		}
+	}
+	assert.Equal(t, models.RescrapeStatusSuccess, byMovie["M1"])
+	assert.Equal(t, models.RescrapeStatusFailed, byMovie["M2"],
+		"the rolled-back movie reports failure, not a success the envelope contradicts")
+	assert.Contains(t, persistResultErr, "job repository unavailable")
 }
 
 // TestPrepareAndLaunchApply_StartApplyError_PersistFailureLogged pins
@@ -255,11 +216,11 @@ func (s *posterStubScraper) Config() *models.ScraperSettings {
 // TestRescrapeBatchMovie_PersistFailureRestoresPosterCache covers F-B/F1 end
 // to end at the HTTP layer: GeneratePoster has replaced the cached
 // {movieID}-full.jpg/preview, the commit succeeded, but the envelope persist
-// then fails. The handler must answer 500 (never ack undurable success), and
-// BOTH the in-memory MovieResult and the cached poster assets must be
-// restored to the pre-rescrape state so memory, cache, and the unpersisted
-// envelope all converge — a restart cannot resurrect pre-rescrape job state
-// against the rescraped image.
+// INSIDE the phase's poster-source lock then fails. The handler must answer
+// 500 (never ack undurable success), and BOTH the in-memory MovieResult and
+// the cached poster assets must be restored to the pre-rescrape state before
+// the phase released its locks — so memory, cache, and the unpersisted
+// envelope all converge.
 func TestRescrapeBatchMovie_PersistFailureRestoresPosterCache(t *testing.T) {
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
@@ -361,8 +322,10 @@ func TestRescrapeBatchMovie_PersistFailureRestoresPosterCache(t *testing.T) {
 }
 
 // TestBatchRescrapeMovies_PersistFailureReturnsResultsWith500 covers F-B's
-// bulk response: the per-file results stay in the response body while the
-// persist failure flips the status to 500 with persist_error detail.
+// bulk response: a movie whose in-phase envelope persist failed reports
+// FAILED (its state reverted to pre-rescrape under its own locks), the
+// batch-level persist error flips the status to 500, and the per-file
+// results stay in the response body.
 func TestBatchRescrapeMovies_PersistFailureReturnsResultsWith500(t *testing.T) {
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
@@ -397,9 +360,12 @@ func TestBatchRescrapeMovies_PersistFailureReturnsResultsWith500(t *testing.T) {
 	var resp contracts.BulkRescrapeResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Contains(t, resp.PersistError, "persist", "the persist failure detail must ride along")
-	require.Len(t, resp.Results, 1, "the per-file results survive the persist-failure response")
-	assert.Equal(t, models.RescrapeStatusSuccess, resp.Results[0].Status)
-	assert.Equal(t, 1, resp.Succeeded)
+	require.Len(t, resp.Results, 1, "the per-file result survives the persist-failure response")
+	assert.Equal(t, models.RescrapeStatusFailed, resp.Results[0].Status,
+		"the rolled-back movie reports failure — its in-memory state is pre-rescrape")
+	assert.Contains(t, resp.Results[0].Error, "persist")
+	assert.Equal(t, 0, resp.Succeeded)
+	assert.Equal(t, 1, resp.Failed)
 
 	// F1: the in-memory result converges back to the pre-rescrape state as
 	// well — not only the cache — so memory matches the unpersisted envelope.
@@ -407,134 +373,6 @@ func TestBatchRescrapeMovies_PersistFailureReturnsResultsWith500(t *testing.T) {
 	require.NotNil(t, stored.Movie)
 	assert.Equal(t, "Old Bulk", stored.Movie.Title,
 		"the bulk persist failure must restore the pre-rescrape MovieResult in memory")
-}
-
-// TestRescrapeOrchestrator_Rescrape_PersistFailureRestoresMemoryThenCache pins
-// F1's orchestrator half: on the envelope-persist failure the in-memory
-// MovieResult restore (ResultStateRollback) runs BEFORE the poster-cache
-// restore — the part-revert-then-cache ordering — and a state-rollback
-// failure surfaces alongside the persist error instead of being swallowed.
-func TestRescrapeOrchestrator_Rescrape_PersistFailureRestoresMemoryThenCache(t *testing.T) {
-	cfg := &config.Config{}
-	deps := createTestDeps(t, cfg, "")
-
-	var order []string
-	mockJob := workermocks.NewMockBatchJobInterface(t)
-	mockJob.EXPECT().SetWorkflow(mock.Anything)
-	mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(
-		&worker.RescrapeResult{
-			Status: models.RescrapeStatusSuccess,
-			ResultStateRollback: func() error {
-				order = append(order, "state")
-				return errors.New("state store gone")
-			},
-			PosterCacheRollback: func() error {
-				order = append(order, "cache")
-				return nil
-			},
-		}, nil)
-
-	persist := &failingEnvelopePersist{err: errors.New("job repository unavailable")}
-	orch := NewRescrapeOrchestrator(RescrapeDeps{
-		JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
-		WfFactory: stubWfFactory{},
-		Factory:   stubRescrapeCmdFactory{},
-		Persist:   persist,
-		ServerCtx: context.Background(),
-	})
-
-	result, err := orch.Rescrape(context.Background(), "job-1", "MOV-1", "/f.mp4", &contracts.BatchRescrapeRequest{})
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.Equal(t, []string{"state", "cache"},
-		order, "the in-memory restore must run before the cache flips back to the pre-rescrape assets")
-	require.Error(t, result.PersistErr)
-	assert.Contains(t, result.PersistErr.Error(), "job repository unavailable")
-	assert.Contains(t, result.PersistErr.Error(), "state rollback failed: state store gone",
-		"a failed in-memory restore surfaces alongside the persist error")
-}
-
-// progressGateBroadcaster closes the gate for each movie the first time the
-// bulk pool reports progress on it — the pool broadcast order IS the rollback
-// append order, so gating later movies on an earlier movie's gate makes the
-// completion (append) order deterministic.
-type progressGateBroadcaster struct {
-	mu    sync.Mutex
-	fired map[string]bool
-	gates map[string]chan struct{}
-}
-
-func (b *progressGateBroadcaster) BroadcastProgress(msg *ws.ProgressMessage) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if ch, ok := b.gates[msg.FilePath]; ok && !b.fired[msg.FilePath] {
-		b.fired[msg.FilePath] = true
-		close(ch)
-	}
-}
-
-// TestRescrapeOrchestrator_BulkRescrape_PersistFailureRollsBackLIFO pins F4:
-// bulkRescrapePool appends each successful movie's rollback in COMPLETION
-// order, so the orchestrator's persist-failure replay must reverse them —
-// undoing the batch newest-first, mirroring the commit order. It also pins
-// the per-movie ordering through processBulkRescrapeMovie's composed
-// rollback: state restore before cache restore.
-func TestRescrapeOrchestrator_BulkRescrape_PersistFailureRollsBackLIFO(t *testing.T) {
-	cfg := &config.Config{}
-	deps := createTestDeps(t, cfg, "")
-
-	gates := map[string]chan struct{}{
-		"M1": make(chan struct{}),
-		"M2": make(chan struct{}),
-		"M3": make(chan struct{}),
-	}
-	var order []string
-	mockJob := workermocks.NewMockBatchJobInterface(t)
-	mockJob.EXPECT().SetWorkflow(mock.Anything)
-	mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, cmd worker.RescrapeCmd) (*worker.RescrapeResult, error) {
-			// M2 and M3 stall until the pool has APPENDED the previous
-			// movie's rollback (signalled via its progress broadcast), so the
-			// rollback list is deterministically [M1, M2, M3].
-			switch cmd.MovieID {
-			case "M2":
-				<-gates["M1"]
-			case "M3":
-				<-gates["M2"]
-			}
-			movieID := cmd.MovieID
-			return &worker.RescrapeResult{
-				Status: models.RescrapeStatusSuccess,
-				ResultStateRollback: func() error {
-					order = append(order, movieID+"-state")
-					return nil
-				},
-				PosterCacheRollback: func() error {
-					order = append(order, movieID+"-cache")
-					return nil
-				},
-			}, nil
-		})
-	mockJob.EXPECT().GetStatus().Return(&worker.BatchJobStatus{})
-
-	persist := &failingEnvelopePersist{err: errors.New("job repository unavailable")}
-	orch := NewRescrapeOrchestrator(RescrapeDeps{
-		JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
-		WfFactory: stubWfFactory{},
-		Factory:   stubRescrapeCmdFactory{},
-		Persist:   persist,
-		Broadcast: &progressGateBroadcaster{fired: map[string]bool{}, gates: gates},
-		ServerCtx: context.Background(),
-	})
-
-	result, err := orch.BulkRescrape(context.Background(), "job-1", []string{"M1", "M2", "M3"}, &contracts.BatchRescrapeRequest{})
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Error(t, result.PersistErr)
-	assert.Equal(t, 3, result.Succeeded)
-	assert.Equal(t,
-		[]string{"M3-state", "M3-cache", "M2-state", "M2-cache", "M1-state", "M1-cache"},
-		order, "the batch replay is LIFO across movies, state-then-cache within each movie")
 }
 
 // TestRescrapeOrchestrator_Rescrape_ErrorGuards pins the pre-execution
@@ -550,7 +388,6 @@ func TestRescrapeOrchestrator_Rescrape_ErrorGuards(t *testing.T) {
 			JobStore:  deps.JobStore,
 			WfFactory: stubWfFactory{},
 			Factory:   stubRescrapeCmdFactory{},
-			Persist:   &failingEnvelopePersist{err: errors.New("unused")},
 			ServerCtx: context.Background(),
 		})
 		_, err := orch.Rescrape(context.Background(), "nope", "M", "/f.mp4", &contracts.BatchRescrapeRequest{})
@@ -565,7 +402,6 @@ func TestRescrapeOrchestrator_Rescrape_ErrorGuards(t *testing.T) {
 			JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
 			WfFactory: stubWfFactory{err: errors.New("wf exploded")},
 			Factory:   stubRescrapeCmdFactory{},
-			Persist:   &failingEnvelopePersist{err: errors.New("unused")},
 			ServerCtx: context.Background(),
 		})
 		_, err := orch.Rescrape(context.Background(), "job-1", "M", "/f.mp4", &contracts.BatchRescrapeRequest{})
@@ -581,7 +417,6 @@ func TestRescrapeOrchestrator_Rescrape_ErrorGuards(t *testing.T) {
 			JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
 			WfFactory: stubWfFactory{},
 			Factory:   stubRescrapeCmdFactory{},
-			Persist:   &failingEnvelopePersist{err: errors.New("unused")},
 			ServerCtx: context.Background(),
 		})
 		_, err := orch.Rescrape(context.Background(), "job-1", "M", "/f.mp4",
@@ -599,7 +434,6 @@ func TestRescrapeOrchestrator_Rescrape_ErrorGuards(t *testing.T) {
 			JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
 			WfFactory: stubWfFactory{},
 			Factory:   stubRescrapeCmdFactory{},
-			Persist:   &failingEnvelopePersist{err: errors.New("unused")},
 			ServerCtx: context.Background(),
 		})
 		_, err := orch.Rescrape(context.Background(), "job-1", "M", "/f.mp4", &contracts.BatchRescrapeRequest{})
@@ -608,12 +442,10 @@ func TestRescrapeOrchestrator_Rescrape_ErrorGuards(t *testing.T) {
 	})
 }
 
-// TestRescrapeOrchestrator_BulkRescrape_ErrorGuardsAndRollbackFailure covers
-// the bulk path's pre-execution rejections (unknown job, workflow failure),
-// the nil-ServerCtx / caller-cancellation context plumbing, and a rollback
-// that FAILS during the persist-failure replay (its error rides along instead
-// of being swallowed).
-func TestRescrapeOrchestrator_BulkRescrape_ErrorGuardsAndRollbackFailure(t *testing.T) {
+// TestRescrapeOrchestrator_BulkRescrape_ErrorGuards covers the bulk path's
+// pre-execution rejections (unknown job, workflow failure) and the
+// nil-ServerCtx / caller-cancellation context plumbing.
+func TestRescrapeOrchestrator_BulkRescrape_ErrorGuards(t *testing.T) {
 	cfg := &config.Config{}
 
 	t.Run("job not found", func(t *testing.T) {
@@ -622,7 +454,6 @@ func TestRescrapeOrchestrator_BulkRescrape_ErrorGuardsAndRollbackFailure(t *test
 			JobStore:  deps.JobStore,
 			WfFactory: stubWfFactory{},
 			Factory:   stubRescrapeCmdFactory{},
-			Persist:   &failingEnvelopePersist{err: errors.New("unused")},
 			ServerCtx: context.Background(),
 		})
 		_, err := orch.BulkRescrape(context.Background(), "nope", []string{"M1"}, &contracts.BatchRescrapeRequest{})
@@ -637,7 +468,6 @@ func TestRescrapeOrchestrator_BulkRescrape_ErrorGuardsAndRollbackFailure(t *test
 			JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
 			WfFactory: stubWfFactory{err: errors.New("wf exploded")},
 			Factory:   stubRescrapeCmdFactory{},
-			Persist:   &failingEnvelopePersist{err: errors.New("unused")},
 			ServerCtx: context.Background(),
 		})
 		_, err := orch.BulkRescrape(context.Background(), "job-1", []string{"M1"}, &contracts.BatchRescrapeRequest{})
@@ -645,7 +475,7 @@ func TestRescrapeOrchestrator_BulkRescrape_ErrorGuardsAndRollbackFailure(t *test
 		assert.Contains(t, err.Error(), "workflow init failed")
 	})
 
-	t.Run("rollback failure surfaces and canceled caller ctx cancels work", func(t *testing.T) {
+	t.Run("canceled caller ctx cancels work", func(t *testing.T) {
 		deps := createTestDeps(t, cfg, "")
 		rescrapeStarted := make(chan struct{})
 		mockJob := workermocks.NewMockBatchJobInterface(t)
@@ -662,12 +492,7 @@ func TestRescrapeOrchestrator_BulkRescrape_ErrorGuardsAndRollbackFailure(t *test
 					close(rescrapeStarted)
 				}
 				<-ctx.Done()
-				return &worker.RescrapeResult{
-					Status: models.RescrapeStatusSuccess,
-					PosterCacheRollback: func() error {
-						return errors.New("restore exploded")
-					},
-				}, nil
+				return &worker.RescrapeResult{Status: models.RescrapeStatusSuccess}, nil
 			})
 		mockJob.EXPECT().GetStatus().Return(&worker.BatchJobStatus{})
 
@@ -675,7 +500,6 @@ func TestRescrapeOrchestrator_BulkRescrape_ErrorGuardsAndRollbackFailure(t *test
 			JobStore:  &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob},
 			WfFactory: stubWfFactory{},
 			Factory:   stubRescrapeCmdFactory{},
-			Persist:   &failingEnvelopePersist{err: errors.New("job repository unavailable")},
 			// ServerCtx deliberately nil: the orchestrator must fall back to
 			// context.Background for the work context base.
 		})
@@ -696,9 +520,7 @@ func TestRescrapeOrchestrator_BulkRescrape_ErrorGuardsAndRollbackFailure(t *test
 		out := <-done
 		require.NoError(t, out.err)
 		require.NotNil(t, out.res)
-		require.Error(t, out.res.PersistErr)
-		assert.Contains(t, out.res.PersistErr.Error(), "job repository unavailable")
-		assert.Contains(t, out.res.PersistErr.Error(), "poster rollback failed: restore exploded",
-			"a failing rollback during the LIFO replay surfaces alongside the persist error")
+		assert.Equal(t, 1, out.res.Succeeded)
+		assert.NoError(t, out.res.PersistErr)
 	})
 }

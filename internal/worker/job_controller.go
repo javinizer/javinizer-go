@@ -7,7 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
-	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
+
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -145,24 +145,11 @@ func (c *jobController) Rescrape(ctx context.Context, cmd RescrapeCmd) (*Rescrap
 
 	inputs := c.buildRescrapeInputs(wf, batchCfg)
 
-	outcome, err := c.job.rescrapePhase.Rescrape(ctx, inputs, cmd)
-	if err != nil {
-		return outcome, err
-	}
-
-	// Provenance: set on ResultTracker after successful rescrape.
-	// This stays accessible through job.results because provenance propagation
-	// crosses the phase/results boundary.
-	if outcome.Status == models.RescrapeStatusSuccess && outcome.FilePath != "" &&
-		(outcome.FieldSources != nil || outcome.ActressSources != nil || outcome.ScraperResults != nil) {
-		c.job.results.SetProvenance(outcome.FilePath, &resultstore.ProvenanceData{
-			FieldSources:   outcome.FieldSources,
-			ActressSources: outcome.ActressSources,
-			ScraperResults: outcome.ScraperResults,
-		})
-	}
-
-	return outcome, nil
+	// Provenance propagation and the envelope persist (with its rollback)
+	// happen INSIDE the phase's poster-source-lock critical section now —
+	// see rescrapePhase.Rescrape. When Rescrape returns, the phase's locks
+	// have been released; nothing poster-state-adjacent may run here.
+	return c.job.rescrapePhase.Rescrape(ctx, inputs, cmd)
 }
 
 // Wait blocks until the job reaches a terminal state and returns any error.
@@ -248,6 +235,9 @@ func (c *jobController) setDepsFromConfig(cfg *JobConfig) {
 	}
 	if cfg.PersistFn != nil {
 		c.job.deps.PersistFn = cfg.PersistFn
+	}
+	if cfg.PersistErrFn != nil {
+		c.job.deps.PersistErrFn = cfg.PersistErrFn
 	}
 	if cfg.PosterGen != nil {
 		c.job.deps.PosterGen = cfg.PosterGen
@@ -340,23 +330,25 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 	c.job.mu.RLock()
 	pg := c.job.deps.PosterGen
 	pfn := c.job.deps.PersistFn
+	perrFn := c.job.deps.PersistErrFn
 	tempDir := c.job.cfg.tempDir
 	histRepo := c.job.deps.HistoryRepo
 	c.job.mu.RUnlock()
 
 	return rescrapePhaseInputs{
-		JobID:       c.job.ID,
-		Concurrency: newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, defaultMaxWorkers, defaultWorkerTimeout),
-		WF:          wf,
-		PosterGen:   pg,
-		HistoryRepo: histRepo,
-		ResultMap:   c.job.results,
-		Lifecycle:   c.job.lifecycle,
-		persister:   persistFunc(pfn),
-		Finder:      c.job.results,
-		Fs:          c.job.fs,
-		TempDir:     tempDir,
-		FsCaseCache: c.job.fsCaseCache,
+		JobID:           c.job.ID,
+		PersistEnvelope: perrFn,
+		Concurrency:     newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, defaultMaxWorkers, defaultWorkerTimeout),
+		WF:              wf,
+		PosterGen:       pg,
+		HistoryRepo:     histRepo,
+		ResultMap:       c.job.results,
+		Lifecycle:       c.job.lifecycle,
+		persister:       persistFunc(pfn),
+		Finder:          c.job.results,
+		Fs:              c.job.fs,
+		TempDir:         tempDir,
+		FsCaseCache:     c.job.fsCaseCache,
 	}
 }
 

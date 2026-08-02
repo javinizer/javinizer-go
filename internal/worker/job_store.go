@@ -264,13 +264,14 @@ func buildAdapters(job *BatchJob) *jobAdapters {
 		},
 		canceller: job.lifecycle,
 		editor: &jobEditorImpl{
-			store:        job.results,
-			lifecycle:    job.lifecycle,
-			posterEditor: job.posterEditor,
-			posterGen:    job.deps.PosterGen,
-			jobID:        string(job.ID),
-			movieRepo:    job.deps.MovieRepo,
-			actressRepo:  job.deps.ActressRepo,
+			store:           job.results,
+			lifecycle:       job.lifecycle,
+			posterEditor:    job.posterEditor,
+			posterGen:       job.deps.PosterGen,
+			jobID:           string(job.ID),
+			movieRepo:       job.deps.MovieRepo,
+			actressRepo:     job.deps.ActressRepo,
+			persistEnvelope: job.deps.PersistErrFn,
 		},
 	}
 }
@@ -326,6 +327,9 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 
 	// Set persistFn after job is constructed so the closure captures the correct pointer
 	job.deps.PersistFn = func() { _ = s.persistence.PersistJob(job) }
+	// Error-returning envelope persist for the rescrape phase's and field-
+	// override editor's critical sections (see BatchJobDeps.PersistErrFn).
+	job.deps.PersistErrFn = func() error { return s.persistence.PersistJob(job) }
 
 	// Fallback: if JobConfig didn't provide these repos, use JobStore's
 	if job.deps.BatchFileOpRepo == nil {

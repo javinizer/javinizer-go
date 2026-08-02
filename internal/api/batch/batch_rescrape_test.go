@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -187,44 +186,14 @@ func TestBatchRescrapeMovies(t *testing.T) {
 	}
 }
 
-// TestCombineRescrapeRollbacks pins the fusion used on the bulk persist-
-// failure path: both-nil collapses to nil (no empty pool step), the state
-// restore runs BEFORE the cache restore, and a failing step does not
-// short-circuit the other while both errors join into the result.
-func TestCombineRescrapeRollbacks(t *testing.T) {
-	assert.Nil(t, combineRescrapeRollbacks(nil, nil),
-		"no compensations means no rollback step for the pool to record")
-
-	errState := errors.New("state store gone")
-	errCache := errors.New("cache restore exploded")
-	var ran []string
-	rb := combineRescrapeRollbacks(
-		func() error { ran = append(ran, "state"); return errState },
-		func() error { ran = append(ran, "cache"); return errCache },
-	)
-	require.NotNil(t, rb)
-	err := rb()
-	assert.Equal(t, []string{"state", "cache"}, ran,
-		"the in-memory restore runs first, the cache flip last — even when both fail")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "state rollback failed: state store gone")
-	assert.Contains(t, err.Error(), "poster rollback failed: cache restore exploded")
-
-	// Single-sided fusions run their only step.
-	only := combineRescrapeRollbacks(func() error { ran = append(ran, "solo-state"); return nil }, nil)
-	require.NotNil(t, only)
-	require.NoError(t, only())
-	assert.Contains(t, ran, "solo-state")
-}
-
 // TestProcessBulkRescrapeMovie_InvalidMergeOptions covers the merge-options
 // rejection at the per-movie seam: the movie reports a failed result without
 // touching the job or the factory.
 func TestProcessBulkRescrapeMovie_InvalidMergeOptions(t *testing.T) {
-	result, rollback := processBulkRescrapeMovie(context.Background(), "MOV-BOGUS", nil,
+	result, persistErr := processBulkRescrapeMovie(context.Background(), "MOV-BOGUS", nil,
 		&contracts.BatchRescrapeRequest{ScalarStrategy: "bogus-strategy"}, stubRescrapeCmdFactory{})
 	require.NotNil(t, result)
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Contains(t, result.Error, "invalid merge options")
-	assert.Nil(t, rollback)
+	assert.NoError(t, persistErr)
 }

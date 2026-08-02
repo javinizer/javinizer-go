@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/poster"
@@ -256,6 +258,33 @@ type posterAssetSnapshooter interface {
 // preview URL only.
 type posterAssetRemover interface {
 	RemovePosterAssets(jobID, movieID string) error
+}
+
+// posterAssetMover is the optional re-key capability of a PosterGenerator:
+// moving the job's cached -full.jpg/preview assets from one movie ID to
+// another. An "id" override adopts the selected source's movie ID, and the
+// cache must follow it or the assets are orphaned at the old key (P3-6).
+// Generators without it (test stubs) hold no assets to move; the re-key is
+// then state-only.
+type posterAssetMover interface {
+	MovePosterAssets(jobID, fromMovieID, toMovieID string) error
+}
+
+// rewritePosterIDInPreviewURL re-points a temp preview poster URL
+// (/api/v1/temp/posters/{jobID}/{posterID}.jpg?...) from oldID to newID when
+// an "id" override re-keys the movie: the asset move (posterAssetMover)
+// renames the files, so the persisted preview URL must name the new key or
+// the review preview 404s. Only the "{oldID}.jpg" path segment is rewritten;
+// a URL not filed under the old key (or an empty one) is returned unchanged.
+func rewritePosterIDInPreviewURL(raw, oldID, newID string) string {
+	if raw == "" || oldID == "" || newID == "" || oldID == newID {
+		return raw
+	}
+	needle := "/" + url.PathEscape(oldID) + ".jpg"
+	if !strings.Contains(raw, needle) {
+		return raw
+	}
+	return strings.Replace(raw, needle, "/"+url.PathEscape(newID)+".jpg", 1)
 }
 
 // effectivePosterSource mirrors ScrapePosterGenerator.GeneratePoster's download

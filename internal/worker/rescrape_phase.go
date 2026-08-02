@@ -367,6 +367,12 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	var posterCacheRollback func() error
 	var originCacheRollback func() error
 	var preRescrapeResult *resultstore.MovieResult
+	var preRescrapeProv *resultstore.ProvenanceData
+	// degradedRollback collects the rollback legs that could NOT be armed
+	// (asset/result snapshots that failed under the lock) so a later
+	// envelope-persist failure can SAY what it could not restore (P3-7's
+	// degraded-rollback visibility).
+	var degradedRollback []string
 	outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
 		// Scrape
 		scrapeResult, meta, scrapeErr := p.ScrapeSingle(ctx, inputs, lookup.FilePath, scrapeCmd)
@@ -463,17 +469,21 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			}
 		}
 
-		// Snapshot the pre-rescrape in-memory MovieResult NOW — poster
-		// lock(s) held, AFTER any re-lock re-capture — so the caller's
-		// envelope-persist-failure path can restore memory to match the cache
-		// rollback and the unpersisted envelope (F1). GetMovieResult returns a
-		// clone, so the merge/commit below cannot alias the snapshot, and the
-		// CAS commit replaces exactly this state. A read miss degrades to no
-		// state rollback (nothing coherent to restore to), same as a failed
-		// asset snapshot degrading to no cache rollback.
+		// Snapshot the pre-rescrape in-memory MovieResult AND its provenance
+		// NOW — poster lock(s) held, AFTER any re-lock re-capture — so the
+		// in-critical-section envelope-persist failure below can restore
+		// memory AND provenance to match the cache rollback and the
+		// unpersisted envelope (F1/P2-4). GetMovieResult/GetProvenance return
+		// clones, so the merge/commit below cannot alias the snapshots, and
+		// the CAS commit replaces exactly this state. A read miss degrades to
+		// no state rollback (nothing coherent to restore to), same as a
+		// failed asset snapshot degrading to no cache rollback.
 		if inputs.ResultMap != nil {
 			if pre, preErr := inputs.ResultMap.GetMovieResult(lookup.FilePath); preErr == nil {
 				preRescrapeResult = pre
+			}
+			if lookupProv, ok := inputs.ResultMap.(resultstore.MovieLookup); ok {
+				preRescrapeProv = lookupProv.GetProvenance(lookup.FilePath)
 			}
 		}
 
@@ -520,26 +530,27 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// from the reconciled movie keeps the cache image == the effective
 		// source the committed movie references.
 		//
-		// Snapshot the cached assets BEFORE the replacement so a post-commit
-		// envelope-persist failure can restore them (RescrapeResult.
-		// PosterCacheRollback — parity with RefreshPosterAssets'
-		// snapshot/rollback): a restart would otherwise resurrect the
-		// pre-rescrape job state against the freshly generated image. Taken
-		// while the poster-source lock(s) are still held, so no crop/edit can
-		// interleave between the snapshot and the replacement. A snapshot
-		// failure degrades to no-rollback (logged) rather than rejecting the
-		// rescrape: poster generation itself is already best-effort below.
+		// Snapshot the cached assets BEFORE the replacement so the in-critical-
+		// section envelope-persist failure below can restore them (parity
+		// with RefreshPosterAssets' snapshot/rollback): a restart would
+		// otherwise resurrect the pre-rescrape job state against the freshly
+		// generated image. Taken while the poster-source lock(s) are still
+		// held, so no crop/edit can interleave between the snapshot and the
+		// replacement. A snapshot failure degrades to no-rollback (logged and
+		// recorded for the P3-7 degraded-rollback hint) rather than rejecting
+		// the rescrape: poster generation itself is already best-effort below.
 		if inputs.PosterGen != nil && movieResult.Movie != nil {
 			if snapshooter, ok := inputs.PosterGen.(posterAssetSnapshooter); ok {
 				snap, snapErr := snapshooter.SnapshotPosterAssets(inputs.JobID.String(), movieResult.Movie.ID)
 				if snapErr != nil {
 					logging.Warnf("[rescrape] Failed to snapshot poster assets for %s before generation (no persist-failure rollback): %v", movieResult.Movie.ID, snapErr)
+					degradedRollback = append(degradedRollback, fmt.Sprintf("destination poster cache rollback unavailable (snapshot failed: %v)", snapErr))
 				} else {
 					posterCacheRollback = func() error { return snapshooter.RestorePosterAssets(snap) }
 				}
 				// Rekeying rescrape (A→B): withRescrapeStatus's success-path
 				// orphan cleanup DELETES origin A's poster assets after the commit
-				// — before the caller's envelope persist — so the destination
+				// — before the envelope persist — so the destination
 				// snapshot alone cannot recover them. Snapshot A's assets too,
 				// under the same held locks, and include their restore in the
 				// rollback (F2). Deferring the cleanup to after the persist was
@@ -551,6 +562,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 				if lookup.OldMovieID != "" && lookup.OldMovieID != movieResult.Movie.ID {
 					if originSnap, originErr := snapshooter.SnapshotPosterAssets(inputs.JobID.String(), lookup.OldMovieID); originErr != nil {
 						logging.Warnf("[rescrape] Failed to snapshot origin poster assets for %s before generation (no persist-failure rollback): %v", lookup.OldMovieID, originErr)
+						degradedRollback = append(degradedRollback, fmt.Sprintf("origin poster cache rollback unavailable (snapshot failed: %v)", originErr))
 					} else {
 						originCacheRollback = func() error { return snapshooter.RestorePosterAssets(originSnap) }
 					}
@@ -581,34 +593,78 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		return nil, err
 	}
 
-	// Attach provenance and file path on success
+	// Success path: provenance propagation and the job-envelope persist run
+	// HERE, INSIDE the still-held poster-source lock(s) (P1-1) — the persist
+	// is part of the same critical section as the asset replacement and the
+	// CAS commit it durably records, so no other poster-state writer can
+	// interleave between them (the old orchestrator-side persist ran after
+	// this function's locks had released). Provenance is committed to the
+	// store BEFORE the persist so the persisted envelope carries it (moved
+	// from jobController.Rescrape, which previously set it after the locks
+	// had already released).
 	if outcome.Status == models.RescrapeStatusSuccess {
 		replaceRescrapeResult(outcome, lookup.FilePath, movieResult, prov)
-		// The persist-failure rollbacks travel to the orchestrator only on
-		// success — failure/gone/conflict outcomes already unwound the
-		// generated assets via withRescrapeStatus's cleanup, so restoring the
-		// snapshots there would resurrect assets the cleanup deliberately
-		// removed. The cache rollback restores the destination's
-		// pre-generation assets first, then the rekeyed origin's pre-cleanup
-		// assets (F2); the state rollback restores the in-memory MovieResult
-		// (F1) and degrades to nil when no snapshot was captured or the
-		// result store cannot be written back through (stub accessors).
-		outcome.PosterCacheRollback = chainRollbacks(posterCacheRollback, originCacheRollback)
-		if preRescrapeResult != nil {
-			if updater, ok := inputs.ResultMap.(resultstore.ResultUpdater); ok {
-				snap := preRescrapeResult
-				filePath := lookup.FilePath
-				outcome.ResultStateRollback = func() error {
-					// AtomicUpdateFileResult re-indexes any rekey back to the
-					// origin movie ID and bumps the revision, so a subsequent CAS
-					// writer is unaffected by the restore itself. The update
-					// closure MUST NOT call store methods (it runs under the
-					// store lock); the snapshot was cloned at capture time and is
-					// re-cloned here so repeat invocations stay pristine.
-					return updater.AtomicUpdateFileResult(filePath, func(_ *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-						return snap.Clone(), nil
-					})
+		updater, canWriteStore := inputs.ResultMap.(resultstore.ResultUpdater)
+		if canWriteStore &&
+			(outcome.FieldSources != nil || outcome.ActressSources != nil || outcome.ScraperResults != nil) {
+			updater.SetProvenance(lookup.FilePath, &resultstore.ProvenanceData{
+				FieldSources:   outcome.FieldSources,
+				ActressSources: outcome.ActressSources,
+				ScraperResults: outcome.ScraperResults,
+			})
+		}
+
+		if inputs.PersistEnvelope != nil {
+			if perr := inputs.PersistEnvelope(); perr != nil {
+				// The rescrape committed but the envelope did not persist: a
+				// restart (reconstructBatchJob reads only the envelope) would
+				// resurrect pre-rescrape job state against the rescraped image.
+				// Roll EVERYTHING back before releasing the locks — in-memory
+				// MovieResult first, then its provenance (P2-4), then the poster
+				// caches (destination's pre-generation assets first, then the
+				// rekeyed origin's pre-cleanup assets, F2) — the
+				// part-revert-then-cache ordering the override compensation
+				// documents, so no in-memory result references the rescraped
+				// state while the cache flips back. Every leg attempts its
+				// restore even when an earlier leg failed; failures ride along
+				// on the surfaced error, as do the legs that could never be
+				// armed (P3-7's degraded-rollback hint).
+				persistErr := fmt.Errorf("rescrape committed but job state persist failed: %w", perr)
+				if !canWriteStore {
+					degradedRollback = append(degradedRollback, "in-memory state and provenance rollback unavailable (result store is read-only through this seam)")
+				} else {
+					if preRescrapeResult != nil {
+						// AtomicUpdateFileResult re-indexes any rekey back to the
+						// origin movie ID and bumps the revision, so a subsequent
+						// CAS writer is unaffected by the restore itself. The
+						// update closure MUST NOT call store methods (it runs
+						// under the store lock); the snapshot was cloned at
+						// capture time and is re-cloned here so the restore stays
+						// pristine.
+						if rbErr := updater.AtomicUpdateFileResult(lookup.FilePath, func(_ *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+							return preRescrapeResult.Clone(), nil
+						}); rbErr != nil {
+							persistErr = fmt.Errorf("%w (state rollback failed: %v)", persistErr, rbErr)
+						}
+						// Provenance restore rides the same leg: immediately after
+						// the in-memory result restore, before the cache leg
+						// (P2-4). SetProvenance(nil-ish) is safe — the store clones
+						// a nil provenance to nil, un-setting the entry.
+						updater.SetProvenance(lookup.FilePath, preRescrapeProv)
+					} else {
+						degradedRollback = append(degradedRollback, "in-memory state and provenance rollback unavailable (no pre-rescrape snapshot captured)")
+					}
 				}
+				if cacheRB := chainRollbacks(posterCacheRollback, originCacheRollback); cacheRB != nil {
+					if rbErr := cacheRB(); rbErr != nil {
+						persistErr = fmt.Errorf("%w (poster rollback failed: %v)", persistErr, rbErr)
+					}
+				}
+				if len(degradedRollback) > 0 {
+					persistErr = fmt.Errorf("%w (degraded rollback: %s)", persistErr, strings.Join(degradedRollback, "; "))
+				}
+				logging.Warnf("rescrape for job %s committed but job envelope persist failed: %v", inputs.JobID.String(), perr)
+				outcome.PersistErr = persistErr
 			}
 		}
 	}

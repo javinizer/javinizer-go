@@ -254,3 +254,218 @@ func TestMergeLivePosterState_SkipsIdentityMismatch(t *testing.T) {
 	mergeLivePosterState(dst, live)
 	assert.Equal(t, "https://b.example/poster.jpg", dst.Poster.PosterURL)
 }
+
+// rekeyLiveResult moves the live result's movie to a NEW identity (B) while
+// the pipeline still holds its A snapshot — what a rescrape or whole-movie
+// edit committing a corrected match does mid-flight.
+func rekeyLiveResult(t *testing.T, tracker resultstore.ResultUpdater, filePath, newID string) *models.Movie {
+	t.Helper()
+	var liveB *models.Movie
+	require.NoError(t, tracker.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+		require.NotNil(t, current.Movie)
+		liveB = current.Movie.Clone()
+		liveB.ID = newID
+		current.Movie = liveB
+		current.FileMatchInfo.MovieID = newID
+		return current, nil
+	}))
+	return liveB
+}
+
+// TestInterpretApplyResult_SuccessKeepsLiveMovieOnRekey pins P2-5 on the
+// apply SUCCESS path: when the live result was re-keyed mid-apply, the
+// pipeline write-back must NOT overwrite the live movie with the apply-start
+// snapshot at all (previously it stamped A's clone over B wholesale).
+func TestInterpretApplyResult_SuccessKeepsLiveMovieOnRekey(t *testing.T) {
+	const filePath = "/input/RK-001.mp4"
+	tracker := resultstore.New(1, []string{filePath})
+	snapshotA := &models.Movie{ID: "AAA-111", Title: "Scraped A", Poster: models.PosterState{
+		PosterURL: "https://a.example/poster.jpg", ShouldCropPoster: true,
+	}}
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "AAA-111"},
+		Status:        models.JobStatusCompleted,
+		Movie:         snapshotA,
+	})
+
+	inputs := applyPhaseInputs{
+		JobID:       models.NewJobID(),
+		Broadcaster: &stubBroadcaster{},
+		Updater:     tracker,
+	}
+	afc := &ApplyFileContext{FilePath: filePath, Match: models.FileMatchInfo{Path: filePath, MovieID: "AAA-111"}}
+
+	liveB := rekeyLiveResult(t, tracker, filePath, "BBB-222")
+
+	pipelineA := &models.Movie{ID: "AAA-111", Title: "Organized A", Poster: models.PosterState{
+		PosterURL: "https://a.example/poster.jpg", ShouldCropPoster: true,
+	}}
+	outcome := interpretApplyResult(filePath, snapshotA, time.Now(), time.Minute, inputs, ApplyPhaseConfig{},
+		context.Background(), afc, &workflow.ApplyResult{Movie: pipelineA}, nil)
+	require.True(t, outcome.Success, "outcome: %+v", outcome)
+
+	stored, err := tracker.GetMovieResult(filePath)
+	require.NoError(t, err)
+	require.NotNil(t, stored.Movie)
+	assert.Equal(t, "BBB-222", stored.Movie.ID,
+		"the write-back must keep the live re-keyed movie — A's snapshot must not stamp over B")
+	assert.Equal(t, liveB.Title, stored.Movie.Title)
+	assert.Equal(t, liveB.Poster.PosterURL, stored.Movie.Poster.PosterURL)
+}
+
+// TestInterpretApplyResult_FailureKeepsLiveMovieOnRekey pins P2-5 on the
+// apply FAILURE path: on an identity mismatch only the pipeline-owned
+// non-movie fields (status/error/timestamps) move — the live re-keyed movie
+// survives.
+func TestInterpretApplyResult_FailureKeepsLiveMovieOnRekey(t *testing.T) {
+	const filePath = "/input/RK-002.mp4"
+	tracker := resultstore.New(1, []string{filePath})
+	snapshotA := &models.Movie{ID: "AAA-111", Title: "Scraped A", Poster: models.PosterState{
+		PosterURL: "https://a.example/poster.jpg",
+	}}
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		ResultID:      "res-rk-002",
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "AAA-111"},
+		Status:        models.JobStatusCompleted,
+		Movie:         snapshotA,
+	})
+
+	inputs := applyPhaseInputs{
+		JobID:       models.NewJobID(),
+		Broadcaster: &stubBroadcaster{},
+		Updater:     tracker,
+	}
+	afc := &ApplyFileContext{FilePath: filePath, Match: models.FileMatchInfo{Path: filePath, MovieID: "AAA-111"}}
+
+	rekeyLiveResult(t, tracker, filePath, "BBB-222")
+
+	outcome := interpretApplyResult(filePath, snapshotA, time.Now(), time.Minute, inputs, ApplyPhaseConfig{},
+		context.Background(), afc, nil, errors.New("simulated apply failure"))
+	require.True(t, outcome.Failed, "outcome: %+v", outcome)
+
+	stored, err := tracker.GetMovieResult(filePath)
+	require.NoError(t, err)
+	require.NotNil(t, stored.Movie, "the live movie must survive the mismatching failure write-back")
+	assert.Equal(t, "BBB-222", stored.Movie.ID)
+	assert.Equal(t, models.JobStatusFailed, stored.Status, "pipeline-owned status still moves")
+	assert.NotEmpty(t, stored.Error, "pipeline-owned error still moves")
+	assert.False(t, stored.StartedAt.IsZero(), "pipeline-owned Start timestamp still moves")
+	require.NotNil(t, stored.EndedAt, "pipeline-owned End timestamp still moves")
+}
+
+// TestPersistScrapeOutcome_KeepsLiveMovieOnRekey pins P2-5 on the scrape
+// persist-pool write-back: a mid-persist rekey keeps the live movie while
+// the pipeline-owned Persisted flag still flips.
+func TestPersistScrapeOutcome_KeepsLiveMovieOnRekey(t *testing.T) {
+	const filePath = "/input/RK-003.mp4"
+	tracker := resultstore.New(1, []string{filePath})
+	scrapedA := &models.Movie{ID: "AAA-111", Title: "Scraped A", Poster: models.PosterState{
+		PosterURL: "https://a.example/poster.jpg", ShouldCropPoster: true,
+	}}
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "AAA-111"},
+		Status:        models.JobStatusCompleted,
+		Movie:         scrapedA,
+	})
+
+	liveB := rekeyLiveResult(t, tracker, filePath, "BBB-222")
+
+	inputs := scrapePhaseInputs{
+		JobID:       models.NewJobID(),
+		MovieRepo:   stripBoundsPersistRepo{savedTitle: "Scraped A (normalized)"},
+		Broadcaster: &stubBroadcaster{},
+		Updater:     tracker,
+	}
+	outcome := scrapeFileOutcome{
+		FilePath: filePath,
+		MovieID:  "AAA-111",
+		Success:  true,
+		Result:   &scrape.ScrapeResult{Movie: scrapedA, Status: scrape.StatusCompleted},
+	}
+
+	persistScrapeOutcome(context.Background(), outcome, inputs, nil)
+
+	stored, err := tracker.GetMovieResult(filePath)
+	require.NoError(t, err)
+	assert.True(t, stored.Persisted, "the pipeline-owned Persisted flag still moves")
+	require.NotNil(t, stored.Movie)
+	assert.Equal(t, "BBB-222", stored.Movie.ID,
+		"the DB round-trip must not stamp A's normalized clone over the re-keyed live movie")
+	assert.Equal(t, liveB.Title, stored.Movie.Title)
+}
+
+// TestWithFileRecovery_PanicKeepsLiveMovieOnRekey pins the panic write-back's
+// poster-state discipline (P2-5's failure sibling): a panicking apply worker
+// whose snapshot was re-keyed mid-flight must NOT overwrite the live movie —
+// only the pipeline-owned status/error/timestamps move.
+func TestWithFileRecovery_PanicKeepsLiveMovieOnRekey(t *testing.T) {
+	const filePath = "/input/RK-004.mp4"
+	tracker := resultstore.New(1, []string{filePath})
+	snapshotA := &models.Movie{ID: "AAA-111", Title: "Scraped A"}
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "AAA-111"},
+		Status:        models.JobStatusCompleted,
+		Movie:         snapshotA,
+	})
+	rekeyLiveResult(t, tracker, filePath, "BBB-222")
+
+	outcome := &applyFileOutcome{}
+	rc := recoveryContext{
+		jobID:     models.NewJobID(),
+		filePath:  filePath,
+		fmi:       models.FileMatchInfo{Path: filePath, MovieID: "AAA-111"},
+		movie:     snapshotA,
+		updater:   tracker,
+		startTime: time.Now(),
+	}
+	func() {
+		defer withFileRecovery(rc, outcome)()
+		panic("simulated apply panic")
+	}()
+
+	assert.True(t, outcome.Panic, "outcome: %+v", outcome)
+	stored, err := tracker.GetMovieResult(filePath)
+	require.NoError(t, err)
+	require.NotNil(t, stored.Movie)
+	assert.Equal(t, "BBB-222", stored.Movie.ID, "the panic write-back must not stamp A's snapshot over B")
+	assert.Equal(t, models.JobStatusFailed, stored.Status)
+	assert.Contains(t, stored.Error, "simulated apply panic")
+}
+
+// TestWithFileRecovery_PanicPreservesMovieOnMatch keeps the legacy behavior
+// when identities match: the panic write-back retains the prior scrape-phase
+// movie (merged with live poster state) so failed-apply rows keep their
+// movie payload.
+func TestWithFileRecovery_PanicPreservesMovieOnMatch(t *testing.T) {
+	const filePath = "/input/RK-005.mp4"
+	tracker := resultstore.New(1, []string{filePath})
+	snapshot := &models.Movie{ID: "MATCH-1", Title: "Scraped", Poster: models.PosterState{
+		PosterURL: "https://old.example/poster.jpg", ShouldCropPoster: true,
+	}}
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "MATCH-1"},
+		Status:        models.JobStatusCompleted,
+		Movie:         snapshot,
+	})
+	bounds := midOrganizeCrop(t, tracker, filePath)
+
+	outcome := &applyFileOutcome{}
+	rc := recoveryContext{
+		jobID:    models.NewJobID(),
+		filePath: filePath,
+		fmi:      models.FileMatchInfo{Path: filePath, MovieID: "MATCH-1"},
+		movie:    snapshot,
+		updater:  tracker,
+	}
+	func() {
+		defer withFileRecovery(rc, outcome)()
+		panic("boom")
+	}()
+
+	stored, err := tracker.GetMovieResult(filePath)
+	require.NoError(t, err)
+	require.NotNil(t, stored.Movie)
+	assert.Equal(t, "MATCH-1", stored.Movie.ID)
+	assertLivePosterPreserved(t, stored.Movie, bounds)
+	assert.Equal(t, models.JobStatusFailed, stored.Status)
+}

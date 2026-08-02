@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -93,52 +94,22 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		result, prov, compensate, err := job.ApplyFieldOverride(c.Request.Context(), resultID, req.Field, req.Source)
+		result, prov, err := job.ApplyFieldOverride(c.Request.Context(), resultID, req.Field, req.Source)
 		if err != nil {
 			status := http.StatusBadRequest
 			if strings.Contains(err.Error(), "not found") {
 				status = http.StatusNotFound
 			}
+			// The envelope persist ran INSIDE ApplyFieldOverride's poster-source
+			// lock (with in-lock compensation of the fan-out, provenance, and
+			// poster assets) — a persist failure surfaces as a 5xx, never an
+			// acked override a restart would drop.
+			if errors.Is(err, worker.ErrEnvelopePersist) {
+				status = http.StatusInternalServerError
+				logging.Errorf("Failed to persist field override for job %s: %v", jobID, err)
+			}
 			logging.Debugf("[FieldOverride] %s/%s field=%s source=%s: %v", jobID, resultID, req.Field, req.Source, err)
 			c.JSON(status, contracts.ErrorResponse{Error: err.Error()})
-			return
-		}
-
-		// The overridden state lives only in the job envelope: surface a failed
-		// persist instead of acknowledging an override a restart would drop.
-		// The same failure after a poster-source refresh used to strand the
-		// divergence permanently (restart state vs. refreshed cache), so the
-		// compensation captured by ApplyFieldOverride reverts the in-memory
-		// parts and rolls the cache back; its failures surface alongside the
-		// persist error, not swallowed.
-		//
-		// Cover the persist + compensation pair with the poster-source lock
-		// ApplyFieldOverride already released. Re-keying hazard: the lock key
-		// is derived from the RETURNED result — ApplyFieldOverride re-resolves
-		// the movie ID under the lock and persists the parts under that final
-		// key, so a key computed from pre-call state could serialize against
-		// nothing (F3). Ordering INSIDE the critical section: persist first,
-		// compensate only on failure. Without the lock, a manual crop (or
-		// source edit) landing in the gap would persist its own state after
-		// the override's whole-movie writes and then be silently erased when
-		// the compensation reverts those parts to their pre-override movies.
-		// Lock ordering: only this lock is taken here — no overrideMu, no
-		// second poster-source lock — matching updateBatchMoviePosterCrop.
-		compensateLockKey := ""
-		if result != nil {
-			compensateLockKey = posterLockKeyFor(result)
-		}
-		releaseCompensateLock := worker.AcquirePosterSourceLock(jobID, compensateLockKey)
-		defer releaseCompensateLock()
-		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
-			errMsg := fmt.Sprintf("Failed to persist job state: %v", perr)
-			if compensate != nil {
-				if compErr := compensate(); compErr != nil {
-					errMsg = fmt.Sprintf("%s (override revert failed: %v)", errMsg, compErr)
-				}
-			}
-			logging.Errorf("Failed to persist field override for job %s: %v", jobID, perr)
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 

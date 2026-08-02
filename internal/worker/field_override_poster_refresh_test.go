@@ -179,7 +179,7 @@ func TestApplyFieldOverride_PosterURLRefreshInvocation(t *testing.T) {
 				counter = tt.gen
 			}
 
-			updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, tt.field, "dmm")
+			updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, tt.field, "dmm")
 
 			if tt.wantErr != "" {
 				require.Error(t, err)
@@ -333,7 +333,7 @@ func TestApplyFieldOverride_PosterURLRefreshTempFiles(t *testing.T) {
 				require.NoError(t, afero.WriteFile(fs, previewPath, oldJPEG, 0o644))
 			}
 
-			updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, tt.field, "dmm")
+			updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, tt.field, "dmm")
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -422,7 +422,7 @@ func TestApplyFieldOverride_RefreshRollsBackWhenPersistFails(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, fullPath, oldJPEG, 0o644))
 	require.NoError(t, afero.WriteFile(fs, previewPath, oldPreview, 0o644))
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist field override")
 	assert.Nil(t, updated)
@@ -463,7 +463,7 @@ func TestApplyFieldOverride_RollbackFailureReportedWithNoPreexistingAssets(t *te
 	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
 	je.movieRepo = repo
 
-	_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist field override")
 	assert.Contains(t, err.Error(), "poster rollback failed")
@@ -498,7 +498,7 @@ func TestApplyFieldOverride_CleanupRollsBackWhenPersistFails(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, fullPath, oldJPEG, 0o644))
 	require.NoError(t, afero.WriteFile(fs, previewPath, oldPreview, 0o644))
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist field override")
 	assert.Nil(t, updated)
@@ -585,7 +585,7 @@ func TestApplyFieldOverride_RollbackFailureReported(t *testing.T) {
 	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
 	je.movieRepo = repo
 
-	_, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist field override")
 	assert.Contains(t, err.Error(), "poster rollback failed")
@@ -627,7 +627,7 @@ func TestApplyFieldOverride_CoverBackedSameEffectiveSourceSkipsRefreshAndKeepsCr
 		return current, nil
 	}))
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.NoError(t, err)
 	require.NotNil(t, updated)
 	assert.Equal(t, 0, gen.calls,
@@ -656,7 +656,7 @@ func TestApplyFieldOverride_CoverBackedTruePosterChangeRefreshesAndClearsCrop(t 
 	gen := &stubOverridePosterGen{}
 	je.posterGen = gen
 
-	updated, _, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	updated, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.NoError(t, err)
 	require.NotNil(t, updated)
 	assert.Equal(t, newPoster, updated.Movie.Poster.PosterURL)

@@ -63,6 +63,12 @@ type PosterManagerInterface interface {
 	// cleanup half of clearing the last poster source. Missing files are
 	// fine; other removal failures surface.
 	RemoveAssets(jobID, posterID string) error
+	// MoveAssets re-keys the cached full-size source and preview from
+	// fromPosterID to toPosterID within the same job directory — the
+	// id-override fan-out adopts a new movie ID and the shared assets must
+	// follow it, or they are orphaned at the old key. Missing source assets
+	// are skipped; stale destination files are replaced.
+	MoveAssets(jobID, fromPosterID, toPosterID string) error
 }
 
 // AssetsSnapshot captures the job's cached full-size poster source
@@ -368,6 +374,67 @@ func (pm *PosterManager) RestoreAssets(snap *AssetsSnapshot) error {
 		}
 	}
 	return restoreErr
+}
+
+// MoveAssets re-keys the cached full-size source and preview from
+// fromPosterID to toPosterID within one job's temp poster directory. Each
+// present source asset ({from}-full.jpg and {from}.jpg) replaces any stale
+// destination file and is renamed onto the destination name; absent source
+// assets are skipped (a poster-free movie has nothing to move) and leave the
+// destination untouched ONLY when absent as well — a stale destination asset
+// with no source is still removed so an id rekey never leaves images filed
+// under the new key that no persisted state produced. Semantics mirror
+// RestoreAssets' replace-the-file family: validated IDs, per-asset atomic
+// rename (same directory), and errors joined across both assets instead of
+// short-circuiting. An unchanged from/to pair is a no-op. The caller holds
+// BOTH poster-source locks (origin and destination, lexical order) across
+// the move so no crop or source edit can interleave.
+func (pm *PosterManager) MoveAssets(jobID, fromPosterID, toPosterID string) error {
+	if fromPosterID == toPosterID {
+		return nil
+	}
+	if err := ValidateJobID(jobID); err != nil {
+		return err
+	}
+	if err := validatePosterID(fromPosterID); err != nil {
+		return err
+	}
+	if err := validatePosterID(toPosterID); err != nil {
+		return err
+	}
+	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
+	var moveErr error
+	for _, pair := range [][2]string{
+		{fromPosterID + "-full.jpg", toPosterID + "-full.jpg"},
+		{fromPosterID + ".jpg", toPosterID + ".jpg"},
+	} {
+		src := filepath.Join(tempPosterDir, pair[0])
+		dst := filepath.Join(tempPosterDir, pair[1])
+		if _, err := pm.fs.Stat(src); err != nil {
+			if !os.IsNotExist(err) {
+				moveErr = errors.Join(moveErr, fmt.Errorf("stat poster asset %s: %w", pair[0], err))
+				continue
+			}
+			// Source absent: drop any stale destination asset so the new key
+			// never carries an image no persisted state produced.
+			if err := pm.fs.Remove(dst); err != nil && !os.IsNotExist(err) {
+				moveErr = errors.Join(moveErr, fmt.Errorf("remove stale destination poster asset %s: %w", pair[1], err))
+			}
+			continue
+		}
+		if err := pm.fs.MkdirAll(tempPosterDir, configDirPermTemp); err != nil {
+			moveErr = errors.Join(moveErr, fmt.Errorf("move poster asset directory: %w", err))
+			continue
+		}
+		if err := pm.fs.Remove(dst); err != nil && !os.IsNotExist(err) {
+			moveErr = errors.Join(moveErr, fmt.Errorf("replace destination poster asset %s: %w", pair[1], err))
+			continue
+		}
+		if err := pm.fs.Rename(src, dst); err != nil {
+			moveErr = errors.Join(moveErr, fmt.Errorf("move poster asset %s -> %s: %w", pair[0], pair[1], err))
+		}
+	}
+	return moveErr
 }
 
 // RemoveAssets deletes the cached full-size source and preview for a poster
