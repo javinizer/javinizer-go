@@ -47,6 +47,17 @@ func TestMergeRescrapeMovie(t *testing.T) {
 		assert.Equal(t, 120, merged.Runtime)
 	})
 
+	// Merge engine failure (both movies nil) falls back to the scraped movie
+	// unchanged instead of blocking the rescrape.
+	t.Run("both nil: merge error falls back to scraped without panicking", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			merged := mergeRescrapeMovie(nil, nil, workflow.MergeOptions{
+				ScalarStrategy: nfo.PreferNFO,
+			}, "file.mp4")
+			assert.Nil(t, merged)
+		})
+	})
+
 	t.Run("nil existing falls back to scraped unchanged", func(t *testing.T) {
 		merged := mergeRescrapeMovie(nil, scraped, workflow.MergeOptions{
 			ScalarStrategy: nfo.PreferNFO,

@@ -566,6 +566,39 @@ func mergeRescrapeMovie(existing, scraped *models.Movie, opts workflow.MergeOpti
 		merged.Merged.Poster.ShouldCropPoster = scraped.Poster.ShouldCropPoster
 	}
 
+	// Crop state (CropBounds + ShouldCropPoster) is measured against the
+	// effective poster source (PosterURL ?? CoverURL — the same semantics as
+	// field_override.go's effectivePosterSource). The scraped movie never
+	// carries CropBounds, so the merge engine leaves merged nil; that is
+	// correct only when reconciliation actually switched the source image.
+	// When the merge keeps the existing effective source (the scraper
+	// returned no image, or returned the same URL), an existing manual crop
+	// was measured against that very image and stays valid: dropping it would
+	// make Organize save the retained cover/poster without the user-approved
+	// crop (the crop's ShouldCropPoster=false reset makes no crop intent
+	// re-derive), and overwriting ShouldCropPoster would discard a deliberate
+	// user crop decision. Invariant: unchanged effective source ⟹ the
+	// currently stored CropBounds and ShouldCropPoster are kept; a changed
+	// source invalidates crop state measured against the old image.
+	// This must run AFTER the URL reconciliation above — it compares the
+	// final merged source, and must override the takeScraperImages crop-intent
+	// copy when the scraper merely re-found the identical source.
+	if existing != nil {
+		oldSource := effectivePosterSource(existing.Poster.PosterURL, existing.Poster.CoverURL)
+		newSource := effectivePosterSource(merged.Merged.Poster.PosterURL, merged.Merged.Poster.CoverURL)
+		if newSource == oldSource {
+			if existing.Poster.CropBounds != nil {
+				b := *existing.Poster.CropBounds // copy: merged must not alias existing
+				merged.Merged.Poster.CropBounds = &b
+			} else {
+				merged.Merged.Poster.CropBounds = nil
+			}
+			merged.Merged.Poster.ShouldCropPoster = existing.Poster.ShouldCropPoster
+		} else {
+			merged.Merged.Poster.CropBounds = nil // crop was measured against the old image
+		}
+	}
+
 	// The poster-original group (OriginalPosterURL/OriginalCroppedPosterURL/
 	// OriginalShouldCropPoster/OriginalCoverURL) is the revert baseline the
 	// review UI restores on Reset — it must track the scraper's value, not be
