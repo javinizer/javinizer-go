@@ -177,6 +177,10 @@ func handleSaveFileLimit(w http.ResponseWriter, r *http.Request, choosePath Choo
 		if removeErr := os.Remove(path); removeErr != nil {
 			cleanupNote = fmt.Sprintf("; also failed to remove partial file %s: %v", path, removeErr)
 		}
+		// A close failure alongside a copy failure would otherwise vanish.
+		if copyErr != nil && closeErr != nil {
+			cleanupNote = fmt.Sprintf("; also failed to finalize %s: %v%s", path, closeErr, cleanupNote)
+		}
 		switch {
 		case copyErr != nil && errors.As(copyErr, new(*http.MaxBytesError)):
 			writeErr(http.StatusRequestEntityTooLarge, fmt.Sprintf("desktop: export exceeds %d-byte limit%s", maxBytes, cleanupNote))

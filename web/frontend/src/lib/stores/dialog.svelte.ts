@@ -1,4 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
+import * as m from '$lib/paraglide/messages';
 
 interface DialogButton {
 	label: string;
@@ -46,9 +47,9 @@ export function confirmDialog(
 		message,
 		variant: options?.variant,
 		buttons: [
-			{ label: options?.cancelLabel ?? 'Cancel', variant: 'outline', value: 'cancel' },
+			{ label: options?.cancelLabel ?? m.common_cancel(), variant: 'outline', value: 'cancel' },
 			{
-				label: options?.confirmLabel ?? 'Confirm',
+				label: options?.confirmLabel ?? m.common_confirm(),
 				variant: options?.variant === 'danger' ? 'destructive' : 'default',
 				value: 'confirm',
 			},
