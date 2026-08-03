@@ -217,7 +217,9 @@ func buildApplyCmd(
 
 // interpretApplyResult processes the workflow.Apply result/error into an
 // applyFileOutcome. It updates the job result tracker, broadcasts events,
-// and runs the PostApply hook if configured.
+// and runs the PostApply hook if configured. applyCmd is the command the
+// physical apply ran with; the mid-apply poster-drift repair pass
+// (Codex P2-B) re-issues it scoped down to the poster write.
 func interpretApplyResult(
 	filePath string,
 	movie *models.Movie,
@@ -227,6 +229,7 @@ func interpretApplyResult(
 	cfg ApplyPhaseConfig,
 	taskCtx context.Context,
 	afc *ApplyFileContext,
+	applyCmd workflow.ApplyCmd,
 	result *workflow.ApplyResult,
 	applyErr error,
 ) applyFileOutcome {
@@ -374,39 +377,31 @@ func interpretApplyResult(
 	}
 
 	if result != nil && result.Movie != nil {
-		// Deferred release INSIDE the closure (L1): a panic in the store
-		// callback must not leak the refcounted lock entry — a leaked entry
-		// never evicts and deadlocks every later writer on this key.
-		func() {
-			releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, filePath, result.Movie.ID))
-			defer releasePosterLock()
-			if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-				// Write the pipeline-updated movie back, but let the LIVE result's
-				// poster state win: a manual crop (or poster-from-URL / source edit)
-				// taken while this file was being organized must not be clobbered by
-				// the apply-start snapshot result.Movie was cloned from — and an
-				// edit that RE-KEYED the result mid-apply (live identity differs)
-				// keeps its whole movie: the write-back touches nothing (P2-5).
-				// Holding the live key's poster-source lock makes the key resolution
-				// and the write one critical section against crop/edit writers.
-				// Design note: the physical poster file just written on disk came
-				// from that apply-start snapshot's source — merging the live poster
-				// identity here updates the ENVELOPE only; it does not retro-crop
-				// the written file. A subsequent re-organize picks up the new
-				// (live) source and reproduces the crop from it.
-				if current.Movie != nil && current.Movie.ID != result.Movie.ID {
-					logging.Debugf("apply write-back skipped for %s — live movie %q re-keyed away from pipeline movie %q", filePath, current.Movie.ID, result.Movie.ID)
-					return current, nil
-				}
-				next := result.Movie.Clone()
-				mergeLivePosterState(next, current.Movie)
-				current.Movie = next
-				return current, nil
-			}); err != nil {
-				logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err)
-			}
-		}()
+		merged, drifted := writeBackSuccessMovie(inputs, filePath, result.Movie)
 		outcome.Movie = result.Movie
+
+		// Mid-apply poster edit (Codex P2-B): a crop, poster-from-URL, or
+		// source edit that committed after wf.Apply captured its snapshot but
+		// before the write-back is MERGED above — the envelope now carries the
+		// new poster state, while the physical pass just wrote the poster file
+		// and NFO from the OLD snapshot. The file is about to be reported
+		// organized with on-disk output no subsequent organize would fix (the
+		// persisted state believes it is already applied). Holding the poster
+		// lock across the whole physical apply was rejected as too coarse:
+		// downloads run minutes under it while crop/edit HTTP requests wait.
+		// Instead, repair BEFORE reporting success: re-run the apply pass with
+		// organize skipped and the MERGED (live-poster) movie, so the poster
+		// file and NFO are rewritten from the state the envelope persists —
+		// then re-check drift under the lock (an edit committed mid-repair
+		// re-triggers; the loop is bounded, see the helper).
+		// merged is non-nil exactly when the write-back stored a movie; drift
+		// can only be detected in that same critical section, so drifted
+		// implies merged != nil here (a skipped/failed write-back reports no
+		// drift and skips the repair).
+		if drifted {
+			result = repairMidApplyPosterDrift(taskCtx, inputs, cfg, filePath, applyCmd, afc, result, merged)
+			outcome.Movie = result.Movie
+		}
 	}
 
 	inputs.Broadcaster.Send(JobEvent{
@@ -503,7 +498,7 @@ func applyFile(
 	result, applyErr := wf.Apply(taskCtx, applyCmd)
 
 	// Step 3: Interpret the result.
-	return interpretApplyResult(filePath, movie, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)
+	return interpretApplyResult(filePath, movie, startTime, applyTimeout, inputs, cfg, taskCtx, afc, applyCmd, result, applyErr)
 }
 
 // trackApplyResults processes collected applyFileOutcomes: increments counters
@@ -603,4 +598,152 @@ func mergeLivePosterState(dst, live *models.Movie) {
 	} else {
 		dst.Poster.OriginalShouldCropPoster = nil
 	}
+}
+
+// writeBackSuccessMovie persists the pipeline-updated movie of a SUCCESSFUL
+// physical apply pass onto the file result, letting the LIVE result's poster
+// state win over the pass snapshot (see mergeLivePosterState) — a manual crop
+// or poster/source edit taken while this file was being applied must not be
+// clobbered, and an edit that RE-KEYED the result mid-apply (live identity
+// differs) keeps its whole movie: the write-back touches nothing then (P2-5).
+//
+// The write runs UNDER the live key's poster-source lock so key resolution
+// and write form one critical section against crop/edit writers. It returns
+// the merged movie that was stored (nil when the write-back was skipped) and
+// whether the live poster state DRIFTED from the poster state `applied`
+// carried into the physical pass — the drift signal Codex P2-B's repair pass
+// keys on: drift means the poster file/NFO just written describe the OLD
+// snapshot while the envelope now persists the NEW one.
+//
+// Deferred release INSIDE the closure (L1): a panic in the store callback
+// must not leak the refcounted lock entry — a leaked entry never evicts and
+// deadlocks every later writer on this key.
+func writeBackSuccessMovie(inputs applyPhaseInputs, filePath string, applied *models.Movie) (merged *models.Movie, drifted bool) {
+	releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, filePath, applied.ID))
+	defer releasePosterLock()
+	if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+		if current.Movie != nil && current.Movie.ID != applied.ID {
+			logging.Debugf("apply write-back skipped for %s — live movie %q re-keyed away from pipeline movie %q", filePath, current.Movie.ID, applied.ID)
+			return current, nil
+		}
+		next := applied.Clone()
+		drifted = posterStateDrifted(applied, current.Movie)
+		mergeLivePosterState(next, current.Movie)
+		current.Movie = next
+		merged = next
+		return current, nil
+	}); err != nil {
+		logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err)
+	}
+	return merged, drifted
+}
+
+// posterStateDrifted reports whether the LIVE movie's physically-applied
+// poster state differs from the state the apply pass ran with. Only the
+// fields that decide the on-disk poster bytes count: the effective source
+// pair (PosterURL ?? CoverURL — the downloader's resolution), the crop intent
+// (ShouldCropPoster), and the carried bounds. The envelope-only group
+// (CroppedPosterURL preview pointer, Original* reset baseline) never reaches
+// disk inside apply, so changes there alone do not repair-trigger. Identity
+// mismatch is NOT drift: the live movie belongs to a different identity
+// (mid-flight rekey) and the write-back already skipped the merge — the
+// rekeyed family's own writers own its disk representation.
+func posterStateDrifted(applied, live *models.Movie) bool {
+	if applied == nil || live == nil || applied.ID != live.ID {
+		return false
+	}
+	a, l := applied.Poster, live.Poster
+	if a.PosterURL != l.PosterURL || a.CoverURL != l.CoverURL || a.ShouldCropPoster != l.ShouldCropPoster {
+		return true
+	}
+	if a.CropBounds == nil || l.CropBounds == nil {
+		return a.CropBounds != l.CropBounds
+	}
+	return *a.CropBounds != *l.CropBounds
+}
+
+// maxPosterDriftRepairPasses bounds the drift-repair loop: each pass re-runs
+// the poster write and re-checks drift under the poster lock, so a crop/edit
+// committed mid-repair triggers one more pass. The bound protects against
+// edit storms (and merge configurations whose NFO-preserve strategy keeps
+// resurrecting the older poster fields); past the bound the file is left
+// organized with a warning — the persisted envelope is authoritative, and a
+// re-organize converges the disk, exactly as with any post-organize edit.
+const maxPosterDriftRepairPasses = 3
+
+// repairMidApplyPosterDrift rewrites the drifted physical poster output of a
+// just-organized file BEFORE the success is reported (Codex P2-B). The
+// first, already-finished pass organized/DOWNLOADED/NFO'd the file from the
+// apply-start snapshot; by write-back time a crop/poster edit had landed, so
+// that output is stale. Each repair pass re-issues wf.Apply with organize
+// skipped (the file is already at its destination; Match.Path is repointed at
+// the moved path so NFO stream details still resolve) and the MERGED movie —
+// pipeline fields authoritative, poster fields live — so the downloader and
+// NFO generator rewrite from the state the envelope persists. The pass's own
+// snapshot→write-back window is closed by re-running writeBackSuccessMovie:
+// an edit committed mid-repair re-detects drift and triggers another pass,
+// up to maxPosterDriftRepairPasses.
+//
+// Nothing here runs under the poster-source lock (the lock spans only the
+// write-backs), so repair passes never extend the critical section across
+// network downloads — the rejected alternative (holding the lock across the
+// physical apply) would have blocked crop/edit requests for the whole
+// download window. The last ApplyResult is returned so outcome/broadcast
+// state reflects the pass whose movie the envelope finally persisted; on a
+// repair failure the EARLIER result stands (the file IS organized — only its
+// poster output lags the live edit, logged for a re-organize).
+func repairMidApplyPosterDrift(
+	taskCtx context.Context,
+	inputs applyPhaseInputs,
+	cfg ApplyPhaseConfig,
+	filePath string,
+	applyCmd workflow.ApplyCmd,
+	afc *ApplyFileContext,
+	lastResult *workflow.ApplyResult,
+	merged *models.Movie,
+) *workflow.ApplyResult {
+	if applyCmd.DryRun || inputs.WF == nil || (!cfg.Download && !applyCmd.GenerateNFO) {
+		// Nothing physical to rewrite: a dry-run touched no bytes, and
+		// without download/NFO generation the pass produced no poster-bearing
+		// artifacts — the persist merge alone is the whole fix. (inputs.WF
+		// nil only in unit harnesses that drive interpretApplyResult directly.)
+		return lastResult
+	}
+	for pass := 1; pass <= maxPosterDriftRepairPasses; pass++ {
+		repairCmd := applyCmd
+		repairCmd.Movie = merged.Clone()
+		repairCmd.Organize.Skip = true
+		repairCmd.Match = afc.Match
+		if lastResult.OrganizeResult != nil {
+			if lastResult.OrganizeResult.NewPath != "" {
+				repairCmd.Match.Path = lastResult.OrganizeResult.NewPath
+			}
+			if lastResult.OrganizeResult.FolderPath != "" {
+				repairCmd.DestPath = lastResult.OrganizeResult.FolderPath
+			}
+		}
+		logging.Infof("apply: poster state changed mid-apply for %s — re-running the poster write from the live state (repair pass %d/%d)", filePath, pass, maxPosterDriftRepairPasses)
+		res, err := inputs.WF.Apply(taskCtx, repairCmd)
+		if err != nil {
+			logging.Warnf("apply: poster-drift repair pass %d for %s failed: %v (on-disk poster/NFO lag the mid-apply edit; re-organize to converge)", pass, filePath, err)
+			return lastResult
+		}
+		if res == nil || res.Movie == nil {
+			logging.Warnf("apply: poster-drift repair pass %d for %s returned no movie (on-disk poster/NFO lag the mid-apply edit; re-organize to converge)", pass, filePath)
+			return lastResult
+		}
+		lastResult = res
+		nextMerged, stillDrifted := writeBackSuccessMovie(inputs, filePath, res.Movie)
+		if nextMerged == nil {
+			// Live result re-keyed mid-repair (or the store write failed):
+			// the rekeyed family owns its disk representation — stop.
+			return lastResult
+		}
+		if !stillDrifted {
+			return lastResult
+		}
+		merged = nextMerged
+	}
+	logging.Warnf("apply: poster state still drifting after %d repair passes for %s (on-disk poster/NFO lag the latest edit; re-organize to converge)", maxPosterDriftRepairPasses, filePath)
+	return lastResult
 }

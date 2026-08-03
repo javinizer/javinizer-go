@@ -70,7 +70,7 @@ func TestInterpretApplyResult_PanicInFailureWritebackReleasesLock(t *testing.T) 
 
 	expectPanicReleasesLock(t, jobID.String(), movieID, func() {
 		interpretApplyResult(filePath, movie, time.Now(), time.Minute, inputs, ApplyPhaseConfig{},
-			context.Background(), afc, nil, errors.New("simulated apply failure"))
+			context.Background(), afc, workflow.ApplyCmd{}, nil, errors.New("simulated apply failure"))
 	})
 	assert.Equal(t, int32(1), atomic.LoadInt32(&updater.armed))
 }
@@ -94,7 +94,7 @@ func TestInterpretApplyResult_PanicInSuccessWritebackReleasesLock(t *testing.T) 
 
 	expectPanicReleasesLock(t, jobID.String(), movieID, func() {
 		interpretApplyResult(filePath, movie, time.Now(), time.Minute, inputs, ApplyPhaseConfig{},
-			context.Background(), afc, &workflow.ApplyResult{Movie: movie.Clone()}, nil)
+			context.Background(), afc, workflow.ApplyCmd{}, &workflow.ApplyResult{Movie: movie.Clone()}, nil)
 	})
 }
 

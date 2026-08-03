@@ -80,7 +80,7 @@ func TestInterpretApplyResult_SuccessPreservesMidOrganizeCrop(t *testing.T) {
 		PosterURL: "https://old.example/poster.jpg", ShouldCropPoster: true,
 	}}
 	outcome := interpretApplyResult(filePath, snapshot, time.Now(), time.Minute, inputs, cfg,
-		context.Background(), afc, &workflow.ApplyResult{Movie: pipeline}, nil)
+		context.Background(), afc, workflow.ApplyCmd{}, &workflow.ApplyResult{Movie: pipeline}, nil)
 
 	require.True(t, outcome.Success, "outcome: %+v", outcome)
 	stored, err := tracker.GetMovieResult(filePath)
@@ -117,7 +117,7 @@ func TestInterpretApplyResult_FailurePreservesMidOrganizeCrop(t *testing.T) {
 	bounds := midOrganizeCrop(t, tracker, filePath)
 
 	outcome := interpretApplyResult(filePath, snapshot, time.Now(), time.Minute, inputs, cfg,
-		context.Background(), afc, nil, errors.New("simulated apply failure"))
+		context.Background(), afc, workflow.ApplyCmd{}, nil, errors.New("simulated apply failure"))
 
 	require.True(t, outcome.Failed, "outcome: %+v", outcome)
 	stored, err := tracker.GetMovieResult(filePath)
@@ -403,7 +403,7 @@ func TestInterpretApplyResult_SuccessKeepsLiveMovieOnRekey(t *testing.T) {
 		PosterURL: "https://a.example/poster.jpg", ShouldCropPoster: true,
 	}}
 	outcome := interpretApplyResult(filePath, snapshotA, time.Now(), time.Minute, inputs, ApplyPhaseConfig{},
-		context.Background(), afc, &workflow.ApplyResult{Movie: pipelineA}, nil)
+		context.Background(), afc, workflow.ApplyCmd{}, &workflow.ApplyResult{Movie: pipelineA}, nil)
 	require.True(t, outcome.Success, "outcome: %+v", outcome)
 
 	stored, err := tracker.GetMovieResult(filePath)
@@ -442,7 +442,7 @@ func TestInterpretApplyResult_FailureKeepsLiveMovieOnRekey(t *testing.T) {
 	rekeyLiveResult(t, tracker, filePath, "BBB-222")
 
 	outcome := interpretApplyResult(filePath, snapshotA, time.Now(), time.Minute, inputs, ApplyPhaseConfig{},
-		context.Background(), afc, nil, errors.New("simulated apply failure"))
+		context.Background(), afc, workflow.ApplyCmd{}, nil, errors.New("simulated apply failure"))
 	require.True(t, outcome.Failed, "outcome: %+v", outcome)
 
 	stored, err := tracker.GetMovieResult(filePath)
