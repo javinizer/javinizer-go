@@ -493,6 +493,13 @@ reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf 'syso\n' > internal/foo/x.syso
 check_hook "e2e: ignored *.syso build input blocked" 1 "x.syso"
 
+# non-ASCII ignored compile input: default git output C-QUOTES unusual
+# paths, the package-dir match then misses, and the masked input evades
+# the guard — every scan that feeds a comparison must emit -z raw bytes
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+printf 'syso\n' > "internal/foo/注釈.syso"
+check_hook "e2e: non-ASCII ignored build input blocked" 1 "注釈.syso"
+
 reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf 'package foo\n\nfunc Local() int { return 1 }\n' > internal/foo/local_extra.go
 check_hook "e2e: ignored *.go masked symbol blocked" 1 "local_extra.go"
@@ -553,6 +560,28 @@ printf 'embeddata\n' > internal/foo/testdata/temb/local_e.db
 printf 'package foo\n\nimport (\n\t_ "probe.local/x/internal/foo/testdata/temb"\n)\n\nfunc Foo() int { return 1 }\n' > internal/foo/a.go
 gofmt -w internal/foo/a.go; git add internal/foo/a.go
 check_hook "e2e: ignored embed asset under testdata masked" 1 "local_e.db"
+
+# asset-only DELETION of an embed target outside the checked pathspecs:
+# nothing checked is staged, yet the committed snapshot loses the LAST
+# match of a //go:embed pattern — the tier-1 census must engage and the
+# fail-closed graph refusal converts the unresolvable pattern into a
+# block (pre-tiering this exact commit passed the hook; CI did not)
+reset
+cat > rootembed_fixture.go <<'EOF'
+package x
+
+import _ "embed"
+
+//go:embed banner.txt
+var Banner string
+EOF
+gofmt -w rootembed_fixture.go
+printf 'banner\n' > banner.txt
+git add rootembed_fixture.go banner.txt
+git commit -qm 'fixture: root-level //go:embed banner.txt'
+git rm -q banner.txt
+check_hook "e2e: asset-only embed-target deletion outside pathspecs refused" 1 "Cannot enumerate"
+git reset -q --hard HEAD >/dev/null
 
 # fail-closed guard scans: with a package graph the toolchain cannot
 # enumerate (UNTRACKED file importing an unresolvable module — GOPROXY=off
