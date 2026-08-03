@@ -594,12 +594,19 @@ FILTER_EOF
         # list/vet/test/build consume the working-tree file here, then the
         # COMMITTED snapshot fails with 'pattern local.db: no matching
         # files found'. No static pathspec can enumerate embed targets, so
-        # ask the toolchain: go list -test resolves the EXACT embed set
-        # against this tree (glob semantics, all: prefixes and the
-        # dot/underscore directory-walk exclusion handled by the tool;
-        # -test is required because plain go list leaves TestEmbedFiles
-        # and XTestEmbedFiles empty — an ignored _test.go embed asset
-        # would otherwise slip the guard while go test consumes it).
+        # ask the toolchain: go list -test -deps resolves the EXACT
+        # embed set against this tree (glob semantics, all: prefixes and
+        # the dot/underscore directory-walk exclusion handled by the
+        # tool). -test is required because plain go list leaves
+        # TestEmbedFiles and XTestEmbedFiles empty — an ignored _test.go
+        # embed asset would otherwise slip the guard while go test
+        # consumes it — and -deps is required because wildcard ./...
+        # never enumerates testdata/, yet explicit imports beneath
+        # testdata DO resolve (the same hole the TOOL_DIRS_CACHE graph
+        # union closes): an embed in such a package hides from a shallow
+        # census while its consumers break in CI. Module-cache deps the
+        # scan surfaces sit outside the checkout; the prefix-strip below
+        # drops them.
         # Recomputed per invocation, deliberately NOT cached like
         # TOOL_DIRS_CACHE: a mid-run-created ignored embed file changes
         # nothing else any comparator observes. Mask set = embedded paths
@@ -609,8 +616,8 @@ FILTER_EOF
         # are not toolchain-enumerable and stay out by design.
         # Same fail-closed rule as the directory scans above: a partial
         # embed census would vouch for masking holes it never saw.
-        EMBED_ABS=$(go list -test -f '{{range .EmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .TestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .XTestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./... 2>/dev/null) ||
-            { refuse_guard_scan "go list -test"; return 1; }
+        EMBED_ABS=$(go list -test -deps -f '{{range .EmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .TestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .XTestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./... 2>/dev/null) ||
+            { refuse_guard_scan "go list -test -deps"; return 1; }
         if [ -n "$EMBED_ABS" ]; then
             EMBED_ROOT=$(pwd)
             EMBED_REL=""

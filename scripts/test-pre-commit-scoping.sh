@@ -543,6 +543,17 @@ printf 'fixture\n' > internal/foo/local_t.db
 git add internal/foo/embed_test.go
 check_hook "e2e: ignored _test.go embed asset masked" 1 "local_t.db"
 
+# ignored embed asset in a package BENEATH testdata/: wildcard ./...
+# never enumerates testdata/ (explicit imports beneath it DO resolve, see
+# the ghost-import scenarios below), so the embed census needs -deps to
+# reach it — exactly like the TOOL_DIRS_CACHE graph union
+reset; mkdir -p internal/foo/testdata/temb
+printf 'package temb\n\nimport _ "embed"\n\n//go:embed local_e.db\n\nvar E string\n' > internal/foo/testdata/temb/e.go
+printf 'embeddata\n' > internal/foo/testdata/temb/local_e.db
+printf 'package foo\n\nimport (\n\t_ "probe.local/x/internal/foo/testdata/temb"\n)\n\nfunc Foo() int { return 1 }\n' > internal/foo/a.go
+gofmt -w internal/foo/a.go; git add internal/foo/a.go
+check_hook "e2e: ignored embed asset under testdata masked" 1 "local_e.db"
+
 # fail-closed guard scans: with a package graph the toolchain cannot
 # enumerate (UNTRACKED file importing an unresolvable module — GOPROXY=off
 # makes resolution fail fast), the guard must REFUSE rather than silently
