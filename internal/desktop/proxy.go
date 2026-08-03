@@ -137,6 +137,30 @@ func handleSaveFile(w http.ResponseWriter, r *http.Request, choosePath ChooseSav
 //
 //nolint:unused // reached only via handleSaveFile
 func handleSaveFileLimit(w http.ResponseWriter, r *http.Request, choosePath ChooseSavePathFunc, maxBytes int64) {
+	handleSaveFileFS(w, r, choosePath, maxBytes, saveFileDiskFS)
+}
+
+// saveFileFS indirection lets tests simulate filesystem failures (read, write,
+// finalize, remove) without fault-injecting the real OS layer.
+//
+//nolint:unused // diskFS reached only via handleSaveFileLimit, which is //go:build desktop
+type saveFileFS struct {
+	open   func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
+	remove func(name string) error
+}
+
+//nolint:unused // reached only via handleSaveFileLimit, which is //go:build desktop
+var saveFileDiskFS = saveFileFS{
+	open: func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		return os.OpenFile(name, flag, perm)
+	},
+	remove: os.Remove,
+}
+
+// handleSaveFileFS is handleSaveFileLimit with the filesystem seam applied.
+//
+//nolint:unused // reached only via handleSaveFileLimit
+func handleSaveFileFS(w http.ResponseWriter, r *http.Request, choosePath ChooseSavePathFunc, maxBytes int64, fs saveFileFS) {
 	writeErr := func(status int, msg string) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -163,7 +187,7 @@ func handleSaveFileLimit(w http.ResponseWriter, r *http.Request, choosePath Choo
 		return
 	}
 
-	dst, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	dst, err := fs.open(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to create %s: %v", path, err))
 		return
@@ -174,7 +198,7 @@ func handleSaveFileLimit(w http.ResponseWriter, r *http.Request, choosePath Choo
 		// Never leave a truncated export behind; surface it when even that fails
 		// (e.g. locked file on Windows) instead of vanishing silently.
 		cleanupNote := ""
-		if removeErr := os.Remove(path); removeErr != nil {
+		if removeErr := fs.remove(path); removeErr != nil {
 			cleanupNote = fmt.Sprintf("; also failed to remove partial file %s: %v", path, removeErr)
 		}
 		// A close failure alongside a copy failure would otherwise vanish.
