@@ -428,6 +428,9 @@ type ScraperSettings struct {
 
 	enabledDecoded  bool `yaml:"-" json:"-"`
 	enabledExplicit bool `yaml:"-" json:"-"`
+
+	rateLimitDecoded  bool `yaml:"-" json:"-"`
+	rateLimitExplicit bool `yaml:"-" json:"-"`
 }
 
 // MarshalYAML preserves the full unified scraper settings shape so config
@@ -442,7 +445,12 @@ func (s *ScraperSettings) MarshalYAML() (interface{}, error) {
 	result["enabled"] = s.Enabled
 	result["language"] = s.Language
 	result["timeout"] = s.Timeout
-	result["rate_limit"] = s.RateLimit
+	// Emit rate_limit only when set or explicitly zeroed: an omitted key must
+	// re-merge defaults on next load instead of persisting a synthesized zero
+	// as an explicit no-throttle override.
+	if s.RateLimit != 0 || s.RateLimitIsExplicit() {
+		result["rate_limit"] = s.RateLimit
+	}
 	result["retry_count"] = s.RetryCount
 	result["user_agent"] = s.UserAgent
 	if s.Proxy != nil {
@@ -548,7 +556,9 @@ func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
 	if defaults.APIKey != "" && s.APIKey == "" {
 		s.APIKey = defaults.APIKey
 	}
-	if defaults.RateLimit != 0 && s.RateLimit == 0 {
+	if defaults.RateLimit != 0 && s.RateLimit == 0 && !s.RateLimitIsExplicit() {
+		// An explicitly configured rate_limit: 0 means "no delay"; only fill
+		// the default when the key was omitted entirely.
 		s.RateLimit = defaults.RateLimit
 	}
 	if defaults.Timeout != 0 && s.Timeout == 0 {
@@ -576,6 +586,21 @@ func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
 func (s *ScraperSettings) SetEnabledPresence(explicit bool) {
 	s.enabledDecoded = true
 	s.enabledExplicit = explicit
+}
+
+// SetRateLimitPresence records whether the `rate_limit` key was present when
+// decoding a scraper entry (including the deprecated request_delay alias).
+// Programmatic literals must not call it.
+func (s *ScraperSettings) SetRateLimitPresence(explicit bool) {
+	s.rateLimitDecoded = true
+	s.rateLimitExplicit = explicit
+}
+
+// RateLimitIsExplicit reports whether rate_limit was explicitly configured,
+// letting scrapers honor an intentional 0 (no delay) while still defaulting
+// an omitted key.
+func (s *ScraperSettings) RateLimitIsExplicit() bool {
+	return s != nil && s.rateLimitDecoded && s.rateLimitExplicit
 }
 
 // MergeEnabledDefault inherits defaults.Enabled when s was decoded with an

@@ -260,6 +260,98 @@ func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
 	return fmt.Sprintf(s.baseURL+searchPath, url.QueryEscape(strings.TrimSpace(id))), nil
 }
 
+var parseActressProfileHTML = func(bodyHTML string) (*goquery.Document, error) {
+	return goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
+}
+
+func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.ActressInfo) (models.ActressInfo, error) {
+	metadata := models.ActressInfo{DMMID: actress.DMMID}
+	if !s.enabled {
+		return metadata, nil
+	}
+
+	actorID := javdbActorIDFromAvatarURL(actress.ThumbURL)
+	if actorID == "" {
+		var findErr error
+		actorID, findErr = s.findActorID(ctx, actress.JapaneseName)
+		if findErr != nil {
+			return metadata, findErr
+		}
+	}
+	if actorID == "" {
+		return metadata, nil
+	}
+
+	profileURL := fmt.Sprintf("%s/actors/%s?locale=en", strings.TrimRight(s.baseURL, "/"), url.PathEscape(actorID))
+	html, err := s.fetchPageCtx(ctx, profileURL)
+	if err != nil {
+		return metadata, err
+	}
+	doc, err := parseActressProfileHTML(html)
+	if err != nil {
+		return metadata, err
+	}
+
+	metadata = extractJavDBActorMetadata(doc, actress.DMMID, actorID)
+	if metadata.JapaneseName == "" {
+		metadata.JapaneseName = strings.TrimSpace(actress.JapaneseName)
+	}
+	return metadata, nil
+}
+
+// ActressFields ... JavDB actor profiles carry the Japanese name and avatar only.
+func (s *scraper) ActressFields() []string {
+	return []string{"actress_japanese_name", "actress_url"}
+}
+
+func (s *scraper) findActorID(ctx context.Context, name string) (string, error) {
+	name = scraperutil.CleanString(name)
+	if name == "" {
+		return "", nil
+	}
+	searchURL := fmt.Sprintf("%s/actors?locale=en&search=%s", strings.TrimRight(s.baseURL, "/"), url.QueryEscape(name))
+	html, err := s.fetchPageCtx(ctx, searchURL)
+	if err != nil {
+		return "", err
+	}
+	doc, err := parseActressProfileHTML(html)
+	if err != nil {
+		return "", err
+	}
+
+	var actorID string
+	ambiguous := false
+	doc.Find("a[href]").EachWithBreak(func(_ int, link *goquery.Selection) bool {
+		linkName := scraperutil.CleanString(link.Text())
+		if linkName == "" {
+			linkName = scraperutil.CleanString(link.AttrOr("title", ""))
+		}
+		if linkName != name {
+			return true
+		}
+		candidate := javdbActorIDFromLink(link)
+		if candidate == "" {
+			return true
+		}
+		if actorID == "" {
+			actorID = candidate
+			return true
+		}
+		if candidate != actorID {
+			// Multiple distinct actor profiles share this exact name; picking
+			// either could attach an unrelated identity to the actress.
+			ambiguous = true
+			return false
+		}
+		return true // duplicate of the same ID — keep scanning for distinct ones
+	})
+	if ambiguous {
+		logging.Debugf("JavDB: actor search for %q produced multiple distinct IDs, skipping", name)
+		return "", nil
+	}
+	return actorID, nil
+}
+
 // isJavDBVideoCode checks if an ID looks like a JavDB video code
 // JavDB video codes are alphanumeric (case-insensitive) and typically 4-10 characters
 // Examples: AbJEe, 5aB3d, etc.
@@ -974,15 +1066,148 @@ func javdbActorIDFromLink(a *goquery.Selection) string {
 	if !ok {
 		return ""
 	}
-	const prefix = "/actors/"
-	if !strings.HasPrefix(href, prefix) {
+	u, err := url.Parse(strings.TrimSpace(href))
+	if err != nil || !strings.HasPrefix(u.Path, "/actors/") {
 		return ""
 	}
-	id := strings.TrimPrefix(href, prefix)
-	if i := strings.IndexAny(id, "?#"); i >= 0 {
-		id = id[:i]
+	id := strings.TrimPrefix(u.Path, "/actors/")
+	if strings.Contains(id, "/") || !isJavDBActorID(id) {
+		return ""
 	}
 	return id
+}
+
+func javdbActorIDFromAvatarURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !isJavDBStaticHost(u.Hostname()) {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 3 || !strings.EqualFold(parts[0], "avatars") {
+		return ""
+	}
+	filename := parts[2]
+	dot := strings.LastIndexByte(filename, '.')
+	if dot <= 0 || dot == len(filename)-1 {
+		return ""
+	}
+	switch strings.ToLower(filename[dot:]) {
+	case ".jpg", ".jpeg", ".png", ".webp":
+	default:
+		return ""
+	}
+	id := filename[:dot]
+	if !isJavDBActorID(id) {
+		return ""
+	}
+	return id
+}
+
+func isJavDBActorID(id string) bool {
+	if len(id) < 2 {
+		return false
+	}
+	for _, r := range id {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func extractJavDBActorMetadata(doc *goquery.Document, dmmID int, actorID string) models.ActressInfo {
+	metadata := models.ActressInfo{DMMID: dmmID}
+	name := ""
+	for _, selector := range []string{".actor-section-name", ".actor-panel h1", ".actor-panel .title", ".actor-info h1", ".actor-info .title", ".actor-name", "h1.actor-name", "h1.title", "h2.title", "h1", "h2"} {
+		doc.Find(selector).EachWithBreak(func(_ int, node *goquery.Selection) bool {
+			candidate := cleanJavDBActorName(scraperutil.CleanString(node.Text()))
+			if candidate == "" {
+				return true
+			}
+			name = candidate
+			return false
+		})
+		if name != "" {
+			break
+		}
+	}
+	if name == "" {
+		for _, selector := range []string{`meta[property="og:title"]`, `meta[name="twitter:title"]`, "title"} {
+			doc.Find(selector).EachWithBreak(func(_ int, node *goquery.Selection) bool {
+				candidate := cleanJavDBActorName(scraperutil.CleanString(node.AttrOr("content", node.Text())))
+				if candidate == "" {
+					return true
+				}
+				name = candidate
+				return false
+			})
+			if name != "" {
+				break
+			}
+		}
+	}
+	if scraperutil.HasJapanese(name) {
+		metadata.JapaneseName = name
+	} else {
+		parts := strings.Fields(name)
+		if len(parts) >= 2 {
+			metadata.FirstName = parts[0]
+			metadata.LastName = strings.Join(parts[1:], " ")
+		} else {
+			metadata.JapaneseName = name
+		}
+	}
+	metadata.ThumbURL = extractJavDBActorThumbURL(doc)
+	if metadata.ThumbURL == "" {
+		metadata.ThumbURL = javdbActorAvatarURL(actorID)
+	}
+	return metadata
+}
+
+func cleanJavDBActorName(raw string) string {
+	name := scraperutil.CleanString(raw)
+	for _, suffix := range []string{" - JavDB", " | JavDB", " — JavDB", " - Javdb", " | Javdb"} {
+		if strings.HasSuffix(name, suffix) {
+			return strings.TrimSpace(strings.TrimSuffix(name, suffix))
+		}
+	}
+	return name
+}
+
+func extractJavDBActorThumbURL(doc *goquery.Document) string {
+	var thumbnail string
+	doc.Find("img, source").EachWithBreak(func(_ int, node *goquery.Selection) bool {
+		for _, attr := range []string{"data-original", "data-src", "src", "srcset"} {
+			raw := strings.TrimSpace(node.AttrOr(attr, ""))
+			if raw == "" {
+				continue
+			}
+			if attr == "srcset" {
+				parts := strings.Fields(strings.TrimSpace(strings.Split(raw, ",")[0]))
+				if len(parts) == 0 {
+					continue
+				}
+				raw = parts[0]
+			}
+			candidate := scraperutil.ResolveURL(defaultBaseURL, raw)
+			if isJavDBAvatarURL(candidate) {
+				thumbnail = candidate
+				return false
+			}
+		}
+		return thumbnail == ""
+	})
+	return thumbnail
+}
+
+func isJavDBAvatarURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && isJavDBStaticHost(u.Hostname()) && strings.HasPrefix(strings.ToLower(u.Path), "/avatars/")
+}
+
+func isJavDBStaticHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "jdbstatic.com" || strings.HasSuffix(host, ".jdbstatic.com")
 }
 
 // javdbActorAvatarURL builds the avatar image URL for a JavDB actor ID.

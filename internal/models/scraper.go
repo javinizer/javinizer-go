@@ -47,6 +47,7 @@ type ScraperResult struct {
 // pointer fields. Used by ProvenanceData.Clone to isolate the raw per-scraper
 // results retained for the review-page source viewer from the scrape path's
 // in-flight values.
+// Clone ...
 func (r *ScraperResult) Clone() *ScraperResult {
 	if r == nil {
 		return nil
@@ -89,6 +90,7 @@ func (r *ScraperResult) Clone() *ScraperResult {
 // (e.g. 2184x1467), so upgrading ps.jpg -> pl.jpg would replace the poster
 // with the jacket and downstream code (e.g. sort) would download the jacket
 // as poster.jpg.
+// NormalizeMediaURLs ...
 func (r *ScraperResult) NormalizeMediaURLs() {
 	if r == nil {
 		return
@@ -127,6 +129,7 @@ func normalizeDMMPosterURL(raw string) string {
 	return parsed.String()
 }
 
+// replacePathSuffixIgnoreCase ...
 func replacePathSuffixIgnoreCase(v, suffix, replacement string) string {
 	lower := strings.ToLower(v)
 	if !strings.HasSuffix(lower, suffix) {
@@ -137,11 +140,12 @@ func replacePathSuffixIgnoreCase(v, suffix, replacement string) string {
 
 // ActressInfo represents actress information from a scraper
 type ActressInfo struct {
-	DMMID        int    `json:"dmm_id"` // DMM actress ID for unique identification
-	FirstName    string `json:"first_name"`
-	LastName     string `json:"last_name"`
-	JapaneseName string `json:"japanese_name"`
-	ThumbURL     string `json:"thumb_url"`
+	DMMID        int      `json:"dmm_id"` // DMM actress ID for unique identification
+	FirstName    string   `json:"first_name"`
+	LastName     string   `json:"last_name"`
+	JapaneseName string   `json:"japanese_name"`
+	ThumbURL     string   `json:"thumb_url"`
+	Aliases      []string `json:"aliases,omitempty"`
 }
 
 // FullName returns the actress's full name
@@ -153,6 +157,7 @@ func (a *ActressInfo) FullName() string {
 // importing scraperutil. Defined in models so both config and scraperutil
 // can reference it without circular imports. Implementations live in
 // scraperutil (ScraperRegistry) and are injected by callers.
+// ScraperConfigResolverInterface ...
 type ScraperConfigResolverInterface interface {
 	IsRegistered(name string) bool
 	GetAllDefaults() map[string]ScraperSettings
@@ -165,6 +170,7 @@ type ScraperConfigResolverInterface interface {
 // (URLHandler, DownloadProxyResolver). Consumers that need those capabilities
 // should use type assertions, following the same pattern as ScraperQueryResolver
 // and ContentIDResolver.
+// Scraper ...
 type Scraper interface {
 	// Name returns the scraper's identifier (e.g., "r18dev", "dmm")
 	Name() string
@@ -222,8 +228,57 @@ type DownloadProxyResolver interface {
 //
 // Implementations should return (normalizedQuery, true) when input matches a
 // scraper-specific pattern, or ("", false) when it does not apply.
+// ScraperQueryResolver ...
 type ScraperQueryResolver interface {
 	ResolveSearchQuery(input string) (string, bool)
+}
+
+// ActressThumbnailResolver ...
+type ActressThumbnailResolver interface {
+	ResolveActressThumbnail(ctx context.Context, actress ActressInfo) string
+}
+
+// ActressMetadataResolver ...
+//
+// ResolveActressMetadata returns partial metadata on success. An empty result
+// with a nil error means "no better data for this actress". A non-nil error
+// means the lookup failed transiently (timeout, HTTP failure, parse error) —
+// callers must surface it as a task warning instead of treating the actress
+// as verifiably resolved, otherwise cache-miss syncs masquerade as skipped.
+type ActressMetadataResolver interface {
+	ResolveActressMetadata(ctx context.Context, actress ActressInfo) (ActressInfo, error)
+}
+
+// ActressFieldCapable may be implemented by an ActressMetadataResolver to
+// advertise which actress metadata fields it can supply (actress,
+// actress_japanese_name, actress_first_name, actress_last_name, actress_url).
+// Resolvers that do not implement it are treated as capable of every field.
+type ActressFieldCapable interface {
+	ActressFields() []string
+}
+
+// ResolverSupportsActressField reports whether r advertises support for an
+// actress metadata field; non-declarers are treated as fully capable.
+func ResolverSupportsActressField(r any, field string) bool {
+	capable, ok := r.(ActressFieldCapable)
+	if !ok {
+		return true
+	}
+	fields := capable.ActressFields()
+	if len(fields) == 0 {
+		return true
+	}
+	for _, f := range fields {
+		if f == field {
+			return true
+		}
+	}
+	return false
+}
+
+// MovieSearchCapable ...
+type MovieSearchCapable interface {
+	SupportsMovieSearch() bool
 }
 
 // ContentIDResolver is an optional interface for scrapers that can resolve
@@ -234,6 +289,7 @@ type ScraperQueryResolver interface {
 //
 // Implementations should return (resolvedID, nil) on success or ("", error) on failure.
 // If a scraper does not support content-ID resolution, it should return (input, false).
+// ContentIDResolver ...
 type ContentIDResolver interface {
 	ResolveContentID(id string) (string, error)
 }
@@ -244,6 +300,7 @@ type ContentIDResolver interface {
 // ContentIDResolver. Callers should type-assert this first and fall back to
 // ContentIDResolver.ResolveContentID for scrapers that only implement the
 // non-context interface.
+// ContentIDResolverCtx ...
 type ContentIDResolverCtx interface {
 	ResolveContentIDCtx(ctx context.Context, id string) (string, error)
 }
@@ -263,6 +320,7 @@ type HTMLParser interface {
 
 // ResolveSearchQueryForScraper resolves an input query using a scraper's
 // optional ScraperQueryResolver hook.
+// ResolveSearchQueryForScraper ...
 func ResolveSearchQueryForScraper(scraper Scraper, input string) (string, bool) {
 	resolver, ok := scraper.(ScraperQueryResolver)
 	if !ok {

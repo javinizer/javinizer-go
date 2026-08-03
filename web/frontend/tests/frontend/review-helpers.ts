@@ -135,9 +135,9 @@ export const mockConfig = {
 };
 
 export const mockScraperInfos: ScraperInfo[] = [
-	{ name: 'javbus', display_title: 'JavBus', enabled: true },
-	{ name: 'javdb', display_title: 'JavDB', enabled: true },
-	{ name: 'r18', display_title: 'R18', enabled: false },
+	{ name: 'javbus', display_title: 'JavBus', enabled: true, supports_movie_search: true, supports_actress_metadata: false },
+	{ name: 'javdb', display_title: 'JavDB', enabled: true, supports_movie_search: true, supports_actress_metadata: true },
+	{ name: 'r18', display_title: 'R18', enabled: false, supports_movie_search: true, supports_actress_metadata: false },
 ];
 
 export { JOB_ID };

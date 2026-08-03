@@ -244,6 +244,8 @@ export class ScraperClient extends BaseClient {
 			name: s.name,
 			display_title: s.display_title,
 			enabled: s.enabled,
+			supports_movie_search: s.supports_movie_search,
+			supports_actress_metadata: s.supports_actress_metadata,
 			options: s.options || {},
 		}));
 	}

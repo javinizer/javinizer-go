@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraper/javstash"
 	"github.com/javinizer/javinizer-go/internal/scraper/libredmm"
 	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
+	"github.com/javinizer/javinizer-go/internal/scraper/minnanoav"
 	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
 	"github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
@@ -33,5 +34,6 @@ func RegisterAll(reg scraperutil.ScraperRegistrar) {
 	caribbeancom.Register(reg)
 	dlgetchu.Register(reg)
 	libredmm.Register(reg)
+	minnanoav.Register(reg)
 	tokyohot.Register(reg)
 }

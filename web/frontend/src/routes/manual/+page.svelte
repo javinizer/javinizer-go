@@ -37,6 +37,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
 	import { createScrapersQuery } from '$lib/query/queries';
+	import { movieSearchScrapers, movieSearchScraperNames } from '$lib/scraper-capabilities';
 	import { portalToBody } from '$lib/actions/portal';
 	import { fade, scale } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
@@ -53,7 +54,7 @@
 	const queryClient = useQueryClient();
 	const scrapersQuery = createScrapersQuery();
 	const enabledScrapers = $derived(
-		(scrapersQuery.data ?? []).filter((s) => s.enabled).map((s) => s.display_title || s.name)
+		movieSearchScrapers(scrapersQuery.data ?? []).filter((s) => s.enabled).map((s) => s.display_title || s.name)
 	);
 
 	const overridesCount = $derived(rows.filter((r) => r.input.trim() !== '').length);
@@ -107,10 +108,24 @@
 	function openScraperModal() {
 		if (!snapshot) return;
 		modalSelectedScrapers = snapshot.showScraperSelector
-			? [...snapshot.selectedScrapers]
-			: (scrapersQuery.data ?? []).filter((s) => s.enabled).map((s) => s.name);
+			? sanitizeMovieSelection(snapshot.selectedScrapers)
+			: movieSearchScrapers(scrapersQuery.data ?? []).filter((s) => s.enabled).map((s) => s.name);
 		showScraperModal = true;
 	}
+
+	function sanitizeMovieSelection(names: string[]): string[] {
+		const data = scrapersQuery.data;
+		if (!data || data.length === 0) return names;
+		return movieSearchScraperNames(movieSearchScrapers(data), names);
+	}
+
+	$effect(() => {
+		if (!snapshot?.showScraperSelector || !scrapersQuery.data?.length) return;
+		const selectedScrapers = sanitizeMovieSelection(snapshot.selectedScrapers);
+		if (selectedScrapers.length !== snapshot.selectedScrapers.length) {
+			snapshot = { ...snapshot, selectedScrapers };
+		}
+	});
 
 	function applyScraperSelection() {
 		if (!snapshot) return;
@@ -182,7 +197,9 @@
 			const req = buildManualScrapeRequest(rows, {
 				destination: snapshot.destination.trim() || undefined,
 				operation_mode: snapshot.effectiveOperationMode,
-				selected_scrapers: snapshot.showScraperSelector ? snapshot.selectedScrapers : undefined,
+				selected_scrapers: snapshot.showScraperSelector
+					? sanitizeMovieSelection(snapshot.selectedScrapers)
+					: undefined,
 				force: snapshot.force,
 				preset: snapshot.update ? (snapshot.preset || undefined) : undefined,
 				scalar_strategy: snapshot.update ? snapshot.scalarStrategy : undefined,
@@ -501,7 +518,7 @@
 							{m.manual_scraper_order_desc()}
 						</p>
 						<ScraperSelector
-							scrapers={scrapersQuery.data ?? []}
+							scrapers={movieSearchScrapers(scrapersQuery.data ?? [])}
 							bind:selected={modalSelectedScrapers}
 							disabled={false}
 						/>

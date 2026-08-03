@@ -18,6 +18,20 @@ type queryOutcome struct {
 	failure *models.ScraperError
 }
 
+func filterMovieScrapers(scrapers []models.Scraper) []models.Scraper {
+	filtered := make([]models.Scraper, 0, len(scrapers))
+	for _, s := range scrapers {
+		if s == nil {
+			continue
+		}
+		if c, ok := s.(models.MovieSearchCapable); ok && !c.SupportsMovieSearch() {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered
+}
+
 func resolveScraperNames(selectedScrapers, priorityOverride []string, cfg *Config) []string {
 	if len(selectedScrapers) > 0 {
 		return selectedScrapers
@@ -32,35 +46,38 @@ func resolveScraperNames(selectedScrapers, priorityOverride []string, cfg *Confi
 }
 
 func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperNames []string) string {
-	if len(scraperNames) == 0 {
+	if len(scraperNames) == 0 || s.registry == nil {
 		return movieID
 	}
-	resolverName := scraperNames[0]
-	resolver, exists := s.registry.GetInstance(resolverName)
-	if !exists || resolver == nil {
-		return movieID
-	}
-	// Prefer the context-aware resolver so cancellation/timeouts reach the
-	// lookup (DMM's ResolveContentID can issue HTTP). Fall back to the
-	// non-context ContentIDResolver for scrapers that only implement that.
-	if r, ok := resolver.(models.ContentIDResolverCtx); ok && r != nil {
-		contentID, err := r.ResolveContentIDCtx(ctx, movieID)
-		if err != nil {
-			logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
-			return movieID
+
+	for _, resolverName := range scraperNames {
+		resolver, exists := s.registry.GetInstance(resolverName)
+		if !exists || resolver == nil || !resolver.IsEnabled() {
+			continue
 		}
-		logging.Debugf("[scrape] Resolved content-ID: %s → %s", movieID, contentID)
-		return contentID
-	}
-	if r, ok := resolver.(models.ContentIDResolver); ok && r != nil {
-		contentID, err := r.ResolveContentID(movieID)
-		if err != nil {
-			logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
-			return movieID
+		// Prefer the context-aware resolver so cancellation/timeouts reach the
+		// lookup (DMM's ResolveContentID can issue HTTP). Fall back to the
+		// non-context ContentIDResolver for scrapers that only implement that.
+		if r, ok := resolver.(models.ContentIDResolverCtx); ok && r != nil {
+			contentID, err := r.ResolveContentIDCtx(ctx, movieID)
+			if err != nil {
+				logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
+				return movieID
+			}
+			logging.Debugf("[scrape] Resolved content-ID: %s → %s", movieID, contentID)
+			return contentID
 		}
-		logging.Debugf("[scrape] Resolved content-ID: %s → %s", movieID, contentID)
-		return contentID
+		if r, ok := resolver.(models.ContentIDResolver); ok && r != nil {
+			contentID, err := r.ResolveContentID(movieID)
+			if err != nil {
+				logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
+				return movieID
+			}
+			logging.Debugf("[scrape] Resolved content-ID: %s → %s", movieID, contentID)
+			return contentID
+		}
 	}
+
 	return movieID
 }
 

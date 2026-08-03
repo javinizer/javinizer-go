@@ -22,6 +22,7 @@
 	} from '$lib/stores/pending-scrape.svelte';
 	import { clearManualInputs } from '$lib/stores/manual-inputs-session';
 	import { createConfigQuery, createScrapersQuery } from '$lib/query/queries';
+	import { movieSearchScrapers, movieSearchScraperNames } from '$lib/scraper-capabilities';
 	import { isTerminalStatus } from '$lib/utils/job-progress';
 	import { Play, FolderOutput, FolderOpen, FileEdit, FileText, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X, Scan } from 'lucide-svelte';
 	import type { Scraper, FileInfo, Config } from '$lib/api/types';
@@ -50,21 +51,22 @@
 	}));
 
 	let config = $derived(configQuery.data ?? null);
-	let availableScrapers = $derived(scrapersQuery.data ?? []);
+	let availableScrapers = $derived(movieSearchScrapers(scrapersQuery.data ?? []));
 	let selectedScrapers: string[] = $state([]);
 	let showScraperSelector = $state(false);
 	let scrapersInitialized = $state(false);
 
 	$effect(() => {
-		const scrapers = scrapersQuery.data;
-		if (scrapers && scrapers.length > 0) {
-			untrack(() => {
-				if (!scrapersInitialized) {
-					scrapersInitialized = true;
-					selectedScrapers = scrapers.filter((s) => s.enabled).map((s) => s.name);
-				}
-			});
-		}
+		const scrapers = movieSearchScrapers(scrapersQuery.data ?? []);
+		if (scrapers.length === 0) return;
+		untrack(() => {
+			if (!scrapersInitialized) {
+				scrapersInitialized = true;
+				selectedScrapers = scrapers.filter((s) => s.enabled).map((s) => s.name);
+			} else {
+				selectedScrapers = movieSearchScraperNames(scrapers, selectedScrapers);
+			}
+		});
 	});
 
 	let pathInitialized = $state(false);

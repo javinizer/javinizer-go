@@ -37,8 +37,12 @@ definitions:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
       source:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      source_updated_at:
+        type: string
       target:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      target_updated_at:
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeRequest:
     properties:
@@ -52,9 +56,17 @@ definitions:
       source_id:
         example: 34
         type: integer
+      source_updated_at:
+        type: string
       target_id:
         example: 12
         type: integer
+      target_updated_at:
+        description: |-
+          TargetUpdatedAt/SourceUpdatedAt fence the merge against concurrent edits
+          observed in a merge preview. They are optional for backward compatibility:
+          omitting them performs an unfenced merge (pre-versioning behavior).
+        type: string
     required:
     - source_id
     - target_id
@@ -1338,6 +1350,12 @@ definitions:
         items:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption'
         type: array
+      supports_actress_metadata:
+        example: false
+        type: boolean
+      supports_movie_search:
+        example: true
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption:
     properties:
@@ -2142,6 +2160,10 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_models.ActressInfo:
     properties:
+      aliases:
+        items:
+          type: string
+        type: array
       dmm_id:
         description: DMM actress ID for unique identification
         type: integer
@@ -2152,6 +2174,82 @@ definitions:
       last_name:
         type: string
       thumb_url:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.ActressSyncJob:
+    properties:
+      cancel_requested:
+        type: boolean
+      cancelled:
+        type: integer
+      completed:
+        type: integer
+      completed_at:
+        type: string
+      conflicts:
+        type: integer
+      created_at:
+        type: string
+      failed:
+        type: integer
+      id:
+        type: string
+      scope:
+        type: string
+      skipped:
+        type: integer
+      started_at:
+        type: string
+      status:
+        type: string
+      total_tasks:
+        type: integer
+      updated:
+        type: integer
+      warnings:
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.ActressSyncTask:
+    properties:
+      actress_id:
+        type: integer
+      attempts:
+        type: integer
+      completed_at:
+        type: string
+      created_at:
+        type: string
+      dedupe_key:
+        type: string
+      error_message:
+        type: string
+      heartbeat_at:
+        type: string
+      id:
+        type: string
+      job_id:
+        type: string
+      label:
+        type: string
+      lease_expires_at:
+        type: string
+      messages:
+        items:
+          type: string
+        type: array
+      outcome:
+        type: string
+      stage:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      updated_fields:
+        items:
+          type: string
+        type: array
+      warning:
         type: string
     type: object
   github_com_javinizer_javinizer-go_internal_models.ActressTranslation:
@@ -2631,6 +2729,15 @@ definitions:
       version:
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_worker.ActressSyncCreateRequest:
+    properties:
+      actress_ids:
+        items:
+          type: integer
+        type: array
+      scope:
+        type: string
+    type: object
   internal_api_actress.actressRequest:
     properties:
       aliases:
@@ -2676,6 +2783,40 @@ definitions:
         type: array
       updated_at:
         type: string
+    type: object
+  internal_api_actress.actressSyncCandidatesResponse:
+    properties:
+      actresses:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        type: array
+      ids:
+        items:
+          type: integer
+        type: array
+      total:
+        type: integer
+    type: object
+  internal_api_actress.actressSyncJobResponse:
+    properties:
+      job:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressSyncJob'
+    type: object
+  internal_api_actress.actressSyncJobsResponse:
+    properties:
+      jobs:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressSyncJob'
+        type: array
+    type: object
+  internal_api_actress.actressSyncTasksResponse:
+    properties:
+      tasks:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressSyncTask'
+        type: array
+      total:
+        type: integer
     type: object
   internal_api_actress.actressesResponse:
     properties:
@@ -3117,6 +3258,11 @@ paths:
         in: query
         name: include_translations
         type: string
+      - description: 'Filter actresses: missing_dmm, has_dmm, missing_thumbnail, missing_japanese_name,
+          japanese_name_only, missing_metadata'
+        in: query
+        name: filter
+        type: string
       produces:
       - application/json
       responses:
@@ -3378,7 +3524,7 @@ paths:
       - actress
   /api/v1/actresses/search:
     get:
-      description: Search for actresses by name (first, last, or Japanese)
+      description: Search for actresses by name or DMM ID
       parameters:
       - description: Search query
         in: query
@@ -3402,6 +3548,166 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Search actresses
+      tags:
+      - actress
+  /api/v1/actresses/sync-candidates:
+    get:
+      description: Return actresses with a DMM ID that lack thumbnail, Japanese name,
+        or romanized names, plus named actresses without a DMM ID pending identity
+        resolution.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.actressSyncCandidatesResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: List actresses eligible for metadata sync
+      tags:
+      - actress
+  /api/v1/actresses/sync-jobs:
+    post:
+      consumes:
+      - application/json
+      description: Queue a background sync job over actresses with missing metadata
+        ("missing") or explicit IDs ("selected").
+      parameters:
+      - description: Sync job request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_worker.ActressSyncCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/internal_api_actress.actressSyncJobResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Start an actress metadata sync job
+      tags:
+      - actress
+  /api/v1/actresses/sync-jobs/{jobID}:
+    get:
+      description: Return a single actress sync job with its aggregate counters.
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: jobID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.actressSyncJobResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Get an actress sync job
+      tags:
+      - actress
+  /api/v1/actresses/sync-jobs/{jobID}/cancel:
+    post:
+      description: 'Mark the job cancelled: pending tasks are cancelled and running
+        tasks are aborted.'
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: jobID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.actressSyncJobResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Request cancellation of an actress sync job
+      tags:
+      - actress
+  /api/v1/actresses/sync-jobs/{jobID}/tasks:
+    get:
+      description: 'List tasks of a sync job: all by default, only running tasks with
+        view=active, or the bounded terminal diagnostics with view=diagnostics.'
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: jobID
+        required: true
+        type: string
+      - description: 'Task view: ''active'' or ''diagnostics'' (default: bounded all-tasks
+          list)'
+        in: query
+        name: view
+        type: string
+      - default: 500
+        description: Max tasks for the default view (1-1000; default 500)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.actressSyncTasksResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: List actress sync job tasks
+      tags:
+      - actress
+  /api/v1/actresses/sync-jobs/active:
+    get:
+      description: Return pending and running actress sync jobs, oldest first.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.actressSyncJobsResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: List active actress sync jobs
       tags:
       - actress
   /api/v1/auth/login:

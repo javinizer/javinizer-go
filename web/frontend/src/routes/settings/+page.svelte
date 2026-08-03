@@ -224,7 +224,11 @@
 			/>
 
 			<SettingsSection title={m.settings_metadata_priority_title()} description={m.settings_metadata_priority_desc()} defaultExpanded={false}>
-				<MetadataPriority config={settings.settingsConfig} onUpdate={(updatedConfig) => { settings.config = updatedConfig; }} />
+				<MetadataPriority
+					config={settings.settingsConfig}
+					onUpdate={(updatedConfig) => { settings.config = updatedConfig; }}
+					actressOnlyScrapers={new Set(scraper.scrapers.filter((s) => !s.supportsMovieSearch && s.supportsActressMetadata).map((s) => s.name))}
+				/>
 			</SettingsSection>
 
 			<CompletenessSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} selectClass={settings.selectClass} />

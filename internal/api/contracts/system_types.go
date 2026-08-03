@@ -76,10 +76,12 @@ type ScraperChoice = models.ScraperChoice
 
 // ScraperInfo represents information about a scraper
 type ScraperInfo struct {
-	Name         string          `json:"name" example:"r18dev"`
-	DisplayTitle string          `json:"display_title" example:"R18.dev"`
-	Enabled      bool            `json:"enabled" example:"true"`
-	Options      []ScraperOption `json:"options,omitempty"`
+	Name                    string          `json:"name" example:"r18dev"`
+	DisplayTitle            string          `json:"display_title" example:"R18.dev"`
+	Enabled                 bool            `json:"enabled" example:"true"`
+	SupportsMovieSearch     bool            `json:"supports_movie_search" example:"true"`
+	SupportsActressMetadata bool            `json:"supports_actress_metadata" example:"false"`
+	Options                 []ScraperOption `json:"options,omitempty"`
 }
 
 // AvailableScrapersResponse represents the list of available scrapers

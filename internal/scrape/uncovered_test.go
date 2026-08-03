@@ -179,14 +179,14 @@ func TestEnrichActressFields_PartialUpdateUncovered(t *testing.T) {
 
 func TestTryCache_NilMovieRepoUncovered(t *testing.T) {
 	s := New(nil, nil, nil, nil, nil, &Config{}, nil, nil)
-	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, time.Time{})
+	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, false, time.Time{})
 	assert.Nil(t, result)
 }
 
 func TestTryCache_FindByIDNotFoundUncovered(t *testing.T) {
 	mockMovieRepo := &mockMovieRepository{findErr: database.ErrNotFound}
 	s := New(nil, nil, nil, mockMovieRepo, nil, &Config{}, nil, nil)
-	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, time.Time{})
+	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, false, time.Time{})
 	assert.Nil(t, result)
 }
 
@@ -195,7 +195,7 @@ func TestTryCache_CacheHitNoTranslationUncovered(t *testing.T) {
 	f.withCachedMovie("TEST-001", "Cached Movie")
 	s := f.build()
 
-	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, time.Time{})
+	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, false, time.Time{})
 	require.NotNil(t, result)
 	assert.Equal(t, StatusCompleted, result.Status)
 	assert.Equal(t, "Cached Movie", result.Movie.Title)

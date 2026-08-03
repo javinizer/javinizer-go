@@ -266,6 +266,7 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 			}
 			ss.SetEnabledPresence(scraperYAMLHasEnabledKey(valNode))
+			ss.SetRateLimitPresence(scraperYAMLHasKey(valNode, "rate_limit") || scraperYAMLHasKey(valNode, "request_delay"))
 
 			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
 			// Walk the node content to find alias keys and apply them if the canonical
@@ -287,22 +288,26 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 
 // applyYAMLAliases handles deprecated YAML aliases request_delay→rate_limit
 // and max_retries→retry_count in a scraper entry's value node.
+// Aliases apply only when the canonical key is absent — an explicit
+// rate_limit: 0 must not be overwritten by a legacy request_delay.
 func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.ScraperSettings) {
 	if valNode.Kind != yaml.MappingNode {
 		return
 	}
+	hasCanonicalRateLimit := scraperYAMLHasKey(valNode, "rate_limit")
+	hasCanonicalRetryCount := scraperYAMLHasKey(valNode, "retry_count")
 	for i := 0; i < len(valNode.Content); i += 2 {
 		k := valNode.Content[i].Value
 		switch k {
 		case "request_delay":
-			if ss.RateLimit == 0 {
+			if !hasCanonicalRateLimit {
 				var v int
 				if err := valNode.Content[i+1].Decode(&v); err == nil {
 					ss.RateLimit = v
 				}
 			}
 		case "max_retries":
-			if ss.RetryCount == 0 {
+			if !hasCanonicalRetryCount {
 				var v int
 				if err := valNode.Content[i+1].Decode(&v); err == nil {
 					ss.RetryCount = v
@@ -313,11 +318,15 @@ func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.Scraper
 }
 
 func scraperYAMLHasEnabledKey(valNode *yaml.Node) bool {
+	return scraperYAMLHasKey(valNode, "enabled")
+}
+
+func scraperYAMLHasKey(valNode *yaml.Node, key string) bool {
 	if valNode == nil || valNode.Kind != yaml.MappingNode {
 		return false
 	}
 	for i := 0; i+1 < len(valNode.Content); i += 2 {
-		if valNode.Content[i].Value == "enabled" {
+		if valNode.Content[i].Value == key {
 			return true
 		}
 	}

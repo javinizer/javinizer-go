@@ -67,6 +67,25 @@ func TestScrapeMiss2_ResolveContentID_ResolverSuccess(t *testing.T) {
 	assert.Equal(t, "abc123", result)
 }
 
+func TestScrapeMiss2_ResolveContentID_SkipsNonResolverPriority(t *testing.T) {
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(&mockScraper{name: "actress-only", enabled: true})
+	registry.RegisterInstance(&cidResolverScraper{name: "mock-resolver", resolvedID: "abc123"})
+	s := &Scraper{registry: registry}
+	result := s.resolveContentID(context.Background(), "ABC-123", []string{"actress-only", "mock-resolver"})
+	assert.Equal(t, "abc123", result)
+}
+
+func TestScrapeMiss2_ResolveContentID_SkipsDisabledResolver(t *testing.T) {
+	registry := scraperutil.NewScraperRegistry()
+	resolver := &disabledCIDResolver{cidResolverScraper: cidResolverScraper{name: "disabled", resolvedID: "rewritten"}}
+	registry.RegisterInstance(resolver)
+	s := &Scraper{registry: registry}
+	result := s.resolveContentID(context.Background(), "ABC-123", []string{"disabled"})
+	assert.Equal(t, "ABC-123", result)
+	assert.Zero(t, resolver.calls)
+}
+
 // --- queryAll: nil context gets background context ---
 
 func TestScrapeMiss2_QueryAll_NilContext(t *testing.T) {
@@ -233,6 +252,7 @@ type cidResolverScraper struct {
 	name       string
 	resolvedID string
 	err        error
+	calls      int
 }
 
 func (c *cidResolverScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
@@ -248,11 +268,18 @@ func (c *cidResolverScraper) Config() *models.ScraperSettings {
 }
 func (c *cidResolverScraper) Close() error { return nil }
 func (c *cidResolverScraper) ResolveContentID(_ string) (string, error) {
+	c.calls++
 	if c.err != nil {
 		return "", c.err
 	}
 	return c.resolvedID, nil
 }
+
+type disabledCIDResolver struct {
+	cidResolverScraper
+}
+
+func (*disabledCIDResolver) IsEnabled() bool { return false }
 
 type panicScraper struct {
 	name string

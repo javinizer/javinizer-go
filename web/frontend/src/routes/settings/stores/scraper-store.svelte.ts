@@ -1,4 +1,4 @@
-	import * as m from '$lib/paraglide/messages';
+import * as m from '$lib/paraglide/messages';
 import { apiClient } from '$lib/api/client';
 import { toastStore } from '$lib/stores/toast';
 import { confirmDialog } from '$lib/stores/dialog.svelte';
@@ -13,6 +13,8 @@ export interface ScraperItem {
 	enabled: boolean;
 	displayName: string;
 	expanded: boolean;
+	supportsMovieSearch: boolean;
+	supportsActressMetadata: boolean;
 	options: ScraperOption[];
 }
 
@@ -112,11 +114,14 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 					(sc[name] as ScraperSettings).enabled = scraperEnabledMap[name];
 				}
 
+				const scraperInfo = response.scrapers.find((scraper) => scraper.name === name);
 				return {
 					name,
 					enabled: (sc[name] as ScraperSettings)?.enabled ?? false,
 					displayName: scraperDisplayNames[name] || name,
 					expanded: false,
+					supportsMovieSearch: scraperInfo?.supports_movie_search !== false,
+				supportsActressMetadata: scraperInfo?.supports_actress_metadata === true,
 					options: scraperOptionsMap[name] || [],
 				};
 			});
@@ -147,6 +152,8 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 				enabled: (sc[name] as ScraperSettings)?.enabled ?? false,
 				displayName: name,
 				expanded: false,
+				supportsMovieSearch: true,
+				supportsActressMetadata: false,
 				options: [],
 			}));
 			scrapers = deps.refreshLocalProxyProfileChoices(scrapers);
@@ -477,8 +484,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 		const fieldsUsing: string[] = [];
 
 		metadataFields.forEach((field) => {
-			const fieldPriority =
-			config?.metadata?.priority?.[field.key];
+			const fieldPriority = config?.metadata?.priority?.[field.key];
 			const priority = fieldPriority && fieldPriority.length > 0 ? fieldPriority : globalPriority;
 
 			if (priority.includes(scraperName)) {
