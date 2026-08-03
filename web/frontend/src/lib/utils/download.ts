@@ -25,7 +25,7 @@ export async function saveJsonFile(filename: string, data: unknown): Promise<Sav
 			body: content,
 		});
 		if (!resp.ok) {
-			let detail = `Save failed (HTTP ${resp.status})`;
+			let detail = `HTTP ${resp.status}`;
 			try {
 				const body = (await resp.json()) as SaveFileErrorBody;
 				if (body.error) detail = body.error;
