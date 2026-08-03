@@ -33,6 +33,16 @@ type MergeStats struct {
 	EmptyFields       int
 }
 
+// mergedEffectivePosterSource resolves the effective poster source the way
+// GeneratePoster and the crop paths do: the poster URL when set, otherwise
+// the cover URL. Used by the crop-bounds source-divergence guard above.
+func mergedEffectivePosterSource(posterURL, coverURL string) string {
+	if strings.TrimSpace(posterURL) != "" {
+		return posterURL
+	}
+	return coverURL
+}
+
 // mergeResultTuple is a generic (value, source) tuple returned by merge functions.
 // The provenance recorder uses the source string to apply timestamps and write
 // the provenance map, separating the merge decision from the recording side effect.
@@ -285,6 +295,29 @@ func MergeMovieMetadataWithOptions(scraped, nfo *models.Movie, scalarStrategy Me
 		fm.recordEmpty("CropBounds")
 	}
 
+	// Source-divergence guard: manual crop bounds (and the paired
+	// ShouldCropPoster intent in job state) are measured against ONE
+	// effective poster source (PosterURL ?? CoverURL — the same resolution
+	// the field-override/rescrape paths use). The scalar merge above can let
+	// the NFO's PosterURL/CoverURL WIN (prefer-nfo), pairing crop state
+	// measured against the scraper/job source with a DIFFERENT image —
+	// Organize would then apply old-image coordinates (or a stale
+	// cover-crop intent) to the NFO's source. When the merged effective
+	// source diverged from the one the crop state arrived with, drop the
+	// bounds and note the divergence in provenance; an unchanged source
+	// keeps them. The ShouldCropPoster intent itself is re-derived from the
+	// winning (NFO) side AFTER the bool merge below — it merges later and
+	// would otherwise let the scraper's stale intent ride onto the NFO's
+	// image (the flag is a bool, so the winning side's deliberate false
+	// reads as "empty" and loses the merge).
+	scrapedSource := mergedEffectivePosterSource(scraped.Poster.PosterURL, scraped.Poster.CoverURL)
+	mergedSource := mergedEffectivePosterSource(merged.Poster.PosterURL, merged.Poster.CoverURL)
+	sourceDiverged := mergedSource != scrapedSource
+	if merged.Poster.CropBounds != nil && sourceDiverged {
+		merged.Poster.CropBounds = nil
+		provenance["CropBounds"] = DataSource{Source: "dropped-source-divergence", Confidence: 0}
+	}
+
 	// Merge int scalar fields using spec-driven loop via fieldMerger
 	for _, spec := range intMergeSpecs {
 		spec.setM(merged, mergeScalarFieldViaMerger(fm, spec.name, spec.getS(scraped), spec.getN(nfo), scalarStrategy, spec.isEmpty))
@@ -298,6 +331,25 @@ func MergeMovieMetadataWithOptions(scraped, nfo *models.Movie, scalarStrategy Me
 	// Merge bool scalar fields
 	for _, spec := range boolMergeSpecs {
 		spec.setM(merged, mergeScalarFieldViaMerger(fm, spec.name, spec.getS(scraped), spec.getN(nfo), scalarStrategy, spec.isEmpty))
+	}
+
+	// Source-divergence intent fix-up (see the guard above): when the NFO
+	// side won a DIFFERENT effective poster source, the just-merged
+	// ShouldCropPoster intent was measured against the scraper's image —
+	// keeping it would have Organize auto-crop the NFO's poster with the
+	// wrong decision. Re-derive the intent from the side whose source
+	// survived; a deliberate no-crop on that side (false) is the correct
+	// value, not "empty".
+	if sourceDiverged {
+		merged.Poster.ShouldCropPoster = nfo.Poster.ShouldCropPoster
+		// Provenance set directly (not via fm.recordNFO/recordEmpty) so the
+		// merge-loop recording above isn't double-counted in stats.
+		if nfo.Poster.ShouldCropPoster {
+			ts := nfoTS
+			provenance["ShouldCropPoster"] = DataSource{Source: "nfo", Confidence: 1.0, LastUpdated: &ts}
+		} else {
+			provenance["ShouldCropPoster"] = DataSource{Source: "dropped-source-divergence", Confidence: 0}
+		}
 	}
 
 	// Merge *time.Time scalar fields
