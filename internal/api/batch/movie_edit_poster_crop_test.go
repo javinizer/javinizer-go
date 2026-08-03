@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 
 	workermocks "github.com/javinizer/javinizer-go/internal/mocks/worker"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
@@ -66,6 +68,7 @@ func cropJobFixture(t *testing.T, movieID string) (*core.APIDeps, *worker.BatchJ
 	router := gin.New()
 	router.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(testkit.GetTestRuntime(deps)))
 	router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
+	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(testkit.GetTestRuntime(deps)))
 	return deps, job, router
 }
 
@@ -146,6 +149,45 @@ func TestPosterCrop_StoresNormalizedGeometry(t *testing.T) {
 	assert.Equal(t, *resp.PosterCropBounds, *stored.Poster.PosterCropBounds)
 	assert.True(t, stored.Poster.PosterCropSourceFull)
 	assert.False(t, stored.Poster.ShouldCropPoster)
+}
+
+// Poster-from-URL after a manual crop clears the stored geometry, applies
+// the new source, and persists the envelope. The runtime's poster manager is
+// pre-seeded with the SSRF check bypassed (its documented test seam) so the
+// loopback fixture server is reachable.
+func TestPosterFromURL_SuccessClearsGeometry(t *testing.T) {
+	deps, job, router := cropJobFixture(t, "CROPGEO-009")
+
+	// Pre-seed BEFORE any handler call crops/populates the shared cache.
+	rt := testkit.GetTestRuntime(deps)
+	rt.GetRuntime().GetPosterManager(func() poster.PosterManagerInterface {
+		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}).
+			WithSSRFCheck(func(string) error { return nil })
+	})
+
+	require.Equal(t, 200, postCrop(t, router, job, "CROPGEO-009",
+		contracts.PosterCropRequest{X: 0, Y: 0, Width: 400, Height: 600}).Code)
+	require.NotNil(t, storedMovie(t, deps, job, "/path/to/CROPGEO-009.mp4").Poster.PosterCropBounds)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		img := image.NewRGBA(image.Rect(0, 0, 64, 96))
+		w.Header().Set("Content-Type", "image/jpeg")
+		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 90})
+	}))
+	t.Cleanup(ts.Close)
+
+	body, err := json.Marshal(contracts.PosterFromURLRequest{URL: ts.URL + "/poster.jpg"})
+	require.NoError(t, err)
+	req := httptest.NewRequest("POST", "/batch/"+job.GetID()+"/results/CROPGEO-009/poster-from-url", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, 200, w.Code, "body: %s", w.Body.String())
+
+	stored := storedMovie(t, deps, job, "/path/to/CROPGEO-009.mp4")
+	assert.Equal(t, ts.URL+"/poster.jpg", stored.Poster.PosterURL)
+	assert.Nil(t, stored.Poster.PosterCropBounds, "new source invalidates stored geometry")
+	assert.False(t, stored.Poster.PosterCropSourceFull)
 }
 
 // cropErrorJobStore overrides only what the crop handler touches: GetBatchJob

@@ -313,6 +313,11 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		// Persist the job envelope after the source change cleared the stored
+		// manual crop geometry — otherwise a restart reloads the stale bounds
+		// from the envelope and undoes the invalidation.
+		deps.GetJobStore().PersistJobByID(jobID)
+
 		c.JSON(http.StatusOK, contracts.PosterFromURLResponse{
 			CroppedPosterURL: croppedURL,
 			PosterURL:        req.URL,

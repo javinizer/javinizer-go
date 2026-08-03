@@ -363,15 +363,17 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 
 			// Rescrape clears stored crop geometry server-side; mirror that into
 			// pending overlays so a later save cannot re-upload pre-rescrape
-			// bounds. (Clearing a failed movie's entry is safe either way: an
-			// omitted geometry key preserves the still-stored geometry.)
+			// bounds. Only movies that actually succeeded — a failed rescrape kept
+			// its server-side geometry, and an explicit null here would clear it.
+			const succeededIds = new Set(
+				(data.results ?? []).filter((r) => r.status === 'success').map((r) => r.movie_id),
+			);
 			const jobSnapshot = data.job ?? deps.getJob();
-			if (jobSnapshot) {
-				const requested = new Set(movieIds);
+			if (jobSnapshot && succeededIds.size > 0) {
 				const editedMovies = deps.getEditedMovies();
 				for (const [filePath, result] of Object.entries(jobSnapshot.results ?? {})) {
 					const fr = result as FileResult;
-					if (!requested.has(fr.movie_id)) continue;
+					if (!succeededIds.has(fr.movie_id)) continue;
 					const pending = editedMovies.get(filePath);
 					if (pending && (pending.poster_crop_bounds != null || pending.poster_crop_source_full)) {
 						editedMovies.set(filePath, clearCropGeometry(pending));
