@@ -951,7 +951,16 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 					}
 					mirrored := false
 					uErr := updater.AtomicUpdateFileResult(sibPath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-						if current.Movie == nil || current.Movie.ID != newKey {
+						// Folded identity comparison (same fold as the result index
+						// and poster-source lock keys): FindFilePathsForMovieID
+						// resolves the family case-insensitively, so a sibling stored
+						// under a case variant (ABC-1 vs abc-1) IS returned by the
+						// lookup — a raw-string guard would skip it while the shared
+						// folded-key cache was just replaced, leaving that sibling's
+						// poster source/intent/bounds measured against the old image.
+						// The rekey guard is retained: a genuinely re-keyed sibling
+						// still keeps its own state.
+						if current.Movie == nil || !strings.EqualFold(current.Movie.ID, newKey) {
 							return current, nil // raced re-key: not this family anymore
 						}
 						current.Movie.Poster = rescrapedPoster.Clone()
