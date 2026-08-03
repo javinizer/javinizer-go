@@ -616,6 +616,31 @@ reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf 'noise\n' > internal/foo/run.log
 check_hook "e2e: harmless ignored runtime artifact does not block" 0
 
+# intent-to-add (git add -N): git commit omits such entries like untracked
+# files and diff --cached hides them, so classification stays consistent;
+# the index snapshot must TOLERATE them (older gits refuse write-tree on
+# empty-blob entries), not report phantom lock contention
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+printf 'scratch\n' > notes-ita.txt; git add -N notes-ita.txt
+check_hook "e2e: intent-to-add entry tolerated" 0
+
+# an intent-to-add GO file is a real guard conflict, though: checks would
+# consume the on-disk file while the commit omits it — block with the
+# exact path, never the misleading lock-contention error
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+printf 'package foo\n' > internal/foo/ita_new.go; git add -N internal/foo/ita_new.go
+check_hook "e2e: intent-to-add Go file flagged as tree drift, no lock error" 1 "ita_new.go"
+
+# unmerged (stage>0) index entries: the one state where the snapshot must
+# STILL refuse — fallback digest tolerates i-t-a but never a conflict
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+ita_blob=$(git hash-object -w internal/foo/a.go)
+{ printf '100644 %s 1\tinternal/foo/a.go\n' "$ita_blob"
+  printf '100644 %s 2\tinternal/foo/a.go\n' "$ita_blob"
+  printf '100644 %s 3\tinternal/foo/a.go\n' "$ita_blob"; } | git update-index --index-info
+check_hook "e2e: unresolved conflict entries refused at snapshot" 1 "Cannot snapshot"
+git reset -q --hard HEAD >/dev/null
+
 # ignored go:embed ASSET: every check is green locally (go list/vet/build
 # consume the working-tree file), but the committed snapshot lacks the
 # ignored *.db and fails with 'pattern local.db: no matching files found'.
@@ -821,8 +846,11 @@ git reset -q --hard HEAD >/dev/null 2>&1; rm -f local_root.go
 reset
 # fresh unique root: a predictable sibling path could belong to a
 # concurrent or crashed run — rm -rf must only ever target what THIS run
-# created, so uniqueness comes first and the bracket lives in the LEAF
-BRKROOT=$(mktemp -d)
+# created, so uniqueness comes first and the bracket lives in the LEAF.
+# mktemp failure must abort: an empty root yields BRK="/br[ack]et" and
+# the copy below would escape to the filesystem root.
+BRKROOT=$(mktemp -d) && [ -n "$BRKROOT" ] && [ -d "$BRKROOT" ] || {
+    echo 'FATAL: mktemp failed for bracketed-path scenario' >&2; exit 2; }
 BRK="$BRKROOT/br[ack]et"
 cp -R "$WORK" "$BRK"
 cd "$BRK" || exit 2

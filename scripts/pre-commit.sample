@@ -53,7 +53,21 @@ snapshot_index() {
         fi
         sleep 0.05
     done
-    return 1
+    # PERSISTENT failure: only UNMERGED (stage > 0) entries are a genuine
+    # deal-breaker. Older gits additionally refuse write-tree on
+    # intent-to-add (git add -N) entries — yet git commit treats those as
+    # untracked and CLASSIFICATION never sees them either (diff --cached
+    # hides intent entries), so the snapshot may tolerate them. Fall back
+    # to a structural digest of the same authority for equality checks
+    # (mode/oid/stage/path rows change exactly when the index changes);
+    # with no unmerged entries the digest is deterministic per index.
+    local stages
+    stages=$(git ls-files --stage 2>/dev/null) || return 1
+    if printf '%s\n' "$stages" | awk '$3 ~ /^[1-9]/ { bad=1 } END { exit bad }'; then
+        printf '%s\n' "$stages" | git hash-object --stdin
+    else
+        return 1   # unmerged entries: genuine conflict state
+    fi
 }
 if ! INITIAL_INDEX_TREE=$(snapshot_index); then
     echo -e "${RED}✗ Cannot snapshot the index (git write-tree kept failing — lock contention${NC}"
