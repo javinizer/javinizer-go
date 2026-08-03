@@ -61,8 +61,10 @@ func TestFullSourceRevision(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, os.IsNotExist(err))
 
-	// Input validation parity with the other manager methods.
-	_, err = pm.FullSourceRevision("bad job", "ABC-001")
+	// Input validation parity with the other manager methods. A traversal
+	// jobID fails ValidateJobID (a merely unusual-but-safe name like
+	// "bad job" would pass validation and only fail at Stat).
+	_, err = pm.FullSourceRevision("../evil", "ABC-001")
 	require.Error(t, err)
 	_, err = pm.FullSourceRevision("job-1", "../etc")
 	require.Error(t, err)
