@@ -140,20 +140,29 @@ func handleSaveFileLimit(w http.ResponseWriter, r *http.Request, choosePath Choo
 	handleSaveFileFS(w, r, choosePath, maxBytes, saveFileDiskFS)
 }
 
-// saveFileFS indirection lets tests simulate filesystem failures (read, write,
-// finalize, remove) without fault-injecting the real OS layer.
+// saveFileFS indirection lets tests simulate filesystem failures (write,
+// finalize, rename, remove) without fault-injecting the real OS layer. The
+// handler writes to a createTemp sibling and swaps it into place with
+// rename so a user's previous export survives a failed one (O_TRUNC on the
+// destination would clobber it before the body has streamed).
 //
-//nolint:unused // diskFS reached only via handleSaveFileLimit, which is //go:build desktop
+//nolint:unused // saveFileDiskFS reached only via handleSaveFileLimit, which is //go:build desktop
 type saveFileFS struct {
-	open   func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
-	remove func(name string) error
+	createTemp func(dir, pattern string) (w io.WriteCloser, name string, err error)
+	rename     func(oldPath, newPath string) error
+	remove     func(name string) error
 }
 
 //nolint:unused // reached only via handleSaveFileLimit, which is //go:build desktop
 var saveFileDiskFS = saveFileFS{
-	open: func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
-		return os.OpenFile(name, flag, perm)
+	createTemp: func(dir, pattern string) (io.WriteCloser, string, error) {
+		f, err := os.CreateTemp(dir, pattern)
+		if err != nil {
+			return nil, "", err
+		}
+		return f, f.Name(), nil
 	},
+	rename: replaceFile,
 	remove: os.Remove,
 }
 
@@ -187,23 +196,35 @@ func handleSaveFileFS(w http.ResponseWriter, r *http.Request, choosePath ChooseS
 		return
 	}
 
-	dst, err := fs.open(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	// Write to a temporary sibling, never the destination directly: if the
+	// stream fails midway (oversized body, disk error, cancelled request) the
+	// user's previous export stays byte-for-byte intact; the destination is
+	// only swapped in by rename after copy, flush, and close all succeed.
+	dir := filepath.Dir(path)
+	tmp, tmpName, err := fs.createTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
-		writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to create %s: %v", path, err))
+		writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to create temp file in %s: %v", dir, err))
 		return
 	}
-	_, copyErr := io.Copy(dst, http.MaxBytesReader(w, r.Body, maxBytes))
-	closeErr := dst.Close()
-	if copyErr != nil || closeErr != nil {
-		// Never leave a truncated export behind; surface it when even that fails
+	_, copyErr := io.Copy(tmp, http.MaxBytesReader(w, r.Body, maxBytes))
+	// Flush before close so a power loss between close and rename cannot
+	// strand a zero-filled destination on write-back filesystems. Sync is
+	// best-effort on writers that implement it (all real *os.File handles).
+	var syncErr error
+	if s, ok := tmp.(interface{ Sync() error }); ok {
+		syncErr = s.Sync()
+	}
+	finErr := errors.Join(syncErr, tmp.Close())
+	if copyErr != nil || finErr != nil {
+		// Never leave a partial temp behind; surface it when even that fails
 		// (e.g. locked file on Windows) instead of vanishing silently.
 		cleanupNote := ""
-		if removeErr := fs.remove(path); removeErr != nil {
-			cleanupNote = fmt.Sprintf("; also failed to remove partial file %s: %v", path, removeErr)
+		if removeErr := fs.remove(tmpName); removeErr != nil {
+			cleanupNote = fmt.Sprintf("; also failed to remove partial file %s: %v", tmpName, removeErr)
 		}
-		// A close failure alongside a copy failure would otherwise vanish.
-		if copyErr != nil && closeErr != nil {
-			cleanupNote = fmt.Sprintf("; also failed to finalize %s: %v%s", path, closeErr, cleanupNote)
+		// A finalize failure alongside a copy failure would otherwise vanish.
+		if copyErr != nil && finErr != nil {
+			cleanupNote = fmt.Sprintf("; also failed to finalize %s: %v%s", path, finErr, cleanupNote)
 		}
 		switch {
 		case copyErr != nil && errors.As(copyErr, new(*http.MaxBytesError)):
@@ -211,8 +232,16 @@ func handleSaveFileFS(w http.ResponseWriter, r *http.Request, choosePath ChooseS
 		case copyErr != nil:
 			writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to write %s: %v%s", path, copyErr, cleanupNote))
 		default:
-			writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to finalize %s: %v%s", path, closeErr, cleanupNote))
+			writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to finalize %s: %v%s", path, finErr, cleanupNote))
 		}
+		return
+	}
+	if err := fs.rename(tmpName, path); err != nil {
+		note := ""
+		if removeErr := fs.remove(tmpName); removeErr != nil {
+			note = fmt.Sprintf("; also failed to remove partial file %s: %v", tmpName, removeErr)
+		}
+		writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to move export into place at %s: %v%s", path, err, note))
 		return
 	}
 

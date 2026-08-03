@@ -28,8 +28,21 @@ func doSaveFileRequest(t *testing.T, h http.Handler, filename, body string) (*ht
 	return w, resp
 }
 
+func leftoverTemps(t *testing.T, dir string) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, ".*.tmp-*"))
+	if err != nil {
+		t.Fatalf("glob temp leftovers: %v", err)
+	}
+	return matches
+}
+
 func TestSaveFile_Success(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "word-replacements.json")
+	// A previous export sits at the destination; a successful write replaces it.
+	if err := os.WriteFile(dst, []byte("ORIGINAL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var gotFilename string
 	choosePath := func(_ context.Context, filename string) (string, error) {
 		gotFilename = filename
@@ -58,6 +71,40 @@ func TestSaveFile_Success(t *testing.T) {
 	}
 	if string(written) != payload {
 		t.Errorf("written content = %q, want %q", written, payload)
+	}
+	if temps := leftoverTemps(t, filepath.Dir(dst)); len(temps) != 0 {
+		t.Errorf("temp leftovers after success: %v", temps)
+	}
+}
+
+// TestSaveFile_ExistingFileSurvivesFailedExport pins the overwrite-atomicity
+// contract end to end against the real filesystem: a failed stream must not
+// truncate or delete the file the user chose to replace.
+func TestSaveFile_ExistingFileSurvivesFailedExport(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "actresses.json")
+	if err := os.WriteFile(dst, []byte("ORIGINAL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	choosePath := func(context.Context, string) (string, error) { return dst, nil }
+	h := newReverseProxyHandler("http://127.0.0.1:1", choosePath)
+
+	req := httptest.NewRequest(http.MethodPost, "/desktop/save-file?filename=actresses.json", errReader{})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("destination must still exist: %v", err)
+	}
+	if string(got) != "ORIGINAL" {
+		t.Errorf("destination = %q, want the untouched ORIGINAL content", got)
+	}
+	if temps := leftoverTemps(t, dir); len(temps) != 0 {
+		t.Errorf("temp leftovers after failure: %v", temps)
 	}
 }
 
@@ -113,7 +160,7 @@ func TestSaveFile_NilChooseFunc(t *testing.T) {
 	}
 }
 
-func TestSaveFile_WriteFailure(t *testing.T) {
+func TestSaveFile_TempCreateFailure(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "no-such-dir", "a.json")
 	choosePath := func(context.Context, string) (string, error) {
 		return dst, nil
@@ -125,8 +172,8 @@ func TestSaveFile_WriteFailure(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
-	if !strings.Contains(resp.Error, "failed to create") {
-		t.Errorf("error = %q, want it to contain %q", resp.Error, "failed to create")
+	if !strings.Contains(resp.Error, "failed to create temp file") {
+		t.Errorf("error = %q, want it to contain %q", resp.Error, "failed to create temp file")
 	}
 }
 
@@ -193,7 +240,8 @@ func TestSaveFile_BodyAtLimitBoundary(t *testing.T) {
 }
 
 func TestSaveFile_OversizedBody(t *testing.T) {
-	dst := filepath.Join(t.TempDir(), "a.json")
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "a.json")
 	choosePath := func(context.Context, string) (string, error) {
 		return dst, nil
 	}
@@ -211,12 +259,20 @@ func TestSaveFile_OversizedBody(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
 	}
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
-		t.Errorf("truncated export must be removed on overflow, stat err = %v", err)
+		t.Errorf("oversized export must never touch the destination, stat err = %v", err)
+	}
+	if temps := leftoverTemps(t, dir); len(temps) != 0 {
+		t.Errorf("temp leftovers after overflow: %v", temps)
 	}
 }
 
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("client went away") }
+
 type failingWriteCloser struct {
 	writeErr error
+	syncErr  error
 	closeErr error
 }
 
@@ -227,27 +283,37 @@ func (f *failingWriteCloser) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (f *failingWriteCloser) Sync() error { return f.syncErr }
+
 func (f *failingWriteCloser) Close() error { return f.closeErr }
 
-func saveFileFSForTest(openErr error, wc io.WriteCloser, removed *bool, removeErr error) saveFileFS {
-	if wc == nil && openErr == nil {
-		wc = &failingWriteCloser{}
-	}
+type fsFailure struct {
+	createTempErr error
+	writeErr      error
+	syncErr       error
+	closeErr      error
+	removeErr     error
+	renameErr     error
+}
+
+func fsForFailure(ff fsFailure, removed *[]string) saveFileFS {
 	return saveFileFS{
-		open: func(string, int, os.FileMode) (io.WriteCloser, error) {
-			if openErr != nil {
-				return nil, openErr
+		createTemp: func(dir, pattern string) (io.WriteCloser, string, error) {
+			if ff.createTempErr != nil {
+				return nil, "", ff.createTempErr
 			}
-			return wc, nil
+			return &failingWriteCloser{writeErr: ff.writeErr, syncErr: ff.syncErr, closeErr: ff.closeErr}, filepath.Join(dir, ".tmp-test"), nil
 		},
-		remove: func(string) error {
-			*removed = true
-			return removeErr
+		rename: func(string, string) error {
+			return ff.renameErr
+		},
+		remove: func(name string) error {
+			*removed = append(*removed, name)
+			return ff.removeErr
 		},
 	}
 }
 
-// doSaveFileRequestFS posts through the handler with an injected filesystem.
 func doSaveFileRequestFS(t *testing.T, fs saveFileFS, body string) (*httptest.ResponseRecorder, saveFileResponse) {
 	t.Helper()
 	choosePath := func(context.Context, string) (string, error) {
@@ -266,9 +332,26 @@ func doSaveFileRequestFS(t *testing.T, fs saveFileFS, body string) (*httptest.Re
 	return w, resp
 }
 
-func TestSaveFile_WriteFailureError(t *testing.T) {
-	removed := false
-	fs := saveFileFSForTest(nil, &failingWriteCloser{writeErr: errors.New("disk io")}, &removed, nil)
+func TestSaveFileFS_CreateTempError(t *testing.T) {
+	removed := []string{}
+	fs := fsForFailure(fsFailure{createTempErr: errors.New("perm denied")}, &removed)
+
+	w, resp := doSaveFileRequestFS(t, fs, "[]")
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(resp.Error, "failed to create temp file") {
+		t.Errorf("error = %q, want it to contain %q", resp.Error, "failed to create temp file")
+	}
+	if len(removed) != 0 {
+		t.Errorf("nothing to clean up when temp creation fails, removed = %v", removed)
+	}
+}
+
+func TestSaveFileFS_WriteFailure(t *testing.T) {
+	removed := []string{}
+	fs := fsForFailure(fsFailure{writeErr: errors.New("disk io")}, &removed)
 
 	w, resp := doSaveFileRequestFS(t, fs, "[]")
 
@@ -278,14 +361,14 @@ func TestSaveFile_WriteFailureError(t *testing.T) {
 	if !strings.Contains(resp.Error, "failed to write") {
 		t.Errorf("error = %q, want it to contain %q", resp.Error, "failed to write")
 	}
-	if !removed {
-		t.Error("partial file must be removed after a write failure")
+	if len(removed) != 1 {
+		t.Errorf("partial temp must be removed after a write failure, removed = %v", removed)
 	}
 }
 
-func TestSaveFile_FinalizeFailureOnly(t *testing.T) {
-	removed := false
-	fs := saveFileFSForTest(nil, &failingWriteCloser{closeErr: errors.New("flush failed")}, &removed, nil)
+func TestSaveFileFS_FinalizeFailureClose(t *testing.T) {
+	removed := []string{}
+	fs := fsForFailure(fsFailure{closeErr: errors.New("flush failed")}, &removed)
 
 	w, resp := doSaveFileRequestFS(t, fs, "[]")
 
@@ -295,14 +378,25 @@ func TestSaveFile_FinalizeFailureOnly(t *testing.T) {
 	if !strings.Contains(resp.Error, "failed to finalize") {
 		t.Errorf("error = %q, want it to contain %q", resp.Error, "failed to finalize")
 	}
-	if !removed {
-		t.Error("partial file must be removed after a finalize failure")
+	if len(removed) != 1 {
+		t.Errorf("partial temp must be removed after a finalize failure, removed = %v", removed)
 	}
 }
 
-func TestSaveFile_WriteAndFinalizeFailure(t *testing.T) {
-	removed := false
-	fs := saveFileFSForTest(nil, &failingWriteCloser{writeErr: errors.New("disk io"), closeErr: errors.New("flush failed")}, &removed, nil)
+func TestSaveFileFS_FinalizeFailureSync(t *testing.T) {
+	removed := []string{}
+	fs := fsForFailure(fsFailure{syncErr: errors.New("fsync failed")}, &removed)
+
+	_, resp := doSaveFileRequestFS(t, fs, "[]")
+
+	if !strings.Contains(resp.Error, "failed to finalize") {
+		t.Errorf("error = %q, want sync failure to surface as finalize failure", resp.Error)
+	}
+}
+
+func TestSaveFileFS_WriteAndFinalizeFailure(t *testing.T) {
+	removed := []string{}
+	fs := fsForFailure(fsFailure{writeErr: errors.New("disk io"), closeErr: errors.New("flush failed")}, &removed)
 
 	_, resp := doSaveFileRequestFS(t, fs, "[]")
 
@@ -314,17 +408,45 @@ func TestSaveFile_WriteAndFinalizeFailure(t *testing.T) {
 	}
 }
 
-func TestSaveFile_RemoveFailureSurfaced(t *testing.T) {
-	removed := false
-	fs := saveFileFSForTest(nil, &failingWriteCloser{writeErr: errors.New("disk io")}, &removed, errors.New("file locked"))
+func TestSaveFileFS_RemoveFailureSurfaced(t *testing.T) {
+	removed := []string{}
+	fs := fsForFailure(fsFailure{writeErr: errors.New("disk io"), removeErr: errors.New("file locked")}, &removed)
 
 	_, resp := doSaveFileRequestFS(t, fs, "[]")
 
-	if !removed {
-		t.Error("cleanup must be attempted after a write failure")
+	if len(removed) != 1 {
+		t.Errorf("cleanup must be attempted after a write failure, removed = %v", removed)
 	}
 	if !strings.Contains(resp.Error, "also failed to remove partial file") {
 		t.Errorf("error = %q, want it to surface the cleanup failure", resp.Error)
+	}
+}
+
+func TestSaveFileFS_RenameFailure(t *testing.T) {
+	removed := []string{}
+	fs := fsForFailure(fsFailure{renameErr: errors.New("target busy")}, &removed)
+
+	w, resp := doSaveFileRequestFS(t, fs, "[]")
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(resp.Error, "failed to move export into place") {
+		t.Errorf("error = %q, want it to contain %q", resp.Error, "failed to move export into place")
+	}
+	if len(removed) != 1 {
+		t.Errorf("temp must be removed when rename fails, removed = %v", removed)
+	}
+}
+
+func TestSaveFileFS_RenameAndRemoveFailure(t *testing.T) {
+	removed := []string{}
+	fs := fsForFailure(fsFailure{renameErr: errors.New("target busy"), removeErr: errors.New("locked")}, &removed)
+
+	_, resp := doSaveFileRequestFS(t, fs, "[]")
+
+	if !strings.Contains(resp.Error, "also failed to remove partial file") {
+		t.Errorf("error = %q, want rename-failure removal problems surfaced too", resp.Error)
 	}
 }
 
