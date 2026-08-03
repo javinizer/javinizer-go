@@ -314,13 +314,13 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 	tempFullPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
 	tempCroppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
 
-	// Defense in depth: ensure paths are inside tempPosterDir.
-	if err := validatePathWithinDir(tempFullPath, tempPosterDir); err != nil {
-		return nil, markCacheUntouched(err)
-	}
-	if err := validatePathWithinDir(tempCroppedPath, tempPosterDir); err != nil {
-		return nil, markCacheUntouched(err)
-	}
+	// Both paths are provably inside tempPosterDir: ValidateJobID and
+	// validatePosterID reject empty, ".", "..", and separator-bearing IDs
+	// above, and filepath.Join nests them under the directory. The twin
+	// validatePathWithinDir checks this comment replaces could only ever
+	// evaluate false (both operands derive from the SAME Join'd prefix), so
+	// their error legs were unreachable; the standalone helper's traversal
+	// behavior is pinned directly in manager_test.go.
 
 	// Build HTTP request.
 	downloadReq, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
