@@ -270,6 +270,18 @@ type posterAssetMover interface {
 	MovePosterAssets(jobID, fromMovieID, toMovieID string) error
 }
 
+// posterAssetCopier is the optional case-variant alias capability of a
+// PosterGenerator: duplicating the job's cached -full.jpg/preview assets
+// from one movie ID to another WITHOUT freeing the source. The rescrape
+// sibling poster fan-out uses it when a mirrored sibling is stored under a
+// CASE VARIANT of the rescraped ID (folded family, one lock, but distinct
+// cache files on a case-sensitive filesystem) so the variant's raw key is
+// refreshed alongside its mirrored poster state (Codex P2). Generators
+// without it (test stubs) degrade to a state-only mirror.
+type posterAssetCopier interface {
+	CopyPosterAssets(jobID, fromMovieID, toMovieID string) error
+}
+
 // RewritePosterIDInPreviewURL re-points a temp preview poster URL
 // (/api/v1/temp/posters/{jobID}/{posterID}.jpg?...) from oldID to newID when
 // a re-key (the field-override "id" fan-out, the whole-movie PATCH rename)

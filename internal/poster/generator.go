@@ -147,6 +147,20 @@ func (g *ScrapePosterGenerator) RemovePosterAssets(jobID, movieID string) error 
 	return g.manager.RemoveAssets(jobID, movieID)
 }
 
+// CopyPosterAssets duplicates the job's cached poster assets from one movie
+// ID to another WITHOUT freeing the source — the case-variant alias half of
+// the rescrape sibling poster fan-out: on a case-sensitive filesystem a
+// family refresh replaced only the rescraped movie's raw cache key, so the
+// variant sibling's raw key (a distinct file) is refreshed alongside the
+// poster-state mirror, or a crop looked up under the variant's ID measures
+// the stale image. A nil manager holds no assets to copy.
+func (g *ScrapePosterGenerator) CopyPosterAssets(jobID, fromMovieID, toMovieID string) error {
+	if g.manager == nil {
+		return nil
+	}
+	return g.manager.CopyAssets(jobID, fromMovieID, toMovieID)
+}
+
 // resolveReferer was removed — PosterManager.DownloadFromURL already performs
 // the same auto-derivation from the download URL when referer is empty.
 // Duplicating it here was redundant and meant both sites had to stay in sync.

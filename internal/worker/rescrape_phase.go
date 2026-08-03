@@ -33,10 +33,14 @@ type RescrapePhase interface {
 // for the rescrape success fan-out (I7): a same-ID rescrape mirrors its
 // refreshed poster state onto every sibling sharing the movie key, and a
 // persist failure afterwards restores these snapshots (parity with
-// preRescrapeResult for the rescraped file itself).
+// preRescrapeResult for the rescraped file itself). cacheRollback restores
+// the sibling's RAW-KEYED cache when the sibling was a case-variant alias
+// whose assets the mirror copied the refreshed bytes onto — the restored
+// state must never reference an image the cache no longer holds.
 type rescrapeSiblingSnapshot struct {
-	filePath string
-	result   *resultstore.MovieResult
+	filePath      string
+	result        *resultstore.MovieResult
+	cacheRollback func() error
 }
 
 type rescrapePhase struct{}
@@ -950,6 +954,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 						continue // nothing coherent to sync or restore
 					}
 					mirrored := false
+					sibRawID := ""
 					uErr := updater.AtomicUpdateFileResult(sibPath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 						// Folded identity comparison (same fold as the result index
 						// and poster-source lock keys): FindFilePathsForMovieID
@@ -963,13 +968,53 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 						if current.Movie == nil || !strings.EqualFold(current.Movie.ID, newKey) {
 							return current, nil // raced re-key: not this family anymore
 						}
+						sibRawID = current.Movie.ID
 						current.Movie.Poster = rescrapedPoster.Clone()
 						mirrored = true
 						return current, nil
 					})
-					if uErr == nil && mirrored {
-						siblingRollback = append(siblingRollback, rescrapeSiblingSnapshot{filePath: sibPath, result: pre})
+					if uErr != nil || !mirrored {
+						continue
 					}
+					sibSnapshot := rescrapeSiblingSnapshot{filePath: sibPath, result: pre}
+					if sibRawID != newKey {
+						// Case-variant alias (Codex P2): the folded lock and index
+						// treat the family as one, but the poster CACHE keys off the
+						// RAW movie ID — so on a case-sensitive filesystem this
+						// sibling's {sibRawID}-full.jpg/preview are DISTINCT files
+						// that GeneratePoster did NOT touch. Refreshing the poster
+						// state without refreshing the variant's raw-keyed cache
+						// would leave a crop looked up under the variant's ID
+						// measured against the stale alias. Both IDs fold to the
+						// SAME poster-source lock key, which is already held — no
+						// second lock (that would self-deadlock, and a raw-keyed
+						// pair acquire would double-take it).
+						copier, copyOK := inputs.PosterGen.(posterAssetCopier)
+						snapshooter, snapOK := inputs.PosterGen.(posterAssetSnapshooter)
+						if copyOK && snapOK {
+							snap, snapErr := snapshooter.SnapshotPosterAssets(inputs.JobID.String(), sibRawID)
+							if snapErr == nil {
+								snapErr = copier.CopyPosterAssets(inputs.JobID.String(), newKey, sibRawID)
+							}
+							if snapErr != nil {
+								// The alias cache could not converge: REVERT the state
+								// mirror so the sibling keeps its old state alongside
+								// its old cache (coherent) instead of referencing the
+								// refreshed image its raw key does not hold.
+								logging.Warnf("rescrape: case-variant poster cache alias refresh failed for %s (reverting the sibling mirror): %v", sibPath, snapErr)
+								if rbErr := updater.AtomicUpdateFileResult(sibPath, func(_ *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+									return pre.Clone(), nil
+								}); rbErr != nil {
+									logging.Warnf("rescrape: failed to revert the sibling poster mirror for %s after the cache alias failure: %v", sibPath, rbErr)
+								}
+								continue
+							}
+							sibSnapshot.cacheRollback = func() error { return snapshooter.RestorePosterAssets(snap) }
+						} else {
+							logging.Debugf("rescrape: generator cannot mirror the case-variant poster cache alias for %s — state mirror only", sibPath)
+						}
+					}
+					siblingRollback = append(siblingRollback, sibSnapshot)
 				}
 			}
 		}
@@ -1023,6 +1068,14 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 							return sib.result.Clone(), nil
 						}); rbErr != nil {
 							persistErr = fmt.Errorf("%w (sibling state rollback failed for %s: %v)", persistErr, sib.filePath, rbErr)
+						}
+						// Restore the case-variant alias cache the mirror refreshed,
+						// so the just-restored sibling state never references an
+						// image the sibling's raw key no longer holds.
+						if sib.cacheRollback != nil {
+							if crbErr := sib.cacheRollback(); crbErr != nil {
+								persistErr = fmt.Errorf("%w (sibling cache rollback failed for %s: %v)", persistErr, sib.filePath, crbErr)
+							}
 						}
 					}
 				}

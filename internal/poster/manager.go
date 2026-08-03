@@ -107,6 +107,13 @@ type PosterManagerInterface interface {
 	// follow it, or they are orphaned at the old key. Missing source assets
 	// are skipped; stale destination files are replaced.
 	MoveAssets(jobID, fromPosterID, toPosterID string) error
+	// CopyAssets duplicates the cached full-size source and preview from
+	// fromPosterID to toPosterID within the same job directory WITHOUT
+	// freeing the source key — the case-variant alias refresh mirrors a
+	// family-wide poster replacement onto a same-folded-family case
+	// variant's raw key (distinct files on a case-sensitive filesystem).
+	// Missing source assets drop any stale destination file.
+	CopyAssets(jobID, fromPosterID, toPosterID string) error
 }
 
 // AssetsSnapshot captures the job's cached full-size poster source
@@ -564,6 +571,66 @@ func (pm *PosterManager) MoveAssets(jobID, fromPosterID, toPosterID string) erro
 		}
 	}
 	return moveErr
+}
+
+// CopyAssets duplicates the cached full-size source and preview from
+// fromPosterID to toPosterID within one job's temp poster directory WITHOUT
+// freeing the source key (unlike MoveAssets, which re-keys). It exists for
+// the case-variant alias refresh: on a case-sensitive filesystem, IDs that
+// differ only in case (ABC-1 vs abc-1) name DISTINCT cache files while the
+// poster-source lock and the result index fold them into ONE family — so a
+// family-wide poster refresh that replaced one raw key must ALSO refresh the
+// variant sibling's raw key, or a crop lookup resolving the sibling's raw
+// movie ID measures the stale alias (Codex P2). Semantics mirror restore's
+// replace-the-file family (validated IDs, errors joined across both assets):
+// the refreshed bytes are read fully into memory before the destination is
+// written, so a case-only pair is safe even on a case-INSENSITIVE fs where
+// src and dst name the SAME file (a same-file read-then-write that cannot
+// truncate its own source). An absent source drops any stale destination
+// asset — the variant key must never keep an image no persisted state
+// produced. An unchanged from/to pair is a no-op.
+func (pm *PosterManager) CopyAssets(jobID, fromPosterID, toPosterID string) error {
+	if fromPosterID == toPosterID {
+		return nil
+	}
+	if err := ValidateJobID(jobID); err != nil {
+		return err
+	}
+	if err := validatePosterID(fromPosterID); err != nil {
+		return err
+	}
+	if err := validatePosterID(toPosterID); err != nil {
+		return err
+	}
+	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
+	var copyErr error
+	for _, pair := range [][2]string{
+		{fromPosterID + "-full.jpg", toPosterID + "-full.jpg"},
+		{fromPosterID + ".jpg", toPosterID + ".jpg"},
+	} {
+		src := filepath.Join(tempPosterDir, pair[0])
+		dst := filepath.Join(tempPosterDir, pair[1])
+		data, err := afero.ReadFile(pm.fs, src)
+		switch {
+		case err == nil:
+			if mkErr := pm.fs.MkdirAll(tempPosterDir, configDirPermTemp); mkErr != nil {
+				copyErr = errors.Join(copyErr, fmt.Errorf("copy poster asset directory: %w", mkErr))
+				continue
+			}
+			if wErr := afero.WriteFile(pm.fs, dst, data, 0o644); wErr != nil {
+				copyErr = errors.Join(copyErr, fmt.Errorf("copy poster asset %s -> %s: %w", pair[0], pair[1], wErr))
+			}
+		case os.IsNotExist(err):
+			// Source absent: drop any stale destination asset so the variant
+			// key never carries an image no persisted state produced.
+			if rmErr := pm.fs.Remove(dst); rmErr != nil && !os.IsNotExist(rmErr) {
+				copyErr = errors.Join(copyErr, fmt.Errorf("remove stale destination poster asset %s: %w", pair[1], rmErr))
+			}
+		default:
+			copyErr = errors.Join(copyErr, fmt.Errorf("read poster asset %s: %w", pair[0], err))
+		}
+	}
+	return copyErr
 }
 
 // RemoveAssets deletes the cached full-size source and preview for a poster
