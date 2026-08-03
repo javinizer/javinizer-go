@@ -614,9 +614,25 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	// MovieResult.Movie shares the result.Movie pointer, so mutating it here
 	// would race with concurrent API/UI readers under -race.
 	cloned := o.Result.Movie.Clone()
+	// Stale-identity gate (Codex P1): the live result may have been RE-KEYED
+	// after this outcome was produced but before this persist acquired the
+	// poster-source lock (a rescrape/whole-movie edit committing a corrected
+	// match A→B). mergeLivePosterState skips that mismatch, but upserting
+	// the stale scrape-time clone would still re-materialize movie A's row in
+	// the movies table — resurrecting stale identity/poster data the re-keyed
+	// family (now persisted under B by the re-key path itself) no longer
+	// owns, from where a later reload revives it. Skip the DB leg on
+	// mismatch; the write-back below still flips the pipeline-owned
+	// Persisted flag and keeps the live movie wholesale.
+	skipStaleUpsert := false
 	if reader, ok := inputs.Updater.(resultstore.ResultMapAccessor); ok {
 		if live, liveErr := reader.GetMovieResult(o.FilePath); liveErr == nil && live != nil && live.Movie != nil {
-			mergeLivePosterState(cloned, live.Movie)
+			if live.Movie.ID != cloned.ID {
+				skipStaleUpsert = true
+				logging.Debugf("scrape persist upsert skipped for %s — live movie %q re-keyed away from scraped movie %q; the re-keyed family persists itself", o.FilePath, live.Movie.ID, cloned.ID)
+			} else {
+				mergeLivePosterState(cloned, live.Movie)
+			}
 		}
 	}
 	var genreTrans []models.GenreTranslationData
@@ -625,45 +641,49 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 		genreTrans = o.Result.TranslationOutput.GenreTranslations
 		actressTrans = o.Result.TranslationOutput.ActressTranslations
 	}
-	saved, err := inputs.MovieRepo.UpsertWithTranslations(ctx, cloned, genreTrans, actressTrans)
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return false
+	var saved *models.Movie
+	if !skipStaleUpsert {
+		savedRes, err := inputs.MovieRepo.UpsertWithTranslations(ctx, cloned, genreTrans, actressTrans)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return false
+			}
+			logging.Warnf("[scrape-phase] Failed to persist %s: %v", o.MovieID, err)
+			_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+				current.Status = models.JobStatusFailed
+				current.Error = fmt.Sprintf("persist failed: %v", err)
+				return current, nil
+			})
+			inputs.Broadcaster.Send(JobEvent{
+				JobID:     inputs.JobID,
+				MovieID:   o.MovieID,
+				Phase:     JobEventPhaseScrape,
+				Step:      StepFailed,
+				Message:   fmt.Sprintf("Scrape persist failed: %v", err),
+				Timestamp: time.Now(),
+			})
+			// Correct the per-file WS status: the scrape worker already emitted a
+			// terminal "success" ProgressMessage (OnFileScraped) for this file before
+			// persist ran. The JobEvent broadcast above is job-level (no FilePath),
+			// so it never reaches the frontend's messagesByFile — re-fire the
+			// per-file failure hook so messagesByFile[filePath] flips from success
+			// to error instead of leaving a stale "success".
+			if onFileFailed != nil {
+				onFileFailed(o.FilePath, o.MovieID, fmt.Sprintf("persist failed: %v", err))
+			}
+			recordAuditCtx, recordAuditCancel := historyAuditContext()
+			defer recordAuditCancel()
+			recordHistory(recordAuditCtx, inputs.HistoryRepo, models.History{
+				MovieID:      o.MovieID,
+				BatchJobID:   jobIDPtr(inputs.JobID),
+				Operation:    models.HistoryOpScrape,
+				OriginalPath: o.FilePath,
+				Status:       models.HistoryStatusFailed,
+				ErrorMessage: fmt.Sprintf("persist failed: %v", err),
+			})
+			return true
 		}
-		logging.Warnf("[scrape-phase] Failed to persist %s: %v", o.MovieID, err)
-		_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-			current.Status = models.JobStatusFailed
-			current.Error = fmt.Sprintf("persist failed: %v", err)
-			return current, nil
-		})
-		inputs.Broadcaster.Send(JobEvent{
-			JobID:     inputs.JobID,
-			MovieID:   o.MovieID,
-			Phase:     JobEventPhaseScrape,
-			Step:      StepFailed,
-			Message:   fmt.Sprintf("Scrape persist failed: %v", err),
-			Timestamp: time.Now(),
-		})
-		// Correct the per-file WS status: the scrape worker already emitted a
-		// terminal "success" ProgressMessage (OnFileScraped) for this file before
-		// persist ran. The JobEvent broadcast above is job-level (no FilePath),
-		// so it never reaches the frontend's messagesByFile — re-fire the
-		// per-file failure hook so messagesByFile[filePath] flips from success
-		// to error instead of leaving a stale "success".
-		if onFileFailed != nil {
-			onFileFailed(o.FilePath, o.MovieID, fmt.Sprintf("persist failed: %v", err))
-		}
-		recordAuditCtx, recordAuditCancel := historyAuditContext()
-		defer recordAuditCancel()
-		recordHistory(recordAuditCtx, inputs.HistoryRepo, models.History{
-			MovieID:      o.MovieID,
-			BatchJobID:   jobIDPtr(inputs.JobID),
-			Operation:    models.HistoryOpScrape,
-			OriginalPath: o.FilePath,
-			Status:       models.HistoryStatusFailed,
-			ErrorMessage: fmt.Sprintf("persist failed: %v", err),
-		})
-		return true
+		saved = savedRes
 	}
 	// Refresh the in-memory movie with the DB-saved version (DB-assigned IDs,
 	// normalized associations) and flip Persisted. AtomicUpdateFileResult clones

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 
 	"testing"
 	"time"
@@ -196,6 +197,107 @@ func TestPersistScrapeOutcome_PreservesInterleavedCrop(t *testing.T) {
 	assertLivePosterPreserved(t, stored.Movie, bounds)
 	assert.Equal(t, "Scraped (normalized)", stored.Movie.Title,
 		"the DB-normalized metadata fields must still reach the result")
+}
+
+// countingUpsertRepo counts UpsertWithTranslations calls so the stale-
+// identity persist gate can assert the scrape-time clone never reaches
+// the DB.
+type countingUpsertRepo struct {
+	stripBoundsPersistRepo
+	upsertCalls int32
+}
+
+func (r *countingUpsertRepo) UpsertWithTranslations(ctx context.Context, m *models.Movie, g []models.GenreTranslationData, a []models.ActressTranslationData) (*models.Movie, error) {
+	atomic.AddInt32(&r.upsertCalls, 1)
+	return r.stripBoundsPersistRepo.UpsertWithTranslations(ctx, m, g, a)
+}
+
+// TestPersistScrapeOutcome_SkipsStaleUpsertOnRekey pins Codex P1-1: when
+// the live result was re-keyed (A→B) before the persist pool acquired the
+// poster-source lock, the stale scrape-time clone of A must NOT be
+// upserted — writing A's row re-materializes the identity the re-key path
+// moved the family away from, and a later reload resurrects A's stale
+// poster/identity state. The result-store write-back still flips the
+// pipeline-owned Persisted flag and keeps the live (re-keyed) movie
+// wholesale; the persisted DB state is the re-key path's own save.
+func TestPersistScrapeOutcome_SkipsStaleUpsertOnRekey(t *testing.T) {
+	const filePath = "/input/RK-006.mp4"
+	tracker := resultstore.New(1, []string{filePath})
+	scrapedA := &models.Movie{ID: "AAA-111", Title: "Scraped A", Poster: models.PosterState{
+		PosterURL: "https://a.example/poster.jpg", ShouldCropPoster: true,
+	}}
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "AAA-111"},
+		Status:        models.JobStatusCompleted,
+		Movie:         scrapedA,
+	})
+
+	liveB := rekeyLiveResult(t, tracker, filePath, "BBB-222")
+
+	repo := &countingUpsertRepo{stripBoundsPersistRepo: stripBoundsPersistRepo{savedTitle: "Scraped A (normalized)"}}
+	inputs := scrapePhaseInputs{
+		JobID:       models.NewJobID(),
+		MovieRepo:   repo,
+		Broadcaster: &stubBroadcaster{},
+		Updater:     tracker,
+	}
+	outcome := scrapeFileOutcome{
+		FilePath: filePath,
+		MovieID:  "AAA-111",
+		Success:  true,
+		Result:   &scrape.ScrapeResult{Movie: scrapedA, Status: scrape.StatusCompleted},
+	}
+
+	persistScrapeOutcome(context.Background(), outcome, inputs, nil)
+
+	assert.Equal(t, int32(0), atomic.LoadInt32(&repo.upsertCalls),
+		"the stale pre-rekey scrape clone must never reach the DB upsert — the re-key path persists the family")
+	stored, err := tracker.GetMovieResult(filePath)
+	require.NoError(t, err)
+	assert.True(t, stored.Persisted, "the pipeline-owned Persisted flag still moves")
+	require.NotNil(t, stored.Movie)
+	assert.Equal(t, "BBB-222", stored.Movie.ID, "the live re-keyed movie is kept wholesale")
+	assert.Equal(t, liveB.Title, stored.Movie.Title)
+}
+
+// TestPersistScrapeOutcome_MatchedIdentityStillUpserts is the positive
+// control for the gate above: with no mid-flight re-key the DB upsert must
+// still run exactly once (the regression floor F-D's DB leg depends on).
+func TestPersistScrapeOutcome_MatchedIdentityStillUpserts(t *testing.T) {
+	const filePath = "/input/RK-007.mp4"
+	tracker := resultstore.New(1, []string{filePath})
+	scraped := &models.Movie{ID: "MTCH-7", Title: "Scraped", Poster: models.PosterState{
+		PosterURL: "https://a.example/poster.jpg",
+	}}
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "MTCH-7"},
+		Status:        models.JobStatusCompleted,
+		Movie:         scraped,
+	})
+
+	repo := &countingUpsertRepo{stripBoundsPersistRepo: stripBoundsPersistRepo{savedTitle: "Scraped (normalized)"}}
+	inputs := scrapePhaseInputs{
+		JobID:       models.NewJobID(),
+		MovieRepo:   repo,
+		Broadcaster: &stubBroadcaster{},
+		Updater:     tracker,
+	}
+	outcome := scrapeFileOutcome{
+		FilePath: filePath,
+		MovieID:  "MTCH-7",
+		Success:  true,
+		Result:   &scrape.ScrapeResult{Movie: scraped, Status: scrape.StatusCompleted},
+	}
+
+	persistScrapeOutcome(context.Background(), outcome, inputs, nil)
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(&repo.upsertCalls),
+		"an identity-matching persist must still reach the DB upsert")
+	stored, err := tracker.GetMovieResult(filePath)
+	require.NoError(t, err)
+	assert.True(t, stored.Persisted)
+	require.NotNil(t, stored.Movie)
+	assert.Equal(t, "Scraped (normalized)", stored.Movie.Title)
 }
 
 // TestMergeLivePosterState_NilGuards pins the helper's degeneration: a nil

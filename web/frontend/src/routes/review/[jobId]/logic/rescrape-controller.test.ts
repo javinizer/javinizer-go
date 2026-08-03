@@ -214,4 +214,41 @@ describe('executeRescrape — sibling pending-edit reconciliation (P1)', () => {
 		// Unrelated movie untouched.
 		expect(h.editedMovies.get(FILE_C)?.title).toBe('C pending');
 	});
+
+	it('skips the pending-edit overlay for pre-rekey siblings on an A→B re-key (P1 rekey guard)', async () => {
+		// Codex P1-4: sibling targets resolve off the PRE-rekey job, but on a
+		// re-key the backend fanned the new poster state out to the POST-rekey
+		// B family only. Overlaying updatedMovie (AAA-009) onto an AAA-001
+		// pending edit would make the next whole-movie Save persist B's image
+		// data under A.
+		const h = makeHarness();
+		h.editedMovies.set(
+			FILE_B,
+			makeMovie('AAA-001', {
+				title: 'B pending title',
+				poster_url: 'https://old/stale-poster.jpg',
+				cover_url: 'https://old/stale-cover.jpg',
+			}),
+		);
+
+		h.rescrapeBatchMovie.mockResolvedValue({
+			movie: makeMovie('AAA-009', {
+				// re-keyed A → AAA-009
+				poster_url: 'https://new/poster.jpg',
+				cover_url: 'https://new/cover.jpg',
+				cropped_poster_url: '/api/v1/temp/posters/job-1/AAA-009.jpg?v=9',
+			}),
+		});
+
+		await h.controller.executeRescrape();
+
+		const sibling = h.editedMovies.get(FILE_B);
+		expect(sibling, 'the pending edit itself must survive').toBeDefined();
+		expect(sibling?.title).toBe('B pending title');
+		expect(sibling?.poster_url).toBe('https://old/stale-poster.jpg');
+		expect(sibling?.cover_url).toBe('https://old/stale-cover.jpg');
+		expect(sibling?.cropped_poster_url).not.toBe(
+			'/api/v1/temp/posters/job-1/AAA-009.jpg?v=9',
+		);
+	});
 });

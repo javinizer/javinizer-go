@@ -93,6 +93,11 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		var renameTarget string
 		var destRelease func()
 		posterLockKey := posterLockKeyFor(current)
+		// entryKey is the identity this request OBSERVED before sleeping on
+		// the lock; the stale-request gate inside the convergence loop below
+		// compares the (pre-lock, never rebased) request's rename intent
+		// against it to reject stale perspectives after a mid-wait re-key.
+		entryKey := posterLockKey
 		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterLockKey)
 		defer func() {
 			if destRelease != nil {
@@ -139,6 +144,30 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				releasePosterLock()
 				posterLockKey = resolvedKey
 				releasePosterLock = worker.AcquirePosterSourceLock(jobID, posterLockKey)
+			}
+
+			// Stale-request gate (Codex P1): the request movie was decoded
+			// BEFORE the lock was acquired and its movie.ID is never rebased
+			// by the convergence loop. If the target re-keyed (A→B) while
+			// this request waited, a client that PATCHed A's movie view with
+			// NO rename intent still carries movie.ID == A — which the
+			// pairing below would treat as an explicit rename B→A (reversing
+			// the committed re-key and migrating B's freshly committed
+			// assets back) or as a false rename collision against a rebuilt
+			// A family. Reject the stale perspective with a 409 (parity with
+			// the crop endpoint's post-lock stale-source re-check, P1-5):
+			// the client reloads the live identity and re-submits; a
+			// reissued request resolves B as its entry identity, so the gate
+			// only fires when BOTH the loop handed the identity off AND the
+			// request ID matches the pre-rekey one. Comparisons fold case
+			// (PosterSourceLockMovieID — the lock map's own identity rule),
+			// so a case-only identity drift gates the same way.
+			if movie.ID != "" &&
+				worker.PosterSourceLockMovieID(movie.ID) == worker.PosterSourceLockMovieID(entryKey) &&
+				worker.PosterSourceLockMovieID(entryKey) != worker.PosterSourceLockMovieID(posterLockKey) {
+				logging.Warnf("Rejected stale whole-movie edit on result %s (job %s): request movie ID %q predates re-key %q → %q", resultID, jobID, movie.ID, entryKey, posterLockKey)
+				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "movie identity changed while the edit was waiting; reload the result and reapply the edit"})
+				return
 			}
 
 			// A whole-movie PATCH can RENAME the movie ID: the request's

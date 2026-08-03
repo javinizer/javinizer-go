@@ -5,7 +5,7 @@ import type {
 	Movie,
 	Scraper,
 } from '$lib/api/types';
-import { overlayPosterState, posterEditTargetFilePaths } from '../stores/overlay-field-override';
+import { overlayPosterState, posterEditTargetFilePaths, sameMovieIdentity } from '../stores/overlay-field-override';
 
 export type ScalarStrategy =
 	| ''
@@ -219,11 +219,22 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			// applyFieldOverrideToEditedMovies / the bulk path's
 			// adopt-server-state contract. Targets resolve off the PRE-rekey
 			// job exactly like the crop-geometry clear above.
+			// Re-key guard (P1): on an A→B re-key the backend fanned the
+			// new poster state out to the POST-rekey B family only, while
+			// these targets — resolved from the PRE-rekey job — are still
+			// A-family entries. Overlaying updatedMovie (B) onto an A
+			// sibling's pending edit would make the next whole-movie Save
+			// persist B's image data under A, so skip any sibling whose ID
+			// diverges from the response movie (mirrors the backend's
+			// POST-rekey family semantics); the invalidateJobQueries refetch
+			// adopts the authoritative state.
 			if (currentJob) {
-				for (const fp of posterEditTargetFilePaths(currentJob.results ?? {}, rescrapeResultId)) {
+				const overlayResults = currentJob.results ?? {};
+				for (const fp of posterEditTargetFilePaths(overlayResults, rescrapeResultId)) {
 					if (fp === currentResult.file_path) continue;
 					const pending = editedMovies.get(fp);
 					if (!pending) continue;
+					if (!sameMovieIdentity(overlayResults[fp]?.movie_id, updatedMovie.id)) continue;
 					const merged: Movie = { ...pending };
 					overlayPosterState(merged, updatedMovie);
 					editedMovies.set(fp, merged);

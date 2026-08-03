@@ -273,3 +273,44 @@ func TestCropWithBounds_RecoversCrashedReplaceBackup(t *testing.T) {
 	_, statErr := mem.Stat(filepath.Join(dir, posterID+".jpg.bak"))
 	assert.Error(t, statErr, "the consumed backup must not linger")
 }
+
+// failBackupRecoveryRenameFs refuses ONLY the crash-recovery rename
+// (.bak → preview) so the fail-closed recovery leg can be exercised.
+type failBackupRecoveryRenameFs struct{ afero.Fs }
+
+func (f *failBackupRecoveryRenameFs) Rename(oldPath, newPath string) error {
+	if strings.HasSuffix(filepath.ToSlash(oldPath), ".jpg.bak") {
+		return errors.New("forced backup recovery failure")
+	}
+	return f.Fs.Rename(oldPath, newPath)
+}
+
+// TestCropWithBounds_FailedBackupRecoveryFailsClosed pins Codex P1-3: a
+// crashed previous replace left the preview slot empty with the only
+// valid copy of the old preview in .bak. When the recovery rename itself
+// fails, CropWithBounds must SURFACE the error and fail closed —
+// swallowing it (the previous `_ = pm.fs.Rename(...)`) let the new crop
+// install over an unrecovered slot while the referenced preview stayed
+// missing and the only valid copy remained stranded in .bak.
+func TestCropWithBounds_FailedBackupRecoveryFailsClosed(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	fs := &failBackupRecoveryRenameFs{Fs: mem}
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", nil).WithSSRFCheck(func(string) error { return nil })
+
+	jobID := "job-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	posterID := "REC-004"
+	dir := filepath.Join("/tmp/javinizer-test", "posters", jobID)
+	require.NoError(t, createTestJPEG(fs, filepath.Join(dir, posterID+"-full.jpg"), 800, 500))
+	onlyCopy := []byte("only surviving copy of the old preview")
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, posterID+".jpg.bak"), onlyCopy, 0o644))
+
+	_, err := pm.CropWithBounds(context.Background(), jobID, posterID, 10, 20, 300, 400, 0)
+	require.Error(t, err, "a failed .bak recovery must surface, not be hidden by installing the new crop")
+	assert.Contains(t, err.Error(), "failed to recover interrupted poster preview backup")
+
+	got, readErr := afero.ReadFile(mem, filepath.Join(dir, posterID+".jpg.bak"))
+	require.NoError(t, readErr, "the only surviving copy must remain in .bak, not be destroyed")
+	assert.Equal(t, onlyCopy, got)
+	_, statErr := mem.Stat(filepath.Join(dir, posterID+".jpg"))
+	assert.Error(t, statErr, "the referenced preview slot must stay empty when recovery failed")
+}

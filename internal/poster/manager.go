@@ -211,7 +211,16 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	backupPath := croppedPath + ".bak"
 	if _, statErr := pm.fs.Stat(croppedPath); errors.Is(statErr, os.ErrNotExist) {
 		if _, bakErr := pm.fs.Stat(backupPath); bakErr == nil {
-			_ = pm.fs.Rename(backupPath, croppedPath)
+			// Fail closed when the recovery rename itself errors (Codex P1):
+			// the .bak holds the ONLY copy of the still-valid preview while
+			// the preview slot the job state references is empty — swallowing
+			// the error would strand that copy and let the crop below (or a
+			// reported success) proceed against an unrecovered slot. Parity
+			// with the downloader's crash-recovery leg
+			// (internal/downloader/media.go), which surfaces the same failure.
+			if recErr := pm.fs.Rename(backupPath, croppedPath); recErr != nil {
+				return nil, fmt.Errorf("failed to recover interrupted poster preview backup %s: %w", backupPath, recErr)
+			}
 		}
 	}
 
