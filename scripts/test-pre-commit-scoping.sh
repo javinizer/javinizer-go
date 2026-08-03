@@ -397,6 +397,27 @@ printf '\n// touch\n' >> internal/testonly/t_test.go; git add internal/testonly/
 # from the binary graph (the build check cannot compile it) — full tests
 # still RUN, which is the assertion's point: classify, never hard-block
 check "test-only package edit -> own tests" "./internal/testonly|./internal/testonly|1|1|yes" "$(probe)"
+
+# embedded testdata fixture: an asset under a NORMAL package's testdata/
+# dir that is ALSO that package's //go:embed target is re-exported through
+# the package API — the private-fixture rule must yield to reverse scope
+reset
+BASE5_SHA=$(git rev-parse HEAD)
+cat > internal/foo/embed_fix.go <<'EOF'
+package foo
+
+import _ "embed"
+
+//go:embed testdata/embedfix.txt
+var Fix string
+EOF
+printf 'v1\n' > internal/foo/testdata/embedfix.txt
+gofmt -w internal/foo/embed_fix.go
+git add internal/foo/embed_fix.go internal/foo/testdata/embedfix.txt
+git commit -qm 'fixture: foo embeds its own testdata fixture'
+printf 'v2\n' >> internal/foo/testdata/embedfix.txt; git add internal/foo/testdata/embedfix.txt
+check "embedded testdata asset -> rev-expanded owner closure" "|$C4||1|yes" "$(probe)"
+git reset -q --hard "$BASE5_SHA" >/dev/null; git clean -qfdx
 git reset -q --hard "$BASE4_SHA" >/dev/null; git clean -qfdx
 
 # an IMPORTABLE package beneath testdata/ (explicit imports resolve there)

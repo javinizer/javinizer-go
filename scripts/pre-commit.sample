@@ -223,7 +223,15 @@ ASSET_CANDIDATES=$(git -c core.quotepath=false diff --cached --name-only --no-re
     | grep -vE '^testdata/|^internal/|^cmd/|^web/dist/|^docs/swagger/|^configs/|\.go$|^go\.(mod|sum)$|^Makefile$|^\.golangci\.(yml|yaml)$' || true)
 DELETED_CANDIDATES=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=D \
     | grep -vE '^testdata/|^internal/|^cmd/|^web/dist/|^docs/swagger/|^configs/|\.go$|^go\.(mod|sum)$|^Makefile$|^\.golangci\.(yml|yaml)$' || true)
-if [ -n "$ASSET_CANDIDATES$DELETED_CANDIDATES" ]; then
+# testdata/** assets join the census drive too: an asset beneath a normal
+# package's testdata/ dir that is ALSO a //go:embed target of that package
+# is re-exported through the package API — its staged change must reach
+# reverse consumers (see the mapping loop's */testdata/* branch below).
+TD_STAGED=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=ACMR \
+    | grep -E '(^|/)testdata/' | grep -v '\.go$' || true)
+TD_DELETED=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=D \
+    | grep -E '(^|/)testdata/' || true)
+if [ -n "$ASSET_CANDIDATES$DELETED_CANDIDATES$TD_STAGED$TD_DELETED" ]; then
     # Membership in EITHER census marks an embed target. The TREE census
     # sees staged content edits and ADDS (a file must exist on disk to be
     # staged). It stays best-effort: a failure here fails the guard's
@@ -236,7 +244,7 @@ if [ -n "$ASSET_CANDIDATES$DELETED_CANDIDATES" ]; then
     # must NOT degrade silently — an empty HEAD census there would let an
     # out-of-roots embed deletion skip all Go validation. Fail closed,
     # checking every stage of the materialize chain explicitly.
-    if [ -n "$DELETED_CANDIDATES" ]; then
+    if [ -n "$DELETED_CANDIDATES$TD_DELETED" ]; then
         IDX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/javinizer-embedsnap.XXXXXX" 2>/dev/null) || {
             echo -e "${RED}✗ Cannot materialize HEAD for the embed-deletion check (mktemp failed).${NC}"
             echo -e "${YELLOW}  Free temp space and retry — $DELETED_CANDIDATES may be an embed target.${NC}"
@@ -256,10 +264,11 @@ if [ -n "$ASSET_CANDIDATES$DELETED_CANDIDATES" ]; then
         fi
         rm -rf "$IDX_TMP"
     fi
-    EMBED_STAGED=$(comm -12 \
-        <( { printf '%s\n' "$ASSET_CANDIDATES"; printf '%s\n' "$DELETED_CANDIDATES"; } | sed '/^$/d' | sort -u) \
-        <( { printf '%s\n' "$EMBED_CENSUS_TREE"; printf '%s\n' "$EMBED_CENSUS_HEAD"; } | sed '/^$/d' | sort -u) || true)
+    CENSUS_UNION=$( { printf '%s\n' "$EMBED_CENSUS_TREE"; printf '%s\n' "$EMBED_CENSUS_HEAD"; } | sed '/^$/d' | sort -u)
 fi
+EMBED_STAGED=$(comm -12 \
+    <( { printf '%s\n' "$ASSET_CANDIDATES"; printf '%s\n' "$DELETED_CANDIDATES"; } | sed '/^$/d' | sort -u) \
+    <(printf '%s\n' "${CENSUS_UNION:-}" | sed '/^$/d' | sort -u) || true)
 while IFS= read -r p; do
     [ -n "$p" ] || continue
     # Cross-directory consumers the ancestor walk cannot express: top-level
@@ -293,12 +302,19 @@ while IFS= read -r p; do
                         ;;
                     *)
                         # .../testdata/ inside a NORMAL package directory is
-                        # a per-package-private fixture by Go convention —
-                        # consumers never read another package's fixtures,
-                        # so the owning package's tests suffice (no
-                        # reverse-dependency expansion).
-                        ASSET_PKGS="$ASSET_PKGS
+                        # per-package-private ONLY for plain fixtures —
+                        # consumers never READ another package's fixtures.
+                        # An asset that is ALSO the package's //go:embed
+                        # target is re-exported through the package API
+                        # (migration SQL, golden payloads), so its staged
+                        # change must reach reverse consumers instead.
+                        if printf '%s\n' "${CENSUS_UNION:-}" | grep -qxF "$p"; then
+                            EMBED_PKGS="$EMBED_PKGS
 ./$mapped"
+                        else
+                            ASSET_PKGS="$ASSET_PKGS
+./$mapped"
+                        fi
                         ;;
                 esac
                 ;;
