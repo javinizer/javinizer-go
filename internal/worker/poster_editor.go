@@ -162,8 +162,15 @@ func effectivePosterSourceOf(posterURL, coverURL string) string {
 }
 
 // backupPosterOriginals preserves the original poster URLs before they are overwritten.
+//
+// The sentinel for "baseline already captured" is EITHER field present:
+// — OriginalPosterURL non-empty covers legacy envelopes (URL-only backups
+// predate the eager baseline) — while OriginalShouldCropPoster non-nil covers
+// cover-fallback movies whose baseline legitimately has an empty poster URL;
+// URL-only sentinel would re-snapshot on the SECOND crop of such a movie and
+// store the first manual crop as the "original".
 func backupPosterOriginals(movie *models.Movie) {
-	if movie.Poster.OriginalPosterURL == "" {
+	if movie.Poster.OriginalPosterURL == "" && movie.Poster.OriginalShouldCropPoster == nil {
 		shouldCrop := movie.Poster.ShouldCropPoster
 		movie.Poster.OriginalPosterURL = movie.Poster.PosterURL
 		movie.Poster.OriginalCroppedPosterURL = movie.Poster.CroppedPosterURL

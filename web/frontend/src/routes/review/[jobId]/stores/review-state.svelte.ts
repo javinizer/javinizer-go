@@ -49,7 +49,7 @@ import { calculateCompleteness, type CompletenessTier } from '$lib/utils/complet
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
 import { buildMovieOverride } from './save-helpers';
-import { clearCropGeometry } from './poster-crop-sync';
+import { clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
 import * as m from '$lib/paraglide/messages';
 
 interface MovieGroup {
@@ -729,6 +729,24 @@ export function createReviewState(pageStore: Page) {
 					should_crop_poster: original.should_crop_poster,
 				}),
 			);
+			// Multipart: poster state is movie-wide and each part's save PATCHes
+			// all parts — propagate the reset into sibling overlays too, or a
+			// sibling's pending edit can out-race this part's save and restore
+			// the geometry that was just cleared.
+			if (job) {
+				for (const fp of siblingResultFilePaths(job.results as Record<string, FileResult>, currentResult!.result_id)) {
+					if (fp === currentResult!.file_path) continue;
+					const sibling = editedMovies.get(fp);
+					if (sibling) {
+						editedMovies.set(fp, clearCropGeometry({
+							...sibling,
+							poster_url: original.poster_url,
+							cropped_poster_url: original.cropped_poster_url,
+							should_crop_poster: original.should_crop_poster,
+						}));
+					}
+				}
+			}
 			clearPosterPreviewOverride();
 		}
 	}
