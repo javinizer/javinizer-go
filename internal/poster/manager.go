@@ -29,6 +29,40 @@ import (
 // remains; such crops cannot be reproduced at apply time and are rejected.
 var ErrLegacyPreviewSource = errors.New("full-size poster source missing (legacy job)")
 
+// ErrPosterCacheUntouched classifies a download/generation failure that
+// provably occurred BEFORE any mutation of the destination cache (SSRF
+// validation, request construction, the fetch itself, size/decode
+// validation — nothing was removed or renamed yet). Callers that fail
+// closed on ambiguous generation errors because a failure AFTER the
+// Remove-before-Rename boundary can have partially replaced the cached
+// assets must treat positively-marked failures as the no-mutation degrade
+// (metadata only). Unclassified errors stay on the conservative side: only
+// an explicit mark proves the cache was never touched.
+var ErrPosterCacheUntouched = errors.New("poster cache untouched")
+
+// cacheUntouchedError wraps a pre-mutation failure so errors.Is reaches
+// ErrPosterCacheUntouched (via Is) AND the underlying cause (via Unwrap)
+// without altering the message — sanitizers and callers see the original
+// text either way.
+type cacheUntouchedError struct{ err error }
+
+func (e *cacheUntouchedError) Error() string { return e.err.Error() }
+func (e *cacheUntouchedError) Unwrap() error { return e.err }
+func (e *cacheUntouchedError) Is(target error) bool {
+	return target == ErrPosterCacheUntouched
+}
+
+// markCacheUntouched annotates a failure from a DownloadFromURL leg that
+// runs before the existing cache is mutated. Legs at or past the
+// Remove-before-Rename boundary deliberately stay UNMARKED so callers keep
+// their fail-closed handling for them.
+func markCacheUntouched(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &cacheUntouchedError{err: err}
+}
+
 // maxPosterSize is the maximum allowed poster download size (50 MB).
 const maxPosterSize = 50 << 20
 
@@ -250,20 +284,22 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 // (falling back to a simple copy if cropping fails).
 func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, rawURL, userAgent, referer string) (*cropResult, error) {
 	if err := ValidateJobID(jobID); err != nil {
-		return nil, err
+		return nil, markCacheUntouched(err)
 	}
 	if err := validatePosterID(posterID); err != nil {
-		return nil, err
+		return nil, markCacheUntouched(err)
 	}
 
 	// SSRF mitigation: validate URL scheme and reject private/reserved IPs.
+	// Pre-mutation by construction (nothing on disk was touched yet), so the
+	// failure is marked cache-untouched: callers degrade it to metadata.
 	if err := pm.ssrfCheck(rawURL); err != nil {
-		return nil, fmt.Errorf("SSRF validation failed: %w", err)
+		return nil, markCacheUntouched(fmt.Errorf("SSRF validation failed: %w", err))
 	}
 
 	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
 	if err := pm.fs.MkdirAll(tempPosterDir, configDirPermTemp); err != nil {
-		return nil, fmt.Errorf("failed to create temp poster directory: %w", err)
+		return nil, markCacheUntouched(fmt.Errorf("failed to create temp poster directory: %w", err))
 	}
 
 	tempFullPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
@@ -271,16 +307,16 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 
 	// Defense in depth: ensure paths are inside tempPosterDir.
 	if err := validatePathWithinDir(tempFullPath, tempPosterDir); err != nil {
-		return nil, err
+		return nil, markCacheUntouched(err)
 	}
 	if err := validatePathWithinDir(tempCroppedPath, tempPosterDir); err != nil {
-		return nil, err
+		return nil, markCacheUntouched(err)
 	}
 
 	// Build HTTP request.
 	downloadReq, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
+		return nil, markCacheUntouched(fmt.Errorf("invalid URL: %w", err))
 	}
 	if userAgent != "" {
 		downloadReq.Header.Set("User-Agent", userAgent)
@@ -294,39 +330,46 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 
 	resp, err := pm.httpClient.Do(downloadReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download image: %w", err)
+		return nil, markCacheUntouched(fmt.Errorf("failed to download image: %w", err))
 	}
 	defer func() { _ = drainAndClose(resp.Body) }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("image download failed with status %d", resp.StatusCode)
+		return nil, markCacheUntouched(fmt.Errorf("image download failed with status %d", resp.StatusCode))
 	}
 
 	// Write to a temp file first, then rename to the final path.
 	tmpFile, err := afero.TempFile(pm.fs, tempPosterDir, posterID+"-full-*.tmp")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp file: %w", err)
+		return nil, markCacheUntouched(fmt.Errorf("failed to create temp file: %w", err))
 	}
 	tempDownloadPath := tmpFile.Name()
 
+	// Every failure up to the image-too-large gate touched ONLY the staging
+	// temp file, never the existing {posterID}-full.jpg/preview — all marked
+	// cache-untouched. The boundary is the Remove-before-Rename below.
 	written, err := io.Copy(tmpFile, io.LimitReader(resp.Body, maxPosterSize+1))
 	closeErr := tmpFile.Close()
 	if err != nil {
 		_ = pm.fs.Remove(tempDownloadPath)
-		return nil, fmt.Errorf("failed to write image: %w", err)
+		return nil, markCacheUntouched(fmt.Errorf("failed to write image: %w", err))
 	}
 	if closeErr != nil {
 		_ = pm.fs.Remove(tempDownloadPath)
-		return nil, fmt.Errorf("failed to close temp file: %w", closeErr)
+		return nil, markCacheUntouched(fmt.Errorf("failed to close temp file: %w", closeErr))
 	}
 
 	// Check if the response was truncated (exceeded the size limit).
 	if written >= maxPosterSize+1 {
 		_ = pm.fs.Remove(tempDownloadPath)
-		return nil, fmt.Errorf("image too large (max 50 MB)")
+		return nil, markCacheUntouched(fmt.Errorf("image too large (max 50 MB)"))
 	}
 
-	// Remove any previous full image, then atomically rename.
+	// Remove any previous full image, then atomically rename. MUTATION
+	// BOUNDARY: from here on the existing cache has been touched (the old
+	// full image is already gone), so failures below are deliberately NOT
+	// marked cache-untouched — callers fail closed and roll back from
+	// their pre-generation snapshot.
 	_ = pm.fs.Remove(tempFullPath)
 	if err := pm.fs.Rename(tempDownloadPath, tempFullPath); err != nil {
 		_ = pm.fs.Remove(tempDownloadPath)

@@ -845,7 +845,24 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 				// touched (the check precedes the download), so it keeps the
 				// degrade below, as does a generator without the snapshot
 				// capability (no restore exists there at all).
-				if (posterCacheRollback != nil || originCacheRollback != nil) && !errors.Is(posterErr, poster.ErrNoPosterSource) {
+				//
+				// Beyond the no-source sentinel, a failure POSITIVELY marked
+				// poster.ErrPosterCacheUntouched proved it happened before any
+				// cache mutation (SSRF blocked, download/HTTP failure, oversized
+				// or undecodable-at-staging image — the Remove-before-Rename
+				// boundary was never crossed and the OLD image still stands), so
+				// it degrades the same way: the rescrape succeeds with PosterError
+				// metadata instead of reverting an untouched state. Every leg
+				// at/past the mutation boundary (finalize/rename, crop-install)
+				// reaches here UNMARKED from the real generator and keeps the
+				// fail-closed contract; unknown third-party generator failures
+				// also stay on the conservative side. An unreachable-but-legal
+				// poster URL (SSRF-blocked host, HTTP 404 — the long-standing
+				// e2e contract) is the marked class: nothing was mutated, so the
+				// rescrape reports Success with the poster failure as metadata.
+				if (posterCacheRollback != nil || originCacheRollback != nil) &&
+					!errors.Is(posterErr, poster.ErrNoPosterSource) &&
+					!errors.Is(posterErr, poster.ErrPosterCacheUntouched) {
 					return &RescrapeResult{Status: models.RescrapeStatusFailed, Error: fmt.Sprintf("poster generation failed: %v", posterErr)}, movieResult, nil
 				}
 				s := posterErr.Error()
