@@ -306,20 +306,37 @@ func newTestWSConn(t *testing.T) (*websocket.Conn, *websocket.Conn, *httptest.Se
 // broadcast is only forwarded to REGISTERED clients, so receiving the probe
 // proves the hub's Run loop has processed the registration.
 //
-// Why retry: Hub.Run drains its register and broadcast channels via a select
-// whose case choice among multiple-ready cases is not spec-guaranteed, so a
-// single probe could (in principle) be processed before the registration and
-// dropped, leaving the helper blocked. The loop re-broadcasts the probe on
-// each read timeout: by the second iteration the register has been drained
-// (registration is ~nanoseconds), so a subsequent probe is guaranteed to be
-// forwarded — making success independent of select ordering. Bounded by an
-// overall deadline so a genuinely broken setup fails fast rather than hanging.
-// Any non-probe frame (e.g. a ping) received while waiting is drained and
-// skipped. Cleanup of conns/server is the caller's responsibility.
+// Why re-broadcast: Hub.Run drains its register and broadcast channels via a
+// select whose case choice among multiple-ready cases is not spec-guaranteed,
+// so a single probe could (in principle) be processed before the registration
+// and dropped, leaving the helper blocked. Re-broadcasting on a ticker until
+// the probe is received makes success independent of select ordering.
+//
+// Why a reader goroutine instead of read-deadline retries: gorilla/websocket
+// permanently caches the FIRST read error on a Conn — including a read
+// deadline timeout (NextReader sets c.readErr and every subsequent read
+// returns that same cached error; after 1000 such reads it panics with
+// "repeated read on failed websocket connection"). A retry loop built on
+// per-attempt read deadlines therefore never actually retries: if the first
+// read times out, all later reads fail instantly with the cached timeout and
+// the loop spin-panics. That is the coverage-run-only CI flake this replaces
+// (coverage timing let the first 20ms read miss the probe; locally the probe
+// always landed in time). Frames are read on one goroutine into a channel and
+// the main goroutine never imposes a per-attempt read deadline.
+//
+// Why the trailing sentinel: after the probe matches, one more re-broadcast
+// may already be in flight. The drain sentinel is broadcast LAST (FIFO: hub
+// broadcast channel → client send buffer → WritePump → TCP all preserve
+// order) and the reader goroutine swallows every frame up to and including
+// it, guaranteeing no stale probe remains on the wire when the caller's test
+// body performs its own ReadMessage. Bounded by an overall deadline so a
+// genuinely broken setup fails fast rather than hanging.
 func registerClientOnHub(t *testing.T, hub *ws.Hub, serverConn *websocket.Conn, clientConn *websocket.Conn) {
 	t.Helper()
 	const probeJobID = "__probe_ready__"
+	const drainSentinel = "__probe_drain_done__" // must NOT contain probeJobID
 	probe := &ws.ProgressMessage{JobID: probeJobID, Status: ws.ProgressStatusPending}
+	sentinel := &ws.ProgressMessage{JobID: drainSentinel, Status: ws.ProgressStatusPending}
 	client := ws.NewClient(serverConn)
 	hub.Register(client)
 	go client.WritePump()
@@ -328,28 +345,72 @@ func registerClientOnHub(t *testing.T, hub *ws.Hub, serverConn *websocket.Conn, 
 		probeInterval   = 20 * time.Millisecond
 		overallDeadline = 2 * time.Second
 	)
-	deadline := time.Now().Add(overallDeadline)
-	for {
+
+	// Sole reader on clientConn. Forwards frames until it swallows the drain
+	// sentinel, then exits; readerDone is closed on any exit path. Sends are
+	// non-blocking so a full channel (junk frames the main goroutine momentarily
+	// is not draining) never wedges the only reader.
+	frames := make(chan []byte, 64)
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for {
+			_, data, err := clientConn.ReadMessage()
+			if err != nil {
+				return
+			}
+			if bytes.Contains(data, []byte(drainSentinel)) {
+				return
+			}
+			select {
+			case frames <- data:
+			default:
+			}
+		}
+	}()
+
+	deadline := time.NewTimer(overallDeadline)
+	defer deadline.Stop()
+	ticker := time.NewTicker(probeInterval)
+	defer ticker.Stop()
+
+	// Phase 1: re-broadcast the probe until the client receives it — receiving
+	// a broadcast proves the hub's Run loop has processed the registration, so
+	// the pipeline is ready for the real broadcast the test body will drive.
+	for probeAcked := false; !probeAcked; {
 		if err := hub.BroadcastProgress(probe); err != nil {
 			t.Fatalf("probe broadcast failed: %v", err)
 		}
-		// Short per-attempt read deadline: on timeout, re-broadcast and retry
-		// (the register has by now been drained, so the next probe is delivered).
-		if err := clientConn.SetReadDeadline(time.Now().Add(probeInterval)); err != nil {
-			t.Fatalf("set probe read deadline: %v", err)
-		}
-		_, data, err := clientConn.ReadMessage()
-		if err == nil {
+		select {
+		case data := <-frames:
 			if bytes.Contains(data, []byte(probeJobID)) {
-				return // registration confirmed; pipeline ready for the real broadcast
+				probeAcked = true
 			}
-			// not the probe (e.g. a ping frame payload) — drain and keep reading
-			// the current probe without re-broadcasting.
-			continue
+			// else: not the probe (e.g. a ping frame payload) — keep waiting
+			// without re-broadcasting.
+		case <-readerDone:
+			t.Fatal("client read loop ended before the probe was received (connection failed)")
+		case <-deadline.C:
+			t.Fatalf("did not receive probe (hub registration not processed within %v)", overallDeadline)
+		case <-ticker.C:
+			// re-broadcast on the next iteration
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("did not receive probe (hub registration not processed within %v): %v", overallDeadline, err)
+	}
+
+	// Phase 2: no more probes will be broadcast; the sentinel is the last frame
+	// enqueued for this connection. Wait for the reader to swallow it (draining
+	// frames meanwhile so the reader never blocks on a full channel), leaving
+	// the wire clean: the caller's next ReadMessage sees the real broadcast.
+	if err := hub.BroadcastProgress(sentinel); err != nil {
+		t.Fatalf("drain sentinel broadcast failed: %v", err)
+	}
+	for {
+		select {
+		case <-frames: // drain lingering probe frames
+		case <-readerDone:
+			return // sentinel swallowed; reader exited; wire is clean
+		case <-deadline.C:
+			t.Fatalf("did not receive drain sentinel within %v", overallDeadline)
 		}
-		// read timed out — loop re-broadcasts the probe and retries
 	}
 }
