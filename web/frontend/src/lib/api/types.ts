@@ -111,6 +111,9 @@ export interface PosterCropResponse {
 	poster_crop_bounds: CropBounds | null;
 	poster_crop_source_full: boolean;
 	should_crop_poster: boolean;
+	original_poster_url?: string;
+	original_cropped_poster_url?: string;
+	original_should_crop_poster?: boolean | null;
 }
 
 export interface PosterFromURLRequest {

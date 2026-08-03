@@ -133,6 +133,14 @@ func TestPosterCrop_StoresNormalizedGeometry(t *testing.T) {
 	assert.False(t, resp.ShouldCropPoster, "manual crop turns the scraper crop intent off")
 	assert.NotEmpty(t, resp.CroppedPosterURL)
 
+	// The response echoes the server-side baseline snapshot (set on first
+	// poster edit), so the client Reset flow never guesses.
+	assert.Equal(t, "https://cdn.example/poster.jpg", resp.OriginalPosterURL)
+	assert.NotNil(t, resp.OriginalShouldCropPoster)
+	if resp.OriginalShouldCropPoster != nil {
+		assert.True(t, *resp.OriginalShouldCropPoster)
+	}
+
 	stored := storedMovie(t, deps, job, "/path/to/CROPGEO-001.mp4")
 	require.NotNil(t, stored.Poster.PosterCropBounds, "job result must carry the geometry for organize")
 	assert.Equal(t, *resp.PosterCropBounds, *stored.Poster.PosterCropBounds)

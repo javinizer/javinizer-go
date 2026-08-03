@@ -5667,6 +5667,16 @@ const docTemplate = `{
                 "cropped_poster_url": {
                     "type": "string"
                 },
+                "original_cropped_poster_url": {
+                    "type": "string"
+                },
+                "original_poster_url": {
+                    "description": "Original poster fields echo the server-side pre-edit snapshot\n(backupPosterOriginals), so the client reset baseline never has to guess.\nEmpty when no snapshot was needed (no prior poster).",
+                    "type": "string"
+                },
+                "original_should_crop_poster": {
+                    "type": "boolean"
+                },
                 "poster_crop_bounds": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.CropBounds"
                 },

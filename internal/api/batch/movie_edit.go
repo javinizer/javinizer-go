@@ -229,7 +229,15 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// with the field-override handler (field_override.go).
 		deps.GetJobStore().PersistJobByID(jobID)
 
-		c.JSON(http.StatusOK, contracts.PosterCropResponse{CroppedPosterURL: croppedURL, PosterCropBounds: bounds, ShouldCropPoster: false, PosterCropSourceFull: bounds != nil})
+		// Echo the server-side baseline snapshot so the client Reset flow
+		// restores exactly what the server would (no client-side guessing).
+		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL, PosterCropBounds: bounds, ShouldCropPoster: false, PosterCropSourceFull: bounds != nil}
+		if stored, _, found2 := lookupResultByResultID(job, resultID); found2 && stored.Movie != nil {
+			resp.OriginalPosterURL = stored.Movie.Poster.OriginalPosterURL
+			resp.OriginalCroppedPosterURL = stored.Movie.Poster.OriginalCroppedPosterURL
+			resp.OriginalShouldCropPoster = stored.Movie.Poster.OriginalShouldCropPoster
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 

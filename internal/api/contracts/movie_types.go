@@ -117,6 +117,12 @@ type PosterCropResponse struct {
 	// full-size source. Clients must round-trip it with the bounds: the apply
 	// gate refuses geometry without it.
 	PosterCropSourceFull bool `json:"poster_crop_source_full"`
+	// Original poster fields echo the server-side pre-edit snapshot
+	// (backupPosterOriginals), so the client reset baseline never has to guess.
+	// Empty when no snapshot was needed (no prior poster).
+	OriginalPosterURL        string `json:"original_poster_url"`
+	OriginalCroppedPosterURL string `json:"original_cropped_poster_url"`
+	OriginalShouldCropPoster *bool  `json:"original_should_crop_poster"`
 }
 
 // PosterFromURLRequest represents a request to download a poster from a URL.

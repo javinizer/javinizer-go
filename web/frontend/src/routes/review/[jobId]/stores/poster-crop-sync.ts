@@ -7,6 +7,11 @@ export interface CropEcho {
 	should_crop_poster: boolean;
 	poster_crop_bounds: CropBounds | null;
 	poster_crop_source_full: boolean;
+	// server-side pre-edit poster baseline (backupPosterOriginals); echoed so
+	// the client reset baseline is authoritative, never guessed.
+	original_poster_url?: string;
+	original_cropped_poster_url?: string;
+	original_should_crop_poster?: boolean | null;
 }
 
 // applyCropEcho merges the server-echoed crop state into a movie — used for
@@ -18,10 +23,21 @@ export interface CropEcho {
 // stored server-side) drops the key entirely so the overlay round-trips as
 // "no geometry", matching server state and avoiding phantom dirty diffs.
 export function applyCropEcho(movie: Movie, echo: CropEcho): Movie {
+	// Adopt the server-side pre-edit baseline verbatim (set on the first
+	// poster edit via backupPosterOriginals). Never derive it from the current
+	// movie: by the time the echo arrives the crop fields are already
+	// post-edit, and a partially-populated legacy baseline would guess wrong.
 	const base: Movie = {
 		...movie,
 		cropped_poster_url: echo.cropped_poster_url,
 		should_crop_poster: echo.should_crop_poster,
+		...(echo.original_poster_url
+			? {
+					original_poster_url: echo.original_poster_url,
+					original_cropped_poster_url: echo.original_cropped_poster_url,
+					original_should_crop_poster: echo.original_should_crop_poster ?? movie.original_should_crop_poster,
+				}
+			: {}),
 	};
 	delete base.poster_crop_bounds;
 	delete base.poster_crop_source_full;

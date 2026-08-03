@@ -63,6 +63,49 @@ describe('applyCropEcho', () => {
 		expect(wire.poster_crop_source_full).toBe(true);
 		expect(wire.should_crop_poster).toBe(false);
 	});
+
+	it('adopts the server-echoed pre-crop baseline verbatim', () => {
+		const synced = applyCropEcho(makeMovie(), {
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+			should_crop_poster: false,
+			poster_crop_bounds: BOUNDS,
+			poster_crop_source_full: true,
+			original_poster_url: 'https://cdn.example/scraped.jpg',
+			original_cropped_poster_url: 'https://cdn.example/scraped-crop.jpg',
+			original_should_crop_poster: true,
+		});
+		expect(synced.original_poster_url).toBe('https://cdn.example/scraped.jpg');
+		expect(synced.original_cropped_poster_url).toContain('scraped-crop');
+		expect(synced.original_should_crop_poster).toBe(true);
+	});
+
+	it('never invents a baseline when the echo carries none', () => {
+		const synced = applyCropEcho(makeMovie(), {
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+			should_crop_poster: false,
+			poster_crop_bounds: BOUNDS,
+			poster_crop_source_full: true,
+		});
+		expect(synced.original_poster_url).toBeUndefined();
+	});
+
+	it('existing scraped baseline is never clobbered by the echo', () => {
+		const synced = applyCropEcho(
+			makeMovie({
+				original_poster_url: 'https://cdn.example/original.jpg',
+				original_cropped_poster_url: 'https://cdn.example/original-crop.jpg',
+				original_should_crop_poster: true,
+			}),
+			{
+				cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+				should_crop_poster: false,
+				poster_crop_bounds: BOUNDS,
+				poster_crop_source_full: true,
+			},
+		);
+		expect(synced.original_poster_url).toBe('https://cdn.example/original.jpg');
+		expect(synced.original_cropped_poster_url).toContain('original-crop');
+	});
 });
 
 describe('siblingResultFilePaths', () => {

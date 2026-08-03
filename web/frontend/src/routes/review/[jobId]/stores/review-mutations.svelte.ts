@@ -355,10 +355,28 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				array_strategy: arrayStrategy as 'merge' | 'replace' | undefined,
 			});
 		},
-		onSuccess: (data) => {
+		onSuccess: (data, { movieIds }) => {
 			if (data.job) {
 				deps.skipJobSync();
 				deps.setJob(data.job);
+			}
+
+			// Rescrape clears stored crop geometry server-side; mirror that into
+			// pending overlays so a later save cannot re-upload pre-rescrape
+			// bounds. (Clearing a failed movie's entry is safe either way: an
+			// omitted geometry key preserves the still-stored geometry.)
+			const jobSnapshot = data.job ?? deps.getJob();
+			if (jobSnapshot) {
+				const requested = new Set(movieIds);
+				const editedMovies = deps.getEditedMovies();
+				for (const [filePath, result] of Object.entries(jobSnapshot.results ?? {})) {
+					const fr = result as FileResult;
+					if (!requested.has(fr.movie_id)) continue;
+					const pending = editedMovies.get(filePath);
+					if (pending && (pending.poster_crop_bounds != null || pending.poster_crop_source_full)) {
+						editedMovies.set(filePath, clearCropGeometry(pending));
+					}
+				}
 			}
 
 			if (data.failed > 0) {
