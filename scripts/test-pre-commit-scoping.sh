@@ -901,6 +901,22 @@ git add go.mod internal/probe_td/testdata/tdpkg/d_test.go
 PCFAST= check_hook "e2e: full suite runs staged testdata package tests" 1 "tdpkg"
 git reset -q --hard "$BASE7_SHA" >/dev/null; git clean -qfdx
 
+# exact-directory variant: a package whose DIRECTORY IS testdata (not a
+# descendant) must join full-mode extras too — same wildcard blind spot
+reset
+BASE10_SHA=$(git rev-parse HEAD)
+mkdir -p internal/foo/testdata
+printf 'package testdata\n\nfunc TD() int { return 1 }\n' > internal/foo/testdata/td.go
+printf 'package testdata\n\nimport "testing"\n\nfunc TestTD(t *testing.T) { if TD() != 1 { t.Fatal() } }\n' > internal/foo/testdata/td_test.go
+gofmt -w internal/foo/testdata 2>/dev/null
+git add internal/foo/testdata && git commit -qm 'fixture: package that IS testdata'
+printf 'package testdata\n\nimport "testing"\n\nfunc TestTD(t *testing.T) { if TD() != 999 { t.Fatal() } }\n' > internal/foo/testdata/td_test.go
+gofmt -w internal/foo/testdata/td_test.go
+printf '\n' >> go.mod
+git add go.mod internal/foo/testdata/td_test.go
+PCFAST= check_hook "e2e: full suite runs package that is testdata itself" 1 "internal/foo/testdata"
+git reset -q --hard "$BASE10_SHA" >/dev/null; git clean -qfdx
+
 # staged embed-target MODIFY then removed from the tree: tree census loses
 # the pattern member, HEAD census predates the add, path outside every
 # pathspec — only the AM-missing probe can catch the divergence

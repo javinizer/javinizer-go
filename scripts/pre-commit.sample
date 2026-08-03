@@ -613,12 +613,13 @@ CHECK_PKGS=$(printf '%s\n' $GO_PKGS $REV_PKGS | sed '/^$/d' | sort -u)
 FULL_TEST_EXTRA=""
 # shellcheck disable=SC2086 # word-splitting TEST_PKGS is intended
 for p in $TEST_PKGS; do
-    case "$p" in ./testdata/*|./*/testdata/*) FULL_TEST_EXTRA="$FULL_TEST_EXTRA $p" ;; esac
+    # ./*/testdata exactly, too: the wildcard skips the DIRECTORY itself
+    case "$p" in ./testdata|./*/testdata|./testdata/*|./*/testdata/*) FULL_TEST_EXTRA="$FULL_TEST_EXTRA $p" ;; esac
 done
 FULL_CHECK_EXTRA=""
 # shellcheck disable=SC2086 # word-splitting CHECK_PKGS is intended
 for p in $CHECK_PKGS; do
-    case "$p" in ./testdata/*|./*/testdata/*) FULL_CHECK_EXTRA="$FULL_CHECK_EXTRA $p" ;; esac
+    case "$p" in ./testdata|./*/testdata|./testdata/*|./*/testdata/*) FULL_CHECK_EXTRA="$FULL_CHECK_EXTRA $p" ;; esac
 done
 # SHOULD_BUILD: single source of truth for the check-5 trigger, composed
 # here (inside the classified block) so the regression matrix can assert the
