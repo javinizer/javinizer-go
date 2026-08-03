@@ -71,6 +71,28 @@ describe('overlayFieldOverride', () => {
 		expect(target.poster_crop_bounds).toBeNull();
 	});
 
+	it('cover_url override keeps geometry when an explicit poster exists', () => {
+		const target = makeMovie({
+			poster_url: 'https://cdn.example/explicit.jpg',
+			poster_crop_bounds: { x: 0.1, y: 0.1, width: 0.4, height: 0.9 },
+			poster_crop_source_full: true,
+		});
+		const src = makeMovie({ cover_url: 'https://cdn.example/new-cover.jpg' });
+		overlayFieldOverride(target, 'cover_url', src);
+		expect(target.cover_url).toBe('https://cdn.example/new-cover.jpg');
+		expect(target.poster_crop_bounds).toEqual({ x: 0.1, y: 0.1, width: 0.4, height: 0.9 });
+	});
+
+	it('cover_url override clears geometry when cover is the poster source', () => {
+		const target = makeMovie({
+			poster_url: '',
+			poster_crop_bounds: { x: 0.1, y: 0.1, width: 0.4, height: 0.9 },
+		});
+		const src = makeMovie({ cover_url: 'https://cdn.example/new-cover.jpg' });
+		overlayFieldOverride(target, 'cover_url', src);
+		expect(target.poster_crop_bounds).toBeNull();
+	});
+
 	it('non-poster overrides keep pending crop geometry', () => {
 		const target = makeMovie({
 			poster_crop_bounds: { x: 0.1, y: 0.1, width: 0.4, height: 0.9 },

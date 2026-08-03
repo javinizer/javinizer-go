@@ -147,7 +147,12 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 	case "cover_url":
 		movie.Poster.CoverURL = result.CoverURL
 		setFieldSource("cover_url")
-		clearPosterCropGeometry(movie) // cover is the fallback poster source
+		// Only clears when the cover IS the effective poster source
+		// (poster_url empty): swapping fanart under an explicit poster must
+		// keep a still-valid manual crop.
+		if movie.Poster.PosterURL == "" {
+			clearPosterCropGeometry(movie)
+		}
 	case "trailer_url":
 		movie.TrailerURL = result.TrailerURL
 		setFieldSource("trailer_url")

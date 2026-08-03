@@ -125,10 +125,12 @@ func clearPosterCropGeometry(m *models.Movie) {
 
 // sanitizePosterCropGeometry enforces the manual-crop invalidation contract
 // when a whole movie is stored (UpdateMovie): carried geometry survives only
-// if it is valid AND the stored poster source (poster_url/cover_url) and crop
-// intent are unchanged. A nil next-bounds means "no geometry" (the batch
-// PATCH handler resolves omitted-vs-explicit-null upstream) — only normalize
-// the flag in that case.
+// if it is valid AND the movie's EFFECTIVE poster source (poster_url, falling
+// back to cover_url — the same selection the downloader and the apply boundary
+// use) and crop intent are unchanged. A fanart-only edit (cover_url changes
+// while poster_url selects the source) must not discard a still-valid crop.
+// A nil next-bounds means "no geometry" (the batch PATCH handler resolves
+// omitted-vs-explicit-null upstream) — only normalize the flag in that case.
 func sanitizePosterCropGeometry(next *models.Movie, haveCurrent bool, curPosterURL, curCoverURL string, curShouldCrop bool) {
 	if next == nil {
 		return
@@ -144,11 +146,19 @@ func sanitizePosterCropGeometry(next *models.Movie, haveCurrent bool, curPosterU
 	if !haveCurrent {
 		return
 	}
-	if next.Poster.PosterURL != curPosterURL ||
-		next.Poster.CoverURL != curCoverURL ||
+	if effectivePosterSourceOf(next.Poster.PosterURL, next.Poster.CoverURL) != effectivePosterSourceOf(curPosterURL, curCoverURL) ||
 		next.Poster.ShouldCropPoster != curShouldCrop {
 		clearPosterCropGeometry(next)
 	}
+}
+
+// effectivePosterSourceOf mirrors the downloader's poster source selection:
+// poster_url when present, otherwise cover_url.
+func effectivePosterSourceOf(posterURL, coverURL string) string {
+	if posterURL != "" {
+		return posterURL
+	}
+	return coverURL
 }
 
 // backupPosterOriginals preserves the original poster URLs before they are overwritten.

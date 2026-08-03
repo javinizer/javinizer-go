@@ -112,6 +112,17 @@ func TestApplyFieldOverridePosterKeys_ClearGeometry(t *testing.T) {
 			assert.False(t, movie.Poster.PosterCropSourceFull)
 		})
 	}
+
+	t.Run("cover_url with an explicit poster keeps geometry", func(t *testing.T) {
+		movie, prov := overrideFixture()
+		movie.Poster.PosterURL = "https://cdn.example/explicit-poster.jpg" // poster is the effective source
+		movie.Poster.PosterCropBounds = cropGeometryFixture()
+		movie.Poster.PosterCropSourceFull = true
+
+		require.NoError(t, applyFieldOverride(movie, prov, "cover_url", "dmm"))
+		require.NotNil(t, movie.Poster.PosterCropBounds, "fanart override under explicit poster must not discard the crop")
+		assert.True(t, movie.Poster.PosterCropSourceFull)
+	})
 }
 
 // sanitizePosterCropGeometry: stored-geometry contract on whole-movie saves.
@@ -140,10 +151,17 @@ func TestSanitizePosterCropGeometry(t *testing.T) {
 		sanitizePosterCropGeometry(next, true, curPoster, curCover, false)
 		assert.Nil(t, next.Poster.PosterCropBounds)
 	})
-	t.Run("cover_url change clears", func(t *testing.T) {
+	t.Run("cover_url change alone preserves (poster is the effective source)", func(t *testing.T) {
 		next := mk()
 		next.Poster.CoverURL = "https://cdn.example/other-cover.jpg"
 		sanitizePosterCropGeometry(next, true, curPoster, curCover, false)
+		require.NotNil(t, next.Poster.PosterCropBounds, "fanart churn must not discard a still-valid crop")
+	})
+	t.Run("cover change clears when cover is the effective source", func(t *testing.T) {
+		next := mk()
+		next.Poster.PosterURL = ""
+		next.Poster.CoverURL = "https://cdn.example/other-cover.jpg"
+		sanitizePosterCropGeometry(next, true, "", curCover, false)
 		assert.Nil(t, next.Poster.PosterCropBounds)
 	})
 	t.Run("intent change clears", func(t *testing.T) {
