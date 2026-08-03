@@ -679,6 +679,20 @@ GUARD_PATHSPEC=(-- '*.go' go.mod go.sum testdata internal cmd web/dist docs/swag
 # the call sites the refusal was already reported (skip the generic
 # unstaged/conflict report).
 GUARD_REFUSED=""
+# guard_consumed_path: is $1 consumed by the staged checks? Mirrors
+# GUARD_PATHSPEC (dir entries as dir/*, lone files and extension globs
+# verbatim) plus any toolchain-resolved embed path. Keep in sync with
+# GUARD_PATHSPEC — the flagged-path probe refuses ONLY consumed paths, so
+# an unrelated hidden local edit or a sparse-cone gap never blocks a
+# commit that runs nothing over it.
+guard_consumed_path() {
+    case "$1" in
+        *.go|go.mod|go.sum|Makefile|.golangci.yml|.golangci.yaml) return 0 ;;
+        testdata/*|internal/*|cmd/*|web/dist/*|web/frontend/*|docs/swagger/*|configs/*) return 0 ;;
+        *.c|*.cc|*.cpp|*.cxx|*.h|*.hh|*.hpp|*.hxx|*.s|*.S|*.sx|*.syso|*.m|*.f|*.F|*.for|*.f90|*.swig|*.swigcxx) return 0 ;;
+    esac
+    printf '%s\n' ${EMBED_REL_ARR[@]+"${EMBED_REL_ARR[@]}"} | grep -qxF "$1"
+}
 refuse_guard_scan() {
     GUARD_REFUSED=1
     echo -e "${RED}✗ Cannot enumerate the Go package graph ($1 failed) — the${NC}"
@@ -721,32 +735,6 @@ $f"
 $f"
         fi
     done < <(git diff --cached --name-only -z --no-renames --diff-filter=AMRT || true)
-    # assume-unchanged / skip-worktree make git diff SILENT for the flagged
-    # path entirely: a tracked compile/embed input can diverge from its
-    # index blob on disk while every diff-based comparator here reports
-    # nothing, and vet/test/build read the disk bytes. Flagged files are
-    # rare (zero on most clones), so verify each by direct content hash
-    # against its index entry — drift or disappearance both conflict.
-    while IFS= read -r -d '' rec; do
-        [ -n "$rec" ] || continue
-        ftag=${rec%% *}
-        fpath=${rec#* }
-        case "$ftag" in
-            H) ;;   # ONLY plain H is diff-reported: 'h' is assume-unchanged,
-                    # 'S' skip-worktree, 's' both — every non-H tag silences
-                    # git diff for that path and must be content-checked
-            *)
-                fblob=$(git ls-files -s -- "$fpath" 2>/dev/null | awk '{print $2; exit}')
-                if [ ! -e "$fpath" ]; then
-                    CONFLICT="$CONFLICT
-$fpath (skip-worktree/assume-unchanged, missing from tree)"
-                elif [ "$(git hash-object -- "$fpath" 2>/dev/null || printf X)" != "$fblob" ]; then
-                    CONFLICT="$CONFLICT
-$fpath (skip-worktree/assume-unchanged, content differs from index)"
-                fi
-                ;;
-        esac
-    done < <(git ls-files -v -z 2>/dev/null || true)
     # A proven divergence beats everything downstream: report the exact
     # path(s) immediately. Continuing would let the fail-closed census
     # refusal (same root cause here — the tree no longer resolves an embed
@@ -783,21 +771,92 @@ EMBED_LIST_EOF
             # -c core.quotepath=false prints RAW bytes for non-ASCII
             # names, so tracked unicode embeds compare equal on both
             # sides of comm (C-quoting one side would fabricate masks).
+            # The right side must model what the COMMIT WILL CONTAIN —
+            # not the raw index: intent-to-add (git add -N) entries look
+            # indexed to ls-files yet git commit omits them (and
+            # write-tree even hashes their DISK content), so a -N-only
+            # embed asset would slip the mask while the committed
+            # snapshot fails CI. Commit view = HEAD tree + staged
+            # adds/modifies (diff --cached hides i-t-a, exactly the
+            # omission semantics needed) minus staged deletions.
+            CVIEW_DEL=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=D || true)
+            COMMIT_VIEW=$( { git -c core.quotepath=false ls-tree -r --name-only HEAD 2>/dev/null
+                             git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=ACMRT
+                           } | sed '/^$/d' | sort -u || true)
+            if [ -n "$CVIEW_DEL" ]; then
+                COMMIT_VIEW=$(comm -23 \
+                    <(printf '%s\n' "$COMMIT_VIEW") \
+                    <(printf '%s\n' "$CVIEW_DEL" | sed '/^$/d' | sort -u) || true)
+            fi
             EMBED_MASKED=$(comm -23 \
                 <(printf '%s\n' "${EMBED_REL_ARR[@]}" | sort -u) \
-                <(git -c core.quotepath=false ls-files | sort -u) || true)
+                <(printf '%s\n' "$COMMIT_VIEW" | sed '/^$/d' | sort -u) || true)
             if [ -n "$EMBED_MASKED" ]; then
                 CONFLICT="$CONFLICT
 $EMBED_MASKED"
             fi
         fi
     fi
+    # Flagged-path probe (assume-unchanged/skip-worktree): git diff is
+    # SILENT for flagged paths, so drift is invisible to every diff-based
+    # comparator while the checks read disk bytes — but only CONSUMED
+    # paths may refuse: an unrelated flagged edit or a sparse cone's
+    # intentionally-absent entries must never block. Runs after tier 1 so
+    # embed-census membership is available to the scope check.
+    SPARSE_ON=$(git config --get --type=bool core.sparse-checkout 2>/dev/null || printf false)
+    while IFS= read -r -d '' rec; do
+        [ -n "$rec" ] || continue
+        ftag=${rec%% *}
+        fpath=${rec#* }
+        # Only plain H is diff-reported: 'h' is assume-unchanged, 'S'
+        # skip-worktree, 's' both — every other tag means diff silence.
+        case "$ftag" in H) continue ;; esac
+        guard_consumed_path "$fpath" || continue
+        fblob=$(git ls-files -s -- "$fpath" 2>/dev/null | awk '{print $2; exit}')
+        if [ ! -e "$fpath" ]; then
+            # Sparse-checkout cones intentionally OMIT skip-worktree
+            # entries — flag-only absence there is by design, never drift.
+            case "$ftag" in
+                S|s) [ "$SPARSE_ON" = "true" ] && continue ;;
+            esac
+            CONFLICT="$CONFLICT
+$fpath (skip-worktree/assume-unchanged, missing from tree)"
+        elif [ "$(git hash-object -- "$fpath" 2>/dev/null || printf X)" != "$fblob" ]; then
+            CONFLICT="$CONFLICT
+$fpath (skip-worktree/assume-unchanged, content differs from index)"
+        fi
+    done < <(git ls-files -v -z 2>/dev/null || true)
+    [ -z "$CONFLICT" ] || return 1
     # ===== Tier 2: dirty-tree union — engages when Go validation does ===
     # CHECKED paths staged is the primary trigger; staged census assets
     # (EMBED_STAGED, from classification) trigger it too, because such a
     # commit runs full Go validation and the union is what keeps the tree
     # equal to the snapshot those checks claim to vouch for.
     if [ -n "$CHECKED_SET" ] || [ -n "${EMBED_STAGED:-}" ]; then
+        # Unstaged drift of out-of-roots embed targets ALSO needs the
+        # HEAD-side census: an unstaged DELETION of a multi-match glob
+        # member vanishes from the tree census (tier 1's array) but stays
+        # in the index, so nothing tree-derived can name it for the union
+        # below. HEAD cannot change mid-run — materialize once, cached
+        # for the second guard invocation, fail-closed like every census.
+        EMBED_HEAD_ARR=()
+        if [ -z "${EMBED_HEAD_CACHED+x}" ]; then
+            EHEAD_TMP=$(mktemp -d "${TMPDIR:-/tmp}/javinizer-embedhead.XXXXXX" 2>/dev/null) ||
+                { refuse_guard_scan "HEAD materialize (mktemp)"; return 1; }
+            if ! git archive -o "$EHEAD_TMP/head.tar" HEAD 2>/dev/null || ! tar -xf "$EHEAD_TMP/head.tar" -C "$EHEAD_TMP" 2>/dev/null; then
+                rm -rf "$EHEAD_TMP"
+                { refuse_guard_scan "HEAD materialize (archive/extract)"; return 1; }
+            fi
+            EMBED_HEAD_SET=$(cd "$EHEAD_TMP" && compute_embed_census) ||
+                { rm -rf "$EHEAD_TMP"; refuse_guard_scan "go list -test -deps (HEAD snapshot)"; return 1; }
+            rm -rf "$EHEAD_TMP"
+            while IFS= read -r hp; do
+                [ -n "$hp" ] && EMBED_HEAD_ARR+=("$hp")
+            done <<EMBED_HEAD_EOF
+$EMBED_HEAD_SET
+EMBED_HEAD_EOF
+            EMBED_HEAD_CACHED=1
+        fi
         # Ignored compile inputs count only inside an ACTUAL Go package
         # directory (one holding tracked .go files) or under an embed root —
         # precise and immune to ignored scratch trees (.planning/, .tmprepro/,
@@ -917,6 +976,8 @@ $raw" ;;
                       # guard, bash 3.2 has no safe empty "${a[@]}").
                       [ "${#EMBED_REL_ARR[@]}" -eq 0 ] || \
                           git diff --name-only -- "${EMBED_REL_ARR[@]}"
+                      [ "${#EMBED_HEAD_ARR[@]}" -eq 0 ] || \
+                          git diff --name-only -- "${EMBED_HEAD_ARR[@]}"
                       git ls-files --others --exclude-standard -- "${GUARD_PATHSPEC[@]}"
                       printf '%s\n' "$IGNORED_KEPT"; } | sort -u || true)
         if [ -n "$UNSTAGED" ]; then

@@ -954,6 +954,67 @@ git update-index --skip-worktree internal/foo/b.go
 check_hook "e2e: skip-worktree without drift passes" 0
 git update-index --no-skip-worktree internal/foo/b.go; reset
 
+# intent-to-add embed asset: the tree census sees the file on disk and
+# the RAW index lists it, but git commit OMITS -N entries — the mask set
+# must be the commit view, not ls-files
+reset; cat > internal/database/ita_embed.go <<'EOF'
+package database
+
+import _ "embed"
+
+//go:embed ita_asset.db
+var ItaAsset string
+EOF
+gofmt -w internal/database/ita_embed.go
+printf 'binaryish\n' > internal/database/ita_asset.db
+git add internal/database/ita_embed.go
+git add -N internal/database/ita_asset.db
+check_hook "e2e: intent-to-add embed asset does not masquerade as committed" 1 "ita_asset.db"
+
+# staged commit + flagged drift on an UNCONSUMED path: the checks never
+# read docs/readme.md, so the hook must not block on it
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+printf 'local tweak\n' >> docs/readme.md
+git update-index --skip-worktree docs/readme.md
+check_hook "e2e: skip-worktree drift on unconsumed path passes" 0
+git update-index --no-skip-worktree docs/readme.md; reset
+
+# skip-worktree + file REMOVED from disk, no sparse mode: genuine drift
+# (must use an UNREFERENCED package — orphan is imported by nobody, so a
+# cone-excluded absence compiles fine; a referenced file's absence breaks
+# the build and refusing is the checks' job, not this probe's)
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+git update-index --skip-worktree internal/orphan/o.go; rm internal/orphan/o.go
+check_hook "e2e: skip-worktree absence refused (no sparse mode)" 1 "missing from tree"
+# same but with sparse-checkout enabled: cone absences are intentional
+git config core.sparse-checkout true
+check_hook "e2e: sparse-mode skip-worktree absence tolerated" 0
+git config --unset core.sparse-checkout
+git update-index --no-skip-worktree internal/orphan/o.go 2>/dev/null; reset
+
+# unstaged deletion of ONE member of an out-of-roots multi-match embed
+# glob: tree census loses the path, index keeps it — only the HEAD-side
+# census lets the dirty-tree union name it
+reset
+BASE11_SHA=$(git rev-parse HEAD)
+cat > rootembed4.go <<'EOF'
+package x
+
+import "embed"
+
+//go:embed tiles/*.txt
+var Tiles embed.FS
+EOF
+mkdir -p tiles
+printf '1\n' > tiles/a.txt
+printf '2\n' > tiles/b.txt
+gofmt -w rootembed4.go
+git add rootembed4.go tiles && git commit -qm 'fixture: root glob embed'
+printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+rm tiles/b.txt
+check_hook "e2e: unstaged out-of-roots glob-member deletion blocked" 1 "tiles/b.txt"
+git reset -q --hard "$BASE11_SHA" >/dev/null; git clean -qfdx
+
 # partial-staging hide: staged content edit of a HEAD-known embed target
 # while the //go:embed DIRECTIVE itself is removed on disk UNSTAGED —
 # the tree census goes blind to the ownership, so only HEAD archaeology
