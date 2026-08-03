@@ -501,6 +501,15 @@ $f"
         #     invisible to both git views but compiles in the tree, letting a
         #     staged import of it pass locally and fail CI. go list skips
         #     dot/underscore/testdata dirs, so scratch trees stay immune.
+        # Dependency-graph dirs must join too: wildcard ./... never
+        # enumerates testdata/, yet explicit imports beneath testdata DO
+        # resolve — an ignored-only package there would otherwise slip the
+        # guard while the committed snapshot fails in CI. Cached outside the
+        # substitution subshell (the guard runs twice per hook; the
+        # graph cannot change mid-run without tripping a consistency check).
+        if [ -z "${TOOL_DIRS_CACHE+x}" ]; then
+            TOOL_DIRS_CACHE=$(go list -f '{{.Dir}}' -deps ./... 2>/dev/null || true)
+        fi
         PKG_DIRS=$( {
             {
                 git ls-files '*.go'
@@ -512,15 +521,21 @@ $f"
             # interpolated pwd containing BRE metacharacters (dots are harmless,
             # but [ ] * \ in a checkout path) would fail sed and fail open.
             root=$(pwd)
-            go list -f '{{.Dir}}' ./... 2>/dev/null | while IFS= read -r abs; do
-                # if/elif instead of case: bash 3.2 (stock macOS) mis-parses
-                # case patterns inside command substitutions this deep.
-                if [ "$abs" = "$root" ]; then
-                    printf '.\n'
-                elif [ "${abs#"$root"/}" != "$abs" ]; then
-                    printf '%s\n' "${abs#"$root"/}"
-                fi
-            done || true
+            # Wildcard packages PLUS the cached dependency graph (the only
+            # side that sees explicit imports beneath testdata/).
+            {
+                go list -f '{{.Dir}}' ./... 2>/dev/null
+                printf '%s\n' "$TOOL_DIRS_CACHE"
+            } | while IFS= read -r abs; do
+                    # if/elif instead of case: bash 3.2 (stock macOS)
+                    # mis-parses case patterns inside nested command
+                    # substitutions.
+                    if [ "$abs" = "$root" ]; then
+                        printf '.\n'
+                    elif [ "${abs#"$root"/}" != "$abs" ]; then
+                        printf '%s\n' "${abs#"$root"/}"
+                    fi
+                done || true
         } | sort -u | tr '\n' ' ' )
         # pad with spaces so case-matching ' "$d" ' is exact-token safe
         PKG_DIRS=" $PKG_DIRS "

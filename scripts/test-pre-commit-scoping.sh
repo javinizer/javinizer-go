@@ -522,6 +522,14 @@ reset; printf 'package x\n\nfunc RootGhost() int { return 1 }\n' > local_root.go
 printf 'package foo\n\nimport (\n\t"fmt"\n\n\t_ "probe.local/x"\n)\n\nfunc Foo() int { fmt.Println(1); return 1 }\n' > internal/foo/a.go
 gofmt -w internal/foo/a.go; git add internal/foo/a.go
 check_hook "e2e: ignored-only module-root package masked" 1 "local_root.go"
+
+# ignored-only package BENEATH testdata/: go list ./... never enumerates it,
+# but an explicit import resolves fine — the dep-graph union must catch it
+reset; mkdir -p internal/foo/testdata/ghost
+printf 'package ghost\n\nfunc G() int { return 1 }\n' > internal/foo/testdata/ghost/local_g.go
+printf 'package foo\n\nimport (\n\t"fmt"\n\n\t_ "probe.local/x/internal/foo/testdata/ghost"\n)\n\nfunc Foo() int { fmt.Println(1); return 1 }\n' > internal/foo/a.go
+gofmt -w internal/foo/a.go; git add internal/foo/a.go
+check_hook "e2e: ignored-only package under testdata masked" 1 "local_g.go"
 git reset -q --hard HEAD >/dev/null 2>&1; rm -f local_root.go
 
 # regex-hostile checkout path: whole scratch copied under a [bracket] dir —
