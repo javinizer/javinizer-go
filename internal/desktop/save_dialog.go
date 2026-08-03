@@ -6,16 +6,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// wailsSaveFileDialog implements SaveFileFunc via wailsruntime.SaveFileDialog.
-// Like wailsRelauncher it must use the OnStartup context — any other ctx makes
-// wails' runtime lookups fatal — so the ctx is captured in OnStartup (app.go)
-// and stored behind a lock because SaveFile runs on HTTP handler goroutines.
+// wailsSaveFileDialog implements ChooseSavePathFunc via
+// wailsruntime.SaveFileDialog. Like wailsRelauncher it must use the OnStartup
+// context — any other ctx makes wails' runtime lookups fatal — so the ctx is
+// captured in OnStartup (app.go) and stored behind a lock because
+// ChooseSavePath runs on HTTP handler goroutines. Writing the file is the
+// handler's job (proxy.go streams the request body to the chosen path).
 type wailsSaveFileDialog struct {
 	mu  sync.RWMutex
 	ctx context.Context
@@ -27,10 +28,10 @@ func (s *wailsSaveFileDialog) setContext(ctx context.Context) {
 	s.ctx = ctx
 }
 
-// SaveFile shows the native save dialog and writes content to the chosen
-// path. An empty path with nil error means the user cancelled the dialog.
-// The request ctx is intentionally ignored; only the OnStartup ctx works.
-func (s *wailsSaveFileDialog) SaveFile(_ context.Context, filename string, content []byte) (string, error) {
+// ChooseSavePath shows the native save dialog and returns the chosen
+// destination path; ("", nil) means the user cancelled. The request ctx is
+// intentionally ignored — only the OnStartup ctx carries the frontend handle.
+func (s *wailsSaveFileDialog) ChooseSavePath(_ context.Context, filename string) (string, error) {
 	s.mu.RLock()
 	wctx := s.ctx
 	s.mu.RUnlock()
@@ -46,12 +47,6 @@ func (s *wailsSaveFileDialog) SaveFile(_ context.Context, filename string, conte
 	})
 	if err != nil {
 		return "", fmt.Errorf("desktop: save dialog failed: %w", err)
-	}
-	if path == "" {
-		return "", nil
-	}
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		return "", fmt.Errorf("desktop: failed to write %s: %w", path, err)
 	}
 	return path, nil
 }

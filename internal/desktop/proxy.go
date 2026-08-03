@@ -3,10 +3,13 @@ package desktop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -31,7 +34,7 @@ import (
 // upgrader override that accepts the cross-origin webview.
 //
 //nolint:unused // referenced only by app.go, which is //go:build desktop
-func newReverseProxyHandler(target string, saveFile SaveFileFunc) http.Handler {
+func newReverseProxyHandler(target string, choosePath ChooseSavePathFunc) http.Handler {
 	parsed, err := url.Parse(target)
 	if err != nil {
 		// target is always "http://127.0.0.1:%d" (see ServerInstance.BaseURL),
@@ -62,7 +65,7 @@ func newReverseProxyHandler(target string, saveFile SaveFileFunc) http.Handler {
 			return
 		}
 		if r.Method == http.MethodPost && r.URL.Path == "/desktop/save-file" {
-			handleSaveFile(w, r, saveFile)
+			handleSaveFile(w, r, choosePath)
 			return
 		}
 		proxy.ServeHTTP(w, r)
@@ -92,66 +95,96 @@ func rewriteSessionCookies(resp *http.Response) error {
 	return nil
 }
 
-// SaveFileFunc shows a native "save file" dialog with filename as the
-// default name and, if the user confirms, writes content to the chosen path.
-// It returns the path actually written, or ("", nil) when the user cancels.
-// The desktop build wires this to wailsruntime.SaveFileDialog (save_dialog.go):
-// anchor[download] blob downloads are silently dropped by the desktop webviews
-// (on macOS Wails wires no WKDownloadDelegate), so exports routed through the
-// frontend go to this native path instead.
-type SaveFileFunc func(ctx context.Context, filename string, content []byte) (string, error)
+// ChooseSavePathFunc shows a native "save file" dialog with filename as the
+// default name and returns the chosen destination path, or ("", nil) when
+// the user cancels. It deliberately does NOT write the file: handleSaveFile
+// streams the request body to the returned path so multi-hundred-MB exports
+// never sit in memory as an extra copy. The desktop build wires this to
+// wailsruntime.SaveFileDialog (save_dialog.go): anchor[download] blob
+// downloads are silently dropped by the desktop webviews (on macOS Wails
+// wires no WKDownloadDelegate), so exports routed through the frontend go to
+// this native path instead.
+type ChooseSavePathFunc func(ctx context.Context, filename string) (string, error)
 
-//nolint:unused // reached only via newReverseProxyHandler, which is //go:build desktop
-type saveFileRequest struct {
-	Filename string `json:"filename"`
-	Content  string `json:"content"`
-}
-
-//nolint:unused // reached only via newReverseProxyHandler, which is //go:build desktop
+//nolint:unused // reached only via handleSaveFileLimit, which is //go:build desktop
 type saveFileResponse struct {
 	Saved bool   `json:"saved"`
 	Path  string `json:"path,omitempty"`
 	Error string `json:"error,omitempty"`
 }
 
-// maxSaveFileBytes caps export payloads; replacement lists and actress
-// exports are a few hundred KB at most.
+// maxSaveFileBytes caps streamed export payloads. The actress export API
+// explicitly supports catalogs with 100k+ records (internal/api/actress),
+// which pretty-printed can reach hundreds of MB; the body is streamed to disk
+// so this is a correctness backstop against unbounded writes, not a memory
+// ceiling.
 //
 //nolint:unused // reached only via newReverseProxyHandler, which is //go:build desktop
-const maxSaveFileBytes = 32 << 20
+const maxSaveFileBytes = 1 << 30
 
-// handleSaveFile backs POST /desktop/save-file: the webview asks the desktop
-// shell to persist an export through a native save dialog. The filename comes
-// from the webview, so it is validated down to a bare name before the dialog
-// or any write can see it.
+// handleSaveFile backs POST /desktop/save-file?filename=<name>: the webview
+// asks the desktop shell to persist an export through a native save dialog.
+// The filename travels in the query (not the body) because the dialog needs
+// it up front and the body is only consumed once a destination is chosen.
 //
 //nolint:unused // reached only via newReverseProxyHandler, which is //go:build desktop
-func handleSaveFile(w http.ResponseWriter, r *http.Request, saveFile SaveFileFunc) {
+func handleSaveFile(w http.ResponseWriter, r *http.Request, choosePath ChooseSavePathFunc) {
+	handleSaveFileLimit(w, r, choosePath, maxSaveFileBytes)
+}
+
+// handleSaveFileLimit is handleSaveFile with an injectable size limit so
+// tests can exercise the overflow path without a 1 GiB body.
+//
+//nolint:unused // reached only via handleSaveFile
+func handleSaveFileLimit(w http.ResponseWriter, r *http.Request, choosePath ChooseSavePathFunc, maxBytes int64) {
 	writeErr := func(status int, msg string) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(saveFileResponse{Error: msg})
 	}
-	if saveFile == nil {
+	if choosePath == nil {
 		writeErr(http.StatusNotFound, "desktop: save-file is not available")
 		return
 	}
-	var req saveFileRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSaveFileBytes)).Decode(&req); err != nil {
-		writeErr(http.StatusBadRequest, fmt.Sprintf("desktop: invalid save-file request: %v", err))
-		return
-	}
-	if err := validateSaveFilename(req.Filename); err != nil {
+	filename := r.URL.Query().Get("filename")
+	if err := validateSaveFilename(filename); err != nil {
 		writeErr(http.StatusBadRequest, fmt.Sprintf("desktop: invalid filename: %v", err))
 		return
 	}
-	path, err := saveFile(r.Context(), req.Filename, []byte(req.Content))
+	path, err := choosePath(r.Context(), filename)
 	if err != nil {
 		writeErr(http.StatusInternalServerError, err.Error())
 		return
 	}
+	if path == "" {
+		// User cancelled the dialog: nothing read, nothing written.
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(saveFileResponse{Saved: false})
+		return
+	}
+
+	dst, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to create %s: %v", path, err))
+		return
+	}
+	_, copyErr := io.Copy(dst, http.MaxBytesReader(w, r.Body, maxBytes))
+	closeErr := dst.Close()
+	if copyErr != nil || closeErr != nil {
+		_ = os.Remove(path) // never leave a truncated export behind
+		switch {
+		case copyErr != nil && errors.As(copyErr, new(*http.MaxBytesError)):
+			writeErr(http.StatusRequestEntityTooLarge, fmt.Sprintf("desktop: export exceeds %d-byte limit", maxBytes))
+		case copyErr != nil:
+			writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to write %s: %v", path, copyErr))
+		default:
+			writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to finalize %s: %v", path, closeErr))
+		}
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(saveFileResponse{Saved: path != "", Path: path})
+	_ = json.NewEncoder(w).Encode(saveFileResponse{Saved: true, Path: path})
 }
 
 // validateSaveFilename rejects empty names and anything with path components:

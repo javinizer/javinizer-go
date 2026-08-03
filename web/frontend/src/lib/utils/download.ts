@@ -12,16 +12,17 @@ interface SaveFileErrorBody {
 // saveJsonFile persists a JSON export. In a normal browser this is the usual
 // Blob + anchor[download] click. The desktop webviews silently drop those
 // downloads (Wails macOS wires no WKDownloadDelegate), so there the payload is
-// handed to POST /desktop/save-file, which the desktop reverse proxy answers
-// with a native save dialog and files the write.
+// streamed to POST /desktop/save-file?filename=<name>, which the desktop
+// reverse proxy answers with a native save dialog and streams to disk without
+// an in-memory copy (exports can reach hundreds of MB).
 export async function saveJsonFile(filename: string, data: unknown): Promise<SaveFileResult> {
 	const content = JSON.stringify(data, null, 2);
 
 	if (isDesktopApp()) {
-		const resp = await fetch('/desktop/save-file', {
+		const resp = await fetch(`/desktop/save-file?filename=${encodeURIComponent(filename)}`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ filename, content }),
+			headers: { 'Content-Type': 'application/octet-stream' },
+			body: content,
 		});
 		if (!resp.ok) {
 			let detail = `Save failed (HTTP ${resp.status})`;

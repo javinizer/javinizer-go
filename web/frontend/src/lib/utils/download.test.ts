@@ -51,7 +51,7 @@ describe('saveJsonFile', () => {
 		await saveJsonFile('genre-replacements.json', []);
 	});
 
-	it('desktop: posts to /desktop/save-file and returns the chosen path', async () => {
+	it('desktop: streams the body to /desktop/save-file and returns the chosen path', async () => {
 		mockedIsDesktop.mockReturnValue(true);
 		globalThis.fetch = vi.fn(() =>
 			Promise.resolve({
@@ -67,14 +67,14 @@ describe('saveJsonFile', () => {
 
 		expect(result).toEqual({ saved: true, path: '/Users/test/Downloads/word-replacements.json' });
 		expect(globalThis.fetch).toHaveBeenCalledWith(
-			'/desktop/save-file',
-			expect.objectContaining({ method: 'POST' }),
+			'/desktop/save-file?filename=word-replacements.json',
+			expect.objectContaining({
+				method: 'POST',
+				headers: { 'Content-Type': 'application/octet-stream' },
+			}),
 		);
-		const sentBody = JSON.parse(
-			(globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
-		);
-		expect(sentBody.filename).toBe('word-replacements.json');
-		expect(JSON.parse(sentBody.content)).toEqual([{ original: 'a', replacement: 'b' }]);
+		const sentBody = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
+		expect(sentBody).toBe(JSON.stringify([{ original: 'a', replacement: 'b' }], null, 2));
 	});
 
 	it('desktop: reports a cancelled native dialog without throwing', async () => {

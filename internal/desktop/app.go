@@ -64,7 +64,7 @@ func Run(opts Options) error {
 		MinWidth:                 900,
 		MinHeight:                600,
 		BackgroundColour:         options.NewRGB(245, 245, 247),
-		AssetServer:              &assetserver.Options{Handler: newReverseProxyHandler(srv.BaseURL(), saveDialog.SaveFile)},
+		AssetServer:              &assetserver.Options{Handler: newReverseProxyHandler(srv.BaseURL(), saveDialog.ChooseSavePath)},
 		LogLevel:                 logger.INFO,
 		LogLevelProduction:       logger.WARNING,
 		EnableDefaultContextMenu: true,

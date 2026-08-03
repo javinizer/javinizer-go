@@ -4,22 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-type saveFileCall struct {
-	filename string
-	content  []byte
-}
-
-func doSaveFileRequest(t *testing.T, h http.Handler, body string) (*httptest.ResponseRecorder, saveFileResponse) {
+func doSaveFileRequest(t *testing.T, h http.Handler, filename, body string) (*httptest.ResponseRecorder, saveFileResponse) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/desktop/save-file", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/desktop/save-file?filename="+url.QueryEscape(filename), strings.NewReader(body))
 	req.Host = "wails.localhost"
+	req.Header.Set("Content-Type", "application/octet-stream")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	var resp saveFileResponse
@@ -30,14 +28,16 @@ func doSaveFileRequest(t *testing.T, h http.Handler, body string) (*httptest.Res
 }
 
 func TestSaveFile_Success(t *testing.T) {
-	var calls []saveFileCall
-	saveFile := func(_ context.Context, filename string, content []byte) (string, error) {
-		calls = append(calls, saveFileCall{filename: filename, content: content})
-		return "/Users/test/Downloads/word-replacements.json", nil
+	dst := filepath.Join(t.TempDir(), "word-replacements.json")
+	var gotFilename string
+	choosePath := func(_ context.Context, filename string) (string, error) {
+		gotFilename = filename
+		return dst, nil
 	}
-	h := newReverseProxyHandler("http://127.0.0.1:1", saveFile)
+	h := newReverseProxyHandler("http://127.0.0.1:1", choosePath)
 
-	w, resp := doSaveFileRequest(t, h, `{"filename":"word-replacements.json","content":"[{\"original\":\"foo\"}]"}`)
+	payload := `[{"original":"foo"}]`
+	w, resp := doSaveFileRequest(t, h, "word-replacements.json", payload)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
@@ -45,27 +45,29 @@ func TestSaveFile_Success(t *testing.T) {
 	if !resp.Saved {
 		t.Errorf("saved = false, want true")
 	}
-	if resp.Path != "/Users/test/Downloads/word-replacements.json" {
-		t.Errorf("path = %q, want %q", resp.Path, "/Users/test/Downloads/word-replacements.json")
+	if resp.Path != dst {
+		t.Errorf("path = %q, want %q", resp.Path, dst)
 	}
-	if len(calls) != 1 {
-		t.Fatalf("saveFile called %d times, want 1", len(calls))
+	if gotFilename != "word-replacements.json" {
+		t.Errorf("choosePath filename = %q, want %q", gotFilename, "word-replacements.json")
 	}
-	if calls[0].filename != "word-replacements.json" {
-		t.Errorf("filename = %q, want %q", calls[0].filename, "word-replacements.json")
+	written, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
 	}
-	if string(calls[0].content) != `[{"original":"foo"}]` {
-		t.Errorf("content = %q, want %q", calls[0].content, `[{"original":"foo"}]`)
+	if string(written) != payload {
+		t.Errorf("written content = %q, want %q", written, payload)
 	}
 }
 
 func TestSaveFile_Cancelled(t *testing.T) {
-	saveFile := func(_ context.Context, _ string, _ []byte) (string, error) {
+	dst := filepath.Join(t.TempDir(), "must-not-exist.json")
+	choosePath := func(context.Context, string) (string, error) {
 		return "", nil
 	}
-	h := newReverseProxyHandler("http://127.0.0.1:1", saveFile)
+	h := newReverseProxyHandler("http://127.0.0.1:1", choosePath)
 
-	w, resp := doSaveFileRequest(t, h, `{"filename":"a.json","content":"[]"}`)
+	w, resp := doSaveFileRequest(t, h, "a.json", "[]")
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
@@ -76,15 +78,18 @@ func TestSaveFile_Cancelled(t *testing.T) {
 	if resp.Path != "" {
 		t.Errorf("path = %q, want empty", resp.Path)
 	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("cancelled dialog must not write any file, stat err = %v", err)
+	}
 }
 
 func TestSaveFile_DialogError(t *testing.T) {
-	saveFile := func(_ context.Context, _ string, _ []byte) (string, error) {
+	choosePath := func(context.Context, string) (string, error) {
 		return "", errors.New("disk full")
 	}
-	h := newReverseProxyHandler("http://127.0.0.1:1", saveFile)
+	h := newReverseProxyHandler("http://127.0.0.1:1", choosePath)
 
-	w, resp := doSaveFileRequest(t, h, `{"filename":"a.json","content":"[]"}`)
+	w, resp := doSaveFileRequest(t, h, "a.json", "[]")
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -94,10 +99,10 @@ func TestSaveFile_DialogError(t *testing.T) {
 	}
 }
 
-func TestSaveFile_NilSaveFunc(t *testing.T) {
+func TestSaveFile_NilChooseFunc(t *testing.T) {
 	h := newReverseProxyHandler("http://127.0.0.1:1", nil)
 
-	w, resp := doSaveFileRequest(t, h, `{"filename":"a.json","content":"[]"}`)
+	w, resp := doSaveFileRequest(t, h, "a.json", "[]")
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
@@ -107,15 +112,20 @@ func TestSaveFile_NilSaveFunc(t *testing.T) {
 	}
 }
 
-func TestSaveFile_InvalidJSON(t *testing.T) {
-	h := newReverseProxyHandler("http://127.0.0.1:1", func(context.Context, string, []byte) (string, error) {
-		return "", nil
-	})
+func TestSaveFile_WriteFailure(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "no-such-dir", "a.json")
+	choosePath := func(context.Context, string) (string, error) {
+		return dst, nil
+	}
+	h := newReverseProxyHandler("http://127.0.0.1:1", choosePath)
 
-	w, _ := doSaveFileRequest(t, h, `{"filename":`)
+	w, resp := doSaveFileRequest(t, h, "a.json", "[]")
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(resp.Error, "failed to create") {
+		t.Errorf("error = %q, want it to contain %q", resp.Error, "failed to create")
 	}
 }
 
@@ -136,14 +146,13 @@ func TestSaveFile_RejectsBadFilenames(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
-			saveFile := func(context.Context, string, []byte) (string, error) {
+			choosePath := func(context.Context, string) (string, error) {
 				called = true
 				return "", nil
 			}
-			h := newReverseProxyHandler("http://127.0.0.1:1", saveFile)
-			body := fmt.Sprintf(`{"filename":%q,"content":"[]"}`, tc.file)
+			h := newReverseProxyHandler("http://127.0.0.1:1", choosePath)
 
-			w, resp := doSaveFileRequest(t, h, body)
+			w, resp := doSaveFileRequest(t, h, tc.file, "[]")
 
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -152,23 +161,32 @@ func TestSaveFile_RejectsBadFilenames(t *testing.T) {
 				t.Errorf("error = %q, want non-empty", resp.Error)
 			}
 			if called {
-				t.Errorf("saveFile must not be called for filename %q", tc.file)
+				t.Errorf("choosePath must not be called for filename %q", tc.file)
 			}
 		})
 	}
 }
 
 func TestSaveFile_OversizedBody(t *testing.T) {
-	saveFile := func(context.Context, string, []byte) (string, error) {
-		return "", nil
+	dst := filepath.Join(t.TempDir(), "a.json")
+	choosePath := func(context.Context, string) (string, error) {
+		return dst, nil
 	}
-	h := newReverseProxyHandler("http://127.0.0.1:1", saveFile)
-	body := `{"filename":"a.json","content":"` + strings.Repeat(" ", maxSaveFileBytes) + `"}`
+	// Exercise the injectable limit; routing through the full handler would
+	// need a 1 GiB body.
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleSaveFileLimit(w, r, choosePath, 16)
+	})
 
-	w, _ := doSaveFileRequest(t, h, body)
+	req := httptest.NewRequest(http.MethodPost, "/desktop/save-file?filename=a.json", strings.NewReader("this body is far longer than sixteen bytes"))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("truncated export must be removed on overflow, stat err = %v", err)
 	}
 }
 
@@ -180,10 +198,10 @@ func TestSaveFile_GetIsProxiedNotHandled(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	saveFile := func(context.Context, string, []byte) (string, error) {
+	choosePath := func(context.Context, string) (string, error) {
 		return "x", nil
 	}
-	h := newReverseProxyHandler(backend.URL, saveFile)
+	h := newReverseProxyHandler(backend.URL, choosePath)
 
 	req := httptest.NewRequest(http.MethodGet, "/desktop/save-file", nil)
 	w := httptest.NewRecorder()
