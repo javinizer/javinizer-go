@@ -41,7 +41,16 @@ func prepareAndLaunchApply(
 	go func() {
 		if err := job.StartApply(rt.ServerCtx(), applyOpts); err != nil {
 			logging.Errorf("BatchJob.StartApply failed: %v", err)
-			if perr := rt.Deps().GetJobStore().PersistJobByID(job.GetID()); perr != nil {
+			// StartApply can fail pre-start (e.g., missing workflow) while an
+			// API edit on this job is inside its mutation→persist→rollback
+			// window; persisting unlocked here would durably capture the edit's
+			// uncommitted mutation. Take the per-job envelope lock for the
+			// compensating persist (the edit handlers do the same around their
+			// PersistJobByID calls).
+			releaseEnvelopeLock := worker.AcquireJobEnvelopeLock(job.GetID())
+			perr := rt.Deps().GetJobStore().PersistJobByID(job.GetID())
+			releaseEnvelopeLock()
+			if perr != nil {
 				if errors.Is(perr, worker.ErrJobGone) {
 					// Benign races: the job was deleted while apply was failing;
 					// there is nothing to persist anymore (A13).

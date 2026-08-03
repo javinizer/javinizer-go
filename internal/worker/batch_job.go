@@ -37,7 +37,11 @@ type BatchJobDeps struct {
 	ActressRepo     database.ActressRepositoryInterface            // Actress persistence for explicit review-page edits
 	HistoryRepo     database.HistoryRepositoryInterface            // History repository
 	Emitter         eventlog.EventEmitter                          // Event emission for audit trail
-	PersistFn       func()                                         // Callback to persist job state to database
+	// PersistFn persists job state to the database at phase boundaries
+	// (phase start and the deferred phase-completion persist). JobStore wires
+	// it through persistJobEnvelopeLocked so the whole-envelope write is
+	// serialized against in-flight edit windows via AcquireJobEnvelopeLock.
+	PersistFn func()
 	// PersistErrFn is the error-returning half of PersistFn: it persists the
 	// whole job envelope and reports failure (also recorded as the job's
 	// PersistError) so that failure-AWARE critical sections can roll back

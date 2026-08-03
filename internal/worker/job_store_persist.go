@@ -102,7 +102,11 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		fsCaseCache:         fscase.NewFSCaseCache(s.fs),
 	}
 
-	wireJobDeps(batchJob, s.movieRepo, s.actressRepo, s.historyRepo, func() { _ = s.persistence.PersistJob(batchJob) })
+	// Reconstructed jobs get the same envelope-locked PersistFn as freshly
+	// created ones (see JobStore.createJob): phase-boundary persists of a
+	// reconstructed job must not capture an in-flight edit's uncommitted
+	// mutation either.
+	wireJobDeps(batchJob, s.movieRepo, s.actressRepo, s.historyRepo, func() { _ = s.persistJobEnvelopeLocked(batchJob) })
 	// Error-returning envelope persist for the rescrape phase's and field-
 	// override editor's critical sections (see BatchJobDeps.PersistErrFn).
 	batchJob.deps.PersistErrFn = func() error { return s.persistence.PersistJob(batchJob) }

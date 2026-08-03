@@ -213,7 +213,7 @@ func (s *JobStore) recoverOrphanedJobs() {
 		job.lifecycle.mu.Unlock()
 
 		job.lifecycle.MarkFailed()
-		_ = s.persistence.PersistJob(job)
+		_ = s.persistJobEnvelopeLocked(job)
 		recovered++
 		logging.Warnf("Recovered orphaned job %s (was %s, marked failed)", id, status)
 	}
@@ -326,8 +326,18 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 		job.posterEditor = NewPosterEditor(job.results, job.results, s.movieRepo)
 	}
 
-	// Set persistFn after job is constructed so the closure captures the correct pointer
-	job.deps.PersistFn = func() { _ = s.persistence.PersistJob(job) }
+	// Set persistFn after job is constructed so the closure captures the correct pointer.
+	// PersistFn persists the WHOLE job envelope at phase boundaries
+	// (StartScrape/StartApply and the scrape/apply deferred completion persist
+	// in scrape_phase.go/apply_phase.go). It must run under the per-job
+	// envelope lock so it cannot observe and durably capture an API
+	// crop/source/field edit's committed-but-not-yet-persisted mutation while
+	// that edit is inside its mutation→persist→rollback window — otherwise a
+	// failed edit (persist error, in-memory rollback only) would be
+	// resurrected on restart despite the API having returned an error.
+	// PersistFn's call sites never hold the (non-reentrant) envelope lock, so
+	// acquiring it here cannot self-deadlock.
+	job.deps.PersistFn = func() { _ = s.persistJobEnvelopeLocked(job) }
 	// Error-returning envelope persist for the rescrape phase's and field-
 	// override editor's critical sections (see BatchJobDeps.PersistErrFn).
 	job.deps.PersistErrFn = func() error { return s.persistence.PersistJob(job) }
@@ -350,7 +360,7 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 	s.jobs[job.ID] = job
 	s.mu.Unlock()
 
-	_ = s.persistence.PersistJob(job)
+	_ = s.persistJobEnvelopeLocked(job)
 
 	return job
 }
@@ -504,10 +514,32 @@ func (s *JobStore) DeleteJob(id string) error {
 	return nil
 }
 
+// persistJobEnvelopeLocked persists the whole job envelope under the per-job
+// envelope lock (AcquireJobEnvelopeLock). This is the required wrapper for
+// every whole-envelope persist that runs WITHOUT its own
+// mutation→persist→rollback window — phase-completion/phase-start persists
+// (PersistFn), the create-time persist, and orphaned-job recovery: an API
+// edit concurrently inside its window holds the envelope lock, so the
+// wrapper either runs BEFORE the edit's commit (cannot observe it) or AFTER
+// its persist/rollback closes (observes only committed or rolled-back state)
+// — never the committed-but-later-rejected mutation. Callers inside an edit
+// window (rescrape phase, field-override editor, API edit handlers) already
+// hold the lock and use PersistErrFn / PersistJobByID directly instead — the
+// lock is a non-reentrant mutex, so re-acquiring it here would self-deadlock.
+func (s *JobStore) persistJobEnvelopeLocked(job *BatchJob) error {
+	release := AcquireJobEnvelopeLock(job.ID.String())
+	defer release()
+	return s.persistence.PersistJob(job)
+}
+
 // PersistJob saves a job to the database.
 // this is the public persistence method. The former PersistManagedJob
 // is removed because it type-asserted to *BatchJob internally — callers that hold
 // a composite should use PersistJobByID instead.
+// Callers that could race an API edit's mutation→persist→rollback window on
+// the same job MUST hold the per-job envelope lock (AcquireJobEnvelopeLock)
+// across this call; lock-free whole-envelope persistence goes through
+// persistJobEnvelopeLocked.
 func (s *JobStore) PersistJob(job *BatchJob) error {
 	return s.persistence.PersistJob(job)
 }
@@ -527,6 +559,10 @@ var ErrJobGone = errors.New("job gone (deleted or never existed)")
 // Returns the persistence error on failure (also recorded as the job's
 // PersistError) so HTTP handlers can surface a failed persist instead of
 // acknowledging state a restart would silently drop.
+// Callers MUST hold the per-job envelope lock (AcquireJobEnvelopeLock) across
+// this call when they could race an edit window on the same job (all API edit
+// handlers do); lock-free call sites use persistJobEnvelopeLocked or wrap
+// explicitly (see internal/api/batch/execute.go).
 func (s *JobStore) PersistJobByID(id string) error {
 	s.mu.RLock()
 	job, ok := s.jobs[models.JobID(id)]
