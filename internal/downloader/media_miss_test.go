@@ -35,7 +35,7 @@ func TestDownloadPoster_Disabled(t *testing.T) {
 			ShouldCropPoster: false,
 		},
 	}
-	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, MediaTypePoster, result.Type)
 	assert.False(t, result.Downloaded)
@@ -54,7 +54,7 @@ func TestDownloadPoster_NoURLs(t *testing.T) {
 		ID:     "TEST-002",
 		Poster: models.PosterState{CoverURL: "", PosterURL: ""},
 	}
-	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, MediaTypePoster, result.Type)
 	assert.False(t, result.Downloaded)
@@ -83,7 +83,7 @@ func TestDownloadPoster_PosterAlreadyExists(t *testing.T) {
 		ID:     "TEST-003",
 		Poster: models.PosterState{CoverURL: "http://example.com/cover.jpg", ShouldCropPoster: false},
 	}
-	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil, false)
 	require.NoError(t, err)
 	assert.False(t, result.Downloaded) // Not downloaded because already exists
 	assert.Equal(t, int64(8), result.Size)
@@ -111,7 +111,7 @@ func TestDownloadPoster_DirectDownloadNoCrop(t *testing.T) {
 		ID:     "TEST-004",
 		Poster: models.PosterState{CoverURL: srv.URL + "/cover.jpg", ShouldCropPoster: false},
 	}
-	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil, false)
 	require.NoError(t, err)
 	assert.True(t, result.Downloaded)
 	assert.Equal(t, MediaTypePoster, result.Type)
@@ -143,7 +143,7 @@ func TestDownloadPoster_UsesPosterURLWhenAvailable(t *testing.T) {
 			ShouldCropPoster: false,
 		},
 	}
-	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil, false)
 	require.NoError(t, err)
 	assert.True(t, result.Downloaded)
 }
@@ -173,7 +173,7 @@ func TestDownloadPoster_CropFromCover(t *testing.T) {
 			ShouldCropPoster: true,
 		},
 	}
-	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil, false)
 	require.NoError(t, err)
 	assert.True(t, result.Downloaded)
 }
@@ -203,7 +203,7 @@ func TestDownloadPoster_CropFailure(t *testing.T) {
 			ShouldCropPoster: true,
 		},
 	}
-	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil, false)
 	// Either the download fails (not valid image) or crop fails
 	if err != nil {
 		assert.Error(t, err)
@@ -443,7 +443,7 @@ func TestDownloadAllWithExtrafanart_PartialError(t *testing.T) {
 			ShouldCropPoster: false,
 		},
 	}
-	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, "/output", nil, false)
+	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, "/output", nil, false, false)
 	// Should return partial error
 	assert.Error(t, err)
 	var partialErr *DownloadPartialError
@@ -636,7 +636,7 @@ func TestDownloadPoster_FallbackFilename(t *testing.T) {
 			ShouldCropPoster: false,
 		},
 	}
-	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, "/output", nil, false)
 	require.NoError(t, err)
 	assert.True(t, result.Downloaded)
 	assert.Contains(t, result.LocalPath, "TEST-071-poster.jpg")
@@ -761,7 +761,7 @@ func TestDownloadAllWithExtrafanart_SecondPartSkipsActress(t *testing.T) {
 	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, "/output", &MultipartInfo{
 		IsMultiPart: true,
 		PartNumber:  2,
-	}, false)
+	}, false, false)
 	require.NoError(t, err)
 	// No actress results should be present
 	for _, r := range results {

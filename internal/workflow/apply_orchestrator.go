@@ -339,6 +339,7 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, state *a
 		DestDir:             state.finalDir,
 		Multipart:           multipart,
 		DownloadExtrafanart: cmd.DownloadExtrafanart,
+		ForceReplacePoster:  cmd.ForcePosterReplace,
 	})
 	// Download failures (including DownloadPartialError, where all critical
 	// media failed) are non-fatal: log and continue so NFO generation still

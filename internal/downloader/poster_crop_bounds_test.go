@@ -69,7 +69,7 @@ func TestDownloadPoster_AppliesManualCropBounds(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -115,7 +115,7 @@ func TestDownloadPoster_StaleBoundsKeepWholeReplacesExistingPoster(t *testing.T)
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err, "keep-whole fallback must replace an existing destination portably")
 	require.True(t, result.Downloaded)
 
@@ -155,7 +155,7 @@ func TestDownloadPoster_ManualCropConcurrentSameDestination(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				res, err := d.downloadPoster(context.Background(), movie(), tmpDir, nil)
+				res, err := d.downloadPoster(context.Background(), movie(), tmpDir, nil, false)
 				if err != nil {
 					errs <- err
 					return
@@ -211,7 +211,7 @@ func TestDownloadPoster_DefaultCropConcurrentSameDestination(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, err := d.downloadPoster(context.Background(), movie(), tmpDir, nil); err != nil {
+				if _, err := d.downloadPoster(context.Background(), movie(), tmpDir, nil, false); err != nil {
 					errs <- err
 				}
 			}()
@@ -253,7 +253,7 @@ func TestDownloadPoster_StaleStagingTempDoesNotShortCircuitCrop(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded, "stale staging file must not short-circuit the manual crop")
 
@@ -307,7 +307,7 @@ func TestDownloadPoster_DownloadFailureInsideCropPipeline(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err, "a failed download inside the crop pipeline must fail the poster step")
 	require.False(t, result.Downloaded)
 
@@ -361,7 +361,7 @@ func TestDownloadPoster_StaleStageRemovalFailureFailsLoudly(t *testing.T) {
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err, "unremovable stale stage must fail the step, not skip the crop silently")
 	require.False(t, result.Downloaded)
 }
@@ -385,7 +385,7 @@ func TestDownloadPoster_FailedInstallRestoresExistingPoster(t *testing.T) {
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err)
 	require.False(t, result.Downloaded)
 
@@ -425,7 +425,7 @@ func TestDownloadPoster_BackupRenameFailureLeavesOldPosterIntact(t *testing.T) {
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err)
 	require.False(t, result.Downloaded)
 
@@ -459,7 +459,7 @@ func TestDownloadPoster_InterruptedBackupRecoveredBeforeReplace(t *testing.T) {
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err, "install rename is forced to fail")
 	require.False(t, result.Downloaded)
 
@@ -497,7 +497,7 @@ func TestDownloadPoster_CrashedBackupRestoredBeforeFailedDownload(t *testing.T) 
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err)
 	require.False(t, result.Downloaded)
 
@@ -525,7 +525,7 @@ func TestDownloadPoster_BackupRecoveryFailureFailsLoudly(t *testing.T) {
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err, "a failed backup recovery must surface, not be overwritten silently")
 	require.False(t, result.Downloaded)
 
@@ -548,7 +548,7 @@ func TestDownloadPoster_BoundsScaleToResizedSource(t *testing.T) {
 	}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -600,7 +600,7 @@ func TestDownloadPoster_ScaledBoundsTouchingEdgeDoNotOverflow(t *testing.T) {
 	}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -619,7 +619,7 @@ func TestDownloadPoster_ManualCropLockReleasedAfterUse(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	_, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	_, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 
 	_, loaded := d.posterCropLocks.Load(filepath.Join(tmpDir, "IPX-535-poster.jpg"))
@@ -635,7 +635,7 @@ func TestDownloadPoster_StaleBoundsFallbackHonorsStoredHeight(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 9000, Y: 0, Width: 400, Height: 600, SourceWasCover: true, MaxPosterHeight: 300}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -660,7 +660,7 @@ func TestDownloadPoster_InstallRenameFailureSurfaces(t *testing.T) {
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err, "a failed install rename must surface as a poster failure")
 	require.False(t, result.Downloaded)
 
@@ -688,7 +688,7 @@ func TestDownloadPoster_FailedCropLeavesExistingPosterIntact(t *testing.T) {
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err, "failed write must surface as a poster failure")
 	require.False(t, result.Downloaded)
 
@@ -709,7 +709,7 @@ func TestDownloadPoster_BoundsCarryMaxPosterHeight(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600, MaxPosterHeight: 300}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -733,7 +733,7 @@ func TestDownloadPoster_UndecodableDownloadDoesNotShipAsPoster(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 9000, Y: 0, Width: 400, Height: 600}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err, "an undecodable download must fail the poster step, not be renamed into place")
 	require.False(t, result.Downloaded)
 	entries, readErr := os.ReadDir(tmpDir)
@@ -769,7 +769,7 @@ func TestDownloadPoster_TruncatedDownloadDoesNotShipAsPoster(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 9000, Y: 0, Width: 400, Height: 600}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err, "a header-valid but body-truncated image must not be renamed into place")
 	require.False(t, result.Downloaded)
 }
@@ -806,7 +806,7 @@ func TestDownloadPoster_FailedInstallRestoreFailureSurfaces(t *testing.T) {
 		DownloadPoster:    true,
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to install cropped poster")
 	assert.Contains(t, err.Error(), "poster rollback failed",
@@ -835,7 +835,7 @@ func TestDownloadPoster_ManualCropOverwritesExistingPoster(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 0, Y: 0, Width: 400, Height: 600}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -858,7 +858,7 @@ func TestDownloadPoster_ExistingPosterWithoutBoundsStillSkipped(t *testing.T) {
 	movie.Poster.ShouldCropPoster = false
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 	require.False(t, result.Downloaded, "existing poster without manual bounds keeps the skip-existing behavior")
 
@@ -877,7 +877,7 @@ func TestDownloadPoster_StaleCropBoundsOnPosterGradeSourceSaveWhole(t *testing.T
 	movie.Poster.CropBounds = &models.CropBounds{X: 9000, Y: 0, Width: 400, Height: 600}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -898,7 +898,7 @@ func TestDownloadPoster_StaleCropBoundsFallBackToDefaultCrop(t *testing.T) {
 	movie.Poster.CropBounds = &models.CropBounds{X: 9000, Y: 0, Width: 400, Height: 600, SourceWasCover: true}
 
 	d := newPosterTestDownloader(&Config{DownloadPoster: true})
-	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	require.NoError(t, err, "stale bounds must not fail the poster download")
 	require.True(t, result.Downloaded)
 

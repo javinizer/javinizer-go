@@ -397,7 +397,7 @@ func TestDownloader_DownloadAll_MultiPartFilenames(t *testing.T) {
 
 	// Test single file (no multipart)
 	tmpDir1 := t.TempDir()
-	results1, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir1, nil, true)
+	results1, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir1, nil, true, false)
 	if err != nil {
 		t.Fatalf("downloadAll (single) failed: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestDownloader_DownloadAll_MultiPartFilenames(t *testing.T) {
 	// Test multipart file
 	tmpDir2 := t.TempDir()
 	multipart := &MultipartInfo{IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"}
-	results2, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir2, multipart, true)
+	results2, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir2, multipart, true, false)
 	if err != nil {
 		t.Fatalf("downloadAll (multipart) failed: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 
 	// Part 1 should download everything
 	multipartPart1 := &MultipartInfo{IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"}
-	resultsPart1, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, multipartPart1, true)
+	resultsPart1, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, multipartPart1, true, false)
 	if err != nil {
 		t.Fatalf("downloadAll part 1 failed: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 	// Part 2 returns results but with Downloaded=false (files already exist with same names)
 	// Note: Actress images are not included for part 2+ (only first part downloads them)
 	multipartPart2 := &MultipartInfo{IsMultiPart: true, PartNumber: 2, PartSuffix: "-pt2"}
-	resultsPart2, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, multipartPart2, true)
+	resultsPart2, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, multipartPart2, true, false)
 	if err != nil {
 		t.Fatalf("downloadAll part 2 failed: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 
 	// nil (single file) should download everything
 	tmpDir2 := t.TempDir()
-	resultsSingle, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir2, nil, true)
+	resultsSingle, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir2, nil, true, false)
 	if err != nil {
 		t.Fatalf("downloadAll single file failed: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestDownloader_DownloadAll(t *testing.T) {
 
 	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true) // nil = single file
+	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true, false) // nil = single file
 	if err != nil {
 		t.Fatalf("downloadAll failed: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestDownloader_DownloadAll_IncludesFailedResults(t *testing.T) {
 	}
 
 	dl := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
-	results, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true)
+	results, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true, false)
 
 	// Cover is the only critical media and it failed — expect DownloadPartialError
 	var partial *DownloadPartialError
@@ -693,7 +693,7 @@ func TestDownloader_DownloadPoster_WithPosterURL(t *testing.T) {
 
 	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	if err != nil {
 		t.Fatalf("downloadPoster failed: %v", err)
 	}
@@ -732,7 +732,7 @@ func TestDownloader_DownloadPoster_Disabled(t *testing.T) {
 
 	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	if err != nil {
 		t.Fatalf("downloadPoster failed: %v", err)
 	}
@@ -979,7 +979,7 @@ func TestDownloadAll_CancelledContext(t *testing.T) {
 		Poster: models.PosterState{CoverURL: "https://example.com/cover.jpg"},
 	}
 
-	results, _ := dl.downloadAllWithExtrafanart(ctx, movie, "/tmp", nil, true)
+	results, _ := dl.downloadAllWithExtrafanart(ctx, movie, "/tmp", nil, true, false)
 
 	mockHTTP.AssertNotCalled(t, "Do", mock.Anything)
 	assert.NotEmpty(t, results)
@@ -1756,7 +1756,7 @@ func TestDownloader_DownloadAll_AllDisabled(t *testing.T) {
 
 	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true)
+	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true, false)
 	if err != nil {
 		t.Fatalf("downloadAll failed: %v", err)
 	}
@@ -1982,7 +1982,7 @@ func TestDownloader_DownloadPoster_WithCropping(t *testing.T) {
 
 	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.downloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	if err != nil {
 		t.Fatalf("downloadPoster with cropping failed: %v", err)
 	}

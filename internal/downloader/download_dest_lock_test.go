@@ -141,7 +141,7 @@ func TestDownload_ConcurrentSameDestSerialized(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		results[1], errs[1] = d.downloadPoster(context.Background(), movie, tmpDir, nil)
+		results[1], errs[1] = d.downloadPoster(context.Background(), movie, tmpDir, nil, false)
 	}()
 
 	// Give a (broken) concurrent second stager a wide deterministic window to

@@ -40,6 +40,14 @@ type DownloadCmd struct {
 	DestDir             string
 	Multipart           *MultipartInfo
 	DownloadExtrafanart *bool // Optional override for config.DownloadExtrafanart; nil = use config
+	// ForceReplacePoster overrides the poster "already exists, keep it" skip
+	// (and the crop-branch re-check under the destination lock): the caller
+	// KNOWS the poster on disk is stale relative to cmd.Movie's poster state
+	// and it must be replaced. Scoped to the apply-phase poster-drift repair
+	// (workflow.ApplyCmd.ForcePosterReplace) — the ordinary apply/download
+	// flows keep the skip so re-running a job never re-downloads an
+	// already-installed poster.
+	ForceReplacePoster bool
 }
 
 // DownloadOutcome wraps the results of a Download call.
@@ -184,7 +192,7 @@ func (d *Downloader) Download(ctx context.Context, cmd DownloadCmd) (*DownloadOu
 		extrafanartEnabled = *cmd.DownloadExtrafanart
 	}
 
-	results, err := d.downloadAllWithExtrafanart(ctx, cmd.Movie, cmd.DestDir, cmd.Multipart, extrafanartEnabled)
+	results, err := d.downloadAllWithExtrafanart(ctx, cmd.Movie, cmd.DestDir, cmd.Multipart, extrafanartEnabled, cmd.ForceReplacePoster)
 	if err != nil {
 		// On a DownloadPartialError sentinel, some non-critical media (actress
 		// images, extrafanart) may have succeeded even though all critical media

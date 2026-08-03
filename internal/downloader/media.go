@@ -29,7 +29,12 @@ func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, des
 // downloadPoster downloads the movie poster
 // If ShouldCropPoster is true, the poster is created by cropping the right 47.2% of the cover image
 // If ShouldCropPoster is false, the poster is downloaded directly without cropping (high-quality poster)
-func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
+// forceReplace overrides every "poster already exists, keep it" skip
+// (codex P2-A): the apply-phase drift repair re-runs the poster write
+// after a mid-apply edit changed the effective source WITHOUT setting crop
+// bounds — the destination the first pass wrote is stale and must be
+// replaced, not kept.
+func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, forceReplace bool) (*DownloadResult, error) {
 	if !d.config.DownloadPoster {
 		return &DownloadResult{Type: MediaTypePoster, Downloaded: false}, nil
 	}
@@ -48,8 +53,10 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 
 	// Check if poster already exists. An explicit manual crop overrides this
 	// skip: the user just asked for a different poster, so the existing file
-	// must be replaced instead of kept.
-	if movie.Poster.CropBounds == nil {
+	// must be replaced instead of kept. So does an explicit force (the
+	// apply-phase drift repair): the drifted state proves the installed
+	// poster predates the movie's effective source.
+	if movie.Poster.CropBounds == nil && !forceReplace {
 		if info, err := d.fs.Stat(destPath); err == nil {
 			// Already exists
 			return &DownloadResult{
@@ -105,8 +112,21 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// Check if we need to crop the poster or use it directly
 	if !movie.Poster.ShouldCropPoster {
 		// High-quality poster - download directly without cropping
-		result, err := d.download(ctx, posterURL, destPath, MediaTypePoster)
-		return result, err
+		if !forceReplace {
+			result, err := d.download(ctx, posterURL, destPath, MediaTypePoster)
+			return result, err
+		}
+		// Forced replacement (drift repair): d.download alone would keep an
+		// existing destination, so route through downloadAndCropPoster with a
+		// no-op "crop" (rename) — the staged download + backup/rollback
+		// install replaces the stale poster atomically instead of deleting it
+		// up front. Serialize with the crop branches: all of them mutate the
+		// destination through the same staging trio.
+		unlock := d.acquirePosterCropLock(destPath)
+		defer unlock()
+		return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
+			return d.fs.Rename(srcPath, outPath)
+		})
 	}
 
 	// Low-quality poster - download and crop from cover. Serialize with the
@@ -119,13 +139,17 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// Re-check under the lock: a peer worker that won the race has already
 	// installed the poster, and the crop-less skip above ran before its
 	// install — repeating the download+crop would redo the work for nothing.
-	if info, err := d.fs.Stat(destPath); err == nil {
-		return &DownloadResult{
-			Type:       MediaTypePoster,
-			LocalPath:  destPath,
-			Size:       info.Size(),
-			Downloaded: false,
-		}, nil
+	// A forced replacement (drift repair) skips this too: the installed
+	// poster is KNOWN stale relative to the movie's effective source.
+	if !forceReplace {
+		if info, err := d.fs.Stat(destPath); err == nil {
+			return &DownloadResult{
+				Type:       MediaTypePoster,
+				LocalPath:  destPath,
+				Size:       info.Size(),
+				Downloaded: false,
+			}, nil
+		}
 	}
 	return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
 		return imageutil.CropPosterFromCover(d.fs, srcPath, outPath, d.config.MaxPosterHeight)
@@ -389,7 +413,7 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 
 // downloadAllWithExtrafanart is like downloadAll but accepts an explicit extrafanart flag.
 // This avoids mutating the shared Config struct when the TUI needs to toggle extrafanart at runtime.
-func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, extrafanartEnabled bool) ([]DownloadResult, error) {
+func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, extrafanartEnabled bool, forceReplacePoster bool) ([]DownloadResult, error) {
 	results := make([]DownloadResult, 0)
 
 	// Track critical media (cover + poster) to detect partial-download-failure.
@@ -423,7 +447,7 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 	}
 
 	// Download poster
-	posterResult, _ := d.downloadPoster(ctx, movie, destDir, multipart)
+	posterResult, _ := d.downloadPoster(ctx, movie, destDir, multipart, forceReplacePoster)
 	if posterResult != nil {
 		if posterResult.Error != nil {
 			logging.Warnf("downloadAll: poster download failed for %s: %v", movie.ID, posterResult.Error)

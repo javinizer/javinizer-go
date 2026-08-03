@@ -409,3 +409,37 @@ func TestPosterStateDrifted(t *testing.T) {
 	assert.False(t, posterStateDrifted(base(), envelopeOnly),
 		"envelope-only poster pointers (preview URL, reset baseline) never reach the disk inside apply")
 }
+
+// TestInterpretApplyResult_DriftRepairForcesPosterReplacement pins Codex
+// P2-A at the worker seam: drift = the mid-apply edit changed the effective
+// poster source while leaving CropBounds NIL (poster-from-URL / source
+// edit). The downloader's exists-skip would keep the poster the first
+// pass installed, so the repair pass must carry ForcePosterReplace to make
+// the rewrite REPLACE, not keep, the stale destination.
+func TestInterpretApplyResult_DriftRepairForcesPosterReplacement(t *testing.T) {
+	fx := newDriftRepairFixture(t, "FORCE-1")
+
+	// A poster-from-URL edit lands mid-apply: new source, no crop bounds.
+	require.NoError(t, fx.tracker.AtomicUpdateFileResult("/input/FORCE-1.mp4", func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+		m := current.Movie.Clone()
+		m.Poster.PosterURL = "https://live.example/user-poster.jpg"
+		m.Poster.CropBounds = nil
+		current.Movie = m
+		return current, nil
+	}))
+
+	cfg := ApplyPhaseConfig{Download: true, GenerateNFO: true}
+	inputs := fx.inputs
+	inputs.NFOEnabled = true
+	outcome := interpretApplyResult("/input/FORCE-1.mp4", fx.applyCmd.Movie, time.Now(), time.Minute, inputs, cfg,
+		context.Background(), fx.afc, fx.applyCmd, fx.pipeline, nil)
+
+	require.True(t, outcome.Success, "outcome: %+v", outcome)
+	require.Equal(t, 1, fx.wf.numCalls())
+	repairCmd := fx.wf.calls[0]
+	assert.True(t, repairCmd.ForcePosterReplace,
+		"the repair pass must force-replace the stale poster — the exists-skip would keep the pass-1 image")
+	require.NotNil(t, repairCmd.Movie)
+	assert.Equal(t, "https://live.example/user-poster.jpg", repairCmd.Movie.Poster.PosterURL)
+	assert.Nil(t, repairCmd.Movie.Poster.CropBounds, "the nil-bounds drift case is the one P2-A covers")
+}

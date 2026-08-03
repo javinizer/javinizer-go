@@ -37,14 +37,22 @@ type MergeOptions struct {
 // and step-control options grouped by step (Organize, Merge).
 // OperationMode is resolved at the factory boundary.
 type ApplyCmd struct {
-	Movie               *models.Movie
-	Match               models.FileMatchInfo
-	DestPath            string
-	DryRun              bool
-	Organize            OrganizeOptions
-	Merge               MergeOptions
-	Download            bool
-	GenerateNFO         bool
+	Movie       *models.Movie
+	Match       models.FileMatchInfo
+	DestPath    string
+	DryRun      bool
+	Organize    OrganizeOptions
+	Merge       MergeOptions
+	Download    bool
+	GenerateNFO bool
+	// ForcePosterReplace tells the download step to REPLACE an existing
+	// destination poster instead of keeping it (downloader.DownloadCmd.
+	// ForceReplacePoster). Set ONLY by the apply-phase poster-drift repair:
+	// a mid-apply edit changed the effective poster source after the first
+	// physical pass wrote it, so the installed poster is known stale
+	// (Codex P2-A). Ordinary apply passes must keep the exists-skip or a
+	// re-run job would re-download every already-installed poster.
+	ForcePosterReplace  bool
 	DisplayTitleSrc     *models.Movie
 	DownloadExtrafanart *bool                       // Optional override for extrafanart downloads; nil = use config default
 	OperationMode       operationmode.OperationMode // resolved at factory boundary

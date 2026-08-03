@@ -678,8 +678,10 @@ const maxPosterDriftRepairPasses = 3
 // that output is stale. Each repair pass re-issues wf.Apply with organize
 // skipped (the file is already at its destination; Match.Path is repointed at
 // the moved path so NFO stream details still resolve) and the MERGED movie —
-// pipeline fields authoritative, poster fields live — so the downloader and
-// NFO generator rewrite from the state the envelope persists. The pass's own
+// pipeline fields authoritative, poster fields live — with ForcePosterReplace
+// set: drift proves the installed poster predates the effective source, and
+// with nil CropBounds the downloader's exists-skip would otherwise keep it
+// (Codex P2-A). The pass's own
 // snapshot→write-back window is closed by re-running writeBackSuccessMovie:
 // an edit committed mid-repair re-detects drift and triggers another pass,
 // up to maxPosterDriftRepairPasses.
@@ -714,6 +716,12 @@ func repairMidApplyPosterDrift(
 		repairCmd.Movie = merged.Clone()
 		repairCmd.Organize.Skip = true
 		repairCmd.Match = afc.Match
+		// Force the poster rewrite to REPLACE the destination the first pass
+		// installed (Codex P2-A): drift with a changed effective source and
+		// nil CropBounds would otherwise hit the downloader's exists-skip
+		// and report success while leaving the organized poster on the OLD
+		// image the envelope no longer references.
+		repairCmd.ForcePosterReplace = true
 		if lastResult.OrganizeResult != nil {
 			if lastResult.OrganizeResult.NewPath != "" {
 				repairCmd.Match.Path = lastResult.OrganizeResult.NewPath
