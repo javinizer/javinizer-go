@@ -479,7 +479,7 @@ export function createReviewState(pageStore: Page) {
 			apiClient.excludeBatchMovie(mutationJobId, resultId),
 		updateBatchMovie: (mutationJobId, resultId, movie) =>
 			apiClient.updateBatchMovie(mutationJobId, resultId, movie),
-		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight, expectedSourceURL) =>
+		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight, expectedSourceURL, expectedPosterRevision) =>
 			apiClient.updateBatchMoviePosterCrop(mutationJobId, resultId, {
 				...crop,
 				// Omit max_poster_height when null OR undefined so a nullable crop
@@ -489,6 +489,8 @@ export function createReviewState(pageStore: Page) {
 				// server cannot read an empty assertion as a source (its empty
 				// means "legacy client — pre/post-lock guard only").
 				...(expectedSourceURL ? { expected_source_url: expectedSourceURL } : {}),
+				// Same omitempty rule for the cache generation token.
+				...(expectedPosterRevision ? { expected_poster_revision: expectedPosterRevision } : {}),
 			}),
 		batchExcludeMovies: (mutationJobId, request) =>
 			apiClient.batchExcludeMovies(mutationJobId, request),
@@ -967,8 +969,20 @@ export function createReviewState(pageStore: Page) {
 		},
 		getPosterCropStates: () => posterCropStates,
 		applyPosterFromUrlAsync: (resultId, url) => mutations.applyPosterFromUrlAsync(resultId, url),
-		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg, expectedSourceURL) => {
-			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg, expectedSourceURL);
+		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg, expectedSourceURL, expectedPosterRevision) => {
+			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg, expectedSourceURL, expectedPosterRevision);
+		},
+		// Read the cache generation token the crop endpoint validates
+		// (expected_poster_revision) straight from the temp poster endpoint — a
+		// HEAD carries the X-Poster-Revision header without the image bytes.
+		fetchPosterRevision: async (url: string) => {
+			try {
+				const res = await fetch(url, { method: 'HEAD' });
+				if (!res.ok) return '';
+				return res.headers.get('x-poster-revision') ?? '';
+			} catch {
+				return '';
+			}
 		},
 		setCropApplying: (applying) => { cropApplying = applying; }
 	});

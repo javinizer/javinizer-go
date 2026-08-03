@@ -45,22 +45,61 @@ interface PosterCropControllerDeps {
 	setCropDragState: (state: PosterCropDragState | null) => void;
 	getPosterCropStates: () => Map<string, PosterCropState>;
 	applyPosterFromUrlAsync: (resultId: string, url: string) => Promise<void>;
-	mutatePosterCropAsync: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number, expectedSourceURL?: string) => Promise<void>;
+	mutatePosterCropAsync: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number, expectedSourceURL?: string, expectedPosterRevision?: string) => Promise<void>;
 	setCropApplying: (applying: boolean) => void;
+	// fetchPosterRevision returns the temp poster endpoint's X-Poster-Revision
+	// header (cache generation token) for a -full.jpg crop source URL, WITHOUT
+	// downloading the image (HEAD). Optional: absent → legacy URL-only guard.
+	fetchPosterRevision?: (url: string) => Promise<string>;
 	now?: () => number;
 }
 
 export function createPosterCropController(deps: PosterCropControllerDeps) {
 	const now = deps.now ?? Date.now;
 
-	// The effective poster source (poster_url || cover_url) of the image
-	// CURRENTLY DISPLAYED in the crop modal, captured when that image loads.
-	// The crop box, metrics and cropSourceURL all describe that displayed
-	// image; a job refetch can swap the reactive currentMovie A→B while the
-	// modal stays open, so applyPosterCrop MUST submit this captured token
-	// (not the recomputed live source) as expected_source_url — otherwise the
-	// server 409 guard validates stale A coordinates against B and passes.
-	let displayedEffectiveSource = '';
+	// The (requestURL, effectiveSource) pair of the CURRENTLY DISPLAYED crop
+	// image, captured at the moment the image request is ISSUED — NOT at
+	// image-load time: a job refetch or navigation can swap the reactive
+	// currentMovie A→B between setCropSourceURL(A) and A's load event, and a
+	// load-time capture would bind B's source to A's coordinate space. The
+	// crop box, metrics and cropSourceURL all describe that issued image, so
+	// applyPosterCrop MUST submit this captured pair (not the recomputed live
+	// source) as expected_source_url — otherwise the server 409 guard
+	// validates stale A coordinates against B and passes. `revision` fills in
+	// asynchronously from the temp poster endpoint's X-Poster-Revision: a
+	// same-URL cache refresh (rescrape / poster-from-URL) leaves every URL
+	// equal while swapping the generation the coordinates were measured on.
+	interface CropSourceToken {
+		requestURL: string;
+		effectiveSource: string;
+		revision: string;
+	}
+	let cropSourceToken: CropSourceToken | null = null;
+
+	// Issue a crop image request and bind the captured pair to it. Only the
+	// {id}-full.jpg cache asset carries a server-side revision worth
+	// validating (the URL-image proxy and the preview-fallback {id}.jpg do
+	// not); a stale revision resolution arriving after a NEWER request
+	// superseded this token is dropped.
+	function issueCropImageRequest(sourceURL: string) {
+		deps.setCropSourceURL(sourceURL);
+		const movie = deps.getCurrentMovie();
+		const token: CropSourceToken = {
+			requestURL: sourceURL,
+			effectiveSource: movie ? movie.poster_url || movie.cover_url || '' : '',
+			revision: '',
+		};
+		cropSourceToken = token;
+		if (deps.fetchPosterRevision && sourceURL.includes('-full.jpg')) {
+			deps.fetchPosterRevision(sourceURL)
+				.then((rev) => {
+					if (cropSourceToken === token && rev) token.revision = rev;
+				})
+				.catch(() => {
+					// Revision fetch failed → empty revision → legacy URL-only guard.
+				});
+		}
+	}
 
 	function refreshPosterCropMetrics() {
 		const cropImageElement = deps.getCropImageElement();
@@ -110,15 +149,10 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			imageOffsetY: imageElement.offsetTop,
 		});
 
-		// Capture the effective source of the DISPLAYED image at the same
-		// moment the seeding below resolves: everything the user measures
-		// (box, metrics) is against THIS source, so it — not whatever the
-		// reactive movie says at Apply time — is the expected_source_url the
-		// server guard must check.
-		const displayedMovie = deps.getCurrentMovie();
-		displayedEffectiveSource = displayedMovie
-			? displayedMovie.poster_url || displayedMovie.cover_url || ''
-			: '';
+		// The (requestURL, effectiveSource) guard pair for the displayed image
+		// was captured when the request was ISSUED (issueCropImageRequest) —
+		// re-reading the reactive movie HERE would pair whatever source is live
+		// at load time (possibly a post-refetch B) with image A's dimensions.
 
 		const currentResult = deps.getCurrentResult();
 
@@ -171,7 +205,8 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		if (currentMovie && deps.getCropSourceURL().includes('-full.jpg')) {
 			const posterMovieId = deps.getCurrentResult()?.movie_id ?? currentMovie.id;
 			const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg${sessionParam()}`;
-			deps.setCropSourceURL(`${fallbackURL}${fallbackURL.includes('?') ? '&' : '?'}v=${now()}`);
+			// The fallback is an image RE-REQUEST: re-bind the guard pair to it.
+			issueCropImageRequest(`${fallbackURL}${fallbackURL.includes('?') ? '&' : '?'}v=${now()}`);
 			return;
 		}
 
@@ -207,8 +242,9 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			const fullPosterURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}-full.jpg${sessionParam()}`;
 			sourceURL = fullPosterURL;
 		}
-		deps.setCropSourceURL(`${sourceURL}${sourceURL.includes('?') ? '&' : '?'}v=${now()}`);
-		displayedEffectiveSource = '';
+		// Bind the guard pair NOW, at request-issue time — the image loads
+		// asynchronously and the reactive movie may change in between.
+		issueCropImageRequest(`${sourceURL}${sourceURL.includes('?') ? '&' : '?'}v=${now()}`);
 		deps.setPosterCropLoadError(null);
 		deps.setCropMetrics(null);
 		deps.setCropBox(null);
@@ -329,19 +365,24 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 
 			const maxPosterHeight = deps.getMaxPosterHeight();
 			// Tell the server which source these coordinates were measured
-			// against — the CAPTURED source of the image displayed at load
-			// time, not the live movie's recomputed effective source. If a job
-			// refetch swapped poster A→B while this modal stayed open, the box
-			// and cropSourceURL still describe A; sending the captured A here
-			// makes the server-side 409 guard actually fire (mismatch vs B)
-			// instead of silently validating stale A coordinates against the
-			// new source — the tokenized 409 toast then tells the user to
-			// reload and re-measure. The editedSource fallback covers flows
-			// where no image load captured a token (identical to the pre-fix
-			// behavior: after any pre-sync above the server source IS
-			// editedSource).
-			const expectedSource = displayedEffectiveSource || editedSource;
-			await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined, expectedSource || undefined);
+			// against — the pair CAPTURED when the displayed image's request was
+			// ISSUED, not the live movie's recomputed effective source. If a job
+			// refetch swapped poster A→B while this modal stayed open, the box and
+			// cropSourceURL still describe A; sending the captured A here makes
+			// the server-side 409 guard actually fire (mismatch vs B) instead of
+			// silently validating stale A coordinates against the new source —
+			// the tokenized 409 toast then tells the user to reload and
+			// re-measure. The revision alongside catches the stealthier same-URL
+			// swap (rescrape / poster-from-URL refreshed {id}-full.jpg's bytes
+			// while the URL stayed equal). The token only describes the image it
+			// was issued with — if cropSourceURL moved on since, fall back to the
+			// live editedSource (identical to the pre-fix behavior: after any
+			// pre-sync above the server source IS editedSource).
+			const issued = cropSourceToken && cropSourceToken.requestURL === deps.getCropSourceURL()
+				? cropSourceToken
+				: null;
+			const expectedSource = issued?.effectiveSource || editedSource;
+			await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined, expectedSource || undefined, issued?.revision || undefined);
 		} catch {
 			// Errors are surfaced via toasts in the mutation handlers; abort the flow.
 		} finally {

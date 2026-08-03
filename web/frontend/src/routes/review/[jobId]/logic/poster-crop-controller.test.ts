@@ -214,7 +214,7 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 
 		await controller.applyPosterCrop();
 
-		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith('job-1', 'res-1', expect.any(Object), 1200, sameUrl);
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith('job-1', 'res-1', expect.any(Object), 1200, sameUrl, undefined);
 	});
 
 	it('sends the effective source the coordinates were measured against (poster_url) with the crop', async () => {
@@ -234,7 +234,8 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 			'res-1',
 			expect.any(Object),
 			undefined,
-			'https://dmm/jacket-full.jpg'
+			'https://dmm/jacket-full.jpg',
+			undefined
 		);
 	});
 
@@ -253,7 +254,8 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 			'res-1',
 			expect.any(Object),
 			undefined,
-			'https://dmm/cover.jpg'
+			'https://dmm/cover.jpg',
+			undefined
 		);
 	});
 
@@ -269,6 +271,7 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 			'job-1',
 			'res-1',
 			expect.any(Object),
+			undefined,
 			undefined,
 			undefined
 		);
@@ -344,6 +347,7 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 			});
 			const applyPosterFromUrlAsync = vi.fn(async () => {});
 			const noop = () => {};
+			let cropSourceURL = '';
 
 			const controller = createPosterCropController({
 				getBrowser: () => true,
@@ -353,8 +357,8 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 				getShowPosterCropModal: () => true,
 				setShowPosterCropModal: noop,
 				setPosterCropLoadError: noop,
-				getCropSourceURL: () => '/api/v1/temp/posters/job-1/STARS-136-full.jpg',
-				setCropSourceURL: noop,
+				getCropSourceURL: () => cropSourceURL,
+				setCropSourceURL: (u: string) => { cropSourceURL = u; },
 				getCropImageElement: () => null,
 				setCropImageElement: noop,
 				getCropMetrics: () => null,
@@ -377,8 +381,12 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 		it('refetch flips poster A→B after image load: submission sends the CAPTURED A source and the simulated server conflicts (409)', async () => {
 			const { controller, movie, result, server, mutatePosterCropAsync, applyPosterFromUrlAsync } = makeRefetchController();
 
+			// Request issued for the A image (movie still A): the guard pair is
+			// captured HERE, at issue time.
+			controller.openPosterCropModal();
+
 			// Image loads while the movie is A: the displayed image, metrics and
-			// box all describe A, and the A source is captured HERE.
+			// box all describe A.
 			controller.handlePosterCropImageLoad(fakeImageLoadEvent(400, 600));
 
 			// Job refetch arrives while the modal is open: another tab changed
@@ -396,7 +404,8 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 				'res-1',
 				expect.any(Object),
 				undefined,
-				'https://dmm/poster-A.jpg'
+				'https://dmm/poster-A.jpg',
+				undefined
 			);
 			// No drift pre-sync: live edited source === server source (both B).
 			expect(applyPosterFromUrlAsync).not.toHaveBeenCalled();
@@ -407,6 +416,7 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 		it('unchanged-source flow after image load still succeeds (200): captured token matches the server source', async () => {
 			const { controller, server, mutatePosterCropAsync, applyPosterFromUrlAsync } = makeRefetchController();
 
+			controller.openPosterCropModal();
 			controller.handlePosterCropImageLoad(fakeImageLoadEvent(400, 600));
 
 			// No refetch drift: the movie is still A at Apply time.
@@ -417,11 +427,201 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 				'res-1',
 				expect.any(Object),
 				undefined,
-				'https://dmm/poster-A.jpg'
+				'https://dmm/poster-A.jpg',
+				undefined
 			);
 			expect(applyPosterFromUrlAsync).not.toHaveBeenCalled();
 			expect(server.conflicts).toBe(0);
 		});
+
+		// Codex P2 follow-up (Codex flagged the surviving window): the refetch
+		// can land BETWEEN the image request and its load event — A was
+		// requested, the reactive movie flips to B, and only THEN does image A's
+		// load event fire (event.currentTarget still describes A). A LOAD-time
+		// capture would pair B's source with A's dimensions, defeating the 409
+		// guard; the capture must happen when the request is ISSUED.
+		it('refetch lands BETWEEN the image request and its load event: the issued A pair still wins (fail pre-fix)', async () => {
+			const { controller, movie, result, server, mutatePosterCropAsync, applyPosterFromUrlAsync } = makeRefetchController();
+
+			// Image A's request is issued while the movie is A — the pair is
+			// bound to this request NOW, not at load time.
+			controller.openPosterCropModal();
+
+			// Refetch swaps the reactive movie AND the server-side movie A→B
+			// while image A is still in flight.
+			movie.poster_url = 'https://dmm/poster-B.jpg';
+			if (result.movie) result.movie.poster_url = 'https://dmm/poster-B.jpg';
+
+			// Only now does image A's load event fire: currentTarget/seeding
+			// still describes A — the B movie must NOT overwrite the guard pair.
+			controller.handlePosterCropImageLoad(fakeImageLoadEvent(400, 600));
+
+			await controller.applyPosterCrop();
+
+			// Captured A source (server is B) → the 409 guard fires. No drift
+			// pre-sync: live edited source === server source (both B).
+			expect(mutatePosterCropAsync).toHaveBeenCalledWith(
+				'job-1',
+				'res-1',
+				expect.any(Object),
+				undefined,
+				'https://dmm/poster-A.jpg',
+				undefined
+			);
+			expect(applyPosterFromUrlAsync).not.toHaveBeenCalled();
+			expect(server.conflicts).toBe(1);
+		});
+	});
+});
+
+// Codex P2 (cache generation token): a rescrape or poster-from-URL refresh
+// can replace {id}-full.jpg's bytes from the SAME source URL — every URL
+// guard passes while the measured coordinate space changed. The controller
+// reads the X-Poster-Revision header of the issued -full.jpg request (HEAD)
+// and threads it to Apply as expected_poster_revision.
+describe('expected_poster_revision is captured with the issued -full.jpg request and threaded to Apply', () => {
+	function makeRevisionController(fetchPosterRevision?: (url: string) => Promise<string>) {
+		const movie: Movie = {
+			id: 'STARS-136',
+			title: 'Test Movie',
+			poster_url: 'https://dmm/poster-A.jpg',
+		};
+		const result: FileResult = {
+			result_id: 'res-1',
+			file_path: '/tmp/test-video.mp4',
+			movie_id: 'STARS-136',
+			status: 'completed',
+			started_at: '',
+			is_multi_part: false,
+			part_number: 0,
+			part_suffix: '',
+			movie: {
+				id: 'STARS-136',
+				title: 'Test Movie',
+				poster_url: 'https://dmm/poster-A.jpg',
+			}
+		};
+		let cropSourceURL = '';
+		const mutatePosterCropAsync = vi.fn(async () => {});
+		const noop = () => {};
+		const controller = createPosterCropController({
+			getBrowser: () => true,
+			getJobId: () => 'job-1',
+			getCurrentMovie: () => movie,
+			getCurrentResult: () => result,
+			getShowPosterCropModal: () => true,
+			setShowPosterCropModal: noop,
+			setPosterCropLoadError: noop,
+			getCropSourceURL: () => cropSourceURL,
+			setCropSourceURL: (u: string) => { cropSourceURL = u; },
+			getCropImageElement: () => null,
+			setCropImageElement: noop,
+			getCropMetrics: () => null,
+			setCropMetrics: noop,
+			getCropBox: () => ({ x: 0, y: 0, width: 100, height: 200 }),
+			setCropBox: noop,
+			getMaxPosterHeight: () => null,
+			setMaxPosterHeight: noop,
+			getCropDragState: (): PosterCropDragState | null => null,
+			setCropDragState: noop,
+			getPosterCropStates: () => new Map<string, PosterCropState>(),
+			applyPosterFromUrlAsync: vi.fn(async () => {}),
+			mutatePosterCropAsync,
+			setCropApplying: noop,
+			...(fetchPosterRevision ? { fetchPosterRevision } : {}),
+			now: () => 12345,
+		});
+		const flush = () => new Promise((r) => setTimeout(r, 0));
+		return { controller, mutatePosterCropAsync, flush };
+	}
+
+	it('fetches the revision for the -full.jpg request and submits it with the crop', async () => {
+		const fetchPosterRevision = vi.fn(async (_url: string) => '1699999999999999999-123456');
+		const { controller, mutatePosterCropAsync, flush } = makeRevisionController(fetchPosterRevision);
+
+		controller.openPosterCropModal();
+		await flush(); // let the async revision resolution land on the token
+
+		expect(fetchPosterRevision).toHaveBeenCalledWith(
+			'/api/v1/temp/posters/job-1/STARS-136-full.jpg?v=12345'
+		);
+
+		await controller.applyPosterCrop();
+
+		expect(mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			undefined,
+			'https://dmm/poster-A.jpg',
+			'1699999999999999999-123456'
+		);
+	});
+
+	it('legacy path: no revision fetcher → revision omitted (URL-only guard)', async () => {
+		const { controller, mutatePosterCropAsync, flush } = makeRevisionController();
+
+		controller.openPosterCropModal();
+		await flush();
+		await controller.applyPosterCrop();
+
+		expect(mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			undefined,
+			'https://dmm/poster-A.jpg',
+			undefined
+		);
+	});
+
+	it('a rejected revision fetch degrades to legacy (omitted revision), never blocks the crop', async () => {
+		const fetchPosterRevision = vi.fn(async (_url: string) => { throw new Error('network down'); });
+		const { controller, mutatePosterCropAsync, flush } = makeRevisionController(fetchPosterRevision);
+
+		controller.openPosterCropModal();
+		await flush();
+		await controller.applyPosterCrop();
+
+		expect(mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			undefined,
+			'https://dmm/poster-A.jpg',
+			undefined
+		);
+	});
+
+	it('a stale revision resolution is dropped once a NEWER request superseded the token', async () => {
+		let resolveFirst: ((rev: string) => void) | null = null;
+		const fetchPosterRevision = vi
+			.fn<(url: string) => Promise<string>>()
+			.mockImplementationOnce(
+				() => new Promise((r) => { resolveFirst = r; })
+			)
+			.mockImplementationOnce(
+				() => new Promise(() => {}) // second request never resolves in this test
+			);
+		const { controller, mutatePosterCropAsync } = makeRevisionController(fetchPosterRevision);
+
+		controller.openPosterCropModal();
+		controller.openPosterCropModal(); // re-issue: the first token is superseded
+		// TS's control-flow analysis cannot see the closure assignment above.
+		const resolveStale = resolveFirst as ((rev: string) => void) | null;
+		resolveStale?.('stale-revision');
+		await new Promise((r) => setTimeout(r, 0));
+
+		await controller.applyPosterCrop();
+
+		expect(mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			undefined,
+			'https://dmm/poster-A.jpg',
+			undefined
+		);
 	});
 });
 

@@ -103,6 +103,18 @@ export interface PosterCropRequest {
 	 * Omitted/empty: legacy-client mode, pre/post-lock guard alone.
 	 */
 	expected_source_url?: string;
+	/**
+	 * Cache generation/revision token (X-Poster-Revision of the temp poster
+	 * endpoint: mtime-nanoseconds + size of `{id}-full.jpg`) captured with the
+	 * displayed crop image. A rescrape or poster-from-URL refresh can replace
+	 * the cached image's bytes while keeping the SAME source URL, defeating
+	 * every URL-level guard; the server validates this token under the
+	 * poster-source lock against the current cache file's revision and 409s on
+	 * mismatch (or a vanished file). Opaque — echo the header verbatim. Omitted:
+	 * legacy URL-only guards (also the preview-fallback / URL-proxy display
+	 * paths, which carry no revision).
+	 */
+	expected_poster_revision?: string;
 }
 
 export interface PosterCropResponse {

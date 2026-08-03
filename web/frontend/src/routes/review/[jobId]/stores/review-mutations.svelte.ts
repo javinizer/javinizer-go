@@ -75,6 +75,7 @@ interface ReviewMutationsDeps {
 		crop: PosterCropBox,
 		maxPosterHeight?: number,
 		expectedSourceURL?: string,
+		expectedPosterRevision?: string,
 	) => Promise<PosterCropResponse>;
 	batchExcludeMovies: (
 		jobId: string,
@@ -364,12 +365,14 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			crop,
 			maxPosterHeight,
 			expectedSourceURL,
+			expectedPosterRevision,
 		}: {
 			jobId: string;
 			resultId: string;
 			crop: PosterCropBox;
 			maxPosterHeight?: number;
 			expectedSourceURL?: string;
+			expectedPosterRevision?: string;
 		}) => {
 			// Capture the metrics WITH the request: the submitted crop box is
 			// in THIS source's pixel space, and drag events stay live while the
@@ -377,7 +380,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			// onSuccess time would persist whatever the box has drifted to
 			// (possibly another movie's box) under THIS request's file path.
 			const metrics = deps.getCropMetrics();
-			const response = await deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight, expectedSourceURL);
+			const response = await deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight, expectedSourceURL, expectedPosterRevision);
 			return { response, metrics };
 		},
 		onSuccess: async ({ response, metrics }, { resultId, crop }) => {
@@ -414,8 +417,8 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		},
 	}));
 
-	async function applyPosterCropAsync(jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number, expectedSourceURL?: string) {
-		await posterCropMutation.mutateAsync({ jobId, resultId, crop, maxPosterHeight, expectedSourceURL });
+	async function applyPosterCropAsync(jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number, expectedSourceURL?: string, expectedPosterRevision?: string) {
+		await posterCropMutation.mutateAsync({ jobId, resultId, crop, maxPosterHeight, expectedSourceURL, expectedPosterRevision });
 	}
 
 	const bulkExcludeMutation = createMutation(() => ({
