@@ -28,7 +28,8 @@ git init -q
 git config user.email test@example.invalid
 git config user.name test
 git config commit.gpgsign false
-printf '/web/dist/ignored/\n*.syso\nlocal_*.go\n*.log\n.worktrees/\n.scratch/\n.tmprepro/\n.planning/\n' > .gitignore
+# *.db mirrors the real repo's .gitignore (embed-asset masking scenario)
+printf '/web/dist/ignored/\n*.syso\nlocal_*.go\n*.log\n*.db\n.worktrees/\n.scratch/\n.tmprepro/\n.planning/\n' > .gitignore
 mkdir -p internal/foo internal/bar internal/shared internal/consumer internal/legacy internal/orphan \
          internal/tagged \
          internal/dual_unref internal/dual_ref internal/tree/sub web/frontend/src \
@@ -499,6 +500,48 @@ check_hook "e2e: ignored *.go masked symbol blocked" 1 "local_extra.go"
 reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf 'noise\n' > internal/foo/run.log
 check_hook "e2e: harmless ignored runtime artifact does not block" 0
+
+# ignored go:embed ASSET: every check is green locally (go list/vet/build
+# consume the working-tree file), but the committed snapshot lacks the
+# ignored *.db and fails with 'pattern local.db: no matching files found'.
+# The static extension pathspec cannot see arbitrary embed types, so the
+# guard must consult the toolchain-resolved embed set.
+# (db_embed.go must not match the fixture gitignore's local_*.go rule —
+# only the ASSET is ignored here)
+reset; cat > internal/database/db_embed.go <<'EOF'
+package database
+
+import _ "embed"
+
+//go:embed local.db
+var LocalDB string
+EOF
+printf 'local\n' > internal/database/local.db
+git add internal/database/db_embed.go
+check_hook "e2e: ignored go:embed asset masked (local.db)" 1 "local.db"
+
+# control: the SAME embed with the asset staged is consistent — the
+# index-membership subtraction must not produce a false positive
+reset; cat > internal/database/db_embed.go <<'EOF'
+package database
+
+import _ "embed"
+
+//go:embed local.db
+var LocalDB string
+EOF
+printf 'local\n' > internal/database/local.db
+git add internal/database/db_embed.go
+git add -f internal/database/local.db
+check_hook "e2e: staged go:embed asset consistent" 0
+
+# test-file variant: //go:embed inside a _test.go is consumed by go test
+# only — plain go list leaves TestEmbedFiles EMPTY, so the -test flag on
+# the embed scan is what keeps this from slipping the guard
+reset; printf 'package foo\n\nimport (\n\t_ "embed"\n\t"testing"\n)\n\n//go:embed local_t.db\nvar fixtureDB string\n\nfunc TestEmbedDB(t *testing.T) { if fixtureDB == "" { t.Fatal() } }\n' > internal/foo/embed_test.go
+printf 'fixture\n' > internal/foo/local_t.db
+git add internal/foo/embed_test.go
+check_hook "e2e: ignored _test.go embed asset masked" 1 "local_t.db"
 
 reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 mkdir -p .worktrees/wt; printf 'package wt\n' > .worktrees/wt/x.go

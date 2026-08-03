@@ -561,6 +561,60 @@ $raw" ;;
         done <<FILTER_EOF
 $IGNORED_RAW
 FILTER_EOF
+        # Ignored go:embed ASSETS: the extension list above covers the
+        # toolchain's STATIC inputs, but //go:embed names ARBITRARY types
+        # from the staged snapshot itself — staging '//go:embed local.db'
+        # while local.db stays ignored (this repo ignores *.db) lets go
+        # list/vet/test/build consume the working-tree file here, then the
+        # COMMITTED snapshot fails with 'pattern local.db: no matching
+        # files found'. No static pathspec can enumerate embed targets, so
+        # ask the toolchain: go list -test resolves the EXACT embed set
+        # against this tree (glob semantics, all: prefixes and the
+        # dot/underscore directory-walk exclusion handled by the tool;
+        # -test is required because plain go list leaves TestEmbedFiles
+        # and XTestEmbedFiles empty — an ignored _test.go embed asset
+        # would otherwise slip the guard while go test consumes it).
+        # Recomputed per invocation, deliberately NOT cached like
+        # TOOL_DIRS_CACHE: a mid-run-created ignored embed file changes
+        # nothing else any comparator observes. Mask set = embedded paths
+        # ABSENT FROM THE INDEX (untracked or ignored, any extension,
+        # present or future) — whatever sits in the index ships with the
+        # commit by definition. Data files READ (not embedded) by tests
+        # are not toolchain-enumerable and stay out by design.
+        EMBED_ABS=$(go list -test -f '{{range .EmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .TestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .XTestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./... 2>/dev/null || true)
+        if [ -n "$EMBED_ABS" ]; then
+            EMBED_ROOT=$(pwd)
+            EMBED_REL=""
+            while IFS= read -r eabs; do
+                [ -n "$eabs" ] || continue
+                # Prefix-strip WITHOUT regex (same metacharacter hazard as
+                # the PKG_DIRS walk above — a bracketed checkout path must
+                # not fail open); paths outside the checkout (synthesized
+                # -test variants) match no prefix and drop out.
+                if [ "${eabs#"$EMBED_ROOT"/}" != "$eabs" ]; then
+                    EMBED_REL="$EMBED_REL
+${eabs#"$EMBED_ROOT"/}"
+                fi
+            done <<EMBED_SCAN_EOF
+$EMBED_ABS
+EMBED_SCAN_EOF
+            if [ -n "$EMBED_REL" ]; then
+                # quotepath=false: non-ASCII tracked embeds must compare
+                # equal on both sides of comm (raw bytes, not C-quoted).
+                EMBED_MASKED=$(comm -23 \
+                    <(printf '%s\n' "$EMBED_REL" | sed '/^$/d' | sort -u) \
+                    <(git -c core.quotepath=false ls-files | sort -u) || true)
+                # Append directly, bypassing the PKG_DIRS filter: the
+                # directive's own .go file is necessarily tracked, and
+                # roots outside the static lists (a future root-level
+                # embed, say) must be admitted by construction, not by a
+                # whitelist that has to be kept in sync.
+                if [ -n "$EMBED_MASKED" ]; then
+                    IGNORED_KEPT="$IGNORED_KEPT
+$EMBED_MASKED"
+                fi
+            fi
+        fi
         UNSTAGED=$( { git diff --name-only -- "${GUARD_PATHSPEC[@]}"
                       git ls-files --others --exclude-standard -- "${GUARD_PATHSPEC[@]}"
                       printf '%s\n' "$IGNORED_KEPT"; } | sort -u || true)
