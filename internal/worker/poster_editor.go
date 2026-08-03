@@ -79,6 +79,33 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 	for _, filePath := range filePaths {
 		provByPath[filePath] = pe.lookup.GetProvenance(filePath)
 	}
+	// Derive the crop intent ONCE for the requested replacement and fan the
+	// single value out to every part (Codex P2): PosterURL/CroppedPosterURL
+	// below are fanned out identically because the poster is movie-wide —
+	// every part shares the same regenerated {movieID}-full.jpg and preview —
+	// so the intent describing that ONE image must be identical too. A
+	// per-part derivation keyed on per-part provenance can flip the flag
+	// between siblings after a single-part rescrape refreshed only one part's
+	// provenance (a URL recognized as a landscape scraper source for one part
+	// yields true while a sibling's provenance-less fallback answers false),
+	// and Organize would then crop one part but write the shared image whole
+	// for the other. The single value uses the strongest provenance across
+	// the FAMILY for the known-URL match (a source that recorded this exact
+	// URL under ANY sibling describes this exact image) and takes the
+	// poster-grade fallback from the PRIMARY result's prior state — the same
+	// result the DB persistence below reads the intent back from, keeping the
+	// persisted row coherent with the in-memory fan-out.
+	mergedProv := &resultstore.ProvenanceData{}
+	for _, filePath := range filePaths {
+		if prov := provByPath[filePath]; prov != nil {
+			mergedProv.ScraperResults = append(mergedProv.ScraperResults, prov.ScraperResults...)
+		}
+	}
+	var primaryPrior models.PosterState
+	if mr, err := pe.lookup.FindMovieResultForMovieID(movieID); err == nil && mr != nil && mr.Movie != nil {
+		primaryPrior = mr.Movie.Poster
+	}
+	shouldCrop := cropIntentAfterPosterFromURL(primaryPrior, posterURL, mergedProv)
 	for _, filePath := range filePaths {
 		err := pe.updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 			if current.Movie == nil {
@@ -86,10 +113,9 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 			}
 			movie := current.Movie.Clone()
 			backupPosterOriginals(movie)
-			priorPoster := movie.Poster.Clone()
 			movie.Poster.PosterURL = posterURL
 			movie.Poster.CroppedPosterURL = croppedURL
-			movie.Poster.ShouldCropPoster = cropIntentAfterPosterFromURL(priorPoster, posterURL, provByPath[filePath])
+			movie.Poster.ShouldCropPoster = shouldCrop
 			movie.Poster.CropBounds = nil
 			current.Movie = movie
 			current.FileMatchInfo.MovieID = movie.ID
@@ -141,7 +167,11 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 }
 
 // cropIntentAfterPosterFromURL derives ShouldCropPoster for a poster-from-URL
-// replacement. The temp preview DownloadFromURL serves is ALWAYS auto-cropped
+// replacement. UpdatePosterFromURL calls it exactly once per request — with
+// the FAMILY's merged provenance and the primary result's prior state — and
+// fans the single result out to every part, never per-part (see the
+// derivation block there for the mixed-provenance divergence it prevents).
+// The temp preview DownloadFromURL serves is ALWAYS auto-cropped
 // (CropPosterFromCover: right-side crop for landscape covers, center 2:3 for
 // portrait images), while Organize's apply-time downloadPoster gates its
 // default cover-crop on ShouldCropPoster — so the flag must describe how the

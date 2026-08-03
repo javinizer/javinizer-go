@@ -151,6 +151,74 @@ func TestUpdatePosterFromURL_CropIntentDerivation(t *testing.T) {
 		assert.Equal(t, "https://example.com/cover.jpg", p.PosterURL)
 	})
 
+	t.Run("multipart mixed provenance derives one intent for every part", func(t *testing.T) {
+		// Codex P2: multipart siblings sharing one poster URL previously derived
+		// ShouldCropPoster PER PART from per-part provenance — part CD1's
+		// rescrape-refreshed provenance recognizes the new URL as javdb's
+		// landscape cover (true) while sibling CD2's poster-grade prior falls
+		// back to false, so Organize would crop one part and write the shared
+		// image whole for the other. The intent is now derived ONCE from the
+		// family's merged provenance and fanned out identically.
+		const (
+			fileA = "/test/multi-cd1.mp4"
+			fileB = "/test/multi-cd2.mp4"
+		)
+		job := newBatchJob([]string{fileA, fileB})
+		for _, fp := range []string{fileA, fileB} {
+			job.results.UpdateFileResult(fp, &resultstore.MovieResult{
+				Status: models.JobStatusCompleted,
+				Movie: &models.Movie{ID: movieID, Poster: models.PosterState{
+					PosterURL: "https://example.com/old-poster.jpg", ShouldCropPoster: false,
+				}},
+				FileMatchInfo: models.FileMatchInfo{Path: fp, MovieID: movieID},
+			})
+		}
+		// Only CD1 carries provenance recognizing the new URL (post single-part
+		// rescrape); CD2's fallback alone would answer false.
+		job.results.SetProvenance(fileA, &resultstore.ProvenanceData{ScraperResults: []*models.ScraperResult{
+			{Source: "javdb", PosterURL: newURL, CoverURL: newURL, ShouldCropPoster: true},
+		}})
+		require.NoError(t, job.posterEditor.UpdatePosterFromURL(context.Background(), movieID, newURL, "https://example.com/new-cropped.jpg"))
+		for _, fp := range []string{fileA, fileB} {
+			res, err := job.results.GetMovieResult(fp)
+			require.NoError(t, err)
+			require.NotNil(t, res.Movie)
+			assert.True(t, res.Movie.Poster.ShouldCropPoster,
+				"%s: every part must carry the single family-derived intent for the shared image", fp)
+			assert.Equal(t, newURL, res.Movie.Poster.PosterURL)
+		}
+	})
+
+	t.Run("multipart unmatched provenance fans the primary's poster-grade fallback everywhere", func(t *testing.T) {
+		// No family provenance matches the new URL: the fallback class comes
+		// from the PRIMARY result's prior state (poster-grade -> stays whole),
+		// and that single value reaches every sibling even when a sibling's own
+		// prior is cover-backed (which alone would answer true).
+		const (
+			fileA = "/test/fallback-cd1.mp4"
+			fileB = "/test/fallback-cd2.mp4"
+		)
+		job := newBatchJob([]string{fileA, fileB})
+		job.results.UpdateFileResult(fileA, &resultstore.MovieResult{
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: movieID, Poster: models.PosterState{PosterURL: "https://example.com/old-poster.jpg", ShouldCropPoster: false}},
+			FileMatchInfo: models.FileMatchInfo{Path: fileA, MovieID: movieID},
+		})
+		job.results.UpdateFileResult(fileB, &resultstore.MovieResult{
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: movieID, Poster: models.PosterState{CoverURL: "https://example.com/old-cover.jpg", ShouldCropPoster: true}},
+			FileMatchInfo: models.FileMatchInfo{Path: fileB, MovieID: movieID},
+		})
+		require.NoError(t, job.posterEditor.UpdatePosterFromURL(context.Background(), movieID, newURL, "https://example.com/new-cropped.jpg"))
+		res, err := job.results.GetMovieResult(fileA)
+		require.NoError(t, err)
+		assert.False(t, res.Movie.Poster.ShouldCropPoster)
+		res, err = job.results.GetMovieResult(fileB)
+		require.NoError(t, err)
+		assert.False(t, res.Movie.Poster.ShouldCropPoster,
+			"the sibling must inherit the family-wide single intent, not its own cover-backed fallback")
+	})
+
 	t.Run("reset-to-baseline is a fixed point for cover-class sources", func(t *testing.T) {
 		// resetPoster routes the restore through poster-from-URL with the
 		// baseline URL: a cover-class (javdb-style) baseline must come back
