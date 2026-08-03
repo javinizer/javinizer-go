@@ -17,6 +17,26 @@ import (
 )
 
 func (d *Downloader) download(ctx context.Context, url, destPath string, mediaType MediaType) (*DownloadResult, error) {
+	// Serialize the whole Stat-skip → MkdirAll → Create(<dest>.tmp staging) →
+	// write → Rename sequence per destination path. Concurrent apply workers
+	// for the SAME destPath (multipart siblings sharing a part-less template's
+	// cover path — downloadCover — or a high-quality poster download racing
+	// another sibling's) would otherwise share the <dest>.tmp staging file and
+	// truncate/interleave each other's writes, or one worker's rename could
+	// install another's half-written image. The crop poster paths already
+	// serialize via acquirePosterCropLock on their destPath; the lock here is
+	// keyed to THIS call's destPath (inside downloadAndCropPoster that is the
+	// distinct *.full.tmp key), so the two never nest the same mutex.
+	//
+	// Scope: this reuses the Downloader's PER-INSTANCE lock map. Organize
+	// jobs serialize their media downloads per job (each job runs its own
+	// apply pipeline/Downloader), so this closes the in-job corruption; two
+	// INDEPENDENT Downloader instances pointing at the same destination file
+	// remain unserialized (residual cross-job scope, accepted per the audit —
+	// deliberately NO package-level/global lock).
+	unlock := d.acquirePosterCropLock(destPath)
+	defer unlock()
+
 	startTime := time.Now()
 
 	result := &DownloadResult{

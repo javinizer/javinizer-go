@@ -2,11 +2,19 @@ package poster
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
+
+// ErrNoPosterSource marks the pre-download rejection: the movie has neither a
+// poster nor a cover URL to generate from. NOTHING was touched when this
+// fires (the check precedes any download), so callers that fail closed on
+// generation errors — because a failure after the download starts can have
+// partially replaced the cached assets — must still treat THIS one as the
+// no-mutation degrade (metadata only).
+var ErrNoPosterSource = errors.New("no poster or cover URL available")
 
 // PosterGenerator generates a poster for a movie during a scrape job.
 type PosterGenerator interface {
@@ -72,7 +80,7 @@ func (g *ScrapePosterGenerator) GeneratePoster(ctx context.Context, jobID string
 		posterURL = movie.Poster.CoverURL
 	}
 	if posterURL == "" {
-		return fmt.Errorf("no poster or cover URL available")
+		return ErrNoPosterSource
 	}
 
 	// Pass the explicit referer if set; otherwise let DownloadFromURL auto-derive

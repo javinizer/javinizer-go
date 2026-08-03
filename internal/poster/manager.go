@@ -150,8 +150,38 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	}
 
 	croppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+	// The crop is staged through {posterID}.jpg.tmp and installed by rename:
+	// imageutil.cropAndWritePoster truncates its output path via fs.Create
+	// BEFORE jpeg.Encode runs, so an in-place write let a crash (or an encode
+	// error) leave a TRUNCATED live preview beside job state that still
+	// references it. Staging keeps the old preview intact until a complete
+	// replacement exists.
+	stagingPath := croppedPath + ".tmp"
 
-	// Defense in depth: ensure both paths are inside tempPosterDir.
+	// Clear a STALE copy of this crop's own staging path before writing (a
+	// crash between the staged write and the rename orphans it). Only the
+	// own path may be swept: per-movie locks let different movies of the
+	// same job crop concurrently and the staging files share this job
+	// directory, so a broader *.jpg.tmp sweep could delete another in-flight
+	// crop's staged output out from under its rename (Codex P1).
+	if err := pm.fs.Remove(stagingPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to clear stale poster preview staging: %w", err)
+	}
+
+	// Recover a crashed previous replace (same class as the downloader's
+	// downloadAndCropPoster): a crop that died after staging the old preview
+	// aside as .bak but before the install left the slot empty, the only
+	// copy of the old preview in the backup. Restore it BEFORE cropping so
+	// any early failure below still finds the old preview in place, not a
+	// permanently empty slot.
+	backupPath := croppedPath + ".bak"
+	if _, statErr := pm.fs.Stat(croppedPath); errors.Is(statErr, os.ErrNotExist) {
+		if _, bakErr := pm.fs.Stat(backupPath); bakErr == nil {
+			_ = pm.fs.Rename(backupPath, croppedPath)
+		}
+	}
+
+	// Defense in depth: ensure all paths are inside tempPosterDir.
 	if err := validatePathWithinDir(sourcePath, tempPosterDir); err != nil {
 		return nil, err
 	}
@@ -164,8 +194,40 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	right := x + width
 	bottom := y + height
 
-	if err := imageutil.CropPosterWithBounds(pm.fs, sourcePath, croppedPath, left, top, right, bottom, maxPosterHeight); err != nil {
+	if err := imageutil.CropPosterWithBounds(pm.fs, sourcePath, stagingPath, left, top, right, bottom, maxPosterHeight); err != nil {
+		_ = pm.fs.Remove(stagingPath)
 		return nil, fmt.Errorf("crop failed: %w", err)
+	}
+	// Platform-safe replace (Windows): os.Rename refuses to overwrite an
+	// EXISTING destination on Windows (the MemMapFs-based tests mask this),
+	// so a plain staged rename failed every RECROP. Stage the old preview
+	// aside first — the downloader's dest→.bak protocol in
+	// internal/downloader/media.go — install, then drop the backup; a failed
+	// install rolls the old preview back instead of leaving the slot empty,
+	// keeping the "old preview intact until a complete replacement exists"
+	// guarantee the staging file exists for. The backup path is per-posterID,
+	// so concurrent crops of other posters in this job dir never collide with
+	// it (same argument as the own-path staging sweep above).
+	_ = pm.fs.Remove(backupPath)
+	hadExisting := false
+	if _, statErr := pm.fs.Stat(croppedPath); statErr == nil {
+		hadExisting = true
+		if mvErr := pm.fs.Rename(croppedPath, backupPath); mvErr != nil {
+			_ = pm.fs.Remove(stagingPath)
+			return nil, fmt.Errorf("failed to stage existing poster preview aside: %w", mvErr)
+		}
+	}
+	if err := pm.fs.Rename(stagingPath, croppedPath); err != nil {
+		if hadExisting {
+			if restoreErr := pm.fs.Rename(backupPath, croppedPath); restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("poster preview rollback failed: %w", restoreErr))
+			}
+		}
+		_ = pm.fs.Remove(stagingPath)
+		return nil, fmt.Errorf("failed to install cropped poster preview: %w", err)
+	}
+	if hadExisting {
+		_ = pm.fs.Remove(backupPath)
 	}
 
 	// A successful crop implies a decodable source; on the off chance the
@@ -386,9 +448,17 @@ func (pm *PosterManager) RestoreAssets(snap *AssetsSnapshot) error {
 // under the new key that no persisted state produced. Semantics mirror
 // RestoreAssets' replace-the-file family: validated IDs, per-asset atomic
 // rename (same directory), and errors joined across both assets instead of
-// short-circuiting. An unchanged from/to pair is a no-op. The caller holds
-// BOTH poster-source locks (origin and destination, lexical order) across
-// the move so no crop or source edit can interleave.
+// short-circuiting. An unchanged from/to pair is a no-op. A CASE-ONLY
+// re-key (names differing only in case — the per-(job,movie) poster-source
+// lock and the result index both fold case, so such a pair can never be a
+// cross-family clobber) still re-keys the raw-named files: on a
+// case-sensitive filesystem src and dst are distinct names and the rename
+// relocates them; on a case-INSENSITIVE one they name the SAME file, so
+// the preemptive destination remove is skipped (it would delete the very
+// source about to be renamed) and the rename recases the file in place.
+// The caller holds BOTH poster-source locks (origin and destination,
+// lexical order) across the move — or the single shared lock when the
+// pair is case-only — so no crop or source edit can interleave.
 func (pm *PosterManager) MoveAssets(jobID, fromPosterID, toPosterID string) error {
 	if fromPosterID == toPosterID {
 		return nil
@@ -402,6 +472,7 @@ func (pm *PosterManager) MoveAssets(jobID, fromPosterID, toPosterID string) erro
 	if err := validatePosterID(toPosterID); err != nil {
 		return err
 	}
+	sameFoldedName := strings.EqualFold(fromPosterID, toPosterID)
 	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
 	var moveErr error
 	for _, pair := range [][2]string{
@@ -426,9 +497,11 @@ func (pm *PosterManager) MoveAssets(jobID, fromPosterID, toPosterID string) erro
 			moveErr = errors.Join(moveErr, fmt.Errorf("move poster asset directory: %w", err))
 			continue
 		}
-		if err := pm.fs.Remove(dst); err != nil && !os.IsNotExist(err) {
-			moveErr = errors.Join(moveErr, fmt.Errorf("replace destination poster asset %s: %w", pair[1], err))
-			continue
+		if !sameFoldedName {
+			if err := pm.fs.Remove(dst); err != nil && !os.IsNotExist(err) {
+				moveErr = errors.Join(moveErr, fmt.Errorf("replace destination poster asset %s: %w", pair[1], err))
+				continue
+			}
 		}
 		if err := pm.fs.Rename(src, dst); err != nil {
 			moveErr = errors.Join(moveErr, fmt.Errorf("move poster asset %s -> %s: %w", pair[0], pair[1], err))

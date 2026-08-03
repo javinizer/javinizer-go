@@ -179,6 +179,57 @@ func TestDownloadPoster_ManualCropConcurrentSameDestination(t *testing.T) {
 	}
 }
 
+func TestDownloadPoster_DefaultCropConcurrentSameDestination(t *testing.T) {
+	// Same race class as the manual-crop variant above, through the DEFAULT
+	// (auto) crop branch: CropBounds is nil and ShouldCropPoster is true, so
+	// every concurrent multipart worker enters downloadAndCropPoster via the
+	// fallback leg. Without the shared per-destination lock, one worker's
+	// stale-staging cleanup deletes the <dest>.full.tmp another worker is
+	// cropping, or the .bak/install renames interleave and destroy the poster.
+	for iter := 0; iter < 5; iter++ {
+		srv := twoToneCoverServer(t)
+		fs := afero.NewMemMapFs()
+		tmpDir := "/out"
+		require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
+
+		movie := func() *models.Movie {
+			m := createTestMovie()
+			m.Poster.PosterURL = srv.URL + "/cover.jpg"
+			m.Poster.ShouldCropPoster = true
+			return m
+		}
+
+		d := NewDownloader(http.DefaultClient, fs, &Config{
+			DownloadPoster:    true,
+			MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+		}, nil)
+
+		const workers = 8
+		errs := make(chan error, workers)
+		var wg sync.WaitGroup
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, err := d.downloadPoster(context.Background(), movie(), tmpDir, nil); err != nil {
+					errs <- err
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatalf("concurrent default crop failed: %v", err)
+		}
+
+		img := decodePosterImageFs(t, fs, filepath.Join(tmpDir, "IPX-535-poster.jpg"))
+		b := img.Bounds()
+		require.Equal(t, 473, b.Dx(), "default crop keeps the right 47.2%% of the 1000px cover")
+		require.Equal(t, 600, b.Dy())
+		srv.Close()
+	}
+}
+
 func decodePosterImageFs(t *testing.T, fs afero.Fs, path string) image.Image {
 	t.Helper()
 	f, err := fs.Open(path)

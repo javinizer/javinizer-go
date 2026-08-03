@@ -109,7 +109,24 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		return result, err
 	}
 
-	// Low-quality poster - download and crop from cover
+	// Low-quality poster - download and crop from cover. Serialize with the
+	// manual-crop branch: BOTH stage through the same <dest>.full.tmp /
+	// .crop.tmp / .bak trio, so concurrent multipart apply workers (part-less
+	// poster template → shared destPath) would otherwise delete/rename staging
+	// files out from under each other.
+	unlock := d.acquirePosterCropLock(destPath)
+	defer unlock()
+	// Re-check under the lock: a peer worker that won the race has already
+	// installed the poster, and the crop-less skip above ran before its
+	// install — repeating the download+crop would redo the work for nothing.
+	if info, err := d.fs.Stat(destPath); err == nil {
+		return &DownloadResult{
+			Type:       MediaTypePoster,
+			LocalPath:  destPath,
+			Size:       info.Size(),
+			Downloaded: false,
+		}, nil
+	}
 	return d.downloadAndCropPoster(ctx, posterURL, destPath, func(srcPath, outPath string) error {
 		return imageutil.CropPosterFromCover(d.fs, srcPath, outPath, d.config.MaxPosterHeight)
 	})
