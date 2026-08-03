@@ -433,6 +433,23 @@ export function createReviewState(pageStore: Page) {
 		skipJobSync: () => {
 			skipJobSync = true;
 		},
+		// Authoritative job refetch for the mutation success handlers'
+		// rekey-during-flight guard (review-mutations.svelte.ts): a genuine
+		// network round-trip through the SAME ['batch-job', jobId] query the
+		// page syncs from, so the result also lands in the cache. The query
+		// uses the default zero staleTime, so fetchQuery always refetches here.
+		refetchJob: async () => {
+			try {
+				return (
+					(await queryClient.fetchQuery({
+						queryKey: ['batch-job', jobId],
+						queryFn: () => apiClient.getBatchJob(jobId, true),
+					})) ?? null
+				);
+			} catch {
+				return null;
+			}
+		},
 		getEditedMovies: () => editedMovies,
 		getCurrentResult: () => currentResult,
 		getPosterPreviewOverrides: () => posterPreviewOverrides,

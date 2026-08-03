@@ -95,6 +95,7 @@ interface Harness {
 	editedMovies: Map<string, Movie>;
 	skipJobSync: ReturnType<typeof vi.fn>;
 	job: { current: BatchJobResponse };
+	refetchJob: ReturnType<typeof vi.fn>;
 	// Flipping this simulates the user navigating to another movie mid-flight.
 	currentResult: { current: FileResult };
 	toastSuccess: ReturnType<typeof vi.fn>;
@@ -183,6 +184,9 @@ function makeHarness(opts: { multipart?: boolean } = {}): Harness {
 
 	const noop = () => {};
 	const invalidateQueries = vi.fn(async () => {});
+	// Default: the refetch returns the same job the handler already holds
+	// (no rekey in flight) — tests exercising the rekey guard override this.
+	const refetchJob = vi.fn(async () => job.current);
 	const mutations = createReviewMutations({
 		getJobId: () => 'job-1',
 		getJob: () => job.current,
@@ -207,6 +211,7 @@ function makeHarness(opts: { multipart?: boolean } = {}): Harness {
 		getCropMetrics: () => cropLive.metrics,
 		getCropBox: () => cropLive.box,
 		getQueryClient: () => ({ invalidateQueries }) as never,
+		refetchJob,
 		getCurrentMovieIndex: () => 0,
 		setCurrentMovieIndex: noop,
 		getMovieResultsLength: () => 2,
@@ -234,6 +239,7 @@ function makeHarness(opts: { multipart?: boolean } = {}): Harness {
 		editedMovies,
 		skipJobSync,
 		job,
+		refetchJob,
 		currentResult,
 		toastSuccess,
 		toastError,

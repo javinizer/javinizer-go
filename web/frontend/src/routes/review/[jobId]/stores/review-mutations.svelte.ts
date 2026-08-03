@@ -47,6 +47,10 @@ interface ReviewMutationsDeps {
 	getCropMetrics: () => PosterCropMetrics | null;
 	getCropBox: () => PosterCropBox | null;
 	getQueryClient: () => QueryClient;
+	// refetchJob returns the AUTHORITATIVE current job (a real network
+	// refetch, not the cached snapshot) so poster-edit success handlers can
+	// re-resolve fan-out targets after a cross-tab rekey; null on failure.
+	refetchJob: () => Promise<BatchJobResponse | null>;
 	getCurrentMovieIndex: () => number;
 	setCurrentMovieIndex: (index: number) => void;
 	getMovieResultsLength: () => number;
@@ -151,6 +155,35 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 	// the preview override / crop state off the current result would land that
 	// state under the wrong movie's file_path (applyPosterEditToState already
 	// keys off the request's resultId for the same reason).
+	// Rekey-during-flight guard (Codex P2): another tab/window can re-key
+	// this result's movie identity A→B (whole-movie PATCH rename, an "id"
+	// field override, a rescrape) while a crop or poster-from-URL request is
+	// IN FLIGHT. The server resolves resultId→file path (rekey-safe) and
+	// converges on B's family, but neither PosterCropResponse nor
+	// PosterFromURLResponse echoes the canonical movie ID or the affected
+	// file paths — so a success handler fanning out from the client's
+	// possibly-stale A-valued job would overlay B's poster state onto A's
+	// siblings and A's pending edits, and a later whole-movie Save of an "A"
+	// sibling would resubmit B's state. The contracts carry too little to do
+	// better, so adopt the authoritative job BEFORE fan-out; every
+	// fan-out/target resolution below (applyPosterEditToState,
+	// filePathForResultId, posterEditTargetFilePaths, clearPosterCropStates)
+	// then keys off the converged family. A failed refetch falls through to
+	// the pre-fix best-effort overlay on the (possibly stale) job — never
+	// worse than today — and the trailing invalidateJobQueries retries.
+	async function resyncJobBeforePosterFanout(): Promise<void> {
+		try {
+			const fresh = await deps.refetchJob();
+			if (!fresh) return;
+			// Deep-clone parity with the job-sync $effect: the fetch result
+			// aliases the query cache, and the overlay writes onto this state.
+			deps.skipJobSync();
+			deps.setJob(JSON.parse(JSON.stringify(fresh)) as BatchJobResponse);
+		} catch {
+			// Best-effort fallback: overlay against the current job.
+		}
+	}
+
 	function filePathForResultId(resultId: string): string | undefined {
 		for (const [filePath, r] of Object.entries(deps.getJob()?.results ?? {})) {
 			if ((r as FileResult).result_id === resultId) return filePath;
@@ -162,7 +195,8 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		mutationFn: async ({ resultId, url }: { resultId: string; url: string }) => {
 			return deps.updateBatchMoviePosterFromURL(deps.getJobId(), resultId, { url });
 		},
-		onSuccess: (data: PosterFromURLResponse, { resultId }) => {
+		onSuccess: async (data: PosterFromURLResponse, { resultId }) => {
+			await resyncJobBeforePosterFanout();
 			// should_crop_poster comes from the SERVER (derived in
 			// PosterEditor.cropIntentAfterPosterFromURL from the prior effective
 			// source / provenance), NOT hard-coded: the temp preview is always
@@ -346,7 +380,8 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			const response = await deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight, expectedSourceURL);
 			return { response, metrics };
 		},
-		onSuccess: ({ response, metrics }, { resultId, crop }) => {
+		onSuccess: async ({ response, metrics }, { resultId, crop }) => {
+			await resyncJobBeforePosterFanout();
 			applyPosterEditToState(resultId, posterCropOverlayFromResponse(response));
 
 			const targetFilePath = filePathForResultId(resultId);
