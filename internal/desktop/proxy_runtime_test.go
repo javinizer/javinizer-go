@@ -12,7 +12,7 @@ func TestNewReverseProxyHandler_DesktopRuntimeReturnsWSURL(t *testing.T) {
 	// The proxy target mirrors ServerInstance.BaseURL: http://127.0.0.1:PORT.
 	// /desktop/runtime must surface ws://localhost:PORT/ws/progress so the
 	// frontend can connect directly (the Wails AssetServer 501s WS upgrades).
-	h := newReverseProxyHandler("http://127.0.0.1:62041")
+	h := newReverseProxyHandler("http://127.0.0.1:62041", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/desktop/runtime", nil)
 	w := httptest.NewRecorder()
@@ -45,7 +45,7 @@ func TestNewReverseProxyHandler_DesktopRuntimeNotForwarded(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	h := newReverseProxyHandler(backend.URL)
+	h := newReverseProxyHandler(backend.URL, nil)
 	req := httptest.NewRequest(http.MethodGet, "/desktop/runtime", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -66,7 +66,7 @@ func TestNewReverseProxyHandler_NonRuntimePathsStillForward(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	h := newReverseProxyHandler(backend.URL)
+	h := newReverseProxyHandler(backend.URL, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/status", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)

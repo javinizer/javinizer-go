@@ -10,6 +10,8 @@
 		ImportResponse,
 	} from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
+	import { confirmDialog } from '$lib/stores/dialog.svelte';
+	import { saveJsonFile } from '$lib/utils/download';
 	import {
 		Trash2,
 		Plus,
@@ -106,18 +108,15 @@
 	}));
 
 	const exportMutation = createMutation(() => ({
-		mutationFn: () => apiClient.exportWordReplacements(),
-		onSuccess: async (data) => {
-			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = 'word-replacements.json';
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			URL.revokeObjectURL(url);
-			toastStore.success(m.words_exported({ count: data.length }), 3000);
+		mutationFn: async () => {
+			const data = await apiClient.exportWordReplacements();
+			const result = await saveJsonFile('word-replacements.json', data);
+			return { count: data.length, saved: result.saved, path: result.path };
+		},
+		onSuccess: (res) => {
+			if (!res.saved) return;
+			const msg = m.words_exported({ count: res.count });
+			toastStore.success(res.path ? `${msg} — ${res.path}` : msg, 3000);
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || m.words_export_failed(), 4000);
@@ -223,9 +222,9 @@
 				return;
 			}
 
-			const includeDefaults = confirm(m.words_import_defaults_confirm());
+			const includeDefaults = await confirmDialog(m.words_import(), m.words_import_defaults_confirm());
 
-			if (!confirm(m.words_import_confirm({ count: replacements.length }))) return;
+			if (!(await confirmDialog(m.words_import(), m.words_import_confirm({ count: replacements.length })))) return;
 
 			importMutation.mutate({ replacements, includeDefaults });
 		} catch (err) {

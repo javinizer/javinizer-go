@@ -58,7 +58,8 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 	// uncancelled context. If markStarted fails, the explicit cancel() call
 	// is a safe no-op on the already-cancelled context.
 	c.job.lifecycle.setCancelFunc(cancel)
-	if err := c.markStarted(models.JobStatusPending); err != nil {
+	pd, err := c.markStarted(models.JobStatusPending)
+	if err != nil {
 		cancel()
 		return err
 	}
@@ -67,6 +68,9 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 	}
 
 	go func() {
+		// Close phaseDone only after Run returns — its deferred persistence
+		// executes on return, after the terminal Mark* it calls mid-body.
+		defer close(pd)
 		defer cancel()
 		inputs := c.buildScrapeInputs(wf, batchCfg, persistFn)
 		c.job.scrapePhase.Run(ctx, inputs, files, cfg)
@@ -93,7 +97,8 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	ctx, cancel := context.WithCancel(ctx)
 	// Same ordering as StartScrape: setCancelFunc before markStarted.
 	c.job.lifecycle.setCancelFunc(cancel)
-	if err := c.markStarted(models.JobStatusCompleted); err != nil {
+	pd, err := c.markStarted(models.JobStatusCompleted)
+	if err != nil {
 		cancel()
 		return err
 	}
@@ -125,6 +130,9 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	}
 
 	go func() {
+		// Close phaseDone only after Run returns — its deferred persistence
+		// executes on return, after the terminal Mark* it calls mid-body.
+		defer close(pd)
 		defer cancel()
 		inputs := c.buildApplyInputs(wf, batchCfg, cfg, persistFn)
 		c.job.applyPhase.Run(ctx, inputs, cfg)
@@ -165,12 +173,25 @@ func (c *jobController) Rescrape(ctx context.Context, cmd RescrapeCmd) (*Rescrap
 	return outcome, nil
 }
 
-// Wait blocks until the job reaches a terminal state and returns any error.
+// Wait blocks until the job fully settles and returns any error.
+//
+// "Fully settles" means the phase goroutine has RETURNED, including its
+// deferred persistence — not merely that a terminal status was set. Run
+// marks the terminal status (closing lifecycle.done) before its deferred
+// persister.Persist() executes, so joining on done alone would let waiters
+// (teardown drains, CLI phase chains) race the final DB writes. When no
+// phase was ever started, phaseDone is nil and done (terminal status) is
+// the join point instead.
 func (c *jobController) Wait() error {
 	c.job.lifecycle.mu.RLock()
+	pd := c.job.lifecycle.phaseDone
 	done := c.job.lifecycle.done
 	c.job.lifecycle.mu.RUnlock()
-	<-done
+	if pd != nil {
+		<-pd
+	} else {
+		<-done
+	}
 	c.job.lifecycle.mu.RLock()
 	status := c.job.lifecycle.Status
 	c.job.lifecycle.mu.RUnlock()
@@ -185,29 +206,33 @@ func (c *jobController) Wait() error {
 	}
 }
 
-// markStarted transitions the job from expectedFrom to running state and creates a
-// fresh Done channel. It performs a compare-and-swap: if the lifecycle status is not
-// expectedFrom when the lock is acquired, it returns an error without modifying state.
+// markStarted transitions the job from expectedFrom to running state and creates
+// fresh Done/phaseDone channels, returning the phaseDone channel the phase
+// goroutine must close when it fully returns. It performs a compare-and-swap:
+// if the lifecycle status is not expectedFrom when the lock is acquired, it
+// returns an error without modifying state.
 // This prevents the TOCTOU race where an API handler checks status == Completed but
 // another concurrent request transitions the job before this call acquires the lock.
-func (c *jobController) markStarted(expectedFrom models.JobStatus) error {
+func (c *jobController) markStarted(expectedFrom models.JobStatus) (chan struct{}, error) {
 	c.job.lifecycle.mu.Lock()
 	if c.job.lifecycle.Status != expectedFrom {
 		actual := c.job.lifecycle.Status
 		c.job.lifecycle.mu.Unlock()
-		return fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), expectedFrom, actual)
+		return nil, fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), expectedFrom, actual)
 	}
 	c.job.lifecycle.Status = models.JobStatusRunning
 	c.job.lifecycle.CompletedAt = nil
 	c.job.lifecycle.OrganizedAt = nil
 	c.job.lifecycle.done = make(chan struct{})
+	c.job.lifecycle.phaseDone = make(chan struct{})
+	pd := c.job.lifecycle.phaseDone
 	c.job.lifecycle.mu.Unlock()
 
 	c.job.mu.Lock()
 	c.job.StartedAt = time.Now()
 	c.job.mu.Unlock()
 
-	return nil
+	return pd, nil
 }
 
 // setDepsFromConfig applies JobConfig fields to the job's deps.

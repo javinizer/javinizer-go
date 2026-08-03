@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -43,7 +44,10 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	tmplCtx := d.buildTemplateContext(movie, multipart)
 	destPath := d.pathResolver.ResolvePosterPath(movie, nil, true, tmplCtx, destDir)
 
-	if !movie.Poster.ShouldCropPoster {
+	bounds := movie.Poster.PosterCropBounds
+	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
+
+	if !geometryUsable && !movie.Poster.ShouldCropPoster {
 		return d.download(ctx, posterURL, destPath, MediaTypePoster, overwriteExisting, dedup)
 	}
 
@@ -84,12 +88,18 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			return result, result.Error
 		}
 	} else if info, err := d.fs.Stat(destPath); err == nil {
+		// Existing artwork is never replaced outside overwrite mode, even with
+		// pending manual crop geometry: downloaded paths feed the revert
+		// delete-list, so replacing here would leave NO poster after a revert.
 		result.LocalPath = destPath
 		result.Size = info.Size()
 		result.Duration = time.Since(startTime)
 		return result, nil
 	}
 
+	// One GET feeds every poster-producing path below — manual crop, promote,
+	// and auto crop all reuse the already-downloaded bytes, so a single-use or
+	// signed poster URL cannot be consumed twice.
 	fullPath := uniqueTempPath(destPath, "full.tmp")
 	defer func() { _ = d.fs.Remove(fullPath) }()
 
@@ -105,34 +115,109 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	cropPath := uniqueTempPath(destPath, "crop.tmp")
 	defer func() { _ = d.fs.Remove(cropPath) }()
 
-	if err := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight); err != nil {
-		fullResult.Error = fmt.Errorf("failed to crop poster: %w", err)
+	candidate := fullPath
+	cropped := false
+	if geometryUsable && d.cropDownloadedPoster(fullPath, cropPath, bounds) {
+		candidate = cropPath
+		cropped = true
+	}
+	if !cropped && movie.Poster.ShouldCropPoster {
+		if err := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight); err != nil {
+			fullResult.Error = fmt.Errorf("failed to crop poster: %w", err)
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.LocalPath = ""
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, fullResult.Error
+		}
+		candidate = cropPath
+	}
+
+	if overwriteExisting {
+		if err := replaceFile(d.fs, candidate, destPath); err != nil {
+			fullResult.Error = fmt.Errorf("failed to replace poster: %w", err)
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.LocalPath = ""
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, fullResult.Error
+		}
+	} else if rerr := d.fs.Rename(candidate, destPath); rerr != nil {
+		logging.Warnf("downloadPoster: failed to promote %s: %v", candidate, rerr)
 		fullResult.Downloaded = false
 		fullResult.Replaced = false
 		fullResult.LocalPath = ""
+		fullResult.Size = 0
+		fullResult.Error = fmt.Errorf("failed to finalize poster: %w", rerr)
 		fullResult.Duration = time.Since(startTime)
 		return fullResult, fullResult.Error
 	}
 
-	if err := replaceFile(d.fs, cropPath, destPath); err != nil {
-		fullResult.Error = fmt.Errorf("failed to replace poster: %w", err)
-		fullResult.Downloaded = false
-		fullResult.Replaced = false
-		fullResult.LocalPath = ""
-		fullResult.Duration = time.Since(startTime)
-		return fullResult, fullResult.Error
-	}
-
-	fullResult.LocalPath = destPath
 	fullResult.Downloaded = true
 	fullResult.Replaced = existed
-	if info, statErr := d.fs.Stat(destPath); statErr == nil {
-		fullResult.Size = info.Size()
-	}
+	d.finalizePosterResult(fullResult, destPath)
 	fullResult.Duration = time.Since(startTime)
 	return fullResult, nil
 }
 
+// finalizePosterResult points result at the promoted poster, or clears the
+// location fields so a caller can never see a dangling (removed) temp path.
+func (d *Downloader) finalizePosterResult(result *DownloadResult, destPath string) {
+	result.LocalPath = ""
+	result.Size = 0
+	if info, err := d.fs.Stat(destPath); err == nil {
+		result.LocalPath = destPath
+		result.Size = info.Size()
+	}
+}
+
+// cropDownloadedPoster applies the normalized review-page geometry to an
+// already-downloaded full source image and writes the cropped poster to dst.
+// Returns false when the geometry does not apply to this image (undecodable,
+// aspect drift, empty rect); the caller then falls back to the pre-geometry
+// behavior with the temp file still in place.
+func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.CropBounds) bool {
+	w, h, derr := imageutil.ImageDimensions(d.fs, tempPath)
+	if derr != nil || w <= 0 || h <= 0 {
+		logging.Warnf("downloadPoster: cannot decode downloaded source for manual crop: %v", derr)
+		return false
+	}
+
+	// Aspect guard: the geometry was normalized against the review-time
+	// source; if the downloaded image no longer matches that aspect, the
+	// geometry targets a different image — refuse and fall back.
+	if bounds.SourceAspect > 0 {
+		got := float64(w) / float64(h)
+		diff := math.Abs(got - bounds.SourceAspect)
+		if diff > 0.01*bounds.SourceAspect {
+			logging.Warnf("downloadPoster: manual crop aspect mismatch (crop %.4f, downloaded %.4f); falling back", bounds.SourceAspect, got)
+			return false
+		}
+	}
+
+	// Valid() guarantees unit-square containment, so no clamping is needed:
+	// rounding stays within [0,w]×[0,h] (the 1e-9 tolerance cannot edge over a
+	// pixel boundary) — only degenerate rounding needs a guard.
+	fw, fh := float64(w), float64(h)
+	left := int(math.Round(bounds.X * fw))
+	top := int(math.Round(bounds.Y * fh))
+	right := int(math.Round((bounds.X + bounds.Width) * fw))
+	bottom := int(math.Round((bounds.Y + bounds.Height) * fh))
+	if right <= left || bottom <= top {
+		logging.Warnf("downloadPoster: manual crop geometry collapses to empty rect; falling back")
+		return false
+	}
+
+	if err := imageutil.CropPosterWithBounds(d.fs, tempPath, dst, left, top, right, bottom, d.config.MaxPosterHeight); err != nil {
+		logging.Warnf("downloadPoster: manual crop failed: %v", err)
+		return false
+	}
+	return true
+}
+
+// downloadExtrafanart downloads screenshots to the extrafanart subdirectory.
+// Extrafanart is used by media centers like Kodi/Plex for background images.
+// Note: In the original Javinizer, screenshots and extrafanart are the same thing.
 func (d *Downloader) downloadExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, enabled bool, options ...any) ([]DownloadResult, error) {
 	overwriteExisting, dedup := resolveDownloadOptions(options)
 	if !enabled || len(movie.Screenshots) == 0 {

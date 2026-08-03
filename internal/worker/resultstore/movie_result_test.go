@@ -1,6 +1,7 @@
 package resultstore
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -72,6 +73,53 @@ func TestMovieResultClone_PointerFields_Independent(t *testing.T) {
 	}
 	if *orig.TranslationWarning != "translation incomplete" {
 		t.Errorf("original TranslationWarning changed: got %q, want %q", *orig.TranslationWarning, "translation incomplete")
+	}
+}
+
+// The job envelope persists MovieResult via encoding/json; manual poster crop
+// geometry on Movie must survive the marshal/unmarshal round-trip so the
+// review-page crop is still available at organize time after a reload.
+func TestMovieResultEnvelopeRoundTrip_PreservesPosterCropGeometry(t *testing.T) {
+	t.Parallel()
+
+	orig := &MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "ABCD-123"},
+		Movie: &models.Movie{
+			ContentID: "ABCD-123",
+			Poster: models.PosterState{
+				PosterURL:            "https://example.com/poster.jpg",
+				CoverURL:             "https://example.com/cover.jpg",
+				CroppedPosterURL:     "/tmp/crop-abcd123.jpg",
+				ShouldCropPoster:     true,
+				PosterCropBounds:     &models.CropBounds{X: 0, Y: 0.05, Width: 0.42, Height: 0.9},
+				PosterCropSourceFull: true,
+			},
+		},
+		Revision: 3,
+		Status:   models.JobStatusCompleted,
+	}
+
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	var reloaded MovieResult
+	if err := json.Unmarshal(data, &reloaded); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+
+	got := reloaded.Movie.Poster
+	if got.PosterCropBounds == nil {
+		t.Fatal("poster crop bounds lost in job-envelope round-trip")
+	}
+	if *got.PosterCropBounds != *orig.Movie.Poster.PosterCropBounds {
+		t.Errorf("poster crop bounds: got %+v, want %+v", *got.PosterCropBounds, *orig.Movie.Poster.PosterCropBounds)
+	}
+	if !got.PosterCropSourceFull {
+		t.Error("poster_crop_source_full lost in job-envelope round-trip")
+	}
+	if got.CroppedPosterURL != orig.Movie.Poster.CroppedPosterURL {
+		t.Errorf("cropped poster url: got %q, want %q", got.CroppedPosterURL, orig.Movie.Poster.CroppedPosterURL)
 	}
 }
 

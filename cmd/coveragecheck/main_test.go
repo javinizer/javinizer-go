@@ -38,7 +38,7 @@ func TestRunWithAnalyze(t *testing.T) {
 			[]string{"--profile", "coverage.out", "--metric", "line", "--min", "79.9"},
 			&stdout,
 			&stderr,
-			func(path string) (coverage.Summary, error) {
+			func(path string, _ coverage.ReportOptions) (coverage.Summary, error) {
 				called = true
 				assert.Equal(t, "coverage.out", path)
 				return stubSummary(), nil
@@ -59,7 +59,7 @@ func TestRunWithAnalyze(t *testing.T) {
 			[]string{"--metric", "statement", "--min", "90"},
 			&stdout,
 			&stderr,
-			func(string) (coverage.Summary, error) {
+			func(string, coverage.ReportOptions) (coverage.Summary, error) {
 				return stubSummary(), nil
 			},
 		)
@@ -77,7 +77,7 @@ func TestRunWithAnalyze(t *testing.T) {
 			[]string{},
 			&stdout,
 			&stderr,
-			func(string) (coverage.Summary, error) {
+			func(string, coverage.ReportOptions) (coverage.Summary, error) {
 				return coverage.Summary{}, errors.New("boom")
 			},
 		)
@@ -94,7 +94,7 @@ func TestRunWithAnalyze(t *testing.T) {
 			[]string{"--metric", "bogus"},
 			&stdout,
 			&stderr,
-			func(string) (coverage.Summary, error) {
+			func(string, coverage.ReportOptions) (coverage.Summary, error) {
 				return stubSummary(), nil
 			},
 		)
@@ -111,7 +111,7 @@ func TestRunWithAnalyze(t *testing.T) {
 			[]string{"--not-a-flag"},
 			&stdout,
 			&stderr,
-			func(string) (coverage.Summary, error) {
+			func(string, coverage.ReportOptions) (coverage.Summary, error) {
 				t.Fatalf("analyze should not be called when flag parsing fails")
 				return coverage.Summary{}, nil
 			},
@@ -147,6 +147,85 @@ func TestSelectMetric(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `unsupported metric "invalid"`)
 	})
+}
+
+func TestRun_ProjectModeAppliesCodecovIgnores(t *testing.T) {
+	// The ignore list must apply to PROJECT coverage too — otherwise the
+	// local number underreads versus the Codecov report (patch mode already
+	// applied it; project mode did not).
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/go.mod", []byte("module github.com/javinizer/javinizer-go\n"), 0o644))
+	require.NoError(t, os.WriteFile(dir+"/codecov.yml", []byte("coverage:\n  status: {}\nignore:\n  - \"docs/swagger/**\"\n"), 0o644))
+	profilePath := dir + "/coverage.out"
+	require.NoError(t, os.WriteFile(profilePath, []byte(
+		"mode: atomic\n"+
+			"github.com/javinizer/javinizer-go/internal/x/ok.go:4.1,6.1 2 1\n"+
+			"github.com/javinizer/javinizer-go/docs/swagger/docs.go:10.1,12.1 2 0\n"), 0o644))
+
+	origGetwd := osGetwd
+	t.Cleanup(func() { osGetwd = origGetwd })
+	osGetwd = func() (string, error) { return dir, nil }
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"--profile", profilePath, "--min", "100"}, &stdout, &stderr)
+	require.Equal(t, 0, exitCode, "ignored file must not count against project coverage; stderr=%s", stderr)
+	assert.Contains(t, stdout.String(), "Ignored Globs:")
+	assert.Contains(t, stdout.String(), "docs/swagger/**")
+	assert.Contains(t, stdout.String(), "Coverage check PASSED")
+}
+
+func TestRun_ProjectModeWarnsOnGetwdError(t *testing.T) {
+	dir := t.TempDir()
+	profilePath := dir + "/coverage.out"
+	require.NoError(t, os.WriteFile(profilePath, []byte(
+		"mode: atomic\n"+
+			"github.com/javinizer/javinizer-go/internal/x/ok.go:4.1,6.1 2 1\n"), 0o644))
+
+	origGetwd := osGetwd
+	t.Cleanup(func() { osGetwd = origGetwd })
+	osGetwd = func() (string, error) { return "", errors.New("cwd unavailable") }
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"--profile", profilePath, "--min", "1"}, &stdout, &stderr)
+	require.Equal(t, 0, exitCode)
+	assert.Contains(t, stderr.String(), "Warning: cannot determine repo root")
+}
+
+func TestRun_ProjectModeWarnsOnMalformedCodecovYml(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/go.mod", []byte("module github.com/javinizer/javinizer-go\n"), 0o644))
+	require.NoError(t, os.WriteFile(dir+"/codecov.yml", []byte("coverage:\n  status: [unclosed\n"), 0o644))
+	profilePath := dir + "/coverage.out"
+	require.NoError(t, os.WriteFile(profilePath, []byte(
+		"mode: atomic\n"+
+			"github.com/javinizer/javinizer-go/internal/x/ok.go:4.1,6.1 2 1\n"), 0o644))
+
+	origGetwd := osGetwd
+	t.Cleanup(func() { osGetwd = origGetwd })
+	osGetwd = func() (string, error) { return dir, nil }
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"--profile", profilePath, "--min", "1"}, &stdout, &stderr)
+	require.Equal(t, 0, exitCode)
+	assert.Contains(t, stderr.String(), "Warning: cannot load codecov ignore rules")
+}
+
+func TestRun_ProjectModeWarnsOnMissingGoMod(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/codecov.yml", []byte("ignore:\n  - \"docs/**\"\n"), 0o644))
+	profilePath := dir + "/coverage.out"
+	require.NoError(t, os.WriteFile(profilePath, []byte(
+		"mode: atomic\n"+
+			"github.com/javinizer/javinizer-go/internal/x/ok.go:4.1,6.1 2 1\n"), 0o644))
+
+	origGetwd := osGetwd
+	t.Cleanup(func() { osGetwd = origGetwd })
+	osGetwd = func() (string, error) { return dir, nil }
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"--profile", profilePath, "--min", "1"}, &stdout, &stderr)
+	require.Equal(t, 0, exitCode)
+	assert.Contains(t, stderr.String(), "Warning: cannot resolve module prefix")
 }
 
 func TestRun_Wrapper(t *testing.T) {

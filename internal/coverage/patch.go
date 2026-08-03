@@ -117,20 +117,30 @@ func analyzePatch(r io.Reader, opts PatchOptions) (PatchSummary, error) {
 	fileLines := make(map[string]map[int]*lineState)
 	changedFiles := make(map[string]bool)
 
-	// Seed every patch line as a miss first. A changed file that appears in
-	// the coverage profile will overwrite these with covered/partial states
-	// below; a changed file with NO profile entry keeps its misses. Without
-	// this, percentage() sees Total==0 and returns 100%, letting a
-	// fully-untested diff pass the patch gate (the bug CodeRabbit flagged).
-	//
-	// The CLI layer (cmd/coveragecheck) is responsible for filtering out
-	// files in packages excluded from `go test -coverpkg` before calling
-	// this function, so they don't show up as false misses here.
+	// Determine which changed files appear in the profile, then seed patch
+	// lines as misses ONLY for changed files with NO profile entries at all:
+	// a wholly untested changed file must not vanish from the denominator
+	// (the CodeRabbit-flagged 100%-on-empty bug). For files present in the
+	// profile the block walk below decides every line individually, matching
+	// Codecov's mapping: comment/doc/blank lines added by a diff never
+	// intersect a coverage block and are excluded from the ratio, rather than
+	// counting as misses. Without this distinction the local gate fails on
+	// any diff that adds doc comments — diverging from what Codecov reports.
+	profileFiles := make(map[string]bool)
+	for _, entry := range merged {
+		repoPath := toRepoPath(entry.file)
+		if !isIgnored(repoPath) {
+			profileFiles[repoPath] = true
+		}
+	}
 	for repoPath, lines := range opts.PatchLines {
 		if isIgnored(repoPath) {
 			continue
 		}
 		changedFiles[repoPath] = true
+		if profileFiles[repoPath] {
+			continue
+		}
 		state := make(map[int]*lineState, len(lines))
 		for line := range lines {
 			state[line] = &lineState{}
@@ -182,6 +192,12 @@ func analyzePatch(r io.Reader, opts PatchOptions) (PatchSummary, error) {
 			summary.Total++
 			switch {
 			case state.hasCovered && state.hasUncovered:
+				// Partial: the line sits on a boundary between a covered and
+				// an uncovered Go cover block (Go emits per-clause blocks, so
+				// e.g. an "} else if" line ends one block and starts another).
+				// Codecov's patch ratio counts partial lines in the
+				// denominator but NOT the numerator — they read as not-hit.
+				// Mirror that so the local gate predicts Codecov exactly.
 				summary.Partial++
 			case state.hasCovered:
 				summary.Hit++

@@ -55,6 +55,8 @@ func Run(opts Options) error {
 		startState = options.Maximised
 	}
 
+	saveDialog := &wailsSaveFileDialog{}
+
 	return wails.Run(&options.App{
 		Title:                    "Javinizer",
 		Width:                    width,
@@ -62,13 +64,14 @@ func Run(opts Options) error {
 		MinWidth:                 900,
 		MinHeight:                600,
 		BackgroundColour:         options.NewRGB(245, 245, 247),
-		AssetServer:              &assetserver.Options{Handler: newReverseProxyHandler(srv.BaseURL())},
+		AssetServer:              &assetserver.Options{Handler: newReverseProxyHandler(srv.BaseURL(), saveDialog.ChooseSavePath)},
 		LogLevel:                 logger.INFO,
 		LogLevelProduction:       logger.WARNING,
 		EnableDefaultContextMenu: true,
 		WindowStartState:         startState,
 		OnStartup: func(wctx context.Context) {
 			relauncher.setContext(wctx)
+			saveDialog.setContext(wctx)
 		},
 		OnBeforeClose: func(wctx context.Context) bool {
 			w, h := wailsruntime.WindowGetSize(wctx)

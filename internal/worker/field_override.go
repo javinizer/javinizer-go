@@ -143,15 +143,23 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 	case "poster_url":
 		movie.Poster.PosterURL = result.PosterURL
 		setFieldSource("poster_url")
+		clearPosterCropGeometry(movie) // new source: stored geometry is stale
 	case "cover_url":
 		movie.Poster.CoverURL = result.CoverURL
 		setFieldSource("cover_url")
+		// Only clears when the cover IS the effective poster source
+		// (poster_url empty): swapping fanart under an explicit poster must
+		// keep a still-valid manual crop.
+		if movie.Poster.PosterURL == "" {
+			clearPosterCropGeometry(movie)
+		}
 	case "trailer_url":
 		movie.TrailerURL = result.TrailerURL
 		setFieldSource("trailer_url")
 	case "should_crop_poster":
 		movie.Poster.ShouldCropPoster = result.ShouldCropPoster
 		setFieldSource("should_crop_poster")
+		clearPosterCropGeometry(movie) // intent change invalidates geometry
 	default:
 		return fmt.Errorf("unhandled field: %s", fieldKey)
 	}

@@ -47,6 +47,61 @@ describe('overlayFieldOverride', () => {
 		expect(target.maker).toBe('New Maker');
 	});
 
+	it('poster source override clears pending crop geometry (mirrors backend)', () => {
+		const target = makeMovie({
+			poster_url: 'https://old/poster.jpg',
+			poster_crop_bounds: { x: 0.1, y: 0.1, width: 0.4, height: 0.9 },
+			poster_crop_source_full: true,
+		});
+		const src = makeMovie({ poster_url: 'https://new/poster.jpg' });
+		overlayFieldOverride(target, 'poster_url', src);
+		expect(target.poster_url).toBe('https://new/poster.jpg');
+		expect(target.poster_crop_bounds).toBeNull();
+		expect(target.poster_crop_source_full).toBe(false);
+	});
+
+	it('should_crop_poster override clears pending crop geometry', () => {
+		const target = makeMovie({
+			poster_crop_bounds: { x: 0.1, y: 0.1, width: 0.4, height: 0.9 },
+			poster_crop_source_full: true,
+		});
+		const src = makeMovie({ should_crop_poster: true });
+		overlayFieldOverride(target, 'should_crop_poster', src);
+		expect(target.should_crop_poster).toBe(true);
+		expect(target.poster_crop_bounds).toBeNull();
+	});
+
+	it('cover_url override keeps geometry when an explicit poster exists', () => {
+		const target = makeMovie({
+			poster_url: 'https://cdn.example/explicit.jpg',
+			poster_crop_bounds: { x: 0.1, y: 0.1, width: 0.4, height: 0.9 },
+			poster_crop_source_full: true,
+		});
+		const src = makeMovie({ cover_url: 'https://cdn.example/new-cover.jpg' });
+		overlayFieldOverride(target, 'cover_url', src);
+		expect(target.cover_url).toBe('https://cdn.example/new-cover.jpg');
+		expect(target.poster_crop_bounds).toEqual({ x: 0.1, y: 0.1, width: 0.4, height: 0.9 });
+	});
+
+	it('cover_url override clears geometry when cover is the poster source', () => {
+		const target = makeMovie({
+			poster_url: '',
+			poster_crop_bounds: { x: 0.1, y: 0.1, width: 0.4, height: 0.9 },
+		});
+		const src = makeMovie({ cover_url: 'https://cdn.example/new-cover.jpg' });
+		overlayFieldOverride(target, 'cover_url', src);
+		expect(target.poster_crop_bounds).toBeNull();
+	});
+
+	it('non-poster overrides keep pending crop geometry', () => {
+		const target = makeMovie({
+			poster_crop_bounds: { x: 0.1, y: 0.1, width: 0.4, height: 0.9 },
+		});
+		const src = makeMovie({ maker: 'New Maker' });
+		overlayFieldOverride(target, 'maker', src);
+		expect(target.poster_crop_bounds).toEqual({ x: 0.1, y: 0.1, width: 0.4, height: 0.9 });
+	});
+
 	it('unrelated fields on target are preserved when overriding maker', () => {
 		const target = makeMovie({ director: 'Orig Director', maker: 'Orig Maker' });
 		const src = makeMovie({ maker: 'New Maker', director: 'Src Director' });

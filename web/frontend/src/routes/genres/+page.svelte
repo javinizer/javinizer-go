@@ -6,6 +6,8 @@
 	import { apiClient } from '$lib/api/client';
 	import type { GenreReplacement, GenreReplacementUpdateRequest, ImportResponse } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
+	import { confirmDialog } from '$lib/stores/dialog.svelte';
+	import { saveJsonFile } from '$lib/utils/download';
 	import { Trash2, Plus, Loader2, Search, X, Check, Pencil, ArrowDownUp, ChevronsDownUp, ArrowLeft, Tags, Download, Upload, Ban, Star } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -95,18 +97,15 @@
 	}));
 
 	const exportMutation = createMutation(() => ({
-		mutationFn: () => apiClient.exportGenreReplacements(),
-		onSuccess: async (data) => {
-			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = 'genre-replacements.json';
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			URL.revokeObjectURL(url);
-			toastStore.success(m.genres_exported({ count: data.length }), 3000);
+		mutationFn: async () => {
+			const data = await apiClient.exportGenreReplacements();
+			const result = await saveJsonFile('genre-replacements.json', data);
+			return { count: data.length, saved: result.saved, path: result.path };
+		},
+		onSuccess: (res) => {
+			if (!res.saved) return;
+			const msg = m.genres_exported({ count: res.count });
+			toastStore.success(res.path ? `${msg} — ${res.path}` : msg, 3000);
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || m.genres_export_failed(), 4000);
@@ -323,7 +322,7 @@
 				return;
 			}
 
-			if (!confirm(m.genres_import_confirm({ count: replacements.length }))) return;
+			if (!(await confirmDialog(m.genres_import(), m.genres_import_confirm({ count: replacements.length })))) return;
 
 			importMutation.mutate({ replacements });
 		} catch (err) {

@@ -55,7 +55,7 @@ github.com/javinizer/javinizer-go/internal/desktop/server.go:10.1,12.1 1 1
 		t.Fatalf("Total = %d, want 10 (8 paths + 2 server)", summary.Total)
 	}
 	if summary.Hit != 5 {
-		t.Fatalf("Hit = %d, want 5 (L20-21 hit, L26 hit, L10-11 hit)", summary.Hit)
+		t.Fatalf("Hit = %d, want 5 (L20-21, L26, L10-11 hit; L27 partial stays out of the numerator like Codecov)", summary.Hit)
 	}
 	if summary.Miss != 4 {
 		t.Fatalf("Miss = %d, want 4 (L23-24 miss, L30-31 miss)", summary.Miss)
@@ -65,6 +65,42 @@ github.com/javinizer/javinizer-go/internal/desktop/server.go:10.1,12.1 1 1
 	}
 	if got := summary.Percent; got < 49.9 || got > 50.1 {
 		t.Fatalf("Percent = %.2f, want about 50.0 (5 hit / 10 total)", got)
+	}
+}
+
+func TestAnalyzePatch_NonEntryLinesInInstrumentedFileAreExcluded(t *testing.T) {
+	t.Parallel()
+
+	// Codecov parity: only lines a coverage block maps to count toward the
+	// ratio. Doc-comment/blank lines added by the diff have no coverage entry
+	// and must be EXCLUDED — previously every patch line was seeded as a miss,
+	// so any diff adding doc comments failed the local strict gate while
+	// Codecov reported 100%.
+	profile := strings.NewReader(`mode: count
+github.com/javinizer/javinizer-go/internal/desktop/paths.go:20.1,21.1 1 1
+`)
+
+	patchLines := PatchLineSet{
+		// 18-19: doc comment lines (no block ever spans them); 20-21: statements (hit).
+		"internal/desktop/paths.go": {18: true, 19: true, 20: true, 21: true},
+	}
+
+	summary, err := analyzePatch(profile, PatchOptions{
+		PatchLines:   patchLines,
+		ModulePrefix: testModulePrefix,
+	})
+	if err != nil {
+		t.Fatalf("analyzePatch() error = %v", err)
+	}
+
+	if summary.Total != 2 {
+		t.Fatalf("Total = %d, want 2 (only the statement lines have coverage entries)", summary.Total)
+	}
+	if summary.Hit != 2 || summary.Miss != 0 {
+		t.Fatalf("Hit = %d, Miss = %d, want 2 hit / 0 miss", summary.Hit, summary.Miss)
+	}
+	if summary.Percent != 100 {
+		t.Fatalf("Percent = %.2f, want 100.00", summary.Percent)
 	}
 }
 

@@ -277,7 +277,9 @@ func (s *stubControlledJob) GetResults() []resultstore.MovieResult              
 // JobEditor methods (required by BatchJobInterface)
 func (s *stubControlledJob) UpdateMovie(context.Context, string, *models.Movie) error { return nil }
 func (s *stubControlledJob) ExcludeFile(string)                                       {}
-func (s *stubControlledJob) UpdatePosterCrop(string, string) error                    { return nil }
+func (s *stubControlledJob) UpdatePosterCrop(string, string, *models.CropBounds, bool) error {
+	return nil
+}
 func (s *stubControlledJob) UpdatePosterFromURL(context.Context, string, string, string) error {
 	return nil
 }

@@ -259,6 +259,7 @@ func TestMiss6_OrganizeJob_RunningJob(t *testing.T) {
 
 	job := batchDeps.Deps().GetJobStore().CreateJobBatch([]string{})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/api/v1/batch/:id/organize", organizeJob(batchDeps))
@@ -870,6 +871,7 @@ func TestOrganizeJob_Miss3_JobAlreadyRunning(t *testing.T) {
 		StartedAt:     time.Now(),
 	})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/batch/:id/organize", organizeJob(testkit.GetTestRuntime(deps)))
@@ -1269,6 +1271,7 @@ func TestOrganizeJob_Miss4_RunningJob(t *testing.T) {
 
 	job := batchDeps.Deps().GetJobStore().CreateJobBatch([]string{})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/api/v1/batch/:id/organize", organizeJob(batchDeps))

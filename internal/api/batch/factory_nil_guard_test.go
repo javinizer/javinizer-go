@@ -147,6 +147,7 @@ func TestBatchRescrapeMovies_RunningJob_409(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/batch/:id/movies/batch-rescrape", batchRescrapeMovies(testkit.GetTestRuntime(deps)))

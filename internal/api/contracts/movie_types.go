@@ -1,5 +1,11 @@
 package contracts
 
+import (
+	"encoding/json"
+
+	"github.com/javinizer/javinizer-go/internal/models"
+)
+
 // ScrapeRequest represents the scrape request payload
 type ScrapeRequest struct {
 	ID               string   `json:"id" binding:"required" example:"IPX-535"`
@@ -48,6 +54,41 @@ type MoviesResponse struct {
 // UpdateMovieRequest represents the update movie request payload
 type UpdateMovieRequest struct {
 	Movie *MovieView `json:"movie" binding:"required"`
+	// PosterCropBoundsFieldPresent records whether the movie payload contained
+	// the poster_crop_bounds key (even as an explicit null). PATCH semantics
+	// per the poster-crop-persistence contract: omitted preserves stored
+	// geometry; explicit null clears it. Not part of the wire format.
+	PosterCropBoundsFieldPresent bool `json:"-"`
+}
+
+// UnmarshalJSON decodes the request while tracking presence of the
+// poster_crop_bounds key on the nested movie object — required to
+// distinguish an omitted field (preserve stored geometry) from an explicit
+// null (clear geometry).
+func (r *UpdateMovieRequest) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Movie json.RawMessage `json:"movie"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.PosterCropBoundsFieldPresent = false
+	if string(raw.Movie) == "null" || len(raw.Movie) == 0 {
+		r.Movie = nil // binding:"required" reports this downstream
+		return nil
+	}
+	var mv MovieView
+	if err := json.Unmarshal(raw.Movie, &mv); err != nil {
+		return err
+	}
+	r.Movie = &mv
+	var keys map[string]json.RawMessage
+	// raw.Movie decoded into a struct above, so it is a JSON object and the
+	// map decode cannot fail; on the impossible failure the key reads absent
+	// (the safe default: preserve stored geometry).
+	_ = json.Unmarshal(raw.Movie, &keys)
+	_, r.PosterCropBoundsFieldPresent = keys["poster_crop_bounds"]
+	return nil
 }
 
 // PosterCropRequest represents manual poster crop coordinates in source-image pixels.
@@ -61,9 +102,27 @@ type PosterCropRequest struct {
 	MaxPosterHeight *int `json:"max_poster_height,omitempty" binding:"omitempty,min=0"`
 }
 
-// PosterCropResponse returns the updated temp cropped poster URL.
+// PosterCropResponse returns the updated temp cropped poster URL plus the
+// effective normalized crop geometry (fractions of the full-size source),
+// or null when the crop was measured against a legacy already-cropped
+// preview and no applyable geometry exists.
 type PosterCropResponse struct {
-	CroppedPosterURL string `json:"cropped_poster_url"`
+	CroppedPosterURL string             `json:"cropped_poster_url"`
+	PosterCropBounds *models.CropBounds `json:"poster_crop_bounds"`
+	// ShouldCropPoster echoes the stored crop intent after a manual crop
+	// (always false: the manual crop replaces the scraper auto-crop), so
+	// clients can sync their pending-edits overlay from this response alone.
+	ShouldCropPoster bool `json:"should_crop_poster"`
+	// PosterCropSourceFull echoes whether the bounds were measured against the
+	// full-size source. Clients must round-trip it with the bounds: the apply
+	// gate refuses geometry without it.
+	PosterCropSourceFull bool `json:"poster_crop_source_full"`
+	// Original poster fields echo the server-side pre-edit snapshot
+	// (backupPosterOriginals), so the client reset baseline never has to guess.
+	// Empty when no snapshot was needed (no prior poster).
+	OriginalPosterURL        string `json:"original_poster_url"`
+	OriginalCroppedPosterURL string `json:"original_cropped_poster_url"`
+	OriginalShouldCropPoster *bool  `json:"original_should_crop_poster"`
 }
 
 // PosterFromURLRequest represents a request to download a poster from a URL.

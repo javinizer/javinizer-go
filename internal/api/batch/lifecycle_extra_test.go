@@ -120,6 +120,7 @@ func TestDeleteBatchJob_RunningJobRejected(t *testing.T) {
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-700.mp4"})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.DELETE("/batch/:id", deleteBatchJob(testkit.GetTestRuntime(deps)))

@@ -280,7 +280,7 @@ func TestStandaloneJob_UpdatePosterCrop(t *testing.T) {
 
 	ej, ok := jq.GetJobForEdit(job.ID.String())
 	require.True(t, ok)
-	err := ej.UpdatePosterCrop("UPC-001", "https://example.com/cropped.jpg")
+	err := ej.UpdatePosterCrop("UPC-001", "https://example.com/cropped.jpg", nil, false)
 	require.NoError(t, err)
 
 	result, _ := job.results.GetMovieResult("file1.mp4")

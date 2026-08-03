@@ -383,6 +383,12 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			establishScrapedBaseline(movieResult.Movie, movieResult.Movie)
 		}
 
+		// A rescrape refreshes the poster source: any manual crop geometry
+		// measured against the previous source is stale. Clear it explicitly
+		// (including same-URL refreshes) rather than relying on the merge
+		// engine incidentally dropping the runtime-only field.
+		clearPosterCropGeometry(movieResult.Movie)
+
 		// Commit result
 		outcome, commitErr := p.CompleteRescrape(inputs, lookup.FilePath, movieResult, lookup.CapturedRevision, newMovieID, lookup.OldMovieID)
 		if commitErr != nil {

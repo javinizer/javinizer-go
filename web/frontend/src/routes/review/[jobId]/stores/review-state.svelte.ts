@@ -52,6 +52,7 @@ import { calculateCompleteness, type CompletenessTier } from '$lib/utils/complet
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
 import { buildMovieOverride } from './save-helpers';
+import { clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
 import * as m from '$lib/paraglide/messages';
 
 interface MovieGroup {
@@ -792,11 +793,19 @@ export function createReviewState(pageStore: Page) {
 	const canResetPoster = $derived.by(() => {
 		if (!currentResult || !currentMovie) return false;
 		const original = posterBaseline;
-		if (!original || !original.poster_url) return false;
+		if (!original) return false;
+		// No scraped poster baseline AND no pending crop: nothing to restore.
+		// Pending geometry alone makes Reset meaningful even for cover-fallback
+		// movies (empty baseline poster_url) — it restores the scraped intent
+		// and clears the crop.
+		if (!original.poster_url && currentMovie.poster_crop_bounds == null) return false;
 		return (
 			currentMovie.poster_url !== original.poster_url ||
 			currentMovie.cropped_poster_url !== original.cropped_poster_url ||
-			currentMovie.should_crop_poster !== original.should_crop_poster
+			currentMovie.should_crop_poster !== original.should_crop_poster ||
+			// pending manual crop geometry is drift from the baseline even when
+			// URL/intent fields happen to match it
+			currentMovie.poster_crop_bounds != null
 		);
 	});
 
@@ -811,22 +820,48 @@ export function createReviewState(pageStore: Page) {
 		if (!currentResult || !currentMovie) return;
 
 		const original = posterBaseline;
-		if (!original || !original.poster_url) return;
+		if (!original) return;
+		// see canResetPoster: pending geometry alone makes Reset meaningful
+		if (!original.poster_url && currentMovie.poster_crop_bounds == null) return;
 
 		const posterChanged =
 			currentMovie.poster_url !== original.poster_url ||
 			currentMovie.cropped_poster_url !== original.cropped_poster_url ||
-			currentMovie.should_crop_poster !== original.should_crop_poster;
+			currentMovie.should_crop_poster !== original.should_crop_poster ||
+			currentMovie.poster_crop_bounds != null;
 		if (!posterChanged) return;
 
-		if (original.poster_url !== currentMovie.poster_url) {
+		// No restorable URL when the baseline is empty (cover-only fallback).
+		if (original.poster_url !== '' && original.poster_url !== currentMovie.poster_url) {
 			mutations.applyPosterFromUrl(currentResult!.result_id, original.poster_url);
 		} else {
-			updateCurrentMovie({
-				...currentMovie,
-				cropped_poster_url: original.cropped_poster_url,
-				should_crop_poster: original.should_crop_poster,
-			});
+			updateCurrentMovie(
+				// explicit null: the next save clears stored crop geometry on the
+				// server (an omitted key would preserve it)
+				clearCropGeometry({
+					...currentMovie,
+					cropped_poster_url: original.cropped_poster_url,
+					should_crop_poster: original.should_crop_poster,
+				}),
+			);
+			// Multipart: poster state is movie-wide and each part's save PATCHes
+			// all parts — propagate the reset into sibling overlays too, or a
+			// sibling's pending edit can out-race this part's save and restore
+			// the geometry that was just cleared.
+			if (job) {
+				for (const fp of siblingResultFilePaths(job.results as Record<string, FileResult>, currentResult!.result_id)) {
+					if (fp === currentResult!.file_path) continue;
+					const sibling = editedMovies.get(fp);
+					if (sibling) {
+						editedMovies.set(fp, clearCropGeometry({
+							...sibling,
+							poster_url: original.poster_url,
+							cropped_poster_url: original.cropped_poster_url,
+							should_crop_poster: original.should_crop_poster,
+						}));
+					}
+				}
+			}
 			clearPosterPreviewOverride();
 		}
 	}

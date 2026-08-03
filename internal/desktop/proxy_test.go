@@ -20,7 +20,7 @@ func TestNewReverseProxyHandler_ForwardsGETRoot(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	h := newReverseProxyHandler(backend.URL)
+	h := newReverseProxyHandler(backend.URL, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Host = "wails.localhost"
@@ -61,7 +61,7 @@ func TestNewReverseProxyHandler_ForwardsPOSTAPIWithBody(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	h := newReverseProxyHandler(backend.URL)
+	h := newReverseProxyHandler(backend.URL, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"hunter2"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -94,7 +94,7 @@ func TestNewReverseProxyHandler_ForwardsPathsAndQuery(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	h := newReverseProxyHandler(backend.URL)
+	h := newReverseProxyHandler(backend.URL, nil)
 
 	cases := []struct {
 		name string
@@ -132,7 +132,7 @@ func TestNewReverseProxyHandler_PassesBackendStatusThrough(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	h := newReverseProxyHandler(backend.URL)
+	h := newReverseProxyHandler(backend.URL, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/no-such-route", nil)
 	req.Host = "wails.localhost"
@@ -156,7 +156,7 @@ func TestNewReverseProxyHandler_ForwardsHeaders(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	h := newReverseProxyHandler(backend.URL)
+	h := newReverseProxyHandler(backend.URL, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/movies", nil)
 	req.Header.Set("Authorization", "Bearer test-token")
@@ -173,7 +173,7 @@ func TestNewReverseProxyHandler_ForwardsHeaders(t *testing.T) {
 }
 
 func TestNewReverseProxyHandler_InvalidTargetReturns502(t *testing.T) {
-	h := newReverseProxyHandler("://not-a-url")
+	h := newReverseProxyHandler("://not-a-url", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
@@ -283,7 +283,7 @@ func TestNewReverseProxyHandler_RewritesSessionCookiesFromBackend(t *testing.T) 
 	}))
 	defer backend.Close()
 
-	h := newReverseProxyHandler(backend.URL)
+	h := newReverseProxyHandler(backend.URL, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
 	req.Host = "wails.localhost"

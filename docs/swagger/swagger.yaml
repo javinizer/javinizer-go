@@ -778,9 +778,14 @@ definitions:
       original_title:
         example: 美人
         type: string
-      poster_url:
+      poster_crop_bounds:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.CropBounds'
         description: Poster / cover (flattened from PosterState — no custom marshaler
           needed)
+      poster_crop_source_full:
+        type: boolean
+      poster_url:
         type: string
       rating_score:
         type: number
@@ -1139,6 +1144,30 @@ definitions:
     properties:
       cropped_poster_url:
         type: string
+      original_cropped_poster_url:
+        type: string
+      original_poster_url:
+        description: |-
+          Original poster fields echo the server-side pre-edit snapshot
+          (backupPosterOriginals), so the client reset baseline never has to guess.
+          Empty when no snapshot was needed (no prior poster).
+        type: string
+      original_should_crop_poster:
+        type: boolean
+      poster_crop_bounds:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.CropBounds'
+      poster_crop_source_full:
+        description: |-
+          PosterCropSourceFull echoes whether the bounds were measured against the
+          full-size source. Clients must round-trip it with the bounds: the apply
+          gate refuses geometry without it.
+        type: boolean
+      should_crop_poster:
+        description: |-
+          ShouldCropPoster echoes the stored crop intent after a manual crop
+          (always false: the manual crop replaces the scraper auto-crop), so
+          clients can sync their pending-edits overlay from this response alone.
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.PosterFromURLRequest:
     properties:
@@ -2347,6 +2376,24 @@ definitions:
         type: integer
       window_width:
         type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.CropBounds:
+    properties:
+      height:
+        type: number
+      source_aspect:
+        description: |-
+          SourceAspect is the width/height ratio of the source image the crop was
+          measured against. The apply phase refuses geometry whose aspect no
+          longer matches the downloaded image, so same-URL source swaps fall back
+          to pre-change behavior instead of cropping the wrong image.
+        type: number
+      width:
+        type: number
+      x:
+        type: number
+      "y":
+        type: number
     type: object
   github_com_javinizer_javinizer-go_internal_models.DeepLMode:
     enum:

@@ -35,6 +35,14 @@ type cropResult struct {
 	FullPath string
 	// CroppedURL is the URL that serves the cropped poster via the API.
 	CroppedURL string
+	// SourceFull is true when the crop was measured against the full-size
+	// source image (<id>-full.jpg); false means the legacy already-cropped
+	// fallback (<id>.jpg) served as the source.
+	SourceFull bool
+	// SourceWidth/SourceHeight are the pixel dimensions of the image the crop
+	// was measured against; zero when they could not be decoded.
+	SourceWidth  int
+	SourceHeight int
 }
 
 // PosterManagerInterface defines the contract for poster operations.
@@ -97,10 +105,12 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 
 	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
 	sourcePath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
+	sourceIsFull := true
 
 	// Fallback for older jobs where the full image was cleaned up.
 	if _, err := pm.fs.Stat(sourcePath); err != nil {
 		sourcePath = filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+		sourceIsFull = false
 	}
 
 	if _, err := pm.fs.Stat(sourcePath); err != nil {
@@ -128,11 +138,19 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 
 	croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg?v=%d", url.PathEscape(jobID), url.PathEscape(posterID), time.Now().UnixMilli())
 
-	return &cropResult{
+	result := &cropResult{
 		CroppedPath: croppedPath,
 		FullPath:    sourcePath,
 		CroppedURL:  croppedURL,
-	}, nil
+		SourceFull:  sourceIsFull,
+	}
+	// Record the source dimensions; a decode failure leaves them zero and the
+	// caller treats the geometry as not applyable (pre-change behavior).
+	if w, h, err := imageutil.ImageDimensions(pm.fs, sourcePath); err == nil {
+		result.SourceWidth = w
+		result.SourceHeight = h
+	}
+	return result, nil
 }
 
 // DownloadFromURL downloads a poster image from rawURL, validates the URL

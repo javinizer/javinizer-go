@@ -73,6 +73,8 @@ jobs:
       - name: Resolve release metadata
         id: meta
         shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
 
@@ -120,7 +122,7 @@ jobs:
             fi
           elif [[ "${event_name}" == "workflow_dispatch" ]]; then
             release_type="${{ inputs.release_type }}"
-            input_version="${{ inputs.version }}"
+            input_version="${INPUT_VERSION}"
             create_release="${{ inputs.create_release }}"
             draft="${{ inputs.draft }}"
             is_nightly="false"
@@ -130,6 +132,7 @@ jobs:
               prerelease="true"
               publish_latest="false"
               is_nightly="true"
+              create_release="false"
             else
               case "${release_type}" in
                 stable)
@@ -154,6 +157,7 @@ jobs:
                   version="${input_version}"
                   prerelease="true"
                   publish_latest="false"
+                  create_release="false"
                   ;;
                 *)
                   echo "Unknown release type: ${release_type}" >&2
@@ -174,7 +178,9 @@ jobs:
               exit 1
             fi
           else
-            if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            release_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+            describe_re='-[0-9]+-g[0-9A-Fa-f]+(-dirty)?$'
+            if [[ ! "${version}" =~ ${release_re} ]] || [[ "${version}" =~ ${describe_re} ]]; then
               echo "Version does not match expected format: ${version}" >&2
               exit 1
             fi
@@ -184,6 +190,16 @@ jobs:
             if [[ "${tracked_version}" != "${version}" ]]; then
               echo "Tracked version (${tracked_version}) does not match requested release version (${version})" >&2
               exit 1
+            fi
+          fi
+
+          if [[ "${event_name}" == "workflow_dispatch" && -n "${input_version:-}" ]]; then
+            if git rev-parse -q --verify "refs/tags/${input_version}" >/dev/null 2>&1; then
+              tag_commit="$(git rev-list -n 1 "refs/tags/${input_version}")"
+              if [[ "${tag_commit}" != "${GITHUB_SHA}" ]]; then
+                echo "Tag ${input_version} points at ${tag_commit} but this run checked out ${GITHUB_SHA}; re-run the workflow from that tag/ref" >&2
+                exit 1
+              fi
             fi
           fi
 
@@ -330,6 +346,20 @@ jobs:
             -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
             -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" \
             -o "dist/${output}" ./cmd/javinizer
+
+      - name: Verify binary version
+        if: matrix.artifact_suffix == 'linux-amd64'
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          actual="$(./dist/${{ env.BINARY_NAME }}-${{ matrix.artifact_suffix }} version --short)"
+          if [[ "${actual}" != "${EXPECTED_VERSION}" ]]; then
+            echo "Binary version mismatch: got '${actual}', want '${EXPECTED_VERSION}'"
+            exit 1
+          fi
+          echo "Binary version OK: ${actual}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -807,6 +837,27 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.suffix }}
           cache-to: type=gha,scope=${{ matrix.suffix }},mode=max
 
+      - name: Verify pushed image version
+        if: needs.prepare-release.outputs.create_release == 'true' || needs.prepare-release.outputs.is_nightly == 'true'
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.prepare-release.outputs.version }}
+          IMAGE_REF: ${{ steps.image.outputs.name }}:${{ needs.prepare-release.outputs.docker_version }}-${{ matrix.suffix }}
+        run: |
+          set -euo pipefail
+          docker pull "${IMAGE_REF}"
+          actual="$(docker run --rm --entrypoint /usr/local/bin/javinizer "${IMAGE_REF}" version --short)"
+          if [[ "${actual}" != "${EXPECTED_VERSION}" ]]; then
+            echo "Image binary version mismatch: got '${actual}', want '${EXPECTED_VERSION}'"
+            exit 1
+          fi
+          label="$(docker image inspect "${IMAGE_REF}" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
+          if [[ "${label}" != "${EXPECTED_VERSION}" ]]; then
+            echo "Image label version mismatch: got '${label}', want '${EXPECTED_VERSION}'"
+            exit 1
+          fi
+          echo "Image version OK: ${actual} (label: ${label})"
+
   merge-manifest:
     name: Merge multi-arch manifest (GHCR)
     needs: [prepare-release, build-docker]
@@ -863,7 +914,7 @@ jobs:
           prerelease="${{ needs.prepare-release.outputs.prerelease }}"
 
           tags=("${ver}")
-          [[ "${publish_latest}" == "true" ]] && tags+=("latest")
+          [[ "${publish_latest}" == "true" && "${prerelease}" != "true" ]] && tags+=("latest")
           [[ "${is_nightly}" == "true" ]] && tags+=("nightly" "nightly-${commit}")
           if [[ "${prerelease}" != "true" && -n "${major}" ]]; then
             tags+=("v${major}")

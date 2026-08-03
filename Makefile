@@ -35,6 +35,7 @@ help:
 	@echo "  make coverage-check     - Enforce 75%% Codecov-compatible line coverage"
 	@echo "  make coverage-patch     - Show patch coverage (new/changed lines vs main)"
 	@echo "  make coverage-patch-check - Enforce 80%% patch coverage (mirrors codecov/patch)"
+	@echo "  make coverage-patch-strict - Enforce 100%% patch coverage (PR completion bar)"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  make fmt                - Format code with go fmt"
@@ -166,7 +167,19 @@ coverage:
 	@echo "Running tests and generating coverage report..."
 	@rm -f coverage.out
 	@pkgs=$$(go list ./... | grep -Ev '(/cmd/(coveragecheck|javinizer-e2e)$$)|(/internal/coverage$$)|(/(mocks|tui|docs|testutil|web)(/|$$))'); \
-	go test -covermode=atomic -coverprofile=coverage.out -coverpkg=$$(echo $$pkgs | tr ' ' ',') -count=1 $$pkgs 2>&1 | awk '/^(ok|github)/ { print; fflush() }'
+	tmp=$$(mktemp); \
+	go test -covermode=atomic -coverprofile=coverage.out -coverpkg=$$(echo $$pkgs | tr ' ' ',') -count=1 $$pkgs >$$tmp 2>&1; status=$$?; \
+	awk '/^(ok|github|--- FAIL|FAIL|panic)/ { print; fflush() }' $$tmp; \
+	if [ $$status -ne 0 ]; then \
+		echo ""; \
+		echo "--- full test output (run failed; the filtered summary above hides assertion details) ---" >&2; \
+		cat $$tmp; \
+		rm -f $$tmp; \
+		echo ""; \
+		echo "✗ Coverage test run failed (exit $$status) — coverage.out is PARTIAL and would report phantom misses" >&2; \
+		exit $$status; \
+	fi; \
+	rm -f $$tmp
 	@echo ""
 	@go run ./cmd/coveragecheck --metric line --profile coverage.out 2>/dev/null
 
@@ -197,6 +210,11 @@ coverage-patch: coverage
 # codecov/patch failures locally instead of after a CI round-trip.
 coverage-patch-check: coverage
 	@go run ./cmd/coveragecheck --patch --profile coverage.out --base main --min 80
+
+# Strict patch gate — 100%% of changed lines must be covered. This mirrors the
+# PR-completion bar (resolve-pr workflow); codecov.yml's 80%% remains the CI floor.
+coverage-patch-strict: coverage
+	@go run ./cmd/coveragecheck --patch --profile coverage.out --base main --min 100
 
 # Test coverage goal - enforces 90% line coverage
 test-coverage: coverage

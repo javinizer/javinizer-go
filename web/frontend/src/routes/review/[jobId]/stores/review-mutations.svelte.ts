@@ -21,6 +21,12 @@ import {
 	type PosterCropMetrics,
 } from '../review-utils';
 import { overlayFieldOverride } from './overlay-field-override';
+import {
+	applyCropEcho,
+	clearCropGeometry,
+	rescrapeClearedMovieKeys,
+	siblingResultFilePaths,
+} from './poster-crop-sync';
 import { buildMovieToSave } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
@@ -96,37 +102,38 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		onSuccess: (data: PosterFromURLResponse, { resultId }) => {
 			const currentJob = deps.getJob();
 			if (currentJob) {
+				// The backend applies the new poster to every part of the movie —
+				// sync siblings too, or a stale sibling overlay would re-upload the
+				// old poster (and crop state) on the next save.
+				const partPaths = siblingResultFilePaths(
+					currentJob.results as Record<string, FileResult>,
+					resultId,
+				);
+				const fromUrlEcho = (movie: Movie): Movie =>
+					clearCropGeometry({
+						...movie,
+						poster_url: data.poster_url,
+						cropped_poster_url: data.cropped_poster_url,
+						should_crop_poster: false,
+					});
 				const updatedJob: BatchJobResponse = {
 					...currentJob,
 					results: { ...currentJob.results },
 				};
-				for (const [filePath, result] of Object.entries(updatedJob.results)) {
-					const r = result as FileResult;
-					if (r.result_id === resultId && r.movie) {
-						updatedJob.results[filePath] = {
-							...r,
-							movie: {
-								...r.movie,
-								poster_url: data.poster_url,
-								cropped_poster_url: data.cropped_poster_url,
-								should_crop_poster: false,
-							},
-						};
+				for (const filePath of partPaths) {
+					const r = updatedJob.results[filePath] as FileResult;
+					if (r?.movie) {
+						updatedJob.results[filePath] = { ...r, movie: fromUrlEcho(r.movie) };
 					}
 				}
 				deps.skipJobSync();
 				deps.setJob(updatedJob);
 
 				const editedMovies = deps.getEditedMovies();
-				for (const [filePath, movie] of editedMovies) {
-					const editedResultId = currentJob.results?.[filePath]?.result_id;
-					if (editedResultId === resultId) {
-						editedMovies.set(filePath, {
-							...movie,
-							poster_url: data.poster_url,
-							cropped_poster_url: data.cropped_poster_url,
-							should_crop_poster: false,
-						});
+				for (const filePath of partPaths) {
+					const movie = editedMovies.get(filePath);
+					if (movie) {
+						editedMovies.set(filePath, fromUrlEcho(movie));
 					}
 				}
 			}
@@ -233,7 +240,39 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		}) => {
 			return deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight);
 		},
-		onSuccess: (response: PosterCropResponse) => {
+		onSuccess: (response: PosterCropResponse, { resultId }) => {
+			// Sync the server-echoed crop state into the visible job-result state
+			// and the pending editedMovies overlay, so a pre-organize saveAllEdits()
+			// cannot re-upload stale pre-crop intent (should_crop_poster=true) and
+			// clobber the crop. A null echo (legacy already-cropped source) drops
+			// the key — the server holds no applyable geometry either.
+			const job = deps.getJob();
+			if (job) {
+				// Same movie ID = same poster: the server applied the crop to every
+				// part, so sync every part here (multipart; see siblingResultFilePaths).
+				const partPaths = siblingResultFilePaths(
+					job.results as Record<string, FileResult>,
+					resultId,
+				);
+				const updatedJob: BatchJobResponse = { ...job, results: { ...job.results } };
+				for (const filePath of partPaths) {
+					const r = updatedJob.results[filePath] as FileResult;
+					if (r?.movie) {
+						updatedJob.results[filePath] = { ...r, movie: applyCropEcho(r.movie, response) };
+					}
+				}
+				deps.skipJobSync();
+				deps.setJob(updatedJob);
+
+				const editedMovies = deps.getEditedMovies();
+				for (const filePath of partPaths) {
+					const movie = editedMovies.get(filePath);
+					if (movie) {
+						editedMovies.set(filePath, applyCropEcho(movie, response));
+					}
+				}
+			}
+
 			const currentResultVal = deps.getCurrentResult();
 			if (currentResultVal) {
 				deps.getPosterPreviewOverrides().set(currentResultVal.file_path, {
@@ -321,10 +360,28 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				array_strategy: arrayStrategy as 'merge' | 'replace' | undefined,
 			});
 		},
-		onSuccess: (data) => {
+		onSuccess: (data, { movieIds }) => {
 			if (data.job) {
 				deps.skipJobSync();
 				deps.setJob(data.job);
+			}
+
+			// Rescrape clears stored crop geometry server-side; mirror that into
+			// pending overlays so a later save cannot re-upload pre-rescrape
+			// bounds. Only movies that actually succeeded — a failed rescrape kept
+			// its server-side geometry, and an explicit null here would clear it.
+			const succeededIds = rescrapeClearedMovieKeys(data.results ?? []);
+			const jobSnapshot = data.job ?? deps.getJob();
+			if (jobSnapshot && succeededIds.size > 0) {
+				const editedMovies = deps.getEditedMovies();
+				for (const [filePath, result] of Object.entries(jobSnapshot.results ?? {})) {
+					const fr = result as FileResult;
+					if (!succeededIds.has(fr.movie_id)) continue;
+					const pending = editedMovies.get(filePath);
+					if (pending && (pending.poster_crop_bounds != null || pending.poster_crop_source_full)) {
+						editedMovies.set(filePath, clearCropGeometry(pending));
+					}
+				}
 			}
 
 			if (data.failed > 0) {

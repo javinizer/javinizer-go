@@ -580,7 +580,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", CroppedPosterURL: "original-crop.jpg", ShouldCropPoster: true}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg", nil, false)
 		require.NoError(t, err)
 
 		result := job.snap().Results["/tmp/ABC-001.mp4"]
@@ -592,6 +592,35 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 		assert.False(t, result.Movie.Poster.ShouldCropPoster)
 	})
 
+	t.Run("cover-fallback movie: second crop preserves the first baseline", func(t *testing.T) {
+		// Cover-fallback: the scraped movie has no poster_url, so the scraped
+		// baseline legitimately holds OriginalPosterURL == "" and possibly a
+		// nil OriginalShouldCropPoster — the "baseline exists" sentinel must
+		// not read that as absent on crop #2, or the first manual crop becomes
+		// the baseline and Reset can never return to the scraped state.
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
+		job := jq.CreateJobBatch([]string{"/tmp/COFB-001.mp4"})
+		job.SetResultDirect("/tmp/COFB-001.mp4", &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/COFB-001.mp4", MovieID: "COFB-001"},
+			Status:        models.JobStatusCompleted,
+			Movie: &models.Movie{ID: "COFB-001", Poster: models.PosterState{
+				CoverURL:         "https://cdn.example/cover.jpg",
+				ShouldCropPoster: true,
+			}},
+		})
+
+		require.NoError(t, job.posterEditor.UpdatePosterCrop("COFB-001", "/tmp/c1.jpg", nil, false))
+		result := job.snap().Results["/tmp/COFB-001.mp4"]
+		assert.Equal(t, "", result.Movie.Poster.OriginalPosterURL)
+		require.NotNil(t, result.Movie.Poster.OriginalShouldCropPoster)
+		assert.True(t, *result.Movie.Poster.OriginalShouldCropPoster)
+
+		require.NoError(t, job.posterEditor.UpdatePosterCrop("COFB-001", "/tmp/c2.jpg", nil, false))
+		result = job.snap().Results["/tmp/COFB-001.mp4"]
+		require.NotNil(t, result.Movie.Poster.OriginalShouldCropPoster)
+		assert.True(t, *result.Movie.Poster.OriginalShouldCropPoster, "baseline must still be the scraped intent")
+		assert.Equal(t, "", result.Movie.Poster.OriginalPosterURL)
+	})
 	t.Run("does not overwrite backup on second crop", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
@@ -601,9 +630,9 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", ShouldCropPoster: true}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop1.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop1.jpg", nil, false)
 		require.NoError(t, err)
-		err = job.posterEditor.UpdatePosterCrop("ABC-001", "crop2.jpg")
+		err = job.posterEditor.UpdatePosterCrop("ABC-001", "crop2.jpg", nil, false)
 		require.NoError(t, err)
 
 		result := job.snap().Results["/tmp/ABC-001.mp4"]
@@ -623,7 +652,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg"}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg", nil, false)
 		require.NoError(t, err)
 
 		assert.Equal(t, "new-crop.jpg", job.snap().Results["/tmp/ABC-001-cd1.mp4"].Movie.Poster.CroppedPosterURL)
@@ -638,7 +667,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         nil,
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg", nil, false)
 		require.NoError(t, err)
 	})
 
@@ -650,7 +679,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg", ShouldCropPoster: true}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg", nil, false)
 		require.NoError(t, err)
 
 		result := job.snap().Results["/tmp/ABC-001.mp4"]

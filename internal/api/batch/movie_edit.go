@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
@@ -63,7 +64,7 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		_, filePaths, found := lookupResultByResultID(job, resultID)
+		result, filePaths, found := lookupResultByResultID(job, resultID)
 
 		if !found {
 			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
@@ -79,6 +80,20 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// canonical no-template/error degradation (display_title.go).
 		movie := contracts.MovieViewToModel(req.Movie)
 		movie.DisplayTitle = movie.Title
+
+		// poster_crop_bounds PATCH semantics: an omitted key preserves the
+		// stored geometry (legacy clients and unrelated edits must not silently
+		// lose a manual crop); an explicit null clears it. The worker-side
+		// UpdateMovie sanitize additionally clears geometry when the poster
+		// source or crop intent changes, so stale bounds carried by an
+		// out-of-sync client cannot survive.
+		if !req.PosterCropBoundsFieldPresent && result.Movie != nil {
+			if stored := result.Movie.Poster.PosterCropBounds; stored != nil {
+				b := *stored
+				movie.Poster.PosterCropBounds = &b
+				movie.Poster.PosterCropSourceFull = result.Movie.Poster.PosterCropSourceFull
+			}
+		}
 		if snap := rt.Snapshot(); snap != nil {
 			if factory, fErr := snap.WorkflowFactory(); fErr == nil && factory != nil {
 				if rendered := factory.RenderDisplayTitle(c.Request.Context(), movie); rendered != "" {
@@ -102,6 +117,14 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				return
 			}
 		}
+
+		// Persist the job envelope so a manual-crop clear (explicit null, or
+		// sanitize clearing it after a source/intent change) survives a restart
+		// — otherwise a reboot reloads the stale bounds from the envelope and a
+		// discarded crop silently resurrects. Parity with the crop and
+		// field-override handlers.
+		deps.GetJobStore().PersistJobByID(jobID)
+
 		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie)})
 	}
 }
@@ -168,13 +191,53 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		croppedURL := cropResult.CroppedURL
 
-		if err := job.UpdatePosterCrop(movieID, croppedURL); err != nil {
+		// Persist the manual crop geometry (normalized 0–1 fractions) next to
+		// the preview URL so the apply phase can reproduce the crop on the
+		// downloaded source image. Bounds are validated in integer pixel space
+		// against the measured source dimensions (exact containment), then
+		// normalized and re-validated. When the legacy already-cropped fallback
+		// served as the source (or its dimensions are undecodable) no applyable
+		// geometry exists: nothing is stored and the response reports null.
+		var bounds *models.CropBounds
+		if cropResult.SourceFull && cropResult.SourceWidth > 0 && cropResult.SourceHeight > 0 {
+			// Normalize pixel bounds to 0–1 fractions of the measured full
+			// source, then validate in the same space the geometry is stored in:
+			// finite components in [0,1], positive size, and unit-square
+			// containment (Valid tolerates float-division error on exact edges).
+			nb := models.CropBounds{
+				X:            float64(req.X) / float64(cropResult.SourceWidth),
+				Y:            float64(req.Y) / float64(cropResult.SourceHeight),
+				Width:        float64(req.Width) / float64(cropResult.SourceWidth),
+				Height:       float64(req.Height) / float64(cropResult.SourceHeight),
+				SourceAspect: float64(cropResult.SourceWidth) / float64(cropResult.SourceHeight),
+			}
+			// No extra validity check here: CropWithBounds rejects out-of-range
+			// or non-positive pixel bounds (400 above), so the normalized geometry
+			// is valid by construction (finite components, positive size, unit
+			// containment); sanitize/apply still re-validate before use.
+			bounds = &nb
+		}
+
+		if err := job.UpdatePosterCrop(movieID, croppedURL, bounds, bounds != nil); err != nil {
 			logging.Errorf("Failed to update poster crop in job state for %s: %v", movieID, err)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
 			return
 		}
 
-		c.JSON(http.StatusOK, contracts.PosterCropResponse{CroppedPosterURL: croppedURL})
+		// Persist the job envelope so the manual crop survives a restart before
+		// organize (the geometry is runtime-only, never a DB column). Parity
+		// with the field-override handler (field_override.go).
+		deps.GetJobStore().PersistJobByID(jobID)
+
+		// Echo the server-side baseline snapshot so the client Reset flow
+		// restores exactly what the server would (no client-side guessing).
+		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL, PosterCropBounds: bounds, ShouldCropPoster: false, PosterCropSourceFull: bounds != nil}
+		if stored, _, found2 := lookupResultByResultID(job, resultID); found2 && stored.Movie != nil {
+			resp.OriginalPosterURL = stored.Movie.Poster.OriginalPosterURL
+			resp.OriginalCroppedPosterURL = stored.Movie.Poster.OriginalCroppedPosterURL
+			resp.OriginalShouldCropPoster = stored.Movie.Poster.OriginalShouldCropPoster
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
@@ -249,6 +312,11 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
 			return
 		}
+
+		// Persist the job envelope after the source change cleared the stored
+		// manual crop geometry — otherwise a restart reloads the stale bounds
+		// from the envelope and undoes the invalidation.
+		deps.GetJobStore().PersistJobByID(jobID)
 
 		c.JSON(http.StatusOK, contracts.PosterFromURLResponse{
 			CroppedPosterURL: croppedURL,

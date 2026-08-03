@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -48,21 +49,41 @@ type lineState struct {
 	hasUncovered bool
 }
 
+// ReportOptions configures whole-profile (project) analysis.
+type ReportOptions struct {
+	// IgnoreGlobs are codecov.yml-style repo-relative path patterns excluded
+	// from BOTH metrics. Codecov applies its `ignore:` list to project
+	// coverage numbers as well as patch numbers; without this option the
+	// local project percentage counts files Codecov excludes (e2e suites,
+	// generated swagger docs, frontend wrappers) and reads lower than the
+	// uploaded report.
+	IgnoreGlobs []string
+	// ModulePrefix is stripped from profile file paths before IgnoreGlobs
+	// apply — cover profiles carry module-prefixed paths
+	// (github.com/javinizer/javinizer-go/internal/...), globs don't.
+	ModulePrefix string
+}
+
 // AnalyzeProfile reads a Go cover profile and returns both Codecov-style line
 // coverage and statement coverage, deduplicating repeated blocks produced by
 // multi-package aggregators such as go-acc.
 func AnalyzeProfile(path string) (Summary, error) {
+	return AnalyzeProfileWithOptions(path, ReportOptions{})
+}
+
+// AnalyzeProfileWithOptions is AnalyzeProfile honoring ReportOptions.
+func AnalyzeProfileWithOptions(path string, opts ReportOptions) (Summary, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return Summary{}, fmt.Errorf("open profile: %w", err)
 	}
 	defer func() { _ = file.Close() }()
 
-	return analyze(file)
+	return analyze(file, opts)
 }
 
 // analyze parses a Go cover profile from r.
-func analyze(r io.Reader) (Summary, error) {
+func analyze(r io.Reader, opts ReportOptions) (Summary, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -78,6 +99,27 @@ func analyze(r io.Reader) (Summary, error) {
 		return Summary{}, fmt.Errorf("invalid coverage profile header: %q", header)
 	}
 
+	ignoreRes := make([]*regexp.Regexp, 0, len(opts.IgnoreGlobs))
+	for _, g := range opts.IgnoreGlobs {
+		re, err := compileIgnoreGlob(g)
+		if err != nil {
+			return Summary{}, fmt.Errorf("invalid ignore glob %q: %w", g, err)
+		}
+		ignoreRes = append(ignoreRes, re)
+	}
+	isIgnored := func(profileFile string) bool {
+		if len(ignoreRes) == 0 {
+			return false
+		}
+		repoPath := strings.TrimPrefix(profileFile, opts.ModulePrefix)
+		for _, re := range ignoreRes {
+			if re.MatchString(repoPath) {
+				return true
+			}
+		}
+		return false
+	}
+
 	merged := make(map[blockKey]block)
 	for lineNo := 2; scanner.Scan(); lineNo++ {
 		line := strings.TrimSpace(scanner.Text())
@@ -88,6 +130,10 @@ func analyze(r io.Reader) (Summary, error) {
 		parsed, key, err := parseBlock(line)
 		if err != nil {
 			return Summary{}, fmt.Errorf("parse profile line %d: %w", lineNo, err)
+		}
+
+		if isIgnored(parsed.file) {
+			continue
 		}
 
 		if existing, ok := merged[key]; ok {

@@ -5178,8 +5178,18 @@ const docTemplate = `{
                     "type": "string",
                     "example": "美人"
                 },
-                "poster_url": {
+                "poster_crop_bounds": {
                     "description": "Poster / cover (flattened from PosterState — no custom marshaler needed)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.CropBounds"
+                        }
+                    ]
+                },
+                "poster_crop_source_full": {
+                    "type": "boolean"
+                },
+                "poster_url": {
                     "type": "string"
                 },
                 "rating_score": {
@@ -5694,6 +5704,27 @@ const docTemplate = `{
             "properties": {
                 "cropped_poster_url": {
                     "type": "string"
+                },
+                "original_cropped_poster_url": {
+                    "type": "string"
+                },
+                "original_poster_url": {
+                    "description": "Original poster fields echo the server-side pre-edit snapshot\n(backupPosterOriginals), so the client reset baseline never has to guess.\nEmpty when no snapshot was needed (no prior poster).",
+                    "type": "string"
+                },
+                "original_should_crop_poster": {
+                    "type": "boolean"
+                },
+                "poster_crop_bounds": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.CropBounds"
+                },
+                "poster_crop_source_full": {
+                    "description": "PosterCropSourceFull echoes whether the bounds were measured against the\nfull-size source. Clients must round-trip it with the bounds: the apply\ngate refuses geometry without it.",
+                    "type": "boolean"
+                },
+                "should_crop_poster": {
+                    "description": "ShouldCropPoster echoes the stored crop intent after a manual crop\n(always false: the manual crop replaces the scraper auto-crop), so\nclients can sync their pending-edits overlay from this response alone.",
+                    "type": "boolean"
                 }
             }
         },
@@ -7451,6 +7482,27 @@ const docTemplate = `{
                 },
                 "window_width": {
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.CropBounds": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "number"
+                },
+                "source_aspect": {
+                    "description": "SourceAspect is the width/height ratio of the source image the crop was\nmeasured against. The apply phase refuses geometry whose aspect no\nlonger matches the downloaded image, so same-URL source swaps fall back\nto pre-change behavior instead of cropping the wrong image.",
+                    "type": "number"
+                },
+                "width": {
+                    "type": "number"
+                },
+                "x": {
+                    "type": "number"
+                },
+                "y": {
+                    "type": "number"
                 }
             }
         },

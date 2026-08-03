@@ -256,6 +256,16 @@ jobs:
     - name: Install frontend dependencies
       run: npm ci --prefix web/frontend
 
+    - name: Resolve version
+      id: version
+      run: |
+        version="$(./scripts/version.sh)"
+        if [ -z "$version" ]; then
+          echo "Failed to resolve version"
+          exit 1
+        fi
+        echo "value=$version" >> "$GITHUB_OUTPUT"
+
     - name: Download dependencies
       run: go mod download
 
@@ -285,12 +295,19 @@ jobs:
 
     - name: Verify binary
       run: |
+        set -euo pipefail
         if [ ! -f bin/javinizer ]; then
           echo "Binary not created"
           exit 1
         fi
         chmod +x bin/javinizer
-        ./bin/javinizer --version || echo "Version check completed"
+        binary_version="$(./bin/javinizer version --short)"
+        expected="${{ steps.version.outputs.value }}"
+        if [ "${binary_version}" != "${expected}" ]; then
+          echo "Binary version mismatch: got '${binary_version}', want '${expected}'"
+          exit 1
+        fi
+        echo "Binary version OK: ${binary_version}"
 
     - name: Verify embedded web UI
       shell: bash
@@ -359,10 +376,16 @@ jobs:
 
     - name: Verify Docker metadata and version output
       run: |
-        docker run --rm --entrypoint /usr/local/bin/javinizer javinizer:test version --short
+        set -euo pipefail
+        expected="${{ steps.version.outputs.value }}"
+        binary_version="$(docker run --rm --entrypoint /usr/local/bin/javinizer javinizer:test version --short)"
+        if [ "${binary_version}" != "${expected}" ]; then
+          echo "Docker binary version mismatch: got '${binary_version}', want '${expected}'"
+          exit 1
+        fi
         image_version="$(docker inspect javinizer:test --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
-        if [ "$image_version" != "${{ steps.version.outputs.value }}" ]; then
-          echo "Docker image label version mismatch: $image_version"
+        if [ "${image_version}" != "${expected}" ]; then
+          echo "Docker image label version mismatch: got '${image_version}', want '${expected}'"
           exit 1
         fi
 

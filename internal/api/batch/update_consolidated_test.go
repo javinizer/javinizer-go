@@ -270,6 +270,7 @@ func TestMiss7_UpdateBatchJob_NotCompleted(t *testing.T) {
 
 	job := batchDeps.Deps().GetJobStore().CreateJobBatch([]string{})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/api/v1/batch/:id/update", updateBatchJob(batchDeps))
@@ -329,6 +330,7 @@ func TestMiss7_UpdateBatchJob_RunningJob(t *testing.T) {
 
 	job := batchDeps.Deps().GetJobStore().CreateJobBatch([]string{})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/api/v1/batch/:id/update", updateBatchJob(batchDeps))
@@ -687,6 +689,7 @@ func TestUpdateBatchJob_Miss3_JobAlreadyRunning(t *testing.T) {
 		StartedAt:     time.Now(),
 	})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/batch/:id/update", updateBatchJob(testkit.GetTestRuntime(deps)))
@@ -903,6 +906,7 @@ func TestUpdateBatchJob_Miss4_RunningJob(t *testing.T) {
 
 	job := batchDeps.Deps().GetJobStore().CreateJobBatch([]string{})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/api/v1/batch/:id/update", updateBatchJob(batchDeps))
@@ -1132,6 +1136,7 @@ func TestUpdateBatchJob_Miss_RunningJobRejected(t *testing.T) {
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/batch/:id/update", updateBatchJob(testkit.GetTestRuntime(deps)))
@@ -1254,6 +1259,7 @@ func TestUpdateBatchJob_RunningJobRejected(t *testing.T) {
 
 	job := createJobWithWF(deps, config.DefaultConfig(nil, nil), []string{"/tmp/IPX-001.mp4"})
 	setJobStatus(job, models.JobStatusRunning)
+	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
 	router := gin.New()
 	router.POST("/batch/:id/update", updateBatchJob(testkit.GetTestRuntime(deps)))
@@ -1291,3 +1297,43 @@ func TestUpdateBatchJob_ValidNoBody(t *testing.T) {
 }
 
 // --- listBatchJobs coverage (lifecycle.go:244) ---
+
+// --- updateBatchJob: async apply launch is tracked so teardown can join it ---
+
+func TestUpdateAsyncLaunch_TrackedAndJoined(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	initTestWebSocket(t)
+
+	cfg := &config.Config{
+		Output: config.OutputConfig{
+			Operation: config.OutputOperationConfig{
+				OperationMode: config.GetOperationMode("in-place"),
+			},
+		},
+		Scrapers: config.ScrapersConfig{Priority: []string{"r18dev"}},
+	}
+	deps := createTestDeps(t, cfg, "")
+	rt := testkit.GetTestRuntime(deps)
+
+	job := rt.Deps().GetJobStore().CreateJobBatch([]string{})
+	setJobStatus(job, models.JobStatusCompleted)
+
+	router := gin.New()
+	router.POST("/api/v1/batch/:id/update", updateBatchJob(rt))
+
+	req := httptest.NewRequest("POST", "/api/v1/batch/"+job.GetID()+"/update", nil)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// The handler launched the apply in a tracked background goroutine.
+	// WaitBackgroundTasks returning true proves the goroutine completed — and
+	// since it ends only after job.Wait() (phaseDone), the phase's deferred
+	// persistence has finished too. An untracked or never-joined launch is
+	// what let teardown race open SQLite handles on Windows.
+	require.True(t, rt.WaitBackgroundTasks(10*time.Second),
+		"handler-launched apply must be tracked and joinable")
+	assert.NotEqual(t, models.JobStatusRunning, job.Lifecycle().GetJobStatus(),
+		"after join the job must have left the Running state")
+}

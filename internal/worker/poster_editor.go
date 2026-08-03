@@ -36,8 +36,12 @@ func NewPosterEditor(lookup resultstore.ResultReadFacade, updater resultstore.Re
 	return &PosterEditor{lookup: lookup, updater: updater, movieRepo: movieRepo}
 }
 
-// UpdatePosterCrop updates the cropped poster URL for all files matching movieID.
-func (pe *PosterEditor) UpdatePosterCrop(movieID string, croppedURL string) error {
+// UpdatePosterCrop updates the cropped poster URL and the manual crop
+// geometry for all files matching movieID. bounds is nil (and sourceFull
+// false) when the crop was measured against a legacy already-cropped
+// preview — no applyable geometry exists, so any stored geometry is cleared
+// and the job keeps pre-change behavior.
+func (pe *PosterEditor) UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds, sourceFull bool) error {
 	filePaths := pe.lookup.FindFilePathsForMovieID(movieID)
 	for _, filePath := range filePaths {
 		err := pe.updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
@@ -48,6 +52,8 @@ func (pe *PosterEditor) UpdatePosterCrop(movieID string, croppedURL string) erro
 			backupPosterOriginals(movie)
 			movie.Poster.CroppedPosterURL = croppedURL
 			movie.Poster.ShouldCropPoster = false
+			movie.Poster.PosterCropBounds = bounds
+			movie.Poster.PosterCropSourceFull = sourceFull
 			current.Movie = movie
 			current.FileMatchInfo.MovieID = movie.ID
 			return current, nil
@@ -74,6 +80,7 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 			movie.Poster.PosterURL = posterURL
 			movie.Poster.CroppedPosterURL = croppedURL
 			movie.Poster.ShouldCropPoster = false
+			clearPosterCropGeometry(movie) // new source: stored geometry is stale
 			current.Movie = movie
 			current.FileMatchInfo.MovieID = movie.ID
 			return current, nil
@@ -105,9 +112,65 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 	return nil
 }
 
+// clearPosterCropGeometry drops persisted manual crop geometry from m.
+// Called at every flow that replaces the poster source or crop intent so a
+// stale crop can never be applied to a different image.
+func clearPosterCropGeometry(m *models.Movie) {
+	if m == nil {
+		return
+	}
+	m.Poster.PosterCropBounds = nil
+	m.Poster.PosterCropSourceFull = false
+}
+
+// sanitizePosterCropGeometry enforces the manual-crop invalidation contract
+// when a whole movie is stored (UpdateMovie): carried geometry survives only
+// if it is valid AND the movie's EFFECTIVE poster source (poster_url, falling
+// back to cover_url — the same selection the downloader and the apply boundary
+// use) and crop intent are unchanged. A fanart-only edit (cover_url changes
+// while poster_url selects the source) must not discard a still-valid crop.
+// A nil next-bounds means "no geometry" (the batch PATCH handler resolves
+// omitted-vs-explicit-null upstream) — only normalize the flag in that case.
+func sanitizePosterCropGeometry(next *models.Movie, haveCurrent bool, curPosterURL, curCoverURL string, curShouldCrop bool) {
+	if next == nil {
+		return
+	}
+	if next.Poster.PosterCropBounds == nil {
+		next.Poster.PosterCropSourceFull = false
+		return
+	}
+	if !next.Poster.PosterCropBounds.Valid() {
+		clearPosterCropGeometry(next)
+		return
+	}
+	if !haveCurrent {
+		return
+	}
+	if effectivePosterSourceOf(next.Poster.PosterURL, next.Poster.CoverURL) != effectivePosterSourceOf(curPosterURL, curCoverURL) ||
+		next.Poster.ShouldCropPoster != curShouldCrop {
+		clearPosterCropGeometry(next)
+	}
+}
+
+// effectivePosterSourceOf mirrors the downloader's poster source selection:
+// poster_url when present, otherwise cover_url.
+func effectivePosterSourceOf(posterURL, coverURL string) string {
+	if posterURL != "" {
+		return posterURL
+	}
+	return coverURL
+}
+
 // backupPosterOriginals preserves the original poster URLs before they are overwritten.
+//
+// The sentinel for "baseline already captured" is EITHER field present:
+// — OriginalPosterURL non-empty covers legacy envelopes (URL-only backups
+// predate the eager baseline) — while OriginalShouldCropPoster non-nil covers
+// cover-fallback movies whose baseline legitimately has an empty poster URL;
+// URL-only sentinel would re-snapshot on the SECOND crop of such a movie and
+// store the first manual crop as the "original".
 func backupPosterOriginals(movie *models.Movie) {
-	if movie.Poster.OriginalPosterURL == "" {
+	if movie.Poster.OriginalPosterURL == "" && movie.Poster.OriginalShouldCropPoster == nil {
 		shouldCrop := movie.Poster.ShouldCropPoster
 		movie.Poster.OriginalPosterURL = movie.Poster.PosterURL
 		movie.Poster.OriginalCroppedPosterURL = movie.Poster.CroppedPosterURL
