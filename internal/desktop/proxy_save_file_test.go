@@ -142,6 +142,8 @@ func TestSaveFile_RejectsBadFilenames(t *testing.T) {
 		{"absolute posix", "/etc/passwd"},
 		{"windows separator", `dir\file.json`},
 		{"windows absolute", `C:\\evil\\file.json`},
+		{"nul byte", "a\x00b.json"},
+		{"newline", "a\nb.json"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -164,6 +166,28 @@ func TestSaveFile_RejectsBadFilenames(t *testing.T) {
 				t.Errorf("choosePath must not be called for filename %q", tc.file)
 			}
 		})
+	}
+}
+
+func TestSaveFile_BodyAtLimitBoundary(t *testing.T) {
+	choosePath := func(context.Context, string) (string, error) {
+		return filepath.Join(t.TempDir(), "a.json"), nil
+	}
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleSaveFileLimit(w, r, choosePath, 16)
+	})
+
+	// Exactly maxBytes must succeed; maxBytes+1 must 413.
+	at := httptest.NewRecorder()
+	h.ServeHTTP(at, httptest.NewRequest(http.MethodPost, "/desktop/save-file?filename=a.json", strings.NewReader(strings.Repeat("x", 16))))
+	if at.Code != http.StatusOK {
+		t.Errorf("at-limit: status = %d, want %d", at.Code, http.StatusOK)
+	}
+
+	over := httptest.NewRecorder()
+	h.ServeHTTP(over, httptest.NewRequest(http.MethodPost, "/desktop/save-file?filename=a.json", strings.NewReader(strings.Repeat("x", 17))))
+	if over.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("over-limit: status = %d, want %d", over.Code, http.StatusRequestEntityTooLarge)
 	}
 }
 

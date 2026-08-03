@@ -171,14 +171,19 @@ func handleSaveFileLimit(w http.ResponseWriter, r *http.Request, choosePath Choo
 	_, copyErr := io.Copy(dst, http.MaxBytesReader(w, r.Body, maxBytes))
 	closeErr := dst.Close()
 	if copyErr != nil || closeErr != nil {
-		_ = os.Remove(path) // never leave a truncated export behind
+		// Never leave a truncated export behind; surface it when even that fails
+		// (e.g. locked file on Windows) instead of vanishing silently.
+		cleanupNote := ""
+		if removeErr := os.Remove(path); removeErr != nil {
+			cleanupNote = fmt.Sprintf("; also failed to remove partial file %s: %v", path, removeErr)
+		}
 		switch {
 		case copyErr != nil && errors.As(copyErr, new(*http.MaxBytesError)):
-			writeErr(http.StatusRequestEntityTooLarge, fmt.Sprintf("desktop: export exceeds %d-byte limit", maxBytes))
+			writeErr(http.StatusRequestEntityTooLarge, fmt.Sprintf("desktop: export exceeds %d-byte limit%s", maxBytes, cleanupNote))
 		case copyErr != nil:
-			writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to write %s: %v", path, copyErr))
+			writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to write %s: %v%s", path, copyErr, cleanupNote))
 		default:
-			writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to finalize %s: %v", path, closeErr))
+			writeErr(http.StatusInternalServerError, fmt.Sprintf("desktop: failed to finalize %s: %v%s", path, closeErr, cleanupNote))
 		}
 		return
 	}
@@ -198,6 +203,11 @@ func validateSaveFilename(name string) error {
 	}
 	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) || filepath.Base(name) != name {
 		return fmt.Errorf("filename must not contain path components: %q", name)
+	}
+	for _, c := range name {
+		if c < 0x20 || c == 0x7f {
+			return fmt.Errorf("filename must not contain control characters: %q", name)
+		}
 	}
 	return nil
 }
