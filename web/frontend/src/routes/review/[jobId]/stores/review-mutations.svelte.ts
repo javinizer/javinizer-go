@@ -21,7 +21,12 @@ import {
 	type PosterCropMetrics,
 } from '../review-utils';
 import { overlayFieldOverride } from './overlay-field-override';
-import { applyCropEcho, clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
+import {
+	applyCropEcho,
+	clearCropGeometry,
+	rescrapeClearedMovieKeys,
+	siblingResultFilePaths,
+} from './poster-crop-sync';
 import { buildMovieToSave } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
@@ -365,9 +370,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			// pending overlays so a later save cannot re-upload pre-rescrape
 			// bounds. Only movies that actually succeeded — a failed rescrape kept
 			// its server-side geometry, and an explicit null here would clear it.
-			const succeededIds = new Set(
-				(data.results ?? []).filter((r) => r.status === 'success').map((r) => r.movie_id),
-			);
+			const succeededIds = rescrapeClearedMovieKeys(data.results ?? []);
 			const jobSnapshot = data.job ?? deps.getJob();
 			if (jobSnapshot && succeededIds.size > 0) {
 				const editedMovies = deps.getEditedMovies();

@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import type { Movie } from '$lib/api/types';
 import { buildMovieToSave } from './save-helpers';
-import { applyCropEcho, clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
+import {
+	applyCropEcho,
+	clearCropGeometry,
+	rescrapeClearedMovieKeys,
+	siblingResultFilePaths,
+} from './poster-crop-sync';
 
 function makeMovie(overrides: Partial<Movie> = {}): Movie {
 	return {
@@ -122,6 +127,24 @@ describe('siblingResultFilePaths', () => {
 	it('is empty for an unknown resultId', () => {
 		expect(siblingResultFilePaths(results, 'nope')).toEqual([]);
 		expect(siblingResultFilePaths(undefined, 'r1')).toEqual([]);
+	});
+});
+
+describe('rescrapeClearedMovieKeys', () => {
+	it('keys successful rescrapes by requested ID and corrected content ID', () => {
+		const keys = rescrapeClearedMovieKeys([
+			{ movie_id: 'OLD-001', status: 'success', movie: { id: 'NEW-001' } },
+			{ movie_id: 'KEEP-002', status: 'success', movie: { id: 'KEEP-002' } },
+			{ movie_id: 'FAIL-003', status: 'failed' },
+		]);
+		expect(keys.has('OLD-001')).toBe(true);
+		expect(keys.has('NEW-001')).toBe(true);
+		expect(keys.has('KEEP-002')).toBe(true);
+		expect(keys.has('FAIL-003')).toBe(false);
+	});
+
+	it('empty results clear nothing', () => {
+		expect(rescrapeClearedMovieKeys([]).size).toBe(0);
 	});
 });
 

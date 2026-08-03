@@ -71,6 +71,23 @@ export function siblingResultFilePaths(
 		.map(([filePath]) => filePath);
 }
 
+// rescrapeClearedMovieKeys returns the movie IDs whose stored crop state a
+// bulk rescrape actually cleared (success only). A rescrape that corrects
+// the content ID reports the requested (old) ID on the result row while the
+// job results and the echoed movie carry the corrected ID — so both the old
+// request ID and the echoed new ID count as cleared.
+export function rescrapeClearedMovieKeys(
+	results: ReadonlyArray<{ movie_id: string; status: string; movie?: { id?: string } }>,
+): Set<string> {
+	const keys = new Set<string>();
+	for (const r of results) {
+		if (r.status !== 'success') continue;
+		keys.add(r.movie_id);
+		if (r.movie?.id) keys.add(r.movie.id);
+	}
+	return keys;
+}
+
 // clearCropGeometry marks pending crop geometry for server-side clearing on
 // the next save: an explicit null rides the movie PATCH as "clear", whereas
 // an omitted key would preserve stored geometry. Used when the poster source

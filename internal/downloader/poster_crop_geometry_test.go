@@ -192,9 +192,11 @@ func TestDownloadPoster_PromoteFailureIsCleanError(t *testing.T) {
 	assert.Zero(t, result.Size)
 }
 
-// Existing destination + usable manual geometry: organize must REPLACE the
-// old artwork with the manual crop (the user explicitly re-cropped at review).
-func TestDownloadPoster_ExistingDestReplacedByManualCrop(t *testing.T) {
+// Existing destination + pending manual crop geometry: existing artwork is
+// still never replaced — replacement would break revert (downloaded paths are
+// deleted on revert, and the pre-existing poster would be gone). In-place
+// artwork refresh is follow-up work requiring overwrite tracking.
+func TestDownloadPoster_ExistingDestKeptWithGeometry(t *testing.T) {
 	server := serveTwoToneSource(t)
 	fs := afero.NewMemMapFs()
 	require.NoError(t, afero.WriteFile(fs, "/dest/IPX-535-poster.jpg", []byte("old artwork"), 0o644))
@@ -204,11 +206,10 @@ func TestDownloadPoster_ExistingDestReplacedByManualCrop(t *testing.T) {
 
 	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
 	require.NoError(t, err)
-	require.True(t, result.Downloaded, "existing poster must be replaced when manual geometry is pending")
-
-	img, w, _ := decodeResultPoster(t, fs, result.LocalPath)
-	assert.InDelta(t, 400, w, 2)
-	assert.Less(t, sampleLuma(img, 0.5, 0.5), 40.0)
+	assert.False(t, result.Downloaded, "existing poster must be kept even with pending geometry")
+	content, err := afero.ReadFile(fs, "/dest/IPX-535-poster.jpg")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("old artwork"), content)
 }
 
 // Existing destination without pending geometry keeps pre-change behavior:

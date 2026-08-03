@@ -46,10 +46,12 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	bounds := movie.Poster.PosterCropBounds
 	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
 
-	// Check if poster already exists — but a pending manual crop always wins:
-	// the user explicitly re-cropped on the review page, so organize replaces
-	// existing artwork with the manual crop (in-place/force-update flows).
-	if info, err := d.fs.Stat(destPath); err == nil && !geometryUsable {
+	// Check if poster already exists. Existing artwork is never replaced,
+	// even with pending manual crop geometry: downloaded paths feed the
+	// revert delete-list, so overwriting would leave NO poster after a
+	// revert. In-place artwork refresh needs overwrite tracking first
+	// (tracked in the follow-up issue).
+	if info, err := d.fs.Stat(destPath); err == nil {
 		// Already exists
 		return &DownloadResult{
 			Type:       MediaTypePoster,
