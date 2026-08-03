@@ -580,7 +580,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", CroppedPosterURL: "original-crop.jpg", ShouldCropPoster: true}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg", nil, false)
 		require.NoError(t, err)
 
 		result := job.snap().Results["/tmp/ABC-001.mp4"]
@@ -601,9 +601,9 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "original.jpg", ShouldCropPoster: true}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop1.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop1.jpg", nil, false)
 		require.NoError(t, err)
-		err = job.posterEditor.UpdatePosterCrop("ABC-001", "crop2.jpg")
+		err = job.posterEditor.UpdatePosterCrop("ABC-001", "crop2.jpg", nil, false)
 		require.NoError(t, err)
 
 		result := job.snap().Results["/tmp/ABC-001.mp4"]
@@ -623,7 +623,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg"}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "new-crop.jpg", nil, false)
 		require.NoError(t, err)
 
 		assert.Equal(t, "new-crop.jpg", job.snap().Results["/tmp/ABC-001-cd1.mp4"].Movie.Poster.CroppedPosterURL)
@@ -638,7 +638,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         nil,
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg", nil, false)
 		require.NoError(t, err)
 	})
 
@@ -650,7 +650,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 			Movie:         &models.Movie{ID: "ABC-001", Poster: models.PosterState{PosterURL: "poster.jpg", ShouldCropPoster: true}},
 		})
 
-		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg")
+		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg", nil, false)
 		require.NoError(t, err)
 
 		result := job.snap().Results["/tmp/ABC-001.mp4"]

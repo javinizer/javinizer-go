@@ -24,6 +24,21 @@ const (
 	LandscapeAspectRatioThreshold = 1.2
 )
 
+// ImageDimensions reads pixel dimensions from an image header without
+// decoding the pixel data.
+func ImageDimensions(fs afero.Fs, path string) (int, int, error) {
+	f, err := fs.Open(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = f.Close() }()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return 0, 0, err
+	}
+	return cfg.Width, cfg.Height, nil
+}
+
 // CropPosterFromCover intelligently crops a cover image to create a poster.
 //
 // Strategy:

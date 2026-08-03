@@ -42,14 +42,16 @@ type MovieView struct {
 	RatingWarning string     `json:"rating_warning,omitempty"`
 
 	// Poster / cover (flattened from PosterState — no custom marshaler needed)
-	PosterURL                string `json:"poster_url"`
-	CoverURL                 string `json:"cover_url"`
-	CroppedPosterURL         string `json:"cropped_poster_url"`
-	ShouldCropPoster         bool   `json:"should_crop_poster"`
-	OriginalPosterURL        string `json:"original_poster_url"`
-	OriginalCroppedPosterURL string `json:"original_cropped_poster_url"`
-	OriginalShouldCropPoster *bool  `json:"original_should_crop_poster"`
-	OriginalCoverURL         string `json:"original_cover_url"`
+	PosterCropBounds         *models.CropBounds `json:"poster_crop_bounds,omitempty"`
+	PosterCropSourceFull     bool               `json:"poster_crop_source_full,omitempty"`
+	PosterURL                string             `json:"poster_url"`
+	CoverURL                 string             `json:"cover_url"`
+	CroppedPosterURL         string             `json:"cropped_poster_url"`
+	ShouldCropPoster         bool               `json:"should_crop_poster"`
+	OriginalPosterURL        string             `json:"original_poster_url"`
+	OriginalCroppedPosterURL string             `json:"original_cropped_poster_url"`
+	OriginalShouldCropPoster *bool              `json:"original_should_crop_poster"`
+	OriginalCoverURL         string             `json:"original_cover_url"`
 
 	// Media
 	TrailerURL       string   `json:"trailer_url"`
@@ -98,6 +100,8 @@ func MovieViewFromModel(m *models.Movie) *MovieView {
 		RatingScore:              m.RatingScore,
 		RatingVotes:              m.RatingVotes,
 		RatingWarning:            m.RatingWarning,
+		PosterCropBounds:         m.Poster.PosterCropBounds,
+		PosterCropSourceFull:     m.Poster.PosterCropSourceFull,
 		PosterURL:                m.Poster.PosterURL,
 		CoverURL:                 m.Poster.CoverURL,
 		CroppedPosterURL:         m.Poster.CroppedPosterURL,
@@ -157,6 +161,8 @@ func MovieViewToModel(v *MovieView) *models.Movie {
 	}
 	// Rebuild PosterState from the flattened MovieView fields.
 	m.Poster = models.PosterState{
+		PosterCropBounds:         v.PosterCropBounds,
+		PosterCropSourceFull:     v.PosterCropSourceFull,
 		PosterURL:                v.PosterURL,
 		CoverURL:                 v.CoverURL,
 		CroppedPosterURL:         v.CroppedPosterURL,

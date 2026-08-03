@@ -1375,16 +1375,16 @@ func (_c *MockBatchJobInterface_UpdateMovie_Call) RunAndReturn(run func(ctx cont
 }
 
 // UpdatePosterCrop provides a mock function for the type MockBatchJobInterface
-func (_mock *MockBatchJobInterface) UpdatePosterCrop(movieID string, croppedURL string) error {
-	ret := _mock.Called(movieID, croppedURL)
+func (_mock *MockBatchJobInterface) UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds, sourceFull bool) error {
+	ret := _mock.Called(movieID, croppedURL, bounds, sourceFull)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdatePosterCrop")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string, string) error); ok {
-		r0 = returnFunc(movieID, croppedURL)
+	if returnFunc, ok := ret.Get(0).(func(string, string, *models.CropBounds, bool) error); ok {
+		r0 = returnFunc(movieID, croppedURL, bounds, sourceFull)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1399,11 +1399,13 @@ type MockBatchJobInterface_UpdatePosterCrop_Call struct {
 // UpdatePosterCrop is a helper method to define mock.On call
 //   - movieID string
 //   - croppedURL string
-func (_e *MockBatchJobInterface_Expecter) UpdatePosterCrop(movieID any, croppedURL any) *MockBatchJobInterface_UpdatePosterCrop_Call {
-	return &MockBatchJobInterface_UpdatePosterCrop_Call{Call: _e.mock.On("UpdatePosterCrop", movieID, croppedURL)}
+//   - bounds *models.CropBounds
+//   - sourceFull bool
+func (_e *MockBatchJobInterface_Expecter) UpdatePosterCrop(movieID any, croppedURL any, bounds any, sourceFull any) *MockBatchJobInterface_UpdatePosterCrop_Call {
+	return &MockBatchJobInterface_UpdatePosterCrop_Call{Call: _e.mock.On("UpdatePosterCrop", movieID, croppedURL, bounds, sourceFull)}
 }
 
-func (_c *MockBatchJobInterface_UpdatePosterCrop_Call) Run(run func(movieID string, croppedURL string)) *MockBatchJobInterface_UpdatePosterCrop_Call {
+func (_c *MockBatchJobInterface_UpdatePosterCrop_Call) Run(run func(movieID string, croppedURL string, bounds *models.CropBounds, sourceFull bool)) *MockBatchJobInterface_UpdatePosterCrop_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 string
 		if args[0] != nil {
@@ -1413,9 +1415,19 @@ func (_c *MockBatchJobInterface_UpdatePosterCrop_Call) Run(run func(movieID stri
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 *models.CropBounds
+		if args[2] != nil {
+			arg2 = args[2].(*models.CropBounds)
+		}
+		var arg3 bool
+		if args[3] != nil {
+			arg3 = args[3].(bool)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -1426,7 +1438,7 @@ func (_c *MockBatchJobInterface_UpdatePosterCrop_Call) Return(err error) *MockBa
 	return _c
 }
 
-func (_c *MockBatchJobInterface_UpdatePosterCrop_Call) RunAndReturn(run func(movieID string, croppedURL string) error) *MockBatchJobInterface_UpdatePosterCrop_Call {
+func (_c *MockBatchJobInterface_UpdatePosterCrop_Call) RunAndReturn(run func(movieID string, croppedURL string, bounds *models.CropBounds, sourceFull bool) error) *MockBatchJobInterface_UpdatePosterCrop_Call {
 	_c.Call.Return(run)
 	return _c
 }

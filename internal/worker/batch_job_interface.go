@@ -150,7 +150,7 @@ type JobReader interface {
 type JobEditor interface {
 	UpdateMovie(ctx context.Context, filePath string, movie *models.Movie) error
 	ExcludeFile(filePath string)
-	UpdatePosterCrop(movieID string, croppedURL string) error
+	UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds, sourceFull bool) error
 	UpdatePosterFromURL(ctx context.Context, movieID string, posterURL string, croppedURL string) error
 
 	// ApplyFieldOverride cherry-picks a single field's value from the named
@@ -353,10 +353,20 @@ func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie
 	// before persisting, so the cover/fanart reset survives server restarts
 	// and the DB/in-memory states stay in sync. Read-only pass: does not mutate
 	// the in-memory result, only populates movie.Poster.OriginalCoverURL.
+	var haveCurrent bool
+	var curPosterURL, curCoverURL string
+	var curShouldCrop bool
 	_ = je.store.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		backupCoverOriginal(current.Movie, movie)
+		if current.Movie != nil {
+			haveCurrent = true
+			curPosterURL = current.Movie.Poster.PosterURL
+			curCoverURL = current.Movie.Poster.CoverURL
+			curShouldCrop = current.Movie.Poster.ShouldCropPoster
+		}
 		return current, nil
 	})
+	sanitizePosterCropGeometry(movie, haveCurrent, curPosterURL, curCoverURL, curShouldCrop)
 
 	// Apply explicit actress name edits before the movie upsert. The shared
 	// MovieUpserter only fills missing actress fields, which would discard a
@@ -423,8 +433,8 @@ func (je *jobEditorImpl) ExcludeFile(filePath string) {
 	}
 }
 
-func (je *jobEditorImpl) UpdatePosterCrop(movieID string, croppedURL string) error {
-	return je.posterEditor.UpdatePosterCrop(movieID, croppedURL)
+func (je *jobEditorImpl) UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds, sourceFull bool) error {
+	return je.posterEditor.UpdatePosterCrop(movieID, croppedURL, bounds, sourceFull)
 }
 
 func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string, posterURL string, croppedURL string) error {

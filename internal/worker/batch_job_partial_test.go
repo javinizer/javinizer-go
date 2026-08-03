@@ -21,7 +21,7 @@ func TestBatchJob_UpdatePosterCrop_NoMatchingFiles_Partial(t *testing.T) {
 		},
 	})
 	// No results set for any file — UpdatePosterCrop should return nil
-	err := job.posterEditor.UpdatePosterCrop("NONEXISTENT-001", "cropped.jpg")
+	err := job.posterEditor.UpdatePosterCrop("NONEXISTENT-001", "cropped.jpg", nil, false)
 	assert.NoError(t, err, "should return nil when no matching files")
 }
 
@@ -40,7 +40,7 @@ func TestBatchJob_UpdatePosterCrop_NilMovie_Partial(t *testing.T) {
 		Movie:         nil,
 	})
 
-	err := job.posterEditor.UpdatePosterCrop("ABC-001", "cropped.jpg")
+	err := job.posterEditor.UpdatePosterCrop("ABC-001", "cropped.jpg", nil, false)
 	assert.NoError(t, err, "should skip files with nil Movie")
 }
 
@@ -76,7 +76,7 @@ func TestBatchJob_UpdatePosterCrop_MultipleFiles_Miss(t *testing.T) {
 		},
 	})
 
-	err := job.posterEditor.UpdatePosterCrop("ABC-001", "cropped.jpg")
+	err := job.posterEditor.UpdatePosterCrop("ABC-001", "cropped.jpg", nil, false)
 	require.NoError(t, err)
 
 	// Both files should be updated

@@ -32,7 +32,7 @@ func TestUpdatePosterCrop_Miss2_WithMovieResult(t *testing.T) {
 		},
 	})
 
-	err := job.posterEditor.UpdatePosterCrop("TEST-001", "https://example.com/cropped.jpg")
+	err := job.posterEditor.UpdatePosterCrop("TEST-001", "https://example.com/cropped.jpg", nil, false)
 	require.NoError(t, err)
 
 	result, err := job.results.GetMovieResult("/test/file.mp4")

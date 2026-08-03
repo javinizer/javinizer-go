@@ -96,8 +96,21 @@ export interface PosterCropRequest {
 	max_poster_height?: number;
 }
 
+// Normalized manual poster crop geometry (0–1 fractions of the
+// full-size source image), or null when no applyable crop is stored.
+export interface CropBounds {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	source_aspect?: number;
+}
+
 export interface PosterCropResponse {
 	cropped_poster_url: string;
+	poster_crop_bounds: CropBounds | null;
+	poster_crop_source_full: boolean;
+	should_crop_poster: boolean;
 }
 
 export interface PosterFromURLRequest {
@@ -433,6 +446,8 @@ export interface Movie {
 	poster_url?: string;
 	cropped_poster_url?: string;
 	should_crop_poster?: boolean;
+	poster_crop_bounds?: CropBounds | null;
+	poster_crop_source_full?: boolean;
 	original_poster_url?: string;
 	original_cropped_poster_url?: string;
 	original_should_crop_poster?: boolean | null;

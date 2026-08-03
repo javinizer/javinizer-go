@@ -291,6 +291,16 @@ func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps
 		steps.Merged = true
 		return nil
 	}
+	// Capture the manual review-page crop geometry before the merge: the
+	// merger rebuilds a fresh Movie and does not know about the runtime-only
+	// geometry, so carry/clear is decided here at the apply boundary.
+	preSource := effectivePosterSource(state.movie)
+	var preBounds *models.CropBounds
+	var preFull bool
+	if state.movie != nil {
+		preBounds = state.movie.Poster.PosterCropBounds
+		preFull = state.movie.Poster.PosterCropSourceFull
+	}
 	mergeRes := o.nfo.MergeWithExistingNFO(state.movie, nfo.MergeWithExistingOptions{
 		Match:          cmd.Match,
 		ForceOverwrite: cmd.Merge.ForceOverwrite,
@@ -299,10 +309,42 @@ func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps
 		ArrayStrategy:  cmd.Merge.ArrayStrategy,
 	})
 	state.movie = mergeRes.Movie
+	carryPosterCropAcrossMerge(state.movie, preSource, preBounds, preFull)
 	state.merged = mergeRes.Merged
 	state.foundNFOPath = mergeRes.FoundNFOPath
 	steps.Merged = true
 	return nil
+}
+
+// effectivePosterSource mirrors the downloader's poster source selection:
+// PosterURL when present, otherwise CoverURL.
+func effectivePosterSource(m *models.Movie) string {
+	if m == nil {
+		return ""
+	}
+	if m.Poster.PosterURL != "" {
+		return m.Poster.PosterURL
+	}
+	return m.Poster.CoverURL
+}
+
+// carryPosterCropAcrossMerge retains manual crop geometry across the
+// pre-organize merge only when the merge left the effective poster source
+// unchanged; any source change (or absent/non-full-source geometry) clears
+// it so a stale crop can never be applied to a different image. Runs at the
+// apply boundary only — the generic NFO merger never sees the field.
+func carryPosterCropAcrossMerge(merged *models.Movie, preSource string, preBounds *models.CropBounds, preFull bool) {
+	if merged == nil {
+		return
+	}
+	if preBounds != nil && preFull && preSource != "" && effectivePosterSource(merged) == preSource {
+		b := *preBounds
+		merged.Poster.PosterCropBounds = &b
+		merged.Poster.PosterCropSourceFull = true
+		return
+	}
+	merged.Poster.PosterCropBounds = nil
+	merged.Poster.PosterCropSourceFull = false
 }
 
 // stepDisplayTitle applies the display title template or falls back to Title.

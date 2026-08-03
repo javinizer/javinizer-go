@@ -170,7 +170,7 @@ func TestUpdatePosterCrop_Miss_NoFilePaths(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{})
 
-	err := job.posterEditor.UpdatePosterCrop("NOFILE-001", "https://example.com/cropped.jpg")
+	err := job.posterEditor.UpdatePosterCrop("NOFILE-001", "https://example.com/cropped.jpg", nil, false)
 	assert.NoError(t, err)
 }
 

@@ -49,6 +49,7 @@ import { calculateCompleteness, type CompletenessTier } from '$lib/utils/complet
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
 import { buildMovieOverride } from './save-helpers';
+import { clearCropGeometry } from './poster-crop-sync';
 import * as m from '$lib/paraglide/messages';
 
 interface MovieGroup {
@@ -681,7 +682,10 @@ export function createReviewState(pageStore: Page) {
 		return (
 			currentMovie.poster_url !== original.poster_url ||
 			currentMovie.cropped_poster_url !== original.cropped_poster_url ||
-			currentMovie.should_crop_poster !== original.should_crop_poster
+			currentMovie.should_crop_poster !== original.should_crop_poster ||
+			// pending manual crop geometry is drift from the baseline even when
+			// URL/intent fields happen to match it
+			currentMovie.poster_crop_bounds != null
 		);
 	});
 
@@ -701,17 +705,22 @@ export function createReviewState(pageStore: Page) {
 		const posterChanged =
 			currentMovie.poster_url !== original.poster_url ||
 			currentMovie.cropped_poster_url !== original.cropped_poster_url ||
-			currentMovie.should_crop_poster !== original.should_crop_poster;
+			currentMovie.should_crop_poster !== original.should_crop_poster ||
+			currentMovie.poster_crop_bounds != null;
 		if (!posterChanged) return;
 
 		if (original.poster_url !== currentMovie.poster_url) {
 			mutations.applyPosterFromUrl(currentResult!.result_id, original.poster_url);
 		} else {
-			updateCurrentMovie({
-				...currentMovie,
-				cropped_poster_url: original.cropped_poster_url,
-				should_crop_poster: original.should_crop_poster,
-			});
+			updateCurrentMovie(
+				// explicit null: the next save clears stored crop geometry on the
+				// server (an omitted key would preserve it)
+				clearCropGeometry({
+					...currentMovie,
+					cropped_poster_url: original.cropped_poster_url,
+					should_crop_poster: original.should_crop_poster,
+				}),
+			);
 			clearPosterPreviewOverride();
 		}
 	}

@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"math"
 	"path/filepath"
 
 	"github.com/javinizer/javinizer-go/internal/imageutil"
@@ -53,14 +54,21 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		}, nil
 	}
 
-	// Check if we need to crop the poster or use it directly
-	if !movie.Poster.ShouldCropPoster {
+	// Check if we need to crop the poster or use it directly. Manual
+	// review-page crop geometry takes precedence over the scraper's crop
+	// intent while it is still applyable; invalid geometry is dropped before
+	// any download so the pre-geometry paths below behave exactly as before.
+	bounds := movie.Poster.PosterCropBounds
+	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
+	if !geometryUsable && !movie.Poster.ShouldCropPoster {
 		// High-quality poster - download directly without cropping
 		result, err := d.download(ctx, posterURL, destPath, MediaTypePoster)
 		return result, err
 	}
 
-	// Low-quality poster - download and crop from cover
+	// One GET feeds every poster-producing path below — fallback paths reuse
+	// the already-downloaded bytes instead of re-requesting the URL, so a
+	// single-use/signed poster URL cannot be consumed twice.
 	tempPath := destPath + ".full.tmp"
 	result, err := d.download(ctx, posterURL, tempPath, MediaTypePoster)
 	if err != nil || !result.Downloaded {
@@ -68,7 +76,32 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		return result, err
 	}
 
-	// Crop the poster from the downloaded image
+	// Manual geometry first: reproduce the review-page crop on the downloaded
+	// source. Any inconsistency (undecodable, aspect drift, empty rect) falls
+	// through to the pre-geometry behavior with the temp file kept in place.
+	if geometryUsable && d.cropDownloadedPoster(tempPath, destPath, bounds) {
+		_ = d.fs.Remove(tempPath)
+		d.finalizePosterResult(result, destPath)
+		return result, nil
+	}
+
+	if !movie.Poster.ShouldCropPoster {
+		// Preserve the pre-geometry direct-download success: promote the
+		// already-downloaded bytes rather than re-requesting the URL.
+		if rerr := d.fs.Rename(tempPath, destPath); rerr != nil {
+			logging.Warnf("downloadPoster: failed to promote %s: %v", tempPath, rerr)
+			_ = d.fs.Remove(tempPath)
+			result.Downloaded = false
+			result.LocalPath = "" // never report the removed temp path
+			result.Size = 0
+			result.Error = fmt.Errorf("failed to finalize poster: %w", rerr)
+			return result, result.Error
+		}
+		d.finalizePosterResult(result, destPath)
+		return result, nil
+	}
+
+	// Low-quality poster - crop from the downloaded cover
 	if err := imageutil.CropPosterFromCover(d.fs, tempPath, destPath, d.config.MaxPosterHeight); err != nil {
 		_ = d.fs.Remove(tempPath) // Clean up temp file
 		result.Error = fmt.Errorf("failed to crop poster: %w", err)
@@ -86,6 +119,70 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	return result, nil
+}
+
+// finalizePosterResult points result at the promoted poster, or clears the
+// location fields so a caller can never see a dangling (removed) temp path.
+func (d *Downloader) finalizePosterResult(result *DownloadResult, destPath string) {
+	result.LocalPath = ""
+	result.Size = 0
+	if info, err := d.fs.Stat(destPath); err == nil {
+		result.LocalPath = destPath
+		result.Size = info.Size()
+	}
+}
+
+// cropDownloadedPoster applies the normalized review-page geometry to an
+// already-downloaded full source image and writes the final poster.
+// Returns false when the geometry does not apply to this image (undecodable,
+// aspect drift, empty rect); the caller then falls back to the pre-geometry
+// behavior with the temp file still in place.
+func (d *Downloader) cropDownloadedPoster(tempPath, destPath string, bounds *models.CropBounds) bool {
+	w, h, derr := imageutil.ImageDimensions(d.fs, tempPath)
+	if derr != nil || w <= 0 || h <= 0 {
+		logging.Warnf("downloadPoster: cannot decode downloaded source for manual crop: %v", derr)
+		return false
+	}
+
+	// Aspect guard: the geometry was normalized against the review-time
+	// source; if the downloaded image no longer matches that aspect, the
+	// geometry targets a different image — refuse and fall back.
+	if bounds.SourceAspect > 0 {
+		got := float64(w) / float64(h)
+		diff := math.Abs(got - bounds.SourceAspect)
+		if diff > 0.01*bounds.SourceAspect {
+			logging.Warnf("downloadPoster: manual crop aspect mismatch (crop %.4f, downloaded %.4f); falling back", bounds.SourceAspect, got)
+			return false
+		}
+	}
+
+	fw, fh := float64(w), float64(h)
+	left := int(math.Round(bounds.X * fw))
+	top := int(math.Round(bounds.Y * fh))
+	right := int(math.Round((bounds.X + bounds.Width) * fw))
+	bottom := int(math.Round((bounds.Y + bounds.Height) * fh))
+	if left < 0 {
+		left = 0
+	}
+	if top < 0 {
+		top = 0
+	}
+	if right > w {
+		right = w
+	}
+	if bottom > h {
+		bottom = h
+	}
+	if right <= left || bottom <= top {
+		logging.Warnf("downloadPoster: manual crop geometry collapses to empty rect; falling back")
+		return false
+	}
+
+	if err := imageutil.CropPosterWithBounds(d.fs, tempPath, destPath, left, top, right, bottom, d.config.MaxPosterHeight); err != nil {
+		logging.Warnf("downloadPoster: manual crop failed: %v", err)
+		return false
+	}
+	return true
 }
 
 // downloadExtrafanart downloads screenshots to the extrafanart subdirectory.
