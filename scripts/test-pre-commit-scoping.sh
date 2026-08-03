@@ -543,6 +543,18 @@ printf 'fixture\n' > internal/foo/local_t.db
 git add internal/foo/embed_test.go
 check_hook "e2e: ignored _test.go embed asset masked" 1 "local_t.db"
 
+# fail-closed guard scans: with a package graph the toolchain cannot
+# enumerate (UNTRACKED file importing an unresolvable module — GOPROXY=off
+# makes resolution fail fast), the guard must REFUSE rather than silently
+# skip its ignored-input/embed scans. The refusal, not the subsequent
+# untracked-file report, must fire first. (-f {{.Dir}} resolves imports
+# lazily, so only a genuinely broken GRAPH reaches the refusal; a mere
+# syntax error in non-import code does not fail go list and stays with
+# the untracked-path report covered above.)
+reset; printf '\nvalue: 2\n' >> configs/config.yaml.example; git add configs/config.yaml.example
+printf 'package foo\n\nimport _ "totally.invalid/nonexistent/pkg"\n\nvar BrokenDep int\n' > internal/foo/zbroken.go
+check_hook "e2e: unresolvable package graph hard-blocks guard scans" 1 "Cannot enumerate"
+
 reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 mkdir -p .worktrees/wt; printf 'package wt\n' > .worktrees/wt/x.go
 check_hook "e2e: ignored .go inside .worktrees/ does not block" 0
@@ -586,8 +598,12 @@ git reset -q --hard HEAD >/dev/null 2>&1; rm -f local_root.go
 # regex-hostile checkout path: whole scratch copied under a [bracket] dir —
 # the prefix strip must not fail open there either
 reset
-BRK="$(dirname "$WORK")/br[ack]et"
-rm -rf "$BRK"; cp -R "$WORK" "$BRK"
+# fresh unique root: a predictable sibling path could belong to a
+# concurrent or crashed run — rm -rf must only ever target what THIS run
+# created, so uniqueness comes first and the bracket lives in the LEAF
+BRKROOT=$(mktemp -d)
+BRK="$BRKROOT/br[ack]et"
+cp -R "$WORK" "$BRK"
 cd "$BRK" || exit 2
 gofmt_w() { gofmt -w "$1"; }
 mkdir -p internal/ghost
@@ -599,7 +615,7 @@ if PRE_COMMIT_FAST=1 bash "$HOOK" >hook.out 2>&1; then brk_rc=0; else brk_rc=$?;
 if [ "$brk_rc" -eq 1 ] && grep -q local_g.go hook.out && grep -q local_root.go hook.out; then
   PASS=$((PASS+1)); echo "ok   - e2e: bracketed checkout path — both ghost masks blocked"
 else FAIL=$((FAIL+1)); echo "FAIL - e2e: bracketed path regressed (rc=$brk_rc)"; tail -5 hook.out; fi
-cd "$WORK" || exit 2; rm -rf "$BRK"
+cd "$WORK" || exit 2; rm -rf "$BRKROOT"
 git reset -q --hard HEAD >/dev/null 2>&1; rm -f local_root.go
 git reset -q --hard HEAD >/dev/null 2>&1; rm -rf internal/ghost
 

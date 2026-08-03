@@ -474,7 +474,25 @@ done < <(git diff --cached --name-only -z --no-renames)
 # never ran.
 GUARD_PATHSPEC=(-- '*.go' go.mod go.sum testdata internal cmd web/dist docs/swagger configs web/frontend .golangci.yml .golangci.yaml Makefile
                 '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' '*.s' '*.S' '*.sx' '*.syso' '*.m' '*.f' '*.F' '*.for' '*.f90' '*.swig' '*.swigcxx')
+# A guard scan that cannot run MUST NOT silently degrade to a partial
+# census: every go list below exists because git alone cannot see some
+# masking hole (ignored-only packages, toolchain-resolved embed targets),
+# and a swallowed error would re-open the very hole the scan exists to
+# close. Refuse instead — the staged checks need the same module graph,
+# so a genuinely unresolvable tree blocks either way. GUARD_REFUSED tells
+# the call sites the refusal was already reported (skip the generic
+# unstaged/conflict report).
+GUARD_REFUSED=""
+refuse_guard_scan() {
+    GUARD_REFUSED=1
+    echo -e "${RED}✗ Cannot enumerate the Go package graph ($1 failed) — the${NC}"
+    echo -e "${RED}  tree-consistency guard cannot prove ignored compile inputs or${NC}"
+    echo -e "${RED}  embed assets absent, and a partial scan vouches for nothing.${NC}"
+    echo -e "${YELLOW}Fix the tree or warm the module cache (go mod download), then retry.${NC}"
+    return 1
+}
 check_tree_consistency() {
+    GUARD_REFUSED=""
     STAGED_SET=$(git diff --cached --name-only --no-renames -- "${GUARD_PATHSPEC[@]}" | sort || true)
     CONFLICT=""
     while IFS= read -r -d '' f; do
@@ -508,13 +526,22 @@ $f"
         # substitution subshell (the guard runs twice per hook; the
         # graph cannot change mid-run without tripping a consistency check).
         if [ -z "${TOOL_DIRS_CACHE+x}" ]; then
-            TOOL_DIRS_CACHE=$( {
-                go list -f '{{.Dir}}' -deps ./... 2>/dev/null || true
+            # Fail CLOSED on error: a partial dep-graph census silently
+            # re-opens the ignored-only-package masking hole this cache
+            # exists to close (see refuse_guard_scan).
+            DEPS_SCAN=$( {
+                go list -f '{{.Dir}}' -deps ./... 2>/dev/null &&
                 # -deps alone skips TEST-ONLY imports; a staged _test.go can
                 # import an ignored-only package (e.g. beneath testdata/).
-                go list -f '{{.Dir}}' -deps -test ./... 2>/dev/null || true
-            } | sort -u )
+                go list -f '{{.Dir}}' -deps -test ./... 2>/dev/null
+            } ) || { refuse_guard_scan "go list -deps"; return 1; }
+            TOOL_DIRS_CACHE=$(printf '%s\n' "$DEPS_SCAN" | sort -u)
         fi
+        # Wildcard view, fresh per invocation (cheap without -deps):
+        # module packages NOBODY imports never appear in the dependency
+        # graph, yet an ignored-only orphan package masks just as well.
+        WILD_SCAN=$(go list -f '{{.Dir}}' ./... 2>/dev/null) ||
+            { refuse_guard_scan "go list"; return 1; }
         PKG_DIRS=$( {
             {
                 git ls-files '*.go'
@@ -529,8 +556,7 @@ $f"
             # Wildcard packages PLUS the cached dependency graph (the only
             # side that sees explicit imports beneath testdata/).
             {
-                go list -f '{{.Dir}}' ./... 2>/dev/null
-                printf '%s\n' "$TOOL_DIRS_CACHE"
+                printf '%s\n%s\n' "$WILD_SCAN" "$TOOL_DIRS_CACHE"
             } | while IFS= read -r abs; do
                     # if/elif instead of case: bash 3.2 (stock macOS)
                     # mis-parses case patterns inside nested command
@@ -581,7 +607,10 @@ FILTER_EOF
         # present or future) — whatever sits in the index ships with the
         # commit by definition. Data files READ (not embedded) by tests
         # are not toolchain-enumerable and stay out by design.
-        EMBED_ABS=$(go list -test -f '{{range .EmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .TestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .XTestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./... 2>/dev/null || true)
+        # Same fail-closed rule as the directory scans above: a partial
+        # embed census would vouch for masking holes it never saw.
+        EMBED_ABS=$(go list -test -f '{{range .EmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .TestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .XTestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./... 2>/dev/null) ||
+            { refuse_guard_scan "go list -test"; return 1; }
         if [ -n "$EMBED_ABS" ]; then
             EMBED_ROOT=$(pwd)
             EMBED_REL=""
@@ -646,7 +675,8 @@ if [ "$POST_CLASSIFICATION_TREE" != "$INITIAL_INDEX_TREE" ]; then
     exit 1
 fi
 if ! check_tree_consistency; then
-    report_tree_conflict "Working tree contains unstaged/untracked changes under checked paths"
+    # GUARD_REFUSED means refuse_guard_scan already printed the reason.
+    [ -n "$GUARD_REFUSED" ] || report_tree_conflict "Working tree contains unstaged/untracked changes under checked paths"
     exit 1
 fi
 # ---------------------------------------------------------------------------
@@ -894,7 +924,7 @@ echo ""
 # model is accidental edits, not adversarial timing (which --no-verify
 # already makes moot).
 if ! check_tree_consistency; then
-    report_tree_conflict "Working tree changed while the checks were running"
+    [ -n "$GUARD_REFUSED" ] || report_tree_conflict "Working tree changed while the checks were running"
     exit 1
 fi
 # Index drift: a concurrent git add leaves tree==index but with staged
