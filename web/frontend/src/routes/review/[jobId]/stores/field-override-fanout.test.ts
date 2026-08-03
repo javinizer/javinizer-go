@@ -192,6 +192,63 @@ describe('applyFieldOverrideToEditedMovies (multipart fanout of pending edits)',
 		expect(editedMovies.get('/a/XYZ-999.mp4')?.poster_url).toBeUndefined();
 	});
 
+	it('id override re-keys every multipart pending edit and carries the re-pointed poster state', () => {
+		const results = makeMultipartResults();
+		const editedMovies = new Map<string, Movie>([
+			[
+				'/a/ABC-001-pt1.mp4',
+				makeMovie({
+					maker: 'User1',
+					cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+					original_cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=1',
+					should_crop_poster: true,
+					poster_crop_bounds: { x: 9, y: 9, width: 150, height: 200 },
+				}),
+			],
+			[
+				'/a/ABC-001-pt2.mp4',
+				makeMovie({
+					maker: 'User2',
+					cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+				}),
+			],
+			['/a/XYZ-999.mp4', makeMovie({ id: 'XYZ-999', maker: 'Unrelated Edit' })],
+		]);
+		// The response movie after the id rekey: new id, BOTH preview URLs
+		// re-pointed at the new cache key, bounds cleared server-side (absent
+		// key), intent synced. Per-part identity (original_filename) must NOT
+		// leak onto siblings — the response carries the selected part's name.
+		const rekeyed = makeMovie({
+			id: 'ABC-002',
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-002.jpg?v=2',
+			original_cropped_poster_url: '/api/v1/temp/posters/job/ABC-002.jpg?v=1',
+			should_crop_poster: false,
+			original_filename: 'ABC-001-pt1.mp4',
+		});
+		delete rekeyed.poster_crop_bounds;
+
+		applyFieldOverrideToEditedMovies(editedMovies, results, 'r1', 'id', rekeyed);
+
+		for (const path of ['/a/ABC-001-pt1.mp4', '/a/ABC-001-pt2.mp4']) {
+			const edit = editedMovies.get(path)!;
+			expect(edit.id, path).toBe('ABC-002');
+			expect(
+				edit.cropped_poster_url,
+				`${path} must carry the re-keyed preview URL, not the deleted old cache key`,
+			).toBe('/api/v1/temp/posters/job/ABC-002.jpg?v=2');
+			expect(edit.original_cropped_poster_url, path).toBe(
+				'/api/v1/temp/posters/job/ABC-002.jpg?v=1',
+			);
+			expect(edit.should_crop_poster, path).toBe(false);
+			expect(edit.poster_crop_bounds, path).toBeNull();
+		}
+		// Unrelated pending edits survive; unrelated movies are untouched.
+		expect(editedMovies.get('/a/ABC-001-pt1.mp4')?.maker).toBe('User1');
+		expect(editedMovies.get('/a/ABC-001-pt2.mp4')?.maker).toBe('User2');
+		expect(editedMovies.get('/a/XYZ-999.mp4')?.id).toBe('XYZ-999');
+		expect(editedMovies.get('/a/XYZ-999.mp4')?.maker).toBe('Unrelated Edit');
+	});
+
 	it('overlays a scalar field override onto every multipart pending edit', () => {
 		const results = makeMultipartResults();
 		const editedMovies = new Map<string, Movie>([

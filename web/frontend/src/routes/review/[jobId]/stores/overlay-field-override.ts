@@ -155,6 +155,29 @@ export function overlayFieldOverride(target: Movie, field: string, src: Movie): 
 			if (old !== src.should_crop_poster) target.poster_crop_bounds = null;
 			break;
 		}
+		case 'id': {
+			// An id override RE-KEYS the movie server-side (ApplyFieldOverride's
+			// id-rekey: MigratePosterCacheAssets moves the cached poster files to
+			// the new {movie.ID} key and RewritePosterIDInPreviewURL rewrites BOTH
+			// persisted preview URLs), but the response only carries the one
+			// edited part's movie. Overlaying just the new id onto a pending edit
+			// would leave the next whole-movie Save (buildMovieToSave sends every
+			// field) resubmitting the STALE cropped_poster_url /
+			// original_cropped_poster_url pointing at the deleted old cache key —
+			// the server performs no second migration — so the synchronized poster
+			// state the server returned must come along with the id. Unrelated
+			// pending fields (title, maker, ...) stay untouched.
+			target.id = src.id;
+			target.cropped_poster_url = src.cropped_poster_url;
+			target.original_cropped_poster_url = src.original_cropped_poster_url;
+			target.should_crop_poster = src.should_crop_poster;
+			// NOT guarded on !== undefined: the server omits poster_crop_bounds
+			// when CLEARED (omitempty on *CropBounds), so an absent key means
+			// "cleared" and must land as null — same absent-key-vs-explicit-null
+			// convention as the poster_url/cover_url case above.
+			target.poster_crop_bounds = src.poster_crop_bounds ?? null;
+			break;
+		}
 		default:
 			(target as unknown as Record<string, unknown>)[field] = (
 				src as unknown as Record<string, unknown>

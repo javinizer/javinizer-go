@@ -82,7 +82,10 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// per-resultID overrideMu BEFORE this lock and no path reverses that.
 		// The store-internal locks inside UpdatePosterCrop/PersistJobByID are
 		// taken while this lock is held, but no path acquires this lock while
-		// holding one of those, so the acquisition order is cycle-free.
+		// holding one of those, so the acquisition order is cycle-free. The
+		// per-job envelope lock (worker.AcquireJobEnvelopeLock) joins LATER —
+		// before the state update below — extending the order to poster-source
+		// → job-envelope → result-store locks; no path reverses it.
 		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterID)
 		defer func() { releasePosterLock() }()
 
@@ -184,15 +187,15 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				bounds.SourceWasCover = result.Movie.Poster.CropBounds.SourceWasCover
 			}
 		}
-		// Snapshot every part's pre-crop movie so a failed envelope persist can
-		// revert the in-memory crop EXACTLY. UpdatePosterCrop mutates three
-		// things per part (CroppedPosterURL preview, ShouldCropPoster=false,
-		// CropBounds) and may lazily stamp the Original* backup baseline, so a
-		// revert must restore the whole pre-crop movie per part — replaying
-		// UpdatePosterCrop with the old bounds would leave ShouldCropPoster at
-		// false even when the pre-crop intent was true. Mirrored from the
-		// poster-from-URL compensation below. GetMovieResult clones, so the
-		// atomic crop update cannot alias these.
+		// Snapshot every part's pre-crop movie so a failed crop-state update OR
+		// a failed envelope persist can revert the in-memory crop EXACTLY.
+		// UpdatePosterCrop mutates three things per part (CroppedPosterURL
+		// preview, ShouldCropPoster=false, CropBounds) and may lazily stamp the
+		// Original* backup baseline, so a revert must restore the whole pre-crop
+		// movie per part — replaying UpdatePosterCrop with the old bounds would
+		// leave ShouldCropPoster at false even when the pre-crop intent was
+		// true. Mirrored from the poster-from-URL compensation below.
+		// GetMovieResult clones, so the atomic crop update cannot alias these.
 		origMovies := make(map[string]*models.Movie)
 		for _, fp := range job.FindFilePathsForMovieID(movieID) {
 			if prev, gErr := job.GetMovieResult(fp); gErr == nil && prev != nil && prev.Movie != nil {
@@ -200,9 +203,46 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 		}
 
+		// Serialize the mutation → envelope persist → rollback tail across
+		// DIFFERENT movies of this job (worker.AcquireJobEnvelopeLock, parity
+		// with the rescrape phase's commit window and the other edit handlers):
+		// a concurrent edit to another movie holds its own poster-source lock,
+		// so without job-scope serialization a peer's whole-envelope persist
+		// (PersistJobByID snapshots ALL results) could durably capture this
+		// request's committed-but-not-yet-durable crop — and when this
+		// request's own persist then fails and compensates in memory, the
+		// peer's envelope still resurrects the rejected crop on restart.
+		// Acquired AFTER the poster-source lock (ordering poster-source →
+		// job-envelope; the deferred release runs before the poster lock's —
+		// LIFO) and held across UpdatePosterCrop, PersistJobByID, and any
+		// compensation.
+		releaseEnvelopeLock := worker.AcquireJobEnvelopeLock(jobID)
+		defer func() { releaseEnvelopeLock() }()
+
+		// compensateCrop reverts the per-part in-memory movies (whole pre-crop
+		// snapshots) and restores the pre-crop cache bytes, part reverts first
+		// so no in-memory result references the rejected crop while the cache
+		// flips back. Shared by BOTH failure legs below: a failed
+		// UpdatePosterCrop must not leave CropWithBounds' rejected preview
+		// installed (and a multipart UpdatePosterCrop can fail mid-fan-out,
+		// leaving earlier parts mutated) — the same divergence the
+		// persist-failure leg already handled.
+		compensateCrop := func(errMsg string) string {
+			for fp, orig := range origMovies {
+				if revertErr := job.UpdateMovie(c.Request.Context(), fp, orig); revertErr != nil {
+					errMsg = fmt.Sprintf("%s (revert of part %s failed: %v)", errMsg, fp, revertErr)
+				}
+			}
+			if restoreErr := snap.PosterManager().RestoreAssets(assetSnap); restoreErr != nil {
+				errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, restoreErr)
+			}
+			return errMsg
+		}
+
 		if err := job.UpdatePosterCrop(movieID, croppedURL, bounds); err != nil {
+			errMsg := compensateCrop(fmt.Sprintf("Failed to update job state: %v", err))
 			logging.Errorf("Failed to update poster crop in job state for %s: %v", movieID, err)
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 
@@ -224,15 +264,7 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// still held (deferred above), so the revert is serialized with the
 		// same edits the crop itself was.
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
-			errMsg := fmt.Sprintf("Failed to persist job state: %v", perr)
-			for fp, orig := range origMovies {
-				if revertErr := job.UpdateMovie(c.Request.Context(), fp, orig); revertErr != nil {
-					errMsg = fmt.Sprintf("%s (revert of part %s failed: %v)", errMsg, fp, revertErr)
-				}
-			}
-			if restoreErr := snap.PosterManager().RestoreAssets(assetSnap); restoreErr != nil {
-				errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, restoreErr)
-			}
+			errMsg := compensateCrop(fmt.Sprintf("Failed to persist job state: %v", perr))
 			logging.Errorf("Failed to persist poster crop for job %s: %v", jobID, perr)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
@@ -311,7 +343,10 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		// Lock ordering: this endpoint acquires ONLY this lock (parity with
 		// updateBatchMoviePosterCrop/updateBatchMovie); ApplyFieldOverride
 		// takes overrideMu BEFORE it and no path reverses either order, so
-		// acquisition stays cycle-free.
+		// acquisition stays cycle-free. The per-job envelope lock
+		// (worker.AcquireJobEnvelopeLock) joins later — before the state
+		// update — extending the order to poster-source → job-envelope →
+		// result-store locks.
 		releasePosterLock := worker.AcquirePosterSourceLock(jobID, posterID)
 		defer func() { releasePosterLock() }()
 
@@ -409,6 +444,19 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 		croppedURL := posterResult.CroppedURL
+
+		// Serialize the mutation → envelope persist → compensate tail below
+		// per job (worker.AcquireJobEnvelopeLock — parity with the crop/PATCH
+		// handlers; see updateBatchMoviePosterCrop for the full rationale): a
+		// peer edit on a DIFFERENT movie of this job holds only its own
+		// poster-source lock, so its whole-envelope persist could otherwise
+		// durably capture this request's committed URL update before it is
+		// durable itself, resurrecting a rolled-back edit on restart. Acquired
+		// AFTER the poster-source lock (poster → envelope ordering; released
+		// LIFO before it) and held across UpdatePosterFromURL,
+		// PersistJobByID, and any compensation.
+		releaseEnvelopeLock := worker.AcquireJobEnvelopeLock(jobID)
+		defer func() { releaseEnvelopeLock() }()
 
 		// UpdatePosterFromURL handles both DB persistence and
 		// in-memory update. No need to call MovieRepo directly.

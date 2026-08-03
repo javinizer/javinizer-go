@@ -394,6 +394,11 @@ type jobEditorImpl struct {
 	// re-keyed assets moved back — before the lock releases: there is NO
 	// release→re-acquire gap a crop or source edit could land in and be
 	// silently erased by the compensation (the old handler-side F3 window).
+	// The persist and its compensation run under the per-job envelope lock
+	// (AcquireJobEnvelopeLock, acquired after the poster-source locks —
+	// poster → envelope ordering) so concurrent envelope writers on other
+	// movies of this job cannot durably capture the fan-out before it is
+	// durable itself.
 	// Nil for editors without envelope persistence (standalone jobs, tests):
 	// the in-section persist is skipped, matching the pre-hoist non-API flow.
 	//
@@ -567,7 +572,11 @@ func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string
 // movies, the pre-override provenance is restored, the poster cache rolls
 // back, and re-keyed assets move back — a restart must never resurrect
 // pre-override job state against a refreshed cache, and no other
-// poster-state writer can interleave with the revert.
+// poster-state writer can interleave with the revert. The fan-out onward is
+// additionally serialized per JOB under the envelope lock
+// (AcquireJobEnvelopeLock, poster → envelope ordering), so a concurrent edit
+// on a different movie of the same job cannot durably persist this
+// override's committed-but-not-yet-durable state.
 func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 	mu, _ := je.overrideMu.LoadOrStore(resultID, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
@@ -774,6 +783,21 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 		// assets at the destination key (compensateMove).
 		return nil, nil, compensateMove(err)
 	}
+	// Whole-job envelope serialization (AcquireJobEnvelopeLock — parity with
+	// the rescrape phase's commit window and the API edit handlers),
+	// layered HERE because this method owns the override path's persist: the
+	// fan-out → persistEnvelope → compensation tail below must not interleave
+	// with another movie's whole-envelope persist. A peer edit on a different
+	// movie of this job holds only its own poster-source lock, so its persist
+	// could otherwise durably capture this override's committed-but-not-yet-
+	// durable part writes — resurrecting them on restart after a persist
+	// failure rolls them back in memory. Nests AFTER overrideMu and the
+	// poster-source lock(s) (overrideMu → poster-source → job-envelope →
+	// result-store locks); the deferred release runs before both (LIFO).
+	// The asset migration/refresh above is cache-level, not envelope state,
+	// so it stays outside this window.
+	releaseEnvelopeLock := AcquireJobEnvelopeLock(je.jobID)
+	defer releaseEnvelopeLock()
 	updatedParts := make([]overridePartWrite, 0, len(planned))
 	for _, part := range planned {
 		if updateErr := je.UpdateMovie(ctx, part.filePath, part.movie); updateErr != nil {

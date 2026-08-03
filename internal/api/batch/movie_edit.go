@@ -345,6 +345,22 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// unchanged, skip the asset refresh, and a subsequent manual crop would
 		// then be measured against the restored old image while Organize
 		// downloads the new source.
+		// Whole-job envelope serialization (worker.AcquireJobEnvelopeLock — the
+		// API-handler parity of the rescrape phase's commit window): a concurrent
+		// crop, poster-from-URL, or field override on a DIFFERENT movie of this
+		// job holds only its own poster-source lock, so without per-job
+		// serialization a peer's whole-envelope persist could durably capture
+		// THIS request's just-committed part updates — which the
+		// UpdateMovie/persist failure branches below then roll back in memory,
+		// resurrecting the rejected edit on restart. Held across the multipart
+		// UpdateMovie loop, the final PersistJobByID, and compensateEdit;
+		// acquired AFTER the poster-source lock(s) (ordering poster → envelope)
+		// so the deferred release runs before theirs (LIFO). The asset
+		// migration/refresh above is cache-level (not envelope state), so it
+		// stays outside this window.
+		releaseEnvelopeLock := worker.AcquireJobEnvelopeLock(jobID)
+		defer func() { releaseEnvelopeLock() }()
+
 		type updatedPart struct {
 			filePath string
 			original *models.Movie // pre-update stored movie, held for revert

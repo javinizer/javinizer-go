@@ -17,14 +17,17 @@ var (
 )
 
 // AcquireJobEnvelopeLock serializes the commit→persist→rollback window of
-// whole-job-envelope writers that run CONCURRENTLY on the same job — the bulk
-// rescrape pool workers (internal/api/batch/batch_rescrape.go) are the
-// motivating case: each worker commits its own movie's ResultMap entry and
+// whole-job-envelope writers that run CONCURRENTLY on the same job. The bulk
+// rescrape pool workers (internal/api/batch/batch_rescrape.go) were the
+// motivating case, and the API edit handlers (updateBatchMovie,
+// updateBatchMoviePosterCrop, updateBatchMoviePosterFromURL in
+// internal/api/batch, and jobEditorImpl.ApplyFieldOverride) follow the same
+// discipline: each writer commits its own movie's ResultMap entry and
 // persists the ENTIRE job envelope while peers commit other movies under
-// their own poster-source locks. Without job-scope serialization, worker A's
-// persist can durably capture worker B's just-committed state, and when B's
+// their own poster-source locks. Without job-scope serialization, writer A's
+// persist can durably capture writer B's just-committed state, and when B's
 // own persist then fails and B rolls its entry back, the durable envelope
-// still contains B's rejected rescrape — a restart resurrects it against the
+// still contains B's rejected edit — a restart resurrects it against the
 // restored old poster cache while the API already reported failure.
 //
 // Holding this mutex from the CAS commit through the envelope persist AND any

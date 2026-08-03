@@ -45,10 +45,11 @@ type BatchJobDeps struct {
 	// (rescrapePhaseInputs.PersistEnvelope) and the field-override editor
 	// (jobEditorImpl.persistEnvelope) call it while holding the poster-source
 	// lock(s), making the envelope persist part of those critical sections;
-	// the rescrape phase additionally holds the per-job envelope lock
-	// (AcquireJobEnvelopeLock) around commit→persist→rollback so concurrent
-	// bulk rescrape workers cannot durably persist each other's
-	// committed-but-later-rolled-back state.
+	// the rescrape phase, the field-override editor, and the API edit
+	// handlers additionally hold the per-job envelope lock
+	// (AcquireJobEnvelopeLock) around mutation→persist→rollback so concurrent
+	// writers on different movies of one job cannot durably persist each
+	// other's committed-but-later-rolled-back state.
 	// Nil for standalone jobs: those paths then skip the in-section persist
 	// entirely (their caller owns persistence, as before).
 	PersistErrFn func() error

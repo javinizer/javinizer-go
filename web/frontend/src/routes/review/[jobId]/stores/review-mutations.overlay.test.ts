@@ -210,6 +210,85 @@ describe('overlayFieldOverride', () => {
 		expect(target.maker).toBe('User Edited Maker');
 	});
 
+	// Finding C: an id override RE-KEYS the movie server-side — the cached
+	// poster assets move old-key → new-key and the response movie carries the
+	// rewritten preview URLs — but the pending-edit overlay used to copy only
+	// the new id. The next whole-movie Save (buildMovieToSave sends every
+	// field) would then resubmit the stale cropped_poster_url /
+	// original_cropped_poster_url pointing at the deleted old cache key (the
+	// server performs no second migration), and stale bounds measured against
+	// the pre-rekey keying.
+	it('id override carries the re-keyed poster state onto the pending edit', () => {
+		const target = makeMovie({
+			id: 'ABC-001',
+			// Unrelated pending edits the user already made:
+			title: 'User Edited Title',
+			maker: 'User Edited Maker',
+			// poster_url is source state, not cache-key state — must survive:
+			poster_url: 'https://example.com/poster.jpg',
+			// Stale pre-rekey cache-key state pointing at the DELETED old key:
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+			original_cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=1',
+			should_crop_poster: true,
+			poster_crop_bounds: { x: 10, y: 10, width: 200, height: 300 },
+		});
+		// The field-override response movie after the id rekey: both preview
+		// URLs re-pointed at the new key, bounds cleared server-side (absent
+		// key — omitempty), intent synced.
+		const src = makeMovie({
+			id: 'ABC-002',
+			poster_url: 'https://example.com/poster.jpg',
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-002.jpg?v=2',
+			original_cropped_poster_url: '/api/v1/temp/posters/job/ABC-002.jpg?v=1',
+			should_crop_poster: false,
+		});
+		delete src.poster_crop_bounds; // server omits the key when cleared
+
+		overlayFieldOverride(target, 'id', src);
+
+		expect(target.id).toBe('ABC-002');
+		expect(target.cropped_poster_url).toBe('/api/v1/temp/posters/job/ABC-002.jpg?v=2');
+		expect(target.original_cropped_poster_url).toBe('/api/v1/temp/posters/job/ABC-002.jpg?v=1');
+		expect(target.should_crop_poster).toBe(false);
+		// Absent key on the response means "cleared" → null, not stale survival.
+		expect(target.poster_crop_bounds).toBeNull();
+		// Unrelated pending edits and source state survive untouched:
+		expect(target.title).toBe('User Edited Title');
+		expect(target.maker).toBe('User Edited Maker');
+		expect(target.poster_url).toBe('https://example.com/poster.jpg');
+	});
+
+	it('id override carries the server-returned bounds when the re-keyed movie keeps them', () => {
+		const kept = { x: 4, y: 4, width: 300, height: 450 };
+		const target = makeMovie({
+			id: 'ABC-001',
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+			poster_crop_bounds: { x: 1, y: 1, width: 100, height: 150 },
+		});
+		const src = makeMovie({
+			id: 'ABC-002',
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-002.jpg?v=2',
+			original_cropped_poster_url: '/api/v1/temp/posters/job/ABC-002.jpg?v=1',
+			should_crop_poster: false,
+			poster_crop_bounds: { ...kept },
+		});
+		overlayFieldOverride(target, 'id', src);
+		expect(target.poster_crop_bounds).toEqual(kept);
+	});
+
+	it('non-id overrides leave the id and original_cropped_poster_url untouched', () => {
+		const target = makeMovie({
+			id: 'ABC-001',
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+			original_cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=1',
+		});
+		overlayFieldOverride(target, 'maker', makeMovie({ maker: 'New Maker' }));
+		expect(target.maker).toBe('New Maker');
+		expect(target.id).toBe('ABC-001');
+		expect(target.cropped_poster_url).toBe('/api/v1/temp/posters/job/ABC-001.jpg?v=2');
+		expect(target.original_cropped_poster_url).toBe('/api/v1/temp/posters/job/ABC-001.jpg?v=1');
+	});
+
 	it('cover_url override leaves an unrelated cover edit alone when the response omits cover_url', () => {
 		const target = makeMovie({
 			poster_url: 'https://example.com/poster.jpg',

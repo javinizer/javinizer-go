@@ -59,6 +59,11 @@ var (
 //
 // Lock ordering: ApplyFieldOverride takes its per-resultID overrideMu BEFORE
 // this lock and no path reverses that order, so the two cannot deadlock.
+// Every whole-envelope writer additionally nests the per-job envelope lock
+// (AcquireJobEnvelopeLock) INSIDE this lock from its commit/update onward
+// (overrideMu → poster-source → job-envelope → leaf locks); no path acquires
+// a poster-source lock while holding the envelope lock — see
+// AcquireJobEnvelopeLock for the cross-movie persist hazard it closes.
 // Two-lock rule: paths that re-resolve their key under the lock (the crop
 // endpoint in internal/api/batch/movie_edit_poster.go and the non-"id"
 // ApplyFieldOverride convergence) RELEASE the old key before acquiring the

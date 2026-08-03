@@ -320,6 +320,9 @@ func TestUpdateBatchMoviePosterCrop_PosterSourceLockReleasedOnAllPaths(t *testin
 		mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
 		mockJob.EXPECT().GetMovieResult("/path/to/CFL-001.mp4").Return(result, nil).Maybe()
 		mockJob.EXPECT().UpdatePosterCrop(movieID, mock.Anything, mock.Anything).Return(assert.AnError)
+		// The compensation leg re-persists the pre-crop snapshot through
+		// UpdateMovie before restoring the cache.
+		mockJob.EXPECT().UpdateMovie(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 		seedFullPoster(t, jobID, movieID)
 
