@@ -96,14 +96,24 @@
 
 				<div class="flex-1 min-h-0 overflow-hidden">
 					<div class="relative w-full h-full p-10 bg-black/40 border-y min-h-[280px] flex items-center justify-center overflow-hidden">
-						<img
-							src={cropSourceURL}
-							alt={m.review_poster_crop_source_alt()}
-							class="block max-w-full max-h-full select-none"
-							draggable="false"
-							onload={onImageLoad}
-							onerror={onImageError}
-						/>
+						<!-- cropSourceURL stays empty while the fetch→blob→object-URL
+						     pipeline resolves (the revision is bound to the exact
+						     displayed bytes, so the <img> must NOT issue its own GET
+						     in parallel). An empty src would fire a spurious error on
+						     some engines — render a spinner until the object URL lands.
+						-->
+						{#if cropSourceURL}
+							<img
+								src={cropSourceURL}
+								alt={m.review_poster_crop_source_alt()}
+								class="block max-w-full max-h-full select-none"
+								draggable="false"
+								onload={onImageLoad}
+								onerror={onImageError}
+							/>
+						{:else if !posterCropLoadError}
+							<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
+						{/if}
 						{#if cropMetrics && cropBox}
 							<div
 								class="absolute border-2 border-white cursor-move touch-none"

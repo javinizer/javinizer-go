@@ -477,10 +477,14 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 // Codex P2 (cache generation token): a rescrape or poster-from-URL refresh
 // can replace {id}-full.jpg's bytes from the SAME source URL — every URL
 // guard passes while the measured coordinate space changed. The controller
-// reads the X-Poster-Revision header of the issued -full.jpg request (HEAD)
-// and threads it to Apply as expected_poster_revision.
-describe('expected_poster_revision is captured with the issued -full.jpg request and threaded to Apply', () => {
-	function makeRevisionController(fetchPosterRevision?: (url: string) => Promise<string>) {
+// reads the X-Poster-Revision header of the SAME GET response whose bytes it
+// displays (fetch → blob → object URL) and threads it to Apply as
+// expected_poster_revision. Codex P1 follow-up: the former independent HEAD
+// could observe a different generation than the <img>'s GET when a refresh
+// landed between the two — the revision must come from the GET that produced
+// the displayed bytes, by construction.
+describe('expected_poster_revision is captured with the displayed crop image and threaded to Apply', () => {
+	function makeRevisionController(fetchCropImage?: (url: string) => Promise<{ objectURL: string; revision: string }>) {
 		const movie: Movie = {
 			id: 'STARS-136',
 			title: 'Test Movie',
@@ -528,23 +532,29 @@ describe('expected_poster_revision is captured with the issued -full.jpg request
 			applyPosterFromUrlAsync: vi.fn(async () => {}),
 			mutatePosterCropAsync,
 			setCropApplying: noop,
-			...(fetchPosterRevision ? { fetchPosterRevision } : {}),
+			...(fetchCropImage ? { fetchCropImage } : {}),
 			now: () => 12345,
 		});
 		const flush = () => new Promise((r) => setTimeout(r, 0));
-		return { controller, mutatePosterCropAsync, flush };
+		return { controller, mutatePosterCropAsync, getCropSourceURL: () => cropSourceURL, flush };
 	}
 
-	it('fetches the revision for the -full.jpg request and submits it with the crop', async () => {
-		const fetchPosterRevision = vi.fn(async (_url: string) => '1699999999999999999-123456');
-		const { controller, mutatePosterCropAsync, flush } = makeRevisionController(fetchPosterRevision);
+	it('fetches the revision WITH the -full.jpg bytes and submits it with the crop', async () => {
+		const fetchCropImage = vi.fn(async (_url: string) => ({
+			objectURL: 'blob:crop-image-A',
+			revision: '1699999999999999999-123456',
+		}));
+		const { controller, mutatePosterCropAsync, getCropSourceURL, flush } = makeRevisionController(fetchCropImage);
 
 		controller.openPosterCropModal();
-		await flush(); // let the async revision resolution land on the token
+		await flush(); // let the async image+revision resolution land on the token
 
-		expect(fetchPosterRevision).toHaveBeenCalledWith(
+		// ONE GET for the whole flow — the modal displays the fetched blob.
+		expect(fetchCropImage).toHaveBeenCalledTimes(1);
+		expect(fetchCropImage).toHaveBeenCalledWith(
 			'/api/v1/temp/posters/job-1/STARS-136-full.jpg?v=12345'
 		);
+		expect(getCropSourceURL()).toBe('blob:crop-image-A');
 
 		await controller.applyPosterCrop();
 
@@ -558,11 +568,48 @@ describe('expected_poster_revision is captured with the issued -full.jpg request
 		);
 	});
 
-	it('legacy path: no revision fetcher → revision omitted (URL-only guard)', async () => {
-		const { controller, mutatePosterCropAsync, flush } = makeRevisionController();
+	// Structural Codex P1 guard: the revision is a property of the response
+	// that produced the DISPLAYED bytes. Simulate a same-URL rescrape landing
+	// mid-flight: the FIRST response (bytes the modal shows) carries revision
+	// 1; any subsequent independent lookup would observe revision 2. Because
+	// the controller never issues that second lookup (single GET per issue),
+	// the submitted revision must be revision 1 — matching the displayed
+	// image's generation, never a later one.
+	it('binds the revision to the DISPLAYED response — by construction no GET-vs-lookup skew is possible', async () => {
+		let generation = 1;
+		const fetchCropImage = vi.fn(async (_url: string) => ({
+			objectURL: `blob:generation-${generation}`,
+			revision: `rev-gen-${generation}`,
+		}));
+		const { controller, mutatePosterCropAsync, getCropSourceURL, flush } = makeRevisionController(fetchCropImage);
+
+		controller.openPosterCropModal();
+		generation = 2; // a same-URL refresh lands while the modal is open
+		await flush();
+
+		expect(getCropSourceURL()).toBe('blob:generation-1');
+
+		await controller.applyPosterCrop();
+
+		expect(fetchCropImage).toHaveBeenCalledTimes(1);
+		expect(mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			undefined,
+			'https://dmm/poster-A.jpg',
+			'rev-gen-1'
+		);
+	});
+
+	it('legacy path: no image fetcher → <img> GETs the URL directly, revision omitted (URL-only guard)', async () => {
+		const { controller, mutatePosterCropAsync, getCropSourceURL, flush } = makeRevisionController();
 
 		controller.openPosterCropModal();
 		await flush();
+
+		expect(getCropSourceURL()).toBe('/api/v1/temp/posters/job-1/STARS-136-full.jpg?v=12345');
+
 		await controller.applyPosterCrop();
 
 		expect(mutatePosterCropAsync).toHaveBeenCalledWith(
@@ -575,14 +622,29 @@ describe('expected_poster_revision is captured with the issued -full.jpg request
 		);
 	});
 
-	it('a rejected revision fetch degrades to legacy (omitted revision), never blocks the crop', async () => {
-		const fetchPosterRevision = vi.fn(async (_url: string) => { throw new Error('network down'); });
-		const { controller, mutatePosterCropAsync, flush } = makeRevisionController(fetchPosterRevision);
+	it('a failed -full.jpg fetch falls back to the preview image through the SAME bound fetch', async () => {
+		// The -full.jpg GET fails; the error path re-issues against the
+		// preview {id}.jpg — also via fetchCropImage, so whatever that
+		// response displays is what the (empty) revision pair describes.
+		const fetchCropImage = vi
+			.fn<(url: string) => Promise<{ objectURL: string; revision: string }>>()
+			.mockImplementationOnce(() => Promise.reject(new Error('gone')))
+			.mockImplementationOnce(() => Promise.resolve({ objectURL: 'blob:preview', revision: '' }));
+		const { controller, mutatePosterCropAsync, getCropSourceURL, flush } = makeRevisionController(fetchCropImage);
 
 		controller.openPosterCropModal();
 		await flush();
+		await flush();
+
+		expect(fetchCropImage).toHaveBeenCalledTimes(2);
+		expect(fetchCropImage).toHaveBeenNthCalledWith(2,
+			'/api/v1/temp/posters/job-1/STARS-136.jpg?v=12345'
+		);
+		expect(getCropSourceURL()).toBe('blob:preview');
+
 		await controller.applyPosterCrop();
 
+		// The preview carries no X-Poster-Revision → legacy URL-only guard.
 		expect(mutatePosterCropAsync).toHaveBeenCalledWith(
 			'job-1',
 			'res-1',
@@ -593,24 +655,29 @@ describe('expected_poster_revision is captured with the issued -full.jpg request
 		);
 	});
 
-	it('a stale revision resolution is dropped once a NEWER request superseded the token', async () => {
-		let resolveFirst: ((rev: string) => void) | null = null;
-		const fetchPosterRevision = vi
-			.fn<(url: string) => Promise<string>>()
+	it('a stale image resolution is dropped once a NEWER request superseded the token', async () => {
+		let resolveFirst: ((v: { objectURL: string; revision: string }) => void) | null = null;
+		const fetchCropImage = vi
+			.fn<(url: string) => Promise<{ objectURL: string; revision: string }>>()
 			.mockImplementationOnce(
 				() => new Promise((r) => { resolveFirst = r; })
 			)
 			.mockImplementationOnce(
-				() => new Promise(() => {}) // second request never resolves in this test
+				() => Promise.resolve({ objectURL: 'blob:second', revision: 'rev-second' })
 			);
-		const { controller, mutatePosterCropAsync } = makeRevisionController(fetchPosterRevision);
+		const { controller, mutatePosterCropAsync, getCropSourceURL, flush } = makeRevisionController(fetchCropImage);
 
 		controller.openPosterCropModal();
 		controller.openPosterCropModal(); // re-issue: the first token is superseded
+		await flush(); // the second fetch resolves and lands on the NEW token
 		// TS's control-flow analysis cannot see the closure assignment above.
-		const resolveStale = resolveFirst as ((rev: string) => void) | null;
-		resolveStale?.('stale-revision');
-		await new Promise((r) => setTimeout(r, 0));
+		const resolveStale = resolveFirst as ((v: { objectURL: string; revision: string }) => void) | null;
+		resolveStale?.({ objectURL: 'blob:stale', revision: 'rev-stale' });
+		await flush();
+
+		// The stale resolution neither replaced the display nor barnacled onto
+		// the live token.
+		expect(getCropSourceURL()).toBe('blob:second');
 
 		await controller.applyPosterCrop();
 
@@ -620,7 +687,7 @@ describe('expected_poster_revision is captured with the issued -full.jpg request
 			expect.any(Object),
 			undefined,
 			'https://dmm/poster-A.jpg',
-			undefined
+			'rev-second'
 		);
 	});
 });

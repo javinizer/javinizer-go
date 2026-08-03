@@ -972,17 +972,22 @@ export function createReviewState(pageStore: Page) {
 		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg, expectedSourceURL, expectedPosterRevision) => {
 			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg, expectedSourceURL, expectedPosterRevision);
 		},
-		// Read the cache generation token the crop endpoint validates
-		// (expected_poster_revision) straight from the temp poster endpoint — a
-		// HEAD carries the X-Poster-Revision header without the image bytes.
-		fetchPosterRevision: async (url: string) => {
-			try {
-				const res = await fetch(url, { method: 'HEAD' });
-				if (!res.ok) return '';
-				return res.headers.get('x-poster-revision') ?? '';
-			} catch {
-				return '';
+		// Fetch the crop image AND the cache generation token
+		// (expected_poster_revision) in ONE GET: the X-Poster-Revision header
+		// is read from the exact response whose bytes the crop modal displays
+		// (blob-backed object URL), so a same-URL rescrape/poster refresh can
+		// never slip a different generation between the display GET and a
+		// separate revision lookup (Codex P2 — the former HEAD approach had
+		// that skew window). A non-OK response rejects so the controller can
+		// run its preview-fallback error path.
+		fetchCropImage: async (url: string) => {
+			const res = await fetch(url);
+			if (!res.ok) {
+				throw new Error(`crop image fetch failed: ${res.status}`);
 			}
+			const revision = res.headers.get('x-poster-revision') ?? '';
+			const objectURL = URL.createObjectURL(await res.blob());
+			return { objectURL, revision };
 		},
 		setCropApplying: (applying) => { cropApplying = applying; }
 	});

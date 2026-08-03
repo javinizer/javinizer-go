@@ -90,8 +90,10 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 		// while the effective source URL stays equal, which a URL guard cannot
 		// see. The crop endpoint validates against the {posterID}-full.jpg
 		// asset's revision; clients only consume the header for -full.jpg
-		// requests (the HEAD route registered alongside GET serves the same
-		// header without the body).
+		// requests — read off the GET whose bytes the client displays, so
+		// the revision and the image are the same generation by construction
+		// (the HEAD route registered alongside GET keeps serving the same
+		// header bodyless for other consumers).
 		c.Header("X-Poster-Revision", poster.AssetRevision(fi))
 
 		// Serve the file (no cache headers for temp files as they're ephemeral)

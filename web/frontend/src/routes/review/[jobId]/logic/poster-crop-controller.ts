@@ -47,58 +47,101 @@ interface PosterCropControllerDeps {
 	applyPosterFromUrlAsync: (resultId: string, url: string) => Promise<void>;
 	mutatePosterCropAsync: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number, expectedSourceURL?: string, expectedPosterRevision?: string) => Promise<void>;
 	setCropApplying: (applying: boolean) => void;
-	// fetchPosterRevision returns the temp poster endpoint's X-Poster-Revision
-	// header (cache generation token) for a -full.jpg crop source URL, WITHOUT
-	// downloading the image (HEAD). Optional: absent → legacy URL-only guard.
-	fetchPosterRevision?: (url: string) => Promise<string>;
+	// fetchCropImage downloads the crop source bytes and returns an object URL
+	// for display TOGETHER with the X-Poster-Revision header read from that
+	// same response. Binding the two to one response closes the GET-vs-HEAD
+	// skew (Codex P2): a same-URL refresh (rescrape / poster refresh) landing
+	// between the image's GET and a separate HEAD would hand the crop the
+	// revision of a generation the user never saw. Optional: absent → legacy
+	// path (the <img> GETs the URL directly; URL-only guard).
+	fetchCropImage?: (url: string) => Promise<{ objectURL: string; revision: string }>;
 	now?: () => number;
 }
 
 export function createPosterCropController(deps: PosterCropControllerDeps) {
 	const now = deps.now ?? Date.now;
 
-	// The (requestURL, effectiveSource) pair of the CURRENTLY DISPLAYED crop
-	// image, captured at the moment the image request is ISSUED — NOT at
-	// image-load time: a job refetch or navigation can swap the reactive
-	// currentMovie A→B between setCropSourceURL(A) and A's load event, and a
-	// load-time capture would bind B's source to A's coordinate space. The
-	// crop box, metrics and cropSourceURL all describe that issued image, so
-	// applyPosterCrop MUST submit this captured pair (not the recomputed live
-	// source) as expected_source_url — otherwise the server 409 guard
-	// validates stale A coordinates against B and passes. `revision` fills in
-	// asynchronously from the temp poster endpoint's X-Poster-Revision: a
-	// same-URL cache refresh (rescrape / poster-from-URL) leaves every URL
-	// equal while swapping the generation the coordinates were measured on.
+	// The (requestURL, effectiveSource, revision) triple of the CURRENTLY
+	// DISPLAYED crop image, captured at the moment the image request is
+	// ISSUED — NOT at image-load time: a job refetch or navigation can swap
+	// the reactive currentMovie A→B between setCropSourceURL(A) and A's load
+	// event, and a load-time capture would bind B's source to A's coordinate
+	// space. The crop box, metrics and cropSourceURL all describe that issued
+	// image, so applyPosterCrop MUST submit this captured trio (not the
+	// recomputed live source) as expected_source_url/expected_poster_revision
+	// — otherwise the server 409 guard validates stale A coordinates against
+	// B and passes. With fetchCropImage wired, `revision` and `displayedURL`
+	// come from the SAME response that produced the displayed bytes
+	// (GET → blob → object URL): a same-URL cache refresh cannot slip a
+	// different generation between the display GET and a separate revision
+	// HEAD (Codex P2) because there IS no separate request. Only the
+	// {id}-full.jpg cache asset carries a revision worth validating (the
+	// URL-image proxy and the preview-fallback {id}.jpg do not — their
+	// responses carry no X-Poster-Revision header).
 	interface CropSourceToken {
 		requestURL: string;
 		effectiveSource: string;
 		revision: string;
+		// displayedURL is what the crop <img> actually shows: the request URL
+		// itself on the legacy path, or the object URL of the fetched bytes.
+		// '' while a fetch is still in flight (nothing of this token is on
+		// screen yet), so the apply-time guard can never match an empty src.
+		displayedURL: string;
 	}
 	let cropSourceToken: CropSourceToken | null = null;
 
-	// Issue a crop image request and bind the captured pair to it. Only the
-	// {id}-full.jpg cache asset carries a server-side revision worth
-	// validating (the URL-image proxy and the preview-fallback {id}.jpg do
-	// not); a stale revision resolution arriving after a NEWER request
-	// superseded this token is dropped.
+	// The object URL backing the CURRENTLY displayed crop image (fetcher path
+	// only), revoked once superseded to avoid leaking one blob per modal open.
+	let displayedObjectURL = '';
+	function releaseDisplayedObjectURL() {
+		if (displayedObjectURL && deps.getBrowser() && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+			URL.revokeObjectURL(displayedObjectURL);
+		}
+		displayedObjectURL = '';
+	}
+
+	// Issue a crop image request and bind the captured pair to it. A stale
+	// resolution arriving after a NEWER request superseded this token is
+	// dropped (and its object URL revoked on the spot).
 	function issueCropImageRequest(sourceURL: string) {
-		deps.setCropSourceURL(sourceURL);
 		const movie = deps.getCurrentMovie();
 		const token: CropSourceToken = {
 			requestURL: sourceURL,
 			effectiveSource: movie ? movie.poster_url || movie.cover_url || '' : '',
 			revision: '',
+			displayedURL: '',
 		};
 		cropSourceToken = token;
-		if (deps.fetchPosterRevision && sourceURL.includes('-full.jpg')) {
-			deps.fetchPosterRevision(sourceURL)
-				.then((rev) => {
-					if (cropSourceToken === token && rev) token.revision = rev;
-				})
-				.catch(() => {
-					// Revision fetch failed → empty revision → legacy URL-only guard.
-				});
+		releaseDisplayedObjectURL();
+		const fetchImage = deps.fetchCropImage;
+		if (!fetchImage) {
+			// Legacy path: the <img> issues its own GET.
+			token.displayedURL = sourceURL;
+			deps.setCropSourceURL(sourceURL);
+			return;
 		}
+		// Fetch → blob → object URL: the revision header and the displayed
+		// bytes come out of this ONE response.
+		deps.setCropSourceURL('');
+		fetchImage(sourceURL)
+			.then(({ objectURL, revision }) => {
+				if (cropSourceToken !== token) {
+					if (deps.getBrowser() && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+						URL.revokeObjectURL(objectURL);
+					}
+					return;
+				}
+				token.revision = revision || '';
+				token.displayedURL = objectURL;
+				displayedObjectURL = objectURL;
+				deps.setCropSourceURL(objectURL);
+			})
+			.catch(() => {
+				// Fetching the source failed → treat exactly like a failed <img>
+				// load: the -full.jpg leg retries against the preview-fallback
+				// ({id}.jpg), anything else surfaces the load error.
+				if (cropSourceToken === token) handlePosterCropImageError();
+			});
 	}
 
 	function refreshPosterCropMetrics() {
@@ -202,7 +245,10 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 
 	function handlePosterCropImageError() {
 		const currentMovie = deps.getCurrentMovie();
-		if (currentMovie && deps.getCropSourceURL().includes('-full.jpg')) {
+		// Key the preview-fallback decision on the token's REQUEST URL, not
+		// the displayed src: on the fetch→blob path cropSourceURL is an object
+		// URL that no longer names -full.jpg.
+		if (currentMovie && cropSourceToken && cropSourceToken.requestURL.includes('-full.jpg')) {
 			const posterMovieId = deps.getCurrentResult()?.movie_id ?? currentMovie.id;
 			const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg${sessionParam()}`;
 			// The fallback is an image RE-REQUEST: re-bind the guard pair to it.
@@ -378,7 +424,12 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			// was issued with — if cropSourceURL moved on since, fall back to the
 			// live editedSource (identical to the pre-fix behavior: after any
 			// pre-sync above the server source IS editedSource).
-			const issued = cropSourceToken && cropSourceToken.requestURL === deps.getCropSourceURL()
+			// The token only counts while the <img> still shows THIS token's
+			// image: compare against displayedURL (the request URL on the legacy
+			// path, the fetched object URL otherwise — never the in-flight '').
+			const issued = cropSourceToken &&
+				cropSourceToken.displayedURL !== '' &&
+				cropSourceToken.displayedURL === deps.getCropSourceURL()
 				? cropSourceToken
 				: null;
 			const expectedSource = issued?.effectiveSource || editedSource;
@@ -397,6 +448,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 
 	function cleanup() {
 		stopPosterCropDrag();
+		releaseDisplayedObjectURL();
 	}
 
 	return {
