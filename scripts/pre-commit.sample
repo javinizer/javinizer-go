@@ -212,17 +212,40 @@ EMBED_PKGS=""
 # cannot see every staged asset whose content edit breaks its embedding
 # package's consumers. Census-intersect every staged path that matches NO
 # static rule; survivors flow through the SAME ancestor-walk mapping below.
-# Best-effort: a census failure simply adds nothing — the tree-consistency
-# guard's fail-closed census blocks loudly a moment later, so nothing evades.
 EMBED_STAGED=""
-ASSET_CANDIDATES=$(git diff --cached --name-only --no-renames --diff-filter=ACMR \
+# Candidates include DELETIONS (a dropped multi-match glob target changes the
+# committed embed set as surely as a content edit) and must compare RAW bytes
+# (quotepath=false): default git output C-quotes non-ASCII paths while the
+# census emits raw ones, and a mismatched encoding silently nulls the
+# intersection. (Newline-in-filename remains out of scope — BSD comm has no
+# -z and the rest of this classification shares the limitation.)
+ASSET_CANDIDATES=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=ACMRTD \
     | grep -vE '^testdata/|^internal/|^cmd/|^web/dist/|^docs/swagger/|^configs/|\.go$|^go\.(mod|sum)$|^Makefile$|^\.golangci\.(yml|yaml)$' || true)
 if [ -n "$ASSET_CANDIDATES" ]; then
-    if EMBED_CENSUS=$(compute_embed_census); then
-        EMBED_STAGED=$(comm -12 \
-            <(printf '%s\n' "$ASSET_CANDIDATES" | sort -u) \
-            <(printf '%s\n' "$EMBED_CENSUS" | sort -u) || true)
+    # Membership in EITHER census marks an embed target. The TREE census
+    # sees staged content edits and ADDS (a file must exist on disk to be
+    # staged). The HEAD census sees staged DELETIONS that have already
+    # vanished from BOTH the tree and the index (a multi-match glob keeps
+    # resolving on the survivors, so only HEAD still lists the dropped
+    # member) — materialized via git archive, never HEAD"~"-detached.
+    # Computing the pair without candidates would tax every docs-only
+    # commit; candidates gate it. Both are best-effort: a census failure
+    # simply adds nothing — the tree-consistency guard's fail-closed
+    # census blocks loudly right after.
+    EMBED_CENSUS_TREE=$(compute_embed_census || true)
+    EMBED_CENSUS_HEAD=""
+    IDX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/javinizer-embedsnap.XXXXXX" 2>/dev/null || true)
+    # An empty IDX_TMP must NEVER reach tar -C: an empty -C operand is a
+    # cwd-relative extract. On failure the HEAD census simply stays empty
+    # — the tree census (and, moments later, the fail-closed guard
+    # census) still stand.
+    if [ -n "$IDX_TMP" ] && git archive HEAD 2>/dev/null | tar -x -C "$IDX_TMP" 2>/dev/null; then
+        EMBED_CENSUS_HEAD=$(cd "$IDX_TMP" && compute_embed_census || true)
     fi
+    [ -z "$IDX_TMP" ] || rm -rf "$IDX_TMP"
+    EMBED_STAGED=$(comm -12 \
+        <(printf '%s\n' "$ASSET_CANDIDATES" | sort -u) \
+        <( { printf '%s\n' "$EMBED_CENSUS_TREE"; printf '%s\n' "$EMBED_CENSUS_HEAD"; } | sed '/^$/d' | sort -u) || true)
 fi
 while IFS= read -r p; do
     [ -n "$p" ] || continue

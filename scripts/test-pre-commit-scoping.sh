@@ -605,6 +605,43 @@ check_hook "e2e: unstaged root embed target drift blocked" 1 "banner.txt"
 # restore the pre-fixture baseline so later scenarios see the ORIGINAL root
 git reset -q --hard "$BASE_SHA" >/dev/null; git clean -qfdx
 
+# staged DELETION of one target of a MULTI-match embed glob outside the
+# static roots: the pattern keeps resolving on disk (b.txt survives), so
+# nothing fails — but the committed embed set changed, and only the
+# INDEX-side census still lists the deleted path
+reset
+BASE2_SHA=$(git rev-parse HEAD)
+mkdir -p assets_probe/data
+cat > assets_probe/probe.go <<'EOF'
+package assetsprobe
+
+import "embed"
+
+//go:embed data/*.txt
+var Data embed.FS
+EOF
+gofmt -w assets_probe/probe.go
+printf 'a\n' > assets_probe/data/a.txt
+printf 'b\n' > assets_probe/data/b.txt
+git add assets_probe
+git commit -qm 'fixture: multi-match embed glob outside asset roots'
+MULTI_SHA=$(git rev-parse HEAD)
+git rm -q assets_probe/data/a.txt
+# full-scope marker: an unreferenced package escalates to the full sweep,
+# which is exactly the point — previously NO Go validation ran at all
+check_hook "e2e: staged deletion from multi-match embed glob runs Go checks" 0 "all packages — module/shared-input change"
+
+# non-ASCII embed asset outside the static roots: candidates must compare
+# RAW bytes against the census, or C-quoting silently nulls the match and
+# the staged edit runs no Go validation at all
+git reset -q --hard "$MULTI_SHA" >/dev/null
+printf 'data\n' > "assets_probe/data/注釈.txt"
+git add "assets_probe/data/注釈.txt"
+check_hook "e2e: non-ASCII embed asset outside roots runs Go checks" 0 "all packages — module/shared-input change"
+
+# drop the fixture before it can dilute later scenarios
+git reset -q --hard "$BASE2_SHA" >/dev/null; git clean -qfdx
+
 # fail-closed guard scans: with a package graph the toolchain cannot
 # enumerate (UNTRACKED file importing an unresolvable module — GOPROXY=off
 # makes resolution fail fast), the guard must REFUSE rather than silently
