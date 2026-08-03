@@ -708,6 +708,32 @@ $f"
 $f"
         fi
     done < <(git diff --cached --name-only -z --no-renames --diff-filter=AMRT || true)
+    # assume-unchanged / skip-worktree make git diff SILENT for the flagged
+    # path entirely: a tracked compile/embed input can diverge from its
+    # index blob on disk while every diff-based comparator here reports
+    # nothing, and vet/test/build read the disk bytes. Flagged files are
+    # rare (zero on most clones), so verify each by direct content hash
+    # against its index entry — drift or disappearance both conflict.
+    while IFS= read -r -d '' rec; do
+        [ -n "$rec" ] || continue
+        ftag=${rec%% *}
+        fpath=${rec#* }
+        case "$ftag" in
+            H) ;;   # ONLY plain H is diff-reported: 'h' is assume-unchanged,
+                    # 'S' skip-worktree, 's' both — every non-H tag silences
+                    # git diff for that path and must be content-checked
+            *)
+                fblob=$(git ls-files -s -- "$fpath" 2>/dev/null | awk '{print $2; exit}')
+                if [ ! -e "$fpath" ]; then
+                    CONFLICT="$CONFLICT
+$fpath (skip-worktree/assume-unchanged, missing from tree)"
+                elif [ "$(git hash-object -- "$fpath" 2>/dev/null || printf X)" != "$fblob" ]; then
+                    CONFLICT="$CONFLICT
+$fpath (skip-worktree/assume-unchanged, content differs from index)"
+                fi
+                ;;
+        esac
+    done < <(git ls-files -v -z 2>/dev/null || true)
     # A proven divergence beats everything downstream: report the exact
     # path(s) immediately. Continuing would let the fail-closed census
     # refusal (same root cause here — the tree no longer resolves an embed

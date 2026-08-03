@@ -922,6 +922,22 @@ rm splash.txt
 check_hook "e2e: staged embed edit deleted from tree blocked" 1 "splash.txt"
 git reset -q --hard "$BASE8_SHA" >/dev/null; git clean -qfdx
 
+# skip-worktree/assume-unchanged silence git diff for the flagged path:
+# content drift is invisible to every diff comparator while the checks
+# read the disk bytes — only a direct content-vs-index hash catches it
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+printf '\n// hidden drift\n' >> internal/foo/b.go
+git update-index --skip-worktree internal/foo/b.go
+check_hook "e2e: skip-worktree content drift detected despite diff silence" 1 "internal/foo/b.go"
+git update-index --no-skip-worktree internal/foo/b.go; reset
+
+# control: the flag WITHOUT drift is a legitimate local workflow and must
+# not block
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+git update-index --skip-worktree internal/foo/b.go
+check_hook "e2e: skip-worktree without drift passes" 0
+git update-index --no-skip-worktree internal/foo/b.go; reset
+
 # last tracked .go staged-deleted, ignored sibling remains -> must still block
 reset; printf 'package vanish\n\nfunc Ghost() int { return 1 }\n' > internal/vanish/local_ghost.go
 git rm -q internal/vanish/v.go
