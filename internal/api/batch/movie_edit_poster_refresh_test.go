@@ -334,6 +334,9 @@ func TestUpdateBatchMovie_ClearLastSourceRollbackOnPersistFailure(t *testing.T) 
 	mockJob.EXPECT().GetProvenance(mock.Anything).Return(nil)
 	mockJob.EXPECT().GetMovieResult(filePath).Return(result, nil)
 	mockJob.EXPECT().UpdateMovie(mock.Anything, filePath, mock.Anything).Return(assert.AnError)
+	// r10 P1-3: the FAILING part's own partial write is restored first —
+	// its UpdateMovie may already have committed DB side effects.
+	mockJob.EXPECT().RestoreMovieResult(mock.Anything, filePath, mock.Anything).Return(nil)
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 
 	const jobID = "job-any"
@@ -401,6 +404,9 @@ func TestUpdateBatchMovie_PosterRefreshRollbackOnPersistFailure(t *testing.T) {
 	mockJob.EXPECT().GetProvenance(mock.Anything).Return(nil)
 	mockJob.EXPECT().GetMovieResult(filePath).Return(result, nil)
 	mockJob.EXPECT().UpdateMovie(mock.Anything, filePath, mock.Anything).Return(assert.AnError)
+	// r10 P1-3: the FAILING part's own partial write is restored first —
+	// its UpdateMovie may already have committed DB side effects.
+	mockJob.EXPECT().RestoreMovieResult(mock.Anything, filePath, mock.Anything).Return(nil)
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 
 	const jobID = "job-any"
@@ -476,6 +482,9 @@ func TestUpdateBatchMovie_PosterRefreshRollbackFailureSurfaced(t *testing.T) {
 			require.NoError(t, os.RemoveAll(tempPosterDir))
 			require.NoError(t, os.WriteFile(tempPosterDir, []byte("blocker"), 0o644))
 		}).Return(assert.AnError)
+	// r10 P1-3: the FAILING part's own partial write is restored first —
+	// its UpdateMovie may already have committed DB side effects.
+	mockJob.EXPECT().RestoreMovieResult(mock.Anything, filePath, mock.Anything).Return(nil)
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 
 	require.NoError(t, os.MkdirAll(tempPosterDir, 0o755))

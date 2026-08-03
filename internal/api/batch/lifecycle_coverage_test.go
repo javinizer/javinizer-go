@@ -275,7 +275,10 @@ func (s *stubControlledJob) SetPersistError(string)                             
 func (s *stubControlledJob) GetResults() []resultstore.MovieResult                      { return nil }
 
 // JobEditor methods (required by BatchJobInterface)
-func (s *stubControlledJob) UpdateMovie(context.Context, string, *models.Movie) error  { return nil }
+func (s *stubControlledJob) UpdateMovie(context.Context, string, *models.Movie) error { return nil }
+func (s *stubControlledJob) RestoreMovieResult(context.Context, string, *resultstore.MovieResult) error {
+	return nil
+}
 func (s *stubControlledJob) ExcludeFile(string)                                        {}
 func (s *stubControlledJob) UpdatePosterCrop(string, string, *models.CropBounds) error { return nil }
 func (s *stubControlledJob) UpdatePosterFromURL(context.Context, string, string, string) error {

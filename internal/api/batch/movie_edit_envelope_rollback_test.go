@@ -518,3 +518,65 @@ func TestUpdateBatchMovie_NilMovieResultStillRefreshesCache(t *testing.T) {
 	assert.Equal(t, srv.URL+"/new.jpg", current.Movie.Poster.PosterURL)
 	assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
 }
+
+// TestUpdateBatchMovie_EnvelopePersistFailureRestoresNilMovieSibling pins
+// Codex P1-3 for the whole-movie PATCH compensation: a multipart sibling
+// whose stored result legitimately has a nil Movie carries a PRESENT
+// snapshot (distinct from a failed lookup), so a failed envelope persist
+// must re-seat that part to its pre-request nil-Movie state through
+// RestoreMovieResult — pre-fix the compensation keyed on
+// original(*models.Movie) == nil, conflating "lookup failed" with "stored
+// movie nil", skipped the revert, and left the rejected edit on the
+// sibling.
+func TestUpdateBatchMovie_EnvelopePersistFailureRestoresNilMovieSibling(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	chdirWorkDir(t)
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+	deps.JobStore = newFailingPersistJobStore(t, cfg)
+
+	const movieID = "NMP-001"
+	file1 := "/path/to/" + movieID + "-cd1.mp4"
+	file2 := "/path/to/" + movieID + "-cd2.mp4"
+	job := createJobWithWF(deps, cfg, []string{file1, file2})
+	setJobResult(job, file1, &resultstore.MovieResult{
+		ResultID:      "res-nmp-1",
+		FileMatchInfo: models.FileMatchInfo{Path: file1, MovieID: movieID},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: movieID, Title: "Old Title", OriginalFileName: movieID + "-cd1"},
+	})
+	// Sibling part: a real stored result, family-indexed via
+	// FileMatchInfo.MovieID, but with a legitimately nil Movie.
+	setJobResult(job, file2, &resultstore.MovieResult{
+		ResultID:      "res-nmp-2",
+		FileMatchInfo: models.FileMatchInfo{Path: file2, MovieID: movieID},
+		Status:        models.JobStatusCompleted,
+		Movie:         nil,
+	})
+
+	router := gin.New()
+	router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
+	body := fmt.Sprintf(`{"movie":{"id":%q,"title":"New Title"}}`, movieID)
+	req := httptest.NewRequest(http.MethodPatch, "/batch/"+job.GetID()+"/results/res-nmp-1", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "persist")
+
+	// The nil-Movie sibling must be restored to NO MOVIE — not left holding
+	// the rejected edit's fanned-out movie.
+	res2 := storedMovieResultByPath(t, job, file2)
+	assert.Nil(t, res2.Movie, "the nil-Movie sibling must be re-seated to its pre-request result")
+	assert.Equal(t, movieID, res2.FileMatchInfo.MovieID, "family membership survives the nil-movie restore")
+
+	// The movie-bearing part reverts to its pre-request movie.
+	res1 := storedMovieResultByPath(t, job, file1)
+	require.NotNil(t, res1.Movie)
+	assert.Equal(t, "Old Title", res1.Movie.Title)
+
+	assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
+}

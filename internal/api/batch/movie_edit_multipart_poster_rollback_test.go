@@ -34,9 +34,13 @@ import (
 // image while Organize downloads the new one.
 //
 // Each recorded UpdateMovie call is tagged "new" (the PATCHed movie carrying
-// the new source URL) or "orig" (pointer-identical to the pre-request stored
-// movie the handler must have fetched via GetMovieResult). The mock job keeps
-// no state of its own, so the call trace is the asserted persistence trace.
+// the new source URL); each RestoreMovieResult revert is tagged "orig" when
+// the restored snapshot's movie is pointer-identical to the pre-request
+// stored movie the handler must have fetched via GetMovieResult (P1-3: the
+// revert now restores the COMPLETE pre-update result snapshot, not just the
+// movie, so a legitimately nil-Movie sibling can be re-seated too). The mock
+// job keeps no state of its own, so the call trace is the asserted
+// persistence trace.
 func TestUpdateBatchMovie_MultipartPartialFailure(t *testing.T) {
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
@@ -56,34 +60,46 @@ func TestUpdateBatchMovie_MultipartPartialFailure(t *testing.T) {
 		wantErrNotContain []string
 	}{
 		{
-			name:            "part 2 fails after part 1 succeeds: part 1 reverted, cache restored",
-			failAt:          1,
-			wantUpdateCalls: []string{"part1:new", "part2:new", "part1:orig"},
+			name:   "part 2 fails after part 1 succeeds: failing part 2 reverted first, then part 1, cache restored",
+			failAt: 1,
+			// r10 P1-3: the FAILING part is restored FIRST (its UpdateMovie
+			// may already have committed DB side effects), then the
+			// previously successful part — both through RestoreMovieResult.
+			wantUpdateCalls: []string{"part1:new", "part2:new", "part2:orig", "part1:orig"},
 			// Persistence, revert, and poster rollback all succeeded: the
 			// job is fully back at the old URLs AND the old cached image.
 			wantErrContains:   []string{"Failed to update movie"},
 			wantErrNotContain: []string{"revert of part", "poster rollback failed"},
 		},
 		{
-			name:              "part 1 fails immediately: nothing updated, cache restored",
-			failAt:            0,
-			wantUpdateCalls:   []string{"part1:new"},
+			name:   "part 1 fails immediately: failing part restored, cache restored",
+			failAt: 0,
+			// The failing part 1's own partial write is reverted via
+			// RestoreMovieResult (r10 P1-3).
+			wantUpdateCalls:   []string{"part1:new", "part1:orig"},
 			wantErrContains:   []string{"Failed to update movie"},
 			wantErrNotContain: []string{"revert of part", "poster rollback failed"},
 		},
 		{
-			name:              "original snapshot of part 1 unavailable: revert skipped, cache still restored",
+			// P1-3: a FAILED snapshot lookup is distinct from a snapshot whose
+			// stored Movie is nil — the part cannot be reverted (nothing to
+			// restore to), and that is now surfaced in the error instead of a
+			// silent skip. (r10: the failing part 2 had its snapshot and is
+			// restored.)
+			name:              "original snapshot of part 1 unavailable: revert skipped but surfaced, cache still restored",
 			failAt:            1,
 			lookupFailPart1:   true,
-			wantUpdateCalls:   []string{"part1:new", "part2:new"},
-			wantErrContains:   []string{"Failed to update movie"},
+			wantUpdateCalls:   []string{"part1:new", "part2:new", "part2:orig"},
+			wantErrContains:   []string{"Failed to update movie", "no pre-update snapshot for part " + "/path/to/MPRT-001-cd1.mp4"},
 			wantErrNotContain: []string{"revert of part", "poster rollback failed"},
 		},
 		{
-			name:              "failed part revert is surfaced alongside the persist failure",
-			failAt:            1,
+			name:   "failed part restore succeeds, then successful part revert failure is surfaced alongside the persist failure",
+			failAt: 1,
+			// The failing part 2 restores cleanly first; only part 1's revert
+			// failure lands in the message.
 			revertPart1Fails:  true,
-			wantUpdateCalls:   []string{"part1:new", "part2:new", "part1:orig"},
+			wantUpdateCalls:   []string{"part1:new", "part2:new", "part2:orig", "part1:orig"},
 			wantErrContains:   []string{"Failed to update movie", "revert of part"},
 			wantErrNotContain: []string{"poster rollback failed"},
 		},
@@ -118,6 +134,17 @@ func TestUpdateBatchMovie_MultipartPartialFailure(t *testing.T) {
 				}
 				return fmt.Sprintf("part%d:%s", i+1, kind)
 			}
+			// restoreTag identifies the reverted part by the snapshot's movie
+			// pointer: the handler must pass back the same movie GetMovieResult
+			// handed it as the pre-update snapshot.
+			restoreTag := func(prior *resultstore.MovieResult) string {
+				for i, orig := range originals {
+					if prior != nil && prior.Movie == orig {
+						return fmt.Sprintf("part%d:orig", i+1)
+					}
+				}
+				return "unknown"
+			}
 
 			mockJob := workermocks.NewMockBatchJobInterface(t)
 			mockJob.EXPECT().GetFileResultByResultID(movieID).Return(resultFor(0), partPaths[0], true)
@@ -131,23 +158,32 @@ func TestUpdateBatchMovie_MultipartPartialFailure(t *testing.T) {
 				mockJob.EXPECT().GetMovieResult(partPaths[0]).Return(resultFor(0), nil)
 			}
 			if tt.failAt == 0 {
-				// Part 1 fails immediately: part 2 and the revert path are untouched.
+				// Part 1 fails immediately: part 2 is untouched, but the FAILING
+				// part 1's partial write is itself reverted (r10 P1-3).
 				mockJob.EXPECT().GetMovieResult(partPaths[1]).
 					Return(resultFor(1), nil).Maybe()
 				mockJob.EXPECT().UpdateMovie(mock.Anything, partPaths[0], mock.Anything).
 					Run(func(_ context.Context, _ string, m *models.Movie) {
 						calls = append(calls, tag(0, m))
 					}).Return(assert.AnError)
+				mockJob.EXPECT().RestoreMovieResult(mock.Anything, partPaths[0], mock.Anything).
+					Run(func(_ context.Context, _ string, prior *resultstore.MovieResult) {
+						calls = append(calls, restoreTag(prior))
+					}).Return(nil)
 			} else {
-				// Part 1 update succeeds (and is what the revert re-persists);
+				// Part 1 update succeeds (and is what the compensation restores);
 				// part 2 fails.
-				if tt.revertPart1Fails {
-					// The revert passes the exact stored movie fetched via
-					// GetMovieResult — match that pointer to fail only it.
-					mockJob.EXPECT().UpdateMovie(mock.Anything, partPaths[0], originals[0]).
-						Run(func(_ context.Context, _ string, m *models.Movie) {
-							calls = append(calls, tag(0, m))
-						}).Return(assert.AnError)
+				if !tt.lookupFailPart1 {
+					// The revert restores the COMPLETE pre-update snapshot via
+					// RestoreMovieResult (JobEditor seam, P1-3).
+					revertErr := error(nil)
+					if tt.revertPart1Fails {
+						revertErr = assert.AnError
+					}
+					mockJob.EXPECT().RestoreMovieResult(mock.Anything, partPaths[0], mock.Anything).
+						Run(func(_ context.Context, _ string, prior *resultstore.MovieResult) {
+							calls = append(calls, restoreTag(prior))
+						}).Return(revertErr)
 				}
 				mockJob.EXPECT().UpdateMovie(mock.Anything, partPaths[0], mock.Anything).
 					Run(func(_ context.Context, _ string, m *models.Movie) {
@@ -158,6 +194,13 @@ func TestUpdateBatchMovie_MultipartPartialFailure(t *testing.T) {
 					Run(func(_ context.Context, _ string, m *models.Movie) {
 						calls = append(calls, tag(1, m))
 					}).Return(assert.AnError)
+				// r10 P1-3: the FAILING part is restored FIRST via
+				// RestoreMovieResult (its forward UpdateMovie may already have
+				// committed DB side effects — actress renames, the upsert).
+				mockJob.EXPECT().RestoreMovieResult(mock.Anything, partPaths[1], mock.Anything).
+					Run(func(_ context.Context, _ string, prior *resultstore.MovieResult) {
+						calls = append(calls, restoreTag(prior))
+					}).Return(nil)
 			}
 			deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 

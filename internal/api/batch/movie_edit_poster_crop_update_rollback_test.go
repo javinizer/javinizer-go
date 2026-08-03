@@ -26,9 +26,9 @@ import (
 // state update fails": UpdatePosterCrop fans out per part and CAN fail after
 // mutating earlier parts, while CropWithBounds already overwrote the shared
 // preview. The handler must revert EVERY part to its exact pre-crop snapshot
-// (through UpdateMovie) and byte-restore the pre-crop preview — a partial
-// revert would leave a sibling multipart entry carrying the rejected crop into
-// a later persist.
+// (through RestoreMovieResult — the whole stored result, not just the movie)
+// and byte-restore the pre-crop preview — a partial revert would leave a
+// sibling multipart entry carrying the rejected crop into a later persist.
 func TestUpdateBatchMoviePosterCrop_UpdateFailureRestoresMultipartPartsAndCache(t *testing.T) {
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
@@ -57,7 +57,7 @@ func TestUpdateBatchMoviePosterCrop_UpdateFailureRestoresMultipartPartsAndCache(
 		}},
 	}
 
-	reverted := map[string]*models.Movie{}
+	reverted := map[string]*resultstore.MovieResult{}
 	mockJob := workermocks.NewMockBatchJobInterface(t)
 	mockJob.EXPECT().GetFileResultByResultID(movieID).Return(res1, fp1, true)
 	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{fp1, fp2})
@@ -65,9 +65,9 @@ func TestUpdateBatchMoviePosterCrop_UpdateFailureRestoresMultipartPartsAndCache(
 	mockJob.EXPECT().GetMovieResult(fp1).Return(res1, nil)
 	mockJob.EXPECT().GetMovieResult(fp2).Return(res2, nil)
 	mockJob.EXPECT().UpdatePosterCrop(movieID, mock.Anything, mock.Anything).Return(assert.AnError)
-	mockJob.EXPECT().UpdateMovie(mock.Anything, mock.Anything, mock.Anything).
-		Run(func(_ context.Context, fp string, m *models.Movie) {
-			reverted[fp] = m
+	mockJob.EXPECT().RestoreMovieResult(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, fp string, prior *resultstore.MovieResult) {
+			reverted[fp] = prior
 		}).Return(nil)
 
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
@@ -94,8 +94,8 @@ func TestUpdateBatchMoviePosterCrop_UpdateFailureRestoresMultipartPartsAndCache(
 
 	// BOTH parts reverted with their own exact pre-crop snapshots.
 	require.Len(t, reverted, 2, "every part of the movie must be reverted, not only the selected one")
-	assert.Same(t, res1.Movie, reverted[fp1])
-	assert.Same(t, res2.Movie, reverted[fp2])
+	assert.Same(t, res1, reverted[fp1], "the revert must carry the WHOLE pre-crop result snapshot, not just its movie")
+	assert.Same(t, res2, reverted[fp2])
 
 	// The shared preview the crop overwrote is byte-restored.
 	preview, err := os.ReadFile(previewPath)
@@ -133,7 +133,7 @@ func TestUpdateBatchMoviePosterCrop_UpdateFailureRevertFailureSurfaced(t *testin
 	mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
 	mockJob.EXPECT().GetMovieResult(filePath).Return(result, nil)
 	mockJob.EXPECT().UpdatePosterCrop(movieID, mock.Anything, mock.Anything).Return(assert.AnError)
-	mockJob.EXPECT().UpdateMovie(mock.Anything, filePath, result.Movie).Return(assert.AnError)
+	mockJob.EXPECT().RestoreMovieResult(mock.Anything, filePath, result).Return(assert.AnError)
 
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 

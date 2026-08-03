@@ -179,13 +179,56 @@ func TestUpdateBatchMoviePosterFromURL_PosterSourceLockReleasedOnAllPaths(t *tes
 		// the lock; it must complete (and release) even when the state update
 		// itself failed.
 		mockJob.EXPECT().GetMovieResult(filePath).Return(result, nil)
-		mockJob.EXPECT().UpdateMovie(mock.Anything, filePath, mock.Anything).Return(nil)
+		mockJob.EXPECT().RestoreMovieResult(mock.Anything, filePath, mock.Anything).Return(nil)
 		deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 
 		require.Equal(t, http.StatusInternalServerError,
 			postPosterFromURL(t, newRouter(deps), jobID, movieID, srv.URL+"/poster.jpg"))
 		assertPosterSourceLockFreeAPI(t, jobID, movieID)
 	})
+}
+
+// TestUpdateBatchMoviePosterFromURL_Returns404WhenResultVanishesUnderPosterLock pins the
+// post-lock re-read guard for the poster-from-URL handler (parity with
+// updateBatchMovie and TestUpdateBatchMovie_Returns404WhenResultVanishesUnderPosterLock):
+// if the result is removed between the pre-lock lookup and the re-read taken
+// after AcquirePosterSourceLock unblocks, the handler must answer 404 rather
+// than download into the shared cache on stale pre-lock state — and must
+// still release the lock.
+func TestUpdateBatchMoviePosterFromURL_Returns404WhenResultVanishesUnderPosterLock(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	allowTestHTTPServerURL(t)
+	srv := newPosterConcurrencyServer(t)
+	chdirWorkDir(t)
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+	const jobID, movieID = "job-fromurl-vanish", "FVN-001"
+	filePath := "/path/to/FVN-001.mp4"
+	result := &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movieID},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{ID: movieID, Title: "Vanish", Poster: models.PosterState{
+			PosterURL: srv.URL + "/old.jpg",
+		}},
+	}
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	mockJob.EXPECT().GetFileResultByResultID(movieID).Return(result, filePath, true).Once()
+	// The writer this request waited behind removed the result: answer 404
+	// without downloading (DownloadFromURL would replace the orphaned
+	// {movieID}-full.jpg) and without mutating any state — the strict mock
+	// fails on any further call.
+	mockJob.EXPECT().GetFileResultByResultID(movieID).Return(nil, "", false).Once()
+	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{filePath})
+	mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
+	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(testkit.GetTestRuntime(deps)))
+	require.Equal(t, http.StatusNotFound,
+		postPosterFromURL(t, router, jobID, movieID, srv.URL+"/poster.jpg"))
+	assertPosterSourceLockFreeAPI(t, jobID, movieID)
 }
 
 // TestUpdateBatchMoviePosterFromURL_SerializesWithManualCrop is the Finding C
@@ -262,7 +305,12 @@ func TestUpdateBatchMoviePosterFromURL_SerializesWithManualCrop(t *testing.T) {
 		go func() { defer wg.Done(); cropCode <- postPosterCropBounds(router, job.GetID(), movieID) }()
 		wg.Wait()
 
-		require.Equal(t, http.StatusOK, <-cropCode, "round %d: the crop is valid against either image", round)
+		// The crop either measured a CONSISTENT image (200: pre-wait it already
+		// saw the post-refresh source, or it won the lock first and the
+		// refresh then cleared its bounds) or was rejected stale (409, P1-5:
+		// the refresh's source swap landed while the crop waited).
+		assert.Contains(t, []int{http.StatusOK, http.StatusConflict}, <-cropCode,
+			"round %d: crop applies against a consistent source or is rejected stale", round)
 		require.Equal(t, http.StatusOK, <-fromURLCode, "round %d", round)
 
 		// The refresh is the last writer of the poster URL under every

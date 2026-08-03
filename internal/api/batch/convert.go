@@ -54,9 +54,13 @@ func movieResultToResponse(mr *resultstore.MovieResult, prov *resultstore.Proven
 		return nil
 	}
 	result := &contracts.BatchFileResult{
-		ResultID:    mr.ResultID,
-		FilePath:    mr.FileMatchInfo.Path,
-		MovieID:     mr.FileMatchInfo.MovieID,
+		ResultID: mr.ResultID,
+		FilePath: mr.FileMatchInfo.Path,
+		// Canonical movie identity (Movie.ID precedence, posterLockKeyFor) —
+		// the same key the poster cache paths and the crop/poster endpoints
+		// resolve; a FileMatchInfo.MovieID-only emission would send the crop
+		// UI after the stale key's {movie_id}-full.jpg for a re-keyed result.
+		MovieID:     posterLockKeyFor(mr),
 		IsMultiPart: mr.FileMatchInfo.IsMultiPart,
 		PartNumber:  mr.FileMatchInfo.PartNumber,
 		PartSuffix:  mr.FileMatchInfo.PartSuffix,
@@ -81,9 +85,10 @@ func movieResultToSlimResponse(mr *resultstore.MovieResult, prov *resultstore.Pr
 		return nil
 	}
 	result := &contracts.BatchFileResultSlim{
-		ResultID:    mr.ResultID,
-		FilePath:    mr.FileMatchInfo.Path,
-		MovieID:     mr.FileMatchInfo.MovieID,
+		ResultID: mr.ResultID,
+		FilePath: mr.FileMatchInfo.Path,
+		// Canonical movie identity, parity with movieResultToResponse above.
+		MovieID:     posterLockKeyFor(mr),
 		IsMultiPart: mr.FileMatchInfo.IsMultiPart,
 		PartNumber:  mr.FileMatchInfo.PartNumber,
 		PartSuffix:  mr.FileMatchInfo.PartSuffix,

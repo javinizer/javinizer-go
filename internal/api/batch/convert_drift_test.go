@@ -46,7 +46,7 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 		"FieldSources":   "from resultstore.ProvenanceData, not MovieResult",
 		"ActressSources": "from resultstore.ProvenanceData, not MovieResult",
 		"FilePath":       "flattened from MovieResult.FileMatchInfo.Path",
-		"MovieID":        "flattened from MovieResult.FileMatchInfo.MovieID",
+		"MovieID":        "canonical movie identity: Movie.ID when set (posterLockKeyFor), else MovieResult.FileMatchInfo.MovieID",
 		"IsMultiPart":    "flattened from MovieResult.FileMatchInfo.IsMultiPart",
 		"PartNumber":     "flattened from MovieResult.FileMatchInfo.PartNumber",
 		"PartSuffix":     "flattened from MovieResult.FileMatchInfo.PartSuffix",

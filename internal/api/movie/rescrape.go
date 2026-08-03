@@ -2,12 +2,14 @@ package movie
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker"
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
@@ -84,10 +86,25 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		// Generate temp poster for the rescraped movie.
 		// Poster generation was moved out of the scrape orchestrator;
 		// API endpoints that call wf.Scrape() directly must do it explicitly.
+		// Serialize per (sentinel-job, movie ID), parity with scrapeMovie: the
+		// cache replacement inside DownloadFromURL (Remove before Rename) must
+		// not interleave with another same-ID generation.
+		var posterErrs []string
 		if deps.PosterGen != nil && result.Movie != nil {
-			_ = deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie)
+			// Deferred release (parity with scrapeMovie): a recovered panic in
+			// GeneratePoster must still release this refcounted lock entry,
+			// or the key deadlocks permanently (L1).
+			release := worker.AcquirePosterSourceLock(models.SentinelJobID().String(), result.Movie.ID)
+			defer release()
+			// Surface a failed generation instead of discarding it (parity with
+			// scrapeMovie): the rescrape succeeded, so this rides as a
+			// movie-level warning in the response contract (MovieResponse.Errors).
+			if genErr := deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie); genErr != nil {
+				logging.Errorf("Poster generation failed for %s after rescrape: %v", result.Movie.ID, genErr)
+				posterErrs = append(posterErrs, fmt.Sprintf("poster generation failed: %s", redactEmbeddedURLs(genErr.Error())))
+			}
 		}
 
-		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(result.Movie)})
+		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(result.Movie), Errors: posterErrs})
 	}
 }

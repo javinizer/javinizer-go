@@ -29,6 +29,7 @@ import (
 // @Success 200 {object} contracts.PosterCropResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/{id}/results/{resultId}/poster-crop [post]
 func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -55,7 +56,21 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		movieID := result.FileMatchInfo.MovieID
+		// Canonical-ID precedence (posterLockKeyFor): Movie.ID when set,
+		// FileMatchInfo.MovieID otherwise — the same key updateBatchMovie and
+		// ApplyFieldOverride lock and fan out on. Deriving the fan-out/family
+		// identity from FileMatchInfo.MovieID alone would, for a result whose
+		// rescrape re-keyed Movie.ID, crop the NEW key's cache while updating
+		// the OLD movie-ID family.
+		movieID := posterLockKeyFor(result)
+
+		// Capture the effective poster source the client's crop coordinates
+		// were measured against BEFORE waiting on the poster-source lock: a
+		// source-changing edit that completes while this request waits would
+		// apply those old-image coordinates to the new image, so the post-lock
+		// re-check below rejects that case with 409 (stale-conflict, parity
+		// with the concurrent-rescrape rejection).
+		preWaitSource := effectivePosterSourceOf(result.Movie)
 
 		posterID, err := resolvePosterID(job, movieID)
 		if err != nil {
@@ -92,8 +107,12 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// Re-read the result under the lock: a source-changing edit may have
 		// persisted while this request waited, replacing the movie — and the
 		// crop-intent flags the SourceWasCover recording below reads — that
-		// the pre-lock lookup saw. Keep the pre-lock result on a miss: the
-		// state update degrades to a no-op for a vanished result either way.
+		// the pre-lock lookup saw. A miss means the writer this request waited
+		// behind REMOVED the result: proceeding with the stale pre-lock result
+		// would still mutate the shared cache (CropWithBounds overwrites the
+		// preview) while answering 200 for a result that no longer exists —
+		// answer 404 instead, as whole-movie PATCH already does for this race
+		// (updateBatchMovie).
 		//
 		// That edit can also RE-KEY the result: a rescrape that corrected the
 		// match from movie A to movie B holds (or held) A's lock and commits
@@ -111,10 +130,13 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// re-acquisition waits behind a writer whose re-key is already
 		// committed.
 		for {
-			if fresh, _, stillFound := job.GetFileResultByResultID(resultID); stillFound && fresh != nil {
-				result = fresh
+			fresh, _, stillFound := job.GetFileResultByResultID(resultID)
+			if !stillFound || fresh == nil {
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
+				return
 			}
-			resolvedMovieID := result.FileMatchInfo.MovieID
+			result = fresh
+			resolvedMovieID := posterLockKeyFor(result)
 			resolvedPosterID, resolveErr := resolvePosterID(job, resolvedMovieID)
 			if resolveErr != nil {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: resolveErr.Error()})
@@ -129,6 +151,18 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			releasePosterLock()
 			posterID = resolvedPosterID
 			releasePosterLock = worker.AcquirePosterSourceLock(jobID, posterID)
+		}
+
+		// Stale-source guard (P1): the effective poster source this request's
+		// coordinates were measured against (captured pre-wait) must still be
+		// the effective source on the POST-lock result. A source swap that
+		// landed while this request waited — poster_url/cover_url PATCH or
+		// override, poster-from-URL, or a source-changing rescrape rekey —
+		// invalidates the coordinate space, so reject without mutating the
+		// cache: the client re-fetches and re-measures against the new image.
+		if postLockSource := effectivePosterSourceOf(result.Movie); postLockSource != preWaitSource {
+			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "poster source changed while the crop request was waiting; reload the result and re-measure the crop"})
+			return
 		}
 
 		// Resolve the max poster height: request-level override wins over the
@@ -167,7 +201,20 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "full-size poster source unavailable for this older job; re-scrape the file or use poster-from-URL to enable manual cropping"})
 				return
 			}
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			// Every NON-legacy crop failure may have mutated the cache:
+			// CropWithBounds stages the new preview via {posterID}.jpg.tmp +
+			// rename, so its own failure leaves the live preview intact — but a
+			// failure riding legacy/partial state must never gamble on that,
+			// and the restore is also the belt-and-braces guarantee against any
+			// future in-place mutation regrowth. Restore the pre-crop snapshot
+			// (parity with the DownloadFromURL failure leg below; the legacy
+			// leg above writes nothing — its Stat check precedes any mutation —
+			// so it needs no restore).
+			errMsg := err.Error()
+			if restoreErr := snap.PosterManager().RestoreAssets(assetSnap); restoreErr != nil {
+				errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, restoreErr)
+			}
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: errMsg})
 			return
 		}
 		croppedURL := cropResult.CroppedURL
@@ -187,20 +234,28 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				bounds.SourceWasCover = result.Movie.Poster.CropBounds.SourceWasCover
 			}
 		}
-		// Snapshot every part's pre-crop movie so a failed crop-state update OR
-		// a failed envelope persist can revert the in-memory crop EXACTLY.
-		// UpdatePosterCrop mutates three things per part (CroppedPosterURL
-		// preview, ShouldCropPoster=false, CropBounds) and may lazily stamp the
-		// Original* backup baseline, so a revert must restore the whole pre-crop
-		// movie per part — replaying UpdatePosterCrop with the old bounds would
-		// leave ShouldCropPoster at false even when the pre-crop intent was
-		// true. Mirrored from the poster-from-URL compensation below.
-		// GetMovieResult clones, so the atomic crop update cannot alias these.
-		origMovies := make(map[string]*models.Movie)
+		// Snapshot every part's COMPLETE pre-crop stored result so a failed
+		// crop-state update OR a failed envelope persist can revert the
+		// in-memory crop EXACTLY. UpdatePosterCrop mutates three things per
+		// part (CroppedPosterURL preview, ShouldCropPoster=false, CropBounds),
+		// may lazily stamp the Original* backup baseline, AND re-stamps
+		// FileMatchInfo.MovieID from Movie.ID — for a re-keyed result whose
+		// FileMatchInfo has not converged, reverting only the Movie (via an
+		// UpdateMovie replay, which re-stamps FileMatchInfo identically) would
+		// MOVE the part's family/index identity despite the claimed exact
+		// rollback. The revert therefore re-seats the whole snapshot through
+		// RestoreMovieResult (parity with the PATCH compensation); a nil prior
+		// marks a FAILED snapshot lookup (surfaced, never silently skipped),
+		// NOT a legitimately-nil stored Movie (RestoreMovieResult re-seats that
+		// verbatim). GetMovieResult clones, so the atomic crop update cannot
+		// alias these. Mirrored in the poster-from-URL compensation below.
+		origResults := make(map[string]*resultstore.MovieResult)
 		for _, fp := range job.FindFilePathsForMovieID(movieID) {
-			if prev, gErr := job.GetMovieResult(fp); gErr == nil && prev != nil && prev.Movie != nil {
-				origMovies[fp] = prev.Movie
+			var prior *resultstore.MovieResult
+			if prev, gErr := job.GetMovieResult(fp); gErr == nil && prev != nil {
+				prior = prev
 			}
+			origResults[fp] = prior
 		}
 
 		// Serialize the mutation → envelope persist → rollback tail across
@@ -219,8 +274,8 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		releaseEnvelopeLock := worker.AcquireJobEnvelopeLock(jobID)
 		defer func() { releaseEnvelopeLock() }()
 
-		// compensateCrop reverts the per-part in-memory movies (whole pre-crop
-		// snapshots) and restores the pre-crop cache bytes, part reverts first
+		// compensateCrop reverts the per-part in-memory stored results (whole
+		// pre-crop snapshots) and restores the pre-crop cache bytes, part reverts first
 		// so no in-memory result references the rejected crop while the cache
 		// flips back. Shared by BOTH failure legs below: a failed
 		// UpdatePosterCrop must not leave CropWithBounds' rejected preview
@@ -228,8 +283,12 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// leaving earlier parts mutated) — the same divergence the
 		// persist-failure leg already handled.
 		compensateCrop := func(errMsg string) string {
-			for fp, orig := range origMovies {
-				if revertErr := job.UpdateMovie(c.Request.Context(), fp, orig); revertErr != nil {
+			for fp, prior := range origResults {
+				if prior == nil {
+					errMsg = fmt.Sprintf("%s (no pre-crop snapshot for part %s: its crop state could not be reverted)", errMsg, fp)
+					continue
+				}
+				if revertErr := job.RestoreMovieResult(c.Request.Context(), fp, prior); revertErr != nil {
 					errMsg = fmt.Sprintf("%s (revert of part %s failed: %v)", errMsg, fp, revertErr)
 				}
 			}
@@ -265,6 +324,15 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// same edits the crop itself was.
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
 			errMsg := compensateCrop(fmt.Sprintf("Failed to persist job state: %v", perr))
+			if errors.Is(perr, worker.ErrJobGone) {
+				// Job deleted between lookup and persist (A13): the crop was
+				// never durable — compensateCrop already restored the in-memory
+				// parts and the cache above; answer 410 instead of acking state
+				// the client could believe landed on a live job.
+				logging.Warnf("Poster crop for job %s not persisted — job vanished: %v", jobID, perr)
+				c.JSON(http.StatusGone, contracts.ErrorResponse{Error: "Job has been deleted"})
+				return
+			}
 			logging.Errorf("Failed to persist poster crop for job %s: %v", jobID, perr)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
@@ -277,6 +345,18 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				MaxPosterHeight: bounds.MaxPosterHeight, ImageWidth: bounds.ImageWidth, ImageHeight: bounds.ImageHeight,
 				SourceWasCover: bounds.SourceWasCover,
 			},
+		}
+		// Echo the Original* revert baseline read back from the post-crop
+		// state (still under the poster-source lock): UpdatePosterCrop may
+		// have lazily stamped it (backupPosterOriginals) on a legacy result
+		// that lacked one, and a client-side overlay that drops these fields
+		// would let a pre-refetch whole-movie Save resubmit empty originals
+		// through UpdateMovie — destroying the reset target the crop just
+		// created.
+		if updated, _, stillFound := job.GetFileResultByResultID(resultID); stillFound && updated != nil && updated.Movie != nil {
+			resp.OriginalPosterURL = updated.Movie.Poster.OriginalPosterURL
+			resp.OriginalCroppedPosterURL = updated.Movie.Poster.OriginalCroppedPosterURL
+			resp.OriginalShouldCropPoster = updated.Movie.Poster.OriginalShouldCropPoster
 		}
 		c.JSON(http.StatusOK, resp)
 	}
@@ -295,6 +375,7 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse
+// @Failure 502 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/{id}/results/{resultId}/poster-from-url [post]
 func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -321,7 +402,9 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		movieID := result.FileMatchInfo.MovieID
+		// Canonical-ID precedence (posterLockKeyFor), parity with the crop
+		// endpoint above and updateBatchMovie: Movie.ID when set.
+		movieID := posterLockKeyFor(result)
 
 		posterID, err := resolvePosterID(job, movieID)
 		if err != nil {
@@ -364,13 +447,19 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		// per the two-lock rule in worker.AcquirePosterSourceLock), then the
 		// result is re-read once more under B. The loop converges because each
 		// re-acquisition waits behind a writer whose re-key is already
-		// committed. On a miss the pre-lock result is kept: the state update
-		// degrades to a no-op for a vanished result either way.
+		// committed. A miss means the writer this request waited behind
+		// REMOVED the result: proceeding with the stale pre-lock result would
+		// still download into the shared cache (orphaning the replacement)
+		// while answering 200 for a result that no longer exists — answer 404
+		// instead, mirroring updateBatchMovie's post-lock 404 for this race.
 		for {
-			if fresh, _, stillFound := job.GetFileResultByResultID(resultID); stillFound && fresh != nil {
-				result = fresh
+			fresh, _, stillFound := job.GetFileResultByResultID(resultID)
+			if !stillFound || fresh == nil {
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
+				return
 			}
-			resolvedMovieID := result.FileMatchInfo.MovieID
+			result = fresh
+			resolvedMovieID := posterLockKeyFor(result)
 			resolvedPosterID, resolveErr := resolvePosterID(job, resolvedMovieID)
 			if resolveErr != nil {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: resolveErr.Error()})
@@ -407,22 +496,31 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		// Capture the pre-request per-part movies for compensation: a failure
-		// after the download reverts the in-memory fan-out (mirroring the
-		// whole-movie PATCH compensation) before the cache restore runs, so no
-		// part keeps the new poster URL while the cache holds the old image.
-		origMovies := make(map[string]*models.Movie)
+		// Capture the pre-request COMPLETE per-part stored results for
+		// compensation: a failure after the download reverts the in-memory
+		// fan-out (mirroring the whole-movie PATCH compensation) BEFORE the
+		// cache restore runs, so no part keeps the new poster URL while the
+		// cache holds the old image. Whole-result snapshots — restoring only
+		// the Movie via UpdateMovie would re-stamp FileMatchInfo.MovieID from
+		// Movie.ID (resultUpdater.UpdateMovie) and strand a re-keyed part's
+		// family/index identity on the wrong key; a nil prior marks a FAILED
+		// lookup (surfaced), distinct from a legitimately-nil stored Movie
+		// (restored verbatim by RestoreMovieResult).
+		origResults := make(map[string]*resultstore.MovieResult)
 		for _, fp := range job.FindFilePathsForMovieID(movieID) {
+			var prior *resultstore.MovieResult
 			if prev, gErr := job.GetMovieResult(fp); gErr == nil && prev != nil {
-				origMovies[fp] = prev.Movie
+				prior = prev
 			}
+			origResults[fp] = prior
 		}
 		compensate := func(errMsg string) string {
-			for fp, orig := range origMovies {
-				if orig == nil {
+			for fp, prior := range origResults {
+				if prior == nil {
+					errMsg = fmt.Sprintf("%s (no pre-edit snapshot for part %s: its edit could not be reverted)", errMsg, fp)
 					continue
 				}
-				if revertErr := job.UpdateMovie(c.Request.Context(), fp, orig); revertErr != nil {
+				if revertErr := job.RestoreMovieResult(c.Request.Context(), fp, prior); revertErr != nil {
 					errMsg = fmt.Sprintf("%s (revert of part %s failed: %v)", errMsg, fp, revertErr)
 				}
 			}
@@ -434,12 +532,22 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 
 		posterResult, err := snap.PosterManager().DownloadFromURL(c.Request.Context(), jobID, posterID, req.URL, batchCfg.ScraperUserAgent, batchCfg.ScraperReferer)
 		if err != nil {
+			// DownloadFromURL is not internally atomic for PRE-EXISTING assets:
+			// it removes the cached {posterID}-full.jpg before its rename and
+			// the preview before its copy fallback, so a rename/crop failure leg
+			// leaves the cache partially (or wholly) deleted while the —
+			// untouched — job state still references it. Restore the snapshot
+			// taken above; a failed restore rides along on the error message.
+			errMsg := err.Error()
+			if restoreErr := snap.PosterManager().RestoreAssets(assetSnap); restoreErr != nil {
+				errMsg = fmt.Sprintf("%s (poster rollback failed: %v)", errMsg, restoreErr)
+			}
 			if strings.Contains(err.Error(), "SSRF") || strings.Contains(err.Error(), "invalid URL") {
-				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: errMsg})
 			} else if strings.Contains(err.Error(), "download") || strings.Contains(err.Error(), "status") {
-				c.JSON(http.StatusBadGateway, contracts.ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusBadGateway, contracts.ErrorResponse{Error: errMsg})
 			} else {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			}
 			return
 		}
@@ -477,6 +585,14 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		// downloaded image.
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
 			errMsg := compensate(fmt.Sprintf("Failed to persist job state: %v", perr))
+			if errors.Is(perr, worker.ErrJobGone) {
+				// Job deleted between lookup and persist (A13) — compensate
+				// already restored memory + cache; answer 410 (see the crop
+				// endpoint's branch above).
+				logging.Warnf("Poster-from-URL for job %s not persisted — job vanished: %v", jobID, perr)
+				c.JSON(http.StatusGone, contracts.ErrorResponse{Error: "Job has been deleted"})
+				return
+			}
 			logging.Errorf("Failed to persist poster-from-URL for job %s: %v", jobID, perr)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return
@@ -490,13 +606,30 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		// would resubmit that false while poster_source is unchanged, which
 		// updateBatchMovie treats as a deliberate crop-intent edit.
 		shouldCrop := false
+		var (
+			originalPosterURL        string
+			originalCroppedPosterURL string
+			originalShouldCropPoster *bool
+		)
 		if updated, _, stillFound := job.GetFileResultByResultID(resultID); stillFound && updated != nil && updated.Movie != nil {
 			shouldCrop = updated.Movie.Poster.ShouldCropPoster
+			// The Original* revert baseline comes from the same read-back:
+			// UpdatePosterFromURL may have lazily stamped it
+			// (backupPosterOriginals) on a legacy result, and a client
+			// overlay that drops it would let a pre-refetch whole-movie Save
+			// resubmit empty originals through UpdateMovie, destroying the
+			// reset target this edit just created.
+			originalPosterURL = updated.Movie.Poster.OriginalPosterURL
+			originalCroppedPosterURL = updated.Movie.Poster.OriginalCroppedPosterURL
+			originalShouldCropPoster = updated.Movie.Poster.OriginalShouldCropPoster
 		}
 		c.JSON(http.StatusOK, contracts.PosterFromURLResponse{
-			CroppedPosterURL: croppedURL,
-			PosterURL:        req.URL,
-			ShouldCropPoster: shouldCrop,
+			CroppedPosterURL:         croppedURL,
+			PosterURL:                req.URL,
+			ShouldCropPoster:         shouldCrop,
+			OriginalPosterURL:        originalPosterURL,
+			OriginalCroppedPosterURL: originalCroppedPosterURL,
+			OriginalShouldCropPoster: originalShouldCropPoster,
 		})
 	}
 }
@@ -520,6 +653,20 @@ func resolvePosterID(lookup resultstore.MovieLookup, movieID string) (string, er
 		return "", errInvalidMovieIDForPoster
 	}
 	return posterID, nil
+}
+
+// effectivePosterSourceOf mirrors worker's effectivePosterSource (and the
+// scrape generator's download-source resolution): PosterURL when set,
+// CoverURL otherwise. The crop endpoint compares it pre/post lock-wait to
+// detect a source swap that invalidated client-measured crop coordinates.
+func effectivePosterSourceOf(movie *models.Movie) string {
+	if movie == nil {
+		return ""
+	}
+	if movie.Poster.PosterURL != "" {
+		return movie.Poster.PosterURL
+	}
+	return movie.Poster.CoverURL
 }
 
 // posterLockKeyFor derives the shared poster-source lock key for a stored movie

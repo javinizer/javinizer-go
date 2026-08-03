@@ -165,7 +165,14 @@ func TestUpdateBatchMoviePosterCrop_SerializesWithPosterSourcePATCH(t *testing.T
 		go func() { defer wg.Done(); cropCode <- postPosterCropBounds(router, job.GetID(), movieID) }()
 		wg.Wait()
 
-		require.Equal(t, http.StatusOK, <-cropCode, "round %d: the crop is valid against either image", round)
+		// The crop either measured a CONSISTENT image (200: it saw the post-edit
+		// source pre-lock, or won the lock before the PATCH — the PATCH then
+		// clears its bounds) or was rejected stale (409, P1-5: the PATCH's
+		// source swap landed while the crop waited on the lock — its
+		// coordinates describe the OLD image and must not be applied to the
+		// new one). Both orders preserve the invariant below.
+		assert.Contains(t, []int{http.StatusOK, http.StatusConflict}, <-cropCode,
+			"round %d: crop applies against a consistent source or is rejected stale", round)
 		require.Equal(t, http.StatusOK, <-patchCode, "round %d", round)
 
 		// The PATCH is the last writer of the poster URL under every
@@ -320,9 +327,9 @@ func TestUpdateBatchMoviePosterCrop_PosterSourceLockReleasedOnAllPaths(t *testin
 		mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
 		mockJob.EXPECT().GetMovieResult("/path/to/CFL-001.mp4").Return(result, nil).Maybe()
 		mockJob.EXPECT().UpdatePosterCrop(movieID, mock.Anything, mock.Anything).Return(assert.AnError)
-		// The compensation leg re-persists the pre-crop snapshot through
-		// UpdateMovie before restoring the cache.
-		mockJob.EXPECT().UpdateMovie(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		// The compensation leg re-seats the pre-crop snapshot through
+		// RestoreMovieResult before restoring the cache.
+		mockJob.EXPECT().RestoreMovieResult(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 		seedFullPoster(t, jobID, movieID)
 
@@ -330,7 +337,7 @@ func TestUpdateBatchMoviePosterCrop_PosterSourceLockReleasedOnAllPaths(t *testin
 		assertPosterSourceLockFreeAPI(t, jobID, movieID)
 	})
 
-	t.Run("result vanishing after the lock falls back to the pre-lock snapshot", func(t *testing.T) {
+	t.Run("result vanishing after the lock answers 404 without touching the cache", func(t *testing.T) {
 		cfg := config.DefaultConfig(nil, nil)
 		deps := createTestDeps(t, cfg, "")
 		const jobID, movieID = "job-lock-gone", "CVN-001"
@@ -345,18 +352,18 @@ func TestUpdateBatchMoviePosterCrop_PosterSourceLockReleasedOnAllPaths(t *testin
 		mockJob := workermocks.NewMockBatchJobInterface(t)
 		mockJob.EXPECT().GetFileResultByResultID(movieID).Return(result, "/path/to/CVN-001.mp4", true).Once()
 		// The source edit won the race AND the result went away before the
-		// post-lock re-read: the endpoint proceeds with the pre-lock state.
+		// post-lock re-read: the endpoint answers 404 (parity with the
+		// whole-movie PATCH vanished-result race, updateBatchMovie) instead
+		// of cropping a deleted result and orphaning the cache change
+		// (CropWithBounds would still overwrite the preview). No cache or
+		// state calls follow — the strict mock fails on any.
 		mockJob.EXPECT().GetFileResultByResultID(movieID).Return(nil, "", false).Once()
 		mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{"/path/to/CVN-001.mp4"})
 		mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
-		mockJob.EXPECT().GetMovieResult("/path/to/CVN-001.mp4").Return(result, nil).Maybe()
-		mockJob.EXPECT().UpdatePosterCrop(movieID, mock.Anything, mock.MatchedBy(func(b *models.CropBounds) bool {
-			return b != nil && b.SourceWasCover
-		})).Return(nil)
 		deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 		seedFullPoster(t, jobID, movieID)
 
-		require.Equal(t, http.StatusOK, postPosterCropBounds(newRouter(deps), jobID, movieID))
+		require.Equal(t, http.StatusNotFound, postPosterCropBounds(newRouter(deps), jobID, movieID))
 		assertPosterSourceLockFreeAPI(t, jobID, movieID)
 	})
 }

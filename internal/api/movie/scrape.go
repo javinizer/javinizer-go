@@ -3,6 +3,7 @@ package movie
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -11,8 +12,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker"
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
@@ -179,8 +182,28 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		// Generate temp poster for the scraped movie.
 		// Poster generation was moved out of the scrape orchestrator;
 		// API endpoints that call wf.Scrape() directly must do it explicitly.
+		// Serialize per (sentinel-job, movie ID): DownloadFromURL replaces the
+		// cached -full.jpg non-atomically (Remove before Rename), so two
+		// concurrent single-movie scrapes resolving to the same ID must not
+		// interleave (parity with the batch scrape phase's L2 lock).
+		var posterErrs []string
 		if deps.PosterGen != nil && result.Movie != nil {
-			_ = deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie)
+			// The release is deferred immediately after acquisition: the lock
+			// is refcounted (worker.AcquirePosterSourceLock), so a recovered
+			// panic inside GeneratePoster must still release it — an explicit
+			// release below would leak the refcount entry, permanently
+			// deadlocking the key (L1).
+			release := worker.AcquirePosterSourceLock(models.SentinelJobID().String(), result.Movie.ID)
+			defer release()
+			// A failed generation must NOT be discarded: the endpoint would
+			// otherwise report success while the poster cache holds no image.
+			// The scrape itself succeeded, so surface it as a movie-level warning
+			// (ScrapeResponse.Errors) with credential material redacted, parity
+			// with the history-audit redaction above.
+			if genErr := deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie); genErr != nil {
+				logging.Errorf("Poster generation failed for %s after scrape: %v", result.Movie.ID, genErr)
+				posterErrs = append(posterErrs, fmt.Sprintf("poster generation failed: %s", redactEmbeddedURLs(genErr.Error())))
+			}
 		}
 
 		// Cached if the scrape seam served from the movie DB cache. Read the
@@ -199,6 +222,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			Cached:      cached,
 			Movie:       contracts.MovieViewFromModel(result.Movie),
 			SourcesUsed: sourcesUsed,
+			Errors:      posterErrs,
 		})
 	}
 }

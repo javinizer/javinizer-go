@@ -22,6 +22,10 @@ type MovieResponse struct {
 	Movie      *MovieView            `json:"movie"`
 	Provenance map[string]DataSource `json:"provenance,omitempty"`  // Field-level data source tracking
 	MergeStats *MergeStatistics      `json:"merge_stats,omitempty"` // Merge statistics when NFO merging occurred
+	// Errors carries movie-level warnings on an otherwise-successful call
+	// (e.g. a failed poster generation after a successful scrape) — parity
+	// with ScrapeResponse.Errors.
+	Errors []string `json:"errors,omitempty"`
 }
 
 // DataSource represents the source of a metadata field
@@ -95,12 +99,23 @@ type PosterCropRequest struct {
 }
 
 // PosterCropResponse returns the updated temp cropped poster URL and the
-// crop bounds actually stored server-side (nil when the crop ran against a
-// legacy already-cropped preview and the bounds were deliberately dropped,
-// so clients must not overlay the requested bounds in that case).
+// crop bounds actually stored server-side. Bounds are echoed verbatim from
+// the persisted crop; a crop whose full-size source is gone (legacy job) is
+// REJECTED with 400 before anything is written, never answered with
+// deliberately dropped bounds, so clients may always overlay the returned
+// bounds on success.
 type PosterCropResponse struct {
 	CroppedPosterURL string      `json:"cropped_poster_url"`
 	PosterCropBounds *CropBounds `json:"poster_crop_bounds,omitempty"`
+	// Original* revert-baseline fields echoed from the post-crop state: the
+	// crop may have lazily STAMPED them (backupPosterOriginals) on a legacy
+	// result that lacked a baseline. Clients must overlay these verbatim, or
+	// a whole-movie Save issued before the next refetch resubmits empty
+	// originals through UpdateMovie and destroys the reset target the crop
+	// just created.
+	OriginalPosterURL        string `json:"original_poster_url"`
+	OriginalCroppedPosterURL string `json:"original_cropped_poster_url"`
+	OriginalShouldCropPoster *bool  `json:"original_should_crop_poster"`
 }
 
 // PosterFromURLRequest represents a request to download a poster from a URL.
@@ -118,6 +133,13 @@ type PosterFromURLResponse struct {
 	// whole-movie Save would resubmit a false that Organize treats as
 	// deliberate, desyncing preview (cropped) from apply (uncropped).
 	ShouldCropPoster bool `json:"should_crop_poster"`
+	// Original* revert-baseline fields echoed from the post-update state —
+	// same contract as PosterCropResponse: UpdatePosterFromURL may have
+	// lazily stamped them (backupPosterOriginals) on a legacy result, and a
+	// pre-refetch whole-movie Save must not resubmit empty originals.
+	OriginalPosterURL        string `json:"original_poster_url"`
+	OriginalCroppedPosterURL string `json:"original_cropped_poster_url"`
+	OriginalShouldCropPoster *bool  `json:"original_should_crop_poster"`
 }
 
 // NFOComparisonRequest represents a request to compare NFO with scraped data

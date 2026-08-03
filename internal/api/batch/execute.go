@@ -2,6 +2,7 @@ package batch
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,7 +42,13 @@ func prepareAndLaunchApply(
 		if err := job.StartApply(rt.ServerCtx(), applyOpts); err != nil {
 			logging.Errorf("BatchJob.StartApply failed: %v", err)
 			if perr := rt.Deps().GetJobStore().PersistJobByID(job.GetID()); perr != nil {
-				logging.Errorf("failed to persist job %s after StartApply error: %v", job.GetID(), perr)
+				if errors.Is(perr, worker.ErrJobGone) {
+					// Benign races: the job was deleted while apply was failing;
+					// there is nothing to persist anymore (A13).
+					logging.Warnf("job %s vanished before post-StartApply-error persist; skipping", job.GetID())
+				} else {
+					logging.Errorf("failed to persist job %s after StartApply error: %v", job.GetID(), perr)
+				}
 			}
 			return
 		}
@@ -294,7 +301,11 @@ func ResolvePreviewData(deps *core.APIDeps, jobID string, resultID string, req c
 		return nil, nil, &previewResolveError{Status: http.StatusNotFound, Err: fmt.Sprintf("Result %s not found in job", resultID)}
 	}
 
-	movieID := result.FileMatchInfo.MovieID
+	// Canonical identity (posterLockKeyFor: Movie.ID precedence), parity with
+	// lookupResultByResultID's fan-out: a re-keyed result whose FileMatchInfo
+	// still carries the old key must preview ITS OWN movie family, not
+	// whatever movie still lives at the stale key.
+	movieID := posterLockKeyFor(result)
 
 	fileResults := job.GetMovieResultsForMovieID(movieID)
 	if len(fileResults) == 0 {

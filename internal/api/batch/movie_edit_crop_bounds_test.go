@@ -85,6 +85,18 @@ func TestUpdateBatchMoviePosterFromURL_SuccessClearsBoundsAndPersists(t *testing
 		assert.Equal(t, srv.URL+"/poster.jpg", r.Movie.Poster.PosterURL)
 		assert.Nil(t, r.Movie.Poster.CropBounds, "replacing the poster image must invalidate stored crop bounds")
 	}
+
+	// The response must carry the Original* revert baseline that
+	// backupPosterOriginals lazily stamped (legacy result, no baseline): a
+	// client overlay that drops these lets a pre-refetch whole-movie Save
+	// resubmit empty originals through UpdateMovie, destroying the reset
+	// target this edit just created (Codex P1).
+	var resp contracts.PosterFromURLResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "https://example.com/old-poster.jpg", resp.OriginalPosterURL)
+	assert.Empty(t, resp.OriginalCroppedPosterURL)
+	require.NotNil(t, resp.OriginalShouldCropPoster)
+	assert.False(t, *resp.OriginalShouldCropPoster)
 }
 
 func TestUpdateBatchMoviePosterFromURL_DownloadGenericErrorReturns500(t *testing.T) {
@@ -170,10 +182,10 @@ func TestUpdateBatchMoviePosterFromURL_UpdateFailureReturns500(t *testing.T) {
 	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{"/path/to/FURL-500.mp4"})
 	mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
 	mockJob.EXPECT().UpdatePosterFromURL(mock.Anything, movieID, mock.Anything, mock.Anything).Return(assert.AnError)
-	// F-A compensation on the state-update failure: pre-request movies are
+	// F-A compensation on the state-update failure: pre-request results are
 	// captured per part and the revert runs before the cache restore.
 	mockJob.EXPECT().GetMovieResult("/path/to/FURL-500.mp4").Return(result, nil)
-	mockJob.EXPECT().UpdateMovie(mock.Anything, "/path/to/FURL-500.mp4", mock.Anything).Return(nil)
+	mockJob.EXPECT().RestoreMovieResult(mock.Anything, "/path/to/FURL-500.mp4", mock.Anything).Return(nil)
 
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
 
@@ -200,8 +212,8 @@ func (s *fixedJobStore) GetBatchJob(string) (worker.BatchJobInterface, bool) { r
 // Codex P2 finding "restore assets when the crop state update fails":
 // CropWithBounds has already overwritten the shared preview ({posterID}.jpg)
 // when UpdatePosterCrop fails, so the handler must run the same movie+asset
-// compensation the envelope-persist leg runs — the part's pre-crop movie is
-// re-persisted through UpdateMovie and the snapshot restores the pre-crop
+// compensation the envelope-persist leg runs — the part's pre-crop result is
+// re-seated through RestoreMovieResult and the snapshot restores the pre-crop
 // cache bytes — instead of returning 500 with the rejected crop still
 // installed while job state points at the old bounds (an uncached reload
 // would display the rejected crop; multipart requests racing after it could
@@ -225,19 +237,19 @@ func TestUpdateBatchMoviePosterCrop_UpdateFailureRestoresStateAndCache(t *testin
 		}},
 	}
 
-	var reverts []*models.Movie
+	var reverts []*resultstore.MovieResult
 	mockJob := workermocks.NewMockBatchJobInterface(t)
 	mockJob.EXPECT().GetFileResultByResultID(movieID).Return(result, filePath, true)
 	mockJob.EXPECT().FindFilePathsForMovieID(movieID).Return([]string{filePath})
 	mockJob.EXPECT().FindMovieResultForMovieID(movieID).Return(result, nil)
 	// The pre-crop per-part snapshot (F7 compensation capture) reads the part
 	// once before the failing UpdatePosterCrop, and the compensation then
-	// re-persists THAT exact snapshot through UpdateMovie.
+	// re-seats THAT exact snapshot through RestoreMovieResult.
 	mockJob.EXPECT().GetMovieResult(filePath).Return(result, nil)
 	mockJob.EXPECT().UpdatePosterCrop(movieID, mock.Anything, mock.Anything).Return(assert.AnError)
-	mockJob.EXPECT().UpdateMovie(mock.Anything, filePath, mock.Anything).
-		Run(func(_ context.Context, _ string, m *models.Movie) {
-			reverts = append(reverts, m)
+	mockJob.EXPECT().RestoreMovieResult(mock.Anything, filePath, mock.Anything).
+		Run(func(_ context.Context, _ string, prior *resultstore.MovieResult) {
+			reverts = append(reverts, prior)
 		}).Return(nil)
 
 	deps.JobStore = &fixedJobStore{JobStoreInterface: deps.JobStore, job: mockJob}
@@ -269,8 +281,8 @@ func TestUpdateBatchMoviePosterCrop_UpdateFailureRestoresStateAndCache(t *testin
 
 	// The single part was reverted with its exact pre-crop snapshot.
 	require.Len(t, reverts, 1, "the failed crop state update must trigger the per-part revert")
-	assert.Same(t, result.Movie, reverts[0],
-		"the revert re-persists the pre-crop snapshot captured before UpdatePosterCrop")
+	assert.Same(t, result, reverts[0],
+		"the revert must carry the WHOLE pre-crop result snapshot captured before UpdatePosterCrop")
 
 	// And the CropWithBounds-overwritten preview is byte-restored — the
 	// rejected crop must not stay installed against the reverted state.
@@ -471,4 +483,48 @@ func TestUpdateBatchMovie_PosterCropBoundsFieldPresence(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestUpdateBatchMoviePosterCrop_ResponseCarriesOriginalBaseline pins the
+// Codex P1 finding that the crop response omitted the server-stamped
+// Original* revert baseline: on a legacy result without a baseline,
+// UpdatePosterCrop's backupPosterOriginals lazily snapshots the pre-crop
+// state — but a client overlay that never learns those values lets a
+// whole-movie Save issued before the async refetch resubmit EMPTY originals
+// through UpdateMovie, destroying the reset target the crop just created.
+func TestUpdateBatchMoviePosterCrop_ResponseCarriesOriginalBaseline(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	chdirWorkDir(t)
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+
+	const movieID = "BASE-CROP"
+	filePath := "/path/to/" + movieID + ".mp4"
+	job := createJobWithWF(deps, cfg, []string{filePath})
+	setJobResult(job, filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movieID},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{ID: movieID, Title: "Baseline Crop", Poster: models.PosterState{
+			PosterURL:        "https://example.com/source.jpg",
+			CroppedPosterURL: "/api/v1/temp/posters/pre-crop.jpg",
+			ShouldCropPoster: true,
+		}},
+	})
+	seedCropFullPoster(t, job.GetID(), movieID)
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(testkit.GetTestRuntime(deps)))
+
+	code, rec := postPosterCrop(router, job.GetID(), movieID)
+	require.Equal(t, http.StatusOK, code, rec.Body.String())
+
+	var resp contracts.PosterCropResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "https://example.com/source.jpg", resp.OriginalPosterURL,
+		"the lazily stamped pre-crop poster baseline must ride the response")
+	assert.Equal(t, "/api/v1/temp/posters/pre-crop.jpg", resp.OriginalCroppedPosterURL)
+	require.NotNil(t, resp.OriginalShouldCropPoster)
+	assert.True(t, *resp.OriginalShouldCropPoster)
 }

@@ -114,7 +114,11 @@ func TestUpdateBatchMoviePosterCrop_RekeysToReassignedMovieAfterLockWait(t *test
 	<-ready
 	require.NoError(t, jobIface.UpdateMovie(t.Context(), fileCrop, &models.Movie{
 		ID: movieB, Title: "Movie B",
-		Poster: models.PosterState{PosterURL: "https://example.com/b.jpg"},
+		// The effective poster SOURCE must stay the pre-wait one across the
+		// re-key: P1-5 rejects crops whose source swapped mid-wait (a different
+		// URL ⇒ different image ⇒ the client-measured coordinates are stale).
+		// This test pins the lock HANDOFF on a same-source rekey.
+		Poster: models.PosterState{PosterURL: "https://example.com/a.jpg"},
 	}))
 
 	// Free A: the fixed handler wakes with A's lock, observes the re-key,

@@ -104,6 +104,22 @@ func bulkRescrapePool(
 	return results, persistErrs
 }
 
+// batchRescrapeMovies godoc
+// @Summary Rescrape movies in batch job
+// @Description Rescrape one or more movies in a batch job's results, optionally forcing a refresh, restricting scrapers, and applying merge strategies
+// @Tags web
+// @Accept json
+// @Produce json
+// @Param id path string true "Job ID"
+// @Param request body contracts.BulkRescrapeRequest true "Bulk rescrape parameters"
+// @Success 200 {object} contracts.BulkRescrapeResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 409 {object} contracts.ErrorResponse
+// @Failure 410 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.BulkRescrapeResponse "PersistError populated: per-movie rescrapes whose job-envelope persist failed after commit were rolled back and report status failed with the persist detail"
+// @Failure 503 {object} contracts.ErrorResponse
+// @Router /api/v1/batch/{id}/movies/batch-rescrape [post]
 func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		deps := rt.Deps()

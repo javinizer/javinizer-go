@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -21,8 +22,14 @@ func lookupResultByResultID(job worker.BatchJobInterface, resultID string) (*res
 	if !found {
 		return nil, nil, false
 	}
-	// Collect ALL file paths for the same movie ID (handles multi-part files)
-	filePaths := job.FindFilePathsForMovieID(result.FileMatchInfo.MovieID)
+	// Collect ALL file paths for the same movie ID (handles multi-part files).
+	// Keyed on the CANONICAL identity (posterLockKeyFor: Movie.ID when set,
+	// FileMatchInfo.MovieID otherwise) — the same precedence the poster lock,
+	// crop endpoints, and apply-time fan-out use. FindFilePathsForMovieID's
+	// index covers BOTH Movie.ID and FileMatchInfo.MovieID (movieIDsForResult),
+	// so keying on FileMatchInfo.MovieID alone would sweep an unrelated movie
+	// still living at the stale key into the fan-out of a re-keyed result.
+	filePaths := job.FindFilePathsForMovieID(posterLockKeyFor(result))
 	if len(filePaths) == 0 {
 		filePaths = []string{filePath}
 	}
@@ -41,6 +48,7 @@ func lookupResultByResultID(job worker.BatchJobInterface, resultID string) (*res
 // @Success 200 {object} contracts.MovieResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/{id}/results/{resultId} [patch]
 func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -148,14 +156,32 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			// have landed — and re-keyed the result — in the gap; on a change
 			// BOTH locks are dropped and pairing reconverges).
 			renameKey := movie.ID
+			// Pair decisions use the case-folded key segments
+			// (worker.PosterSourceLockMovieID — the lock map folds case): a
+			// case-only rename names the SAME lock (pairing would self-deadlock),
+			// and raw-string lexical order can disagree with the folded order.
 			if renameKey == "" || renameKey == posterLockKey {
+				break
+			}
+			if worker.PosterSourceLockMovieID(renameKey) == worker.PosterSourceLockMovieID(posterLockKey) {
+				// Case-only rename: no second lock to stack (same folded
+				// key), but the RAW-keyed cache assets and preview-URL
+				// segments still re-key — the temp poster cache names files
+				// by the raw movie ID, so on a case-sensitive filesystem
+				// abc-full.jpg and ABC-full.jpg are DIFFERENT files. Record
+				// renameTarget so the collision check and
+				// MigratePosterCacheAssets below still run; the single held
+				// lock already serializes every writer keyed on either
+				// casing. A case-only key differs only in case from a valid
+				// current key, so it is itself valid.
+				renameTarget = renameKey
 				break
 			}
 			if !validPosterLockKey(renameKey) {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: errInvalidMovieIDForPoster.Error()})
 				return
 			}
-			if renameKey > posterLockKey {
+			if worker.PosterSourceLockMovieID(renameKey) > worker.PosterSourceLockMovieID(posterLockKey) {
 				destRelease = worker.AcquirePosterSourceLock(jobID, renameKey)
 				renameTarget = renameKey
 				break
@@ -381,15 +407,26 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 
 		type updatedPart struct {
 			filePath string
-			original *models.Movie // pre-update stored movie, held for revert
+			// prior is the part's COMPLETE pre-update stored result clone
+			// (GetMovieResult) — including a legitimately nil Movie. nil prior
+			// marks a FAILED snapshot lookup, NOT a nil stored movie: the two
+			// were conflated by a bare *models.Movie snapshot, and compensation
+			// then skipped a just-updated nil-Movie part, stranding the
+			// rejected edit in memory.
+			prior *resultstore.MovieResult
 		}
 		var updated []updatedPart
 		var updateErr error
 		var updateFailPath string
+		var updateFailPrior *resultstore.MovieResult
 		for _, filePath := range filePaths {
-			var original *models.Movie
+			var prior *resultstore.MovieResult
 			if prev, gErr := job.GetMovieResult(filePath); gErr == nil && prev != nil {
-				original = prev.Movie
+				prior = prev
+			}
+			var original *models.Movie
+			if prior != nil {
+				original = prior.Movie
 			}
 			// OriginalFileName is per-part: it is populated from each part's
 			// own FileMatchInfo (scrapeResultToMovieResult) and read by
@@ -409,10 +446,10 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				partMovie.OriginalFileName = original.OriginalFileName
 			}
 			if err := job.UpdateMovie(c.Request.Context(), filePath, partMovie); err != nil {
-				updateErr, updateFailPath = err, filePath
+				updateErr, updateFailPath, updateFailPrior = err, filePath, prior
 				break
 			}
-			updated = append(updated, updatedPart{filePath: filePath, original: original})
+			updated = append(updated, updatedPart{filePath: filePath, prior: prior})
 		}
 		// compensateEdit reverts every part already updated in this request and
 		// rolls the refreshed poster cache back, in that order: restoring the
@@ -423,11 +460,31 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// strand the exact same divergence on restart (reconstructBatchJob reads
 		// only the envelope).
 		compensateEdit := func(errMsg string) string {
+			// The FAILING part (when a mid-loop UpdateMovie failed) is
+			// restored FIRST, before the successfully updated parts: its
+			// UpdateMovie can already have committed DB side effects —
+			// actress renames land before the movie upsert and the
+			// in-memory write (UpdateMovie's order) — so skipping it would
+			// leave its partial write permanent. Same RestoreMovieResult
+			// semantics as below.
+			if updateFailPath != "" {
+				if updateFailPrior == nil {
+					errMsg = fmt.Sprintf("%s (no pre-update snapshot for failing part %s: its partial edit could not be reverted)", errMsg, updateFailPath)
+				} else if revertErr := job.RestoreMovieResult(c.Request.Context(), updateFailPath, updateFailPrior); revertErr != nil {
+					errMsg = fmt.Sprintf("%s (revert of failing part %s failed: %v)", errMsg, updateFailPath, revertErr)
+				}
+				updateFailPath, updateFailPrior = "", nil // consumed — never double-restore
+			}
 			for _, part := range updated {
-				if part.original == nil {
+				// nil prior means the snapshot LOOKUP failed (distinct from a
+				// snapshot holding a legitimately nil Movie — RestoreMovieResult
+				// re-seats that verbatim): nothing remains to restore TO, so this
+				// part keeps the rejected write — surface it, never silently skip.
+				if part.prior == nil {
+					errMsg = fmt.Sprintf("%s (no pre-update snapshot for part %s: its edit could not be reverted)", errMsg, part.filePath)
 					continue
 				}
-				if revertErr := job.UpdateMovie(c.Request.Context(), part.filePath, part.original); revertErr != nil {
+				if revertErr := job.RestoreMovieResult(c.Request.Context(), part.filePath, part.prior); revertErr != nil {
 					errMsg = fmt.Sprintf("%s (revert of part %s failed: %v)", errMsg, part.filePath, revertErr)
 				}
 			}
@@ -456,6 +513,15 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// poster cache describe the same image.
 		if perr := deps.GetJobStore().PersistJobByID(jobID); perr != nil {
 			errMsg := compensateEdit(fmt.Sprintf("Failed to persist job state: %v", perr))
+			if errors.Is(perr, worker.ErrJobGone) {
+				// Job deleted between lookup and persist (A13): the edit was
+				// never durable — compensateEdit already reverted the parts and
+				// refreshed cache above; answer 410 instead of acking state the
+				// client could believe landed on a live job.
+				logging.Warnf("Movie edit for job %s not persisted — job vanished: %v", jobID, perr)
+				c.JSON(http.StatusGone, contracts.ErrorResponse{Error: "Job has been deleted"})
+				return
+			}
 			logging.Errorf("Failed to persist movie edit for job %s: %v", jobID, perr)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: errMsg})
 			return

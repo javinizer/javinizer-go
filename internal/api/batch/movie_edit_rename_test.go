@@ -616,3 +616,71 @@ func TestUpdateBatchMovie_RenameGapReconvergesAfterMidGapRekey(t *testing.T) {
 	assertPosterSourceLockFreeAPI(t, jobID, midID)
 	assertPosterSourceLockFreeAPI(t, jobID, destID)
 }
+
+// TestUpdateBatchMovie_CaseOnlyRenameMigratesCacheAndURLs pins r10 P1-5 on
+// the whole-movie PATCH side: a rename differing only by CASE names the
+// SAME folded poster-source lock — the handler must NOT try to stack a
+// destination lock (self-deadlock) — but the temp cache files and the
+// persisted preview URLs live under the RAW movie ID, so the collision
+// check, the asset migration (with the case-fold-safe MoveAssets), and the
+// URL re-point must still run. On a case-sensitive filesystem the recased
+// files land at the recased key; on a case-insensitive one the recase is a
+// rename of the same file (the fix skips the destination remove that would
+// otherwise delete the source about to be renamed). Either way the
+// persisted URLs must carry the NEW casing afterwards.
+func TestUpdateBatchMovie_CaseOnlyRenameMigratesCacheAndURLs(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	allowTestHTTPServerURL(t)
+	srv := newPatchPosterSourceServer(t)
+	chdirWorkDir(t)
+
+	cfg := config.DefaultConfig(nil, nil)
+	deps := createTestDeps(t, cfg, "")
+	const oldID, newID = "case-mix1", "CASE-MIX1" // same folded lock key
+	fileTarget := "/path/to/" + oldID + ".mp4"
+	job := createJobWithWF(deps, cfg, []string{fileTarget})
+	setJobResult(job, fileTarget, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: fileTarget, MovieID: oldID},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: oldID, Title: "Old Title", Poster: models.PosterState{PosterURL: srv.URL + "/old.jpg"}},
+	})
+	jobID := job.GetID()
+	posterDir := filepath.Join("data", "temp", "posters", jobID)
+	seedRenameCache(t, posterDir, oldID, srv.oldJPEG)
+
+	tempURL := func(key, query string) string {
+		return "/api/v1/temp/posters/" + jobID + "/" + key + ".jpg?" + query
+	}
+	renamed := &models.Movie{
+		ID:    newID,
+		Title: "Renamed Title",
+		Poster: models.PosterState{
+			PosterURL:                srv.URL + "/old.jpg", // source unchanged: pure recase migration
+			CroppedPosterURL:         tempURL(oldID, "v=111"),
+			OriginalCroppedPosterURL: tempURL(oldID, "v=orig7"),
+		},
+	}
+
+	router := gin.New()
+	router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
+	code, body := patchRenameMovie(router, jobID, oldID, renamed)
+	require.Equal(t, http.StatusOK, code, body)
+
+	res := storedMovieResultByPath(t, job, fileTarget)
+	require.NotNil(t, res.Movie)
+	assert.Equal(t, newID, res.Movie.ID, "the part adopts the recased movie ID")
+	assert.Equal(t, tempURL(newID, "v=111"), res.Movie.Poster.CroppedPosterURL,
+		"the preview URL follows the recased key")
+	assert.Equal(t, tempURL(newID, "v=orig7"), res.Movie.Poster.OriginalCroppedPosterURL,
+		"the reset-flow original preview URL follows the recased key too")
+
+	// The recased key holds the migrated bytes (readable under the new casing
+	// on both filesystem flavors).
+	newFull, err := os.ReadFile(filepath.Join(posterDir, newID+"-full.jpg"))
+	require.NoError(t, err, "the full-size asset must exist at the recased key")
+	assert.Equal(t, srv.oldJPEG, newFull)
+	assert.Equal(t, 0, srv.newHits, "an unchanged source must not re-download — the migration replaces regeneration")
+	assertPosterSourceLockFreeAPI(t, jobID, oldID)
+	assertPosterSourceLockFreeAPI(t, jobID, newID)
+}
