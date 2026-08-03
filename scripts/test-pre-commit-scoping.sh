@@ -380,6 +380,34 @@ check "configs example -> internal/config (static)" "|./internal/config||0|no" "
 reset; printf 'select 2;\n' >> internal/database/migrations/001.sql; git add internal/database/migrations/001.sql
 check "migration sql -> embed pkg + consumer" "|./cmd/javinizer${nl}./internal/database${nl}./internal/database/migrations||1|yes" "$(probe)"
 
+# an IMPORTABLE package beneath testdata/ (explicit imports resolve there)
+# holds //go:embed targets that outside consumers can break — its staged
+# asset must join the EMBED_PKGS reverse scan, not the private-fixture
+# ASSET_PKGS bucket, or consumers' tests never run
+reset
+BASE3_SHA=$(git rev-parse HEAD)
+mkdir -p internal/foo/testdata/embp
+cat > internal/foo/testdata/embp/e.go <<'EOF'
+package embp
+
+import _ "embed"
+
+//go:embed asset.txt
+var A string
+EOF
+printf 'x\n' > internal/foo/testdata/embp/asset.txt
+printf 'package main\n\nimport (\n\t"fmt"\n\n\t_ "probe.local/x/internal/foo/testdata/embp"\n\t"probe.local/x/internal/foo"\n)\n\nfunc main() { fmt.Println(foo.FooB()) }\n' > cmd/e2e/main.go
+gofmt -w internal/foo/testdata/embp/e.go cmd/e2e/main.go
+git add -A && git commit -qm 'fixture: importable embed package beneath testdata'
+# both cmds import the owner: keeps the package inside the binary graph
+# (an orphan would escalate FULL_SUITE and mask the scope distinction)
+printf 'package main\n\nimport (\n\t"fmt"\n\n\t_ "probe.local/x/internal/foo/testdata/embp"\n\t_ "probe.local/x/internal/bar"\n)\n\nfunc main() { fmt.Println(1) }\n' > cmd/javinizer/main.go
+gofmt -w cmd/javinizer/main.go
+git add cmd/javinizer/main.go && git commit -qm 'fixture: binary imports testdata embed pkg'
+printf 'y\n' >> internal/foo/testdata/embp/asset.txt; git add internal/foo/testdata/embp/asset.txt
+check "testdata embed pkg asset -> owner + rev consumers" "|./cmd/e2e${nl}./cmd/javinizer${nl}./internal/foo/testdata/embp||1|yes" "$(probe)"
+git reset -q --hard "$BASE3_SHA" >/dev/null; git clean -qfdx
+
 reset; printf '\n// v\n' >> internal/base/b.go; git add internal/base/b.go
 check "re-export chain -> transitive closure" "./internal/base|./cmd/javinizer${nl}./internal/base${nl}./internal/high${nl}./internal/mid||1|yes" "$(probe)"
 
@@ -462,10 +490,15 @@ reset; printf 'go 1.21\n\nuse .\n' > go.work; git add -f go.work
 check_hook "e2e: force-staged go.work refused" 1 "go.work"
 
 # a previously-TRACKED workspace file must be removable (deletion != staging)
-reset; printf 'go 1.21\n\nuse .\n' > go.work; git add -f go.work; git -c commit.gpgsign=false commit -qm 'track go.work (fixture)'
+reset; printf 'go 1.21\n\nuse .\n' > go.work; git add -f go.work
+GOWORK_BASE=$(git rev-parse HEAD)
+git -c commit.gpgsign=false commit -qm 'track go.work (fixture)'
 git rm -q --cached go.work
 check_hook "e2e: staged deletion of tracked go.work allowed" 0
-git reset -q --hard HEAD >/dev/null; git rm -q --cached go.work 2>/dev/null; reset
+# restore the pre-fixture baseline: leaving go.work TRACKED in HEAD would
+# turn the later 'broken local go.work' case (which must be ignored+untracked)
+# into a tracked edit that exercises nothing
+git reset -q --hard "$GOWORK_BASE" >/dev/null; git clean -qfdx
 
 reset; printf '\n// staged A\n' >> internal/foo/a.go; git add internal/foo/a.go
 printf '\n// unstaged B\n' >> internal/bar/c.go

@@ -279,12 +279,28 @@ while IFS= read -r p; do
     done
     if [ -n "$mapped" ]; then
         case "$p" in
-            # testdata/ is per-package-private by Go convention — consumers
-            # never read another package's fixtures, so the owning package's
-            # tests suffice (no reverse-dependency expansion).
             */testdata/*)
-                ASSET_PKGS="$ASSET_PKGS
+                case "$mapped" in
+                    # The mapped ancestor itself lives BENEATH a testdata/
+                    # segment: an IMPORTABLE package there (explicit imports
+                    # beneath testdata/ resolve) may own //go:embed targets
+                    # consumed by other packages' tests — private-fixture
+                    # treatment would test the owner while its auxiliary or
+                    # test-only consumers break in CI.
+                    testdata/*|*/testdata/*)
+                        EMBED_PKGS="$EMBED_PKGS
 ./$mapped"
+                        ;;
+                    *)
+                        # .../testdata/ inside a NORMAL package directory is
+                        # a per-package-private fixture by Go convention —
+                        # consumers never read another package's fixtures,
+                        # so the owning package's tests suffice (no
+                        # reverse-dependency expansion).
+                        ASSET_PKGS="$ASSET_PKGS
+./$mapped"
+                        ;;
+                esac
                 ;;
             # Everything else is consumed via the import graph (go:embed
             # targets, adjacent assets), so owners feed the reverse scan.
