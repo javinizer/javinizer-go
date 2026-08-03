@@ -798,6 +798,69 @@ func (_c *MockEditableJob_Subscribe_Call) RunAndReturn(run func() worker.JobEven
 	return _c
 }
 
+// RestoreMovieResult provides a mock function for the type MockEditableJob
+func (_mock *MockEditableJob) RestoreMovieResult(ctx context.Context, filePath string, prior *resultstore.MovieResult) error {
+	ret := _mock.Called(ctx, filePath, prior)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RestoreMovieResult")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, *resultstore.MovieResult) error); ok {
+		r0 = returnFunc(ctx, filePath, prior)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockEditableJob_RestoreMovieResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreMovieResult'
+type MockEditableJob_RestoreMovieResult_Call struct {
+	*mock.Call
+}
+
+// RestoreMovieResult is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filePath string
+//   - prior *resultstore.MovieResult
+func (_e *MockEditableJob_Expecter) RestoreMovieResult(ctx any, filePath any, prior any) *MockEditableJob_RestoreMovieResult_Call {
+	return &MockEditableJob_RestoreMovieResult_Call{Call: _e.mock.On("RestoreMovieResult", ctx, filePath, prior)}
+}
+
+func (_c *MockEditableJob_RestoreMovieResult_Call) Run(run func(ctx context.Context, filePath string, prior *resultstore.MovieResult)) *MockEditableJob_RestoreMovieResult_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 *resultstore.MovieResult
+		if args[2] != nil {
+			arg2 = args[2].(*resultstore.MovieResult)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockEditableJob_RestoreMovieResult_Call) Return(err error) *MockEditableJob_RestoreMovieResult_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockEditableJob_RestoreMovieResult_Call) RunAndReturn(run func(ctx context.Context, filePath string, prior *resultstore.MovieResult) error) *MockEditableJob_RestoreMovieResult_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateMovie provides a mock function for the type MockEditableJob
 func (_mock *MockEditableJob) UpdateMovie(ctx context.Context, filePath string, movie *models.Movie) error {
 	ret := _mock.Called(ctx, filePath, movie)

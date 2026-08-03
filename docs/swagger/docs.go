@@ -929,6 +929,83 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/batch/{id}/movies/batch-rescrape": {
+            "post": {
+                "description": "Rescrape one or more movies in a batch job's results, optionally forcing a refresh, restricting scrapers, and applying merge strategies",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Rescrape movies in batch job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Bulk rescrape parameters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "Gone",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "PersistError populated: per-movie rescrapes whose job-envelope persist failed after commit were rolled back and report status failed with the persist detail",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/batch/{id}/organize": {
             "post": {
                 "description": "Organize files from a completed scrape job (move files, download artwork, create NFO)",
@@ -1038,6 +1115,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -1314,6 +1397,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -1377,6 +1466,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -4654,6 +4749,98 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeMovieResult": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found in job"
+                },
+                "movie": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
+                },
+                "movie_id": {
+                    "type": "string",
+                    "example": "IPX-535"
+                },
+                "status": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.RescrapeStatus"
+                        }
+                    ],
+                    "example": "success"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeRequest": {
+            "type": "object",
+            "required": [
+                "movie_ids"
+            ],
+            "properties": {
+                "array_strategy": {
+                    "type": "string",
+                    "example": "merge"
+                },
+                "force": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "movie_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "IPX-535",
+                        "ABC-123"
+                    ]
+                },
+                "preset": {
+                    "type": "string",
+                    "example": "conservative"
+                },
+                "scalar_strategy": {
+                    "type": "string",
+                    "example": "prefer-nfo"
+                },
+                "selected_scrapers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "r18dev",
+                        "dmm"
+                    ]
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeResponse": {
+            "type": "object",
+            "properties": {
+                "failed": {
+                    "type": "integer"
+                },
+                "job": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse"
+                },
+                "persist_error": {
+                    "description": "PersistError is set when the rescrapes committed but the job-envelope\npersist failed afterwards (the response then also carries an HTTP 500);\nthe per-file Results remain authoritative for what was committed.",
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeMovieResult"
+                    }
+                },
+                "succeeded": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.CropBounds": {
             "type": "object",
             "properties": {
@@ -5036,6 +5223,13 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.MovieResponse": {
             "type": "object",
             "properties": {
+                "errors": {
+                    "description": "Errors carries movie-level warnings on an otherwise-successful call\n(e.g. a failed poster generation after a successful scrape) — parity\nwith ScrapeResponse.Errors.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "merge_stats": {
                     "description": "Merge statistics when NFO merging occurred",
                     "allOf": [
@@ -5689,6 +5883,16 @@ const docTemplate = `{
                 "cropped_poster_url": {
                     "type": "string"
                 },
+                "original_cropped_poster_url": {
+                    "type": "string"
+                },
+                "original_poster_url": {
+                    "description": "Original* revert-baseline fields echoed from the post-crop state: the\ncrop may have lazily STAMPED them (backupPosterOriginals) on a legacy\nresult that lacked a baseline. Clients must overlay these verbatim, or\na whole-movie Save issued before the next refetch resubmits empty\noriginals through UpdateMovie and destroys the reset target the crop\njust created.",
+                    "type": "string"
+                },
+                "original_should_crop_poster": {
+                    "type": "boolean"
+                },
                 "poster_crop_bounds": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.CropBounds"
                 }
@@ -5710,6 +5914,16 @@ const docTemplate = `{
             "properties": {
                 "cropped_poster_url": {
                     "type": "string"
+                },
+                "original_cropped_poster_url": {
+                    "type": "string"
+                },
+                "original_poster_url": {
+                    "description": "Original* revert-baseline fields echoed from the post-update state —\nsame contract as PosterCropResponse: UpdatePosterFromURL may have\nlazily stamped them (backupPosterOriginals) on a legacy result, and a\npre-refetch whole-movie Save must not resubmit empty originals.",
+                    "type": "string"
+                },
+                "original_should_crop_poster": {
+                    "type": "boolean"
                 },
                 "poster_url": {
                     "type": "string"
@@ -7600,6 +7814,33 @@ const docTemplate = `{
                     "type": "integer"
                 }
             }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.RescrapeStatus": {
+            "type": "string",
+            "enum": [
+                "success",
+                "failed",
+                "gone",
+                "conflict"
+            ],
+            "x-enum-comments": {
+                "RescrapeStatusConflict": "Revision conflict — concurrent modification detected",
+                "RescrapeStatusFailed": "Scrape failed or produced no result",
+                "RescrapeStatusGone": "Job was deleted or reached terminal state",
+                "RescrapeStatusSuccess": "Scrape succeeded, result committed"
+            },
+            "x-enum-descriptions": [
+                "Scrape succeeded, result committed",
+                "Scrape failed or produced no result",
+                "Job was deleted or reached terminal state",
+                "Revision conflict — concurrent modification detected"
+            ],
+            "x-enum-varnames": [
+                "RescrapeStatusSuccess",
+                "RescrapeStatusFailed",
+                "RescrapeStatusGone",
+                "RescrapeStatusConflict"
+            ]
         },
         "github_com_javinizer_javinizer-go_internal_models.RevertOutcomeEnum": {
             "type": "string",

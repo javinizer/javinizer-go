@@ -934,6 +934,69 @@ func (_c *MockBatchJobInterface_Rescrape_Call) RunAndReturn(run func(ctx context
 	return _c
 }
 
+// RestoreMovieResult provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) RestoreMovieResult(ctx context.Context, filePath string, prior *resultstore.MovieResult) error {
+	ret := _mock.Called(ctx, filePath, prior)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RestoreMovieResult")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, *resultstore.MovieResult) error); ok {
+		r0 = returnFunc(ctx, filePath, prior)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockBatchJobInterface_RestoreMovieResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreMovieResult'
+type MockBatchJobInterface_RestoreMovieResult_Call struct {
+	*mock.Call
+}
+
+// RestoreMovieResult is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filePath string
+//   - prior *resultstore.MovieResult
+func (_e *MockBatchJobInterface_Expecter) RestoreMovieResult(ctx any, filePath any, prior any) *MockBatchJobInterface_RestoreMovieResult_Call {
+	return &MockBatchJobInterface_RestoreMovieResult_Call{Call: _e.mock.On("RestoreMovieResult", ctx, filePath, prior)}
+}
+
+func (_c *MockBatchJobInterface_RestoreMovieResult_Call) Run(run func(ctx context.Context, filePath string, prior *resultstore.MovieResult)) *MockBatchJobInterface_RestoreMovieResult_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 *resultstore.MovieResult
+		if args[2] != nil {
+			arg2 = args[2].(*resultstore.MovieResult)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_RestoreMovieResult_Call) Return(err error) *MockBatchJobInterface_RestoreMovieResult_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_RestoreMovieResult_Call) RunAndReturn(run func(ctx context.Context, filePath string, prior *resultstore.MovieResult) error) *MockBatchJobInterface_RestoreMovieResult_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetBatchCfg provides a mock function for the type MockBatchJobInterface
 func (_mock *MockBatchJobInterface) SetBatchCfg(cfg worker.BatchJobConfig) {
 	_mock.Called(cfg)

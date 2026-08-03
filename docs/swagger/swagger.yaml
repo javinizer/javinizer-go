@@ -414,6 +414,71 @@ definitions:
         example: /path/to
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeMovieResult:
+    properties:
+      error:
+        example: Movie not found in job
+        type: string
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+      movie_id:
+        example: IPX-535
+        type: string
+      status:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.RescrapeStatus'
+        example: success
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeRequest:
+    properties:
+      array_strategy:
+        example: merge
+        type: string
+      force:
+        example: false
+        type: boolean
+      movie_ids:
+        example:
+        - IPX-535
+        - ABC-123
+        items:
+          type: string
+        type: array
+      preset:
+        example: conservative
+        type: string
+      scalar_strategy:
+        example: prefer-nfo
+        type: string
+      selected_scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+    required:
+    - movie_ids
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeResponse:
+    properties:
+      failed:
+        type: integer
+      job:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse'
+      persist_error:
+        description: |-
+          PersistError is set when the rescrapes committed but the job-envelope
+          persist failed afterwards (the response then also carries an HTTP 500);
+          the per-file Results remain authoritative for what was committed.
+        type: string
+      results:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeMovieResult'
+        type: array
+      succeeded:
+        type: integer
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.CropBounds:
     properties:
       height:
@@ -687,6 +752,14 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.MovieResponse:
     properties:
+      errors:
+        description: |-
+          Errors carries movie-level warnings on an otherwise-successful call
+          (e.g. a failed poster generation after a successful scrape) — parity
+          with ScrapeResponse.Errors.
+        items:
+          type: string
+        type: array
       merge_stats:
         allOf:
         - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
@@ -1143,6 +1216,19 @@ definitions:
     properties:
       cropped_poster_url:
         type: string
+      original_cropped_poster_url:
+        type: string
+      original_poster_url:
+        description: |-
+          Original* revert-baseline fields echoed from the post-crop state: the
+          crop may have lazily STAMPED them (backupPosterOriginals) on a legacy
+          result that lacked a baseline. Clients must overlay these verbatim, or
+          a whole-movie Save issued before the next refetch resubmits empty
+          originals through UpdateMovie and destroys the reset target the crop
+          just created.
+        type: string
+      original_should_crop_poster:
+        type: boolean
       poster_crop_bounds:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.CropBounds'
     type: object
@@ -1157,6 +1243,17 @@ definitions:
     properties:
       cropped_poster_url:
         type: string
+      original_cropped_poster_url:
+        type: string
+      original_poster_url:
+        description: |-
+          Original* revert-baseline fields echoed from the post-update state —
+          same contract as PosterCropResponse: UpdatePosterFromURL may have
+          lazily stamped them (backupPosterOriginals) on a legacy result, and a
+          pre-refetch whole-movie Save must not resubmit empty originals.
+        type: string
+      original_should_crop_poster:
+        type: boolean
       poster_url:
         type: string
       should_crop_poster:
@@ -2468,6 +2565,28 @@ definitions:
       votes:
         type: integer
     type: object
+  github_com_javinizer_javinizer-go_internal_models.RescrapeStatus:
+    enum:
+    - success
+    - failed
+    - gone
+    - conflict
+    type: string
+    x-enum-comments:
+      RescrapeStatusConflict: Revision conflict — concurrent modification detected
+      RescrapeStatusFailed: Scrape failed or produced no result
+      RescrapeStatusGone: Job was deleted or reached terminal state
+      RescrapeStatusSuccess: Scrape succeeded, result committed
+    x-enum-descriptions:
+    - Scrape succeeded, result committed
+    - Scrape failed or produced no result
+    - Job was deleted or reached terminal state
+    - Revision conflict — concurrent modification detected
+    x-enum-varnames:
+    - RescrapeStatusSuccess
+    - RescrapeStatusFailed
+    - RescrapeStatusGone
+    - RescrapeStatusConflict
   github_com_javinizer_javinizer-go_internal_models.RevertOutcomeEnum:
     enum:
     - reverted
@@ -3699,6 +3818,60 @@ paths:
       summary: Bulk exclude movies from batch organization
       tags:
       - web
+  /api/v1/batch/{id}/movies/batch-rescrape:
+    post:
+      consumes:
+      - application/json
+      description: Rescrape one or more movies in a batch job's results, optionally
+        forcing a refresh, restricting scrapers, and applying merge strategies
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Bulk rescrape parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: 'PersistError populated: per-movie rescrapes whose job-envelope
+            persist failed after commit were rolled back and report status failed
+            with the persist detail'
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BulkRescrapeResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Rescrape movies in batch job
+      tags:
+      - web
   /api/v1/batch/{id}/organize:
     post:
       consumes:
@@ -3772,6 +3945,10 @@ paths:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update movie in batch job
@@ -3964,6 +4141,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update manual poster crop in batch job
       tags:
       - web
@@ -4007,6 +4188,10 @@ paths:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "502":
+          description: Bad Gateway
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Download poster from URL
