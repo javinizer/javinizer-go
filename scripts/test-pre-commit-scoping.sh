@@ -938,6 +938,31 @@ git update-index --skip-worktree internal/foo/b.go
 check_hook "e2e: skip-worktree without drift passes" 0
 git update-index --no-skip-worktree internal/foo/b.go; reset
 
+# partial-staging hide: staged content edit of a HEAD-known embed target
+# while the //go:embed DIRECTIVE itself is removed on disk UNSTAGED —
+# the tree census goes blind to the ownership, so only HEAD archaeology
+# keeps it visible; the guard must then refuse the unstaged directive
+# drift with its exact path
+reset
+BASE9_SHA=$(git rev-parse HEAD)
+cat > rootembed3.go <<'EOF'
+package x
+
+import _ "embed"
+
+//go:embed banner3.txt
+var Banner3 string
+EOF
+gofmt -w rootembed3.go
+printf 'v1\n' > banner3.txt
+git add rootembed3.go banner3.txt && git commit -qm 'fixture: root embed for partial-staging hide'
+printf 'v2\n' > banner3.txt; git add banner3.txt
+printf 'package x\n\nvar Banner3 string\n' > rootembed3.go
+gofmt -w rootembed3.go
+check_hook "e2e: unstaged directive removal cannot mask embed asset edit" 1 "rootembed3.go"
+
+git reset -q --hard "$BASE9_SHA" >/dev/null; git clean -qfdx
+
 # last tracked .go staged-deleted, ignored sibling remains -> must still block
 reset; printf 'package vanish\n\nfunc Ghost() int { return 1 }\n' > internal/vanish/local_ghost.go
 git rm -q internal/vanish/v.go

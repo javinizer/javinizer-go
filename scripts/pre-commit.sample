@@ -245,6 +245,16 @@ TD_STAGED=$(git -c core.quotepath=false diff --cached --name-only --no-renames -
     | grep -E '(^|/)testdata/' | grep -v '\.go$' || true)
 TD_DELETED=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=D \
     | grep -E '(^|/)testdata/' || true)
+# MODIFIED tracked candidates additionally need HEAD-side ownership
+# evidence: an UNSTAGED edit can remove or narrow the //go:embed directive
+# itself, making the TREE census blind to a staged content edit of a
+# HEAD-known target (adds stay tree-census exact — a file must exist on
+# disk to be staged — so only M/T/D dispositions pay the archaeology
+# cost; A directives-in-tree remain authoritative).
+MODIFIED_CANDIDATES=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=MT \
+    | grep -vE '^testdata/|^internal/|^cmd/|^web/dist/|^docs/swagger/|^configs/|\.go$|^go\.(mod|sum)$|^Makefile$|^\.golangci\.(yml|yaml)$' || true)
+TD_MODIFIED=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=MT \
+    | grep -E '(^|/)testdata/' | grep -v '\.go$' || true)
 if [ -n "$ASSET_CANDIDATES$DELETED_CANDIDATES$TD_STAGED$TD_DELETED" ]; then
     # Membership in EITHER census marks an embed target. The TREE census
     # sees staged content edits and ADDS (a file must exist on disk to be
@@ -252,13 +262,15 @@ if [ -n "$ASSET_CANDIDATES$DELETED_CANDIDATES$TD_STAGED$TD_DELETED" ]; then
     # identical fail-closed census a moment later, so nothing advances.
     EMBED_CENSUS_TREE=$(compute_embed_census || true)
     EMBED_CENSUS_HEAD=""
-    # The HEAD census is the ONLY view that still lists a staged deletion
-    # which vanished from both tree and index (a multi-match glob keeps
-    # resolving on the survivors). When a deletion candidate exists it
-    # must NOT degrade silently — an empty HEAD census there would let an
-    # out-of-roots embed deletion skip all Go validation. Fail closed,
-    # checking every stage of the materialize chain explicitly.
-    if [ -n "$DELETED_CANDIDATES$TD_DELETED" ]; then
+    # The HEAD census is the only evidence for TWO ownership blind spots:
+    # a staged DELETION vanished from both tree and index (a multi-match
+    # glob keeps resolving on the survivors), and a staged MODIFY whose
+    # directive an unstaged/staged edit removed from the tree's view.
+    # Whenever either disposition is staged it must NOT degrade silently —
+    # an empty HEAD census there would let an out-of-roots embed change
+    # skip all Go validation. Fail closed, checking every stage of the
+    # materialize chain explicitly.
+    if [ -n "$DELETED_CANDIDATES$TD_DELETED$MODIFIED_CANDIDATES$TD_MODIFIED" ]; then
         IDX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/javinizer-embedsnap.XXXXXX" 2>/dev/null) || {
             echo -e "${RED}✗ Cannot materialize HEAD for the embed-deletion check (mktemp failed).${NC}"
             echo -e "${YELLOW}  Free temp space and retry — $DELETED_CANDIDATES may be an embed target.${NC}"
