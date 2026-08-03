@@ -53,6 +53,15 @@ interface PosterCropControllerDeps {
 export function createPosterCropController(deps: PosterCropControllerDeps) {
 	const now = deps.now ?? Date.now;
 
+	// The effective poster source (poster_url || cover_url) of the image
+	// CURRENTLY DISPLAYED in the crop modal, captured when that image loads.
+	// The crop box, metrics and cropSourceURL all describe that displayed
+	// image; a job refetch can swap the reactive currentMovie A→B while the
+	// modal stays open, so applyPosterCrop MUST submit this captured token
+	// (not the recomputed live source) as expected_source_url — otherwise the
+	// server 409 guard validates stale A coordinates against B and passes.
+	let displayedEffectiveSource = '';
+
 	function refreshPosterCropMetrics() {
 		const cropImageElement = deps.getCropImageElement();
 		const cropMetrics = deps.getCropMetrics();
@@ -100,6 +109,16 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			imageOffsetX: imageElement.offsetLeft,
 			imageOffsetY: imageElement.offsetTop,
 		});
+
+		// Capture the effective source of the DISPLAYED image at the same
+		// moment the seeding below resolves: everything the user measures
+		// (box, metrics) is against THIS source, so it — not whatever the
+		// reactive movie says at Apply time — is the expected_source_url the
+		// server guard must check.
+		const displayedMovie = deps.getCurrentMovie();
+		displayedEffectiveSource = displayedMovie
+			? displayedMovie.poster_url || displayedMovie.cover_url || ''
+			: '';
 
 		const currentResult = deps.getCurrentResult();
 
@@ -189,6 +208,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			sourceURL = fullPosterURL;
 		}
 		deps.setCropSourceURL(`${sourceURL}${sourceURL.includes('?') ? '&' : '?'}v=${now()}`);
+		displayedEffectiveSource = '';
 		deps.setPosterCropLoadError(null);
 		deps.setCropMetrics(null);
 		deps.setCropBox(null);
@@ -309,12 +329,19 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 
 			const maxPosterHeight = deps.getMaxPosterHeight();
 			// Tell the server which source these coordinates were measured
-			// against (the same effective-source rule the modal preview and the
-			// drift pre-sync use): after any pre-sync above the server source IS
-			// editedSource, so a 409 mismatch can only mean another tab/device
-			// changed it — the tokenized 409 toast then tells the user to reload
-			// and re-measure instead of silently cropping the wrong image.
-			await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined, editedSource || undefined);
+			// against — the CAPTURED source of the image displayed at load
+			// time, not the live movie's recomputed effective source. If a job
+			// refetch swapped poster A→B while this modal stayed open, the box
+			// and cropSourceURL still describe A; sending the captured A here
+			// makes the server-side 409 guard actually fire (mismatch vs B)
+			// instead of silently validating stale A coordinates against the
+			// new source — the tokenized 409 toast then tells the user to
+			// reload and re-measure. The editedSource fallback covers flows
+			// where no image load captured a token (identical to the pre-fix
+			// behavior: after any pre-sync above the server source IS
+			// editedSource).
+			const expectedSource = displayedEffectiveSource || editedSource;
+			await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined, expectedSource || undefined);
 		} catch {
 			// Errors are surfaced via toasts in the mutation handlers; abort the flow.
 		} finally {

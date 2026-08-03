@@ -287,6 +287,142 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 		expect(log.mutatePosterCropAsync).not.toHaveBeenCalled();
 		expect(log.setCropApplying).not.toHaveBeenCalled();
 	});
+
+	// Codex P2 (crop source token must be CAPTURED at image-load time): a job
+	// refetch may swap the reactive currentMovie A→B while the crop modal is
+	// still open. The crop box, metrics and cropSourceURL still describe A,
+	// but applyPosterCrop used to recompute editedSource from the now-reactive
+	// movie B — making the server guard validate stale A coordinates against
+	// B. expected_source_url must be the source captured when the DISPLAYED
+	// image loaded.
+	describe('expected_source_url is captured from the displayed image, not recomputed from live state', () => {
+		function fakeImageLoadEvent(width: number, height: number): Event {
+			return {
+				currentTarget: {
+					naturalWidth: width,
+					naturalHeight: height,
+					clientWidth: width / 2,
+					clientHeight: height / 2,
+					offsetLeft: 0,
+					offsetTop: 0,
+				},
+			} as unknown as Event;
+		}
+
+		function makeRefetchController() {
+			const movie: Movie = {
+				id: 'STARS-136',
+				title: 'Test Movie',
+				poster_url: 'https://dmm/poster-A.jpg',
+			};
+			const result: FileResult = {
+				result_id: 'res-1',
+				file_path: '/tmp/test-video.mp4',
+				movie_id: 'STARS-136',
+				status: 'completed',
+				started_at: '',
+				is_multi_part: false,
+				part_number: 0,
+				part_suffix: '',
+				movie: {
+					id: 'STARS-136',
+					title: 'Test Movie',
+					poster_url: 'https://dmm/poster-A.jpg',
+				}
+			};
+
+			// Simulated server: the crop endpoint rejects (409) when the
+			// submitted expected_source_url does not match the server's current
+			// effective source for the movie.
+			const server = { conflicts: 0 };
+			const mutatePosterCropAsync = vi.fn(async (_jobId: string, _resultId: string, _crop: PosterCropBox, _max?: number, expectedSourceURL?: string) => {
+				const serverSource = result.movie?.poster_url || result.movie?.cover_url || '';
+				if (expectedSourceURL && serverSource && expectedSourceURL !== serverSource) {
+					server.conflicts++;
+					throw Object.assign(new Error('source changed; reload and re-measure'), { status: 409 });
+				}
+			});
+			const applyPosterFromUrlAsync = vi.fn(async () => {});
+			const noop = () => {};
+
+			const controller = createPosterCropController({
+				getBrowser: () => true,
+				getJobId: () => 'job-1',
+				getCurrentMovie: () => movie,
+				getCurrentResult: () => result,
+				getShowPosterCropModal: () => true,
+				setShowPosterCropModal: noop,
+				setPosterCropLoadError: noop,
+				getCropSourceURL: () => '/api/v1/temp/posters/job-1/STARS-136-full.jpg',
+				setCropSourceURL: noop,
+				getCropImageElement: () => null,
+				setCropImageElement: noop,
+				getCropMetrics: () => null,
+				setCropMetrics: noop,
+				getCropBox: () => ({ x: 0, y: 0, width: 100, height: 200 }),
+				setCropBox: noop,
+				getMaxPosterHeight: () => null,
+				setMaxPosterHeight: noop,
+				getCropDragState: (): PosterCropDragState | null => null,
+				setCropDragState: noop,
+				getPosterCropStates: () => new Map<string, PosterCropState>(),
+				applyPosterFromUrlAsync,
+				mutatePosterCropAsync,
+				setCropApplying: noop
+			});
+
+			return { controller, movie, result, server, mutatePosterCropAsync, applyPosterFromUrlAsync };
+		}
+
+		it('refetch flips poster A→B after image load: submission sends the CAPTURED A source and the simulated server conflicts (409)', async () => {
+			const { controller, movie, result, server, mutatePosterCropAsync, applyPosterFromUrlAsync } = makeRefetchController();
+
+			// Image loads while the movie is A: the displayed image, metrics and
+			// box all describe A, and the A source is captured HERE.
+			controller.handlePosterCropImageLoad(fakeImageLoadEvent(400, 600));
+
+			// Job refetch arrives while the modal is open: another tab changed
+			// poster A→B. Both the live edited movie and the server-side movie
+			// now carry B (no unsaved local edit → no pre-sync drift).
+			movie.poster_url = 'https://dmm/poster-B.jpg';
+			if (result.movie) result.movie.poster_url = 'https://dmm/poster-B.jpg';
+
+			await controller.applyPosterCrop();
+
+			// The crop IS attempted, but with the CAPTURED A source — never the
+			// recomputed live B source.
+			expect(mutatePosterCropAsync).toHaveBeenCalledWith(
+				'job-1',
+				'res-1',
+				expect.any(Object),
+				undefined,
+				'https://dmm/poster-A.jpg'
+			);
+			// No drift pre-sync: live edited source === server source (both B).
+			expect(applyPosterFromUrlAsync).not.toHaveBeenCalled();
+			// The captured-A token mismatches server-side B → the 409 guard fires.
+			expect(server.conflicts).toBe(1);
+		});
+
+		it('unchanged-source flow after image load still succeeds (200): captured token matches the server source', async () => {
+			const { controller, server, mutatePosterCropAsync, applyPosterFromUrlAsync } = makeRefetchController();
+
+			controller.handlePosterCropImageLoad(fakeImageLoadEvent(400, 600));
+
+			// No refetch drift: the movie is still A at Apply time.
+			await controller.applyPosterCrop();
+
+			expect(mutatePosterCropAsync).toHaveBeenCalledWith(
+				'job-1',
+				'res-1',
+				expect.any(Object),
+				undefined,
+				'https://dmm/poster-A.jpg'
+			);
+			expect(applyPosterFromUrlAsync).not.toHaveBeenCalled();
+			expect(server.conflicts).toBe(0);
+		});
+	});
 });
 
 describe('openPosterCropModal — crop source URL formation (poster rendering regressions)', () => {
