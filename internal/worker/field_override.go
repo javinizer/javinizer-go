@@ -304,6 +304,47 @@ func RewritePosterIDInPreviewURL(raw, oldID, newID string) string {
 	return out
 }
 
+// CheckRenameDestinationCollision guards the shared precondition of BOTH
+// movie-ID rename paths — the id-override re-key
+// (jobEditorImpl.ApplyFieldOverride, batch_job_interface.go) and the
+// whole-movie PATCH rename (updateBatchMovie, internal/api/batch/movie_edit.go):
+// re-keying a movie family originID→destID is only safe when destID is not
+// ALREADY used by another result family in the same job.
+// MigratePosterCacheAssets normalizes the destination key to the origin's
+// assets (MoveAssets removes the destination's files before renaming, and
+// DELETES them outright when the origin's leg is absent), while the state
+// fan-out (findPaths(originID)) only walks the ORIGIN's family — so a
+// pre-existing destID result would keep its own poster source and crop state
+// while sharing the origin's migrated cache, and a later crop of either would
+// fan bounds measured on one family over both (Organize then applies them
+// against different sources). The rejection here is 400-class: the message
+// deliberately avoids "not found" so handlers keying on it stay at 400.
+//
+// Callers MUST run the check under the held (originID, destID) poster-source
+// lock pair, BEFORE any asset or state mutation — holding both keys freezes
+// index membership at destID too: a concurrent re-key into it needs that
+// key's lock. A path indexed at destID that belongs to the ORIGIN's own
+// family (e.g. a multipart sibling whose FileMatchInfo.MovieID already equals
+// destID) is the normal fan-out case, not a collision; selfPath excludes the
+// selected result belt-and-braces even if the index misses it under originID.
+// A nil result means the rename is safe to proceed.
+func CheckRenameDestinationCollision(findPaths func(movieID string) []string, originID, selfPath, destID string) error {
+	if destID == "" {
+		return nil
+	}
+	ownFamily := make(map[string]struct{})
+	for _, p := range findPaths(originID) {
+		ownFamily[p] = struct{}{}
+	}
+	ownFamily[selfPath] = struct{}{} // belt-and-braces: never collide with self
+	for _, p := range findPaths(destID) {
+		if _, ok := ownFamily[p]; !ok {
+			return fmt.Errorf("movie ID rename to %q rejected: another result in this job already uses that movie ID", destID)
+		}
+	}
+	return nil
+}
+
 // MigratePosterCacheAssets re-keys the job's cached poster assets
 // ({tempDir}/posters/{jobID}/{fromKey}-full.jpg + {fromKey}.jpg) from fromKey
 // to toKey through the generator's move capability (posterAssetMover), and

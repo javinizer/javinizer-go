@@ -299,6 +299,24 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		var moveAssetsBack func() error
 		if renameTarget != "" {
+			// Codex P2 (parity with the id-override path —
+			// jobEditorImpl.ApplyFieldOverride's check added in 1ab4e0e8): a
+			// rename whose destination ID is ALREADY used by another result
+			// family must be REJECTED here — under the held lexical lock pair,
+			// BEFORE MigratePosterCacheAssets. The move normalizes the
+			// destination key to THIS movie's assets (or DELETES it when this
+			// movie has none), while the update loop below only rewrites this
+			// result's own family — the pre-existing destination result would
+			// keep its poster source and crop state while sharing the migrated
+			// cache, and a later crop would fan bounds across both families.
+			// Same-family paths (e.g. a multipart sibling indexed at the
+			// destination) are the fan-out case, not a collision. Shared helper:
+			// worker.CheckRenameDestinationCollision.
+			if err := worker.CheckRenameDestinationCollision(job.FindFilePathsForMovieID, posterLockKey, current.FileMatchInfo.Path, renameTarget); err != nil {
+				logging.Warnf("Rejected colliding movie-ID rename on result %s (job %s): %v", resultID, jobID, err)
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+				return
+			}
 			back, moveErr := worker.MigratePosterCacheAssets(rt.Snapshot().PosterGen(), jobID, posterLockKey, renameTarget)
 			if moveErr != nil {
 				logging.Errorf("Failed to migrate poster assets for renamed movie edit on result %s: %v", resultID, moveErr)
