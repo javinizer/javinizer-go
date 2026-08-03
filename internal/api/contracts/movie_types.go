@@ -105,6 +105,18 @@ type PosterCropRequest struct {
 	// source snapshots cannot see (both already name the new image). Empty
 	// (older clients) falls back to the pre/post-lock guard alone.
 	ExpectedSourceURL string `json:"expected_source_url,omitempty"`
+	// ExpectedPosterRevision is the cache generation/revision token
+	// (X-Poster-Revision of the temp poster endpoint: mtime-nanoseconds + size
+	// of {posterID}-full.jpg) captured with the displayed crop image. A
+	// rescrape or poster-from-URL refresh can replace the cached image's bytes
+	// while keeping the SAME effective source URL, defeating both URL-level
+	// guards above; the server validates this token UNDER the poster-source
+	// lock against the CURRENT cache file's revision and rejects a mismatch
+	// (or a vanished file) with the same 409 stale-conflict shape. Opaque to
+	// clients — echo the header verbatim. Empty (older clients, or the
+	// preview-fallback / URL-proxy display paths that carry no revision) keeps
+	// the URL-only guards.
+	ExpectedPosterRevision string `json:"expected_poster_revision,omitempty"`
 }
 
 // PosterCropResponse returns the updated temp cropped poster URL and the

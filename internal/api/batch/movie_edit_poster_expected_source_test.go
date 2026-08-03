@@ -2,6 +2,7 @@ package batch
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -111,6 +112,118 @@ func TestUpdateBatchMoviePosterCrop_ClientMeasuredSourceGuard(t *testing.T) {
 		stored := storedMovieResult(t, job, movieID)
 		require.NotNil(t, stored.Movie)
 		assert.NotNil(t, stored.Movie.Poster.CropBounds)
+		assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
+	})
+}
+
+// TestUpdateBatchMoviePosterCrop_ExpectedPosterRevisionGuard pins the Codex
+// P2 same-URL guard: a rescrape or poster-from-URL refresh can replace the
+// cached {movieID}-full.jpg bytes while keeping the SAME effective source
+// URL, leaving expected_source_url AND both pre/post-lock snapshots equal
+// even though the displayed image's coordinate space changed. The client
+// echoes the cache generation token (X-Poster-Revision: mtime-ns + size, see
+// poster.AssetRevision) captured with the displayed image as
+// expected_poster_revision, and the server validates it under the
+// poster-source lock against the CURRENT cache file's revision.
+func TestUpdateBatchMoviePosterCrop_ExpectedPosterRevisionGuard(t *testing.T) {
+	initTestWebSocket(t)
+	gin.SetMode(gin.TestMode)
+	chdirWorkDir(t)
+
+	setup := func(t *testing.T, movieID string) (*worker.BatchJob, *gin.Engine, string) {
+		t.Helper()
+		cfg := config.DefaultConfig(nil, nil)
+		deps := createTestDeps(t, cfg, "")
+		filePath := "/path/to/" + movieID + ".mp4"
+		job := createJobWithWF(deps, cfg, []string{filePath})
+		setJobResult(job, filePath, &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movieID},
+			Status:        models.JobStatusCompleted,
+			// The effective source URL stays IDENTICAL across the test — only the
+			// cached image bytes (the generation) change.
+			Movie: &models.Movie{ID: movieID, Title: "Measured", Poster: models.PosterState{
+				PosterURL: "https://x/same-source.jpg",
+			}},
+		})
+		posterDir := filepath.Join("data", "temp", "posters", job.GetID())
+		require.NoError(t, os.MkdirAll(posterDir, 0o755))
+		writeJPEG(t, filepath.Join(posterDir, movieID+"-full.jpg"), 1000, 600)
+		router := gin.New()
+		router.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(testkit.GetTestRuntime(deps)))
+		return job, router, posterDir
+	}
+
+	post := func(t *testing.T, router *gin.Engine, job *worker.BatchJob, movieID, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/"+movieID+"/poster-crop", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// revisionOf mirrors poster.AssetRevision over the on-disk cache file the
+	// crop endpoint's poster manager stats (both read cfg.System.TempDir).
+	revisionOf := func(t *testing.T, posterDir, movieID string) string {
+		t.Helper()
+		fi, err := os.Stat(filepath.Join(posterDir, movieID+"-full.jpg"))
+		require.NoError(t, err)
+		return fmt.Sprintf("%d-%d", fi.ModTime().UnixNano(), fi.Size())
+	}
+
+	t.Run("same-URL content refresh with a stale revision rejects 409 without mutating state or cache", func(t *testing.T) {
+		const movieID = "EMR-001"
+		job, router, posterDir := setup(t, movieID)
+		fullPath := filepath.Join(posterDir, movieID+"-full.jpg")
+		staleRev := revisionOf(t, posterDir, movieID)
+
+		// Same-URL refresh: the cached -full.jpg is regenerated from the UNCHANGED
+		// source URL — the URL guard sees no drift, only the generation moved.
+		writeJPEG(t, fullPath, 1200, 800)
+		require.NotEqual(t, staleRev, revisionOf(t, posterDir, movieID))
+
+		rec := post(t, router, job, movieID,
+			`{"x":10,"y":10,"width":200,"height":200,"expected_source_url":"https://x/same-source.jpg","expected_poster_revision":"`+staleRev+`"}`)
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), "poster image changed")
+
+		stored := storedMovieResult(t, job, movieID)
+		require.NotNil(t, stored.Movie)
+		assert.Nil(t, stored.Movie.Poster.CropBounds)
+		assert.NoFileExists(t, filepath.Join(posterDir, movieID+".jpg"), "the 409 leg returns before CropWithBounds, so no preview is written")
+		assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
+	})
+
+	t.Run("matching revision succeeds", func(t *testing.T) {
+		const movieID = "EMR-002"
+		job, router, posterDir := setup(t, movieID)
+		rev := revisionOf(t, posterDir, movieID)
+
+		rec := post(t, router, job, movieID,
+			`{"x":10,"y":10,"width":200,"height":200,"expected_source_url":"https://x/same-source.jpg","expected_poster_revision":"`+rev+`"}`)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+		stored := storedMovieResult(t, job, movieID)
+		require.NotNil(t, stored.Movie)
+		require.NotNil(t, stored.Movie.Poster.CropBounds)
+		assert.Equal(t, 200, stored.Movie.Poster.CropBounds.Width)
+		assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
+	})
+
+	t.Run("presented revision with a vanished cache file rejects 409", func(t *testing.T) {
+		const movieID = "EMR-003"
+		job, router, posterDir := setup(t, movieID)
+		rev := revisionOf(t, posterDir, movieID)
+		require.NoError(t, os.Remove(filepath.Join(posterDir, movieID+"-full.jpg")))
+
+		// The generation the client measured no longer exists — even though the
+		// URL guard passes, the crop cannot measure the old coordinate space.
+		// (A legacy client WITHOUT expected_poster_revision would hit the
+		// legacy-source 400 here instead; the revision guard fires first.)
+		rec := post(t, router, job, movieID,
+			`{"x":10,"y":10,"width":200,"height":200,"expected_poster_revision":"`+rev+`"}`)
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), "poster image changed")
 		assertPosterSourceLockFreeAPI(t, job.GetID(), movieID)
 	})
 }

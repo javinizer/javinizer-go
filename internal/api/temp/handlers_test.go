@@ -145,6 +145,56 @@ func TestServeTempPoster_PathTraversalDefenseInDepth(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestServeTempPoster_PosterRevisionHeader pins the stable-cache generation
+// token the manual-crop client binds its measured coordinates to
+// (X-Poster-Revision, echoed back as PosterCropRequest.expected_poster_revision):
+// same file generation → same header; a same-URL refresh that rewrites the
+// bytes → a new header; and the HEAD route (no body) carries the identical
+// header so the client can read the token without re-downloading the image.
+func TestServeTempPoster_PosterRevisionHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tempDir := t.TempDir()
+	jobID := "rev-job"
+	posterDir := filepath.Join(tempDir, "posters", jobID)
+	require.NoError(t, os.MkdirAll(posterDir, 0755))
+	posterPath := filepath.Join(posterDir, "ABC-001-full.jpg")
+	require.NoError(t, os.WriteFile(posterPath, []byte("generation-one"), 0644))
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.TempDir = tempDir
+	deps := newTestDeps(cfg)
+
+	router := gin.New()
+	router.GET("/temp/posters/:jobId/:filename", serveTempPoster(testkit.GetTestRuntime(deps)))
+	router.HEAD("/temp/posters/:jobId/:filename", serveTempPoster(testkit.GetTestRuntime(deps)))
+
+	get := func(method string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/temp/posters/"+jobID+"/ABC-001-full.jpg", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	w := get(http.MethodGet)
+	require.Equal(t, http.StatusOK, w.Code)
+	rev := w.Header().Get("X-Poster-Revision")
+	require.NotEmpty(t, rev, "served temp posters must carry the generation token")
+	assert.Regexp(t, `^\d+-\d+$`, rev, "token shape: mtime-nanoseconds + '-' + size")
+
+	// Same generation → identical token; HEAD exposes it with an empty body.
+	w2 := get(http.MethodHead)
+	require.Equal(t, http.StatusOK, w2.Code)
+	assert.Equal(t, rev, w2.Header().Get("X-Poster-Revision"))
+	assert.Empty(t, w2.Body.String())
+
+	// Same-URL refresh (bytes replaced under the same filename) → new token.
+	require.NoError(t, os.WriteFile(posterPath, []byte("generation-two-is-longer"), 0644))
+	w3 := get(http.MethodGet)
+	require.Equal(t, http.StatusOK, w3.Code)
+	assert.NotEqual(t, rev, w3.Header().Get("X-Poster-Revision"))
+}
+
 func TestServeCroppedPoster(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

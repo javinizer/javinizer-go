@@ -91,6 +91,10 @@ type PosterManagerInterface interface {
 	DownloadFromURL(ctx context.Context, jobID, posterID, rawURL, userAgent, referer string) (*cropResult, error)
 	// SnapshotAssets captures the cached full-size source and preview bytes.
 	SnapshotAssets(jobID, posterID string) (*AssetsSnapshot, error)
+	// FullSourceRevision returns the cache generation/revision token
+	// (mtime-nanoseconds + size) of {posterID}-full.jpg — a same-URL refresh
+	// changes the revision while leaving the effective source URL unchanged.
+	FullSourceRevision(jobID, posterID string) (string, error)
 	// RestoreAssets writes back a previously captured snapshot.
 	RestoreAssets(snap *AssetsSnapshot) error
 	// RemoveAssets deletes the cached full-size source and preview — the

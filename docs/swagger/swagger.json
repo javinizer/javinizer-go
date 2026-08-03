@@ -5852,6 +5852,10 @@
         "github_com_javinizer_javinizer-go_internal_api_contracts.PosterCropRequest": {
             "type": "object",
             "properties": {
+                "expected_poster_revision": {
+                    "description": "ExpectedPosterRevision is the cache generation/revision token\n(X-Poster-Revision of the temp poster endpoint: mtime-nanoseconds + size\nof {posterID}-full.jpg) captured with the displayed crop image. A\nrescrape or poster-from-URL refresh can replace the cached image's bytes\nwhile keeping the SAME effective source URL, defeating both URL-level\nguards above; the server validates this token UNDER the poster-source\nlock against the CURRENT cache file's revision and rejects a mismatch\n(or a vanished file) with the same 409 stale-conflict shape. Opaque to\nclients — echo the header verbatim. Empty (older clients, or the\npreview-fallback / URL-proxy display paths that carry no revision) keeps\nthe URL-only guards.",
+                    "type": "string"
+                },
                 "expected_source_url": {
                     "description": "ExpectedSourceURL is the effective poster source (poster_url, else\ncover_url) the client's crop coordinates were measured against. When\nset, the server validates it UNDER the poster-source lock against the\ncurrent effective source and rejects a mismatch with 409 (stale\nconflict) — this catches a cross-tab/device source swap that committed\nBEFORE this request arrived, which the server's own pre/post-lock\nsource snapshots cannot see (both already name the new image). Empty\n(older clients) falls back to the pre/post-lock guard alone.",
                     "type": "string"

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -176,10 +175,29 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		// Resolve the max poster height: request-level override wins over the
-		// configured default. 0 means no cap (preserve source resolution).
 		// Snapshot so apiCfg and the poster manager see the same reload epoch (issue #44).
 		snap := rt.Snapshot()
+
+		// Cache-generation guard (P2): a rescrape or poster-from-URL refresh can
+		// replace {posterID}-full.jpg's bytes from the SAME effective source URL,
+		// leaving both URL-level guards above equal while the image the client
+		// measured was swapped out. The client echoes the X-Poster-Revision
+		// captured with the displayed image; validate it under this lock against
+		// the CURRENT cache file's revision. A mismatch — or the file being gone
+		// — means the coordinate space died with the old generation: reject with
+		// the same 409 stale-conflict shape BEFORE any cache mutation. Empty
+		// (older clients, preview-fallback / URL-proxy display paths) keeps the
+		// URL-only guards alone.
+		if req.ExpectedPosterRevision != "" {
+			rev, revErr := snap.PosterManager().FullSourceRevision(jobID, posterID)
+			if revErr != nil || rev != req.ExpectedPosterRevision {
+				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "poster image changed since the crop coordinates were measured; reload the result and re-measure the crop"})
+				return
+			}
+		}
+
+		// Resolve the max poster height: request-level override wins over the
+		// configured default. 0 means no cap (preserve source resolution).
 		maxPosterHeight := snap.APIConfig().BatchConfig().MaxPosterHeight
 		if req.MaxPosterHeight != nil {
 			maxPosterHeight = *req.MaxPosterHeight
@@ -645,56 +663,7 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
-// errInvalidMovieIDForPoster is the rejection shared by every endpoint that
-// resolves a poster-operation key from job state (pre-lock resolution and the
-// post-lock convergence re-resolution alike).
-var errInvalidMovieIDForPoster = errors.New("invalid movie ID for poster operation")
-
-// resolvePosterID resolves the effective poster identifier for a movie within a
-// batch job. It starts with the URL parameter movieID, then looks up the movie
-// result to use the canonical Movie.ID if available. Returns an error if the
-// resolved ID fails safe-filename validation (path traversal check).
-func resolvePosterID(lookup resultstore.MovieLookup, movieID string) (string, error) {
-	posterID := movieID
-	movieResult, _ := lookup.FindMovieResultForMovieID(movieID)
-	if movieResult != nil && movieResult.Movie != nil && movieResult.Movie.ID != "" {
-		posterID = movieResult.Movie.ID
-	}
-	if !validPosterLockKey(posterID) {
-		return "", errInvalidMovieIDForPoster
-	}
-	return posterID, nil
-}
-
-// effectivePosterSourceOf mirrors worker's effectivePosterSource (and the
-// scrape generator's download-source resolution): PosterURL when set,
-// CoverURL otherwise. The crop endpoint compares it pre/post lock-wait to
-// detect a source swap that invalidated client-measured crop coordinates.
-func effectivePosterSourceOf(movie *models.Movie) string {
-	if movie == nil {
-		return ""
-	}
-	if movie.Poster.PosterURL != "" {
-		return movie.Poster.PosterURL
-	}
-	return movie.Poster.CoverURL
-}
-
-// posterLockKeyFor derives the shared poster-source lock key for a stored movie
-// result: Movie.ID when set, FileMatchInfo.MovieID otherwise — the same
-// precedence the temp poster cache and the override path key on, and the key
-// updateBatchMovie's convergence loop re-resolves from fresh post-lock state.
-func posterLockKeyFor(result *resultstore.MovieResult) string {
-	key := result.FileMatchInfo.MovieID
-	if result.Movie != nil && result.Movie.ID != "" {
-		key = result.Movie.ID
-	}
-	return key
-}
-
-// validPosterLockKey is the safe-filename validation (path traversal check)
-// shared by resolvePosterID and the post-lock re-resolved keys: the poster
-// cache paths are built from this key, so it must be a plain file name.
-func validPosterLockKey(posterID string) bool {
-	return posterID == filepath.Base(posterID) && posterID != "" && posterID != "."
-}
+// The poster-edit identity/source helpers (errInvalidMovieIDForPoster,
+// resolvePosterID, effectivePosterSourceOf, posterLockKeyFor,
+// validPosterLockKey) live in poster_edit_helpers.go — this file sits at the
+// API file-size cap.

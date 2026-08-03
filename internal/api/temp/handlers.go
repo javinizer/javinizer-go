@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
 )
 
@@ -75,10 +76,23 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		// Check if file exists and is accessible before serving
-		if _, err := os.Stat(posterPath); err != nil {
+		fi, err := os.Stat(posterPath)
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
 			return
 		}
+
+		// Expose the cache generation/revision token (poster.AssetRevision:
+		// mtime-nanoseconds + size) so the manual-crop client can bind its
+		// measured coordinates to this exact generation of the cached image
+		// and echo it back via PosterCropRequest.expected_poster_revision — a
+		// same-URL refresh (rescrape / poster-from-URL) replaces the bytes
+		// while the effective source URL stays equal, which a URL guard cannot
+		// see. The crop endpoint validates against the {posterID}-full.jpg
+		// asset's revision; clients only consume the header for -full.jpg
+		// requests (the HEAD route registered alongside GET serves the same
+		// header without the body).
+		c.Header("X-Poster-Revision", poster.AssetRevision(fi))
 
 		// Serve the file (no cache headers for temp files as they're ephemeral)
 		c.File(posterPath)

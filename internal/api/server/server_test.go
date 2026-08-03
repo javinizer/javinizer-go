@@ -237,6 +237,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"GET /swagger/*any",
 		"GET /ws/progress",
 		"HEAD /docs/openapi.json",
+		"HEAD /api/v1/temp/posters/:jobId/:filename",
 		"PATCH /api/v1/batch/:id/results/:resultId",
 		"POST /api/v1/actresses",
 		"POST /api/v1/actresses/import",
