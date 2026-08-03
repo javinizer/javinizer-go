@@ -469,3 +469,128 @@ func TestWithFileRecovery_PanicPreservesMovieOnMatch(t *testing.T) {
 	assertLivePosterPreserved(t, stored.Movie, bounds)
 	assert.Equal(t, models.JobStatusFailed, stored.Status)
 }
+
+// TestMergeLivePosterState_PreservesLiveOriginalBaseline pins the Original*
+// reset-baseline group: a manual poster edit that landed mid-pipeline
+// captured its revert baseline (lazily, via backupPosterOriginals) alongside
+// the edited poster fields. A write-back cloned from an older pipeline
+// snapshot must carry LIVE's baseline too — keeping the snapshot's would
+// erase the baseline (Reset losing its restore target) while the edited
+// poster fields survive, an inconsistent pairing.
+func TestMergeLivePosterState_PreservesLiveOriginalBaseline(t *testing.T) {
+	crop := false
+	// dst: cloned from a pre-edit snapshot whose baseline was never
+	// established (scraper found no poster / pre-baseline-era envelope).
+	dst := &models.Movie{ID: "AAA-111", Title: "Pipeline Out", Poster: models.PosterState{
+		PosterURL:        "https://old.example/poster.jpg",
+		CroppedPosterURL: "/old-preview.jpg",
+	}}
+	// live: a concurrent edit changed the source and lazily captured the
+	// pre-edit state as the baseline.
+	live := &models.Movie{ID: "AAA-111", Poster: models.PosterState{
+		PosterURL:                "https://new.example/poster.jpg",
+		CoverURL:                 "https://new.example/cover.jpg",
+		CroppedPosterURL:         "/new-preview.jpg",
+		OriginalPosterURL:        "https://old.example/poster.jpg",
+		OriginalCroppedPosterURL: "/old-preview.jpg",
+		OriginalShouldCropPoster: &crop,
+		OriginalCoverURL:         "https://old.example/cover.jpg",
+	}}
+
+	mergeLivePosterState(dst, live)
+
+	assert.Equal(t, "https://old.example/poster.jpg", dst.Poster.OriginalPosterURL,
+		"the freshly captured revert baseline must survive the stale-snapshot write-back")
+	assert.Equal(t, "/old-preview.jpg", dst.Poster.OriginalCroppedPosterURL)
+	assert.Equal(t, "https://old.example/cover.jpg", dst.Poster.OriginalCoverURL)
+	require.NotNil(t, dst.Poster.OriginalShouldCropPoster)
+	assert.False(t, *dst.Poster.OriginalShouldCropPoster)
+
+	// The bool baseline is deep-copied, not aliased.
+	*live.Poster.OriginalShouldCropPoster = true
+	assert.False(t, *dst.Poster.OriginalShouldCropPoster, "baseline pointer must not alias live")
+
+	// A live movie WITHOUT a baseline clears the snapshot's stale one —
+	// parity with the CropBounds rule ("live state without bounds must
+	// clear the snapshot's stale bounds").
+	dst2 := &models.Movie{ID: "X", Poster: models.PosterState{
+		PosterURL:         "a",
+		OriginalPosterURL: "stale-baseline",
+	}}
+	mergeLivePosterState(dst2, &models.Movie{ID: "X", Poster: models.PosterState{PosterURL: "b"}})
+	assert.Equal(t, "", dst2.Poster.OriginalPosterURL)
+	assert.Nil(t, dst2.Poster.OriginalShouldCropPoster)
+}
+
+// recordingPersistRepo captures the exact movie handed to the movies-table
+// upsert so a test can assert which poster state PERSISTED — the DB leg the
+// resultstore-focused tests above cannot observe.
+type recordingPersistRepo struct{ upserted *models.Movie }
+
+func (r *recordingPersistRepo) Create(_ context.Context, _ *models.Movie) error { return nil }
+func (r *recordingPersistRepo) Update(_ context.Context, _ *models.Movie) error { return nil }
+func (r *recordingPersistRepo) Upsert(_ context.Context, m *models.Movie) (*models.Movie, error) {
+	return m, nil
+}
+func (r *recordingPersistRepo) UpsertWithTranslations(_ context.Context, m *models.Movie, _ []models.GenreTranslationData, _ []models.ActressTranslationData) (*models.Movie, error) {
+	r.upserted = m.Clone()
+	return m, nil
+}
+func (r *recordingPersistRepo) FindByID(_ context.Context, _ string) (*models.Movie, error) {
+	return nil, nil
+}
+func (r *recordingPersistRepo) FindByContentID(_ context.Context, _ string) (*models.Movie, error) {
+	return nil, nil
+}
+func (r *recordingPersistRepo) Delete(_ context.Context, _ string) error { return nil }
+func (r *recordingPersistRepo) List(_ context.Context, _, _ int) ([]models.Movie, error) {
+	return nil, nil
+}
+
+// TestPersistScrapeOutcome_DBUpsertCarriesLivePosterState pins the round-12
+// P1 (F-D DB leg): the persist pool used to upsert the scrape-time clone into
+// the movies table BEFORE re-reading live poster state under the
+// poster-source lock. A poster edit that landed between the scrape commit and
+// the persist was then overwritten in the DB while surviving in resultstore
+// (TestPersistScrapeOutcome_PreservesInterleavedCrop's leg) — a later reload
+// resurrected the pre-edit poster URL/crop state. The upsert must carry the
+// LIVE poster identity.
+func TestPersistScrapeOutcome_DBUpsertCarriesLivePosterState(t *testing.T) {
+	const movieID = "ABC-004"
+	filePath := "/input/" + movieID + ".mp4"
+	tracker := resultstore.New(1, []string{filePath})
+	scraped := &models.Movie{ID: movieID, Title: "Scraped", Poster: models.PosterState{
+		PosterURL: "https://old.example/poster.jpg", ShouldCropPoster: true,
+	}}
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movieID},
+		Status:        models.JobStatusCompleted,
+		Movie:         scraped,
+	})
+
+	// A crop/source edit lands after the scrape committed its movie but
+	// before the persist pool ran. The API edit path wrote BOTH the live
+	// result and the movies table; the persist must not rewrite the table
+	// with the scrape-time clone.
+	bounds := midOrganizeCrop(t, tracker, filePath)
+
+	repo := &recordingPersistRepo{}
+	inputs := scrapePhaseInputs{
+		JobID:       models.NewJobID(),
+		MovieRepo:   repo,
+		Broadcaster: &stubBroadcaster{},
+		Updater:     tracker,
+	}
+	outcome := scrapeFileOutcome{
+		FilePath: filePath,
+		MovieID:  movieID,
+		Success:  true,
+		Result:   &scrape.ScrapeResult{Movie: scraped, Status: scrape.StatusCompleted},
+	}
+
+	persistScrapeOutcome(context.Background(), outcome, inputs, nil)
+
+	require.NotNil(t, repo.upserted, "the persist must upsert the movie")
+	assertLivePosterPreserved(t, repo.upserted, bounds)
+	assert.Equal(t, "Scraped", repo.upserted.Title, "non-poster fields still come from the scrape result")
+}

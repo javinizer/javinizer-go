@@ -379,16 +379,17 @@ func TestPlanMultipartOverride(t *testing.T) {
 		assert.Equal(t, "DMM Title", part.movie.Title)
 		assert.Equal(t, part.filePath, part.movie.OriginalFileName,
 			"part %s keeps its own file name in the planned write", part.filePath)
-		require.NotNil(t, part.original)
-		assert.NotSame(t, part.original, part.movie)
+		require.NotNil(t, part.prior)
+		require.NotNil(t, part.prior.Movie)
+		assert.NotSame(t, part.prior.Movie, part.movie)
 	}
 
-	// An unreadable snapshot plans the wholesale clone with nil original.
+	// An unreadable snapshot plans the wholesale clone with nil prior.
 	je.store = &overrideFailStore{Store: tracker, lookupErrPath: part2}
 	planned, err = je.planMultipartOverride([]string{part1, part2}, selected.Movie, prov, "title", "dmm")
 	require.NoError(t, err)
 	require.Len(t, planned, 2)
-	assert.Nil(t, planned[1].original)
+	assert.Nil(t, planned[1].prior)
 	assert.Same(t, selected.Movie, planned[1].movie)
 
 	// A merge failure aborts the whole plan with a part-attributed error.
@@ -530,10 +531,11 @@ func TestApplyFieldOverride_EnvelopeCompensationRollbackFailureSurfaced(t *testi
 }
 
 // TestApplyFieldOverride_EnvelopePersistFailureSkipsRevertWithoutOriginal
-// pins the compensation's nil-original skip: a part whose pre-override
-// snapshot could not be read keeps the wholesale clone (there is no
-// per-part identity to revert TO), and the persist-failure compensation
-// reverts only the parts that HAVE originals.
+// pins the compensation's FAILED-snapshot distinction (P1-3): a part whose
+// pre-override snapshot lookup ERRORED keeps the wholesale clone (there is
+// no pre-state to revert TO — unlike a present snapshot holding a nil
+// Movie, which IS restored), and that un-revertible part is surfaced in
+// the compensation error instead of silently skipped.
 func TestApplyFieldOverride_EnvelopePersistFailureSkipsRevertWithoutOriginal(t *testing.T) {
 	je, tracker, resultID, part1, part2 := multipartOverrideFixture(t, "AUD-009", "https://old.example/poster.jpg", "", false)
 	gen := &stubOverrideSnapshotter{}
@@ -544,8 +546,10 @@ func TestApplyFieldOverride_EnvelopePersistFailureSkipsRevertWithoutOriginal(t *
 	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrEnvelopePersist)
-	assert.NotContains(t, err.Error(), "override revert failed",
-		"the nil-original part is skipped, not error-reported, during compensation")
+	assert.Contains(t, err.Error(), "no pre-override snapshot for part "+part2,
+		"the un-revertible part must be reported, not silently skipped (P1-3)")
+	assert.Contains(t, err.Error(), "override revert failed",
+		"the surfaced snapshot gap joins the compensation error set")
 
 	res1, getErr := tracker.GetMovieResult(part1)
 	require.NoError(t, getErr)
@@ -557,4 +561,72 @@ func TestApplyFieldOverride_EnvelopePersistFailureSkipsRevertWithoutOriginal(t *
 	assert.Equal(t, "dmm-poster-url", res2.Movie.Poster.PosterURL,
 		"part2 (no original snapshot) keeps the wholesale clone — there is nothing to revert to")
 	assertPosterSourceLockFree(t, "job-mp", "AUD-009")
+}
+
+// TestApplyFieldOverride_EnvelopePersistFailureUnsetsProvenanceOnPartsWithoutAny
+// pins the compensation's nil-original provenance restore: the fan-out writes
+// the override's provenance onto EVERY part, so a part that had NO provenance
+// must have the entry UNSET again on persist failure — SetProvenance(nil)
+// stores a nil clone that GetProvenance normalizes back to nil (the same
+// unset the rescrape rollback relies on). Skipping nil originals left the
+// override's attribution behind as phantom provenance that the next
+// successful envelope persist would durably capture.
+func TestApplyFieldOverride_EnvelopePersistFailureUnsetsProvenanceOnPartsWithoutAny(t *testing.T) {
+	je, tracker, resultID, part1, part2 := multipartOverrideFixture(t, "AUD-010", "https://old.example/poster.jpg", "", false)
+	je.posterGen = &stubOverrideSnapshotter{}
+	// part2 has no recorded provenance (e.g. a result added after the scrape
+	// recorded it) — GetProvenance returns nil for it.
+	tracker.SetProvenance(part2, nil)
+	je.persistEnvelope = func() error { return errors.New("job repository unavailable") }
+
+	_, _, err := je.ApplyFieldOverride(context.Background(), resultID, "poster_url", "dmm")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrEnvelopePersist)
+
+	assert.Nil(t, tracker.GetProvenance(part2),
+		"part had no provenance before the override: the failed fan-out's attribution must be unset, not left as a phantom")
+	prov1 := tracker.GetProvenance(part1)
+	require.NotNil(t, prov1, "part1's real pre-override provenance must be restored, not dropped")
+	assert.NotEqual(t, "dmm", prov1.FieldSources["poster_url"])
+	assertPosterSourceLockFree(t, "job-mp", "AUD-010")
+}
+
+// TestApplyFieldOverride_EnvelopePersistFailureRestoresNilMovieSibling pins
+// Codex P1-3 for the override fan-out: a sibling part whose stored result
+// legitimately has a nil Movie carries a PRESENT snapshot (not "no
+// snapshot"), so when the envelope persist fails the compensation must
+// re-seat that part to its pre-override nil-Movie result instead of
+// skipping it — pre-fix the bare-*models.Movie snapshot conflated
+// "lookup failed" with "stored movie nil" and left the rejected edit on
+// the sibling.
+func TestApplyFieldOverride_EnvelopePersistFailureRestoresNilMovieSibling(t *testing.T) {
+	je, tracker, resultID, part1, part2 := multipartOverrideFixture(t, "NMX-001", "https://old.example/p.jpg", "", false)
+
+	// Sibling's stored result legitimately has NO movie (scrape pending),
+	// still indexed in the movie's family via FileMatchInfo.MovieID.
+	res2, err := tracker.GetMovieResult(part2)
+	require.NoError(t, err)
+	res2.Movie = nil
+	tracker.UpdateFileResult(part2, res2)
+
+	je.persistEnvelope = func() error { return errors.New("persist down") }
+
+	_, _, err = je.ApplyFieldOverride(context.Background(), resultID, "title", "dmm")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "persist down")
+
+	// The nil-Movie sibling must be restored to NO MOVIE — not left holding
+	// the rejected override's wholesale-clone movie.
+	got2, err := tracker.GetMovieResult(part2)
+	require.NoError(t, err)
+	assert.Nil(t, got2.Movie, "nil-Movie sibling must be re-seated to its pre-override result")
+	assert.Equal(t, "NMX-001", got2.FileMatchInfo.MovieID, "family membership survives the nil-movie restore")
+
+	// The movie-bearing part reverted to its own pre-override movie.
+	got1, err := tracker.GetMovieResult(part1)
+	require.NoError(t, err)
+	require.NotNil(t, got1.Movie)
+	assert.NotEqual(t, "DMM Title", got1.Movie.Title, "part 1 must revert to its pre-override title")
+
+	assertPosterSourceLockFree(t, "job-mp", "NMX-001")
 }

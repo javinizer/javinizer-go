@@ -501,7 +501,8 @@ func TestApplyFieldOverride_PersistFailureRevertErrorAndNilProvenance(t *testing
 		})
 	}
 	// Only part1 carries provenance; part2 has NONE — its compensation
-	// restore must hit the nil-provenance skip branch.
+	// restore exercises the nil-provenance un-set leg: SetProvenance(nil)
+	// stores a nil clone that GetProvenance normalizes back to nil.
 	tracker.SetProvenance(part1, &resultstore.ProvenanceData{
 		FieldSources:   map[string]string{"maker": "r18dev"},
 		ScraperResults: []*models.ScraperResult{{Source: "dmm", Maker: "DMMMaker"}, {Source: "r18dev", Maker: "R18Maker"}},
@@ -542,9 +543,8 @@ func TestApplyFieldOverride_PersistFailureRevertErrorAndNilProvenance(t *testing
 	require.NotNil(t, prov)
 	assert.Equal(t, "r18dev", prov.FieldSources["maker"], "part1's attribution is restored")
 	part2Prov := tracker.GetProvenance(part2)
-	require.NotNil(t, part2Prov)
-	assert.Equal(t, "dmm", part2Prov.FieldSources["maker"],
-		"part2 never had provenance — the nil-snapshot branch skips it, so the fan-out stays (provenance cannot be unset)")
+	assert.Nil(t, part2Prov,
+		"part2 never had provenance — the compensation un-sets the fan-out's phantom attribution")
 	assertPosterSourceLockFree(t, jobID, movieID)
 }
 
@@ -650,4 +650,69 @@ func TestApplyFieldOverride_IDRekeyPlanFailureMovesAssetsBack(t *testing.T) {
 		assertPosterSourceLockFree(t, jobID, oldID)
 		assertPosterSourceLockFree(t, jobID, newID)
 	})
+}
+
+// TestApplyFieldOverride_IDCaseOnlyRekeyMigratesPosterAssets pins r10 P1-5:
+// an "id" override differing only by CASE names the SAME folded
+// poster-source lock — no destination lock may be stacked — but the cached
+// poster files and preview URLs live under the RAW movie ID, so on a
+// case-sensitive filesystem (the in-mem FS here is case-sensitive)
+// abc-full.jpg and ABC-full.jpg are DIFFERENT files. The override must
+// still run the collision check, the asset migration, and the preview-URL
+// re-point, or every later crop/generation lookup under the new casing
+// misses the cache.
+func TestApplyFieldOverride_IDCaseOnlyRekeyMigratesPosterAssets(t *testing.T) {
+	const (
+		jobID = "job-idcaseonly"
+		oldID = "dmm-ab12"
+		newID = "DMM-AB12" // case-only change: SAME folded lock key
+	)
+	je, tracker, fs, filePath, oldFull, oldPreview := idRekeyFixture(t, jobID, oldID, newID)
+
+	updated, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, newID, updated.Movie.ID, "the override adopted the recased movie ID")
+	assert.Equal(t, "/api/v1/temp/posters/"+jobID+"/"+newID+".jpg?v=111",
+		updated.Movie.Poster.CroppedPosterURL, "the preview URL follows the recased key")
+	assert.Equal(t, "/api/v1/temp/posters/"+jobID+"/"+newID+".jpg?v=orig7",
+		updated.Movie.Poster.OriginalCroppedPosterURL,
+		"the ORIGINAL preview URL follows the recased key too — the poster reset flow reads it")
+
+	// Assets moved to the recased key, origin cleared (case-sensitive in-mem fs).
+	full, ok := fileContents(t, fs, "/temp/posters/"+jobID+"/"+newID+"-full.jpg")
+	require.True(t, ok, "the full-size asset must exist at the recased key")
+	assert.Equal(t, "old-full-bytes", full)
+	preview, ok := fileContents(t, fs, "/temp/posters/"+jobID+"/"+newID+".jpg")
+	require.True(t, ok)
+	assert.Equal(t, "old-preview-bytes", preview)
+	_, ok = fileContents(t, fs, oldFull)
+	assert.False(t, ok, "the old-cased full-size asset is gone (no orphan)")
+	_, ok = fileContents(t, fs, oldPreview)
+	assert.False(t, ok, "the old-cased preview is gone (no orphan)")
+
+	// The store was re-indexed (the folded index sees one family throughout).
+	assert.Equal(t, newID, tracker.GetCurrentMovieID(filePath))
+	assertPosterSourceLockFree(t, jobID, oldID)
+	assertPosterSourceLockFree(t, jobID, newID)
+}
+
+// TestApplyFieldOverride_IDCaseOnlyRekeyDoesNotCollideWithSelf pins the
+// collision-check half of r10 P1-5: a case-only re-key must NOT be rejected
+// as a collision — the destination lookup resolves the SAME family (the
+// store index folds case), and same-family paths are exclusions, not
+// collisions.
+func TestApplyFieldOverride_IDCaseOnlyRekeyDoesNotCollideWithSelf(t *testing.T) {
+	const (
+		jobID = "job-idcaseonly2"
+		oldID = "self-9"
+		newID = "SELF-9"
+	)
+	je, tracker, _, _, _, _ := idRekeyFixture(t, jobID, oldID, newID)
+
+	updated, _, err := je.ApplyFieldOverride(context.Background(), "res-idrekey", "id", "dmm")
+	require.NoError(t, err, "a case-only re-key onto the movie's own folded key is not a collision")
+	require.NotNil(t, updated)
+	assert.Equal(t, newID, updated.Movie.ID)
+	assert.Equal(t, newID, tracker.GetCurrentMovieID("/source/"+oldID+".mp4"))
 }

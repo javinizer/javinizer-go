@@ -286,34 +286,41 @@ func interpretApplyResult(
 		if movie != nil {
 			snapshotID = movie.ID
 		}
-		releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, filePath, snapshotID))
-		writeErr := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-			if movie == nil || (current.Movie != nil && current.Movie.ID != movie.ID) {
-				// Identity mismatch (mid-apply rekey) or no snapshot movie: do
-				// NOT overwrite the live movie. Only pipeline-owned non-movie
-				// fields move.
-				current.Status = fileStatus
-				current.Error = errMsg
-				current.StartedAt = startTime
-				current.EndedAt = &now
-				return current, nil
-			}
-			merged := movie.Clone()
-			mergeLivePosterState(merged, current.Movie)
-			return &resultstore.MovieResult{
-				// UpdateFileResult preserved ResultID on wholesale writes;
-				// the atomic callback must carry it over explicitly or review
-				// lookups keyed by result_id break for failed applies.
-				ResultID:      current.ResultID,
-				FileMatchInfo: afc.Match,
-				Movie:         merged,
-				Status:        fileStatus,
-				Error:         errMsg,
-				StartedAt:     startTime,
-				EndedAt:       &now,
-			}, nil
-		})
-		releasePosterLock()
+		// The release is deferred INSIDE the closure: a panic in the store
+		// callback would otherwise leak the refcounted lock entry permanently
+		// (the map entry never evicts → every later writer on this key
+		// deadlocks). The panic still propagates to withFileRecovery, which
+		// re-acquires the same key — that only works because it is free.
+		writeErr := func() error {
+			releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, filePath, snapshotID))
+			defer releasePosterLock()
+			return inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+				if movie == nil || (current.Movie != nil && current.Movie.ID != movie.ID) {
+					// Identity mismatch (mid-apply rekey) or no snapshot movie: do
+					// NOT overwrite the live movie. Only pipeline-owned non-movie
+					// fields move.
+					current.Status = fileStatus
+					current.Error = errMsg
+					current.StartedAt = startTime
+					current.EndedAt = &now
+					return current, nil
+				}
+				merged := movie.Clone()
+				mergeLivePosterState(merged, current.Movie)
+				return &resultstore.MovieResult{
+					// UpdateFileResult preserved ResultID on wholesale writes;
+					// the atomic callback must carry it over explicitly or review
+					// lookups keyed by result_id break for failed applies.
+					ResultID:      current.ResultID,
+					FileMatchInfo: afc.Match,
+					Movie:         merged,
+					Status:        fileStatus,
+					Error:         errMsg,
+					StartedAt:     startTime,
+					EndedAt:       &now,
+				}, nil
+			})
+		}()
 		if writeErr != nil {
 			logging.Warnf("Failed to atomically update movie result for %s after apply failure: %v", filePath, writeErr)
 			inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
@@ -367,33 +374,38 @@ func interpretApplyResult(
 	}
 
 	if result != nil && result.Movie != nil {
-		releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, filePath, result.Movie.ID))
-		if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-			// Write the pipeline-updated movie back, but let the LIVE result's
-			// poster state win: a manual crop (or poster-from-URL / source edit)
-			// taken while this file was being organized must not be clobbered by
-			// the apply-start snapshot result.Movie was cloned from — and an
-			// edit that RE-KEYED the result mid-apply (live identity differs)
-			// keeps its whole movie: the write-back touches nothing (P2-5).
-			// Holding the live key's poster-source lock makes the key resolution
-			// and the write one critical section against crop/edit writers.
-			// Design note: the physical poster file just written on disk came
-			// from that apply-start snapshot's source — merging the live poster
-			// identity here updates the ENVELOPE only; it does not retro-crop
-			// the written file. A subsequent re-organize picks up the new
-			// (live) source and reproduces the crop from it.
-			if current.Movie != nil && current.Movie.ID != result.Movie.ID {
-				logging.Debugf("apply write-back skipped for %s — live movie %q re-keyed away from pipeline movie %q", filePath, current.Movie.ID, result.Movie.ID)
+		// Deferred release INSIDE the closure (L1): a panic in the store
+		// callback must not leak the refcounted lock entry — a leaked entry
+		// never evicts and deadlocks every later writer on this key.
+		func() {
+			releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, filePath, result.Movie.ID))
+			defer releasePosterLock()
+			if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+				// Write the pipeline-updated movie back, but let the LIVE result's
+				// poster state win: a manual crop (or poster-from-URL / source edit)
+				// taken while this file was being organized must not be clobbered by
+				// the apply-start snapshot result.Movie was cloned from — and an
+				// edit that RE-KEYED the result mid-apply (live identity differs)
+				// keeps its whole movie: the write-back touches nothing (P2-5).
+				// Holding the live key's poster-source lock makes the key resolution
+				// and the write one critical section against crop/edit writers.
+				// Design note: the physical poster file just written on disk came
+				// from that apply-start snapshot's source — merging the live poster
+				// identity here updates the ENVELOPE only; it does not retro-crop
+				// the written file. A subsequent re-organize picks up the new
+				// (live) source and reproduces the crop from it.
+				if current.Movie != nil && current.Movie.ID != result.Movie.ID {
+					logging.Debugf("apply write-back skipped for %s — live movie %q re-keyed away from pipeline movie %q", filePath, current.Movie.ID, result.Movie.ID)
+					return current, nil
+				}
+				next := result.Movie.Clone()
+				mergeLivePosterState(next, current.Movie)
+				current.Movie = next
 				return current, nil
+			}); err != nil {
+				logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err)
 			}
-			next := result.Movie.Clone()
-			mergeLivePosterState(next, current.Movie)
-			current.Movie = next
-			return current, nil
-		}); err != nil {
-			logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err)
-		}
-		releasePosterLock()
+		}()
 		outcome.Movie = result.Movie
 	}
 
@@ -544,7 +556,15 @@ func liveWritebackLockKey(updater resultstore.ResultUpdater, filePath, snapshotI
 // decision (ShouldCropPoster), the carried CropBounds, and the cached preview
 // URL (CroppedPosterURL). Everything else on dst (organized/merged pipeline
 // output: titles, paths, genres...) is authoritative and never regressed.
-// The Original* baseline group is also left to dst/pipeline semantics.
+// The Original* reset-baseline group moves too: it is captured against the
+// SAME stored movie the mutable group was edited on (lazily by the first
+// manual edit via backupPosterOriginals/backupCoverOriginal, eagerly at
+// scrape/rescrape), and no pipeline write-back path produces a newer one —
+// the NFO format carries no original_* fields and dst's group is always the
+// older snapshot's. Keeping dst's would let a mid-flight edit's freshly
+// captured baseline be overwritten by the stale snapshot (Reset losing its
+// restore target) while its edited poster fields survive — an inconsistent
+// pairing.
 //
 // Lock ordering: this function takes NO poster-source lock — apply callers
 // hold none of these locks, and the two-lock rule reserves multi-lock
@@ -573,5 +593,14 @@ func mergeLivePosterState(dst, live *models.Movie) {
 		dst.Poster.CropBounds = &b
 	} else {
 		dst.Poster.CropBounds = nil
+	}
+	dst.Poster.OriginalPosterURL = live.Poster.OriginalPosterURL
+	dst.Poster.OriginalCroppedPosterURL = live.Poster.OriginalCroppedPosterURL
+	dst.Poster.OriginalCoverURL = live.Poster.OriginalCoverURL
+	if live.Poster.OriginalShouldCropPoster != nil {
+		b := *live.Poster.OriginalShouldCropPoster
+		dst.Poster.OriginalShouldCropPoster = &b
+	} else {
+		dst.Poster.OriginalShouldCropPoster = nil
 	}
 }

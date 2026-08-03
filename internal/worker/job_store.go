@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -511,10 +512,18 @@ func (s *JobStore) PersistJob(job *BatchJob) error {
 	return s.persistence.PersistJob(job)
 }
 
+// ErrJobGone marks the job-vanished race on PersistJobByID: the job ID was
+// absent from the store (deleted/vanished between a handler's lookup and the
+// persist). Edit handlers map it to 410 instead of acking state that was
+// never persisted.
+var ErrJobGone = errors.New("job gone (deleted or never existed)")
+
 // PersistJobByID persists a job by its ID.
 // callers that hold a composite (EditableJob, ControlledJob)
 // use this instead of PersistJob — no type assertion needed. The store holds
-// the concrete *BatchJob internally. No-op if the job is not found.
+// the concrete *BatchJob internally. Returns ErrJobGone if the job is not
+// found (failsafe mapping: answering 200 for state never persisted would let
+// a client believe a vanished job's edit landed).
 // Returns the persistence error on failure (also recorded as the job's
 // PersistError) so HTTP handlers can surface a failed persist instead of
 // acknowledging state a restart would silently drop.
@@ -523,7 +532,7 @@ func (s *JobStore) PersistJobByID(id string) error {
 	job, ok := s.jobs[models.JobID(id)]
 	s.mu.RUnlock()
 	if !ok {
-		return nil
+		return ErrJobGone
 	}
 	return s.persistence.PersistJob(job)
 }

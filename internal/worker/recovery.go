@@ -64,38 +64,45 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 			if rc.movie != nil {
 				snapshotID = rc.movie.ID
 			}
-			releasePosterLock := AcquirePosterSourceLock(rc.jobID.String(), liveWritebackLockKey(rc.updater, rc.filePath, snapshotID))
-			writeErr := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-				current.Status = models.JobStatusFailed
-				current.Error = panicErr.Error()
-				if !rc.startTime.IsZero() {
-					current.StartedAt = rc.startTime
-					current.EndedAt = &now
+			// The whole critical section — including the legacy fallback write —
+			// runs in a closure with a DEFERRED release (L1): this code already
+			// runs inside a recover handler, and a second panic in the store
+			// callback must not leak the refcounted lock entry (leaked entries
+			// never evict and deadlock every later writer on the key).
+			func() {
+				releasePosterLock := AcquirePosterSourceLock(rc.jobID.String(), liveWritebackLockKey(rc.updater, rc.filePath, snapshotID))
+				defer releasePosterLock()
+				writeErr := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+					current.Status = models.JobStatusFailed
+					current.Error = panicErr.Error()
+					if !rc.startTime.IsZero() {
+						current.StartedAt = rc.startTime
+						current.EndedAt = &now
+					}
+					// Preserve the prior scrape-phase Movie on the apply panic path
+					// (mirrors interpretApplyResult's err-branch fix), merging the
+					// live poster state — and only when identities match (P2-5).
+					if rc.movie != nil && (current.Movie == nil || current.Movie.ID == rc.movie.ID) {
+						merged := rc.movie.Clone()
+						mergeLivePosterState(merged, current.Movie)
+						current.Movie = merged
+					}
+					return current, nil
+				})
+				if writeErr != nil {
+					mr := &resultstore.MovieResult{
+						FileMatchInfo: rc.fmi,
+						Status:        models.JobStatusFailed,
+						Error:         panicErr.Error(),
+						Movie:         rc.movie,
+					}
+					if !rc.startTime.IsZero() {
+						mr.StartedAt = rc.startTime
+						mr.EndedAt = &now
+					}
+					rc.updater.UpdateFileResult(rc.filePath, mr)
 				}
-				// Preserve the prior scrape-phase Movie on the apply panic path
-				// (mirrors interpretApplyResult's err-branch fix), merging the
-				// live poster state — and only when identities match (P2-5).
-				if rc.movie != nil && (current.Movie == nil || current.Movie.ID == rc.movie.ID) {
-					merged := rc.movie.Clone()
-					mergeLivePosterState(merged, current.Movie)
-					current.Movie = merged
-				}
-				return current, nil
-			})
-			if writeErr != nil {
-				mr := &resultstore.MovieResult{
-					FileMatchInfo: rc.fmi,
-					Status:        models.JobStatusFailed,
-					Error:         panicErr.Error(),
-					Movie:         rc.movie,
-				}
-				if !rc.startTime.IsZero() {
-					mr.StartedAt = rc.startTime
-					mr.EndedAt = &now
-				}
-				rc.updater.UpdateFileResult(rc.filePath, mr)
-			}
-			releasePosterLock()
+			}()
 
 			if rc.broadcast != nil {
 				rc.broadcast(panicErr.Error())

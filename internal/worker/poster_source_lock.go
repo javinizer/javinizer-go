@@ -1,6 +1,9 @@
 package worker
 
-import "sync"
+import (
+	"strings"
+	"sync"
+)
 
 // posterSourceLockEntry is a reference-counted per-key mutex. It mirrors the
 // downloader's posterCropLock pattern (internal/downloader/media.go): entries
@@ -77,7 +80,7 @@ var (
 // The returned function releases the lock exactly once and evicts the map
 // entry when the last holder returns, so the map never grows unboundedly.
 func AcquirePosterSourceLock(jobID, movieID string) (release func()) {
-	key := jobID + "\x00" + movieID
+	key := jobID + "\x00" + PosterSourceLockMovieID(movieID)
 
 	posterSourceLockGuard.Lock()
 	v, _ := posterSourceLockEntries.Load(key)
@@ -99,4 +102,22 @@ func AcquirePosterSourceLock(jobID, movieID string) (release func()) {
 		}
 		posterSourceLockGuard.Unlock()
 	}
+}
+
+// PosterSourceLockMovieID normalizes the movie-ID segment of a poster-source
+// lock key. The result store's movie-ID family index (resultstore.indexKey)
+// folds case, and the temp poster cache files ({movieID}-full.jpg/{movieID}.jpg)
+// share a slot on case-insensitive filesystems — so "ABC-1" and "abc-1" name
+// ONE family and ONE cache. Verbatim lock keys would let the two variants
+// bypass each other's lock while mutating that shared cache, hence the fold.
+//
+// Two-lock PAIR decisions must use this normalization for BOTH the equality
+// test and the lexical ordering (rescrapePhase.Rescrape's A→B pair,
+// ApplyFieldOverride's id-override pair, updateBatchMovie's rename pair): a
+// case-only difference is NOT a rekey — acquiring both variants as a "pair"
+// would take the same folded lock twice and self-deadlock — and ordering on
+// the raw IDs can disagree with the folded key order ('a' > 'B'), which would
+// break the cycle-free acquisition guarantee.
+func PosterSourceLockMovieID(movieID string) string {
+	return strings.ToLower(movieID)
 }

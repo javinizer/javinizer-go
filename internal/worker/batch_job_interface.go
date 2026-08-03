@@ -168,6 +168,15 @@ type JobReader interface {
 // narrow interface rather than the full composite.
 type JobEditor interface {
 	UpdateMovie(ctx context.Context, filePath string, movie *models.Movie) error
+	// RestoreMovieResult reverts one file's result to a pre-edit snapshot
+	// taken via GetMovieResult. Unlike UpdateMovie it can restore a result
+	// whose stored result legitimately had a nil Movie (UpdateMovie
+	// dereferences movie and upserts by movie.ID, so it cannot express
+	// "no movie"). Compensation must distinguish a FAILED snapshot lookup
+	// (nil prior: nothing to restore to — surface it) from a PRESENT
+	// snapshot holding Movie=nil (restore verbatim here); conflating them
+	// strands rejected multipart edits.
+	RestoreMovieResult(ctx context.Context, filePath string, prior *resultstore.MovieResult) error
 	ExcludeFile(filePath string)
 	UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds) error
 	UpdatePosterFromURL(ctx context.Context, movieID string, posterURL string, croppedURL string) error
@@ -601,6 +610,13 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	// (Movie.ID when set, FileMatchInfo.MovieID otherwise).
 	movieID := posterLockKeyForMovieResult(result)
 	releasePosterLock := AcquirePosterSourceLock(je.jobID, movieID)
+	// Closure-form deferred release IMMEDIATELY after acquisition (L1): the
+	// lock is refcounted, so a recovered panic anywhere below — especially
+	// inside the convergence loop's explicit release→re-acquire handoffs,
+	// which reassign releasePosterLock — must still drop the CURRENT
+	// entry; a value-form defer registered later would either miss the
+	// panic window or release a stale function value.
+	defer func() { releasePosterLock() }()
 
 	// Re-read the result under the lock: a crop or source-changing edit may
 	// have persisted while this call waited on the lock, replacing the movie
@@ -656,7 +672,6 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 		for {
 			freshResult, fp, stillFound := je.store.GetFileResultByResultID(resultID)
 			if !stillFound || freshResult == nil || freshResult.Movie == nil {
-				releasePosterLock()
 				return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
 			}
 			result = freshResult
@@ -682,7 +697,6 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 		oldPosterURL = movie.Poster.PosterURL
 		oldCoverURL = movie.Poster.CoverURL
 		if err := applyFieldOverride(movie, prov, fieldKey, source); err != nil {
-			releasePosterLock()
 			return nil, nil, err
 		}
 
@@ -693,14 +707,31 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 		// the same newID unless the underlying state changed — which the
 		// convergence loop above then re-checks.
 		newID := movie.ID
+		// Pair decisions compare the case-folded key segments
+		// (PosterSourceLockMovieID): the lock map folds case, so a case-only
+		// "rekey" names the SAME lock — pairing it would self-deadlock — and
+		// raw-string lexical order can disagree with the folded order.
 		if fieldKey != "id" || newID == "" || newID == movieID {
 			dropDestLock() // stale destination from a prior pass; no rekey now
 			break
 		}
-		if releaseDestPosterLock != nil && destKey == newID {
+		if PosterSourceLockMovieID(newID) == PosterSourceLockMovieID(movieID) {
+			// Case-only re-key: no destination lock is stacked (same folded
+			// key), but the RAW-keyed cache assets and preview-URL segments
+			// still re-key — poster/manager.go names files by the raw movie
+			// ID, so on a case-sensitive filesystem abc-full.jpg and
+			// ABC-full.jpg are DIFFERENT files. Record the destination so
+			// the collision check and MigratePosterCacheAssets below still
+			// run; the single held lock already serializes every writer
+			// keyed on either casing.
+			dropDestLock() // stale destination lock from a prior pass
+			destKey = newID
+			break
+		}
+		if releaseDestPosterLock != nil && PosterSourceLockMovieID(destKey) == PosterSourceLockMovieID(newID) {
 			break // destination pair already held from an earlier pass
 		}
-		if newID > movieID {
+		if PosterSourceLockMovieID(newID) > PosterSourceLockMovieID(movieID) {
 			dropDestLock()
 			releaseDestPosterLock = AcquirePosterSourceLock(je.jobID, newID)
 			destKey = newID
@@ -712,7 +743,6 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 		destKey = newID
 		releasePosterLock = AcquirePosterSourceLock(je.jobID, movieID)
 	}
-	defer releasePosterLock()
 
 	// Codex P2: an "id" override whose destination ID is ALREADY in use by
 	// another result family must be REJECTED before the asset move below —
@@ -813,11 +843,29 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	for _, part := range planned {
 		if updateErr := je.UpdateMovie(ctx, part.filePath, part.movie); updateErr != nil {
 			errMsg := fmt.Errorf("persist field override: %w", updateErr)
+			// The FAILING part's UpdateMovie can already have committed DB
+			// side effects — actress renames land BEFORE the movie upsert and
+			// the in-memory write (UpdateMovie's order) — so reverting only
+			// the SUCCESSFUL parts below would leave its partial write
+			// permanent. Restore it first with the same RestoreMovieResult
+			// semantics (the re-upsert reverts persisted actress edits, the
+			// snapshot re-seat undoes the in-memory leg).
+			if part.prior == nil {
+				errMsg = fmt.Errorf("%w (no pre-override snapshot for failing part %s: its partial update could not be reverted)", errMsg, part.filePath)
+			} else if revertErr := je.revertPartWrite(ctx, part); revertErr != nil {
+				errMsg = fmt.Errorf("%w (revert of failing part %s failed: %v)", errMsg, part.filePath, revertErr)
+			}
 			for _, done := range updatedParts {
-				if done.original == nil {
+				// nil prior means the snapshot LOOKUP failed (distinct from a
+				// snapshot holding a legitimately nil Movie — restored by
+				// revertPartWrite). Nothing remains to restore TO, so this part
+				// keeps the rejected write: surface that instead of silently
+				// skipping.
+				if done.prior == nil {
+					errMsg = fmt.Errorf("%w (no pre-override snapshot for part %s: its update could not be reverted)", errMsg, done.filePath)
 					continue
 				}
-				if revertErr := je.UpdateMovie(ctx, done.filePath, done.original); revertErr != nil {
+				if revertErr := je.revertPartWrite(ctx, done); revertErr != nil {
 					errMsg = fmt.Errorf("%w (revert of part %s failed: %v)", errMsg, done.filePath, revertErr)
 				}
 			}
@@ -861,19 +909,21 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 			errMsg := fmt.Errorf("failed to persist job state after field override: %w: %w", ErrEnvelopePersist, perr)
 			var errs []error
 			for _, part := range updatedParts {
-				if part.original == nil {
+				if part.prior == nil {
+					errs = append(errs, fmt.Errorf("no pre-override snapshot for part %s: its update could not be reverted", part.filePath))
 					continue
 				}
-				if revertErr := je.UpdateMovie(ctx, part.filePath, part.original); revertErr != nil {
+				if revertErr := je.revertPartWrite(ctx, part); revertErr != nil {
 					errs = append(errs, fmt.Errorf("revert of part %s failed: %w", part.filePath, revertErr))
 				}
 			}
 			for partPath, orig := range origProvenance {
-				if orig == nil {
-					// Provenance cannot be UNSET through the store; only real
-					// pre-override snapshots are restored.
-					continue
-				}
+				// SetProvenance(nil) stores a nil clone, which GetProvenance
+				// normalizes back to nil — that IS the unset. Skipping a nil
+				// original would leave this part's override attribution in place
+				// after the revert (phantom provenance), and the next successful
+				// envelope persist would durably capture it. Mirrors the rescrape
+				// rollback's unconditional SetProvenance(preRescrapeProv).
 				je.store.SetProvenance(partPath, orig)
 			}
 			if rollback != nil {
@@ -900,22 +950,35 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 // snapshot held for compensation.
 type overridePartWrite struct {
 	filePath string
-	original *models.Movie // pre-override stored movie, held for revert
-	movie    *models.Movie // per-part merged movie to persist
+	// prior is the part's COMPLETE pre-override stored result clone
+	// (GetMovieResult) — including a legitimately nil Movie. nil prior means
+	// the snapshot lookup itself failed, NOT that the stored movie was nil:
+	// conflating the two let compensation skip a part whose nil-Movie result
+	// had just been overwritten, stranding the rejected edit in memory.
+	prior *resultstore.MovieResult
+	movie *models.Movie // per-part merged movie to persist
 }
 
 // planMultipartOverride builds every part's fan-out write BEFORE any
 // persistence, so a merge failure aborts the override cleanly instead of
 // stranding earlier parts on compensated state. A part whose stored
-// snapshot vanished (nil original) keeps the wholesale clone of the
-// selected part's movie: no per-part identity remains to preserve, and its
-// compensation step is skipped for the same reason.
+// snapshot could not be read (nil prior) keeps the wholesale clone of the
+// selected part's movie — no per-part identity remains to preserve — and
+// its compensation is reported as un-revertible instead of silently
+// skipped; a part whose stored result legitimately has a nil Movie carries
+// a PRESENT snapshot restored verbatim (revertPartWrite).
 func (je *jobEditorImpl) planMultipartOverride(filePaths []string, movie *models.Movie, prov *resultstore.ProvenanceData, fieldKey, source string) ([]overridePartWrite, error) {
 	planned := make([]overridePartWrite, 0, len(filePaths))
 	for _, partPath := range filePaths {
-		var original *models.Movie
+		// Snapshot the complete prior result (a nil Movie inside a present
+		// snapshot is a valid pre-state, restored verbatim by compensation).
+		var prior *resultstore.MovieResult
 		if previous, getErr := je.store.GetMovieResult(partPath); getErr == nil && previous != nil {
-			original = previous.Movie
+			prior = previous
+		}
+		var original *models.Movie
+		if prior != nil {
+			original = prior.Movie
 		}
 		partMovie := movie
 		if original != nil {
@@ -925,9 +988,49 @@ func (je *jobEditorImpl) planMultipartOverride(filePaths []string, movie *models
 			}
 			partMovie = merged
 		}
-		planned = append(planned, overridePartWrite{filePath: partPath, original: original, movie: partMovie})
+		planned = append(planned, overridePartWrite{filePath: partPath, prior: prior, movie: partMovie})
 	}
 	return planned, nil
+}
+
+// revertPartWrite restores one fanned-out part to its pre-write snapshot.
+func (je *jobEditorImpl) revertPartWrite(ctx context.Context, part overridePartWrite) error {
+	return je.RestoreMovieResult(ctx, part.filePath, part.prior)
+}
+
+// RestoreMovieResult implements JobEditor. A present snapshot is restored
+// COMPLETELY — movie AND result identity: for a snapshot carrying a movie,
+// UpdateMovie runs FIRST (it re-upserts the DB row, reverts any persisted
+// actress-name edits, and preserves the cover-original backup), then the
+// whole snapshot (FileMatchInfo included) is re-seated verbatim.
+// UpdateMovie alone would NOT be an exact rollback: it re-stamps
+// FileMatchInfo.MovieID from Movie.ID (resultUpdater.UpdateMovie), so a
+// re-keyed result whose snapshot legitimately diverges
+// (FileMatchInfo.MovieID=A, Movie.ID=B) would be left indexed at B despite
+// the promised restore. A snapshot whose stored result had a nil Movie goes
+// straight to the re-seat — UpdateMovie cannot express "no movie" (it
+// dereferences movie and upserts by movie.ID). The DB movies-table row the
+// rejected write upserted is NOT deleted on the nil-Movie leg: that table
+// is a shared by-ID cache the row may pre-date this job in, and Delete
+// could clobber a legitimate record; an unreferenced cache row is harmless
+// while a wrong deletion is not.
+func (je *jobEditorImpl) RestoreMovieResult(ctx context.Context, filePath string, prior *resultstore.MovieResult) error {
+	if prior == nil {
+		return fmt.Errorf("missing pre-edit snapshot for %s", filePath)
+	}
+	if prior.Movie != nil {
+		if err := je.UpdateMovie(ctx, filePath, prior.Movie); err != nil {
+			return err
+		}
+	}
+	// Re-seat the snapshot VERBATIM: FileMatchInfo.MovieID (family/index
+	// membership), status, and every other pre-edit result field restore
+	// exactly — nothing about the result's identity is recomputed from the
+	// movie. UpdateFileResult re-indexes and keeps the counters coherent, so
+	// the no-op-on-aligned-IDs flow is unchanged when the snapshot already
+	// agrees with Movie.ID.
+	je.store.UpdateFileResult(filePath, prior.Clone())
+	return nil
 }
 
 // posterLockKeyForMovieResult derives the shared per-(jobID, movieID)

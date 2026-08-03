@@ -69,7 +69,8 @@ type JobStoreInterface interface {
 	// PersistJobByID persists a job by its ID.
 	// The store holds the concrete *BatchJob internally, so callers that only
 	// have a composite (EditableJob, ControlledJob) can persist without
-	// a type assertion. No-op (nil) if the job is not found in the store.
+	// a type assertion. Returns ErrJobGone when the job ID is absent (the
+	// job-vanished race — see PersistJobByID on JobStore).
 	// Returns the persistence error on failure.
 	PersistJobByID(id string) error
 

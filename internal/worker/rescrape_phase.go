@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
+	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	timeoutPkg "github.com/javinizer/javinizer-go/internal/timeout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
@@ -26,6 +27,16 @@ type RescrapePhase interface {
 	// Rescrape performs the full rescrape lifecycle: file lookup, scrape, poster generation,
 	// result commit, and cleanup.
 	Rescrape(ctx context.Context, inputs rescrapePhaseInputs, cmd RescrapeCmd) (*RescrapeResult, error)
+}
+
+// rescrapeSiblingSnapshot captures a multipart sibling's pre-mirror result
+// for the rescrape success fan-out (I7): a same-ID rescrape mirrors its
+// refreshed poster state onto every sibling sharing the movie key, and a
+// persist failure afterwards restores these snapshots (parity with
+// preRescrapeResult for the rescraped file itself).
+type rescrapeSiblingSnapshot struct {
+	filePath string
+	result   *resultstore.MovieResult
 }
 
 type rescrapePhase struct{}
@@ -161,8 +172,14 @@ type rescrapeLifecycle struct {
 	// restores the bystander's bytes instead of deleting them, and the
 	// destination rollback is never lost after being armed; the blanket
 	// delete then runs only when no snapshot could be captured (no
-	// generation ran, or a snapshot-less/failed snapshot degrade).
-	failureCleanup func(movie *models.Movie)
+	// generation ran, or a snapshot-less generator degrade — a snapshot
+	// ERROR fails the rescrape closed before generation, so a failed
+	// snapshot can never reach this cleanup with replaced assets).
+	// A rollback error is RETURNED (never swallowed): without it the cache
+	// can stay replaced/corrupted while the failure the caller already has
+	// gives no indication the restore itself failed — the same surfacing the
+	// persist-failure rollback does (errors joined onto the outcome).
+	failureCleanup func(movie *models.Movie) error
 }
 
 // withRescrapeStatus executes fn within a rescrape status-transition wrapper.
@@ -172,7 +189,9 @@ type rescrapeLifecycle struct {
 // the bystander's or pre-rescrape bytes GeneratePoster replaced, and removing
 // freshly generated files at a brand-new key (RestoreAssets deletes files
 // absent from the snapshot) — otherwise the destination assets are deleted
-// outright (the pre-existing degrade for snapshot-less generators). On
+// outright (the pre-existing degrade for snapshot-less generators; a
+// snapshot that ERRORS fails the rescrape closed before generation, so this
+// delete fallback can never fire after an unrecoverable replacement). On
 // success, orphaned poster paths are cleaned up instead.
 func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resultstore.MovieResult, error)) (*RescrapeResult, error) {
 	outcome, movieResult, err := fn()
@@ -182,16 +201,18 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 		}
 		return nil
 	}
-	rewindFailurePosters := func() {
+	rewindFailurePosters := func() error {
 		movie := cleanupMovie()
 		if lc.failureCleanup != nil {
-			lc.failureCleanup(movie)
-			return
+			return lc.failureCleanup(movie)
 		}
 		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, movie)
+		return nil
 	}
 	if err != nil {
-		rewindFailurePosters()
+		if rbErr := rewindFailurePosters(); rbErr != nil {
+			err = fmt.Errorf("%w (poster cache rollback failed: %v)", err, rbErr)
+		}
 		if lc.inputs.HistoryRepo != nil {
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
@@ -207,8 +228,8 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 	}
 	switch outcome.Status {
 	case models.RescrapeStatusGone, models.RescrapeStatusConflict, models.RescrapeStatusFailed:
-		rewindFailurePosters()
-		if lc.inputs.HistoryRepo != nil {
+		rbErr := rewindFailurePosters()
+		if lc.inputs.HistoryRepo != nil || rbErr != nil {
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
 				movieID = movieResult.Movie.ID
@@ -217,7 +238,17 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 			if errMsg == "" {
 				errMsg = fmt.Sprintf("rescrape %s", outcome.Status)
 			}
-			auditRescrapeFailure(lc.inputs, movieID, lc.lookup.FilePath, errors.New(errMsg))
+			// A failed poster-cache restore changes what the caller must know
+			// (the cache may still hold the replaced/corrupted assets), so it
+			// rides on the surfaced failure — the same join the
+			// persist-failure rollback does below.
+			if rbErr != nil {
+				errMsg = fmt.Sprintf("%s (poster cache rollback failed: %v)", errMsg, rbErr)
+				outcome.Error = errMsg
+			}
+			if lc.inputs.HistoryRepo != nil {
+				auditRescrapeFailure(lc.inputs, movieID, lc.lookup.FilePath, errors.New(errMsg))
+			}
 		}
 		return outcome, nil
 	}
@@ -377,11 +408,32 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			releaseDestPosterLock()
 		}
 	}()
-	if inputs.Finder != nil {
-		lookup.CapturedRevision = inputs.Finder.GetRevision(lookup.FilePath)
-	}
-	if inputs.ResultMap != nil {
+	// Post-lock convergence (parity with the crop/PATCH/override re-resolve
+	// loops): the writer this rescrape waited behind can have RE-KEYED the
+	// result mid-wait (a manual edit or another rescrape committing A→X).
+	// Re-capturing only lookup.OldMovieID while still holding A's lock would
+	// run the whole asset snapshot/generation and the commit below
+	// unserialized against X's crop/edit writers — and the destination-lock
+	// condition inside the closure compares against posterLockID, so a stale
+	// origin key would also mis-derive the rekey pairing. When the
+	// re-captured key differs, the stale lock is released BEFORE the new key
+	// is acquired (never two poster-source locks here) and the state is
+	// re-read under the new key; each re-acquisition waits behind a writer
+	// whose re-key is already committed, so the loop converges.
+	for {
+		if inputs.Finder != nil {
+			lookup.CapturedRevision = inputs.Finder.GetRevision(lookup.FilePath)
+		}
+		if inputs.ResultMap == nil {
+			break
+		}
 		lookup.OldMovieID = inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
+		if lookup.OldMovieID == posterLockID {
+			break
+		}
+		releasePosterLock()
+		posterLockID = lookup.OldMovieID
+		releasePosterLock = AcquirePosterSourceLock(inputs.JobID.String(), posterLockID)
 	}
 
 	// Job-scope envelope serialization (Codex P2: bulk rescrape workers each
@@ -416,14 +468,22 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	var originCacheRollback func() error
 	var preRescrapeResult *resultstore.MovieResult
 	var preRescrapeProv *resultstore.ProvenanceData
+	// posterGenerationAttempted gates the blanket failure-cleanup delete
+	// (C5): a cancellation/failure BEFORE GeneratePoster ran never touched
+	// the destination cache, so deleting it would destroy a PRE-EXISTING
+	// poster the review UI still references. Only a run that actually
+	// attempted generation may have replaced the cache and need cleanup.
+	var posterGenerationAttempted bool
 	// degradedRollback collects the rollback legs that could NOT be armed
-	// (asset/result snapshots that failed under the lock) so a later
-	// envelope-persist failure can SAY what it could not restore (P3-7's
-	// degraded-rollback visibility).
+	// (a result-store read miss at snapshot time, or a read-only store
+	// seam — asset-snapshot errors no longer land here: they fail the
+	// rescrape closed before generation) so a later envelope-persist
+	// failure can SAY what it could not restore (P3-7's degraded-rollback
+	// visibility).
 	var degradedRollback []string
 
 	lc := rescrapeLifecycle{inputs: inputs, lookup: lookup}
-	lc.failureCleanup = func(movie *models.Movie) {
+	lc.failureCleanup = func(movie *models.Movie) error {
 		// F-new: a failure cleanup must not DELETE the destination key's
 		// assets when the pre-generation snapshot was captured — replay the
 		// snapshot instead. The failed leg's GeneratePoster already replaced
@@ -446,18 +506,27 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// persist-failure rollback below and this cleanup are mutually
 		// exclusive (only a Success outcome reaches the persist), and the
 		// nil-out pins that contract if this ever changes.
-		// Degrade: no PosterGen, a generator without the snapshot capability,
-		// or a failed snapshot (degradedRollback records it) falls back to
-		// the blanket delete — the pre-existing semantics.
+		// Degrade: no PosterGen, or a generator without the snapshot
+		// capability, falls back to the blanket delete — the pre-existing
+		// semantics (a snapshot ERROR never gets here: it fails the rescrape
+		// closed before generation, and its cleanup receives a nil movie).
 		if posterCacheRollback != nil {
 			rb := posterCacheRollback
 			posterCacheRollback = nil
 			if rbErr := rb(); rbErr != nil {
-				logging.Warnf("[rescrape] Failed to restore destination poster cache during failure cleanup for job %s: %v", inputs.JobID.String(), rbErr)
+				return fmt.Errorf("restore destination poster cache: %w", rbErr)
 			}
-			return
+			return nil
+		}
+		if !posterGenerationAttempted {
+			// Failure BEFORE poster generation (e.g. ctx cancelled right after
+			// the scrape, or a snapshooter-less generator never reached): the
+			// run replaced NOTHING, so the destructive delete below would only
+			// remove pre-existing destination cache the cleanup must preserve.
+			return nil
 		}
 		CleanupMoviePosters(inputs.Fs, inputs.TempDir, inputs.JobID, movie)
+		return nil
 	}
 	outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
 		// Scrape
@@ -531,26 +600,106 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// re-acquiring) — so taking the pair in a stable order makes a lock
 		// cycle impossible. Keys are acquired in lexical movie-ID order (the
 		// shared jobID prefix on the composite key cancels): when B sorts
-		// after the held origin key, B is acquired directly on top of A; when
-		// B sorts BEFORE A, A is released first, then B and A are acquired in
-		// order, and the origin-side under-lock state (revision, OldMovieID)
-		// is re-captured again because an A-side edit could have landed in
-		// the gap. Two opposite-direction rescrapes (A→B while B→A) therefore
-		// cannot deadlock: whichever acquired its origin first is also the
-		// one allowed to take the other key first.
-		if newMovieID != "" && newMovieID != posterLockID {
+		// after the held origin key, B is acquired directly on top of A (the
+		// origin key is verified stable under its own held lock first, so no
+		// re-read gap exists); when B sorts BEFORE A, A is released first,
+		// then B and A are acquired in order, and the origin-side under-lock
+		// state (revision, OldMovieID) is re-captured again because an A-side
+		// edit could have landed in the gap. If that re-capture shows the
+		// result was RE-KEYED mid-gap (A→C), refreshing only OldMovieID
+		// would leave posterLockID stale: the snapshot/generation/commit
+		// below would run against C's state while holding locks for {B, A} —
+		// unserialized against C's crop/edit writers, and the collision check
+		// would run against the wrong origin. So the gap re-key drops BOTH
+		// locks and re-converges the origin lock on the LIVE key (mirroring
+		// the post-lock convergence loop above; each re-acquisition waits
+		// behind a writer whose re-key is already committed, so the loop
+		// converges) before re-attempting the pairing. Two opposite-direction
+		// rescrapes (A→B while B→A) therefore cannot deadlock: whichever
+		// acquired its origin first is also the one allowed to take the other
+		// key first. All pair decisions below compare the normalized (case-folded)
+		// key segments — PosterSourceLockMovieID — matching the folded lock map
+		// key: a case-only variant names the SAME lock, so treating it as a
+		// rekey pair would self-deadlock, and raw-string ordering can disagree
+		// with the folded order.
+		if newMovieID != "" && PosterSourceLockMovieID(newMovieID) != PosterSourceLockMovieID(posterLockID) {
 			jobID := inputs.JobID.String()
-			if posterLockID < newMovieID {
-				releaseDestPosterLock = AcquirePosterSourceLock(jobID, newMovieID)
-			} else {
+			for {
+				// Re-verify the origin key under its own held lock before
+				// pairing: a gap re-key from a previous iteration (or any
+				// window where the origin lock was released) may have moved
+				// it. First pass is a no-op — the origin lock has been held
+				// continuously since the convergence loop above.
+				if inputs.ResultMap != nil {
+					if inputs.Finder != nil {
+						lookup.CapturedRevision = inputs.Finder.GetRevision(lookup.FilePath)
+					}
+					liveID := inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
+					lookup.OldMovieID = liveID
+					if liveID != posterLockID {
+						releasePosterLock()
+						posterLockID = liveID
+						releasePosterLock = AcquirePosterSourceLock(jobID, posterLockID)
+						continue
+					}
+				}
+				if PosterSourceLockMovieID(newMovieID) == PosterSourceLockMovieID(posterLockID) {
+					// A mid-gap writer re-keyed the result ONTO the scraped
+					// destination: the origin lock IS the destination lock, so
+					// no pair is needed (the writer's own collision check
+					// already guarded B).
+					break
+				}
+				if PosterSourceLockMovieID(posterLockID) < PosterSourceLockMovieID(newMovieID) {
+					releaseDestPosterLock = AcquirePosterSourceLock(jobID, newMovieID)
+					break
+				}
 				releasePosterLock()
-				releaseDestPosterLock = AcquirePosterSourceLock(jobID, newMovieID)
+				destRelease := AcquirePosterSourceLock(jobID, newMovieID)
 				releasePosterLock = AcquirePosterSourceLock(jobID, posterLockID)
 				if inputs.Finder != nil {
 					lookup.CapturedRevision = inputs.Finder.GetRevision(lookup.FilePath)
 				}
-				if inputs.ResultMap != nil {
-					lookup.OldMovieID = inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
+				if inputs.ResultMap == nil {
+					releaseDestPosterLock = destRelease
+					break
+				}
+				liveID := inputs.ResultMap.GetCurrentMovieID(lookup.FilePath)
+				lookup.OldMovieID = liveID
+				if liveID == posterLockID {
+					releaseDestPosterLock = destRelease
+					break
+				}
+				// Gap re-key (A→C): drop the BOTH-locks pair and re-converge
+				// the origin lock on the live key; the loop top re-verifies
+				// under it before pairing again.
+				releasePosterLock()
+				destRelease()
+				posterLockID = liveID
+				releasePosterLock = AcquirePosterSourceLock(jobID, posterLockID)
+			}
+
+			// Codex P0: a rekeying rescrape (A→B) whose destination B is ALREADY
+			// used by ANOTHER result family must be REJECTED — GeneratePoster
+			// below would otherwise overwrite B's shared {B}-full.jpg/preview
+			// cache while B's persisted poster URL and crop bounds still reference
+			// B's own source, and a later crop fanned out by movie ID would apply
+			// coordinates measured on one image against both families. Same
+			// rejection semantics as the id-override re-key
+			// (jobEditorImpl.ApplyFieldOverride) and the whole-movie PATCH rename
+			// (updateBatchMovie) via the shared CheckRenameDestinationCollision —
+			// running HERE, under the held (origin, destination) lock pair with
+			// the keys re-converged, BEFORE any snapshot, poster generation, or
+			// commit, so a collision leaves the destination's cache and state
+			// untouched (nothing has mutated yet; the Failed outcome's cleanup
+			// replays the unchanged cache). Skipped when a mid-gap re-key moved
+			// the result onto the destination itself (no rename remains).
+			if PosterSourceLockMovieID(newMovieID) != PosterSourceLockMovieID(posterLockID) {
+				if lookupIdx, ok := inputs.ResultMap.(resultstore.MovieLookup); ok {
+					if cerr := CheckRenameDestinationCollision(lookupIdx.FindFilePathsForMovieID, posterLockID, lookup.FilePath, newMovieID); cerr != nil {
+						//nolint:nilerr // a collision is a per-result reject reported via the Failed outcome, not a phase error
+						return &RescrapeResult{Status: models.RescrapeStatusFailed, Error: cerr.Error()}, nil, nil
+					}
 				}
 			}
 		}
@@ -622,39 +771,83 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// otherwise resurrect the pre-rescrape job state against the freshly
 		// generated image. Taken while the poster-source lock(s) are still
 		// held, so no crop/edit can interleave between the snapshot and the
-		// replacement. A snapshot failure degrades to no-rollback (logged and
-		// recorded for the P3-7 degraded-rollback hint) rather than rejecting
-		// the rescrape: poster generation itself is already best-effort below.
+		// replacement. A snapshot failure FAILS CLOSED (Codex P1) instead of
+		// degrading to no-rollback: continuing would let GeneratePoster
+		// replace the destination cache unrecoverably, and a later in-section
+		// failure would then DELETE the destination's existing assets via the
+		// blanket failure cleanup — or, for a rekey, the success-path orphan
+		// cleanup would delete the origin's assets before the persist, and a
+		// persist failure would roll the store back onto an ID whose assets
+		// are already gone. Nothing has mutated at snapshot time (the state
+		// and asset snapshots are read-only captures; generation/commit have
+		// not run), so the Failed outcome is returned with a nil movieResult
+		// and withRescrapeStatus's failure cleanup is a deliberate no-op —
+		// parity with the destination-collision rejection above. A generator
+		// WITHOUT the snapshot capability still degrades (no rollback can
+		// exist there).
 		if inputs.PosterGen != nil && movieResult.Movie != nil {
 			if snapshooter, ok := inputs.PosterGen.(posterAssetSnapshooter); ok {
 				snap, snapErr := snapshooter.SnapshotPosterAssets(inputs.JobID.String(), movieResult.Movie.ID)
 				if snapErr != nil {
-					logging.Warnf("[rescrape] Failed to snapshot poster assets for %s before generation (no persist-failure rollback): %v", movieResult.Movie.ID, snapErr)
-					degradedRollback = append(degradedRollback, fmt.Sprintf("destination poster cache rollback unavailable (snapshot failed: %v)", snapErr))
-				} else {
-					posterCacheRollback = func() error { return snapshooter.RestorePosterAssets(snap) }
+					logging.Warnf("[rescrape] Failed to snapshot poster assets for %s before generation (failing closed): %v", movieResult.Movie.ID, snapErr)
+					return &RescrapeResult{Status: models.RescrapeStatusFailed, Error: fmt.Sprintf("failed to snapshot destination poster assets for %s before generation: %v", movieResult.Movie.ID, snapErr)}, nil, nil
 				}
+				posterCacheRollback = func() error { return snapshooter.RestorePosterAssets(snap) }
 				// Rekeying rescrape (A→B): withRescrapeStatus's success-path
 				// orphan cleanup DELETES origin A's poster assets after the commit
 				// — before the envelope persist — so the destination
 				// snapshot alone cannot recover them. Snapshot A's assets too,
 				// under the same held locks, and include their restore in the
-				// rollback (F2). Deferring the cleanup to after the persist was
-				// the alternative; it was rejected because callers that never
+				// rollback (F2); a failed origin snapshot fails closed for the
+				// same destructive-cleanup reason as the destination (the store
+				// could otherwise roll back onto A after A's assets were already
+				// deleted). Deferring the cleanup to after the persist was the
+				// alternative; it was rejected because callers that never
 				// persist an envelope (non-API flows) would then leak the orphan
 				// assets permanently. A snapshot taken for an origin that turns
 				// out NOT orphaned is harmless: its restore rewrites identical
 				// bytes and the rollback only runs on persist failure.
 				if lookup.OldMovieID != "" && lookup.OldMovieID != movieResult.Movie.ID {
-					if originSnap, originErr := snapshooter.SnapshotPosterAssets(inputs.JobID.String(), lookup.OldMovieID); originErr != nil {
-						logging.Warnf("[rescrape] Failed to snapshot origin poster assets for %s before generation (no persist-failure rollback): %v", lookup.OldMovieID, originErr)
-						degradedRollback = append(degradedRollback, fmt.Sprintf("origin poster cache rollback unavailable (snapshot failed: %v)", originErr))
-					} else {
-						originCacheRollback = func() error { return snapshooter.RestorePosterAssets(originSnap) }
+					originSnap, originErr := snapshooter.SnapshotPosterAssets(inputs.JobID.String(), lookup.OldMovieID)
+					if originErr != nil {
+						logging.Warnf("[rescrape] Failed to snapshot origin poster assets for %s before generation (failing closed): %v", lookup.OldMovieID, originErr)
+						// Disarm the destination rollback armed above: nothing has
+						// mutated (the destination snapshot is a read-only capture;
+						// generation has not run), so the Failed outcome's cleanup
+						// must be a true no-op — replaying the snapshot would only
+						// rewrite identical bytes, but the nil movie the outcome
+						// carries already makes the cleanup a no-op once no
+						// rollback is armed.
+						posterCacheRollback = nil
+						return &RescrapeResult{Status: models.RescrapeStatusFailed, Error: fmt.Sprintf("failed to snapshot origin poster assets for %s before generation: %v", lookup.OldMovieID, originErr)}, nil, nil
 					}
+					originCacheRollback = func() error { return snapshooter.RestorePosterAssets(originSnap) }
 				}
 			}
+			posterGenerationAttempted = true
 			if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
+				// Fail closed on a generation failure once a pre-generation
+				// snapshot is armed AND the failure can have mutated the
+				// destination cache: GeneratePoster replaces it NON-atomically
+				// (DownloadFromURL removes the existing {movieID}-full.jpg before
+				// finalizing the replacement), so degrading such a failure to
+				// success-with-metadata would commit the NEW poster URL while
+				// the OLD image is already gone — and no rollback would ever
+				// replay the snapshot. The Failed outcome makes
+				// withRescrapeStatus's failure cleanup replay the destination
+				// snapshot (restoring pre-generation bytes, or removing fresh
+				// files from a brand-new key); the origin's assets are untouched
+				// (orphan cleanup is success-path-only). movieResult rides along
+				// non-nil so the cleanup branch with the armed rollback runs —
+				// parity with RefreshPosterAssets, which fail-closes the same
+				// GeneratePoster failure with a snapshot restore.
+				// ErrNoPosterSource is the pre-download rejection — NOTHING was
+				// touched (the check precedes the download), so it keeps the
+				// degrade below, as does a generator without the snapshot
+				// capability (no restore exists there at all).
+				if (posterCacheRollback != nil || originCacheRollback != nil) && !errors.Is(posterErr, poster.ErrNoPosterSource) {
+					return &RescrapeResult{Status: models.RescrapeStatusFailed, Error: fmt.Sprintf("poster generation failed: %v", posterErr)}, movieResult, nil
+				}
 				s := posterErr.Error()
 				movieResult.PosterError = &s
 			}
@@ -710,6 +903,51 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			})
 		}
 
+		// Single-sibling poster fan-out (I7): a same-ID (non-rekey) rescrape of
+		// ONE multipart sibling regenerated the shared {movieID}-full.jpg that
+		// every family member uses, but committed the refreshed poster state
+		// only on the rescraped file — the other siblings would keep poster
+		// state measured against the OLD image while sharing the NEW cached
+		// one (the exact desync class mergeOverrideOntoPart's poster fan-out
+		// exists to prevent for field overrides). Mirror the rescraped movie's
+		// poster state onto every sibling sharing the new key — same shape as
+		// mergeOverrideOntoPart: each sibling keeps its OWN movie wholesale,
+		// only the Poster group is cloned across (per-part identity fields
+		// survive). Runs HERE, inside the poster-source lock(s) and before the
+		// envelope persist, so the persisted envelope is coherent; siblings
+		// whose identity raced away from the key mid-write are left alone
+		// (P2-5 parity). Pre-mirror snapshots ride into the persist-failure
+		// rollback below so a rejected persist never leaves sibling state
+		// desynced from the rolled-back cache.
+		var siblingRollback []rescrapeSiblingSnapshot
+		if canWriteStore && movieResult != nil && movieResult.Movie != nil {
+			if family, ok := inputs.ResultMap.(resultstore.MovieLookup); ok {
+				newKey := movieResult.Movie.ID
+				rescrapedPoster := movieResult.Movie.Poster
+				for _, sibPath := range family.FindFilePathsForMovieID(newKey) {
+					if sibPath == lookup.FilePath {
+						continue
+					}
+					pre, preErr := inputs.ResultMap.GetMovieResult(sibPath)
+					if preErr != nil || pre == nil || pre.Movie == nil {
+						continue // nothing coherent to sync or restore
+					}
+					mirrored := false
+					uErr := updater.AtomicUpdateFileResult(sibPath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+						if current.Movie == nil || current.Movie.ID != newKey {
+							return current, nil // raced re-key: not this family anymore
+						}
+						current.Movie.Poster = rescrapedPoster.Clone()
+						mirrored = true
+						return current, nil
+					})
+					if uErr == nil && mirrored {
+						siblingRollback = append(siblingRollback, rescrapeSiblingSnapshot{filePath: sibPath, result: pre})
+					}
+				}
+			}
+		}
+
 		if inputs.PersistEnvelope != nil {
 			if perr := inputs.PersistEnvelope(); perr != nil {
 				// The rescrape committed but the envelope did not persist: a
@@ -749,6 +987,17 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 						updater.SetProvenance(lookup.FilePath, preRescrapeProv)
 					} else {
 						degradedRollback = append(degradedRollback, "in-memory state and provenance rollback unavailable (no pre-rescrape snapshot captured)")
+					}
+					// I7 fan-out rollback: the sibling poster-state mirrors above
+					// revert alongside the rescraped file (same
+					// revert-state-before-cache ordering) so no sibling references
+					// the rescraped poster while the cache flips back.
+					for _, sib := range siblingRollback {
+						if rbErr := updater.AtomicUpdateFileResult(sib.filePath, func(_ *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+							return sib.result.Clone(), nil
+						}); rbErr != nil {
+							persistErr = fmt.Errorf("%w (sibling state rollback failed for %s: %v)", persistErr, sib.filePath, rbErr)
+						}
 					}
 				}
 				if cacheRB := chainRollbacks(posterCacheRollback, originCacheRollback); cacheRB != nil {

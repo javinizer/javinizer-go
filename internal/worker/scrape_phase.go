@@ -304,29 +304,50 @@ func interpretScrapeResult(
 	// Poster generation — moved from the workflow's scrape orchestrator
 	// to the worker phase so that ScrapeCmd stays a pure query and
 	// the side-effect (filesystem write) is owned by the orchestration layer.
-	if inputs.PosterGen != nil && fileResult.Movie != nil {
-		posterErr := inputs.PosterGen.GeneratePoster(taskCtx, inputs.JobID.String(), fileResult.Movie)
-		if posterErr != nil {
-			s := posterErr.Error()
-			fileResult.PosterError = &s
+	//
+	// The whole generation→baseline→commit sequence runs under the scraped
+	// movie's poster-source lock (L2): GeneratePoster replaces the job's
+	// cached {movieID}-full.jpg via a non-atomic Remove-then-Rename
+	// (DownloadFromURL), so two scrapes resolving to the SAME movie ID must
+	// not interleave that cache mutation. Holding the lock through the
+	// UpdateFileResult commit additionally freezes the destination family
+	// JOIN against a rekey's collision-check→migration window (D10):
+	// CheckRenameDestinationCollision runs under the destination lock pair,
+	// so while this scrape holds the very key being committed into, no rekey
+	// can pass its check and migrate midsession — and vice versa. The closure
+	// form keeps the release deferred (panic-safe, L1: a leaked refcounted
+	// entry never evicts and deadlocks the key). A nil Movie carries no
+	// poster/caches/family join — nothing to serialize.
+	func() {
+		var releaseScrapePosterLock func()
+		if fileResult.Movie != nil {
+			releaseScrapePosterLock = AcquirePosterSourceLock(inputs.JobID.String(), fileResult.Movie.ID)
+			defer releaseScrapePosterLock()
 		}
-		fileResult.PosterGenerated = true
-	}
+		if inputs.PosterGen != nil && fileResult.Movie != nil {
+			posterErr := inputs.PosterGen.GeneratePoster(taskCtx, inputs.JobID.String(), fileResult.Movie)
+			if posterErr != nil {
+				s := posterErr.Error()
+				fileResult.PosterError = &s
+			}
+			fileResult.PosterGenerated = true
+		}
 
-	// Establish the scraped poster state as the Reset baseline so the review
-	// UI's Reset returns to what this scrape produced. Done after poster
-	// generation so the generated CroppedPosterURL is captured too. Mirrors the
-	// rescrape path (establishScrapedBaseline) for full symmetry — without it,
-	// Original* stays empty until the first manual edit snapshots it lazily via
-	// backupPosterOriginals, which is inconsistent with the rescrape baseline.
-	if fileResult.Movie != nil {
-		establishScrapedBaseline(fileResult.Movie, fileResult.Movie)
-	}
+		// Establish the scraped poster state as the Reset baseline so the review
+		// UI's Reset returns to what this scrape produced. Done after poster
+		// generation so the generated CroppedPosterURL is captured too. Mirrors the
+		// rescrape path (establishScrapedBaseline) for full symmetry — without it,
+		// Original* stays empty until the first manual edit snapshots it lazily via
+		// backupPosterOriginals, which is inconsistent with the rescrape baseline.
+		if fileResult.Movie != nil {
+			establishScrapedBaseline(fileResult.Movie, fileResult.Movie)
+		}
 
-	inputs.Updater.UpdateFileResult(filePath, fileResult)
-	if prov != nil {
-		inputs.Updater.SetProvenance(filePath, prov)
-	}
+		inputs.Updater.UpdateFileResult(filePath, fileResult)
+		if prov != nil {
+			inputs.Updater.SetProvenance(filePath, prov)
+		}
+	}()
 
 	inputs.Broadcaster.Send(JobEvent{
 		JobID:     inputs.JobID,
@@ -570,11 +591,34 @@ func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inp
 // Persist failures surface on the MovieResult, preserving the original
 // error semantics (persist error → Status=Failed).
 func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, movieID, errMsg string)) (handled bool) {
+	// Persist ordering (P1 / F-D DB leg): take the poster-source lock BEFORE
+	// cloning for the DB upsert and hold it through the resultstore write-back
+	// below. The previous order (clone → upsert → lock+merge) repaired an
+	// interleaved poster edit in resultstore via the post-upsert merge, but
+	// the UPSERT itself still wrote the stale scrape-time clone to the movies
+	// table — overwriting the concurrent edit's poster columns in the DB,
+	// from where a later reload resurrected the pre-edit poster URL/crop
+	// state. Under the lock, re-read the LIVE result's poster state and merge
+	// it onto the upsert clone: every poster writer (crop, source edit,
+	// poster-from-URL, rescrape) serializes on this same key
+	// (AcquirePosterSourceLock), so no edit can interleave between the re-read
+	// and the upsert, and an edit that lands after the upsert simply writes
+	// again and wins. The lock key is resolved the same way as the write-back
+	// leg (liveWritebackLockKey): the live result may have been re-keyed since
+	// the outcome was produced.
+	releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, o.FilePath, o.MovieID))
+	defer releasePosterLock()
+
 	// Clone before persisting: UpsertWithTranslations mutates its input movie in
 	// place (resets association slices to reapply associations). The in-memory
 	// MovieResult.Movie shares the result.Movie pointer, so mutating it here
 	// would race with concurrent API/UI readers under -race.
 	cloned := o.Result.Movie.Clone()
+	if reader, ok := inputs.Updater.(resultstore.ResultMapAccessor); ok {
+		if live, liveErr := reader.GetMovieResult(o.FilePath); liveErr == nil && live != nil && live.Movie != nil {
+			mergeLivePosterState(cloned, live.Movie)
+		}
+	}
 	var genreTrans []models.GenreTranslationData
 	var actressTrans []models.ActressTranslationData
 	if o.Result != nil && o.Result.TranslationOutput != nil {
@@ -630,12 +674,15 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	// that landed while this file's persist queued would be overwritten by the
 	// scrape-time clone. Merge the LIVE result's poster state onto the saved
 	// movie instead of wholesale replacement (mergeLivePosterState — same fix
-	// class as the apply-phase write-backs), UNDER the live movie's
-	// poster-source lock so no crop/edit interleaves between the key
-	// resolution and the write; on an identity mismatch (the live result was
-	// re-keyed mid-persist) the live movie is kept wholesale — Persisted is
-	// pipeline-owned and still moves.
-	releasePosterLock := AcquirePosterSourceLock(inputs.JobID.String(), liveWritebackLockKey(inputs.Updater, o.FilePath, o.MovieID))
+	// class as the apply-phase write-backs). The poster-source lock is already
+	// held (acquired before the upsert clone above): poster writers serialize
+	// on this key and rekey writers need it too, so the lock key resolved
+	// before the upsert still matches the live movie here — a crop/edit
+	// cannot have interleaved, and on an identity mismatch (the live result
+	// was re-keyed before this persist acquired the lock) the live movie is
+	// kept wholesale — Persisted is pipeline-owned and still moves. Lock
+	// release rides the function-level defer (L1 parity: panics unwind
+	// through it, so the refcounted entry never leaks).
 	_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		current.Persisted = true
 		if saved != nil {
@@ -649,7 +696,6 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 		}
 		return current, nil
 	})
-	releasePosterLock()
 	movieID := o.MovieID
 	if saved != nil {
 		movieID = saved.ID

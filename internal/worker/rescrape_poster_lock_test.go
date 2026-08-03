@@ -448,3 +448,108 @@ func TestRescrapePhase_RescrapePosterLockReleasedOnAllPaths(t *testing.T) {
 		assertPosterSourceLockFree(t, "job-rescrape-nilmap", "")
 	})
 }
+
+// TestRescrapePhase_RescrapeReconvergesOnRekeyWhileWaitingForPosterLock pins
+// the post-lock key convergence: a writer holding the pre-rescrape key (A)
+// can re-key the result A→X while the rescrape waits on A's lock. Re-reading
+// OldMovieID without re-resolving the LOCK KEY left the rescrape holding A's
+// (now unrelated) lock through the poster snapshot/generation and the commit
+// — unserialized against X's crop/edit writers. The loop must release A and
+// converge onto X before proceeding.
+//
+// The mid-wait rekey target (X) deliberately DIFFERS from the scrape's
+// resolved ID (B): when they coincide, the destination-lock block acquires B
+// anyway and masks the stale origin key. With X != B the pre-fix rescrape
+// held only {A, B}, leaving X's writers unserialized.
+func TestRescrapePhase_RescrapeReconvergesOnRekeyWhileWaitingForPosterLock(t *testing.T) {
+	const (
+		jobID  = models.JobID("job-rescrape-converge")
+		movieA = "RKY-A"
+		movieX = "RKY-X"
+		movieB = "RKY-B"
+		newURL = "https://new.example/poster.jpg"
+	)
+	filePath := "/source/" + movieA + ".mp4"
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{
+		Movie: &models.Movie{ID: movieB, Title: "Rekeyed", Poster: models.PosterState{PosterURL: newURL}},
+	}}
+	gen := &blockingPosterGen{entered: make(chan struct{}), finish: make(chan struct{})}
+	inputs, tracker := rescrapeLockFixture(t, jobID, movieA, filePath, wf, gen)
+
+	// A rekeying writer holds A's lock first; the rescrape blocks behind it.
+	releaseA := AcquirePosterSourceLock(jobID.String(), movieA)
+
+	type rescrapeOutcome struct {
+		res *RescrapeResult
+		err error
+	}
+	done := make(chan rescrapeOutcome, 1)
+	go func() {
+		res, err := NewRescrapePhase().Rescrape(context.Background(), inputs,
+			RescrapeCmd{MovieID: movieA, FilePath: filePath})
+		done <- rescrapeOutcome{res, err}
+	}()
+
+	// The rescrape must NOT slip through while A's lock is held.
+	select {
+	case out := <-done:
+		releaseA()
+		t.Fatalf("rescrape completed (status=%v, err=%v) while the origin lock was held", out.res, out.err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// The writer re-keys the result A→X mid-wait, then releases A.
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movieX},
+		Movie:         &models.Movie{ID: movieX, Poster: models.PosterState{PosterURL: "https://old.example/poster.jpg"}},
+		Status:        models.JobStatusCompleted,
+	})
+	releaseA()
+
+	// The rescrape re-reads the result under A, sees the re-key, and must
+	// converge onto X BEFORE poster generation (then pair with the scrape's
+	// resolved destination B — X sorts after B, so the origin is released
+	// and the (B, X) pair is taken in lexical order inside the closure).
+	select {
+	case <-gen.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rescrape did not reach poster generation after the origin lock was released")
+	}
+
+	// While it generates, X's poster-source lock (the CURRENT key of the
+	// file's result family) must be held by the rescrape: a crop on the
+	// re-keyed movie blocking here is the fix's observable. Pre-fix the
+	// rescrape kept holding only {A, B} and this acquire succeeded
+	// immediately.
+	acquired := make(chan func(), 1)
+	go func() { acquired <- AcquirePosterSourceLock(jobID.String(), movieX) }()
+	select {
+	case r := <-acquired:
+		r()
+		t.Fatal("movie X's poster-source lock was free while the rescrape ran — it kept holding the stale pre-rekey key")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(gen.finish)
+	var out rescrapeOutcome
+	select {
+	case out = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rescrape did not finish after poster generation was released")
+	}
+	// Drain the pending acquirer now that the rescrape released X.
+	(<-acquired)()
+
+	require.NoError(t, out.err)
+	require.NotNil(t, out.res)
+	assert.Equal(t, models.RescrapeStatusSuccess, out.res.Status)
+
+	final, getErr := tracker.GetMovieResult(filePath)
+	require.NoError(t, getErr)
+	require.NotNil(t, final.Movie)
+	assert.Equal(t, movieB, final.Movie.ID)
+	assert.Equal(t, newURL, final.Movie.Poster.PosterURL)
+	assertPosterSourceLockFree(t, jobID.String(), movieA)
+	assertPosterSourceLockFree(t, jobID.String(), movieX)
+	assertPosterSourceLockFree(t, jobID.String(), movieB)
+}
