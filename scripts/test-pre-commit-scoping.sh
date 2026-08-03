@@ -567,6 +567,11 @@ check_hook "e2e: ignored embed asset under testdata masked" 1 "local_e.db"
 # fail-closed graph refusal converts the unresolvable pattern into a
 # block (pre-tiering this exact commit passed the hook; CI did not)
 reset
+# baseline restore point: the fixture COMMIT below must not leak into the
+# later root-package masking scenarios (a tracked root .go would mask the
+# ghost via plain PKG_DIRS membership instead of the '.'-normalisation
+# those scenarios isolate)
+BASE_SHA=$(git rev-parse HEAD)
 cat > rootembed_fixture.go <<'EOF'
 package x
 
@@ -596,6 +601,9 @@ check_hook "e2e: root-level embed asset edit runs full Go checks" 0 "all package
 reset; printf 'banner-index\n' > banner.txt; git add banner.txt
 printf 'banner-tree\n' > banner.txt
 check_hook "e2e: unstaged root embed target drift blocked" 1 "banner.txt"
+
+# restore the pre-fixture baseline so later scenarios see the ORIGINAL root
+git reset -q --hard "$BASE_SHA" >/dev/null; git clean -qfdx
 
 # fail-closed guard scans: with a package graph the toolchain cannot
 # enumerate (UNTRACKED file importing an unresolvable module — GOPROXY=off

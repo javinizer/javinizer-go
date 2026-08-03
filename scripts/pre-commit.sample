@@ -216,7 +216,7 @@ EMBED_PKGS=""
 # guard's fail-closed census blocks loudly a moment later, so nothing evades.
 EMBED_STAGED=""
 ASSET_CANDIDATES=$(git diff --cached --name-only --no-renames --diff-filter=ACMR \
-    | grep -vE '^testdata/|^internal/|^cmd/|^web/|^docs/swagger/|^configs/|\.go$|^go\.(mod|sum)$|^Makefile$|^\.golangci\.(yml|yaml)$' || true)
+    | grep -vE '^testdata/|^internal/|^cmd/|^web/dist/|^docs/swagger/|^configs/|\.go$|^go\.(mod|sum)$|^Makefile$|^\.golangci\.(yml|yaml)$' || true)
 if [ -n "$ASSET_CANDIDATES" ]; then
     if EMBED_CENSUS=$(compute_embed_census); then
         EMBED_STAGED=$(comm -12 \
