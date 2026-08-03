@@ -104,13 +104,31 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 	// do not fail the request, matching the previous adapter-level behavior.
 	if pe.movieRepo != nil {
 		posterID := movieID
-		if mr, _ := pe.lookup.FindMovieResultForMovieID(movieID); mr != nil && mr.Movie != nil && mr.Movie.ID != "" {
-			posterID = mr.Movie.ID
+		// shouldCrop mirrors the in-memory fan-out's derived intent
+		// (cropIntentAfterPosterFromURL): leaving the DB row's old flag while
+		// writing the new URLs would let a later scrape load this record
+		// through internal/scrape/cache.go and organize the SAME URL with the
+		// STALE crop decision (an uncropped cover or an unwanted crop). The
+		// authoritative post-update value is read from the primary result
+		// AFTER the fan-out loop above, so the DB write carries exactly the
+		// intent the job envelope persisted (Codex P2).
+		var (
+			shouldCrop bool
+			haveIntent bool
+		)
+		if mr, _ := pe.lookup.FindMovieResultForMovieID(movieID); mr != nil && mr.Movie != nil {
+			if mr.Movie.ID != "" {
+				posterID = mr.Movie.ID
+			}
+			shouldCrop, haveIntent = mr.Movie.Poster.ShouldCropPoster, true
 		}
 		existing, dbErr := pe.movieRepo.FindByID(ctx, posterID)
 		if dbErr == nil && existing != nil {
 			existing.Poster.PosterURL = posterURL
 			existing.Poster.CroppedPosterURL = croppedURL
+			if haveIntent {
+				existing.Poster.ShouldCropPoster = shouldCrop
+			}
 			if _, upErr := pe.movieRepo.Upsert(ctx, existing); upErr != nil {
 				logging.Warnf("Failed to update movie poster in database: %v", upErr)
 			}

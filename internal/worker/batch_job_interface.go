@@ -714,6 +714,36 @@ func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, field
 	}
 	defer releasePosterLock()
 
+	// Codex P2: an "id" override whose destination ID is ALREADY in use by
+	// another result must be REJECTED before the asset move below. The move
+	// normalizes the destination key to the origin's assets
+	// (MoveAssets removes destination files before renaming), while the
+	// fan-out (FindFilePathsForMovieID(movieID)) only walks the ORIGIN's
+	// family — so a pre-existing B result would keep its own poster URLs and
+	// crop state while its cache gets silently replaced by A's images, and a
+	// later crop of either would fan bounds measured on one family over both
+	// (Organize then crops each from the wrong source). The check runs HERE
+	// — under the held (origin, destination) lock pair, before any asset or
+	// state mutation — comparing the destination key against every result's
+	// movie IDs EXCLUDING the selected result's own family: a path indexed
+	// at destKey that belongs to the SAME movie family (e.g. a multipart
+	// sibling whose FileMatchInfo.MovieID happens to equal destKey) is the
+	// normal fan-out case, not a collision. Holding both keys' locks freezes
+	// index membership at destKey too: a concurrent re-key INTO it needs
+	// that key's lock.
+	if destKey != "" {
+		ownFamily := make(map[string]struct{})
+		for _, p := range je.store.FindFilePathsForMovieID(movieID) {
+			ownFamily[p] = struct{}{}
+		}
+		ownFamily[filePath] = struct{}{} // belt-and-braces: never collide with self
+		for _, p := range je.store.FindFilePathsForMovieID(destKey) {
+			if _, ok := ownFamily[p]; !ok {
+				return nil, nil, fmt.Errorf("id override to %q rejected: another result in this job already uses that movie ID", destKey)
+			}
+		}
+	}
+
 	// P3-6: an "id" override re-keyed the movie — migrate the cached poster
 	// assets from the old key to the new one UNDER BOTH held locks, or they
 	// are orphaned at the old key while every crop/preview lookup resolves

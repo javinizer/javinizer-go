@@ -303,3 +303,59 @@ func TestOverrideBatchMovieField_CompensateRunsUnderPosterLock(t *testing.T) {
 	assert.Equal(t, "r18dev", prov.FieldSources["maker"], "the pre-override provenance attribution is restored")
 	assertPosterSourceLockFreeAPI(t, job.GetID(), resultID)
 }
+
+// TestOverrideBatchMovieField_IDCollisionSurfaces400 pins the handler-layer
+// surface of Codex P2 (FindFilePathsForMovieID collision rejection in
+// worker.jobEditorImpl.ApplyFieldOverride): an "id" override onto a movie ID
+// another result in the same job already uses must surface as a 400-class
+// validation error — and leave both movies' state untouched (no asset move,
+// no re-index; the worker-level invariants are pinned in
+// field_override_id_collision_test.go).
+func TestOverrideBatchMovieField_IDCollisionSurfaces400(t *testing.T) {
+	cfg := &config.Config{}
+	deps := createTestDeps(t, cfg, "")
+	fileA := "/path/to/AAA-001.mp4"
+	fileB := "/path/to/BBB-002.mp4"
+	job := deps.JobStore.CreateJobBatch([]string{fileA, fileB})
+	setJobResult(job, fileA, &resultstore.MovieResult{
+		ResultID:      "res-A",
+		FileMatchInfo: models.FileMatchInfo{Path: fileA, MovieID: "AAA-001"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "AAA-001", ContentID: "AAA-001", Title: "MovieA"},
+		StartedAt:     time.Now(),
+	})
+	setJobResult(job, fileB, &resultstore.MovieResult{
+		ResultID:      "res-B",
+		FileMatchInfo: models.FileMatchInfo{Path: fileB, MovieID: "BBB-002"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "BBB-002", ContentID: "BBB-002", Title: "MovieB"},
+		StartedAt:     time.Now(),
+	})
+	job.ResultsWriter().SetProvenance(fileA, &resultstore.ProvenanceData{
+		FieldSources: map[string]string{"id": "r18dev"},
+		ScraperResults: []*models.ScraperResult{
+			{Source: "r18dev", ID: "AAA-001"},
+			{Source: "dmm", ID: "BBB-002"}, // the destination ID movie B already uses
+		},
+	})
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/field-override", overrideBatchMovieField(testkit.GetTestRuntime(deps)))
+
+	body, _ := json.Marshal(contracts.FieldOverrideRequest{Field: "id", Source: "dmm"})
+	req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/res-A/field-override", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "already uses that movie ID")
+
+	// Both results are untouched by the rejected override.
+	storedA := storedMovieResult(t, job, "AAA-001")
+	require.NotNil(t, storedA.Movie)
+	assert.Equal(t, "AAA-001", storedA.Movie.ID)
+	storedB := storedMovieResult(t, job, "BBB-002")
+	require.NotNil(t, storedB.Movie)
+	assert.Equal(t, "BBB-002", storedB.Movie.ID)
+}
