@@ -752,52 +752,6 @@ func (_c *MockEditableJob_GetStatus_Call) RunAndReturn(run func() *worker.BatchJ
 	return _c
 }
 
-// Subscribe provides a mock function for the type MockEditableJob
-func (_mock *MockEditableJob) Subscribe() worker.JobEventSubscriber {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Subscribe")
-	}
-
-	var r0 worker.JobEventSubscriber
-	if returnFunc, ok := ret.Get(0).(func() worker.JobEventSubscriber); ok {
-		r0 = returnFunc()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(worker.JobEventSubscriber)
-		}
-	}
-	return r0
-}
-
-// MockEditableJob_Subscribe_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Subscribe'
-type MockEditableJob_Subscribe_Call struct {
-	*mock.Call
-}
-
-// Subscribe is a helper method to define mock.On call
-func (_e *MockEditableJob_Expecter) Subscribe() *MockEditableJob_Subscribe_Call {
-	return &MockEditableJob_Subscribe_Call{Call: _e.mock.On("Subscribe")}
-}
-
-func (_c *MockEditableJob_Subscribe_Call) Run(run func()) *MockEditableJob_Subscribe_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockEditableJob_Subscribe_Call) Return(jobEventSubscriber worker.JobEventSubscriber) *MockEditableJob_Subscribe_Call {
-	_c.Call.Return(jobEventSubscriber)
-	return _c
-}
-
-func (_c *MockEditableJob_Subscribe_Call) RunAndReturn(run func() worker.JobEventSubscriber) *MockEditableJob_Subscribe_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // RestoreMovieResult provides a mock function for the type MockEditableJob
 func (_mock *MockEditableJob) RestoreMovieResult(ctx context.Context, filePath string, prior *resultstore.MovieResult) error {
 	ret := _mock.Called(ctx, filePath, prior)
@@ -857,6 +811,52 @@ func (_c *MockEditableJob_RestoreMovieResult_Call) Return(err error) *MockEditab
 }
 
 func (_c *MockEditableJob_RestoreMovieResult_Call) RunAndReturn(run func(ctx context.Context, filePath string, prior *resultstore.MovieResult) error) *MockEditableJob_RestoreMovieResult_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Subscribe provides a mock function for the type MockEditableJob
+func (_mock *MockEditableJob) Subscribe() worker.JobEventSubscriber {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Subscribe")
+	}
+
+	var r0 worker.JobEventSubscriber
+	if returnFunc, ok := ret.Get(0).(func() worker.JobEventSubscriber); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(worker.JobEventSubscriber)
+		}
+	}
+	return r0
+}
+
+// MockEditableJob_Subscribe_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Subscribe'
+type MockEditableJob_Subscribe_Call struct {
+	*mock.Call
+}
+
+// Subscribe is a helper method to define mock.On call
+func (_e *MockEditableJob_Expecter) Subscribe() *MockEditableJob_Subscribe_Call {
+	return &MockEditableJob_Subscribe_Call{Call: _e.mock.On("Subscribe")}
+}
+
+func (_c *MockEditableJob_Subscribe_Call) Run(run func()) *MockEditableJob_Subscribe_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockEditableJob_Subscribe_Call) Return(jobEventSubscriber worker.JobEventSubscriber) *MockEditableJob_Subscribe_Call {
+	_c.Call.Return(jobEventSubscriber)
+	return _c
+}
+
+func (_c *MockEditableJob_Subscribe_Call) RunAndReturn(run func() worker.JobEventSubscriber) *MockEditableJob_Subscribe_Call {
 	_c.Call.Return(run)
 	return _c
 }
