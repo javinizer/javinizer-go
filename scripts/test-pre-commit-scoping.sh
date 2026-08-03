@@ -380,6 +380,25 @@ check "configs example -> internal/config (static)" "|./internal/config||0|no" "
 reset; printf 'select 2;\n' >> internal/database/migrations/001.sql; git add internal/database/migrations/001.sql
 check "migration sql -> embed pkg + consumer" "|./cmd/javinizer${nl}./internal/database${nl}./internal/database/migrations||1|yes" "$(probe)"
 
+# test-only package (only _test.go files): modern toolchains list such
+# packages fine — 'no non-test Go files in' is NOT emitted by go list on
+# Go 1.26 for either the same-package or the external _test package shape
+# (verified empirically), so the tolerated-prune regex must NOT gain a
+# clause for it (pruning is deletion-equivalent — wrong for a live test
+# package edit). This scenario LOCKS the toolchain assumption: a test-file
+# edit classifies as the package's own scoped tests, not a hard block.
+reset
+BASE4_SHA=$(git rev-parse HEAD)
+mkdir -p internal/testonly
+printf 'package testonly\n\nimport "testing"\n\nfunc TestOnly(t *testing.T) {}\n' > internal/testonly/t_test.go
+git add internal/testonly/t_test.go && git commit -qm 'fixture: test-only package'
+printf '\n// touch\n' >> internal/testonly/t_test.go; git add internal/testonly/t_test.go
+# FULL_SUITE because an unreferenced/test-only package is unreachable
+# from the binary graph (the build check cannot compile it) — full tests
+# still RUN, which is the assertion's point: classify, never hard-block
+check "test-only package edit -> own tests" "./internal/testonly|./internal/testonly|1|1|yes" "$(probe)"
+git reset -q --hard "$BASE4_SHA" >/dev/null; git clean -qfdx
+
 # an IMPORTABLE package beneath testdata/ (explicit imports resolve there)
 # holds //go:embed targets that outside consumers can break — its staged
 # asset must join the EMBED_PKGS reverse scan, not the private-fixture
