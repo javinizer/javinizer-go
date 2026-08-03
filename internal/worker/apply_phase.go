@@ -677,11 +677,16 @@ const maxPosterDriftRepairPasses = 3
 // apply-start snapshot; by write-back time a crop/poster edit had landed, so
 // that output is stale. Each repair pass re-issues wf.Apply with organize
 // skipped (the file is already at its destination; Match.Path is repointed at
-// the moved path so NFO stream details still resolve) and the MERGED movie —
-// pipeline fields authoritative, poster fields live — with ForcePosterReplace
-// set: drift proves the installed poster predates the effective source, and
-// with nil CropBounds the downloader's exists-skip would otherwise keep it
-// (Codex P2-A). The pass's own
+// the moved path so NFO stream details still resolve), the MERGED movie —
+// pipeline fields authoritative, poster fields live — and
+// ForcePosterReplace set: drift proves the installed poster predates the
+// effective source, and with nil CropBounds the downloader's exists-skip
+// would otherwise keep it (Codex P2-A). The original pass's OrganizeResult
+// is retained across every repair pass — repair passes run Skip=true and
+// carry none of their own, so repointing off the LATEST result or returning
+// it unmodified would lose the organized destination the caller's
+// outcome/audit path reports (Codex P2-B). The rewrite runs from the state
+// the envelope persists. The pass's own
 // snapshot→write-back window is closed by re-running writeBackSuccessMovie:
 // an edit committed mid-repair re-detects drift and triggers another pass,
 // up to maxPosterDriftRepairPasses.
@@ -711,6 +716,9 @@ func repairMidApplyPosterDrift(
 		// nil only in unit harnesses that drive interpretApplyResult directly.)
 		return lastResult
 	}
+	// The organize step ran at most once — in the FIRST pass. Retain its
+	// result across the whole repair loop (P2-B); see the repoint/merge below.
+	organizeResult := lastResult.OrganizeResult
 	for pass := 1; pass <= maxPosterDriftRepairPasses; pass++ {
 		repairCmd := applyCmd
 		repairCmd.Movie = merged.Clone()
@@ -722,12 +730,19 @@ func repairMidApplyPosterDrift(
 		// and report success while leaving the organized poster on the OLD
 		// image the envelope no longer references.
 		repairCmd.ForcePosterReplace = true
-		if lastResult.OrganizeResult != nil {
-			if lastResult.OrganizeResult.NewPath != "" {
-				repairCmd.Match.Path = lastResult.OrganizeResult.NewPath
+		// Repoint at the destination the FIRST pass organized to — retained
+		// separately across passes (Codex P2-B): repair passes run with
+		// Organize.Skip=true, so their results carry NO OrganizeResult;
+		// reading the LATEST result's OrganizeResult after a repair pass
+		// would fall back to the pre-organize match path and destination
+		// root, writing poster/NFO outside the organized folder while
+		// reporting success.
+		if organizeResult != nil {
+			if organizeResult.NewPath != "" {
+				repairCmd.Match.Path = organizeResult.NewPath
 			}
-			if lastResult.OrganizeResult.FolderPath != "" {
-				repairCmd.DestPath = lastResult.OrganizeResult.FolderPath
+			if organizeResult.FolderPath != "" {
+				repairCmd.DestPath = organizeResult.FolderPath
 			}
 		}
 		logging.Infof("apply: poster state changed mid-apply for %s — re-running the poster write from the live state (repair pass %d/%d)", filePath, pass, maxPosterDriftRepairPasses)
@@ -739,6 +754,13 @@ func repairMidApplyPosterDrift(
 		if res == nil || res.Movie == nil {
 			logging.Warnf("apply: poster-drift repair pass %d for %s returned no movie (on-disk poster/NFO lag the mid-apply edit; re-organize to converge)", pass, filePath)
 			return lastResult
+		}
+		// The repair pass skipped organize, so it carries no OrganizeResult:
+		// carry the FIRST pass's destination record forward onto the result
+		// that now wins, or the caller's outcome/audit path (and any later
+		// repointing) loses the organized destination entirely (Codex P2-B).
+		if res.OrganizeResult == nil {
+			res.OrganizeResult = organizeResult
 		}
 		lastResult = res
 		nextMerged, stillDrifted := writeBackSuccessMovie(inputs, filePath, res.Movie)

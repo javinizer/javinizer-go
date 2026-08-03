@@ -443,3 +443,56 @@ func TestInterpretApplyResult_DriftRepairForcesPosterReplacement(t *testing.T) {
 	assert.Equal(t, "https://live.example/user-poster.jpg", repairCmd.Movie.Poster.PosterURL)
 	assert.Nil(t, repairCmd.Movie.Poster.CropBounds, "the nil-bounds drift case is the one P2-A covers")
 }
+
+// TestRepairMidApplyPosterDrift_PreservesOrganizeResultAcrossPasses pins
+// Codex P2-B: when ANOTHER poster edit lands during the first repair pass,
+// pass 2 must still repoint at the destination the FIRST pass organized to —
+// the repair result carries no OrganizeResult (Organize.Skip=true), so
+// reading the latest result would fall back to the pre-organize match path
+// and destination root. The first pass's OrganizeResult is additionally
+// carried forward onto the winning repair result so the caller's
+// outcome/audit path keeps reporting the organized destination.
+func TestRepairMidApplyPosterDrift_PreservesOrganizeResultAcrossPasses(t *testing.T) {
+	fx := newDriftRepairFixture(t, "KEEPPATH-1")
+
+	// Live state at repair start: new URL (the drift that triggered repair).
+	require.NoError(t, fx.tracker.AtomicUpdateFileResult("/input/KEEPPATH-1.mp4", func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+		m := current.Movie.Clone()
+		m.Poster.PosterURL = "https://live.example/a.jpg"
+		current.Movie = m
+		return current, nil
+	}))
+	// A SECOND edit lands while repair pass 1 runs — the loop must take
+	// another pass and KEEP targeting the organized destination.
+	fx.wf.onApply = func(call int) {
+		if call == 1 {
+			require.NoError(t, fx.tracker.AtomicUpdateFileResult("/input/KEEPPATH-1.mp4", func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+				m := current.Movie.Clone()
+				m.Poster.CropBounds = &models.CropBounds{X: 3, Y: 4, Width: 100, Height: 150, ImageWidth: 1000, ImageHeight: 1500, MaxPosterHeight: 800}
+				current.Movie = m
+				return current, nil
+			}))
+		}
+	}
+
+	merged := fx.pipeline.Movie.Clone()
+	merged.Poster.PosterURL = "https://live.example/a.jpg"
+	cfg := ApplyPhaseConfig{Download: true, GenerateNFO: true}
+	got := repairMidApplyPosterDrift(context.Background(), fx.inputs, cfg, "/input/KEEPPATH-1.mp4",
+		fx.applyCmd, fx.afc, fx.pipeline, merged)
+
+	require.Equal(t, 2, fx.wf.numCalls(), "the mid-repair edit must trigger exactly one extra pass")
+	for i, cmd := range fx.wf.calls {
+		assert.True(t, cmd.ForcePosterReplace, "pass %d forces the poster replacement", i+1)
+		assert.Equal(t, "/dest/KEEPPATH-1/KEEPPATH-1.mp4", cmd.Match.Path,
+			"pass %d must target the file the first pass ORGANIZED, not the pre-organize input path", i+1)
+		assert.Equal(t, "/dest/KEEPPATH-1", cmd.DestPath,
+			"pass %d must target the organized folder, not the pre-organize destination root", i+1)
+	}
+	require.NotNil(t, got)
+	assert.Same(t, fx.pipeline.OrganizeResult, got.OrganizeResult,
+		"the winning repair result carries the first pass's organized destination forward")
+	stored, err := fx.tracker.GetMovieResult("/input/KEEPPATH-1.mp4")
+	require.NoError(t, err)
+	require.NotNil(t, stored.Movie.Poster.CropBounds, "the envelope converged on the latest live crop")
+}
