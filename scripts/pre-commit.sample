@@ -694,6 +694,25 @@ check_tree_consistency() {
 $f"
         fi
     done < <(git diff --cached --name-only -z --no-renames --diff-filter=D -- "${GUARD_PATHSPEC[@]}" || true)
+    # Mirror probe: a path staged as ADDED/MODIFIED but ABSENT from the
+    # working tree means tree w snapshot for content the checks validate —
+    # notably an out-of-roots //go:embed target: the TREE census can no
+    # longer resolve its pattern members (or fails outright), the HEAD
+    # census predates the add, and GUARD_PATHSPEC never listed the path,
+    # so without this probe the commit embeds bytes no check ever ran.
+    # Universally a mistake state (the commit would carry a file the tree
+    # deleted), so the probe is deliberately NOT pathspec-scoped.
+    while IFS= read -r -d '' f; do
+        if [ -n "$f" ] && [ ! -e "$f" ]; then
+            CONFLICT="$CONFLICT
+$f"
+        fi
+    done < <(git diff --cached --name-only -z --no-renames --diff-filter=AMRT || true)
+    # A proven divergence beats everything downstream: report the exact
+    # path(s) immediately. Continuing would let the fail-closed census
+    # refusal (same root cause here — the tree no longer resolves an embed
+    # pattern) print the GENERIC message and swallow these paths.
+    [ -z "$CONFLICT" ] || return 1
     # ===== Tier 1: toolchain embed census — engages for ANY staged path ==
     # //go:embed targets live at ARBITRARY paths, so even a commit whose
     # staged paths match no checked pathspec can invalidate the snapshot:

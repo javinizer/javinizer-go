@@ -901,6 +901,27 @@ git add go.mod internal/probe_td/testdata/tdpkg/d_test.go
 PCFAST= check_hook "e2e: full suite runs staged testdata package tests" 1 "tdpkg"
 git reset -q --hard "$BASE7_SHA" >/dev/null; git clean -qfdx
 
+# staged embed-target MODIFY then removed from the tree: tree census loses
+# the pattern member, HEAD census predates the add, path outside every
+# pathspec — only the AM-missing probe can catch the divergence
+reset
+BASE8_SHA=$(git rev-parse HEAD)
+cat > rootembed2.go <<'EOF'
+package x
+
+import _ "embed"
+
+//go:embed splash.txt
+var Splash string
+EOF
+gofmt -w rootembed2.go
+printf 'v1\n' > splash.txt
+git add rootembed2.go splash.txt && git commit -qm 'fixture: root-level embed'
+printf 'v2-major\n' > splash.txt; git add splash.txt
+rm splash.txt
+check_hook "e2e: staged embed edit deleted from tree blocked" 1 "splash.txt"
+git reset -q --hard "$BASE8_SHA" >/dev/null; git clean -qfdx
+
 # last tracked .go staged-deleted, ignored sibling remains -> must still block
 reset; printf 'package vanish\n\nfunc Ghost() int { return 1 }\n' > internal/vanish/local_ghost.go
 git rm -q internal/vanish/v.go
