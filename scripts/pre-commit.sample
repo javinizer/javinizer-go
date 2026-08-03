@@ -508,7 +508,12 @@ $f"
         # substitution subshell (the guard runs twice per hook; the
         # graph cannot change mid-run without tripping a consistency check).
         if [ -z "${TOOL_DIRS_CACHE+x}" ]; then
-            TOOL_DIRS_CACHE=$(go list -f '{{.Dir}}' -deps ./... 2>/dev/null || true)
+            TOOL_DIRS_CACHE=$( {
+                go list -f '{{.Dir}}' -deps ./... 2>/dev/null || true
+                # -deps alone skips TEST-ONLY imports; a staged _test.go can
+                # import an ignored-only package (e.g. beneath testdata/).
+                go list -f '{{.Dir}}' -deps -test ./... 2>/dev/null || true
+            } | sort -u )
         fi
         PKG_DIRS=$( {
             {

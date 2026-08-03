@@ -530,6 +530,14 @@ printf 'package ghost\n\nfunc G() int { return 1 }\n' > internal/foo/testdata/gh
 printf 'package foo\n\nimport (\n\t"fmt"\n\n\t_ "probe.local/x/internal/foo/testdata/ghost"\n)\n\nfunc Foo() int { fmt.Println(1); return 1 }\n' > internal/foo/a.go
 gofmt -w internal/foo/a.go; git add internal/foo/a.go
 check_hook "e2e: ignored-only package under testdata masked" 1 "local_g.go"
+
+# test-ONLY import of an ignored-only testdata package: -deps without -test
+# never traverses it — the cache must include test dependencies
+reset; mkdir -p internal/foo/testdata/tghost
+printf 'package tghost\n\nfunc T() int { return 1 }\n' > internal/foo/testdata/tghost/local_t.go
+printf 'package foo\n\nimport (\n\t"testing"\n\n\t_ "probe.local/x/internal/foo/testdata/tghost"\n)\n\nfunc TestFoo(t *testing.T) { if Foo() != 1 { t.Fatal() } }\n' > internal/foo/a_test.go
+gofmt -w internal/foo/a_test.go; git add internal/foo/a_test.go
+check_hook "e2e: test-only ignored testdata import masked" 1 "local_t.go"
 git reset -q --hard HEAD >/dev/null 2>&1; rm -f local_root.go
 
 # regex-hostile checkout path: whole scratch copied under a [bracket] dir —
