@@ -84,6 +84,23 @@ describe('applyCropEcho', () => {
 		expect(synced.original_should_crop_poster).toBe(true);
 	});
 
+	it('empty original_poster_url is still a baseline (cover-fallback movies)', () => {
+		// Cover-fallback movie that originally required auto-crop: the server
+		// echoes an empty poster URL with the pre-crop crop/intent baseline.
+		const synced = applyCropEcho(makeMovie({ poster_url: '' }), {
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+			should_crop_poster: false,
+			poster_crop_bounds: BOUNDS,
+			poster_crop_source_full: true,
+			original_poster_url: '',
+			original_cropped_poster_url: 'https://cdn.example/scraped-crop.jpg',
+			original_should_crop_poster: true,
+		});
+		expect(synced.original_poster_url).toBe('');
+		expect(synced.original_cropped_poster_url).toContain('scraped-crop');
+		expect(synced.original_should_crop_poster).toBe(true);
+	});
+
 	it('never invents a baseline when the echo carries none', () => {
 		const synced = applyCropEcho(makeMovie(), {
 			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',

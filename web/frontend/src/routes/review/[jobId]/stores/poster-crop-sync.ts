@@ -31,11 +31,14 @@ export function applyCropEcho(movie: Movie, echo: CropEcho): Movie {
 		...movie,
 		cropped_poster_url: echo.cropped_poster_url,
 		should_crop_poster: echo.should_crop_poster,
-		...(echo.original_poster_url
+		// Presence, not truthiness: a cover-fallback movie legitimately echoes
+		// an EMPTY original_poster_url with the pre-crop crop/intent baseline,
+		// and that baseline is exactly what Reset must restore.
+		...(echo.original_poster_url !== undefined
 			? {
 					original_poster_url: echo.original_poster_url,
 					original_cropped_poster_url: echo.original_cropped_poster_url,
-					original_should_crop_poster: echo.original_should_crop_poster ?? movie.original_should_crop_poster,
+					original_should_crop_poster: echo.original_should_crop_poster ?? null,
 				}
 			: {}),
 	};
