@@ -462,12 +462,16 @@ export function createReviewState(pageStore: Page) {
 			apiClient.excludeBatchMovie(mutationJobId, resultId),
 		updateBatchMovie: (mutationJobId, resultId, movie) =>
 			apiClient.updateBatchMovie(mutationJobId, resultId, movie),
-		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight) =>
+		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight, expectedSourceURL) =>
 			apiClient.updateBatchMoviePosterCrop(mutationJobId, resultId, {
 				...crop,
 				// Omit max_poster_height when null OR undefined so a nullable crop
 				// height is never serialized as `max_poster_height: null`.
 				...(maxPosterHeight != null ? { max_poster_height: maxPosterHeight } : {}),
+				// Omit expected_source_url when empty (never serialize "") so the
+				// server cannot read an empty assertion as a source (its empty
+				// means "legacy client — pre/post-lock guard only").
+				...(expectedSourceURL ? { expected_source_url: expectedSourceURL } : {}),
 			}),
 		batchExcludeMovies: (mutationJobId, request) =>
 			apiClient.batchExcludeMovies(mutationJobId, request),
@@ -946,8 +950,8 @@ export function createReviewState(pageStore: Page) {
 		},
 		getPosterCropStates: () => posterCropStates,
 		applyPosterFromUrlAsync: (resultId, url) => mutations.applyPosterFromUrlAsync(resultId, url),
-		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg) => {
-			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg);
+		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg, expectedSourceURL) => {
+			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg, expectedSourceURL);
 		},
 		setCropApplying: (applying) => { cropApplying = applying; }
 	});

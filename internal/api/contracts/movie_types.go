@@ -96,6 +96,15 @@ type PosterCropRequest struct {
 	// MaxPosterHeight optional override for the max poster height (px). 0 = no cap.
 	// When omitted, the configured output.max_poster_height is used.
 	MaxPosterHeight *int `json:"max_poster_height,omitempty" binding:"omitempty,min=0"`
+	// ExpectedSourceURL is the effective poster source (poster_url, else
+	// cover_url) the client's crop coordinates were measured against. When
+	// set, the server validates it UNDER the poster-source lock against the
+	// current effective source and rejects a mismatch with 409 (stale
+	// conflict) — this catches a cross-tab/device source swap that committed
+	// BEFORE this request arrived, which the server's own pre/post-lock
+	// source snapshots cannot see (both already name the new image). Empty
+	// (older clients) falls back to the pre/post-lock guard alone.
+	ExpectedSourceURL string `json:"expected_source_url,omitempty"`
 }
 
 // PosterCropResponse returns the updated temp cropped poster URL and the

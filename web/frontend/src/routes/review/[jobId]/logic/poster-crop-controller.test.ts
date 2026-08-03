@@ -4,6 +4,7 @@ import { BaseClient } from '$lib/api/clients/common';
 import type { FileResult, Movie, PosterCropBounds } from '$lib/api/types';
 import {
 	getDefaultPosterCropBox,
+	normalizeCropBox,
 	restoreCropBox,
 	type PosterCropBox,
 	type PosterCropMetrics,
@@ -54,7 +55,7 @@ function makeController(opts: {
 		calls.push('persist');
 		if (opts.persistRejects) throw new Error('download failed');
 	});
-	const mutatePosterCropAsync = vi.fn(async (_jobId: string, _resultId: string, _crop: PosterCropBox, _max?: number) => {
+	const mutatePosterCropAsync = vi.fn(async (_jobId: string, _resultId: string, _crop: PosterCropBox, _max?: number, _expectedSourceURL?: string) => {
 		calls.push('crop');
 	});
 	const setCropApplying = vi.fn((applying: boolean) => {
@@ -213,7 +214,64 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 
 		await controller.applyPosterCrop();
 
-		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith('job-1', 'res-1', expect.any(Object), 1200);
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith('job-1', 'res-1', expect.any(Object), 1200, sameUrl);
+	});
+
+	it('sends the effective source the coordinates were measured against (poster_url) with the crop', async () => {
+		// Codex P2 (cross-tab/device): the server validates expected_source_url
+		// under the poster-source lock; a same-tab measurement must name the
+		// SERVER-effective source even after the drift pre-sync moved the server
+		// to it.
+		const { controller, log } = makeController({
+			editedPosterUrl: 'https://dmm/jacket-full.jpg',
+			serverPosterUrl: 'https://dmm/digital-poster.jpg'
+		});
+
+		await controller.applyPosterCrop();
+
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			undefined,
+			'https://dmm/jacket-full.jpg'
+		);
+	});
+
+	it('sends a cover-backed effective source (poster_url || cover_url) with the crop', async () => {
+		const { controller, log } = makeController({
+			editedPosterUrl: '',
+			serverPosterUrl: '',
+			editedCoverUrl: 'https://dmm/cover.jpg',
+			serverCoverUrl: 'https://dmm/cover.jpg'
+		});
+
+		await controller.applyPosterCrop();
+
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			undefined,
+			'https://dmm/cover.jpg'
+		);
+	});
+
+	it('omits the expected source (legacy mode) when the movie has neither poster_url nor cover_url', async () => {
+		const { controller, log } = makeController({
+			editedPosterUrl: '',
+			serverPosterUrl: ''
+		});
+
+		await controller.applyPosterCrop();
+
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			undefined,
+			undefined
+		);
 	});
 
 	it('does nothing when there is no crop box', async () => {
@@ -481,8 +539,13 @@ describe('handlePosterCropImageLoad — seeds from server-stored poster_crop_bou
 		expect(setCropBox).toHaveBeenCalledWith(getDefaultPosterCropBox(800, 1200));
 	});
 
-	it('prefers the locally stored crop state over the server bounds', () => {
-		const savedCrop: PosterCropState = { xRatio: 0.5, yRatio: 0, widthRatio: 0.25, heightRatio: 1 };
+	it('prefers the SERVER-stored bounds over older LOCAL geometry when another tab/device re-cropped', () => {
+		// Codex P2 (cross-tab/device): this browser saved a crop locally, then
+		// ANOTHER tab changed the server-side crop; a job refetch supplied the
+		// newer poster_crop_bounds. Seeding from the LOCAL entry would reopen
+		// the stale rectangle and an unchanged Apply would overwrite the newer
+		// persisted crop.
+		const staleLocalCrop: PosterCropState = { xRatio: 0.5, yRatio: 0, widthRatio: 0.25, heightRatio: 1 };
 		const { controller, setCropBox } = makeLoadController({
 			posterCropBounds: {
 				x: 40,
@@ -492,11 +555,53 @@ describe('handlePosterCropImageLoad — seeds from server-stored poster_crop_bou
 				image_width: 400,
 				image_height: 600,
 			},
+			savedCrop: staleLocalCrop,
+		});
+
+		controller.handlePosterCropImageLoad(fakeImageLoadEvent(800, 1200));
+
+		// The server-derived box WINS: ratios from the recorded 400x600 dims
+		// re-applied to the 800x1200 source.
+		expect(setCropBox).toHaveBeenCalledWith({ x: 80, y: 40, width: 360, height: 540 });
+	});
+
+	it('falls back to the locally stored crop state when the server carries no recorded crop', () => {
+		const savedCrop: PosterCropState = { xRatio: 0.5, yRatio: 0, widthRatio: 0.25, heightRatio: 1 };
+		const { controller, setCropBox } = makeLoadController({
+			posterCropBounds: null,
 			savedCrop,
 		});
 
 		controller.handlePosterCropImageLoad(fakeImageLoadEvent(800, 1200));
 
 		expect(setCropBox).toHaveBeenCalledWith(restoreCropBox(savedCrop, 800, 1200));
+	});
+
+	it('own-edit flow presents identical geometry under both rules (response overlay + local save agree)', () => {
+		// After this browser's own crop save, the mutation both (a) writes the
+		// normalized box into posterCropStates and (b) overlays the response's
+		// poster_crop_bounds into the results. Reopening must therefore seed the
+		// same box whether the server-bounds rule or the local-fallback rule
+		// supplies the geometry — no drift between the two paths.
+		const submitted: PosterCropBox = { x: 80, y: 40, width: 360, height: 540 }; // measured on the 800x1200 source
+		const metricsThatSavedIt = { sourceWidth: 800, sourceHeight: 1200, displayWidth: 400, displayHeight: 600, imageOffsetX: 0, imageOffsetY: 0 };
+		const savedCrop: PosterCropState = normalizeCropBox(submitted, metricsThatSavedIt);
+		const { controller, setCropBox } = makeLoadController({
+			posterCropBounds: {
+				x: submitted.x,
+				y: submitted.y,
+				width: submitted.width,
+				height: submitted.height,
+				image_width: 800,
+				image_height: 1200,
+			},
+			savedCrop,
+		});
+
+		controller.handlePosterCropImageLoad(fakeImageLoadEvent(800, 1200));
+
+		const serverSourcedBox = { x: 80, y: 40, width: 360, height: 540 };
+		expect(setCropBox).toHaveBeenCalledWith(serverSourcedBox);
+		expect(restoreCropBox(savedCrop, 800, 1200)).toEqual(serverSourcedBox);
 	});
 });

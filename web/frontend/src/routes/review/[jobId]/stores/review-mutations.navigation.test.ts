@@ -147,6 +147,7 @@ function makeHarness(opts: { multipart?: boolean } = {}): Harness {
 			_resultId: string,
 			_crop: PosterCropBox,
 			_maxPosterHeight?: number,
+			_expectedSourceURL?: string,
 		): Promise<PosterCropResponse> => {
 			throw new Error('updateBatchMoviePosterCrop not stubbed for this test');
 		},
@@ -291,7 +292,7 @@ describe('review-mutations — mid-flight navigation keys poster state by the RE
 
 		const crop: PosterCropBox = { x: 10, y: 20, width: 300, height: 450 };
 		const done = h.mutations.applyPosterCropAsync('job-1', 'res-A', crop, undefined);
-		expect(h.api.updateBatchMoviePosterCrop).toHaveBeenCalledWith('job-1', 'res-A', crop, undefined);
+		expect(h.api.updateBatchMoviePosterCrop).toHaveBeenCalledWith('job-1', 'res-A', crop, undefined, undefined);
 
 		// Navigate to movie B mid-flight.
 		h.currentResult.current = h.job.current.results![FILE_B] as FileResult;
@@ -338,7 +339,7 @@ describe('review-mutations — mid-flight navigation keys poster state by the RE
 
 		const submitted: PosterCropBox = { x: 10, y: 20, width: 300, height: 450 };
 		const done = h.mutations.applyPosterCropAsync('job-1', 'res-A', submitted, undefined);
-		expect(h.api.updateBatchMoviePosterCrop).toHaveBeenCalledWith('job-1', 'res-A', submitted, undefined);
+		expect(h.api.updateBatchMoviePosterCrop).toHaveBeenCalledWith('job-1', 'res-A', submitted, undefined, undefined);
 
 		// Drag events move the live box while the request is in flight.
 		h.cropLive.box = { x: 200, y: 100, width: 150, height: 225 };

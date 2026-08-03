@@ -70,6 +70,7 @@ interface ReviewMutationsDeps {
 		resultId: string,
 		crop: PosterCropBox,
 		maxPosterHeight?: number,
+		expectedSourceURL?: string,
 	) => Promise<PosterCropResponse>;
 	batchExcludeMovies: (
 		jobId: string,
@@ -328,11 +329,13 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			resultId,
 			crop,
 			maxPosterHeight,
+			expectedSourceURL,
 		}: {
 			jobId: string;
 			resultId: string;
 			crop: PosterCropBox;
 			maxPosterHeight?: number;
+			expectedSourceURL?: string;
 		}) => {
 			// Capture the metrics WITH the request: the submitted crop box is
 			// in THIS source's pixel space, and drag events stay live while the
@@ -340,7 +343,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			// onSuccess time would persist whatever the box has drifted to
 			// (possibly another movie's box) under THIS request's file path.
 			const metrics = deps.getCropMetrics();
-			const response = await deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight);
+			const response = await deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight, expectedSourceURL);
 			return { response, metrics };
 		},
 		onSuccess: ({ response, metrics }, { resultId, crop }) => {
@@ -376,8 +379,8 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		},
 	}));
 
-	async function applyPosterCropAsync(jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number) {
-		await posterCropMutation.mutateAsync({ jobId, resultId, crop, maxPosterHeight });
+	async function applyPosterCropAsync(jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number, expectedSourceURL?: string) {
+		await posterCropMutation.mutateAsync({ jobId, resultId, crop, maxPosterHeight, expectedSourceURL });
 	}
 
 	const bulkExcludeMutation = createMutation(() => ({

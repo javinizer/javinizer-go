@@ -94,6 +94,15 @@ export interface PosterCropRequest {
 	width: number;
 	height: number;
 	max_poster_height?: number;
+	/**
+	 * Effective poster source (poster_url, else cover_url) the modal's crop
+	 * coordinates were measured against. The server validates it under the
+	 * poster-source lock and rejects a mismatch with 409 — this catches a
+	 * cross-tab/device source swap that committed BEFORE the crop request
+	 * arrived, which the server's own pre/post-lock snapshots cannot see.
+	 * Omitted/empty: legacy-client mode, pre/post-lock guard alone.
+	 */
+	expected_source_url?: string;
 }
 
 export interface PosterCropResponse {

@@ -45,7 +45,7 @@ interface PosterCropControllerDeps {
 	setCropDragState: (state: PosterCropDragState | null) => void;
 	getPosterCropStates: () => Map<string, PosterCropState>;
 	applyPosterFromUrlAsync: (resultId: string, url: string) => Promise<void>;
-	mutatePosterCropAsync: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number) => Promise<void>;
+	mutatePosterCropAsync: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number, expectedSourceURL?: string) => Promise<void>;
 	setCropApplying: (applying: boolean) => void;
 	now?: () => number;
 }
@@ -102,35 +102,40 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		});
 
 		const currentResult = deps.getCurrentResult();
-		let seedCrop: PosterCropState | undefined = currentResult
-			? deps.getPosterCropStates().get(currentResult.file_path)
-			: undefined;
 
-		// No LOCAL geometry (siblings of a multipart crop, fresh devices):
-		// seed from the SERVER-stored crop instead of falling back to a blind
-		// default box — the default both hides the recorded crop and lets a
-		// blind Apply overwrite it. The bounds were measured against the
-		// dims recorded on them, so normalize there and restore onto the
-		// CURRENT source dims (ratio-based, so it stays correct if the image
-		// was re-rendered at a different size); bounds without usable dims
-		// predate dimension recording and keep the default-box fallback.
-		if (!seedCrop) {
-			const bounds = deps.getCurrentMovie()?.poster_crop_bounds;
-			const boundsWidth = bounds?.image_width ?? 0;
-			const boundsHeight = bounds?.image_height ?? 0;
-			if (bounds && boundsWidth > 0 && boundsHeight > 0) {
-				seedCrop = normalizeCropBox(
-					{ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
-					{
-						sourceWidth: boundsWidth,
-						sourceHeight: boundsHeight,
-						displayWidth: 0,
-						displayHeight: 0,
-						imageOffsetX: 0,
-						imageOffsetY: 0,
-					},
-				);
-			}
+		// Prefer the AUTHORITATIVE server-stored crop over LOCAL geometry: a job
+		// refetch may have supplied NEWER poster_crop_bounds than this browser's
+		// local posterCropStates entry (another tab/device re-cropped after this
+		// tab last saved) — seeding from the stale LOCAL entry would reopen the
+		// older rectangle and an unchanged Apply would overwrite the newer
+		// persisted crop. The bounds were measured against the dims recorded on
+		// them, so normalize there and restore onto the CURRENT source dims
+		// (ratio-based, so it stays correct if the image was re-rendered at a
+		// different size); bounds without usable dims predate dimension
+		// recording. LOCAL state remains the fallback when the server carries no
+		// recorded crop — and for OWN edits both rules agree: a save overlays
+		// the response bounds into the results AND writes the normalized box
+		// into the local map (asserted by the identical-geometry test).
+		let seedCrop: PosterCropState | undefined;
+		const bounds = deps.getCurrentMovie()?.poster_crop_bounds;
+		const boundsWidth = bounds?.image_width ?? 0;
+		const boundsHeight = bounds?.image_height ?? 0;
+		if (bounds && boundsWidth > 0 && boundsHeight > 0) {
+			seedCrop = normalizeCropBox(
+				{ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+				{
+					sourceWidth: boundsWidth,
+					sourceHeight: boundsHeight,
+					displayWidth: 0,
+					displayHeight: 0,
+					imageOffsetX: 0,
+					imageOffsetY: 0,
+				},
+			);
+		} else if (currentResult) {
+			// No usable SERVER geometry: fall back to this browser's local crop
+			// state (own unsaved drags within the session).
+			seedCrop = deps.getPosterCropStates().get(currentResult.file_path);
 		}
 
 		deps.setCropBox(
@@ -303,7 +308,13 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			}
 
 			const maxPosterHeight = deps.getMaxPosterHeight();
-			await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined);
+			// Tell the server which source these coordinates were measured
+			// against (the same effective-source rule the modal preview and the
+			// drift pre-sync use): after any pre-sync above the server source IS
+			// editedSource, so a 409 mismatch can only mean another tab/device
+			// changed it — the tokenized 409 toast then tells the user to reload
+			// and re-measure instead of silently cropping the wrong image.
+			await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined, editedSource || undefined);
 		} catch {
 			// Errors are surfaced via toasts in the mutation handlers; abort the flow.
 		} finally {

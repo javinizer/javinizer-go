@@ -5854,6 +5854,10 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.PosterCropRequest": {
             "type": "object",
             "properties": {
+                "expected_source_url": {
+                    "description": "ExpectedSourceURL is the effective poster source (poster_url, else\ncover_url) the client's crop coordinates were measured against. When\nset, the server validates it UNDER the poster-source lock against the\ncurrent effective source and rejects a mismatch with 409 (stale\nconflict) — this catches a cross-tab/device source swap that committed\nBEFORE this request arrived, which the server's own pre/post-lock\nsource snapshots cannot see (both already name the new image). Empty\n(older clients) falls back to the pre/post-lock guard alone.",
+                    "type": "string"
+                },
                 "height": {
                     "type": "integer",
                     "minimum": 1

@@ -156,12 +156,23 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		// Stale-source guard (P1): the effective poster source this request's
 		// coordinates were measured against (captured pre-wait) must still be
 		// the effective source on the POST-lock result. A source swap that
-		// landed while this request waited — poster_url/cover_url PATCH or
-		// override, poster-from-URL, or a source-changing rescrape rekey —
-		// invalidates the coordinate space, so reject without mutating the
-		// cache: the client re-fetches and re-measures against the new image.
-		if postLockSource := effectivePosterSourceOf(result.Movie); postLockSource != preWaitSource {
+		// landed while this request waited invalidates the coordinate space,
+		// so reject without mutating the cache: the client re-fetches and
+		// re-measures against the new image.
+		postLockSource := effectivePosterSourceOf(result.Movie)
+		if postLockSource != preWaitSource {
 			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "poster source changed while the crop request was waiting; reload the result and re-measure the crop"})
+			return
+		}
+
+		// Client-measured source guard (P2): the snapshot pair above cannot
+		// catch a source swap that landed BEFORE this request arrived (both
+		// snapshots then name image B while the client's coordinates describe
+		// image A — the cross-tab/source-edit race). Validate the source the
+		// client actually displayed, under the lock; empty (older clients)
+		// keeps the pre/post-lock guard alone.
+		if req.ExpectedSourceURL != "" && req.ExpectedSourceURL != postLockSource {
+			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "poster source changed since the crop coordinates were measured; reload the result and re-measure the crop"})
 			return
 		}
 

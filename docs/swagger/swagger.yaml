@@ -1193,6 +1193,17 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.PosterCropRequest:
     properties:
+      expected_source_url:
+        description: |-
+          ExpectedSourceURL is the effective poster source (poster_url, else
+          cover_url) the client's crop coordinates were measured against. When
+          set, the server validates it UNDER the poster-source lock against the
+          current effective source and rejects a mismatch with 409 (stale
+          conflict) — this catches a cross-tab/device source swap that committed
+          BEFORE this request arrived, which the server's own pre/post-lock
+          source snapshots cannot see (both already name the new image). Empty
+          (older clients) falls back to the pre/post-lock guard alone.
+        type: string
       height:
         minimum: 1
         type: integer
