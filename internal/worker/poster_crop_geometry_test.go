@@ -48,6 +48,13 @@ func storedPosterState(t *testing.T, job *BatchJob, filePath string) models.Post
 
 // The crop endpoint's editor call stores normalized geometry next to the
 // cropped preview URL for every file of the movie.
+// Nil-receiver guards on the geometry helpers: defensive branches must hold
+// without touching state.
+func TestCropGeometryHelpers_NilGuards(t *testing.T) {
+	t.Parallel()
+	clearPosterCropGeometry(nil)                           // no panic
+	sanitizePosterCropGeometry(nil, true, "a", "b", false) // no panic
+}
 func TestUpdatePosterCrop_StoresGeometry(t *testing.T) {
 	job, filePath := newCropGeometryJob(t)
 

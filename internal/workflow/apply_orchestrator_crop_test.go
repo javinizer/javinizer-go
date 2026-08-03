@@ -133,6 +133,31 @@ func TestApplyMergeBoundary_SourceUnchangedKeepsGeometry(t *testing.T) {
 	assert.NotSame(t, pre.Poster.PosterCropBounds, state.movie.Poster.PosterCropBounds, "carry must copy, not alias")
 }
 
+// Edge branches of the boundary carry/clear: nil merged movie is a no-op;
+// absent, non-full-source, or source-less geometry never applies.
+func TestApplyMergeBoundary_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	carryPosterCropAcrossMerge(nil, "https://cdn/p.jpg", cropBoundsFixture(), true) // no panic
+
+	// No pre-merge geometry: merged movie gains nothing.
+	merged := &models.Movie{}
+	merged.Poster.PosterURL = "https://cdn/p.jpg"
+	carryPosterCropAcrossMerge(merged, "", nil, false)
+	assert.Nil(t, merged.Poster.PosterCropBounds)
+	assert.False(t, merged.Poster.PosterCropSourceFull)
+
+	// Geometry without a poster source is meaningless: never carried.
+	merged2 := &models.Movie{}
+	carryPosterCropAcrossMerge(merged2, "", cropBoundsFixture(), true)
+	assert.Nil(t, merged2.Poster.PosterCropBounds)
+
+	assert.Equal(t, "", effectivePosterSource(nil))
+	withCover := &models.Movie{}
+	withCover.Poster.CoverURL = "https://cdn/c.jpg"
+	assert.Equal(t, "https://cdn/c.jpg", effectivePosterSource(withCover))
+}
+
 // A merge that changes the effective poster source clears the geometry so a
 // crop measured against the old image is never applied to the new one.
 func TestApplyMergeBoundary_SourceChangedClearsGeometry(t *testing.T) {

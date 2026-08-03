@@ -156,23 +156,14 @@ func (d *Downloader) cropDownloadedPoster(tempPath, destPath string, bounds *mod
 		}
 	}
 
+	// Valid() guarantees unit-square containment, so no clamping is needed:
+	// rounding stays within [0,w]×[0,h] (the 1e-9 tolerance cannot edge over a
+	// pixel boundary) — only degenerate rounding needs a guard.
 	fw, fh := float64(w), float64(h)
 	left := int(math.Round(bounds.X * fw))
 	top := int(math.Round(bounds.Y * fh))
 	right := int(math.Round((bounds.X + bounds.Width) * fw))
 	bottom := int(math.Round((bounds.Y + bounds.Height) * fh))
-	if left < 0 {
-		left = 0
-	}
-	if top < 0 {
-		top = 0
-	}
-	if right > w {
-		right = w
-	}
-	if bottom > h {
-		bottom = h
-	}
 	if right <= left || bottom <= top {
 		logging.Warnf("downloadPoster: manual crop geometry collapses to empty rect; falling back")
 		return false

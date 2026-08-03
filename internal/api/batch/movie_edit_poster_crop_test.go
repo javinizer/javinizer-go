@@ -12,15 +12,19 @@ import (
 	"testing"
 	"time"
 
+	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/config"
+
+	workermocks "github.com/javinizer/javinizer-go/internal/mocks/worker"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -134,6 +138,37 @@ func TestPosterCrop_StoresNormalizedGeometry(t *testing.T) {
 	assert.Equal(t, *resp.PosterCropBounds, *stored.Poster.PosterCropBounds)
 	assert.True(t, stored.Poster.PosterCropSourceFull)
 	assert.False(t, stored.Poster.ShouldCropPoster)
+}
+
+// cropErrorJobStore overrides only what the crop handler touches: GetBatchJob
+// (returns the configured mock job) and PersistJobByID (no-op).
+type cropErrorJobStore struct {
+	worker.JobStoreInterface
+	job worker.BatchJobInterface
+}
+
+func (s *cropErrorJobStore) GetBatchJob(string) (worker.BatchJobInterface, bool) { return s.job, true }
+func (s *cropErrorJobStore) PersistJobByID(string)                               {}
+
+// A failure inside the job-state update surfaces as 500 after a successful
+// preview crop (mock job drives the otherwise-unreachable error branch).
+func TestPosterCrop_UpdatePosterCropErrorIs500(t *testing.T) {
+	deps, job, router := cropJobFixture(t, "CROPGEO-008")
+
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	mockJob.EXPECT().GetFileResultByResultID("CROPGEO-008").Return(&resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/CROPGEO-008.mp4", MovieID: "CROPGEO-008"},
+		Movie:         &models.Movie{ID: "CROPGEO-008"},
+	}, "/path/to/CROPGEO-008.mp4", true)
+	mockJob.EXPECT().FindMovieResultForMovieID("CROPGEO-008").Return(nil, nil)
+	mockJob.EXPECT().FindFilePathsForMovieID("CROPGEO-008").Return([]string{"/path/to/CROPGEO-008.mp4"})
+	mockJob.EXPECT().UpdatePosterCrop("CROPGEO-008", mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("store exploded"))
+	deps.JobStore = &cropErrorJobStore{job: mockJob}
+
+	w := postCrop(t, router, job, "CROPGEO-008", contracts.PosterCropRequest{X: 0, Y: 0, Width: 400, Height: 600})
+	assert.Equal(t, 500, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "Failed to update job state")
 }
 
 // Pixel-space containment violations against the measured source must be

@@ -2,11 +2,14 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -84,6 +87,130 @@ func geometryMovie(url string, bounds *models.CropBounds, autoCrop bool) *models
 
 // The persisted manual crop geometry is applied to the downloaded source
 // instead of the scraper's default right-side auto-crop.
+// renameFailFs blocks only the final promote rename (dst = the poster
+// destination); the downloader's internal atomic ".tmp" staging is let
+// through — the promote step is the one under test.
+type renameFailFs struct {
+	afero.Fs
+}
+
+func (f renameFailFs) Rename(src, dst string) error {
+	if strings.HasSuffix(dst, "-poster.jpg") {
+		return errTestRenameFail
+	}
+	return f.Fs.Rename(src, dst)
+}
+
+var errTestRenameFail = errors.New("rename blocked")
+
+// Download failure with otherwise-applyable geometry: the error propagates
+// and nothing is left behind. Exactly one request is made.
+func TestDownloadPoster_GeometryDownloadFailurePropagates(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	fs := afero.NewMemMapFs()
+	movie := geometryMovie(srv.URL+"/cover.jpg", &models.CropBounds{
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0,
+	}, true)
+
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	require.Error(t, err)
+	require.False(t, result.Downloaded)
+	assert.Equal(t, int32(1), hits.Load())
+	leftover, _ := afero.ReadDir(fs, "/dest")
+	assert.Empty(t, leftover, "no temp or dest file may survive a failed download")
+}
+
+// Dimensions decode fine (header intact) but pixel data is truncated: the
+// crop itself fails, and with scraper auto-crop intent the auto-crop attempt
+// fails identically — pre-change behavior for a broken source image.
+func TestDownloadPoster_GeometryCropFailureFallsToAutoCropError(t *testing.T) {
+	srv := serveTwoToneSource(t)
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	full, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	// Header survives DecodeConfig, pixels are gone.
+	trunc := full[:len(full)/3]
+	var hits atomic.Int32
+	ts2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(trunc)
+	}))
+	t.Cleanup(ts2.Close)
+
+	fs := afero.NewMemMapFs()
+	movie := geometryMovie(ts2.URL+"/cover.jpg", &models.CropBounds{
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0,
+	}, true)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	assert.Error(t, err, "broken source fails exactly like the pre-change auto-crop path")
+	require.False(t, result.Downloaded)
+	assert.Equal(t, int32(1), hits.Load())
+}
+
+// Geometry that rounds to an empty pixel rect falls back cleanly to the
+// scraper auto-crop.
+func TestDownloadPoster_DegenerateRectFallsBack(t *testing.T) {
+	server := serveTwoToneSource(t)
+	fs := afero.NewMemMapFs()
+	movie := geometryMovie(server.URL+"/cover.jpg", &models.CropBounds{
+		X: 0.5, Y: 0.5, Width: 0.0001, Height: 0.0001, SourceAspect: 1000.0 / 600.0,
+	}, true)
+
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	require.NoError(t, err)
+	require.True(t, result.Downloaded)
+	img, w, _ := decodeResultPoster(t, fs, result.LocalPath)
+	assert.InDelta(t, 472, w, 3, "degenerate geometry must fall back to auto-crop")
+	assert.Greater(t, sampleLuma(img, 0.5, 0.5), 215.0)
+}
+
+// Rename failure on the direct-promote fallback: clean error, no dangling
+// temp path in the result.
+func TestDownloadPoster_PromoteFailureIsCleanError(t *testing.T) {
+	fs := renameFailFs{afero.NewMemMapFs()}
+	// Undecodable payload: the geometry path bails to the direct-promote fallback.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("definitely not jpeg"))
+	}))
+	t.Cleanup(srv.Close)
+	movie := geometryMovie(srv.URL+"/poster.jpg", &models.CropBounds{
+		X: 0, Y: 0, Width: 0.4, Height: 1, SourceAspect: 1000.0 / 600.0,
+	}, false)
+
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	require.Error(t, err)
+	assert.False(t, result.Downloaded)
+	assert.Empty(t, result.LocalPath, "removed temp path must never leak into the result")
+	assert.Zero(t, result.Size)
+}
+
+// finalizePosterResult clears the location fields when the promoted file
+// cannot be stat'd, and points at the file with its size when it can.
+func TestFinalizePosterResult_StatFailClearsLocation(t *testing.T) {
+	d := newGeometryDownloader(afero.NewMemMapFs())
+	result := &DownloadResult{Downloaded: true, LocalPath: "/dest/X-poster.jpg.full.tmp", Size: 99}
+	d.finalizePosterResult(result, "/dest/X-poster.jpg")
+	assert.Empty(t, result.LocalPath, "missing destination must clear the temp path")
+	assert.Zero(t, result.Size)
+}
+
+func TestFinalizePosterResult_StatSuccessSetsLocation(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/dest/X-poster.jpg", []byte("img"), 0o644))
+	d := newGeometryDownloader(fs)
+	result := &DownloadResult{Downloaded: true}
+	d.finalizePosterResult(result, "/dest/X-poster.jpg")
+	assert.Equal(t, "/dest/X-poster.jpg", result.LocalPath)
+	assert.Equal(t, int64(3), result.Size)
+}
 func TestDownloadPoster_ManualGeometryApplied(t *testing.T) {
 	server := serveTwoToneSource(t)
 	fs := afero.NewMemMapFs()

@@ -66,18 +66,28 @@ type UpdateMovieRequest struct {
 // distinguish an omitted field (preserve stored geometry) from an explicit
 // null (clear geometry).
 func (r *UpdateMovieRequest) UnmarshalJSON(data []byte) error {
-	type Alias UpdateMovieRequest
-	if err := json.Unmarshal(data, (*Alias)(r)); err != nil {
+	var raw struct {
+		Movie json.RawMessage `json:"movie"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 	r.PosterCropBoundsFieldPresent = false
-	var probe struct {
-		Movie map[string]json.RawMessage `json:"movie"`
+	if string(raw.Movie) == "null" || len(raw.Movie) == 0 {
+		r.Movie = nil // binding:"required" reports this downstream
+		return nil
 	}
-	if err := json.Unmarshal(data, &probe); err != nil {
+	var mv MovieView
+	if err := json.Unmarshal(raw.Movie, &mv); err != nil {
 		return err
 	}
-	_, r.PosterCropBoundsFieldPresent = probe.Movie["poster_crop_bounds"]
+	r.Movie = &mv
+	var keys map[string]json.RawMessage
+	// raw.Movie decoded into a struct above, so it is a JSON object and the
+	// map decode cannot fail; on the impossible failure the key reads absent
+	// (the safe default: preserve stored geometry).
+	_ = json.Unmarshal(raw.Movie, &keys)
+	_, r.PosterCropBoundsFieldPresent = keys["poster_crop_bounds"]
 	return nil
 }
 
