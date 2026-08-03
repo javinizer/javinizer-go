@@ -43,8 +43,13 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	tmplCtx := d.buildTemplateContext(movie, multipart)
 	destPath := d.pathResolver.ResolvePosterPath(movie, nil, true, tmplCtx, destDir)
 
-	// Check if poster already exists
-	if info, err := d.fs.Stat(destPath); err == nil {
+	bounds := movie.Poster.PosterCropBounds
+	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
+
+	// Check if poster already exists — but a pending manual crop always wins:
+	// the user explicitly re-cropped on the review page, so organize replaces
+	// existing artwork with the manual crop (in-place/force-update flows).
+	if info, err := d.fs.Stat(destPath); err == nil && !geometryUsable {
 		// Already exists
 		return &DownloadResult{
 			Type:       MediaTypePoster,
@@ -53,13 +58,6 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			Downloaded: false,
 		}, nil
 	}
-
-	// Check if we need to crop the poster or use it directly. Manual
-	// review-page crop geometry takes precedence over the scraper's crop
-	// intent while it is still applyable; invalid geometry is dropped before
-	// any download so the pre-geometry paths below behave exactly as before.
-	bounds := movie.Poster.PosterCropBounds
-	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
 	if !geometryUsable && !movie.Poster.ShouldCropPoster {
 		// High-quality poster - download directly without cropping
 		result, err := d.download(ctx, posterURL, destPath, MediaTypePoster)

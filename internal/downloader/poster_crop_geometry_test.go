@@ -192,6 +192,41 @@ func TestDownloadPoster_PromoteFailureIsCleanError(t *testing.T) {
 	assert.Zero(t, result.Size)
 }
 
+// Existing destination + usable manual geometry: organize must REPLACE the
+// old artwork with the manual crop (the user explicitly re-cropped at review).
+func TestDownloadPoster_ExistingDestReplacedByManualCrop(t *testing.T) {
+	server := serveTwoToneSource(t)
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/dest/IPX-535-poster.jpg", []byte("old artwork"), 0o644))
+	movie := geometryMovie(server.URL+"/cover.jpg", &models.CropBounds{
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0,
+	}, true)
+
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	require.NoError(t, err)
+	require.True(t, result.Downloaded, "existing poster must be replaced when manual geometry is pending")
+
+	img, w, _ := decodeResultPoster(t, fs, result.LocalPath)
+	assert.InDelta(t, 400, w, 2)
+	assert.Less(t, sampleLuma(img, 0.5, 0.5), 40.0)
+}
+
+// Existing destination without pending geometry keeps pre-change behavior:
+// the existing file is left untouched.
+func TestDownloadPoster_ExistingDestKeptWithoutGeometry(t *testing.T) {
+	server := serveTwoToneSource(t)
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/dest/IPX-535-poster.jpg", []byte("old artwork"), 0o644))
+	movie := geometryMovie(server.URL+"/cover.jpg", nil, true)
+
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	require.NoError(t, err)
+	assert.False(t, result.Downloaded, "no geometry: existing poster must be kept")
+	content, err := afero.ReadFile(fs, "/dest/IPX-535-poster.jpg")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("old artwork"), content)
+}
+
 // finalizePosterResult clears the location fields when the promoted file
 // cannot be stat'd, and points at the file with its size when it can.
 func TestFinalizePosterResult_StatFailClearsLocation(t *testing.T) {

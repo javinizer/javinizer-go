@@ -117,6 +117,14 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				return
 			}
 		}
+
+		// Persist the job envelope so a manual-crop clear (explicit null, or
+		// sanitize clearing it after a source/intent change) survives a restart
+		// — otherwise a reboot reloads the stale bounds from the envelope and a
+		// discarded crop silently resurrects. Parity with the crop and
+		// field-override handlers.
+		deps.GetJobStore().PersistJobByID(jobID)
+
 		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie)})
 	}
 }
