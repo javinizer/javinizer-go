@@ -17,20 +17,28 @@ import (
 )
 
 type stubScraper struct {
-	name    string
-	enabled bool
-	result  *models.ScraperResult
-	err     error
-	panic   interface{}
+	name       string
+	enabled    bool
+	result     *models.ScraperResult
+	err        error
+	panic      interface{}
+	blockOnCtx bool
 }
 
 func (s *stubScraper) Name() string { return s.name }
-func (s *stubScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
+func (s *stubScraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if s.panic != nil {
 		panic(s.panic)
 	}
 	if s.err != nil {
 		return nil, s.err
+	}
+	// blockOnCtx makes timeout tests deterministic: the scraper only ever
+	// resolves through ctx.Done, so the engine cannot win a select race
+	// between an instant result and an expired context.
+	if s.blockOnCtx {
+		<-ctx.Done()
+		return nil, ctx.Err()
 	}
 	r := *s.result
 	r.ID = id
@@ -218,7 +226,7 @@ func TestJSONOutput_TimeoutError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 	time.Sleep(5 * time.Millisecond)
-	engine := newTestEngine(t, &stubScraper{name: "test", enabled: true, result: &models.ScraperResult{}})
+	engine := newTestEngine(t, &stubScraper{name: "test", enabled: true, result: &models.ScraperResult{}, blockOnCtx: true})
 	result, err := engine.QueryRaw(ctx, "TEST-001", "test")
 	require.Nil(t, result)
 	require.NotNil(t, err)
