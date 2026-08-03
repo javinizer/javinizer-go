@@ -29,7 +29,7 @@ git config user.email test@example.invalid
 git config user.name test
 git config commit.gpgsign false
 # *.db mirrors the real repo's .gitignore (embed-asset masking scenario)
-printf '/web/dist/ignored/\n*.syso\nlocal_*.go\n*.log\n*.db\n.worktrees/\n.scratch/\n.tmprepro/\n.planning/\n' > .gitignore
+printf '/web/dist/ignored/\n*.syso\nlocal_*.go\n*.log\n*.db\nscratch-*\n.worktrees/\n.scratch/\n.tmprepro/\n.planning/\n' > .gitignore
 mkdir -p internal/foo internal/bar internal/shared internal/consumer internal/legacy internal/orphan \
          internal/tagged \
          internal/dual_unref internal/dual_ref internal/tree/sub web/frontend/src \
@@ -734,6 +734,20 @@ check_hook "e2e: ignored .go inside .worktrees/ does not block" 0
 reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
 mkdir -p .tmprepro; printf 'package main\n\nfunc main() {}\n' > .tmprepro/repro.go
 check_hook "e2e: ignored .go inside scratch tree does not block" 0
+
+# ignored FRONTEND source consumed by staged frontend code: svelte-check
+# reads the import graph from disk, so a gitignored module masks the
+# committed snapshot exactly like an ignored .go — only when the
+# frontend checks actually engage
+reset; printf '\nexport const y = 2;\n' >> web/frontend/src/app.ts; git add web/frontend/src/app.ts
+printf 'export const ghost = 1;\n' > web/frontend/src/scratch-ghost.ts
+check_hook "e2e: ignored frontend src import blocked (frontend staged)" 1 "scratch-ghost.ts"
+
+# same ignored file, but nothing frontend staged: no frontend check runs,
+# so nothing vouches and nothing blocks (tier-2 gating philosophy)
+reset; printf '\n// staged\n' >> internal/foo/a.go; git add internal/foo/a.go
+printf 'export const ghost = 1;\n' > web/frontend/src/scratch-ghost2.ts
+check_hook "e2e: ignored frontend src file passes when frontend idle" 0
 
 # create-side masking: a brand-new package whose ONLY .go file is
 # ignored+untracked — a staged import of it compiles locally but cannot on CI

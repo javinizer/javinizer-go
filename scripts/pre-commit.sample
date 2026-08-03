@@ -738,6 +738,21 @@ $EMBED_MASKED"
         # pad with spaces so case-matching ' "$d" ' is exact-token safe
         PKG_DIRS=" $PKG_DIRS "
         IGNORED_KEPT=""
+        # Frontend compile inputs join in, gated on the frontend checks
+        # actually engaging: svelte-check/prettier read the IMPORT GRAPH
+        # from disk, so an IGNORED source file under web/frontend/src (a
+        # user-gitignored scratch module imported by staged code) passes
+        # locally while the committed snapshot breaks CI. The extension
+        # lists cannot express the web toolchain's whole module space
+        # (assets import too), so the src tree is scanned whole — user
+        # ignores there are rare by construction (.gitignore only lists
+        # build outputs under src's parent).
+        if [ "${FRONTEND_CHANGED:-0}" -gt 0 ]; then
+            while IFS= read -r -d '' feraw; do
+                [ -n "$feraw" ] && IGNORED_KEPT="$IGNORED_KEPT
+$feraw"
+            done < <(git ls-files -z --others --ignored --exclude-standard -- web/frontend/src || true)
+        fi
         while IFS= read -r -d '' raw; do
             [ -n "$raw" ] || continue
             case "$raw" in
