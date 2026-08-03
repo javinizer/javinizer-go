@@ -466,8 +466,23 @@ fi
 REV_PKGS=""
 if [ -n "$DROPPED_DIRS" ] || { [ -z "$FULL_SUITE" ] && [ -n "$STAGED_IMPS" ]; }; then
     GOLIST_ERR=$(mktemp)
-    if TEST_EDGES=$(go list -f '{{.ImportPath}} {{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>"$GOLIST_ERR") && [ -n "$MODULE" ]; then
+    # Edge sources must include packages the WILDCARD omits: ./... never
+        # enumerates testdata/ (go help packages), yet explicit imports
+        # beneath testdata/ resolve — a bridge helper there would be a
+        # missing ROW, severing the chain consumer_test -> bridge ->
+        # staged producer before the fixpoint can reach the consumer.
+        # -test -deps follows imports instead of enumerating dirs, so
+        # those packages appear with full regular+test import lists.
+        # Status discipline: capture RAW output FIRST, filter SECOND — a
+        # pipeline would report grep's status and mask a deep-graph
+        # failure as a healthy-but-partial row set.
+        # Filters: module-internal rows only (deps pulls the module
+        # cache); drop synthesized -test variants ('pkg [pkg.test]' rows
+        # duplicate the base row's edges, and 'pkg.test' binaries would
+        # poison REV_PKGS with directory-less import paths).
+        if RAW_EDGES=$(go list -f '{{.ImportPath}} {{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' -test -deps ./... 2>"$GOLIST_ERR") && [ -n "$MODULE" ]; then
         rm -f "$GOLIST_ERR"
+        TEST_EDGES=$(printf '%s\n' "$RAW_EDGES" | grep -E "^$MODULE( |/)" | grep -v '\[' | grep -v '\.test ' || true)
         EDGES_PAD=" $(printf '%s\n' "$TEST_EDGES" | tr '\n' ' ') "
         # Dangling references to vanished/emptied packages are a hard block:
         # the staged snapshot itself is inconsistent (something still imports
@@ -516,12 +531,35 @@ EOF
             done
         fi
     else
+        # The DEEP graph failed, but the shallow wildcard view still
+        # records DECLARED imports without loading them — enough to name
+        # the importers of a staged-deleted package whose disappearance
+        # BROKE the deep enumeration (classic: a deletion imported only
+        # from _test.go files). Give the precise dangling block first;
+        # deletions reachable via REGULAR imports break even this view
+        # and land in the generic block below, as before.
+        if [ -n "$MODULE" ] && [ -n "$DROPPED_DIRS" ] && WILD_EDGES=$(go list -f '{{.ImportPath}} {{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>/dev/null); then
+            WEDGES_PAD=" $(printf '%s\n' "$WILD_EDGES" | tr '\n' ' ') "
+            for dd in $DROPPED_DIRS; do
+                dimp=$MODULE/$dd
+                [ "$dd" = . ] && dimp=$MODULE
+                case "$WEDGES_PAD" in
+                    *" $dimp "*)
+                        echo -e "${RED}✗ Staged deletion of package '$dd' — these packages still import it:${NC}"
+                        printf '%s\n' "$WILD_EDGES" | grep -F " $dimp" | cut -d' ' -f1 | sed 's|^|  |'
+                        echo -e "${YELLOW}Update or remove the importers before deleting the package.${NC}"
+                        rm -f "$GOLIST_ERR"
+                        exit 1
+                        ;;
+                esac
+            done
+        fi
         # Hard block: the package graph cannot be enumerated, so reverse-
         # dependency and dangling-reference reasoning is impossible. This is
         # an inconsistent repository snapshot (e.g. a staged deletion still
         # imported elsewhere) — show the real error instead of degrading to
         # a suite that PRE_COMMIT_FAST=1 could then skip.
-        echo -e "${RED}✗ Cannot enumerate the package graph (go list ./... failed):${NC}"
+        echo -e "${RED}✗ Cannot enumerate the package graph (go list -test -deps ./... failed):${NC}"
         cat "$GOLIST_ERR"
         rm -f "$GOLIST_ERR"
         echo -e "${YELLOW}Fix the errors above (or unstage the offending files) and retry.${NC}"

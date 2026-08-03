@@ -418,6 +418,41 @@ git commit -qm 'fixture: foo embeds its own testdata fixture'
 printf 'v2\n' >> internal/foo/testdata/embedfix.txt; git add internal/foo/testdata/embedfix.txt
 check "embedded testdata asset -> rev-expanded owner closure" "|$C4||1|yes" "$(probe)"
 git reset -q --hard "$BASE5_SHA" >/dev/null; git clean -qfdx
+
+# staged producer -> testdata BRIDGE -> consumer_test: the wildcard ./...
+# never enumerates the bridge (go help packages), so without -test -deps
+# edge rows the fixpoint cannot reach the consumer through it
+reset
+BASE6_SHA=$(git rev-parse HEAD)
+mkdir -p internal/prod2 internal/prod2/testdata/bridge internal/cons3
+printf 'package prod2\n\nfunc P() int { return 1 }\n' > internal/prod2/prod.go
+printf 'package bridge\n\nimport "probe.local/x/internal/prod2"\n\nfunc B() int { return prod2.P() }\n' > internal/prod2/testdata/bridge/bridge.go
+printf 'package cons3\n\nfunc C3() int { return 1 }\n' > internal/cons3/cons3.go
+printf 'package cons3\n\nimport (\n\t"testing"\n\n\t"probe.local/x/internal/prod2/testdata/bridge"\n)\n\nfunc TestC3(t *testing.T) { if bridge.B() != 1 { t.Fatal() } }\n' > internal/cons3/cons3_test.go
+cat > cmd/javinizer/main.go <<'EOF'
+package main
+
+import (
+	"fmt"
+
+	_ "probe.local/x/docs/swagger"
+	_ "probe.local/x/web"
+	"probe.local/x/internal/bar"
+	"probe.local/x/internal/consumer"
+	"probe.local/x/internal/database"
+	"probe.local/x/internal/foo"
+	"probe.local/x/internal/mid"
+	"probe.local/x/internal/prod2"
+	_ "probe.local/x/internal/tree"
+)
+
+func main() { fmt.Println(foo.Foo(), bar.Bar(), consumer.C(), database.SQL(), mid.M(), prod2.P()) }
+EOF
+gofmt -w .
+git add -A && git commit -qm 'fixture: testdata bridge in import chain'
+printf '\n// touch\n' >> internal/prod2/prod.go; git add internal/prod2/prod.go
+check "testdata intermediate in rev closure" "./internal/prod2|./cmd/javinizer${nl}./internal/cons3${nl}./internal/prod2${nl}./internal/prod2/testdata/bridge||1|yes" "$(probe)"
+git reset -q --hard "$BASE6_SHA" >/dev/null; git clean -qfdx
 git reset -q --hard "$BASE4_SHA" >/dev/null; git clean -qfdx
 
 # an IMPORTABLE package beneath testdata/ (explicit imports resolve there)
