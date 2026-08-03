@@ -219,32 +219,45 @@ EMBED_STAGED=""
 # census emits raw ones, and a mismatched encoding silently nulls the
 # intersection. (Newline-in-filename remains out of scope — BSD comm has no
 # -z and the rest of this classification shares the limitation.)
-ASSET_CANDIDATES=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=ACMRTD \
+ASSET_CANDIDATES=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=ACMR \
     | grep -vE '^testdata/|^internal/|^cmd/|^web/dist/|^docs/swagger/|^configs/|\.go$|^go\.(mod|sum)$|^Makefile$|^\.golangci\.(yml|yaml)$' || true)
-if [ -n "$ASSET_CANDIDATES" ]; then
+DELETED_CANDIDATES=$(git -c core.quotepath=false diff --cached --name-only --no-renames --diff-filter=D \
+    | grep -vE '^testdata/|^internal/|^cmd/|^web/dist/|^docs/swagger/|^configs/|\.go$|^go\.(mod|sum)$|^Makefile$|^\.golangci\.(yml|yaml)$' || true)
+if [ -n "$ASSET_CANDIDATES$DELETED_CANDIDATES" ]; then
     # Membership in EITHER census marks an embed target. The TREE census
     # sees staged content edits and ADDS (a file must exist on disk to be
-    # staged). The HEAD census sees staged DELETIONS that have already
-    # vanished from BOTH the tree and the index (a multi-match glob keeps
-    # resolving on the survivors, so only HEAD still lists the dropped
-    # member) — materialized via git archive, never HEAD"~"-detached.
-    # Computing the pair without candidates would tax every docs-only
-    # commit; candidates gate it. Both are best-effort: a census failure
-    # simply adds nothing — the tree-consistency guard's fail-closed
-    # census blocks loudly right after.
+    # staged). It stays best-effort: a failure here fails the guard's
+    # identical fail-closed census a moment later, so nothing advances.
     EMBED_CENSUS_TREE=$(compute_embed_census || true)
     EMBED_CENSUS_HEAD=""
-    IDX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/javinizer-embedsnap.XXXXXX" 2>/dev/null || true)
-    # An empty IDX_TMP must NEVER reach tar -C: an empty -C operand is a
-    # cwd-relative extract. On failure the HEAD census simply stays empty
-    # — the tree census (and, moments later, the fail-closed guard
-    # census) still stand.
-    if [ -n "$IDX_TMP" ] && git archive HEAD 2>/dev/null | tar -x -C "$IDX_TMP" 2>/dev/null; then
-        EMBED_CENSUS_HEAD=$(cd "$IDX_TMP" && compute_embed_census || true)
+    # The HEAD census is the ONLY view that still lists a staged deletion
+    # which vanished from both tree and index (a multi-match glob keeps
+    # resolving on the survivors). When a deletion candidate exists it
+    # must NOT degrade silently — an empty HEAD census there would let an
+    # out-of-roots embed deletion skip all Go validation. Fail closed,
+    # checking every stage of the materialize chain explicitly.
+    if [ -n "$DELETED_CANDIDATES" ]; then
+        IDX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/javinizer-embedsnap.XXXXXX" 2>/dev/null) || {
+            echo -e "${RED}✗ Cannot materialize HEAD for the embed-deletion check (mktemp failed).${NC}"
+            echo -e "${YELLOW}  Free temp space and retry — $DELETED_CANDIDATES may be an embed target.${NC}"
+            exit 1
+        }
+        if ! git archive -o "$IDX_TMP/head.tar" HEAD 2>/dev/null || ! tar -xf "$IDX_TMP/head.tar" -C "$IDX_TMP" 2>/dev/null; then
+            echo -e "${RED}✗ Cannot materialize HEAD for the embed-deletion check (archive/extract failed).${NC}"
+            rm -rf "$IDX_TMP"
+            exit 1
+        fi
+        if ! EMBED_CENSUS_HEAD=$(cd "$IDX_TMP" && compute_embed_census); then
+            echo -e "${RED}✗ go list failed on the materialized HEAD snapshot — cannot prove${NC}"
+            echo -e "${RED}  the staged deletion(s) are no //go:embed targets. Fix the module${NC}"
+            echo -e "${RED}  state (go mod download) and retry.${NC}"
+            rm -rf "$IDX_TMP"
+            exit 1
+        fi
+        rm -rf "$IDX_TMP"
     fi
-    [ -z "$IDX_TMP" ] || rm -rf "$IDX_TMP"
     EMBED_STAGED=$(comm -12 \
-        <(printf '%s\n' "$ASSET_CANDIDATES" | sort -u) \
+        <( { printf '%s\n' "$ASSET_CANDIDATES"; printf '%s\n' "$DELETED_CANDIDATES"; } | sed '/^$/d' | sort -u) \
         <( { printf '%s\n' "$EMBED_CENSUS_TREE"; printf '%s\n' "$EMBED_CENSUS_HEAD"; } | sed '/^$/d' | sort -u) || true)
 fi
 while IFS= read -r p; do
