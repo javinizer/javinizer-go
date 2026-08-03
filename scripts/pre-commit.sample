@@ -590,6 +590,24 @@ TEST_PKGS=$(printf '%s\n' $GO_PKGS $ASSET_PKGS $EMBED_PKGS $STATIC_PKGS $REV_PKG
 # notices fire at use sites), so reverse dependents join the analysis scope.
 # shellcheck disable=SC2086 # word-splitting the pattern lists is intended
 CHECK_PKGS=$(printf '%s\n' $GO_PKGS $REV_PKGS | sed '/^$/d' | sort -u)
+# Full-mode invocations (test/vet/lint) run ./... WILDCARDS, which never
+# enumerate testdata/ trees (go help packages) — a staged package beneath
+# testdata/ escalates to FULL_SUITE and would then vanish from the very
+# run that claimed to cover it. Re-append stage-scoped testdata packages
+# verbatim: explicit patterns resolve beneath testdata/ fine, and the
+# toolchain deduplicates any overlap with ./... Two lanes, mirroring what
+# each check consumes: tests use the wider TEST_PKGS (asset owners
+# included), vet/lint the CHECK_PKGS analysis scope.
+FULL_TEST_EXTRA=""
+# shellcheck disable=SC2086 # word-splitting TEST_PKGS is intended
+for p in $TEST_PKGS; do
+    case "$p" in ./testdata/*|./*/testdata/*) FULL_TEST_EXTRA="$FULL_TEST_EXTRA $p" ;; esac
+done
+FULL_CHECK_EXTRA=""
+# shellcheck disable=SC2086 # word-splitting CHECK_PKGS is intended
+for p in $CHECK_PKGS; do
+    case "$p" in ./testdata/*|./*/testdata/*) FULL_CHECK_EXTRA="$FULL_CHECK_EXTRA $p" ;; esac
+done
 # SHOULD_BUILD: single source of truth for the check-5 trigger, composed
 # here (inside the classified block) so the regression matrix can assert the
 # exact value the hook consumes. Triggers: staged/deleted Go files
@@ -932,7 +950,7 @@ echo ""
 LINT_PKGS=$CHECK_PKGS
 LINT_SCOPE="staged packages + reverse dependents"
 if [ -n "$LINT_CONFIG" ] || [ -n "$FULL_SUITE" ]; then
-    LINT_PKGS="./..."
+    LINT_PKGS="./...$FULL_CHECK_EXTRA"
     LINT_SCOPE="full repo — lint config staged"
     [ -z "$LINT_CONFIG" ] && LINT_SCOPE="full repo — module/shared-input change"
 fi
@@ -966,7 +984,8 @@ echo ""
 if [ -n "$MODULE_CHANGED" ] || [ -n "$FULL_SUITE" ]; then
     # checked FIRST: module+Go mixed staging must not collapse to scoped vet
     echo -e "${BLUE}[3/8] Running go vet (all packages — module/shared-input change)...${NC}"
-    if ! go vet ./... 2>&1; then
+    # shellcheck disable=SC2086 # word-splitting FULL_CHECK_EXTRA is intended
+    if ! go vet ./... $FULL_CHECK_EXTRA 2>&1; then
         echo -e "${RED}✗ go vet found issues${NC}"
         exit 1
     fi
@@ -990,7 +1009,8 @@ echo ""
 # suite because scoped testing cannot see the breakage they cause.
 if [ -n "$FULL_SUITE" ] && [ -z "${PRE_COMMIT_FAST:-}" ]; then
     echo -e "${BLUE}[4/8] Running fast unit tests (full suite — module/shared/helper change)...${NC}"
-    if ! go test -short -timeout=60s ./... 2>&1; then
+    # shellcheck disable=SC2086 # word-splitting FULL_TEST_EXTRA is intended
+    if ! go test -short -timeout=60s ./... $FULL_TEST_EXTRA 2>&1; then
         echo -e "${RED}✗ Tests failed${NC}"
         exit 1
     fi

@@ -453,6 +453,8 @@ git add -A && git commit -qm 'fixture: testdata bridge in import chain'
 printf '\n// touch\n' >> internal/prod2/prod.go; git add internal/prod2/prod.go
 check "testdata intermediate in rev closure" "./internal/prod2|./cmd/javinizer${nl}./internal/cons3${nl}./internal/prod2${nl}./internal/prod2/testdata/bridge||1|yes" "$(probe)"
 git reset -q --hard "$BASE6_SHA" >/dev/null; git clean -qfdx
+
+
 git reset -q --hard "$BASE4_SHA" >/dev/null; git clean -qfdx
 
 # an IMPORTABLE package beneath testdata/ (explicit imports resolve there)
@@ -880,6 +882,24 @@ git reset -q --hard HEAD >/dev/null 2>&1; rm -rf internal/ghost
 # full (non-FAST) run: the scoped test invocation genuinely executes tests
 reset; printf '\n// full run\n' >> internal/foo/a.go; git add internal/foo/a.go
 PCFAST= check_hook "e2e: non-FAST run executes scoped tests" 0 "Running fast unit tests"
+
+# FULL mode + staged package beneath testdata/: 'go test ./...' skips
+# testdata trees entirely, so the full run must re-append the scoped
+# package explicitly — a failing test there must NOT pass the hook
+reset
+BASE7_SHA=$(git rev-parse HEAD)
+mkdir -p internal/probe_td/testdata/tdpkg
+printf 'package probetd\n\nfunc T() int { return 1 }\n' > internal/probe_td/t.go
+printf 'package tdpkg\n\nfunc D() int { return 1 }\n' > internal/probe_td/testdata/tdpkg/d.go
+printf 'package tdpkg\n\nimport "testing"\n\nfunc TestD(t *testing.T) { if D() != 1 { t.Fatal() } }\n' > internal/probe_td/testdata/tdpkg/d_test.go
+gofmt -w .
+git add -A && git commit -qm 'fixture: package with tests under testdata'
+printf 'package tdpkg\n\nimport "testing"\n\nfunc TestD(t *testing.T) { if D() != 999 { t.Fatal() } }\n' > internal/probe_td/testdata/tdpkg/d_test.go
+gofmt -w internal/probe_td/testdata/tdpkg/d_test.go
+printf '\n' >> go.mod
+git add go.mod internal/probe_td/testdata/tdpkg/d_test.go
+PCFAST= check_hook "e2e: full suite runs staged testdata package tests" 1 "tdpkg"
+git reset -q --hard "$BASE7_SHA" >/dev/null; git clean -qfdx
 
 # last tracked .go staged-deleted, ignored sibling remains -> must still block
 reset; printf 'package vanish\n\nfunc Ghost() int { return 1 }\n' > internal/vanish/local_ghost.go
