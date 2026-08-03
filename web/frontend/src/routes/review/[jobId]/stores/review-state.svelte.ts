@@ -678,7 +678,12 @@ export function createReviewState(pageStore: Page) {
 	const canResetPoster = $derived.by(() => {
 		if (!currentResult || !currentMovie) return false;
 		const original = posterBaseline;
-		if (!original || !original.poster_url) return false;
+		if (!original) return false;
+		// No scraped poster baseline AND no pending crop: nothing to restore.
+		// Pending geometry alone makes Reset meaningful even for cover-fallback
+		// movies (empty baseline poster_url) — it restores the scraped intent
+		// and clears the crop.
+		if (!original.poster_url && currentMovie.poster_crop_bounds == null) return false;
 		return (
 			currentMovie.poster_url !== original.poster_url ||
 			currentMovie.cropped_poster_url !== original.cropped_poster_url ||
@@ -700,7 +705,9 @@ export function createReviewState(pageStore: Page) {
 		if (!currentResult || !currentMovie) return;
 
 		const original = posterBaseline;
-		if (!original || !original.poster_url) return;
+		if (!original) return;
+		// see canResetPoster: pending geometry alone makes Reset meaningful
+		if (!original.poster_url && currentMovie.poster_crop_bounds == null) return;
 
 		const posterChanged =
 			currentMovie.poster_url !== original.poster_url ||
@@ -709,7 +716,8 @@ export function createReviewState(pageStore: Page) {
 			currentMovie.poster_crop_bounds != null;
 		if (!posterChanged) return;
 
-		if (original.poster_url !== currentMovie.poster_url) {
+		// No restorable URL when the baseline is empty (cover-only fallback).
+		if (original.poster_url !== '' && original.poster_url !== currentMovie.poster_url) {
 			mutations.applyPosterFromUrl(currentResult!.result_id, original.poster_url);
 		} else {
 			updateCurrentMovie(
