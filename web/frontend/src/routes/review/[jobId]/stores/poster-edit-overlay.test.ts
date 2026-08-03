@@ -48,6 +48,23 @@ describe('posterCropOverlayFromResponse', () => {
 		});
 	});
 
+	it('carries the server-stamped original_* revert baseline through the overlay', () => {
+		// A crop on a legacy result lazily stamps backupPosterOriginals
+		// server-side; dropping these fields from the overlay lets a pre-refetch
+		// whole-movie Save resubmit empty originals through UpdateMovie and
+		// destroy the reset target the crop just created.
+		const overlay = posterCropOverlayFromResponse({
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=2',
+			poster_crop_bounds: { x: 10, y: 20, width: 300, height: 450 },
+			original_poster_url: 'https://example.com/source.jpg',
+			original_cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=1',
+			original_should_crop_poster: true,
+		});
+		expect(overlay.original_poster_url).toBe('https://example.com/source.jpg');
+		expect(overlay.original_cropped_poster_url).toBe('/api/v1/temp/posters/job/ABC-001.jpg?v=1');
+		expect(overlay.original_should_crop_poster).toBe(true);
+	});
+
 	it('overlays null bounds when the server dropped them (legacy-source crop)', () => {
 		expect(posterCropOverlayFromResponse({ cropped_poster_url: '/x.jpg' }).poster_crop_bounds).toBeNull();
 		expect(
@@ -96,6 +113,32 @@ describe('overlayPosterEdit', () => {
 			poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
 		});
 		expect(result.poster_url).toBe('https://example.com/cover.jpg');
+	});
+
+	it('applies server-echoed original_* baseline fields when present, preserves them when omitted', () => {
+		const target = makeMovie({
+			original_poster_url: 'https://example.com/already.jpg',
+		});
+		const result = overlayPosterEdit(target, {
+			poster_url: 'https://example.com/new.jpg',
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=3',
+			should_crop_poster: false,
+			poster_crop_bounds: null,
+			original_poster_url: 'https://example.com/stamped.jpg',
+			original_cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=1',
+			original_should_crop_poster: true,
+		});
+		expect(result.original_poster_url).toBe('https://example.com/stamped.jpg');
+		expect(result.original_cropped_poster_url).toBe('/api/v1/temp/posters/job/ABC-001.jpg?v=1');
+		expect(result.original_should_crop_poster).toBe(true);
+
+		// A response predating the fields must not wipe the baseline with undefined.
+		const preserved = overlayPosterEdit(target, {
+			cropped_poster_url: '/api/v1/temp/posters/job/ABC-001.jpg?v=4',
+			should_crop_poster: false,
+			poster_crop_bounds: { x: 0, y: 0, width: 400, height: 600 },
+		});
+		expect(preserved.original_poster_url).toBe('https://example.com/already.jpg');
 	});
 
 	it('does not mutate the input movie', () => {

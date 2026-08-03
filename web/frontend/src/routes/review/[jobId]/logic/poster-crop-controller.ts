@@ -9,6 +9,7 @@ function sessionParam(): string {
 import {
 	clamp,
 	getDefaultPosterCropBox,
+	normalizeCropBox,
 	restoreCropBox,
 	type PosterCropBox,
 	type PosterCropMetrics,
@@ -101,13 +102,40 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		});
 
 		const currentResult = deps.getCurrentResult();
-		const savedCrop = currentResult
+		let seedCrop: PosterCropState | undefined = currentResult
 			? deps.getPosterCropStates().get(currentResult.file_path)
 			: undefined;
 
+		// No LOCAL geometry (siblings of a multipart crop, fresh devices):
+		// seed from the SERVER-stored crop instead of falling back to a blind
+		// default box — the default both hides the recorded crop and lets a
+		// blind Apply overwrite it. The bounds were measured against the
+		// dims recorded on them, so normalize there and restore onto the
+		// CURRENT source dims (ratio-based, so it stays correct if the image
+		// was re-rendered at a different size); bounds without usable dims
+		// predate dimension recording and keep the default-box fallback.
+		if (!seedCrop) {
+			const bounds = deps.getCurrentMovie()?.poster_crop_bounds;
+			const boundsWidth = bounds?.image_width ?? 0;
+			const boundsHeight = bounds?.image_height ?? 0;
+			if (bounds && boundsWidth > 0 && boundsHeight > 0) {
+				seedCrop = normalizeCropBox(
+					{ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+					{
+						sourceWidth: boundsWidth,
+						sourceHeight: boundsHeight,
+						displayWidth: 0,
+						displayHeight: 0,
+						imageOffsetX: 0,
+						imageOffsetY: 0,
+					},
+				);
+			}
+		}
+
 		deps.setCropBox(
-			savedCrop
-				? restoreCropBox(savedCrop, sourceWidth, sourceHeight)
+			seedCrop
+				? restoreCropBox(seedCrop, sourceWidth, sourceHeight)
 				: getDefaultPosterCropBox(sourceWidth, sourceHeight),
 		);
 
@@ -133,13 +161,23 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		if (!currentMovie) return;
 
 		const currentResult = deps.getCurrentResult();
+		// The backend crops the EFFECTIVE poster source (effectivePosterSourceOf:
+		// poster_url when set, else cover_url), so an unsaved SOURCE edit must be
+		// detected against that same pair — a cover-backed movie has an EMPTY
+		// poster_url, and a poster_url-only check would miss an unsaved cover_url
+		// edit entirely: the modal would show the cached OLD cover image while
+		// the pre-apply sync below (same rule) persists the new one, or neither
+		// sees the change and the crop silently targets the cover the user no
+		// longer references. Server-side drift comparison is the effective pair
+		// too (a same-poster_url cover-only edit must surface). Exact string
+		// compare mirrors the backend's pre/post-lock source check.
+		const editedSource = currentMovie.poster_url || currentMovie.cover_url || '';
+		const serverSource = currentResult?.movie
+			? (currentResult.movie.poster_url || currentResult.movie.cover_url || '')
+			: '';
 		let sourceURL: string;
-		if (
-			currentMovie.poster_url &&
-			currentResult?.movie &&
-			currentMovie.poster_url !== currentResult.movie.poster_url
-		) {
-			sourceURL = `/api/v1/temp/image?url=${encodeURIComponent(currentMovie.poster_url)}${sessionParam().replace('?', '&')}`;
+		if (editedSource && currentResult?.movie && editedSource !== serverSource) {
+			sourceURL = `/api/v1/temp/image?url=${encodeURIComponent(editedSource)}${sessionParam().replace('?', '&')}`;
 		} else {
 			const posterMovieId = currentResult?.movie_id ?? currentMovie.id;
 			const fullPosterURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}-full.jpg${sessionParam()}`;
@@ -247,15 +285,21 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			// crop the original scraped image, reverting the preview.
 			//
 			// The server poster_url may be EMPTY (cover-backed movie) while the
-			// edited URL is set: pre-sync anyway. poster-from-URL handles an
-			// empty prior source (it replaces {movieId}-full.jpg wholesale and
-			// returns the same { cropped_poster_url, poster_url } shape as the
-			// non-cover path), and openPosterCropModal already shows the edited
-			// URL in this case — skipping the sync would crop the cover with
-			// bounds measured on the edited image.
-			const serverPosterUrl = currentResult.movie?.poster_url;
-			if (currentMovie.poster_url && currentMovie.poster_url !== serverPosterUrl) {
-				await deps.applyPosterFromUrlAsync(currentResult.result_id, currentMovie.poster_url);
+			// edited URL is set: pre-sync anyway. The same holds when the
+			// UNSAVED edit landed on cover_url — the effective source (poster
+			// ?? cover) is what the backend crops (effectivePosterSourceOf),
+			// so the drift check, like openPosterCropModal's preview source,
+			// runs on the effective pair, not poster_url alone. poster-from-URL
+			// handles an empty prior source (it replaces {movieId}-full.jpg
+			// wholesale and returns the same { cropped_poster_url, poster_url }
+			// shape as the non-cover path), and openPosterCropModal already
+			// shows the edited URL in this case — skipping the sync would crop
+			// the cover with bounds measured on the edited image.
+			const editedSource = currentMovie.poster_url || currentMovie.cover_url || '';
+			const serverSource =
+				(currentResult.movie?.poster_url || currentResult.movie?.cover_url) ?? '';
+			if (editedSource && editedSource !== serverSource) {
+				await deps.applyPosterFromUrlAsync(currentResult.result_id, editedSource);
 			}
 
 			const maxPosterHeight = deps.getMaxPosterHeight();

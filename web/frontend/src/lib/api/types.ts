@@ -100,6 +100,16 @@ export interface PosterCropResponse {
 	cropped_poster_url: string;
 	/** Bounds the server actually stored; absent/null for legacy-source crops. */
 	poster_crop_bounds?: PosterCropBounds | null;
+	/**
+	 * Revert-baseline fields echoed from the post-crop state: the crop may have
+	 * lazily STAMPED them (backupPosterOriginals) on a legacy result that lacked
+	 * a baseline. Overlay them verbatim, or a whole-movie Save issued before the
+	 * next refetch resubmits empty originals through UpdateMovie and destroys
+	 * the reset target the crop just created.
+	 */
+	original_poster_url?: string;
+	original_cropped_poster_url?: string;
+	original_should_crop_poster?: boolean | null;
 }
 
 export interface PosterCropBounds {
@@ -131,6 +141,15 @@ export interface PosterFromURLResponse {
 	 * crop the preview already showed.
 	 */
 	should_crop_poster: boolean;
+	/**
+	 * Revert-baseline fields echoed from the post-update state — same contract
+	 * as PosterCropResponse: the server may have lazily stamped them on a legacy
+	 * result, and a pre-refetch whole-movie Save must not resubmit empty
+	 * originals.
+	 */
+	original_poster_url?: string;
+	original_cropped_poster_url?: string;
+	original_should_crop_poster?: boolean | null;
 }
 
 export interface ScraperRating {

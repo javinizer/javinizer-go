@@ -249,7 +249,9 @@ export class ScraperClient extends BaseClient {
 	}
 
 	async rescrapeMovie(id: string, req: RescrapeRequest): Promise<Movie> {
-		const response = await this.request<{ movie: Movie }>(`/api/v1/movies/${id}/rescrape`, {
+		// errors: movie-level warnings on an otherwise-successful rescrape
+		// (e.g. poster generation failure), per MovieResponse.errors contract.
+		const response = await this.request<{ movie: Movie; errors?: string[] }>(`/api/v1/movies/${id}/rescrape`, {
 			method: 'POST',
 			body: JSON.stringify(req),
 		});
@@ -265,7 +267,8 @@ export class ScraperClient extends BaseClient {
 			force: options?.force,
 			selected_scrapers: options?.selected_scrapers,
 		};
-		const response = await this.request<{ movie: Movie }>('/api/v1/scrape', {
+		// errors: movie-level warnings (poster generation failure) — ScrapeResponse.errors.
+		const response = await this.request<{ movie: Movie; cached?: boolean; errors?: string[] }>('/api/v1/scrape', {
 			method: 'POST',
 			body: JSON.stringify(request),
 		});

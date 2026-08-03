@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createPosterCropController, type PosterCropDragState } from './poster-crop-controller';
 import { BaseClient } from '$lib/api/clients/common';
-import type { FileResult, Movie } from '$lib/api/types';
-import type { PosterCropBox, PosterCropMetrics, PosterCropState } from '../review-utils';
+import type { FileResult, Movie, PosterCropBounds } from '$lib/api/types';
+import {
+	getDefaultPosterCropBox,
+	restoreCropBox,
+	type PosterCropBox,
+	type PosterCropMetrics,
+	type PosterCropState,
+} from '../review-utils';
 
 interface CallLog {
 	calls: string[];
@@ -14,6 +20,8 @@ interface CallLog {
 function makeController(opts: {
 	editedPosterUrl?: string;
 	serverPosterUrl?: string;
+	editedCoverUrl?: string;
+	serverCoverUrl?: string;
 	cropBox?: PosterCropBox | null;
 	maxPosterHeight?: number | null;
 	persistRejects?: boolean;
@@ -21,7 +29,8 @@ function makeController(opts: {
 	const movie: Movie = {
 		id: 'STARS-136',
 		title: 'Test Movie',
-		poster_url: opts.editedPosterUrl ?? 'https://dmm/jacket-full.jpg'
+		poster_url: opts.editedPosterUrl ?? 'https://dmm/jacket-full.jpg',
+		...(opts.editedCoverUrl !== undefined ? { cover_url: opts.editedCoverUrl } : {})
 	};
 	const result: FileResult = {
 		result_id: 'res-1',
@@ -35,7 +44,8 @@ function makeController(opts: {
 		movie: {
 			id: 'STARS-136',
 			title: 'Test Movie',
-			poster_url: opts.serverPosterUrl ?? 'https://dmm/digital-poster.jpg'
+			poster_url: opts.serverPosterUrl ?? 'https://dmm/digital-poster.jpg',
+			...(opts.serverCoverUrl !== undefined ? { cover_url: opts.serverCoverUrl } : {})
 		}
 	};
 
@@ -159,6 +169,40 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 		expect(log.mutatePosterCropAsync).toHaveBeenCalledTimes(1);
 	});
 
+	it('pre-syncs an unsaved cover_url edit on a cover-backed movie (effective source = poster_url || cover_url)', async () => {
+		// Cover-backed movie: poster_url is EMPTY on both sides, the effective
+		// poster source is the cover (backend: effectivePosterSourceOf). The
+		// user pasted a new COVER URL client-side. Without the pre-sync the
+		// crop endpoint would crop the OLD cached cover with bounds measured
+		// against the edited image the modal showed.
+		const { controller, log } = makeController({
+			editedPosterUrl: '',
+			serverPosterUrl: '',
+			editedCoverUrl: 'https://dmm/new-cover.jpg',
+			serverCoverUrl: 'https://dmm/old-cover.jpg'
+		});
+
+		await controller.applyPosterCrop();
+
+		expect(log.applyPosterFromUrlAsync).toHaveBeenCalledWith('res-1', 'https://dmm/new-cover.jpg');
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledTimes(1);
+		expect(log.calls).toEqual(['applying:true', 'persist', 'crop', 'applying:false']);
+	});
+
+	it('skips the pre-sync when a cover-backed movie has no source drift (cover unchanged on both sides)', async () => {
+		const { controller, log } = makeController({
+			editedPosterUrl: '',
+			serverPosterUrl: '',
+			editedCoverUrl: 'https://dmm/cover.jpg',
+			serverCoverUrl: 'https://dmm/cover.jpg'
+		});
+
+		await controller.applyPosterCrop();
+
+		expect(log.applyPosterFromUrlAsync).not.toHaveBeenCalled();
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledTimes(1);
+	});
+
 	it('passes maxPosterHeight through to the crop mutation', async () => {
 		const sameUrl = 'https://dmm/poster.jpg';
 		const { controller, log } = makeController({
@@ -198,7 +242,7 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 		BaseClient.setSessionID(null);
 	});
 
-	function makeCropController(opts: { editedPosterUrl?: string; serverPosterUrl?: string } = {}) {
+	function makeCropController(opts: { editedPosterUrl?: string; serverPosterUrl?: string; editedCoverUrl?: string; serverCoverUrl?: string } = {}) {
 		BaseClient.setSessionID('sid-abc');
 		const setCropSourceURL = vi.fn();
 		const editedPosterUrl = opts.editedPosterUrl ?? 'https://dmm/poster-GOOD-001.jpg';
@@ -207,6 +251,7 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 			id: 'GOOD-001',
 			title: 'Test Movie',
 			poster_url: editedPosterUrl,
+			...(opts.editedCoverUrl !== undefined ? { cover_url: opts.editedCoverUrl } : {}),
 		};
 		const result: FileResult = {
 			result_id: 'res-1',
@@ -217,7 +262,12 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 			is_multi_part: false,
 			part_number: 0,
 			part_suffix: '',
-			movie: { id: 'GOOD-001', title: 'Test Movie', poster_url: serverPosterUrl },
+			movie: {
+				id: 'GOOD-001',
+				title: 'Test Movie',
+				poster_url: serverPosterUrl,
+				...(opts.serverCoverUrl !== undefined ? { cover_url: opts.serverCoverUrl } : {}),
+			},
 		};
 		const controller = createPosterCropController({
 			getBrowser: () => true,
@@ -291,5 +341,162 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 		);
 		expect(url).not.toContain('/posters/job-1/GOOD-001-full.jpg');
 		expect(url).toContain('session=sid-abc');
+	});
+
+	it('measures the crop on the EDITED cover URL for a cover-backed movie with an unsaved cover_url edit', () => {
+		// Zero poster_url on both sides: the effective poster source is the
+		// cover (backend: effectivePosterSourceOf), so an unsaved cover_url
+		// edit must flip the modal to the image proxy — otherwise the preview
+		// shows the cached OLD cover while the user measures bounds meant for
+		// the new one.
+		const { controller, setCropSourceURL } = makeCropController({
+			editedPosterUrl: '',
+			serverPosterUrl: '',
+			editedCoverUrl: 'https://dmm/new-cover.jpg',
+			serverCoverUrl: 'https://dmm/old-cover.jpg',
+		});
+		controller.openPosterCropModal();
+
+		expect(setCropSourceURL).toHaveBeenCalledTimes(1);
+		const url = setCropSourceURL.mock.calls[0][0] as string;
+		expect(url).toContain(
+			`/api/v1/temp/image?url=${encodeURIComponent('https://dmm/new-cover.jpg')}`,
+		);
+		expect(url).not.toContain('/posters/job-1/GOOD-001-full.jpg');
+	});
+
+	it('uses the cached job poster for a cover-backed movie with no source drift (cover unchanged)', () => {
+		const { controller, setCropSourceURL } = makeCropController({
+			editedPosterUrl: '',
+			serverPosterUrl: '',
+			editedCoverUrl: 'https://dmm/cover.jpg',
+			serverCoverUrl: 'https://dmm/cover.jpg',
+		});
+		controller.openPosterCropModal();
+
+		expect(setCropSourceURL).toHaveBeenCalledTimes(1);
+		const url = setCropSourceURL.mock.calls[0][0] as string;
+		expect(url).toContain('/posters/job-1/GOOD-001-full.jpg');
+		expect(url).not.toContain('/api/v1/temp/image?url=');
+	});
+});
+
+describe('handlePosterCropImageLoad — seeds from server-stored poster_crop_bounds', () => {
+	// Regression: with no LOCAL crop state (siblings of a multipart crop,
+	// fresh devices), the editor opened on a blind default box even though
+	// the server held the recorded crop in movie.poster_crop_bounds — the
+	// recorded crop was invisible AND a blind Apply overwrote it.
+	function fakeImageLoadEvent(width: number, height: number): Event {
+		return {
+			currentTarget: {
+				naturalWidth: width,
+				naturalHeight: height,
+				clientWidth: width / 2,
+				clientHeight: height / 2,
+				offsetLeft: 0,
+				offsetTop: 0,
+			},
+		} as unknown as Event;
+	}
+
+	function makeLoadController(
+		opts: {
+			posterCropBounds?: PosterCropBounds | null;
+			savedCrop?: PosterCropState;
+		} = {},
+	) {
+		const movie: Movie = {
+			id: 'AAA-001',
+			title: 'Test Movie',
+			poster_url: 'https://dmm/poster.jpg',
+			poster_crop_bounds: opts.posterCropBounds ?? null,
+		};
+		const result: FileResult = {
+			result_id: 'res-1',
+			file_path: '/tmp/AAA-001.mp4',
+			movie_id: 'AAA-001',
+			status: 'completed',
+			started_at: '',
+			is_multi_part: false,
+			part_number: 0,
+			part_suffix: '',
+			movie,
+		};
+		const cropStates = new Map<string, PosterCropState>();
+		if (opts.savedCrop) cropStates.set(result.file_path, opts.savedCrop);
+		const setCropBox = vi.fn();
+		const controller = createPosterCropController({
+			getBrowser: () => true,
+			getJobId: () => 'job-1',
+			getCurrentMovie: () => movie,
+			getCurrentResult: () => result,
+			getShowPosterCropModal: () => true,
+			setShowPosterCropModal: () => {},
+			setPosterCropLoadError: () => {},
+			getCropSourceURL: () => '',
+			setCropSourceURL: () => {},
+			getCropImageElement: () => null,
+			setCropImageElement: () => {},
+			getCropMetrics: () => null,
+			setCropMetrics: () => {},
+			getCropBox: () => null,
+			setCropBox,
+			getMaxPosterHeight: () => null,
+			setMaxPosterHeight: () => {},
+			getCropDragState: () => null,
+			setCropDragState: () => {},
+			getPosterCropStates: () => cropStates,
+			applyPosterFromUrlAsync: vi.fn(async () => {}),
+			mutatePosterCropAsync: vi.fn(async () => {}),
+			setCropApplying: () => {},
+		});
+		return { controller, setCropBox };
+	}
+
+	it('restores the server-stored crop (normalized against its recorded dims) when no local geometry exists', () => {
+		const { controller, setCropBox } = makeLoadController({
+			posterCropBounds: {
+				x: 40,
+				y: 20,
+				width: 180,
+				height: 270,
+				image_width: 400,
+				image_height: 600,
+			},
+		});
+
+		controller.handlePosterCropImageLoad(fakeImageLoadEvent(800, 1200));
+
+		// Ratios from the recorded 400x600 dims re-applied to the 800x1200 source.
+		expect(setCropBox).toHaveBeenCalledWith({ x: 80, y: 40, width: 360, height: 540 });
+	});
+
+	it('falls back to the default box when the server bounds carry no usable source dims', () => {
+		const { controller, setCropBox } = makeLoadController({
+			posterCropBounds: { x: 40, y: 20, width: 180, height: 270 },
+		});
+
+		controller.handlePosterCropImageLoad(fakeImageLoadEvent(800, 1200));
+
+		expect(setCropBox).toHaveBeenCalledWith(getDefaultPosterCropBox(800, 1200));
+	});
+
+	it('prefers the locally stored crop state over the server bounds', () => {
+		const savedCrop: PosterCropState = { xRatio: 0.5, yRatio: 0, widthRatio: 0.25, heightRatio: 1 };
+		const { controller, setCropBox } = makeLoadController({
+			posterCropBounds: {
+				x: 40,
+				y: 20,
+				width: 180,
+				height: 270,
+				image_width: 400,
+				image_height: 600,
+			},
+			savedCrop,
+		});
+
+		controller.handlePosterCropImageLoad(fakeImageLoadEvent(800, 1200));
+
+		expect(setCropBox).toHaveBeenCalledWith(restoreCropBox(savedCrop, 800, 1200));
 	});
 });

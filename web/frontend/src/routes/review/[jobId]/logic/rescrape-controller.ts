@@ -5,6 +5,7 @@ import type {
 	Movie,
 	Scraper,
 } from '$lib/api/types';
+import { overlayPosterState, posterEditTargetFilePaths } from '../stores/overlay-field-override';
 
 export type ScalarStrategy =
 	| ''
@@ -40,6 +41,16 @@ interface RescrapeControllerDeps {
 	getRescrapeArrayStrategy: () => ArrayStrategy;
 	setRescrapeArrayStrategy: (strategy: ArrayStrategy) => void;
 	getRescrapingStates: () => Map<string, boolean>;
+	// Mirrors bulkRescrapeMutation (review-mutations.svelte.ts): a rescrape
+	// can replace the effective poster source, which clears the crop bounds
+	// server-side — the local geometry measured against the OLD image must
+	// then go too, for EVERY part of the movie.
+	clearPosterCropStates: (filePaths: string[]) => void;
+	// Mirrors bulkRescrapeMutation's invalidation: a successful rescrape
+	// commits server-side changes outside the synthetic result update below
+	// (multipart siblings, rekeyed assets), and a FAILED rescrape may still
+	// have applied partial state — refetch in both cases.
+	invalidateJobQueries: () => void;
 	toastSuccess: (message: string, duration?: number) => void;
 	toastError: (message: string, duration?: number) => void;
 	api: {
@@ -155,23 +166,68 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			});
 
 			const updatedMovie = response.movie;
-			if (deps.getJob() && currentResult.file_path) {
+			// Capture the PRE-update job: sibling resolution below keys on the
+			// (possibly pre-rekey) movie_id of the rescraped result — same as
+			// the bulk path's rescrapedPaths capture.
+			const currentJob = deps.getJob();
+			if (currentJob && currentResult.file_path) {
 				const filePath = currentResult.file_path;
-				const currentJob = deps.getJob()!;
 				const newResults = { ...currentJob.results };
 				newResults[filePath] = {
 					...newResults[filePath],
 					status: 'completed',
+					// A rescrape can re-key the movie; the result key (file_path)
+					// survives, so propagate the new movie_id here or the result
+					// keeps pointing at the old key (bulk gets this for free by
+					// adopting the whole server job — the single path synthesizes
+					// its result update and must mirror it).
+					movie_id: updatedMovie.id,
 					movie: updatedMovie,
 					field_sources: response.field_sources ?? newResults[filePath]?.field_sources,
 					actress_sources: response.actress_sources ?? newResults[filePath]?.actress_sources,
 				};
 				deps.setJob({ ...currentJob, results: newResults });
+
+				// Mirror bulkRescrapeMutation's crop invalidation signal: bounds
+				// null/absent in the response means the server cleared the crop
+				// (effective poster source changed) — drop the local geometry for
+				// every part. Resolve targets off the PRE-rekey job (currentJob)
+				// exactly like the bulk path.
+				if ((updatedMovie.poster_crop_bounds ?? null) === null) {
+					deps.clearPosterCropStates(
+						posterEditTargetFilePaths(currentJob.results ?? {}, rescrapeResultId),
+					);
+				}
 			}
+			deps.invalidateJobQueries();
 
 			const editedMovies = deps.getEditedMovies();
 			if (editedMovies.has(currentResult.file_path)) {
 				editedMovies.delete(currentResult.file_path);
+			}
+
+			// Sibling pending-edit reconciliation (P1): the backend fans the
+			// rescraped movie's poster state out to EVERY same-ID sibling part
+			// (rescrape_phase.go I7 single-sibling poster fan-out), but the
+			// response and the synthetic result update above only carry the
+			// RESCAPED file. A pending edit on sibling B still holds the
+			// pre-rescrape poster group (stale cropped_poster_url / crop bounds
+			// / Original* revert baseline), and buildMovieToSave resubmits every
+			// field on Save — overwriting the server fan-out with that stale
+			// snapshot. Overlay the server's poster state onto sibling pending
+			// edits (preserving their unrelated edited fields), mirroring
+			// applyFieldOverrideToEditedMovies / the bulk path's
+			// adopt-server-state contract. Targets resolve off the PRE-rekey
+			// job exactly like the crop-geometry clear above.
+			if (currentJob) {
+				for (const fp of posterEditTargetFilePaths(currentJob.results ?? {}, rescrapeResultId)) {
+					if (fp === currentResult.file_path) continue;
+					const pending = editedMovies.get(fp);
+					if (!pending) continue;
+					const merged: Movie = { ...pending };
+					overlayPosterState(merged, updatedMovie);
+					editedMovies.set(fp, merged);
+				}
 			}
 
 			deps.toastSuccess(
@@ -185,6 +241,11 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			deps.toastError(
 				(effectiveManualSearchMode ? 'Manual search failed: ' : 'Rescrape failed: ') + errorMessage,
 			);
+			// A failed single rescrape can still have committed partial
+			// server-side state (same failure surface as bulk: merged fields
+			// persist before the error) — refetch so the client doesn't keep
+			// showing the pre-rescrape snapshot. Mirrors bulkRescrapeMutation.
+			deps.invalidateJobQueries();
 		} finally {
 			setRescrapingState(deps, rescrapeResultId, false);
 		}

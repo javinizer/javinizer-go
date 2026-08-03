@@ -20,7 +20,7 @@ import {
 	type PosterPreviewOverride,
 	type PosterCropMetrics,
 } from '../review-utils';
-import { overlayFieldOverride, overlayPosterEdit, posterCropOverlayFromResponse, posterEditTargetFilePaths, applyFieldOverrideToEditedMovies, applyFieldOverrideToResults, type PosterEditOverlay } from './overlay-field-override';
+import { overlayFieldOverride, overlayPosterEdit, posterCropOverlayFromResponse, posterEditTargetFilePaths, applyFieldOverrideToEditedMovies, applyFieldOverrideToResults, sameMovieIdentity, type PosterEditOverlay } from './overlay-field-override';
 import { buildMovieToSave } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
@@ -36,6 +36,14 @@ interface ReviewMutationsDeps {
 	getCurrentResult: () => FileResult | undefined;
 	getPosterPreviewOverrides: () => Map<string, PosterPreviewOverride>;
 	getPosterCropStates: () => Map<string, PosterCropState>;
+	// clearPosterCropStates drops stored crop geometry for the given file
+	// paths. posterCropStates is keyed by file path and persisted to
+	// localStorage, so any mutation whose poster edit changes the source
+	// image server-side (poster-from-URL, source field override, rescrape)
+	// must invalidate the geometry measured against the OLD image —
+	// otherwise reopening the crop modal restores it
+	// (handlePosterCropImageLoad) and applying submits stale bounds.
+	clearPosterCropStates: (filePaths: string[]) => void;
 	getCropMetrics: () => PosterCropMetrics | null;
 	getCropBox: () => PosterCropBox | null;
 	getQueryClient: () => QueryClient;
@@ -77,6 +85,18 @@ interface ReviewMutationsDeps {
 	toastSuccess: (message: string, duration?: number) => void;
 	toastError: (message: string, duration?: number) => void;
 }
+
+// Fields whose override can invalidate the server-side crop — mirrored from
+// field_override.go (poster_url / cover_url clear CropBounds on an
+// effective-source change and re-derive the intent; should_crop_poster
+// clears on a flip; id re-keys the cached assets). Combined with the
+// response's poster_crop_bounds as the server's actual invalidation signal.
+const CROP_AFFECTING_OVERRIDE_FIELDS = new Set([
+	'id',
+	'poster_url',
+	'cover_url',
+	'should_crop_poster',
+]);
 
 export function createReviewMutations(deps: ReviewMutationsDeps) {
 	const queryClient = deps.getQueryClient();
@@ -155,6 +175,13 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				cropped_poster_url: data.cropped_poster_url,
 				should_crop_poster: data.should_crop_poster,
 				poster_crop_bounds: null,
+				// Server-echoed revert baseline (backupPosterOriginals may have
+				// stamped it just now on a legacy result): carry it, or a Save
+				// issued before the refetch applies resubmits empty originals
+				// through UpdateMovie and destroys the fresh reset target.
+				original_poster_url: data.original_poster_url,
+				original_cropped_poster_url: data.original_cropped_poster_url,
+				original_should_crop_poster: data.original_should_crop_poster,
 			});
 
 			const targetFilePath = filePathForResultId(resultId);
@@ -164,6 +191,17 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					version: Date.now(),
 				});
 			}
+
+			// The replace/reset just installed a NEW source image server-side
+			// (bounds cleared — the overlay above mirrors that), so the stored
+			// crop geometry was measured against the OLD image: drop it for
+			// every part of the movie, or reopening the crop modal would
+			// restore it and a blind Apply would submit stale bounds against
+			// the new image. Fan out matches applyPosterEditToState (siblings
+			// share the {movieID}-full.jpg the source replaced).
+			deps.clearPosterCropStates(
+				posterEditTargetFilePaths(deps.getJob()?.results ?? {}, resultId),
+			);
 
 			void invalidateJobQueries();
 		},
@@ -218,18 +256,45 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 	const saveEditsMutation = createMutation(() => ({
 		mutationFn: async () => {
 			const job = deps.getJob();
-			const savePromises = Array.from(deps.getEditedMovies().entries()).map(([filePath, movie]) => {
+			const targets: { filePath: string; promise: Promise<unknown> }[] = [];
+			for (const [filePath, movie] of deps.getEditedMovies().entries()) {
 				const movieToSave = buildMovieToSave(movie);
 				const resultId = job?.results?.[filePath]?.result_id;
-				if (!resultId) return null;
-				return deps.updateBatchMovie(deps.getJobId(), resultId, movieToSave);
-			});
-
-			const sent = savePromises.filter((p): p is Promise<unknown> => p !== null);
-			if (sent.length > 0) {
-				await Promise.all(sent);
+				if (!resultId) continue;
+				targets.push({
+					filePath,
+					promise: deps.updateBatchMovie(deps.getJobId(), resultId, movieToSave),
+				});
 			}
-			return sent.length;
+
+			// Promise.allSettled, NOT Promise.all: with N pending edits a single
+			// failing PATCH leaves the EARLIER ones already committed
+			// server-side. Promise.all rejected without distinguishing them, so
+			// onError could neither drop the confirmed saves from the pending
+			// map nor refetch them — the UI diverged until an unrelated
+			// invalidation. Settle every request and report per-file outcomes.
+			const settled = await Promise.allSettled(targets.map((t) => t.promise));
+			const succeededPaths: string[] = [];
+			const failures: { filePath: string; message: string }[] = [];
+			settled.forEach((outcome, i) => {
+				if (outcome.status === 'fulfilled') {
+					succeededPaths.push(targets[i].filePath);
+				} else {
+					failures.push({
+						filePath: targets[i].filePath,
+						message:
+							outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+					});
+				}
+			});
+			if (failures.length > 0) {
+				const err = new Error(
+					failures.map((f) => `${f.filePath}: ${f.message}`).join('; '),
+				) as Error & { succeededPaths: string[] };
+				err.succeededPaths = succeededPaths;
+				throw err;
+			}
+			return targets.length;
 		},
 		onSuccess: async (sent: number) => {
 			if (sent > 0) {
@@ -241,6 +306,18 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			deps.clearEditStorage();
 		},
 		onError: (err: Error) => {
+			// Partial failure: drop ONLY the edits the server confirmed from the
+			// pending map (the failed ones stay for retry), and refetch the job
+			// — the confirmed PATCHes are committed server-side, so the client
+			// must adopt their state instead of showing the pre-save snapshot.
+			const succeededPaths = (err as { succeededPaths?: string[] }).succeededPaths;
+			if (Array.isArray(succeededPaths) && succeededPaths.length > 0) {
+				const editedMovies = deps.getEditedMovies();
+				for (const fp of succeededPaths) {
+					editedMovies.delete(fp);
+				}
+			}
+			void invalidateJobQueries();
 			deps.toastError(m.review_save_edits_failed({ error: err.message }));
 		},
 	}));
@@ -257,9 +334,16 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			crop: PosterCropBox;
 			maxPosterHeight?: number;
 		}) => {
-			return deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight);
+			// Capture the metrics WITH the request: the submitted crop box is
+			// in THIS source's pixel space, and drag events stay live while the
+			// save is in flight — reading getCropMetrics()/getCropBox() at
+			// onSuccess time would persist whatever the box has drifted to
+			// (possibly another movie's box) under THIS request's file path.
+			const metrics = deps.getCropMetrics();
+			const response = await deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight);
+			return { response, metrics };
 		},
-		onSuccess: (response: PosterCropResponse, { resultId }) => {
+		onSuccess: ({ response, metrics }, { resultId, crop }) => {
 			applyPosterEditToState(resultId, posterCropOverlayFromResponse(response));
 
 			const targetFilePath = filePathForResultId(resultId);
@@ -269,12 +353,16 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					version: Date.now(),
 				});
 
-				const cropMetricsVal = deps.getCropMetrics();
-				const cropBoxVal = deps.getCropBox();
-				if (cropMetricsVal && cropBoxVal) {
-					deps
-						.getPosterCropStates()
-						.set(targetFilePath, normalizeCropBox(cropBoxVal, cropMetricsVal));
+				if (metrics) {
+					const normalized = normalizeCropBox(crop, metrics);
+					// The server applies the crop to EVERY file of the movie
+					// (applyPosterEditToState above fans out the same way), so
+					// persist the geometry under all parts — otherwise reopening
+					// the crop editor on a multi-part sibling found no local
+					// state and fell back to a blind default box.
+					for (const fp of posterEditTargetFilePaths(deps.getJob()?.results ?? {}, resultId)) {
+						deps.getPosterCropStates().set(fp, normalized);
+					}
 				}
 			}
 
@@ -349,11 +437,38 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				array_strategy: arrayStrategy as 'merge' | 'replace' | undefined,
 			});
 		},
-		onSuccess: (data) => {
+		onSuccess: (data, { movieIds }) => {
+			// Capture the rescraped movies' file paths BEFORE setJob: results
+			// are keyed by file path, which survives a rescrape, while a rekey
+			// changes movie_id — resolving targets off the replaced job would
+			// miss every rekeyed result.
+			const rescrapedPaths = new Set<string>();
+			// Case-insensitive match (sameMovieIdentity): the backend resolves
+			// each requested ID through its folded movie-ID indexKey, so a
+			// case-variant sibling's results ARE rescraped server-side and must
+			// be captured here or they stay stale until the async refetch.
+			for (const [fp, r] of Object.entries(deps.getJob()?.results ?? {})) {
+				if (movieIds.some((mid) => sameMovieIdentity(mid, (r as FileResult).movie_id))) {
+					rescrapedPaths.add(fp);
+				}
+			}
+
 			if (data.job) {
 				deps.skipJobSync();
 				deps.setJob(data.job);
 			}
+
+			// A rescrape can replace the effective poster source; the server
+			// clears CropBounds exactly then (merge keeps them for an unchanged
+			// source — see mergeRescrapeMovie). Mirror that signal locally so
+			// reopening the crop modal never restores geometry measured
+			// against the old image.
+			deps.clearPosterCropStates(
+				Array.from(rescrapedPaths).filter((fp) => {
+					const newMovie = (data.job?.results?.[fp] as FileResult | undefined)?.movie;
+					return newMovie != null && (newMovie.poster_crop_bounds ?? null) === null;
+				}),
+			);
 
 			if (data.failed > 0) {
 				deps.toastError(m.review_rescrape_failed_count({ count: data.failed }));
@@ -365,6 +480,14 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		},
 		onError: (err: Error) => {
 			deps.toastError(m.review_rescrape_movies_failed({ error: err.message }));
+			// A persist-failure 500 carries the authoritative per-item results
+			// and the post-rollback job in its body (batchRescrapeMovies answers
+			// the BulkRescrapeResponse with status 500), but ApiError discards
+			// everything except the message — so adopt the server state the
+			// only way available here: refetch. Without this the client keeps
+			// the pre-rescrape UI for movies that SUCCEEDED, and shows
+			// pre-rollback edits as current for the ones that reverted.
+			void invalidateJobQueries();
 		},
 	}));
 
@@ -406,6 +529,25 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					field,
 					data.movie,
 				);
+
+				// Crop-affecting overrides (poster_url / cover_url source picks,
+				// an explicit should_crop_poster re-pick, an id rekey) can
+				// invalidate the crop SERVER-side; the server's own signal is the
+				// response's poster_crop_bounds (omitted/nil = cleared — see
+				// overlayFieldOverride's absent-key convention). Drop the local
+				// crop geometry measured against the old image exactly then, and
+				// keep it when the server kept the bounds (same effective source,
+				// or the id-rekey asset MOVE — same bytes at the new key).
+				// Targets resolve from the PRE-override job: an id override
+				// re-keys movie_id in the overlaid results.
+				if (
+					CROP_AFFECTING_OVERRIDE_FIELDS.has(field) &&
+					(data.movie.poster_crop_bounds ?? null) === null
+				) {
+					deps.clearPosterCropStates(
+						posterEditTargetFilePaths(currentJob.results ?? {}, resultId),
+					);
+				}
 			}
 			deps.toastSuccess(m.review_field_replaced({ field, source }));
 			void invalidateJobQueries();

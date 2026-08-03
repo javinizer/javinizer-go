@@ -48,6 +48,7 @@ import equal from 'fast-deep-equal';
 import { calculateCompleteness, type CompletenessTier } from '$lib/utils/completeness';
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
+import { planPosterReset, posterEditTargetFilePaths } from './overlay-field-override';
 import { buildMovieOverride } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
@@ -406,6 +407,23 @@ export function createReviewState(pageStore: Page) {
 		!!currentMovie && getEffectiveOperationMode() === 'organize' && !destinationPath.trim(),
 	);
 
+	// Source-changing poster edits (poster-from-URL, crop-affecting field
+	// overrides, rescrape) invalidate geometry measured against the OLD
+	// image. The persistence $effect for posterCropStates intentionally
+	// no-ops when the map is EMPTY (its initial-mount run must not wipe
+	// localStorage before the restore reads it), so a deletion that
+	// empties the map must remove the localStorage entry eagerly or the
+	// stale geometry would resurrect on the next reload.
+	function clearPosterCropStates(filePaths: string[]) {
+		let changed = false;
+		for (const fp of filePaths) {
+			if (posterCropStates.delete(fp)) changed = true;
+		}
+		if (changed && browser && posterCropStates.size === 0) {
+			localStorage.removeItem(posterCropStatesStorageKey);
+		}
+	}
+
 	const mutations = createReviewMutations({
 		getJobId: () => jobId,
 		getJob: () => job,
@@ -419,6 +437,7 @@ export function createReviewState(pageStore: Page) {
 		getCurrentResult: () => currentResult,
 		getPosterPreviewOverrides: () => posterPreviewOverrides,
 		getPosterCropStates: () => posterCropStates,
+		clearPosterCropStates,
 		getCropMetrics: () => cropMetrics,
 		getCropBox: () => cropBox,
 		getQueryClient: () => queryClient,
@@ -696,15 +715,10 @@ export function createReviewState(pageStore: Page) {
 		if (!currentResult || !currentMovie) return;
 
 		const original = posterBaseline;
-		if (!original || !original.poster_url) return;
+		const plan = planPosterReset(currentMovie, original);
+		if (plan === 'noop' || !original) return;
 
-		const posterChanged =
-			currentMovie.poster_url !== original.poster_url ||
-			currentMovie.cropped_poster_url !== original.cropped_poster_url ||
-			currentMovie.should_crop_poster !== original.should_crop_poster;
-		if (!posterChanged) return;
-
-		if (original.poster_url !== currentMovie.poster_url) {
+		if (plan === 'restore-url') {
 			mutations.applyPosterFromUrl(currentResult!.result_id, original.poster_url);
 		} else {
 			updateCurrentMovie({
@@ -714,6 +728,16 @@ export function createReviewState(pageStore: Page) {
 				poster_crop_bounds: null,
 			});
 			clearPosterPreviewOverride();
+			// The local revert cleared the recorded bounds WITHOUT a poster-URL
+			// change (no server round-trip), so nothing else invalidates
+			// crop geometry measured in the pre-reset crop session — reopening
+			// the crop editor would restore that stale posterCropStates entry
+			// and a blind Apply would silently undo the reset. Clear it for
+			// every part of the movie (fan-out parity with the r6 source-change
+			// invalidations; siblings share the {movieID}-full.jpg).
+			clearPosterCropStates(
+				posterEditTargetFilePaths(job?.results ?? {}, currentResult.result_id),
+			);
 		}
 	}
 
@@ -867,6 +891,14 @@ export function createReviewState(pageStore: Page) {
 			rescrapeArrayStrategy = strategy;
 		},
 		getRescrapingStates: () => rescrapingStates,
+		clearPosterCropStates,
+		invalidateJobQueries: () => {
+			void Promise.all([
+				queryClient.invalidateQueries({ queryKey: ['batch-job', jobId] }),
+				queryClient.invalidateQueries({ queryKey: ['batch-job-slim', jobId] }),
+				queryClient.invalidateQueries({ queryKey: ['actresses'] }),
+			]);
+		},
 		toastSuccess: (message, duration) => toastStore.success(message, duration),
 		toastError: (message, duration) => toastStore.error(message, duration),
 		api: {
@@ -1087,6 +1119,40 @@ export function createReviewState(pageStore: Page) {
 		localStorage.setItem(VIEW_MODE_KEY, viewMode);
 	});
 
+	/**
+	 * Restore + job-scope posterCropStates.
+	 *
+	 * Mirrors the editedMovies/posterPreviewOverrides restore $effect below:
+	 * declared BEFORE the persistence $effect so its initial-mount run
+	 * populates the map first, and its only reactive dependency is the
+	 * jobId-derived storage key so it re-runs exactly on mount (map already
+	 * empty — clear is a no-op) and on /review/A → /review/B navigation.
+	 * Without this scope step the persistence effect below re-ran on the
+	 * key change with job A's geometry still in the map and wrote it under
+	 * job B's localStorage key. Untracked so the clear/set doesn't loop the
+	 * effect against itself; prior-job geometry stays safe in localStorage
+	 * under the prior job's key (the persistence effect writes on every edit).
+	 */
+	$effect(() => {
+		if (!browser) return;
+		untrack(() => {
+			posterCropStates.clear();
+		});
+		const savedCrops = localStorage.getItem(posterCropStatesStorageKey);
+		if (savedCrops) {
+			try {
+				const parsed = JSON.parse(savedCrops) as Record<string, PosterCropState>;
+				untrack(() => {
+					for (const [k, v] of Object.entries(parsed)) {
+						posterCropStates.set(k, v);
+					}
+				});
+			} catch {
+				localStorage.removeItem(posterCropStatesStorageKey);
+			}
+		}
+	});
+
 	$effect(() => {
 		if (!browser) return;
 		if (posterCropStates.size === 0) return;
@@ -1230,25 +1296,12 @@ export function createReviewState(pageStore: Page) {
 				}
 			}
 			viewModeInitialized = true;
-			const savedCrops = localStorage.getItem(posterCropStatesStorageKey);
-			if (savedCrops) {
-				try {
-					const parsed = JSON.parse(savedCrops) as Record<string, PosterCropState>;
-					untrack(() => {
-						for (const [k, v] of Object.entries(parsed)) {
-							posterCropStates.set(k, v);
-						}
-					});
-				} catch {
-					localStorage.removeItem(posterCropStatesStorageKey);
-				}
-			}
 
-			// editedMovies + posterPreviewOverrides restore moved to a $effect
-			// declared before the persistence $effects above — restore-on-mount
-			// now runs as an $effect (in declaration order, before persistence)
-			// so the persistence effect's initial-mount removeItem-when-empty
-			// branch no longer destroys the entries before restore reads them.
+			// editedMovies + posterPreviewOverrides + posterCropStates restores
+			// all live in $effects declared before their persistence $effects
+			// above — restore-on-mount runs in declaration order before
+			// persistence, and the jobId-scoped clear stops /review/A →
+			// /review/B navigations from writing A's state under B's key.
 		}
 
 		window.addEventListener('resize', posterCropController.handleWindowResize);
