@@ -93,6 +93,69 @@ func TestRefCountedDumpLookupDrainsInFlightQueries(t *testing.T) {
 	require.ErrorIs(t, err, models.ErrDumpMiss)
 }
 
+func TestRefCountedDumpLookupIdempotentCloseAndMissesAfterClose(t *testing.T) {
+	store := &fakeDumpStore{}
+	dump := &refCountedDumpLookup{inner: store, closer: store, drainedCh: make(chan struct{})}
+
+	// Cover the remaining wrappers before close.
+	_, err := dump.LookupByContentID(context.Background(), "118ipx00535")
+	require.ErrorIs(t, err, models.ErrDumpMiss)
+	_, sErr := dump.Stats(context.Background())
+	require.NoError(t, sErr)
+
+	require.NoError(t, dump.Close())
+	require.True(t, store.isClosed())
+	// Second Close is a no-op.
+	require.NoError(t, dump.Close())
+	require.Equal(t, 1, store.closeCalls)
+}
+
+// Close times out past drain when a lookup wedges (exercises the timeout arm).
+func TestRefCountedDumpLookupCloseTimesOutOnStuckLookup(t *testing.T) {
+	store := &fakeDumpStore{release: make(chan struct{})} // never released
+	dump := &refCountedDumpLookup{inner: store, closer: store, drainedCh: make(chan struct{})}
+
+	// Park a lookup permanently by latching the acquire manually.
+	dump.mu.Lock()
+	dump.active++
+	dump.mu.Unlock()
+	prevWait := dumpDrainWait
+	dumpDrainWait = 30 * time.Millisecond
+	t.Cleanup(func() { dumpDrainWait = prevWait })
+	start := time.Now()
+	require.NoError(t, dump.Close())
+	require.GreaterOrEqual(t, time.Since(start), 25*time.Millisecond)
+	require.True(t, store.isClosed())
+
+	// late lookups miss cleanly
+	_, err := dump.LookupMovie(context.Background(), "IPX-535")
+	require.ErrorIs(t, err, models.ErrDumpMiss)
+}
+
+// After Close every wrapper must degrade to a clean dump miss so callers
+// fall back to HTTP even mid-reload.
+func TestRefCountedDumpLookupPostCloseWrappersMiss(t *testing.T) {
+	store := &fakeDumpStore{}
+	dump := &refCountedDumpLookup{inner: store, closer: store, drainedCh: make(chan struct{})}
+	require.NoError(t, dump.Close())
+
+	if _, err := dump.LookupByDVDID(context.Background(), "IPX-535"); err == nil {
+		t.Fatal("expected miss after close")
+	} else {
+		require.ErrorIs(t, err, models.ErrDumpMiss)
+	}
+	if _, err := dump.LookupByContentID(context.Background(), "118ipx00535"); err == nil {
+		t.Fatal("expected miss after close")
+	} else {
+		require.ErrorIs(t, err, models.ErrDumpMiss)
+	}
+	if _, err := dump.Stats(context.Background()); err == nil {
+		t.Fatal("expected miss after close")
+	} else {
+		require.ErrorIs(t, err, models.ErrDumpMiss)
+	}
+}
+
 func TestRefCountedDumpLookupClosesWhenIdle(t *testing.T) {
 	store := &fakeDumpStore{}
 	dump := &refCountedDumpLookup{inner: store, closer: store, drainedCh: make(chan struct{})}

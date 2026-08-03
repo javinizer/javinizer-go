@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/google/uuid"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/require"
 )
@@ -224,6 +225,134 @@ func TestMergeMigrationKeepsCanonicalWinnerDuringCancel(t *testing.T) {
 } // Deleting an actress cancels her in-flight sync tasks and detaches the
 // terminal ones; SQLite FK enforcement is off in production, so rows holding
 // the reference would otherwise dangle.
+// Coverage of the defensive DB error tails: pluck-before-cancel misdeed,
+// cancel fail, terminal-null fail, delete fail — all via callback-forced
+// errors, keeping each defensive return plane real.
+func oneShotUpdateErrorOn(t *testing.T, db *DB, call int) func() {
+	t.Helper()
+	name := "coverage:update-call:" + uuid.NewString()
+	seen := 0
+	require.NoError(t, db.DB.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+		seen++
+		if seen == call {
+			tx.AddError(errForcedActressCoverage)
+		}
+	}))
+	return func() { require.NoError(t, db.DB.Callback().Update().Remove(name)) }
+}
+
+func oneShotDeleteErrorOn(t *testing.T, db *DB, call int) func() {
+	t.Helper()
+	name := "coverage:delete-call:" + uuid.NewString()
+	seen := 0
+	require.NoError(t, db.DB.Callback().Delete().Before("gorm:delete").Register(name, func(tx *gorm.DB) {
+		seen++
+		if seen == call {
+			tx.AddError(errForcedActressCoverage)
+		}
+	}))
+	return func() { require.NoError(t, db.DB.Callback().Delete().Remove(name)) }
+}
+
+// The supersede-key rewrite inside createActressSyncTaskTx fails safely.
+func TestCreateJobSupersedeFailsOnUpdateError(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressSyncRepository(db)
+	actress := &models.Actress{JapaneseName: "retry"}
+	require.NoError(t, NewActressRepository(db).Create(context.Background(), actress))
+
+	canon := "actress:" + strconv.FormatUint(uint64(actress.ID), 10)
+	job := models.ActressSyncJob{ID: "old-job", Status: models.ActressSyncJobRunning, Scope: "missing", CancelRequested: true}
+	require.NoError(t, db.Create(&job).Error)
+	until := time.Now().UTC().Add(time.Hour)
+	old := models.ActressSyncTask{ID: "old-task", JobID: job.ID, Label: "x", DedupeKey: canon, Status: models.ActressSyncTaskRunning, Stage: "running", Messages: []string{}, UpdatedFields: []string{}, ActressID: &actress.ID, LeaseToken: "tok", LeaseExpiresAt: &until}
+	require.NoError(t, db.Create(&old).Error)
+
+	newJob := models.ActressSyncJob{ID: "new-job", Status: models.ActressSyncJobPending, Scope: "missing"}
+	newTask := models.ActressSyncTask{ID: "new-task", JobID: newJob.ID, Label: "x", DedupeKey: canon, Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, ActressID: &actress.ID}
+
+	undo := forceUpdateError(t, db)
+	defer undo()
+	require.Error(t, repo.CreateJob(&newJob, []models.ActressSyncTask{newTask}))
+}
+
+// CompleteTask's job refresh may fail inside the same transaction.
+func TestCompleteTaskSurfacesRefreshError(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo, job, task := claimActressCoverageTask(t, db, nil)
+	_ = job
+	name := "coverage:complete-refresh:" + uuid.NewString()
+	require.NoError(t, db.DB.Callback().Update().After("gorm:update").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Table == "actress_sync_tasks" {
+			tx.AddError(tx.Exec("DROP TABLE actress_sync_jobs").Error)
+		}
+	}))
+	defer func() { require.NoError(t, db.DB.Callback().Update().Remove(name)) }()
+	task.Status = models.ActressSyncTaskCompleted
+	task.Outcome = "updated"
+	require.Error(t, repo.CompleteTask(task, task.LeaseToken))
+}
+
+func TestLeaseGateCancelledArmCoversUpdates(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressSyncRepository(db)
+	actress := &models.Actress{JapaneseName: "fence"}
+	require.NoError(t, NewActressRepository(db).Create(context.Background(), actress))
+	job := models.ActressSyncJob{ID: "jobs-cancel", Status: models.ActressSyncJobRunning, Scope: "missing", CancelRequested: true}
+	require.NoError(t, db.Create(&job).Error)
+	until := time.Now().UTC().Add(time.Hour)
+	old := models.ActressSyncTask{ID: "task-cancelled-cancel", JobID: job.ID, Label: "x", DedupeKey: "actress:" + strconv.FormatUint(uint64(actress.ID), 10), Status: models.ActressSyncTaskRunning, Stage: "running", Messages: []string{}, UpdatedFields: []string{}, ActressID: &actress.ID, LeaseToken: "tok", LeaseExpiresAt: &until}
+	require.NoError(t, db.Create(&old).Error)
+	complete := models.ActressSyncTask{ID: old.ID, JobID: job.ID, Status: models.ActressSyncTaskSkipped, Outcome: "skipped", Messages: []string{}, UpdatedFields: []string{}}
+	require.NoError(t, repo.CompleteTask(&complete, "tok"), "the fence converts in-place rather than erroring")
+	var stored models.ActressSyncTask
+	require.NoError(t, db.First(&stored, "id = ?", old.ID).Error)
+	require.Equal(t, models.ActressSyncTaskCancelled, stored.Status)
+}
+
+func TestActressDeleteErrorBranches(t *testing.T) {
+	makeRepo := func(t *testing.T) (*ActressRepository, *models.Actress) {
+		t.Helper()
+		db := newDatabaseTestDB(t)
+		repo := NewActressRepository(db)
+		actress := &models.Actress{JapaneseName: "db"}
+		require.NoError(t, repo.Create(context.Background(), actress))
+		return repo, actress
+	}
+
+	t.Run("pluck", func(t *testing.T) {
+		repo, actress := makeRepo(t)
+		db := repo.GetDB()
+		undo := forceQueryErrorOnCall(t, db, 1)
+		defer undo()
+		require.ErrorIs(t, repo.Delete(context.Background(), actress.ID), errForcedActressCoverage)
+	})
+
+	t.Run("cancel", func(t *testing.T) {
+		repo, actress := makeRepo(t)
+		db := repo.GetDB()
+		undo := forceUpdateError(t, db) // always fail update ops
+		defer undo()
+		require.ErrorIs(t, repo.Delete(context.Background(), actress.ID), errForcedActressCoverage)
+	})
+
+	t.Run("null-update", func(t *testing.T) {
+		repo, actress := makeRepo(t)
+		db := repo.GetDB()
+		undo := oneShotUpdateErrorOn(t, db, 2) // second Update call: the null-out
+		defer undo()
+		require.ErrorIs(t, repo.Delete(context.Background(), actress.ID), errForcedActressCoverage)
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		repo, actress := makeRepo(t)
+		db := repo.GetDB()
+		undo := oneShotDeleteErrorOn(t, db, 1)
+		defer undo()
+		require.ErrorIs(t, repo.Delete(context.Background(), actress.ID), errForcedActressCoverage)
+	})
+}
+
 func TestActressDeleteCancelsAndDetachesSyncTasks(t *testing.T) {
 	db, err := New(&Config{Type: "sqlite", DSN: ":memory:"})
 	require.NoError(t, err)

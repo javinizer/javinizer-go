@@ -42,6 +42,39 @@ func TestValidateThumbnailRejectsDecompressionBomb(t *testing.T) {
 	assert.Contains(t, rejected.Reason, "pixel decoder limit")
 }
 
+func TestValidateThumbnailRejectsZeroDimensions(t *testing.T) {
+	body := pngHeaderWithDimensions(t, 0, 128)
+	_, err := ValidateThumbnail(context.Background(), testFetcher(http.StatusOK, "image/png", body, nil), "https://example.test/photo.png", 0, 1<<20)
+	require.Error(t, err)
+	var rejected *ThumbnailRejectedError
+	require.ErrorAs(t, err, &rejected)
+	assert.Contains(t, rejected.Reason, "non-positive dimension", "header-level zero dimensions are refused")
+}
+
+// Header parses fine but pixel data is truncated: DecodeConfig succeeds while
+// the full Decode must still be reported as a rejection.
+func TestValidateThumbnailRejectsTruncatedPixelData(t *testing.T) {
+	body := pngHeaderWithDimensions(t, 128, 128)
+	// Add a truncated IDAT chunk after the valid IHDR: claims N bytes, delivers fewer.
+	trailer := append([]byte{0, 0, 4, 0}, []byte("IDAT")...) // length 1024 claimed
+	trailer = append(trailer, []byte{0x78, 0x9c}...)         // zlib magic, then nothing
+	trailer = append(trailer, 0, 0, 0, 0)                    // CRC padding (bad on purpose)
+	body = append(body, trailer...)
+	_, err := ValidateThumbnail(context.Background(), testFetcher(http.StatusOK, "image/png", body, nil), "https://example.test/photo.png", 0, 1<<20)
+	require.Error(t, err)
+	var rejected *ThumbnailRejectedError
+	require.ErrorAs(t, err, &rejected)
+}
+
+func TestValidateThumbnailRejectsInvalidDimensions(t *testing.T) {
+	// Width zero case needs a gif whose LSD says 0x N gif.Data: only png errors out
+	// pre-decode, so use a GIF, which reports header dimensions honestly.
+	gif := []byte("GIF89a" + string([]byte{0, 0, 60, 0, 0, 0}))
+	gif = append(gif, 0x3b)
+	_, err := ValidateThumbnail(context.Background(), testFetcher(http.StatusOK, "image/gif", gif, nil), "https://example.test/z.gif", 0, 1<<20)
+	require.Error(t, err)
+}
+
 func TestValidateThumbnailAcceptsLargeButBoundedImage(t *testing.T) {
 	if MaxThumbnailPixels < 64*64 {
 		t.Skip("pixel cap below minimum test image")

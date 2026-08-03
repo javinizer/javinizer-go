@@ -63,6 +63,7 @@ type ActressSyncManager struct {
 	wg                  sync.WaitGroup
 	wake                chan struct{}
 	active              atomic.Int32
+	recoveryInterval    time.Duration // test-tunable recovery ticker period
 	// taskMu guards runningTasks; it is separate from mu because Stop holds
 	// mu across wg.Wait while task goroutines still need to unregister.
 	taskMu     sync.Mutex
@@ -76,11 +77,12 @@ type ActressSyncManager struct {
 // NewActressSyncManager ...
 func NewActressSyncManager(deps ActressSyncManagerDeps) *ActressSyncManager {
 	m := &ActressSyncManager{
-		deps:         deps,
-		owner:        uuid.NewString(),
-		wake:         make(chan struct{}, 1),
-		retryDelay:   time.Second,
-		runningTasks: make(map[string][]trackedSyncTask),
+		deps:             deps,
+		owner:            uuid.NewString(),
+		wake:             make(chan struct{}, 1),
+		retryDelay:       time.Second,
+		recoveryInterval: 15 * time.Second,
+		runningTasks:     make(map[string][]trackedSyncTask),
 	}
 	if deps.DB != nil {
 		m.repo = database.NewActressSyncRepository(deps.DB)

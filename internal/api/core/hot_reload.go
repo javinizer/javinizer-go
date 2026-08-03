@@ -159,17 +159,17 @@ func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.Scr
 		logging.Warnf("%v", dumpErr)
 	}
 	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
-	warnings := actressOnlyPriorityWarnings(newRegistry, cfg)
-	for _, warning := range warnings {
-		logging.Warnf("%s", warning.Message)
-	}
-	cfg.Warnings = append(cfg.Warnings, warnings...)
 	if err != nil {
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()
 		}
 		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
+	warnings := actressOnlyPriorityWarnings(newRegistry, cfg)
+	for _, warning := range warnings {
+		logging.Warnf("%s", warning.Message)
+	}
+	cfg.Warnings = append(cfg.Warnings, warnings...)
 	// Atomic publication (issue #44): swap the dump closer, publish cfg+registry,
 	// rebuild the APIConfig snapshot, and invalidate the cached factories all
 	// under one reloadMu.Lock so concurrent readers cannot observe a mix of

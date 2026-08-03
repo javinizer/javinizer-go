@@ -161,6 +161,52 @@ func TestBuildRefreshDoesNotSkipAndDisablesPruningAtLimit(t *testing.T) {
 	assert.Len(t, cache.Records, 1)
 }
 
+// A single candidate matching two groups merges them into the base one;
+// a fully stale/emptied group sessions through the record pivot.
+func TestMergeCandidatesMultiGroupProbe(t *testing.T) {
+	mk := func(key, jp string, aliases ...string) rankedCandidate {
+		return rankedCandidate{candidate: ValidatedCandidate{Candidate: Candidate{Key: key, Source: "test", JapaneseName: jp, Aliases: aliases, ThumbURL: "thumb"}}}
+	}
+	dmk := func(key, jp string, dmmID int, aliases ...string) rankedCandidate {
+		return rankedCandidate{candidate: ValidatedCandidate{Candidate: Candidate{Key: key, Source: "test", DMMID: dmmID, JapaneseName: jp, Aliases: aliases, ThumbURL: "thumb"}}}
+	}
+
+	groups := make([]candidateGroup, 0)
+	identityGroups := map[string]map[int]struct{}{}
+	for _, c := range []rankedCandidate{mk("a", "一", "shared-a"), mk("b", "二", "shared-b")} {
+		ids := candidateIdentities(c.candidate.Candidate)
+		groups = append(groups, newCandidateGroup(c, ids))
+		registerGroup(identityGroups, len(groups)-1, ids)
+	}
+	bridge := dmk("bridge", "", 7, "shared-a", "shared-b")
+	matches := compatibleGroups(groups, identityGroups, candidateIdentities(bridge.candidate.Candidate), bridge.candidate.Candidate)
+	t.Logf("matches=%v (want [0 1])", matches)
+	require.Equal(t, []int{0, 1}, matches)
+}
+
+func TestMergeCandidatesMergesMultipleMatchedGroups(t *testing.T) {
+	mk := func(key, jp string, aliases ...string) rankedCandidate {
+		return rankedCandidate{candidate: ValidatedCandidate{Candidate: Candidate{Key: key, Source: "test", JapaneseName: jp, Aliases: aliases, ThumbURL: "thumb"}}}
+	}
+	dmk := func(key, jp string, dmmID int, aliases ...string) rankedCandidate {
+		return rankedCandidate{candidate: ValidatedCandidate{Candidate: Candidate{Key: key, Source: "test", DMMID: dmmID, JapaneseName: jp, Aliases: aliases, ThumbURL: "thumb"}}}
+	}
+	// A DMM-backed bridge absorbs at least one name-only group onto its
+	// identity; the mergeCandidateGroup loop in merges must run.
+	records := mergeCandidates([]rankedCandidate{
+		mk("a", "一", "shared-a"),
+		mk("b", "二", "shared-b"),
+		dmk("bridge", "", 7, "shared-a", "shared-b"),
+	})
+	var multi int
+	for _, record := range records {
+		if len(record.Sources) > 1 {
+			multi++
+		}
+	}
+	require.GreaterOrEqual(t, multi, 1, "bridge merge must collapse at least one group")
+}
+
 func TestMergeCandidatesBridgesCompatibleGroups(t *testing.T) {
 	candidate := func(key, jp string, dmmID, rank int, aliases ...string) rankedCandidate {
 		return rankedCandidate{rank: rank, candidate: ValidatedCandidate{Candidate: Candidate{Key: key, Source: "test", DMMID: dmmID, JapaneseName: jp, Aliases: aliases, ThumbURL: "thumb"}}}

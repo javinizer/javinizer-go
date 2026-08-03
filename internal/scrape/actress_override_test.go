@@ -2,6 +2,7 @@ package scrape
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -55,6 +56,59 @@ func (r *recordingMetadataResolver) ResolveActressMetadata(_ context.Context, ac
 
 // Each resolver must see values discovered by earlier ones: a name-keyed
 // resolver can only contribute once another source found the Japanese name.
+// A failing resolver must not masquerade as ... nothing: the chain logs and
+// continues with the remaining resolvers.
+type failingMetadataResolver struct {
+	testMetadataResolver
+}
+
+func (r *failingMetadataResolver) ResolveActressMetadata(context.Context, models.ActressInfo) (models.ActressInfo, error) {
+	return models.ActressInfo{}, errors.New("resolver down")
+}
+
+func TestResolverEnrichmentContinuesPastResolverFailure(t *testing.T) {
+	offender := &failingMetadataResolver{testMetadataResolver{name: "dmm", enabled: true}}
+	backup := &testMetadataResolver{name: "minnanoav", enabled: true, metadata: models.ActressInfo{DMMID: 5, FirstName: "Backup"}}
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 5}}}
+	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(offender, backup), &Config{ScrapeActress: true}))
+	assert.Equal(t, "Backup", movie.Actresses[0].FirstName)
+}
+
+// Exclusive override naming only unknown scrapers: nothing usable.
+func TestResolverEnrichmentExclusiveUnknownSelection(t *testing.T) {
+	resolver := &testMetadataResolver{name: "dmm", enabled: true, metadata: models.ActressInfo{DMMID: 9, FirstName: "A"}}
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 9}}}
+	cfg := &Config{ScrapeActress: true, ActressFieldPriority: []string{"nonexistent"}}
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(resolver), cfg))
+	assert.Equal(t, 0, resolver.calls)
+}
+
+// Ranker must consider higher-ranked resolvers ahead of lower-ranked ones
+// even when the lower one comes first in registry order, and must skip the
+// early-exit when a later resolver can still improve a pick.
+func TestResolverEnrichmentNilGuards(t *testing.T) {
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), &models.Movie{}, newTestRegistry(), nil))
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), nil, newTestRegistry(), &Config{ScrapeActress: true}))
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), &models.Movie{}, nil, &Config{ScrapeActress: true}))
+}
+
+// Blank entries in a rank list must not occupy a rank slot.
+func TestActressFieldRankerSkipsBlankEntries(t *testing.T) {
+	r := actressFieldRanker([]string{"", "dmm"}, nil)
+	assert.Equal(t, 0, r("dmm"))
+}
+
+func TestResolverEnrichmentContinuesWhenLaterResolverCanImprove(t *testing.T) {
+	lowerFirst := &testMetadataResolver{name: "Lower", enabled: true, metadata: models.ActressInfo{DMMID: 9, FirstName: "Lower"}}
+	higherLater := &testMetadataResolver{name: "Higher", enabled: true, metadata: models.ActressInfo{DMMID: 9, FirstName: "Higher"}}
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 9}}}
+	cfg := &Config{ScrapeActress: true, ActressFieldPriority: []string{"Higher", "Lower"}}
+	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(lowerFirst, higherLater), cfg))
+	assert.Equal(t, "Higher", movie.Actresses[0].FirstName)
+	assert.Equal(t, 1, lowerFirst.calls)
+	assert.Equal(t, 1, higherLater.calls)
+}
+
 func TestResolverEnrichmentThreadsEarlierDiscoveries(t *testing.T) {
 	discoverer := &testMetadataResolver{name: "dmm", enabled: true, metadata: models.ActressInfo{DMMID: 7, JapaneseName: "発見"}}
 	recorder := &recordingMetadataResolver{testMetadataResolver: &testMetadataResolver{

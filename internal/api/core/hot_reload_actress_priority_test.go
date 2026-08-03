@@ -38,6 +38,12 @@ func TestActressOnlyPriorityWarning(t *testing.T) {
 	require.Empty(t, actressOnlyPriorityWarnings(registry, cfg))
 	require.Empty(t, actressOnlyPriorityWarnings(nil, cfg))
 	require.Empty(t, actressOnlyPriorityWarnings(registry, nil))
+	cfg.Metadata.Priority.Fields = map[string][]string{"actress": {}}
+	require.Empty(t, actressOnlyPriorityWarnings(registry, cfg))
+	cfg.Metadata.Priority.Fields = map[string][]string{"actress": {"unknown-name"}}
+	require.Empty(t, actressOnlyPriorityWarnings(registry, cfg), "unregistered scrapers are out of judgment scope")
+	require.Empty(t, actressOnlyPriorityWarnings(registry, nil))
+	require.Empty(t, actressOnlyPriorityWarnings(nil, cfg))
 	// Non-actress fields reject an actress-only sole override too.
 	cfg.Metadata.Priority.Fields = map[string][]string{"title": {"minnanoav"}}
 	warnings := actressOnlyPriorityWarnings(registry, cfg)

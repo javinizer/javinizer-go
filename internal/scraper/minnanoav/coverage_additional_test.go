@@ -18,6 +18,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Redirecting to a non-MinnanoAV host must be refused.
+func TestSearchRedirectToForeignHostRefused(t *testing.T) {
+	client := resty.New().SetTransport(roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusFound,
+			Header:     http.Header{"Location": []string{"http://127.0.0.1:16999/internal"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+			Request:    req,
+		}, nil
+	}))
+	s := newScraperWithClient(&models.ScraperSettings{Enabled: true}, client)
+	_, _, err := s.searchActress(context.Background(), "whatever")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "redirect")
+}
+
+// Negative rate limits clamp to zero (no throttling), not the 1000ms default.
+func TestNegativeRateLimitClampsToZero(t *testing.T) {
+	settings := models.ScraperSettings{Enabled: true, RateLimit: -50}
+	settings.SetRateLimitPresence(true)
+	s := newScraperWithClient(&settings, resty.New())
+	require.NoError(t, s.rateLimiter.Wait(context.Background()))
+	require.NoError(t, s.rateLimiter.Wait(context.Background()), "no throttle when clamped to zero")
+}
+
+func TestMinnanoAVActressFieldsCoverEverything(t *testing.T) {
+	got := (&scraper{}).ActressFields()
+	for _, want := range []string{"actress", "actress_japanese_name", "actress_first_name", "actress_last_name", "actress_url"} {
+		assert.Contains(t, got, want)
+	}
+}
+
 func TestValidateScraperSettingsRejectsInvalidBaseURL(t *testing.T) {
 	err := validateScraperSettings(&models.ScraperSettings{BaseURL: "://bad"})
 	require.Error(t, err)

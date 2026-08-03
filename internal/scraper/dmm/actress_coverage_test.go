@@ -6,7 +6,15 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/stretchr/testify/assert"
 )
+
+func TestDMMActressFieldsCoverEverything(t *testing.T) {
+	got := (&scraper{}).ActressFields()
+	for _, want := range []string{"actress", "actress_japanese_name", "actress_first_name", "actress_last_name", "actress_url"} {
+		assert.Contains(t, got, want)
+	}
+}
 
 func TestDMMActressThumbnailValidation(t *testing.T) {
 	s := &scraper{enabled: true, settings: models.ScraperSettings{Enabled: true}}

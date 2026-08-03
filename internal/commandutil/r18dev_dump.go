@@ -106,6 +106,11 @@ func (r *refCountedDumpLookup) release() {
 // Windows cannot rename or delete the file while the handle is open.
 const dumpDrainTimeout = 10 * time.Second
 
+// dumpDrainWait is the active drain grace period; tests can shrink it.
+//
+//nolint:gochecknoglobals // test-tunable timeout
+var dumpDrainWait = dumpDrainTimeout
+
 // Close retires the dump and waits for in-flight lookups to drain so
 // callers that immediately rename/delete the file (dump import, clear) are
 // safe. After dumpDrainTimeout the handle is closed regardless.
@@ -121,8 +126,8 @@ func (r *refCountedDumpLookup) Close() error {
 	if !idle {
 		select {
 		case <-r.drainedCh:
-		case <-time.After(dumpDrainTimeout):
-			logging.Warnf("R18.dev dump lookup: closing after %s with lookups still in flight", dumpDrainTimeout)
+		case <-time.After(dumpDrainWait):
+			logging.Warnf("R18.dev dump lookup: closing after %s with lookups still in flight", dumpDrainWait)
 		}
 	}
 	r.mu.Lock()
