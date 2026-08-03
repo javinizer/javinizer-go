@@ -163,6 +163,30 @@ while IFS= read -r -d '' p; do
         internal/*|cmd/*|docs/swagger/*|Makefile) API_CHANGED=$((API_CHANGED+1)) ;;
     esac
 done < <(git diff --cached --name-only -z --no-renames)
+# compute_embed_census: repo-relative paths consumed by //go:embed ANYWHERE
+# in the module graph, resolved by the TOOLCHAIN itself — no static list can
+# enumerate them (arbitrary types at arbitrary roots), and only the tool
+# applies glob semantics, all: prefixes and the dot/underscore directory-walk
+# exclusion faithfully. -test is required: plain go list leaves
+# TestEmbedFiles/XTestEmbedFiles empty, so test-file embeds would be missed;
+# -deps is required: wildcard ./... never enumerates testdata/, yet imports
+# beneath it DO resolve. Module-cache deps sit outside the checkout and the
+# prefix-strip drops them. Exit status = go list status; CALLERS pick the
+# failure policy (classification maps best-effort — the guard census blocks
+# loudly moments later — while the tree-consistency guard fails closed).
+compute_embed_census() {
+    local census_abs census_root
+    census_abs=$(go list -test -deps -f '{{range .EmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .TestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .XTestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./... 2>/dev/null) || return 1
+    census_root=$(pwd)
+    # Prefix-strip WITHOUT regex — a bracketed checkout path must not fail
+    # open on a BRE metacharacter (same hazard as the PKG_DIRS walk).
+    printf '%s\n' "$census_abs" | while IFS= read -r a; do
+        [ -n "$a" ] || continue
+        if [ "${a#"$census_root"/}" != "$a" ]; then
+            printf '%s\n' "${a#"$census_root"/}"
+        fi
+    done
+}
 # Non-Go inputs consumed by Go packages (testdata/** fixtures, go:embed
 # assets like *.sql migrations, locales/*.json, config.yaml.example) plus
 # cgo/linker inputs (.c/.s/.h/.syso…) anywhere — e.g. staging web/bad.c
@@ -183,6 +207,23 @@ STATIC_PKGS=""
 # EMBED_PKGS: ancestor-mapped packages whose assets are consumed through the
 # import graph — reverse-dependency expansion applies to these.
 EMBED_PKGS=""
+# Embed targets OUTSIDE the hard-coded roots above: //go:embed assets live at
+# ARBITRARY paths (a root-level banner.txt, say), so a static prefix list
+# cannot see every staged asset whose content edit breaks its embedding
+# package's consumers. Census-intersect every staged path that matches NO
+# static rule; survivors flow through the SAME ancestor-walk mapping below.
+# Best-effort: a census failure simply adds nothing — the tree-consistency
+# guard's fail-closed census blocks loudly a moment later, so nothing evades.
+EMBED_STAGED=""
+ASSET_CANDIDATES=$(git diff --cached --name-only --no-renames --diff-filter=ACMR \
+    | grep -vE '^testdata/|^internal/|^cmd/|^web/|^docs/swagger/|^configs/|\.go$|^go\.(mod|sum)$|^Makefile$|^\.golangci\.(yml|yaml)$' || true)
+if [ -n "$ASSET_CANDIDATES" ]; then
+    if EMBED_CENSUS=$(compute_embed_census); then
+        EMBED_STAGED=$(comm -12 \
+            <(printf '%s\n' "$ASSET_CANDIDATES" | sort -u) \
+            <(printf '%s\n' "$EMBED_CENSUS" | sort -u) || true)
+    fi
+fi
 while IFS= read -r p; do
     [ -n "$p" ] || continue
     # Cross-directory consumers the ancestor walk cannot express: top-level
@@ -221,6 +262,7 @@ while IFS= read -r p; do
     fi
 done <<EOF
 $(git diff --cached --name-only --no-renames --diff-filter=ACMRTD -- testdata internal cmd web/dist docs/swagger configs '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' '*.s' '*.S' '*.sx' '*.syso' '*.m' '*.f' '*.F' '*.for' '*.f90' '*.swig' '*.swigcxx' ':!*.go' || true)
+$EMBED_STAGED
 EOF
 # The ancestor walk maps web/dist and docs/swagger to their embedding
 # packages (web/embed.go and docs/swagger/embed.go) — keep the pathspec list
@@ -514,7 +556,52 @@ check_tree_consistency() {
 $f"
         fi
     done < <(git diff --cached --name-only -z --no-renames --diff-filter=D -- "${GUARD_PATHSPEC[@]}" || true)
-    if [ -n "$CHECKED_SET" ]; then
+    # ===== Tier 1: toolchain embed census — engages for ANY staged path ==
+    # //go:embed targets live at ARBITRARY paths, so even a commit whose
+    # staged paths match no checked pathspec can invalidate the snapshot:
+    # a staged deletion of a root-level embed asset kills nothing here
+    # but fails every CI build. An unstaged edit to a TRACKED embed
+    # target outside GUARD_PATHSPEC likewise poisons the tree the checks
+    # read — the dirty-tree union in tier 2 therefore covers every census
+    # path in addition to the hard-coded lists. Mask set = embedded paths
+    # ABSENT FROM THE INDEX (untracked or ignored, any extension, present
+    # or future — staging '//go:embed local.db' while local.db stays
+    # ignored (this repo ignores *.db) lets go list/vet/test/build
+    # consume the working-tree file here, then the COMMITTED snapshot
+    # fails with 'pattern local.db: no matching files found'); whatever
+    # sits in the index ships with the commit by definition. Data files
+    # READ (not embedded) by tests are not toolchain-enumerable and stay
+    # out by design. Recomputed per invocation, never cached: a mid-run
+    # created or edited embed asset changes nothing else any comparator
+    # observes.
+    EMBED_REL_ARR=()
+    if [ -n "$STAGED_SET" ]; then
+        EMBED_REL=$(compute_embed_census) ||
+            { refuse_guard_scan "go list -test -deps"; return 1; }
+        if [ -n "$EMBED_REL" ]; then
+            while IFS= read -r epath; do
+                [ -n "$epath" ] && EMBED_REL_ARR+=("$epath")
+            done <<EMBED_LIST_EOF
+$EMBED_REL
+EMBED_LIST_EOF
+            # -c core.quotepath=false prints RAW bytes for non-ASCII
+            # names, so tracked unicode embeds compare equal on both
+            # sides of comm (C-quoting one side would fabricate masks).
+            EMBED_MASKED=$(comm -23 \
+                <(printf '%s\n' "${EMBED_REL_ARR[@]}" | sort -u) \
+                <(git -c core.quotepath=false ls-files | sort -u) || true)
+            if [ -n "$EMBED_MASKED" ]; then
+                CONFLICT="$CONFLICT
+$EMBED_MASKED"
+            fi
+        fi
+    fi
+    # ===== Tier 2: dirty-tree union — engages when Go validation does ===
+    # CHECKED paths staged is the primary trigger; staged census assets
+    # (EMBED_STAGED, from classification) trigger it too, because such a
+    # commit runs full Go validation and the union is what keeps the tree
+    # equal to the snapshot those checks claim to vouch for.
+    if [ -n "$CHECKED_SET" ] || [ -n "${EMBED_STAGED:-}" ]; then
         # Ignored compile inputs count only inside an ACTUAL Go package
         # directory (one holding tracked .go files) or under an embed root —
         # precise and immune to ignored scratch trees (.planning/, .tmprepro/,
@@ -601,79 +688,18 @@ $raw" ;;
             '*.syso' '*.go' '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' \
             '*.s' '*.S' '*.sx' '*.m' '*.f' '*.F' '*.for' '*.f90' '*.swig' '*.swigcxx' || true)
         UNSTAGED=$( { git diff --name-only -- "${GUARD_PATHSPEC[@]}"
+                      # Census paths extend the union: a TRACKED embed
+                      # target outside GUARD_PATHSPEC must not drift
+                      # from the staged snapshot either (tier 1 feeds
+                      # the array; empty under set -u needs the count
+                      # guard, bash 3.2 has no safe empty "${a[@]}").
+                      [ "${#EMBED_REL_ARR[@]}" -eq 0 ] || \
+                          git diff --name-only -- "${EMBED_REL_ARR[@]}"
                       git ls-files --others --exclude-standard -- "${GUARD_PATHSPEC[@]}"
                       printf '%s\n' "$IGNORED_KEPT"; } | sort -u || true)
         if [ -n "$UNSTAGED" ]; then
             CONFLICT="$CONFLICT
 $UNSTAGED"
-        fi
-    fi
-    # Tier 1 census — ANY staged path (see the trigger comment above):
-    # Ignored go:embed ASSETS escape BOTH the extension lists and the
-    # checked-pathspec trigger — //go:embed names ARBITRARY types at
-    # ARBITRARY paths from the staged snapshot itself. Staging
-    # '//go:embed local.db' while local.db stays ignored (this repo
-    # ignores *.db) lets go list/vet/test/build consume the working-tree
-    # file here, then the COMMITTED snapshot fails with 'pattern
-    # local.db: no matching files found'; likewise a staged deletion of
-    # the last embed match breaks the pattern go list itself evaluates,
-    # which the fail-closed refusal converts into a block rather than a
-    # silent skip. No static pathspec can enumerate embed targets, so ask
-    # the toolchain: go list -test -deps resolves the EXACT embed set
-    # against this tree (glob semantics, all: prefixes and the
-    # dot/underscore directory-walk exclusion handled by the tool).
-    # -test is required because plain go list leaves TestEmbedFiles and
-    # XTestEmbedFiles empty — an ignored _test.go embed asset would
-    # otherwise slip the guard while go test consumes it — and -deps is
-    # required because wildcard ./... never enumerates testdata/, yet
-    # explicit imports beneath testdata DO resolve (the same hole the
-    # TOOL_DIRS_CACHE graph union closes): an embed in such a package
-    # hides from a shallow census while its consumers break in CI.
-    # Module-cache deps the scan surfaces sit outside the checkout; the
-    # prefix-strip below drops them. Recomputed per invocation,
-    # deliberately NOT cached like TOOL_DIRS_CACHE: a mid-run-created
-    # ignored embed file changes nothing else any comparator observes.
-    # Mask set = embedded paths ABSENT FROM THE INDEX (untracked or
-    # ignored, any extension, present or future) — whatever sits in the
-    # index ships with the commit by definition. Data files READ (not
-    # embedded) by tests are not toolchain-enumerable and stay out by
-    # design.
-    if [ -n "$STAGED_SET" ]; then
-        EMBED_ABS=$(go list -test -deps -f '{{range .EmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .TestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .XTestEmbedFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./... 2>/dev/null) ||
-            { refuse_guard_scan "go list -test -deps"; return 1; }
-        if [ -n "$EMBED_ABS" ]; then
-            EMBED_ROOT=$(pwd)
-            EMBED_REL=""
-            while IFS= read -r eabs; do
-                [ -n "$eabs" ] || continue
-                # Prefix-strip WITHOUT regex (same metacharacter hazard
-                # as the PKG_DIRS walk above — a bracketed checkout path
-                # must not fail open); paths outside the checkout
-                # (synthesized -test variants) match no prefix and drop.
-                if [ "${eabs#"$EMBED_ROOT"/}" != "$eabs" ]; then
-                    EMBED_REL="$EMBED_REL
-${eabs#"$EMBED_ROOT"/}"
-                fi
-            done <<EMBED_SCAN_EOF
-$EMBED_ABS
-EMBED_SCAN_EOF
-            if [ -n "$EMBED_REL" ]; then
-                # -c core.quotepath=false prints RAW bytes for non-ASCII
-                # names, so tracked unicode embeds compare equal on both
-                # sides of comm (C-quoting one side would fabricate
-                # phantom masks).
-                EMBED_MASKED=$(comm -23 \
-                    <(printf '%s\n' "$EMBED_REL" | sed '/^$/d' | sort -u) \
-                    <(git -c core.quotepath=false ls-files | sort -u) || true)
-                # Append directly, bypassing the PKG_DIRS filter: the
-                # directive's own .go file is necessarily tracked, and
-                # roots outside the static lists (a future root-level
-                # embed, say) are precisely what this tier exists to see.
-                if [ -n "$EMBED_MASKED" ]; then
-                    CONFLICT="$CONFLICT
-$EMBED_MASKED"
-                fi
-            fi
         fi
     fi
     [ -z "$CONFLICT" ]

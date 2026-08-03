@@ -583,6 +583,20 @@ git rm -q banner.txt
 check_hook "e2e: asset-only embed-target deletion outside pathspecs refused" 1 "Cannot enumerate"
 git reset -q --hard HEAD >/dev/null
 
+# staged CONTENT edit of a root-level embed target: the asset sits
+# outside every static root, yet its embedding package's consumers break
+# exactly like an in-list asset edit — the census intersection must map
+# it (ASSET_FULL for a root-level file) and engage full Go validation
+reset; printf 'banner2\n' > banner.txt; git add banner.txt
+check_hook "e2e: root-level embed asset edit runs full Go checks" 0 "all packages — module/shared-input change"
+
+# TRACKED root embed target staged, then tree-edited: tree ≠ snapshot at
+# a census path outside GUARD_PATHSPEC — the dirty-tree union covers the
+# census paths too, not only the hard-coded lists
+reset; printf 'banner-index\n' > banner.txt; git add banner.txt
+printf 'banner-tree\n' > banner.txt
+check_hook "e2e: unstaged root embed target drift blocked" 1 "banner.txt"
+
 # fail-closed guard scans: with a package graph the toolchain cannot
 # enumerate (UNTRACKED file importing an unresolvable module — GOPROXY=off
 # makes resolution fail fast), the guard must REFUSE rather than silently
