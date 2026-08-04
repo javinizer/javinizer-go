@@ -156,13 +156,15 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host string) err
 // lookupIP resolves dial hostnames; replaced in tests.
 var lookupIP = net.DefaultResolver.LookupIP
 
-// proxyPinningTransport pins PLAIN-HTTP proxy requests to the locally
-// validated target IP: a proxy re-resolves hostnames independently, so
-// without rewriting the request target a split-horizon DNS answer could
-// route the fetch to a private address the request-layer guard cleared. The
-// original Host header is preserved (virtual hosting); HTTPS-over-CONNECT is
-// exempt — the proxy necessarily terminates name resolution for tunnels and
-// sits inside the deployment trust boundary (documented on checkFetchTarget).
+// proxyPinningTransport decides whether a proxy-routed request may proceed:
+// a proxy re-resolves hostnames independently, so a plain-HTTP request whose
+// hostname the local guard cleared could reach a private address via
+// split-horizon DNS. Stdlib couples the absolute request line and the Host
+// header, leaving no way to pin the target IP while preserving virtual
+// hosting — so hostname targets over an active proxy are rejected as
+// unverifiable. Literal-IP targets (nothing to re-resolve) pass through, as
+// does HTTPS: CONNECT tunnels inherit the documented proxy-trust-boundary
+// model on checkFetchTarget.
 type proxyPinningTransport struct {
 	base     http.RoundTripper
 	viaProxy func(scheme, host string) bool
@@ -170,41 +172,13 @@ type proxyPinningTransport struct {
 
 // RoundTrip ...
 func (p *proxyPinningTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Scheme != "http" || !p.viaProxy("http", req.URL.Hostname()) {
-		return p.base.RoundTrip(req)
+	if p == nil || p.base == nil {
+		return nil, fmt.Errorf("actress cache proxy pinning transport is not initialized")
 	}
-	host := req.URL.Hostname()
-	if hostIPLiteral(host) != nil {
-		// IP literals cannot be re-resolved by the proxy.
-		return p.base.RoundTrip(req)
+	if req.URL.Scheme == "http" && p.viaProxy("http", req.URL.Hostname()) && hostIPLiteral(req.URL.Hostname()) == nil {
+		return nil, &ssrf.UnverifiableHostError{Host: req.URL.Hostname(), Err: errors.New("plain-HTTP proxy fetch of a hostname cannot pin the resolved address (use an HTTPS target or a CONNECT tunnel)")}
 	}
-	ips, err := lookupIP(req.Context(), "ip", host)
-	if err != nil || len(ips) == 0 {
-		if err == nil {
-			err = errors.New("no A/AAAA records at target pin time")
-		}
-		return nil, &ssrf.UnverifiableHostError{Host: host, Err: err}
-	}
-	chosen := ips[0]
-	for _, ip := range ips {
-		if isBlockedIP(ip) {
-			return nil, &BlockedFetchError{URL: host}
-		}
-		if ip.To4() != nil { // prefer IPv4 to match the widest proxy support
-			chosen = ip
-			break
-		}
-	}
-	pinned := req.Clone(req.Context())
-	pinnedURL := *req.URL
-	if port := req.URL.Port(); port != "" {
-		pinnedURL.Host = net.JoinHostPort(chosen.String(), port)
-	} else {
-		pinnedURL.Host = chosen.String()
-	}
-	pinned.URL = &pinnedURL
-	pinned.Host = req.URL.Host // keep the virtual host the proxy would have seen
-	return p.base.RoundTrip(pinned)
+	return p.base.RoundTrip(req)
 }
 
 // guardedDialContext resolves addr's host and dials only the resolved
