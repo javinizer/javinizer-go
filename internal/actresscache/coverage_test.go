@@ -657,7 +657,14 @@ func TestBuiltinDataMarshalFailure(t *testing.T) {
 func TestFetcherExhaustedAndBodyCancellation(t *testing.T) {
 	original := fetchAttempts
 	fetchAttempts = 0
-	_, _, err := mustFetcher(NewFetcher(nil, 0, "test")).Get(context.Background(), "https://example.test", "*/*", 1)
+	// Restore via defer: a require failure here must not poison every later
+	// fetcher test in the process.
+	defer func() { fetchAttempts = original }()
+	// Explicit no-proxy transport: the default transport honors HTTP(S)_PROXY,
+	// which would route this request through proxy DNS preflight and surface
+	// UnverifiableHostError instead of the exhaustion error under test.
+	fetcher := mustFetcher(NewFetcher(&http.Client{Transport: &http.Transport{}}, 0, "test"))
+	_, _, err := fetcher.Get(context.Background(), "https://example.test", "*/*", 1)
 	require.ErrorContains(t, err, "attempts exhausted")
 	fetchAttempts = original
 
