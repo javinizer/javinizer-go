@@ -32,3 +32,14 @@ func TestResolvePublicIPsAllowedHostCorners(t *testing.T) {
 		t.Error("lookup failure must propagate")
 	}
 }
+
+func TestResolvePublicIPsAllowedLiteralFallsBackToParse(t *testing.T) {
+	undo := AllowHostForTest("127.0.0.5")
+	defer undo()
+	cleanup := SetLookupIPForTest(func(string) ([]net.IP, error) { return nil, nil })
+	defer cleanup()
+	ips, err := resolvePublicIPs("127.0.0.5")
+	if err != nil || len(ips) != 1 {
+		t.Fatalf("literal fallback failed: %v %v", ips, err)
+	}
+}

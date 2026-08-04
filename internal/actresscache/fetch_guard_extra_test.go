@@ -68,3 +68,11 @@ func TestFetcherGetDoesNotRetryPolicyErrors(t *testing.T) {
 	require.True(t, errors.As(err, &blocked), "expected typed BlockedFetchError, got %v", err)
 	assert.Equal(t, 1, calls, "policy errors must not burn retry attempts")
 }
+
+func TestViaProxyEmptySchemeWithProxy(t *testing.T) {
+	proxy := &Fetcher{proxyFunc: func(*http.Request) (*url.URL, error) {
+		u, _ := url.Parse("http://corp.proxy:3128")
+		return u, nil
+	}}
+	assert.True(t, proxy.viaProxy("", "example.test"), "empty scheme must default to https and probe the proxy")
+}
