@@ -48,7 +48,7 @@ func testValidator(_ context.Context, candidate Candidate) (ThumbnailValidation,
 	if candidate.ThumbURL == "reject" {
 		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: "invalid thumbnail"}
 	}
-	return ThumbnailValidation{CheckedAt: "now", SHA256: candidate.Key, Width: 100, Height: 100, Format: "jpeg"}, nil
+	return ThumbnailValidation{CheckedAt: "now", SHA256: candidate.Key, Bytes: 1024, Width: 100, Height: 100, Format: "jpeg"}, nil
 }
 
 func TestBuildMergesSourcesByPriority(t *testing.T) {
@@ -142,6 +142,39 @@ func TestBuildCachedMetricCountsOnlyReusedEntries(t *testing.T) {
 	_, thirdReport, err := Build(context.Background(), options)
 	require.NoError(t, err)
 	assert.Equal(t, 0, thirdReport.Cached, "pruned previously-reused entries must decrement the metric")
+}
+
+func TestBuildRevalidatesCachedThumbnailsUnderStricterPolicy(t *testing.T) {
+	source := &testSource{
+		name:       "test",
+		candidates: []Candidate{{Key: "test:1", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "https://example.test/thumb.jpg"}},
+	}
+	registry := NewRegistry()
+	registry.Register("test", func() Source { return source })
+	statePath := filepath.Join(t.TempDir(), "state.jsonl")
+	validates := 0
+	validator := func(ctx context.Context, candidate Candidate) (ThumbnailValidation, error) {
+		validates++
+		return testValidator(ctx, candidate)
+	}
+	options := BuildOptions{Registry: registry, Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: validator}
+
+	_, firstReport, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	require.Equal(t, 1, firstReport.Validated)
+	_, secondReport, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	require.Equal(t, 1, secondReport.Cached, "same policy reuses the cached thumbnail")
+	require.Equal(t, 1, validates, "reuse means no second fetch/validation")
+
+	// A stricter minimum dimension than the stored 100px thumbnail satisfies
+	// must force revalidation instead of republishing the stale approval.
+	options.MinThumbnailDimension = 200
+	_, thirdReport, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Equal(t, 0, thirdReport.Cached)
+	assert.Equal(t, 1, thirdReport.Validated)
+	assert.Equal(t, 2, validates, "stricter policy forced revalidation")
 }
 
 func TestBuildRefreshReportsZeroCached(t *testing.T) {

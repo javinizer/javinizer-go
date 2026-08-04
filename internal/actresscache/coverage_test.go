@@ -95,7 +95,7 @@ func TestBuildIgnoresUnusableAndUnselectedCachedEntries(t *testing.T) {
 		{Key: "nil-thumbnail", Status: "ok", Candidate: &Candidate{ThumbURL: "https://example.test/x.jpg"}},
 		{Key: "blank-thumbnail", Status: "ok", Candidate: &Candidate{}, Thumbnail: &ThumbnailValidation{}},
 		{Key: "placeholder", Status: "ok", Candidate: &Candidate{ThumbURL: "https://www.minnano-av.com/p_actress_125_125/000/np.gif"}, Thumbnail: &ThumbnailValidation{}},
-		{Key: "other", Status: "ok", Candidate: &Candidate{Source: "other", JapaneseName: "他", ThumbURL: "https://example.test/x.jpg"}, Thumbnail: &ThumbnailValidation{}},
+		{Key: "other", Status: "ok", Candidate: &Candidate{Source: "other", JapaneseName: "他", ThumbURL: "https://example.test/x.jpg"}, Thumbnail: &ThumbnailValidation{CheckedAt: "now", SHA256: "o", Bytes: 10, Width: 100, Height: 100, Format: "jpeg"}},
 	}
 	var data bytes.Buffer
 	for _, entry := range entries {
@@ -147,7 +147,7 @@ func TestBuildPruningHandlesSupersededStateAndUnknownCandidateSource(t *testing.
 func TestBuildRefreshDoesNotSkipAndDisablesPruningAtLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.jsonl")
 	candidate := Candidate{Key: "one", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "https://example.test/thumb.jpg"}
-	entry := StateEntry{Key: "one", Status: "ok", Candidate: &candidate, Thumbnail: &ThumbnailValidation{}}
+	entry := StateEntry{Key: "one", Status: "ok", Candidate: &candidate, Thumbnail: &ThumbnailValidation{CheckedAt: "now", SHA256: "one", Bytes: 10, Width: 100, Height: 100, Format: "jpeg"}}
 	data, err := json.Marshal(entry)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, append(data, '\n'), 0o600))
@@ -178,10 +178,22 @@ func TestMergeCandidatesMultiGroupProbe(t *testing.T) {
 		groups = append(groups, newCandidateGroup(c, ids))
 		registerGroup(identityGroups, len(groups)-1, ids)
 	}
+	// A nameless DMM bridge must not join groups whose Japanese identities
+	// conflict: that merges distinct actresses sharing a romanized name.
 	bridge := dmk("bridge", "", 7, "shared-a", "shared-b")
 	matches := compatibleGroups(groups, identityGroups, candidateIdentities(bridge.candidate.Candidate), bridge.candidate.Candidate)
-	t.Logf("matches=%v (want [0 1])", matches)
-	require.Equal(t, []int{0, 1}, matches)
+	require.Empty(t, matches)
+
+	// Non-conflicting nameless groups sharing a romanized key still bridge.
+	nameless := make([]candidateGroup, 0)
+	identity2 := map[string]map[int]struct{}{}
+	for _, c := range []rankedCandidate{mk("x", "", "shared-a"), mk("y", "", "shared-b")} {
+		ids := candidateIdentities(c.candidate.Candidate)
+		nameless = append(nameless, newCandidateGroup(c, ids))
+		registerGroup(identity2, len(nameless)-1, ids)
+	}
+	matches = compatibleGroups(nameless, identity2, candidateIdentities(bridge.candidate.Candidate), bridge.candidate.Candidate)
+	require.Len(t, matches, 2, "no Japanese-name conflict: bridge may join both")
 }
 
 func TestMergeCandidatesMergesMultipleMatchedGroups(t *testing.T) {
@@ -191,20 +203,15 @@ func TestMergeCandidatesMergesMultipleMatchedGroups(t *testing.T) {
 	dmk := func(key, jp string, dmmID int, aliases ...string) rankedCandidate {
 		return rankedCandidate{candidate: ValidatedCandidate{Candidate: Candidate{Key: key, Source: "test", DMMID: dmmID, JapaneseName: jp, Aliases: aliases, ThumbURL: "thumb"}}}
 	}
-	// A DMM-backed bridge absorbs at least one name-only group onto its
-	// identity; the mergeCandidateGroup loop in merges must run.
+	// A romanized-only DMM bridge with no Japanese name must not collapse
+	// both groups onto one record regardless of merge order: the invariant is
+	// that distinct actresses are never unified under this bridge.
 	records := mergeCandidates([]rankedCandidate{
 		mk("a", "一", "shared-a"),
 		mk("b", "二", "shared-b"),
 		dmk("bridge", "", 7, "shared-a", "shared-b"),
 	})
-	var multi int
-	for _, record := range records {
-		if len(record.Sources) > 1 {
-			multi++
-		}
-	}
-	require.GreaterOrEqual(t, multi, 1, "bridge merge must collapse at least one group")
+	require.GreaterOrEqual(t, len(records), 2, "conflicting groups must survive the nameless bridge")
 }
 
 func TestMergeCandidatesBridgesCompatibleGroups(t *testing.T) {
@@ -306,13 +313,16 @@ func TestFetcherDefaultsLimitAndRejectsOversize(t *testing.T) {
 
 func TestFetcherRedirectCallbackBranches(t *testing.T) {
 	redirectErr := errors.New("redirect denied")
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return redirectErr }}
+	// Explicit no-proxy transport: the default transport honors HTTP(S)_PROXY,
+	// and a proxy-enabled CI host would route the goal-URL's DNS preflight into
+	// an UnverifiableHostError before the supplied callback branch runs.
+	client := &http.Client{Transport: &http.Transport{}, CheckRedirect: func(*http.Request, []*http.Request) error { return redirectErr }}
 	fetcher := mustFetcher(NewFetcherWithHostDelays(client, 0, "test", nil))
 	req, err := http.NewRequest(http.MethodGet, "https://example.test", nil)
 	require.NoError(t, err)
 	require.ErrorIs(t, fetcher.client.CheckRedirect(req, nil), redirectErr)
 
-	fetcher = mustFetcher(NewFetcher(nil, time.Hour, "test"))
+	fetcher = mustFetcher(NewFetcher(&http.Client{Transport: &http.Transport{}}, time.Hour, "test"))
 	req, err = http.NewRequest(http.MethodGet, "https://other.test", nil)
 	require.NoError(t, err)
 	require.NoError(t, fetcher.client.CheckRedirect(req, nil))
@@ -493,6 +503,14 @@ func TestThumbnailValidatorCacheHandlesForeignSingleflightValue(t *testing.T) {
 	time.AfterFunc(time.Millisecond, func() { close(release) })
 	_, err := cache.Validate(context.Background(), Candidate{ThumbURL: "https://example.test/x.jpg"})
 	require.ErrorContains(t, err, "foreign error")
+}
+
+func TestCachedCandidateReusablePolicyBranches(t *testing.T) {
+	candidate := &Candidate{ThumbURL: "https://example.test/t.jpg"}
+	monoThumb := &ThumbnailValidation{Bytes: 100, Width: 100, Height: 100}
+	assert.False(t, cachedCandidateReusable(candidate, &ThumbnailValidation{Bytes: 0, Width: 100, Height: 100}, 64, 1<<20), "unknown bytes must revalidate")
+	assert.False(t, cachedCandidateReusable(candidate, &ThumbnailValidation{Bytes: 2 << 20, Width: 100, Height: 100}, 64, 1<<20), "oversized bytes must revalidate")
+	assert.True(t, cachedCandidateReusable(candidate, monoThumb, 64, 1<<20))
 }
 
 func TestBuiltinIndexHelpersAndLookupNames(t *testing.T) {
@@ -704,7 +722,7 @@ func TestBuildStateWriteFailures(t *testing.T) {
 func TestBuildStaleStateWriteFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.jsonl")
 	candidate := Candidate{Key: "one", Source: "test", SourceID: "1", ThumbURL: "https://example.test/one.jpg"}
-	data, err := json.Marshal(StateEntry{Key: "one", Status: "ok", Candidate: &candidate, Thumbnail: &ThumbnailValidation{}})
+	data, err := json.Marshal(StateEntry{Key: "one", Status: "ok", Candidate: &candidate, Thumbnail: &ThumbnailValidation{CheckedAt: "now", SHA256: "one", Bytes: 10, Width: 100, Height: 100, Format: "jpeg"}})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, append(data, '\n'), 0o600))
 	originalOpen := stateOpenFile
