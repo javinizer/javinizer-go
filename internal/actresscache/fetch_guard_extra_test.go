@@ -22,7 +22,7 @@ func TestCheckFetchTargetAllowsResolvedPublicHost(t *testing.T) {
 	defer func() { lookupIP = prev }()
 	fetcher := mustFetcher(NewFetcher(&http.Client{Transport: &http.Transport{}}, 0, "test"))
 	// Positive path: hostname resolved, all answers public -> allow.
-	require.NoError(t, fetcher.checkFetchTarget(context.Background(), "https", "public.example.test"))
+	require.NoError(t, fetcher.checkFetchTarget(context.Background(), "https", "public.example.test", ""))
 }
 
 func TestNewFetcherRejectsCustomRoundTripper(t *testing.T) {
@@ -42,7 +42,19 @@ func TestNewFetcherRejectsCustomRoundTripper(t *testing.T) {
 	// No resolution is promised for mirror mode: the guard stays lexical-only
 	// and the caller's transport is used verbatim.
 	assert.False(t, fetcher.resolveTargets)
-	require.NoError(t, fetcher.checkFetchTarget(context.Background(), "https", "unyielding.invalid"))
+	require.NoError(t, fetcher.checkFetchTarget(context.Background(), "https", "unyielding.invalid", ""))
+}
+
+func TestViaProxyProbesFullAuthorityWithPort(t *testing.T) {
+	var probedHost string
+	proxy := &Fetcher{proxyFunc: func(req *http.Request) (*url.URL, error) {
+		probedHost = req.URL.Host
+		return &url.URL{Scheme: "http", Host: "corp.proxy:3128"}, nil
+	}}
+	// A port-qualified authority must survive to the probe: port-sensitive
+	// proxy rules (x/net NO_PROXY host:port entries) must see it.
+	require.True(t, proxy.viaProxy("http", "target.example:8080"))
+	assert.Equal(t, "target.example:8080", probedHost)
 }
 
 func TestViaProxyBranches(t *testing.T) {

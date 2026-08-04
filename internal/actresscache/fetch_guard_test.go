@@ -51,8 +51,8 @@ func TestIsBlockedIPBranches(t *testing.T) {
 
 func TestCheckFetchTargetVariants(t *testing.T) {
 	f := mustFetcher(NewFetcher(nil, 0, "test"))
-	assert.Error(t, f.checkFetchTarget(context.Background(), "https", "127.0.0.1"))
-	assert.Error(t, f.checkFetchTarget(context.Background(), "", ""), "empty host is blocked lexically")
+	assert.Error(t, f.checkFetchTarget(context.Background(), "https", "127.0.0.1", ""))
+	assert.Error(t, f.checkFetchTarget(context.Background(), "", "", ""), "empty host is blocked lexically")
 }
 
 func TestGuardedDialContextBranches(t *testing.T) {

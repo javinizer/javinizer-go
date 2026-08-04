@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -48,6 +49,24 @@ func TestRunHonorsR18DevDumpOption(t *testing.T) {
 	assert.NotContains(t, err.Error(), "unknown actress cache source")
 }
 
+// A zero-record run must fail loudly instead of atomically replacing the
+// published artifact with an empty cache.
+func TestRunRefusesToPublishEmptyCache(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "legacy.csv")
+	require.NoError(t, os.WriteFile(csvPath, []byte("FullName,LastName,FirstName,JapaneseName,ThumbUrl\n"), 0o600))
+	state := filepath.Join(dir, "state.jsonl")
+	output := filepath.Join(dir, "out.json.gz")
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), []string{
+		"--source", "legacy-jvthumbs", "--option", "legacy.csv=" + csvPath,
+		"--output", output, "--state", state,
+		"--min-dimension", "1", "--delay", "0", "--image-delay", "0", "--workers", "1",
+	}, &stdout, &stderr)
+	require.ErrorContains(t, err, "refusing to publish empty actress cache")
+	_, statErr := os.Stat(output)
+	assert.True(t, os.IsNotExist(statErr), "no empty artifact must be written")
+}
 func TestRunPropagatesFetcherConstructionError(t *testing.T) {
 	original := newFetcherWithOptions
 	t.Cleanup(func() { newFetcherWithOptions = original })

@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -58,7 +59,50 @@ func openState(path string) (*stateStore, error) {
 	if err := stateRepairTail(path, data, incompleteTail); err != nil {
 		return nil, err
 	}
+	if len(data) > stateCompactionThreshold {
+		// The journal is append-only and whole-file slurped on open; bound it.
+		if err := compactStateFile(path, store.entries); err != nil {
+			return nil, fmt.Errorf("compact actress cache state: %w", err)
+		}
+	}
 	return openStateWriter(path, store)
+}
+
+// stateCompactionThreshold bounds the append-only journal; over it the file
+// is compacted to the latest entry per key on open.
+const stateCompactionThreshold = 8 << 20
+
+// compactStateFile atomically rewrites the journal with the latest entry per
+// key (sorted for deterministic output). Resume semantics are unchanged.
+func compactStateFile(path string, entries map[string]StateEntry) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-compact-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	encoder := json.NewEncoder(tmp)
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if err := encoder.Encode(entries[key]); err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
+			return err
+		}
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return stateRename(tmpPath, path)
 }
 
 func openStateWriter(path string, store *stateStore) (*stateStore, error) {

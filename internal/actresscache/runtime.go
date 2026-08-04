@@ -183,13 +183,19 @@ var newRuntimeGzipReader = func(reader io.Reader) (io.ReadCloser, error) {
 	return gzip.NewReader(reader)
 }
 
+// maxRuntimeCacheDecodedBytes bounds decompression of the built-in cache
+// (currently ~25k records ≈ a few MB; 64MB is generous headroom).
+const maxRuntimeCacheDecodedBytes = 64 << 20
+
 // decodeRuntimeCache ...
 func decodeRuntimeCache(reader io.Reader) (RuntimeCache, error) {
 	compressed, err := newRuntimeGzipReader(reader)
 	if err != nil {
 		return RuntimeCache{}, fmt.Errorf("open built-in actress cache: %w", err)
 	}
-	decoder := json.NewDecoder(compressed)
+	// Cap decompressed payload size: the embedded artifact is trusted but a
+	// corrupt or hostile build artifact must not OOM the process.
+	decoder := json.NewDecoder(io.LimitReader(compressed, maxRuntimeCacheDecodedBytes+1))
 	// cache ...
 	var cache RuntimeCache
 	if err := decoder.Decode(&cache); err != nil {

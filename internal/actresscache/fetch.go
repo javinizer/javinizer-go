@@ -102,7 +102,10 @@ func (f *Fetcher) viaProxy(scheme, host string) bool {
 	}
 	// Probe with the request's own scheme: HTTP_PROXY and HTTPS_PROXY are
 	// configured independently, so an HTTP thumbnail URL must not be judged
-	// by the HTTPS route.
+	// by the HTTPS route. host must be the request's full authority
+	// (hostname:port when a port is present): x/net NO_PROXY entries are
+	// port-sensitive, so probing a bare hostname can misclassify proxied
+	// requests as direct and re-open the split-horizon path.
 	proxyURL, err := f.proxyFunc(&http.Request{URL: &url.URL{Scheme: scheme, Host: host}})
 	return err == nil && proxyURL != nil
 }
@@ -120,7 +123,14 @@ func (f *Fetcher) viaProxy(scheme, host string) bool {
 // deployment's trust boundary — and the guard remains aimed at the common
 // cases: literal/private targets and locally-resolvable internal names are
 // rejected even under a proxy, and unresolvable names fail closed.
-func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host string) error {
+// checkFetchTarget validates host lexically and, when pinning is active,
+// resolves it locally. authority (host[:port]) feeds the port-sensitive proxy
+// decision probe (NO_PROXY entries may carry ports); pass host when no port
+// is involved.
+func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host, authority string) error {
+	if authority == "" {
+		authority = host
+	}
 	if isBlockedFetchHost(host) {
 		return &BlockedFetchError{URL: host}
 	}
@@ -129,7 +139,7 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host string) err
 	}
 	ips, err := lookupIP(ctx, "ip", host)
 	if err != nil || len(ips) == 0 {
-		if f.viaProxy(scheme, host) {
+		if f.viaProxy(scheme, authority) {
 			// A proxy resolves the hostname remotely, so dial-time checks
 			// cannot see the real target: fail closed when local resolution
 			// cannot prove the host is public. Classified unverifiable
@@ -151,6 +161,18 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host string) err
 		}
 	}
 	return nil
+}
+
+// FetchTooLargeError marks an operator-policy byte-ceiling breach. Unlike a
+// flaky download, the image will still be oversized tomorrow.
+type FetchTooLargeError struct {
+	URL   string
+	Limit int64
+}
+
+// Error ...
+func (e *FetchTooLargeError) Error() string {
+	return fmt.Sprintf("response from %s exceeds %d bytes", e.URL, e.Limit)
 }
 
 // lookupIP resolves dial hostnames; replaced in tests.
@@ -175,7 +197,7 @@ func (p *proxyPinningTransport) RoundTrip(req *http.Request) (*http.Response, er
 	if p == nil || p.base == nil {
 		return nil, fmt.Errorf("actress cache proxy pinning transport is not initialized")
 	}
-	if req.URL.Scheme == "http" && p.viaProxy("http", req.URL.Hostname()) && hostIPLiteral(req.URL.Hostname()) == nil {
+	if req.URL.Scheme == "http" && p.viaProxy("http", req.URL.Host) && hostIPLiteral(req.URL.Hostname()) == nil {
 		return nil, &ssrf.UnverifiableHostError{Host: req.URL.Hostname(), Err: errors.New("plain-HTTP proxy fetch of a hostname cannot pin the resolved address (use an HTTPS target or a CONNECT tunnel)")}
 	}
 	return p.base.RoundTrip(req)
@@ -311,7 +333,7 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			return errors.New("stopped after 10 redirects")
 		}
 		if !fetcher.allowPrivateHosts {
-			if err := fetcher.checkFetchTarget(req.Context(), req.URL.Scheme, req.URL.Hostname()); err != nil {
+			if err := fetcher.checkFetchTarget(req.Context(), req.URL.Scheme, req.URL.Hostname(), req.URL.Host); err != nil {
 				return err
 			}
 		}
@@ -327,10 +349,11 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		// Plain-HTTP proxy requests otherwise carry the original HOSTNAME to
 		// the proxy, which re-resolves it independently (split-horizon DNS can
 		// land the proxy on a private address our local check never sees).
-		// Rewrite the target to the locally validated IP while preserving the
-		// Host header so virtual hosting stays intact. HTTPS over CONNECT keeps
-		// the documented proxy-trust-boundary model: the proxy necessarily
-		// terminates name resolution for tunneled targets.
+		// Plain-HTTP hostname targets cannot be pinned through a proxy — Go's
+		// stdlib writes one value into both the absolute request line and the
+		// Host header — so they are REJECTED as unverifiable rather than
+		// approximated. Literal-IP targets and HTTPS/CONNECT tunneled hosts
+		// pass through (the latter under the documented proxy trust model).
 		clientCopy.Transport = &proxyPinningTransport{base: clientCopy.Transport, viaProxy: fetcher.viaProxy}
 	}
 	fetcher.client = &clientCopy
@@ -354,7 +377,7 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 		return nil, nil, err
 	}
 	if !f.allowPrivateHosts {
-		if err := f.checkFetchTarget(requestCtx, req.URL.Scheme, req.URL.Hostname()); err != nil {
+		if err := f.checkFetchTarget(requestCtx, req.URL.Scheme, req.URL.Hostname(), req.URL.Host); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -410,7 +433,10 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 			continue
 		}
 		if int64(len(body)) > maxBytes {
-			return nil, resp.Header, fmt.Errorf("response from %s exceeds %d bytes", rawURL, maxBytes)
+			// The policy ceiling is a persistent property of the resource, not
+			// a transport fault: classification maps this to a rejection, so
+			// default builds skip it and refreshes do not wedge publish aborts.
+			return nil, resp.Header, &FetchTooLargeError{URL: rawURL, Limit: maxBytes}
 		}
 		return body, resp.Header, nil
 	}
