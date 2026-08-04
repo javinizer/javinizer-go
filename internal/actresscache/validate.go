@@ -56,7 +56,10 @@ func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, min
 	if isKnownSourcePlaceholder(u) {
 		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: "known source placeholder URL"}
 	}
-	body, headers, err := fetcher.Get(ctx, rawURL, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8", maxBytes)
+	// Advertise only formats a decoder is registered for (gif/jpeg/png/webp):
+	// an AVIF answer would fail DecodeConfig and be recorded as a permanent
+	// rejection despite being a valid thumbnail.
+	body, headers, err := fetcher.Get(ctx, rawURL, "image/webp,image/apng,image/*,*/*;q=0.8", maxBytes)
 	if err != nil {
 		// statusErr ...
 		var statusErr *HTTPError
