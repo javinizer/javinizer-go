@@ -78,7 +78,12 @@ type StateEntry struct {
 	CheckedAt string               `json:"checked_at"`
 	Candidate *Candidate           `json:"candidate,omitempty"`
 	Thumbnail *ThumbnailValidation `json:"thumbnail,omitempty"`
-	Error     string               `json:"error,omitempty"`
+	// ValidatedWithPrivateHosts records that this entry's thumbnail passed
+	// under --allow-private-hosts. The host may be an internal DNS name, so a
+	// later default-safe run cannot lexically prove it safe and must
+	// revalidate instead of reusing.
+	ValidatedWithPrivateHosts bool   `json:"private_hosts,omitempty"`
+	Error                     string `json:"error,omitempty"`
 }
 
 // SourceOptions ...

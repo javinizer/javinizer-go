@@ -61,7 +61,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	}
 	candidates := make(map[string]ValidatedCandidate)
 	for key, entry := range state.entries {
-		if entry.Status != "ok" || entry.Candidate == nil || entry.Thumbnail == nil || !cachedCandidateReusable(entry.Candidate, entry.Thumbnail, minDimension, maxBytes, options.AllowPrivateHosts) {
+		if entry.Status != "ok" || entry.Candidate == nil || entry.Thumbnail == nil || !cachedCandidateReusable(&entry, minDimension, maxBytes, options.AllowPrivateHosts) {
 			continue
 		}
 		candidate := cloneCandidate(*entry.Candidate)
@@ -119,7 +119,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 			if entry.Status == "rejected" {
 				return true
 			}
-			return entry.Status == "ok" && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(entry.Candidate, entry.Thumbnail, minDimension, maxBytes, options.AllowPrivateHosts)
+			return entry.Status == "ok" && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(&entry, minDimension, maxBytes, options.AllowPrivateHosts)
 		}
 		sourceOptions.RecordFailure = recordSourceFailure
 		sourceOptions.MarkSeen = func(key string) {
@@ -165,6 +165,10 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 				CheckedAt: time.Now().UTC().Format(time.RFC3339),
 				Candidate: candidatePtr(candidate),
 				Thumbnail: thumbnailPtr(thumbnail),
+				// Persist the safety mode: a thumbnail proven under a trusted
+				// mirror must be revalidated by any later default-safe run —
+				// its host can resolve privately without looking private.
+				ValidatedWithPrivateHosts: options.AllowPrivateHosts,
 			}
 			if err := state.append(entry); err != nil {
 				return fmt.Errorf("write state for %s: %w", candidate.Key, err)
@@ -288,7 +292,8 @@ func normalizeSources(names []string) ([]string, error) {
 // between runs must force revalidation instead of republishing thumbnails
 // that only passed under older settings. Zero-valued measurements mean the
 // entry predates tracking and cannot prove compliance, so it revalidates.
-func cachedCandidateReusable(candidate *Candidate, thumbnail *ThumbnailValidation, minDimension int, maxBytes int64, allowPrivateHosts bool) bool {
+func cachedCandidateReusable(entry *StateEntry, minDimension int, maxBytes int64, allowPrivateHosts bool) bool {
+	candidate, thumbnail := entry.Candidate, entry.Thumbnail
 	if candidate == nil || strings.TrimSpace(candidate.ThumbURL) == "" {
 		return false
 	}
@@ -296,8 +301,14 @@ func cachedCandidateReusable(candidate *Candidate, thumbnail *ThumbnailValidatio
 		return false
 	}
 	if !allowPrivateHosts {
-		// A thumbnail fetched under --allow-private-hosts may carry a private
-		// URL; a default-safe run must not reuse (and later embed) it.
+		// Any thumbnail proven under --allow-private-hosts is untrusted for a
+		// default-safe run: even a hostname that reads as public may resolve
+		// to an internal address (mirror.lan -> 10.0.0.5).
+		if entry.ValidatedWithPrivateHosts {
+			return false
+		}
+		// Belt-and-braces for entries predating the mode marker: still reject
+		// lexically private hosts.
 		if u, err := url.Parse(strings.TrimSpace(candidate.ThumbURL)); err == nil && isBlockedFetchHost(u.Hostname()) {
 			return false
 		}
