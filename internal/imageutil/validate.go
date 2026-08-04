@@ -416,9 +416,9 @@ func ValidateRemoteImageWithClient(ctx context.Context, client *http.Client, raw
 		return err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	// Advertise only registered decoders (gif/jpeg/png/webp): an AVIF answer
-	// would fail DecodeConfig as an unknown format.
-	req.Header.Set("Accept", "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	// Advertise exactly the formats with registered decoders (no image/*
+	// wildcard: that re-advertises AVIF/SVG, which DecodeConfig rejects).
+	req.Header.Set("Accept", "image/webp,image/apng,image/png,image/jpeg,image/gif")
 	if strings.TrimSpace(referer) != "" {
 		req.Header.Set("Referer", referer)
 	}

@@ -56,10 +56,10 @@ func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, min
 	if isKnownSourcePlaceholder(u) {
 		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: "known source placeholder URL"}
 	}
-	// Advertise only formats a decoder is registered for (gif/jpeg/png/webp):
-	// an AVIF answer would fail DecodeConfig and be recorded as a permanent
-	// rejection despite being a valid thumbnail.
-	body, headers, err := fetcher.Get(ctx, rawURL, "image/webp,image/apng,image/*,*/*;q=0.8", maxBytes)
+	// Advertise exactly the formats with registered decoders: no image/*
+	// wildcard (it re-advertises AVIF at full quality), no SVG (no decoder).
+	// Anything else a server serves fails q-value negotiation or DecodeConfig.
+	body, headers, err := fetcher.Get(ctx, rawURL, "image/webp,image/apng,image/png,image/jpeg,image/gif", maxBytes)
 	if err != nil {
 		// statusErr ...
 		var statusErr *HTTPError
