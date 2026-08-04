@@ -71,6 +71,13 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	}
 
 	report := BuildReport{Sources: append([]string(nil), sources...), Cached: len(candidates)}
+	// initialKeys remembers which candidates were reused from state so the
+	// Cached metric survives: candidates validated during this run must not
+	// inflate it; only pruned previously-reused entries decrement it.
+	initialKeys := make(map[string]struct{}, len(candidates))
+	for key := range candidates {
+		initialKeys[key] = struct{}{}
+	}
 	// mu ...
 	var mu sync.Mutex
 	seenBySource := make(map[string]map[string]struct{}, len(sources))
@@ -203,9 +210,11 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 				}
 				delete(candidates, key)
 				staleKeys = append(staleKeys, key)
+				if _, reused := initialKeys[key]; reused {
+					report.Cached--
+				}
 			}
 		}
-		report.Cached = len(candidates)
 		mu.Unlock()
 		for _, key := range staleKeys {
 			entry, ok := state.get(key)

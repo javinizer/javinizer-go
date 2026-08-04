@@ -56,12 +56,20 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	if limit <= 0 || limit > maxScanRows {
 		limit = maxScanRows
 	}
-	actresses, err := s.lister(ctx, limit)
+	// Fetch one row past the cap to distinguish a complete scan from a
+	// truncated one: Build prunes unmarked r18dev entries whenever
+	// SourceOptions.Limit is unset, so silently capping the scan would mark
+	// every actress beyond the cap stale and publish a truncated cache.
+	actresses, err := s.lister(ctx, limit+1)
 	if err != nil {
 		return err
 	}
-	// Defence in depth for custom listers that ignore the limit argument.
 	if len(actresses) > limit {
+		if options.Limit <= 0 {
+			return fmt.Errorf("r18dev dump exceeds the scan safety cap of %d actress rows; refusing to assemble a truncated cache (use --limit to window intentionally)", maxScanRows)
+		}
+		// User limits intentionally window the dump; defence in depth for
+		// listers that ignore the limit argument.
 		actresses = actresses[:limit]
 	}
 	candidates := make([]actresscache.Candidate, 0, len(actresses))

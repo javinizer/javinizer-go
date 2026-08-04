@@ -116,6 +116,34 @@ func TestBuildReusesSuccessfulState(t *testing.T) {
 	assert.Equal(t, 1, source.emitted)
 }
 
+func TestBuildCachedMetricCountsOnlyReusedEntries(t *testing.T) {
+	source := &testSource{
+		name:       "test",
+		candidates: []Candidate{{Key: "test:1", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "https://example.test/thumb.jpg"}},
+	}
+	registry := NewRegistry()
+	registry.Register("test", func() Source { return source })
+	statePath := filepath.Join(t.TempDir(), "state.jsonl")
+	options := BuildOptions{Registry: registry, Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: testValidator}
+
+	// A clean build that validates candidates reports zero reused entries.
+	_, firstReport, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Equal(t, 0, firstReport.Cached, "freshly validated candidates are not cached reuse")
+
+	// A resume that reuses the entry reports one.
+	_, secondReport, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Equal(t, 1, secondReport.Cached)
+
+	// Once the source stops emitting the entry and completes, the reused
+	// entry is pruned and no longer counted.
+	source.candidates = nil
+	_, thirdReport, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Equal(t, 0, thirdReport.Cached, "pruned previously-reused entries must decrement the metric")
+}
+
 func TestBuildSkipsRejectedStateOnResume(t *testing.T) {
 	source := &testSource{
 		name:       "test",
