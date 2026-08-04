@@ -112,6 +112,17 @@ func TestParseDMMActressIDKeepsScanningPastBrokenLinks(t *testing.T) {
 	assert.Zero(t, parseDMMActressID(nil))
 }
 
+func TestParseDMMActressIDAcceptsArticleStyleLinks(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://al.dmm.co.jp/?lurl=https%3A%2F%2Fvideo.dmm.co.jp%2Fav%2Flist%2F%3Farticle%3Dactress%26id%3D778899%2F">encoded</a><a href="/mono/dvd/-/list/=/article=actress/id=5567/">direct path</a>`))
+	require.NoError(t, err)
+	assert.Equal(t, 5567, parseDMMActressID(doc))
+
+	// Encoded lurl payloads carrying the article form decode to the ID too.
+	encoded, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://example.test/redir?u=https%3A%2F%2Fvideo.dmm.co.jp%2Fav%2Flist%2F%3D%2Farticle%3Dactress%2Fid%3D778899%2F">encoded only</a>`))
+	require.NoError(t, err)
+	assert.Equal(t, 778899, parseDMMActressID(encoded))
+}
+
 func TestParseProfileSkipsEmptyAndDuplicateAliases(t *testing.T) {
 	page := `<html><body><h1>山田花子<span>やまだ / Yamada Hanako</span></h1><div class="act-profile"><table><tr><td><span>別名</span></td><td><p>山田花子（やまだ / dup）</p></td></tr></table></div></body></html>`
 	profile, err := ParseProfile([]byte(page), "https://www.minnano-av.com/x.html")
