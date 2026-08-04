@@ -62,6 +62,8 @@ Thumbs.db
 /downloads/
 /logs/
 **/data/
+!internal/actresscache/data/
+!internal/actresscache/data/actresses.json.gz
 **/logs/
 config.local.yaml
 configs/config.yaml

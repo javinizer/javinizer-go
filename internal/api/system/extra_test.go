@@ -321,6 +321,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	t.Run("invalid request body", func(t *testing.T) {
 		testCfg := config.DefaultConfig(nil, nil)

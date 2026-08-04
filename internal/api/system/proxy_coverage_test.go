@@ -29,6 +29,7 @@ func TestProxyCov_DirectSuccessWithToken(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -83,6 +84,7 @@ func TestProxyCov_DirectSuccessNoTokenStore(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -135,6 +137,7 @@ func TestProxyCov_DefaultTargetURL(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	cfg := config.DefaultConfig(nil, nil)
 	deps := newTestDeps(cfg)
@@ -197,6 +200,7 @@ func TestProxyCov_FlareSolverrWithProxy(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
@@ -242,6 +246,7 @@ func TestProxyCov_FlareSolverrSuccessWithToken(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -278,6 +283,7 @@ func TestProxyCov_DirectWithCustomUserAgent(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	var receivedUA string
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -357,6 +363,7 @@ func TestProxyCov_DirectTokenScopeIsGlobal(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
