@@ -313,13 +313,12 @@ func NewSSRFSafeClient(timeout time.Duration) *http.Client {
 	// exotic; in that case fall back to a fresh *http.Transport (still pinned),
 	// NEVER to an unguarded one.
 	base := &http.Transport{}
-	if dt, ok := http.DefaultTransport.(*http.Transport); ok {
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok && dt.DialTLSContext == nil && dt.DialTLS == nil { //nolint:staticcheck // fail closed on unpinnable defaults
 		base = dt
 	}
-	transport, err := NewPinnedDialTransport(base)
-	if err != nil {
-		transport, _ = NewPinnedDialTransport(&http.Transport{})
-	}
+	// base is always pinnable here (fresh or devoid of TLS dialers), so this
+	// cannot fail.
+	transport, _ := NewPinnedDialTransport(base)
 	transport.Proxy = nil
 	return &http.Client{
 		Transport:     transport,
