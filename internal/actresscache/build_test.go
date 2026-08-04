@@ -144,6 +144,33 @@ func TestBuildCachedMetricCountsOnlyReusedEntries(t *testing.T) {
 	assert.Equal(t, 0, thirdReport.Cached, "pruned previously-reused entries must decrement the metric")
 }
 
+func TestBuildRefreshReportsZeroCached(t *testing.T) {
+	source := &testSource{
+		name:       "test",
+		candidates: []Candidate{{Key: "test:1", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "https://example.test/thumb.jpg"}},
+	}
+	registry := NewRegistry()
+	registry.Register("test", func() Source { return source })
+	statePath := filepath.Join(t.TempDir(), "state.jsonl")
+	validates := 0
+	validator := func(ctx context.Context, candidate Candidate) (ThumbnailValidation, error) {
+		validates++
+		return testValidator(ctx, candidate)
+	}
+	options := BuildOptions{Registry: registry, Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: validator}
+
+	_, firstReport, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	require.Equal(t, 1, firstReport.Validated)
+	require.Equal(t, 0, firstReport.Cached, "fresh validation is not reuse")
+	options.Refresh = true
+	_, refreshReport, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Equal(t, 2, validates, "refresh revalidates every state entry")
+	assert.Equal(t, 0, refreshReport.Cached, "refresh reuses nothing; Cached must be zero")
+	assert.Equal(t, 1, refreshReport.Validated)
+}
+
 func TestBuildSkipsRejectedStateOnResume(t *testing.T) {
 	source := &testSource{
 		name:       "test",
