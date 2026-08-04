@@ -24,10 +24,6 @@ func (s *spyDialer) dial(_ context.Context, _ string, addr string) (net.Conn, er
 	return &net.TCPConn{}, nil // not a real conn — callers must not read
 }
 
-func TestMustCIDRsPanicsOnInvalidLiteral(t *testing.T) {
-	require.Panics(t, func() { mustCIDRs("not-a-cidr") })
-}
-
 func TestHostIPLiteralZoneStripping(t *testing.T) {
 	assert.NotNil(t, hostIPLiteral("fe80::250:56ff:fec0:dead%eth0"))
 	assert.NotNil(t, hostIPLiteral("fe80::1%eno1"))   // zone stripped

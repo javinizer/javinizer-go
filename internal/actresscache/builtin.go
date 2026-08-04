@@ -68,8 +68,10 @@ func Lookup(dmmID int, japaneseName, firstName, lastName string) (Record, bool) 
 		// A jp-name miss is not authoritative-absent: fall through to the
 		// romanized index so romanized-only records stay reachable.
 	}
-	if name := normalizeIdentity(firstName + " " + lastName); name != "" {
-		if index, ok := builtinIndex.byName[name]; ok {
+	// Consult the romanized index only with both name parts present: a
+	// single-part key can collide with mononymous/stage-name records.
+	if firstName != "" && lastName != "" {
+		if index, ok := builtinIndex.byName[normalizeIdentity(firstName+" "+lastName)]; ok {
 			return runtimeRecordToRecord(builtinIndex.records[index]), true
 		}
 	}

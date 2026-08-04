@@ -52,6 +52,9 @@ func hostAllowedForTest(host string) bool {
 // IPv6 transition ranges that tunnel embedded IPv4 through anycast relays.
 var blockedTargetPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
+	// NAT64 well-known + local-use prefixes embed/carry translated IPv4.
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
 	netip.MustParsePrefix("10.0.0.0/8"),
 	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("127.0.0.0/8"),
@@ -286,6 +289,11 @@ func NewPinnedDialTransport(base *http.Transport) (*http.Transport, error) {
 		}
 		base = t
 	}
+	// Fails closed: a custom TLS dialer bypasses DialContext for HTTPS, which
+	// would silently skip validation+pinning.
+	if base.DialTLSContext != nil || base.DialTLS != nil { //nolint:staticcheck // reading deprecated DialTLS is required to fail closed on transports that would bypass the pinned dial
+		return nil, errors.New("SSRF: transports with DialTLSContext/DialTLS cannot be pinned")
+	}
 	clone := base.Clone()
 	fallback := clone.DialContext
 	if fallback == nil {
@@ -301,9 +309,16 @@ func NewPinnedDialTransport(base *http.Transport) (*http.Transport, error) {
 // internal IP addresses, with pinned dialing and per-redirect revalidation.
 // Kept for compatibility; new code should prefer NewPinnedDialTransport.
 func NewSSRFSafeClient(timeout time.Duration) *http.Client {
-	transport, err := NewPinnedDialTransport(nil)
+	// Construction cannot fail with a nil base unless http.DefaultTransport is
+	// exotic; in that case fall back to a fresh *http.Transport (still pinned),
+	// NEVER to an unguarded one.
+	base := &http.Transport{}
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok {
+		base = dt
+	}
+	transport, err := NewPinnedDialTransport(base)
 	if err != nil {
-		transport = &http.Transport{Proxy: nil}
+		transport, _ = NewPinnedDialTransport(&http.Transport{})
 	}
 	transport.Proxy = nil
 	return &http.Client{
