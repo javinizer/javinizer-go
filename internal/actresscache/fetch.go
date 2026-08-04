@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -219,6 +220,12 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 	if !ok && clientCopy.Transport == nil {
 		transport = http.DefaultTransport.(*http.Transport)
 		ok = transport != nil
+	}
+	if ok && (transport.DialTLSContext != nil || transport.DialTLS != nil) { //nolint:staticcheck // reading deprecated DialTLS is required to fail closed on unpinnable transports
+		// A custom TLS dialer bypasses DialContext for HTTPS and cannot be
+		// pinned; refuse to wrap and keep the request-layer guard only.
+		log.Printf("actresscache: fetch client transport has DialTLS*/DialTLSContext; SSRF pinning unavailable for this client")
+		ok = false
 	}
 	if ok {
 		fetcher.resolveTargets = true

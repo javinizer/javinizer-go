@@ -381,6 +381,9 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 		}
 		safeClient.Transport = &pinnedProxyTransport{base: defaultTransport.Clone()}
 	} else if transport, ok := client.Transport.(*http.Transport); ok {
+		if transport.DialTLSContext != nil || transport.DialTLS != nil { //nolint:staticcheck // fail closed: a custom TLS dialer would bypass the pinned dial for HTTPS
+			return fmt.Errorf("image validation rejects transports with DialTLSContext/DialTLS (unpinnable)")
+		}
 		safeClient.Transport = &pinnedProxyTransport{base: transport.Clone()}
 	} else {
 		// Fail closed: a wrapped RoundTripper (cloudscraper-style) cannot be
