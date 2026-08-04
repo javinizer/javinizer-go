@@ -257,6 +257,30 @@ func TestBuildRefreshReportsZeroCached(t *testing.T) {
 	assert.Equal(t, 1, refreshReport.Validated)
 }
 
+// A permanent rejection under --refresh still journals over a last-good
+// entry: rejected means the thumbnail is a durable defect, not a transient
+// outage, and the candidate must not come back on the next resume.
+func TestBuildRefreshPermanentRejectionStillOverwritesState(t *testing.T) {
+	source := &testSource{name: "test", candidates: []Candidate{{Key: "test:1", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "https://example.test/thumb.jpg"}}}
+	registry := NewRegistry()
+	registry.Register("test", func() Source { return source })
+	statePath := filepath.Join(t.TempDir(), "state.jsonl")
+	_, _, err := Build(context.Background(), BuildOptions{Registry: registry, Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: testValidator})
+	require.NoError(t, err)
+
+	rejecter := func(context.Context, Candidate) (ThumbnailValidation, error) {
+		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: "permanent"}
+	}
+	cache, report, err := Build(context.Background(), BuildOptions{Registry: registry, Sources: []string{"test"}, StatePath: statePath, Refresh: true, ValidateThumbnail: rejecter})
+	require.NoError(t, err, "permanent rejection is not a publish-blocking failure")
+	assert.Empty(t, cache.Records)
+	assert.Equal(t, 1, report.Rejected)
+
+	data, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "\"status\":\"rejected\"")
+}
+
 func TestBuildSkipsRejectedStateOnResume(t *testing.T) {
 	source := &testSource{
 		name:       "test",
@@ -358,10 +382,25 @@ func TestBuildRefreshFailureRemovesStaleCandidate(t *testing.T) {
 	assert.Empty(t, cache.Records)
 	assert.Equal(t, 1, report.Failed)
 	assert.Contains(t, err.Error(), "refusing to publish")
-	fail = false
-	cache, _, err = Build(context.Background(), BuildOptions{Registry: registry, Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: validator})
+
+	// The aborted refresh must not poison the journal: the last-good entry
+	// stays effective (no "failed" line appended for the key).
+	data, readErr := os.ReadFile(statePath)
+	require.NoError(t, readErr)
+	assert.NotContains(t, string(data), "\"status\":\"failed\"", "transient refresh failure must not overwrite last-good state")
+
+	// A later default build therefore resumes from the cached validation
+	// instead of refetching the thumbnail.
+	validated := 0
+	countingValidator := func(ctx context.Context, candidate Candidate) (ThumbnailValidation, error) {
+		validated++
+		return testValidator(ctx, candidate)
+	}
+	cache, report, err = Build(context.Background(), BuildOptions{Registry: registry, Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: countingValidator})
 	require.NoError(t, err)
 	assert.Len(t, cache.Records, 1)
+	assert.Equal(t, 1, report.Cached, "transient refresh failure must not destroy reusability")
+	assert.Zero(t, validated, "no revalidation needed: last-good state was preserved")
 }
 func TestBuildValidatesOptions(t *testing.T) {
 	registry := NewRegistry()
