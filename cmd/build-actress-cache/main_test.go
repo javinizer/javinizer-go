@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,4 +80,27 @@ func TestRunHelpSucceedsWithoutSources(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	assert.NoError(t, run(t.Context(), []string{"--help"}, &stdout, &stderr))
 	assert.Contains(t, stderr.String(), "Usage of build-actress-cache")
+}
+
+func TestRunRejectsDumpOpenFailure(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), []string{"--r18dev-dump", filepath.Join(t.TempDir(), "missing.db")}, &stdout, &stderr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "r18.dev dump")
+}
+
+func TestRunRejectsExoticDefaultTransport(t *testing.T) {
+	original := http.DefaultTransport
+	defer func() { http.DefaultTransport = original }()
+	http.DefaultTransport = roundTripperFuncStub{}
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), []string{"--source", "minnanoav", "--limit", "1"}, &stdout, &stderr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a *http.Transport")
+}
+
+type roundTripperFuncStub struct{}
+
+func (roundTripperFuncStub) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("not a transport")
 }

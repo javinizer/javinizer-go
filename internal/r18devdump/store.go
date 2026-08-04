@@ -33,6 +33,10 @@ type Store struct {
 
 var openSQL = sql.Open
 
+// scanActressRow indirection lets tests exercise the scan-error leg without a
+// misbehaving driver.
+var scanActressRow = func(rows *sql.Rows, dest ...any) error { return rows.Scan(dest...) }
+
 // Open opens a read-only connection to the dump sidecar database. Returns an
 // error if the file does not exist or is not a valid dump database; callers
 // should treat that as "dump not available" and fall back to HTTP resolution.
@@ -72,7 +76,7 @@ func (s *Store) ListActresses(ctx context.Context) ([]models.DumpActress, error)
 	for rows.Next() {
 		// id ...
 		var id, nameRomaji, imageURL, nameKanji, nameKana sql.NullString
-		if err := rows.Scan(&id, &nameRomaji, &imageURL, &nameKanji, &nameKana); err != nil {
+		if err := scanActressRow(rows, &id, &nameRomaji, &imageURL, &nameKanji, &nameKana); err != nil {
 			return nil, fmt.Errorf("scan actress: %w", err)
 		}
 		actresses = append(actresses, models.DumpActress{

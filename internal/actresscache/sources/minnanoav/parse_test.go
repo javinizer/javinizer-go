@@ -1,7 +1,10 @@
 package minnanoavsource
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/PuerkitoBio/goquery"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,4 +76,38 @@ func TestStripQueryEdges(t *testing.T) {
 	assert.Equal(t, "", stripQuery("  "))
 	assert.Equal(t, "https://a.test/x.jpg", stripQuery("https://a.test/x.jpg?v=1"))
 	assert.Equal(t, "http://a.test/x", stripQuery("http://a.test/x"))
+}
+
+func TestParseNameEntryReadingOnlyAndEmptyInner(t *testing.T) {
+	jp, reading, romaji := parseNameEntry("名（よみ）")
+	assert.Equal(t, "名", jp)
+	assert.Equal(t, "よみ", reading)
+	assert.Empty(t, romaji)
+
+	jp, reading, romaji = parseNameEntry("名（）")
+	assert.Equal(t, "名", jp)
+	assert.Empty(t, reading)
+	assert.Empty(t, romaji)
+}
+
+func TestSplitRomajiNameSingleField(t *testing.T) {
+	first, last, ok := splitRomajiName("Mononym")
+	assert.False(t, ok)
+	assert.Empty(t, first)
+	assert.Empty(t, last)
+}
+
+func TestDirectTextSkipsNodeWithoutChildren(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader("<h1><span>inner</span></h1>"))
+	require.NoError(t, err)
+	// h1 with only an element child (no direct text) yields empty.
+	assert.Empty(t, directText(doc.Find("h1")))
+	assert.Empty(t, directText(nil))
+}
+
+func TestParseDMMActressIDKeepsScanningPastBrokenLinks(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://x.test/?actress=abc">nonnumeric</a><a href="https://x.test/?a=b">none</a><a href="https://dmm.test/?actress=42">hit</a>`))
+	require.NoError(t, err)
+	assert.Equal(t, 42, parseDMMActressID(doc))
+	assert.Zero(t, parseDMMActressID(nil))
 }

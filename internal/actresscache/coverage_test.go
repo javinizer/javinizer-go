@@ -808,3 +808,25 @@ func TestThumbnailValidateAndCacheCachedBranch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "cached", result.validation.SHA256)
 }
+
+func TestWriteFileSyncFailure(t *testing.T) {
+	original := createCacheTemp
+	defer func() { createCacheTemp = original }()
+	sentinel := errors.New("sync failed")
+	createCacheTemp = func(dir, pattern string) (cacheTempFile, error) {
+		return &fakeTempFile{name: filepath.Join(dir, "tmp.json"), syncErr: sentinel}, nil
+	}
+	err := WriteFile(filepath.Join(t.TempDir(), "out.json"), Cache{})
+	require.ErrorIs(t, err, sentinel)
+}
+
+func TestWriteRuntimeFileSyncFailure(t *testing.T) {
+	original := createRuntimeTemp
+	defer func() { createRuntimeTemp = original }()
+	sentinel := errors.New("sync failed")
+	createRuntimeTemp = func(dir, pattern string) (cacheTempFile, error) {
+		return &fakeTempFile{name: filepath.Join(dir, "tmp.json.gz"), syncErr: sentinel}, nil
+	}
+	err := WriteRuntimeFile(filepath.Join(t.TempDir(), "out.json.gz"), Cache{})
+	require.ErrorIs(t, err, sentinel)
+}
