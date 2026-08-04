@@ -43,3 +43,33 @@ func TestPinnedProxyTransportAppliesResponseHeaderTimeout(t *testing.T) {
 	assert.Less(t, time.Since(start), 3*time.Second)
 	assert.ErrorContains(t, err, "timeout")
 }
+
+// A proxy answering promptly within the configured timeout succeeds, and the
+// success path clears the read deadline before the body streams.
+func TestPinnedProxyTransportResponseHeaderTimeoutSuccessPath(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = listener.Close() }()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
+	}()
+
+	proxyURL, err := url.Parse("http://" + listener.Addr().String())
+	require.NoError(t, err)
+	transport := &pinnedProxyTransport{base: &http.Transport{
+		Proxy:                 http.ProxyURL(proxyURL),
+		ResponseHeaderTimeout: 2 * time.Second,
+	}}
+
+	req, err := http.NewRequest(http.MethodGet, "http://93.184.216.34/image", nil)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
