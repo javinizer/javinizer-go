@@ -64,13 +64,17 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	if err != nil {
 		return err
 	}
+	// A user limit intentionally windows the dump; the enumeration is then
+	// by definition NOT exhaustive, so MarkComplete must not run — declaring
+	// completion would license the builder to prune unseen entries.
+	truncated := false
 	if len(actresses) > limit {
 		if options.Limit <= 0 {
 			return fmt.Errorf("r18dev dump exceeds the scan safety cap of %d actress rows; refusing to assemble a truncated cache (use --limit to window intentionally)", maxScanRows)
 		}
-		// User limits intentionally window the dump; defence in depth for
-		// listers that ignore the limit argument.
+		// Defence in depth for listers that ignore the limit argument.
 		actresses = actresses[:limit]
+		truncated = true
 	}
 	candidates := make([]actresscache.Candidate, 0, len(actresses))
 	for _, actress := range actresses {
@@ -140,7 +144,7 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	if emitErr != nil {
 		return emitErr
 	}
-	if enqueueErr == nil && options.MarkComplete != nil {
+	if enqueueErr == nil && !truncated && options.MarkComplete != nil {
 		options.MarkComplete()
 	}
 	return enqueueErr

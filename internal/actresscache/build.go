@@ -30,6 +30,12 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 			return Cache{}, BuildReport{}, fmt.Errorf("unknown actress cache source %q (available: %s)", name, strings.Join(options.Registry.Names(), ", "))
 		}
 	}
+	if options.Refresh && options.SourceOptions.Limit > 0 {
+		// --limit disables pruning, so unrefreshed state entries would publish
+		// unchanged while reporting zero reuse — silently mixing stale
+		// thumbnails into a "refreshed" cache. Refuse the combination.
+		return Cache{}, BuildReport{}, fmt.Errorf("--refresh cannot be combined with --limit (pruning disabled; unrefreshed state would publish)")
+	}
 	state, err := openState(options.StatePath)
 	if err != nil {
 		return Cache{}, BuildReport{}, fmt.Errorf("open actress cache state: %w", err)

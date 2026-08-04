@@ -76,10 +76,16 @@ func TestCollectTruncatesIgnoringLister(t *testing.T) {
 		return fakeActresses("1", "2", "3"), nil
 	})
 	emitted := 0
-	err := src.Collect(context.Background(), actresscache.SourceOptions{Limit: 2, Workers: 1}, func(actresscache.Candidate) error {
+	completed := false
+	err := src.Collect(context.Background(), actresscache.SourceOptions{
+		Limit:        2,
+		Workers:      1,
+		MarkComplete: func() { completed = true },
+	}, func(actresscache.Candidate) error {
 		emitted++
 		return nil
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 2, emitted)
+	assert.False(t, completed, "truncated enumeration must not declare completion")
 }

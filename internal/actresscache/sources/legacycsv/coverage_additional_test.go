@@ -106,3 +106,15 @@ func TestCandidateFromRowHandlesShortAndMultiwordNames(t *testing.T) {
 	assert.Empty(t, candidate.ThumbURL)
 	assert.Equal(t, "9", candidate.SourceID)
 }
+
+func TestCollectLimitTruncationSkipsMarkComplete(t *testing.T) {
+	path := writeCSV(t, "FullName,ThumbUrl\nOne,https://example.test/one.jpg\nTwo,https://example.test/two.jpg\nThree,https://example.test/three.jpg\n")
+	complete := false
+	err := New().Collect(context.Background(), actresscache.SourceOptions{
+		Parameters:   map[string]string{"legacy.csv": path},
+		Limit:        2,
+		MarkComplete: func() { complete = true },
+	}, func(actresscache.Candidate) error { return nil })
+	require.NoError(t, err)
+	assert.False(t, complete, "limit-truncated enumeration is not complete")
+}
