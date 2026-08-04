@@ -111,3 +111,16 @@ func TestParseDMMActressIDKeepsScanningPastBrokenLinks(t *testing.T) {
 	assert.Equal(t, 42, parseDMMActressID(doc))
 	assert.Zero(t, parseDMMActressID(nil))
 }
+
+func TestParseProfileSkipsEmptyAndDuplicateAliases(t *testing.T) {
+	page := `<html><body><h1>山田花子<span>やまだ / Yamada Hanako</span></h1><div class="act-profile"><table><tr><td><span>別名</span></td><td><p>山田花子（やまだ / dup）</p></td></tr></table></div></body></html>`
+	profile, err := ParseProfile([]byte(page), "https://www.minnano-av.com/x.html")
+	require.NoError(t, err)
+	assert.Empty(t, profile.Aliases, "alias equal to the primary name is skipped")
+}
+
+func TestParseActressPageNilDocument(t *testing.T) {
+	page := parseActressPage(nil, "https://x.test")
+	assert.Empty(t, page.primaryName)
+	assert.Empty(t, page.thumbURL)
+}
