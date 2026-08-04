@@ -230,7 +230,15 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 	}
 	headerReader := &responseHeaderLimitReader{reader: conn, remaining: maxHeaderBytes + responseHeaderReadSlop}
 	bufferedReader := bufio.NewReader(headerReader)
+	headerTimeout := transport.ResponseHeaderTimeout
 	for {
+		if headerTimeout > 0 {
+			// This manual ReadResponse path has no client/transport machinery
+			// above it: honor Transport.ResponseHeaderTimeout via a read
+			// deadline so a proxy that accepted the request but never answers
+			// cannot hang validation indefinitely.
+			_ = conn.SetReadDeadline(time.Now().Add(headerTimeout))
+		}
 		resp, err := http.ReadResponse(bufferedReader, req)
 		if err != nil {
 			return closeConn(err)
@@ -240,6 +248,11 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 			continue
 		}
 		headerReader.done = true
+		if headerTimeout > 0 {
+			// ResponseHeaderTimeout governs the header wait only; the body
+			// streams without a deadline over this connection.
+			_ = conn.SetReadDeadline(time.Time{})
+		}
 		resp.Body = &proxyResponseBody{ReadCloser: resp.Body, conn: conn, done: done}
 		return resp, nil
 	}
