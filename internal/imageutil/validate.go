@@ -392,6 +392,12 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 		if !ok {
 			return fmt.Errorf("image validation requires a *http.Transport-capable default transport")
 		}
+		// A globally customized default transport with DialTLS/DialTLSContext
+		// would bypass the pinned DialContext for HTTPS: reject it here too,
+		// same as an explicitly supplied client transport.
+		if defaultTransport.DialTLSContext != nil || defaultTransport.DialTLS != nil { //nolint:staticcheck // fail closed on unpinnable defaults
+			return fmt.Errorf("image validation rejects default transports with DialTLSContext/DialTLS (unpinnable)")
+		}
 		safeClient.Transport = &pinnedProxyTransport{base: defaultTransport.Clone()}
 	} else if transport, ok := client.Transport.(*http.Transport); ok {
 		if transport.DialTLSContext != nil || transport.DialTLS != nil { //nolint:staticcheck // fail closed: a custom TLS dialer would bypass the pinned dial for HTTPS

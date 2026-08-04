@@ -1,6 +1,7 @@
 package ssrf
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -182,6 +183,23 @@ func TestCheckRedirect_AllowsPublicIP(t *testing.T) {
 	err := checkRedirect(req, via)
 	if err != nil {
 		t.Errorf("expected no error for public IP redirect, got: %v", err)
+	}
+}
+
+func TestWrapTransportWithSSRFCheckClearsUnpinnableTLSDialers(t *testing.T) {
+	transport := &http.Transport{
+		DialTLSContext: func(context.Context, string, string) (net.Conn, error) { return nil, context.DeadlineExceeded },
+		DialTLS:        func(string, string) (net.Conn, error) { return nil, context.DeadlineExceeded }, //nolint:staticcheck // cleared intentionally
+	}
+	WrapTransportWithSSRFCheck(transport)
+	if transport.DialTLSContext != nil {
+		t.Error("DialTLSContext must be cleared by the pinning wrapper")
+	}
+	if transport.DialTLS != nil { //nolint:staticcheck // verifying the clear
+		t.Error("DialTLS must be cleared by the pinning wrapper")
+	}
+	if transport.DialContext == nil {
+		t.Error("DialContext must be installed by the pinning wrapper")
 	}
 }
 

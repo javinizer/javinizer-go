@@ -255,6 +255,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		StatePath:             opts.state,
 		Refresh:               opts.refresh,
 		MinThumbnailDimension: opts.minDimension,
+		AllowPrivateHosts:     opts.allowPrivateHosts,
 		MaxThumbnailBytes:     opts.maxImageBytes,
 		SourceOptions: actresscache.SourceOptions{
 			Parameters: parameters,

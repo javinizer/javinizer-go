@@ -2,6 +2,7 @@ package actresscache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -175,6 +176,31 @@ func TestBuildRevalidatesCachedThumbnailsUnderStricterPolicy(t *testing.T) {
 	assert.Equal(t, 0, thirdReport.Cached)
 	assert.Equal(t, 1, thirdReport.Validated)
 	assert.Equal(t, 2, validates, "stricter policy forced revalidation")
+}
+
+func TestBuildDoesNotReusePrivateURLThumbnailsWithoutOptIn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.jsonl")
+	candidate := Candidate{Key: "one", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "http://127.0.0.1:8080/thumb.jpg"}
+	thumb := ThumbnailValidation{CheckedAt: "now", SHA256: "one", Bytes: 100, Width: 100, Height: 100, Format: "jpeg"}
+	data, err := json.Marshal(StateEntry{Key: "one", Status: "ok", Candidate: &candidate, Thumbnail: &thumb})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, append(data, byte(0x0a)), 0o600))
+
+	source := sourceFunc{name: "test", collect: func(context.Context, SourceOptions, func(Candidate) error) error { return nil }}
+	options := BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: path, ValidateThumbnail: testValidator}
+
+	// Without the opt-in, the private URL is not trusted from state.
+	cache, report, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Empty(t, cache.Records)
+	assert.Zero(t, report.Cached)
+
+	// With the trusted-mirror opt-in, the same state entry is reused.
+	options.AllowPrivateHosts = true
+	cache, report, err = Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Len(t, cache.Records, 1)
+	assert.Equal(t, 1, report.Cached)
 }
 
 func TestBuildRefreshReportsZeroCached(t *testing.T) {

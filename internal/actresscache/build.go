@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -60,7 +61,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	}
 	candidates := make(map[string]ValidatedCandidate)
 	for key, entry := range state.entries {
-		if entry.Status != "ok" || entry.Candidate == nil || entry.Thumbnail == nil || !cachedCandidateReusable(entry.Candidate, entry.Thumbnail, minDimension, maxBytes) {
+		if entry.Status != "ok" || entry.Candidate == nil || entry.Thumbnail == nil || !cachedCandidateReusable(entry.Candidate, entry.Thumbnail, minDimension, maxBytes, options.AllowPrivateHosts) {
 			continue
 		}
 		candidate := cloneCandidate(*entry.Candidate)
@@ -118,7 +119,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 			if entry.Status == "rejected" {
 				return true
 			}
-			return entry.Status == "ok" && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(entry.Candidate, entry.Thumbnail, minDimension, maxBytes)
+			return entry.Status == "ok" && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(entry.Candidate, entry.Thumbnail, minDimension, maxBytes, options.AllowPrivateHosts)
 		}
 		sourceOptions.RecordFailure = recordSourceFailure
 		sourceOptions.MarkSeen = func(key string) {
@@ -287,12 +288,19 @@ func normalizeSources(names []string) ([]string, error) {
 // between runs must force revalidation instead of republishing thumbnails
 // that only passed under older settings. Zero-valued measurements mean the
 // entry predates tracking and cannot prove compliance, so it revalidates.
-func cachedCandidateReusable(candidate *Candidate, thumbnail *ThumbnailValidation, minDimension int, maxBytes int64) bool {
+func cachedCandidateReusable(candidate *Candidate, thumbnail *ThumbnailValidation, minDimension int, maxBytes int64, allowPrivateHosts bool) bool {
 	if candidate == nil || strings.TrimSpace(candidate.ThumbURL) == "" {
 		return false
 	}
 	if runtimeThumbnailURL(candidate.ThumbURL) == "" {
 		return false
+	}
+	if !allowPrivateHosts {
+		// A thumbnail fetched under --allow-private-hosts may carry a private
+		// URL; a default-safe run must not reuse (and later embed) it.
+		if u, err := url.Parse(strings.TrimSpace(candidate.ThumbURL)); err == nil && isBlockedFetchHost(u.Hostname()) {
+			return false
+		}
 	}
 	if thumbnail.Width < minDimension || thumbnail.Height < minDimension {
 		return false
