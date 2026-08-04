@@ -61,9 +61,23 @@ func Lookup(dmmID int, japaneseName, firstName, lastName string) (Record, bool) 
 			return runtimeRecordToRecord(builtinIndex.records[index]), true
 		}
 	}
+	// Name-index fallback after a positive-DMM miss must not return a record
+	// whose authoritative DMM ID conflicts with the requested one: a newly
+	// assigned ID sharing a name with an older actress must not resolve to
+	// her record. Only DMM-less legacy records (or same-ID entries whose DMM
+	// index was ambiguous) are acceptable fallback candidates.
+	accept := func(index int) (Record, bool) {
+		record := builtinIndex.records[index]
+		if dmmID > 0 && record.DMMID > 0 && record.DMMID != dmmID {
+			return Record{}, false
+		}
+		return runtimeRecordToRecord(record), true
+	}
 	if name := normalizeIdentity(japaneseName); name != "" {
 		if index, ok := builtinIndex.byJP[name]; ok {
-			return runtimeRecordToRecord(builtinIndex.records[index]), true
+			if record, ok := accept(index); ok {
+				return record, true
+			}
 		}
 		// A jp-name miss is not authoritative-absent: fall through to the
 		// romanized index so romanized-only records stay reachable.
@@ -72,7 +86,9 @@ func Lookup(dmmID int, japaneseName, firstName, lastName string) (Record, bool) 
 	// single-part key can collide with mononymous/stage-name records.
 	if firstName != "" && lastName != "" {
 		if index, ok := builtinIndex.byName[normalizeIdentity(firstName+" "+lastName)]; ok {
-			return runtimeRecordToRecord(builtinIndex.records[index]), true
+			if record, ok := accept(index); ok {
+				return record, true
+			}
 		}
 	}
 	return Record{}, false
