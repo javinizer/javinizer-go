@@ -97,6 +97,40 @@ func TestFetcherFailsClosedForUnresolvableProxiedHost(t *testing.T) {
 	require.ErrorAs(t, err, &unverifiableErr, "proxied DNS failure must be transient-unverifiable, not a permanent block")
 }
 
+func TestFetcherProxiedLookupPreservesCancellation(t *testing.T) {
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	prev := lookupIP
+	lookupIP = func(ctx context.Context, network, host string) ([]net.IP, error) {
+		return nil, ctx.Err()
+	}
+	defer func() { lookupIP = prev }()
+	proxyTransport := &http.Transport{Proxy: func(*http.Request) (*url.URL, error) {
+		return url.Parse("http://proxy.corp.example:3128")
+	}}
+	fetcher := mustFetcher(NewFetcher(&http.Client{Transport: proxyTransport}, 0, "test"))
+	_, _, err := fetcher.Get(canceledCtx, "https://unresolvable.invalid/x", "*/*", 1024)
+	require.ErrorIs(t, err, context.Canceled, "cancellation behind a proxy must stay classifiable")
+	var unverifiableErr *ssrf.UnverifiableHostError
+	require.ErrorAs(t, err, &unverifiableErr)
+}
+
+func TestFetcherProxiedEmptyResolutionFailsUnverifiable(t *testing.T) {
+	prev := lookupIP
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		return nil, nil
+	}
+	defer func() { lookupIP = prev }()
+	proxyTransport := &http.Transport{Proxy: func(*http.Request) (*url.URL, error) {
+		return url.Parse("http://proxy.corp.example:3128")
+	}}
+	fetcher := mustFetcher(NewFetcher(&http.Client{Transport: proxyTransport}, 0, "test"))
+	_, _, err := fetcher.Get(context.Background(), "https://empty-answers.invalid/x", "*/*", 1024)
+	var unverifiableErr *ssrf.UnverifiableHostError
+	require.ErrorAs(t, err, &unverifiableErr)
+	assert.Contains(t, err.Error(), "no A/AAAA records")
+}
+
 // An allowed-private fixture transport (trusted-mirror mode) takes no
 // request-layer resolution, so a broken local resolver does not matter.
 func TestFetcherToleratesLookupFailureForAllowedPrivateMirror(t *testing.T) {

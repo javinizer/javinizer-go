@@ -134,7 +134,13 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host string) err
 			// cannot see the real target: fail closed when local resolution
 			// cannot prove the host is public. Classified unverifiable
 			// (transient): a DNS blip must not become a permanent rejection.
-			return &ssrf.UnverifiableHostError{Host: host, Err: errors.New("cannot resolve fetch target locally while proxied")}
+			// Preserve the resolver error (notably context cancellation /
+			// deadline) so callers classify the failure correctly.
+			resolveErr := err
+			if resolveErr == nil {
+				resolveErr = errors.New("cannot resolve fetch target locally while proxied: no A/AAAA records")
+			}
+			return &ssrf.UnverifiableHostError{Host: host, Err: resolveErr}
 		}
 		//nolint:nilerr // no proxy: dial surfaces DNS errors authoritatively.
 		return nil
