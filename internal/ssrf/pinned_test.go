@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+func TestIsBlockedIPUnparseableSlice(t *testing.T) {
+	// A non-nil but malformed net.IP (wrong length) fails closed.
+	if !IsBlockedIP(net.IP{1, 2, 3}) {
+		t.Error("malformed IP slice must be blocked")
+	}
+}
+
 func TestIsBlockedIPExtendedRanges(t *testing.T) {
 	blocked := []string{
 		"100.64.0.1",      // CGNAT (cloud metadata, Tailscale)
