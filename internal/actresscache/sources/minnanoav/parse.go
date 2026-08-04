@@ -130,7 +130,18 @@ func parseActressPage(doc *goquery.Document, sourceURL string) actressPage {
 	})
 	if thumb := doc.Find(`meta[property="og:image"]`).First(); thumb.Length() > 0 {
 		if src := strings.TrimSpace(thumb.AttrOr("content", "")); src != "" {
-			page.thumbURL = scraperutil.ResolveURL(sourceURL, src)
+			// url.ResolveReference resolves relative AND protocol-relative values
+			// correctly, including query strings (scraperutil.ResolveURL glues a
+			// query into the escaped path).
+			if ref, err := url.Parse(src); err == nil {
+				if base, berr := url.Parse(sourceURL); berr == nil {
+					page.thumbURL = base.ResolveReference(ref).String()
+				} else {
+					page.thumbURL = scraperutil.ResolveURL(sourceURL, src)
+				}
+			} else {
+				page.thumbURL = scraperutil.ResolveURL(sourceURL, src)
+			}
 		}
 	}
 	return page
