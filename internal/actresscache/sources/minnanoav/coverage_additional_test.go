@@ -43,7 +43,7 @@ func TestCollectUsesParameterSitemapMarksSeenAndCompletes(t *testing.T) {
 	var seen []string
 	complete := false
 	err := New().Collect(context.Background(), actresscache.SourceOptions{
-		Fetcher:      actresscache.NewFetcher(client, 0, "test"),
+		Fetcher:      mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)),
 		Parameters:   map[string]string{"minnanoav.sitemap": "https://www.minnano-av.com/custom.xml"},
 		Workers:      8,
 		MarkSeen:     func(key string) { seen = append(seen, key) },
@@ -59,12 +59,12 @@ func TestCollectUsesGenericSitemapParameter(t *testing.T) {
 	client := &http.Client{Transport: sitemapTransport(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/html"}}, Body: io.NopCloser(strings.NewReader(profileFixture())), Request: req}, nil
 	})}
-	fetcher := actresscache.NewFetcher(&http.Client{Transport: testTransport(func(req *http.Request) (*http.Response, error) {
+	fetcher := mustFetch(actresscache.NewFetcherWithOptions(&http.Client{Transport: testTransport(func(req *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(req.URL.Path, ".xml") && strings.Contains(req.URL.Path, "generic") {
 			requested = req.URL.String()
 		}
 		return client.Transport.RoundTrip(req)
-	})}, 0, "test")
+	})}, 0, "test", nil, true))
 	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: fetcher, Parameters: map[string]string{"sitemap": "https://www.minnano-av.com/generic.xml"}}, func(actresscache.Candidate) error { return nil })
 	// The custom transport intentionally has no generic sitemap fixture; the request itself proves fallback selection.
 	require.Error(t, err)
@@ -94,7 +94,7 @@ func TestCollectRejectsProfileURLInvalidatedAfterDiscovery(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(profileFixture())), Request: req}, nil
 	})}
 
-	err := New().Collect(ctx, actresscache.SourceOptions{Fetcher: actresscache.NewFetcher(client, 0, "test")}, func(actresscache.Candidate) error { return nil })
+	err := New().Collect(ctx, actresscache.SourceOptions{Fetcher: mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true))}, func(actresscache.Candidate) error { return nil })
 	require.ErrorContains(t, err, "invalid MinnanoAV profile URL")
 }
 
@@ -110,7 +110,7 @@ func TestCollectReturnsEmitterErrorDuringEnqueue(t *testing.T) {
 		}
 	})}
 	want := errors.New("emit failed")
-	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: actresscache.NewFetcher(client, 0, "test"), Workers: 1}, func(actresscache.Candidate) error { return want })
+	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)), Workers: 1}, func(actresscache.Candidate) error { return want })
 	require.ErrorIs(t, err, want)
 }
 
@@ -120,7 +120,7 @@ func TestCollectHandlesProfileParseFailures(t *testing.T) {
 		client := &http.Client{Transport: sitemapTransport(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/html"}}, Body: io.NopCloser(strings.NewReader(invalidHTML)), Request: req}, nil
 		})}
-		return actresscache.NewFetcher(client, 0, "test")
+		return mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true))
 	}
 
 	t.Run("without recorder", func(t *testing.T) {
@@ -151,7 +151,7 @@ func TestCollectReturnsRecordFailureError(t *testing.T) {
 	})}
 	want := errors.New("state unavailable")
 	err := New().Collect(context.Background(), actresscache.SourceOptions{
-		Fetcher:       actresscache.NewFetcher(client, 0, "test"),
+		Fetcher:       mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)),
 		RecordFailure: func(actresscache.Candidate, error) error { return want },
 	}, func(actresscache.Candidate) error { return nil })
 	require.ErrorIs(t, err, want)
@@ -165,7 +165,7 @@ func TestCollectStopsAfterCanceledProfileFailure(t *testing.T) {
 	})}
 	failures := 0
 	err := New().Collect(ctx, actresscache.SourceOptions{
-		Fetcher:       actresscache.NewFetcher(client, 0, "test"),
+		Fetcher:       mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)),
 		RecordFailure: func(actresscache.Candidate, error) error { failures++; return nil },
 	}, func(actresscache.Candidate) error { return nil })
 	require.ErrorIs(t, err, context.Canceled)
@@ -173,9 +173,9 @@ func TestCollectStopsAfterCanceledProfileFailure(t *testing.T) {
 }
 
 func TestDiscoverProfileURLsReturnsIndexFetchError(t *testing.T) {
-	fetcher := actresscache.NewFetcher(&http.Client{Transport: testTransport(func(*http.Request) (*http.Response, error) {
+	fetcher := mustFetch(actresscache.NewFetcherWithOptions(&http.Client{Transport: testTransport(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("index unavailable")
-	})}, 0, "test")
+	})}, 0, "test", nil, true))
 	_, err := discoverProfileURLs(context.Background(), fetcher, "https://www.minnano-av.com/sitemap.xml")
 	require.ErrorContains(t, err, "index unavailable")
 }
@@ -197,7 +197,7 @@ func TestDiscoverProfileURLsRejectsNestedFailures(t *testing.T) {
 				}
 				return tc.nested(req)
 			})}
-			_, err := discoverProfileURLs(context.Background(), actresscache.NewFetcher(client, 0, "test"), "https://www.minnano-av.com/sitemap.xml")
+			_, err := discoverProfileURLs(context.Background(), mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)), "https://www.minnano-av.com/sitemap.xml")
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
@@ -215,7 +215,7 @@ func TestDiscoverProfileURLsFiltersSortsAndDeduplicates(t *testing.T) {
 			return xmlResponse(req, `<urlset><url><loc>https://minnano-av.com/actress2.html?x=1</loc></url><url><loc>https://www.minnano-av.com/actress2.html</loc></url><url><loc>http://www.minnano-av.com/actress3.html</loc></url><url><loc>https://example.test/actress4.html</loc></url></urlset>`), nil
 		}
 	})}
-	urls, err := discoverProfileURLs(context.Background(), actresscache.NewFetcher(client, 0, "test"), "https://www.minnano-av.com/sitemap.xml")
+	urls, err := discoverProfileURLs(context.Background(), mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)), "https://www.minnano-av.com/sitemap.xml")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://www.minnano-av.com/actress2.html"}, urls)
 }

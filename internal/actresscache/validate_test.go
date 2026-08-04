@@ -44,7 +44,12 @@ func testFetcher(status int, contentType string, body []byte, requestErr error) 
 		}
 		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(bytes.NewReader(body)), Request: req}, nil
 	})}
-	return NewFetcher(client, 0, "test")
+	// Fixture transport: opt in so the canned RoundTripper is used verbatim.
+	f, err := NewFetcherWithOptions(client, 0, "test", nil, true)
+	if err != nil {
+		panic(err)
+	}
+	return f
 }
 
 func TestValidateThumbnailAcceptsDecodedImage(t *testing.T) {
@@ -78,7 +83,7 @@ func TestValidateThumbnailKeepsTransientHTTPFailuresRetryable(t *testing.T) {
 	client := &http.Client{Transport: validateTransport(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{"Retry-After": []string{"0"}}, Body: io.NopCloser(bytes.NewReader(nil)), Request: req}, nil
 	})}
-	_, err := ValidateThumbnail(context.Background(), NewFetcher(client, 0, "test"), "https://example.test/photo.jpg", 64, 1<<20)
+	_, err := ValidateThumbnail(context.Background(), mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)), "https://example.test/photo.jpg", 64, 1<<20)
 	require.Error(t, err)
 	var rejected *ThumbnailRejectedError
 	assert.False(t, errors.As(err, &rejected))
@@ -138,7 +143,7 @@ func TestValidateThumbnailTreatsUnverifiableHostAsTransient(t *testing.T) {
 		return nil, errors.New("dns down")
 	}
 	defer func() { lookupIP = prev }()
-	fetcher := NewFetcher(&http.Client{Transport: proxied}, 0, "test")
+	fetcher := mustFetcher(NewFetcher(&http.Client{Transport: proxied}, 0, "test"))
 	_, err := ValidateThumbnail(context.Background(), fetcher, "https://img.example-invalid.test/x.jpg", 0, 1024)
 	require.Error(t, err)
 	var rejected *ThumbnailRejectedError

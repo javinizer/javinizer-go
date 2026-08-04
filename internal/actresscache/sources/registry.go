@@ -27,7 +27,7 @@ func RegisterR18Dev(registry *actresscache.Registry, dumpPath string) (io.Closer
 		return nil, fmt.Errorf("open r18.dev dump: %w", err)
 	}
 	registry.Register("r18dev", func() actresscache.Source {
-		return r18devsource.NewFromLister(store.ListActresses)
+		return r18devsource.NewFromLister(store.ListActressesLimit)
 	})
 	return store, nil
 }

@@ -18,7 +18,7 @@ func TestWrappedDialContextBranches(t *testing.T) {
 	base := &http.Transport{DialContext: spy.dial}
 
 	// AllowPrivateHosts bypasses the guard.
-	f := NewFetcherWithOptions(&http.Client{Transport: base}, 0, "test", nil, true)
+	f := mustFetcher(NewFetcherWithOptions(&http.Client{Transport: base}, 0, "test", nil, true))
 	dial := f.client.Transport.(*http.Transport).DialContext
 	_, err := dial(context.Background(), "tcp", "127.0.0.1:443")
 	require.NoError(t, err)
@@ -28,7 +28,7 @@ func TestWrappedDialContextBranches(t *testing.T) {
 	spy2 := &spyDialer{}
 	proxyURL, _ := url.Parse("http://corp.proxy:3128")
 	base2 := &http.Transport{DialContext: spy2.dial, Proxy: http.ProxyURL(proxyURL)}
-	f2 := NewFetcher(&http.Client{Transport: base2}, 0, "test")
+	f2 := mustFetcher(NewFetcher(&http.Client{Transport: base2}, 0, "test"))
 	dial2 := f2.client.Transport.(*http.Transport).DialContext
 	_, err = dial2(context.Background(), "tcp", "corp.proxy:3128")
 	require.NoError(t, err)
@@ -41,7 +41,7 @@ func TestWrappedDialContextBranches(t *testing.T) {
 	// Untrusted host address hits the guarded resolver path: stub the
 	// resolver to a private IP and assert the refusal.
 	base3 := &http.Transport{DialContext: spy2.dial}
-	f3 := NewFetcher(&http.Client{Transport: base3}, 0, "test")
+	f3 := mustFetcher(NewFetcher(&http.Client{Transport: base3}, 0, "test"))
 	dial3 := f3.client.Transport.(*http.Transport).DialContext
 	prev := lookupIP
 	lookupIP = func(context.Context, string, string) ([]net.IP, error) { return []net.IP{net.ParseIP("10.1.2.3")}, nil }

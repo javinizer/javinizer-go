@@ -25,7 +25,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	}
 	for _, name := range sources {
 		if _, ok := options.Registry.Create(name); !ok {
-			return Cache{}, BuildReport{}, fmt.Errorf("unknown actress cache source %q", name)
+			return Cache{}, BuildReport{}, fmt.Errorf("unknown actress cache source %q (available: %s)", name, strings.Join(options.Registry.Names(), ", "))
 		}
 	}
 	state, err := openState(options.StatePath)

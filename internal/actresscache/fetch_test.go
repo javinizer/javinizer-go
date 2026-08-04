@@ -51,7 +51,7 @@ func TestNormalizeRateLimitHost(t *testing.T) {
 }
 
 func TestFetcherUsesSeparateHostLimiters(t *testing.T) {
-	fetcher := NewFetcher(nil, time.Second, "test")
+	fetcher := mustFetcher(NewFetcher(nil, time.Second, "test"))
 	www := fetcher.limiterForHost("www.example.com")
 	root := fetcher.limiterForHost("example.com")
 	images := fetcher.limiterForHost("pics.example.com")
@@ -60,7 +60,7 @@ func TestFetcherUsesSeparateHostLimiters(t *testing.T) {
 }
 
 func TestFetcherUsesHostDelayOverride(t *testing.T) {
-	fetcher := NewFetcherWithHostDelays(nil, time.Second, "test", map[string]time.Duration{"pics.dmm.co.jp": 100 * time.Millisecond})
+	fetcher := mustFetcher(NewFetcherWithHostDelays(nil, time.Second, "test", map[string]time.Duration{"pics.dmm.co.jp": 100 * time.Millisecond}))
 	assert.Equal(t, 100*time.Millisecond, fetcher.delayForHost("pics.dmm.co.jp"))
 	assert.Equal(t, time.Second, fetcher.delayForHost("www.minnano-av.com"))
 }
@@ -72,7 +72,9 @@ func TestFetcherLimitsRedirectDestination(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/jpeg"}}, Body: io.NopCloser(strings.NewReader("ok")), Request: req}, nil
 	})}
-	fetcher := NewFetcherWithHostDelays(client, 0, "test", map[string]time.Duration{"cdn.test": 0})
+	// Fixture transport: opt in to private hosts so the canned RoundTripper
+	// is used verbatim, exactly like the pre-pinning behavior.
+	fetcher := mustFetcher(NewFetcherWithOptions(client, 0, "test", map[string]time.Duration{"cdn.test": 0}, true))
 	body, _, err := fetcher.Get(context.Background(), "https://origin.test/start", "*/*", 100)
 	require.NoError(t, err)
 	assert.Equal(t, "ok", string(body))
@@ -97,7 +99,7 @@ func TestFetcherRetriesTransientStatus(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Request: req}, nil
 	})}
-	fetcher := NewFetcher(client, 0, "test")
+	fetcher := mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true))
 	body, _, err := fetcher.Get(context.Background(), "https://example.test/profile", "text/html", 100)
 	require.NoError(t, err)
 	assert.Equal(t, "ok", string(body))
@@ -113,7 +115,7 @@ func TestFetcherRetriesSuccessfulResponseBodyReadFailure(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("complete")), Request: req}, nil
 	})}
-	body, _, err := NewFetcher(client, 0, "test").Get(context.Background(), "https://example.test/profile", "text/html", 100)
+	body, _, err := mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)).Get(context.Background(), "https://example.test/profile", "text/html", 100)
 	require.NoError(t, err)
 	assert.Equal(t, "complete", string(body))
 	assert.Equal(t, 3, calls)
@@ -124,7 +126,7 @@ func TestFetcherRetryBackoffHonorsClientTimeout(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{"Retry-After": []string{"60"}}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
 	})}
 	started := time.Now()
-	_, _, err := NewFetcher(client, 0, "test").Get(context.Background(), "https://example.test/profile", "text/html", 100)
+	_, _, err := mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)).Get(context.Background(), "https://example.test/profile", "text/html", 100)
 	require.Error(t, err)
 	assert.Less(t, time.Since(started), time.Second)
 }
@@ -135,7 +137,7 @@ func TestFetcherReturnsTransientHTTPErrorAfterRetries(t *testing.T) {
 		calls++
 		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{"Retry-After": []string{"0"}}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
 	})}
-	fetcher := NewFetcher(client, 0, "test")
+	fetcher := mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true))
 	_, _, err := fetcher.Get(context.Background(), "https://example.test/profile", "text/html", 100)
 	var statusErr *HTTPError
 	require.ErrorAs(t, err, &statusErr)

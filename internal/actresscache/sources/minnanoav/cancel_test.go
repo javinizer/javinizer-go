@@ -31,7 +31,7 @@ func TestCollectCancelledCrawlDoesNotMarkComplete(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/xml"}}, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 	})}
-	fetcher := actresscache.NewFetcher(client, 0, "test")
+	fetcher := mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true))
 	marked := false
 	err := New().Collect(ctx, actresscache.SourceOptions{
 		Fetcher:      fetcher,

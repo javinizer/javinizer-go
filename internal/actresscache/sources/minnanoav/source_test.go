@@ -38,7 +38,7 @@ func TestCollectDiscoversAndParsesProfiles(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 	})}
-	fetcher := actresscache.NewFetcher(client, 0, "test")
+	fetcher := mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true))
 	var got []actresscache.Candidate
 	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: fetcher, SitemapURL: "https://www.minnano-av.com/sitemap.xml"}, func(candidate actresscache.Candidate) error {
 		got = append(got, candidate)
@@ -79,7 +79,7 @@ func TestCollectRejectsMalformedSitemap(t *testing.T) {
 	client := &http.Client{Transport: testTransport(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/xml"}}, Body: io.NopCloser(strings.NewReader("not xml")), Request: req}, nil
 	})}
-	fetcher := actresscache.NewFetcher(client, 0, "test")
+	fetcher := mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true))
 	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: fetcher, SitemapURL: "https://www.minnano-av.com/sitemap.xml"}, func(actresscache.Candidate) error { return nil })
 	require.Error(t, err)
 }
@@ -97,7 +97,7 @@ func TestCollectHonorsLimitSkipAndEmitErrors(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 	})}
-	fetcher := actresscache.NewFetcher(client, 0, "test")
+	fetcher := mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true))
 	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: fetcher, Limit: 1}, func(actresscache.Candidate) error { return errors.New("stop") })
 	require.ErrorContains(t, err, "stop")
 	count := 0
@@ -110,7 +110,7 @@ func TestCollectRejectsMissingActressSitemaps(t *testing.T) {
 	client := &http.Client{Transport: testTransport(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/xml"}}, Body: io.NopCloser(strings.NewReader(`<sitemapindex><sitemap><loc>https://www.minnano-av.com/sitemap_video.xml</loc></sitemap></sitemapindex>`)), Request: req}, nil
 	})}
-	fetcher := actresscache.NewFetcher(client, 0, "test")
+	fetcher := mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true))
 	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: fetcher}, func(actresscache.Candidate) error { return nil })
 	require.ErrorContains(t, err, "no actress URL sets")
 }
@@ -135,7 +135,7 @@ func TestCollectRecordsProfileFailuresAndContinues(t *testing.T) {
 	var failures []string
 	var got []actresscache.Candidate
 	err := New().Collect(context.Background(), actresscache.SourceOptions{
-		Fetcher: actresscache.NewFetcher(client, 0, "test"),
+		Fetcher: mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)),
 		RecordFailure: func(candidate actresscache.Candidate, err error) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -165,6 +165,6 @@ func TestCollectReturnsProfileFetchError(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 	})}
-	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: actresscache.NewFetcher(client, 0, "test")}, func(actresscache.Candidate) error { return nil })
+	err := New().Collect(context.Background(), actresscache.SourceOptions{Fetcher: mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true))}, func(actresscache.Candidate) error { return nil })
 	require.ErrorContains(t, err, "profile unavailable")
 }

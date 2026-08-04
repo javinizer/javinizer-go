@@ -188,17 +188,22 @@ func guardedDialContext(ctx context.Context, network, addr string, fallback func
 }
 
 // NewFetcher ...
-func NewFetcher(client *http.Client, delay time.Duration, userAgent string) *Fetcher {
+func NewFetcher(client *http.Client, delay time.Duration, userAgent string) (*Fetcher, error) {
 	return NewFetcherWithHostDelays(client, delay, userAgent, nil)
 }
 
 // NewFetcherWithHostDelays ...
-func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgent string, hostDelays map[string]time.Duration) *Fetcher {
+func NewFetcherWithHostDelays(client *http.Client, delay time.Duration, userAgent string, hostDelays map[string]time.Duration) (*Fetcher, error) {
 	return NewFetcherWithOptions(client, delay, userAgent, hostDelays, false)
 }
 
-// NewFetcherWithOptions ...
-func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent string, hostDelays map[string]time.Duration, allowPrivateHosts bool) *Fetcher {
+// NewFetcherWithOptions fails closed: with private hosts disabled it REJECTS
+// caller transports that cannot be egress-pinned (wrapped RoundTrippers whose
+// dialing is invisible, and transports carrying DialTLS/DialTLSContext that
+// bypass DialContext for HTTPS). Retaining either would silently downgrade
+// the SSRF guard to lexical-only checks, so construction returns an error
+// instead. Trusted local mirrors may opt in via allowPrivateHosts.
+func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent string, hostDelays map[string]time.Duration, allowPrivateHosts bool) (*Fetcher, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -218,13 +223,20 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 	// the caller uses a standard transport; custom transports stay untouched.
 	transport, ok := clientCopy.Transport.(*http.Transport)
 	if !ok && clientCopy.Transport == nil {
-		transport = http.DefaultTransport.(*http.Transport)
-		ok = transport != nil
+		transport, ok = http.DefaultTransport.(*http.Transport)
+	}
+	if !ok && !allowPrivateHosts {
+		// A wrapped RoundTripper (cloudscraper-style) dials invisibly; with
+		// egress pinning mandatory there is no safe fallback.
+		return nil, fmt.Errorf("actresscache: fetch requires a *http.Transport (got %T) so egress can be pinned; pass allowPrivateHosts for trusted local mirrors", clientCopy.Transport)
 	}
 	if ok && (transport.DialTLSContext != nil || transport.DialTLS != nil) { //nolint:staticcheck // reading deprecated DialTLS is required to fail closed on unpinnable transports
 		// A custom TLS dialer bypasses DialContext for HTTPS and cannot be
 		// pinned; refuse to wrap and keep the request-layer guard only.
-		log.Printf("actresscache: fetch client transport has DialTLS*/DialTLSContext; SSRF pinning unavailable for this client")
+		if !allowPrivateHosts {
+			return nil, fmt.Errorf("actresscache: fetch refuses transports with DialTLS/DialTLSContext (unpinnable TLS dialer would bypass the SSRF guard)")
+		}
+		log.Printf("actresscache: fetch client transport has DialTLS*/DialTLSContext; SSRF pinning unavailable for this allowed-private client")
 		ok = false
 	}
 	if ok {
@@ -281,7 +293,7 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		return nil
 	}
 	fetcher.client = &clientCopy
-	return fetcher
+	return fetcher, nil
 }
 
 // Get ...
