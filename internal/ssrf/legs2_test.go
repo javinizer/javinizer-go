@@ -1,6 +1,7 @@
 package ssrf
 
 import (
+	"context"
 	"errors"
 	"net"
 	"testing"
@@ -41,5 +42,24 @@ func TestResolvePublicIPsAllowedLiteralFallsBackToParse(t *testing.T) {
 	ips, err := resolvePublicIPs("127.0.0.5")
 	if err != nil || len(ips) != 1 {
 		t.Fatalf("literal fallback failed: %v %v", ips, err)
+	}
+}
+
+func TestDialPinnedPublicLiteralAndNilBase(t *testing.T) {
+	var dialed string
+	fallback := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = addr
+		client, server := net.Pipe()
+		_ = server.Close()
+		return client, nil
+	}
+	if _, err := dialPinned(context.Background(), "tcp", "8.8.8.8:443", fallback); err != nil {
+		t.Fatal(err)
+	}
+	if dialed != "8.8.8.8:443" {
+		t.Errorf("dialed %q, want the literal (no lookup happened)", dialed)
+	}
+	if _, err := NewPinnedDialTransport(nil); err != nil {
+		t.Fatalf("nil base should pin the default transport: %v", err)
 	}
 }

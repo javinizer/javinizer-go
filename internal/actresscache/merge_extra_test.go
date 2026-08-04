@@ -31,9 +31,11 @@ func validatedStubFull(key string, rank int, dmmID int, aliases []string) ranked
 // はなこ} bridges both, exercising the matches[1:] merge loop.
 func TestMergeCandidatesTransitiveCollapse(t *testing.T) {
 	records := mergeCandidates([]rankedCandidate{
-		validatedStubRank("a", 1, []string{"花子"}),
-		validatedStubRank("c", 0, []string{"はなこ"}),          // sorts first, own group
-		validatedStubFull("b", 1, 7, []string{"花子", "はなこ"}), // DMM ID lets it bridge two groups
+		// Sorting puts c(1), a(2) into separate groups before b(3) — the
+		// DMM ID defeats the without-DMM ambiguity guard so b bridges both.
+		validatedStubRank("a", 2, []string{"花子"}),
+		validatedStubRank("c", 1, []string{"はなこ"}),
+		validatedStubFull("b", 3, 7, []string{"花子", "はなこ"}),
 	})
 	require.Len(t, records, 1, "bridging candidate must collapse both groups")
 	assert.ElementsMatch(t, []string{"花子", "はなこ"}, records[0].Aliases)
