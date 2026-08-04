@@ -58,6 +58,11 @@ func ParseProfile(body []byte, sourceURL string) (Profile, error) {
 
 var dmmActressIDPattern = regexp.MustCompile("(?:^|[?&])actress=([0-9]+)")
 
+// DMM also links actresses with path-style URLs (/list/=/article=actress/id=NNNN/);
+// the DMM scraper treats those as valid actress anchors, so the extractor must too
+// or the candidate loses its authoritative DMM ID.
+var dmmActressArticleIDPattern = regexp.MustCompile(`article=actress/id=([0-9]+)`)
+
 func parseDMMActressID(doc *goquery.Document) int {
 	if doc == nil {
 		return 0
@@ -73,6 +78,9 @@ func parseDMMActressID(doc *goquery.Document) int {
 			href = decoded
 		}
 		match := dmmActressIDPattern.FindStringSubmatch(href)
+		if len(match) != 2 {
+			match = dmmActressArticleIDPattern.FindStringSubmatch(href)
+		}
 		if len(match) != 2 {
 			return true
 		}
