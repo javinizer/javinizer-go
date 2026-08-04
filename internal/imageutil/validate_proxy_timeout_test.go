@@ -1,6 +1,7 @@
 package imageutil
 
 import (
+	"bufio"
 	"net"
 	"net/http"
 	"net/url"
@@ -56,6 +57,11 @@ func TestPinnedProxyTransportResponseHeaderTimeoutSuccessPath(t *testing.T) {
 			return
 		}
 		defer func() { _ = conn.Close() }()
+		// Drain the request first: closing a socket with unread client bytes
+		// RSTs the connection on Windows and tears down the response.
+		if _, err := http.ReadRequest(bufio.NewReader(conn)); err != nil {
+			return
+		}
 		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
 	}()
 
