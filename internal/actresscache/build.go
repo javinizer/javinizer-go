@@ -70,13 +70,18 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 		candidates[key] = ValidatedCandidate{Candidate: candidate, Thumbnail: *entry.Thumbnail}
 	}
 
-	report := BuildReport{Sources: append([]string(nil), sources...), Cached: len(candidates)}
+	report := BuildReport{Sources: append([]string(nil), sources...)}
 	// initialKeys remembers which candidates were reused from state so the
 	// Cached metric survives: candidates validated during this run must not
-	// inflate it; only pruned previously-reused entries decrement it.
+	// inflate it; only pruned previously-reused entries decrement it. Under
+	// --refresh nothing is reused (every entry is validated again), so the
+	// metric starts at zero and no entry counts as previously reused.
 	initialKeys := make(map[string]struct{}, len(candidates))
-	for key := range candidates {
-		initialKeys[key] = struct{}{}
+	if !options.Refresh {
+		report.Cached = len(candidates)
+		for key := range candidates {
+			initialKeys[key] = struct{}{}
+		}
 	}
 	// mu ...
 	var mu sync.Mutex
