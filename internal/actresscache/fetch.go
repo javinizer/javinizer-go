@@ -156,6 +156,57 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host string) err
 // lookupIP resolves dial hostnames; replaced in tests.
 var lookupIP = net.DefaultResolver.LookupIP
 
+// proxyPinningTransport pins PLAIN-HTTP proxy requests to the locally
+// validated target IP: a proxy re-resolves hostnames independently, so
+// without rewriting the request target a split-horizon DNS answer could
+// route the fetch to a private address the request-layer guard cleared. The
+// original Host header is preserved (virtual hosting); HTTPS-over-CONNECT is
+// exempt — the proxy necessarily terminates name resolution for tunnels and
+// sits inside the deployment trust boundary (documented on checkFetchTarget).
+type proxyPinningTransport struct {
+	base     http.RoundTripper
+	viaProxy func(scheme, host string) bool
+}
+
+// RoundTrip ...
+func (p *proxyPinningTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != "http" || !p.viaProxy("http", req.URL.Hostname()) {
+		return p.base.RoundTrip(req)
+	}
+	host := req.URL.Hostname()
+	if hostIPLiteral(host) != nil {
+		// IP literals cannot be re-resolved by the proxy.
+		return p.base.RoundTrip(req)
+	}
+	ips, err := lookupIP(req.Context(), "ip", host)
+	if err != nil || len(ips) == 0 {
+		if err == nil {
+			err = errors.New("no A/AAAA records at target pin time")
+		}
+		return nil, &ssrf.UnverifiableHostError{Host: host, Err: err}
+	}
+	chosen := ips[0]
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			return nil, &BlockedFetchError{URL: host}
+		}
+		if ip.To4() != nil { // prefer IPv4 to match the widest proxy support
+			chosen = ip
+			break
+		}
+	}
+	pinned := req.Clone(req.Context())
+	pinnedURL := *req.URL
+	if port := req.URL.Port(); port != "" {
+		pinnedURL.Host = net.JoinHostPort(chosen.String(), port)
+	} else {
+		pinnedURL.Host = chosen.String()
+	}
+	pinned.URL = &pinnedURL
+	pinned.Host = req.URL.Host // keep the virtual host the proxy would have seen
+	return p.base.RoundTrip(pinned)
+}
+
 // guardedDialContext resolves addr's host and dials only the resolved
 // address, so a hostname pointing at a private/loopback/link-local IP —
 // including via DNS rebinding between a pre-check and connect — is rejected
@@ -297,6 +348,16 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			return previousCheckRedirect(req, via)
 		}
 		return nil
+	}
+	if !fetcher.allowPrivateHosts && fetcher.resolveTargets {
+		// Plain-HTTP proxy requests otherwise carry the original HOSTNAME to
+		// the proxy, which re-resolves it independently (split-horizon DNS can
+		// land the proxy on a private address our local check never sees).
+		// Rewrite the target to the locally validated IP while preserving the
+		// Host header so virtual hosting stays intact. HTTPS over CONNECT keeps
+		// the documented proxy-trust-boundary model: the proxy necessarily
+		// terminates name resolution for tunneled targets.
+		clientCopy.Transport = &proxyPinningTransport{base: clientCopy.Transport, viaProxy: fetcher.viaProxy}
 	}
 	fetcher.client = &clientCopy
 	return fetcher, nil

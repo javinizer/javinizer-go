@@ -29,7 +29,8 @@ func TestWrappedDialContextBranches(t *testing.T) {
 	proxyURL, _ := url.Parse("http://corp.proxy:3128")
 	base2 := &http.Transport{DialContext: spy2.dial, Proxy: http.ProxyURL(proxyURL)}
 	f2 := mustFetcher(NewFetcher(&http.Client{Transport: base2}, 0, "test"))
-	dial2 := f2.client.Transport.(*http.Transport).DialContext
+	// Non-mirror fetchers wrap the pinned transport with the proxy target pin.
+	dial2 := f2.client.Transport.(*proxyPinningTransport).base.(*http.Transport).DialContext
 	_, err = dial2(context.Background(), "tcp", "corp.proxy:3128")
 	require.NoError(t, err)
 	require.Contains(t, spy2.calls, "corp.proxy:3128")
@@ -42,7 +43,7 @@ func TestWrappedDialContextBranches(t *testing.T) {
 	// resolver to a private IP and assert the refusal.
 	base3 := &http.Transport{DialContext: spy2.dial}
 	f3 := mustFetcher(NewFetcher(&http.Client{Transport: base3}, 0, "test"))
-	dial3 := f3.client.Transport.(*http.Transport).DialContext
+	dial3 := f3.client.Transport.(*proxyPinningTransport).base.(*http.Transport).DialContext
 	prev := lookupIP
 	lookupIP = func(context.Context, string, string) ([]net.IP, error) { return []net.IP{net.ParseIP("10.1.2.3")}, nil }
 	defer func() { lookupIP = prev }()
