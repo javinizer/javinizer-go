@@ -90,6 +90,19 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	seenBySource := make(map[string]map[string]struct{}, len(sources))
 	completedSources := make(map[string]bool, len(sources))
 	recordSourceFailure := func(candidate Candidate, failure error) error {
+		if options.Refresh {
+			if prior, ok := state.get(candidate.Key); ok && prior.Status == "ok" && classifyStateFailure(failure) == "failed" {
+				// Transient refresh failure on a previously-good entry: keep
+				// the journal's last-good line effective so a later default
+				// build can still reuse the validated thumbnail. The refresh
+				// still aborts publishing via report.Failed below.
+				mu.Lock()
+				report.Failed++
+				delete(candidates, candidate.Key)
+				mu.Unlock()
+				return nil
+			}
+		}
 		err := recordFailure(state, candidate, failure, &mu, &report)
 		if err == nil && options.Refresh {
 			mu.Lock()
@@ -323,13 +336,19 @@ func cachedCandidateReusable(entry *StateEntry, minDimension int, maxBytes int64
 }
 
 // recordFailure ...
-func recordFailure(state *stateStore, candidate Candidate, failure error, mu *sync.Mutex, report *BuildReport) error {
-	status := "failed"
-	// rejected ...
+// classifyStateFailure returns "rejected" for permanent validation defects
+// (safe to drop forever on resume) and "failed" for transient ones.
+func classifyStateFailure(failure error) string {
 	var rejected *ThumbnailRejectedError
 	if errors.As(failure, &rejected) || strings.Contains(failure.Error(), "no stable identity") {
-		status = "rejected"
+		return "rejected"
 	}
+	return "failed"
+}
+
+// recordFailure ...
+func recordFailure(state *stateStore, candidate Candidate, failure error, mu *sync.Mutex, report *BuildReport) error {
+	status := classifyStateFailure(failure)
 	entry := StateEntry{
 		Key:       candidate.Key,
 		Status:    status,
