@@ -60,6 +60,46 @@ func TestBuiltinLookupFallsBackToRomanizedWhenJapaneseIdentityMisses(t *testing.
 	assert.Equal(t, 1, found.DMMID)
 }
 
+func TestBuiltinLookupRejectsConflictingDMMIDFallback(t *testing.T) {
+	originalData := builtinData
+	defer func() {
+		builtinData = originalData
+		resetBuiltinIndex()
+	}()
+	data, err := json.Marshal(RuntimeCache{SchemaVersion: RuntimeSchemaVersion, Records: []RuntimeRecord{
+		{BuiltinKey: "conflicting", DMMID: 100, JapaneseName: "新旧重複"},
+		{BuiltinKey: "legacy", DMMID: 0, JapaneseName: "レガシー"},
+		{BuiltinKey: "romanized-conflict", DMMID: 200, FirstName: "Jane", LastName: "Doe"},
+		{BuiltinKey: "ambiguous-one", DMMID: 300, JapaneseName: "曖昧一"},
+		{BuiltinKey: "ambiguous-two", DMMID: 300, JapaneseName: "曖昧二"},
+	}})
+	require.NoError(t, err)
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	_, err = writer.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	builtinData = compressed.Bytes()
+	resetBuiltinIndex()
+
+	// A positive-ID miss must not fall back to a record whose authoritative
+	// DMM ID conflicts, via either the jp or the romanized index.
+	_, ok := Lookup(999, "新旧重複", "", "")
+	assert.False(t, ok, "conflicting positive DMM ID via jp index must be rejected")
+	_, ok = Lookup(999, "", "Jane", "Doe")
+	assert.False(t, ok, "conflicting positive DMM ID via romanized index must be rejected")
+
+	// DMM-less legacy records remain reachable by name fallback.
+	legacy, ok := Lookup(999, "レガシー", "", "")
+	require.True(t, ok)
+	assert.Equal(t, "legacy", legacy.BuiltinKey)
+
+	// Same-ID records whose DMM index was dropped as ambiguous stay reachable.
+	ambiguous, ok := Lookup(300, "曖昧一", "", "")
+	require.True(t, ok)
+	assert.Equal(t, "ambiguous-one", ambiguous.BuiltinKey)
+}
+
 func TestBuiltinLookupMissesEmptyPlaceholderCache(t *testing.T) {
 	_, ok := Lookup(123, "花子", "Hanako", "Yamada")
 	assert.False(t, ok)
