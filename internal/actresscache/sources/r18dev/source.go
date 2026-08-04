@@ -15,9 +15,16 @@ import (
 
 const dmmActressImageBase = "https://pics.dmm.co.jp/mono/actjpgs/"
 
-// Lister supplies dump actresses. It matches r18devdump.Store.ListActresses;
-// the caller owns the underlying store's lifetime.
-type Lister func(ctx context.Context) ([]models.DumpActress, error)
+// maxScanRows is the hard cap on dump rows materialized by Collect. It
+// applies even without --limit: a hostile or unexpectedly large dump must
+// not grow the builder's memory without bound. The value is ~4x the size
+// of the real r18.dev actress export (~250k rows).
+const maxScanRows = 1_000_000
+
+// Lister supplies up to limit dump actresses; limit <= 0 means no explicit
+// cap. It matches r18devdump.Store.ListActressesLimit; the caller owns the
+// underlying store's lifetime.
+type Lister func(ctx context.Context, limit int) ([]models.DumpActress, error)
 
 type source struct {
 	lister Lister
@@ -45,12 +52,17 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	if s.lister == nil {
 		return fmt.Errorf("r18dev source requires a dump lister (use sources.RegisterR18Dev or NewFromLister)")
 	}
-	actresses, err := s.lister(ctx)
+	limit := options.Limit
+	if limit <= 0 || limit > maxScanRows {
+		limit = maxScanRows
+	}
+	actresses, err := s.lister(ctx, limit)
 	if err != nil {
 		return err
 	}
-	if options.Limit > 0 && len(actresses) > options.Limit {
-		actresses = actresses[:options.Limit]
+	// Defence in depth for custom listers that ignore the limit argument.
+	if len(actresses) > limit {
+		actresses = actresses[:limit]
 	}
 	candidates := make([]actresscache.Candidate, 0, len(actresses))
 	for _, actress := range actresses {

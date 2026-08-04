@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // register the sqlite3 driver for sql.Open
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,8 +46,7 @@ func TestListActressesIterateErrorLeg(t *testing.T) {
 	_, err = (&Store{db: db}).ListActresses(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "iterate actresses")
-	var sqliteErr sqlite3.Error
-	assert.True(t, errors.As(err, &sqliteErr) || true)
+	assert.Error(t, err)
 }
 
 func TestListActressesQueryErrorLeg(t *testing.T) {

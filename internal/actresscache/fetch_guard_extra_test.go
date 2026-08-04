@@ -20,26 +20,29 @@ func TestCheckFetchTargetAllowsResolvedPublicHost(t *testing.T) {
 		return []net.IP{net.ParseIP("93.184.216.34")}, nil
 	}
 	defer func() { lookupIP = prev }()
-	fetcher := NewFetcher(&http.Client{Transport: &http.Transport{}}, 0, "test")
+	fetcher := mustFetcher(NewFetcher(&http.Client{Transport: &http.Transport{}}, 0, "test"))
 	// Positive path: hostname resolved, all answers public -> allow.
 	require.NoError(t, fetcher.checkFetchTarget(context.Background(), "https", "public.example.test"))
 }
 
-func TestCheckFetchTargetSkipsResolutionForCustomTransport(t *testing.T) {
-	lookupCalls := 0
-	prev := lookupIP
-	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
-		lookupCalls++
-		return nil, errors.New("should not be called")
-	}
-	defer func() { lookupIP = prev }()
-	// A non-*http.Transport (custom RoundTripper) owns its own connections:
-	// the guard stays lexical and never resolves.
-	fetcher := NewFetcher(&http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
+func TestNewFetcherRejectsCustomRoundTripper(t *testing.T) {
+	// A wrapped RoundTripper dials invisibly; the fetcher must refuse it when
+	// egress pinning is mandatory instead of silently downgrading the guard.
+	_, err := NewFetcher(&http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
 	})}, 0, "test")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "*http.Transport")
+
+	// Trusted-mirror opt-in accepts the custom transport untouched.
+	fetcher, err2 := NewFetcherWithOptions(&http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+	})}, 0, "test", nil, true)
+	require.NoError(t, err2)
+	// No resolution is promised for mirror mode: the guard stays lexical-only
+	// and the caller's transport is used verbatim.
+	assert.False(t, fetcher.resolveTargets)
 	require.NoError(t, fetcher.checkFetchTarget(context.Background(), "https", "unyielding.invalid"))
-	assert.Zero(t, lookupCalls)
 }
 
 func TestViaProxyBranches(t *testing.T) {
@@ -57,11 +60,12 @@ func TestViaProxyBranches(t *testing.T) {
 
 func TestFetcherGetDoesNotRetryPolicyErrors(t *testing.T) {
 	calls := 0
-	client := &http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		calls++
-		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": []string{"http://127.0.0.1/private"}}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
-	})}
-	fetcher := NewFetcher(client, 0, "test")
+		return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1/private\r\nContent-Length: 0\r\n\r\n")(ctx, network, addr)
+	}
+	client := &http.Client{Transport: &http.Transport{DialContext: dial}}
+	fetcher := mustFetcher(NewFetcher(client, 0, "test"))
 	_, _, err := fetcher.Get(context.Background(), "http://1.1.1.1/start", "*/*", 1024)
 	require.Error(t, err)
 	var blocked *BlockedFetchError

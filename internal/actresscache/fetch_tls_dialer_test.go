@@ -11,14 +11,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFetcherDeclinesPinningCustomTLSDialerTransport(t *testing.T) {
+func TestFetcherRejectsCustomTLSDialerTransport(t *testing.T) {
 	transport := &http.Transport{DialTLSContext: func(context.Context, string, string) (net.Conn, error) {
 		return nil, errors.New("must never be called")
 	}}
-	fetcher := NewFetcher(&http.Client{Transport: transport}, 0, "test")
-	assert.False(t, fetcher.resolveTargets, "unpinnable transport must not be wrapped")
-	// Request-layer guard still blocks literal/internal targets.
-	_, _, err := fetcher.Get(context.Background(), "http://127.0.0.1:9/x", "*/*", 64)
-	var blockedErr *BlockedFetchError
-	require.True(t, errors.As(err, &blockedErr))
+	// A custom TLS dialer bypasses DialContext for HTTPS and cannot be
+	// pinned; with egress pinning mandatory the fetcher must refuse it
+	// rather than silently downgrading the guard to lexical-only checks.
+	_, err := NewFetcher(&http.Client{Transport: transport}, 0, "test")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "DialTLS")
+
+	// Trusted local mirrors may opt in: the custom transport is kept
+	// verbatim and no resolution is promised.
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, true)
+	require.NoError(t, err)
+	assert.False(t, fetcher.resolveTargets, "allowed-private custom TLS dialer stays unpinned")
 }

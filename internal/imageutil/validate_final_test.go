@@ -3,15 +3,23 @@ package imageutil
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestValidateRemoteImageRejectsUnsafeAndDelegatesSafeURL(t *testing.T) {
 	require.Error(t, ValidateRemoteImage(t.Context(), "http://127.0.0.1/image.jpg"))
+
+	// Keep the guard's hostname resolution offline: example.com must never
+	// be looked up for real (H2).
+	defer ssrf.SetLookupIPForTest(func(string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	})()
 
 	old := validateRemoteImageWithClient
 	t.Cleanup(func() { validateRemoteImageWithClient = old })

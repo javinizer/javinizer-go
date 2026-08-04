@@ -265,12 +265,12 @@ func TestFetchErrorAndRequestBranches(t *testing.T) {
 	var nilFetcher *Fetcher
 	_, _, err := nilFetcher.Get(context.Background(), "https://example.test", "*/*", 1)
 	require.ErrorContains(t, err, "not initialized")
-	_, _, err = NewFetcher(nil, 0, "test").Get(context.Background(), "://bad", "*/*", 1)
+	_, _, err = mustFetcher(NewFetcher(nil, 0, "test")).Get(context.Background(), "://bad", "*/*", 1)
 	require.Error(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err = NewFetcher(nil, time.Second, "test").Get(ctx, "https://example.test", "*/*", 1)
+	_, _, err = mustFetcher(NewFetcher(nil, time.Second, "test")).Get(ctx, "https://example.test", "*/*", 1)
 	require.ErrorIs(t, err, context.Canceled)
 
 	calls := 0
@@ -278,14 +278,14 @@ func TestFetchErrorAndRequestBranches(t *testing.T) {
 		calls++
 		return nil, errors.New("network down")
 	})}
-	_, _, err = NewFetcher(client, 0, "test").Get(context.Background(), "https://example.test", "*/*", 1)
+	_, _, err = mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)).Get(context.Background(), "https://example.test", "*/*", 1)
 	require.ErrorContains(t, err, "network down")
 	assert.Equal(t, maxFetchAttempts, calls)
 
 	client = &http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{"X-Test": []string{"yes"}}, Body: io.NopCloser(strings.NewReader("no")), Request: req}, nil
 	})}
-	_, headers, err := NewFetcher(client, 0, "test").Get(context.Background(), "https://example.test", "*/*", 1)
+	_, headers, err := mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)).Get(context.Background(), "https://example.test", "*/*", 1)
 	var statusErr *HTTPError
 	require.ErrorAs(t, err, &statusErr)
 	assert.Equal(t, "yes", headers.Get("X-Test"))
@@ -297,22 +297,22 @@ func TestFetcherDefaultsLimitAndRejectsOversize(t *testing.T) {
 	client := &http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Request: req}, nil
 	})}
-	body, _, err := NewFetcher(client, 0, "test").Get(context.Background(), "https://example.test", "*/*", 0)
+	body, _, err := mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)).Get(context.Background(), "https://example.test", "*/*", 0)
 	require.NoError(t, err)
 	assert.Equal(t, "ok", string(body))
-	_, _, err = NewFetcher(client, 0, "test").Get(context.Background(), "https://example.test", "*/*", 1)
+	_, _, err = mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)).Get(context.Background(), "https://example.test", "*/*", 1)
 	require.ErrorContains(t, err, "exceeds")
 }
 
 func TestFetcherRedirectCallbackBranches(t *testing.T) {
 	redirectErr := errors.New("redirect denied")
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return redirectErr }}
-	fetcher := NewFetcherWithHostDelays(client, 0, "test", nil)
+	fetcher := mustFetcher(NewFetcherWithHostDelays(client, 0, "test", nil))
 	req, err := http.NewRequest(http.MethodGet, "https://example.test", nil)
 	require.NoError(t, err)
 	require.ErrorIs(t, fetcher.client.CheckRedirect(req, nil), redirectErr)
 
-	fetcher = NewFetcher(nil, time.Hour, "test")
+	fetcher = mustFetcher(NewFetcher(nil, time.Hour, "test"))
 	req, err = http.NewRequest(http.MethodGet, "https://other.test", nil)
 	require.NoError(t, err)
 	require.NoError(t, fetcher.client.CheckRedirect(req, nil))
@@ -344,7 +344,7 @@ func TestFetcherCancellationDuringRetries(t *testing.T) {
 			time.AfterFunc(time.Millisecond, cancel)
 			return nil, errors.New("retry")
 		})}
-		_, _, err := NewFetcher(client, 0, "test").Get(ctx, "https://example.test", "*/*", 1)
+		_, _, err := mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)).Get(ctx, "https://example.test", "*/*", 1)
 		require.ErrorIs(t, err, context.Canceled)
 	})
 	t.Run("body", func(t *testing.T) {
@@ -353,13 +353,13 @@ func TestFetcherCancellationDuringRetries(t *testing.T) {
 			time.AfterFunc(time.Millisecond, cancel)
 			return &http.Response{StatusCode: http.StatusOK, Body: &failAfterReader{}, Request: req}, nil
 		})}
-		_, _, err := NewFetcher(client, 0, "test").Get(ctx, "https://example.test", "*/*", 100)
+		_, _, err := mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)).Get(ctx, "https://example.test", "*/*", 100)
 		require.ErrorIs(t, err, context.Canceled)
 	})
 }
 
 func TestFetcherLimiterCancellation(t *testing.T) {
-	fetcher := NewFetcher(nil, time.Hour, "test")
+	fetcher := mustFetcher(NewFetcher(nil, time.Hour, "test"))
 	fetcher.limiterForHost("example.test").Wait(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -657,7 +657,7 @@ func TestBuiltinDataMarshalFailure(t *testing.T) {
 func TestFetcherExhaustedAndBodyCancellation(t *testing.T) {
 	original := fetchAttempts
 	fetchAttempts = 0
-	_, _, err := NewFetcher(nil, 0, "test").Get(context.Background(), "https://example.test", "*/*", 1)
+	_, _, err := mustFetcher(NewFetcher(nil, 0, "test")).Get(context.Background(), "https://example.test", "*/*", 1)
 	require.ErrorContains(t, err, "attempts exhausted")
 	fetchAttempts = original
 
@@ -665,7 +665,7 @@ func TestFetcherExhaustedAndBodyCancellation(t *testing.T) {
 	client := &http.Client{Transport: fetchTransport(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: cancelErrorReader{cancel: cancel}, Request: req}, nil
 	})}
-	_, _, err = NewFetcher(client, 0, "test").Get(ctx, "https://example.test", "*/*", 100)
+	_, _, err = mustFetcher(NewFetcherWithOptions(client, 0, "test", nil, true)).Get(ctx, "https://example.test", "*/*", 100)
 	require.ErrorIs(t, err, context.Canceled)
 }
 

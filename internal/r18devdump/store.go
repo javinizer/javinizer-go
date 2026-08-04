@@ -64,10 +64,21 @@ func (s *Store) Close() error {
 
 // ListActresses ...
 func (s *Store) ListActresses(ctx context.Context) ([]models.DumpActress, error) {
+	return s.ListActressesLimit(ctx, 0)
+}
+
+// ListActressesLimit lists actresses with the cap pushed into the query:
+// building a cache from a hostile or unexpectedly large dump must not be an
+// unbounded scan-and-buffer of the whole table. limit <= 0 means no cap
+// (SQLite treats LIMIT -1 as unlimited).
+func (s *Store) ListActressesLimit(ctx context.Context, limit int) ([]models.DumpActress, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("dump store is not open")
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name_romaji, image_url, name_kanji, name_kana FROM actresses ORDER BY id")
+	if limit <= 0 {
+		limit = -1
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT id, name_romaji, image_url, name_kanji, name_kana FROM actresses ORDER BY id LIMIT ?", limit)
 	if err != nil {
 		return nil, fmt.Errorf("list actresses: %w", err)
 	}

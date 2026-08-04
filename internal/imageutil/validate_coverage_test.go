@@ -2,9 +2,12 @@ package imageutil
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateRemoteImage(t *testing.T) {
@@ -18,10 +21,14 @@ func TestValidateRemoteImage(t *testing.T) {
 	}
 }
 
-func TestValidateRemoteImageWithSafeClientRedirectBlocked(t *testing.T) {
-	client := &http.Client{}
-	err := ValidateRemoteImageWithSafeClient(context.Background(), client, "https://example.com/img.jpg", "test", "")
-	if err == nil {
-		t.Fatal("expected error for unreachable URL")
+// A literal public origin needs no DNS; its 302 to the link-local metadata
+// address must be stopped by the redirect guard without any network access.
+func TestValidateRemoteImageWithSafeClientBlocksRedirectToLinkLocal(t *testing.T) {
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return respondWith("HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/meta\r\nContent-Length: 0\r\n\r\n")(ctx, network, addr)
 	}
+	client := &http.Client{Transport: &http.Transport{DialContext: dial}}
+	err := ValidateRemoteImageWithSafeClient(context.Background(), client, "http://93.184.216.34/image.jpg", "test", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "SSRF blocked")
 }

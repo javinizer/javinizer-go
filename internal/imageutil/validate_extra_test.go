@@ -73,7 +73,8 @@ func TestWriteFullHandlesShortWrites(t *testing.T) {
 }
 
 func TestValidateRemoteImageWithSafeClientGuards(t *testing.T) {
-	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), nil, "https://example.com/a.jpg", "", ""))
+	// Literal public IPs need no DNS: no test path may reach the network.
+	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), nil, "https://93.184.216.34/a.jpg", "", ""))
 	require.Error(t, ValidateRemoteImageWithSafeClient(t.Context(), http.DefaultClient, "http://127.0.0.1/a.jpg", "", ""))
 }
 
@@ -90,9 +91,9 @@ func TestValidateRemoteImageWithSafeClientHonorsRedirectPolicy(t *testing.T) {
 func TestValidateRemoteImageWithSafeClientWrapsHTTPTransportAndLimitsRedirects(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	require.Error(t, ValidateRemoteImageWithSafeClient(ctx, &http.Client{}, "https://example.com/image", "", ""))
+	require.Error(t, ValidateRemoteImageWithSafeClient(ctx, &http.Client{}, "https://93.184.216.34/image", "", ""))
 	transport := &http.Transport{}
-	err := ValidateRemoteImageWithSafeClient(ctx, &http.Client{Transport: transport}, "https://example.com/image", "", "")
+	err := ValidateRemoteImageWithSafeClient(ctx, &http.Client{Transport: transport}, "https://93.184.216.34/image", "", "")
 	require.Error(t, err)
 	require.Nil(t, transport.DialContext)
 

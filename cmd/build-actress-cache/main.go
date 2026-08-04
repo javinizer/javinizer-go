@@ -160,7 +160,37 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	if opts.maxImageBytes <= 0 {
 		return options{}, fmt.Errorf("--max-image-bytes must be positive")
 	}
+	for key := range opts.parameters {
+		if !acceptedOptionKeys[key] {
+			return options{}, fmt.Errorf("unknown --option key %q (accepted: %s)", key, strings.Join(acceptedOptionKeyList(), ", "))
+		}
+	}
 	return opts, nil
+}
+
+// newFetcherWithOptions is the fetcher constructor seam; tests swap it to
+// exercise the fetcher-construction error propagation in run().
+var newFetcherWithOptions = actresscache.NewFetcherWithOptions
+
+// acceptedOptionKeys is the complete set of --option keys any cache source
+// consumes. Registration rejects typos loudly instead of silently ignoring
+// them (e.g. a misspelled legacy.csv would otherwise vanish).
+var acceptedOptionKeys = map[string]bool{
+	"legacy.csv":        true,
+	"jvthumbs.csv":      true,
+	"minnanoav.sitemap": true,
+	"sitemap":           true,
+	"r18dev.dump":       true,
+}
+
+// acceptedOptionKeyList returns the accepted keys in stable sorted order.
+func acceptedOptionKeyList() []string {
+	keys := make([]string, 0, len(acceptedOptionKeys))
+	for key := range acceptedOptionKeys {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -173,10 +203,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	registry := actresscache.NewRegistry()
 	sources.RegisterAll(registry)
+	// Resolve the dump path before registration: the documented
+	// --option r18dev.dump=PATH form is equivalent to --r18dev-dump PATH,
+	// with the explicit flag taking precedence.
+	dumpPath := opts.r18devDump
+	if dumpPath == "" {
+		dumpPath = opts.parameters["r18dev.dump"]
+	}
 	var dumpStore io.Closer
-	if opts.r18devDump != "" {
+	if dumpPath != "" {
 		var openErr error
-		dumpStore, openErr = sources.RegisterR18Dev(registry, opts.r18devDump)
+		dumpStore, openErr = sources.RegisterR18Dev(registry, dumpPath)
 		if openErr != nil {
 			return openErr
 		}
@@ -199,9 +236,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	transport.MaxIdleConnsPerHost = maxConnections
 	transport.MaxConnsPerHost = maxConnections
 	client := &http.Client{Timeout: opts.timeout, Transport: transport}
-	fetcher := actresscache.NewFetcherWithOptions(client, opts.delay, opts.userAgent, map[string]time.Duration{
+	fetcher, err := newFetcherWithOptions(client, opts.delay, opts.userAgent, map[string]time.Duration{
 		"pics.dmm.co.jp": opts.imageDelay,
 	}, opts.allowPrivateHosts)
+	if err != nil {
+		return err
+	}
 	parameters := make(parameterMap, len(opts.parameters)+1)
 	for key, value := range opts.parameters {
 		parameters[key] = value
