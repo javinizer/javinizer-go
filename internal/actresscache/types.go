@@ -106,7 +106,11 @@ type BuildOptions struct {
 	Refresh               bool
 	MinThumbnailDimension int
 	MaxThumbnailBytes     int64
-	ValidateThumbnail     ThumbnailValidator
+	// AllowPrivateHosts widens the egress guard for trusted local mirrors.
+	// Cached thumbnails fetched under it may carry private URLs, so a
+	// default-safe run must not reuse them (see cachedCandidateReusable).
+	AllowPrivateHosts bool
+	ValidateThumbnail ThumbnailValidator
 }
 
 // BuildReport ...

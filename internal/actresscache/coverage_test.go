@@ -508,9 +508,15 @@ func TestThumbnailValidatorCacheHandlesForeignSingleflightValue(t *testing.T) {
 func TestCachedCandidateReusablePolicyBranches(t *testing.T) {
 	candidate := &Candidate{ThumbURL: "https://example.test/t.jpg"}
 	monoThumb := &ThumbnailValidation{Bytes: 100, Width: 100, Height: 100}
-	assert.False(t, cachedCandidateReusable(candidate, &ThumbnailValidation{Bytes: 0, Width: 100, Height: 100}, 64, 1<<20), "unknown bytes must revalidate")
-	assert.False(t, cachedCandidateReusable(candidate, &ThumbnailValidation{Bytes: 2 << 20, Width: 100, Height: 100}, 64, 1<<20), "oversized bytes must revalidate")
-	assert.True(t, cachedCandidateReusable(candidate, monoThumb, 64, 1<<20))
+	assert.False(t, cachedCandidateReusable(candidate, &ThumbnailValidation{Bytes: 0, Width: 100, Height: 100}, 64, 1<<20, false), "unknown bytes must revalidate")
+	assert.False(t, cachedCandidateReusable(candidate, &ThumbnailValidation{Bytes: 2 << 20, Width: 100, Height: 100}, 64, 1<<20, false), "oversized bytes must revalidate")
+	assert.True(t, cachedCandidateReusable(candidate, monoThumb, 64, 1<<20, false))
+
+	// Thumbnails fetched under --allow-private-hosts may carry private URLs:
+	// a default-safe run must not reuse (and later embed) them.
+	privateCandidate := &Candidate{ThumbURL: "http://127.0.0.1:8080/t.jpg"}
+	assert.False(t, cachedCandidateReusable(privateCandidate, monoThumb, 64, 1<<20, false), "private URL rejected when private hosts disabled")
+	assert.True(t, cachedCandidateReusable(privateCandidate, monoThumb, 64, 1<<20, true), "trusted mirror run may reuse its own private thumbnails")
 }
 
 func TestBuiltinIndexHelpersAndLookupNames(t *testing.T) {

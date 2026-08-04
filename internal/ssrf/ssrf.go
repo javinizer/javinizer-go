@@ -330,7 +330,13 @@ func NewSSRFSafeClient(timeout time.Duration) *http.Client {
 // WrapTransportWithSSRFCheck installs pinned public-IP dialing on transport
 // in place. Kept for compatibility; new code should use
 // NewPinnedDialTransport and keep the returned clone.
+//
+// A custom TLS dialer would bypass the pinned DialContext for HTTPS, so any
+// DialTLS/DialTLSContext on the transport is cleared here rather than
+// silently left to defeat the guard.
 func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
+	transport.DialTLSContext = nil
+	transport.DialTLS = nil //nolint:staticcheck // cleared intentionally: unpinnable
 	fallback := transport.DialContext
 	if fallback == nil {
 		fallback = (&net.Dialer{Timeout: 30 * time.Second}).DialContext

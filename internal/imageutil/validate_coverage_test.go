@@ -21,6 +21,19 @@ func TestValidateRemoteImage(t *testing.T) {
 	}
 }
 
+// A globally customized default transport whose HTTPS dialing is unpinnable
+// must be refused, same as an explicitly supplied unpinnable transport.
+func TestValidateRemoteImageWithSafeClientRejectsUnpinnableDefaultTransport(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	http.DefaultTransport = &http.Transport{DialTLSContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, context.DeadlineExceeded
+	}}
+	err := ValidateRemoteImageWithSafeClient(context.Background(), &http.Client{}, "http://93.184.216.34/img.jpg", "agent", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "DialTLS")
+}
+
 // A literal public origin needs no DNS; its 302 to the link-local metadata
 // address must be stopped by the redirect guard without any network access.
 func TestValidateRemoteImageWithSafeClientBlocksRedirectToLinkLocal(t *testing.T) {

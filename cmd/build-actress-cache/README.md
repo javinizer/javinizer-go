@@ -21,4 +21,4 @@ Source-specific settings can be passed without changing the command, for example
 
 The builder validates every thumbnail as an image, rejects placeholders and undersized files, writes resumable state to `data/actress-cache/build-state.jsonl`, and atomically replaces the output. The state file is local and ignored by Git. The runtime gzip is the checked-in upstream artifact; `--audit-output` optionally writes the full source and validation metadata for maintainer inspection.
 
-The application embeds the generated compact gzip cache as a read-only fallback. It fills missing movie metadata and never imports or overwrites user actress rows. Use `--refresh` to re-fetch successful candidates.
+Planned (later phase, not wired in this change): the application will embed the compact gzip cache as a read-only runtime fallback. It will fill missing movie metadata and never import or overwrite user actress rows. Use `--refresh` to re-fetch successful candidates.
