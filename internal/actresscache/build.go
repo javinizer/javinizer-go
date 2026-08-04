@@ -261,11 +261,9 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 		}
 	}
 
-	// Entries revalidated under refresh are not reuse.
+	// Entries revalidated under refresh are not reuse. revalidatedKeys ⊆
+	// initialKeys by construction, so this can never go negative.
 	report.Cached -= len(revalidatedKeys)
-	if report.Cached < 0 {
-		report.Cached = 0
-	}
 
 	validated := make([]rankedCandidate, 0, len(candidates))
 	ranks := make(map[string]int, len(sources))

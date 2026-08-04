@@ -2,6 +2,7 @@ package ssrf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -276,5 +277,18 @@ func TestCheckURL_FailedResolve(t *testing.T) {
 	err := CheckURL("http://nonexistent.invalid/")
 	if err == nil {
 		t.Error("expected error for failed DNS resolution, got nil")
+	}
+}
+
+func TestUnverifiableHostErrorText(t *testing.T) {
+	e := &UnverifiableHostError{Host: "h.test", Err: fmt.Errorf("dns down")}
+	s := e.Error()
+	if !strings.Contains(s, "SSRF unverifiable") || !strings.Contains(s, "h.test") || !strings.Contains(s, "dns down") {
+		t.Fatalf("unexpected error text: %s", s)
+	}
+	inner := errors.New("inner cause")
+	wrapped := &UnverifiableHostError{Host: "h.test", Err: inner}
+	if !errors.Is(wrapped, inner) {
+		t.Fatal("Unwrap must expose the inner resolver error")
 	}
 }

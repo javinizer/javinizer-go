@@ -24,6 +24,7 @@ var (
 	stateSeekEnd        = func(file *os.File) error { _, err := file.Seek(0, io.SeekEnd); return err }
 	stateWriteNewline   = func(file *os.File) error { _, err := file.Write([]byte{10}); return err }
 	stateRename         = os.Rename
+	stateWriteFileNew   = os.WriteFile
 )
 
 type stateStore struct {
@@ -75,31 +76,20 @@ const stateCompactionThreshold = 8 << 20
 // compactStateFile atomically rewrites the journal with the latest entry per
 // key (sorted for deterministic output). Resume semantics are unchanged.
 func compactStateFile(path string, entries map[string]StateEntry) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-compact-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	encoder := json.NewEncoder(tmp)
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
 	keys := make([]string, 0, len(entries))
 	for key := range entries {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		if err := encoder.Encode(entries[key]); err != nil {
-			_ = tmp.Close()
-			_ = os.Remove(tmpPath)
-			return err
-		}
+		// Encoding into an in-memory buffer cannot fail; entries came from a
+		// successfully parsed journal.
+		_ = encoder.Encode(entries[key])
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
+	tmpPath := path + ".compact-tmp"
+	if err := stateWriteFileNew(tmpPath, buf.Bytes(), 0o600); err != nil {
 		return err
 	}
 	return stateRename(tmpPath, path)
