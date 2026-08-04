@@ -34,18 +34,19 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	}
 	defer func() { _ = state.close() }()
 
+	// Effective validation policy for this run; reused state must satisfy it.
+	minDimension := options.MinThumbnailDimension
+	if minDimension <= 0 {
+		minDimension = 64
+	}
+	maxBytes := options.MaxThumbnailBytes
+	if maxBytes <= 0 {
+		maxBytes = 2 << 20
+	}
 	validator := options.ValidateThumbnail
 	if validator == nil {
 		if options.SourceOptions.Fetcher == nil {
 			return Cache{}, BuildReport{}, fmt.Errorf("actress cache fetcher is required")
-		}
-		minDimension := options.MinThumbnailDimension
-		if minDimension <= 0 {
-			minDimension = 64
-		}
-		maxBytes := options.MaxThumbnailBytes
-		if maxBytes <= 0 {
-			maxBytes = 2 << 20
 		}
 		validator = func(ctx context.Context, candidate Candidate) (ThumbnailValidation, error) {
 			return ValidateThumbnail(ctx, options.SourceOptions.Fetcher, candidate.ThumbURL, minDimension, maxBytes)
@@ -59,7 +60,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	}
 	candidates := make(map[string]ValidatedCandidate)
 	for key, entry := range state.entries {
-		if entry.Status != "ok" || entry.Candidate == nil || entry.Thumbnail == nil || !cachedCandidateReusable(entry.Candidate) {
+		if entry.Status != "ok" || entry.Candidate == nil || entry.Thumbnail == nil || !cachedCandidateReusable(entry.Candidate, entry.Thumbnail, minDimension, maxBytes) {
 			continue
 		}
 		candidate := cloneCandidate(*entry.Candidate)
@@ -117,7 +118,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 			if entry.Status == "rejected" {
 				return true
 			}
-			return entry.Status == "ok" && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(entry.Candidate)
+			return entry.Status == "ok" && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(entry.Candidate, entry.Thumbnail, minDimension, maxBytes)
 		}
 		sourceOptions.RecordFailure = recordSourceFailure
 		sourceOptions.MarkSeen = func(key string) {
@@ -281,12 +282,25 @@ func normalizeSources(names []string) ([]string, error) {
 	return result, nil
 }
 
-// cachedCandidateReusable ...
-func cachedCandidateReusable(candidate *Candidate) bool {
+// cachedCandidateReusable reports whether a cached thumbnail still satisfies
+// the ACTIVE validation policy: dimensions and byte ceilings tightened
+// between runs must force revalidation instead of republishing thumbnails
+// that only passed under older settings. Zero-valued measurements mean the
+// entry predates tracking and cannot prove compliance, so it revalidates.
+func cachedCandidateReusable(candidate *Candidate, thumbnail *ThumbnailValidation, minDimension int, maxBytes int64) bool {
 	if candidate == nil || strings.TrimSpace(candidate.ThumbURL) == "" {
 		return false
 	}
-	return runtimeThumbnailURL(candidate.ThumbURL) != ""
+	if runtimeThumbnailURL(candidate.ThumbURL) == "" {
+		return false
+	}
+	if thumbnail.Width < minDimension || thumbnail.Height < minDimension {
+		return false
+	}
+	if thumbnail.Bytes <= 0 || int64(thumbnail.Bytes) > maxBytes {
+		return false
+	}
+	return true
 }
 
 // recordFailure ...
@@ -461,6 +475,23 @@ func compatibleGroups(groups []candidateGroup, identityGroups map[string]map[int
 		case 1:
 			matched = map[int]struct{}{withoutDMM[0]: {}}
 		default:
+			return nil
+		}
+	}
+	if normalizeIdentity(candidate.JapaneseName) == "" && len(matched) > 1 {
+		// A candidate with no Japanese name is not authoritative enough to
+		// bridge multiple groups: when they carry conflicting Japanese
+		// identities (distinct actresses sharing a romanized name), merging
+		// would collapse them onto this one record.
+		names := make(map[string]struct{})
+		for group := range matched {
+			for _, item := range groups[group].items {
+				if name := normalizeIdentity(item.candidate.Candidate.JapaneseName); name != "" {
+					names[name] = struct{}{}
+				}
+			}
+		}
+		if len(names) > 1 {
 			return nil
 		}
 	}
