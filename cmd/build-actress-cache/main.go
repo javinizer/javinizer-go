@@ -268,6 +268,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if report.Records == 0 {
+		// A zero-record build is operator error (header-only CSV, empty dump
+		// table). Publishing it would atomically replace the checked-in
+		// artifact with an empty cache — and pruning completed sources would
+		// already have marked reused state stale. Fail loudly instead.
+		return fmt.Errorf("refusing to publish empty actress cache (sources: %s)", strings.Join(opts.sources, ","))
+	}
 	if opts.auditOutput != "" {
 		if err := actresscache.WriteFile(opts.auditOutput, cache); err != nil {
 			return fmt.Errorf("write actress audit cache: %w", err)

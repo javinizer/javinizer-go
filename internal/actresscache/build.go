@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -61,7 +62,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	}
 	candidates := make(map[string]ValidatedCandidate)
 	for key, entry := range state.entries {
-		if entry.Status != "ok" || entry.Candidate == nil || entry.Thumbnail == nil || !cachedCandidateReusable(&entry, minDimension, maxBytes, options.AllowPrivateHosts) {
+		if entry.Status != stateStatusOK || entry.Candidate == nil || entry.Thumbnail == nil || !cachedCandidateReusable(&entry, minDimension, maxBytes, options.AllowPrivateHosts) {
 			continue
 		}
 		candidate := cloneCandidate(*entry.Candidate)
@@ -72,26 +73,22 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 		candidates[key] = ValidatedCandidate{Candidate: candidate, Thumbnail: *entry.Thumbnail}
 	}
 
-	report := BuildReport{Sources: append([]string(nil), sources...)}
-	// initialKeys remembers which candidates were reused from state so the
-	// Cached metric survives: candidates validated during this run must not
-	// inflate it; only pruned previously-reused entries decrement it. Under
-	// --refresh nothing is reused (every entry is validated again), so the
-	// metric starts at zero and no entry counts as previously reused.
+	report := BuildReport{Sources: append([]string(nil), sources...), Cached: len(candidates)}
+	// Cached = entries reused from state that stayed untouched this run.
+	// Freshly validated entries never inflate it; a reused entry that got
+	// revalidated (refresh) or pruned decrements it.
 	initialKeys := make(map[string]struct{}, len(candidates))
-	if !options.Refresh {
-		report.Cached = len(candidates)
-		for key := range candidates {
-			initialKeys[key] = struct{}{}
-		}
+	for key := range candidates {
+		initialKeys[key] = struct{}{}
 	}
+	revalidatedKeys := make(map[string]struct{})
 	// mu ...
 	var mu sync.Mutex
 	seenBySource := make(map[string]map[string]struct{}, len(sources))
 	completedSources := make(map[string]bool, len(sources))
 	recordSourceFailure := func(candidate Candidate, failure error) error {
 		if options.Refresh {
-			if prior, ok := state.get(candidate.Key); ok && prior.Status == "ok" && classifyStateFailure(failure) == "failed" {
+			if prior, ok := state.get(candidate.Key); ok && prior.Status == stateStatusOK && classifyStateFailure(candidate, failure) == stateStatusFailed {
 				// Transient refresh failure on a previously-good entry: keep
 				// the journal's last-good line effective so a later default
 				// build can still reuse the validated thumbnail. The refresh
@@ -129,10 +126,10 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 			if !ok {
 				return false
 			}
-			if entry.Status == "rejected" {
+			if entry.Status == stateStatusRejected {
 				return true
 			}
-			return entry.Status == "ok" && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(&entry, minDimension, maxBytes, options.AllowPrivateHosts)
+			return entry.Status == stateStatusOK && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(&entry, minDimension, maxBytes, options.AllowPrivateHosts)
 		}
 		sourceOptions.RecordFailure = recordSourceFailure
 		sourceOptions.MarkSeen = func(key string) {
@@ -174,7 +171,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 			}
 			entry := StateEntry{
 				Key:       candidate.Key,
-				Status:    "ok",
+				Status:    stateStatusOK,
 				CheckedAt: time.Now().UTC().Format(time.RFC3339),
 				Candidate: candidatePtr(candidate),
 				Thumbnail: thumbnailPtr(thumbnail),
@@ -189,6 +186,10 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 			mu.Lock()
 			candidates[candidate.Key] = ValidatedCandidate{Candidate: cloneCandidate(candidate), Thumbnail: thumbnail}
 			report.Validated++
+			if _, reused := initialKeys[candidate.Key]; reused {
+				// Refresh re-proved a reused entry: it is not reuse.
+				revalidatedKeys[candidate.Key] = struct{}{}
+			}
 			mu.Unlock()
 			return nil
 		}
@@ -242,7 +243,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 		mu.Unlock()
 		for _, key := range staleKeys {
 			entry, ok := state.get(key)
-			if !ok || entry.Status != "ok" {
+			if !ok || entry.Status != stateStatusOK {
 				continue
 			}
 			entry.Status = "stale"
@@ -252,6 +253,12 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 				return Cache{}, report, fmt.Errorf("write stale state for %s: %w", key, err)
 			}
 		}
+	}
+
+	// Entries revalidated under refresh are not reuse.
+	report.Cached -= len(revalidatedKeys)
+	if report.Cached < 0 {
+		report.Cached = 0
 	}
 
 	validated := make([]rankedCandidate, 0, len(candidates))
@@ -335,20 +342,40 @@ func cachedCandidateReusable(entry *StateEntry, minDimension int, maxBytes int64
 	return true
 }
 
-// recordFailure ...
-// classifyStateFailure returns "rejected" for permanent validation defects
-// (safe to drop forever on resume) and "failed" for transient ones.
-func classifyStateFailure(failure error) string {
-	var rejected *ThumbnailRejectedError
-	if errors.As(failure, &rejected) || strings.Contains(failure.Error(), "no stable identity") {
-		return "rejected"
+const (
+	stateStatusOK       = "ok"
+	stateStatusFailed   = "failed"
+	stateStatusRejected = "rejected"
+)
+
+// classifyStateFailure returns stateStatusRejected only for DURABLE content defects
+// (safe to drop forever on resume) and stateStatusFailed for transient conditions —
+// including source-data gaps that may heal (missing URL, missing identity,
+// fabricated-thumbnail 404s), which must not ghost the actress forever.
+func classifyStateFailure(candidate Candidate, failure error) string {
+	var tooLarge *FetchTooLargeError
+	if errors.As(failure, &tooLarge) {
+		return stateStatusRejected // the image stays oversized under unchanged policy
 	}
-	return "failed"
+	var statusErr *HTTPError
+	if errors.As(failure, &statusErr) && statusErr.StatusCode == http.StatusNotFound && candidate.Source == "r18dev" {
+		// Fabricated thumbnail guesses 404 when the dump lacks the image; the
+		// dump may gain the real URL later.
+		return stateStatusFailed
+	}
+	var rejected *ThumbnailRejectedError
+	if errors.As(failure, &rejected) {
+		if rejected.Reason == "thumbnail URL is empty" {
+			return stateStatusFailed // source offered no URL this run
+		}
+		return stateStatusRejected
+	}
+	return stateStatusFailed
 }
 
 // recordFailure ...
 func recordFailure(state *stateStore, candidate Candidate, failure error, mu *sync.Mutex, report *BuildReport) error {
-	status := classifyStateFailure(failure)
+	status := classifyStateFailure(candidate, failure)
 	entry := StateEntry{
 		Key:       candidate.Key,
 		Status:    status,
@@ -360,7 +387,7 @@ func recordFailure(state *stateStore, candidate Candidate, failure error, mu *sy
 		return fmt.Errorf("write %s state for %s: %w", status, candidate.Key, err)
 	}
 	mu.Lock()
-	if status == "rejected" {
+	if status == stateStatusRejected {
 		report.Rejected++
 	} else {
 		report.Failed++

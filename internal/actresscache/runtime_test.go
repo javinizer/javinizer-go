@@ -65,6 +65,19 @@ func TestWriteRuntimeFileRejectsEmptyPath(t *testing.T) {
 	assert.Error(t, WriteRuntimeFile("", Cache{}))
 }
 
+func TestDecodeRuntimeCacheRejectsOversizedPayload(t *testing.T) {
+	// A gzipped payload decompressing past the decoder cap must be rejected
+	// instead of materializing unboundedly.
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	data, err := json.Marshal(RuntimeCache{SchemaVersion: RuntimeSchemaVersion, Records: []RuntimeRecord{{BuiltinKey: "x", ThumbURL: string(make([]byte, maxRuntimeCacheDecodedBytes))}}})
+	require.NoError(t, err)
+	_, err = writer.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	_, err = decodeRuntimeCache(bytes.NewReader(compressed.Bytes()))
+	require.Error(t, err, "over-cap payload must not decode successfully")
+}
 func TestDecodeRuntimeCacheRejectsInvalidDataAndSchema(t *testing.T) {
 	_, err := decodeRuntimeCache(bytes.NewReader([]byte("not gzip")))
 	require.Error(t, err)

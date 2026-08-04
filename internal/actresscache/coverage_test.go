@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -80,8 +81,11 @@ func TestBuildRejectsStateAndCandidateFailures(t *testing.T) {
 			if tc.name == "missing key" {
 				require.ErrorContains(t, err, tc.want)
 			} else {
+				// An unmergeable candidate is a healable source-data gap:
+				// transient, not a terminal rejection.
 				require.NoError(t, err)
-				assert.Equal(t, 1, report.Rejected)
+				assert.Equal(t, 0, report.Rejected)
+				assert.Equal(t, 1, report.Failed)
 			}
 		})
 	}
@@ -156,13 +160,30 @@ func TestBuildRefreshDoesNotSkipAndDisablesPruningAtLimit(t *testing.T) {
 		options.MarkComplete()
 		return nil
 	}}
-	cache, _, err := Build(context.Background(), BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: path, Refresh: true, SourceOptions: SourceOptions{Limit: 1}, ValidateThumbnail: testValidator})
+	cache, report, err := Build(context.Background(), BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: path, Refresh: true, SourceOptions: SourceOptions{Limit: 1}, ValidateThumbnail: testValidator})
 	require.NoError(t, err)
 	assert.Len(t, cache.Records, 1)
+	// The record comes straight from state without revalidation (refresh +
+	// limit): that IS reuse, and the metric must report it.
+	assert.Equal(t, 1, report.Cached, "seeded-and-untouched under refresh+limit is reuse")
 }
 
 // A single candidate matching two groups merges them into the base one;
 // a fully stale/emptied group sessions through the record pivot.
+func TestClassifyStateFailureLegs(t *testing.T) {
+	// Durable content defects are permanent.
+	assert.Equal(t, "rejected", classifyStateFailure(Candidate{}, &FetchTooLargeError{URL: "x", Limit: 1}))
+	assert.Equal(t, "rejected", classifyStateFailure(Candidate{}, &ThumbnailRejectedError{Reason: "known placeholder"}))
+	// Healable source-data gaps are transient.
+	assert.Equal(t, "failed", classifyStateFailure(Candidate{}, &ThumbnailRejectedError{Reason: "thumbnail URL is empty"}))
+	assert.Equal(t, "failed", classifyStateFailure(Candidate{Source: "r18dev"}, &HTTPError{StatusCode: 404, URL: "u"}), "fabricated-guess 404 must not ghost the actress")
+	assert.Equal(t, "failed", classifyStateFailure(Candidate{}, errors.New("candidate has no stable identity")))
+	// Mixed rule: rejected-type bit 404 for a DIFFERENT source stays permanent.
+	assert.Equal(t, "rejected", classifyStateFailure(Candidate{Source: "test"}, &ThumbnailRejectedError{Reason: "404 fake"}))
+	// Plain fetch failures are transient.
+	assert.Equal(t, "failed", classifyStateFailure(Candidate{}, &HTTPError{StatusCode: 404, URL: "u"}))
+}
+
 func TestMergeCandidatesMultiGroupProbe(t *testing.T) {
 	mk := func(key, jp string, aliases ...string) rankedCandidate {
 		return rankedCandidate{candidate: ValidatedCandidate{Candidate: Candidate{Key: key, Source: "test", JapaneseName: jp, Aliases: aliases, ThumbURL: "thumb"}}}
@@ -312,6 +333,12 @@ func TestFetcherDefaultsLimitAndRejectsOversize(t *testing.T) {
 }
 
 func TestFetcherRedirectCallbackBranches(t *testing.T) {
+	// Stub the resolver: fake .test names must never hit the system resolver
+	// (hijacking resolvers answering .test privately would flip the asserted
+	// branch to a block).
+	prevLookup := lookupIP
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) { return nil, errors.New("offline") }
+	defer func() { lookupIP = prevLookup }()
 	redirectErr := errors.New("redirect denied")
 	// Explicit no-proxy transport: the default transport honors HTTP(S)_PROXY,
 	// and a proxy-enabled CI host would route the goal-URL's DNS preflight into
@@ -691,6 +718,11 @@ func TestFetcherExhaustedAndBodyCancellation(t *testing.T) {
 	// Restore via defer: a require failure here must not poison every later
 	// fetcher test in the process.
 	defer func() { fetchAttempts = original }()
+	// Resolver stub: fake .test names must never reach the system resolver; a
+	// hijacking resolver answering .test privately would flip the outcome.
+	prevLookup := lookupIP
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) { return nil, errors.New("offline") }
+	defer func() { lookupIP = prevLookup }()
 	// Explicit no-proxy transport: the default transport honors HTTP(S)_PROXY,
 	// which would route this request through proxy DNS preflight and surface
 	// UnverifiableHostError instead of the exhaustion error under test.

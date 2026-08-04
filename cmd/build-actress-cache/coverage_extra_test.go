@@ -64,13 +64,25 @@ func TestRunReportsBuildAndWriteErrors(t *testing.T) {
 	err := run(t.Context(), []string{"--source", "legacy-jvthumbs", "--legacy-csv", filepath.Join(dir, "missing.csv"), "--state", filepath.Join(dir, "state")}, &stdout, &stderr)
 	require.Error(t, err)
 
-	csvPath := filepath.Join(dir, "empty.csv")
-	require.NoError(t, os.WriteFile(csvPath, []byte("FullName,ThumbUrl\n"), 0o600))
+	// A non-empty build must exist so the write paths are reached (the empty
+	// build fails earlier by design: empty-publish guard).
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		require.NoError(t, png.Encode(w, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	}))
+	defer server.Close()
+
+	csvPath := filepath.Join(dir, "legacy.csv")
+	require.NoError(t, os.WriteFile(csvPath, []byte("FullName,ThumbUrl\nA Name,"+server.URL+"/thumb.png\n"), 0o600))
 	blocked := filepath.Join(dir, "blocked")
 	require.NoError(t, os.WriteFile(blocked, []byte("file"), 0o600))
-	err = run(t.Context(), []string{"--source", "legacy-jvthumbs", "--legacy-csv", csvPath, "--state", filepath.Join(dir, "state2"), "--output", filepath.Join(blocked, "cache.gz")}, &stdout, &stderr)
+	buildArgs := func(state, out string) []string {
+		return []string{"--source", "legacy-jvthumbs", "--legacy-csv", csvPath, "--state", state, "--output", out, "--min-dimension", "1", "--delay", "0", "--image-delay", "0", "--workers", "1", "--allow-private-hosts"}
+	}
+	err = run(t.Context(), buildArgs(filepath.Join(dir, "state2"), filepath.Join(blocked, "cache.gz")), &stdout, &stderr)
 	require.ErrorContains(t, err, "write actress runtime cache")
 
-	err = run(t.Context(), []string{"--source", "legacy-jvthumbs", "--legacy-csv", csvPath, "--state", filepath.Join(dir, "state3"), "--output", filepath.Join(dir, "cache.gz"), "--audit-output", filepath.Join(blocked, "audit.json")}, &stdout, &stderr)
+	auditArgs := append(buildArgs(filepath.Join(dir, "state3"), filepath.Join(dir, "cache.gz")), "--audit-output", filepath.Join(blocked, "audit.json"))
+	err = run(t.Context(), auditArgs, &stdout, &stderr)
 	require.ErrorContains(t, err, "write actress audit cache")
 }

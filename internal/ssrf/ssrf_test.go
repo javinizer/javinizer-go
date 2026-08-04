@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -54,6 +55,14 @@ func TestIsPrivateIP(t *testing.T) {
 }
 
 func TestCheckURL(t *testing.T) {
+	// Resolver stub: no subtest may perform real DNS (offline CI must pass).
+	cleanup := setLookupIPForTest(func(host string) ([]net.IP, error) {
+		if host == "example.com" {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		}
+		return nil, fmt.Errorf("test resolver: unexpected host %q", host)
+	})
+	defer cleanup()
 	testCases := []struct {
 		name    string
 		url     string
@@ -133,13 +142,19 @@ func TestNewSSRFSafeClient_BlocksRedirectToPrivateIP(t *testing.T) {
 	})
 	defer cleanup()
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example.com/redirect", nil)
+	// The redirect origin is the local listener (allowlisted loopback); only
+	// its 302 target is private. Asserts the actual block, not a dial error.
+	undo := AllowHostForTest("127.0.0.1")
+	defer undo()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, redirectServer.URL+"/go", nil)
 	if err != nil {
 		t.Fatalf("failed to create request: %v", err)
 	}
 	_, err = client.Do(req)
 	if err == nil {
 		t.Error("expected error for redirect to private IP, got nil")
+	} else if !strings.Contains(err.Error(), "SSRF blocked") {
+		t.Errorf("expected SSRF block on the redirect target, got: %v", err)
 	}
 }
 
