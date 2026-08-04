@@ -229,3 +229,31 @@ func TestURLHelpersCoverInvalidInputs(t *testing.T) {
 	assert.False(t, isMinnanoURL(&url.URL{Scheme: "http", Host: "www.minnano-av.com"}))
 	assert.True(t, isMinnanoURL(&url.URL{Scheme: "https", Host: "images.minnano-av.com."}))
 }
+
+func TestCollectLimitTruncationSkipsMarkCompleteMinnano(t *testing.T) {
+	client := &http.Client{Transport: testTransport(func(req *http.Request) (*http.Response, error) {
+		body := ""
+		contentType := "text/html"
+		switch {
+		case req.URL.Path == "/sitemap.xml":
+			contentType = "application/xml"
+			body = `<sitemapindex><sitemap><loc>https://www.minnano-av.com/sitemap_actress_1.xml</loc></sitemap></sitemapindex>`
+		case strings.HasSuffix(req.URL.Path, ".xml"):
+			contentType = "application/xml"
+			body = `<urlset><url><loc>https://www.minnano-av.com/actress811239.html</loc></url><url><loc>https://www.minnano-av.com/actress811240.html</loc></url></urlset>`
+		default:
+			body = profileFixture()
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+	})}
+	complete := false
+	emitted := 0
+	err := New().Collect(context.Background(), actresscache.SourceOptions{
+		Fetcher:      mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)),
+		Limit:        1,
+		MarkComplete: func() { complete = true },
+	}, func(actresscache.Candidate) error { emitted++; return nil })
+	require.NoError(t, err)
+	assert.Equal(t, 1, emitted)
+	assert.False(t, complete, "limit-truncated enumeration is not complete")
+}

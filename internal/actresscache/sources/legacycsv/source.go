@@ -32,6 +32,7 @@ func (s *source) Name() string {
 
 // Collect ...
 func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions, emit func(actresscache.Candidate) error) error {
+	truncated := false
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -121,6 +122,7 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 			continue
 		}
 		if options.Limit > 0 && processed >= options.Limit {
+			truncated = true // windowed enumeration is not exhaustive
 			break
 		}
 		processed++
@@ -138,7 +140,7 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	if emitErr != nil {
 		return emitErr
 	}
-	if readErr == nil && options.MarkComplete != nil {
+	if readErr == nil && !truncated && options.MarkComplete != nil {
 		options.MarkComplete()
 	}
 	return readErr

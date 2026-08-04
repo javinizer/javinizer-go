@@ -65,8 +65,10 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	if err != nil {
 		return err
 	}
+	truncated := false
 	if options.Limit > 0 && len(profileURLs) > options.Limit {
 		profileURLs = profileURLs[:options.Limit]
+		truncated = true
 	}
 	workers := options.Workers
 	if workers < 1 {
@@ -172,7 +174,8 @@ enqueue:
 		// truncated cache.
 		sourceErr = ctx.Err()
 	}
-	if sourceErr == nil && options.MarkComplete != nil {
+	if sourceErr == nil && !truncated && options.MarkComplete != nil {
+		// A limit-truncated enumeration is not complete; pruning must stay off.
 		options.MarkComplete()
 	}
 	return sourceErr

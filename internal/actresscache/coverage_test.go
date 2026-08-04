@@ -160,12 +160,11 @@ func TestBuildRefreshDoesNotSkipAndDisablesPruningAtLimit(t *testing.T) {
 		options.MarkComplete()
 		return nil
 	}}
-	cache, report, err := Build(context.Background(), BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: path, Refresh: true, SourceOptions: SourceOptions{Limit: 1}, ValidateThumbnail: testValidator})
-	require.NoError(t, err)
-	assert.Len(t, cache.Records, 1)
-	// The record comes straight from state without revalidation (refresh +
-	// limit): that IS reuse, and the metric must report it.
-	assert.Equal(t, 1, report.Cached, "seeded-and-untouched under refresh+limit is reuse")
+	_, _, err = Build(context.Background(), BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: path, Refresh: true, SourceOptions: SourceOptions{Limit: 1}, ValidateThumbnail: testValidator})
+	// --refresh with --limit would publish unrevalidated state while pruning
+	// is disabled: refused loud instead.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--refresh cannot be combined with --limit")
 }
 
 // A single candidate matching two groups merges them into the base one;
