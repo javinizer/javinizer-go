@@ -178,6 +178,33 @@ func TestBuildRevalidatesCachedThumbnailsUnderStricterPolicy(t *testing.T) {
 	assert.Equal(t, 2, validates, "stricter policy forced revalidation")
 }
 
+// A hostname that reads as public but was validated under --allow-private-hosts
+// (e.g. mirror.lan resolving to an internal address) must force revalidation
+// in any later default-safe run — the lexical host check cannot see this.
+func TestBuildDowngradeRevalidatesMirrorValidatedEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.jsonl")
+	candidate := Candidate{Key: "mirror:1", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "http://mirror.lan/thumb.jpg"}
+	thumb := ThumbnailValidation{CheckedAt: "now", SHA256: "m", Bytes: 100, Width: 100, Height: 100, Format: "jpeg"}
+	entry := StateEntry{Key: "mirror:1", Status: "ok", Candidate: &candidate, Thumbnail: &thumb, ValidatedWithPrivateHosts: true}
+	data, err := json.Marshal(entry)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, append(data, byte(0x0a)), 0o600))
+
+	source := sourceFunc{name: "test", collect: func(context.Context, SourceOptions, func(Candidate) error) error { return nil }}
+	options := BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: path, ValidateThumbnail: testValidator}
+
+	cache, report, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Empty(t, cache.Records, "default-safe run must not reuse a mirror-validated thumbnail")
+	assert.Zero(t, report.Cached)
+
+	options.AllowPrivateHosts = true
+	cache, report, err = Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Len(t, cache.Records, 1, "mirror run may reuse its own marked entries")
+	assert.Equal(t, 1, report.Cached)
+}
+
 func TestBuildDoesNotReusePrivateURLThumbnailsWithoutOptIn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.jsonl")
 	candidate := Candidate{Key: "one", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "http://127.0.0.1:8080/thumb.jpg"}
