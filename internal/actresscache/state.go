@@ -50,7 +50,7 @@ func openState(path string) (*stateStore, error) {
 		// instead of failing every build until manual deletion.
 		corruptPath := path + ".corrupt"
 		if renameErr := stateRename(path, corruptPath); renameErr != nil {
-			return nil, fmt.Errorf("parse state: %w (quarantine to %s failed: %v)", err, corruptPath, renameErr)
+			return nil, fmt.Errorf("parse state: %w (quarantine to %s failed: %w)", err, corruptPath, renameErr)
 		}
 		log.Printf("actresscache: state file %s corrupt (%v); quarantined to %s", path, err, corruptPath)
 		return openStateWriter(path, &stateStore{entries: make(map[string]StateEntry)})

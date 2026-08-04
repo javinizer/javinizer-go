@@ -82,67 +82,13 @@ func (e *BlockedFetchError) Error() string {
 	return fmt.Sprintf("refusing to fetch internal address: %s", e.URL)
 }
 
-// blockedCIDRs are special-use ranges not covered by net.IP classification
-// that still route to internal infrastructure: CGNAT (hosts cloud metadata
-// IPs like 100.100.100.200), IETF protocol assignments, benchmark ranges,
-// reserved space, IPv6 transition (6to4 embeds a public IPv4 that may route
-// internally via relay), site-local, and documentation prefixes.
-var blockedCIDRs = mustCIDRs(
-	"100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4",
-	// 6to4 and Teredo tunnel through anycast relays to the embedded IPv4
-	// address, dodging every IPv4-range check; site-local and documentation
-	// space must not be dialed either.
-	"2002::/16", "2001::/32", "fec0::/10", "2001:db8::/32",
-)
+// Blocklist policy lives in internal/ssrf (THE single guard). These local
+// helpers exist only so the fetcher's proxy-trust paths can delegate.
+func hostIPLiteral(host string) net.IP { return ssrf.HostIPLiteral(host) }
 
-func mustCIDRs(cidrs ...string) []*net.IPNet {
-	out := make([]*net.IPNet, 0, len(cidrs))
-	for _, c := range cidrs {
-		_, block, err := net.ParseCIDR(c)
-		if err != nil {
-			panic(fmt.Sprintf("invalid built-in CIDR %q: %v", c, err))
-		}
-		out = append(out, block)
-	}
-	return out
-}
+func isBlockedFetchHost(host string) bool { return ssrf.IsBlockedHost(host) }
 
-// hostIPLiteral parses host as an IP literal, tolerating IPv6 zones and
-// bracketed forms; returns nil for hostnames.
-func hostIPLiteral(host string) net.IP {
-	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	if i := strings.LastIndex(host, "%"); i >= 0 { // IPv6 zone, e.g. fe80::1%eth0
-		host = host[:i]
-	}
-	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
-	return net.ParseIP(host)
-}
-
-// isBlockedFetchHost reports whether host is localhost or a non-public IP
-// literal. Hostnames are not resolved here.
-func isBlockedFetchHost(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return true
-	}
-	if ip := hostIPLiteral(host); ip != nil {
-		return isBlockedIP(ip)
-	}
-	return false
-}
-
-// isBlockedIP reports whether ip is a non-public or special-use address.
-func isBlockedIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
-		return true
-	}
-	for _, cidr := range blockedCIDRs {
-		if cidr.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
+func isBlockedIP(ip net.IP) bool { return ssrf.IsBlockedIP(ip) }
 
 // viaProxy reports whether fetches to host would traverse a configured
 // HTTP(S) proxy (which resolves the target remotely).
@@ -362,6 +308,13 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 		resp, err := f.client.Do(req)
 		if err != nil {
 			if attempt+1 == fetchAttempts || requestCtx.Err() != nil {
+				return nil, nil, err
+			}
+			// Policy/typed failures are not transport faults: never burn a retry.
+			var blocked *ssrf.BlockedTargetError
+			var blockedFetch *BlockedFetchError
+			var unverifiable *ssrf.UnverifiableHostError
+			if errors.As(err, &blocked) || errors.As(err, &blockedFetch) || errors.As(err, &unverifiable) {
 				return nil, nil, err
 			}
 			if err := waitRetry(requestCtx, retryBaseDelay<<attempt); err != nil {
