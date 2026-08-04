@@ -26,7 +26,7 @@ func TestIsPrivateIP(t *testing.T) {
 		{"public 1.1.1.1", "1.1.1.1", false},
 		{"IPv6 loopback", "::1", true},
 		{"IPv6 link-local", "fe80::1", true},
-		{"nil IP", "", false},
+		{"nil IP", "", true},
 		{"unspecified 0.0.0.0", "0.0.0.0", true},
 		{"172.15.x not RFC1918", "172.15.0.1", false},
 		{"172.32.x not RFC1918", "172.32.0.1", false},
@@ -35,8 +35,8 @@ func TestIsPrivateIP(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.ip == "" {
-				if isPrivateIP(nil) != tc.wantPriv {
-					t.Errorf("isPrivateIP(nil) = %v, want %v", !tc.wantPriv, tc.wantPriv)
+				if IsBlockedIP(nil) != tc.wantPriv {
+					t.Errorf("IsBlockedIP(nil) = %v, want %v", !tc.wantPriv, tc.wantPriv)
 				}
 				return
 			}
@@ -44,9 +44,9 @@ func TestIsPrivateIP(t *testing.T) {
 			if ip == nil {
 				t.Fatalf("failed to parse IP %q", tc.ip)
 			}
-			got := isPrivateIP(ip)
+			got := IsBlockedIP(ip)
 			if got != tc.wantPriv {
-				t.Errorf("isPrivateIP(%s) = %v, want %v", tc.ip, got, tc.wantPriv)
+				t.Errorf("IsBlockedIP(%s) = %v, want %v", tc.ip, got, tc.wantPriv)
 			}
 		})
 	}

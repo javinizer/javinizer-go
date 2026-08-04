@@ -168,6 +168,7 @@ func TestServeTempImage_PrivateIPBlocked(t *testing.T) {
 		return []net.IP{net.ParseIP("192.168.1.1")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	cfg := config.DefaultConfig(nil, nil)
 	cfg.System.ImageCacheEnabled = false
@@ -191,6 +192,7 @@ func TestServeTempImage_UpstreamNon200Status(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -221,6 +223,7 @@ func TestServeTempImage_SuccessWithNoContentType(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -255,6 +258,7 @@ func TestServeTempImage_CustomUserAgent(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	var receivedUA string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

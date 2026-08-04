@@ -6,3 +6,11 @@ import "net"
 func SetLookupIPForTest(fn func(string) ([]net.IP, error)) func() {
 	return setLookupIPForTest(fn)
 }
+
+// AllowHostForTest bypasses the SSRF blocklist for one exact hostname (e.g.
+// a loopback httptest listener). Production code must never call this.
+func AllowHostForTest(host string) func() {
+	key := normalizeHost(host)
+	testAllowedHosts.Store(key, struct{}{})
+	return func() { testAllowedHosts.Delete(key) }
+}

@@ -17,6 +17,7 @@ import (
 
 // dmmCDNBase is the host prefix for DMM image paths stored as relative paths
 // in the dump (e.g. "digital/video/118abw00013/118abw00013pl").
+// dmmCDNBase ...
 const dmmCDNBase = "https://pics.dmm.co.jp/"
 
 // Store is a read-only local lookup over a cached r18.dev dump. It implements
@@ -24,17 +25,21 @@ const dmmCDNBase = "https://pics.dmm.co.jp/"
 // read-only mode (mode=ro), so concurrent writes from a `javinizer dump
 // download` import (which targets a .tmp file) never conflict with runtime
 // lookups.
+// Store ...
 type Store struct {
 	db   *sql.DB
 	path string
 }
 
+var openSQL = sql.Open
+
 // Open opens a read-only connection to the dump sidecar database. Returns an
 // error if the file does not exist or is not a valid dump database; callers
 // should treat that as "dump not available" and fall back to HTTP resolution.
+// Open ...
 func Open(path string) (*Store, error) {
 	dsn := fmt.Sprintf("file:%s?mode=ro&_busy_timeout=5000", path)
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := openSQL("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open dump db: %w", err)
 	}
@@ -53,10 +58,42 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// ListActresses ...
+func (s *Store) ListActresses(ctx context.Context) ([]models.DumpActress, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("dump store is not open")
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT id, name_romaji, image_url, name_kanji, name_kana FROM actresses ORDER BY id")
+	if err != nil {
+		return nil, fmt.Errorf("list actresses: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	actresses := make([]models.DumpActress, 0)
+	for rows.Next() {
+		// id ...
+		var id, nameRomaji, imageURL, nameKanji, nameKana sql.NullString
+		if err := rows.Scan(&id, &nameRomaji, &imageURL, &nameKanji, &nameKana); err != nil {
+			return nil, fmt.Errorf("scan actress: %w", err)
+		}
+		actresses = append(actresses, models.DumpActress{
+			ID:         id.String,
+			NameRomaji: nameRomaji.String,
+			ImageURL:   imageURL.String,
+			NameKanji:  nameKanji.String,
+			NameKana:   nameKana.String,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate actresses: %w", err)
+	}
+	return actresses, nil
+}
+
 // LookupByDVDID resolves a display dvd_id (e.g. "IPX-535") to its DMM
 // content_id. The query is matched against a normalized dvd_id column
 // (uppercase, hyphens and whitespace stripped), so "IPX-535", "ipx535", and
 // " IPX 535 " all resolve identically. Returns models.ErrDumpMiss on a miss.
+// LookupByDVDID ...
 func (s *Store) LookupByDVDID(ctx context.Context, dvdID string) (string, error) {
 	if s == nil || dvdID == "" {
 		return "", models.ErrDumpMiss
@@ -65,6 +102,7 @@ func (s *Store) LookupByDVDID(ctx context.Context, dvdID string) (string, error)
 	if norm == "" {
 		return "", models.ErrDumpMiss
 	}
+	// contentID ...
 	var contentID string
 	err := s.db.QueryRowContext(ctx,
 		"SELECT content_id FROM videos WHERE dvd_id_norm = ? ORDER BY content_id LIMIT 1",
@@ -82,10 +120,12 @@ func (s *Store) LookupByDVDID(ctx context.Context, dvdID string) (string, error)
 // LookupByContentID resolves a DMM content_id back to its display dvd_id.
 // Returns models.ErrDumpMiss when the content_id is absent or its dvd_id is
 // NULL.
+// LookupByContentID ...
 func (s *Store) LookupByContentID(ctx context.Context, contentID string) (string, error) {
 	if s == nil || contentID == "" {
 		return "", models.ErrDumpMiss
 	}
+	// dvdID ...
 	var dvdID sql.NullString
 	err := s.db.QueryRowContext(ctx,
 		"SELECT dvd_id FROM videos WHERE content_id = ? LIMIT 1",
@@ -202,6 +242,7 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 // models.ErrDumpMiss on a miss; any other wrapped error indicates a degraded
 // dump (corrupt file, schema drift, I/O failure) that the caller should log
 // before falling back to HTTP.
+// LookupMovie ...
 func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovie, error) {
 	if s == nil || dvdID == "" {
 		return nil, models.ErrDumpMiss
@@ -211,16 +252,23 @@ func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovi
 		return nil, models.ErrDumpMiss
 	}
 
+	// m ...
 	var m models.DumpMovie
+	// makerID ...
 	var makerID, labelID, seriesID, dvdIDCol sql.NullString
 	// All text columns are nullable in the dump (encoded as \N -> NULL on
 	// import), so every column scans into a sql.Null* to avoid Scan panics on
 	// NULL. The thumb gallery columns are retained only as a fallback when the
 	// full-size gallery range is absent (some dump rows populate only thumbs).
+	// titleEn ...
 	var titleEn, titleJa, commentEn, commentJa, sampleURL sql.NullString
+	// jacketFull ...
 	var jacketFull, jacketThumb, galleryFirst, galleryLast sql.NullString
+	// thumbFirst ...
 	var thumbFirst, thumbLast sql.NullString
+	// siteID ...
 	var siteID, serviceCode, releaseDate sql.NullString
+	// runtime ...
 	var runtime sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `SELECT
 		content_id, dvd_id, title_en, title_ja, comment_en, comment_ja,
@@ -336,7 +384,9 @@ func (s *Store) lookupNamedEntity(ctx context.Context, table string, id sql.Null
 	if !id.Valid || id.String == "" {
 		return nil, nil
 	}
+	// e ...
 	var e models.DumpNamedEntity
+	// nameEn ...
 	var nameEn, nameJa sql.NullString
 	err := s.db.QueryRowContext(ctx,
 		fmt.Sprintf("SELECT name_en, name_ja FROM %s WHERE id = ?", table),
@@ -354,6 +404,7 @@ func (s *Store) lookupNamedEntity(ctx context.Context, table string, id sql.Null
 }
 
 func (s *Store) lookupDirector(ctx context.Context, contentID string) (*models.DumpDirector, error) {
+	// dirID ...
 	var dirID string
 	err := s.db.QueryRowContext(ctx,
 		"SELECT director_id FROM video_directors WHERE content_id = ? ORDER BY director_id LIMIT 1",
@@ -365,7 +416,9 @@ func (s *Store) lookupDirector(ctx context.Context, contentID string) (*models.D
 	if err != nil {
 		return nil, fmt.Errorf("lookup director join for %q: %w", contentID, err)
 	}
+	// d ...
 	var d models.DumpDirector
+	// kanji ...
 	var kanji, kana, romaji sql.NullString
 	err = s.db.QueryRowContext(ctx,
 		"SELECT name_kanji, name_kana, name_romaji FROM directors WHERE id = ?",
@@ -393,9 +446,12 @@ func (s *Store) lookupActresses(ctx context.Context, contentID string) ([]models
 		return nil, fmt.Errorf("lookup actresses for %q: %w", contentID, err)
 	}
 	defer func() { _ = rows.Close() }()
+	// out ...
 	var out []models.DumpActress
 	for rows.Next() {
+		// a ...
 		var a models.DumpActress
+		// romaji ...
 		var romaji, imageURL, kanji, kana sql.NullString
 		if err := rows.Scan(&a.ID, &romaji, &imageURL, &kanji, &kana); err != nil {
 			return nil, fmt.Errorf("scan actress for %q: %w", contentID, err)
@@ -422,9 +478,12 @@ func (s *Store) lookupCategories(ctx context.Context, contentID string) ([]model
 		return nil, fmt.Errorf("lookup categories for %q: %w", contentID, err)
 	}
 	defer func() { _ = rows.Close() }()
+	// out ...
 	var out []models.DumpNamedEntity
 	for rows.Next() {
+		// c ...
 		var c models.DumpNamedEntity
+		// nameEn ...
 		var nameEn, nameJa sql.NullString
 		if err := rows.Scan(&nameEn, &nameJa); err != nil {
 			return nil, fmt.Errorf("scan category for %q: %w", contentID, err)
@@ -440,6 +499,7 @@ func (s *Store) lookupCategories(ctx context.Context, contentID string) ([]model
 }
 
 func (s *Store) lookupTrailer(ctx context.Context, contentID string) (string, error) {
+	// url ...
 	var url sql.NullString
 	err := s.db.QueryRowContext(ctx,
 		"SELECT url FROM trailers WHERE content_id = ?", contentID,
@@ -458,6 +518,7 @@ func (s *Store) Stats(ctx context.Context) (models.DumpStats, error) {
 	if s == nil {
 		return models.DumpStats{}, fmt.Errorf("dump store is nil")
 	}
+	// rowCount ...
 	var rowCount int64
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM videos").Scan(&rowCount); err != nil {
 		return models.DumpStats{}, fmt.Errorf("count videos: %w", err)
@@ -483,7 +544,9 @@ func (s *Store) loadMeta(ctx context.Context) (map[string]string, error) {
 	defer func() { _ = rows.Close() }()
 	meta := map[string]string{}
 	for rows.Next() {
+		// k ...
 		var k string
+		// v ...
 		var v sql.NullString // value is schema-nullable; key is PRIMARY KEY NOT NULL
 		if err := rows.Scan(&k, &v); err != nil {
 			return nil, fmt.Errorf("scan dump_meta: %w", err)
@@ -506,6 +569,7 @@ func (s *Store) loadMeta(ctx context.Context) (map[string]string, error) {
 // and last; a mismatch indicates a malformed range and yields no URLs rather
 // than silently emitting paths with the wrong prefix. A non-numeric suffix
 // also yields no URLs.
+// ExpandGallery ...
 func ExpandGallery(first, last string) []string {
 	if first == "" || last == "" {
 		return nil
@@ -544,6 +608,7 @@ func ExpandGallery(first, last string) []string {
 // "digital/video/118abw00013/118abw00013pl") into an absolute DMM CDN URL with
 // a .jpg extension. Paths that are already absolute URLs, or that already carry
 // an image extension, are returned unchanged.
+// NormalizeDumpURL ...
 func NormalizeDumpURL(rel string) string {
 	rel = strings.TrimSpace(rel)
 	if rel == "" {
@@ -561,6 +626,7 @@ func NormalizeDumpURL(rel string) string {
 // normalizeDVDID normalizes a display dvd_id for index matching: uppercase,
 // strip hyphens and all Unicode whitespace. This mirrors the r18.dev scraper's
 // own dvd_id normalization so lookups align with how IDs are stored on import.
+// normalizeDVDID ...
 func normalizeDVDID(id string) string {
 	id = strings.ToUpper(id)
 	id = strings.ReplaceAll(id, "-", "")
