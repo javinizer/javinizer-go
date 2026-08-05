@@ -76,7 +76,7 @@ func TestAllowedHostLookupFailurePropagatesRaw(t *testing.T) {
 	defer undo()
 	cleanup := SetLookupIPForTest(func(string) ([]net.IP, error) { return nil, errors.New("lookup boom") })
 	defer cleanup()
-	_, err := resolvePublicIPs("probe.invalid")
+	_, err := resolvePublicIPs(context.Background(), "probe.invalid")
 	if err == nil || err.Error() != "lookup boom" {
 		t.Errorf("allowed-host lookup error must propagate raw, got %v", err)
 	}

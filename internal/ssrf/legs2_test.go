@@ -25,11 +25,11 @@ func TestResolvePublicIPsAllowedHostCorners(t *testing.T) {
 		return nil, errors.New("nope")
 	})
 	defer cleanup()
-	if _, err := resolvePublicIPs("empty-answer.example"); err == nil {
+	if _, err := resolvePublicIPs(context.Background(), "empty-answer.example"); err == nil {
 		t.Error("empty answers must error")
 	}
 	// Allowed host with failing lookup still surfaces the lookup error.
-	if _, err := resolvePublicIPs("literal-bypass.example"); err == nil {
+	if _, err := resolvePublicIPs(context.Background(), "literal-bypass.example"); err == nil {
 		t.Error("lookup failure must propagate")
 	}
 }
@@ -39,7 +39,7 @@ func TestResolvePublicIPsAllowedLiteralFallsBackToParse(t *testing.T) {
 	defer undo()
 	cleanup := SetLookupIPForTest(func(string) ([]net.IP, error) { return nil, nil })
 	defer cleanup()
-	ips, err := resolvePublicIPs("127.0.0.5")
+	ips, err := resolvePublicIPs(context.Background(), "127.0.0.5")
 	if err != nil || len(ips) != 1 {
 		t.Fatalf("literal fallback failed: %v %v", ips, err)
 	}

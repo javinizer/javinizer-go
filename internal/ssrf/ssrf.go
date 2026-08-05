@@ -15,7 +15,9 @@ import (
 
 var (
 	lookupIPMu sync.RWMutex
-	lookupIP   = net.LookupIP
+	lookupIP   = func(ctx context.Context, host string) ([]net.IP, error) {
+		return net.DefaultResolver.LookupIP(ctx, "ip", host)
+	}
 )
 
 // testAllowedHosts are exact hostnames the guard bypasses for tests.
@@ -26,7 +28,7 @@ func setLookupIPForTest(fn func(string) ([]net.IP, error)) func() {
 	lookupIPMu.Lock()
 	defer lookupIPMu.Unlock()
 	original := lookupIP
-	lookupIP = fn
+	lookupIP = func(_ context.Context, host string) ([]net.IP, error) { return fn(host) }
 	return func() {
 		lookupIPMu.Lock()
 		defer lookupIPMu.Unlock()
@@ -34,7 +36,7 @@ func setLookupIPForTest(fn func(string) ([]net.IP, error)) func() {
 	}
 }
 
-func currentLookupIP() func(string) ([]net.IP, error) {
+func currentLookupIP() func(context.Context, string) ([]net.IP, error) {
 	lookupIPMu.RLock()
 	defer lookupIPMu.RUnlock()
 	return lookupIP
@@ -168,9 +170,9 @@ func (e *UnverifiableHostError) Unwrap() error { return e.Err }
 // resolvePublicIPs resolves host and verifies every answer is public. A
 // literal IP skips resolution. DNS failure yields *UnverifiableHostError;
 // blocked answers yield *BlockedTargetError.
-func resolvePublicIPs(host string) ([]net.IP, error) {
+func resolvePublicIPs(ctx context.Context, host string) ([]net.IP, error) {
 	if hostAllowedForTest(host) {
-		ips, err := currentLookupIP()(host)
+		ips, err := currentLookupIP()(ctx, host)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +190,7 @@ func resolvePublicIPs(host string) ([]net.IP, error) {
 		}
 		return []net.IP{ip}, nil
 	}
-	ips, err := currentLookupIP()(host)
+	ips, err := currentLookupIP()(ctx, host)
 	if err != nil {
 		return nil, &UnverifiableHostError{Host: host, Err: err}
 	}
@@ -222,8 +224,7 @@ func CheckTarget(ctx context.Context, u *url.URL) error {
 	if HostIPLiteral(host) != nil {
 		return nil
 	}
-	_ = ctx // resolution seams do not take a context; the parameter stabilizes the API
-	_, err := resolvePublicIPs(host)
+	_, err := resolvePublicIPs(ctx, host)
 	return err
 }
 
@@ -260,7 +261,7 @@ func dialPinned(ctx context.Context, network, addr string, fallback func(context
 	if hostAllowedForTest(host) {
 		return fallback(ctx, network, addr)
 	}
-	ips, err := resolvePublicIPs(host)
+	ips, err := resolvePublicIPs(ctx, host)
 	if err != nil {
 		return nil, err
 	}

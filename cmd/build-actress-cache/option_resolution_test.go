@@ -3,14 +3,19 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
+	"image"
+	"image/png"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/actresscache"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -66,6 +71,38 @@ func TestRunRefusesToPublishEmptyCache(t *testing.T) {
 	require.ErrorContains(t, err, "refusing to publish empty actress cache")
 	_, statErr := os.Stat(output)
 	assert.True(t, os.IsNotExist(statErr), "no empty artifact must be written")
+}
+
+// The runtime projection drops candidates with no DMM ID, no names, and no
+// aliases (e.g. an r18.dev dump row carrying only a SourceID); the publish
+// path must refuse instead of writing an empty runtime artifact.
+func TestRunRefusesToPublishIdentitylessProjection(t *testing.T) {
+	dir := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		require.NoError(t, png.Encode(w, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	}))
+	defer server.Close()
+	dumpPath := filepath.Join(dir, "dump.db")
+	db, err := sql.Open("sqlite3", dumpPath)
+	require.NoError(t, err)
+	_, err = db.Exec("CREATE TABLE actresses (id TEXT, name_romaji TEXT, image_url TEXT, name_kanji TEXT, name_kana TEXT)")
+	require.NoError(t, err)
+	_, err = db.Exec("INSERT INTO actresses VALUES ('k001', '', '" + server.URL + "/thumb.png', '', '')")
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	state := filepath.Join(dir, "state.jsonl")
+	output := filepath.Join(dir, "out.json.gz")
+	var stdout, stderr bytes.Buffer
+	err = run(t.Context(), []string{
+		"--source", "r18dev", "--option", "r18dev.dump=" + dumpPath,
+		"--output", output, "--state", state,
+		"--min-dimension", "1", "--delay", "0", "--image-delay", "0", "--workers", "1", "--allow-private-hosts",
+	}, &stdout, &stderr)
+	require.ErrorContains(t, err, "zero projected records")
+	_, statErr := os.Stat(output)
+	assert.True(t, os.IsNotExist(statErr))
 }
 func TestRunPropagatesFetcherConstructionError(t *testing.T) {
 	original := newFetcherWithOptions

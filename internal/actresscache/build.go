@@ -51,6 +51,10 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	if maxBytes <= 0 {
 		maxBytes = 2 << 20
 	}
+	// Policy fingerprint: journaled entries record it, so rejected entries
+	// re-evaluate when the operator changes validation thresholds or safety
+	// mode. Reused ok entries are RECHECKED against current thresholds anyway.
+	policyKey := fmt.Sprintf("%d/%d/%t", minDimension, maxBytes, options.AllowPrivateHosts)
 	validator := options.ValidateThumbnail
 	if validator == nil {
 		if options.SourceOptions.Fetcher == nil {
@@ -106,7 +110,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 				return nil
 			}
 		}
-		err := recordFailure(state, candidate, failure, &mu, &report)
+		err := recordFailure(state, candidate, failure, policyKey, &mu, &report)
 		if err == nil && options.Refresh {
 			mu.Lock()
 			delete(candidates, candidate.Key)
@@ -132,7 +136,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 			if !ok {
 				return false
 			}
-			if entry.Status == stateStatusRejected {
+			if entry.Status == stateStatusRejected && entry.Policy == policyKey {
 				return true
 			}
 			return entry.Status == stateStatusOK && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(&entry, minDimension, maxBytes, options.AllowPrivateHosts)
@@ -223,6 +227,11 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	if options.Refresh && report.Failed > 0 {
 		return Cache{}, report, fmt.Errorf("refresh encountered %d transient failures; refusing to publish incomplete cache", report.Failed)
 	}
+	// Pruning decision is made fully in-memory first; journal writes happen
+	// only after we know a publish WILL occur (an empty survivor set aborts
+	// the build, so last-good journal entries must not be staled by a run
+	// that never produced output).
+	staleKeysAll := make([]string, 0)
 	for _, sourceName := range sources {
 		mu.Lock()
 		complete := completedSources[sourceName]
@@ -230,7 +239,6 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 		for key := range seenBySource[sourceName] {
 			seen[key] = struct{}{}
 		}
-		staleKeys := make([]string, 0)
 		if complete {
 			for key, candidate := range candidates {
 				if candidate.Candidate.Source != sourceName {
@@ -240,25 +248,22 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 					continue
 				}
 				delete(candidates, key)
-				staleKeys = append(staleKeys, key)
+				staleKeysAll = append(staleKeysAll, key)
 				if _, reused := initialKeys[key]; reused {
 					report.Cached--
 				}
 			}
 		}
 		mu.Unlock()
-		for _, key := range staleKeys {
-			entry, ok := state.get(key)
-			if !ok || entry.Status != stateStatusOK {
-				continue
-			}
-			entry.Status = "stale"
-			entry.CheckedAt = time.Now().UTC().Format(time.RFC3339)
-			entry.Error = "candidate was not present in source enumeration"
-			if err := state.append(entry); err != nil {
-				return Cache{}, report, fmt.Errorf("write stale state for %s: %w", key, err)
-			}
-		}
+	}
+	if len(candidates) == 0 && len(staleKeysAll) > 0 {
+		// Publishing is empty AND pruning would orphan the journal into that
+		// empty publish. Refuse transactionally: no stale lines were written,
+		// so last-good entries stay reusable for the next run.
+		return Cache{}, report, fmt.Errorf("refusing to publish empty actress cache (sources: %s)", strings.Join(sources, ","))
+	}
+	if err := markStale(state, staleKeysAll); err != nil {
+		return Cache{}, report, err
 	}
 
 	// Entries revalidated under refresh are not reuse. revalidatedKeys ⊆
@@ -285,6 +290,28 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	}
 	report.Records = len(cache.Records)
 	return cache, report, nil
+}
+
+// markStale is the seam point for journal stale-marking failures in tests.
+var markStale = markStaleEntries
+
+// markStaleEntries journals "stale" for previously-ok entries whose source
+// stopped enumerating them. Runs only after the publish decision (a refused
+// empty publish must not touch the journal).
+func markStaleEntries(state *stateStore, keys []string) error {
+	for _, key := range keys {
+		entry, ok := state.get(key)
+		if !ok || entry.Status != stateStatusOK {
+			continue
+		}
+		entry.Status = "stale"
+		entry.CheckedAt = time.Now().UTC().Format(time.RFC3339)
+		entry.Error = "candidate was not present in source enumeration"
+		if err := state.append(entry); err != nil {
+			return fmt.Errorf("write stale state for %s: %w", key, err)
+		}
+	}
+	return nil
 }
 
 // normalizeSources ...
@@ -378,13 +405,14 @@ func classifyStateFailure(candidate Candidate, failure error) string {
 }
 
 // recordFailure ...
-func recordFailure(state *stateStore, candidate Candidate, failure error, mu *sync.Mutex, report *BuildReport) error {
+func recordFailure(state *stateStore, candidate Candidate, failure error, policy string, mu *sync.Mutex, report *BuildReport) error {
 	status := classifyStateFailure(candidate, failure)
 	entry := StateEntry{
 		Key:       candidate.Key,
 		Status:    status,
 		CheckedAt: time.Now().UTC().Format(time.RFC3339),
 		Candidate: candidatePtr(candidate),
+		Policy:    policy,
 		Error:     failure.Error(),
 	}
 	if err := state.append(entry); err != nil {

@@ -67,7 +67,9 @@ func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, min
 			if statusErr.IsTransient() {
 				return ThumbnailValidation{}, err
 			}
-			return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: statusErr.Error()}
+			// Keep the typed HTTPError in the chain: classification inspects
+			// the status code (e.g. r18dev fabricated-thumb 404s are transient).
+			return ThumbnailValidation{}, fmt.Errorf("%w: %w", &ThumbnailRejectedError{Reason: statusErr.Error()}, err)
 		}
 		var unverifiable *ssrf.UnverifiableHostError
 		if errors.As(err, &unverifiable) {
