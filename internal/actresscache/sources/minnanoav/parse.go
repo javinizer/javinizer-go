@@ -108,26 +108,7 @@ func parseDMMActressID(doc *goquery.Document) int {
 	doc.Find("a[href]").EachWithBreak(func(_ int, link *goquery.Selection) bool {
 		href := html.UnescapeString(strings.TrimSpace(link.AttrOr("href", "")))
 		href = resolveAffiliateChain(href)
-		// Follow the redirect chain DOWN to the innermost link target before
-		// trusting it: a dmm affiliate URL that wraps a non-DMM target must
-		// not mint a DMM ID for the wrapped host.
-		target := href
-		for range 4 {
-			parsed, parseErr := url.Parse(target)
-			if parseErr != nil {
-				return true
-			}
-			inner := strings.TrimSpace(parsed.Query().Get("lurl"))
-			if inner == "" {
-				break
-			}
-			next, decErr := url.QueryUnescape(inner)
-			if decErr != nil {
-				return true
-			}
-			target = next
-		}
-		parsed, err := url.Parse(target)
+		parsed, err := url.Parse(href)
 		if err != nil {
 			return true
 		}
