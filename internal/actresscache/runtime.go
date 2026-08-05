@@ -193,6 +193,13 @@ func atomicReplace(src, dst string) error {
 		// (only Windows' rename-over-existing needs the remove+retry fallback).
 		return err
 	}
+	// Even on Windows, remove+retry is only for the replace-collision class
+	// (destination exists / locked by a reader). Missing source, genuine
+	// permission failures, and cross-volume moves cannot be healed by
+	// deleting dst first -- doing so would destroy the last-good artifact.
+	if !errors.Is(err, os.ErrExist) && !errors.Is(err, os.ErrPermission) {
+		return err
+	}
 	if rmErr := atomicRemove(dst); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 		return rmErr
 	}
