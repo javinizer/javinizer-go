@@ -77,6 +77,29 @@ func parseDMMActressID(doc *goquery.Document) int {
 			}
 			href = decoded
 		}
+		parsed, err := url.Parse(href)
+		if err != nil {
+			return true
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if host == "" {
+			// Relative link on a minnanoav profile: only the path-shaped DMM
+			// article form (/list/=/article=actress/id=N/) means a DMM anchor.
+			match := dmmActressArticleIDPattern.FindStringSubmatch(href)
+			if len(match) != 2 {
+				return true
+			}
+			id, _ = strconv.Atoi(match[1])
+			return false
+		}
+		// The candidate's authoritative ID may only come from DMM/FANZA
+		// actress links; unrelated sites also use ?actress=. Restrict extraction
+		// to those domains before pattern-matching the ID.
+		if host != "dmm.co.jp" && host != "www.dmm.co.jp" &&
+			host != "video.dmm.co.jp" && host != "al.dmm.co.jp" &&
+			host != "tv.dmm.co.jp" && !strings.HasSuffix(host, ".dmm.co.jp") {
+			return true
+		}
 		match := dmmActressIDPattern.FindStringSubmatch(href)
 		if len(match) != 2 {
 			match = dmmActressArticleIDPattern.FindStringSubmatch(href)
