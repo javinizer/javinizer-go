@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,4 +79,28 @@ func TestRejectSharedArtifactPathsCaseFolding(t *testing.T) {
 		output: filepath.Join(dir, "cache.json.gz"),
 		state:  filepath.Join(dir, "CACHE.JSON.GZ"),
 	}))
+}
+
+// Symlinked spellings of an artifact must collide with the real path, and
+// symlinked PARENTS must too (cache/state leaves usually do not exist yet).
+func TestRejectSharedArtifactPathsResolvesSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	require.NoError(t, os.Mkdir(real, 0o755))
+	link := filepath.Join(dir, "link")
+	require.NoError(t, os.Symlink(real, link))
+
+	// Existing leaf: state is the real journal file; output points at it
+	// through the symlink.
+	journal := filepath.Join(real, "state.jsonl")
+	require.NoError(t, os.WriteFile(journal, []byte("{}"), 0o600))
+	err := rejectSharedArtifactPaths(options{output: filepath.Join(link, "state.jsonl"), state: journal})
+	require.Error(t, err)
+
+	// Not-yet-created files inside a symlinked DIRECTORY collide as well.
+	err = rejectSharedArtifactPaths(options{output: filepath.Join(link, "fresh.json"), state: filepath.Join(real, "fresh.json")})
+	require.Error(t, err)
+
+	// Legitimately distinct neighbors stay accepted.
+	require.NoError(t, rejectSharedArtifactPaths(options{output: filepath.Join(link, "cache.json.gz"), state: filepath.Join(real, "state.jsonl")}))
 }

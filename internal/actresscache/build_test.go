@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -648,4 +649,25 @@ func TestBuildPruneSweepSkipsIneligibleEntries(t *testing.T) {
 	_, report, err := Build(context.Background(), options)
 	require.NoError(t, err)
 	assert.Empty(t, report.StaleKeys, "tombstoned/seen/cross-source entries are not newly staled")
+}
+
+// Cancellation arriving while validation is in flight (after enumeration
+// finished) must abort the build instead of publishing a partial cache:
+// built-in sources can convert context.Canceled into per-candidate failures
+// and still return nil from Collect.
+func TestBuildAbortsWhenContextCanceledMidValidation(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.jsonl")
+	source := &testSource{name: "test", candidates: []Candidate{
+		{Key: "test:a", Source: "test", DMMID: 501, ThumbURL: "https://cdn.test/a.jpg"},
+		{Key: "test:b", Source: "test", DMMID: 502, ThumbURL: "https://cdn.test/b.jpg"},
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	var once sync.Once
+	validator := func(_ context.Context, c Candidate) (ThumbnailValidation, error) {
+		once.Do(func() { cancel() }) // outer cancellation mid-flight
+		return ThumbnailValidation{CheckedAt: "now", SHA256: c.Key, Bytes: 1024, Width: 100, Height: 100}, nil
+	}
+	_, _, err := Build(ctx, BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: validator})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }

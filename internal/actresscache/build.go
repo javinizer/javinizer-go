@@ -227,6 +227,13 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	if sourceErr != nil {
 		return Cache{}, report, sourceErr
 	}
+	// Built-in sources can persist context.Canceled as a per-candidate failure
+	// and STILL complete (returning nil), so an outer cancellation arrived
+	// mid-validation would otherwise sail through with a partial cache and the
+	// CLI would publish it. Context errors are never publishable.
+	if err := ctx.Err(); err != nil {
+		return Cache{}, report, fmt.Errorf("build canceled before publish: %w", err)
+	}
 	if options.Refresh && report.Failed > 0 {
 		return Cache{}, report, fmt.Errorf("refresh encountered %d transient failures; refusing to publish incomplete cache", report.Failed)
 	}
