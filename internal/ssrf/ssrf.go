@@ -361,16 +361,35 @@ func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
 // resolution (SOCKS5 via x/net/proxy installs DialContext while
 // http.Transport.Proxy stays nil, so policy code cannot rely on Proxy != nil
 // or on named-func method detection -- Go erases either at assignment).
-var remoteDNSTransports sync.Map // *http.Transport → struct{}
+// Bounded with FIFO eviction: short-lived transports (admin proxy-test
+// clicks recreate one per attempt) must not grow process memory forever.
+const maxRemoteDNSTransports = 256
+
+var remoteDNSRegistry = struct {
+	sync.Mutex
+	set   map[*http.Transport]struct{}
+	order []*http.Transport
+}{set: make(map[*http.Transport]struct{})}
 
 // MarkRemoteDNSTransport declares that tr's dial path resolves names
 // remotely. Wrappers must preserve hostnames (never locally pin), while
-// still blocking private IP literals. Registered at construction time by
-// httpclient for SOCKS5 transports; respects one entry per proxy config.
+// still blocking private IP literals. Re-marking the same pointer is a no-op.
 func MarkRemoteDNSTransport(tr *http.Transport) {
-	if tr != nil {
-		remoteDNSTransports.Store(tr, struct{}{})
+	if tr == nil {
+		return
 	}
+	remoteDNSRegistry.Lock()
+	defer remoteDNSRegistry.Unlock()
+	if _, exists := remoteDNSRegistry.set[tr]; exists {
+		return
+	}
+	for len(remoteDNSRegistry.order) >= maxRemoteDNSTransports {
+		oldest := remoteDNSRegistry.order[0]
+		remoteDNSRegistry.order = remoteDNSRegistry.order[1:]
+		delete(remoteDNSRegistry.set, oldest)
+	}
+	remoteDNSRegistry.set[tr] = struct{}{}
+	remoteDNSRegistry.order = append(remoteDNSRegistry.order, tr)
 }
 
 // TransportResolvesRemotely reports whether tr's dial path owns DNS. Check
@@ -379,7 +398,9 @@ func TransportResolvesRemotely(tr *http.Transport) bool {
 	if tr == nil {
 		return false
 	}
-	_, ok := remoteDNSTransports.Load(tr)
+	remoteDNSRegistry.Lock()
+	defer remoteDNSRegistry.Unlock()
+	_, ok := remoteDNSRegistry.set[tr]
 	return ok
 }
 

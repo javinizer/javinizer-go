@@ -484,19 +484,32 @@ func validateImageTarget(ctx context.Context, rawURL string, remoteDNS bool) err
 	if !remoteDNS {
 		return ssrf.CheckTarget(ctx, parsed)
 	}
-	// Remote-DNS (SOCKS5) transports resolve on the proxy: local DNS can
-	// neither prove nor disprove what the proxy will get. Keep the lexical
-	// guard: scheme, non-empty host, and private IP literals are knowable.
-	if parsed.Scheme != "http" && parsed.Scheme != httpsScheme {
-		return &ssrf.BlockedTargetError{Target: parsed.String(), Reason: "non-http(s) scheme"}
+	return lexicalImageTargetCheck(parsed)
+}
+
+// lexicalImageTargetCheck is the DNS-free shape guard used for remote-DNS
+// (SOCKS5) clients: local resolution cannot prove what the proxy will get,
+// but scheme, host presence, and private literals are knowable without DNS.
+func lexicalImageTargetCheck(u *url.URL) error {
+	if u.Scheme != "http" && u.Scheme != httpsScheme {
+		return &ssrf.BlockedTargetError{Target: u.String(), Reason: "non-http(s) scheme"}
 	}
-	if parsed.Hostname() == "" {
-		return &ssrf.BlockedTargetError{Target: parsed.String(), Reason: "empty host"}
+	if u.Hostname() == "" {
+		return &ssrf.BlockedTargetError{Target: u.String(), Reason: "empty host"}
 	}
-	if ssrf.IsBlockedHost(parsed.Hostname()) {
-		return &ssrf.BlockedTargetError{Target: parsed.Hostname(), Reason: "lexically private/loopback host or literal"}
+	if ssrf.IsBlockedHost(u.Hostname()) {
+		return &ssrf.BlockedTargetError{Target: u.Hostname(), Reason: "lexically private/loopback host or literal"}
 	}
 	return nil
+}
+
+// checkImageTargetHop validates a redirect hop with the same remote-DNS
+// contract the initial-URL preflight uses.
+func checkImageTargetHop(ctx context.Context, u *url.URL, remoteDNS bool) error {
+	if remoteDNS {
+		return lexicalImageTargetCheck(u)
+	}
+	return ssrf.CheckTarget(ctx, u)
 }
 
 // ValidateRemoteImage ...
@@ -556,7 +569,7 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 		if len(via) >= 10 {
 			return fmt.Errorf("stopped after 10 redirects")
 		}
-		if err := ssrf.CheckTarget(req.Context(), req.URL); err != nil {
+		if err := checkImageTargetHop(req.Context(), req.URL, remoteDNS); err != nil {
 			return err
 		}
 		if previousCheckRedirect != nil {
@@ -565,7 +578,7 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 			}
 			// Caller redirect policies may REWRITE req.URL before approving the
 			// hop; validate the final target, not just the pre-callback one.
-			return ssrf.CheckTarget(req.Context(), req.URL)
+			return checkImageTargetHop(req.Context(), req.URL, remoteDNS)
 		}
 		return nil
 	}
