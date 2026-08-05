@@ -222,6 +222,14 @@ func rejectSharedArtifactPaths(opts options) error {
 		} else {
 			key = filepath.Clean(path)
 		}
+		// Symlinks (and symlinked parents) alias too: journal reads through a
+		// symlinked --state while the writer renames over its real path would
+		// corrupt the resume journal, so resolve what exists.
+		if resolved, err := filepath.EvalSymlinks(key); err == nil {
+			key = resolved
+		} else if resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(key)); err == nil {
+			key = filepath.Join(resolvedParent, filepath.Base(key))
+		}
 		// Windows and most macOS volumes are case-insensitive: differently
 		// cased spellings then name the SAME artifact, and a positional
 		// string match would let the runtime writer clobber the journal.
