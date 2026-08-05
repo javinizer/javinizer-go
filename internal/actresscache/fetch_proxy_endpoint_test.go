@@ -160,3 +160,11 @@ func TestProxyDialExemptionFailsOnEmptyAnswers(t *testing.T) {
 	assert.NotErrorIs(t, err, sentinel)
 	assert.Contains(t, err.Error(), "no addresses")
 }
+
+func TestCanonicalProxyDialTargetSchemeDefaults(t *testing.T) {
+	assert.Equal(t, "proxy.example:443", canonicalProxyDialTarget("https", "Proxy.EXAMPLE", ""))
+	assert.Equal(t, "proxy.example:1080", canonicalProxyDialTarget("socks5", "proxy.example", ""))
+	assert.Equal(t, "proxy.example:1080", canonicalProxyDialTarget("socks5h", "proxy.example", ""))
+	assert.Equal(t, "proxy.example:80", canonicalProxyDialTarget("http", "proxy.example", ""))
+	assert.Equal(t, "proxy.example:8443", canonicalProxyDialTarget("http", "proxy.example", "8443"))
+}
