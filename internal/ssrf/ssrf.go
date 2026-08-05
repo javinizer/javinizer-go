@@ -368,17 +368,27 @@ func DialContextFunc(transport *http.Transport) func(ctx context.Context, networ
 				conn net.Conn
 				err  error
 			}
-			result := make(chan outcome, 1)
+			result := make(chan outcome)
+			abandoned := make(chan struct{})
 			go func() {
 				conn, err := legacy(network, addr)
-				result <- outcome{conn, err}
+				select {
+				case result <- outcome{conn, err}:
+				case <-abandoned:
+					// The caller already gave up: a late-arriving connection
+					// must be closed by the owner that created it, not leaked.
+					if conn != nil {
+						_ = conn.Close()
+					}
+				}
 			}()
 			select {
 			case o := <-result:
 				return o.conn, o.err
 			case <-ctx.Done():
-				// Legacy Dial cannot be canceled; the abandoned goroutine
-				// settles when the OS dial returns.
+				// Legacy Dial cannot be canceled: abandon, and let the goroutine
+				// close whatever eventually arrives.
+				close(abandoned)
 				return nil, ctx.Err()
 			}
 		}

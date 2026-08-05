@@ -335,3 +335,24 @@ func TestDialContextFuncAdaptsLegacyDial(t *testing.T) {
 	// Neither: a default dialer is returned.
 	assert.NotNil(t, DialContextFunc(&http.Transport{}))
 }
+
+// A canceled caller abandons the legacy dial; when it completes LATE with a
+// live connection, that connection must be closed instead of leaking an fd.
+func TestDialContextFuncClosesLateLegacyResults(t *testing.T) {
+	connA, connB := net.Pipe()
+	defer func() { _ = connB.Close() }()
+	release := make(chan struct{})
+	legacy := &http.Transport{Dial: func(string, string) (net.Conn, error) { //nolint:staticcheck // fixture
+		<-release
+		return connA, nil
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := DialContextFunc(legacy)(ctx, "tcp", "late.example:443")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	close(release)
+	require.Eventually(t, func() bool {
+		_, werr := connA.Write([]byte{0})
+		return werr != nil
+	}, 2*time.Second, 5*time.Millisecond, "late legacy result must be closed once abandoned")
+}
