@@ -163,7 +163,12 @@ func WriteRuntimeFile(path string, cache Cache) error {
 
 // runtimeRecordHasIdentity ...
 func runtimeRecordHasIdentity(record Record) bool {
-	return record.DMMID > 0 || strings.TrimSpace(record.JapaneseName) != "" || strings.TrimSpace(record.FirstName+" "+record.LastName) != "" || len(record.Aliases) > 0
+	// Mirror Lookup's reachability exactly: a DMM ID, a Japanese name (alias
+	// or canonical), or BOTH romanized name parts — Lookup refuses a single
+	// romanized part (it collides with mononymous/stage-name records), so
+	// single-part records would be embedded but unfindable.
+	romanized := strings.TrimSpace(record.FirstName) != "" && strings.TrimSpace(record.LastName) != ""
+	return record.DMMID > 0 || strings.TrimSpace(record.JapaneseName) != "" || romanized || len(record.Aliases) > 0
 }
 
 // runtimeThumbnailURL ...
