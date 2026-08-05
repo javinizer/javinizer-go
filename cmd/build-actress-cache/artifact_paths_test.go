@@ -57,3 +57,25 @@ func TestRejectSharedArtifactPathsAbsFailureFallback(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must name distinct paths")
 }
+
+// Case-insensitive filesystems: differently-cased spellings of the same file
+// must collide; with folding off (case-sensitive volumes) they stay distinct.
+func TestRejectSharedArtifactPathsCaseFolding(t *testing.T) {
+	original := artifactKeysFoldCase
+	t.Cleanup(func() { artifactKeysFoldCase = original })
+	dir := t.TempDir()
+
+	artifactKeysFoldCase = true
+	err := rejectSharedArtifactPaths(options{
+		output: filepath.Join(dir, "cache.json.gz"),
+		state:  filepath.Join(dir, "CACHE.JSON.GZ"),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must name distinct paths")
+
+	artifactKeysFoldCase = false
+	assert.NoError(t, rejectSharedArtifactPaths(options{
+		output: filepath.Join(dir, "cache.json.gz"),
+		state:  filepath.Join(dir, "CACHE.JSON.GZ"),
+	}))
+}

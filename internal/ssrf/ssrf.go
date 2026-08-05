@@ -301,10 +301,9 @@ func NewPinnedDialTransport(base *http.Transport) (*http.Transport, error) {
 		return nil, errors.New("SSRF: transports with DialTLSContext/DialTLS cannot be pinned")
 	}
 	clone := base.Clone()
-	fallback := clone.DialContext
-	if fallback == nil {
-		fallback = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-	}
+	// Honor a legacy-only Dial hook: assigning DialContext while ignoring it
+	// would silently discard the caller's configured dialer.
+	fallback := DialContextFunc(clone)
 	// NewPinnedDialTransport keeps IP-pinning semantics even when the original
 	// had a proxy (the proxy itself gets pinned) — its callers are hardened
 	// wrapper paths, not SOCKS-compat ones.

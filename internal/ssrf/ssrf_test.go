@@ -356,3 +356,23 @@ func TestDialContextFuncClosesLateLegacyResults(t *testing.T) {
 		return werr != nil
 	}, 2*time.Second, 5*time.Millisecond, "late legacy result must be closed once abandoned")
 }
+
+// NewPinnedDialTransport must honor a legacy-only Dial hook (not discard it
+// for a default dialer), and the hook receives the PINNED address.
+func TestNewPinnedDialTransportHonorsLegacyDial(t *testing.T) {
+	cleanup := SetLookupIPForTest(func(string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	})
+	defer cleanup()
+	sentinel := errors.New("legacy dialed")
+	var dialed string
+	base := &http.Transport{Dial: func(network, addr string) (net.Conn, error) { //nolint:staticcheck // exercising the legacy seam
+		dialed = addr
+		return nil, sentinel
+	}}
+	wrapped, err := NewPinnedDialTransport(base)
+	require.NoError(t, err)
+	_, err = wrapped.DialContext(context.Background(), "tcp", "media.example:443")
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, "93.184.216.34:443", dialed)
+}
