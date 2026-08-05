@@ -37,8 +37,10 @@ func TestAtomicReplaceFallbacksNative(t *testing.T) {
 
 // Gate: remove(dst) reports a hard error — propagate it, don't retry.
 func TestAtomicReplaceRemoveFailureLeg(t *testing.T) {
-	originalR, originalM := atomicRename, atomicRemove
-	t.Cleanup(func() { atomicRename, atomicRemove = originalR, originalM })
+	originalR, originalM, originalOS := atomicRename, atomicRemove, replaceIsWindows
+	t.Cleanup(func() { atomicRename, atomicRemove, replaceIsWindows = originalR, originalM, originalOS })
+	// Exercise the Windows-only fallback deterministically on any host OS.
+	replaceIsWindows = true
 	first := true
 	atomicRename = func(_, _ string) error {
 		if first {
@@ -58,8 +60,10 @@ func TestAtomicReplaceRemoveFailureLeg(t *testing.T) {
 // Gate: remove(dst) races a concurrent delete — the remove-gets-ENOENT path
 // must skip the failure entirely and re-run rename.
 func TestAtomicReplaceRemoveNotExistLeg(t *testing.T) {
-	originalR, originalM := atomicRename, atomicRemove
-	t.Cleanup(func() { atomicRename, atomicRemove = originalR, originalM })
+	originalR, originalM, originalOS := atomicRename, atomicRemove, replaceIsWindows
+	t.Cleanup(func() { atomicRename, atomicRemove, replaceIsWindows = originalR, originalM, originalOS })
+	// Exercise the Windows-only fallback deterministically on any host OS.
+	replaceIsWindows = true
 	calls := 0
 	atomicRename = func(_, _ string) error {
 		calls++
@@ -74,4 +78,26 @@ func TestAtomicReplaceRemoveNotExistLeg(t *testing.T) {
 	require.NoError(t, os.WriteFile(src, []byte("x"), 0o600))
 	require.NoError(t, atomicReplace(src, dst))
 	assert.GreaterOrEqual(t, calls, 2)
+}
+
+// Non-Windows rename failures are final: dst (the committed artifact) must
+// never be removed for unrelated errors like cross-device or permission
+// failures -- the retry could not succeed anyway.
+func TestAtomicReplacePreservesDstOnNonWindowsRenameFailure(t *testing.T) {
+	originalR, originalM, originalOS := atomicRename, atomicRemove, replaceIsWindows
+	t.Cleanup(func() { atomicRename, atomicRemove, replaceIsWindows = originalR, originalM, originalOS })
+	replaceIsWindows = false
+	removeCalls := 0
+	atomicRename = func(_, _ string) error { return errors.New("cross-device link") }
+	atomicRemove = func(string) error { removeCalls++; return nil }
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "tmp"), filepath.Join(dir, "committed.json")
+	require.NoError(t, os.WriteFile(src, []byte("pending"), 0o600))
+	require.NoError(t, os.WriteFile(dst, []byte("committed"), 0o600))
+	err := atomicReplace(src, dst)
+	require.ErrorContains(t, err, "cross-device link")
+	assert.Equal(t, 0, removeCalls, "POSIX must never destroy dst on rename failure")
+	got, readErr := os.ReadFile(dst)
+	require.NoError(t, readErr)
+	assert.Equal(t, "committed", string(got))
 }

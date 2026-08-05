@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -176,13 +177,21 @@ func runtimeRecordHasIdentity(record Record) bool {
 // already exists, so it falls back to remove-then-rename. The fallback is not
 // atomic, but the short window opens only when replacing a committed artifact.
 var (
-	atomicRename = os.Rename
-	atomicRemove = os.Remove
+	atomicRename     = os.Rename
+	atomicRemove     = os.Remove
+	replaceIsWindows = runtime.GOOS == "windows"
 )
 
 func atomicReplace(src, dst string) error {
-	if err := atomicRename(src, dst); err == nil {
+	err := atomicRename(src, dst)
+	if err == nil {
 		return nil
+	}
+	if !replaceIsWindows {
+		// POSIX rename atomically replaces dst, so failure is final: removing
+		// dst would destroy the committed artifact while the retry still fails
+		// (only Windows' rename-over-existing needs the remove+retry fallback).
+		return err
 	}
 	if rmErr := atomicRemove(dst); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 		return rmErr
