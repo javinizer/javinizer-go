@@ -14,3 +14,12 @@ func TestParseDMMActressIDChainDescentEndsAtLeaf(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 998877, parseDMMActressID(doc))
 }
+
+func TestParseDMMActressIDPreservesEncodedInnerQuery(t *testing.T) {
+	// The affiliate target carries its own query with the actress param
+	// percent-encoded inside lurl=; decoding the whole outer href before
+	// parsing truncates the target at the inner & and loses the ID.
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://al.dmm.co.jp/?lurl=https%3A%2F%2Fvideo.dmm.co.jp%2Fav%2Flist%2F%3Ffoo%3Dbar%26actress%3D28262">affiliate</a>`))
+	require.NoError(t, err)
+	assert.Equal(t, 28262, parseDMMActressID(doc))
+}
