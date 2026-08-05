@@ -12,11 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The proxied-request exemption follows the request's chosen proxy endpoint:
-// net/http dials the proxy (canonical scheme default port included) with the
-// marker, and only that dial skips the guard.
+// The proxied-request exemption follows the request's chosen proxy endpoint
+// AND pins it: net/http dials the proxy (canonical scheme default port
+// included) with the marker, and the resolved+validated answers are dialed,
+// not the freshly-re-resolvable hostname.
 func TestProxyDialExemptionFollowsTheProxiedRequest(t *testing.T) {
-	sentinel := errors.New("reached raw proxy endpoint")
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, _ string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("198.51.100.7")}, nil
+	}
+	sentinel := errors.New("reached proxy endpoint")
 	var dialed []string
 	transport := &http.Transport{
 		Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy.example"}),
@@ -29,7 +35,28 @@ func TestProxyDialExemptionFollowsTheProxiedRequest(t *testing.T) {
 	require.NoError(t, err)
 	_, err = fetcher.client.Get("https://img.example/thumb.jpg")
 	require.ErrorIs(t, err, sentinel)
-	require.Equal(t, []string{"proxy.example:80"}, dialed, "proxied dial reaches the canonical proxy endpoint raw")
+	require.Equal(t, []string{"198.51.100.7:80"}, dialed, "proxy dial is pinned to the resolved answer")
+}
+
+// An unresolvable configured proxy fails the request loudly instead of
+// silently re-resolving on someone else's resolver.
+func TestProxyDialExemptionFailsWhenProxyUnresolvable(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, _ string) ([]net.IP, error) { return nil, errors.New("nxdomain") }
+	sentinel := errors.New("must not dial")
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy.example"}),
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://img.example/thumb.jpg")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, sentinel)
+	assert.Contains(t, err.Error(), "resolve configured proxy")
 }
 
 // A dial to the SAME authority without the request marker (direct routing
@@ -88,4 +115,48 @@ func TestDirectTargetIsNotStampedAndStaysPinned(t *testing.T) {
 	_, err = fetcher.client.Get("https://direct.example/thumb.jpg")
 	require.ErrorIs(t, err, sentinel)
 	require.Equal(t, []string{"93.184.216.34:443"}, dialed, "direct target is pinned to the validated IP")
+}
+
+// Literal-IP proxy endpoints dial through untouched (no resolution needed).
+func TestProxyDialExemptionLiteralIPPassthrough(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		t.Fatal("literal proxy endpoints must not resolve")
+		return nil, nil
+	}
+	sentinel := errors.New("reached literal proxy")
+	var dialed string
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "192.0.2.5:3128"}),
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = addr
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://img.example/thumb.jpg")
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, "192.0.2.5:3128", dialed)
+}
+
+// An empty resolver answer set fails loudly, never riding the raw fallback.
+func TestProxyDialExemptionFailsOnEmptyAnswers(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) { return nil, nil }
+	sentinel := errors.New("must not dial")
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy.example"}),
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://img.example/thumb.jpg")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, sentinel)
+	assert.Contains(t, err.Error(), "no addresses")
 }

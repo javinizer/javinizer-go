@@ -1,9 +1,4 @@
 
-!/web/dist/index.html
-!/web/dist/robots.txt
-!docs/superpowers/contracts/
-!internal/actresscache/data/
-!internal/actresscache/data/actresses.json.gz
 .DS_Store
 .env
 .idea/
@@ -50,6 +45,8 @@
 *.syso
 *.test
 **/data/
+!internal/actresscache/data/
+!/internal/actresscache/data/actresses.json.gz
 **/logs/
 *~
 /auth.credentials.json
@@ -65,6 +62,8 @@
 /test-videos/
 /tmp/
 /web/dist/*
+!/web/dist/index.html
+!/web/dist/robots.txt
 /web/frontend/.svelte-kit/
 /web/frontend/blob-report/
 /web/frontend/build/
@@ -110,6 +109,7 @@ COVERAGE_REPORT.md
 coverage.html
 coverage*.out
 docs/superpowers/*
+!docs/superpowers/contracts/
 go.work
 graphify-out/
 javinizer-go

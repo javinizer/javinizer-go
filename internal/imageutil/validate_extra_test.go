@@ -558,22 +558,22 @@ func TestDialTLSProxy(t *testing.T) {
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
 	dialer := &net.Dialer{}
-	conn, err := dialTLSProxy(t.Context(), "tcp", server.Listener.Addr().String(), "", dialer.DialContext, &tls.Config{RootCAs: roots})
+	conn, err := dialTLSProxy(t.Context(), "tcp", server.Listener.Addr().String(), "", dialer.DialContext, &tls.Config{RootCAs: roots}, 0)
 	require.NoError(t, err)
 	require.Equal(t, server.Listener.Addr().String(), conn.RemoteAddr().String())
 	require.NoError(t, conn.Close())
 
-	_, err = dialTLSProxy(t.Context(), "tcp", "invalid", "", dialer.DialContext, &tls.Config{})
+	_, err = dialTLSProxy(t.Context(), "tcp", "invalid", "", dialer.DialContext, &tls.Config{}, 0)
 	require.Error(t, err)
 	dialErr := errors.New("dial failed")
 	_, err = dialTLSProxy(t.Context(), "tcp", "proxy.example:443", "", func(context.Context, string, string) (net.Conn, error) {
 		return nil, dialErr
-	}, &tls.Config{})
+	}, &tls.Config{}, 0)
 	require.ErrorIs(t, err, dialErr)
 
 	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(plain.Close)
-	_, err = dialTLSProxy(t.Context(), "tcp", plain.Listener.Addr().String(), "", dialer.DialContext, &tls.Config{InsecureSkipVerify: true})
+	_, err = dialTLSProxy(t.Context(), "tcp", plain.Listener.Addr().String(), "", dialer.DialContext, &tls.Config{InsecureSkipVerify: true}, 0)
 	require.Error(t, err)
 }
 
