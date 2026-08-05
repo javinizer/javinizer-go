@@ -66,3 +66,22 @@ func TestWrapTransportPinsUnmarkedCustomDialer(t *testing.T) {
 	require.ErrorContains(t, err, "record-only dialer")
 	assert.Equal(t, "93.184.216.34:80", dialed, "unmarked dial paths stay pinned to validated IPs")
 }
+
+// Remote-DNS preservation must not leak private IP LITERALS to the proxy:
+// literals need no DNS, so callers without a separate CheckTarget preflight
+// stay protected.
+func TestWrapTransportPreservingHostnamesBlocksPrivateLiterals(t *testing.T) {
+	var dialed []string
+	transport := &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		return nil, errors.New("dialer ran")
+	}}
+	wrapped := WrapTransportPreservingHostnames(transport)
+	client := &http.Client{Transport: wrapped}
+	for _, target := range []string{"http://127.0.0.1/", "http://169.254.169.254/latest/meta-data", "http://10.0.0.9/"} {
+		_, err := client.Get(target)
+		require.Error(t, err, target)
+		assert.Contains(t, err.Error(), "private/internal IP literal", target)
+	}
+	assert.Empty(t, dialed, "blocked literals never reach the dialer")
+}
