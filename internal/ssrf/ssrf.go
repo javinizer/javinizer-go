@@ -253,7 +253,7 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 // only validated IPs (trying each in order for DNS failover). The hostname
 // is never re-resolved at connect time, so DNS rebinding between the check
 // and the dial cannot redirect the connection.
-func dialPinned(ctx context.Context, network, addr string, fallback func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+func dialPinned(ctx context.Context, network, addr string, fallback func(context.Context, string, string) (net.Conn, error), preserveHostname bool) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
@@ -264,6 +264,11 @@ func dialPinned(ctx context.Context, network, addr string, fallback func(context
 	ips, err := resolvePublicIPs(ctx, host)
 	if err != nil {
 		return nil, err
+	}
+	if preserveHostname {
+		// SOCKS5/CONNECT-style proxy dialers own target resolution: keep the
+		// original hostname so proxy-side or split-horizon DNS still answers.
+		return fallback(ctx, network, addr)
 	}
 	var dialErr error
 	for _, ip := range ips {
@@ -300,8 +305,11 @@ func NewPinnedDialTransport(base *http.Transport) (*http.Transport, error) {
 	if fallback == nil {
 		fallback = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	}
+	// NewPinnedDialTransport keeps IP-pinning semantics even when the original
+	// had a proxy (the proxy itself gets pinned) — its callers are hardened
+	// wrapper paths, not SOCKS-compat ones.
 	clone.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return dialPinned(ctx, network, addr, fallback)
+		return dialPinned(ctx, network, addr, fallback, false)
 	}
 	return clone, nil
 }
@@ -342,8 +350,9 @@ func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
 	if fallback == nil {
 		fallback = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
 	}
+	proxied := transport.Proxy != nil
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return dialPinned(ctx, network, addr, fallback)
+		return dialPinned(ctx, network, addr, fallback, proxied)
 	}
 	return transport
 }

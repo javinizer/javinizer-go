@@ -92,3 +92,23 @@ func TestViaProxyEmptySchemeWithProxy(t *testing.T) {
 	}}
 	assert.True(t, proxy.viaProxy("", "example.test"), "empty scheme must default to https and probe the proxy")
 }
+
+// A caller-supplied CheckRedirect that rewrites the target is re-guarded.
+func TestFetchRedirectCallbackRewritesGuardPostTarget(t *testing.T) {
+	// The first request gets a canned 302 from a pinnable literal host; the
+	// caller's policy then mutates the target to a private address. Follow-up
+	// must be blocked even though the callback returned nil.
+	mutator := func(req *http.Request, via []*http.Request) error {
+		u, _ := url.Parse("http://127.0.0.1/leaked")
+		req.URL = u
+		return nil
+	}
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://origin.public/x\r\nContent-Length: 0\r\n\r\n")(ctx, network, addr)
+	}
+	client := &http.Client{Transport: &http.Transport{DialContext: dial}, CheckRedirect: mutator}
+	fetcher := mustFetcher(NewFetcher(client, 0, "test"))
+	_, _, err := fetcher.Get(context.Background(), "http://93.184.216.34/start", "*/*", 1024)
+	var blocked *BlockedFetchError
+	require.ErrorAs(t, err, &blocked, "rewritten redirect target must be re-guarded before dispatch")
+}

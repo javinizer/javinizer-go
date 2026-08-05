@@ -53,7 +53,7 @@ func TestDialPinnedPublicLiteralAndNilBase(t *testing.T) {
 		_ = server.Close()
 		return client, nil
 	}
-	if _, err := dialPinned(context.Background(), "tcp", "8.8.8.8:443", fallback); err != nil {
+	if _, err := dialPinned(context.Background(), "tcp", "8.8.8.8:443", fallback, false); err != nil {
 		t.Fatal(err)
 	}
 	if dialed != "8.8.8.8:443" {

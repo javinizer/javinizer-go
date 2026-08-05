@@ -37,7 +37,7 @@ func TestResolvePublicIPsAllowsTestHostWithLiteral(t *testing.T) {
 }
 
 func TestDialPinnedBadAddress(t *testing.T) {
-	if _, err := dialPinned(context.Background(), "tcp", "no-port", nil); err == nil {
+	if _, err := dialPinned(context.Background(), "tcp", "no-port", nil, false); err == nil {
 		t.Error("missing port must error")
 	}
 }

@@ -89,7 +89,7 @@ func TestPinnedDialResolvesOnceAndFailsOver(t *testing.T) {
 		_ = serverSide.Close()
 		return clientSide, nil
 	}
-	conn, err := dialPinned(context.Background(), "tcp", "example.test:443", fallback)
+	conn, err := dialPinned(context.Background(), "tcp", "example.test:443", fallback, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestPinnedDialBlocksPrivateAnswerWithoutDialing(t *testing.T) {
 	_, err := dialPinned(context.Background(), "tcp", "metadata.test:443", func(context.Context, string, string) (net.Conn, error) {
 		dialed = true
 		return nil, nil
-	})
+	}, false)
 	var blocked *BlockedTargetError
 	if !errors.As(err, &blocked) {
 		t.Errorf("blocked dial not typed BlockedTargetError: %v", err)

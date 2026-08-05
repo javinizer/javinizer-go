@@ -422,14 +422,16 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 	}
 	previousCheckRedirect := client.CheckRedirect
 	safeClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		// The redirect cap runs regardless of a caller-supplied policy: an
+		// always-nil policy must not let a looping server hang validation.
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
 		if err := ssrf.CheckTarget(req.Context(), req.URL); err != nil {
 			return err
 		}
 		if previousCheckRedirect != nil {
 			return previousCheckRedirect(req, via)
-		}
-		if len(via) >= 10 {
-			return fmt.Errorf("stopped after 10 redirects")
 		}
 		return nil
 	}

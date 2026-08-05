@@ -45,3 +45,22 @@ func TestValidateRemoteImageWithSafeClientBlocksRedirectToLinkLocal(t *testing.T
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "SSRF blocked")
 }
+
+// A caller-provided CheckRedirect that always returns nil must NOT lift the
+// hop cap; validation stops after 10 hops regardless.
+func TestValidateRemoteImageWithSafeClientCapsRegardlessOfCallerPolicy(t *testing.T) {
+	hops := 0
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		hops++
+		return respondWith("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.34/redirect\r\nContent-Length: 0\r\n\r\n")(ctx, network, addr)
+	}
+	allowAll := &http.Transport{DialContext: dial}
+	client := &http.Client{Transport: allowAll, CheckRedirect: func(*http.Request, []*http.Request) error { return nil }}
+	err := ValidateRemoteImageWithSafeClient(context.Background(), client, "http://93.184.216.34/x", "", "")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "stopped after 10 redirects")
+	if hops < 10 {
+		t.Errorf("caller policy must not bypass the redirect cap: only %d hops", hops)
+	}
+}
