@@ -83,7 +83,10 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 		candidates[key] = ValidatedCandidate{Candidate: candidate, Thumbnail: *entry.Thumbnail}
 	}
 
-	report := BuildReport{Sources: append([]string(nil), sources...), Cached: len(candidates)}
+	report := BuildReport{Sources: append([]string(nil), sources...)}
+	// Cached is computed ONCE at the end from survivors (see below):
+	// single-pass avoids drift between the seed count, pruning, refresh
+	// revalidation, and refresh-side rejection removal paths.
 	// Cached = entries reused from state that stayed untouched this run.
 	// Freshly validated entries never inflate it; a reused entry that got
 	// revalidated (refresh) or pruned decrements it.
@@ -249,9 +252,6 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 				}
 				delete(candidates, key)
 				staleKeysAll = append(staleKeysAll, key)
-				if _, reused := initialKeys[key]; reused {
-					report.Cached--
-				}
 			}
 		}
 		mu.Unlock()
@@ -266,9 +266,17 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 		return Cache{}, report, err
 	}
 
-	// Entries revalidated under refresh are not reuse. revalidatedKeys ⊆
-	// initialKeys by construction, so this can never go negative.
-	report.Cached -= len(revalidatedKeys)
+	// Cached = state-reused entries that survived this run un-revalidated:
+	// pruning, refresh revalidation, and refresh-side deletions all reduce it.
+	for key := range candidates {
+		if _, reused := initialKeys[key]; !reused {
+			continue
+		}
+		if _, was := revalidatedKeys[key]; was {
+			continue
+		}
+		report.Cached++
+	}
 
 	validated := make([]rankedCandidate, 0, len(candidates))
 	ranks := make(map[string]int, len(sources))

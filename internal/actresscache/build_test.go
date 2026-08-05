@@ -285,6 +285,7 @@ func TestBuildRefreshPermanentRejectionStillOverwritesState(t *testing.T) {
 	require.NoError(t, err, "permanent rejection is not a publish-blocking failure")
 	assert.Empty(t, cache.Records)
 	assert.Equal(t, 1, report.Rejected)
+	assert.Equal(t, 0, report.Cached, "a refresh-rejected reused entry is not a reuse survivor")
 
 	data, err := os.ReadFile(statePath)
 	require.NoError(t, err)
