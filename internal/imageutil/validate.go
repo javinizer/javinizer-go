@@ -476,17 +476,32 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 // validateImageTarget runs the SSRF preflight with the CALLER's context so a
 // canceled/deadline-bound request aborts during DNS instead of waiting out a
 // background resolution.
-func validateImageTarget(ctx context.Context, rawURL string) error {
+func validateImageTarget(ctx context.Context, rawURL string, remoteDNS bool) error {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
-	return ssrf.CheckTarget(ctx, parsed)
+	if !remoteDNS {
+		return ssrf.CheckTarget(ctx, parsed)
+	}
+	// Remote-DNS (SOCKS5) transports resolve on the proxy: local DNS can
+	// neither prove nor disprove what the proxy will get. Keep the lexical
+	// guard: scheme, non-empty host, and private IP literals are knowable.
+	if parsed.Scheme != "http" && parsed.Scheme != httpsScheme {
+		return &ssrf.BlockedTargetError{Target: parsed.String(), Reason: "non-http(s) scheme"}
+	}
+	if parsed.Hostname() == "" {
+		return &ssrf.BlockedTargetError{Target: parsed.String(), Reason: "empty host"}
+	}
+	if ssrf.IsBlockedHost(parsed.Hostname()) {
+		return &ssrf.BlockedTargetError{Target: parsed.Hostname(), Reason: "lexically private/loopback host or literal"}
+	}
+	return nil
 }
 
 // ValidateRemoteImage ...
 func ValidateRemoteImage(ctx context.Context, rawURL string) error {
-	if err := validateImageTarget(ctx, rawURL); err != nil {
+	if err := validateImageTarget(ctx, rawURL, false); err != nil {
 		return err
 	}
 	return ValidateRemoteImageWithSafeClient(ctx, ssrf.NewSSRFSafeClient(30*time.Second), rawURL, config.DefaultUserAgent, httpclient.ResolveMediaReferer(rawURL, ""))
@@ -494,14 +509,25 @@ func ValidateRemoteImage(ctx context.Context, rawURL string) error {
 
 // ValidateRemoteImageWithSafeClient ...
 func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client, rawURL, userAgent, referer string) error {
-	if err := validateImageTarget(ctx, rawURL); err != nil {
-		return err
-	}
 	if client == nil {
 		return fmt.Errorf("image validator client is nil")
 	}
+	// Remote-DNS transports (SOCKS5 from httpclient, Proxy==nil with a
+	// resolver-owning dialer) get the lexical-only preflight: local DNS cannot
+	// prove what the proxy will resolve.
+	remoteDNS := false
+	if transport, ok := client.Transport.(*http.Transport); ok && ssrf.TransportResolvesRemotely(transport) {
+		remoteDNS = true
+	}
+	if err := validateImageTarget(ctx, rawURL, remoteDNS); err != nil {
+		return err
+	}
 	safeClient := *client
-	if client.Transport == nil {
+	if remoteDNS {
+		// Preserve hostnames end to end: the SOCKS5 dialer resolves them;
+		// literals stay blocked inside the preserving wrapper.
+		safeClient.Transport = ssrf.WrapTransportPreservingHostnames(client.Transport.(*http.Transport))
+	} else if client.Transport == nil {
 		defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 		if !ok {
 			return fmt.Errorf("image validation requires a *http.Transport-capable default transport")
@@ -513,7 +539,7 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 			return fmt.Errorf("image validation rejects default transports with DialTLSContext/DialTLS (unpinnable)")
 		}
 		safeClient.Transport = &pinnedProxyTransport{base: defaultTransport.Clone()}
-	} else if transport, ok := client.Transport.(*http.Transport); ok {
+	} else if transport, ok := client.Transport.(*http.Transport); ok { //nolint:gocritic // remoteDNS arm precedes
 		if transport.DialTLSContext != nil || transport.DialTLS != nil { //nolint:staticcheck // fail closed: a custom TLS dialer would bypass the pinned dial for HTTPS
 			return fmt.Errorf("image validation rejects transports with DialTLSContext/DialTLS (unpinnable)")
 		}

@@ -1,6 +1,7 @@
 package imageutil
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -9,15 +10,19 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"image"
+	"image/png"
 	"math"
 	"math/big"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -299,4 +304,39 @@ func TestRoundTripHTTPProxyHonorsLegacyDial(t *testing.T) {
 	_, err = roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:3128"}, "1.1.1.1:80", legacyTransport, stubProxyLookup)
 	require.ErrorIs(t, err, sentinel)
 	assert.Equal(t, []string{"203.0.113.9:3128"}, dialed, "legacy dialer receives the pinned proxy endpoint")
+}
+
+// SOCKS5 transports (registered by httpclient as remote-DNS) must keep
+// hostname targets end to end: no local DNS runs and the dialer receives
+// the name verbatim -- pinnning would break proxy-only and split-horizon
+// services.
+func TestValidateRemoteImagePreservesRemoteDNSHostnames(t *testing.T) {
+	var dialed string
+	var pngBuf bytes.Buffer
+	require.NoError(t, png.Encode(&pngBuf, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	socksLike := func(_ context.Context, network, addr string) (net.Conn, error) {
+		dialed = addr
+		return respondWith("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: "+strconv.Itoa(pngBuf.Len())+"\r\n\r\n"+pngBuf.String())(context.Background(), network, addr)
+	}
+	transport := &http.Transport{DialContext: socksLike}
+	ssrf.MarkRemoteDNSTransport(transport)
+
+	err := ValidateRemoteImageWithSafeClient(context.Background(), &http.Client{Transport: transport}, "http://proxy-only.example/img.png", "ua", "")
+	require.NoError(t, err)
+	assert.Equal(t, "proxy-only.example:80", dialed, "dial must receive the unresolved hostname")
+
+	// Lexical guard still applies with local DNS off: literals stay blocked.
+	dialed = ""
+	err = ValidateRemoteImageWithSafeClient(context.Background(), &http.Client{Transport: transport}, "http://10.1.2.3/img.png", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "10.1.2.3")
+	assert.Empty(t, dialed, "blocked literal never dialed")
+}
+
+// The remote-DNS lexical preflight rejects non-http schemes and empty hosts
+// without ever consulting DNS (or a resolver we keep unused).
+func TestValidateImageTargetLexicalGuardForRemoteDNS(t *testing.T) {
+	require.ErrorContains(t, validateImageTarget(t.Context(), "ftp://proxy-only.example/x", true), "non-http(s)")
+	require.ErrorContains(t, validateImageTarget(t.Context(), "http:///x", true), "empty host")
+	require.NoError(t, validateImageTarget(t.Context(), "https://proxy-only.example/x", true))
 }

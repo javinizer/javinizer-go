@@ -59,6 +59,11 @@ type Fetcher struct {
 	// proxyFunc mirrors the wrapped transport's proxy configuration so lookup
 	// failures can fail closed when a proxy would resolve targets remotely.
 	proxyFunc func(*http.Request) (*url.URL, error)
+	// remoteDNS is true for transports whose dialer owns hostname resolution
+	// (SOCKS5): target names pass through unresolved -- locally pinning would
+	// defeat proxy-only/split-horizon names -- while private IP literals stay
+	// blocked and the lexical preflight keeps running.
+	remoteDNS bool
 
 	client     *http.Client
 	delay      time.Duration
@@ -138,6 +143,11 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, req *http.Request) error
 	host := req.URL.Hostname()
 	if isBlockedFetchHost(host) {
 		return &BlockedFetchError{URL: host}
+	}
+	if f.remoteDNS {
+		// Remote-DNS transports own name resolution; local answers prove
+		// nothing about what the proxy will get.
+		return nil
 	}
 	if !f.resolveTargets || hostIPLiteral(host) != nil {
 		return nil
@@ -365,6 +375,7 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 	}
 	if ok {
 		fetcher.resolveTargets = true
+		fetcher.remoteDNS = ssrf.TransportResolvesRemotely(transport)
 		guarded := transport.Clone()
 		fetcher.proxyFunc = guarded.Proxy
 		if guarded.Proxy != nil {
@@ -383,41 +394,58 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		// Respect a legacy-only Dial hook: assigning DialContext while
 		// ignoring Dial would silently discard the caller's dialer.
 		fallback := ssrf.DialContextFunc(guarded)
-		guarded.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if fetcher.allowPrivateHosts {
+		if fetcher.remoteDNS {
+			// SOCKS5-style transports: the dialer owns DNS, so hostnames pass
+			// through untouched; private IP literals remain blocked here because
+			// they need no DNS.
+			guarded.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if !fetcher.allowPrivateHosts {
+					host, _, splitErr := net.SplitHostPort(addr)
+					if splitErr == nil {
+						if ip := ssrf.HostIPLiteral(host); ip != nil && ssrf.IsBlockedIP(ip) {
+							return nil, &ssrf.BlockedTargetError{Target: host, Reason: "private/internal IP literal"}
+						}
+					}
+				}
 				return fallback(ctx, network, addr)
 			}
-			if endpoint, ok := ctx.Value(proxiedDialCtxKey{}).(string); ok && endpoint != "" {
-				// Only dials serving THIS proxied request may use the proxy
-				// lane, and only to the exact endpoint the request layer
-				// selected. Even then the proxy hostname is resolved ONCE and
-				// dialed pinned: the raw fallback would re-resolve at connect
-				// time and a rebind could move the proxy connection somewhere
-				// unvetted. (Proxies are trusted infrastructure, so answers are
-				// pinned without the public-address gate.)
-				if host, port, splitErr := net.SplitHostPort(addr); splitErr == nil && canonicalProxyDialTarget("", host, port) == endpoint {
-					if net.ParseIP(host) != nil {
-						return fallback(ctx, network, addr)
-					}
-					ips, rerr := lookupIP(ctx, "ip", host)
-					if rerr != nil {
-						return nil, fmt.Errorf("resolve configured proxy %s: %w", host, rerr)
-					}
-					if len(ips) == 0 {
-						return nil, fmt.Errorf("resolve configured proxy %s: no addresses", host)
-					}
-					var dialErr error
-					for _, ip := range ips {
-						conn, cerr := fallback(ctx, network, net.JoinHostPort(ip.String(), port))
-						if cerr == nil {
-							return conn, nil
-						}
-						dialErr = errors.Join(dialErr, cerr)
-					}
-					return nil, dialErr
+		} else {
+			guarded.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if fetcher.allowPrivateHosts {
+					return fallback(ctx, network, addr)
 				}
+				if endpoint, ok := ctx.Value(proxiedDialCtxKey{}).(string); ok && endpoint != "" {
+					// Only dials serving THIS proxied request may use the proxy
+					// lane, and only to the exact endpoint the request layer
+					// selected. Even then the proxy hostname is resolved ONCE and
+					// dialed pinned: the raw fallback would re-resolve at connect
+					// time and a rebind could move the proxy connection somewhere
+					// unvetted. (Proxies are trusted infrastructure, so answers are
+					// pinned without the public-address gate.)
+					if host, port, splitErr := net.SplitHostPort(addr); splitErr == nil && canonicalProxyDialTarget("", host, port) == endpoint {
+						if net.ParseIP(host) != nil {
+							return fallback(ctx, network, addr)
+						}
+						ips, rerr := lookupIP(ctx, "ip", host)
+						if rerr != nil {
+							return nil, fmt.Errorf("resolve configured proxy %s: %w", host, rerr)
+						}
+						if len(ips) == 0 {
+							return nil, fmt.Errorf("resolve configured proxy %s: no addresses", host)
+						}
+						var dialErr error
+						for _, ip := range ips {
+							conn, cerr := fallback(ctx, network, net.JoinHostPort(ip.String(), port))
+							if cerr == nil {
+								return conn, nil
+							}
+							dialErr = errors.Join(dialErr, cerr)
+						}
+						return nil, dialErr
+					}
+				}
+				return guardedDialContext(ctx, network, addr, fallback)
 			}
-			return guardedDialContext(ctx, network, addr, fallback)
 		}
 		clientCopy.Transport = guarded
 	}
@@ -439,17 +467,22 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			return err
 		}
 		if previousCheckRedirect != nil {
+			before := req.URL.String()
 			if err := previousCheckRedirect(req, via); err != nil {
 				return err
 			}
-			// The caller's policy may have rewritten req.URL; restamp the
-			// decision and revalidate the FINAL target before dispatch so a
-			// rewritten hop cannot smuggle a private address past the entry guard.
-			if err := fetcher.stampProxyDecision(req); err != nil {
-				return err
-			}
-			if !fetcher.allowPrivateHosts {
-				return fetcher.checkFetchTarget(req.Context(), req)
+			if req.URL.String() != before {
+				// The caller's policy REWROTE req.URL: restamp the decision and
+				// revalidate the final target so a rewritten hop cannot smuggle
+				// a private address past the entry guard. (Unchanged hops keep
+				// the decision taken before the callback -- re-evaluating would
+				// let a stateful policy flip within the same hop.)
+				if err := fetcher.stampProxyDecision(req); err != nil {
+					return err
+				}
+				if !fetcher.allowPrivateHosts {
+					return fetcher.checkFetchTarget(req.Context(), req)
+				}
 			}
 		}
 		return nil
