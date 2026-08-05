@@ -2,6 +2,7 @@ package actresscache
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,7 +46,7 @@ func TestAtomicReplaceRemoveFailureLeg(t *testing.T) {
 	atomicRename = func(_, _ string) error {
 		if first {
 			first = false
-			return errors.New("windows-style busy")
+			return fmt.Errorf("windows replace collision: %w", os.ErrExist)
 		}
 		return nil
 	}
@@ -68,7 +69,7 @@ func TestAtomicReplaceRemoveNotExistLeg(t *testing.T) {
 	atomicRename = func(_, _ string) error {
 		calls++
 		if calls == 1 {
-			return errors.New("windows-style busy")
+			return fmt.Errorf("windows replace collision: %w", os.ErrPermission)
 		}
 		return nil
 	}
@@ -97,6 +98,28 @@ func TestAtomicReplacePreservesDstOnNonWindowsRenameFailure(t *testing.T) {
 	err := atomicReplace(src, dst)
 	require.ErrorContains(t, err, "cross-device link")
 	assert.Equal(t, 0, removeCalls, "POSIX must never destroy dst on rename failure")
+	got, readErr := os.ReadFile(dst)
+	require.NoError(t, readErr)
+	assert.Equal(t, "committed", string(got))
+}
+
+// On Windows, rename failures OUTSIDE the replace-collision class must not
+// touch dst: deleting the committed artifact cannot heal a missing source or
+// a cross-volume move.
+func TestAtomicReplacePreservesDstOnWindowsNonCollisionFailure(t *testing.T) {
+	originalR, originalM, originalOS := atomicRename, atomicRemove, replaceIsWindows
+	t.Cleanup(func() { atomicRename, atomicRemove, replaceIsWindows = originalR, originalM, originalOS })
+	replaceIsWindows = true
+	removeCalls := 0
+	atomicRename = func(_, _ string) error { return errors.New("not the same device") }
+	atomicRemove = func(string) error { removeCalls++; return nil }
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "tmp"), filepath.Join(dir, "committed.json")
+	require.NoError(t, os.WriteFile(src, []byte("pending"), 0o600))
+	require.NoError(t, os.WriteFile(dst, []byte("committed"), 0o600))
+	err := atomicReplace(src, dst)
+	require.ErrorContains(t, err, "not the same device")
+	assert.Equal(t, 0, removeCalls)
 	got, readErr := os.ReadFile(dst)
 	require.NoError(t, readErr)
 	assert.Equal(t, "committed", string(got))

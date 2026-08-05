@@ -212,7 +212,12 @@ func candidateFromRow(row []string, columns csvColumns, fileURL string, rowNumbe
 			firstName = strings.Join(parts[1:], " ")
 		}
 	}
-	fields := []string{fullName, lastName, firstName, get(columns.japaneseName), get(columns.thumbURL), get(columns.alias)}
+	// Stable identity key: digest ONLY the identity fields. Mutable content
+	// (the thumbnail URL) must not mint a new key -- otherwise a changed row
+	// whose validation transiently fails gets pruned with its old key absent,
+	// and the published cache silently loses the actress instead of keeping
+	// the last-good entry. Content changes heal via --refresh.
+	fields := []string{fullName, lastName, firstName, get(columns.japaneseName), get(columns.alias)}
 	digest := sha256.New()
 	for _, field := range fields {
 		_, _ = io.WriteString(digest, field)

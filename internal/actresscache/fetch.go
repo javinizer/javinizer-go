@@ -59,12 +59,6 @@ type Fetcher struct {
 	// proxyFunc mirrors the wrapped transport's proxy configuration so lookup
 	// failures can fail closed when a proxy would resolve targets remotely.
 	proxyFunc func(*http.Request) (*url.URL, error)
-	// proxyEndpoints are the configured proxies' canonical "host:port" dial
-	// targets. Only the exact proxy endpoint is exempt from the dial-time
-	// pin -- exemption keyed by hostname alone would let a directly-routed
-	// target that merely SHARES the proxy's hostname (NO_PROXY rules, DNS
-	// rebinding past the request-layer preflight) escape validation.
-	proxyEndpoints map[string]struct{}
 
 	client     *http.Client
 	delay      time.Duration
@@ -190,9 +184,17 @@ var lookupIP = net.DefaultResolver.LookupIP
 // unverifiable. Literal-IP targets (nothing to re-resolve) pass through, as
 // does HTTPS: CONNECT tunnels inherit the documented proxy-trust-boundary
 // model on checkFetchTarget.
+// proxiedDialCtxKey marks the ONE dial that serves a proxied request: the
+// request layer records the canonical proxy endpoint it selected, and only
+// a dial to that exact endpoint may skip the guarded/pinned path. Authority
+// alone (even host:port) cannot vouch for routing -- a NO_PROXY rule can
+// send a same-authority target directly, and DNS can move after preflight.
+type proxiedDialCtxKey struct{}
+
 type proxyPinningTransport struct {
 	base     http.RoundTripper
 	viaProxy func(scheme, host string) bool
+	proxyFor func(*http.Request) (*url.URL, error)
 }
 
 // RoundTrip ...
@@ -200,10 +202,37 @@ func (p *proxyPinningTransport) RoundTrip(req *http.Request) (*http.Response, er
 	if p == nil || p.base == nil {
 		return nil, fmt.Errorf("actress cache proxy pinning transport is not initialized")
 	}
-	if req.URL.Scheme == "http" && p.viaProxy("http", req.URL.Host) && hostIPLiteral(req.URL.Hostname()) == nil {
+	proxied := p.viaProxy(req.URL.Scheme, req.URL.Host)
+	if req.URL.Scheme == "http" && proxied && hostIPLiteral(req.URL.Hostname()) == nil {
 		return nil, &ssrf.UnverifiableHostError{Host: req.URL.Hostname(), Err: errors.New("plain-HTTP proxy fetch of a hostname cannot pin the resolved address (use an HTTPS target or a CONNECT tunnel)")}
 	}
+	if proxied && p.proxyFor != nil {
+		if proxyURL, err := p.proxyFor(req); err == nil && proxyURL != nil {
+			ctx := context.WithValue(req.Context(), proxiedDialCtxKey{}, canonicalProxyDialTarget(proxyURL.Scheme, proxyURL.Hostname(), proxyURL.Port()))
+			req = req.Clone(ctx)
+		}
+	}
 	return p.base.RoundTrip(req)
+}
+
+// schemeHTTPS names the https scheme in one place (goconst threshold).
+const schemeHTTPS = "https"
+
+// canonicalProxyDialTarget renders scheme/hostname/port as the dial authority
+// net/http will use: lowercase hostname, with the proxy scheme's default port
+// filled in (net/http dials proxies on those defaults when no port is given).
+func canonicalProxyDialTarget(proxyScheme, hostname, port string) string {
+	if port == "" {
+		switch strings.ToLower(proxyScheme) {
+		case schemeHTTPS:
+			port = "443"
+		case "socks5", "socks5h":
+			port = "1080"
+		default:
+			port = "80"
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(hostname)) + ":" + port
 }
 
 // guardedDialContext resolves addr's host and dials only the resolved
@@ -299,26 +328,6 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		fetcher.resolveTargets = true
 		guarded := transport.Clone()
 		fetcher.proxyFunc = guarded.Proxy
-		if guarded.Proxy != nil {
-			fetcher.proxyEndpoints = make(map[string]struct{}, 2)
-			// Probe both schemes: HTTP_PROXY and HTTPS_PROXY may name
-			// different hosts, so thumbnail fetches over either stay trusted.
-			for _, scheme := range []string{"http", "https"} {
-				if proxyURL, err := guarded.Proxy(&http.Request{URL: &url.URL{Scheme: scheme, Host: "dial-probe.invalid"}}); err == nil && proxyURL != nil {
-					port := proxyURL.Port()
-					if port == "" {
-						// net/http dials proxies on their scheme's default
-						// port, so endpoint matching must do the same.
-						if strings.EqualFold(proxyURL.Scheme, "https") {
-							port = "443"
-						} else {
-							port = "80"
-						}
-					}
-					fetcher.proxyEndpoints[strings.ToLower(proxyURL.Hostname())+":"+port] = struct{}{}
-				}
-			}
-		}
 		fallback := guarded.DialContext
 		if fallback == nil {
 			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
@@ -328,11 +337,11 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			if fetcher.allowPrivateHosts {
 				return fallback(ctx, network, addr)
 			}
-			if host, port, splitErr := net.SplitHostPort(addr); splitErr == nil && fetcher.proxyEndpoints != nil {
-				if _, trusted := fetcher.proxyEndpoints[strings.ToLower(host)+":"+port]; trusted {
-					// The configured proxy endpoint itself (often a private
-					// corporate address) is dialed to reach public targets
-					// that were vetted at the request layer.
+			if endpoint, ok := ctx.Value(proxiedDialCtxKey{}).(string); ok && endpoint != "" {
+				// Only dials serving THIS proxied request may use the raw
+				// fallback, and only to the exact proxy endpoint the request
+				// layer selected.
+				if host, port, splitErr := net.SplitHostPort(addr); splitErr == nil && canonicalProxyDialTarget("", host, port) == endpoint {
 					return fallback(ctx, network, addr)
 				}
 			}
@@ -375,7 +384,7 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		// Host header — so they are REJECTED as unverifiable rather than
 		// approximated. Literal-IP targets and HTTPS/CONNECT tunneled hosts
 		// pass through (the latter under the documented proxy trust model).
-		clientCopy.Transport = &proxyPinningTransport{base: clientCopy.Transport, viaProxy: fetcher.viaProxy}
+		clientCopy.Transport = &proxyPinningTransport{base: clientCopy.Transport, viaProxy: fetcher.viaProxy, proxyFor: fetcher.proxyFunc}
 	}
 	fetcher.client = &clientCopy
 	return fetcher, nil
