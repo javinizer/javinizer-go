@@ -367,7 +367,14 @@ func TestBuildPrunesMissingSourceEntries(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, cache.Records, 1)
 	assert.Equal(t, 1, report.Cached)
+
+	// Build carries prune decisions; the caller commits them post-publish.
 	data, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "\"status\":\"stale\"", "journal untouched until publish")
+	require.Equal(t, []string{"test:2"}, report.StaleKeys)
+	require.NoError(t, JournalStale(statePath, report.StaleKeys))
+	data, err = os.ReadFile(statePath)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "\"status\":\"stale\"")
 }

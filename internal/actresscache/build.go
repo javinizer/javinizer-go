@@ -262,9 +262,11 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 		// so last-good entries stay reusable for the next run.
 		return Cache{}, report, fmt.Errorf("refusing to publish empty actress cache (sources: %s)", strings.Join(sources, ","))
 	}
-	if err := markStale(state, staleKeysAll); err != nil {
-		return Cache{}, report, err
-	}
+	// Journal writes for the prune pass are deferred to post-publish: the
+	// caller (CLI) commits them with JournalStale only after every artifact
+	// successfully replaced. A build that fails to publish leaves last-good
+	// journal entries effective so a later run keeps reusing them.
+	report.StaleKeys = staleKeysAll
 
 	// Cached = state-reused entries that survived this run un-revalidated:
 	// pruning, refresh revalidation, and refresh-side deletions all reduce it.
@@ -299,9 +301,6 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	report.Records = len(cache.Records)
 	return cache, report, nil
 }
-
-// markStale is the seam point for journal stale-marking failures in tests.
-var markStale = markStaleEntries
 
 // markStaleEntries journals "stale" for previously-ok entries whose source
 // stopped enumerating them. Runs only after the publish decision (a refused

@@ -18,61 +18,10 @@ func fakeActresses(ids ...string) []models.DumpActress {
 	return out
 }
 
-func TestCollectPassesScanCapToLister(t *testing.T) {
-	t.Run("no user limit scans up to the hard cap", func(t *testing.T) {
-		var gotLimit int
-		src := NewFromLister(func(_ context.Context, limit int) ([]models.DumpActress, error) {
-			gotLimit = limit
-			return fakeActresses("1"), nil
-		})
-		err := src.Collect(context.Background(), actresscache.SourceOptions{Workers: 1}, func(actresscache.Candidate) error { return nil })
-		require.NoError(t, err)
-		assert.Equal(t, maxScanRows+1, gotLimit, "one row past the cap distinguishes complete from capped scans")
-	})
-
-	t.Run("user limit below the cap wins", func(t *testing.T) {
-		var gotLimit int
-		src := NewFromLister(func(_ context.Context, limit int) ([]models.DumpActress, error) {
-			gotLimit = limit
-			return fakeActresses("1"), nil
-		})
-		err := src.Collect(context.Background(), actresscache.SourceOptions{Limit: 5, Workers: 1}, func(actresscache.Candidate) error { return nil })
-		require.NoError(t, err)
-		assert.Equal(t, 6, gotLimit)
-	})
-
-	t.Run("user limit above the cap is clamped", func(t *testing.T) {
-		var gotLimit int
-		src := NewFromLister(func(_ context.Context, limit int) ([]models.DumpActress, error) {
-			gotLimit = limit
-			return fakeActresses("1"), nil
-		})
-		err := src.Collect(context.Background(), actresscache.SourceOptions{Limit: maxScanRows + 1, Workers: 1}, func(actresscache.Candidate) error { return nil })
-		require.NoError(t, err)
-		assert.Equal(t, maxScanRows+1, gotLimit)
-	})
-}
-
-// With no user limit, Build would prune every entry not seen this run; a
-// scan truncated by the hard cap must therefore fail loudly instead of
-// marking the crawl complete and publishing a truncated cache.
-func TestCollectFailsWhenCappedScanExceedsHardCap(t *testing.T) {
-	rows := make([]models.DumpActress, 0, maxScanRows+1)
-	for i := 0; i <= maxScanRows; i++ {
-		rows = append(rows, models.DumpActress{ID: "x"})
-	}
-	src := NewFromLister(func(_ context.Context, _ int) ([]models.DumpActress, error) {
-		return rows, nil
-	})
-	err := src.Collect(context.Background(), actresscache.SourceOptions{Workers: 1}, func(actresscache.Candidate) error { return nil })
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "scan safety cap")
-}
-
-// A custom lister that ignores the limit argument must still not flood the
-// pipeline: Collect truncates defensively when a user limit is set.
-func TestCollectTruncatesIgnoringLister(t *testing.T) {
-	src := NewFromLister(func(_ context.Context, _ int) ([]models.DumpActress, error) {
+// Collect has no limit argument on the seam path: the store-level adapter
+// (RegisterR18Dev) enforces MaxScanRows; here we pin user-limit semantics.
+func TestCollectWindowsAtUserLimit(t *testing.T) {
+	src := NewFromLister(func(context.Context) ([]models.DumpActress, error) {
 		return fakeActresses("1", "2", "3"), nil
 	})
 	emitted := 0
@@ -88,4 +37,17 @@ func TestCollectTruncatesIgnoringLister(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, emitted)
 	assert.False(t, completed, "truncated enumeration must not declare completion")
+}
+
+func TestCollectFullEnumerationMarksComplete(t *testing.T) {
+	src := NewFromLister(func(context.Context) ([]models.DumpActress, error) {
+		return fakeActresses("1", "2"), nil
+	})
+	completed := false
+	err := src.Collect(context.Background(), actresscache.SourceOptions{
+		Workers:      1,
+		MarkComplete: func() { completed = true },
+	}, func(actresscache.Candidate) error { return nil })
+	require.NoError(t, err)
+	assert.True(t, completed)
 }

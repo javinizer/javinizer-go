@@ -1,11 +1,8 @@
 package actresscache
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,21 +24,13 @@ func TestMarkStaleEntriesWriteFailure(t *testing.T) {
 	}
 }
 
-// Cover Build's stale-journal error propagation via the seam.
-func TestBuildPropagatesStaleWriteFailure(t *testing.T) {
-	source := &testSource{name: "test", candidates: []Candidate{{Key: "test:1", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "https://example.test/thumb.jpg"}}}
-	registry := NewRegistry()
-	registry.Register("test", func() Source { return source })
-	statePath := filepath.Join(t.TempDir(), "state.jsonl")
-	if _, _, err := Build(context.Background(), BuildOptions{Registry: registry, Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: testValidator}); err != nil {
-		t.Fatalf("seed build: %v", err)
-	}
-	source.candidates = []Candidate{{Key: "test:2", Source: "test", SourceID: "2", JapaneseName: "插花", ThumbURL: "https://example.test/t2.jpg"}}
-	original := markStale
-	markStale = func(*stateStore, []string) error { return errors.New("stale journal write failed") }
-	t.Cleanup(func() { markStale = original })
-	_, _, err := Build(context.Background(), BuildOptions{Registry: registry, Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: testValidator})
-	if err == nil || !strings.Contains(err.Error(), "stale journal write failed") {
-		t.Fatalf("expected propagated stale-write error, got %v", err)
-	}
+// JournalStale fails when the journal path cannot even be opened
+// (post-publish ordering keeps this off the critical path).
+func TestJournalStaleErrorsOnBadPath(t *testing.T) {
+	badDir := filepath.Join(t.TempDir(), "nonexistent")
+	assert.NoError(t, JournalStale("", []string{"x"}))
+	assert.NoError(t, JournalStale(filepath.Join(t.TempDir(), "s.jsonl"), nil))
+	// A directory as the journal path fails to read (not NotExist, not writable).
+	err := JournalStale(filepath.Dir(badDir), []string{"x"})
+	assert.Error(t, err)
 }

@@ -15,16 +15,14 @@ import (
 
 const dmmActressImageBase = "https://pics.dmm.co.jp/mono/actjpgs/"
 
-// maxScanRows is the hard cap on dump rows materialized by Collect. It
-// applies even without --limit: a hostile or unexpectedly large dump must
-// not grow the builder's memory without bound. The value is ~4x the size
-// of the real r18.dev actress export (~250k rows).
-const maxScanRows = 1_000_000
+// MaxScanRows is the hard cap on dump rows materialized for Collect. The
+// scan-level adapter (registry wiring) enforced the cap before Collect sees
+// the slice; ~4x headroom over the real r18.dev actress export (~250k rows).
+const MaxScanRows = 1_000_000
 
-// Lister supplies up to limit dump actresses; limit <= 0 means no explicit
-// cap. It matches r18devdump.Store.ListActressesLimit; the caller owns the
-// underlying store's lifetime.
-type Lister func(ctx context.Context, limit int) ([]models.DumpActress, error)
+// Lister supplies dump actresses. It matches r18devdump.Store.ListActresses;
+// the caller owns the underlying store's lifetime and any scan-cap adapter.
+type Lister func(ctx context.Context) ([]models.DumpActress, error)
 
 type source struct {
 	lister Lister
@@ -52,15 +50,7 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	if s.lister == nil {
 		return fmt.Errorf("r18dev source requires a dump lister (use sources.RegisterR18Dev or NewFromLister)")
 	}
-	limit := options.Limit
-	if limit <= 0 || limit > maxScanRows {
-		limit = maxScanRows
-	}
-	// Fetch one row past the cap to distinguish a complete scan from a
-	// truncated one: Build prunes unmarked r18dev entries whenever
-	// SourceOptions.Limit is unset, so silently capping the scan would mark
-	// every actress beyond the cap stale and publish a truncated cache.
-	actresses, err := s.lister(ctx, limit+1)
+	actresses, err := s.lister(ctx)
 	if err != nil {
 		return err
 	}
@@ -68,12 +58,8 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	// by definition NOT exhaustive, so MarkComplete must not run — declaring
 	// completion would license the builder to prune unseen entries.
 	truncated := false
-	if len(actresses) > limit {
-		if options.Limit <= 0 {
-			return fmt.Errorf("r18dev dump exceeds the scan safety cap of %d actress rows; refusing to assemble a truncated cache (use --limit to window intentionally)", maxScanRows)
-		}
-		// Defence in depth for listers that ignore the limit argument.
-		actresses = actresses[:limit]
+	if options.Limit > 0 && len(actresses) > options.Limit {
+		actresses = actresses[:options.Limit]
 		truncated = true
 	}
 	candidates := make([]actresscache.Candidate, 0, len(actresses))

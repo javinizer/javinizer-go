@@ -179,6 +179,22 @@ func (s *stateStore) append(entry StateEntry) error {
 	return s.file.Sync()
 }
 
+// JournalStale commits prune decisions for keys whose source stopped
+// enumerating them. It runs ONLY after the caller's publish succeeded, so a
+// write failure in audit/runtime output never orphans last-good state into a
+// vanished cache.
+func JournalStale(path string, keys []string) error {
+	if len(keys) == 0 || path == "" {
+		return nil
+	}
+	store, err := openState(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.close() }()
+	return markStaleEntries(store, keys)
+}
+
 func (s *stateStore) close() error {
 	if s == nil || s.file == nil {
 		return nil
