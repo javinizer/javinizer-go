@@ -137,9 +137,19 @@ func TestBuildCachedMetricCountsOnlyReusedEntries(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, secondReport.Cached)
 
-	// Once the source stops emitting the entry and completes, the reused
-	// entry is pruned and no longer counted.
+	// The source disappearing wholesale would publish an EMPTY cache while
+	// pruning journaled entries: refuse transactionally before any journal
+	// write, so the reused entry stays intact for a later healthy run.
 	source.candidates = nil
+	_, _, err = Build(context.Background(), options)
+	require.ErrorContains(t, err, "refusing to publish empty")
+	data, readErr := os.ReadFile(statePath)
+	require.NoError(t, readErr)
+	assert.NotContains(t, string(data), "\"status\":\"stale\"", "journal untouched by the refused publish")
+
+	// A partial disappearance (source still emits other entries) still prunes
+	// and the metric drops the pruned reuse.
+	source.candidates = []Candidate{{Key: "test:2", Source: "test", SourceID: "2", JapaneseName: "插花", ThumbURL: "https://example.test/t2.jpg"}}
 	_, thirdReport, err := Build(context.Background(), options)
 	require.NoError(t, err)
 	assert.Equal(t, 0, thirdReport.Cached, "pruned previously-reused entries must decrement the metric")

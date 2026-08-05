@@ -82,8 +82,13 @@ type StateEntry struct {
 	// under --allow-private-hosts. The host may be an internal DNS name, so a
 	// later default-safe run cannot lexically prove it safe and must
 	// revalidate instead of reusing.
-	ValidatedWithPrivateHosts bool   `json:"private_hosts,omitempty"`
-	Error                     string `json:"error,omitempty"`
+	ValidatedWithPrivateHosts bool `json:"private_hosts,omitempty"`
+	// Policy fingerprints the validation policy in force when this entry was
+	// journaled (min-dimension, max-bytes, private-hosts). Entries rejected
+	// under a DIFFERENT policy re-evaluate on the next run instead of being
+	// skipped forever.
+	Policy string `json:"policy,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // SourceOptions ...

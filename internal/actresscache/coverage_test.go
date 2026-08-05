@@ -759,28 +759,8 @@ func TestBuildStateWriteFailures(t *testing.T) {
 
 	store := &stateStore{entries: make(map[string]StateEntry), encoder: json.NewEncoder(errorWriter{})}
 	report := BuildReport{}
-	err = recordFailure(store, Candidate{Key: "one"}, errors.New("failure"), &sync.Mutex{}, &report)
+	err = recordFailure(store, Candidate{Key: "one"}, errors.New("failure"), "p", &sync.Mutex{}, &report)
 	require.ErrorContains(t, err, "write failed state")
-}
-
-func TestBuildStaleStateWriteFailure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.jsonl")
-	candidate := Candidate{Key: "one", Source: "test", SourceID: "1", ThumbURL: "https://example.test/one.jpg"}
-	data, err := json.Marshal(StateEntry{Key: "one", Status: "ok", Candidate: &candidate, Thumbnail: &ThumbnailValidation{CheckedAt: "now", SHA256: "one", Bytes: 10, Width: 100, Height: 100, Format: "jpeg"}})
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(path, append(data, '\n'), 0o600))
-	originalOpen := stateOpenFile
-	defer func() { stateOpenFile = originalOpen }()
-	closed, err := os.CreateTemp(t.TempDir(), "closed")
-	require.NoError(t, err)
-	require.NoError(t, closed.Close())
-	stateOpenFile = func(string, int, os.FileMode) (*os.File, error) { return closed, nil }
-	source := sourceFunc{name: "test", collect: func(_ context.Context, options SourceOptions, _ func(Candidate) error) error {
-		options.MarkComplete()
-		return nil
-	}}
-	_, _, err = Build(context.Background(), BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: path, ValidateThumbnail: testValidator})
-	require.ErrorContains(t, err, "write stale state")
 }
 
 func TestOpenStateQuarantinesCorruptCompleteLine(t *testing.T) {

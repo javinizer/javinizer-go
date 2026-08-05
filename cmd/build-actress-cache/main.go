@@ -275,6 +275,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// already have marked reused state stale. Fail loudly instead.
 		return fmt.Errorf("refusing to publish empty actress cache (sources: %s)", strings.Join(opts.sources, ","))
 	}
+	// The runtime projection is stricter than the audit set: records with no
+	// DMM ID, names, or aliases drop out. If everything drops out, the runtime
+	// artifact would be empty despite report.Records > 0 — catch that too.
+	if len(actresscache.NewRuntimeCache(cache).Records) == 0 {
+		return fmt.Errorf("refusing to publish runtime cache with zero projected records (audit built %d records — check source identity fields)", report.Records)
+	}
 	if opts.auditOutput != "" {
 		if err := actresscache.WriteFile(opts.auditOutput, cache); err != nil {
 			return fmt.Errorf("write actress audit cache: %w", err)
