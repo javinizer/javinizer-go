@@ -94,7 +94,10 @@ func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, min
 	if header.Width <= 0 || header.Height <= 0 {
 		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("image reports invalid dimensions %dx%d", header.Width, header.Height)}
 	}
-	if int64(header.Width)*int64(header.Height) > MaxThumbnailPixels {
+	// Overflow-safe: declared dimensions on wide containers can reach int32
+	// scale, and multiplying pairs of them could push past int64 if a decoder
+	// ever reports broader ranges; compare by division instead.
+	if int64(header.Width) > MaxThumbnailPixels/int64(header.Height) {
 		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("dimensions %dx%d exceed the %d pixel decoder limit", header.Width, header.Height, MaxThumbnailPixels)}
 	}
 	if minDimension > 0 && (header.Width < minDimension || header.Height < minDimension) {

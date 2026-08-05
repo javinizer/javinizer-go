@@ -344,15 +344,27 @@ func NewSSRFSafeClient(timeout time.Duration) *http.Client {
 // DialTLS/DialTLSContext on the transport is cleared here rather than
 // silently left to defeat the guard.
 func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
+	return wrapTransport(transport, transport.Proxy != nil)
+}
+
+// WrapTransportPreservingHostnames is WrapTransportWithSSRFCheck for dial
+// paths whose hostname resolution happens remotely (SOCKS5 via x/net/proxy
+// installs DialContext while http.Transport.Proxy stays nil). Without this
+// the wrapper would pin to a locally resolved IP and defeat SOCKS5 remote-DNS
+// and split-horizon semantics.
+func WrapTransportPreservingHostnames(transport *http.Transport) *http.Transport {
+	return wrapTransport(transport, true)
+}
+
+func wrapTransport(transport *http.Transport, preserveHostnames bool) *http.Transport {
 	transport.DialTLSContext = nil
 	transport.DialTLS = nil //nolint:staticcheck // cleared intentionally: unpinnable
 	fallback := transport.DialContext
 	if fallback == nil {
 		fallback = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
 	}
-	proxied := transport.Proxy != nil
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return dialPinned(ctx, network, addr, fallback, proxied)
+		return dialPinned(ctx, network, addr, fallback, preserveHostnames)
 	}
 	return transport
 }

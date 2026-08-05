@@ -608,8 +608,11 @@ func ExpandGallery(first, last string) []string {
 		return nil
 	}
 	// Cap the expanded count at 1000 to guard against a malformed range
-	// producing a pathological number of URLs.
-	if count := end - start + 1; count > 1000 {
+	// producing a pathological number of URLs. Overflow-safe: end >= start >= 0
+	// here, so plain subtraction cannot wrap; computing end-start+1 FIRST would
+	// overflow when end == math.MaxInt (count wraps negative, the cap is
+	// bypassed, and "for n := start; n <= end; n++" wraps n and never ends).
+	if end-start >= 1000 {
 		return nil
 	}
 	urls := make([]string, 0, end-start+1)
