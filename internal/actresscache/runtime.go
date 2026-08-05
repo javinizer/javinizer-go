@@ -3,6 +3,7 @@ package actresscache
 import (
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -158,7 +159,7 @@ func WriteRuntimeFile(path string, cache Cache) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	return atomicReplace(tmpPath, path)
 }
 
 // runtimeRecordHasIdentity ...
@@ -169,6 +170,24 @@ func runtimeRecordHasIdentity(record Record) bool {
 	// single-part records would be embedded but unfindable.
 	romanized := strings.TrimSpace(record.FirstName) != "" && strings.TrimSpace(record.LastName) != ""
 	return record.DMMID > 0 || strings.TrimSpace(record.JapaneseName) != "" || romanized || len(record.Aliases) > 0
+}
+
+// atomicReplace is os.Rename on Unix; on Windows os.Rename fails when dst
+// already exists, so it falls back to remove-then-rename. The fallback is not
+// atomic, but the short window opens only when replacing a committed artifact.
+var (
+	atomicRename = os.Rename
+	atomicRemove = os.Remove
+)
+
+func atomicReplace(src, dst string) error {
+	if err := atomicRename(src, dst); err == nil {
+		return nil
+	}
+	if rmErr := atomicRemove(dst); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		return rmErr
+	}
+	return atomicRename(src, dst)
 }
 
 // runtimeThumbnailURL ...

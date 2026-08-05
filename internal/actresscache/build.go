@@ -629,10 +629,18 @@ func compatibleGroup(group candidateGroup, candidate Candidate) bool {
 	if groupHasAlias(group, candidateJapaneseName) {
 		return true
 	}
+	candidateAliases := make(map[string]struct{}, len(candidate.Aliases))
+	for _, alias := range candidate.Aliases {
+		candidateAliases[normalizeIdentity(alias)] = struct{}{}
+	}
 	for _, item := range group.items {
 		groupJapaneseName := normalizeIdentity(item.candidate.Candidate.JapaneseName)
 		if groupJapaneseName != "" && groupJapaneseName != candidateJapaneseName {
-			return false
+			// The incoming candidate explicitly declares that group name as an
+			// alias: the two records are the same actress.
+			if _, declared := candidateAliases[groupJapaneseName]; !declared {
+				return false
+			}
 		}
 	}
 	return true
@@ -823,5 +831,5 @@ func WriteFile(path string, cache Cache) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	return atomicReplace(tmpPath, path)
 }

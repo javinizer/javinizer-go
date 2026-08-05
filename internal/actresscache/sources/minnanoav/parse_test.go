@@ -142,3 +142,11 @@ func TestParseActressPageNilDocument(t *testing.T) {
 	assert.Empty(t, page.primaryName)
 	assert.Empty(t, page.thumbURL)
 }
+
+// Malformed hrefs must not pollute ID extraction: url.Parse failure is
+// skipped gracefully so the next candidate can still mint.
+func TestParseDMMActressIDResumesPastUnparseable(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="http://[]:bad/x?actress=999">broken</a>`))
+	require.NoError(t, err)
+	assert.Zero(t, parseDMMActressID(doc))
+}

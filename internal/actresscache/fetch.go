@@ -341,7 +341,15 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			return err
 		}
 		if previousCheckRedirect != nil {
-			return previousCheckRedirect(req, via)
+			if err := previousCheckRedirect(req, via); err != nil {
+				return err
+			}
+			// The caller's policy may have rewritten req.URL; revalidate the
+			// FINAL target before dispatch so a rewritten hop cannot smuggle a
+			// private address past the entry guard.
+			if !fetcher.allowPrivateHosts {
+				return fetcher.checkFetchTarget(req.Context(), req.URL.Scheme, req.URL.Hostname(), req.URL.Host)
+			}
 		}
 		return nil
 	}

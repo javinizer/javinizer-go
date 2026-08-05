@@ -879,3 +879,25 @@ func TestWriteRuntimeFileSyncFailure(t *testing.T) {
 	err := WriteRuntimeFile(filepath.Join(t.TempDir(), "out.json.gz"), Cache{})
 	require.ErrorIs(t, err, sentinel)
 }
+
+// A candidate whose canonical name B paired with alias A must merge into a
+// group whose canonical name is A — the reverse direction was ignored before.
+func TestBuildMergesIncomingAliasIntoExistingCanonicalGroup(t *testing.T) {
+	mk := func(key, jp string, aliases ...string) rankedCandidate {
+		return rankedCandidate{candidate: ValidatedCandidate{Candidate: Candidate{Key: key, Source: "test", JapaneseName: jp, Aliases: aliases, ThumbURL: "thumb"}}}
+	}
+	groups := make([]candidateGroup, 0)
+	identityGroups := map[string]map[int]struct{}{}
+	first := mk("a", "青田 加代子")
+	ids := candidateIdentities(first.candidate.Candidate)
+	groups = append(groups, newCandidateGroup(first, ids))
+	registerGroup(identityGroups, len(groups)-1, ids)
+
+	bridge := mk("b", "野上 律子", "青田 加代子")
+	matches := compatibleGroups(groups, identityGroups, candidateIdentities(bridge.candidate.Candidate), bridge.candidate.Candidate)
+	require.Len(t, matches, 1, "incoming alias must join the canonical-named group")
+	records := mergeCandidates([]rankedCandidate{first, bridge})
+	require.Len(t, records, 1)
+	universe := append([]string{records[0].JapaneseName}, records[0].Aliases...)
+	assert.ElementsMatch(t, []string{"青田 加代子", "野上 律子"}, universe, "both identities survive")
+}

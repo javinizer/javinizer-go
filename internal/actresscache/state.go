@@ -23,7 +23,7 @@ var (
 	stateTruncate       = func(file *os.File, size int64) error { return file.Truncate(size) }
 	stateSeekEnd        = func(file *os.File) error { _, err := file.Seek(0, io.SeekEnd); return err }
 	stateWriteNewline   = func(file *os.File) error { _, err := file.Write([]byte{10}); return err }
-	stateRename         = os.Rename
+	stateRename         = atomicReplace
 	stateWriteFileNew   = os.WriteFile
 )
 
