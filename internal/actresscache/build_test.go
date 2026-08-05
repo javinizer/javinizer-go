@@ -573,3 +573,79 @@ func TestMergeDoesNotCollapseLegacyRowsWithSameEnglishName(t *testing.T) {
 	records := mergeCandidates(items)
 	require.Len(t, records, 2)
 }
+
+func TestBuildPrunesPolicyExcludedStateEntries(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.jsonl")
+	gone := Candidate{Key: "test:gone", Source: "test", DMMID: 77, JapaneseName: "消える子", FirstName: "Kieru", LastName: "Ko", ThumbURL: "https://cdn.test/gone.jpg"}
+	stay := Candidate{Key: "test:stay", Source: "test", DMMID: 78, JapaneseName: "残る子", FirstName: "Nokoru", LastName: "Ko", ThumbURL: "https://cdn.test/stay.jpg"}
+	source := &testSource{name: "test", candidates: []Candidate{gone, stay}}
+	options := BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: testValidator}
+
+	// Run 1: default policy publishes both entries.
+	cache, _, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Len(t, cache.Records, 2)
+
+	// Run 2: stricter policy (100x100 thumbs now too small) and "gone" is no
+	// longer enumerated upstream. "gone" never enters the survivor set, so a
+	// candidates-only prune misses it; the state sweep must stale it.
+	source.candidates = []Candidate{stay}
+	options.MinThumbnailDimension = 150
+	_, report, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	require.Equal(t, []string{"test:gone"}, report.StaleKeys)
+
+	// The CLI commits prune lines only post-publish; mirror that ordering.
+	require.NoError(t, JournalStale(statePath, report.StaleKeys))
+
+	// Run 3: relaxed policy with a limit (pruning disabled). The removed,
+	// policy-excluded record must stay dead -- no resurrection from a stale
+	// last-good journal line.
+	source.candidates = nil
+	options.MinThumbnailDimension = 0
+	options.SourceOptions.Limit = 5
+	cache, report, err = Build(context.Background(), options)
+	require.NoError(t, err)
+	for _, record := range cache.Records {
+		assert.NotEqual(t, 77, record.DMMID, "removed record must not be resurrected")
+	}
+	assert.Equal(t, 1, report.Cached, "only the surviving reusable entry may count as cached")
+}
+
+func TestBuildStaleKeysDedupForReusedEntries(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.jsonl")
+	gone := Candidate{Key: "test:gone", Source: "test", DMMID: 177, JapaneseName: "消える子", FirstName: "Kieru", LastName: "Ko", ThumbURL: "https://cdn.test/gone.jpg"}
+	stay := Candidate{Key: "test:stay", Source: "test", DMMID: 178, JapaneseName: "残る子", FirstName: "Nokoru", LastName: "Ko", ThumbURL: "https://cdn.test/stay.jpg"}
+	source := &testSource{name: "test", candidates: []Candidate{gone, stay}}
+	options := BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: testValidator}
+	_, _, err := Build(context.Background(), options)
+	require.NoError(t, err)
+
+	// Same policy: "gone" is reused into candidates and reaches pruning via
+	// the candidate pass AND the state sweep -- but must be staled exactly once.
+	source.candidates = []Candidate{stay}
+	_, report, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"test:gone"}, report.StaleKeys, "candidate+state sweep must dedup stale keys")
+}
+
+func TestBuildPruneSweepSkipsIneligibleEntries(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.jsonl")
+	main := &testSource{name: "test", candidates: []Candidate{{Key: "test:gone", Source: "test", DMMID: 277, ThumbURL: "https://cdn.test/gone.jpg"}}}
+	other := &testSource{name: "other", candidates: []Candidate{{Key: "other:keep", Source: "other", DMMID: 308, ThumbURL: "https://cdn.test/keep.jpg"}}}
+	registry := NewRegistry()
+	registry.Register("test", func() Source { return main })
+	registry.Register("other", func() Source { return other })
+	options := BuildOptions{Registry: registry, Sources: []string{"test", "other"}, StatePath: statePath, ValidateThumbnail: testValidator}
+	_, _, err := Build(context.Background(), options)
+	require.NoError(t, err)
+
+	// Tombstone "test:gone" before the sweep runs, then complete both sources
+	// without re-listing it: the sweep must skip the non-ok entry, skip OK
+	// entries owned by another source, and skip seen (reused) entries.
+	require.NoError(t, JournalStale(statePath, []string{"test:gone"}))
+	main.candidates = nil
+	_, report, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Empty(t, report.StaleKeys, "tombstoned/seen/cross-source entries are not newly staled")
+}

@@ -235,6 +235,14 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 	// the build, so last-good journal entries must not be staled by a run
 	// that never produced output).
 	staleKeysAll := make([]string, 0)
+	staleSeen := make(map[string]struct{})
+	markStale := func(key string) {
+		if _, done := staleSeen[key]; done {
+			return
+		}
+		staleSeen[key] = struct{}{}
+		staleKeysAll = append(staleKeysAll, key)
+	}
 	for _, sourceName := range sources {
 		mu.Lock()
 		complete := completedSources[sourceName]
@@ -251,7 +259,24 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 					continue
 				}
 				delete(candidates, key)
-				staleKeysAll = append(staleKeysAll, key)
+				markStale(key)
+			}
+			// Sweep journal-effective OK entries that were never seeded into
+			// candidates this run: a policy/safety-excluded entry whose source
+			// stopped enumerating it must not keep a reusable last-good line,
+			// or a later relaxed (or non-pruning) run would resurrect a record
+			// this completed source no longer lists.
+			for key, entry := range state.entries {
+				if entry.Status != stateStatusOK || entry.Candidate == nil {
+					continue
+				}
+				if strings.ToLower(strings.TrimSpace(entry.Candidate.Source)) != sourceName {
+					continue
+				}
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				markStale(key)
 			}
 		}
 		mu.Unlock()
