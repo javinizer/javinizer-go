@@ -344,7 +344,12 @@ func NewSSRFSafeClient(timeout time.Duration) *http.Client {
 // DialTLS/DialTLSContext on the transport is cleared here rather than
 // silently left to defeat the guard.
 func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
-	return wrapTransport(transport, transport.Proxy != nil)
+	// Pin by default even when Proxy is set: net/http dials the PROXY address,
+	// which we resolve+validate; dialing the original hostname afterwards
+	// would re-resolve it and allow DNS rebinding onto a private address.
+	// Only explicit remote-DNS paths (WrapTransportPreservingHostnames, used
+	// for SOCKS5 DialContext transports) may keep the hostname.
+	return wrapTransport(transport, false)
 }
 
 // WrapTransportPreservingHostnames is WrapTransportWithSSRFCheck for dial

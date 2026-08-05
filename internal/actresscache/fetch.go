@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -429,7 +430,14 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 		if maxBytes <= 0 {
 			maxBytes = 8 << 20
 		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+		// Read one byte past the cap to detect over-limit bodies; at
+		// math.MaxInt64 the +1 would overflow to a negative limit and
+		// LimitReader would yield an empty (hence undecodable) body.
+		limit := maxBytes
+		if limit < math.MaxInt64 {
+			limit++
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 		_ = resp.Body.Close()
 		if err != nil {
 			if attempt+1 == fetchAttempts || requestCtx.Err() != nil {

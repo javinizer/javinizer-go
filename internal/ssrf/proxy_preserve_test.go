@@ -12,10 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Compat wrapper keeps the hostname for transports whose Proxy is set
-// (SOCKS5/CONNECT dialers own resolution), but literal-private dials still
-// stop before any proxy dialer runs.
-func TestWrapTransportPreservesHostnameForProxiedDialers(t *testing.T) {
+// Compat wrapper PINS proxy connections to validated IPs: net/http dials the
+// proxy address when Proxy is set, and re-resolving the proxy hostname at
+// dial time would reopen DNS rebinding onto private addresses. Hostname
+// preservation exists only for explicit remote-DNS wrapping (SOCKS5
+// DialContext transports). Literal-private dials still stop before any
+// proxy dialer runs.
+func TestWrapTransportPinsDialTargetForProxiedTransports(t *testing.T) {
 	// The pinned dial resolves and validates targets first; proxies only
 	// matter for what gets dialed, so the resolver must be controllable.
 	cleanup := SetLookupIPForTest(func(_ string) ([]net.IP, error) {
@@ -25,7 +28,7 @@ func TestWrapTransportPreservesHostnameForProxiedDialers(t *testing.T) {
 
 	var dialed []string
 	wrapped := WrapTransportWithSSRFCheck(&http.Transport{
-		Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: "127.0.0.1:1080"}),
+		Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy.example:8080"}),
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			dialed = append(dialed, addr)
 			return nil, errors.New("sentinel-stop")
@@ -34,7 +37,7 @@ func TestWrapTransportPreservesHostnameForProxiedDialers(t *testing.T) {
 
 	_, err := wrapped.DialContext(context.Background(), "tcp", "media.example:443")
 	require.ErrorContains(t, err, "sentinel-stop")
-	assert.Equal(t, []string{"media.example:443"}, dialed, "proxy dialer keeps hostnames unchanged")
+	assert.Equal(t, []string{"93.184.216.34:443"}, dialed, "dial target is pinned to the validated IP (no rebinding window)")
 
 	// A private literal still short-circuits *before* the proxy dialer runs.
 	_, err = wrapped.DialContext(context.Background(), "tcp", "10.2.3.4:443")
