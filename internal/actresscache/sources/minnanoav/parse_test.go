@@ -122,12 +122,16 @@ func TestParseDMMActressIDAcceptsArticleStyleLinks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 778899, parseDMMActressID(encoded))
 
-	// A non-DMM domain carrying the same numeric params must NOT mint an ID
-	// (proxied affiliate walls, other vendors, and mirrors otherwise get
-	// journaled with a bogus authoritative DMM anchor).
-	nonDMM, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://other-vendor.example/items?actress=42">no</a><a href="https://redirect.example/?u=https%3A%2F%2Fvideo.dmm.co.jp%2Fav%2Flist%2F%3D%2Farticle%3Dactress%2Fid%3D55%2F">enc-scam</a>`))
+	// A non-DMM wrapper whose query encodes a DMM article link must mint.
+	affiliateWrapped, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://redirect.example/?u=https%3A%2F%2Fvideo.dmm.co.jp%2Fav%2Flist%2F%3D%2Farticle%3Dactress%2Fid%3D55%2F">enc</a>`))
 	require.NoError(t, err)
-	assert.Zero(t, parseDMMActressID(nonDMM))
+	assert.Equal(t, 55, parseDMMActressID(affiliateWrapped))
+
+	// The DOMM affiliate path must not mint anything when the innermost
+	// target is not DMM at all (e.g. wrapper leans on a non-DMM actor URL).
+	evilWrap, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://redirect.example/?u=https%3A%2F%2Fnotdmm.example%2Fx%3Factress%3D7777">enc</a>`))
+	require.NoError(t, err)
+	assert.Zero(t, parseDMMActressID(evilWrap))
 }
 
 func TestParseProfileSkipsEmptyAndDuplicateAliases(t *testing.T) {

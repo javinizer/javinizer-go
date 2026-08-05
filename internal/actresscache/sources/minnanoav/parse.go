@@ -63,6 +63,43 @@ var dmmActressIDPattern = regexp.MustCompile("(?:^|[?&])actress=([0-9]+)")
 // or the candidate loses its authoritative DMM ID.
 var dmmActressArticleIDPattern = regexp.MustCompile(`article=actress/id=([0-9]+)`)
 
+// resolveAffiliateChain unwraps DMM affiliate redirectors (lurl=, u=) to the
+// innermost target before the host gate runs, so a wrapped non-DMM target
+// cannot mint a DMM authorID. Descent is bounded at 4 hops.
+// isDMMActressHost restricts which hosts can mint a candidate's authoritative DMM anchor.
+func isDMMActressHost(host string) bool {
+	switch host {
+	case "dmm.co.jp", "www.dmm.co.jp", "video.dmm.co.jp", "al.dmm.co.jp", "tv.dmm.co.jp":
+		return true
+	}
+	return strings.HasSuffix(host, ".dmm.co.jp")
+}
+
+func resolveAffiliateChain(href string) string {
+	for range 4 {
+		if decoded, err := url.QueryUnescape(href); err == nil {
+			href = decoded
+		}
+		u, err := url.Parse(href)
+		if err != nil {
+			break
+		}
+		inner := strings.TrimSpace(u.Query().Get("lurl"))
+		if inner == "" {
+			inner = strings.TrimSpace(u.Query().Get("u"))
+		}
+		if inner == "" {
+			break
+		}
+		next, err := url.Parse(inner)
+		if err != nil || (next.Hostname() == "" && !strings.HasPrefix(inner, "/")) {
+			break
+		}
+		href = inner
+	}
+	return href
+}
+
 func parseDMMActressID(doc *goquery.Document) int {
 	if doc == nil {
 		return 0
@@ -70,21 +107,32 @@ func parseDMMActressID(doc *goquery.Document) int {
 	id := 0
 	doc.Find("a[href]").EachWithBreak(func(_ int, link *goquery.Selection) bool {
 		href := html.UnescapeString(strings.TrimSpace(link.AttrOr("href", "")))
-		for range 3 {
-			decoded, err := url.QueryUnescape(href)
-			if err != nil || decoded == href {
+		href = resolveAffiliateChain(href)
+		// Follow the redirect chain DOWN to the innermost link target before
+		// trusting it: a dmm affiliate URL that wraps a non-DMM target must
+		// not mint a DMM ID for the wrapped host.
+		target := href
+		for range 4 {
+			parsed, parseErr := url.Parse(target)
+			if parseErr != nil {
+				return true
+			}
+			inner := strings.TrimSpace(parsed.Query().Get("lurl"))
+			if inner == "" {
 				break
 			}
-			href = decoded
+			next, decErr := url.QueryUnescape(inner)
+			if decErr != nil {
+				return true
+			}
+			target = next
 		}
-		parsed, err := url.Parse(href)
+		parsed, err := url.Parse(target)
 		if err != nil {
 			return true
 		}
 		host := strings.ToLower(parsed.Hostname())
 		if host == "" {
-			// Relative link on a minnanoav profile: only the path-shaped DMM
-			// article form (/list/=/article=actress/id=N/) means a DMM anchor.
 			match := dmmActressArticleIDPattern.FindStringSubmatch(href)
 			if len(match) != 2 {
 				return true
@@ -93,11 +141,8 @@ func parseDMMActressID(doc *goquery.Document) int {
 			return false
 		}
 		// The candidate's authoritative ID may only come from DMM/FANZA
-		// actress links; unrelated sites also use ?actress=. Restrict extraction
-		// to those domains before pattern-matching the ID.
-		if host != "dmm.co.jp" && host != "www.dmm.co.jp" &&
-			host != "video.dmm.co.jp" && host != "al.dmm.co.jp" &&
-			host != "tv.dmm.co.jp" && !strings.HasSuffix(host, ".dmm.co.jp") {
+		// actress links; unrelated hosts carrying ?actress= must not mint one.
+		if !isDMMActressHost(host) {
 			return true
 		}
 		match := dmmActressIDPattern.FindStringSubmatch(href)
