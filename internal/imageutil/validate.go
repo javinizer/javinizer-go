@@ -132,31 +132,52 @@ func canonicalProxyAddr(proxyURL *url.URL) string {
 	return net.JoinHostPort(proxyURL.Hostname(), port)
 }
 
-// resolveProxyDialAddr pins the proxy endpoint itself: a hostname proxy URL
-// is resolved ONCE and the first answer dialed, so DNS rebinding or
-// multi-answer churn between preflight and connect cannot redirect the
-// validator's proxy connection elsewhere. Configured proxies are trusted
-// infrastructure (often internal), so answers are pinned, not public-gated.
-// Literal-IP proxies pass through untouched.
-func resolveProxyDialAddr(ctx context.Context, proxyURL *url.URL, lookup func(context.Context, string) ([]net.IPAddr, error)) (string, error) {
+// resolveProxyDialAddrs pins the proxy endpoint itself: a hostname proxy URL
+// is resolved ONCE and every answer becomes a pinned dial candidate, so DNS
+// rebinding or multi-answer churn between preflight and connect cannot
+// redirect the validator's proxy connection elsewhere -- and an unreachable
+// first answer fails over to the rest instead of stalling every attempt.
+// Configured proxies are trusted infrastructure (often internal), so answers
+// are pinned, not public-gated. Literal-IP proxies pass through untouched.
+func resolveProxyDialAddrs(ctx context.Context, proxyURL *url.URL, lookup func(context.Context, string) ([]net.IPAddr, error)) ([]string, error) {
 	addr := canonicalProxyAddr(proxyURL)
 	// canonicalProxyAddr always yields host:port, so the split cannot fail.
 	host, _, _ := net.SplitHostPort(addr)
 	if net.ParseIP(host) != nil {
-		return addr, nil
+		return []string{addr}, nil
 	}
 	if lookup == nil {
 		lookup = net.DefaultResolver.LookupIPAddr
 	}
 	addrs, err := lookup(ctx, host)
 	if err != nil {
-		return "", fmt.Errorf("resolve configured proxy %s: %w", host, err)
+		return nil, fmt.Errorf("resolve configured proxy %s: %w", host, err)
 	}
 	if len(addrs) == 0 {
-		return "", fmt.Errorf("resolve configured proxy %s: no addresses", host)
+		return nil, fmt.Errorf("resolve configured proxy %s: no addresses", host)
 	}
 	_, port, _ := net.SplitHostPort(addr)
-	return net.JoinHostPort(addrs[0].IP.String(), port), nil
+	candidates := make([]string, 0, len(addrs))
+	for _, resolved := range addrs {
+		candidates = append(candidates, net.JoinHostPort(resolved.IP.String(), port))
+	}
+	return candidates, nil
+}
+
+// dialPinnedAddrs dials the first reachable pinned proxy address.
+func dialPinnedAddrs(ctx context.Context, network string, addrs []string, dial func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+	var dialErr error
+	for _, addr := range addrs {
+		conn, err := dial(ctx, network, addr)
+		if err == nil {
+			return conn, nil
+		}
+		dialErr = errors.Join(dialErr, err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, dialErr
 }
 
 func writeFull(writer io.Writer, data []byte) error {
@@ -229,7 +250,7 @@ func (b *proxyResponseBody) Close() error {
 }
 
 func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.URL, pinnedHost string, transport *http.Transport, lookup func(context.Context, string) ([]net.IPAddr, error)) (*http.Response, error) {
-	proxyAddr, err := resolveProxyDialAddr(ctx, proxyURL, lookup)
+	proxyAddrs, err := resolveProxyDialAddrs(ctx, proxyURL, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -239,9 +260,13 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 	}
 	var conn net.Conn
 	if proxyURL.Scheme == httpsScheme {
-		conn, err = dialTLSProxy(ctx, "tcp", proxyAddr, proxyURL.Hostname(), dial, transport.TLSClientConfig)
+		serverName := proxyURL.Hostname()
+		tlsConfig := transport.TLSClientConfig
+		conn, err = dialPinnedAddrs(ctx, "tcp", proxyAddrs, func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialTLSProxy(ctx, network, addr, serverName, dial, tlsConfig)
+		})
 	} else {
-		conn, err = dial(ctx, "tcp", proxyAddr)
+		conn, err = dialPinnedAddrs(ctx, "tcp", proxyAddrs, dial)
 	}
 	if err != nil {
 		return nil, err
@@ -402,8 +427,9 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 			targetTLSConfig.ServerName = host
 			transport.TLSClientConfig = targetTLSConfig
 			// Pin the proxy endpoint for the CONNECT path too: the peer the
-			// validator tunnels through must be the one resolved up front.
-			proxyDialAddr, err := resolveProxyDialAddr(req.Context(), proxyURL, lookup)
+			// validator tunnels through must be the one resolved up front,
+			// with failover across all its answers.
+			proxyDialAddrs, err := resolveProxyDialAddrs(req.Context(), proxyURL, lookup)
 			if err != nil {
 				roundTripErr = errors.Join(roundTripErr, err)
 				continue
@@ -414,12 +440,15 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 			}
 			// With a proxy in play, net/http only ever dials THE PROXY here.
 			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
-				return pinnedProxyDial(ctx, network, proxyDialAddr)
+				return dialPinnedAddrs(ctx, network, proxyDialAddrs, pinnedProxyDial)
 			}
 			if proxyURL.Scheme == httpsScheme && transport.DialTLSContext == nil {
 				dial := transport.DialContext
+				serverName := proxyURL.Hostname()
 				transport.DialTLSContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
-					return dialTLSProxy(ctx, network, proxyDialAddr, proxyURL.Hostname(), dial, baseTLSConfig)
+					return dialPinnedAddrs(ctx, network, proxyDialAddrs, func(ctx context.Context, network, addr string) (net.Conn, error) {
+						return dialTLSProxy(ctx, network, addr, serverName, dial, baseTLSConfig)
+					})
 				}
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math"
 	"math/big"
 	"net"
@@ -21,40 +22,94 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolveProxyDialAddrPins(t *testing.T) {
+func TestResolveProxyDialAddrsPins(t *testing.T) {
 	// Literal proxies pass through without touching DNS.
 	literal, err := url.Parse("http://192.0.2.1:3128")
 	require.NoError(t, err)
-	addr, err := resolveProxyDialAddr(t.Context(), literal, func(context.Context, string) ([]net.IPAddr, error) {
+	addrs, err := resolveProxyDialAddrs(t.Context(), literal, func(context.Context, string) ([]net.IPAddr, error) {
 		t.Fatal("literal proxies must not resolve")
 		return nil, nil
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "192.0.2.1:3128", addr)
+	assert.Equal(t, []string{"192.0.2.1:3128"}, addrs)
 
-	// Hostname proxies pin to the first resolved answer with scheme defaults.
+	// Hostname proxies pin every answer with scheme defaults applied.
 	named, err := url.Parse("https://proxy.example")
 	require.NoError(t, err)
-	addr, err = resolveProxyDialAddr(t.Context(), named, stubProxyLookup)
+	addrs, err = resolveProxyDialAddrs(t.Context(), named, stubProxyLookup)
 	require.NoError(t, err)
-	assert.Equal(t, "203.0.113.9:443", addr)
+	assert.Equal(t, []string{"203.0.113.9:443"}, addrs)
+
+	// Multiple answers all become failover candidates.
+	multi := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.9")}, {IP: net.ParseIP("203.0.113.10")}}, nil
+	}
+	addrs, err = resolveProxyDialAddrs(t.Context(), named, multi)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"203.0.113.9:443", "203.0.113.10:443"}, addrs)
 
 	// nil lookup falls back to the default resolver (kept for direct helper
 	// callers outside the pinned transport).
 	localhost, err := url.Parse("http://localhost:3128")
 	require.NoError(t, err)
-	addr, err = resolveProxyDialAddr(t.Context(), localhost, nil)
+	addrs, err = resolveProxyDialAddrs(t.Context(), localhost, nil)
 	require.NoError(t, err)
-	assert.True(t, strings.HasSuffix(addr, ":3128"))
-	assert.NotContains(t, addr, "localhost")
+	require.NotEmpty(t, addrs)
+	assert.True(t, strings.HasSuffix(addrs[0], ":3128"))
+	assert.NotContains(t, addrs[0], "localhost")
 
 	// Resolution failure and empty answers both fail closed.
-	_, err = resolveProxyDialAddr(t.Context(), named, func(context.Context, string) ([]net.IPAddr, error) {
+	_, err = resolveProxyDialAddrs(t.Context(), named, func(context.Context, string) ([]net.IPAddr, error) {
 		return nil, assert.AnError
 	})
 	require.ErrorContains(t, err, "resolve configured proxy")
-	_, err = resolveProxyDialAddr(t.Context(), named, func(context.Context, string) ([]net.IPAddr, error) { return nil, nil })
+	_, err = resolveProxyDialAddrs(t.Context(), named, func(context.Context, string) ([]net.IPAddr, error) { return nil, nil })
 	require.ErrorContains(t, err, "no addresses")
+}
+
+// Proxy failover: an unreachable first answer must not sink the request; the
+// remaining pinned answers are tried in order.
+func TestRoundTripHTTPProxyFailsOverResolvedAddresses(t *testing.T) {
+	multi := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.9")}, {IP: net.ParseIP("203.0.113.10")}}, nil
+	}
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	go func() {
+		buf := make([]byte, 4096)
+		_, _ = server.Read(buf)
+		_, _ = server.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+	}()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/x", nil)
+	require.NoError(t, err)
+	var tried []string
+	resp, err := roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			tried = append(tried, addr)
+			if addr == "203.0.113.9:80" {
+				return nil, errors.New("first answer unreachable")
+			}
+			return client, nil
+		},
+	}, multi)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	_ = resp.Body.Close()
+	assert.Equal(t, []string{"203.0.113.9:80", "203.0.113.10:80"}, tried, "later answers are failover candidates")
+}
+
+func TestDialPinnedAddrsStopsWhenExhaustedOrCanceled(t *testing.T) {
+	_, err := dialPinnedAddrs(t.Context(), "tcp", []string{"192.0.2.1:80", "192.0.2.2:80"}, func(context.Context, string, string) (net.Conn, error) {
+		return nil, assert.AnError
+	})
+	require.ErrorIs(t, err, assert.AnError)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = dialPinnedAddrs(ctx, "tcp", []string{"192.0.2.1:80", "192.0.2.2:80"}, func(context.Context, string, string) (net.Conn, error) {
+		return nil, assert.AnError
+	})
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // After pinning, the proxy connection still presents the proxy HOSTNAME as

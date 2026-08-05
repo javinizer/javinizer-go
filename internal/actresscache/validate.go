@@ -40,6 +40,14 @@ func (e *ThumbnailRejectedError) Error() string {
 // decoded RGBA frame ≈80MB, safe with parallel validation workers.
 const MaxThumbnailPixels = 20_000_000
 
+// maxConcurrentThumbnailDecodes caps how many images decode at once across
+// the whole process (all sources, all workers).
+const maxConcurrentThumbnailDecodes = 4
+
+// thumbnailDecodeSlots is sized to maxConcurrentThumbnailDecodes; tests may
+// saturate it to observe backpressure but must drain it back to empty.
+var thumbnailDecodeSlots = make(chan struct{}, maxConcurrentThumbnailDecodes)
+
 // ValidateThumbnail ...
 func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, minDimension int, maxBytes int64) (ThumbnailValidation, error) {
 	rawURL = strings.TrimSpace(rawURL)
@@ -102,6 +110,15 @@ func ValidateThumbnail(ctx context.Context, fetcher *Fetcher, rawURL string, min
 	}
 	if minDimension > 0 && (header.Width < minDimension || header.Height < minDimension) {
 		return ThumbnailValidation{}, &ThumbnailRejectedError{Reason: fmt.Sprintf("dimensions are %dx%d, minimum is %d", header.Width, header.Height, minDimension)}
+	}
+	// Bound concurrent full decodes: a near-cap (~20MP) PNG can cost ~80MB
+	// decoded, and every worker of every selected source validates
+	// concurrently -- an uncapped hostile set can OOM the cache builder.
+	select {
+	case thumbnailDecodeSlots <- struct{}{}:
+		defer func() { <-thumbnailDecodeSlots }()
+	case <-ctx.Done():
+		return ThumbnailValidation{}, ctx.Err()
 	}
 	decoded, format, err := image.Decode(bytes.NewReader(body))
 	if err != nil {

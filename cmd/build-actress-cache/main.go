@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -197,12 +198,53 @@ func acceptedOptionKeyList() []string {
 	return keys
 }
 
+// absPath is a seam for tests (a dead working directory breaks Abs).
+var absPath = filepath.Abs
+
+// rejectSharedArtifactPaths refuses runs where --state, --output, or
+// --audit-output collide: the atomic writers would otherwise clobber the
+// JSONL resume journal with cache data (corrupting/quarantining it next run)
+// or silently discard the audit artifact entirely.
+func rejectSharedArtifactPaths(opts options) error {
+	seen := make(map[string]string, 3)
+	// artifactKey normalizes for collision detection; Abs can fail when the
+	// working directory is gone -- fall back to lexical cleaning so identical
+	// spellings still collide.
+	artifactKey := func(path string) string {
+		if abs, err := absPath(path); err == nil {
+			return abs
+		}
+		return filepath.Clean(path)
+	}
+	for _, artifact := range []struct {
+		flag string
+		path string
+	}{
+		{"--state", opts.state},
+		{"--output", opts.output},
+		{"--audit-output", opts.auditOutput},
+	} {
+		if strings.TrimSpace(artifact.path) == "" {
+			continue
+		}
+		abs := artifactKey(artifact.path)
+		if prev, dup := seen[abs]; dup {
+			return fmt.Errorf("%s and %s must name distinct paths (both resolve to %s)", prev, artifact.flag, abs)
+		}
+		seen[abs] = artifact.flag
+	}
+	return nil
+}
+
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	opts, err := parseOptions(args, stderr)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
+		return err
+	}
+	if err := rejectSharedArtifactPaths(opts); err != nil {
 		return err
 	}
 	registry := actresscache.NewRegistry()
