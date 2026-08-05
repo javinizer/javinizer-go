@@ -362,3 +362,39 @@ func TestValidateRemoteImageRemoteDNSRedirectLexicalOnly(t *testing.T) {
 	require.NoError(t, err, "redirect to a locally-unresolvable name must not fail remote-DNS validation")
 	assert.Equal(t, []string{"proxy-only.example:80", "also-proxy-only.example:80"}, dialed)
 }
+
+// Validating through a marked remote-DNS transport must not mutate the
+// caller's live transport: the wrapper installs onto a fresh clone, and a
+// second validation does not stack wrappers onto the caller's object.
+func TestValidateRemoteImageLeavesCallerTransportUnwrapped(t *testing.T) {
+	sentinel := errors.New("caller dialer observed")
+	var dialed []string
+	caller := &http.Transport{DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		var pngBuf bytes.Buffer
+		require.NoError(t, png.Encode(&pngBuf, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+		return respondWith("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: "+strconv.Itoa(pngBuf.Len())+"\r\n\r\n"+pngBuf.String())(context.Background(), network, addr)
+	}}
+	ssrf.MarkRemoteDNSTransport(caller)
+	client := &http.Client{Transport: caller}
+	require.NoError(t, ValidateRemoteImageWithSafeClient(context.Background(), client, "http://still-proxy-only.example/a.png", "ua", ""))
+	require.NoError(t, ValidateRemoteImageWithSafeClient(context.Background(), client, "http://still-proxy-only.example/b.png", "ua", ""))
+	require.Len(t, dialed, 2, "both validations dialed via the caller dialer (untouched)")
+	for _, addr := range dialed {
+		assert.Equal(t, "still-proxy-only.example:80", addr)
+	}
+
+	// Proof the CALLER'S transport is unwrapped: dialing a private literal
+	// through it must reach the raw dialer (a wrapper would refuse first).
+	rawReached := false
+	raw := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		rawReached = true
+		return nil, sentinel
+	}}
+	ssrf.MarkRemoteDNSTransport(raw)
+	probe := &http.Client{Transport: raw}
+	require.Error(t, ValidateRemoteImageWithSafeClient(context.Background(), probe, "http://other.example/", "ua", "")) // canned dialer dead-ends here; fine
+	_, derr := raw.DialContext(context.Background(), "tcp", "10.99.99.1:80")
+	require.ErrorIs(t, derr, sentinel, "the caller's transport object is byte-for-byte untouched")
+	assert.True(t, rawReached)
+}

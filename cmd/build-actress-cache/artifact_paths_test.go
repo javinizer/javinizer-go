@@ -104,3 +104,55 @@ func TestRejectSharedArtifactPathsResolvesSymlinks(t *testing.T) {
 	// Legitimately distinct neighbors stay accepted.
 	require.NoError(t, rejectSharedArtifactPaths(options{output: filepath.Join(link, "cache.json.gz"), state: filepath.Join(real, "state.jsonl")}))
 }
+
+// A DANGLING symlink defeats EvalSymlinks but still aliases its target:
+// --state=/tmp/link.bin with link.bin->/tmp/stash.bin must collide with
+// --output=/tmp/stash.bin even when stash.bin does not exist yet.
+func TestRejectSharedArtifactPathsDanglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "stash.bin")
+	link := filepath.Join(dir, "link.bin")
+	require.NoError(t, os.Symlink(target, link)) // dangling on purpose
+
+	err := rejectSharedArtifactPaths(options{output: target, state: link})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must name distinct paths")
+
+	// A dangling link pointing at a genuinely different path stays accepted.
+	other := filepath.Join(dir, "other.bin")
+	require.NoError(t, os.Symlink(other, filepath.Join(dir, "other-link.bin")))
+	assert.NoError(t, rejectSharedArtifactPaths(options{
+		output: target,
+		state:  filepath.Join(dir, "other-link.bin"),
+	}))
+}
+
+// Relative symlink targets resolve against the link's directory and still
+// alias their target.
+func TestRejectSharedArtifactPathsRelativeSymlinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "nested")
+	require.NoError(t, os.Mkdir(real, 0o755))
+	target := filepath.Join(real, "cargo.bin")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o600))
+	link := filepath.Join(dir, "down.bin")
+	require.NoError(t, os.Symlink(filepath.Join("nested", "cargo.bin"), link)) // relative, dangling? no -- live
+	require.NoError(t, os.WriteFile(target, []byte("y"), 0o600))
+
+	err := rejectSharedArtifactPaths(options{output: target, state: link})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must name distinct paths")
+}
+
+// Dangling symlink with a RELATIVE target: the join-with-parent-dir branch
+// must still expose the alias.
+func TestRejectSharedArtifactPathsDanglingRelativeSymlink(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "ghost-link.bin")
+	require.NoError(t, os.Symlink("ghost.bin", link)) // relative + dangling
+
+	target := filepath.Join(dir, "ghost.bin")
+	err := rejectSharedArtifactPaths(options{output: target, state: link})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must name distinct paths")
+}
