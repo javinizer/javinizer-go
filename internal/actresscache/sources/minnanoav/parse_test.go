@@ -106,7 +106,7 @@ func TestDirectTextSkipsNodeWithoutChildren(t *testing.T) {
 }
 
 func TestParseDMMActressIDKeepsScanningPastBrokenLinks(t *testing.T) {
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://x.test/?actress=abc">nonnumeric</a><a href="https://x.test/?a=b">none</a><a href="https://dmm.test/?actress=42">hit</a>`))
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://x.test/?actress=abc">nonnumeric</a><a href="https://x.test/?a=b">none</a><a href="https://www.dmm.co.jp/?actress=42">hit</a>`))
 	require.NoError(t, err)
 	assert.Equal(t, 42, parseDMMActressID(doc))
 	assert.Zero(t, parseDMMActressID(nil))
@@ -117,10 +117,17 @@ func TestParseDMMActressIDAcceptsArticleStyleLinks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 5567, parseDMMActressID(doc))
 
-	// Encoded lurl payloads carrying the article form decode to the ID too.
-	encoded, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://example.test/redir?u=https%3A%2F%2Fvideo.dmm.co.jp%2Fav%2Flist%2F%3D%2Farticle%3Dactress%2Fid%3D778899%2F">encoded only</a>`))
+	// The same article form inside a DMM affiliate redirect decodes.
+	encoded, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://al.dmm.co.jp/?lurl=https%3A%2F%2Fvideo.dmm.co.jp%2Fav%2Flist%2F%3D%2Farticle%3Dactress%2Fid%3D778899%2F">wrapped</a>`))
 	require.NoError(t, err)
 	assert.Equal(t, 778899, parseDMMActressID(encoded))
+
+	// A non-DMM domain carrying the same numeric params must NOT mint an ID
+	// (proxied affiliate walls, other vendors, and mirrors otherwise get
+	// journaled with a bogus authoritative DMM anchor).
+	nonDMM, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="https://other-vendor.example/items?actress=42">no</a><a href="https://redirect.example/?u=https%3A%2F%2Fvideo.dmm.co.jp%2Fav%2Flist%2F%3D%2Farticle%3Dactress%2Fid%3D55%2F">enc-scam</a>`))
+	require.NoError(t, err)
+	assert.Zero(t, parseDMMActressID(nonDMM))
 }
 
 func TestParseProfileSkipsEmptyAndDuplicateAliases(t *testing.T) {
