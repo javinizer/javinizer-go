@@ -32,10 +32,15 @@ func TestWrappedDialContextBranches(t *testing.T) {
 	f2 := mustFetcher(NewFetcher(&http.Client{Transport: base2}, 0, "test"))
 	// Non-mirror fetchers wrap the pinned transport with the proxy target pin.
 	dial2 := f2.client.Transport.(*proxyPinningTransport).base.(*http.Transport).DialContext
+	prev2 := lookupIP
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("198.51.100.9")}, nil
+	}
+	defer func() { lookupIP = prev2 }()
 	marked := context.WithValue(context.Background(), proxiedDialCtxKey{}, canonicalProxyDialTarget("http", "corp.proxy", "3128"))
 	_, err = dial2(marked, "tcp", "corp.proxy:3128")
 	require.NoError(t, err)
-	require.Contains(t, spy2.calls, "corp.proxy:3128")
+	require.Contains(t, spy2.calls, "198.51.100.9:3128", "proxy dials reach the fallback pinned to the resolved answer")
 	// The SAME authority without a request marker (NO_PROXY-routed target or
 	// rebinding) must not ride the exemption.
 	_, err = dial2(context.Background(), "tcp", "corp.proxy:3128")

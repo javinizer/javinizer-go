@@ -338,11 +338,33 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 				return fallback(ctx, network, addr)
 			}
 			if endpoint, ok := ctx.Value(proxiedDialCtxKey{}).(string); ok && endpoint != "" {
-				// Only dials serving THIS proxied request may use the raw
-				// fallback, and only to the exact proxy endpoint the request
-				// layer selected.
+				// Only dials serving THIS proxied request may use the proxy
+				// lane, and only to the exact endpoint the request layer
+				// selected. Even then the proxy hostname is resolved ONCE and
+				// dialed pinned: the raw fallback would re-resolve at connect
+				// time and a rebind could move the proxy connection somewhere
+				// unvetted. (Proxies are trusted infrastructure, so answers are
+				// pinned without the public-address gate.)
 				if host, port, splitErr := net.SplitHostPort(addr); splitErr == nil && canonicalProxyDialTarget("", host, port) == endpoint {
-					return fallback(ctx, network, addr)
+					if net.ParseIP(host) != nil {
+						return fallback(ctx, network, addr)
+					}
+					ips, rerr := lookupIP(ctx, "ip", host)
+					if rerr != nil {
+						return nil, fmt.Errorf("resolve configured proxy %s: %w", host, rerr)
+					}
+					if len(ips) == 0 {
+						return nil, fmt.Errorf("resolve configured proxy %s: no addresses", host)
+					}
+					var dialErr error
+					for _, ip := range ips {
+						conn, cerr := fallback(ctx, network, net.JoinHostPort(ip.String(), port))
+						if cerr == nil {
+							return conn, nil
+						}
+						dialErr = errors.Join(dialErr, cerr)
+					}
+					return nil, dialErr
 				}
 			}
 			return guardedDialContext(ctx, network, addr, fallback)

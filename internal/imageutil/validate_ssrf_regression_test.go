@@ -155,7 +155,7 @@ func TestDialTLSProxyPreservesSNIOnPinnedAddr(t *testing.T) {
 	}()
 
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	conn, err := dialTLSProxy(t.Context(), "tcp", listener.Addr().String(), "proxy.example", dialer.DialContext, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // SNI assertion does not need chain validation
+	conn, err := dialTLSProxy(t.Context(), "tcp", listener.Addr().String(), "proxy.example", dialer.DialContext, &tls.Config{InsecureSkipVerify: true}, 0) //nolint:gosec // SNI assertion does not need chain validation
 	require.NoError(t, err)
 	_ = conn.Close()
 	assert.Equal(t, "proxy.example", serverHelloSNI, "SNI keeps the proxy hostname after IP pinning")
@@ -207,4 +207,78 @@ func TestRoundTripHTTPProxyResolveFailureAbortsBeforeDial(t *testing.T) {
 	}, func(context.Context, string) ([]net.IPAddr, error) { return nil, assert.AnError })
 	require.ErrorContains(t, err, "resolve configured proxy")
 	assert.Zero(t, dialed)
+}
+
+func TestTargetTLSConfigNeverOverridesCallerServerName(t *testing.T) {
+	custom := targetTLSConfigFor(&tls.Config{ServerName: "override.example"}, "origin.example")
+	assert.Equal(t, "override.example", custom.ServerName, "caller SNI must survive")
+	defaulted := targetTLSConfigFor(cloneTLSConfig(nil), "origin.example")
+	assert.Equal(t, "origin.example", defaulted.ServerName)
+}
+
+// A manually-driven TLS handshake on this path must honor
+// Transport.TLSHandshakeTimeout: a proxy that accepts TCP but never answers
+// the handshake cannot hang validation indefinitely.
+func TestDialTLSProxyHonorsHandshakeTimeout(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = server.Close(); _ = client.Close() })
+	go func() {
+		buf := make([]byte, 2048)
+		_, _ = server.Read(buf) // swallow ClientHello, then never answer
+		<-t.Context().Done()
+	}()
+	start := time.Now()
+	_, err := dialTLSProxy(t.Context(), "tcp", "1.1.1.1:443", "proxy.example",
+		func(context.Context, string, string) (net.Conn, error) { return client, nil },
+		&tls.Config{InsecureSkipVerify: true}, 80*time.Millisecond) //nolint:gosec // timeout assertion, not chain validation
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second, "handshake must be time-bounded")
+}
+
+// A caller-provided TLS ServerName must survive the manual proxy handshake
+// (SNI pinning must not rewrite it to the dial host).
+func TestDialTLSProxyKeepsCallerServerName(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		DNSNames:     []string{"override.example"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err)
+	cert, err := tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
+	)
+	require.NoError(t, err)
+
+	hello := make(chan string, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = listener.Close() }()
+	go func() {
+		raw, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		server := tls.Server(raw, &tls.Config{
+			GetConfigForClient: func(h *tls.ClientHelloInfo) (*tls.Config, error) {
+				hello <- h.ServerName
+				return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
+			},
+		})
+		_ = server.Handshake()
+		_ = server.Close()
+	}()
+
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialTLSProxy(t.Context(), "tcp", listener.Addr().String(), "proxy.example", dialer.DialContext,
+		&tls.Config{InsecureSkipVerify: true, ServerName: "override.example"}, 5*time.Second) //nolint:gosec // asserting SNI plumbing, not chain validation
+	require.NoError(t, err)
+	_ = conn.Close()
+	assert.Equal(t, "override.example", <-hello)
 }

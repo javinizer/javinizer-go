@@ -95,7 +95,18 @@ func cloneTLSConfig(config *tls.Config) *tls.Config {
 // HOSTNAME): after proxy dialing was pinned to a resolved IP, the dial
 // address no longer carries the name the proxy's certificate expects. A
 // caller-set config.ServerName always wins.
-func dialTLSProxy(ctx context.Context, network, addr, serverName string, dial func(context.Context, string, string) (net.Conn, error), config *tls.Config) (net.Conn, error) {
+// targetTLSConfigFor clones base and defaults ServerName to the request host
+// -- but never overrides a caller-set ServerName (custom certificate and
+// SNI setups must survive pinning).
+func targetTLSConfigFor(base *tls.Config, host string) *tls.Config {
+	clone := base.Clone()
+	if clone.ServerName == "" {
+		clone.ServerName = host
+	}
+	return clone
+}
+
+func dialTLSProxy(ctx context.Context, network, addr, serverName string, dial func(context.Context, string, string) (net.Conn, error), config *tls.Config, handshakeTimeout time.Duration) (net.Conn, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -112,7 +123,16 @@ func dialTLSProxy(ctx context.Context, network, addr, serverName string, dial fu
 		tlsConfig.ServerName = host
 	}
 	tlsConn := tls.Client(conn, tlsConfig)
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
+	// This path handshakes MANUALLY, so Transport.TLSHandshakeTimeout would
+	// otherwise be ignored: a proxy that accepts TCP but stalls TLS could hang
+	// validation forever on a deadline-less caller context.
+	handshakeCtx := ctx
+	if handshakeTimeout > 0 {
+		var cancel context.CancelFunc
+		handshakeCtx, cancel = context.WithTimeout(ctx, handshakeTimeout)
+		defer cancel()
+	}
+	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -263,7 +283,7 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 		serverName := proxyURL.Hostname()
 		tlsConfig := transport.TLSClientConfig
 		conn, err = dialPinnedAddrs(ctx, "tcp", proxyAddrs, func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialTLSProxy(ctx, network, addr, serverName, dial, tlsConfig)
+			return dialTLSProxy(ctx, network, addr, serverName, dial, tlsConfig, transport.TLSHandshakeTimeout)
 		})
 	} else {
 		conn, err = dialPinnedAddrs(ctx, "tcp", proxyAddrs, dial)
@@ -423,9 +443,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		pinnedReq.Host = req.URL.Host
 		if req.URL.Scheme == httpsScheme {
 			baseTLSConfig := cloneTLSConfig(transport.TLSClientConfig)
-			targetTLSConfig := baseTLSConfig.Clone()
-			targetTLSConfig.ServerName = host
-			transport.TLSClientConfig = targetTLSConfig
+			transport.TLSClientConfig = targetTLSConfigFor(baseTLSConfig, host)
 			// Pin the proxy endpoint for the CONNECT path too: the peer the
 			// validator tunnels through must be the one resolved up front,
 			// with failover across all its answers.
@@ -447,7 +465,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 				serverName := proxyURL.Hostname()
 				transport.DialTLSContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
 					return dialPinnedAddrs(ctx, network, proxyDialAddrs, func(ctx context.Context, network, addr string) (net.Conn, error) {
-						return dialTLSProxy(ctx, network, addr, serverName, dial, baseTLSConfig)
+						return dialTLSProxy(ctx, network, addr, serverName, dial, baseTLSConfig, transport.TLSHandshakeTimeout)
 					})
 				}
 			}
