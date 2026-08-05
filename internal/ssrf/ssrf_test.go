@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsPrivateIP(t *testing.T) {
@@ -291,4 +294,44 @@ func TestUnverifiableHostErrorText(t *testing.T) {
 	if !errors.Is(wrapped, inner) {
 		t.Fatal("Unwrap must expose the inner resolver error")
 	}
+}
+func TestDialContextFuncAdaptsLegacyDial(t *testing.T) {
+	// DialContext wins when present.
+	ctxSpy := 0
+	legacyCalled := false
+	transport := &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) { ctxSpy++; return nil, errors.New("ctx") },
+		Dial:        func(string, string) (net.Conn, error) { legacyCalled = true; return nil, nil }, //nolint:staticcheck // fixture for the legacy path
+	}
+	_, err := DialContextFunc(transport)(context.Background(), "tcp", "x:443")
+	require.ErrorContains(t, err, "ctx")
+	assert.False(t, legacyCalled, "DialContext takes precedence")
+
+	// Legacy-only transports are ADAPTED (not discarded).
+	sentinel := errors.New("legacy dialer routed it")
+	legacy := &http.Transport{Dial: func(network, addr string) (net.Conn, error) { //nolint:staticcheck // fixture
+		assert.Equal(t, "tcp", network)
+		assert.Equal(t, "host.example:443", addr)
+		return nil, sentinel
+	}}
+	_, err = DialContextFunc(legacy)(context.Background(), "tcp", "host.example:443")
+	require.ErrorIs(t, err, sentinel)
+
+	// Legacy dials that outlive the request context are abandoned with the
+	// context error (legacy Dial has no cancellation).
+	settle := make(chan struct{})
+	t.Cleanup(func() { close(settle) })
+	slow := &http.Transport{Dial: func(string, string) (net.Conn, error) { //nolint:staticcheck // fixture
+		<-settle // blocks until the test ends; the adapter abandons it first
+		return nil, errors.New("abandoned dial finally settled")
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = DialContextFunc(slow)(ctx, "tcp", "never:443")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 2*time.Second)
+
+	// Neither: a default dialer is returned.
+	assert.NotNil(t, DialContextFunc(&http.Transport{}))
 }

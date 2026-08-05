@@ -274,10 +274,9 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 	if err != nil {
 		return nil, err
 	}
-	dial := transport.DialContext
-	if dial == nil {
-		dial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
-	}
+	// Respect legacy Dial-only transports (assigning DialContext while
+	// ignoring Dial would silently discard them).
+	dial := ssrf.DialContextFunc(transport)
 	var conn net.Conn
 	if proxyURL.Scheme == httpsScheme {
 		serverName := proxyURL.Hostname()
@@ -385,10 +384,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 			transport := t.base.Clone()
 			transport.Proxy = nil
 			transport.DisableKeepAlives = true
-			originalDialContext := transport.DialContext
-			if originalDialContext == nil {
-				originalDialContext = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
-			}
+			originalDialContext := ssrf.DialContextFunc(transport)
 			transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 				// Read the lookup seam dynamically so a replaced resolver still
 				// applies after the clone is cached.
@@ -452,10 +448,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 				roundTripErr = errors.Join(roundTripErr, err)
 				continue
 			}
-			pinnedProxyDial := transport.DialContext
-			if pinnedProxyDial == nil {
-				pinnedProxyDial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
-			}
+			pinnedProxyDial := ssrf.DialContextFunc(transport)
 			// With a proxy in play, net/http only ever dials THE PROXY here.
 			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return dialPinnedAddrs(ctx, network, proxyDialAddrs, pinnedProxyDial)

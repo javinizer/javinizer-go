@@ -352,6 +352,40 @@ func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
 	return wrapTransport(transport, false)
 }
 
+// DialContextFunc returns the transport's effective dial entry point:
+// DialContext when set; otherwise a context-wrapped adaptation of the
+// deprecated Dial hook; otherwise a default dialer. Wrappers must use this
+// instead of checking DialContext alone -- installing a DialContext while
+// ignoring a legacy Dial makes net/http silently discard the caller's dialer.
+func DialContextFunc(transport *http.Transport) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	if transport.DialContext != nil {
+		return transport.DialContext
+	}
+	if transport.Dial != nil { //nolint:staticcheck // reading the deprecated hook is required to respect it
+		legacy := transport.Dial //nolint:staticcheck // honored on purpose
+		return func(ctx context.Context, network, addr string) (net.Conn, error) {
+			type outcome struct {
+				conn net.Conn
+				err  error
+			}
+			result := make(chan outcome, 1)
+			go func() {
+				conn, err := legacy(network, addr)
+				result <- outcome{conn, err}
+			}()
+			select {
+			case o := <-result:
+				return o.conn, o.err
+			case <-ctx.Done():
+				// Legacy Dial cannot be canceled; the abandoned goroutine
+				// settles when the OS dial returns.
+				return nil, ctx.Err()
+			}
+		}
+	}
+	return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+}
+
 // WrapTransportPreservingHostnames is WrapTransportWithSSRFCheck for dial
 // paths whose hostname resolution happens remotely (SOCKS5 via x/net/proxy
 // installs DialContext while http.Transport.Proxy stays nil). Without this
@@ -364,10 +398,7 @@ func WrapTransportPreservingHostnames(transport *http.Transport) *http.Transport
 func wrapTransport(transport *http.Transport, preserveHostnames bool) *http.Transport {
 	transport.DialTLSContext = nil
 	transport.DialTLS = nil //nolint:staticcheck // cleared intentionally: unpinnable
-	fallback := transport.DialContext
-	if fallback == nil {
-		fallback = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
-	}
+	fallback := DialContextFunc(transport)
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return dialPinned(ctx, network, addr, fallback, preserveHostnames)
 	}
