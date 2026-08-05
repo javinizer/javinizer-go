@@ -155,6 +155,18 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
+// proxyTestPreservesHostnames reports whether the proxy-test transport must
+// preserve hostnames at the SSRF wrapper: SOCKS5 dialers resolve names on
+// the proxy (x/net/proxy over DialContext with Transport.Proxy == nil), so
+// locally pinning the target IP would defeat remote/split-horizon DNS.
+func proxyTestPreservesHostnames(proxyProfile *models.ProxyProfile) bool {
+	if proxyProfile == nil {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(proxyProfile.URL))
+	return err == nil && strings.EqualFold(u.Scheme, "socks5")
+}
+
 // TestDirectProxy tests direct proxy connectivity to a target URL.
 // It creates a transport, sends an HTTP GET, and returns a ProxyTestResult
 // with the outcome. This function is side-effect-free and testable in isolation.
@@ -171,7 +183,11 @@ func TestDirectProxy(ctx context.Context, targetURL string, proxyProfile *models
 		return result
 	}
 	defer transport.CloseIdleConnections()
-	ssrf.WrapTransportWithSSRFCheck(transport)
+	if proxyTestPreservesHostnames(proxyProfile) {
+		ssrf.WrapTransportPreservingHostnames(transport)
+	} else {
+		ssrf.WrapTransportWithSSRFCheck(transport)
+	}
 
 	client := resty.New()
 	client.SetTimeout(30 * time.Second)
