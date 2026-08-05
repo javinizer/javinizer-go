@@ -88,6 +88,23 @@ func isBlockedFetchHost(host string) bool { return ssrf.IsBlockedHost(host) }
 
 func isBlockedIP(ip net.IP) bool { return ssrf.IsBlockedIP(ip) }
 
+// stampProxyDecision evaluates the proxy policy for THIS hop and pins the
+// answer onto the request context (in place: redirect callbacks cannot
+// substitute the request pointer, so we mutate the struct). Every hop gets
+// its own evaluation -- e.g. a NO_PROXY match on a redirect target must not
+// inherit hop 1's decision.
+func (f *Fetcher) stampProxyDecision(req *http.Request) error {
+	if f.proxyFunc == nil {
+		return nil
+	}
+	decision, err := f.proxyFunc(req)
+	if err != nil {
+		return fmt.Errorf("actress cache proxy decision failed: %w", err)
+	}
+	*req = *req.WithContext(context.WithValue(req.Context(), proxyDecisionCtxKey{}, &proxyDecision{proxyURL: decision}))
+	return nil
+}
+
 // requestProxied evaluates the transport's proxy policy against the ACTUAL
 // request: synthetic probes carry no headers, so header-keyed policies (e.g.
 // User-Agent-dependent routing) would misclassify the hop and downgrade the
@@ -409,6 +426,10 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
+		// Restamp the hop-scoped proxy decision before decision-dependent checks.
+		if err := fetcher.stampProxyDecision(req); err != nil {
+			return err
+		}
 		if !fetcher.allowPrivateHosts {
 			if err := fetcher.checkFetchTarget(req.Context(), req); err != nil {
 				return err
@@ -421,9 +442,12 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			if err := previousCheckRedirect(req, via); err != nil {
 				return err
 			}
-			// The caller's policy may have rewritten req.URL; revalidate the
-			// FINAL target before dispatch so a rewritten hop cannot smuggle a
-			// private address past the entry guard.
+			// The caller's policy may have rewritten req.URL; restamp the
+			// decision and revalidate the FINAL target before dispatch so a
+			// rewritten hop cannot smuggle a private address past the entry guard.
+			if err := fetcher.stampProxyDecision(req); err != nil {
+				return err
+			}
 			if !fetcher.allowPrivateHosts {
 				return fetcher.checkFetchTarget(req.Context(), req)
 			}
@@ -465,16 +489,13 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 	// evaluate the decision against the exact request that will be dialed.
 	req.Header.Set("User-Agent", f.userAgent)
 	req.Header.Set("Accept", accept)
-	// Evaluate the proxy decision ONCE per Get and carry it on the context:
+	// Evaluate the proxy decision ONCE per hop and carry it on the context:
 	// preflight, the redirect wrapper, the marker, and net/http all replay
 	// this single evaluation, so a stateful policy cannot answer differently
-	// between the fail-closed check and the actual hop.
-	if f.proxyFunc != nil {
-		decision, derr := f.proxyFunc(req)
-		if derr != nil {
-			return nil, nil, fmt.Errorf("actress cache proxy decision failed: %w", derr)
-		}
-		req = req.WithContext(context.WithValue(req.Context(), proxyDecisionCtxKey{}, &proxyDecision{proxyURL: decision}))
+	// between the fail-closed check and the actual hop. Redirect hops restamp
+	// their own decision in the CheckRedirect wrapper below.
+	if err := f.stampProxyDecision(req); err != nil {
+		return nil, nil, err
 	}
 	if !f.allowPrivateHosts {
 		if err := f.checkFetchTarget(requestCtx, req); err != nil {
