@@ -261,14 +261,18 @@ func dialPinned(ctx context.Context, network, addr string, fallback func(context
 	if hostAllowedForTest(host) {
 		return fallback(ctx, network, addr)
 	}
+	if preserveHostname {
+		// Remote-DNS dialers (SOCKS5) own target resolution COMPLETELY: the
+		// hostname goes to the proxy unresolved so proxy-only names and
+		// split-horizon answers work. Local resolution here would be wrong in
+		// both directions -- it cannot prove what the proxy will resolve, and
+		// it rejects private/split-horizon answers that are valid remotely.
+		// (Policy for what may be fetched stays at the request layer.)
+		return fallback(ctx, network, addr)
+	}
 	ips, err := resolvePublicIPs(ctx, host)
 	if err != nil {
 		return nil, err
-	}
-	if preserveHostname {
-		// SOCKS5/CONNECT-style proxy dialers own target resolution: keep the
-		// original hostname so proxy-side or split-horizon DNS still answers.
-		return fallback(ctx, network, addr)
 	}
 	var dialErr error
 	for _, ip := range ips {

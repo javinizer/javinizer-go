@@ -15,8 +15,10 @@ import (
 // original hostname: pinning to a locally resolved IP defeats split-horizon
 // and proxy-side DNS.
 func TestWrapTransportPreservesHostnameForRemoteDNSDialer(t *testing.T) {
+	// Local resolution MUST NOT run for remote-DNS dialers: proxy-only names
+	// would fail, and split-horizon answers would be misjudged.
 	restore := SetLookupIPForTest(func(host string) ([]net.IP, error) {
-		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		return nil, errors.New("local DNS cannot see proxy-resolved names")
 	})
 	defer restore()
 	var dialed string
@@ -29,9 +31,22 @@ func TestWrapTransportPreservesHostnameForRemoteDNSDialer(t *testing.T) {
 	require.Same(t, transport, wrapped)
 
 	client := &http.Client{Transport: wrapped}
-	_, err := client.Get("http://split-horizon.example/")
+	_, err := client.Get("http://proxy-only.example/")
 	require.ErrorContains(t, err, "record-only dialer")
-	assert.Equal(t, "split-horizon.example:80", dialed, "remote-DNS dialer must receive the hostname, not a pinned IP")
+	assert.Equal(t, "proxy-only.example:80", dialed,
+		"remote-DNS dialer receives the hostname unresolved (no local lookup)")
+
+	// A name that IS locally resolvable but answers privately in local DNS
+	// (split-horizon) must still pass through untouched.
+	dialed = ""
+	restore()
+	restore = SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("10.9.9.9")}, nil
+	})
+	defer restore()
+	_, err = client.Get("http://mirror.lan/")
+	require.ErrorContains(t, err, "record-only dialer")
+	assert.Equal(t, "mirror.lan:80", dialed, "split-horizon targets stay proxy-side")
 }
 
 // Custom dialers WITHOUT the remote-DNS marker keep fail-closed pinning.
