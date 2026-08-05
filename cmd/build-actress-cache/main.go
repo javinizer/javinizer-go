@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -201,6 +202,10 @@ func acceptedOptionKeyList() []string {
 // absPath is a seam for tests (a dead working directory breaks Abs).
 var absPath = filepath.Abs
 
+// artifactKeysFoldCase is a seam so tests can exercise case-insensitive
+// collision detection on any host OS.
+var artifactKeysFoldCase = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+
 // rejectSharedArtifactPaths refuses runs where --state, --output, or
 // --audit-output collide: the atomic writers would otherwise clobber the
 // JSONL resume journal with cache data (corrupting/quarantining it next run)
@@ -211,10 +216,19 @@ func rejectSharedArtifactPaths(opts options) error {
 	// working directory is gone -- fall back to lexical cleaning so identical
 	// spellings still collide.
 	artifactKey := func(path string) string {
+		key := ""
 		if abs, err := absPath(path); err == nil {
-			return abs
+			key = abs
+		} else {
+			key = filepath.Clean(path)
 		}
-		return filepath.Clean(path)
+		// Windows and most macOS volumes are case-insensitive: differently
+		// cased spellings then name the SAME artifact, and a positional
+		// string match would let the runtime writer clobber the journal.
+		if artifactKeysFoldCase {
+			key = strings.ToLower(key)
+		}
+		return key
 	}
 	for _, artifact := range []struct {
 		flag string

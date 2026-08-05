@@ -229,7 +229,10 @@ func candidateFromRow(row []string, columns csvColumns, fileURL string, rowNumbe
 	}
 	digestText := fmt.Sprintf("%x", digest.Sum(nil)[:12])
 	return actresscache.Candidate{
-		Key:          fmt.Sprintf("%s:%08d:%s", sourceName, rowNumber, digestText),
+		// Identity key is content-derived ONLY: row positions shift when the
+		// CSV gains/reorders rows, and a position-dependent key would orphan
+		// the last-good journal entry on any upstream insertion.
+		Key:          fmt.Sprintf("%s:%s", sourceName, digestText),
 		Source:       sourceName,
 		SourceID:     strconv.Itoa(rowNumber),
 		SourceURL:    fileURL + "#row=" + strconv.Itoa(rowNumber),

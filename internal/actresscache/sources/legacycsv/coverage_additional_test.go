@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -38,7 +39,8 @@ func TestCollectMarksRowsAndCompletionAndIgnoresBlankThumbnails(t *testing.T) {
 	// whose prior journal entry must survive the completed-source stale sweep
 	// instead of being silently pruned out of published caches.
 	require.Len(t, seen, 2)
-	assert.Contains(t, seen[0], "legacy-jvthumbs:00000002:")
+	assert.True(t, strings.HasPrefix(seen[0], "legacy-jvthumbs:"))
+	assert.NotContains(t, seen[0], "00000002", "identity keys must not embed row positions")
 	assert.True(t, complete)
 	// ...but only rows WITH thumbnails are emitted.
 	assert.Equal(t, "Hanako", got.FirstName)

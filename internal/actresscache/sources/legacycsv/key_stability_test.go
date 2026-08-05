@@ -21,3 +21,14 @@ func TestCandidateKeyStableAcrossThumbnailChanges(t *testing.T) {
 	c := candidateFromRow(changedName, cols, "https://dump.example/actresses.csv", 7)
 	assert.NotEqual(t, a.Key, c.Key, "identity changes still mint distinct keys")
 }
+
+// Row insertion/reordering upstream must not change identity keys.
+func TestCandidateKeyStableAcrossRowReorder(t *testing.T) {
+	cols := csvColumns{fullName: 0, lastName: 1, firstName: 2, japaneseName: 3, thumbURL: 4, alias: 5}
+	row := []string{"First Last", "Last", "First", "姓 名", "https://cdn.example/p.jpg", "Alias"}
+	a := candidateFromRow(row, cols, "https://dump.example/actresses.csv", 3)
+	b := candidateFromRow(row, cols, "https://dump.example/actresses.csv", 42)
+	assert.Equal(t, a.Key, b.Key)
+	// SourceID keeps the row for traceability, but identity must not.
+	assert.NotEqual(t, a.SourceID, b.SourceID)
+}
