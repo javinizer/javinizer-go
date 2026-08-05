@@ -182,6 +182,15 @@ var lookupIP = net.DefaultResolver.LookupIP
 // send a same-authority target directly, and DNS can move after preflight.
 type proxiedDialCtxKey struct{}
 
+// proxyDecision records the wrapper's evaluated proxy choice (nil URL = the
+// request is explicitly direct). A stateful/rotating Proxy func could answer
+// differently when net/http evaluates it for the real hop; the ledger makes
+// the base transport replay THIS decision so markers, rejections, and dials
+// cannot disagree.
+type proxyDecision struct{ proxyURL *url.URL }
+
+type proxyDecisionCtxKey struct{}
+
 type proxyPinningTransport struct {
 	base     http.RoundTripper
 	proxyFor func(*http.Request) (*url.URL, error)
@@ -203,13 +212,14 @@ func (p *proxyPinningTransport) RoundTrip(req *http.Request) (*http.Response, er
 			return nil, fmt.Errorf("actress cache proxy decision failed: %w", err)
 		}
 		proxyURL = decision
+		ctx := context.WithValue(req.Context(), proxyDecisionCtxKey{}, &proxyDecision{proxyURL: decision})
+		if decision != nil {
+			ctx = context.WithValue(ctx, proxiedDialCtxKey{}, canonicalProxyDialTarget(decision.Scheme, decision.Hostname(), decision.Port()))
+		}
+		req = req.Clone(ctx)
 	}
 	if req.URL.Scheme == "http" && proxyURL != nil && hostIPLiteral(req.URL.Hostname()) == nil {
 		return nil, &ssrf.UnverifiableHostError{Host: req.URL.Hostname(), Err: errors.New("plain-HTTP proxy fetch of a hostname cannot pin the resolved address (use an HTTPS target or a CONNECT tunnel)")}
-	}
-	if proxyURL != nil {
-		ctx := context.WithValue(req.Context(), proxiedDialCtxKey{}, canonicalProxyDialTarget(proxyURL.Scheme, proxyURL.Hostname(), proxyURL.Port()))
-		req = req.Clone(ctx)
 	}
 	return p.base.RoundTrip(req)
 }
@@ -327,6 +337,19 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		fetcher.resolveTargets = true
 		guarded := transport.Clone()
 		fetcher.proxyFunc = guarded.Proxy
+		if guarded.Proxy != nil {
+			original := guarded.Proxy
+			// Ledger: when the pinning wrapper already evaluated the policy
+			// for this request, net/http MUST replay that decision -- a
+			// rotating/stateful Proxy func could otherwise answer differently
+			// on the real hop than the checks validated.
+			guarded.Proxy = func(req *http.Request) (*url.URL, error) {
+				if decision, ok := req.Context().Value(proxyDecisionCtxKey{}).(*proxyDecision); ok {
+					return decision.proxyURL, nil
+				}
+				return original(req)
+			}
+		}
 		// Respect a legacy-only Dial hook: assigning DialContext while
 		// ignoring Dial would silently discard the caller's dialer.
 		fallback := ssrf.DialContextFunc(guarded)

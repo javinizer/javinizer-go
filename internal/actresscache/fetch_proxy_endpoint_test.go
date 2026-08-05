@@ -196,3 +196,56 @@ func TestGetFailsClosedForHeaderKeyedProxyWhenLocalDNSFails(t *testing.T) {
 	var unsure *ssrf.UnverifiableHostError
 	require.ErrorAs(t, err, &unsure, "header-matched proxy + unverifiable local DNS must fail closed")
 }
+
+// A rotating Proxy func answers differently per call; the marker, rejection,
+// and dial must all follow the SAME decision -- the wrapper evaluates once,
+// and the base transport replays it from the request ledger.
+func TestProxiedDialFollowsTheEvaluatedDecision(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		switch host {
+		case "proxy-a.example":
+			return []net.IP{net.ParseIP("198.51.100.11")}, nil
+		case "proxy-b.example":
+			return []net.IP{net.ParseIP("198.51.100.22")}, nil
+		}
+		return nil, errors.New("unreachable target (fine: proxies answer)")
+	}
+	calls := 0
+	rotating := func(*http.Request) (*url.URL, error) {
+		calls++
+		if calls%2 == 1 {
+			return &url.URL{Scheme: "http", Host: "proxy-a.example:3128"}, nil
+		}
+		return &url.URL{Scheme: "http", Host: "proxy-b.example:3128"}, nil
+	}
+	sentinel := errors.New("dial observed")
+	var dialed []string
+	transport := &http.Transport{
+		Proxy: rotating,
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://media.example/thumb.jpg")
+	require.ErrorIs(t, err, sentinel)
+	require.Len(t, dialed, 1)
+	assert.Equal(t, "198.51.100.11:3128", dialed[0],
+		"the dial must use the FIRST evaluated decision (marker cannot disagree)")
+}
+
+// The ledgered Proxy func falls back to the original policy for requests the
+// wrapper never evaluated (defensive: internal callers + future paths).
+func TestProxyLedgerFallsBackToOriginalPolicy(t *testing.T) {
+	transport := &http.Transport{Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy-c.example:8080"})}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	inner := fetcher.client.Transport.(*proxyPinningTransport).base.(*http.Transport)
+	got, err := inner.Proxy(&http.Request{URL: &url.URL{Scheme: "https", Host: "direct-target.example"}})
+	require.NoError(t, err)
+	assert.Equal(t, "proxy-c.example:8080", got.Host)
+}
