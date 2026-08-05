@@ -328,11 +328,9 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		fetcher.resolveTargets = true
 		guarded := transport.Clone()
 		fetcher.proxyFunc = guarded.Proxy
-		fallback := guarded.DialContext
-		if fallback == nil {
-			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-			fallback = dialer.DialContext
-		}
+		// Respect a legacy-only Dial hook: assigning DialContext while
+		// ignoring Dial would silently discard the caller's dialer.
+		fallback := ssrf.DialContextFunc(guarded)
 		guarded.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if fetcher.allowPrivateHosts {
 				return fallback(ctx, network, addr)

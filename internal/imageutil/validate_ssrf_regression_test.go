@@ -282,3 +282,21 @@ func TestDialTLSProxyKeepsCallerServerName(t *testing.T) {
 	_ = conn.Close()
 	assert.Equal(t, "override.example", <-hello)
 }
+
+// The manual proxy path must keep dialing through a legacy-only Dial hook
+// (deprecated, but honored) instead of silently discarding it.
+func TestRoundTripHTTPProxyHonorsLegacyDial(t *testing.T) {
+	sentinel := errors.New("legacy dialer routed it")
+	var dialed []string
+	legacyTransport := &http.Transport{
+		Dial: func(network, addr string) (net.Conn, error) { //nolint:staticcheck // exercising the legacy seam
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/x", nil)
+	require.NoError(t, err)
+	_, err = roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:3128"}, "1.1.1.1:80", legacyTransport, stubProxyLookup)
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, []string{"203.0.113.9:3128"}, dialed, "legacy dialer receives the pinned proxy endpoint")
+}
