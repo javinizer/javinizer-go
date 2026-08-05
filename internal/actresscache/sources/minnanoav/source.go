@@ -61,15 +61,14 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	if sitemapURL == "" {
 		sitemapURL = defaultSitemapURL
 	}
-	profileURLs, err := discoverProfileURLs(ctx, options.Fetcher, sitemapURL)
+	profileURLs, err := discoverProfileURLs(ctx, options.Fetcher, sitemapURL, options.Limit)
 	if err != nil {
 		return err
 	}
-	truncated := false
-	if options.Limit > 0 && len(profileURLs) > options.Limit {
-		profileURLs = profileURLs[:options.Limit]
-		truncated = true
-	}
+	// Any limit makes enumeration windowed by construction (discovery now
+	// stops at the cap), so completion never marks: the completed-source
+	// prune sweep must stay disabled.
+	truncated := options.Limit > 0
 	workers := options.Workers
 	if workers < 1 {
 		workers = 1
@@ -181,7 +180,7 @@ enqueue:
 	return sourceErr
 }
 
-func discoverProfileURLs(ctx context.Context, fetcher *actresscache.Fetcher, sitemapURL string) ([]string, error) {
+func discoverProfileURLs(ctx context.Context, fetcher *actresscache.Fetcher, sitemapURL string, limit int) ([]string, error) {
 	body, _, err := fetcher.Get(ctx, sitemapURL, "application/xml,text/xml,*/*", maxSitemapBytes)
 	if err != nil {
 		return nil, err
@@ -207,6 +206,12 @@ func discoverProfileURLs(ctx context.Context, fetcher *actresscache.Fetcher, sit
 	}
 	seen := make(map[string]struct{})
 	for _, sitemap := range sitemaps {
+		// --limit must bound DISCOVERY too: stop fetching sitemaps (and stop
+		// collecting URLs) once the requested window is covered instead of
+		// downloading/parsing the full actress index.
+		if limit > 0 && len(seen) >= limit {
+			break
+		}
 		body, _, err := fetcher.Get(ctx, sitemap, "application/xml,text/xml,*/*", maxSitemapBytes)
 		if err != nil {
 			return nil, fmt.Errorf("fetch %s: %w", sitemap, err)
@@ -216,8 +221,13 @@ func discoverProfileURLs(ctx context.Context, fetcher *actresscache.Fetcher, sit
 			return nil, fmt.Errorf("parse %s: %w", sitemap, err)
 		}
 		for _, item := range set.URLs {
-			if profileURL, ok := normalizeProfileURL(item.Location); ok {
-				seen[profileURL] = struct{}{}
+			profileURL, ok := normalizeProfileURL(item.Location)
+			if !ok {
+				continue
+			}
+			seen[profileURL] = struct{}{}
+			if limit > 0 && len(seen) >= limit {
+				break
 			}
 		}
 	}

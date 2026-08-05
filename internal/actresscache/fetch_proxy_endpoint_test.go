@@ -249,3 +249,42 @@ func TestProxyLedgerFallsBackToOriginalPolicy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "proxy-c.example:8080", got.Host)
 }
+
+// Get evaluates the proxy policy ONCE; preflight and the actual hop must
+// replay the same decision even for a stateful policy.
+func TestGetBindsPreflightToSingleProxyEvaluation(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if host == "media.example" {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		}
+		return nil, errors.New("proxy hosts resolve only in the rotation answer")
+	}
+	calls := 0
+	rotating := func(*http.Request) (*url.URL, error) {
+		calls++
+		if calls == 1 {
+			return nil, nil // preflight says: direct
+		}
+		return &url.URL{Scheme: "http", Host: "proxy.example:3128"}, nil // flip: proxied
+	}
+	sentinel := errors.New("dial observed")
+	var dialed []string
+	transport := &http.Transport{
+		Proxy: rotating,
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(context.Background(), "https://media.example/x", "image/*", 1<<20)
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, 1, calls, "policy evaluated exactly once (retries replay the stamp)")
+	require.NotEmpty(t, dialed)
+	for _, addr := range dialed {
+		assert.Equal(t, "93.184.216.34:443", addr, "every attempt replays the direct decision and pins the target")
+	}
+}

@@ -176,7 +176,7 @@ func TestDiscoverProfileURLsReturnsIndexFetchError(t *testing.T) {
 	fetcher := mustFetch(actresscache.NewFetcherWithOptions(&http.Client{Transport: testTransport(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("index unavailable")
 	})}, 0, "test", nil, true))
-	_, err := discoverProfileURLs(context.Background(), fetcher, "https://www.minnano-av.com/sitemap.xml")
+	_, err := discoverProfileURLs(context.Background(), fetcher, "https://www.minnano-av.com/sitemap.xml", 0)
 	require.ErrorContains(t, err, "index unavailable")
 }
 
@@ -197,7 +197,7 @@ func TestDiscoverProfileURLsRejectsNestedFailures(t *testing.T) {
 				}
 				return tc.nested(req)
 			})}
-			_, err := discoverProfileURLs(context.Background(), mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)), "https://www.minnano-av.com/sitemap.xml")
+			_, err := discoverProfileURLs(context.Background(), mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)), "https://www.minnano-av.com/sitemap.xml", 0)
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
@@ -215,7 +215,7 @@ func TestDiscoverProfileURLsFiltersSortsAndDeduplicates(t *testing.T) {
 			return xmlResponse(req, `<urlset><url><loc>https://minnano-av.com/actress2.html?x=1</loc></url><url><loc>https://www.minnano-av.com/actress2.html</loc></url><url><loc>http://www.minnano-av.com/actress3.html</loc></url><url><loc>https://example.test/actress4.html</loc></url></urlset>`), nil
 		}
 	})}
-	urls, err := discoverProfileURLs(context.Background(), mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)), "https://www.minnano-av.com/sitemap.xml")
+	urls, err := discoverProfileURLs(context.Background(), mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true)), "https://www.minnano-av.com/sitemap.xml", 0)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://www.minnano-av.com/actress2.html"}, urls)
 }
@@ -256,4 +256,31 @@ func TestCollectLimitTruncationSkipsMarkCompleteMinnano(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, emitted)
 	assert.False(t, complete, "limit-truncated enumeration is not complete")
+}
+func TestDiscoverProfileURLsStopsAtLimit(t *testing.T) {
+	var fetches []string
+	client := &http.Client{Transport: testTransport(func(req *http.Request) (*http.Response, error) {
+		fetches = append(fetches, req.URL.Path)
+		switch req.URL.Path {
+		case "/sitemap.xml":
+			return xmlResponse(req, `<sitemapindex>
+<sitemap><loc>https://www.minnano-av.com/sitemap_actress_1.xml</loc></sitemap>
+<sitemap><loc>https://www.minnano-av.com/sitemap_actress_2.xml</loc></sitemap>
+<sitemap><loc>https://www.minnano-av.com/sitemap_actress_3.xml</loc></sitemap></sitemapindex>`), nil
+		default:
+			n := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/sitemap_actress_"), ".xml")
+			return xmlResponse(req, `<urlset><url><loc>https://www.minnano-av.com/actress81140`+n+`.html</loc></url></urlset>`), nil
+		}
+	})}
+	fetcher := mustFetch(actresscache.NewFetcherWithOptions(client, 0, "test", nil, true))
+
+	urls, err := discoverProfileURLs(context.Background(), fetcher, "https://www.minnano-av.com/sitemap.xml", 1)
+	require.NoError(t, err)
+	require.Len(t, urls, 1)
+	assert.Equal(t, []string{"/sitemap.xml", "/sitemap_actress_1.xml"}, fetches,
+		"discovery stops fetching sitemaps once the limit window is covered")
+
+	urls, err = discoverProfileURLs(context.Background(), fetcher, "https://www.minnano-av.com/sitemap.xml", 0)
+	require.NoError(t, err)
+	require.Len(t, urls, 3, "unlimited discovery sees everything")
 }
