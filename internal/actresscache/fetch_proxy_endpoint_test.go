@@ -404,3 +404,41 @@ func TestRedirectRewriteThenDecisionError(t *testing.T) {
 	_, err = fetcher.client.Get("http://93.184.216.1/x")
 	require.ErrorContains(t, err, "rewritten-hop policy exploded")
 }
+
+// A callback that does NOT rewrite the request must leave the hop's
+// evaluation alone -- re-evaluating could flip a stateful policy mid-hop.
+func TestRedirectNoOpCallbackKeepsSingleEvaluation(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	evals := 0
+	policy := func(*http.Request) (*url.URL, error) {
+		evals++
+		return nil, nil
+	}
+	var dials int
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dials++
+		switch dials {
+		case 1:
+			return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.9/next\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+		default:
+			return serveOnce("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx")(context.Background(), "tcp", addr)
+		}
+	}
+	transport := &http.Transport{Proxy: policy, DialContext: dial}
+	callback := func(*http.Request, []*http.Request) error { return nil } // touches nothing
+	client := &http.Client{Transport: transport, CheckRedirect: callback}
+	fetcher, err := NewFetcherWithOptions(client, 0, "test", nil, false)
+	require.NoError(t, err)
+	resp, err := fetcher.client.Get("http://93.184.216.1/a")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, 2, evals, "one evaluation per hop; the no-op callback must not add one")
+	assert.Equal(t, 2, dials)
+}

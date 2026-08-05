@@ -357,6 +357,32 @@ func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
 	return wrapTransport(transport, false)
 }
 
+// remoteDNSTransports tracks transports whose dial path owns hostname
+// resolution (SOCKS5 via x/net/proxy installs DialContext while
+// http.Transport.Proxy stays nil, so policy code cannot rely on Proxy != nil
+// or on named-func method detection -- Go erases either at assignment).
+var remoteDNSTransports sync.Map // *http.Transport → struct{}
+
+// MarkRemoteDNSTransport declares that tr's dial path resolves names
+// remotely. Wrappers must preserve hostnames (never locally pin), while
+// still blocking private IP literals. Registered at construction time by
+// httpclient for SOCKS5 transports; respects one entry per proxy config.
+func MarkRemoteDNSTransport(tr *http.Transport) {
+	if tr != nil {
+		remoteDNSTransports.Store(tr, struct{}{})
+	}
+}
+
+// TransportResolvesRemotely reports whether tr's dial path owns DNS. Check
+// BEFORE cloning a transport -- clones are distinct pointers.
+func TransportResolvesRemotely(tr *http.Transport) bool {
+	if tr == nil {
+		return false
+	}
+	_, ok := remoteDNSTransports.Load(tr)
+	return ok
+}
+
 // DialContextFunc returns the transport's effective dial entry point:
 // DialContext when set; otherwise a context-wrapped adaptation of the
 // deprecated Dial hook; otherwise a default dialer. Wrappers must use this

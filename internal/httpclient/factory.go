@@ -12,6 +12,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"golang.org/x/net/proxy"
 )
 
@@ -91,6 +92,11 @@ func NewTransport(proxyProfile *models.ProxyProfile) (*http.Transport, error) {
 			}
 			// Clear transport.Proxy to prevent HTTP_PROXY env vars from overriding SOCKS5
 			transport.Proxy = nil
+			// Transport.Proxy is nil yet the dialer owns DNS: announce remote-DNS
+			// ownership so SSRF wrappers preserve hostnames (policy layers cannot
+			// detect this structurally -- Go erases named func types at field
+			// assignment).
+			ssrf.MarkRemoteDNSTransport(transport)
 		} else {
 			// HTTP/HTTPS proxy
 			transport.Proxy = http.ProxyURL(parsedProxyURL)
