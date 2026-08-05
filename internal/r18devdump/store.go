@@ -611,13 +611,17 @@ func ExpandGallery(first, last string) []string {
 	// producing a pathological number of URLs. Overflow-safe: end >= start >= 0
 	// here, so plain subtraction cannot wrap; computing end-start+1 FIRST would
 	// overflow when end == math.MaxInt (count wraps negative, the cap is
-	// bypassed, and "for n := start; n <= end; n++" wraps n and never ends).
+	// bypassed). The fill loop breaks AT end instead of testing after the
+	// increment, so a range ending at math.MaxInt cannot wrap n and never ends.
 	if end-start >= 1000 {
 		return nil
 	}
 	urls := make([]string, 0, end-start+1)
-	for n := start; n <= end; n++ {
+	for n := start; ; n++ {
 		urls = append(urls, prefix+strconv.Itoa(n))
+		if n == end {
+			break
+		}
 	}
 	return urls
 }
