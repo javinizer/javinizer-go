@@ -132,6 +132,9 @@ type BuildReport struct {
 	Rejected   int      `json:"rejected"`
 	Failed     int      `json:"failed"`
 	Records    int      `json:"records"`
+	// StaleKeys carries prune decisions for the caller to commit AFTER the
+	// publish step succeeds (see JournalStale); never serialized.
+	StaleKeys []string `json:"-"`
 }
 
 // SourceFactory ...

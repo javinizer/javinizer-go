@@ -289,6 +289,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := actresscache.WriteRuntimeFile(opts.output, cache); err != nil {
 		return fmt.Errorf("write actress runtime cache: %w", err)
 	}
+	// Journal prune decisions ONLY after every artifact landed: ordering the
+	// stale commit after publication keeps last-good resume state intact
+	// whenever an output write fails.
+	if err := actresscache.JournalStale(opts.state, report.StaleKeys); err != nil {
+		return fmt.Errorf("journal stale entries: %w", err)
+	}
 	_, _ = fmt.Fprintf(stdout, "sources=%s cached=%d candidates=%d validated=%d rejected=%d failed=%d records=%d output=%s audit_output=%s state=%s\n", strings.Join(report.Sources, ","), report.Cached, report.Candidates, report.Validated, report.Rejected, report.Failed, report.Records, opts.output, opts.auditOutput, opts.state)
 	return nil
 }
