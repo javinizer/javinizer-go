@@ -22,7 +22,8 @@ func TestCheckFetchTargetAllowsResolvedPublicHost(t *testing.T) {
 	defer func() { lookupIP = prev }()
 	fetcher := mustFetcher(NewFetcher(&http.Client{Transport: &http.Transport{}}, 0, "test"))
 	// Positive path: hostname resolved, all answers public -> allow.
-	require.NoError(t, fetcher.checkFetchTarget(context.Background(), "https", "public.example.test", ""))
+	reqPub := &http.Request{URL: &url.URL{Scheme: "https", Host: "public.example.test"}}
+	require.NoError(t, fetcher.checkFetchTarget(context.Background(), reqPub))
 }
 
 func TestNewFetcherRejectsCustomRoundTripper(t *testing.T) {
@@ -42,32 +43,45 @@ func TestNewFetcherRejectsCustomRoundTripper(t *testing.T) {
 	// No resolution is promised for mirror mode: the guard stays lexical-only
 	// and the caller's transport is used verbatim.
 	assert.False(t, fetcher.resolveTargets)
-	require.NoError(t, fetcher.checkFetchTarget(context.Background(), "https", "unyielding.invalid", ""))
+	reqUn := &http.Request{URL: &url.URL{Scheme: "https", Host: "unyielding.invalid"}}
+	require.NoError(t, fetcher.checkFetchTarget(context.Background(), reqUn))
 }
 
-func TestViaProxyProbesFullAuthorityWithPort(t *testing.T) {
-	var probedHost string
+func TestRequestProxiedEvaluatesTheActualRequest(t *testing.T) {
+	var probed *http.Request
 	proxy := &Fetcher{proxyFunc: func(req *http.Request) (*url.URL, error) {
-		probedHost = req.URL.Host
+		probed = req
 		return &url.URL{Scheme: "http", Host: "corp.proxy:3128"}, nil
 	}}
-	// A port-qualified authority must survive to the probe: port-sensitive
-	// proxy rules (x/net NO_PROXY host:port entries) must see it.
-	require.True(t, proxy.viaProxy("http", "target.example:8080"))
-	assert.Equal(t, "target.example:8080", probedHost)
+	req, err := http.NewRequest(http.MethodGet, "http://target.example:8080/x", nil)
+	require.NoError(t, err)
+	req.Header.Set("User-Agent", "cache-builder")
+	require.True(t, proxy.requestProxied(req))
+	// The SAME request object is probed: header-keyed policies (and
+	// port-sensitive NO_PROXY rules) decide with full fidelity.
+	require.Same(t, req, probed)
+	assert.Equal(t, "target.example:8080", probed.URL.Host)
+	assert.Equal(t, "cache-builder", probed.Header.Get("User-Agent"))
 }
 
-func TestViaProxyBranches(t *testing.T) {
+func TestRequestProxiedBranches(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, "https://example.test/x", nil)
+	require.NoError(t, err)
+
 	bare := &Fetcher{}
-	assert.False(t, bare.viaProxy("https", "example.test"), "nil proxyFunc means direct")
-	assert.False(t, bare.viaProxy("", "example.test"), "empty scheme defaults physically, still direct")
+	assert.False(t, bare.requestProxied(req), "nil proxyFunc means direct")
+
 	noProxy := &Fetcher{proxyFunc: func(*http.Request) (*url.URL, error) { return nil, nil }}
-	assert.False(t, noProxy.viaProxy("https", "example.test"), "proxy func returning nil means direct")
+	assert.False(t, noProxy.requestProxied(req), "proxy func returning nil means direct")
+
+	errProxy := &Fetcher{proxyFunc: func(*http.Request) (*url.URL, error) { return nil, errors.New("conf broken") }}
+	assert.False(t, errProxy.requestProxied(req), "decision errors stay direct here; RoundTrip fails closed")
+
 	proxy := &Fetcher{proxyFunc: func(*http.Request) (*url.URL, error) {
 		u, _ := url.Parse("http://corp.proxy:3128")
 		return u, nil
 	}}
-	assert.True(t, proxy.viaProxy("https", "example.test"))
+	assert.True(t, proxy.requestProxied(req))
 }
 
 func TestFetcherGetDoesNotRetryPolicyErrors(t *testing.T) {
@@ -85,12 +99,16 @@ func TestFetcherGetDoesNotRetryPolicyErrors(t *testing.T) {
 	assert.Equal(t, 1, calls, "policy errors must not burn retry attempts")
 }
 
-func TestViaProxyEmptySchemeWithProxy(t *testing.T) {
+func TestRequestProxiedWithProxyMatchesAnyScheme(t *testing.T) {
 	proxy := &Fetcher{proxyFunc: func(*http.Request) (*url.URL, error) {
 		u, _ := url.Parse("http://corp.proxy:3128")
 		return u, nil
 	}}
-	assert.True(t, proxy.viaProxy("", "example.test"), "empty scheme must default to https and probe the proxy")
+	for _, rawURL := range []string{"https://example.test/x", "http://example.test/x"} {
+		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+		require.NoError(t, err)
+		assert.True(t, proxy.requestProxied(req), rawURL)
+	}
 }
 
 // A caller-supplied CheckRedirect that rewrites the target is re-guarded.

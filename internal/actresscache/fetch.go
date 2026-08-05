@@ -88,23 +88,16 @@ func isBlockedFetchHost(host string) bool { return ssrf.IsBlockedHost(host) }
 
 func isBlockedIP(ip net.IP) bool { return ssrf.IsBlockedIP(ip) }
 
-// viaProxy reports whether fetches to host would traverse a configured
-// HTTP(S) proxy (which resolves the target remotely).
-func (f *Fetcher) viaProxy(scheme, host string) bool {
+// requestProxied evaluates the transport's proxy policy against the ACTUAL
+// request: synthetic probes carry no headers, so header-keyed policies (e.g.
+// User-Agent-dependent routing) would misclassify the hop and downgrade the
+// fail-closed branch below.
+func (f *Fetcher) requestProxied(req *http.Request) bool {
 	if f.proxyFunc == nil {
 		return false
 	}
-	if scheme == "" {
-		scheme = "https"
-	}
-	// Probe with the request's own scheme: HTTP_PROXY and HTTPS_PROXY are
-	// configured independently, so an HTTP thumbnail URL must not be judged
-	// by the HTTPS route. host must be the request's full authority
-	// (hostname:port when a port is present): x/net NO_PROXY entries are
-	// port-sensitive, so probing a bare hostname can misclassify proxied
-	// requests as direct and re-open the split-horizon path.
-	proxyURL, err := f.proxyFunc(&http.Request{URL: &url.URL{Scheme: scheme, Host: host}})
-	return err == nil && proxyURL != nil
+	decision, err := f.proxyFunc(req)
+	return err == nil && decision != nil
 }
 
 // checkFetchTarget validates the request host lexically and — when the
@@ -124,10 +117,8 @@ func (f *Fetcher) viaProxy(scheme, host string) bool {
 // resolves it locally. authority (host[:port]) feeds the port-sensitive proxy
 // decision probe (NO_PROXY entries may carry ports); pass host when no port
 // is involved.
-func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host, authority string) error {
-	if authority == "" {
-		authority = host
-	}
+func (f *Fetcher) checkFetchTarget(ctx context.Context, req *http.Request) error {
+	host := req.URL.Hostname()
 	if isBlockedFetchHost(host) {
 		return &BlockedFetchError{URL: host}
 	}
@@ -136,7 +127,7 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, scheme, host, authority 
 	}
 	ips, err := lookupIP(ctx, "ip", host)
 	if err != nil || len(ips) == 0 {
-		if f.viaProxy(scheme, authority) {
+		if f.requestProxied(req) {
 			// A proxy resolves the hostname remotely, so dial-time checks
 			// cannot see the real target: fail closed when local resolution
 			// cannot prove the host is public. Classified unverifiable
@@ -383,7 +374,7 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			return errors.New("stopped after 10 redirects")
 		}
 		if !fetcher.allowPrivateHosts {
-			if err := fetcher.checkFetchTarget(req.Context(), req.URL.Scheme, req.URL.Hostname(), req.URL.Host); err != nil {
+			if err := fetcher.checkFetchTarget(req.Context(), req); err != nil {
 				return err
 			}
 		}
@@ -398,7 +389,7 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			// FINAL target before dispatch so a rewritten hop cannot smuggle a
 			// private address past the entry guard.
 			if !fetcher.allowPrivateHosts {
-				return fetcher.checkFetchTarget(req.Context(), req.URL.Scheme, req.URL.Hostname(), req.URL.Host)
+				return fetcher.checkFetchTarget(req.Context(), req)
 			}
 		}
 		return nil
@@ -434,13 +425,15 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 	if err != nil {
 		return nil, nil, err
 	}
+	// Headers first: proxy policy may key on them, and the preflight must
+	// evaluate the decision against the exact request that will be dialed.
+	req.Header.Set("User-Agent", f.userAgent)
+	req.Header.Set("Accept", accept)
 	if !f.allowPrivateHosts {
-		if err := f.checkFetchTarget(requestCtx, req.URL.Scheme, req.URL.Hostname(), req.URL.Host); err != nil {
+		if err := f.checkFetchTarget(requestCtx, req); err != nil {
 			return nil, nil, err
 		}
 	}
-	req.Header.Set("User-Agent", f.userAgent)
-	req.Header.Set("Accept", accept)
 	limiter := f.limiterForHost(req.URL.Hostname())
 	for attempt := 0; attempt < fetchAttempts; attempt++ {
 		if err := limiter.Wait(requestCtx); err != nil {

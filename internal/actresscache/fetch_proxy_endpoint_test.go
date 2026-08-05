@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/ssrf"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -167,4 +169,30 @@ func TestCanonicalProxyDialTargetSchemeDefaults(t *testing.T) {
 	assert.Equal(t, "proxy.example:1080", canonicalProxyDialTarget("socks5h", "proxy.example", ""))
 	assert.Equal(t, "proxy.example:80", canonicalProxyDialTarget("http", "proxy.example", ""))
 	assert.Equal(t, "proxy.example:8443", canonicalProxyDialTarget("http", "proxy.example", "8443"))
+}
+
+// The preflight (checkFetchTarget) must evaluate the proxy decision on the
+// REQUEST that will actually run -- headers included. A User-Agent-keyed
+// proxy whose target cannot be resolved locally must fail closed
+// (unverifiable), not sail into a CONNECT the proxy resolves privately.
+func TestGetFailsClosedForHeaderKeyedProxyWhenLocalDNSFails(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		return nil, errors.New("nxdomain: home-view only")
+	}
+	uaKeyed := func(req *http.Request) (*url.URL, error) {
+		if req.Header.Get("User-Agent") == "cache-builder" {
+			return &url.URL{Scheme: "http", Host: "corp.proxy:3128"}, nil
+		}
+		return nil, nil
+	}
+	transport := &http.Transport{Proxy: uaKeyed, DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("no dial should happen")
+	}}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "cache-builder", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(context.Background(), "https://mirror.lan.local/thumb.jpg", "image/*", 1<<20)
+	var unsure *ssrf.UnverifiableHostError
+	require.ErrorAs(t, err, &unsure, "header-matched proxy + unverifiable local DNS must fail closed")
 }
