@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -173,11 +174,69 @@ func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	path := strings.Trim(u.Path, "/")
 	parts := strings.Split(path, "/")
 	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i] != "" && len(parts[i]) > 4 {
-			return parts[i], nil
+		seg := parts[i]
+		if seg == "" {
+			continue
+		}
+		// A direct page URL (e.g. "/en/javliay67q.html") has no ID to extract —
+		// return the URL itself so the pipeline opens the page as-is instead of
+		// searching a mangled ID.
+		if hasHTMLExt(seg) {
+			return urlStr, nil
+		}
+		// Otherwise strip any stray extension and use the bare segment as the ID.
+		if ext := filepath.Ext(seg); ext != "" {
+			seg = strings.TrimSuffix(seg, ext)
+		}
+		if len(seg) > 4 {
+			return seg, nil
 		}
 	}
 	return "", fmt.Errorf("failed to extract ID from URL")
+}
+
+// hasHTMLExt reports whether p's trailing segment carries a page extension
+// (.html/.htm), marking a concrete JavLibrary page rather than a bare ID path.
+func hasHTMLExt(p string) bool {
+	lower := strings.ToLower(strings.TrimRight(p, "/"))
+	return strings.HasSuffix(lower, ".html") || strings.HasSuffix(lower, ".htm")
+}
+
+// isDirectPageURL reports whether rawURL points at a concrete JavLibrary page
+// (a ?v= product URL or .html/.htm page) that should be opened directly rather
+// than searched.
+func isDirectPageURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return u.Query().Get("v") != "" || hasHTMLExt(u.Path)
+}
+
+// pageIDFromURL derives a best-effort display ID from a direct JavLibrary page
+// URL (the ?v= value, else the path basename minus a page extension).
+func pageIDFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	if v := u.Query().Get("v"); v != "" {
+		return v
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		seg := parts[i]
+		if seg == "" {
+			continue
+		}
+		if ext := filepath.Ext(seg); ext != "" {
+			seg = strings.TrimSuffix(seg, ext)
+		}
+		if seg != "" {
+			return seg
+		}
+	}
+	return ""
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
@@ -185,14 +244,10 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("JavLibrary", "URL not handled by JavLibrary scraper")
 	}
 
-	id, err := s.ExtractIDFromURL(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
-	}
-
 	var detailURL string
 	var resultLanguage string
-	if u, parseErr := url.Parse(rawURL); parseErr == nil && u.Query().Get("v") != "" {
+	if u, parseErr := url.Parse(rawURL); parseErr == nil && isDirectPageURL(rawURL) {
+		// Direct page (product URL or .html/.htm page): open it as-is.
 		detailURL = rawURL
 		path := strings.Trim(u.Path, "/")
 		parts := strings.Split(path, "/")
@@ -200,11 +255,21 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 			resultLanguage = parts[0]
 		}
 	}
-	if detailURL == "" {
-		detailURL = fmt.Sprintf("%s/%s/?v=%s", s.baseURL, s.language, url.QueryEscape(id))
-	}
 	if resultLanguage == "" {
 		resultLanguage = s.language
+	}
+
+	var id string
+	if detailURL != "" {
+		// Direct page: display ID derived from the URL — no search needed.
+		id = pageIDFromURL(rawURL)
+	} else {
+		var extractErr error
+		id, extractErr = s.ExtractIDFromURL(rawURL)
+		if extractErr != nil {
+			return nil, fmt.Errorf("failed to extract ID from URL: %w", extractErr)
+		}
+		detailURL = fmt.Sprintf("%s/%s/?v=%s", s.baseURL, s.language, url.QueryEscape(id))
 	}
 
 	html, err := s.fetchPageCtx(ctx, detailURL)
@@ -231,6 +296,20 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("JavLibrary scraper is disabled")
+	}
+
+	// A direct page URL (e.g. ".../javliay67q.html" or a ?v= product URL) is
+	// opened and parsed as-is — no keyword search, no ID extraction.
+	if s.CanHandleURL(id) && isDirectPageURL(id) {
+		pageID := pageIDFromURL(id)
+		html, err := s.fetchPageCtx(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch JavLibrary page: %w", err)
+		}
+		if !strings.Contains(html, `id="video_info"`) {
+			return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
+		}
+		return s.parseDetailPage(html, pageID, id, s.language)
 	}
 
 	searchURL, err := s.getURLCtx(ctx, id)
