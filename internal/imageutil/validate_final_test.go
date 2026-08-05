@@ -12,6 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestValidateRemoteImageRejectsUnparseableURL(t *testing.T) {
+	// A control character in the host fails url.Parse before any resolution.
+	err := ValidateRemoteImage(t.Context(), "http://exa"+string(rune(0x7f))+"mple.test/x")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid URL")
+}
 func TestValidateRemoteImageRejectsUnsafeAndDelegatesSafeURL(t *testing.T) {
 	require.Error(t, ValidateRemoteImage(t.Context(), "http://127.0.0.1/image.jpg"))
 
