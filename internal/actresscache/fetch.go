@@ -193,7 +193,6 @@ type proxiedDialCtxKey struct{}
 
 type proxyPinningTransport struct {
 	base     http.RoundTripper
-	viaProxy func(scheme, host string) bool
 	proxyFor func(*http.Request) (*url.URL, error)
 }
 
@@ -202,15 +201,24 @@ func (p *proxyPinningTransport) RoundTrip(req *http.Request) (*http.Response, er
 	if p == nil || p.base == nil {
 		return nil, fmt.Errorf("actress cache proxy pinning transport is not initialized")
 	}
-	proxied := p.viaProxy(req.URL.Scheme, req.URL.Host)
-	if req.URL.Scheme == "http" && proxied && hostIPLiteral(req.URL.Hostname()) == nil {
+	// Compute the proxy decision from the ACTUAL request: custom Proxy funcs
+	// may key on headers (e.g. User-Agent); a synthetic probe could declare
+	// "direct" while the real hop is proxied, skipping both the plain-HTTP
+	// hostname rejection and the request-bound endpoint marker.
+	var proxyURL *url.URL
+	if p.proxyFor != nil {
+		decision, err := p.proxyFor(req)
+		if err != nil {
+			return nil, fmt.Errorf("actress cache proxy decision failed: %w", err)
+		}
+		proxyURL = decision
+	}
+	if req.URL.Scheme == "http" && proxyURL != nil && hostIPLiteral(req.URL.Hostname()) == nil {
 		return nil, &ssrf.UnverifiableHostError{Host: req.URL.Hostname(), Err: errors.New("plain-HTTP proxy fetch of a hostname cannot pin the resolved address (use an HTTPS target or a CONNECT tunnel)")}
 	}
-	if proxied && p.proxyFor != nil {
-		if proxyURL, err := p.proxyFor(req); err == nil && proxyURL != nil {
-			ctx := context.WithValue(req.Context(), proxiedDialCtxKey{}, canonicalProxyDialTarget(proxyURL.Scheme, proxyURL.Hostname(), proxyURL.Port()))
-			req = req.Clone(ctx)
-		}
+	if proxyURL != nil {
+		ctx := context.WithValue(req.Context(), proxiedDialCtxKey{}, canonicalProxyDialTarget(proxyURL.Scheme, proxyURL.Hostname(), proxyURL.Port()))
+		req = req.Clone(ctx)
 	}
 	return p.base.RoundTrip(req)
 }
@@ -404,7 +412,7 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		// Host header — so they are REJECTED as unverifiable rather than
 		// approximated. Literal-IP targets and HTTPS/CONNECT tunneled hosts
 		// pass through (the latter under the documented proxy trust model).
-		clientCopy.Transport = &proxyPinningTransport{base: clientCopy.Transport, viaProxy: fetcher.viaProxy, proxyFor: fetcher.proxyFunc}
+		clientCopy.Transport = &proxyPinningTransport{base: clientCopy.Transport, proxyFor: fetcher.proxyFunc}
 	}
 	fetcher.client = &clientCopy
 	return fetcher, nil
