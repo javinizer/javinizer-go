@@ -104,6 +104,39 @@ func TestRunRefusesToPublishIdentitylessProjection(t *testing.T) {
 	_, statErr := os.Stat(output)
 	assert.True(t, os.IsNotExist(statErr))
 }
+
+// The journal commit happens only after BOTH artifacts are written; a write
+// failure there must propagate (and must NOT poison last-good state).
+func TestRunPropagatesJournalStaleError(t *testing.T) {
+	dir := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		require.NoError(t, png.Encode(w, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	}))
+	defer server.Close()
+	csvPath := filepath.Join(dir, "legacy.csv")
+	require.NoError(t, os.WriteFile(csvPath, []byte("FullName,ThumbUrl\nA Name,"+server.URL+"/thumb.png\n"), 0o600))
+	state := filepath.Join(dir, "state.jsonl")
+	output := filepath.Join(dir, "out.json.gz")
+	var stdout, stderr bytes.Buffer
+	buildArgs := []string{
+		"--source", "legacy-jvthumbs", "--legacy-csv", csvPath,
+		"--output", output, "--state", state,
+		"--min-dimension", "1", "--delay", "0", "--image-delay", "0", "--workers", "1",
+		"--allow-private-hosts",
+	}
+	// Seed one build so a next one has prune-eligible entries.
+	require.NoError(t, run(t.Context(), buildArgs, &stdout, &stderr))
+
+	reg := actresscache.NewRegistry
+	_ = reg
+	original := journalStale
+	t.Cleanup(func() { journalStale = original })
+	journalStale = func(string, []string) error { return errors.New("journal down") }
+	err := run(t.Context(), buildArgs, &stdout, &stderr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "journal stale entries")
+}
 func TestRunPropagatesFetcherConstructionError(t *testing.T) {
 	original := newFetcherWithOptions
 	t.Cleanup(func() { newFetcherWithOptions = original })

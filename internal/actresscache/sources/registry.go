@@ -44,7 +44,7 @@ func r18DevBoundedLister(store *r18devdump.Store, maxRows int) r18devsource.List
 			return nil, err
 		}
 		if len(actresses) > maxRows {
-			return nil, fmt.Errorf("r18dev dump exceeds the scan safety cap of %d actress rows; refusing to assemble a truncated cache (use --limit to window intentionally)", maxRows)
+			return nil, fmt.Errorf("r18dev dump exceeds the scan safety cap of %d actress rows; refusing to assemble a truncated cache (--limit caps, not widens, the scan window in this phase)", maxRows)
 		}
 		return actresses, nil
 	}
