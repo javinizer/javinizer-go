@@ -172,6 +172,10 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 // exercise the fetcher-construction error propagation in run().
 var newFetcherWithOptions = actresscache.NewFetcherWithOptions
 
+// journalStale is the post-publish journal seam; tests swap it to exercise
+// the stale-commit error propagation in run().
+var journalStale = actresscache.JournalStale
+
 // acceptedOptionKeys is the complete set of --option keys any cache source
 // consumes. Registration rejects typos loudly instead of silently ignoring
 // them (e.g. a misspelled legacy.csv would otherwise vanish).
@@ -281,6 +285,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(actresscache.NewRuntimeCache(cache).Records) == 0 {
 		return fmt.Errorf("refusing to publish runtime cache with zero projected records (audit built %d records — check source identity fields)", report.Records)
 	}
+
 	if opts.auditOutput != "" {
 		if err := actresscache.WriteFile(opts.auditOutput, cache); err != nil {
 			return fmt.Errorf("write actress audit cache: %w", err)
@@ -292,7 +297,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Journal prune decisions ONLY after every artifact landed: ordering the
 	// stale commit after publication keeps last-good resume state intact
 	// whenever an output write fails.
-	if err := actresscache.JournalStale(opts.state, report.StaleKeys); err != nil {
+	if err := journalStale(opts.state, report.StaleKeys); err != nil {
 		return fmt.Errorf("journal stale entries: %w", err)
 	}
 	_, _ = fmt.Fprintf(stdout, "sources=%s cached=%d candidates=%d validated=%d rejected=%d failed=%d records=%d output=%s audit_output=%s state=%s\n", strings.Join(report.Sources, ","), report.Cached, report.Candidates, report.Validated, report.Rejected, report.Failed, report.Records, opts.output, opts.auditOutput, opts.state)

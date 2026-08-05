@@ -68,3 +68,15 @@ func TestR18DevBoundedLister(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "scan safety cap")
 }
+
+func TestR18DevBoundedListerStoreError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "r18dev.db")
+	dump := "COPY public.derived_actress (id, name_romaji, image_url, name_kanji, name_kana) FROM stdin;\n1\tA One\ta.jpg\t\t\t\n\\.\n"
+	_, err := r18devdump.Import(context.Background(), strings.NewReader(dump), path, r18devdump.ImportOptions{})
+	require.NoError(t, err)
+	store, err := r18devdump.Open(path)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	_, err = r18DevBoundedLister(store, 2)(context.Background())
+	require.Error(t, err, "closed dump store must surface the lister error")
+}
