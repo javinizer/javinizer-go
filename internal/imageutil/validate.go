@@ -370,9 +370,20 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 	return nil, roundTripErr
 }
 
+// validateImageTarget runs the SSRF preflight with the CALLER's context so a
+// canceled/deadline-bound request aborts during DNS instead of waiting out a
+// background resolution.
+func validateImageTarget(ctx context.Context, rawURL string) error {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	return ssrf.CheckTarget(ctx, parsed)
+}
+
 // ValidateRemoteImage ...
 func ValidateRemoteImage(ctx context.Context, rawURL string) error {
-	if err := ssrf.CheckURL(rawURL); err != nil {
+	if err := validateImageTarget(ctx, rawURL); err != nil {
 		return err
 	}
 	return ValidateRemoteImageWithSafeClient(ctx, ssrf.NewSSRFSafeClient(30*time.Second), rawURL, config.DefaultUserAgent, httpclient.ResolveMediaReferer(rawURL, ""))
@@ -380,7 +391,7 @@ func ValidateRemoteImage(ctx context.Context, rawURL string) error {
 
 // ValidateRemoteImageWithSafeClient ...
 func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client, rawURL, userAgent, referer string) error {
-	if err := ssrf.CheckURL(rawURL); err != nil {
+	if err := validateImageTarget(ctx, rawURL); err != nil {
 		return err
 	}
 	if client == nil {
@@ -411,7 +422,7 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 	}
 	previousCheckRedirect := client.CheckRedirect
 	safeClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if err := ssrf.CheckURL(req.URL.String()); err != nil {
+		if err := ssrf.CheckTarget(req.Context(), req.URL); err != nil {
 			return err
 		}
 		if previousCheckRedirect != nil {
