@@ -59,10 +59,12 @@ type Fetcher struct {
 	// proxyFunc mirrors the wrapped transport's proxy configuration so lookup
 	// failures can fail closed when a proxy would resolve targets remotely.
 	proxyFunc func(*http.Request) (*url.URL, error)
-	// proxyHosts are the configured proxies' hostnames per scheme; they are
-	// trusted infrastructure and exempt from the dial-time pin (targets are
-	// validated by name at the request layer instead).
-	proxyHosts map[string]struct{}
+	// proxyEndpoints are the configured proxies' canonical "host:port" dial
+	// targets. Only the exact proxy endpoint is exempt from the dial-time
+	// pin -- exemption keyed by hostname alone would let a directly-routed
+	// target that merely SHARES the proxy's hostname (NO_PROXY rules, DNS
+	// rebinding past the request-layer preflight) escape validation.
+	proxyEndpoints map[string]struct{}
 
 	client     *http.Client
 	delay      time.Duration
@@ -298,12 +300,22 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		guarded := transport.Clone()
 		fetcher.proxyFunc = guarded.Proxy
 		if guarded.Proxy != nil {
-			fetcher.proxyHosts = make(map[string]struct{}, 2)
+			fetcher.proxyEndpoints = make(map[string]struct{}, 2)
 			// Probe both schemes: HTTP_PROXY and HTTPS_PROXY may name
 			// different hosts, so thumbnail fetches over either stay trusted.
 			for _, scheme := range []string{"http", "https"} {
 				if proxyURL, err := guarded.Proxy(&http.Request{URL: &url.URL{Scheme: scheme, Host: "dial-probe.invalid"}}); err == nil && proxyURL != nil {
-					fetcher.proxyHosts[strings.ToLower(proxyURL.Hostname())] = struct{}{}
+					port := proxyURL.Port()
+					if port == "" {
+						// net/http dials proxies on their scheme's default
+						// port, so endpoint matching must do the same.
+						if strings.EqualFold(proxyURL.Scheme, "https") {
+							port = "443"
+						} else {
+							port = "80"
+						}
+					}
+					fetcher.proxyEndpoints[strings.ToLower(proxyURL.Hostname())+":"+port] = struct{}{}
 				}
 			}
 		}
@@ -316,11 +328,11 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			if fetcher.allowPrivateHosts {
 				return fallback(ctx, network, addr)
 			}
-			if host, _, splitErr := net.SplitHostPort(addr); splitErr == nil && fetcher.proxyHosts != nil {
-				if _, trusted := fetcher.proxyHosts[strings.ToLower(host)]; trusted {
-					// The configured proxy itself (often a private corporate
-					// address) is dialed to reach public targets that were
-					// vetted at the request layer.
+			if host, port, splitErr := net.SplitHostPort(addr); splitErr == nil && fetcher.proxyEndpoints != nil {
+				if _, trusted := fetcher.proxyEndpoints[strings.ToLower(host)+":"+port]; trusted {
+					// The configured proxy endpoint itself (often a private
+					// corporate address) is dialed to reach public targets
+					// that were vetted at the request layer.
 					return fallback(ctx, network, addr)
 				}
 			}
