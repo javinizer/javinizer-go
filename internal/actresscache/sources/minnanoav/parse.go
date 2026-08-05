@@ -77,25 +77,31 @@ func isDMMActressHost(host string) bool {
 
 func resolveAffiliateChain(href string) string {
 	for range 4 {
-		if decoded, err := url.QueryUnescape(href); err == nil {
+		if u, err := url.Parse(href); err == nil {
+			// Extract from the RAW href: url.Values.Get decodes only the
+			// extracted lurl/u value, so an encoded inner & (e.g.
+			// lurl=...%3Ffoo%3Dbar%26actress%3D5) stays inside the target
+			// instead of splitting the outer query and losing the DMM ID.
+			inner := strings.TrimSpace(u.Query().Get("lurl"))
+			if inner == "" {
+				inner = strings.TrimSpace(u.Query().Get("u"))
+			}
+			if inner != "" {
+				next, err := url.Parse(inner)
+				if err != nil || (next.Hostname() == "" && !strings.HasPrefix(inner, "/")) {
+					break
+				}
+				href = inner
+				continue
+			}
+		}
+		// A fully percent-encoded href hides its query from url.Parse;
+		// decode one layer of the WHOLE string and retry.
+		if decoded, err := url.QueryUnescape(href); err == nil && decoded != href {
 			href = decoded
+			continue
 		}
-		u, err := url.Parse(href)
-		if err != nil {
-			break
-		}
-		inner := strings.TrimSpace(u.Query().Get("lurl"))
-		if inner == "" {
-			inner = strings.TrimSpace(u.Query().Get("u"))
-		}
-		if inner == "" {
-			break
-		}
-		next, err := url.Parse(inner)
-		if err != nil || (next.Hostname() == "" && !strings.HasPrefix(inner, "/")) {
-			break
-		}
-		href = inner
+		break
 	}
 	return href
 }
