@@ -288,3 +288,119 @@ func TestGetBindsPreflightToSingleProxyEvaluation(t *testing.T) {
 		assert.Equal(t, "93.184.216.34:443", addr, "every attempt replays the direct decision and pins the target")
 	}
 }
+
+// Redirect hops must get their OWN proxy decision: a policy that proxies the
+// first URL but not the redirect target must not inherit hop 1's answer.
+func TestRedirectHopsReEvaluateProxyDecisions(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		if host == "hop-proxy.example" {
+			return []net.IP{net.ParseIP("198.51.100.20")}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	// Proxies ONLY the first hop; the redirect target is direct.
+	hopPolicy := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "93.184.216.1" {
+			return &url.URL{Scheme: "http", Host: "hop-proxy.example:3128"}, nil
+		}
+		return nil, nil
+	}
+	sentinel := errors.New("canned")
+	var dialed []string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		switch addr {
+		case "198.51.100.20:3128":
+			return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.9/y\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+		case "93.184.216.9:80":
+			return serveOnce("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")(context.Background(), "tcp", addr)
+		default:
+			return nil, sentinel
+		}
+	}
+	transport := &http.Transport{Proxy: hopPolicy, DialContext: dial}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	resp, err := fetcher.client.Get("http://93.184.216.1/x")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Len(t, dialed, 2)
+	assert.Equal(t, "198.51.100.20:3128", dialed[0], "hop 1 goes through its evaluated proxy")
+	assert.Equal(t, "93.184.216.9:80", dialed[1], "hop 2 re-evaluates and pins the direct target")
+}
+
+// A proxy policy that fails at Get must fail closed there.
+func TestGetFailsOnProxyDecisionError(t *testing.T) {
+	transport := &http.Transport{Proxy: func(*http.Request) (*url.URL, error) {
+		return nil, errors.New("proxy conf unreadable")
+	}}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(context.Background(), "https://media.example/x", "image/*", 1<<20)
+	require.ErrorContains(t, err, "proxy conf unreadable")
+}
+
+// A policy that fails on a LATER hop must abort the chain, not ship hop 1's
+// evaluation.
+func TestRedirectHopProxyDecisionError(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	policy := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "93.184.216.9" {
+			return nil, errors.New("hop-2 decision exploded")
+		}
+		return nil, nil
+	}
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.9/y\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+	}
+	transport := &http.Transport{Proxy: policy, DialContext: dial}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("http://93.184.216.1/x")
+	require.ErrorContains(t, err, "hop-2 decision exploded")
+}
+
+// A caller redirect callback rewriting the URL, followed by a policy error
+// on the REWRITTEN target, must surface that decision error.
+func TestRedirectRewriteThenDecisionError(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	policy := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "93.184.216.9" {
+			return nil, errors.New("rewritten-hop policy exploded")
+		}
+		return nil, nil
+	}
+	mutator := func(req *http.Request, _ []*http.Request) error {
+		u, _ := url.Parse("http://93.184.216.9/rewritten")
+		req.URL = u
+		return nil
+	}
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.5/mid\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+	}
+	transport := &http.Transport{Proxy: policy, DialContext: dial}
+	client := &http.Client{Transport: transport, CheckRedirect: mutator}
+	fetcher, err := NewFetcherWithOptions(client, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("http://93.184.216.1/x")
+	require.ErrorContains(t, err, "rewritten-hop policy exploded")
+}
