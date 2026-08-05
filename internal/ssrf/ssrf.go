@@ -262,12 +262,14 @@ func dialPinned(ctx context.Context, network, addr string, fallback func(context
 		return fallback(ctx, network, addr)
 	}
 	if preserveHostname {
-		// Remote-DNS dialers (SOCKS5) own target resolution COMPLETELY: the
+		// Remote-DNS dialers (SOCKS5) own NAME resolution completely: the
 		// hostname goes to the proxy unresolved so proxy-only names and
-		// split-horizon answers work. Local resolution here would be wrong in
-		// both directions -- it cannot prove what the proxy will resolve, and
-		// it rejects private/split-horizon answers that are valid remotely.
-		// (Policy for what may be fetched stays at the request layer.)
+		// split-horizon answers work. IP LITERALS need no DNS at all, though,
+		// so private/internal literals stay blocked here regardless of who
+		// would have resolved them.
+		if ip := HostIPLiteral(host); ip != nil && IsBlockedIP(ip) {
+			return nil, &BlockedTargetError{Target: host, Reason: "private/internal IP literal"}
+		}
 		return fallback(ctx, network, addr)
 	}
 	ips, err := resolvePublicIPs(ctx, host)
