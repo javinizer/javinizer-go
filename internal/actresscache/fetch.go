@@ -127,7 +127,13 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, req *http.Request) error
 	}
 	ips, err := lookupIP(ctx, "ip", host)
 	if err != nil || len(ips) == 0 {
-		if f.requestProxied(req) {
+		// A prior evaluation (Get stamps one per attempt) replays; compute only
+		// when nothing was stamped (e.g. caller-mutated redirects).
+		proxied := f.requestProxied(req)
+		if stamped, ok := req.Context().Value(proxyDecisionCtxKey{}).(*proxyDecision); ok {
+			proxied = stamped.proxyURL != nil
+		}
+		if proxied {
 			// A proxy resolves the hostname remotely, so dial-time checks
 			// cannot see the real target: fail closed when local resolution
 			// cannot prove the host is public. Classified unverifiable
@@ -205,18 +211,25 @@ func (p *proxyPinningTransport) RoundTrip(req *http.Request) (*http.Response, er
 	// may key on headers (e.g. User-Agent); a synthetic probe could declare
 	// "direct" while the real hop is proxied, skipping both the plain-HTTP
 	// hostname rejection and the request-bound endpoint marker.
+	// Replay a stamped decision when one exists (Get evaluates once); only a
+	// request that never passed Get's evaluation computes fresh here.
 	var proxyURL *url.URL
 	if p.proxyFor != nil {
-		decision, err := p.proxyFor(req)
-		if err != nil {
-			return nil, fmt.Errorf("actress cache proxy decision failed: %w", err)
+		if stamped, ok := req.Context().Value(proxyDecisionCtxKey{}).(*proxyDecision); ok {
+			proxyURL = stamped.proxyURL
+		} else {
+			decision, err := p.proxyFor(req)
+			if err != nil {
+				return nil, fmt.Errorf("actress cache proxy decision failed: %w", err)
+			}
+			proxyURL = decision
+			req = req.WithContext(context.WithValue(req.Context(), proxyDecisionCtxKey{}, &proxyDecision{proxyURL: decision}))
 		}
-		proxyURL = decision
-		ctx := context.WithValue(req.Context(), proxyDecisionCtxKey{}, &proxyDecision{proxyURL: decision})
-		if decision != nil {
-			ctx = context.WithValue(ctx, proxiedDialCtxKey{}, canonicalProxyDialTarget(decision.Scheme, decision.Hostname(), decision.Port()))
+		if proxyURL != nil {
+			// Dial exemption marker is hop-scoped: always refresh it for THIS
+			// hop (redirects re-enter RoundTrip with the stamped decision).
+			req = req.WithContext(context.WithValue(req.Context(), proxiedDialCtxKey{}, canonicalProxyDialTarget(proxyURL.Scheme, proxyURL.Hostname(), proxyURL.Port())))
 		}
-		req = req.Clone(ctx)
 	}
 	if req.URL.Scheme == "http" && proxyURL != nil && hostIPLiteral(req.URL.Hostname()) == nil {
 		return nil, &ssrf.UnverifiableHostError{Host: req.URL.Hostname(), Err: errors.New("plain-HTTP proxy fetch of a hostname cannot pin the resolved address (use an HTTPS target or a CONNECT tunnel)")}
@@ -452,6 +465,17 @@ func (f *Fetcher) Get(ctx context.Context, rawURL, accept string, maxBytes int64
 	// evaluate the decision against the exact request that will be dialed.
 	req.Header.Set("User-Agent", f.userAgent)
 	req.Header.Set("Accept", accept)
+	// Evaluate the proxy decision ONCE per Get and carry it on the context:
+	// preflight, the redirect wrapper, the marker, and net/http all replay
+	// this single evaluation, so a stateful policy cannot answer differently
+	// between the fail-closed check and the actual hop.
+	if f.proxyFunc != nil {
+		decision, derr := f.proxyFunc(req)
+		if derr != nil {
+			return nil, nil, fmt.Errorf("actress cache proxy decision failed: %w", derr)
+		}
+		req = req.WithContext(context.WithValue(req.Context(), proxyDecisionCtxKey{}, &proxyDecision{proxyURL: decision}))
+	}
 	if !f.allowPrivateHosts {
 		if err := f.checkFetchTarget(requestCtx, req); err != nil {
 			return nil, nil, err
