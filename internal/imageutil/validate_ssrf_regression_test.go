@@ -1,0 +1,155 @@
+package imageutil
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math"
+	"math/big"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestResolveProxyDialAddrPins(t *testing.T) {
+	// Literal proxies pass through without touching DNS.
+	literal, err := url.Parse("http://192.0.2.1:3128")
+	require.NoError(t, err)
+	addr, err := resolveProxyDialAddr(t.Context(), literal, func(context.Context, string) ([]net.IPAddr, error) {
+		t.Fatal("literal proxies must not resolve")
+		return nil, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "192.0.2.1:3128", addr)
+
+	// Hostname proxies pin to the first resolved answer with scheme defaults.
+	named, err := url.Parse("https://proxy.example")
+	require.NoError(t, err)
+	addr, err = resolveProxyDialAddr(t.Context(), named, stubProxyLookup)
+	require.NoError(t, err)
+	assert.Equal(t, "203.0.113.9:443", addr)
+
+	// nil lookup falls back to the default resolver (kept for direct helper
+	// callers outside the pinned transport).
+	localhost, err := url.Parse("http://localhost:3128")
+	require.NoError(t, err)
+	addr, err = resolveProxyDialAddr(t.Context(), localhost, nil)
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(addr, ":3128"))
+	assert.NotContains(t, addr, "localhost")
+
+	// Resolution failure and empty answers both fail closed.
+	_, err = resolveProxyDialAddr(t.Context(), named, func(context.Context, string) ([]net.IPAddr, error) {
+		return nil, assert.AnError
+	})
+	require.ErrorContains(t, err, "resolve configured proxy")
+	_, err = resolveProxyDialAddr(t.Context(), named, func(context.Context, string) ([]net.IPAddr, error) { return nil, nil })
+	require.ErrorContains(t, err, "no addresses")
+}
+
+// After pinning, the proxy connection still presents the proxy HOSTNAME as
+// TLS SNI (pinned IPs would otherwise break cert validation / vhost routes).
+func TestDialTLSProxyPreservesSNIOnPinnedAddr(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "proxy.example"},
+		DNSNames:     []string{"proxy.example"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err)
+	keyDER := x509.MarshalPKCS1PrivateKey(key)
+	cert, err := tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER}),
+	)
+	require.NoError(t, err)
+
+	var serverHelloSNI string
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = listener.Close() }()
+	go func() {
+		raw, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		server := tls.Server(raw, &tls.Config{
+			GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+				serverHelloSNI = hello.ServerName
+				return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
+			},
+		})
+		_ = server.Handshake()
+		_ = server.Close()
+	}()
+
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialTLSProxy(t.Context(), "tcp", listener.Addr().String(), "proxy.example", dialer.DialContext, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // SNI assertion does not need chain validation
+	require.NoError(t, err)
+	_ = conn.Close()
+	assert.Equal(t, "proxy.example", serverHelloSNI, "SNI keeps the proxy hostname after IP pinning")
+}
+
+// math.MaxInt64 - slop and beyond must not wrap the header limit negative.
+func TestRoundTripHTTPProxyMaxHeaderBytesClamped(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	go func() {
+		buf := make([]byte, 4096)
+		_, _ = server.Read(buf)
+		_, _ = server.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+	}()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/x", nil)
+	require.NoError(t, err)
+	resp, err := roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{
+		DialContext:            func(context.Context, string, string) (net.Conn, error) { return client, nil },
+		MaxResponseHeaderBytes: math.MaxInt64 - 1,
+	}, stubProxyLookup)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	_ = resp.Body.Close()
+}
+
+// A caller CheckRedirect that REWRITES req.URL before returning nil must not
+// smuggle the rewritten target past the SSRF guard.
+func TestValidateRemoteImageWithSafeClientRechecksRewrittenRedirect(t *testing.T) {
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return respondWith("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.34/legit\r\nContent-Length: 0\r\n\r\n")(ctx, network, addr)
+	}
+	rewriter := func(req *http.Request, _ []*http.Request) error {
+		req.URL.Host = "169.254.169.254"
+		return nil
+	}
+	client := &http.Client{Transport: &http.Transport{DialContext: dial}, CheckRedirect: rewriter}
+	err := ValidateRemoteImageWithSafeClient(context.Background(), client, "http://93.184.216.34/x", "", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "SSRF blocked", "rewritten redirect target must be revalidated")
+}
+
+// A proxy-resolution failure aborts the attempt before any dial.
+func TestRoundTripHTTPProxyResolveFailureAbortsBeforeDial(t *testing.T) {
+	dialed := 0
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example/x", nil)
+	require.NoError(t, err)
+	_, err = roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) { dialed++; return nil, assert.AnError },
+	}, func(context.Context, string) ([]net.IPAddr, error) { return nil, assert.AnError })
+	require.ErrorContains(t, err, "resolve configured proxy")
+	assert.Zero(t, dialed)
+}

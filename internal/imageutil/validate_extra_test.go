@@ -208,6 +208,11 @@ func TestProxyResponseBodyClosesConnectionBeforeBody(t *testing.T) {
 	require.NoError(t, body.Close())
 }
 
+// stubProxyLookup pins proxy endpoint resolution to a stable public answer.
+func stubProxyLookup(context.Context, string) ([]net.IPAddr, error) {
+	return []net.IPAddr{{IP: net.ParseIP("203.0.113.9")}}, nil
+}
+
 func TestRoundTripHTTPProxyErrorsAndCancellation(t *testing.T) {
 	dialErr := errors.New("dial failed")
 	var dialed string
@@ -216,21 +221,21 @@ func TestRoundTripHTTPProxyErrorsAndCancellation(t *testing.T) {
 	require.NoError(t, err)
 	httpProxy, err := url.Parse("http://proxy.example")
 	require.NoError(t, err)
-	_, err = roundTripHTTPProxy(t.Context(), req, httpProxy, "1.1.1.1:80", &http.Transport{DialContext: dial})
+	_, err = roundTripHTTPProxy(t.Context(), req, httpProxy, "1.1.1.1:80", &http.Transport{DialContext: dial}, stubProxyLookup)
 	require.ErrorIs(t, err, dialErr)
-	require.Equal(t, "proxy.example:80", dialed)
+	require.Equal(t, "203.0.113.9:80", dialed, "proxy endpoint is pinned to its resolved IP")
 	httpsProxy, err := url.Parse("https://proxy.example")
 	require.NoError(t, err)
-	_, err = roundTripHTTPProxy(t.Context(), req, httpsProxy, "1.1.1.1:80", &http.Transport{DialContext: dial})
+	_, err = roundTripHTTPProxy(t.Context(), req, httpsProxy, "1.1.1.1:80", &http.Transport{DialContext: dial}, stubProxyLookup)
 	require.ErrorIs(t, err, dialErr)
-	require.Equal(t, "proxy.example:443", dialed)
+	require.Equal(t, "203.0.113.9:443", dialed)
 
 	badReq := req.Clone(t.Context())
 	writeErr := errors.New("body failed")
 	badReq.Body = io.NopCloser(failingReader{err: writeErr})
 	badReq.ContentLength = -1
 	client, server := net.Pipe()
-	_, err = roundTripHTTPProxy(t.Context(), badReq, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil }})
+	_, err = roundTripHTTPProxy(t.Context(), badReq, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil }}, stubProxyLookup)
 	require.ErrorContains(t, err, writeErr.Error())
 	_ = server.Close()
 
@@ -238,7 +243,7 @@ func TestRoundTripHTTPProxyErrorsAndCancellation(t *testing.T) {
 	_ = server.Close()
 	_, err = roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
 		return writeFailConn{Conn: client, err: writeErr}, nil
-	}})
+	}}, stubProxyLookup)
 	require.ErrorIs(t, err, writeErr)
 
 	client, server = net.Pipe()
@@ -250,14 +255,14 @@ func TestRoundTripHTTPProxyErrorsAndCancellation(t *testing.T) {
 	_, err = roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{
 		DialContext:            func(context.Context, string, string) (net.Conn, error) { return client, nil },
 		MaxResponseHeaderBytes: 32,
-	})
+	}, stubProxyLookup)
 	require.Error(t, err)
 
 	cancelCtx, cancel := context.WithCancel(t.Context())
 	client, server = net.Pipe()
 	result := make(chan error, 1)
 	go func() {
-		_, proxyErr := roundTripHTTPProxy(cancelCtx, req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil }})
+		_, proxyErr := roundTripHTTPProxy(cancelCtx, req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil }}, stubProxyLookup)
 		result <- proxyErr
 	}()
 	go func() { _, _ = io.Copy(io.Discard, server) }()
@@ -302,7 +307,7 @@ func TestRoundTripHTTPProxySkipsInformationalResponses(t *testing.T) {
 	require.NoError(t, err)
 	resp, err := roundTripHTTPProxy(t.Context(), req, &url.URL{Scheme: "http", Host: "proxy:80"}, "1.1.1.1:80", &http.Transport{
 		DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil },
-	})
+	}, stubProxyLookup)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	body, err := io.ReadAll(resp.Body)
@@ -553,22 +558,22 @@ func TestDialTLSProxy(t *testing.T) {
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
 	dialer := &net.Dialer{}
-	conn, err := dialTLSProxy(t.Context(), "tcp", server.Listener.Addr().String(), dialer.DialContext, &tls.Config{RootCAs: roots})
+	conn, err := dialTLSProxy(t.Context(), "tcp", server.Listener.Addr().String(), "", dialer.DialContext, &tls.Config{RootCAs: roots})
 	require.NoError(t, err)
 	require.Equal(t, server.Listener.Addr().String(), conn.RemoteAddr().String())
 	require.NoError(t, conn.Close())
 
-	_, err = dialTLSProxy(t.Context(), "tcp", "invalid", dialer.DialContext, &tls.Config{})
+	_, err = dialTLSProxy(t.Context(), "tcp", "invalid", "", dialer.DialContext, &tls.Config{})
 	require.Error(t, err)
 	dialErr := errors.New("dial failed")
-	_, err = dialTLSProxy(t.Context(), "tcp", "proxy.example:443", func(context.Context, string, string) (net.Conn, error) {
+	_, err = dialTLSProxy(t.Context(), "tcp", "proxy.example:443", "", func(context.Context, string, string) (net.Conn, error) {
 		return nil, dialErr
 	}, &tls.Config{})
 	require.ErrorIs(t, err, dialErr)
 
 	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(plain.Close)
-	_, err = dialTLSProxy(t.Context(), "tcp", plain.Listener.Addr().String(), dialer.DialContext, &tls.Config{InsecureSkipVerify: true})
+	_, err = dialTLSProxy(t.Context(), "tcp", plain.Listener.Addr().String(), "", dialer.DialContext, &tls.Config{InsecureSkipVerify: true})
 	require.Error(t, err)
 }
 
