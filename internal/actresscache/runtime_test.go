@@ -21,7 +21,12 @@ func TestNewRuntimeCacheDropsAuditMetadata(t *testing.T) {
 			JapaneseName: "名前", Aliases: []string{"旧名"}, ThumbURL: "https://example.test/a.jpg",
 			Thumbnail: ThumbnailValidation{SHA256: "hash"}, PrimarySource: "test",
 			Sources: []SourceRecord{{Source: "test", SourceID: "1", Thumbnail: ThumbnailValidation{SHA256: "hash"}}},
-		}, {BuiltinKey: "unreachable", ThumbURL: "https://www.minnano-av.com/p_actress_125_125/000/np.gif"}, {BuiltinKey: "placeholder", DMMID: 2, JapaneseName: "占位", ThumbURL: "https://www.minnano-av.com/p_actress_125_125/000/np.gif"}},
+		}, {BuiltinKey: "unreachable", ThumbURL: "https://www.minnano-av.com/p_actress_125_125/000/np.gif"},
+			// Single romanized token with no other identity: Lookup refuses a
+			// single-part romanized fallback, so this record would be embedded
+			// but unfindable — projection must drop it.
+			{BuiltinKey: "name-only", FirstName: "OnlyFirst", ThumbURL: "https://example.test/n.jpg"},
+			{BuiltinKey: "placeholder", DMMID: 2, JapaneseName: "占位", ThumbURL: "https://www.minnano-av.com/p_actress_125_125/000/np.gif"}},
 	}
 	runtime := NewRuntimeCache(cache)
 	require.Equal(t, RuntimeSchemaVersion, runtime.SchemaVersion)
