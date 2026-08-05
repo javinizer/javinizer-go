@@ -13,6 +13,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -90,7 +91,11 @@ func cloneTLSConfig(config *tls.Config) *tls.Config {
 	return config.Clone()
 }
 
-func dialTLSProxy(ctx context.Context, network, addr string, dial func(context.Context, string, string) (net.Conn, error), config *tls.Config) (net.Conn, error) {
+// dialTLSProxy dials dialAddr and handshakes with SNI serverName (the proxy
+// HOSTNAME): after proxy dialing was pinned to a resolved IP, the dial
+// address no longer carries the name the proxy's certificate expects. A
+// caller-set config.ServerName always wins.
+func dialTLSProxy(ctx context.Context, network, addr, serverName string, dial func(context.Context, string, string) (net.Conn, error), config *tls.Config) (net.Conn, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -100,13 +105,58 @@ func dialTLSProxy(ctx context.Context, network, addr string, dial func(context.C
 		return nil, err
 	}
 	tlsConfig := cloneTLSConfig(config)
-	tlsConfig.ServerName = host
+	if tlsConfig.ServerName == "" {
+		tlsConfig.ServerName = serverName
+	}
+	if tlsConfig.ServerName == "" {
+		tlsConfig.ServerName = host
+	}
 	tlsConn := tls.Client(conn, tlsConfig)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
 	return tlsConn, nil
+}
+
+// canonicalProxyAddr renders the proxy's dial target with its scheme default
+// port filled in (net/http dials proxies on 80/443 when no port is given).
+func canonicalProxyAddr(proxyURL *url.URL) string {
+	if proxyURL.Port() != "" {
+		return proxyURL.Host
+	}
+	port := "80"
+	if proxyURL.Scheme == httpsScheme {
+		port = "443"
+	}
+	return net.JoinHostPort(proxyURL.Hostname(), port)
+}
+
+// resolveProxyDialAddr pins the proxy endpoint itself: a hostname proxy URL
+// is resolved ONCE and the first answer dialed, so DNS rebinding or
+// multi-answer churn between preflight and connect cannot redirect the
+// validator's proxy connection elsewhere. Configured proxies are trusted
+// infrastructure (often internal), so answers are pinned, not public-gated.
+// Literal-IP proxies pass through untouched.
+func resolveProxyDialAddr(ctx context.Context, proxyURL *url.URL, lookup func(context.Context, string) ([]net.IPAddr, error)) (string, error) {
+	addr := canonicalProxyAddr(proxyURL)
+	// canonicalProxyAddr always yields host:port, so the split cannot fail.
+	host, _, _ := net.SplitHostPort(addr)
+	if net.ParseIP(host) != nil {
+		return addr, nil
+	}
+	if lookup == nil {
+		lookup = net.DefaultResolver.LookupIPAddr
+	}
+	addrs, err := lookup(ctx, host)
+	if err != nil {
+		return "", fmt.Errorf("resolve configured proxy %s: %w", host, err)
+	}
+	if len(addrs) == 0 {
+		return "", fmt.Errorf("resolve configured proxy %s: no addresses", host)
+	}
+	_, port, _ := net.SplitHostPort(addr)
+	return net.JoinHostPort(addrs[0].IP.String(), port), nil
 }
 
 func writeFull(writer io.Writer, data []byte) error {
@@ -178,23 +228,18 @@ func (b *proxyResponseBody) Close() error {
 	return closeErr
 }
 
-func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.URL, pinnedHost string, transport *http.Transport) (*http.Response, error) {
-	proxyAddr := proxyURL.Host
-	if proxyURL.Port() == "" {
-		if proxyURL.Scheme == httpsScheme {
-			proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "443")
-		} else {
-			proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "80")
-		}
+func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.URL, pinnedHost string, transport *http.Transport, lookup func(context.Context, string) ([]net.IPAddr, error)) (*http.Response, error) {
+	proxyAddr, err := resolveProxyDialAddr(ctx, proxyURL, lookup)
+	if err != nil {
+		return nil, err
 	}
 	dial := transport.DialContext
 	if dial == nil {
 		dial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
 	}
 	var conn net.Conn
-	var err error
 	if proxyURL.Scheme == httpsScheme {
-		conn, err = dialTLSProxy(ctx, "tcp", proxyAddr, dial, transport.TLSClientConfig)
+		conn, err = dialTLSProxy(ctx, "tcp", proxyAddr, proxyURL.Hostname(), dial, transport.TLSClientConfig)
 	} else {
 		conn, err = dial(ctx, "tcp", proxyAddr)
 	}
@@ -228,7 +273,13 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 	if maxHeaderBytes <= 0 {
 		maxHeaderBytes = defaultMaxResponseHeaderBytes
 	}
-	headerReader := &responseHeaderLimitReader{reader: conn, remaining: maxHeaderBytes + responseHeaderReadSlop}
+	// Clamp: at settings within 4096 of math.MaxInt64 the slop addition would
+	// overflow negative and break the framing read below.
+	headerLimit := maxHeaderBytes + responseHeaderReadSlop
+	if headerLimit < maxHeaderBytes {
+		headerLimit = math.MaxInt64
+	}
+	headerReader := &responseHeaderLimitReader{reader: conn, remaining: headerLimit}
 	bufferedReader := bufio.NewReader(headerReader)
 	headerTimeout := transport.ResponseHeaderTimeout
 	for {
@@ -329,7 +380,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		transport.Proxy = http.ProxyURL(proxyURL)
 		transport.DisableKeepAlives = true
 		if req.URL.Scheme == "http" && (proxyURL.Scheme == "http" || proxyURL.Scheme == httpsScheme) {
-			resp, err := roundTripHTTPProxy(req.Context(), req, proxyURL, pinnedHost, transport)
+			resp, err := roundTripHTTPProxy(req.Context(), req, proxyURL, pinnedHost, transport, lookup)
 			if err == nil && !isRetryableProxyStatus(resp.StatusCode) {
 				resp.Request = req
 				return resp, nil
@@ -350,13 +401,25 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 			targetTLSConfig := baseTLSConfig.Clone()
 			targetTLSConfig.ServerName = host
 			transport.TLSClientConfig = targetTLSConfig
+			// Pin the proxy endpoint for the CONNECT path too: the peer the
+			// validator tunnels through must be the one resolved up front.
+			proxyDialAddr, err := resolveProxyDialAddr(req.Context(), proxyURL, lookup)
+			if err != nil {
+				roundTripErr = errors.Join(roundTripErr, err)
+				continue
+			}
+			pinnedProxyDial := transport.DialContext
+			if pinnedProxyDial == nil {
+				pinnedProxyDial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+			}
+			// With a proxy in play, net/http only ever dials THE PROXY here.
+			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return pinnedProxyDial(ctx, network, proxyDialAddr)
+			}
 			if proxyURL.Scheme == httpsScheme && transport.DialTLSContext == nil {
 				dial := transport.DialContext
-				if dial == nil {
-					dial = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
-				}
-				transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-					return dialTLSProxy(ctx, network, addr, dial, baseTLSConfig)
+				transport.DialTLSContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+					return dialTLSProxy(ctx, network, proxyDialAddr, proxyURL.Hostname(), dial, baseTLSConfig)
 				}
 			}
 		}
@@ -431,7 +494,12 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 			return err
 		}
 		if previousCheckRedirect != nil {
-			return previousCheckRedirect(req, via)
+			if err := previousCheckRedirect(req, via); err != nil {
+				return err
+			}
+			// Caller redirect policies may REWRITE req.URL before approving the
+			// hop; validate the final target, not just the pre-callback one.
+			return ssrf.CheckTarget(req.Context(), req.URL)
 		}
 		return nil
 	}
