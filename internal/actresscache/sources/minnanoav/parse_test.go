@@ -150,3 +150,11 @@ func TestParseDMMActressIDResumesPastUnparseable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, parseDMMActressID(doc))
 }
+
+// Relative hrefs that are not the DMM article form are skipped without
+// erroring out (e.g. /list/=/prefecture=/a/ navigational anchors).
+func TestParseDMMActressIDSkipsRelativeNonArticle(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<a href="/mono/dvd/-/list/=/prefecture=/a/">nav</a><a href="/mono/dvd/-/list/=/article=actress/id=5567/">hit</a>`))
+	require.NoError(t, err)
+	assert.Equal(t, 5567, parseDMMActressID(doc))
+}
