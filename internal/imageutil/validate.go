@@ -537,9 +537,11 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 	}
 	safeClient := *client
 	if remoteDNS {
-		// Preserve hostnames end to end: the SOCKS5 dialer resolves them;
-		// literals stay blocked inside the preserving wrapper.
-		safeClient.Transport = ssrf.WrapTransportPreservingHostnames(client.Transport.(*http.Transport))
+		// NEVER mutate the caller's live transport: clone, re-mark the clone
+		// (registry membership is pointer-keyed; clones lose it), then wrap.
+		clone := client.Transport.(*http.Transport).Clone()
+		ssrf.MarkRemoteDNSTransport(clone)
+		safeClient.Transport = ssrf.WrapTransportPreservingHostnames(clone)
 	} else if client.Transport == nil {
 		defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 		if !ok {

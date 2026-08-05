@@ -224,10 +224,24 @@ func rejectSharedArtifactPaths(opts options) error {
 		}
 		// Symlinks (and symlinked parents) alias too: journal reads through a
 		// symlinked --state while the writer renames over its real path would
-		// corrupt the resume journal, so resolve what exists.
+		// corrupt the resume journal, so resolve what exists. DANGLING links
+		// defeat EvalSymlinks but still alias their target -- follow them via
+		// readlink before falling back to the parent directory.
 		if resolved, err := filepath.EvalSymlinks(key); err == nil {
 			key = resolved
-		} else if resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(key)); err == nil {
+		} else if info, lerr := os.Lstat(key); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			if target, rerr := os.Readlink(key); rerr == nil {
+				if !filepath.IsAbs(target) {
+					target = filepath.Join(filepath.Dir(key), target)
+				}
+				key = filepath.Clean(target)
+				// The link target itself may live under symlinked parents
+				// (e.g. macOS /var -> /private/var): resolve that chain too.
+				if resolvedParent, perr := filepath.EvalSymlinks(filepath.Dir(key)); perr == nil {
+					key = filepath.Join(resolvedParent, filepath.Base(key))
+				}
+			}
+		} else if resolvedParent, perr := filepath.EvalSymlinks(filepath.Dir(key)); perr == nil {
 			key = filepath.Join(resolvedParent, filepath.Base(key))
 		}
 		// Windows and most macOS volumes are case-insensitive: differently

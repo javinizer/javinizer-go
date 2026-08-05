@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -377,20 +379,26 @@ func TestNewPinnedDialTransportHonorsLegacyDial(t *testing.T) {
 	assert.Equal(t, "93.184.216.34:443", dialed)
 }
 
-// Repeated short-lived transport creation must not grow the registry without
-// bound: at capacity the oldest entry evicts, and re-marking is idempotent.
-func TestRemoteDNSRegistryBoundsGrowth(t *testing.T) {
-	MarkRemoteDNSTransport(nil) // defensive: must not panic or register
-	first := &http.Transport{}
-	MarkRemoteDNSTransport(first)
-	MarkRemoteDNSTransport(first) // idempotent: same pointer stays one entry
-	recent := &http.Transport{}
-	for i := 0; i < maxRemoteDNSTransports; i++ {
-		tr := &http.Transport{}
-		MarkRemoteDNSTransport(tr)
-		recent = tr
-	}
-	assert.False(t, TransportResolvesRemotely(first), "oldest entry evicts beyond capacity")
-	assert.True(t, TransportResolvesRemotely(recent), "most recent survives")
+// Live transports must keep their markers; dead ones must be released by the
+// runtime cleanup -- never evicted while alive, never retained after death.
+func TestRemoteDNSRegistryReleasesCollected(t *testing.T) {
+	MarkRemoteDNSTransport(nil) // no-op guard
+	live := &http.Transport{}
+	MarkRemoteDNSTransport(live)
+	MarkRemoteDNSTransport(live) // idempotent re-mark
 	assert.False(t, TransportResolvesRemotely(nil))
+	defer func() { _ = live }() // keep alive past this test
+
+	var dead weak.Pointer[http.Transport]
+	func() {
+		tmp := &http.Transport{}
+		MarkRemoteDNSTransport(tmp)
+		dead = weak.Make(tmp)
+		require.True(t, TransportResolvesRemotely(tmp))
+	}()
+	require.Eventually(t, func() bool {
+		runtime.GC()
+		return dead.Value() == nil && !RemoteDNSHasWeakEntryForTest(dead)
+	}, 5*time.Second, 20*time.Millisecond, "collected transports release their marker")
+	assert.True(t, TransportResolvesRemotely(live), "live markers are never evicted")
 }

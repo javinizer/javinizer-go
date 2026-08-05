@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
+	"weak"
 )
 
 var (
@@ -361,15 +363,15 @@ func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
 // resolution (SOCKS5 via x/net/proxy installs DialContext while
 // http.Transport.Proxy stays nil, so policy code cannot rely on Proxy != nil
 // or on named-func method detection -- Go erases either at assignment).
-// Bounded with FIFO eviction: short-lived transports (admin proxy-test
-// clicks recreate one per attempt) must not grow process memory forever.
-const maxRemoteDNSTransports = 256
-
+//
+// Keys are WEAK pointers: evicting a marker whose transport is still live
+// would silently misroute its traffic through local DNS/pinning, and strong
+// keys would retain transports forever. runtime cleanup deletes the entry as
+// soon as the transport becomes unreachable.
 var remoteDNSRegistry = struct {
 	sync.Mutex
-	set   map[*http.Transport]struct{}
-	order []*http.Transport
-}{set: make(map[*http.Transport]struct{})}
+	set map[weak.Pointer[http.Transport]]struct{}
+}{set: make(map[weak.Pointer[http.Transport]]struct{})}
 
 // MarkRemoteDNSTransport declares that tr's dial path resolves names
 // remotely. Wrappers must preserve hostnames (never locally pin), while
@@ -378,18 +380,19 @@ func MarkRemoteDNSTransport(tr *http.Transport) {
 	if tr == nil {
 		return
 	}
+	wp := weak.Make(tr)
 	remoteDNSRegistry.Lock()
-	defer remoteDNSRegistry.Unlock()
-	if _, exists := remoteDNSRegistry.set[tr]; exists {
+	if _, exists := remoteDNSRegistry.set[wp]; exists {
+		remoteDNSRegistry.Unlock()
 		return
 	}
-	for len(remoteDNSRegistry.order) >= maxRemoteDNSTransports {
-		oldest := remoteDNSRegistry.order[0]
-		remoteDNSRegistry.order = remoteDNSRegistry.order[1:]
-		delete(remoteDNSRegistry.set, oldest)
-	}
-	remoteDNSRegistry.set[tr] = struct{}{}
-	remoteDNSRegistry.order = append(remoteDNSRegistry.order, tr)
+	remoteDNSRegistry.set[wp] = struct{}{}
+	remoteDNSRegistry.Unlock()
+	runtime.AddCleanup(tr, func(key weak.Pointer[http.Transport]) {
+		remoteDNSRegistry.Lock()
+		defer remoteDNSRegistry.Unlock()
+		delete(remoteDNSRegistry.set, key)
+	}, wp)
 }
 
 // TransportResolvesRemotely reports whether tr's dial path owns DNS. Check
@@ -400,7 +403,7 @@ func TransportResolvesRemotely(tr *http.Transport) bool {
 	}
 	remoteDNSRegistry.Lock()
 	defer remoteDNSRegistry.Unlock()
-	_, ok := remoteDNSRegistry.set[tr]
+	_, ok := remoteDNSRegistry.set[weak.Make(tr)]
 	return ok
 }
 
