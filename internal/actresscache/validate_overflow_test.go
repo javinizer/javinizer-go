@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"hash/crc32"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,4 +38,15 @@ func TestValidateThumbnailRejectsOverflowingPixelCount(t *testing.T) {
 	_, err := ValidateThumbnail(context.Background(), fetcher, "https://cdn.test/huge.png", 1, 1<<30)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exceed the 20000000 pixel decoder limit")
+}
+
+// With maxBytes == math.MaxInt64 the one-past-the-cap sentinel read must not
+// overflow the LimitReader bound into a negative (empty-body) limit.
+func TestValidateThumbnailMaxBytesSentinelNoOverflow(t *testing.T) {
+	image := makeJPEG(t, 80, 80)
+	fetcher := testFetcher(200, "image/jpeg", image, nil)
+	got, err := ValidateThumbnail(context.Background(), fetcher, "https://cdn.test/ok.jpg", 1, math.MaxInt64)
+	require.NoError(t, err)
+	assert.Equal(t, 80, got.Width)
+	assert.Equal(t, len(image), got.Bytes)
 }
