@@ -340,3 +340,25 @@ func TestValidateImageTargetLexicalGuardForRemoteDNS(t *testing.T) {
 	require.ErrorContains(t, validateImageTarget(t.Context(), "http:///x", true), "empty host")
 	require.NoError(t, validateImageTarget(t.Context(), "https://proxy-only.example/x", true))
 }
+
+// Under a remote-DNS (SOCKS5) transport, redirect hops to proxy-only names
+// must validate lexically -- never via local DNS.
+func TestValidateRemoteImageRemoteDNSRedirectLexicalOnly(t *testing.T) {
+	var pngBuf bytes.Buffer
+	require.NoError(t, png.Encode(&pngBuf, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	var dialed []string
+	dial := func(_ context.Context, network, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		switch addr {
+		case "proxy-only.example:80":
+			return respondWith("HTTP/1.1 302 Found\r\nLocation: http://also-proxy-only.example/final.png\r\nContent-Length: 0\r\n\r\n")(context.Background(), network, addr)
+		default:
+			return respondWith("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: "+strconv.Itoa(pngBuf.Len())+"\r\n\r\n"+pngBuf.String())(context.Background(), network, addr)
+		}
+	}
+	transport := &http.Transport{DialContext: dial}
+	ssrf.MarkRemoteDNSTransport(transport)
+	err := ValidateRemoteImageWithSafeClient(context.Background(), &http.Client{Transport: transport}, "http://proxy-only.example/start.png", "ua", "")
+	require.NoError(t, err, "redirect to a locally-unresolvable name must not fail remote-DNS validation")
+	assert.Equal(t, []string{"proxy-only.example:80", "also-proxy-only.example:80"}, dialed)
+}

@@ -376,3 +376,21 @@ func TestNewPinnedDialTransportHonorsLegacyDial(t *testing.T) {
 	require.ErrorIs(t, err, sentinel)
 	assert.Equal(t, "93.184.216.34:443", dialed)
 }
+
+// Repeated short-lived transport creation must not grow the registry without
+// bound: at capacity the oldest entry evicts, and re-marking is idempotent.
+func TestRemoteDNSRegistryBoundsGrowth(t *testing.T) {
+	MarkRemoteDNSTransport(nil) // defensive: must not panic or register
+	first := &http.Transport{}
+	MarkRemoteDNSTransport(first)
+	MarkRemoteDNSTransport(first) // idempotent: same pointer stays one entry
+	recent := &http.Transport{}
+	for i := 0; i < maxRemoteDNSTransports; i++ {
+		tr := &http.Transport{}
+		MarkRemoteDNSTransport(tr)
+		recent = tr
+	}
+	assert.False(t, TransportResolvesRemotely(first), "oldest entry evicts beyond capacity")
+	assert.True(t, TransportResolvesRemotely(recent), "most recent survives")
+	assert.False(t, TransportResolvesRemotely(nil))
+}
