@@ -34,8 +34,13 @@ func TestCollectMarksRowsAndCompletionAndIgnoresBlankThumbnails(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	require.Len(t, seen, 1)
+	// Both identities are marked seen -- including the currently thumbless row,
+	// whose prior journal entry must survive the completed-source stale sweep
+	// instead of being silently pruned out of published caches.
+	require.Len(t, seen, 2)
+	assert.Contains(t, seen[0], "legacy-jvthumbs:00000002:")
 	assert.True(t, complete)
+	// ...but only rows WITH thumbnails are emitted.
 	assert.Equal(t, "Hanako", got.FirstName)
 	assert.Equal(t, "Yamada", got.LastName)
 }

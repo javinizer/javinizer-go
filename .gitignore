@@ -1,136 +1,117 @@
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.syso
-*.dylib
 
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go build
-/bin/
-/dist/
-/tmp/
-javinizer-go
-/javinizer
-/javinizer-e2e
-
-# Node modules (root or any subdirectory)
-node_modules/
-
-# Web build artifacts
-/web/frontend/.svelte-kit/
-/web/frontend/build/
-/web/frontend/test-results/
-/web/frontend/tests/e2e/auth-state.json
-/web/frontend/playwright-report/
-/web/frontend/blob-report/
-/web/frontend/playwright/.cache/
-/web/dist/*
-!/web/dist/robots.txt
 !/web/dist/index.html
-
-# Go workspace file
-go.work
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# Backup files
-*.bak
-*.backup
-
-# OS
+!/web/dist/robots.txt
+!docs/superpowers/contracts/
+!internal/actresscache/data/
+!internal/actresscache/data/actresses.json.gz
 .DS_Store
-Thumbs.db
-
-# Application
+.env
+.idea/
+.omo/
+.pi-subagents/
+.pi/
+.pi/batch-history.json
+.pi/batch-state.json
+.pi/lane-state-*
+.pi/merge-request-*
+.pi/merge-result-*
+.pi/npm/
+.pi/orch-abort-signal
+.pi/orch-logs/
+.pi/settings.json
+.pi/worker-conversation-*
+.planning/
+.scratch/
+.secrets
+.superpowers/
+.superturtle/
+.taskplane-tasks/
+.tmprepro/
+.vscode/
+.worktrees/
+*.backup
+*.bak
+*.coverprofile
 *.db
 *.db-shm
 *.db-wal
-*.sqlite
-*.sqlite3
+*.dll
+*.dylib
+*.exe
+*.exe~
 *.log
 *.migration.lock
-/data/
-/downloads/
-/logs/
+*.out
+*.so
+*.sqlite
+*.sqlite3
+*.swo
+*.swp
+*.syso
+*.test
 **/data/
-!internal/actresscache/data/
-!internal/actresscache/data/actresses.json.gz
 **/logs/
-config.local.yaml
-configs/config.yaml
-configs/auth.credentials.json
+*~
 /auth.credentials.json
-auth.sessions.json
-
-# Docker configuration
-.env
-
-# Test files
-/test-videos/
+/bin/
 /cli
+/coveragecheck
+/data/
+/dist/
+/downloads/
+/javinizer
+/javinizer-e2e
+/logs/
+/test-videos/
+/tmp/
+/web/dist/*
+/web/frontend/.svelte-kit/
+/web/frontend/blob-report/
+/web/frontend/build/
+/web/frontend/playwright-report/
+/web/frontend/playwright/.cache/
+/web/frontend/test-results/
+/web/frontend/tests/e2e/auth-state.json
+# Agent runtime
+# Agent scratch files
+# Allow contracts but ignore other superpowers content
+# Application
+# Backup files
+# Binaries for programs and plugins
+# Coverage files
+# Docker configuration
+# Go workspace file
+# Graphify output
+# IDE
+# Local GitHub Actions testing (act)
+# Node modules (root or any subdirectory)
+# OpenSpec
+# OS
+# Output of the go build
+# Pi project-local packages (if using pi install -l)
+# pi subagent async-run artifacts (scratch, never committed)
+# superturtle
+# Taskplane runtime artifacts (machine-specific, do not commit)
+# Test binary, built with `go test -c`
+# Test files
+# Web build artifacts
+auth.sessions.json
+build-actress-cache
+cmd/javinizer/commands/update/.actors/
 cmd/javinizer/commands/update/*.jpg
 cmd/javinizer/commands/update/*.mp4
 cmd/javinizer/commands/update/*.nfo
-cmd/javinizer/commands/update/.actors/
 cmd/javinizer/commands/update/extrafanart/
-
-# Coverage files
-*.out
-coverage*.out
-/coveragecheck
-coverage.html
-*.coverprofile
-COVERAGE_REPORT.md
-
-# Local GitHub Actions testing (act)
-.secrets
-
-# Agent runtime
-.omo/
-
-# superturtle
-.superturtle/
-.planning/
-.superpowers/
-.tmprepro/
-.pi/
-# Allow contracts but ignore other superpowers content
-docs/superpowers/*
-!docs/superpowers/contracts/
-.worktrees/
+config.local.yaml
+configs/auth.credentials.json
+configs/config.yaml
 context.md
-
-# Graphify output
+COVERAGE_REPORT.md
+coverage.html
+coverage*.out
+docs/superpowers/*
+go.work
 graphify-out/
-
-# Taskplane runtime artifacts (machine-specific, do not commit)
-.pi/batch-state.json
-.pi/batch-history.json
-.pi/lane-state-*
-.pi/merge-result-*
-.pi/merge-request-*
-.pi/worker-conversation-*
-.pi/orch-logs/
-.pi/orch-abort-signal
-.pi/settings.json
-.taskplane-tasks/
-
-# Pi project-local packages (if using pi install -l)
-.pi/npm/
-
-# Agent scratch files
-.scratch/
-
-# pi subagent async-run artifacts (scratch, never committed)
-.pi-subagents/
-
-# OpenSpec
+javinizer-go
+node_modules/
+Thumbs.db

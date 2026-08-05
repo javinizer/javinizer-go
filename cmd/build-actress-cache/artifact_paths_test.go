@@ -18,16 +18,19 @@ func TestRejectSharedArtifactPaths(t *testing.T) {
 	require.NoError(t, rejectSharedArtifactPaths(options{output: cache, state: state, auditOutput: audit}))
 	require.NoError(t, rejectSharedArtifactPaths(options{output: cache, state: state}))
 
-	cwd, err := filepath.Abs(".")
-	require.NoError(t, err)
-	relCache, err := filepath.Rel(cwd, cache)
-	require.NoError(t, err)
-	for name, opts := range map[string]options{
-		"state equals output":  {output: cache, state: cache},
-		"audit equals output":  {output: cache, state: state, auditOutput: cache},
-		"audit equals state":   {output: cache, state: state, auditOutput: state},
-		"relative alias match": {output: cache, state: relCache, auditOutput: ""},
-	} {
+	collisions := map[string]options{
+		"state equals output": {output: cache, state: cache},
+		"audit equals output": {output: cache, state: state, auditOutput: cache},
+		"audit equals state":  {output: cache, state: state, auditOutput: state},
+	}
+	// Relative-spelling alias (skipped when the temp dir lives on another
+	// volume than the test binary, e.g. CI runners with C: vs D:).
+	if cwd, err := filepath.Abs("."); err == nil {
+		if relCache, err := filepath.Rel(cwd, cache); err == nil && !filepath.IsAbs(relCache) {
+			collisions["relative alias match"] = options{output: cache, state: relCache, auditOutput: ""}
+		}
+	}
+	for name, opts := range collisions {
 		err := rejectSharedArtifactPaths(opts)
 		require.Error(t, err, name)
 		assert.Contains(t, err.Error(), "must name distinct paths", name)

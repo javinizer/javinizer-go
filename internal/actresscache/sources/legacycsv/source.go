@@ -112,11 +112,15 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 			break
 		}
 		candidate := candidateFromRow(row, columns, fileURL, rowNumber)
+		if options.MarkSeen != nil {
+			// Mark BEFORE the thumbnail check: a row whose thumbnail is
+			// temporarily blank must keep its prior journal entry alive
+			// (marked seen = not staled by the completed-source sweep),
+			// otherwise the published cache silently loses the actress.
+			options.MarkSeen(candidate.Key)
+		}
 		if candidate.ThumbURL == "" {
 			continue
-		}
-		if options.MarkSeen != nil {
-			options.MarkSeen(candidate.Key)
 		}
 		if options.ShouldSkip != nil && options.ShouldSkip(candidate.Key) {
 			continue
