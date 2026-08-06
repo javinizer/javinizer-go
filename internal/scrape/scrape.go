@@ -240,7 +240,12 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 		parsed, parseErr := matcher.ParseInput(source, registry)
 		if parseErr != nil {
 			logging.Warnf("[scrape] input parse failed for %q: %v (using as-is for MovieID)", RedactURLQuery(source), parseErr)
+			// MovieID stays query-redacted for a stable/secret-free identity, but
+			// the full URL is kept in RawInput so URL-aware scrapers (via the
+			// ScrapeURL seam) still receive required query parameters, e.g.
+			// jp.jav321.com/search?sn=IPX-123.
 			cmd.MovieID = RedactURLQuery(source)
+			cmd.RawInput = source
 			cmd.ParseWarning = fmt.Sprintf("input could not be parsed: %v", parseErr)
 		} else {
 			cmd.MovieID = parsed.ID

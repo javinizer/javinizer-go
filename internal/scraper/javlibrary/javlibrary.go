@@ -299,7 +299,11 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	}
 
 	if strings.Contains(html, `id="video_info"`) {
-		return s.parseDetailPage(html, pageIDFromURL(rawURL), redactPageURL(rawURL), resultLanguage)
+		movieID := pageIDFromURL(rawURL)
+		if vid := s.extractVideoID(html); vid != "" {
+			movieID = vid
+		}
+		return s.parseDetailPage(html, movieID, redactPageURL(rawURL), resultLanguage)
 	}
 
 	return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
@@ -329,6 +333,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 		if !strings.Contains(html, `id="video_info"`) {
 			return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
+		}
+		if vid := s.extractVideoID(html); vid != "" {
+			pageID = vid
 		}
 		return s.parseDetailPage(html, pageID, redactPageURL(id), languageFromURL(id, s.language))
 	}
@@ -643,6 +650,20 @@ func (s *scraper) extractRuntime(html string) int {
 
 // extractField extracts a field value from a video_info div by its ID
 // Works for video_director, video_maker, video_label
+// extractVideoID extracts the canonical product code from a detail page's
+// <div id="video_id">…</div> (plain text, e.g. "ONED-120"). Empty if absent.
+func (s *scraper) extractVideoID(html string) string {
+	// javlibrary renders the canonical code as
+	// <div id="video_id"><table>…<td class="text">ONED-120</td></table></div>
+	pattern := `id="video_id"[\s\S]*?<td\s+class="text">([^<]+)</td>`
+	re := regexp.MustCompile(pattern)
+	m := re.FindStringSubmatch(html)
+	if len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
 func (s *scraper) extractField(html string, divID string) string {
 	// Pattern: <div id="video_director" ...> ... <a ...>Value</a> ...
 	pattern := fmt.Sprintf(`id="%s"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>`, divID)

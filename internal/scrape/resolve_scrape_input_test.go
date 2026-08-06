@@ -57,6 +57,8 @@ func TestResolveScrapeInput_RedactsQueryOnParseFailFallback(t *testing.T) {
 	assert.Equal(t, "https://example.com/v/123", got.MovieID,
 		"parse-fail fallback MovieID must be query-redacted (security F2)")
 	assert.NotContains(t, got.MovieID, "token=secret")
+	assert.Equal(t, "https://example.com/v/123?token=secret", got.RawInput,
+		"parse-fail fallback keeps the full URL in RawInput so URL-aware scrapers retain query params")
 	assert.Contains(t, got.ParseWarning, "could not be parsed",
 		"ParseWarning surfaces the parse failure (backend F5 follow-on)")
 }
