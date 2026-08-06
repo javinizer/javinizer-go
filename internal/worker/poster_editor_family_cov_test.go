@@ -136,6 +136,26 @@ func TestLockedMovieOpsMovieIDAccessor(t *testing.T) {
 	assert.Equal(t, "K-1", got)
 }
 
+// Movie ID clearing is an identity-change request — rejected up-front
+// (codex P1-F): a blank ID would restamp every part's matcher key and drop
+// the family out of the result index entirely.
+func TestUpdateMovieFamilyRejectsEmptyID(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "NE-1", "")
+	pe := newEditorForStore(store)
+	m := &LockedMovieOps{pe: pe, movieID: "NE-1"}
+	var conflict *EditAdmissionConflictError
+	require.ErrorAs(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "", Title: "cleared"}), &conflict)
+}
+
+func TestUpdateMovieSingleRejectsEmptyID(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "NE-2", "")
+	pe := newEditorForStore(store)
+	var conflict *EditAdmissionConflictError
+	require.ErrorAs(t, pe.UpdateMovieSingle(context.Background(), "/f/a.mp4", &models.Movie{ID: "", Title: "cleared"}), &conflict)
+}
+
 // --- commit pipeline error arms ---
 
 func TestPublishCandidatesPropagatesAtomicUpdateError(t *testing.T) {
