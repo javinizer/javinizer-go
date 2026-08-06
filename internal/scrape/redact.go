@@ -14,6 +14,30 @@ import "net/url"
 //
 // Exported so the batch rescrape log (and other manual-input log sites) can
 // share the same redaction as resolveScrapeInput's parse-fail fallback.
+// RedactSourceURL strips credentials and secret query parameters from a
+// provenance URL while retaining the non-secret `v` identifier (the canonical
+// JavLibrary detail-page param) and the path itself.
+func RedactSourceURL(input string) string {
+	u, err := url.Parse(input)
+	if err != nil {
+		return input
+	}
+	u.User = nil
+	u.Fragment = ""
+	q := u.Query()
+	for k := range q {
+		if k != "v" {
+			q.Del(k)
+		}
+	}
+	if len(q) > 0 {
+		u.RawQuery = q.Encode()
+	} else {
+		u.RawQuery = ""
+	}
+	return u.String()
+}
+
 func RedactURLQuery(input string) string {
 	if input == "" {
 		return ""

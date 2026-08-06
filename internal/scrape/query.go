@@ -164,12 +164,16 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 				outcome = queryOutcome{failure: classifyContextError(scraper.Name(), err)}
 				return
 			}
-			// A typed scraper error (e.g. "URL is not a direct page", or a
-			// scraper whose ScrapeURL refuses the URL) means this URL is not
-			// directly scrapable: fall through to the ID-based keyword Search
-			// path instead of failing (preserves vl_searchbyid?keyword= handling
-			// and scrapers like JAVStash whose ScrapeURL is unsupported).
-			if _, ok := models.AsScraperError(err); !ok {
+			// Only a "not found"/unsupported URL shape (typed NotFound) falls
+			// through to the ID-based keyword Search. Availability errors (403,
+			// 429, challenges, 5xx) surface as failures instead of triggering a
+			// second request.
+			if se, ok := models.AsScraperError(err); ok {
+				if se.Kind != models.ScraperErrorKindNotFound {
+					outcome = queryOutcome{failure: se}
+					return
+				}
+			} else {
 				outcome = queryOutcome{failure: classifyScraperError(scraper.Name(), err, "")}
 				return
 			}
@@ -307,6 +311,8 @@ func safeScrapeURL(ctx context.Context, handler models.URLHandler, url string) (
 	result, err = handler.ScrapeURL(ctx, url)
 	if result != nil {
 		result.NormalizeMediaURLs()
+		// Credentials/signed tokens must never reach persisted provenance.
+		result.SourceURL = RedactSourceURL(result.SourceURL)
 	}
 	return result, err
 }

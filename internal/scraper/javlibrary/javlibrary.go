@@ -224,8 +224,18 @@ func redactPageURL(rawURL string) string {
 		return rawURL
 	}
 	u.User = nil
-	u.RawQuery = ""
 	u.Fragment = ""
+	q := u.Query()
+	for k := range q {
+		if k != "v" {
+			q.Del(k)
+		}
+	}
+	if len(q) > 0 {
+		u.RawQuery = q.Encode()
+	} else {
+		u.RawQuery = ""
+	}
 	return u.String()
 }
 
@@ -320,7 +330,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		if !strings.Contains(html, `id="video_info"`) {
 			return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
 		}
-		return s.parseDetailPage(html, pageID, id, languageFromURL(id, s.language))
+		return s.parseDetailPage(html, pageID, redactPageURL(id), languageFromURL(id, s.language))
 	}
 
 	searchURL, err := s.getURLCtx(ctx, id)

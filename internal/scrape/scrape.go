@@ -228,14 +228,27 @@ func New(
 // to extract MovieID and determine optimal scrapers. Returns the resolved
 // ScrapeCmd or an error if MovieID is empty after resolution.
 func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInstanceResolver, cfg *Config) (ScrapeCmd, error) {
-	if cmd.RawInput != "" {
-		parsed, parseErr := matcher.ParseInput(cmd.RawInput, registry)
+	// Prefer RawInput (batch/manual seam); fall back to URL-shaped MovieIDs so
+	// plain CLI calls like `scrape <url>` (which pass the URL as MovieID with
+	// no RawInput) get the same resolution: MovieID becomes the derived ID and
+	// RawInput carries the URL for the direct-page seam.
+	source := cmd.RawInput
+	if source == "" {
+		source = cmd.MovieID
+	}
+	if source != "" {
+		parsed, parseErr := matcher.ParseInput(source, registry)
 		if parseErr != nil {
-			logging.Warnf("[scrape] RawInput parse failed for %q: %v (using as-is for MovieID)", RedactURLQuery(cmd.RawInput), parseErr)
-			cmd.MovieID = RedactURLQuery(cmd.RawInput)
+			logging.Warnf("[scrape] input parse failed for %q: %v (using as-is for MovieID)", RedactURLQuery(source), parseErr)
+			cmd.MovieID = RedactURLQuery(source)
 			cmd.ParseWarning = fmt.Sprintf("input could not be parsed: %v", parseErr)
 		} else {
 			cmd.MovieID = parsed.ID
+			// Keep the URL in RawInput when it came in via MovieID so the
+			// direct-page URL seam (querySingle -> ScrapeURL) still fires.
+			if cmd.RawInput == "" && parsed.IsURL {
+				cmd.RawInput = source
+			}
 			if len(cmd.SelectedScrapers) == 0 && parsed.IsURL && len(parsed.CompatibleScrapers) > 0 {
 				cmd.PriorityOverride = matcher.CalculateOptimalScrapers(nil, cfg.ScrapersPriority, parsed)
 			} else if len(cmd.SelectedScrapers) > 0 {
