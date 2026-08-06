@@ -18,10 +18,26 @@ func fakeActresses(ids ...string) []models.DumpActress {
 	return out
 }
 
-// Collect has no limit argument on the seam path: the store-level adapter
-// (RegisterR18Dev) enforces MaxScanRows; here we pin user-limit semantics.
+// Collect forwards the user limit into the lister query window: a small
+// --limit must never materialize the full ~250k-row dump.
+func TestCollectPassesUserLimitIntoLister(t *testing.T) {
+	requiredLimit := -1
+	src := NewFromLister(func(_ context.Context, limit int) ([]models.DumpActress, error) {
+		requiredLimit = limit
+		return fakeActresses("1"), nil
+	})
+	require.NoError(t, src.Collect(context.Background(), actresscache.SourceOptions{
+		Limit:   7,
+		Workers: 1,
+	}, func(actresscache.Candidate) error { return nil }))
+	assert.Equal(t, 7, requiredLimit)
+}
+
+// User-limit semantics on the source: windowing marks the enumeration
+// truncated; the store-level adapter (RegisterR18Dev) still enforces
+// MaxScanRows as the outer safety cap.
 func TestCollectWindowsAtUserLimit(t *testing.T) {
-	src := NewFromLister(func(context.Context) ([]models.DumpActress, error) {
+	src := NewFromLister(func(context.Context, int) ([]models.DumpActress, error) {
 		return fakeActresses("1", "2", "3"), nil
 	})
 	emitted := 0
@@ -40,7 +56,7 @@ func TestCollectWindowsAtUserLimit(t *testing.T) {
 }
 
 func TestCollectFullEnumerationMarksComplete(t *testing.T) {
-	src := NewFromLister(func(context.Context) ([]models.DumpActress, error) {
+	src := NewFromLister(func(context.Context, int) ([]models.DumpActress, error) {
 		return fakeActresses("1", "2"), nil
 	})
 	completed := false

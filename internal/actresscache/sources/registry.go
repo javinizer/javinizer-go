@@ -37,13 +37,25 @@ func RegisterR18Dev(registry *actresscache.Registry, dumpPath string) (io.Closer
 // r18DevBoundedLister caps the dump scan; cap+1 distinguishes a complete scan
 // from a truncated one, and above-cap scans fail closed instead of feeding a
 // partially-full cache to the builder (pruning would mark beyond-cap entries stale).
+// A user-requested window (limit > 0) tightens the cap inside the query — it
+// narrows but never widens the safety bound.
 func r18DevBoundedLister(store *r18devdump.Store, maxRows int) r18devsource.Lister {
-	return func(ctx context.Context) ([]models.DumpActress, error) {
-		actresses, err := store.ListActressesLimit(ctx, maxRows+1)
+	return func(ctx context.Context, limit int) ([]models.DumpActress, error) {
+		cap := maxRows
+		userWindow := limit > 0 && limit < maxRows
+		if userWindow {
+			cap = limit
+		}
+		actresses, err := store.ListActressesLimit(ctx, cap+1)
 		if err != nil {
 			return nil, err
 		}
-		if len(actresses) > maxRows {
+		if len(actresses) > cap {
+			if userWindow {
+				// cap+1 rows is the window-overflow sentinel: return them so
+				// the source marks the enumeration truncated.
+				return actresses, nil
+			}
 			return nil, fmt.Errorf("r18dev dump exceeds the scan safety cap of %d actress rows; refusing to assemble a truncated cache (--limit caps, not widens, the scan window in this phase)", maxRows)
 		}
 		return actresses, nil

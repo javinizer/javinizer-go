@@ -32,7 +32,9 @@ func listerSource(t *testing.T, path string) actresscache.Source {
 	store, err := r18devdump.Open(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	return NewFromLister(store.ListActresses)
+	return NewFromLister(func(ctx context.Context, _ int) ([]models.DumpActress, error) {
+		return store.ListActresses(ctx)
+	})
 }
 
 func TestCollectSupportsGenericDumpParameterAndLifecycleCallbacks(t *testing.T) {

@@ -58,15 +58,23 @@ func TestR18DevBoundedLister(t *testing.T) {
 
 	// Under the cap the full table passes through.
 	lister := r18DevBoundedLister(store, 2)
-	got, err := lister(context.Background())
+	got, err := lister(context.Background(), 0)
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 
 	// At cap-1 the scan errors loudly (no truncated cache handed to the builder).
 	lister = r18DevBoundedLister(store, 1)
-	_, err = lister(context.Background())
+	_, err = lister(context.Background(), 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "scan safety cap")
+
+	// A user window narrows the QUERY: with 2 rows and limit 1 the store
+	// returns cap+1=2 rows as a truncation sentinel instead of erroring, and
+	// the window never widens the safety cap.
+	lister = r18DevBoundedLister(store, 2)
+	got, err = lister(context.Background(), 1)
+	require.NoError(t, err)
+	assert.Len(t, got, 2, "cap+1 rows signal a truncated user window")
 }
 
 func TestR18DevBoundedListerStoreError(t *testing.T) {
@@ -77,6 +85,6 @@ func TestR18DevBoundedListerStoreError(t *testing.T) {
 	store, err := r18devdump.Open(path)
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
-	_, err = r18DevBoundedLister(store, 2)(context.Background())
+	_, err = r18DevBoundedLister(store, 2)(context.Background(), 0)
 	require.Error(t, err, "closed dump store must surface the lister error")
 }
