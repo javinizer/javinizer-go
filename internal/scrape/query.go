@@ -158,8 +158,16 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 		if uh, ok := scraper.(models.URLHandler); ok && uh.CanHandleURL(rawInput) {
 			result, err := safeScrapeURL(ctx, uh, rawInput)
 			if err == nil && result != nil {
-				outcome = queryOutcome{result: result}
-				return
+				// Validate the result has meaningful metadata. A non-detail page
+				// (e.g. DMM home/search/challenge) can return HTTP 200 with a
+				// non-nil but empty result. Treat sparse results as NotFound so
+				// the ID-based keyword Search fallback fires.
+				if strings.TrimSpace(result.ID) == "" && strings.TrimSpace(result.Title) == "" {
+					err = models.NewScraperNotFoundError(scraper.Name(), "direct URL returned sparse result")
+				} else {
+					outcome = queryOutcome{result: result}
+					return
+				}
 			}
 			if err == nil && result == nil {
 				// A nil result with nil error is a contract violation; treat as

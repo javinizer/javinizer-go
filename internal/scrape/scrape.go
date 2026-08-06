@@ -174,10 +174,9 @@ func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*m
 	// Resolve URL-shaped inputs to their extracted ID so the Search fallback
 	// receives the product code, not the raw URL.
 	resolvedID := movieID
-	rawInput := movieID
-	if parsed, parseErr := matcher.ParseInput(movieID, s.registry); parseErr == nil && parsed.IsURL {
+	rawInput := strings.TrimSpace(movieID)
+	if parsed, parseErr := matcher.ParseInput(rawInput, s.registry); parseErr == nil && parsed.IsURL {
 		resolvedID = parsed.ID
-		rawInput = movieID
 	}
 	outcome := querySingle(ctx, resolvedID, rawInput, scraper)
 	if outcome.failure != nil {
