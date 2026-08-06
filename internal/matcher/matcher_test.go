@@ -2778,6 +2778,66 @@ func TestValidateMultipartInDirectory_LetterPrefixTrailingNumberEndToEnd(t *test
 	}
 }
 
+// TestValidateMultipartInDirectory_CompoundQualitySuffixEndToEnd verifies that a
+// compound quality suffix (e.g. 4k-HDR, 4k-h265) after the letter part marker is detected
+// as letter+trailing, so two such siblings confirm as multipart.
+func TestValidateMultipartInDirectory_CompoundQualitySuffixEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	files := []models.FileMatchInfo{
+		{Name: "SVFLA-001a-4k-HDR.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001a-4k-HDR.mp4"},
+		{Name: "SVFLA-001b-4k-HDR.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001b-4k-HDR.mp4"},
+	}
+	results := m.Match(files)
+	require.Len(t, results, 2)
+	for _, r := range results {
+		require.Equal(t, PatternLetter, r.MultipartPattern)
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	confirmed := 0
+	for _, r := range validated {
+		if r.IsMultiPart {
+			confirmed++
+		}
+	}
+	require.Equal(t, 2, confirmed, "both compound-quality siblings should confirm multipart")
+}
+
+// TestValidateMultipartInDirectory_StrippedEZWithGenuineSibling confirms that a
+// stripped E/Z part letter confirms when it has a genuine non-stripped sibling, so
+// SVFLA-001d-4k + SVFLA-001e-4k both confirm as multipart parts D and E (E is a genuine
+// part here, not a lone catalog suffix).
+func TestValidateMultipartInDirectory_StrippedEZWithGenuineSibling(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	files := []models.FileMatchInfo{
+		{Name: "SVFLA-001d-4k.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001d-4k.mp4"},
+		{Name: "SVFLA-001e-4k.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001e-4k.mp4"},
+	}
+	results := m.Match(files)
+	require.Len(t, results, 2)
+
+	validated := ValidateMultipartInDirectory(results)
+	confirmed := 0
+	for i, r := range validated {
+		if r.IsMultiPart {
+			confirmed++
+		}
+		wantID := "SVFLA-001"
+		if r.ID != wantID {
+			t.Errorf("result %d: expected ID %q, got %q", i, wantID, r.ID)
+		}
+	}
+	if confirmed != 2 {
+		t.Errorf("expected both d-4k + e-4k to confirm multipart, got %d", confirmed)
+	}
+}
+
 // TestValidateMultipartInDirectory_StrippedEZDoNotConfirmEachOther verifies that two
 // E/Z-stripped catalog IDs (e.g. IPX-535E-4k + IPX-535Z-4k) do NOT confirm each other as
 // multipart: E and Z are catalog suffixes, not part letters, so both restore their original IDs.

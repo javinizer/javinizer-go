@@ -276,18 +276,19 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 			if len(set) < 2 {
 				return
 			}
-			// Exclude files whose letter was a stripped E/Z catalog suffix — they are not
-			// genuine part letters and must not confirm each other as multipart.
-			genuine := make([]int, 0, len(set))
+			// A stripped E/Z catalog suffix is a genuine part letter only when it has a
+			// non-stripped sibling to confirm with (e.g. d-4k + e-4k). When ALL candidates
+			// are stripped (e.g. E-4k + Z-4k, distinct catalog IDs), none are genuine parts;
+			// exclude the whole group so they restore their original catalog IDs.
+			genuineCount := 0
 			for _, idx := range set {
 				if validated[idx].strippedSuffix == "" {
-					genuine = append(genuine, idx)
+					genuineCount++
 				}
 			}
-			if len(genuine) < 2 {
+			if genuineCount == 0 {
 				return
 			}
-			set = genuine
 			countByPart := make(map[int]int)
 			for _, idx := range set {
 				countByPart[validated[idx].PartNumber]++
