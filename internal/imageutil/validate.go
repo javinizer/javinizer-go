@@ -420,6 +420,21 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		defer transport.CloseIdleConnections()
 		transport.Proxy = http.ProxyURL(proxyURL)
 		transport.DisableKeepAlives = true
+		if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
+			// net/http speaks native SOCKS through DialContext: pin the proxy
+			// endpoint (trusted infrastructure: pinned, not public-gated) with
+			// failover across its answers -- proxy credentials cannot leak to a
+			// rebound address.
+			proxyAddrs, err := resolveProxyDialAddrs(req.Context(), proxyURL, lookup)
+			if err != nil {
+				roundTripErr = errors.Join(roundTripErr, err)
+				continue
+			}
+			baseDial := ssrf.DialContextFunc(transport)
+			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return dialPinnedAddrs(ctx, network, proxyAddrs, baseDial)
+			}
+		}
 		if req.URL.Scheme == "http" && (proxyURL.Scheme == "http" || proxyURL.Scheme == httpsScheme) {
 			resp, err := roundTripHTTPProxy(req.Context(), req, proxyURL, pinnedHost, transport, lookup)
 			if err == nil && !isRetryableProxyStatus(resp.StatusCode) {
