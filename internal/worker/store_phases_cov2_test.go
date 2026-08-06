@@ -229,7 +229,9 @@ func TestDeleteJobDrainLoopFlips(t *testing.T) {
 		defer rel()
 		go func() {
 			time.Sleep(60 * time.Millisecond)
+			job.lifecycle.mu.Lock()
 			job.lifecycle.Status = models.JobStatusRunning
+			job.lifecycle.mu.Unlock()
 		}()
 		err = s.DeleteJob(job.ID.String())
 		require.ErrorContains(t, err, "cannot delete running job")
@@ -345,7 +347,9 @@ func TestDeleteJobPostLeaseRunningObserved(t *testing.T) {
 	require.NoError(t, err)
 	go func() {
 		time.Sleep(35 * time.Millisecond)
+		job.lifecycle.mu.Lock()
 		job.lifecycle.Status = models.JobStatusRunning
+		job.lifecycle.mu.Unlock()
 		rel()
 	}()
 	err = s.DeleteJob(job.ID.String())
