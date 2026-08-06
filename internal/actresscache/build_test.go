@@ -671,3 +671,43 @@ func TestBuildAbortsWhenContextCanceledMidValidation(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+// Sentinel discipline: explicit --min-dimension 0 must reach validation as
+// "disabled" (no minimum), while the omitted flag still lands at 64.
+func TestBuildExplicitZeroMinDimensionDisablesThreshold(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.jsonl")
+	row := Candidate{Key: "test:tiny", Source: "test", DMMID: 331, JapaneseName: "小畑", FirstName: "Kohata", LastName: "Obata", ThumbURL: "https://cdn.test/tiny.jpg"}
+	smallValidator := func(_ context.Context, c Candidate) (ThumbnailValidation, error) {
+		return ThumbnailValidation{CheckedAt: "now", SHA256: c.Key, Bytes: 512, Width: 32, Height: 32, Format: "jpeg"}, nil
+	}
+	source := &testSource{name: "test", candidates: []Candidate{row}}
+	options := BuildOptions{Registry: registryWith(source), Sources: []string{"test"}, StatePath: statePath, ValidateThumbnail: smallValidator}
+	_, _, err := Build(context.Background(), options)
+	require.NoError(t, err)
+
+	// Explicit 0 disables the minimum: the 32x32 thumb stays reusable (no fetch).
+	calls := 0
+	counting := func(ctx context.Context, c Candidate) (ThumbnailValidation, error) {
+		calls++
+		return smallValidator(ctx, c)
+	}
+	options.MinThumbnailDimension = 0
+	options.ValidateThumbnail = counting
+	_, report, err := Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Equal(t, 0, calls, "explicit zero keeps the thumb reusable")
+	assert.Equal(t, 1, report.Cached)
+
+	// An explicit positive threshold forces revalidation.
+	options.MinThumbnailDimension = 40
+	_, _, err = Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Equal(t, 1, calls, "tightening revalidates")
+
+	// Omitted (sentinel) maps to the 64 default.
+	options.MinThumbnailDimension = -1
+	options.MinThumbnailDimension = -1 // double-set mirrors the parse sentinel
+	_, _, err = Build(context.Background(), options)
+	require.NoError(t, err)
+	assert.Equal(t, 2, calls, "omitted => 64 default revalidates 32px thumbs")
+}

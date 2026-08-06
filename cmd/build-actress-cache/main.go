@@ -102,13 +102,15 @@ func main() {
 
 func parseOptions(args []string, stderr io.Writer) (options, error) {
 	opts := options{
-		output:        defaultOutput,
-		state:         defaultState,
-		workers:       8,
-		delay:         250 * time.Millisecond,
-		imageDelay:    100 * time.Millisecond,
-		timeout:       30 * time.Second,
-		minDimension:  64,
+		output:     defaultOutput,
+		state:      defaultState,
+		workers:    8,
+		delay:      250 * time.Millisecond,
+		imageDelay: 100 * time.Millisecond,
+		timeout:    30 * time.Second,
+		// Sentinel: absent means "apply the 64px default"; explicit 0 disables
+		// the threshold entirely (operators need that escape hatch).
+		minDimension:  -1,
 		maxImageBytes: 2 << 20,
 		userAgent:     defaultUserAgent,
 	}
@@ -129,7 +131,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	flags.DurationVar(&opts.imageDelay, "image-delay", opts.imageDelay, "Minimum delay between image requests to the same host")
 	flags.DurationVar(&opts.timeout, "timeout", opts.timeout, "HTTP request timeout")
 	flags.IntVar(&opts.limit, "limit", 0, "Maximum records per source; zero means all")
-	flags.IntVar(&opts.minDimension, "min-dimension", opts.minDimension, "Minimum thumbnail width and height")
+	flags.IntVar(&opts.minDimension, "min-dimension", opts.minDimension, "Minimum thumbnail width and height in pixels (0 disables; default 64 when omitted)")
 	flags.Int64Var(&opts.maxImageBytes, "max-image-bytes", opts.maxImageBytes, "Maximum thumbnail response size")
 	flags.StringVar(&opts.userAgent, "user-agent", opts.userAgent, "HTTP User-Agent")
 	flags.BoolVar(&opts.refresh, "refresh", false, "Re-fetch candidates already successful in state")
@@ -157,7 +159,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	if opts.limit < 0 {
 		return options{}, fmt.Errorf("--limit cannot be negative")
 	}
-	if opts.minDimension < 0 {
+	if opts.minDimension < -1 {
 		return options{}, fmt.Errorf("--min-dimension cannot be negative")
 	}
 	if opts.maxImageBytes <= 0 {
