@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/ssrf"
 
@@ -441,4 +442,91 @@ func TestRedirectNoOpCallbackKeepsSingleEvaluation(t *testing.T) {
 	_ = resp.Body.Close()
 	assert.Equal(t, 2, evals, "one evaluation per hop; the no-op callback must not add one")
 	assert.Equal(t, 2, dials)
+}
+
+// A callback touching ONLY headers (not the URL) must still restamp the
+// decision: header-keyed proxy policies route on UA/Host.
+func TestRedirectHeaderMutationRestampsDecision(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		if host == "ua-proxy.example" {
+			return []net.IP{net.ParseIP("198.51.100.30")}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	policy := func(req *http.Request) (*url.URL, error) {
+		if req.Header.Get("User-Agent") == "via-proxy" {
+			return &url.URL{Scheme: "http", Host: "ua-proxy.example:3128"}, nil
+		}
+		return nil, nil
+	}
+	var dialed []string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		switch len(dialed) {
+		case 1:
+			return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.217.5/next\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+		default:
+			return serveOnce("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx")(context.Background(), "tcp", addr)
+		}
+	}
+	mutateUA := func(req *http.Request, _ []*http.Request) error {
+		req.Header.Set("User-Agent", "via-proxy") // header-only rewrite
+		return nil
+	}
+	client := &http.Client{Transport: &http.Transport{Proxy: policy, DialContext: dial}, CheckRedirect: mutateUA}
+	fetcher, err := NewFetcherWithOptions(client, 0, "direct-agent", nil, false)
+	require.NoError(t, err)
+	resp, err := fetcher.client.Get("http://93.184.216.1/start")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Len(t, dialed, 2)
+	assert.Equal(t, "93.184.216.1:80", dialed[0], "hop 1 took the direct lane (UA unmutated)")
+	assert.Equal(t, "198.51.100.30:3128", dialed[1], "hop 2 restamps after the header change and proxies via the pinned proxy endpoint")
+}
+
+// Rewriting to a different host must re-apply that host's throttle -- without
+// it, redirects bypass configured per-host delays entirely.
+func TestRedirectRewriteReappliesHostThrottle(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	var dialed []string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		switch len(dialed) {
+		case 1:
+			return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.111/rewritten\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+		default:
+			return serveOnce("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx")(context.Background(), "tcp", addr)
+		}
+	}
+	rewrite := func(req *http.Request, _ []*http.Request) error {
+		u, _ := url.Parse("http://93.184.216.111/rewritten")
+		req.URL = u
+		return nil
+	}
+	client := &http.Client{Transport: &http.Transport{DialContext: dial}, CheckRedirect: rewrite}
+	fetcher, err := NewFetcherWithOptions(client, 120*time.Millisecond, "test", nil, false)
+	require.NoError(t, err)
+	// Prime the REWRITTEN host's limiter: its first wait within the configured
+	// interval then blocks, so a missing re-wait is measurable.
+	require.NoError(t, fetcher.limiterForHost("93.184.216.111").Wait(context.Background()))
+	start := time.Now()
+	resp, err := fetcher.client.Get("http://93.184.216.1/start")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	elapsed := time.Since(start)
+	require.Len(t, dialed, 2)
+	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond,
+		"the rewritten hop must wait on the rewritten host's limiter (second dial is the rewritten target)")
 }
