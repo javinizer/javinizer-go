@@ -477,3 +477,40 @@ func TestValidateImageNativeSocksProxyShape(t *testing.T) {
 	require.Len(t, dialed, 1)
 	assert.Equal(t, "203.0.113.60:1080", dialed[0], "proxy endpoint passed to dialer was resolved+pinned")
 }
+
+// Policy-level per-hop decision: hosts using socks5 get lexical guard +
+// preserved hostname; direct hops get the full CheckTarget. A policy keyed
+// on hop hostname proves evaluation happens per hop, not per transport.
+func TestHopGuard_SockDecisionAllowsProxyOnlyName_LeavesDirectHopFullGuard(t *testing.T) {
+	proxyURL := &url.URL{Scheme: "socks5", Host: "hop-socks.example:1080"}
+	transport := &http.Transport{Proxy: func(req *http.Request) (*url.URL, error) {
+		switch req.URL.Hostname() {
+		case "via-socks.example":
+			return proxyURL, nil
+			// fallthrough
+		}
+		return nil, nil
+	}}
+	// Request for the socks hop; direct for the other.
+	req1, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://via-socks.example/x", nil)
+	require.NoError(t, err)
+	assert.True(t, hopRemoteDNSDecision(req1, transport), "socks5 decision => lexical guard for the hop")
+
+	req2, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://direct.example/x", nil)
+	require.NoError(t, err)
+	assert.False(t, hopRemoteDNSDecision(req2, transport), "nil proxy decision => full guard")
+
+	// The direct-hop full guard rejects a private mirror even under a
+	// transport that previously proxied another hop.
+	restore := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("10.0.0.5")}, nil
+	})
+	defer restore()
+	guard := checkImageTargetHop(req2.Context(), req2.URL, hopRemoteDNSDecision(req2, transport))
+	require.ErrorContains(t, guard, "SSRF blocked")
+}
+func TestHopGuard_NilTransportIsFullGuard(t *testing.T) {
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://direct.example/x", nil)
+	require.NoError(t, err)
+	assert.False(t, hopRemoteDNSDecision(req, nil), "nil transport = no proxy policy = local resolution")
+}

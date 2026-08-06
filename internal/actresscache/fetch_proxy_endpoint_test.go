@@ -626,3 +626,34 @@ func TestMarkerClearedWhenHopGoesDirect(t *testing.T) {
 	assert.Contains(t, hop2err.Error(), "internal address")
 	require.Len(t, dialed, 1, "no dial on hop 2: the stale marker must not sneak it onto the unvalidated lane")
 }
+
+// A target resolvable ONLY by the SOCKS proxy must pass preflight (local
+// DNS failure is fine): decision = socks5, so the hop keeps the hostname and
+// rides the pinned endpoint.
+func TestProxyOnlyTargetUnresolvableViaNativeSocksProceeds(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if host == "legacy-socks.example" {
+			return []net.IP{net.ParseIP("198.51.100.60")}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	sentinel := errors.New("dial observed")
+	var dialed []string
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: "legacy-socks.example:1080"}),
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(context.Background(), "http://proxy-only.example/thumb.jpg", "image/*", 1<<20)
+	require.ErrorIs(t, err, sentinel, "no UnverifiableHostError: the socks tunnel owns resolution")
+	require.NotEmpty(t, dialed)
+	for _, addr := range dialed {
+		assert.Equal(t, "198.51.100.60:1080", addr, "every attempt dials the pinned socks endpoint")
+	}
+}

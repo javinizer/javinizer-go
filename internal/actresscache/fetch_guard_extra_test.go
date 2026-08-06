@@ -56,7 +56,7 @@ func TestRequestProxiedEvaluatesTheActualRequest(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, "http://target.example:8080/x", nil)
 	require.NoError(t, err)
 	req.Header.Set("User-Agent", "cache-builder")
-	require.True(t, proxy.requestProxied(req))
+	require.NotNil(t, proxy.proxyDecisionFor(req))
 	// The SAME request object is probed: header-keyed policies (and
 	// port-sensitive NO_PROXY rules) decide with full fidelity.
 	require.Same(t, req, probed)
@@ -69,19 +69,19 @@ func TestRequestProxiedBranches(t *testing.T) {
 	require.NoError(t, err)
 
 	bare := &Fetcher{}
-	assert.False(t, bare.requestProxied(req), "nil proxyFunc means direct")
+	assert.Nil(t, bare.proxyDecisionFor(req), "nil proxyFunc means direct")
 
 	noProxy := &Fetcher{proxyFunc: func(*http.Request) (*url.URL, error) { return nil, nil }}
-	assert.False(t, noProxy.requestProxied(req), "proxy func returning nil means direct")
+	assert.Nil(t, noProxy.proxyDecisionFor(req), "proxy func returning nil means direct")
 
 	errProxy := &Fetcher{proxyFunc: func(*http.Request) (*url.URL, error) { return nil, errors.New("conf broken") }}
-	assert.False(t, errProxy.requestProxied(req), "decision errors stay direct here; RoundTrip fails closed")
+	assert.Nil(t, errProxy.proxyDecisionFor(req), "decision errors stay direct here; RoundTrip fails closed")
 
 	proxy := &Fetcher{proxyFunc: func(*http.Request) (*url.URL, error) {
 		u, _ := url.Parse("http://corp.proxy:3128")
 		return u, nil
 	}}
-	assert.True(t, proxy.requestProxied(req))
+	assert.NotNil(t, proxy.proxyDecisionFor(req))
 }
 
 func TestFetcherGetDoesNotRetryPolicyErrors(t *testing.T) {
@@ -107,7 +107,7 @@ func TestRequestProxiedWithProxyMatchesAnyScheme(t *testing.T) {
 	for _, rawURL := range []string{"https://example.test/x", "http://example.test/x"} {
 		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 		require.NoError(t, err)
-		assert.True(t, proxy.requestProxied(req), rawURL)
+		assert.NotNil(t, proxy.proxyDecisionFor(req), rawURL)
 	}
 }
 

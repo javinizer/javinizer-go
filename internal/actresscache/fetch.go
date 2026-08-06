@@ -134,16 +134,22 @@ func redirectDecisionFingerprint(req *http.Request) string {
 	return b.String()
 }
 
-// requestProxied evaluates the transport's proxy policy against the ACTUAL
-// request: synthetic probes carry no headers, so header-keyed policies (e.g.
-// User-Agent-dependent routing) would misclassify the hop and downgrade the
-// fail-closed branch below.
-func (f *Fetcher) requestProxied(req *http.Request) bool {
+// proxyDecisionFor returns the evaluated proxy choice for req: the stamped
+// per-hop decision when available, else a fresh evaluation with the full
+// request shape (header-keyed policies decide with real data, and get one
+// evaluation per stamp cycle).
+func (f *Fetcher) proxyDecisionFor(req *http.Request) *url.URL {
+	if stamped, ok := req.Context().Value(proxyDecisionCtxKey{}).(*proxyDecision); ok {
+		return stamped.proxyURL
+	}
 	if f.proxyFunc == nil {
-		return false
+		return nil
 	}
 	decision, err := f.proxyFunc(req)
-	return err == nil && decision != nil
+	if err != nil {
+		return nil
+	}
+	return decision
 }
 
 // checkFetchTarget validates the request host lexically and — when the
@@ -178,13 +184,14 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, req *http.Request) error
 	}
 	ips, err := lookupIP(ctx, "ip", host)
 	if err != nil || len(ips) == 0 {
-		// A prior evaluation (Get stamps one per attempt) replays; compute only
-		// when nothing was stamped (e.g. caller-mutated redirects).
-		proxied := f.requestProxied(req)
-		if stamped, ok := req.Context().Value(proxyDecisionCtxKey{}).(*proxyDecision); ok {
-			proxied = stamped.proxyURL != nil
+		decision := f.proxyDecisionFor(req)
+		if ssrf.IsSOCKSProxyURL(decision) {
+			// Remote-DNS proxy: the SOCKS tunnel resolves the target itself;
+			// local answers prove nothing about proxy-only/split-horizon
+			// targets -- only the lexical/literal guards above apply.
+			return nil
 		}
-		if proxied {
+		if decision != nil {
 			// A proxy resolves the hostname remotely, so dial-time checks
 			// cannot see the real target: fail closed when local resolution
 			// cannot prove the host is public. Classified unverifiable
