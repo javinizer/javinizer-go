@@ -122,7 +122,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 			Movie:         &models.Movie{ID: "NEW-001"},
 		}
 
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "OLD-001")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "OLD-001", nil)
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
 		assert.Equal(t, uint64(2), job.snap().Results["file1.mp4"].Revision)
@@ -135,7 +135,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job.lifecycle.deleted = true
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusGone, outcome.Status)
 	})
@@ -146,7 +146,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job.lifecycle.Status = models.JobStatusRunning
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusGone, outcome.Status)
 	})
@@ -161,7 +161,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		})
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 3, "NEW-001", "")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 3, "NEW-001", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusConflict, outcome.Status)
 	})
@@ -182,7 +182,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		})
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-001"}}
-		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001")
+		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001", nil)
 		require.NoError(t, err)
 		assert.Equal(t, uint64(2), job.snap().Results["file1.mp4"].Revision)
 	})
@@ -205,7 +205,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job.ID = "test-job-456"
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "NEW-001"}}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "SHARED-001")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "SHARED-001", nil)
 		require.NoError(t, err)
 		assert.NotContains(t, outcome.OrphanedMovieIDs, "SHARED-001")
 	})
@@ -221,7 +221,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job.results.RecalculateProgress()
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-001"}}
-		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001")
+		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001", nil)
 		require.NoError(t, err)
 		assert.Equal(t, 1, job.prog().Completed)
 		assert.Equal(t, 50.0, job.prog().Progress)

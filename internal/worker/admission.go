@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -192,18 +193,41 @@ type phaseEntry struct{ b *admissionBarrier }
 // WAITING for in-flight operations (edit/rescrape) to finish rather than
 // failing busy: a phase launch is a queued decision, never a silently
 // discarded one (codex P3-A). Returns ErrJobGone when the job was deleted
-// while waiting (MarkGone wakes the queue as well).
-func (b *admissionBarrier) BeginPhase() (*phaseEntry, error) {
+// while waiting (MarkGone wakes the queue as well). The wait honors ctx:
+// caller cancellation drains the pendingPhase registration (codex P2-B) and
+// returns the context error instead of starting an abandoned phase.
+func (b *admissionBarrier) BeginPhase(ctx context.Context) (*phaseEntry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	// Writer-preference accounting: the queued phase start blocks new shared
 	// admissions (pendingPhase) and yields to queued deletes — an exclusive
 	// waiter must starve a phase, never the reverse (codex P4-A).
 	b.pendingPhase++
+	// codex r36 P2: the wait must honor caller cancellation — a client that
+	// disconnects while queued behind a long shared op (rescrape / poster
+	// download) would otherwise leave pendingPhase registered (blocking every
+	// new shared admission) and could start a phase with an already-cancelled
+	// context. Wake on ctx.Done() and drain the counter on the way out.
+	if done := ctx.Done(); done != nil {
+		stop := context.AfterFunc(ctx, func() {
+			b.mu.Lock()
+			b.cond.Broadcast()
+			b.mu.Unlock()
+		})
+		defer stop()
+	}
 	for {
 		if b.gone.Load() {
 			b.pendingPhase--
 			return nil, ErrJobGone
+		}
+		if err := ctx.Err(); err != nil {
+			b.pendingPhase--
+			b.cond.Broadcast()
+			return nil, err
 		}
 		if b.shared == 0 && !b.exclusive && b.pendingExclusive == 0 {
 			b.pendingPhase--

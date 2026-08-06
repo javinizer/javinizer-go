@@ -2,13 +2,13 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
-	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -57,9 +57,15 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 	// start never overwrites the running phase cancel handle.
 	// codex P1-G: only the admission winner installs the CancelFunc — a
 	// queued start must never supplant the running phase's cancel handle.
-	entry, err := c.job.admission.BeginPhase()
+	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// codex r36 P2: client-aborted queued start ⇒ Cancelled with no
+			// Running window; nil error so callers don't cascade to Failed.
+			c.job.lifecycle.markAbortedStart()
+			return nil
+		}
 		return err // ErrJobGone when deleted mid-wait (BeginPhase queues behind in-flight ops)
 	}
 	c.job.lifecycle.setCancelFunc(cancel)
@@ -136,9 +142,16 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	ctx, cancel := context.WithCancel(ctx)
 	// codex P1-G: only the admission winner installs the CancelFunc — never
 	// let a queued start overwrite the running phase's cancel handle.
-	entry, err := c.job.admission.BeginPhase()
+	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// codex r36 P2: the client abandoned the launch while it queued —
+			// record the legacy-observable Cancelled WITHOUT a Running
+			// transition, and report success so callers don't set Failed.
+			c.job.lifecycle.markAbortedStart()
+			return nil
+		}
 		return err // ErrJobGone when deleted mid-wait (BeginPhase queues behind in-flight ops)
 	}
 	c.job.lifecycle.setCancelFunc(cancel)
@@ -225,48 +238,18 @@ func (c *jobController) Rescrape(ctx context.Context, cmd RescrapeCmd) (*Rescrap
 	// long network section — holding the key there would stall every edit on
 	// the family until timeout. Serialization lives at the COMMIT leg (see
 	// familyKeyedResultMap in buildRescrapeInputs) and at provenance below.
-	setProvenance := func(o *RescrapeResult) {
-		if o.Status == models.RescrapeStatusSuccess && o.FilePath != "" &&
-			(o.FieldSources != nil || o.ActressSources != nil || o.ScraperResults != nil) {
-			c.job.results.SetProvenance(o.FilePath, &resultstore.ProvenanceData{
-				FieldSources:   o.FieldSources,
-				ActressSources: o.ActressSources,
-				ScraperResults: o.ScraperResults,
-			})
-		}
-	}
-
 	var outcome *RescrapeResult
 	var err error
 	// Rescrape (network + scrape) runs WITHOUT the family key — that section
 	// is too long to hold locks (codex r20). The COMMIT leg serializes via
-	// familyKeyedResultMap on the store side; provenance publishes under the
-	// same key so a concurrent override never double-commits against it.
+	// familyKeyedResultMap on the store side, and provenance publishes inside
+	// the SAME keyed CommitResult section (codex r36 P1): no post-hoc locked
+	// tail, so a concurrent field override can never slip into a
+	// commit/provenance gap and have its attribution clobbered.
 	outcome, err = c.job.rescrapePhase.Rescrape(ctx, inputs, cmd)
 	if err != nil {
 		return outcome, err
 	}
-
-	if outcome.FilePath != "" {
-		// codex r33: provenance must publish under the full identity PAIR (matcher alias + canonical Movie.ID after rescrape); single-key publication lets an interleaved edit slip between the CommitResult release and this write.
-		keys := []string{}
-		if fm, ok := c.job.results.GetFileMatchInfo(outcome.FilePath); ok && fm.MovieID != "" {
-			keys = append(keys, fm.MovieID)
-		}
-		if cur, err := c.job.results.GetMovieResult(outcome.FilePath); err == nil && cur != nil && cur.Movie != nil && cur.Movie.ID != "" {
-			keys = append(keys, cur.Movie.ID)
-		}
-		if len(keys) > 0 {
-			release := c.job.posterEditor.lockRegistry().AcquireMany(keys)
-			setProvenance(outcome)
-			release()
-			return outcome, nil
-		}
-	}
-	// FilePath empty OR its identity vanished before this tail: publish is
-	// safe outside the key (nothing left to collide with).
-	setProvenance(outcome)
-
 	return outcome, nil
 }
 
@@ -473,7 +456,7 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 		PosterGen:   pg,
 		HistoryRepo: histRepo,
 		// Commit leg wraps through the family lock (codex r20): the scrape's network section stays unlocked; CommitResult serializes with concurrent family edits on the process-wide registry.
-		ResultMap:   &familyKeyedResultMap{ResultMapAccessor: c.job.results, registry: c.job.posterEditor.lockRegistry()},
+		ResultMap:   &familyKeyedResultMap{ResultMapAccessor: c.job.results, updater: c.job.results, registry: c.job.posterEditor.lockRegistry()},
 		Lifecycle:   c.job.lifecycle,
 		persister:   persistFunc(pfn),
 		Finder:      c.job.results,

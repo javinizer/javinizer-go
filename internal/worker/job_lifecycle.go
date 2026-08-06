@@ -135,6 +135,25 @@ func (lc *JobLifecycle) Cancel() {
 	lc.cancelAndMarkCancelled()
 }
 
+// markAbortedStart records the terminal Cancelled for a phase launch whose
+// caller context was already cancelled while queued (codex r36 P2 parity):
+// the pre-ctx-aware flow produced the same observable outcome (start →
+// cancel race ⇒ Cancelled). No phase ever runs and there is no Running
+// window — pendingPhase already drained inside BeginPhase.
+func (lc *JobLifecycle) markAbortedStart() {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	if lc.cancelled || lc.deleted ||
+		lc.Status == models.JobStatusCancelled || lc.Status == models.JobStatusFailed ||
+		lc.Status == models.JobStatusOrganized || lc.Status == models.JobStatusReverted {
+		return
+	}
+	lc.Status = models.JobStatusCancelled
+	lc.CompletedAt = nowTimePtr()
+	lc.clearCurrentPhaseLocked()
+	lc.closeDoneLocked()
+}
+
 // MarkFailed transitions the job to failed unless it has already reached a terminal state.
 func (lc *JobLifecycle) MarkFailed() {
 	lc.mu.Lock()

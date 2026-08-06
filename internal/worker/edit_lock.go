@@ -101,10 +101,16 @@ func (r *keyedMutexRegistry) AcquireMany(keys []string) func() {
 // the network leg runs unlocked, the commit leg is serialized.
 type familyKeyedResultMap struct {
 	resultstore.ResultMapAccessor
+	// updater publishes provenance inside the same keyed section as the
+	// result commit (codex r36 P1); nil in bare test fixtures.
+	updater  resultstore.ResultUpdater
 	registry *keyedMutexRegistry
 }
 
-func (w *familyKeyedResultMap) CommitResult(filePath string, result *resultstore.MovieResult, expectedRevision uint64) error {
+// commitKeys computes the full identity key set for a commit: the matcher
+// alias, the stored canonical and content-id, and the incoming candidate ID
+// — any edit/rescrape of this file collides on the same set (codex r28–r34).
+func (w *familyKeyedResultMap) commitKeys(filePath string, result *resultstore.MovieResult) []string {
 	// codex r28+r29: edits lock with the matcher alias; rescrape reads the
 	// canonical Movie.ID of the CURRENT result and the INCOMING identity of
 	// the rescrape candidate. Acquire ALL of them atomically — acquiring
@@ -133,7 +139,26 @@ func (w *familyKeyedResultMap) CommitResult(filePath string, result *resultstore
 			pair = append(pair, "cid:"+cid)
 		}
 	}
-	release := w.registry.AcquireMany(pair)
+	return pair
+}
+
+func (w *familyKeyedResultMap) CommitResult(filePath string, result *resultstore.MovieResult, expectedRevision uint64) error {
+	return w.CommitResultWithProvenance(filePath, result, expectedRevision, nil)
+}
+
+// CommitResultWithProvenance commits the result AND publishes its provenance
+// within ONE continuous family-locked section (codex r36 P1): a concurrent
+// field override can never slip into a post-commit/pre-provenance gap, read
+// the new movie with stale attribution, and then have its commit overwritten
+// by the rescrape's provenance write.
+func (w *familyKeyedResultMap) CommitResultWithProvenance(filePath string, result *resultstore.MovieResult, expectedRevision uint64, prov *resultstore.ProvenanceData) error {
+	release := w.registry.AcquireMany(w.commitKeys(filePath, result))
 	defer release()
-	return w.ResultMapAccessor.CommitResult(filePath, result, expectedRevision)
+	if err := w.ResultMapAccessor.CommitResult(filePath, result, expectedRevision); err != nil {
+		return err
+	}
+	if prov != nil && (prov.FieldSources != nil || prov.ActressSources != nil || prov.ScraperResults != nil) && w.updater != nil {
+		w.updater.SetProvenance(filePath, prov)
+	}
+	return nil
 }

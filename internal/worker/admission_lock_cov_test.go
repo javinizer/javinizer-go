@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -10,6 +11,50 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
+
+// --- BeginPhase context-aware queued wait (codex r36 P2) ---
+
+func TestBeginPhasePreCancelledCtxReturnsImmediately(t *testing.T) {
+	b := newAdmissionBarrier()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := b.BeginPhase(ctx)
+	assert.ErrorIs(t, err, context.Canceled)
+	// pendingPhase must be drained — a fresh phase start is unblocked.
+	p, err2 := b.BeginPhase(context.Background())
+	require.NoError(t, err2)
+	p.Fail()
+}
+
+func TestBeginPhaseCancelMidWaitDrainsPendingPhase(t *testing.T) {
+	b := newAdmissionBarrier()
+	rel, err := b.AdmitShared()
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := b.BeginPhase(ctx)
+		done <- err
+	}()
+	// Wait until the queued phase is actually parked behind the shared lease
+	// (pendingPhase blocks a second shared admission while registered).
+	assert.Eventually(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.pendingPhase == 1
+	}, 2*time.Second, 5*time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	b.mu.Lock()
+	pending := b.pendingPhase
+	b.mu.Unlock()
+	assert.Zero(t, pending, "cancelled queued phase must deregister pendingPhase")
+	// Shared admissions flow again even while the first lease is still held.
+	rel2, err2 := b.AdmitShared()
+	require.NoError(t, err2)
+	rel2()
+	rel()
+}
 
 // --- EditPhaseBusyError / Is ---
 
@@ -115,7 +160,7 @@ func TestPhaseEntryWaitsThenDowngrades(t *testing.T) {
 	require.NoError(t, err)
 	started := make(chan *phaseEntry, 1)
 	go func() {
-		p, _ := b.BeginPhase()
+		p, _ := b.BeginPhase(context.Background())
 		started <- p
 	}()
 	time.Sleep(40 * time.Millisecond)
@@ -139,7 +184,7 @@ func TestBeginPhaseGoneWhileQueued(t *testing.T) {
 	require.NoError(t, err)
 	started := make(chan error, 1)
 	go func() {
-		_, err := b.BeginPhase()
+		_, err := b.BeginPhase(context.Background())
 		started <- err
 	}()
 	time.Sleep(40 * time.Millisecond)
@@ -150,7 +195,7 @@ func TestBeginPhaseGoneWhileQueued(t *testing.T) {
 
 func TestPhaseEntryFailReleasesLease(t *testing.T) {
 	b := newAdmissionBarrier()
-	p, err := b.BeginPhase()
+	p, err := b.BeginPhase(context.Background())
 	require.NoError(t, err)
 	p.Fail()
 	rel, ok := b.TryAdmitExclusive()
@@ -228,4 +273,85 @@ func TestCommitResultLocksAllIdentitySurfaces(t *testing.T) {
 	incoming := &resultstore.MovieResult{ResultID: "res-1", Movie: &models.Movie{ID: "INC-9"}}
 	require.Error(t, wrapped.CommitResult("/f/a.mp4", incoming, cur.Revision+1), "stale revision rejected")
 	require.NoError(t, wrapped.CommitResult("/f/a.mp4", incoming, cur.Revision), "matching revision commits")
+}
+
+// codex r36 P1: provenance publishes inside the SAME family-locked section as
+// the result commit — a successful CommitResultWithProvenance must leave both
+// the result AND the provenance visible, with no interleave window.
+func TestCommitResultWithProvenanceLockedSection(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/p.mp4"})
+	seedFamilyResult(store, "/f/p.mp4", "res-p", "PROV-1", "")
+	wrapped := &familyKeyedResultMap{ResultMapAccessor: store, updater: store, registry: newKeyedMutexRegistry()}
+	cur, err := store.GetMovieResult("/f/p.mp4")
+	require.NoError(t, err)
+	prov := &resultstore.ProvenanceData{FieldSources: map[string]string{"title": "r18.dev"}}
+	incoming := &resultstore.MovieResult{ResultID: "res-p", Movie: &models.Movie{ID: "PROV-2"}, FileMatchInfo: models.FileMatchInfo{Path: "/f/p.mp4", MovieID: "PROV-2"}}
+	require.NoError(t, wrapped.CommitResultWithProvenance("/f/p.mp4", incoming, cur.Revision, prov))
+	got, err := store.GetMovieResult("/f/p.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "PROV-2", got.Movie.ID, "result committed")
+	gotProv := store.GetProvenance("/f/p.mp4")
+	require.NotNil(t, gotProv, "provenance published in the same section")
+	assert.Equal(t, map[string]string{"title": "r18.dev"}, gotProv.FieldSources)
+}
+
+// A commit that FAILS the revision check must not leave half-state behind:
+// neither the result nor the provenance moves.
+func TestCommitResultWithProvenanceFailurePublishesNeither(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/q.mp4"})
+	seedFamilyResult(store, "/f/q.mp4", "res-q", "PROV-3", "")
+	wrapped := &familyKeyedResultMap{ResultMapAccessor: store, updater: store, registry: newKeyedMutexRegistry()}
+	cur, err := store.GetMovieResult("/f/q.mp4")
+	require.NoError(t, err)
+	prov := &resultstore.ProvenanceData{FieldSources: map[string]string{"title": "x"}}
+	incoming := &resultstore.MovieResult{ResultID: "res-q", Movie: &models.Movie{ID: "PROV-9"}}
+	require.Error(t, wrapped.CommitResultWithProvenance("/f/q.mp4", incoming, cur.Revision+99, prov))
+	assert.Nil(t, store.GetProvenance("/f/q.mp4"), "failed commit publishes no provenance")
+	still, err := store.GetMovieResult("/f/q.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "PROV-3", still.Movie.ID, "failed commit leaves the stored result untouched")
+}
+
+// Zero-value provenance and a nil updater both keep publish-side effects off
+// (parity with the retired controller tail gate).
+func TestCommitResultWithProvenanceGates(t *testing.T) {
+	mk := func(withUpdater bool) (resultstore.Store, *familyKeyedResultMap) {
+		store := resultstore.New(1, []string{"/f/g.mp4"})
+		seedFamilyResult(store, "/f/g.mp4", "res-g", "G-1", "")
+		var upd resultstore.ResultUpdater
+		if withUpdater {
+			upd = store
+		}
+		return store, &familyKeyedResultMap{ResultMapAccessor: store, updater: upd, registry: newKeyedMutexRegistry()}
+	}
+	// zero-value prov: nothing to publish
+	s1, w1 := mk(true)
+	cur, err := s1.GetMovieResult("/f/g.mp4")
+	require.NoError(t, err)
+	in := &resultstore.MovieResult{ResultID: "res-g", Movie: &models.Movie{ID: "G-2"}}
+	require.NoError(t, w1.CommitResultWithProvenance("/f/g.mp4", in, cur.Revision, &resultstore.ProvenanceData{}))
+	assert.Nil(t, s1.GetProvenance("/f/g.mp4"), "empty provenance is never published")
+	// nil updater: commit proceeds, publish skipped
+	s2, w2 := mk(false)
+	cur2, err := s2.GetMovieResult("/f/g.mp4")
+	require.NoError(t, err)
+	require.NoError(t, w2.CommitResultWithProvenance("/f/g.mp4", in, cur2.Revision, &resultstore.ProvenanceData{FieldSources: map[string]string{"t": "x"}}))
+	assert.Nil(t, s2.GetProvenance("/f/g.mp4"), "nil updater cannot publish")
+}
+
+// CompleteRescape publishes provenance through the fallback setter path when
+// the ResultMap is the bare store (no keyed wrapper).
+func TestCompleteRescapePublishesProvenance(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/c.mp4"})
+	seedFamilyResult(store, "/f/c.mp4", "res-c", "CR-1", "")
+	cur, err := store.GetMovieResult("/f/c.mp4")
+	require.NoError(t, err)
+	phase := &rescrapePhase{}
+	prov := &resultstore.ProvenanceData{FieldSources: map[string]string{"studio": "dmm"}}
+	in := &resultstore.MovieResult{ResultID: "res-c", Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "CR-1"}, FileMatchInfo: models.FileMatchInfo{Path: "/f/c.mp4", MovieID: "CR-1"}}
+	outcome, err := phase.CompleteRescrape(rescrapePhaseInputs{ResultMap: store, Lifecycle: &JobLifecycle{Status: models.JobStatusCompleted, done: make(chan struct{})}}, "/f/c.mp4", in, cur.Revision, "CR-1", "CR-1", prov)
+	require.NoError(t, err)
+	require.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
+	require.NotNil(t, store.GetProvenance("/f/c.mp4"), "bare-store fallback publishes provenance after commit")
+	assert.Equal(t, map[string]string{"studio": "dmm"}, store.GetProvenance("/f/c.mp4").FieldSources)
 }

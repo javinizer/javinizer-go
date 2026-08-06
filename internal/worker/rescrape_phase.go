@@ -22,7 +22,7 @@ import (
 // commit + cleanup). ScrapeSingle and CompleteRescrape remain for backward compat.
 type RescrapePhase interface {
 	ScrapeSingle(ctx context.Context, inputs rescrapePhaseInputs, filePath string, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error)
-	CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error)
+	CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string, prov *resultstore.ProvenanceData) (*RescrapeResult, error)
 	// Rescrape performs the full rescrape lifecycle: file lookup, scrape, poster generation,
 	// result commit, and cleanup.
 	Rescrape(ctx context.Context, inputs rescrapePhaseInputs, cmd RescrapeCmd) (*RescrapeResult, error)
@@ -86,7 +86,41 @@ func (p *rescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePhaseIn
 	return result, meta, scrapeErr
 }
 
-func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+// provenanceLockedCommitter is implemented by familyKeyedResultMap: the
+// result commit and the provenance publish share ONE family-locked section
+// (codex r36 P1).
+type provenanceLockedCommitter interface {
+	CommitResultWithProvenance(filePath string, result *resultstore.MovieResult, expectedRevision uint64, prov *resultstore.ProvenanceData) error
+}
+
+type provenanceSetter interface {
+	SetProvenance(filePath string, prov *resultstore.ProvenanceData)
+}
+
+// commitResultWithProvenance commits the rescrape result and publishes its
+// provenance. On the production wrapper both happen inside the same keyed
+// section; a bare ResultMapAccessor (tests, legacy seams) falls back to an
+// unlocked commit+publish, matching the historical non-keyed behavior.
+func commitResultWithProvenance(rm resultstore.ResultMapAccessor, filePath string, result *resultstore.MovieResult, rev uint64, prov *resultstore.ProvenanceData) error {
+	if prov != nil {
+		if pc, ok := rm.(provenanceLockedCommitter); ok {
+			return pc.CommitResultWithProvenance(filePath, result, rev, prov)
+		}
+	}
+	if err := rm.CommitResult(filePath, result, rev); err != nil {
+		return err
+	}
+	// Zero-value provenance carries no attribution — skip the write entirely
+	// (matches the retired controller tail's "any source non-nil" gate).
+	if prov != nil && (prov.FieldSources != nil || prov.ActressSources != nil || prov.ScraperResults != nil) {
+		if ps, ok := rm.(provenanceSetter); ok {
+			ps.SetProvenance(filePath, prov)
+		}
+	}
+	return nil
+}
+
+func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string, prov *resultstore.ProvenanceData) (*RescrapeResult, error) {
 	if inputs.ResultMap.IsGone() {
 		return &RescrapeResult{Status: models.RescrapeStatusGone}, nil
 	}
@@ -103,7 +137,9 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 	// CommitResult performs an atomic revision check to guard against races.
 	// Revision conflicts (TOCTOU race or stale capturedRevision) are handled via
 	// models.RescrapeStatusConflict — no error is returned. Real system errors are propagated.
-	if commitErr := inputs.ResultMap.CommitResult(filePath, result, capturedRevision); commitErr != nil {
+	// Result + provenance commit as one keyed leg where the seam supports it
+	// (codex r36 P1) — see commitResultWithProvenance.
+	if commitErr := commitResultWithProvenance(inputs.ResultMap, filePath, result, capturedRevision, prov); commitErr != nil {
 		if strings.HasPrefix(commitErr.Error(), "conflict:") {
 			return &RescrapeResult{Status: models.RescrapeStatusConflict}, nil
 		}
@@ -389,8 +425,8 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// engine incidentally dropping the runtime-only field.
 		clearPosterCropGeometry(movieResult.Movie)
 
-		// Commit result
-		outcome, commitErr := p.CompleteRescrape(inputs, lookup.FilePath, movieResult, lookup.CapturedRevision, newMovieID, lookup.OldMovieID)
+		// Commit result (provenance rides the same keyed section via prov).
+		outcome, commitErr := p.CompleteRescrape(inputs, lookup.FilePath, movieResult, lookup.CapturedRevision, newMovieID, lookup.OldMovieID, prov)
 		if commitErr != nil {
 			return nil, movieResult, commitErr
 		}
