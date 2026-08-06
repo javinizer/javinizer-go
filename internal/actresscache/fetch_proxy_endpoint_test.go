@@ -566,3 +566,63 @@ func TestRedirectRewriteReappliesHostThrottle(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond,
 		"the rewritten hop must wait on the rewritten host's limiter (second dial is the rewritten target)")
 }
+
+// Proxied hop -> redirect to a DIRECT target: the endpoint exemption marker
+// from hop 1 must NOT linger; the new hop dials through the guarded, pinned
+// lane even if it literally targets the old proxy's authority.
+// Marker hygiene at RoundTrip level: after a proxied hop, a redirect hop
+// whose policy evaluates DIRECT must clear the exemption marker before the
+// base transport dials -- otherwise a DNS rebind-to-private could ride the
+// previous hop's raw lane.
+func TestMarkerClearedWhenHopGoesDirect(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	resolveCalls := 0
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if host == "legacy-proxy.example" {
+			resolveCalls++
+			if resolveCalls == 1 {
+				return []net.IP{net.ParseIP("198.51.100.40")}, nil // hop 1: public
+			}
+			return []net.IP{net.ParseIP("10.9.9.9")}, nil // hop 2: REBOUND private
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+
+	// Proxy only for the first hop's target.
+	policy := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "media.example" {
+			return &url.URL{Scheme: "http", Host: "legacy-proxy.example:3128"}, nil
+		}
+		return nil, nil
+	}
+	sentinel := errors.New("dial end")
+	var dialed []string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		return nil, sentinel
+	}
+	transport := &http.Transport{Proxy: policy, DialContext: dial}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	pinning := fetcher.client.Transport.(*proxyPinningTransport)
+
+	// Hop 1: proxied decision -> marker set -> raw pinned proxy dial exempted.
+	req1, err := http.NewRequest(http.MethodGet, "https://media.example/", nil)
+	require.NoError(t, err)
+	_, _ = pinning.RoundTrip(req1)
+	require.Equal(t, []string{"198.51.100.40:3128"}, dialed)
+
+	// Simulate net/http's redirect: hop 2 inherits a context that carries the
+	// STALE marker from hop 1 (exactly how net/http forwards cloned contexts).
+	req2, err := http.NewRequestWithContext(
+		context.WithValue(req1.Context(), proxiedDialCtxKey{}, "legacy-proxy.example:3128"),
+		http.MethodGet, "https://legacy-proxy.example:3128/", nil)
+	require.NoError(t, err)
+	// The redirect wrapper restamped hop 2's OWN decision (direct) first.
+	require.NoError(t, fetcher.stampProxyDecision(req2))
+	_, hop2err := pinning.RoundTrip(req2)
+	require.Error(t, hop2err, "rebounD proxy-authority answer must be blocked")
+	assert.Contains(t, hop2err.Error(), "internal address")
+	require.Len(t, dialed, 1, "no dial on hop 2: the stale marker must not sneak it onto the unvalidated lane")
+}
