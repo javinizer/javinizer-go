@@ -156,16 +156,23 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 	if rawInput != "" {
 		if uh, ok := scraper.(models.URLHandler); ok && uh.CanHandleURL(rawInput) {
 			result, err := safeScrapeURL(ctx, uh, rawInput)
-			if err != nil {
-				if isContextError(ctx, err) {
-					outcome = queryOutcome{failure: classifyContextError(scraper.Name(), err)}
-					return
-				}
+			if err == nil {
+				outcome = queryOutcome{result: result}
+				return
+			}
+			if isContextError(ctx, err) {
+				outcome = queryOutcome{failure: classifyContextError(scraper.Name(), err)}
+				return
+			}
+			// A typed scraper error (e.g. "URL is not a direct page", or a
+			// scraper whose ScrapeURL refuses the URL) means this URL is not
+			// directly scrapable: fall through to the ID-based keyword Search
+			// path instead of failing (preserves vl_searchbyid?keyword= handling
+			// and scrapers like JAVStash whose ScrapeURL is unsupported).
+			if _, ok := models.AsScraperError(err); !ok {
 				outcome = queryOutcome{failure: classifyScraperError(scraper.Name(), err, "")}
 				return
 			}
-			outcome = queryOutcome{result: result}
-			return
 		}
 	}
 

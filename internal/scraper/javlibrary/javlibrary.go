@@ -216,6 +216,19 @@ func isDirectPageURL(rawURL string) bool {
 
 // languageFromURL returns the language segment of a JavLibrary URL when it is a
 // supported lang code, falling back to the configured language.
+// redactPageURL strips userinfo, query, and fragment from a URL so only the
+// stable scheme+host+path is retained as provenance (SourceURL).
+func redactPageURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
 func languageFromURL(rawURL string, fallback string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -259,41 +272,24 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("JavLibrary", "URL not handled by JavLibrary scraper")
 	}
 
-	var detailURL string
-	var resultLanguage string
-	if u, parseErr := url.Parse(rawURL); parseErr == nil && isDirectPageURL(rawURL) {
-		// Direct page (product URL or .html/.htm page): open it as-is.
-		detailURL = rawURL
-		path := strings.Trim(u.Path, "/")
-		parts := strings.Split(path, "/")
-		if len(parts) > 0 && isValidLanguage(parts[0]) {
-			resultLanguage = parts[0]
-		}
-	}
-	if resultLanguage == "" {
-		resultLanguage = s.language
+	// ScrapeURL is the direct-detail-page seam only. Search-shaped or unclear
+	// URLs are refused with a typed NotFound so the query layer falls back to
+	// the ID-based keyword search (which understands ?keyword= etc.).
+	if !isDirectPageURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("JavLibrary", "URL is not a direct page; use search instead")
 	}
 
-	var id string
-	if detailURL != "" {
-		// Direct page: display ID derived from the URL — no search needed.
-		id = pageIDFromURL(rawURL)
-	} else {
-		var extractErr error
-		id, extractErr = s.ExtractIDFromURL(rawURL)
-		if extractErr != nil {
-			return nil, fmt.Errorf("failed to extract ID from URL: %w", extractErr)
-		}
-		detailURL = fmt.Sprintf("%s/%s/?v=%s", s.baseURL, s.language, url.QueryEscape(id))
-	}
+	resultLanguage := languageFromURL(rawURL, s.language)
 
-	html, err := s.fetchPageCtx(ctx, detailURL)
+	// Fetch the raw URL, but only ever surface a redacted copy as provenance
+	// (SourceURL): signed query tokens or userinfo must not be persisted.
+	html, err := s.fetchPageCtx(ctx, rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JavLibrary page: %w", err)
 	}
 
 	if strings.Contains(html, `id="video_info"`) {
-		return s.parseDetailPage(html, id, detailURL, resultLanguage)
+		return s.parseDetailPage(html, pageIDFromURL(rawURL), redactPageURL(rawURL), resultLanguage)
 	}
 
 	return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
