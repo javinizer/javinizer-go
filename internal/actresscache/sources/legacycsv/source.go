@@ -123,6 +123,11 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 			continue
 		}
 		if options.ShouldSkip != nil && options.ShouldSkip(candidate.Key) {
+			processed++
+			if options.Limit > 0 && processed >= options.Limit {
+				truncated = true
+				break
+			}
 			continue
 		}
 		if options.Limit > 0 && processed >= options.Limit {
