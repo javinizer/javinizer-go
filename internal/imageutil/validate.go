@@ -450,21 +450,7 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		defer transport.CloseIdleConnections()
 		transport.Proxy = http.ProxyURL(proxyURL)
 		transport.DisableKeepAlives = true
-		if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
-			// net/http speaks native SOCKS through DialContext: pin the proxy
-			// endpoint (trusted infrastructure: pinned, not public-gated) with
-			// failover across its answers -- proxy credentials cannot leak to a
-			// rebound address.
-			proxyAddrs, err := resolveProxyDialAddrs(req.Context(), proxyURL, lookup)
-			if err != nil {
-				roundTripErr = errors.Join(roundTripErr, err)
-				continue
-			}
-			baseDial := ssrf.DialContextFunc(transport)
-			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
-				return dialPinnedAddrs(ctx, network, proxyAddrs, baseDial)
-			}
-		}
+
 		if req.URL.Scheme == "http" && (proxyURL.Scheme == "http" || proxyURL.Scheme == httpsScheme) {
 			resp, err := roundTripHTTPProxy(req.Context(), req, proxyURL, pinnedHost, transport, lookup)
 			if err == nil && !isRetryableProxyStatus(resp.StatusCode) {
@@ -516,15 +502,6 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 		roundTripErr = errors.Join(roundTripErr, err)
 	}
 	return nil, roundTripErr
-}
-
-// proxyDialProbeHost extracts the authority the policy evaluation should see
-// when probing for native socks routing of rawURL.
-func proxyDialProbeHost(rawURL string) string {
-	if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
-		return parsed.Host
-	}
-	return "probe.invalid"
 }
 
 // validateImageTarget runs the SSRF preflight with the CALLER's context so a
@@ -606,9 +583,6 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 		remoteDNS = ssrf.TransportResolvesRemotely(transport)
 		if !remoteDNS && transport.Proxy != nil {
 			probeURL, _ := url.Parse(strings.TrimSpace(rawURL))
-			if probeURL == nil {
-				probeURL = &url.URL{Scheme: "https", Host: proxyDialProbeHost(rawURL)}
-			}
 			probeReq := &http.Request{Method: http.MethodGet, URL: probeURL}
 			probeReq.Header = http.Header{"User-Agent": {userAgent}}
 			if u, err := transport.Proxy(probeReq); err == nil && ssrf.IsSOCKSProxyURL(u) {

@@ -514,3 +514,33 @@ func TestHopGuard_NilTransportIsFullGuard(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, hopRemoteDNSDecision(req, nil), "nil transport = no proxy policy = local resolution")
 }
+
+// Private literal target through the socks branch of pinnedProxyTransport.
+func TestSocksPrivateLiteralBlockedInPinnedProxyTransport(t *testing.T) {
+	transport := &pinnedProxyTransport{
+		base: &http.Transport{Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: "127.0.0.1:1080"})},
+	}
+	req, err := http.NewRequest(http.MethodGet, "http://10.0.0.5/x.png", nil)
+	require.NoError(t, err)
+	_, err = transport.RoundTrip(req)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "private/internal IP literal")
+}
+
+func TestProxyDialProbeHostRemoved(t *testing.T) {
+	t.Skip("proxyDialProbeHost removed; probe uses url.Parse directly")
+	// An unparseable URL falls through to the default.
+	t.Skip("proxyDialProbeHost removed")
+}
+
+func TestRemoteDNSTransportWithDialTLSRejected(t *testing.T) {
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: "127.0.0.1:1080"}),
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return nil, nil
+		},
+	}
+	err := ValidateRemoteImageWithSafeClient(context.Background(), &http.Client{Transport: transport}, "http://proxy-only.example/x.png", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "DialTLSContext/DialTLS")
+}
