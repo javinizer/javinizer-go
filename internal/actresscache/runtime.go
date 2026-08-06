@@ -100,10 +100,14 @@ func runtimeRecordReachable(record RuntimeRecord, index int, dmmCounts map[int]i
 			}
 		}
 	}
-	owners := nameOwners[normalizeIdentity(record.FirstName+" "+record.LastName)]
-	if len(owners) == 1 {
-		_, ok := owners[index]
-		return ok
+	// A single-part name (e.g. just "Ai") is too weak to serve as a unique
+	// reachability owner; require both romanized parts.
+	if strings.TrimSpace(record.FirstName) != "" && strings.TrimSpace(record.LastName) != "" {
+		owners := nameOwners[normalizeIdentity(record.FirstName+" "+record.LastName)]
+		if len(owners) == 1 {
+			_, ok := owners[index]
+			return ok
+		}
 	}
 	return false
 }
