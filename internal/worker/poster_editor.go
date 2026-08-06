@@ -249,7 +249,8 @@ func (m *LockedMovieOps) commitCandidate(ctx context.Context, candidates map[str
 				if err := publish(); err != nil {
 					return err
 				}
-				return m.publishProvenance(provOverrides)
+				m.publishProvenance(provOverrides)
+				return nil
 			},
 		}
 		if legs != nil {
@@ -272,9 +273,7 @@ func (m *LockedMovieOps) commitCandidate(ctx context.Context, candidates map[str
 	if err := publish(); err != nil {
 		return err
 	}
-	if err := m.publishProvenance(provOverrides); err != nil {
-		return err
-	}
+	m.publishProvenance(provOverrides)
 	if env != nil && env.persistFn != nil {
 		if err := env.persistFn(); err != nil {
 			logging.Warnf("envelope persist failed after edit on %s: %v (state remains committed in memory)", m.movieID, err)
@@ -283,11 +282,10 @@ func (m *LockedMovieOps) commitCandidate(ctx context.Context, candidates map[str
 	return nil
 }
 
-func (m *LockedMovieOps) publishProvenance(provOverrides map[string]*resultstore.ProvenanceData) error {
+func (m *LockedMovieOps) publishProvenance(provOverrides map[string]*resultstore.ProvenanceData) {
 	for fp, prov := range provOverrides {
 		m.pe.updater.SetProvenance(fp, prov)
 	}
-	return nil
 }
 
 // legacyDBLegs performs the non-transactional fallback DB writes used when no
@@ -684,11 +682,10 @@ func (m *LockedMovieOps) ExcludeFamily(ctx context.Context) error {
 	env := m.pe.currentEnv()
 	// Exclusion is an envelope-only mutation: no movie-row legs, but the
 	// excluded map flips ride the same composite tx path when available.
-	publish := func() error {
+	publish := func() {
 		for _, fp := range filePaths {
 			m.pe.updater.MarkExcluded(fp)
 		}
-		return nil
 	}
 	cancelIfAll := func() bool {
 		var lc *JobLifecycle
@@ -712,7 +709,7 @@ func (m *LockedMovieOps) ExcludeFamily(ctx context.Context) error {
 			EnvelopeFn: func() (*models.Job, error) {
 				return env.envelope(nil, nil, m.excludedSnapshot(filePaths))
 			},
-			Publish: publish,
+			Publish: func() error { publish(); return nil },
 		})
 		if err != nil {
 			return err
@@ -736,9 +733,10 @@ func (m *LockedMovieOps) ExcludeFamily(ctx context.Context) error {
 		}
 		return nil
 	}
-	if err := publish(); err != nil {
-		return err
-	}
+	publish()
+	// Auto-cancel (legacy semantic) fires AFTER the exclusion commit. A failed
+	// persistFn leaves the cancellation in-memory only; surface it so the
+	// caller retries (idempotent) rather than silently de-hardening it.
 	cancelled := cancelIfAll()
 	if env != nil && env.persistFn != nil {
 		// The legacy store's persistFn snapshots post-cancel state — but if

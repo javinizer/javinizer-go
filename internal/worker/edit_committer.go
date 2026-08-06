@@ -59,6 +59,9 @@ type EditCommitPlan struct {
 // no DB legs (e.g. geometry-only crop edits whose only leg is the envelope)
 // still route through Commit when an envelope is present.
 func (p *EditCommitPlan) HasDBLegs() bool {
+	if p == nil {
+		return false
+	}
 	return p.UpsertMovie != nil || p.MutateMovie != nil || len(p.Renames) > 0 || p.EnvelopeFn != nil
 }
 

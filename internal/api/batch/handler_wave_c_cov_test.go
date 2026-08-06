@@ -1,0 +1,185 @@
+package batch
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
+	"github.com/javinizer/javinizer-go/internal/config"
+
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	workermocks "github.com/javinizer/javinizer-go/internal/mocks/worker"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/poster"
+	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
+	wfin "github.com/javinizer/javinizer-go/internal/workflow"
+)
+
+// --- rescrape orchestrator persist-warning arms ---
+
+type failingPersist struct{ err error }
+
+func (p failingPersist) PersistJobByID(string) error { return p.err }
+
+type staticWfFactory struct{ err error }
+
+func (w staticWfFactory) GetBatchWorkflow(string) (wfin.WorkflowInterface, error) { return nil, w.err }
+
+type minimalFactory struct {
+	worker.BatchJobFactoryInterface
+}
+
+func (minimalFactory) NewRescrapeCmd(movieID, filePath, manualSearchInput string, selectedScrapers []string, force bool, mergeOpts wfin.MergeOptions) worker.RescrapeCmd {
+	return worker.RescrapeCmd{MovieID: movieID, FilePath: filePath}
+}
+
+func TestRescrapeSinglePersistFailureIsWarned(t *testing.T) {
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	mockJob.EXPECT().SetWorkflow(mock.Anything).Return()
+	mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(&worker.RescrapeResult{Status: models.RescrapeStatusSuccess}, nil)
+
+	orch := NewRescrapeOrchestrator(RescrapeDeps{
+		JobStore:  &excludeEdgeStore{job: mockJob},
+		WfFactory: staticWfFactory{},
+		Factory:   minimalFactory{},
+		Persist:   failingPersist{err: errors.New("disk read-only")},
+	})
+	out, err := orch.Rescrape(context.Background(), "job-9", "MV-9", "/f/mv9.mp4", &contracts.BatchRescrapeRequest{})
+	require.NoError(t, err, "persist failure must not fail the rescrape (it warns)")
+	require.NotNil(t, out)
+}
+
+func TestRescrapeBulkPersistFailureIsWarned(t *testing.T) {
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	mockJob.EXPECT().SetWorkflow(mock.Anything).Return()
+	mockJob.EXPECT().GetStatus().Return(&worker.BatchJobStatus{}).Maybe()
+	orch := NewRescrapeOrchestrator(RescrapeDeps{
+		JobStore:  &excludeEdgeStore{job: mockJob},
+		WfFactory: staticWfFactory{},
+		Factory:   minimalFactory{},
+		Persist:   failingPersist{err: errors.New("disk read-only")},
+	})
+	// Empty movie list: pool runs zero items; the persist still runs and warns.
+	out, err := orch.BulkRescrape(context.Background(), "job-9", nil, &contracts.BatchRescrapeRequest{})
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	assert.Equal(t, 0, out.Succeeded)
+}
+
+func TestRescrapeNotAllowedDeletedJob(t *testing.T) {
+	snap := &worker.BatchJobStatus{}
+	snap.IsDeleted = true
+	assert.True(t, rescrapeNotAllowed(snap))
+}
+
+// --- poster-pair rollback unpark warn arm ---
+
+func TestPromoteRollbackWarnsWhenUnparkRenameFails(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := "posters/JOB-U2"
+	seedPosterPair(t, mem, dir, "PID-U2")
+	seedPosterPair(t, mem, dir, "ST-U2")
+	fs := &brokenFS{Fs: mem, failRenameAt: map[int]bool{3: true, 4: true}}
+	_, err := promoteStagedPosterPair(fs, "", "JOB-U2", "ST-U2", "PID-U2")
+	require.ErrorContains(t, err, "park previous poster")
+}
+
+// --- crop handler: commit-leg (cerr) restores the backup ---
+
+func TestPosterCrop_CommitFailureRestoresBackup(t *testing.T) {
+	deps, job, router := cropJobFixture(t, "CROPE-5")
+	emptyStore := resultstore.New(0, nil)
+	pe := worker.NewPosterEditor(emptyStore, emptyStore, nil)
+	var captured *worker.LockedMovieOps
+	_ = pe.WithMovieEditLock("CROPE-5", func(m *worker.LockedMovieOps) error { captured = m; return nil })
+
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	mockJob.EXPECT().GetFileResultByResultID("CROPE-5").Return(&resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/CROPE-5.mp4", MovieID: "CROPE-5"},
+		Movie:         &models.Movie{ID: "CROPE-5"},
+	}, "/path/to/CROPE-5.mp4", true)
+	mockJob.EXPECT().FindMovieResultForMovieID("CROPE-5").Return(nil, nil).Maybe()
+	mockJob.EXPECT().FindFilePathsForMovieID("CROPE-5").Return([]string{"/path/to/CROPE-5.mp4"}).Maybe()
+	mockJob.EXPECT().WithMovieEditLock("CROPE-5", mock.Anything).
+		RunAndReturn(func(_ string, fn func(*worker.LockedMovieOps) error) error { return fn(captured) })
+	deps.JobStore = &cropErrorJobStore{job: mockJob}
+
+	w := postCrop(t, router, job, "CROPE-5", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
+	assert.Equal(t, 404, w.Code, w.Body.String()) // typed empty-family inside a locked empty store
+}
+
+// --- from-URL: promote failure inside the locked section ---
+
+func TestPosterFromURL_PromoteFailureInsideKey(t *testing.T) {
+	deps, job, mockJ, router, ts := fromURLFixture(t, "URLC-5")
+	mockJ.EXPECT().GetFileResultByResultID("URLC-5").Return(&resultstore.MovieResult{
+		ResultID:      "URLC-5",
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/URLC-5.mp4", MovieID: "URLC-5"},
+		Movie:         &models.Movie{ID: "URLC-5"},
+	}, "/path/to/URLC-5.mp4", true)
+	mockJ.EXPECT().WithMovieEditLock("URLC-5", mock.Anything).
+		RunAndReturn(func(_ string, fn func(*worker.LockedMovieOps) error) error { return fn(nil) })
+	deps.Fs = &brokenFS{Fs: deps.GetFs(), failRenameAt: map[int]bool{1: true}}
+	w := postFromURLRequest(t, router, job, "URLC-5", ts.URL+"/pic.jpg")
+	assert.Equal(t, 500, w.Code, "promote failure is untyped → 500: %s", w.Body.String())
+}
+
+// Untyped ApplyFieldOverride errors land as 500.
+func TestFieldOverrideGeneric500(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	mockJob.EXPECT().ApplyFieldOverride(mock.Anything, "FO-9", "maker", "dmm").Return(nil, nil, errors.New("plain boom"))
+	deps := createTestDeps(t, &config.Config{}, "")
+	deps.JobStore = &excludeEdgeStore{job: mockJob}
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/field-override", overrideBatchMovieField(testkit.GetTestRuntime(deps)))
+	payload, _ := json.Marshal(contracts.FieldOverrideRequest{Field: "maker", Source: "dmm"})
+	req := httptest.NewRequest(http.MethodPost, "/batch/job-any/results/FO-9/field-override", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, 500, w.Code)
+}
+
+// Delete with an untyped error is the 500 default in deleteBatchJob.
+func TestDeleteBatchJob_Untyped500(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps := createTestDeps(t, &config.Config{}, "")
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	deps.JobStore = &excludeEdgeStore{job: mockJob, deleteErr: errors.New("permission denied on job dir")}
+	router := gin.New()
+	router.DELETE("/batch/:id", deleteBatchJob(testkit.GetTestRuntime(deps)))
+	req := httptest.NewRequest(http.MethodDelete, "/batch/job-x", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, 500, w.Code)
+	assert.Contains(t, w.Body.String(), "Failed to delete job")
+}
+
+// Keyword-free download failure (temp-dir setup error) is the 500 arm — the
+// keyword classes must not own it.
+func TestPosterFromURL_GenericDownloadErrorIs500(t *testing.T) {
+	deps, job, mockJ, router, ts := fromURLFixture(t, "URLC-7")
+	_ = mockJ
+	broken := &brokenFS{Fs: deps.GetFs(), failMkdirAll: func(string) bool { return true }}
+	deps.Fs = broken
+	rt2 := testkit.GetTestRuntime(deps)
+	rt2.GetRuntime().InvalidatePosterManager()
+	rt2.GetRuntime().GetPosterManager(func() poster.PosterManagerInterface {
+		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}).WithSSRFCheck(func(string) error { return nil })
+	})
+	w := postFromURLRequest(t, router, job, "URLC-7", ts.URL+"/pic.jpg")
+	assert.Equal(t, 500, w.Code, "%s", w.Body.String())
+}

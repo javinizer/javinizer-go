@@ -235,10 +235,9 @@ func s_candidateEnvelope(job *BatchJob, overrides map[string]*resultstore.MovieR
 				excludedCount++
 			}
 		}
+		// Snapshot boundaries (stateCloneResultsLocked) never emit nil-valued
+		// rows; no nil guard is needed here.
 		for k, r := range snapshot.results {
-			if r == nil {
-				continue
-			}
 			if excluded[k] && r.Status == models.JobStatusRunning {
 				r.Status = models.JobStatusCancelled // clone — safe to mutate
 			}

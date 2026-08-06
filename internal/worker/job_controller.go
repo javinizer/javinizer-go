@@ -242,6 +242,8 @@ func (c *jobController) Rescrape(ctx context.Context, cmd RescrapeCmd) (*Rescrap
 			release := c.job.posterEditor.lockRegistry().AcquireMany(keys)
 			setProvenance(outcome)
 			release()
+		} else {
+			setProvenance(outcome)
 		}
 	} else {
 		setProvenance(outcome)
@@ -253,8 +255,6 @@ func (c *jobController) Rescrape(ctx context.Context, cmd RescrapeCmd) (*Rescrap
 	return outcome, nil
 }
 
-// Wait blocks until the job fully settles and returns any error.
-//
 // "Fully settles" means the phase goroutine has RETURNED, including its
 // deferred persistence — not merely that a terminal status was set. Run
 // marks the terminal status (closing lifecycle.done) before its deferred

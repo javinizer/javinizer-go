@@ -343,12 +343,7 @@ func (s *JobStore) AcquireRescrapeAccess(id string) (ControlledJob, func(), erro
 	if err != nil {
 		return nil, nil, err
 	}
-	ctrl, ok := job.(ControlledJob)
-	if !ok {
-		release()
-		return nil, nil, fmt.Errorf("job %s does not expose control seam", id)
-	}
-	return ctrl, release, nil
+	return job, release, nil
 }
 
 // AcquireSharedLease takes a gone-checked shared admission lease without a
