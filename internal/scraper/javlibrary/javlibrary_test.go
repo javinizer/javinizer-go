@@ -39,18 +39,6 @@ func TestCanHandleURL(t *testing.T) {
 	}
 }
 
-func TestExtractVideoID(t *testing.T) {
-	s := newScraper(&models.ScraperSettings{
-		Enabled:  false,
-		Language: "en",
-		BaseURL:  "http://www.javlibrary.com",
-	}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
-
-	html := `<div id="video_id" class="item"><table><tbody><tr><td class="header">ID:</td><td class="text">ONED-120</td></tr></tbody></table></div>`
-	assert.Equal(t, "ONED-120", s.extractVideoID(html))
-	assert.Equal(t, "", s.extractVideoID(`<div id="video_info">no video id</div>`))
-}
-
 func TestExtractIDFromURL(t *testing.T) {
 	settings := models.ScraperSettings{
 		Enabled:  false,

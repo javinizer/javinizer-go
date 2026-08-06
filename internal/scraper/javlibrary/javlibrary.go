@@ -299,10 +299,9 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	}
 
 	if strings.Contains(html, `id="video_info"`) {
+		// Result ID stays aligned with the scrape/cache key (the page slug) so
+		// MovieRepo lookups (keyed by ID/ContentID) hit on repeated URL scrapes.
 		movieID := pageIDFromURL(rawURL)
-		if vid := s.extractVideoID(html); vid != "" {
-			movieID = vid
-		}
 		return s.parseDetailPage(html, movieID, redactPageURL(rawURL), resultLanguage)
 	}
 
@@ -334,9 +333,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		if !strings.Contains(html, `id="video_info"`) {
 			return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
 		}
-		if vid := s.extractVideoID(html); vid != "" {
-			pageID = vid
-		}
+		// ID stays the cache key (page slug), aligned with MovieRepo lookups.
 		return s.parseDetailPage(html, pageID, redactPageURL(id), languageFromURL(id, s.language))
 	}
 
@@ -390,6 +387,10 @@ func (s *scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 		return "", fmt.Errorf("JavLibrary: rate limit wait failed: %w", err)
 	}
 
+	// The raw URL is used only for the request; logs must carry a redacted copy
+	// so userinfo or signed query parameters never leak.
+	logURL := redactPageURL(url)
+
 	// Try direct request first and only escalate to FlareSolverr on blocked/challenge responses.
 	resp, err := s.client.R().SetContext(ctx).Get(url)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {
@@ -397,16 +398,16 @@ func (s *scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 		if !challengedetect.IsCloudflareChallengePage(html) {
 			return html, nil
 		}
-		logging.Warnf("JavLibrary: Direct request returned Cloudflare challenge, escalating to FlareSolverr: %s", url)
+		logging.Warnf("JavLibrary: Direct request returned Cloudflare challenge, escalating to FlareSolverr: %s", logURL)
 	} else if err == nil && resp != nil {
-		logging.Debugf("JavLibrary: Direct request returned status %d for %s", resp.StatusCode(), url)
+		logging.Debugf("JavLibrary: Direct request returned status %d for %s", resp.StatusCode(), logURL)
 	}
 
 	// Fallback to FlareSolverr if client was created.
 	// The flaresolverr client is only non-nil when it was successfully initialized,
 	// which happens when useFlareSolverr=true (based on scraper/global FlareSolverr config).
 	if s.flaresolverr != nil {
-		logging.Infof("JavLibrary: Using FlareSolverr for %s", url)
+		logging.Infof("JavLibrary: Using FlareSolverr for %s", logURL)
 		html, cookies, fsErr := s.flaresolverr.ResolveURL(url)
 		if fsErr == nil {
 			if challengedetect.IsCloudflareChallengePage(html) {
@@ -650,20 +651,6 @@ func (s *scraper) extractRuntime(html string) int {
 
 // extractField extracts a field value from a video_info div by its ID
 // Works for video_director, video_maker, video_label
-// extractVideoID extracts the canonical product code from a detail page's
-// <div id="video_id">…</div> (plain text, e.g. "ONED-120"). Empty if absent.
-func (s *scraper) extractVideoID(html string) string {
-	// javlibrary renders the canonical code as
-	// <div id="video_id"><table>…<td class="text">ONED-120</td></table></div>
-	pattern := `id="video_id"[\s\S]*?<td\s+class="text">([^<]+)</td>`
-	re := regexp.MustCompile(pattern)
-	m := re.FindStringSubmatch(html)
-	if len(m) > 1 {
-		return strings.TrimSpace(m[1])
-	}
-	return ""
-}
-
 func (s *scraper) extractField(html string, divID string) string {
 	// Pattern: <div id="video_director" ...> ... <a ...>Value</a> ...
 	pattern := fmt.Sprintf(`id="%s"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>`, divID)
