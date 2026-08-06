@@ -44,25 +44,29 @@ func CanonicalProxyEndpoint(proxyURL *url.URL) string {
 // under an env policy) passes through untouched -- target-level private
 // literals stay blocked.
 func NativeSOCKSPinnedDial(proxyURL *url.URL, lookup func(context.Context, string) ([]net.IPAddr, error), fallback func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
+	if lookup == nil {
+		lookup = net.DefaultResolver.LookupIPAddr
+	}
 	endpoint := CanonicalProxyEndpoint(proxyURL)
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
 		}
+		// The configured proxy endpoint is trusted infrastructure (often
+		// loopback or private): recognize it BEFORE the private-literal block
+		// so socks5://127.0.0.1:1080 is not rejected as an SSRF target.
+		isProxyEndpoint := strings.EqualFold(addr, endpoint)
+		if isProxyEndpoint {
+			if ip := net.ParseIP(host); ip != nil {
+				return fallback(ctx, network, addr)
+			}
+		}
 		if ip := HostIPLiteral(host); ip != nil && IsBlockedIP(ip) {
 			return nil, &BlockedTargetError{Target: host, Reason: "private/internal IP literal"}
 		}
-		// Only the exact proxy endpoint canonical authority runs the pin lane;
-		// everything else (direct routes, non-proxy hops) passes untouched.
-		if !strings.EqualFold(addr, endpoint) {
+		if !isProxyEndpoint {
 			return fallback(ctx, network, addr)
-		}
-		if ip := net.ParseIP(host); ip != nil {
-			return fallback(ctx, network, addr)
-		}
-		if lookup == nil {
-			lookup = net.DefaultResolver.LookupIPAddr
 		}
 		addrs, lerr := lookup(ctx, host)
 		if lerr != nil {

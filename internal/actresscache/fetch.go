@@ -207,9 +207,14 @@ func (f *Fetcher) checkFetchTarget(ctx context.Context, req *http.Request) error
 		//nolint:nilerr // no proxy: dial surfaces DNS errors authoritatively.
 		return nil
 	}
-	for _, ip := range ips {
-		if isBlockedIP(ip) {
-			return &BlockedFetchError{URL: host}
+	// SOCKS-proxied targets resolve remotely: a private local answer is a
+	// split-horizon artifact, not a policy violation. Only block IPs for
+	// direct/non-socks hops.
+	if decision := f.proxyDecisionFor(req); !ssrf.IsSOCKSProxyURL(decision) {
+		for _, ip := range ips {
+			if isBlockedIP(ip) {
+				return &BlockedFetchError{URL: host}
+			}
 		}
 	}
 	return nil
