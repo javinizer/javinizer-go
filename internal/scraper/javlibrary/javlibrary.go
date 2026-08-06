@@ -674,9 +674,14 @@ func (s *scraper) extractRuntime(html string) int {
 // <div id="video_id">...</div> (e.g. "ONED-120"). Empty if absent. Used as the
 // primary source for result.ID in parseDetailPage and for title prefix stripping.
 func (s *scraper) extractVideoID(html string) string {
-	pattern := `id="video_id"[\s\S]*?<td\s+class="text">([^<]+)</td>`
+	pattern := `id="video_id"[\s\S]*?</div>`
 	re := regexp.MustCompile(pattern)
-	m := re.FindStringSubmatch(html)
+	vidBlock := re.FindString(html)
+	if vidBlock == "" {
+		return ""
+	}
+	codeRe := regexp.MustCompile(`<td\s+class="text">([^<]+)</td>`)
+	m := codeRe.FindStringSubmatch(vidBlock)
 	if len(m) > 1 {
 		return strings.TrimSpace(m[1])
 	}

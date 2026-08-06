@@ -251,9 +251,10 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 			cmd.ParseWarning = fmt.Sprintf("input could not be parsed: %v", parseErr)
 		} else {
 			cmd.MovieID = parsed.ID
-			// Keep the URL in RawInput when it came in via MovieID so the
-			// direct-page URL seam (querySingle -> ScrapeURL) still fires.
-			if cmd.RawInput == "" && parsed.IsURL {
+			// Keep the trimmed URL in RawInput so the direct-page URL seam
+			// (querySingle -> ScrapeURL) receives a clean URL even when the
+			// caller supplied surrounding whitespace.
+			if parsed.IsURL {
 				cmd.RawInput = source
 			}
 			if len(cmd.SelectedScrapers) == 0 && parsed.IsURL && len(parsed.CompatibleScrapers) > 0 {

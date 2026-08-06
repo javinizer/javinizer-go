@@ -349,9 +349,10 @@ func redactErrorURL(err error, rawURL string) error {
 func safeScrapeURL(ctx context.Context, handler models.URLHandler, url string) (result *models.ScraperResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = panicutil.HandleRecover(r)
-			// Scrub any raw URL from the recovered panic before it reaches
-			// logs or failure messages (credential-redaction guarantee).
+			// Scrub the raw URL from the recovered panic value before
+			// HandleRecover logs it, so signed tokens never reach logs.
+			redacted := strings.ReplaceAll(fmt.Sprint(r), url, RedactSourceURL(url))
+			err = panicutil.HandleRecover(redacted)
 			err = redactErrorURL(err, url)
 		}
 	}()

@@ -353,6 +353,9 @@ func TestExtractVideoID(t *testing.T) {
 	html := `<div id="video_id" class="item"><table><tbody><tr><td class="header">ID:</td><td class="text">ONED-120</td></tr></tbody></table></div>`
 	assert.Equal(t, "ONED-120", s.extractVideoID(html))
 	assert.Equal(t, "", s.extractVideoID(`<div id="video_info">no video id</div>`))
+	// Bounded regex: a later td.text outside video_id must not be captured.
+	badHTML := `<div id="video_title"></div><div id="video_release_date"><table><td class="text">2024-01-01</td></table></div>`
+	assert.Equal(t, "", s.extractVideoID(badHTML), "must not capture td.text outside video_id element")
 }
 
 func TestExtractTitle_DirectPageSlugID(t *testing.T) {
