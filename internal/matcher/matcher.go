@@ -128,19 +128,24 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 	// quality tag (the letter+trailing part form, e.g. "SVFLA-001e-4k" where 'e' is
 	// part E, not a catalog suffix), strip it from the ID so the part letter is
 	// detected. A bare E/Z without a trailing tag is a legitimate catalog suffix
-	// (e.g. IPX-535Z) and is preserved.
-	if n := len(result.ID); n > 1 && (result.ID[n-1] == 'E' || result.ID[n-1] == 'Z') {
-		baseID := result.ID[:n-1]
-		num, suffix, patternType, trailingPrefix := DetectPartSuffix(filename, baseID)
-		if patternType == PatternLetter && trailingPrefix != "" {
-			result.strippedSuffix = string(result.ID[n-1])
-			result.ID = baseID
-			result.PartNumber = num
-			result.PartSuffix = suffix
-			result.MultipartPattern = patternType
-			result.TrailingPrefix = trailingPrefix
-			result.IsMultiPart = false
-			return result
+	// (e.g. IPX-535Z) and is preserved. Only the built-in pattern applies this
+	// heuristic; a custom regex that explicitly captures an E/Z-suffixed ID is
+	// authoritative and must not be overridden.
+	if matchType == "builtin" {
+		n := len(result.ID)
+		if n > 1 && (result.ID[n-1] == 'E' || result.ID[n-1] == 'Z') {
+			baseID := result.ID[:n-1]
+			num, suffix, patternType, trailingPrefix := DetectPartSuffix(filename, baseID)
+			if patternType == PatternLetter && trailingPrefix != "" {
+				result.strippedSuffix = string(result.ID[n-1])
+				result.ID = baseID
+				result.PartNumber = num
+				result.PartSuffix = suffix
+				result.MultipartPattern = patternType
+				result.TrailingPrefix = trailingPrefix
+				result.IsMultiPart = false
+				return result
+			}
 		}
 	}
 

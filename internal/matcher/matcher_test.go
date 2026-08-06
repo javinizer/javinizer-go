@@ -627,6 +627,19 @@ func TestMatcher_MatchFile_CustomRegexEmptyCapture(t *testing.T) {
 	assert.Nil(t, result, "custom regex with empty capture group must yield no match (falls back to builtin, which also misses '123')")
 }
 
+func TestMatcher_EZ_CatalogSuffix_CustomRegexNotStripped(t *testing.T) {
+	// A custom regex that explicitly captures an E-suffixed catalog ID must not have
+	// the E/Z stripping heuristic override it (only built-in matches strip).
+	cfg := &Config{RegexEnabled: true, RegexPattern: "([A-Z]+-\\d+E)"}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	result := m.MatchFile(models.FileMatchInfo{Name: "IPX-535E-4k.mp4", Extension: ".mp4"})
+	require.NotNil(t, result)
+	assert.Equal(t, "IPX-535E", result.ID, "custom-regex E-suffixed capture must be preserved")
+	assert.Equal(t, "regex", result.MatchedBy)
+}
+
 func TestMatcher_EZ_CatalogSuffix_StrippedForLetterQuality(t *testing.T) {
 	cfg := &Config{RegexEnabled: false}
 	m, err := NewMatcher(cfg)
