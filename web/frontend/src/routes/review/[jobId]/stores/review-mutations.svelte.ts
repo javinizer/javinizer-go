@@ -280,10 +280,16 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				);
 			});
 
-			const ops = Array.from(latestByFamily.entries());
-			const paths = Array.from(familyPathsByKey.entries());
+const ops = Array.from(latestByFamily.entries());
 			const settled = await Promise.allSettled(savePromises.filter((p): p is Promise<unknown> => p !== null));
-			return settled.map((s, i) => ({ key: ops[i]?.[0] ?? '', status: s.status, paths: paths[i]?.[1] ?? [] }));
+			// codex P2-F: paths come by family-key lookup — latestByFamily reorders
+			// (delete+set) on interleaved sibling edits, so positional indexing of
+			// familyPathsByKey would misalign them.
+			return settled.map((s, i) => ({
+				key: ops[i]?.[0] ?? '',
+				status: s.status,
+				paths: familyPathsByKey.get(ops[i]?.[0] ?? '') ?? [],
+			}));
 		},
 		onSuccess: async (results: Array<{ key: string; status: string; paths: string[] }>) => {
 			const ops0 = results ?? [];
