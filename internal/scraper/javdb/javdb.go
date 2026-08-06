@@ -231,7 +231,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 			return nil, err
 		}
 		if !hasDetailMetadata(result, videoID) {
-			return nil, fmt.Errorf("JavDB returned non-detail content for %s", urlStr)
+			return nil, models.NewScraperNotFoundError("JavDB", fmt.Sprintf("non-detail content for %s", urlStr))
 		}
 	}
 
