@@ -170,7 +170,7 @@ func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*m
 	}
 	// Skip content-ID resolution in raw mode — it reads/writes the DB cache,
 	// which contradicts the no-persistence contract.
-	outcome := querySingle(ctx, movieID, scraper)
+	outcome := querySingle(ctx, movieID, movieID, scraper)
 	if outcome.failure != nil {
 		return nil, outcome.failure
 	}
@@ -330,7 +330,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	resolvedID := s.resolveContentID(ctx, cmd.MovieID, scraperNames)
 	scrapers := s.registry.GetInstancesByPriorityForInput(scraperNames, resolvedID)
 
-	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, scrapers, startTime)
+	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, cmd.RawInput, scrapers, startTime)
 	if len(results) == 0 {
 		return failedResult(cmd.MovieID, buildNoResultsError(failures), classifyFailures(failures), startTime), nil
 	}

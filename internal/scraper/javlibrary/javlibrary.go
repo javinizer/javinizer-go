@@ -178,11 +178,12 @@ func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 		if seg == "" {
 			continue
 		}
-		// A direct page URL (e.g. "/en/javliay67q.html") has no ID to extract —
-		// return the URL itself so the pipeline opens the page as-is instead of
-		// searching a mangled ID.
+		// A direct page URL (e.g. "/en/javliay67q.html") opens as-is via the
+		// ScrapeURL seam; here we only derive a stable ID so MovieID/cache
+		// identity never carries the raw URL (which may embed signed query
+		// params or userinfo).
 		if hasHTMLExt(seg) {
-			return urlStr, nil
+			return pageIDFromURL(urlStr), nil
 		}
 		// Otherwise strip any stray extension and use the bare segment as the ID.
 		if ext := filepath.Ext(seg); ext != "" {
@@ -211,6 +212,20 @@ func isDirectPageURL(rawURL string) bool {
 		return false
 	}
 	return u.Query().Get("v") != "" || hasHTMLExt(u.Path)
+}
+
+// languageFromURL returns the language segment of a JavLibrary URL when it is a
+// supported lang code, falling back to the configured language.
+func languageFromURL(rawURL string, fallback string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fallback
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) > 0 && isValidLanguage(parts[0]) {
+		return parts[0]
+	}
+	return fallback
 }
 
 // pageIDFromURL derives a best-effort display ID from a direct JavLibrary page
@@ -309,7 +324,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		if !strings.Contains(html, `id="video_info"`) {
 			return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
 		}
-		return s.parseDetailPage(html, pageID, id, s.language)
+		return s.parseDetailPage(html, pageID, id, languageFromURL(id, s.language))
 	}
 
 	searchURL, err := s.getURLCtx(ctx, id)

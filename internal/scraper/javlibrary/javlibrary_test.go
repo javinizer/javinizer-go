@@ -57,9 +57,9 @@ func TestExtractIDFromURL(t *testing.T) {
 		{"path with v", "https://www.javlibrary.com/?v=javli456", "javli456", false},
 		{"empty path", "https://www.javlibrary.com/", "", true},
 		{"short segment", "https://www.javlibrary.com/abc", "", true},
-		{"pretty html path opens directly", "https://www.javlibrary.com/en/javliay67q.html", "https://www.javlibrary.com/en/javliay67q.html", false},
-		{"pretty html path with ja opens directly", "https://www.javlibrary.com/ja/javc4dd12.html", "https://www.javlibrary.com/ja/javc4dd12.html", false},
-		{"short html path still direct", "https://www.javlibrary.com/ab.html", "https://www.javlibrary.com/ab.html", false},
+		{"html page yields stable derived id", "https://www.javlibrary.com/en/javliay67q.html", "javliay67q", false},
+		{"html page with ja yields stable derived id", "https://www.javlibrary.com/ja/javc4dd12.html", "javc4dd12", false},
+		{"short html page yields derived id", "https://www.javlibrary.com/ab.html", "ab", false},
 	}
 
 	for _, tt := range tests {

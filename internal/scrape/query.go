@@ -69,7 +69,7 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 // without significantly increasing CPU or memory pressure.
 var maxQueryConcurrency = runtime.NumCPU()
 
-func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string, scrapers []models.Scraper, startTime time.Time) ([]*models.ScraperResult, []models.ScraperError) {
+func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID, rawInput string, scrapers []models.Scraper, startTime time.Time) ([]*models.ScraperResult, []models.ScraperError) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -78,7 +78,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 		if len(scrapers) == 0 {
 			return nil, nil
 		}
-		outcome := querySingle(ctx, resolvedMovieID, scrapers[0])
+		outcome := querySingle(ctx, resolvedMovieID, rawInput, scrapers[0])
 		var results []*models.ScraperResult
 		var failures []models.ScraperError
 		if outcome.result != nil {
@@ -105,7 +105,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 				return gCtx.Err()
 			default:
 			}
-			outcomes[i] = querySingle(gCtx, resolvedMovieID, scraper)
+			outcomes[i] = querySingle(gCtx, resolvedMovieID, rawInput, scraper)
 			return nil // errors are captured in outcomes[i].failure
 		})
 	}
@@ -137,7 +137,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 	return results, failures
 }
 
-func querySingle(ctx context.Context, movieID string, scraper models.Scraper) (outcome queryOutcome) {
+func querySingle(ctx context.Context, movieID, rawInput string, scraper models.Scraper) (outcome queryOutcome) {
 	defer func() {
 		if r := recover(); r != nil {
 			outcome = queryOutcome{
@@ -148,6 +148,26 @@ func querySingle(ctx context.Context, movieID string, scraper models.Scraper) (o
 			}
 		}
 	}()
+
+	// A direct page URL is scraped as-is via the scraper's ScrapeURL seam rather
+	// than ID extraction + keyword search. Keeping the raw URL out of MovieID
+	// prevents credential leaks on signed URLs and gives a stable cache/identity
+	// key (the derived ID); URL shape is irrelevant for identity.
+	if rawInput != "" {
+		if uh, ok := scraper.(models.URLHandler); ok && uh.CanHandleURL(rawInput) {
+			result, err := safeScrapeURL(ctx, uh, rawInput)
+			if err != nil {
+				if isContextError(ctx, err) {
+					outcome = queryOutcome{failure: classifyContextError(scraper.Name(), err)}
+					return
+				}
+				outcome = queryOutcome{failure: classifyScraperError(scraper.Name(), err, "")}
+				return
+			}
+			outcome = queryOutcome{result: result}
+			return
+		}
+	}
 
 	scraperQuery := movieID
 	if mappedQuery, ok := models.ResolveSearchQueryForScraper(scraper, movieID); ok {
@@ -258,6 +278,26 @@ func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result 
 	default:
 	}
 	result, err = scraper.Search(ctx, id)
+	if result != nil {
+		result.NormalizeMediaURLs()
+	}
+	return result, err
+}
+
+// safeScrapeURL invokes a scraper's direct-URL scrape path (ScrapeURL) with
+// panic recovery, mirroring safeSearch.
+func safeScrapeURL(ctx context.Context, handler models.URLHandler, url string) (result *models.ScraperResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = panicutil.HandleRecover(r)
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	result, err = handler.ScrapeURL(ctx, url)
 	if result != nil {
 		result.NormalizeMediaURLs()
 	}
