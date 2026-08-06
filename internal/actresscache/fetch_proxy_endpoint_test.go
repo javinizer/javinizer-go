@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -442,6 +443,41 @@ func TestRedirectNoOpCallbackKeepsSingleEvaluation(t *testing.T) {
 	_ = resp.Body.Close()
 	assert.Equal(t, 2, evals, "one evaluation per hop; the no-op callback must not add one")
 	assert.Equal(t, 2, dials)
+}
+
+// A restamped hop that fails its limiter wait (request ctx canceled while the
+// per-host slot is taken) must surface the wait error from the redirect
+// callback chain. The limiter slot is taken by the first hop's wait; the
+// second hop's callback mutates the fingerprint and cancels the request ctx,
+// so the restamp-path wait observes the cancellation.
+func TestRedirectRestampPropagatesLimiterWaitError(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	dial := func(_ context.Context, network, addr string) (net.Conn, error) {
+		return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.217.5/next\r\nContent-Length: 0\r\n\r\n")(context.Background(), network, addr)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	mutations := 0
+	mutateAndCancel := func(req *http.Request, _ []*http.Request) error {
+		mutations++
+		req.Header.Set("X-Test-Mutation", strconv.Itoa(mutations))
+		if mutations >= 2 {
+			cancel()
+		}
+		return nil
+	}
+	client := &http.Client{Transport: &http.Transport{DialContext: dial, DisableKeepAlives: true}, CheckRedirect: mutateAndCancel}
+	fetcher, err := NewFetcherWithOptions(client, 200*time.Millisecond, "ua", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(ctx, "http://93.184.217.5/start", "application/json", 1<<20)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 2, mutations, "the error must come from the second hop's restamp wait")
 }
 
 // A callback touching ONLY headers (not the URL) must still restamp the
