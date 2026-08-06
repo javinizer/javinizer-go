@@ -5,8 +5,6 @@ import (
 
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,7 +12,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 
 	"github.com/gin-gonic/gin"
-	"github.com/spf13/afero"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -474,183 +471,6 @@ func excludeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{"message": "Movie excluded from organization"})
 	}
-}
-
-// posterPairBackup snapshots the temp poster pair (<posterID>.jpg and
-// <posterID>-full.jpg) so a failed commit can restore the previous bytes
-// (POSTER-WRITE-HARDENING D4 applies to served asset bytes too — codex P4-B).
-// Plain os ops: the poster manager writes these paths via OsFs in production
-// and the crop tests exercise them through the test chdir trick.
-type posterPairBackup struct {
-	fs            afero.Fs
-	dir           string
-	fullPath      string
-	croppedPath   string
-	fullBytes     []byte
-	croppedBytes  []byte
-	fullExisted   bool
-	croppedExists bool
-
-	// unreadable marks files that exist but could not be snapshotted (perm /
-	// I/O errors). Restore NEVER deletes them (codex r12): remove-if-absent
-	// semantics apply only to files that were genuinely absent pre-op.
-	fullUnreadable    bool
-	croppedUnreadable bool
-}
-
-// fs must be the same afero.Fs the PosterManager writes through (codex
-// P9-A: a host-os os.Open reads nothing when an injected fs backs the
-// manager); callers pass rt.Deps().GetFs().
-func backupPosterPair(fs afero.Fs, tempDir, jobID, posterID string) *posterPairBackup {
-	if fs == nil {
-		fs = afero.NewOsFs()
-	}
-	b := &posterPairBackup{
-		fs:          fs,
-		dir:         filepath.Join(tempDir, "posters", jobID),
-		fullPath:    filepath.Join(tempDir, "posters", jobID, fmt.Sprintf("%s-full.jpg", posterID)),
-		croppedPath: filepath.Join(tempDir, "posters", jobID, fmt.Sprintf("%s.jpg", posterID)),
-	}
-	fs = b.fs
-	if data, err := afero.ReadFile(fs, b.fullPath); err == nil {
-		b.fullBytes = data
-		b.fullExisted = true
-	} else if !os.IsNotExist(err) {
-		b.fullUnreadable = true
-		logging.Warnf("poster rollback: %s unreadable (%v) — restore will leave it untouched", b.fullPath, err)
-	}
-	if data, err := afero.ReadFile(fs, b.croppedPath); err == nil {
-		b.croppedBytes = data
-		b.croppedExists = true
-	} else if !os.IsNotExist(err) {
-		b.croppedUnreadable = true
-		logging.Warnf("poster rollback: %s unreadable (%v) — restore will leave it untouched", b.croppedPath, err)
-	}
-	return b
-}
-
-// restore rewinds the two poster files to their pre-op bytes: existing files
-// are rewritten, previously-absent ones are removed. Best-effort: restore
-// failures are logged (the next sweep reconciles leftovers).
-func (b *posterPairBackup) restore() {
-	if !b.fullExisted && !b.fullUnreadable {
-		if err := b.fs.Remove(b.fullPath); err != nil && !os.IsNotExist(err) {
-			logging.Warnf("poster rollback: remove %s: %v", b.fullPath, err)
-		}
-	} else if b.fullExisted {
-		if err := afero.WriteFile(b.fs, b.fullPath, b.fullBytes, 0o644); err != nil {
-			logging.Warnf("poster rollback: restore %s: %v", b.fullPath, err)
-		}
-	}
-	if !b.croppedExists && !b.croppedUnreadable {
-		if err := b.fs.Remove(b.croppedPath); err != nil && !os.IsNotExist(err) {
-			logging.Warnf("poster rollback: remove %s: %v", b.croppedPath, err)
-		}
-	} else if b.croppedExists {
-		if err := afero.WriteFile(b.fs, b.croppedPath, b.croppedBytes, 0o644); err != nil {
-			logging.Warnf("poster rollback: restore %s: %v", b.croppedPath, err)
-		}
-	}
-}
-
-// promoteStagedPosterPair atomically renames the staged poster files into
-// the canonical <posterID> names (codex r18): callers run this inside the
-// family key; a backupPosterPair taken just before covers commit-failure
-// rollback.
-// promoteStagedPosterPair relocates the staged poster files into the
-// canonical <posterID> names and returns `finalize`; callers MUST run
-// finalize only AFTER the state commit lands (codex r22: .bak rotation
-// survives until the commit witness, so a crash can be reconciled).
-func promoteStagedPosterPair(fs afero.Fs, tempDir, jobID, stageID, posterID string) (finalize func(), err error) {
-	if fs == nil {
-		fs = afero.NewOsFs()
-	}
-	dir := filepath.Join(tempDir, "posters", jobID)
-	srcs := []struct{ src, dst string }{
-		{filepath.Join(dir, stageID+"-full.jpg"), filepath.Join(dir, posterID+"-full.jpg")},
-		{filepath.Join(dir, stageID+".jpg"), filepath.Join(dir, posterID+".jpg")},
-	}
-	// Promote: park canonical → staged-rename; .bak files persist until the
-	// caller's finalize runs at the commit witness. Mid-promote failure
-	// reverses whatever was moved (unpark + un-promote) so a partial error
-	// leaves the canonical pair untouched and no .bak litter (codex r19+r28).
-	var parked []string
-	var promoted []string
-	rollbackPromote := func() {
-		// un-promote the already-installed new bytes (they were never committed)
-		for i := len(promoted) - 1; i >= 0; i-- {
-			if rbErr := fs.Remove(promoted[i]); rbErr != nil && !os.IsNotExist(rbErr) {
-				logging.Warnf("poster promote unpromote %s: %v", promoted[i], rbErr)
-			}
-		}
-		for _, bak := range parked {
-			orig := strings.TrimSuffix(bak, ".bak")
-			if rbErr := fs.Rename(bak, orig); rbErr != nil {
-				logging.Warnf("poster promote un->park %s: %v", bak, rbErr)
-			}
-		}
-	}
-	for _, mv := range srcs {
-		if _, err := fs.Stat(mv.src); err != nil {
-			if os.IsNotExist(err) {
-				continue // manager may not have produced this leg
-			}
-			rollbackPromote()
-			return nil, err
-		}
-		bak := mv.dst + ".bak"
-		_ = fs.Remove(bak)
-		if _, err := fs.Stat(mv.dst); err == nil {
-			if err := fs.Rename(mv.dst, bak); err != nil {
-				rollbackPromote()
-				return nil, fmt.Errorf("park previous poster %s: %w", mv.dst, err)
-			}
-			parked = append(parked, bak)
-		}
-		if err := fs.Rename(mv.src, mv.dst); err != nil {
-			rollbackPromote()
-			return nil, fmt.Errorf("promote staged poster %s: %w", mv.src, err)
-		}
-		promoted = append(promoted, mv.dst)
-	}
-	return func() {
-		for _, bak := range parked {
-			if err := fs.Remove(bak); err != nil && !os.IsNotExist(err) {
-				logging.Warnf("poster promote finalize %s: %v", bak, err)
-			}
-		}
-	}, nil
-}
-
-// cleanupStagedPosterPair removes leftover staged files after a failed
-// promote/commit. Callers own the stage namespace (unique per request), so
-// no lock is needed.
-func cleanupStagedPosterPair(fs afero.Fs, tempDir, jobID, stageID string) {
-	if fs == nil {
-		fs = afero.NewOsFs()
-	}
-	dir := filepath.Join(tempDir, "posters", jobID)
-	for _, name := range []string{stageID + "-full.jpg", stageID + ".jpg"} {
-		if err := fs.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
-			logging.Warnf("staged poster cleanup %s: %v", name, err)
-		}
-	}
-}
-
-// resolvePosterID resolves the effective poster identifier for a movie within a
-// batch job. It starts with the URL parameter movieID, then looks up the movie
-// result to use the canonical Movie.ID if available. Returns an error if the
-// resolved ID fails safe-filename validation (path traversal check).
-func resolvePosterID(lookup resultstore.MovieLookup, movieID string) (string, error) {
-	posterID := movieID
-	movieResult, _ := lookup.FindMovieResultForMovieID(movieID)
-	if movieResult != nil && movieResult.Movie != nil && movieResult.Movie.ID != "" {
-		posterID = movieResult.Movie.ID
-	}
-	if posterID != filepath.Base(posterID) || posterID == "" || posterID == "." {
-		return "", fmt.Errorf("invalid movie ID for poster operation")
-	}
-	return posterID, nil
 }
 
 const bulkExcludeMaxMovies = 100
