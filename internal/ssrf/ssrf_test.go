@@ -427,3 +427,122 @@ func TestHostIPLiteralAlternateForms(t *testing.T) {
 	assert.True(t, IsBlockedIP(HostIPLiteral("2130706433")), "dword loopback is blocked")
 	assert.False(t, IsBlockedIP(HostIPLiteral("134744072")), "8.8.8.8 dword stays allowed")
 }
+func TestIsSOCKSProxyURL(t *testing.T) {
+	assert.False(t, IsSOCKSProxyURL(nil))
+	assert.True(t, IsSOCKSProxyURL(&url.URL{Scheme: "socks5"}))
+	assert.True(t, IsSOCKSProxyURL(&url.URL{Scheme: "SOCKS5H"}))
+	assert.False(t, IsSOCKSProxyURL(&url.URL{Scheme: "http"}))
+}
+
+func TestCanonicalProxyEndpointDefaults(t *testing.T) {
+	assert.Equal(t, "proxy.example:1080", CanonicalProxyEndpoint(&url.URL{Scheme: "socks5", Host: "proxy.example"}))
+	assert.Equal(t, "proxy.example:443", CanonicalProxyEndpoint(&url.URL{Scheme: "https", Host: "proxy.example"}))
+	assert.Equal(t, "proxy.example:80", CanonicalProxyEndpoint(&url.URL{Scheme: "http", Host: "proxy.example"}))
+	assert.Equal(t, "proxy.example:8443", CanonicalProxyEndpoint(&url.URL{Scheme: "http", Host: "proxy.example:8443"}))
+}
+
+func TestNativeSOCKSPinnedDialBehavior(t *testing.T) {
+	lookup := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host == "socks.example" {
+			return []net.IPAddr{{IP: net.ParseIP("203.0.113.9"), Zone: ""}, {IP: net.ParseIP("203.0.113.10")}}, nil
+		}
+		return nil, errors.New("unknown")
+	}
+	fallbackSentinel := errors.New("fallback observed")
+	var dialed []string
+	fallback := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		if addr == "203.0.113.9:1080" {
+			return nil, errors.New("first answer dead")
+		}
+		return nil, fallbackSentinel
+	}
+	dial := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "socks.example:1080"}, lookup, fallback)
+
+	// Proxy endpoint: resolved once (pin the fallback answer).
+	_, err := dial(context.Background(), "tcp", "socks.example:1080")
+	require.ErrorIs(t, err, fallbackSentinel)
+	assert.Equal(t, []string{"203.0.113.9:1080", "203.0.113.10:1080"}, dialed, "failover across proxy answers")
+
+	// Direct (non-proxy) traffic passes through with hostname intact.
+	dialed = nil
+	_, _ = dial(context.Background(), "tcp", "media.example:443")
+	assert.Equal(t, []string{"media.example:443"}, dialed)
+
+	// Private literals blocked before any resolution/decision.
+	dialed = nil
+	_, err = dial(context.Background(), "tcp", "10.9.9.9:80")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "private")
+	assert.Empty(t, dialed)
+
+	// Resolution failure propagates (on the endpoint-matching path).
+	dialFail := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "other.example:8080"}, lookup, fallback)
+	_, err = dialFail(context.Background(), "tcp", "other.example:8080")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolve configured socks proxy")
+}
+
+// Leg coverage: malformed addr, literal endpoint passthrough, default
+// resolver seam, empty answers, resolution failure, failover.
+func TestNativeSOCKSPinnedDialEdgeLegs(t *testing.T) {
+	sentinel := errors.New("fallback observed")
+	mkFallback := func(spy *[]string) func(context.Context, string, string) (net.Conn, error) {
+		return func(_ context.Context, _, addr string) (net.Conn, error) {
+			*spy = append(*spy, addr)
+			return nil, sentinel
+		}
+	}
+	lookup := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.9")}}, nil
+	}
+	var dialed []string
+	dial := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "socks.example:1080"}, lookup, mkFallback(&dialed))
+
+	// Malformed dial authority.
+	_, err := dial(context.Background(), "tcp", "garbage")
+	require.ErrorContains(t, err, "invalid address")
+
+	// Literal proxy endpoint: passthrough, no resolution.
+	_, _ = dial(context.Background(), "tcp", "8.8.8.8:1080")
+	assert.Contains(t, dialed, "8.8.8.8:1080")
+
+	// Default-resolver seam engaged when lookup==nil: probe via error text.
+	dialNoLookup := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "nonexistent.probe.invalid:1080"}, nil, mkFallback(&dialed))
+	_, err = dialNoLookup(context.Background(), "tcp", "nonexistent.probe.invalid:1080")
+	require.Error(t, err)
+
+	// Empty resolver answers.
+	dialEmpty := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "empty.example:1080"}, func(context.Context, string) ([]net.IPAddr, error) { return nil, nil }, mkFallback(&dialed))
+	_, err = dialEmpty(context.Background(), "tcp", "empty.example:1080")
+	require.ErrorContains(t, err, "no addresses")
+}
+func TestNativeSOCKSPinnedDialLiteralEndpointAndSuccess(t *testing.T) {
+	sentinel := errors.New("unreached")
+	var dialed []string
+	fallbackRec := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		return nil, sentinel
+	}
+
+	// Literal proxy endpoint: no resolution, same addr forwarded.
+	dialLit := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "8.8.8.8:1080"}, func(context.Context, string) ([]net.IPAddr, error) {
+		t.Fatal("literal endpoint must not resolve")
+		return nil, nil
+	}, fallbackRec)
+	_, _ = dialLit(context.Background(), "tcp", "8.8.8.8:1080")
+	assert.Equal(t, []string{"8.8.8.8:1080"}, dialed)
+
+	// Successful pinned dial returns the connection.
+	conn1, conn2 := net.Pipe()
+	defer func() { _ = conn2.Close() }()
+	fallbackOK := func(context.Context, string, string) (net.Conn, error) { return conn1, nil }
+	dial := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "socks.example:1080"},
+		func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("203.0.113.9")}}, nil
+		}, fallbackOK)
+	got, err := dial(context.Background(), "tcp", "socks.example:1080")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	_ = got.Close()
+}

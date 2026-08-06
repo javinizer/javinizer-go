@@ -449,3 +449,31 @@ func TestSocksProxyResolutionFailureFailsAttempt(t *testing.T) {
 	_, err = p.RoundTrip(req)
 	require.ErrorContains(t, err, "resolve configured proxy")
 }
+
+// Native socks5 proxying through Transport.Proxy: validation sees the
+// lexical guard, the target hostname passes untouched to the SOCKS resolver,
+// and the proxy endpoint itself is dialed pinned.
+func TestValidateImageNativeSocksProxyShape(t *testing.T) {
+	prev := lookupProxyAddrs
+	defer func() { lookupProxyAddrs = prev }()
+	lookupProxyAddrs = func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host == "native-socks.example" {
+			return []net.IPAddr{{IP: net.ParseIP("203.0.113.60")}}, nil
+		}
+		return nil, errors.New("no local answer for " + host)
+	}
+	var dialed []string
+	sentinel := errors.New("dial observed")
+	dial := func(_ context.Context, network, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		return nil, sentinel // observe only; the full SOCKS handshake needs no canned HTTP here
+	}
+	transport := &http.Transport{
+		Proxy:       http.ProxyURL(&url.URL{Scheme: "socks5", Host: "native-socks.example:1080"}),
+		DialContext: dial,
+	}
+	err := ValidateRemoteImageWithSafeClient(context.Background(), &http.Client{Transport: transport}, "http://proxy-only.example/img.png", "ua", "")
+	require.ErrorIs(t, err, sentinel)
+	require.Len(t, dialed, 1)
+	assert.Equal(t, "203.0.113.60:1080", dialed[0], "proxy endpoint passed to dialer was resolved+pinned")
+}

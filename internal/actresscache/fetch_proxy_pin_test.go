@@ -1,7 +1,9 @@
 package actresscache
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"testing"
@@ -138,4 +140,37 @@ func TestProxyPinningFailsClosedOnProxyDecisionError(t *testing.T) {
 	require.NoError(t, err)
 	_, err = tr.RoundTrip(req)
 	require.ErrorContains(t, err, "bogus proxy conf")
+}
+
+// Plain-HTTP hostname targets are ALLOWED over native socks5 proxying (the
+// tunnel owns DNS); they would be flat-out rejected via an HTTP(S) proxy.
+func TestPlainHTTPHostnameAllowedViaNativeSocks(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		switch host {
+		case "legacy-socks.example":
+			return []net.IP{net.ParseIP("198.51.100.60")}, nil
+		case "media.example":
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	sentinel := errors.New("dial observed")
+	var dialed []string
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: "legacy-socks.example:1080"}),
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(context.Background(), "http://media.example/thumb.jpg", "image/*", 1<<20)
+	require.ErrorIs(t, err, sentinel, "the hop proceeds to the pinned socks endpoint instead of being rejected")
+	require.NotEmpty(t, dialed)
+	for _, addr := range dialed {
+		assert.Equal(t, "198.51.100.60:1080", addr, "every retry goes through the pinned socks endpoint")
+	}
 }

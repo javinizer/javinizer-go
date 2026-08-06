@@ -286,8 +286,10 @@ func (p *proxyPinningTransport) RoundTrip(req *http.Request) (*http.Response, er
 			req = req.WithContext(context.WithValue(req.Context(), proxiedDialCtxKey{}, ""))
 		}
 	}
-	if req.URL.Scheme == "http" && proxyURL != nil && hostIPLiteral(req.URL.Hostname()) == nil {
-		return nil, &ssrf.UnverifiableHostError{Host: req.URL.Hostname(), Err: errors.New("plain-HTTP proxy fetch of a hostname cannot pin the resolved address (use an HTTPS target or a CONNECT tunnel)")}
+	if req.URL.Scheme == "http" && proxyURL != nil && !ssrf.IsSOCKSProxyURL(proxyURL) && hostIPLiteral(req.URL.Hostname()) == nil {
+		// Native socks5 tunnels perform remote DNS themselves, so hostname
+		// targets stay verifiable there; plain HTTP(S) proxies do not.
+		return nil, &ssrf.UnverifiableHostError{Host: req.URL.Hostname(), Err: errors.New("plain-HTTP proxy fetch of a hostname cannot pin the resolved address (use an HTTPS target, a CONNECT tunnel, or a socks5 proxy)")}
 	}
 	return p.base.RoundTrip(req)
 }
@@ -423,9 +425,10 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		// ignoring Dial would silently discard the caller's dialer.
 		fallback := ssrf.DialContextFunc(guarded)
 		if fetcher.remoteDNS {
-			// SOCKS5-style transports: the dialer owns DNS, so hostnames pass
-			// through untouched; private IP literals remain blocked here because
-			// they need no DNS.
+			// Remote-DNS transports: target names pass through untouched;
+			// private IP literals remain blocked (they need no DNS). Native
+			// socks proxying still pins the PROXY endpoint inside the dial
+			// lane below (markers apply per hop).
 			guarded.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 				if !fetcher.allowPrivateHosts {
 					host, _, splitErr := net.SplitHostPort(addr)
@@ -518,7 +521,11 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 		}
 		return nil
 	}
-	if !fetcher.allowPrivateHosts && fetcher.resolveTargets {
+	if !fetcher.allowPrivateHosts && fetcher.resolveTargets && !fetcher.remoteDNS {
+		// Remote-DNS transports resolve target names on the proxy: pinning the
+		// hostname into the dial would defeat split-horizon/proxy-only targets,
+		// so this HTTP-proxy pinning layer does not apply to them.
+		//
 		// Plain-HTTP proxy requests otherwise carry the original HOSTNAME to
 		// the proxy, which re-resolves it independently (split-horizon DNS can
 		// land the proxy on a private address our local check never sees).
