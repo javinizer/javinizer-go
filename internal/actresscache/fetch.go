@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -108,6 +109,29 @@ func (f *Fetcher) stampProxyDecision(req *http.Request) error {
 	}
 	*req = *req.WithContext(context.WithValue(req.Context(), proxyDecisionCtxKey{}, &proxyDecision{proxyURL: decision}))
 	return nil
+}
+
+// redirectDecisionFingerprint captures every request dimension a proxy
+// policy may read when routing: URL, overridden Host header, and all headers
+// (header-keyed policies exist in the wild).
+func redirectDecisionFingerprint(req *http.Request) string {
+	var b strings.Builder
+	b.WriteString(req.URL.String())
+	b.WriteByte(0)
+	b.WriteString(req.Host)
+	b.WriteByte(0)
+	keys := make([]string, 0, len(req.Header))
+	for key := range req.Header {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		b.WriteString(key)
+		b.WriteByte(1)
+		b.WriteString(strings.Join(req.Header[key], ","))
+		b.WriteByte(0)
+	}
+	return b.String()
 }
 
 // requestProxied evaluates the transport's proxy policy against the ACTUAL
@@ -467,17 +491,20 @@ func NewFetcherWithOptions(client *http.Client, delay time.Duration, userAgent s
 			return err
 		}
 		if previousCheckRedirect != nil {
-			before := req.URL.String()
+			before := redirectDecisionFingerprint(req)
 			if err := previousCheckRedirect(req, via); err != nil {
 				return err
 			}
-			if req.URL.String() != before {
-				// The caller's policy REWROTE req.URL: restamp the decision and
-				// revalidate the final target so a rewritten hop cannot smuggle
-				// a private address past the entry guard. (Unchanged hops keep
-				// the decision taken before the callback -- re-evaluating would
-				// let a stateful policy flip within the same hop.)
+			if redirectDecisionFingerprint(req) != before {
+				// The callback changed decision-relevant state (URL *or*
+				// headers/Host, e.g. header-keyed proxy policies): restamp the
+				// proxy decision against the FINAL request, then revalidate.
+				// Unchanged fingerprints keep the pre-callback decision --
+				// re-evaluating could flip a stateful policy mid-hop.
 				if err := fetcher.stampProxyDecision(req); err != nil {
+					return err
+				}
+				if err := fetcher.limiterForHost(req.URL.Hostname()).Wait(req.Context()); err != nil {
 					return err
 				}
 				if !fetcher.allowPrivateHosts {
