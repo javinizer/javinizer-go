@@ -383,17 +383,37 @@ func TestPinnedProxyTransportPreservesSOCKSHandshake(t *testing.T) {
 			serverErr <- readErr
 			return
 		}
-		address := make([]byte, net.IPv4len)
-		port := make([]byte, 2)
-		if _, readErr := io.ReadFull(conn, address); readErr != nil {
-			serverErr <- readErr
+		var target string
+		switch header[3] {
+		case 0x01: // IPv4
+			address := make([]byte, net.IPv4len)
+			if _, readErr := io.ReadFull(conn, address); readErr != nil {
+				serverErr <- readErr
+				return
+			}
+			target = net.IP(address).String()
+		case 0x03: // domain name (remote-DNS path)
+			lb := make([]byte, 1)
+			if _, readErr := io.ReadFull(conn, lb); readErr != nil {
+				serverErr <- readErr
+				return
+			}
+			host := make([]byte, int(lb[0]))
+			if _, readErr := io.ReadFull(conn, host); readErr != nil {
+				serverErr <- readErr
+				return
+			}
+			target = string(host)
+		default:
+			serverErr <- fmt.Errorf("unsupported address type %d", header[3])
 			return
 		}
+		port := make([]byte, 2)
 		if _, readErr := io.ReadFull(conn, port); readErr != nil {
 			serverErr <- readErr
 			return
 		}
-		targets <- net.JoinHostPort(net.IP(address).String(), strconv.Itoa(int(binary.BigEndian.Uint16(port))))
+		targets <- net.JoinHostPort(target, strconv.Itoa(int(binary.BigEndian.Uint16(port))))
 		if _, writeErr := conn.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); writeErr != nil {
 			serverErr <- writeErr
 			return
@@ -427,7 +447,10 @@ func TestPinnedProxyTransportPreservesSOCKSHandshake(t *testing.T) {
 	resp, err := transport.RoundTrip(req)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
-	require.Equal(t, "1.1.1.1:80", <-targets)
+	// Remote-DNS native socks tunnel: target hostname passes through the
+	// handshake; the proxy resolves it. Pinning natives targets was round-33
+	// behavior -- the validated hostname flow is what the tunnel requires.
+	require.Equal(t, "public.example:80", <-targets)
 	require.NoError(t, <-serverErr)
 }
 

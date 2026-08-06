@@ -384,6 +384,31 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 			return nil, err
 		}
 	}
+	if ssrf.IsSOCKSProxyURL(proxyURL) {
+		// Native SOCKS5/SOCKS5H: the TUNNEL resolves the target. Preserve the
+		// hostname, pin the proxy endpoint, and still refuse private literals.
+		if literal := ssrf.HostIPLiteral(req.URL.Hostname()); literal != nil && ssrf.IsBlockedIP(literal) {
+			return nil, &ssrf.BlockedTargetError{Target: req.URL.Hostname(), Reason: "private/internal IP literal"}
+		}
+		transport := t.base.Clone()
+		transport.Proxy = http.ProxyURL(proxyURL)
+		transport.DisableKeepAlives = true
+		defer transport.CloseIdleConnections()
+		proxyAddrs, plErr := resolveProxyDialAddrs(req.Context(), proxyURL, lookup)
+		if plErr != nil {
+			return nil, plErr
+		}
+		baseDial := ssrf.DialContextFunc(transport)
+		transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialPinnedAddrs(ctx, network, proxyAddrs, baseDial)
+		}
+		resp, err := transport.RoundTrip(req)
+		if err != nil {
+			return nil, err
+		}
+		resp.Request = req
+		return resp, nil
+	}
 	if proxyURL == nil {
 		t.directOnce.Do(func() {
 			transport := t.base.Clone()
@@ -541,6 +566,23 @@ func checkImageTargetHop(ctx context.Context, u *url.URL, remoteDNS bool) error 
 	return ssrf.CheckTarget(ctx, u)
 }
 
+// hopRemoteDNSDecision reports whether THIS request hop resolves remotely:
+// registry-marked transports or a native socks5/socks5h decision computed
+// from the hop's request (header/URL-sensitive policies included).
+func hopRemoteDNSDecision(req *http.Request, transport *http.Transport) bool {
+	if transport == nil {
+		return false
+	}
+	if ssrf.TransportResolvesRemotely(transport) {
+		return true
+	}
+	if transport.Proxy == nil {
+		return false
+	}
+	u, err := transport.Proxy(req)
+	return err == nil && ssrf.IsSOCKSProxyURL(u)
+}
+
 // ValidateRemoteImage ...
 func ValidateRemoteImage(ctx context.Context, rawURL string) error {
 	if err := validateImageTarget(ctx, rawURL, false); err != nil {
@@ -616,7 +658,8 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 		if len(via) >= 10 {
 			return fmt.Errorf("stopped after 10 redirects")
 		}
-		if err := checkImageTargetHop(req.Context(), req.URL, remoteDNS); err != nil {
+		checkTransport, _ := client.Transport.(*http.Transport)
+		if err := checkImageTargetHop(req.Context(), req.URL, hopRemoteDNSDecision(req, checkTransport)); err != nil {
 			return err
 		}
 		if previousCheckRedirect != nil {
@@ -624,8 +667,9 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 				return err
 			}
 			// Caller redirect policies may REWRITE req.URL before approving the
-			// hop; validate the final target, not just the pre-callback one.
-			return checkImageTargetHop(req.Context(), req.URL, remoteDNS)
+			// hop; validate the final target, not just the pre-callback one,
+			// and evaluate the decision against THE REWRITTEN request.
+			return checkImageTargetHop(req.Context(), req.URL, hopRemoteDNSDecision(req, checkTransport))
 		}
 		return nil
 	}
