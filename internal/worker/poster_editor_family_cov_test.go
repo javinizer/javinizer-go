@@ -77,6 +77,22 @@ func newEditorForStore(store resultstore.Store) *PosterEditor {
 	return NewPosterEditor(store, store, nil)
 }
 
+// Poster-only commits must not rewrite the matcher alias (codex P3-A).
+func TestUpdatePosterCropPreservesMatcherAlias(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-al", Status: models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "CANON-9"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "ALIAS-9"},
+	})
+	store.SetFileMatchInfo("/f/a.mp4", models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "ALIAS-9"})
+	pe := NewPosterEditor(store, store, nil)
+	require.NoError(t, pe.UpdatePosterCrop("ALIAS-9", "https://img.example/crop.jpg", &models.CropBounds{X: 0, Y: 0, Width: 0.5, Height: 0.5}, false))
+	fmi, ok := store.GetFileMatchInfo("/f/a.mp4")
+	require.True(t, ok)
+	assert.Equal(t, "ALIAS-9", fmi.MovieID, "poster-only commits must not stamp canonical IDs onto aliases")
+}
+
 // --- registry / key plumbing ---
 
 func TestPosterEditorLockRegistryLazyInit(t *testing.T) {

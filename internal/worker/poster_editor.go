@@ -188,7 +188,8 @@ func (m *LockedMovieOps) mutateCandidates(filePaths []string, mutator func(movie
 		}
 		cand := current.Clone()
 		mutator(cand.Movie)
-		cand.FileMatchInfo.MovieID = cand.Movie.ID
+		// codex P3-A: clones keep the stored matcher alias; ONLY the whole-movie
+		// save stamps the new Movie.ID onto FileMatchInfo (explicit rekey site).
 		// Predict the post-publication revision (codex r15): the committed
 		// envelope snapshot and the in-memory AtomicUpdateFileResult bump
 		// must expose the SAME revision — otherwise a restart reads one less

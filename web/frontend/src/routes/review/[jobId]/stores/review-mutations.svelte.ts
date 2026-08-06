@@ -292,8 +292,14 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			// Always refetch after this batch: even the all-rejected case must
 			// advance the CAS baseline or a same-session retry loops on the
 			// same stale revision (codex r38).
-			await invalidateJobQueries().catch(() => {});
-			if (succeeded.length > 0) {
+			// codex P3-B: if the refetch itself failed, the pane still carries
+			// PRE-save baselines; deleting overlays now would produce a 409 storm
+			// the next save. Keep them when the refresh failed (retry-prone but correct).
+			const refreshed = await invalidateJobQueries().then(
+				() => true,
+				() => false,
+			);
+			if (succeeded.length > 0 && refreshed) {
 				const editedMovies = deps.getEditedMovies();
 				for (const ok of succeeded) {
 					// codex P2-E: delete by PRE-SAVE family membership (immunity to the

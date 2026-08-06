@@ -278,7 +278,9 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		result := status.Results["/tmp/ALT-001.mp4"]
 		require.NotNil(t, result)
 		require.NotNil(t, result.Movie)
-		assert.Equal(t, "ALT-001", result.FileMatchInfo.MovieID)
+		// Codex P3-A: poster edits never restamp the matcher alias — the
+		// canonical ID stays in Movie.ID and drives poster file naming.
+		assert.Equal(t, "LEGACY-001", result.FileMatchInfo.MovieID, "alias is untouched by poster ops")
 		assert.Contains(t, result.Movie.Poster.CroppedPosterURL, "/api/v1/temp/posters/"+job.GetID()+"/ALT-001.jpg")
 		assert.False(t, result.Movie.Poster.ShouldCropPoster)
 	})
