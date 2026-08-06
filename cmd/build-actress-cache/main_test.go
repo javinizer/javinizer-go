@@ -55,7 +55,7 @@ func TestRunListsSourcesWithoutBuilding(t *testing.T) {
 	require.NoError(t, run(t.Context(), []string{"--list-sources"}, &stdout, &stderr))
 	assert.Contains(t, stdout.String(), "legacy-jvthumbs")
 	assert.Contains(t, stdout.String(), "minnanoav")
-	assert.NotContains(t, stdout.String(), "r18dev", "r18dev registers only when a dump path is provided")
+	assert.Contains(t, stdout.String(), "r18dev", "listing shows supported adapters regardless of dump configuration")
 }
 
 func TestRunListsR18DevWithDump(t *testing.T) {

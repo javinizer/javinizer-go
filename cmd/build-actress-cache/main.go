@@ -16,6 +16,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/actresscache"
 	"github.com/javinizer/javinizer-go/internal/actresscache/sources"
+	r18devsource "github.com/javinizer/javinizer-go/internal/actresscache/sources/r18dev"
 )
 
 const (
@@ -302,6 +303,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		defer func() { _ = dumpStore.Close() }()
 	}
 	if opts.listSources {
+		// Listing advertises every SUPPORTED adapter: r18dev's dump is a
+		// runtime dependency the listing walk must not require, so register
+		// the lister-less placeholder unless the dump already registered it.
+		if _, exists := registry.Create("r18dev"); !exists {
+			registry.Register("r18dev", r18devsource.New)
+		}
 		_, _ = fmt.Fprintln(stdout, strings.Join(registry.Names(), "\n"))
 		return nil
 	}
