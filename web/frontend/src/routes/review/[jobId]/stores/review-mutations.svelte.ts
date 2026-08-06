@@ -240,6 +240,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			// if the user edited sibling parts differently, only the newest
 			// overlay is the intent worth persisting.
 			const latestByFamily = new Map<string, [string, Movie]>();
+			const familyPathsByKey = new Map<string, string[]>();
 			for (const [filePath, movie] of deps.getEditedMovies()) {
 				const resultEntry = job?.results?.[filePath];
 				const resultId = resultEntry?.result_id;
@@ -251,6 +252,10 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				// edit order A,B,A resolves to A's newest overlay (codex r9-II).
 				latestByFamily.delete(key);
 				latestByFamily.set(key, [filePath, movie]);
+				// codex P2-E: family membership must be captured pre-save — the
+				// post-save refetch rekeys results, so movie_id lookups miss the
+				// clear below. FS paths stay stable through renames.
+				familyPathsByKey.set(key, [...(familyPathsByKey.get(key) ?? []), filePath]);
 			}
 			const savePromises = Array.from(latestByFamily.entries()).map(([key, [filePath, movie]]) => {
 				const resultEntry = job?.results?.[filePath];
@@ -276,10 +281,11 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			});
 
 			const ops = Array.from(latestByFamily.entries());
+			const paths = Array.from(familyPathsByKey.entries());
 			const settled = await Promise.allSettled(savePromises.filter((p): p is Promise<unknown> => p !== null));
-			return settled.map((s, i) => ({ key: ops[i]?.[0] ?? '', status: s.status }));
+			return settled.map((s, i) => ({ key: ops[i]?.[0] ?? '', status: s.status, paths: paths[i]?.[1] ?? [] }));
 		},
-		onSuccess: async (results: Array<{ key: string; status: string }>) => {
+		onSuccess: async (results: Array<{ key: string; status: string; paths: string[] }>) => {
 			const ops0 = results ?? [];
 			const failed = ops0.filter((r) => r.status === 'rejected');
 			const succeeded = ops0.filter((r) => r.status === 'fulfilled');
@@ -289,13 +295,10 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			await invalidateJobQueries().catch(() => {});
 			if (succeeded.length > 0) {
 				const editedMovies = deps.getEditedMovies();
-				const job = deps.getJob();
 				for (const ok of succeeded) {
-					for (const [fp, movie] of Array.from(editedMovies.entries())) {
-						const rid = job?.results?.[fp]?.movie_id;
-						const ridKey = rid !== '' && rid !== undefined ? rid : '__unpathed__' + fp;
-						if (ridKey === ok.key) editedMovies.delete(fp);
-					}
+					// codex P2-E: delete by PRE-SAVE family membership (immunity to the
+					// post-commit rekey the refetch has already installed).
+					for (const fp of ok.paths) editedMovies.delete(fp);
 				}
 				deps.toastSuccess(m.review_changes_saved());
 			}
