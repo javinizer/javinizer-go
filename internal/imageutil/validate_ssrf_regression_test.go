@@ -398,3 +398,54 @@ func TestValidateRemoteImageLeavesCallerTransportUnwrapped(t *testing.T) {
 	require.ErrorIs(t, derr, sentinel, "the caller's transport object is byte-for-byte untouched")
 	assert.True(t, rawReached)
 }
+
+// SOCKS5 proxy endpoint dials are pinned + failover across answers (the
+// native net/http socks path would otherwise resolve the proxy hostname
+// itself, reopening rebinding).
+func TestSocksProxyEndpointIsPinned(t *testing.T) {
+	var dialed string
+	sentinel := errors.New("dial observed")
+	baseTransport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: "socks.example:1080"}),
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = addr
+			return nil, sentinel
+		},
+	}
+	lookup := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		switch host {
+		case "socks.example":
+			return []net.IPAddr{{IP: net.ParseIP("198.51.100.40")}}, nil
+		default:
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		}
+	}
+	p := &pinnedProxyTransport{base: baseTransport, lookup: lookup}
+	req, err := http.NewRequest(http.MethodGet, "https://media.example/img.jpg", nil)
+	require.NoError(t, err)
+	_, err = p.RoundTrip(req)
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, "198.51.100.40:1080", dialed, "socks endpoint dialed pinned")
+}
+
+// A proxy that cannot be resolved must void the attempt (no unguarded dial).
+func TestSocksProxyResolutionFailureFailsAttempt(t *testing.T) {
+	baseTransport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: "socks.example:1080"}),
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			t.Fatal("must never dialed")
+			return nil, nil
+		},
+	}
+	lookup := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host == "socks.example" {
+			return nil, errors.New("dns down for proxy")
+		}
+		return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+	}
+	p := &pinnedProxyTransport{base: baseTransport, lookup: lookup}
+	req, err := http.NewRequest(http.MethodGet, "https://media.example/img.jpg", nil)
+	require.NoError(t, err)
+	_, err = p.RoundTrip(req)
+	require.ErrorContains(t, err, "resolve configured proxy")
+}

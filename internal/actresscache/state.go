@@ -14,6 +14,38 @@ import (
 	"sync"
 )
 
+// syncFile models the file operations durability needs, so tests can fault
+// each stage independently.
+type syncFile interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
+// stateSyncOpen is seam-injectable for failure coverage of each stage.
+var stateSyncOpen = func(path string, perm os.FileMode) (syncFile, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+}
+
+// writeFileSync writes data with fsync before close: compactions rename over
+// the live journal, so an unsynced tmp file could rename to a TORN state
+// file after power loss and destroy the resumable last-good entries.
+func writeFileSync(path string, data []byte, perm os.FileMode) error {
+	f, err := stateSyncOpen(path, perm)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	if serr := f.Sync(); serr != nil && werr == nil {
+		werr = serr
+	}
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	return cerr
+}
+
 var (
 	stateReadFile       = os.ReadFile
 	stateRepairTail     = repairStateTail
@@ -24,7 +56,7 @@ var (
 	stateSeekEnd        = func(file *os.File) error { _, err := file.Seek(0, io.SeekEnd); return err }
 	stateWriteNewline   = func(file *os.File) error { _, err := file.Write([]byte{10}); return err }
 	stateRename         = atomicReplace
-	stateWriteFileNew   = os.WriteFile
+	stateWriteFileNew   = writeFileSync
 )
 
 type stateStore struct {
