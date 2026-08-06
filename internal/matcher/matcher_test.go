@@ -2778,6 +2778,33 @@ func TestValidateMultipartInDirectory_LetterPrefixTrailingNumberEndToEnd(t *test
 	}
 }
 
+// TestValidateMultipartInDirectory_StrippedEZDoNotConfirmEachOther verifies that two
+// E/Z-stripped catalog IDs (e.g. IPX-535E-4k + IPX-535Z-4k) do NOT confirm each other as
+// multipart: E and Z are catalog suffixes, not part letters, so both restore their original IDs.
+func TestValidateMultipartInDirectory_StrippedEZDoNotConfirmEachOther(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535E-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535E-4k.mp4"},
+		{Name: "IPX-535Z-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535Z-4k.mp4"},
+	}
+	results := m.Match(files)
+	require.Len(t, results, 2)
+
+	validated := ValidateMultipartInDirectory(results)
+	for i, r := range validated {
+		if r.IsMultiPart {
+			t.Errorf("result %d: stripped E/Z catalog IDs must not confirm as multipart", i)
+		}
+		wantID := "IPX-535" + map[int]string{0: "E", 1: "Z"}[i]
+		if r.ID != wantID {
+			t.Errorf("result %d: expected ID %q, got %q", i, wantID, r.ID)
+		}
+	}
+}
+
 // TestValidateMultipartInDirectory_LoneEZCatalogSuffixRestored verifies that a lone
 // E/Z-suffixed catalog ID with a quality tag (e.g. IPX-535E-4k) has its ID restored to
 // IPX-535E after validation, since E is a catalog suffix (not a part letter) when there
