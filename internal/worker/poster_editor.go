@@ -672,6 +672,45 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 	return updated, updatedProv, nil
 }
 
+// flipPendingCancelIfTerminal pre-marks a cancellable job cancelled before the
+// commit encodes the envelope, when the candidate exclusion set covers EVERY
+// known result (codex P5-A): the committed row then carries Cancelled
+// atomically — a Pending+all-excluded row surviving a crash is resurrected as
+// Failed by recoverOrphanedJobs. On Commit failure the caller restores the
+// status via the returned function; post-commit cancelIfAll brings the real
+// Cancel() transition (timestamps/done broadcast) as before.
+func flipPendingCancelIfTerminal(lc *JobLifecycle, excluded map[string]bool, lookup resultstore.ResultReadFacade) func() {
+	if lc == nil || len(excluded) == 0 {
+		return nil
+	}
+	st := lc.GetJobStatus()
+	if st != models.JobStatusPending && st != models.JobStatusRunning {
+		return nil
+	}
+	ra, ok := lookup.(resultstore.ResultMapAccessor)
+	if !ok {
+		return nil
+	}
+	snap := ra.SnapshotData()
+	if len(snap.Results) == 0 {
+		return nil
+	}
+	for fp := range snap.Results {
+		if !excluded[fp] {
+			return nil
+		}
+	}
+	lc.mu.Lock()
+	prevStatus := lc.Status
+	lc.Status = models.JobStatusCancelled
+	lc.mu.Unlock()
+	return func() {
+		lc.mu.Lock()
+		lc.Status = prevStatus
+		lc.mu.Unlock()
+	}
+}
+
 // ExcludeFamily marks every file of the family excluded and auto-cancels the
 // job when nothing remains (legacy ExcludeFile semantics, family-scoped).
 // Called under WithMovieEditLock.
@@ -706,6 +745,10 @@ func (m *LockedMovieOps) ExcludeFamily(ctx context.Context) error {
 		return false
 	}
 	if env != nil && env.committer != nil && env.envelope != nil {
+		// codex P5-A: all-excluded jobs must ATOMICALLY carry the cancelled
+		// status in the committed envelope — the tx's row would otherwise sit
+		// as still-Pending post-cancel and restart-converts to Failed.
+		restore := flipPendingCancelIfTerminal(env.lifecycle, m.excludedSnapshot(filePaths), m.pe.lookup)
 		err := env.committer.Commit(ctx, &EditCommitPlan{
 			EnvelopeFn: func() (*models.Job, error) {
 				return env.envelope(nil, nil, m.excludedSnapshot(filePaths))
@@ -713,6 +756,9 @@ func (m *LockedMovieOps) ExcludeFamily(ctx context.Context) error {
 			Publish: func() error { publish(); return nil },
 		})
 		if err != nil {
+			if restore != nil {
+				restore()
+			}
 			return err
 		}
 		// Auto-cancel (legacy semantic) fires AFTER the exclusion commit. If

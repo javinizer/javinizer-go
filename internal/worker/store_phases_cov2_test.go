@@ -375,7 +375,65 @@ func TestDeleteJobPendingDoneTimeout(t *testing.T) {
 	assert.True(t, s.IsTombstoned(job.ID.String()))
 }
 
-// --- scrape phase Run defer arms ---
+// --- exclusion atomic-cancel flip arms ---
+
+// flipPendingCancelIfTerminal gates: only when the candidate set covers every
+// stored result and the job is cancellable.
+func TestFlipPendingCancelIfTerminalArms(t *testing.T) {
+	t.Run("nil lifecycle no-op", func(t *testing.T) {
+		assert.Nil(t, flipPendingCancelIfTerminal(nil, map[string]bool{"/f/a.mp4": true}, nil))
+	})
+	t.Run("persist status excludes flip", func(t *testing.T) {
+		_ = "x"
+		lc := &JobLifecycle{Status: models.JobStatusCompleted, done: make(chan struct{})}
+		assert.Nil(t, flipPendingCancelIfTerminal(lc, map[string]bool{"/f/a.mp4": true}, nil))
+		assert.Equal(t, models.JobStatusCompleted, lc.GetJobStatus())
+	})
+	t.Run("non-empty result not in the exclusion set", func(t *testing.T) {
+		store := resultstore.New(2, []string{"/f/a.mp4", "/f/z.mp4"})
+		seedFamilyResult(store, "/f/a.mp4", "res-a", "FC-1", "")
+		seedFamilyResult(store, "/f/z.mp4", "res-z", "FC-2", "")
+		lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
+		assert.Nil(t, flipPendingCancelIfTerminal(lc, map[string]bool{"/f/a.mp4": true}, store))
+	})
+	t.Run("fully excluded flips to cancelled pre-commit", func(t *testing.T) {
+		store := resultstore.New(1, []string{"/f/a.mp4"})
+		seedFamilyResult(store, "/f/a.mp4", "res-a", "FC-3", "")
+		lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
+		restore := flipPendingCancelIfTerminal(lc, map[string]bool{"/f/a.mp4": true}, store)
+		require.NotNil(t, restore)
+		assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus())
+		restore()
+		assert.Equal(t, models.JobStatusRunning, lc.GetJobStatus())
+	})
+	t.Run("accessor-less lookup skips the flip", func(t *testing.T) {
+		lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
+		assert.Nil(t, flipPendingCancelIfTerminal(lc, map[string]bool{"/f/a.mp4": true}, nil))
+	})
+}
+
+// The committer leg now folds the cancel before the tx so the on-disk row is
+// atomically Cancelled (codex P5-A) and rolls the marker back on tx failure.
+func TestExcludeFamilyCommitterFoldCancelIntoTx(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "FC-F1", "")
+	lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
+	capturedInTx := make(chan models.JobStatus, 1)
+	committer := NewEditCommitter(&okTransactor{}, newKeyedMutexRegistry(), "JOB-FC", newKeyedMutexRegistry())
+	pe := NewPosterEditor(store, store, nil)
+	pe.attachEnv(&posterEditEnv{
+		committer: committer,
+		envelope: func(map[string]*resultstore.MovieResult, map[string]*resultstore.ProvenanceData, map[string]bool) (*models.Job, error) {
+			capturedInTx <- lc.GetJobStatus()
+			return nil, nil
+		},
+		lifecycle: lc,
+	})
+	m := &LockedMovieOps{pe: pe, movieID: "FC-F1"}
+	require.NoError(t, m.ExcludeFamily(context.Background()))
+	assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus())
+	assert.Equal(t, models.JobStatusCancelled, <-capturedInTx, "the tx's envelope encode observed the cancelled marker")
+}
 
 func TestScrapePhaseRunDeferPersistsThroughEmptyRun(t *testing.T) {
 	calls := 0
