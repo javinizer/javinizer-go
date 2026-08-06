@@ -25,6 +25,7 @@ type MatchResult struct {
 	MatchedBy        string // "regex" or "builtin"
 	MultipartPattern string // Pattern type: "explicit", "letter", "trailing", or "" (see PatternExplicit, PatternLetter, PatternTrailing, PatternNone)
 	TrailingPrefix   string // For PatternTrailing: noise portion before the part number (e.g., "-un-javgg.net")
+	strippedSuffix   string // E/Z catalog suffix stripped from the ID at match time; restored by ValidateMultipartInDirectory if the part does not confirm
 }
 
 // NewMatcher creates a new file matcher
@@ -132,6 +133,7 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 		baseID := result.ID[:n-1]
 		num, suffix, patternType, trailingPrefix := DetectPartSuffix(filename, baseID)
 		if patternType == PatternLetter && trailingPrefix != "" {
+			result.strippedSuffix = string(result.ID[n-1])
 			result.ID = baseID
 			result.PartNumber = num
 			result.PartSuffix = suffix
@@ -311,6 +313,10 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 
 	for i := range validated {
 		if validated[i].MultipartPattern == PatternLetter && !validated[i].IsMultiPart {
+			if validated[i].strippedSuffix != "" {
+				validated[i].ID += validated[i].strippedSuffix
+				validated[i].strippedSuffix = ""
+			}
 			validated[i].PartNumber = 0
 			validated[i].PartSuffix = ""
 		}

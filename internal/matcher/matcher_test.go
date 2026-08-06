@@ -642,6 +642,8 @@ func TestMatcher_EZ_CatalogSuffix_StrippedForLetterQuality(t *testing.T) {
 		{"part z + 1080p tag", "ABC-123z-1080p.mp4", "ABC-123"},
 		{"catalog suffix Z (no tag)", "IPX-535Z.mp4", "IPX-535Z"},
 		{"catalog suffix E (no tag)", "IPX-535E.mp4", "IPX-535E"},
+		{"catalog suffix E + 4k tag (lone)", "IPX-535E-4k.mp4", "IPX-535"},
+		{"catalog suffix Z + 1080p tag (lone)", "ABC-123Z-1080p.mp4", "ABC-123"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2774,6 +2776,32 @@ func TestValidateMultipartInDirectory_LetterPrefixTrailingNumberEndToEnd(t *test
 	if confirmed != 2 {
 		t.Errorf("expected both trailing-number siblings to confirm multipart, got %d", confirmed)
 	}
+}
+
+// TestValidateMultipartInDirectory_LoneEZCatalogSuffixRestored verifies that a lone
+// E/Z-suffixed catalog ID with a quality tag (e.g. IPX-535E-4k) has its ID restored to
+// IPX-535E after validation, since E is a catalog suffix (not a part letter) when there
+// are no confirming siblings.
+func TestValidateMultipartInDirectory_LoneEZCatalogSuffixRestored(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535E-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535E-4k.mp4"},
+	}
+	results := m.Match(files)
+	require.Len(t, results, 1)
+	// Pre-validation: E is optimistically stripped
+	assert.Equal(t, "IPX-535", results[0].ID, "pre-validation: E stripped optimistically")
+	assert.Equal(t, PatternLetter, results[0].MultipartPattern)
+
+	validated := ValidateMultipartInDirectory(results)
+	require.Len(t, validated, 1)
+	assert.False(t, validated[0].IsMultiPart, "lone file must not be multipart")
+	assert.Equal(t, "IPX-535E", validated[0].ID, "post-validation: lone E catalog suffix must be restored")
+	assert.Equal(t, 0, validated[0].PartNumber, "PartNumber cleared")
+	assert.Equal(t, "", validated[0].PartSuffix, "PartSuffix cleared")
 }
 
 // TestValidateMultipartInDirectory_SGKI071EndToEnd tests the specific regression case
