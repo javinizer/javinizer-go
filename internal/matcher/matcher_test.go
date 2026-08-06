@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMatcher_MatchFile(t *testing.T) {
@@ -615,6 +617,16 @@ func TestMatcher_LongStudioCodes(t *testing.T) {
 }
 
 // TestMatcher_PartSuffixVariations tests various multi-part suffix formats
+func TestMatcher_MatchFile_CustomRegexEmptyCapture(t *testing.T) {
+	cfg := &Config{RegexEnabled: true, RegexPattern: "([A-Z]*)"}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	file := models.FileMatchInfo{Name: "123.mp4", Extension: ".mp4"}
+	result := m.MatchFile(file)
+	assert.Nil(t, result, "custom regex with empty capture group must yield no match (falls back to builtin, which also misses '123')")
+}
+
 func TestMatcher_PartSuffixVariations(t *testing.T) {
 	cfg := &Config{
 		RegexEnabled: false,
@@ -639,6 +651,10 @@ func TestMatcher_PartSuffixVariations(t *testing.T) {
 		{"Letter B", "IPX-535-B.mp4", "IPX-535", 2, false, PatternLetter},
 		{"Letter C", "IPX-535-C.mp4", "IPX-535", 3, false, PatternLetter},
 		{"Lowercase letter", "IPX-535-a.mp4", "IPX-535", 1, false, PatternLetter},
+
+		// Letter + trailing content (quality/resolution tag) - ambiguous, require directory validation
+		{"Letter a + 4k tag (no sep)", "IPX-535a-4k.mp4", "IPX-535", 1, false, PatternLetter},
+		{"Letter b + 1080p tag (dash sep)", "IPX-535-b-1080p.mp4", "IPX-535", 2, false, PatternLetter},
 
 		// Numeric suffixes - explicit, always multipart
 		{"pt1", "IPX-535-pt1.mp4", "IPX-535", 1, true, PatternExplicit},
@@ -1177,7 +1193,7 @@ func TestMatcher_PartSuffixEdgeCases(t *testing.T) {
 
 		// Parts with extra text (the regex is flexible and still detects these)
 		{"Part with text after", "IPX-535-part1-extra.mp4", "IPX-535", 1, "-part1", true, PatternExplicit},
-		{"Letter with text after", "IPX-535-A-extra.mp4", "IPX-535", 0, "", false, PatternNone}, // Extra text prevents letter detection
+		{"Letter with text after", "IPX-535-A-extra.mp4", "IPX-535", 0, "", false, PatternNone}, // -extra is not a resolution tag, so not a letter+trailing part
 
 		// ID ending in letter ABC-123A (letter pattern - needs validation)
 		{"ID ending in letter ABC-123A (letter pattern - needs validation)", "ABC-123A.mp4", "ABC-123", 1, "-A", false, PatternLetter},
@@ -1335,6 +1351,334 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 			},
 			expectedMulti: []bool{true, true},
 			desc:          "Two files with same ID and letter suffixes should be detected as multipart",
+		},
+		{
+			name: "two letter+quality-tag files same ID - IS multipart",
+			results: []MatchResult{
+				{
+					ID:               "SVFLA-001",
+					PartNumber:       1,
+					PartSuffix:       "-A",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					File:             models.FileMatchInfo{Path: "/videos/SVFLA-001a-4k.mp4"},
+				},
+				{
+					ID:               "SVFLA-001",
+					PartNumber:       2,
+					PartSuffix:       "-B",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					File:             models.FileMatchInfo{Path: "/videos/SVFLA-001b-4k.mp4"},
+				},
+			},
+			expectedMulti: []bool{true, true},
+			desc:          "Two letter+quality-tag files with same ID should be detected as multipart",
+		},
+		{
+			name: "single letter+quality-tag file - NOT multipart",
+			results: []MatchResult{
+				{
+					ID:               "SVFLA-001",
+					PartNumber:       1,
+					PartSuffix:       "-A",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					File:             models.FileMatchInfo{Path: "/videos/SVFLA-001a-4k.mp4"},
+				},
+			},
+			expectedMulti: []bool{false},
+			desc:          "Single letter+quality-tag file should NOT be treated as multipart",
+		},
+		{
+			name: "same letter, different quality tag - NOT multipart (same part, different encode)",
+			results: []MatchResult{
+				{
+					ID:               "IPX-535",
+					PartNumber:       1,
+					PartSuffix:       "-A",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					TrailingPrefix:   "-4k",
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID:               "IPX-535",
+					PartNumber:       1,
+					PartSuffix:       "-A",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					TrailingPrefix:   "-1080p",
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535a-1080p.mp4"},
+				},
+			},
+			expectedMulti: []bool{false, false},
+			desc:          "Two files with same part letter but different quality tags are the same part (duplicate encodes), not two parts",
+		},
+		{
+			name: "same letter, same trailing tag, different container - NOT multipart (same part)",
+			results: []MatchResult{
+				{
+					ID:               "IPX-535",
+					PartNumber:       1,
+					PartSuffix:       "-A",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					TrailingPrefix:   "-4k",
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID:               "IPX-535",
+					PartNumber:       1,
+					PartSuffix:       "-A",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					TrailingPrefix:   "-4k",
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mkv"},
+				},
+			},
+			expectedMulti: []bool{false, false},
+			desc:          "Two files with the same part letter and same trailing tag (e.g. mp4 + mkv encodes) are the same part, not two parts",
+		},
+		{
+			name: "letter + non-quality trailing word - NOT multipart (edition variant)",
+			results: []MatchResult{
+				{
+					ID: "IPX-535", PartNumber: 0, PartSuffix: "", MultipartPattern: PatternNone, IsMultiPart: false,
+					File: models.FileMatchInfo{Path: "/videos/IPX-535-A-extra.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 0, PartSuffix: "", MultipartPattern: PatternNone, IsMultiPart: false,
+					File: models.FileMatchInfo{Path: "/videos/IPX-535-B-extra.mp4"},
+				},
+			},
+			expectedMulti: []bool{false, false},
+			desc:          "Letter + a non-quality trailing word (e.g. -extra) is an edition/variant, not a part; the regex only accepts digit-first resolution tags as trailing content",
+		},
+		{
+			name: "bare A/B and tagged A/B-4k overlap - only one set confirms",
+			results: []MatchResult{
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "", File: models.FileMatchInfo{Path: "/videos/IPX-535-A.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "", File: models.FileMatchInfo{Path: "/videos/IPX-535-B.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535b-4k.mp4"},
+				},
+			},
+			expectedMulti: []bool{true, true, false, false},
+			desc:          "Bare A/B and tagged A/B-4k both render -pt1/-pt2; the bare set confirms first and the tagged set is rejected to avoid the collision (duplicate targets left to the organize layer)",
+		},
+		{
+			name: "bare letter and tagged letter do NOT cross-validate",
+			results: []MatchResult{
+				{
+					ID: "ABW-121", PartNumber: 3, PartSuffix: "-C", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "", File: models.FileMatchInfo{Path: "/videos/ABW-121-C.mp4"},
+				},
+				{
+					ID: "ABW-121", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/ABW-121-A-4k.mp4"},
+				},
+				{
+					ID: "ABW-121", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/ABW-121-B-4k.mp4"},
+				},
+			},
+			expectedMulti: []bool{false, true, true},
+			desc:          "Bare letter C (subtitle variant) does not cross-validate with tagged letters A/B-4k; the tagged pair confirms among themselves, the bare C stays single-part",
+		},
+		{
+			name: "different letters, different trailing tags - both confirm (distinct parts)",
+			results: []MatchResult{
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-1080p", File: models.FileMatchInfo{Path: "/videos/IPX-535b-1080p.mp4"},
+				},
+			},
+			expectedMulti: []bool{true, true},
+			desc:          "a-4k and b-1080p are distinct parts (letters A and B); differing trailing tags do not change the part identity, so both confirm as parts 1 and 2",
+		},
+		{
+			name: "transitive overlap via shared part - later candidate NOT confirmed (order-independent)",
+			results: []MatchResult{
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535b-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-1080p", File: models.FileMatchInfo{Path: "/videos/IPX-535a-1080p.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-2160p", File: models.FileMatchInfo{Path: "/videos/IPX-535b-2160p.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 3, PartSuffix: "-C", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-2160p", File: models.FileMatchInfo{Path: "/videos/IPX-535c-2160p.mp4"},
+				},
+			},
+			expectedMulti: []bool{false, false, false, false, false},
+			desc:          "X={1,2}-4k, Y={1}-1080p, Z={2,3}-2160p: Z shares part 2 with the invalidated X, so Z must NOT confirm regardless of map iteration order (part 2 would collide)",
+		},
+		{
+			name: "part number shared across letter groups - candidate NOT confirmed",
+			results: []MatchResult{
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535b-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-1080p", File: models.FileMatchInfo{Path: "/videos/IPX-535a-1080p.mp4"},
+				},
+			},
+			expectedMulti: []bool{false, false, false},
+			desc:          "Part number 1 appears in both the -4k and -1080p letter groups, so the -4k candidate is not confirmed (a-1080p would otherwise be misclassified as the single-part ID.mp4); duplicate targets left to the organize layer",
+		},
+		{
+			name: "letter group overlapping trailing group - letter group NOT confirmed",
+			results: []MatchResult{
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535b-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-1", MultipartPattern: PatternTrailing, IsMultiPart: false,
+					TrailingPrefix: "-HD", File: models.FileMatchInfo{Path: "/videos/IPX-535-HD-1.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-2", MultipartPattern: PatternTrailing, IsMultiPart: false,
+					TrailingPrefix: "-HD", File: models.FileMatchInfo{Path: "/videos/IPX-535-HD-2.mp4"},
+				},
+			},
+			expectedMulti: []bool{false, false, true, true},
+			desc:          "Letter group parts 1/2 overlap a trailing group parts 1/2, so the letter group is not confirmed (would collide on -pt1/-pt2); trailing group still confirms",
+		},
+		{
+			name: "letter group overlapping explicit part - letter group NOT confirmed",
+			results: []MatchResult{
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-pt1", MultipartPattern: PatternExplicit, IsMultiPart: true,
+					File: models.FileMatchInfo{Path: "/videos/IPX-535-pt1.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535b-4k.mp4"},
+				},
+			},
+			expectedMulti: []bool{true, false, false},
+			desc:          "Letter group parts 1/2 overlap explicit pt1 on part 1, so the letter group is not confirmed (would collide on -pt1); explicit stays multipart",
+		},
+		{
+			name: "disjoint quality-tag groups - both confirm (no part-number overlap)",
+			results: []MatchResult{
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535b-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 3, PartSuffix: "-C", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-1080p", File: models.FileMatchInfo{Path: "/videos/IPX-535c-1080p.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 4, PartSuffix: "-D", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-1080p", File: models.FileMatchInfo{Path: "/videos/IPX-535d-1080p.mp4"},
+				},
+			},
+			expectedMulti: []bool{true, true, true, true},
+			desc:          "Two quality-tag groups with disjoint part numbers (1-2 and 3-4) produce distinct -pt1/-pt2/-pt3/-pt4 targets, so both confirm",
+		},
+		{
+			name: "two quality-tag groups same ID - NOT multipart (would collide on -pt1/-pt2)",
+			results: []MatchResult{
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-4k", File: models.FileMatchInfo{Path: "/videos/IPX-535b-4k.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 1, PartSuffix: "-A", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-1080p", File: models.FileMatchInfo{Path: "/videos/IPX-535a-1080p.mp4"},
+				},
+				{
+					ID: "IPX-535", PartNumber: 2, PartSuffix: "-B", MultipartPattern: PatternLetter, IsMultiPart: false,
+					TrailingPrefix: "-1080p", File: models.FileMatchInfo{Path: "/videos/IPX-535b-1080p.mp4"},
+				},
+			},
+			expectedMulti: []bool{false, false, false, false},
+			desc:          "Two distinct quality-tag groups (4k and 1080p) for the same ID would both render ID-pt1/pt2 targets and collide under concurrent apply, so neither group confirms; duplicate single-part targets are left to the organize layer's conflict detection",
+		},
+		{
+			name: "A/A/B same tag - NOT multipart (duplicate part number A)",
+			results: []MatchResult{
+				{
+					ID:               "IPX-535",
+					PartNumber:       1,
+					PartSuffix:       "-A",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					TrailingPrefix:   "-4k",
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mp4"},
+				},
+				{
+					ID:               "IPX-535",
+					PartNumber:       1,
+					PartSuffix:       "-A",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					TrailingPrefix:   "-4k",
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535a-4k.mkv"},
+				},
+				{
+					ID:               "IPX-535",
+					PartNumber:       2,
+					PartSuffix:       "-B",
+					MultipartPattern: PatternLetter,
+					IsMultiPart:      false,
+					TrailingPrefix:   "-4k",
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535b-4k.mp4"},
+				},
+			},
+			expectedMulti: []bool{false, false, false},
+			desc:          "A/A/B with a shared tag has a duplicate part number (A), so none are confirmed multipart — no colliding -pt1 names",
 		},
 		{
 			name: "explicit pattern stays multipart regardless of sibling count",
@@ -1959,6 +2303,373 @@ func TestValidateMultipartInDirectory_ActualMultipart(t *testing.T) {
 	for i, r := range validated {
 		if r.IsMultiPart != true {
 			t.Errorf("Result %d: expected IsMultiPart=true after validation, got false", i)
+		}
+	}
+}
+
+// TestValidateMultipartInDirectory_LetterQualityTagEndToEnd tests the regression case
+// where a single-letter part marker is followed by a quality/resolution tag
+// (e.g. SVFLA-001a-4k.mp4 + SVFLA-001b-4k.mp4), which previously fell through to
+// PatternNone and produced identical <ID> filenames that collided on disk.
+func TestValidateMultipartInDirectory_LetterQualityTagEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "SVFLA-001a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001a-4k.mp4"},
+		{Name: "SVFLA-001b-4k.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001b-4k.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 results, got %d", len(results))
+	}
+
+	wantParts := map[string]int{"SVFLA-001a-4k.mp4": 1, "SVFLA-001b-4k.mp4": 2}
+	wantSuffix := map[string]string{"SVFLA-001a-4k.mp4": "-A", "SVFLA-001b-4k.mp4": "-B"}
+	for _, r := range results {
+		if r.MultipartPattern != PatternLetter {
+			t.Errorf("%s: expected MultipartPattern %s, got %s", r.File.Name, PatternLetter, r.MultipartPattern)
+		}
+		if r.IsMultiPart != false {
+			t.Errorf("%s: expected IsMultiPart=false before validation, got true", r.File.Name)
+		}
+		if r.PartNumber != wantParts[r.File.Name] {
+			t.Errorf("%s: expected PartNumber %d, got %d", r.File.Name, wantParts[r.File.Name], r.PartNumber)
+		}
+		if r.PartSuffix != wantSuffix[r.File.Name] {
+			t.Errorf("%s: expected PartSuffix %s, got %s", r.File.Name, wantSuffix[r.File.Name], r.PartSuffix)
+		}
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	for _, r := range validated {
+		if r.IsMultiPart != true {
+			t.Errorf("%s: expected IsMultiPart=true after validation, got false", r.File.Name)
+		}
+		if r.PartNumber != wantParts[r.File.Name] {
+			t.Errorf("%s: expected PartNumber %d after validation, got %d", r.File.Name, wantParts[r.File.Name], r.PartNumber)
+		}
+	}
+}
+
+// TestValidateMultipartInDirectory_LetterSamePartDifferentQualityEndToEnd verifies that
+// two encodes of the SAME part (same letter, different quality tag) are NOT confirmed as
+// multipart through the real Match -> Validate pipeline, so they do not both render -pt1.
+func TestValidateMultipartInDirectory_LetterSamePartDifferentQualityEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k.mp4"},
+		{Name: "IPX-535a-1080p.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-1080p.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.MultipartPattern != PatternLetter {
+			t.Errorf("%s: expected MultipartPattern %s, got %s", r.File.Name, PatternLetter, r.MultipartPattern)
+		}
+		if r.TrailingPrefix == "" {
+			t.Errorf("%s: expected non-empty TrailingPrefix for letter+trailing match", r.File.Name)
+		}
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	for _, r := range validated {
+		if r.IsMultiPart {
+			t.Errorf("%s: same-part-different-quality must NOT be confirmed multipart, got IsMultiPart=true", r.File.Name)
+		}
+	}
+}
+
+// TestValidateMultipartInDirectory_LetterSamePartSameTrailingEndToEnd verifies that
+// two encodes of the SAME part in different containers (e.g. .mp4 + .mkv, both "a-4k")
+// are NOT confirmed as multipart through the real Match -> Validate pipeline: they share
+// both the part letter and the trailing tag, so they must not render a colliding -pt1.
+func TestValidateMultipartInDirectory_LetterSamePartSameTrailingEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k.mp4"},
+		{Name: "IPX-535a-4k.mkv", Extension: ".mkv", Path: "/media/JAV/IPX-535a-4k.mkv"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 results, got %d", len(results))
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	for _, r := range validated {
+		if r.IsMultiPart {
+			t.Errorf("%s: same-part-same-trailing must NOT be confirmed multipart, got IsMultiPart=true", r.File.Name)
+		}
+	}
+}
+
+// TestValidateMultipartInDirectory_TwoQualityTagGroupsEndToEnd verifies that two
+// distinct quality-tag groups (a/b-4k + a/b-1080p) for the same ID are NOT confirmed
+// multipart through the real Match -> Validate pipeline, so neither renders the
+// colliding -pt1/-pt2 names that concurrent apply could overwrite.
+func TestValidateMultipartInDirectory_TwoQualityTagGroupsEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k.mp4"},
+		{Name: "IPX-535b-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535b-4k.mp4"},
+		{Name: "IPX-535a-1080p.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-1080p.mp4"},
+		{Name: "IPX-535b-1080p.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535b-1080p.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 4 {
+		t.Fatalf("Expected 4 results, got %d", len(results))
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	for _, r := range validated {
+		if r.IsMultiPart {
+			t.Errorf("%s: two quality-tag groups must not both confirm multipart (would collide on -pt1/-pt2), got IsMultiPart=true", r.File.Name)
+		}
+	}
+}
+
+// TestValidateMultipartInDirectory_DisjointQualityTagGroupsEndToEnd verifies that
+// two quality-tag groups with disjoint part numbers (a/b-4k parts 1-2 + c/d-1080p parts 3-4)
+// both confirm multipart through the real Match -> Validate pipeline, producing distinct
+// -pt1/-pt2/-pt3/-pt4 targets with no collision.
+func TestValidateMultipartInDirectory_DisjointQualityTagGroupsEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k.mp4"},
+		{Name: "IPX-535b-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535b-4k.mp4"},
+		{Name: "IPX-535c-1080p.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535c-1080p.mp4"},
+		{Name: "IPX-535d-1080p.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535d-1080p.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 4 {
+		t.Fatalf("Expected 4 results, got %d", len(results))
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	confirmed := 0
+	for _, r := range validated {
+		if r.IsMultiPart {
+			confirmed++
+		}
+	}
+	if confirmed != 4 {
+		t.Errorf("expected all 4 disjoint-group files to confirm multipart, got %d", confirmed)
+	}
+}
+
+// TestValidateMultipartInDirectory_LetterGroupOverlappingExplicitEndToEnd verifies that
+// a letter quality-tag group whose part numbers overlap an existing explicit -pt1 part is
+// NOT confirmed through the real Match -> Validate pipeline, preventing a colliding -pt1
+// target (explicit pt1 vs letter part A both render ID-pt1).
+func TestValidateMultipartInDirectory_LetterGroupOverlappingExplicitEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535-pt1.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-pt1.mp4"},
+		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k.mp4"},
+		{Name: "IPX-535b-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535b-4k.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 3 {
+		t.Fatalf("Expected 3 results, got %d", len(results))
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	explicitConfirmed := 0
+	letterConfirmed := 0
+	for _, r := range validated {
+		if r.MultipartPattern == PatternExplicit && r.IsMultiPart {
+			explicitConfirmed++
+		}
+		if r.MultipartPattern == PatternLetter && r.IsMultiPart {
+			letterConfirmed++
+			t.Errorf("%s: letter group overlapping an explicit part must not be confirmed multipart", r.File.Name)
+		}
+	}
+	if explicitConfirmed != 1 {
+		t.Errorf("expected the explicit pt1 to stay multipart, got %d confirmed", explicitConfirmed)
+	}
+	if letterConfirmed != 0 {
+		t.Errorf("expected no letter-group file confirmed, got %d", letterConfirmed)
+	}
+}
+
+// TestValidateMultipartInDirectory_LetterGroupOverlappingTrailingEndToEnd verifies
+// that a letter quality-tag group whose part numbers overlap a trailing-number group
+// (PatternTrailing) is NOT confirmed through the real Match -> Validate pipeline, even
+// though trailing parts start with IsMultiPart=false, because trailing confirmation runs
+// before the letter overlap check.
+func TestValidateMultipartInDirectory_LetterGroupOverlappingTrailingEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k.mp4"},
+		{Name: "IPX-535b-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535b-4k.mp4"},
+		{Name: "IPX-535-HD-1.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-HD-1.mp4"},
+		{Name: "IPX-535-HD-2.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-HD-2.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 4 {
+		t.Fatalf("Expected 4 results, got %d", len(results))
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	letterConfirmed := 0
+	trailingConfirmed := 0
+	for _, r := range validated {
+		if r.MultipartPattern == PatternLetter && r.IsMultiPart {
+			letterConfirmed++
+			t.Errorf("%s: letter group overlapping a trailing group must not be confirmed multipart", r.File.Name)
+		}
+		if r.MultipartPattern == PatternTrailing && r.IsMultiPart {
+			trailingConfirmed++
+		}
+	}
+	if letterConfirmed != 0 {
+		t.Errorf("expected no letter-group file confirmed, got %d", letterConfirmed)
+	}
+	if trailingConfirmed != 2 {
+		t.Errorf("expected both trailing files confirmed, got %d", trailingConfirmed)
+	}
+}
+
+// TestValidateMultipartInDirectory_PartSharedAcrossLetterGroupsEndToEnd verifies that
+// a candidate letter group sharing a part number with any other letter group (candidate or
+// not) is NOT confirmed through the real Match -> Validate pipeline. With a/b-4k (parts 1-2)
+// plus a lone a-1080p (part 1), the -4k group would misclassify a-1080p as the single-part
+// <ID>.mp4, so neither confirms.
+func TestValidateMultipartInDirectory_PartSharedAcrossLetterGroupsEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k.mp4"},
+		{Name: "IPX-535b-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535b-4k.mp4"},
+		{Name: "IPX-535a-1080p.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-1080p.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 3 {
+		t.Fatalf("Expected 3 results, got %d", len(results))
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	for _, r := range validated {
+		if r.IsMultiPart {
+			t.Errorf("%s: part shared across letter groups must not confirm multipart, got IsMultiPart=true", r.File.Name)
+		}
+	}
+}
+
+// TestValidateMultipartInDirectory_LoneLetterTagCleared verifies that a lone
+// letter+trailing file (no siblings) has PartNumber/PartSuffix cleared after validation so
+// it does not render part metadata as a single-part file.
+func TestValidateMultipartInDirectory_LoneLetterTagCleared(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "SVFLA-001a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001a-4k.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+	if results[0].MultipartPattern != PatternLetter {
+		t.Fatalf("expected PatternLetter pre-validation, got %q", results[0].MultipartPattern)
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	if validated[0].IsMultiPart {
+		t.Error("lone file must not be multipart")
+	}
+	if validated[0].PartNumber != 0 {
+		t.Errorf("lone unconfirmed letter file must have PartNumber cleared, got %d", validated[0].PartNumber)
+	}
+	if validated[0].PartSuffix != "" {
+		t.Errorf("lone unconfirmed letter file must have PartSuffix cleared, got %q", validated[0].PartSuffix)
+	}
+}
+
+// TestValidateMultipartInDirectory_NonQualityTrailingEndToEnd verifies that letter +
+// non-resolution trailing content (e.g. -extra) is NOT detected as a letter+trailing part
+// through the real Match -> Validate pipeline, so edition variants are not misclassified.
+func TestValidateMultipartInDirectory_NonQualityTrailingEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535-A-extra.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-A-extra.mp4"},
+		{Name: "IPX-535-B-extra.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-B-extra.mp4"},
+	}
+
+	results := matcher.Match(files)
+	for _, r := range results {
+		if r.MultipartPattern != PatternNone {
+			t.Errorf("%s: expected PatternNone for non-resolution trailing content, got %q", r.File.Name, r.MultipartPattern)
+		}
+		if r.IsMultiPart {
+			t.Errorf("%s: edition variant must not be multipart, got IsMultiPart=true", r.File.Name)
 		}
 	}
 }

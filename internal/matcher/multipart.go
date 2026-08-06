@@ -13,6 +13,7 @@ var (
 	rePlainNumber = regexp.MustCompile(`^[-_.\s]?(\d{1,2})$`)
 	// Strict letter-only remainder: optional sep + [a-z] + optional sep
 	reLetterOnlyRemainder = regexp.MustCompile(`(?i)^\s*[-_.\s]?([a-z])\s*$`)
+	reLetterWithTrailing  = regexp.MustCompile(`(?i)^\s*[-_.\s]?([a-z])(?:[-_.\s]+\d[a-z0-9]*)+\s*$`)
 	// Trailing number at end of remainder after separator: ...-1, ..._2, ...3, etc.
 	// Catches part numbers buried behind noise like "-un-javgg.net-1"
 	reTrailingPartNumber = regexp.MustCompile(`[-_.](\d{1,2})$`)
@@ -93,13 +94,26 @@ func DetectPartSuffix(nameWithoutExt, id string) (int, string, string, string) {
 	// Only accept when the remainder is just that letter (plus optional separators) - AMBIGUOUS
 	// These need directory context validation to confirm multipart status.
 	if m := reLetterOnlyRemainder.FindStringSubmatch(trimmed); len(m) == 2 {
-		letter := strings.ToUpper(m[1])
-		n := int(letter[0]-'A') + 1
-		if n >= 1 && n <= 26 {
-			return n, "-" + letter, PatternLetter, ""
+		if n, suf, ok := letterPart(m[1]); ok {
+			return n, suf, PatternLetter, ""
+		}
+	}
+
+	if idx := reLetterWithTrailing.FindStringSubmatchIndex(trimmed); idx != nil {
+		if n, suf, ok := letterPart(trimmed[idx[2]:idx[3]]); ok {
+			return n, suf, PatternLetter, trimmed[idx[3]:]
 		}
 	}
 
 	// No recognizable part
 	return 0, "", PatternNone, ""
+}
+
+func letterPart(letter string) (int, string, bool) {
+	upper := strings.ToUpper(letter)
+	n := int(upper[0]-'A') + 1
+	if n < 1 || n > 26 {
+		return 0, "", false
+	}
+	return n, "-" + upper, true
 }

@@ -29,6 +29,20 @@ func (m *mockScraper) IsEnabled() bool                                    { retu
 func (m *mockScraper) Config() *models.ScraperSettings                    { return nil }
 func (m *mockScraper) Close() error                                       { return nil }
 
+func TestIsNilInterface(t *testing.T) {
+	assert.True(t, isNilInterface(nil), "untyped nil")
+	var typedNilPtr *int
+	assert.True(t, isNilInterface(typedNilPtr), "typed nil pointer")
+	var typedNilMap map[string]int
+	assert.True(t, isNilInterface(typedNilMap), "typed nil map")
+	var typedNilSlice []int
+	assert.True(t, isNilInterface(typedNilSlice), "typed nil slice")
+	assert.False(t, isNilInterface(42), "non-nil int")
+	assert.False(t, isNilInterface("x"), "non-nil string")
+	s := "ok"
+	assert.False(t, isNilInterface(&s), "non-nil pointer")
+}
+
 // Scraper URL-handling methods
 func (m *mockScraper) CanHandleURL(_ string) bool {
 	return m.canHandle

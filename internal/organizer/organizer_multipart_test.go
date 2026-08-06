@@ -1,12 +1,16 @@
 package organizer
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
 
+	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 )
@@ -164,4 +168,189 @@ func TestOrganizeBatch_GroupsAndSortsParts(t *testing.T) {
 	if dir0 != dir1 {
 		t.Errorf("Parts should be in the same folder: got %q and %q", dir0, dir1)
 	}
+}
+
+// TestPlan_LetterQualityTagNoCollision_EndToEnd verifies the reported regression:
+// SVFLA-001a-4k.mp4 + SVFLA-001b-4k.mp4 must organize to distinct filenames via the
+// real matcher -> ValidateMultipartInDirectory -> organizer.plan pipeline, using the
+// default conditional template <ID><IF:MULTIPART>-pt<PART></IF>.
+func TestPlan_LetterQualityTagNoCollision_EndToEnd(t *testing.T) {
+	cfg := &Config{
+		FolderFormat:    "<ID>",
+		FileFormat:      "<ID><IF:MULTIPART>-pt<PART></IF>",
+		RenameFile:      true,
+		OperationMode:   operationmode.OperationModeOrganize,
+		SubfolderFormat: []string{},
+		MaxPathLength:   260,
+	}
+	o := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
+
+	m, err := matcher.NewMatcher(&matcher.Config{RegexEnabled: false})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "SVFLA-001a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001a-4k.mp4"},
+		{Name: "SVFLA-001b-4k.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001b-4k.mp4"},
+	}
+
+	results := matcher.ValidateMultipartInDirectory(m.Match(files))
+
+	movie := &models.Movie{ID: "SVFLA-001", Title: "Test"}
+	seen := map[string]bool{}
+	for _, r := range results {
+		fmi := models.FileMatchInfo{
+			MovieID: r.ID, IsMultiPart: r.IsMultiPart, PartNumber: r.PartNumber, PartSuffix: r.PartSuffix,
+			Path: r.File.Path, Name: r.File.Name, Extension: r.File.Extension,
+		}
+		plan, err := o.plan(fmi, movie, "/dest", false, "")
+		if err != nil {
+			t.Fatalf("plan %s: %v", r.File.Name, err)
+		}
+		if seen[plan.TargetFile] {
+			t.Fatalf("filename collision: %q produced more than once", plan.TargetFile)
+		}
+		seen[plan.TargetFile] = true
+	}
+
+	want := map[string]bool{"SVFLA-001-pt1.mp4": true, "SVFLA-001-pt2.mp4": true}
+	for f := range want {
+		if !seen[f] {
+			t.Errorf("missing expected TargetFile %q; got %v", f, seen)
+		}
+	}
+	for f := range seen {
+		if !want[f] {
+			t.Errorf("unexpected TargetFile %q", f)
+		}
+	}
+}
+
+// TestPlan_LetterSamePartDifferentQuality_NoPtCollision verifies that two encodes of the
+// SAME part (same letter, different quality tag) are NOT confirmed multipart, so they do
+// not both render the colliding -pt1 name. They stay single-part; any duplicate-target
+// collision is surfaced by the existing plan.Conflicts mechanism, not invented here.
+func TestPlan_LetterSamePartDifferentQuality_NoPtCollision(t *testing.T) {
+	cfg := &Config{
+		FolderFormat:    "<ID>",
+		FileFormat:      "<ID><IF:MULTIPART>-pt<PART></IF>",
+		RenameFile:      true,
+		OperationMode:   operationmode.OperationModeOrganize,
+		SubfolderFormat: []string{},
+		MaxPathLength:   260,
+	}
+	o := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
+
+	m, err := matcher.NewMatcher(&matcher.Config{RegexEnabled: false})
+	if err != nil {
+		t.Fatalf("NewMatcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k.mp4"},
+		{Name: "IPX-535a-1080p.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-1080p.mp4"},
+	}
+
+	results := matcher.ValidateMultipartInDirectory(m.Match(files))
+
+	movie := &models.Movie{ID: "IPX-535", Title: "Test"}
+	targets := map[string]int{}
+	for _, r := range results {
+		if r.IsMultiPart {
+			t.Errorf("%s: same-part-different-quality must stay single-part, got IsMultiPart=true", r.File.Name)
+		}
+		fmi := models.FileMatchInfo{
+			MovieID: r.ID, IsMultiPart: r.IsMultiPart, PartNumber: r.PartNumber, PartSuffix: r.PartSuffix,
+			Path: r.File.Path, Name: r.File.Name, Extension: r.File.Extension,
+		}
+		plan, err := o.plan(fmi, movie, "/dest", false, "")
+		if err != nil {
+			t.Fatalf("plan %s: %v", r.File.Name, err)
+		}
+		if strings.Contains(plan.TargetFile, "-pt") {
+			t.Errorf("same-part-different-quality must not render a -pt name, got %q", plan.TargetFile)
+		}
+		targets[plan.TargetFile]++
+	}
+
+	// Both encodes are the same part: they share the single-part name <ID>.<ext>.
+	// The duplicate-target collision is surfaced by execute-time conflict detection
+	// (see TestOrganizerWithAfero_MoveCollision), not invented by the matcher.
+	if len(targets) != 1 {
+		t.Errorf("expected both encodes to share the single-part name, got %v", targets)
+	}
+	if _, ok := targets["IPX-535.mp4"]; !ok {
+		t.Errorf("expected single-part name IPX-535.mp4, got %v", targets)
+	}
+}
+
+// TestPlan_LetterSamePart_EncodeNoDataLoss_Execute verifies at EXECUTE time (not just
+// plan) that two encodes of the same part (a-4k + a-1080p) do not cause data loss:
+// the first moves to the single-part name, the second is skipped via the existing
+// target-exists conflict detection rather than overwriting the first.
+func TestPlan_LetterSamePart_EncodeNoDataLoss_Execute(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	srcDir := "/src"
+	require.NoError(t, fs.MkdirAll(srcDir, 0755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(srcDir, "IPX-535a-4k.mp4"), []byte("encode-4k"), 0644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(srcDir, "IPX-535a-1080p.mp4"), []byte("encode-1080p"), 0644))
+
+	cfg := &Config{
+		FolderFormat:    "<ID>",
+		FileFormat:      "<ID><IF:MULTIPART>-pt<PART></IF>",
+		RenameFile:      true,
+		OperationMode:   operationmode.OperationModeOrganize,
+		SubfolderFormat: []string{},
+		MaxPathLength:   260,
+	}
+	org := NewOrganizer(fs, cfg, nil, nil)
+
+	m, err := matcher.NewMatcher(&matcher.Config{RegexEnabled: false})
+	require.NoError(t, err)
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: filepath.Join(srcDir, "IPX-535a-4k.mp4")},
+		{Name: "IPX-535a-1080p.mp4", Extension: ".mp4", Path: filepath.Join(srcDir, "IPX-535a-1080p.mp4")},
+	}
+	results := matcher.ValidateMultipartInDirectory(m.Match(files))
+	for _, r := range results {
+		require.False(t, r.IsMultiPart, "same-part encodes must stay single-part")
+	}
+
+	movie := &models.Movie{ID: "IPX-535", Title: "Test"}
+	destDir := "/dest"
+	var firstResult, secondResult *OrganizeResult
+	for i, r := range results {
+		fmi := models.FileMatchInfo{
+			MovieID: r.ID, IsMultiPart: r.IsMultiPart, PartNumber: r.PartNumber, PartSuffix: r.PartSuffix,
+			Path: r.File.Path, Name: r.File.Name, Extension: r.File.Extension,
+		}
+		res, err := org.Organize(context.Background(), OrganizeCmd{
+			Match:     fmi,
+			Movie:     movie,
+			DestDir:   destDir,
+			MoveFiles: true,
+		})
+		if i == 0 {
+			firstResult = res
+			require.NoError(t, err, "first encode should move")
+			require.True(t, res.Moved, "first encode should move to IPX-535.mp4")
+		} else {
+			secondResult = res
+			// Second encode targets the same name; existing conflict detection must reject it
+			// (Organize returns nil + error on conflict) rather than overwriting the first.
+			require.Error(t, err, "second encode must error on duplicate target, not overwrite")
+			if res != nil {
+				require.False(t, res.Moved, "second encode must not overwrite the first (no data loss)")
+			}
+		}
+	}
+
+	// Verify the first encode's content survived (no overwrite).
+	content, err := afero.ReadFile(fs, filepath.Join(destDir, "IPX-535", "IPX-535.mp4"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("encode-4k"), content, "first encode content must be preserved")
+	_ = firstResult
+	_ = secondResult
 }
