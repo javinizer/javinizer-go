@@ -173,7 +173,9 @@ func TestScraper_Search_Success(t *testing.T) {
 	assert.Equal(t, "Test Director", result.Director)
 	assert.Equal(t, "Test description", result.Description)
 	assert.Equal(t, "Test studio", result.Maker)
-	assert.Equal(t, "ipx00535", result.ContentID, "ContentID should be extracted from DMM URL")
+	// ID and ContentID are now scene.Code (page-first), not the DMM content-id.
+	assert.Equal(t, "IPX-535", result.ID)
+	assert.Equal(t, "IPX-535", result.ContentID, "ContentID should equal scene.Code, not DMM content-id")
 	assert.Equal(t, "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=ipx00535/", result.SourceURL)
 	assert.Len(t, result.Actresses, 1)
 	assert.Equal(t, "Actress Name", result.Actresses[0].JapaneseName)

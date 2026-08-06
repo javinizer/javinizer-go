@@ -181,7 +181,9 @@ func TestParseScene_WithImagesAndURLs(t *testing.T) {
 
 	result, err := s.parseScene(sc, "IPX-535")
 	require.NoError(t, err)
-	assert.Equal(t, "ipx00535", result.ContentID)
+	// ID and ContentID are now scene.Code (page-first), not the DMM content-id.
+	assert.Equal(t, "IPX-535", result.ID)
+	assert.Equal(t, "IPX-535", result.ContentID)
 	assert.Equal(t, "https://www.dmm.co.jp/digital/video/-/detail/=/cid=ipx00535/", result.SourceURL)
 	assert.NotEmpty(t, result.PosterURL)
 	assert.NotEmpty(t, result.CoverURL)

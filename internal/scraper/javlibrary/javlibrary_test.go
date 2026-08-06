@@ -367,3 +367,34 @@ func TestExtractTitle_DirectPageSlugID(t *testing.T) {
 	title := s.extractTitle(html, "javliay67q")
 	assert.Equal(t, "Barely One", title)
 }
+
+func TestParseDetailPage_PageFirstID(t *testing.T) {
+	s := newScraper(&models.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+
+	// video_id present → ID = canonical code from page (not slug)
+	html := `<title>ONED-120 Barely One - JAVLibrary</title><div id="video_id"><table><td class="text">ONED-120</td></table></div><div id="video_info"></div>`
+	result, err := s.parseDetailPage(html, "javliay67q", "http://example.com", "en")
+	require.NoError(t, err)
+	assert.Equal(t, "ONED-120", result.ID, "ID should be canonical code from video_id, not slug")
+	assert.Equal(t, "ONED-120", result.ContentID, "ContentID should equal ID")
+	assert.Equal(t, "Barely One", result.Title)
+}
+
+func TestParseDetailPage_FallbackID(t *testing.T) {
+	s := newScraper(&models.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+
+	// video_id absent → ID falls back to the passed id (slug or search term)
+	html := `<title>Some Title - JAVLibrary</title><div id="video_info"></div>`
+	result, err := s.parseDetailPage(html, "javliay67q", "http://example.com", "en")
+	require.NoError(t, err)
+	assert.Equal(t, "javliay67q", result.ID, "ID should fall back to slug when video_id absent")
+	assert.Equal(t, "javliay67q", result.ContentID, "ContentID should equal ID")
+}

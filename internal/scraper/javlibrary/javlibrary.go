@@ -299,8 +299,9 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	}
 
 	if strings.Contains(html, `id="video_info"`) {
-		// Result ID stays aligned with the scrape/cache key (the page slug) so
-		// MovieRepo lookups (keyed by ID/ContentID) hit on repeated URL scrapes.
+		// The page slug is passed as fallbackID; parseDetailPage extracts the
+		// canonical product code from <div id="video_id"> and uses it as
+		// result.ID, falling back to the slug only when extraction fails.
 		movieID := pageIDFromURL(rawURL)
 		return s.parseDetailPage(html, movieID, redactPageURL(rawURL), resultLanguage)
 	}
@@ -333,7 +334,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		if !strings.Contains(html, `id="video_info"`) {
 			return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
 		}
-		// ID stays the cache key (page slug), aligned with MovieRepo lookups.
+		// The search term is passed as fallbackID; parseDetailPage extracts the
+		// canonical product code from <div id="video_id"> and uses it as
+		// result.ID, falling back to the search term only when extraction fails.
 		return s.parseDetailPage(html, pageID, redactPageURL(id), languageFromURL(id, s.language))
 	}
 
@@ -484,11 +487,20 @@ func extractIDFromURL(u *url.URL) string {
 }
 
 func (s *scraper) parseDetailPage(html string, id string, sourceURL string, language string) (*models.ScraperResult, error) {
+	// Page-first ID extraction: derive the canonical product code from the
+	// page's <div id="video_id"> div. The `id` parameter (URL slug or search
+	// term) is only a fallback when page extraction fails.
+	canonicalID := s.extractVideoID(html)
+	if canonicalID == "" {
+		canonicalID = id
+	}
+
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
 		Language:  language,
-		ID:        id,
+		ID:        canonicalID,
+		ContentID: canonicalID,
 	}
 
 	// Parse HTML document for goquery-based extraction
@@ -573,9 +585,9 @@ func (s *scraper) extractTitle(html string, id string) string {
 	}
 
 	// Strip the canonical product-code prefix (e.g., "ONED-120 " or
-	// "[ONED-120] "). Derive it from the page's video_id div so direct-page
-	// scrapes (where the result ID is the opaque page slug) still clean the
-	// title; fall back to the result ID for search-path scrapes.
+	// "[ONED-120] "). The code is derived from the page's video_id div,
+	// matching the page-first result ID, with the passed ID as fallback when
+	// extraction fails.
 	code := s.extractVideoID(html)
 	if code == "" {
 		code = id
@@ -659,8 +671,8 @@ func (s *scraper) extractRuntime(html string) int {
 // extractField extracts a field value from a video_info div by its ID
 // Works for video_director, video_maker, video_label
 // extractVideoID extracts the canonical product code from a detail page's
-// <div id="video_id">...</div> (e.g. "ONED-120"). Empty if absent. Used for
-// title cleaning on direct-page scrapes where the result ID is the page slug.
+// <div id="video_id">...</div> (e.g. "ONED-120"). Empty if absent. Used as the
+// primary source for result.ID in parseDetailPage and for title prefix stripping.
 func (s *scraper) extractVideoID(html string) string {
 	pattern := `id="video_id"[\s\S]*?<td\s+class="text">([^<]+)</td>`
 	re := regexp.MustCompile(pattern)

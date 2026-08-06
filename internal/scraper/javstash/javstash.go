@@ -262,19 +262,28 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 }
 
 func (s *scraper) parseScene(scene *scene, searchID string) (*models.ScraperResult, error) {
+	// Page-first ID extraction: scene.Code is the API's canonical product code.
+	// searchID is only a fallback when scene.Code is empty.
+	movieID := scene.Code
+	if movieID == "" {
+		movieID = searchID
+	}
+
 	result := &models.ScraperResult{
 		Source:      s.Name(),
 		SourceURL:   fmt.Sprintf("%s/scenes/%s", strings.TrimSuffix(s.baseURL, "/graphql"), scene.ID),
 		Language:    s.language,
-		ID:          searchID,
-		ContentID:   scene.Code,
+		ID:          movieID,
+		ContentID:   movieID,
 		Title:       scraperutil.CleanString(scene.Title),
 		Description: scraperutil.CleanString(scene.Details),
 		Runtime:     scene.Duration / 60,
 		Director:    scraperutil.CleanString(scene.Director),
 	}
 
-	if result.ContentID == "" {
+	// Fallback to searchID when scene.Code is absent (both ID and ContentID).
+	if result.ID == "" {
+		result.ID = searchID
 		result.ContentID = searchID
 	}
 
@@ -322,8 +331,9 @@ func (s *scraper) parseScene(scene *scene, searchID string) (*models.ScraperResu
 	if len(scene.URLs) > 0 {
 		for _, u := range scene.URLs {
 			if strings.Contains(u.URL, "dmm.co.jp") && strings.Contains(u.URL, "cid=") {
-				if extracted := extractDMMContentID(u.URL); extracted != "" {
-					result.ContentID = extracted
+				if extractDMMContentID(u.URL) != "" {
+					// SourceURL points to the DMM detail page (provenance);
+					// ContentID is NOT overwritten — it stays == result.ID (Decision 4).
 					result.SourceURL = u.URL
 					break
 				}
