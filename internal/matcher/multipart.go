@@ -76,7 +76,26 @@ func DetectPartSuffix(nameWithoutExt, id string) (int, string, string, string) {
 		}
 	}
 
-	// 3) Trailing number after separator at end of remainder: -un-javgg.net-1, _site.name-2
+	// 3) Letter parts: single trailing letter (A/B/C/...) optionally separated by dash/underscore/space
+	// Only accept when the remainder is just that letter (plus optional separators) - AMBIGUOUS
+	// These need directory context validation to confirm multipart status.
+	if m := reLetterOnlyRemainder.FindStringSubmatch(trimmed); len(m) == 2 {
+		if n, suf, ok := letterPart(m[1]); ok {
+			return n, suf, PatternLetter, ""
+		}
+	}
+
+	// 4) Letter + digit-first trailing content (e.g. a-4k, b-1080p, a-4k-60). The part
+	// identity is the letter; the trailing content is a resolution/quality tag. Checked
+	// BEFORE the trailing-number pattern so a numeric quality component (e.g. -60 fps
+	// shorthand in "a-4k-60") is not consumed as a trailing part number.
+	if idx := reLetterWithTrailing.FindStringSubmatchIndex(trimmed); idx != nil {
+		if n, suf, ok := letterPart(trimmed[idx[2]:idx[3]]); ok {
+			return n, suf, PatternLetter, trimmed[idx[3]:]
+		}
+	}
+
+	// 5) Trailing number after separator at end of remainder: -un-javgg.net-1, _site.name-2
 	// This handles filenames where site tags or other noise sits between the ID and the part number.
 	// The separator (- or _) + digits at the very end suggests a part number, but it's not
 	// as unambiguous as a clean remainder-only match (step 2), so directory validation is required.
@@ -87,21 +106,6 @@ func DetectPartSuffix(nameWithoutExt, id string) (int, string, string, string) {
 		if n, err := strconv.Atoi(numStr); err == nil && n > 0 {
 			prefix := trimmed[:len(trimmed)-len(m[0])]
 			return n, "-" + numStr, PatternTrailing, prefix
-		}
-	}
-
-	// 4) Letter parts: single trailing letter (A/B/C/...) optionally separated by dash/underscore/space
-	// Only accept when the remainder is just that letter (plus optional separators) - AMBIGUOUS
-	// These need directory context validation to confirm multipart status.
-	if m := reLetterOnlyRemainder.FindStringSubmatch(trimmed); len(m) == 2 {
-		if n, suf, ok := letterPart(m[1]); ok {
-			return n, suf, PatternLetter, ""
-		}
-	}
-
-	if idx := reLetterWithTrailing.FindStringSubmatchIndex(trimmed); idx != nil {
-		if n, suf, ok := letterPart(trimmed[idx[2]:idx[3]]); ok {
-			return n, suf, PatternLetter, trimmed[idx[3]:]
 		}
 	}
 

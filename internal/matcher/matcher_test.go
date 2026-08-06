@@ -2674,6 +2674,44 @@ func TestValidateMultipartInDirectory_NonQualityTrailingEndToEnd(t *testing.T) {
 	}
 }
 
+// TestValidateMultipartInDirectory_LetterQualityTagFpsShorthandEndToEnd verifies that
+// a numeric quality component (e.g. -60 fps shorthand in "a-4k-60") does not get consumed as
+// a trailing part number, so two letter+quality+fps siblings confirm as multipart.
+func TestValidateMultipartInDirectory_LetterQualityTagFpsShorthandEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535a-4k-60.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k-60.mp4"},
+		{Name: "IPX-535b-4k-60.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535b-4k-60.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.MultipartPattern != PatternLetter {
+			t.Errorf("%s: expected PatternLetter, got %q", r.File.Name, r.MultipartPattern)
+		}
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	confirmed := 0
+	for _, r := range validated {
+		if r.IsMultiPart {
+			confirmed++
+		}
+	}
+	if confirmed != 2 {
+		t.Errorf("expected both fps-shorthand siblings to confirm multipart, got %d", confirmed)
+	}
+}
+
 // TestValidateMultipartInDirectory_SGKI071EndToEnd tests the specific regression case
 // that motivated the PatternTrailing implementation: SGKI-071-un-javgg.net-{1,2}.mp4
 // producing duplicate filenames in the preview.

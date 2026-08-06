@@ -35,6 +35,8 @@ func TestDetectPartSuffix(t *testing.T) {
 		// Letter + trailing content (quality/resolution tag) - ambiguous, need directory validation
 		{"SVFLA-001a-4k", "SVFLA-001", 1, "-A", PatternLetter},
 		{"SVFLA-001b-1080p", "SVFLA-001", 2, "-B", PatternLetter},
+		{"IPX-535a-4k-60", "IPX-535", 1, "-A", PatternLetter},
+		{"IPX-535b-4k-60", "IPX-535", 2, "-B", PatternLetter},
 
 		// No pattern
 		{"ABC-123", "ABC-123", 0, "", PatternNone},
