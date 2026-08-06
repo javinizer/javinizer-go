@@ -20,9 +20,12 @@ const dmmActressImageBase = "https://pics.dmm.co.jp/mono/actjpgs/"
 // the slice; ~4x headroom over the real r18.dev actress export (~250k rows).
 const MaxScanRows = 1_000_000
 
-// Lister supplies dump actresses. It matches r18devdump.Store.ListActresses;
-// the caller owns the underlying store's lifetime and any scan-cap adapter.
-type Lister func(ctx context.Context) ([]models.DumpActress, error)
+// Lister supplies dump actresses. limit windows the store query itself
+// (>0 returns at most limit+1 rows so the caller can distinguish a complete
+// window from a truncated one; <=0 means the lister's default window), so a
+// small user --limit never materializes the full ~250k-row dump. The caller
+// owns the underlying store's lifetime and any scan-cap adapter.
+type Lister func(ctx context.Context, limit int) ([]models.DumpActress, error)
 
 type source struct {
 	lister Lister
@@ -50,7 +53,7 @@ func (s *source) Collect(ctx context.Context, options actresscache.SourceOptions
 	if s.lister == nil {
 		return fmt.Errorf("r18dev source requires a dump lister (use sources.RegisterR18Dev or NewFromLister)")
 	}
-	actresses, err := s.lister(ctx)
+	actresses, err := s.lister(ctx, options.Limit)
 	if err != nil {
 		return err
 	}
