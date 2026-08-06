@@ -157,10 +157,15 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 	if rawInput != "" {
 		if uh, ok := scraper.(models.URLHandler); ok && uh.CanHandleURL(rawInput) {
 			// NOTE: The raw URL is passed to ScrapeURL because the handler must
-			// fetch it. Per-scraper log redaction (e.g. JavLibrary's
-			// redactPageURL in fetchPageCtx) is the correct fix for log
-			// leakage; pipeline-level redaction before the call would break
-			// fetching. See OpenSpec page-derived-scraper-identity, Decision 2.
+			// fetch it. Per-scraper log redaction (e.g. JavLibrary redactPageURL
+			// in fetchPageCtx, round 6) is the correct fix for credential leakage
+			// in handler logs; pipeline-level redaction before the call would
+			// break fetching. JavDB/R18.dev/DMM browser log internally and are
+			// pre-existing — out of scope for page-derived-scraper-identity
+			// (OpenSpec Decision 2). The P2 cache-miss (canonical ID != URL slug)
+			// is also an explicitly accepted design decision (Decision 2):
+			// URL scrapes cache-miss by design; the movie is persisted under its
+			// canonical identity so search-by-code hits.
 			result, err := safeScrapeURL(ctx, uh, rawInput)
 			if err == nil && result != nil {
 				// Validate the result has a meaningful identity. A non-detail page
