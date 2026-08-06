@@ -605,7 +605,9 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 	if transport, ok := client.Transport.(*http.Transport); ok {
 		remoteDNS = ssrf.TransportResolvesRemotely(transport)
 		if !remoteDNS && transport.Proxy != nil {
-			if u, err := transport.Proxy(&http.Request{URL: &url.URL{Scheme: "https", Host: proxyDialProbeHost(rawURL)}}); err == nil && ssrf.IsSOCKSProxyURL(u) {
+			probeReq := &http.Request{URL: &url.URL{Scheme: "https", Host: proxyDialProbeHost(rawURL)}}
+			probeReq.Header = http.Header{"User-Agent": {userAgent}}
+			if u, err := transport.Proxy(probeReq); err == nil && ssrf.IsSOCKSProxyURL(u) {
 				nativeSocksURL = u
 				remoteDNS = true
 			}
@@ -616,15 +618,17 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 	}
 	safeClient := *client
 	if remoteDNS {
-		// NEVER mutate the caller's live transport: clone, re-mark the clone
-		// (registry membership is pointer-keyed; clones lose it), then wrap.
+		// Fail closed: a custom TLS dialer bypasses the guarded DialContext
+		// for HTTPS, so it is unpinnable on ANY transport shape.
 		clone := client.Transport.(*http.Transport).Clone()
+		if clone.DialTLSContext != nil || clone.DialTLS != nil { //nolint:staticcheck // fail closed on unpinnable TLS
+			return fmt.Errorf("image validation rejects transports with DialTLSContext/DialTLS on remote-DNS paths (unpinnable)")
+		}
 		if nativeSocksURL != nil {
-			// Native net/http SOCKS: pin the proxy ENDPOINT (trusted infra),
-			// target hostnames keep flowing to the SOCKS resolver unresolved.
-			fallback := ssrf.DialContextFunc(clone)
-			clone.DialContext = ssrf.NativeSOCKSPinnedDial(nativeSocksURL, lookupProxyAddrs, fallback)
-			safeClient.Transport = clone
+			// Use the per-hop-evaluating pinning transport so redirect hops that
+			// the policy routes DIRECT fall back to the full guard instead of
+			// riding the first hop's SOCKS endpoint.
+			safeClient.Transport = &pinnedProxyTransport{base: clone, lookup: lookupProxyAddrs}
 		} else {
 			ssrf.MarkRemoteDNSTransport(clone)
 			safeClient.Transport = ssrf.WrapTransportPreservingHostnames(clone)

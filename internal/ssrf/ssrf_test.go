@@ -546,3 +546,17 @@ func TestNativeSOCKSPinnedDialLiteralEndpointAndSuccess(t *testing.T) {
 	require.NotNil(t, got)
 	_ = got.Close()
 }
+
+// A nil lookup falls back to the default resolver; literal proxy endpoints
+// skip resolution entirely so this leg is reachable without DNS.
+func TestNativeSOCKSPinnedDialNilLookupLiteral(t *testing.T) {
+	sentinel := errors.New("dialed")
+	dialed := ""
+	dial := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "127.0.0.1:1080"}, nil, func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = addr
+		return nil, sentinel
+	})
+	_, err := dial(context.Background(), "tcp", "127.0.0.1:1080")
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, "127.0.0.1:1080", dialed)
+}
