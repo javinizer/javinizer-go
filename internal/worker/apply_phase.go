@@ -45,6 +45,17 @@ type applyFileOutcome struct {
 	DryRun    bool          // true if apply was a dry-run
 }
 
+// recoverRunPanic marks the job failed only when a panic recovered in Run's
+// defer counciled the main body (never nil on normal exit).
+func recoverRunPanic(inputs applyPhaseInputs, r any) {
+	if r == nil {
+		return
+	}
+	panicErr := panicutil.FormatRecover(r)
+	logging.Errorf("BatchJob.StartApply %s %v", inputs.JobID.String(), panicErr)
+	inputs.Lifecycle.MarkFailed()
+}
+
 // Run executes the apply phase: setup errgroup → iterate files → dispatch
 // applyFile → collect outcomes → track results → report status.
 func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
@@ -52,11 +63,10 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	persister := inputs.persister
 
 	defer func() {
-		if r := recover(); r != nil {
-			panicErr := panicutil.FormatRecover(r)
-			logging.Errorf("BatchJob.StartApply %s %v", inputs.JobID.String(), panicErr)
-			inputs.Lifecycle.MarkFailed()
-		}
+		// Extraction keeps the recovery arm testable: fanout workers forward
+		// panics, so ONLY main-body panics reach this defer — and a named fn is
+		// the honest seam for exercising MarkFailed on phase panic (codex P2-E).
+		recoverRunPanic(inputs, recover())
 		if persister != nil {
 			if err := persister.Persist(); err != nil {
 				logging.Warnf("[Apply] envelope persist failed: %v", err)

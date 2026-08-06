@@ -12,10 +12,18 @@ import (
 
 	wfmocks "github.com/javinizer/javinizer-go/internal/mocks/workflow"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
+
+func wfMockForRunComplete(t *testing.T) *wfmocks.MockWorkflowInterface {
+	t.Helper()
+	wfm := wfmocks.NewMockWorkflowInterface(t)
+	wfm.EXPECT().Apply(mock.Anything, mock.Anything).Return(&workflow.ApplyResult{Movie: &models.Movie{ID: "P-9"}}, nil)
+	return wfm
+}
 
 // Failure write-back with a LIVE drift on the SAME identity: live edits win,
 // the phase-side field set is preserved (failure leg of D5-lite merge).
@@ -224,9 +232,80 @@ func minimalApplyInputs2(u *callbackOnlyUpdater) applyPhaseInputs {
 	}
 }
 
-// commitResult wrapper: stored result's canonical identity differs from the
-// current lookup key (alias-preference divergence is impossible through one
-// store, but the seam must tolerate it).
+// interpretApplyResult final arms: cancelled-with-audit, failure hooks, the
+// success in-callback mismatch safety net, and the organized hook.
+func TestInterpretApplyResultCancelledAuditsOrganizeResult(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-z1", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "Z-1", Title: "user edit"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "Z-1"},
+	})
+	inputs := minimalApplyInputs(t, store, false)
+	afc := &ApplyFileContext{FilePath: "/f/a.mp4", Match: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "Z-1"}}
+	result := &workflow.ApplyResult{Movie: &models.Movie{ID: "Z-1"}, OrganizeResult: &organizer.OrganizeResult{}}
+	outcome := interpretApplyResult("/f/a.mp4", &models.Movie{ID: "Z-1"}, time.Now(), time.Minute, inputs, ApplyPhaseConfig{}, context.Background(), afc, result, context.Canceled)
+	assert.True(t, outcome.Cancelled)
+}
+
+func TestInterpretApplyResultHooks(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-z2", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "Z-2", Title: "user"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "Z-2"},
+	})
+	var failedPath, organizedPath string
+	cfg := ApplyPhaseConfig{
+		OnFileFailed:    func(fp, errMsg string) { failedPath = fp },
+		OnFileOrganized: func(fp string) { organizedPath = fp },
+	}
+	inputs := minimalApplyInputs(t, store, false)
+	afc := &ApplyFileContext{FilePath: "/f/a.mp4", Match: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "Z-2"}}
+	outcome := interpretApplyResult("/f/a.mp4", &models.Movie{ID: "Z-2"}, time.Now(), time.Minute, inputs, cfg, context.Background(), afc, nil, errors.New("engine wedged"))
+	require.True(t, outcome.Failed)
+	assert.Equal(t, "/f/a.mp4", failedPath)
+
+	// Success leg with OnFileOrganized set
+	outcome2 := interpretApplyResult("/f/a.mp4", &models.Movie{ID: "Z-2"}, time.Now(), time.Minute, inputs, cfg, context.Background(), afc, &workflow.ApplyResult{Movie: &models.Movie{ID: "Z-2"}}, nil)
+	require.True(t, outcome2.Success)
+	assert.Equal(t, "/f/a.mp4", organizedPath)
+}
+
+// Success write-back with a callback-only seam + rekeyed result: the
+// in-callback check still guards (defense net for read-less seams).
+func TestInterpretSuccessWritebackCallbackOnlySkip(t *testing.T) {
+	inner := resultstore.New(1, []string{"/f/a.mp4"})
+	inner.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-z3", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "Z-NEW", Title: "user edit"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "Z-NEW"},
+	})
+	u := &callbackOnlyUpdater{inner: inner}
+	inputs := minimalApplyInputs2(u)
+	afc := &ApplyFileContext{FilePath: "/f/a.mp4", Match: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "Z-OLD"}}
+	result := &workflow.ApplyResult{Movie: &models.Movie{ID: "Z-OLD", Title: "phase computed"}}
+	outcome := interpretApplyResult("/f/a.mp4", &models.Movie{ID: "Z-OLD"}, time.Now(), time.Minute, inputs, ApplyPhaseConfig{}, context.Background(), afc, result, nil)
+	require.True(t, outcome.Success)
+	assert.Equal(t, 1, u.calls)
+	final, err := inner.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "user edit", final.Movie.Title, "stale write-back skipped by the in-callback check")
+}
+
+// Run's deferred recover arm with an actual panic under persisting mock WF.
+// run's deferred recover arm: a hook panic inside the fanout closure bubbles
+// to the deferred recover; the persister still completes in its tail.
+// apply Run's deferred panic handler (extracted because fanout workers bubble
+// panics in a way that crashes the test process, not reach Run's defer).
+func TestRecoverRunPanicMarksFailed(t *testing.T) {
+	failed := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
+	recoverRunPanic(applyPhaseInputs{JobID: models.NewJobID(), Lifecycle: failed, persister: nil}, errors.New("engine wedge"))
+	assert.Equal(t, models.JobStatusFailed, failed.GetJobStatus())
+
+	// Non-recovery exit passes through harmlessly.
+}
+
 type flipCurStore struct {
 	resultstore.ResultMapAccessor
 	alt *resultstore.MovieResult
@@ -241,6 +320,7 @@ func TestCommitResultFoldsAliasWhenCanonicalDiffersFromKey(t *testing.T) {
 		Movie:         &models.Movie{ID: "CUR-9", ContentID: "cid9"},
 		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "CUR-9"},
 	})
+
 	wrapped := &familyKeyedResultMap{
 		ResultMapAccessor: flipCurStore{
 			ResultMapAccessor: inner,
