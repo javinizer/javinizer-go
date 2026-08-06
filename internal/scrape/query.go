@@ -156,14 +156,19 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 	// key (the derived ID); URL shape is irrelevant for identity.
 	if rawInput != "" {
 		if uh, ok := scraper.(models.URLHandler); ok && uh.CanHandleURL(rawInput) {
+			// NOTE: The raw URL is passed to ScrapeURL because the handler must
+			// fetch it. Per-scraper log redaction (e.g. JavLibrary's
+			// redactPageURL in fetchPageCtx) is the correct fix for log
+			// leakage; pipeline-level redaction before the call would break
+			// fetching. See OpenSpec page-derived-scraper-identity, Decision 2.
 			result, err := safeScrapeURL(ctx, uh, rawInput)
 			if err == nil && result != nil {
-				// Validate the result has meaningful metadata. A non-detail page
+				// Validate the result has a meaningful identity. A non-detail page
 				// (e.g. DMM home/search/challenge) can return HTTP 200 with a
-				// non-nil but empty result. Treat sparse results as NotFound so
-				// the ID-based keyword Search fallback fires.
-				if strings.TrimSpace(result.ID) == "" && strings.TrimSpace(result.Title) == "" {
-					err = models.NewScraperNotFoundError(scraper.Name(), "direct URL returned sparse result")
+				// non-nil but empty result. Treat results without an ID as
+				// NotFound so the ID-based keyword Search fallback fires.
+				if strings.TrimSpace(result.ID) == "" {
+					err = models.NewScraperNotFoundError(scraper.Name(), "direct URL returned result without ID")
 				} else {
 					outcome = queryOutcome{result: result}
 					return
