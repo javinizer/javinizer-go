@@ -23,3 +23,24 @@ func TestParseDMMActressIDPreservesEncodedInnerQuery(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 28262, parseDMMActressID(doc))
 }
+
+func TestResolveAffiliateChainDecodesWholeEncodedHref(t *testing.T) {
+	// A fully percent-encoded href hides its query from url.Parse until one
+	// whole-string decode layer exposes the lurl parameter.
+	encoded := "https%3A%2F%2Fal.dmm.co.jp%2F%3Flurl%3Dhttps%253A%252F%252Fvideo.dmm.co.jp%252F%253Factress%253D42"
+	assert.Equal(t, "https://video.dmm.co.jp/?actress=42", resolveAffiliateChain(encoded))
+}
+
+func TestResolveAffiliateChainKeepsUndecodableHref(t *testing.T) {
+	// An invalid %-encoding must not be mangled: unescaping errors and the
+	// original href is returned for downstream matching.
+	bad := "https://dmm.co.jp/?x=%zz"
+	assert.Equal(t, bad, resolveAffiliateChain(bad))
+}
+
+func TestResolveAffiliateChainStopsAtNonURLRedirect(t *testing.T) {
+	// lurl extracts to a value that is not a URL target: descent stops and
+	// the wrapper href is what downstream matching sees.
+	href := "https://al.dmm.co.jp/?lurl=not-an-url"
+	assert.Equal(t, href, resolveAffiliateChain(href))
+}
