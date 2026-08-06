@@ -293,7 +293,7 @@ func TestBuildRefreshPermanentRejectionStillOverwritesState(t *testing.T) {
 	assert.Contains(t, string(data), "\"status\":\"rejected\"")
 }
 
-func TestBuildSkipsRejectedStateOnResume(t *testing.T) {
+func TestBuildRevalidatesRejectedStateOnResume(t *testing.T) {
 	source := &testSource{
 		name:       "test",
 		candidates: []Candidate{{Key: "test:1", Source: "test", SourceID: "1", JapaneseName: "花子", ThumbURL: "reject"}},
@@ -310,9 +310,11 @@ func TestBuildSkipsRejectedStateOnResume(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 1, firstReport.Rejected)
-	assert.Equal(t, 0, secondReport.Candidates)
-	assert.Equal(t, 0, secondReport.Rejected)
-	assert.Equal(t, 1, source.emitted)
+	// Rejected entries are RE-VALIDATED on resume: a corrected URL at the
+	// same identity key must get a chance, not be suppressed forever.
+	assert.Equal(t, 1, secondReport.Candidates, "rejected entries re-enter validation")
+	assert.Equal(t, 1, secondReport.Rejected, "still rejected: same invalid thumbnail")
+	assert.Equal(t, 2, source.emitted, "the candidate is emitted on both runs")
 }
 
 func TestBuildKeepsRejectedCandidatesOutOfCache(t *testing.T) {

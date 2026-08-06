@@ -605,7 +605,11 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 	if transport, ok := client.Transport.(*http.Transport); ok {
 		remoteDNS = ssrf.TransportResolvesRemotely(transport)
 		if !remoteDNS && transport.Proxy != nil {
-			probeReq := &http.Request{URL: &url.URL{Scheme: "https", Host: proxyDialProbeHost(rawURL)}}
+			probeURL, _ := url.Parse(strings.TrimSpace(rawURL))
+			if probeURL == nil {
+				probeURL = &url.URL{Scheme: "https", Host: proxyDialProbeHost(rawURL)}
+			}
+			probeReq := &http.Request{Method: http.MethodGet, URL: probeURL}
 			probeReq.Header = http.Header{"User-Agent": {userAgent}}
 			if u, err := transport.Proxy(probeReq); err == nil && ssrf.IsSOCKSProxyURL(u) {
 				nativeSocksURL = u

@@ -116,6 +116,8 @@ func (f *Fetcher) stampProxyDecision(req *http.Request) error {
 // (header-keyed policies exist in the wild).
 func redirectDecisionFingerprint(req *http.Request) string {
 	var b strings.Builder
+	b.WriteString(req.Method)
+	b.WriteByte(0)
 	b.WriteString(req.URL.String())
 	b.WriteByte(0)
 	b.WriteString(req.Host)
