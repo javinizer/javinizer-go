@@ -57,3 +57,12 @@ func TestRedactErrorURL_NoChangeWhenURLAbsent(t *testing.T) {
 	redacted := redactErrorURL(err, rawURL)
 	assert.Equal(t, err, redacted, "error should be unchanged when URL is not in message")
 }
+
+func TestRedactErrorURL_PanicURLScrubbed(t *testing.T) {
+	rawURL := "https://example.com/page?token=secret"
+	// Simulate a panic value that contains the raw URL.
+	panicErr := fmt.Errorf("boom at %s", rawURL)
+	redacted := redactErrorURL(panicErr, rawURL)
+	assert.NotContains(t, redacted.Error(), rawURL, "raw URL must be scrubbed from panic-recovered errors")
+	assert.NotContains(t, redacted.Error(), "token=secret", "secret query must be scrubbed")
+}

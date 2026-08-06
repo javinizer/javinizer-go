@@ -157,9 +157,14 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 	if rawInput != "" {
 		if uh, ok := scraper.(models.URLHandler); ok && uh.CanHandleURL(rawInput) {
 			result, err := safeScrapeURL(ctx, uh, rawInput)
-			if err == nil {
+			if err == nil && result != nil {
 				outcome = queryOutcome{result: result}
 				return
+			}
+			if err == nil && result == nil {
+				// A nil result with nil error is a contract violation; treat as
+				// NotFound so the ID-based keyword Search fallback fires.
+				err = models.NewScraperNotFoundError(scraper.Name(), "URL handler returned no result")
 			}
 			if isContextError(ctx, err) {
 				outcome = queryOutcome{failure: classifyContextError(scraper.Name(), err)}
@@ -345,6 +350,9 @@ func safeScrapeURL(ctx context.Context, handler models.URLHandler, url string) (
 	defer func() {
 		if r := recover(); r != nil {
 			err = panicutil.HandleRecover(r)
+			// Scrub any raw URL from the recovered panic before it reaches
+			// logs or failure messages (credential-redaction guarantee).
+			err = redactErrorURL(err, url)
 		}
 	}()
 	select {

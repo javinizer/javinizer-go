@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
@@ -236,6 +237,7 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 	if source == "" {
 		source = cmd.MovieID
 	}
+	source = strings.TrimSpace(source)
 	if source != "" {
 		parsed, parseErr := matcher.ParseInput(source, registry)
 		if parseErr != nil {
