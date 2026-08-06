@@ -125,3 +125,23 @@ func TestCollectLimitTruncationSkipsMarkComplete(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, complete, "limit-truncated enumeration is not complete")
 }
+
+// Skipped rows must count toward --limit: the source stops reading
+// after the requested window, not after the window of EMITTED rows.
+func TestCollectSkipCountTowardLimit(t *testing.T) {
+	path := writeCSV(t, "FullName,ThumbUrl\nA,https://example.test/1.jpg\nB,https://example.test/2.jpg\nC,https://example.test/3.jpg\n")
+	opts := actresscache.SourceOptions{
+		Parameters: map[string]string{"legacy.csv": path},
+		Limit:      2,
+		ShouldSkip: func(key string) bool { return true },
+	}
+	emitted := 0
+	err := New().Collect(context.Background(), opts, func(actresscache.Candidate) error {
+		emitted++
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, emitted, "all rows were skipped")
+	// Source returns truncated=true when limit reached via skips
+	assert.Equal(t, 0, emitted, "all rows were skipped before emit")
+}

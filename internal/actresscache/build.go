@@ -113,6 +113,18 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 				return nil
 			}
 		}
+		// A non-refresh build that must revalidate a previously OK entry
+		// (policy tightened, private-host mode disabled) should preserve the
+		// prior OK state if the revalidation is transient -- the journal's
+		// last-good line stays effective so a later default build can reuse
+		// the validated thumbnail.
+		if prior, ok := state.get(candidate.Key); ok && prior.Status == stateStatusOK && classifyStateFailure(candidate, failure) == stateStatusFailed {
+			mu.Lock()
+			report.Failed++
+			delete(candidates, candidate.Key)
+			mu.Unlock()
+			return nil
+		}
 		err := recordFailure(state, candidate, failure, policyKey, &mu, &report)
 		if err == nil && options.Refresh {
 			mu.Lock()
