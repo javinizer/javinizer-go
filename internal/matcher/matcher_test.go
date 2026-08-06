@@ -627,6 +627,30 @@ func TestMatcher_MatchFile_CustomRegexEmptyCapture(t *testing.T) {
 	assert.Nil(t, result, "custom regex with empty capture group must yield no match (falls back to builtin, which also misses '123')")
 }
 
+func TestMatcher_EZ_CatalogSuffix_MatchStringConsistent(t *testing.T) {
+	// MatchString must apply the same E/Z stripping as MatchFile for built-in matches
+	// so downstream re-match (e.g. scrape_phase buildScrapeCmd) stays consistent.
+	cfg := &Config{RegexEnabled: false}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"part e + 4k tag", "SVFLA-001e-4k.mp4", "SVFLA-001"},
+		{"part d + 4k tag", "SVFLA-001d-4k.mp4", "SVFLA-001"},
+		{"catalog suffix E (no tag)", "IPX-535E.mp4", "IPX-535E"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := m.MatchString(tt.in)
+			assert.Equal(t, tt.want, got, "MatchString must match MatchFile's E/Z stripping")
+		})
+	}
+}
+
 func TestMatcher_EZ_CatalogSuffix_CustomRegexNotStripped(t *testing.T) {
 	// A custom regex that explicitly captures an E-suffixed catalog ID must not have
 	// the E/Z stripping heuristic override it (only built-in matches strip).

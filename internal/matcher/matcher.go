@@ -178,7 +178,19 @@ func (m *Matcher) MatchString(s string) string {
 	// Try built-in pattern
 	matches := m.builtinPattern.FindStringSubmatch(s)
 	if len(matches) > 1 {
-		return strings.ToUpper(matches[1])
+		id := strings.ToUpper(matches[1])
+		// Apply the same E/Z catalog-suffix stripping as matchWithRegex so MatchString
+		// stays consistent with MatchFile for downstream re-match callers (e.g. the
+		// scrape phase re-deriving a movie ID from a filename). A bare E/Z without a
+		// trailing digit-first quality tag is a legitimate catalog suffix and preserved.
+		if n := len(id); n > 1 && (id[n-1] == 'E' || id[n-1] == 'Z') {
+			baseID := id[:n-1]
+			_, _, patternType, trailingPrefix := DetectPartSuffix(s, baseID)
+			if patternType == PatternLetter && trailingPrefix != "" {
+				return baseID
+			}
+		}
+		return id
 	}
 
 	return ""
