@@ -62,7 +62,7 @@ interface ReviewMutationsDeps {
 		body: { field: string; source: string },
 	) => Promise<FieldOverrideResponse>;
 	excludeBatchMovie: (jobId: string, resultId: string) => Promise<unknown>;
-	updateBatchMovie: (jobId: string, resultId: string, movie: Movie) => Promise<unknown>;
+	updateBatchMovie: (jobId: string, resultId: string, movie: Movie, expectedResultRevision?: number | Record<string, number>) => Promise<unknown>;
 	updateBatchMoviePosterCrop: (
 		jobId: string,
 		resultId: string,
@@ -124,6 +124,36 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					const r = updatedJob.results[filePath] as FileResult;
 					if (r?.movie) {
 						updatedJob.results[filePath] = { ...r, movie: fromUrlEcho(r.movie) };
+					}
+				}
+				// D12: advance the CAS baseline ONLY for the target part —
+				// siblings' fresh revisions arrive via the invalidated query
+				// (copying the target's revision onto them would lie, codex
+				// r24).
+				// Advance EVERY family part's CAS baseline from the committed
+				// revision map (codex r26); fall back to the single target
+				// field for older servers.
+				const advanceRevision = (filePath: string, rev: number) => {
+					const r = updatedJob.results[filePath] as FileResult | undefined;
+					if (r) updatedJob.results[filePath] = { ...r, revision: rev };
+				};
+				if (data.revisions && Object.keys(data.revisions).length > 0) {
+					const resultToPath = new Map(
+						Object.entries(updatedJob.results).map(([fp, r]) => [
+							(r as FileResult).result_id,
+							fp,
+						] as const),
+					);
+					for (const [rid, rev] of Object.entries(data.revisions)) {
+						const fp = resultToPath.get(rid);
+						if (fp) advanceRevision(fp, rev);
+					}
+				} else if (data.revision !== undefined) {
+					for (const [filePath, r0] of Object.entries(updatedJob.results)) {
+						const r = r0 as FileResult;
+						if (r?.result_id === resultId) {
+							updatedJob.results[filePath] = { ...r, revision: data.revision };
+						}
 					}
 				}
 				deps.skipJobSync();
@@ -199,27 +229,101 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 	const saveEditsMutation = createMutation(() => ({
 		mutationFn: async () => {
 			const job = deps.getJob();
-			const savePromises = Array.from(deps.getEditedMovies().entries()).map(([filePath, movie]) => {
+			// POSTER-WRITE-HARDENING D1/D14: the backend commits a whole-movie
+			// save transactionally for EVERY part of the family — fan out ONE
+			// request per movie, not one per part (parts sharing a movie_id are
+			// deduped to the first part's result).
+			// POSTER-WRITE-HARDENING D1/D14: the backend commits a whole-movie
+			// save transactionally for EVERY part of the family — fan out ONE
+			// request per movie, not one per part. Keep the LATEST edit entry
+			// per family (codex r9 P2): Map iteration is insertion-ordered, so
+			// if the user edited sibling parts differently, only the newest
+			// overlay is the intent worth persisting.
+			const latestByFamily = new Map<string, [string, Movie]>();
+			for (const [filePath, movie] of deps.getEditedMovies()) {
+				const resultEntry = job?.results?.[filePath];
+				const resultId = resultEntry?.result_id;
+				if (!resultId) continue;
+				const movieId = resultEntry?.movie_id ?? '';
+				const key = movieId !== '' ? movieId : '__unpathed__' + filePath;
+				// Map.set on an existing key keeps the ORIGINAL insertion
+				// position; delete+set moves the entry to the tail so sibling
+				// edit order A,B,A resolves to A's newest overlay (codex r9-II).
+				latestByFamily.delete(key);
+				latestByFamily.set(key, [filePath, movie]);
+			}
+			const savePromises = Array.from(latestByFamily.entries()).map(([key, [filePath, movie]]) => {
+				const resultEntry = job?.results?.[filePath];
+				if (!resultEntry?.result_id) return null;
 				const movieToSave = buildMovieToSave(movie);
-				const resultId = job?.results?.[filePath]?.result_id;
-				if (!resultId) return null;
-				return deps.updateBatchMovie(deps.getJobId(), resultId, movieToSave);
+				// Codex r20+r39: multipart families need the whole family revision
+				// map (one sibling's stale baseline would otherwise silently pass
+				// target-only CAS and overwrite a newer sibling edit).
+				const partsRevisions: Record<string, number> = {};
+				for (const [fp, r0] of Object.entries(job?.results ?? {})) {
+					const r = r0 as FileResult;
+					if (r.movie_id === (resultEntry?.movie_id ?? '') && r.result_id && typeof r.revision === 'number') {
+						partsRevisions[r.result_id] = r.revision;
+					}
+				}
+				const isMultipart = Object.keys(partsRevisions).length > 1;
+				return deps.updateBatchMovie(
+					deps.getJobId(),
+					resultEntry.result_id,
+					movieToSave,
+					isMultipart ? partsRevisions : resultEntry.revision,
+				);
 			});
 
-			const sent = savePromises.filter((p): p is Promise<unknown> => p !== null);
-			if (sent.length > 0) {
-				await Promise.all(sent);
-			}
-			return sent.length;
+			const ops = Array.from(latestByFamily.entries());
+			const settled = await Promise.allSettled(savePromises.filter((p): p is Promise<unknown> => p !== null));
+			return settled.map((s, i) => ({ key: ops[i]?.[0] ?? '', status: s.status }));
 		},
-		onSuccess: async (sent: number) => {
-			if (sent > 0) {
-				await invalidateJobQueries().catch(() => {});
+		onSuccess: async (results: Array<{ key: string; status: string }>) => {
+			const ops0 = results ?? [];
+			const failed = ops0.filter((r) => r.status === 'rejected');
+			const succeeded = ops0.filter((r) => r.status === 'fulfilled');
+			// Always refetch after this batch: even the all-rejected case must
+			// advance the CAS baseline or a same-session retry loops on the
+			// same stale revision (codex r38).
+			await invalidateJobQueries().catch(() => {});
+			if (succeeded.length > 0) {
+				const editedMovies = deps.getEditedMovies();
+				const job = deps.getJob();
+				for (const ok of succeeded) {
+					for (const [fp, movie] of Array.from(editedMovies.entries())) {
+						const rid = job?.results?.[fp]?.movie_id;
+						const ridKey = rid !== '' && rid !== undefined ? rid : '__unpathed__' + fp;
+						if (ridKey === ok.key) editedMovies.delete(fp);
+					}
+				}
 				deps.toastSuccess(m.review_changes_saved());
 			}
-			deps.clearEditedMovies();
+			if (failed.length > 0) {
+				// Partial failure: clean families were cleared above; rejected
+				// overlays stay + baseline advance via refetch, so retry works.
+				deps.toastError(m.review_save_edits_failed({ error: `${failed.length} movie(s) rejected` }));
+			}
 			deps.clearPosterPreviewOverrides();
-			deps.clearEditStorage();
+			// codex r39: keep REJECTED edits reload-safe — write only the
+			// surviving rejected set back to sessionStorage instead of
+			// clearEditStorage()'s blanket wipe.
+			if (failed.length > 0) {
+				const remaining: Record<string, Movie> = {};
+				for (const [fp, mv] of deps.getEditedMovies()) remaining[fp] = mv;
+				try {
+					if (Object.keys(remaining).length > 0) {
+						sessionStorage.setItem(`javinizer.review.editedMovies.${deps.getJobId()}`, JSON.stringify(remaining));
+					} else {
+						sessionStorage.removeItem(`javinizer.review.editedMovies.${deps.getJobId()}`);
+					}
+				} catch {
+					// storage full → fall back to clearEditStorage behavior
+					deps.clearEditStorage();
+				}
+			} else {
+				deps.clearEditStorage();
+			}
 		},
 		onError: (err: Error) => {
 			deps.toastError(m.review_save_edits_failed({ error: err.message }));
@@ -259,6 +363,29 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					const r = updatedJob.results[filePath] as FileResult;
 					if (r?.movie) {
 						updatedJob.results[filePath] = { ...r, movie: applyCropEcho(r.movie, response) };
+					}
+				}
+				const advanceRevision = (filePath: string, rev: number) => {
+					const r = updatedJob.results[filePath] as FileResult | undefined;
+					if (r) updatedJob.results[filePath] = { ...r, revision: rev };
+				};
+				if (response.revisions && Object.keys(response.revisions).length > 0) {
+					const resultToPath = new Map(
+						Object.entries(updatedJob.results).map(([fp, r]) => [
+							(r as FileResult).result_id,
+							fp,
+						] as const),
+					);
+					for (const [rid, rev] of Object.entries(response.revisions)) {
+						const fp = resultToPath.get(rid);
+						if (fp) advanceRevision(fp, rev);
+					}
+				} else if (response.revision !== undefined) {
+					for (const [filePath, r0] of Object.entries(updatedJob.results)) {
+						const r = r0 as FileResult;
+						if (r?.result_id === resultId) {
+							updatedJob.results[filePath] = { ...r, revision: response.revision };
+						}
 					}
 				}
 				deps.skipJobSync();
@@ -427,6 +554,8 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 							movie: data.movie,
 							field_sources: data.field_sources ?? r.field_sources,
 							actress_sources: data.actress_sources ?? r.actress_sources,
+							// codex r24: advance the CAS baseline without a refetch.
+							...(data.revision !== undefined ? { revision: data.revision } : {}),
 						};
 					}
 				}

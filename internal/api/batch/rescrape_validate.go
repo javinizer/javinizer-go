@@ -97,5 +97,12 @@ func writeErrorResponse(c *gin.Context, status int, isGone bool, errMsg string) 
 func rescrapeNotAllowed(snap *worker.BatchJobStatus) bool {
 	// Logically deleted jobs are never rescrapeable, even if their status is
 	// still Pending or Completed — rescrape must return the 410 deleted path.
-	return snap.IsDeleted || (snap.Status != models.JobStatusPending && snap.Status != models.JobStatusCompleted)
+	if snap.IsDeleted {
+		return true
+	}
+	// Rescrape rejects any Running job. The apply-phase rescrape admission
+	// presumes the merged write-back machinery (Phase 2, D5); until then the
+	// apply worker's per-file write-back can clobber a mid-run rescrape
+	// (codex P4-C), so running-jobs reject regardless of current_phase.
+	return snap.Status != models.JobStatusPending && snap.Status != models.JobStatusCompleted
 }

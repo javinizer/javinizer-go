@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -63,6 +62,7 @@ type batchJobBase struct {
 	Update                bool                            `json:"update"`
 	ApplyPlan             *applyplan.Plan                 `json:"apply_plan,omitempty"`
 	PersistError          string                          `json:"persist_error,omitempty"`
+	CurrentPhase          string                          `json:"current_phase,omitempty"`
 	IsDeleted             bool                            `json:"is_deleted"`
 }
 
@@ -140,6 +140,9 @@ type RescrapeResult struct {
 type JobReader interface {
 	GetID() string
 	GetJobStatus() models.JobStatus
+	// GetCurrentPhase reports which phase ("scrape"/"apply") owns a Running
+	// job, "" when idle (POSTER-WRITE-HARDENING D16 admission gate).
+	GetCurrentPhase() string
 	GetStatus() *BatchJobStatus
 	GetMovieResult(filePath string) (*resultstore.MovieResult, error)
 	GetResults() []resultstore.MovieResult
@@ -150,14 +153,40 @@ type JobReader interface {
 // Consumers that only need to modify job results should depend on this
 // narrow interface rather than the full composite.
 type JobEditor interface {
+	// UpdateMovie saves a whole-movie edit for the file's movie family.
+	// Serialized per family through the keyed edit lock (D1); DB legs commit
+	// transactionally through the EditCommitter when the store wires one (D4).
 	UpdateMovie(ctx context.Context, filePath string, movie *models.Movie) error
+
+	// UpdateMovieFamily saves a whole-movie edit for every file of movieID
+	// under a SINGLE family-key acquisition — dual-key-locked when the PATCH
+	// rekeys the family to movie.ID (D1). When carryCropGeometry is true and
+	// the payload's poster_crop_bounds is nil (key omitted), the stored
+	// geometry from the named result is re-read INSIDE the key and carried
+	// onto the payload — a crop committed concurrently can never be silently
+	// reverted by a stale pre-lock read.
+	UpdateMovieFamily(ctx context.Context, movieID, resultID string, movie *models.Movie, opts FamilySaveOptions) error
+
 	ExcludeFile(filePath string)
+
+	// ExcludeMovieFamily excludes every file of the family as one admitted
+	// editor operation (D16: callers perform the admission gate first).
+	ExcludeMovieFamily(ctx context.Context, movieID string) error
+
 	UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds, sourceFull bool) error
 	UpdatePosterFromURL(ctx context.Context, movieID string, posterURL string, croppedURL string) error
+
+	// WithMovieEditLock runs fn under the family key with the cores-only
+	// view (callback sees only LockedMovieOps — two cores invoked inside one
+	// callback share the single acquisition; TestWithMovieEditLock_*
+	// callbacks contract, D1). Used when a handler must run its own
+	// pre-commit work (e.g. poster crop measure) inside the same section.
+	WithMovieEditLock(movieID string, fn func(m *LockedMovieOps) error) error
 
 	// ApplyFieldOverride cherry-picks a single field's value from the named
 	// scraper source's raw results and applies it to the movie, updating
 	// provenance attribution. Mirrors the original Javinizer "Replace" button.
+	// Serialized under the family key (the per-result overrideMu is retired).
 	// Returns the updated MovieResult and ProvenanceData (both clones).
 	ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)
 }
@@ -327,6 +356,7 @@ type jobReaderImpl struct {
 
 func (jr *jobReaderImpl) GetID() string                  { return jr.id }
 func (jr *jobReaderImpl) GetJobStatus() models.JobStatus { return jr.lifecycle.GetJobStatus() }
+func (jr *jobReaderImpl) GetCurrentPhase() string        { return jr.lifecycle.CurrentPhase() }
 func (jr *jobReaderImpl) GetStatus() *BatchJobStatus     { return jr.snapshotFn() }
 func (jr *jobReaderImpl) GetMovieResult(filePath string) (*resultstore.MovieResult, error) {
 	return jr.results.GetMovieResult(filePath)
@@ -347,68 +377,25 @@ type jobEditorImpl struct {
 	posterEditor *PosterEditor
 	movieRepo    database.MovieRepositoryInterface
 	actressRepo  database.ActressRepositoryInterface
-	overrideMu   sync.Map // resultID -> *sync.Mutex
+	editorOnce   sync.Once // guards lazy default-editor construction (race-safe)
 }
 
+// UpdateMovie applies the whole-movie save to the TARGET file only, but
+// serialized under the family's keyed edit lock so it can never interleave
+// with a parallel family op on the same movie (D1). DB legs (movie upsert
+// before actress renames) commit transactionally when the store wires the
+// EditCommitter seam (D4); failures roll ALL back including the envelope.
+//
+// Prefer UpdateMovieFamily from handlers that hold a movieID: one
+// acquisition across all parts.
 func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie *models.Movie) error {
-	// Preserve the original cover snapshot from the existing in-memory movie
-	// before persisting, so the cover/fanart reset survives server restarts
-	// and the DB/in-memory states stay in sync. Read-only pass: does not mutate
-	// the in-memory result, only populates movie.Poster.OriginalCoverURL.
-	var haveCurrent bool
-	var curPosterURL, curCoverURL string
-	var curShouldCrop bool
-	_ = je.store.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-		backupCoverOriginal(current.Movie, movie)
-		if current.Movie != nil {
-			haveCurrent = true
-			curPosterURL = current.Movie.Poster.PosterURL
-			curCoverURL = current.Movie.Poster.CoverURL
-			curShouldCrop = current.Movie.Poster.ShouldCropPoster
-		}
-		return current, nil
-	})
-	sanitizePosterCropGeometry(movie, haveCurrent, curPosterURL, curCoverURL, curShouldCrop)
+	return je.editor().UpdateMovieSingle(ctx, filePath, movie)
+}
 
-	// Apply explicit actress name edits before the movie upsert. The shared
-	// MovieUpserter only fills missing actress fields, which would discard a
-	// review-page name edit; renaming the record by ID here overwrites it, and
-	// doing so before Upsert makes Upsert's name-based lookup find the renamed
-	// record so the in-memory clone (and NFO generation) carries the edit.
-	// Gated on movieRepo so the in-memory-only edit path (no DB persistence)
-	// never mutates the database.
-	if je.actressRepo != nil && je.movieRepo != nil {
-		for i := range movie.Actresses {
-			a := &movie.Actresses[i]
-			if a.ID == 0 {
-				continue
-			}
-			existing, err := je.actressRepo.FindByID(ctx, a.ID)
-			if err != nil {
-				if database.IsNotFound(err) {
-					continue
-				}
-				return fmt.Errorf("load actress for rename: %w", err)
-			}
-			if existing.FirstName == a.FirstName && existing.LastName == a.LastName && existing.JapaneseName == a.JapaneseName {
-				continue
-			}
-			if err := je.actressRepo.RenameNameFields(ctx, a.ID, a.FirstName, a.LastName, a.JapaneseName); err != nil {
-				return fmt.Errorf("persist actress name edit: %w", err)
-			}
-		}
-	}
-
-	// persist to DB first, then update in-memory. If DB persist
-	// fails, the in-memory state is not updated — no divergence. If DB persist
-	// succeeds but in-memory update fails, the job's state is stale but the
-	// DB is authoritative.
-	if je.movieRepo != nil {
-		if _, err := je.movieRepo.Upsert(ctx, movie); err != nil {
-			return fmt.Errorf("persist movie update: %w", err)
-		}
-	}
-	return je.store.UpdateMovie(filePath, movie)
+// UpdateMovieFamily applies the save to EVERY file of the movie family under
+// one acquisition of the family key (D1).
+func (je *jobEditorImpl) UpdateMovieFamily(ctx context.Context, movieID, resultID string, movie *models.Movie, opts FamilySaveOptions) error {
+	return je.editor().UpdateMovieFamily(ctx, movieID, resultID, movie, opts)
 }
 
 // ExcludeFile marks a file as excluded from the job and, if all files are excluded,
@@ -436,54 +423,54 @@ func (je *jobEditorImpl) ExcludeFile(filePath string) {
 }
 
 func (je *jobEditorImpl) UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds, sourceFull bool) error {
-	return je.posterEditor.UpdatePosterCrop(movieID, croppedURL, bounds, sourceFull)
+	return je.editor().UpdatePosterCrop(movieID, croppedURL, bounds, sourceFull)
 }
 
 func (je *jobEditorImpl) UpdatePosterFromURL(ctx context.Context, movieID string, posterURL string, croppedURL string) error {
-	// Delegates entirely to PosterEditor, which handles both in-memory update
-	// and DB persistence when movieRepo is configured.
-	return je.posterEditor.UpdatePosterFromURL(ctx, movieID, posterURL, croppedURL)
+	return je.editor().UpdatePosterFromURL(ctx, movieID, posterURL, croppedURL)
 }
 
-// ApplyFieldOverride cherry-picks a single field's value from the named
-// scraper source's raw results and applies it to the movie, updating
-// provenance attribution to reflect the user's choice. Mirrors the original
-// PowerShell Javinizer "Replace" button (javinizergui.ps1:2538):
+// editor returns a non-nil PosterEditor — tests constructing jobEditorImpl
+// by hand (without the batch job wiring) must not segfault on a nil
+// posterEditor. The zero-deps editor still serializes edits correctly.
+func (je *jobEditorImpl) editor() *PosterEditor {
+	je.editorOnce.Do(func() {
+		if je.posterEditor == nil {
+			pe := NewPosterEditor(je.store, je.store, je.movieRepo)
+			pe.attachEnv(&posterEditEnv{lifecycle: je.lifecycle, actressRepo: je.actressRepo})
+			je.posterEditor = pe
+		}
+	})
+	return je.posterEditor
+}
+
+// ApplyFieldOverride applies one field cherry-pick under the family's
+// keyed edit lock — the retired per-resultID mutex could not serialize
+// against a concurrent PATCH on a sibling part sharing the movie row (D1).
+// Semantics mirror the original Javinizer "Replace" button.
 //
 //	$cache:findData[$cache:index].Data.($prop.Name) = $prop.Value
 //	$cache:findData[$cache:index].Selected.($prop.Name) = $source
-//
-// The movie is persisted via UpdateMovie (DB upsert + in-memory), consistent
-// with the poster-from-url / poster-crop edit endpoints. Provenance
-// (FieldSources/ActressSources/ScraperResults) is persisted via the job
-// envelope — the handler calls PersistJobByID after this method succeeds.
-// Raw ScraperResults round-trip through the envelope (json:"scraper_results").
-// A per-resultID mutex serializes concurrent overrides on the same result so
-// the read-clone-mutate-write sequence cannot lose an earlier override.
 func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
-	mu, _ := je.overrideMu.LoadOrStore(resultID, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	result, _, found := je.store.GetFileResultByResultID(resultID)
+	movieID := resultID
+	if found && result != nil && result.FileMatchInfo.MovieID != "" {
+		movieID = result.FileMatchInfo.MovieID
+	}
+	return je.editor().ApplyFieldOverride(ctx, resultID, movieID, fieldKey, source)
+}
 
-	result, filePath, found := je.store.GetFileResultByResultID(resultID)
-	if !found || result == nil || result.Movie == nil {
-		return nil, nil, fmt.Errorf("result %s not found or has no movie", resultID)
-	}
-	prov := je.store.GetProvenance(filePath)
-	if prov == nil {
-		prov = &resultstore.ProvenanceData{}
-	}
-	movie := result.Movie.Clone()
-	if err := applyFieldOverride(movie, prov, fieldKey, source); err != nil {
-		return nil, nil, err
-	}
-	if err := je.UpdateMovie(ctx, filePath, movie); err != nil {
-		return nil, nil, fmt.Errorf("persist field override: %w", err)
-	}
-	je.store.SetProvenance(filePath, prov)
-	updated, _, _ := je.store.GetFileResultByResultID(resultID)
-	updatedProv := je.store.GetProvenance(filePath)
-	return updated, updatedProv, nil
+// ExcludeMovieFamily excludes every part of the movie family as ONE admitted
+// editor operation: keyed lock, envelope flip committed alongside the
+// exclusion state, then the legacy all-excluded auto-cancel.
+func (je *jobEditorImpl) ExcludeMovieFamily(ctx context.Context, movieID string) error {
+	return je.editor().ExcludeMovieFamily(ctx, movieID)
+}
+
+// WithMovieEditLock exposes the keyed section for handler-composed ops (crop
+// measure + commit under one key; D1 handler flow).
+func (je *jobEditorImpl) WithMovieEditLock(movieID string, fn func(m *LockedMovieOps) error) error {
+	return je.editor().WithMovieEditLock(movieID, fn)
 }
 
 // editableJobAdapter satisfies EditableJob by composing jobReaderImpl,

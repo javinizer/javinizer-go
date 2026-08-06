@@ -511,7 +511,7 @@ func TestApplyPhase_Run_PersistFnCalled(t *testing.T) {
 		Movie:         &models.Movie{ID: "IPX-777"},
 	}
 	persisted := false
-	inputs.persister = persistFunc(func() { persisted = true })
+	inputs.persister = persistFunc(func() error { persisted = true; return nil })
 
 	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
 		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},

@@ -236,7 +236,7 @@ type fakePersistencer struct {
 	jobs            []*models.Job
 }
 
-func (f *fakePersistencer) PersistJob(job *BatchJob) {
+func (f *fakePersistencer) PersistJob(job *BatchJob) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -245,9 +245,10 @@ func (f *fakePersistencer) PersistJob(job *BatchJob) {
 	f.lastStatus = job.lifecycle.Status
 	f.lastCompletedAt = job.lifecycle.CompletedAt
 	job.lifecycle.mu.RUnlock()
+	return nil
 }
 
-func (f *fakePersistencer) PersistJobByID(id string) {}
+func (f *fakePersistencer) PersistJobByID(id string) error { return nil }
 
 func (f *fakePersistencer) DeleteJobFromDB(id string) error { return nil }
 

@@ -60,14 +60,14 @@ type JobStoreInterface interface {
 	// Returns error if job not found, job is running, or database deletion fails.
 	DeleteJob(id string) error
 
-	// PersistJob saves a job to the database.
-	PersistJob(job *BatchJob)
+	// PersistJob saves a job to the database (envelope-locked, tombstone-aware).
+	PersistJob(job *BatchJob) error
 
-	// PersistJobByID persists a job by its ID.
+	// PersistJobByID persists a job by its ID (envelope-locked, tombstone-aware).
 	// The store holds the concrete *BatchJob internally, so callers that only
 	// have a composite (EditableJob, ControlledJob) can persist without
-	// a type assertion. No-op if the job is not found in the store.
-	PersistJobByID(id string)
+	// a type assertion. Returns ErrJobNotFound/ErrJobGone when no such live job.
+	PersistJobByID(id string) error
 
 	// ListJobs returns thread-safe snapshots of all jobs.
 	// Returns read-only BatchJobStatus snapshots.
@@ -88,6 +88,30 @@ type JobStoreInterface interface {
 	// Called by APIRuntime after the BatchJobFactory is built, since these deps
 	// are not available at NewJobStore time. Also re-hydrates already-loaded jobs.
 	SetReconstructionDeps(m matcher.MatcherInterface, pg poster.PosterGenerator, batchCfg BatchJobConfig)
+
+	// AcquireEditAccess admits a review-edit request (PATCH/crop/from-URL/
+	// field-override): typed ErrJobNotFound (404) / ErrJobGone (410) /
+	// EditPhaseBusyError→ErrEditNotAdmitted (409 while Pending or
+	// Running-with-scrape, D16). Returns the job seam plus a shared
+	// admission lease the caller MUST release (delete-drain fence, D3).
+	AcquireEditAccess(id string) (BatchJobInterface, func(), error)
+
+	// AcquireExclusionAccess admits exclude requests: same 404/410 typing;
+	// 409 while ANY phase is Running (Pending stays admitted).
+	AcquireExclusionAccess(id string) (BatchJobInterface, func(), error)
+
+	// AcquireRescrapeAccess admits rescrape requests with the same
+	// lifecycle gate as review edits (D16).
+	AcquireRescrapeAccess(id string) (ControlledJob, func(), error)
+
+	// JobGone distinguishes explicitly-deleted jobs (410) from never-known
+	// ones (404) via the tombstone registry.
+	JobGone(id string) bool
+
+	// AcquireSharedLease takes a gone-checked shared admission lease without
+	// a lifecycle gate. Long-running non-phase operations (rescrape) hold it
+	// so DeleteJob's exclusive drain covers them (D3).
+	AcquireSharedLease(id string) (func(), error)
 }
 
 // Compile-time assertion that JobStore satisfies JobStoreInterface.

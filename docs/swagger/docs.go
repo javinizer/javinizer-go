@@ -829,6 +829,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
                     },
+                    "410": {
+                        "description": "job already deleted (tombstone)",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -922,6 +928,18 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "a phase is running",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "job deleted",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -1047,6 +1065,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
+                    },
+                    "409": {
+                        "description": "job busy (pending or scrape-phase)",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "job deleted",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "transactional save failed; all writes rolled back",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -1149,6 +1185,18 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "a phase is running",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "job deleted",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -1255,8 +1303,20 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "job busy (pending or scrape-phase) or content-id change rejected",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "job deleted",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
                     "500": {
-                        "description": "Internal Server Error",
+                        "description": "transactional commit failed; all writes rolled back",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -1317,6 +1377,24 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "job busy (pending or scrape-phase)",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "job deleted",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "transactional commit failed; all writes rolled back",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -1381,8 +1459,20 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "job busy (pending or scrape-phase)",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "job deleted",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
                     "500": {
-                        "description": "Internal Server Error",
+                        "description": "transactional commit failed; all writes rolled back",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -4407,6 +4497,10 @@ const docTemplate = `{
                     "description": "Stable UUID — survives movie_id changes",
                     "type": "string"
                 },
+                "revision": {
+                    "description": "Revision: server-managed update counter used as the CAS baseline for\nPATCH expected_result_revision (POSTER-WRITE-HARDENING D12).",
+                    "type": "integer"
+                },
                 "started_at": {
                     "type": "string"
                 },
@@ -4553,6 +4647,10 @@ const docTemplate = `{
                 },
                 "movie": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
+                },
+                "revision": {
+                    "description": "Revision is the fresh post-commit revision of the rescraped result\n(D12) — clients advance their CAS baseline from it.",
+                    "type": "integer"
                 }
             }
         },
@@ -4810,6 +4908,10 @@ const docTemplate = `{
                 },
                 "movie": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
+                },
+                "revision": {
+                    "description": "Revision is the revision AFTER the override commit (D12).",
+                    "type": "integer"
                 }
             }
         },
@@ -5052,6 +5154,18 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource"
+                    }
+                },
+                "revision": {
+                    "description": "Revision is the fresh post-commit result revision (POSTER-WRITE-HARDENING D12).",
+                    "type": "integer"
+                },
+                "revisions": {
+                    "description": "Revisions carries EVERY family part's fresh revision keyed by\nresult_id (multipart-safe CAS baselines, codex r26).",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
                     }
                 }
             }
@@ -5722,6 +5836,18 @@ const docTemplate = `{
                     "description": "PosterCropSourceFull echoes whether the bounds were measured against the\nfull-size source. Clients must round-trip it with the bounds: the apply\ngate refuses geometry without it.",
                     "type": "boolean"
                 },
+                "revision": {
+                    "description": "Revision is the revision AFTER the crop commit (D12).",
+                    "type": "integer"
+                },
+                "revisions": {
+                    "description": "Revisions carries EVERY family part's fresh revision keyed by\nresult_id.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
                 "should_crop_poster": {
                     "description": "ShouldCropPoster echoes the stored crop intent after a manual crop\n(always false: the manual crop replaces the scraper auto-crop), so\nclients can sync their pending-edits overlay from this response alone.",
                     "type": "boolean"
@@ -5747,6 +5873,18 @@ const docTemplate = `{
                 },
                 "poster_url": {
                     "type": "string"
+                },
+                "revision": {
+                    "description": "Revision is the revision AFTER the from-URL commit (D12).",
+                    "type": "integer"
+                },
+                "revisions": {
+                    "description": "Revisions carries EVERY family part's fresh revision keyed by\nresult_id.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
                 }
             }
         },
@@ -6174,6 +6312,18 @@ const docTemplate = `{
                 "movie"
             ],
             "properties": {
+                "expected_result_revision": {
+                    "description": "ExpectedResultRevision (POSTER-WRITE-HARDENING D12): optional CAS\nguard — when set, the save 409s if the target result's current\nrevision differs, so a stale-snapshot client cannot silently clobber a\nnewer committed edit.",
+                    "type": "integer"
+                },
+                "expected_result_revisions": {
+                    "description": "ExpectedResultRevisions: per-part CAS for multipart families (codex\nr39) - EVERY listed result must currently sit at the mapped revision or\nthe whole save 409s before any write.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
                 "movie": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
                 }

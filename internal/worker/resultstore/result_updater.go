@@ -88,6 +88,7 @@ func (ru *resultUpdater) AtomicUpdateFileResult(filePath string, updateFn func(*
 	if err != nil {
 		return err
 	}
+
 	updated.Revision = current.Revision + 1
 	stateReindexFilePathLocked(ru.resultTrackerState, filePath, current, updated)
 	if !ru.Excluded[filePath] {

@@ -226,6 +226,11 @@ definitions:
       result_id:
         description: Stable UUID — survives movie_id changes
         type: string
+      revision:
+        description: |-
+          Revision: server-managed update counter used as the CAS baseline for
+          PATCH expected_result_revision (POSTER-WRITE-HARDENING D12).
+        type: integer
       started_at:
         type: string
       status:
@@ -328,6 +333,11 @@ definitions:
         type: object
       movie:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+      revision:
+        description: |-
+          Revision is the fresh post-commit revision of the rescraped result
+          (D12) — clients advance their CAS baseline from it.
+        type: integer
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchScrapeRequest:
     properties:
@@ -522,6 +532,9 @@ definitions:
         type: object
       movie:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+      revision:
+        description: Revision is the revision AFTER the override commit (D12).
+        type: integer
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo:
     properties:
@@ -689,6 +702,18 @@ definitions:
         additionalProperties:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
         description: Field-level data source tracking
+        type: object
+      revision:
+        description: Revision is the fresh post-commit result revision (POSTER-WRITE-HARDENING
+          D12).
+        type: integer
+      revisions:
+        additionalProperties:
+          format: int64
+          type: integer
+        description: |-
+          Revisions carries EVERY family part's fresh revision keyed by
+          result_id (multipart-safe CAS baselines, codex r26).
         type: object
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.MovieTranslationView:
@@ -1162,6 +1187,17 @@ definitions:
           full-size source. Clients must round-trip it with the bounds: the apply
           gate refuses geometry without it.
         type: boolean
+      revision:
+        description: Revision is the revision AFTER the crop commit (D12).
+        type: integer
+      revisions:
+        additionalProperties:
+          format: int64
+          type: integer
+        description: |-
+          Revisions carries EVERY family part's fresh revision keyed by
+          result_id.
+        type: object
       should_crop_poster:
         description: |-
           ShouldCropPoster echoes the stored crop intent after a manual crop
@@ -1182,6 +1218,17 @@ definitions:
         type: string
       poster_url:
         type: string
+      revision:
+        description: Revision is the revision AFTER the from-URL commit (D12).
+        type: integer
+      revisions:
+        additionalProperties:
+          format: int64
+          type: integer
+        description: |-
+          Revisions carries EVERY family part's fresh revision keyed by
+          result_id.
+        type: object
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ProxyTestRequest:
     properties:
@@ -1468,6 +1515,22 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.UpdateMovieRequest:
     properties:
+      expected_result_revision:
+        description: |-
+          ExpectedResultRevision (POSTER-WRITE-HARDENING D12): optional CAS
+          guard — when set, the save 409s if the target result's current
+          revision differs, so a stale-snapshot client cannot silently clobber a
+          newer committed edit.
+        type: integer
+      expected_result_revisions:
+        additionalProperties:
+          format: int64
+          type: integer
+        description: |-
+          ExpectedResultRevisions: per-part CAS for multipart families (codex
+          r39) - EVERY listed result must currently sit at the mapped revision or
+          the whole save 409s before any write.
+        type: object
       movie:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
     required:
@@ -3785,6 +3848,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "410":
+          description: job already deleted (tombstone)
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -3872,6 +3939,14 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: a phase is running
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "410":
+          description: job deleted
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Bulk exclude movies from batch organization
       tags:
       - web
@@ -3954,6 +4029,18 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: job busy (pending or scrape-phase)
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "410":
+          description: job deleted
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: transactional save failed; all writes rolled back
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update movie in batch job
       tags:
       - web
@@ -4025,6 +4112,14 @@ paths:
             type: object
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: a phase is running
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "410":
+          description: job deleted
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Exclude movie from batch organization
@@ -4099,8 +4194,16 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: job busy (pending or scrape-phase) or content-id change rejected
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "410":
+          description: job deleted
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
-          description: Internal Server Error
+          description: transactional commit failed; all writes rolled back
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Override a field with a source's value
@@ -4144,6 +4247,18 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: job busy (pending or scrape-phase)
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "410":
+          description: job deleted
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: transactional commit failed; all writes rolled back
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update manual poster crop in batch job
       tags:
       - web
@@ -4185,8 +4300,16 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: job busy (pending or scrape-phase)
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "410":
+          description: job deleted
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
-          description: Internal Server Error
+          description: transactional commit failed; all writes rolled back
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Download poster from URL

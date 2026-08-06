@@ -746,8 +746,8 @@ func TestSnapshotForPersist_MinimalJob(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{})
 
-	dbJob, ok := snapshotForPersist(job)
-	require.True(t, ok)
+	dbJob, err := snapshotForPersist(job)
+	require.NoError(t, err)
 	require.NotNil(t, dbJob)
 	assert.NotNil(t, dbJob.Files) // empty JSON array, not nil
 	assert.NotEmpty(t, dbJob.Results)

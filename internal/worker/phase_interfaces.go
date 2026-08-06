@@ -79,18 +79,22 @@ type PhaseLifecycle interface {
 
 // persister persists job state. Called by phases after state mutations.
 // *BatchJob satisfies this interface via persistFunc adapter wrapping job.deps.PersistFn.
+// Phase-driven persists are best-effort: phases log-and-continue on error
+// (surfaced via persist_error on the job), review-edit paths surface errors
+// to the caller instead (POSTER-WRITE-HARDENING D2/D4).
 type persister interface {
-	Persist()
+	Persist() error
 }
 
-// persistFunc wraps a func() to satisfy the persister interface.
-// A nil persistFunc is safe to call — Persist() becomes a no-op.
-type persistFunc func()
+// persistFunc wraps a func() error to satisfy the persister interface.
+// A nil persistFunc is safe to call — Persist() becomes a nil-error no-op.
+type persistFunc func() error
 
-func (p persistFunc) Persist() {
+func (p persistFunc) Persist() error {
 	if p != nil {
-		p()
+		return p()
 	}
+	return nil
 }
 
 // scrapePhaseInputs carries only what the scrape phase needs.
@@ -123,7 +127,12 @@ type scrapePhaseInputs struct {
 // applyPhaseInputs carries only what the apply phase needs.
 // Not the full *BatchJob — each field is a narrow dependency.
 type applyPhaseInputs struct {
-	JobID       models.JobID
+	JobID models.JobID
+	// EditLockFn acquires the per-movie-family edit key (POSTER-WRITE-HARDENING):
+	// per-file apply write-backs run under it, so a mid-phase committed review
+	// PATCH and the phase's result publication serialize rather than
+	// interleave stale candidates (codex r11). nil ⇒ skip locking.
+	EditLockFn  func(movieID string) (release func())
 	Concurrency concurrencyConfig
 	NFOEnabled  bool
 	WF          workflow.WorkflowInterface

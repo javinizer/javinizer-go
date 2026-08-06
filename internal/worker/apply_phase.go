@@ -58,7 +58,9 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 			inputs.Lifecycle.MarkFailed()
 		}
 		if persister != nil {
-			persister.Persist()
+			if err := persister.Persist(); err != nil {
+				logging.Warnf("[Apply] envelope persist failed: %v", err)
+			}
 		}
 	}()
 
@@ -275,14 +277,42 @@ func interpretApplyResult(
 		// failed-apply row loses its movie payload and /review/[jobId] can't
 		// render the movie card / poster preview. Same dropped-on-failure-path
 		// pattern fixed for FileMatchInfo in commit 6249de64.
-		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
-			FileMatchInfo: afc.Match,
-			Movie:         movie,
-			Status:        fileStatus,
-			Error:         errMsg,
-			StartedAt:     startTime,
-			EndedAt:       &now,
+		// Live-session merge (not whole-struct replace): the review-editable
+		// set keeps the LIVE value when the user edited it mid-phase
+		// (codex P6-B); phase-computed fields still come from the frozen
+		// movie. Falls back to whole-struct write when no result exists yet
+		// (early-fail paths in phase tests create rows on demand).
+		// Serialize with concurrent review edits (codex r11 P1): publication of
+		// the merged write-back happens under the movie family key.
+		unlock := func() {}
+		if inputs.EditLockFn != nil {
+			unlock = inputs.EditLockFn(afc.Match.MovieID)
+		}
+		errUp := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+			if applyWritebackIdentityMismatch(movie, current) {
+				logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+				return current, nil
+			}
+			fm := applyMatchFollowedByLiveIdentity(afc.Match, current)
+			current.FileMatchInfo = fm
+			current.Movie = mergeLiveReviewEdits(movie, movie, current.Movie)
+			current.Status = fileStatus
+			current.Error = errMsg
+			current.StartedAt = startTime
+			current.EndedAt = &now
+			return current, nil
 		})
+		unlock()
+		if errUp != nil {
+			inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
+				FileMatchInfo: afc.Match,
+				Movie:         movie,
+				Status:        fileStatus,
+				Error:         errMsg,
+				StartedAt:     startTime,
+				EndedAt:       &now,
+			})
+		}
 		if isCancelled {
 			if result != nil && result.OrganizeResult != nil {
 				auditOrganizeSuccess(inputs, movie, filePath, result, cfg)
@@ -325,12 +355,21 @@ func interpretApplyResult(
 	}
 
 	if result != nil && result.Movie != nil {
+		unlock := func() {}
+		if inputs.EditLockFn != nil {
+			unlock = inputs.EditLockFn(afc.Match.MovieID)
+		}
 		if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-			current.Movie = result.Movie.Clone()
+			if applyWritebackIdentityMismatch(movie, current) {
+				logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+				return current, nil
+			}
+			current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
 			return current, nil
 		}); err != nil {
 			logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err)
 		}
+		unlock()
 		outcome.Movie = result.Movie
 	}
 
@@ -395,11 +434,12 @@ func applyFile(
 		// path. Constructing a fresh struct here would silently zero multipart
 		// metadata for any file that panicked mid-apply, so /review/[jobId]
 		// would then show the file as single-part.
-		fmi:       fileResult.FileMatchInfo,
-		movie:     fileResult.Movie,
-		updater:   inputs.Updater,
-		broadcast: broadcastFailure(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply, "Apply"),
-		startTime: startTime,
+		fmi:        fileResult.FileMatchInfo,
+		movie:      fileResult.Movie,
+		updater:    inputs.Updater,
+		broadcast:  broadcastFailure(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply, "Apply"),
+		startTime:  startTime,
+		editLockFn: inputs.EditLockFn,
 	}
 	defer withFileRecovery(rc, &outcome)()
 

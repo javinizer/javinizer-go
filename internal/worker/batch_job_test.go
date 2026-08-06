@@ -76,7 +76,7 @@ func TestNewBatchJobDeps(t *testing.T) {
 
 		// Verify optional fields can be set after construction
 		persistCalled := false
-		deps.PersistFn = func() { persistCalled = true }
+		deps.PersistFn = func() error { persistCalled = true; return nil }
 		deps.PersistFn()
 		assert.True(t, persistCalled)
 	})
@@ -411,7 +411,10 @@ func TestBuildRescrapeInputs(t *testing.T) {
 
 	assert.Equal(t, job.ID, inputs.JobID)
 	assert.Equal(t, wf, inputs.WF)
-	assert.Equal(t, job.results, inputs.ResultMap)
+	// ResultMap is wrapped by familyKeyedResultMap (codex r20 commit-leg serialization) — unwrap.
+	wrapped, ok := inputs.ResultMap.(*familyKeyedResultMap)
+	require.True(t, ok, "rescrape ResultMap should route commits through the family key")
+	assert.Equal(t, job.results, wrapped.ResultMapAccessor)
 	assert.Equal(t, job.lifecycle, inputs.Lifecycle)
 }
 
@@ -493,7 +496,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = true
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
 		job.lifecycle.MarkCompleted()
 
 		// Call StartApply with Update: nil — should preserve job.cfg.update = true
@@ -515,7 +518,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = false
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
 		job.lifecycle.MarkCompleted()
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -536,7 +539,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = false
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
 		job.lifecycle.MarkCompleted()
 
 		updateTrue := true
@@ -558,7 +561,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = true
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
 		job.lifecycle.MarkCompleted()
 
 		updateFalse := false
@@ -668,7 +671,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 		})
 
 		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg", nil, false)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, ErrMovieFamilyEmpty)
 	})
 
 	t.Run("preserves original ShouldCropPoster value despite subsequent false assignment", func(t *testing.T) {
@@ -757,7 +760,7 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 		})
 
 		err := job.posterEditor.UpdatePosterFromURL(context.TODO(), "ABC-001", "poster.jpg", "crop.jpg")
-		require.NoError(t, err)
+		require.ErrorIs(t, err, ErrMovieFamilyEmpty)
 	})
 }
 

@@ -197,7 +197,7 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.A
 	repos := db.Repositories()
 
 	// Initialize job queue with jobRepo for persistence
-	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, nil, nil, worker.WithActressRepo(repos.ActressRepo), worker.WithHistoryRepo(repos.HistoryRepo))
+	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, nil, nil, worker.WithActressRepo(repos.ActressRepo), worker.WithHistoryRepo(repos.HistoryRepo), worker.WithEditTransactor(db))
 
 	deps := &core.APIDeps{
 		CoreDeps: &commandutil.CoreDeps{

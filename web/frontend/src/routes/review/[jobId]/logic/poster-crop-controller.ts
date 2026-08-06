@@ -133,18 +133,36 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		if (!currentMovie) return;
 
 		const currentResult = deps.getCurrentResult();
-		let sourceURL: string;
-		if (
-			currentMovie.poster_url &&
-			currentResult?.movie &&
-			currentMovie.poster_url !== currentResult.movie.poster_url
-		) {
-			sourceURL = `/api/v1/temp/image?url=${encodeURIComponent(currentMovie.poster_url)}${sessionParam().replace('?', '&')}`;
-		} else {
-			const posterMovieId = currentResult?.movie_id ?? currentMovie.id;
-			const fullPosterURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}-full.jpg${sessionParam()}`;
-			sourceURL = fullPosterURL;
+		// POSTER-WRITE-HARDENING D9/D14: crop geometry is ALWAYS measured
+		// against the installed bytes (the served temp poster), never a
+		// divergent remote URL — the server revalidates revision/fingerprint
+		// against installed state at commit time (the /temp/image?url=
+		// remote-measure lane is deleted). A form-edited-but-unsaved
+		// poster_url is NOT installed bytes either: refuse to measure the
+		// stale installed image under a new URL (codex P2) and guide the
+		// user to install the URL first via poster-from-url.
+		// Effective poster source folds poster_url → cover_url fallback (the
+		// same selection the downloader + apply boundary use; codex r14-C):
+		// a cover-only edit is still a poster source change in waiting.
+		const effectiveSourceOf = (m: { poster_url?: string; cover_url?: string }) =>
+			m.poster_url || m.cover_url || '';
+		const currentEffective = effectiveSourceOf(currentMovie);
+		const storedEffective = currentResult?.movie ? effectiveSourceOf(currentResult.movie) : '';
+		// Cropping measures the INSTALLED bytes — a cleared source (user
+		// emptied the URL fields) would otherwise crop the old image and
+		// commit geometry for a source the user already discarded.
+		if (currentEffective !== storedEffective) {
+			deps.setCropSourceURL('');
+			deps.setPosterCropLoadError(
+				'Poster URL was changed but not applied. Apply it with "Poster from URL" first, then crop.',
+			);
+			deps.setCropMetrics(null);
+			deps.setCropBox(null);
+			deps.setShowPosterCropModal(true);
+			return;
 		}
+		const posterMovieId = currentResult?.movie_id ?? currentMovie.id;
+		const sourceURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}-full.jpg${sessionParam()}`;
 		deps.setCropSourceURL(`${sourceURL}${sourceURL.includes('?') ? '&' : '?'}v=${now()}`);
 		deps.setPosterCropLoadError(null);
 		deps.setCropMetrics(null);

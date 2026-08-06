@@ -320,7 +320,7 @@ func TestJobStore_DeleteJob_AlreadyDeleted_Miss(t *testing.T) {
 
 	err := jq.DeleteJob(job.ID.String())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "already deleted")
+	assert.Contains(t, err.Error(), "job was deleted")
 }
 
 // --- DeleteJob running job (line 292) ---

@@ -446,6 +446,11 @@ func TestUpdateMovie_DBPersistError(t *testing.T) {
 	movie, _ := overrideFixture()
 	filePath := "test.mp4"
 	tracker := resultstore.New(1, []string{filePath})
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movie.ID},
+		Movie:         movie.Clone(),
+		Status:        models.JobStatusCompleted,
+	})
 	repo := mocks.NewMockMovieRepositoryInterface(t)
 	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
 	je := &jobEditorImpl{store: tracker, movieRepo: repo}

@@ -48,6 +48,7 @@ func cropJobFixture(t *testing.T, movieID string) (*core.APIDeps, *worker.BatchJ
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/" + movieID + ".mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 	setJobResult(job, "/path/to/"+movieID+".mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/" + movieID + ".mp4", MovieID: movieID},
 		Status:        models.JobStatusCompleted,
@@ -198,7 +199,13 @@ type cropErrorJobStore struct {
 }
 
 func (s *cropErrorJobStore) GetBatchJob(string) (worker.BatchJobInterface, bool) { return s.job, true }
-func (s *cropErrorJobStore) PersistJobByID(string)                               {}
+func (s *cropErrorJobStore) PersistJobByID(string) error                         { return nil }
+
+// The embedded interface satisfies the admission acquisitions unless the crop
+// handler is exercised through them — these tests always supply access.
+func (s *cropErrorJobStore) AcquireEditAccess(string) (worker.BatchJobInterface, func(), error) {
+	return s.job, func() {}, nil
+}
 
 // A failure inside the job-state update surfaces as 500 after a successful
 // preview crop (mock job drives the otherwise-unreachable error branch).
@@ -210,15 +217,23 @@ func TestPosterCrop_UpdatePosterCropErrorIs500(t *testing.T) {
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/CROPGEO-008.mp4", MovieID: "CROPGEO-008"},
 		Movie:         &models.Movie{ID: "CROPGEO-008"},
 	}, "/path/to/CROPGEO-008.mp4", true)
-	mockJob.EXPECT().FindMovieResultForMovieID("CROPGEO-008").Return(nil, nil)
+	// resolvePosterID used to run pre-lock; the handler now resolves inside
+	// WithMovieEditLock, which this mock intercepts — the lookup never runs
+	// in the error path, so mark the call optional.
+	mockJob.EXPECT().FindMovieResultForMovieID("CROPGEO-008").Return(nil, nil).Maybe()
 	mockJob.EXPECT().FindFilePathsForMovieID("CROPGEO-008").Return([]string{"/path/to/CROPGEO-008.mp4"})
-	mockJob.EXPECT().UpdatePosterCrop("CROPGEO-008", mock.Anything, mock.Anything, mock.Anything).
-		Return(errors.New("store exploded"))
+	// The handler acquires the family edit lock and commits inside it; the
+	// store explosion surfaces from the keyed section.
+	mockJob.EXPECT().WithMovieEditLock("CROPGEO-008", mock.Anything).
+		RunAndReturn(func(_ string, fn func(*worker.LockedMovieOps) error) error {
+			_ = fn
+			return errors.New("store exploded")
+		})
 	deps.JobStore = &cropErrorJobStore{job: mockJob}
 
 	w := postCrop(t, router, job, "CROPGEO-008", contracts.PosterCropRequest{X: 0, Y: 0, Width: 400, Height: 600})
 	assert.Equal(t, 500, w.Code, "body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "Failed to update job state")
+	assert.Contains(t, w.Body.String(), "store exploded")
 }
 
 // Pixel-space containment violations against the measured source must be

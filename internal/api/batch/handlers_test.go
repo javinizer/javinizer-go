@@ -232,6 +232,7 @@ func TestUpdateBatchMovie(t *testing.T) {
 			name: "update movie successfully",
 			setupJob: func(jq worker.JobStoreInterface) (string, string) {
 				job := jq.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
+				job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission
 
 				// Simulate a completed scrape with movie data
 				result := &resultstore.MovieResult{
@@ -276,6 +277,8 @@ func TestUpdateBatchMovie(t *testing.T) {
 					Movie:         &models.Movie{ID: "ABC-123"},
 					StartedAt:     time.Now(),
 				}
+				job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission
+				job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission
 				setJobResult(job, "/path/to/ABC-123.mp4", result)
 				return job.GetID(), "NONEXISTENT-999"
 			},
@@ -357,6 +360,7 @@ func TestUpdateBatchMoviePosterCrop(t *testing.T) {
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Test Movie"},
 		StartedAt:     time.Now(),
 	})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate: Pending rejects edits with 409
 
 	posterDir := filepath.Join("data", "temp", "posters", job.GetID())
 	require.NoError(t, os.MkdirAll(posterDir, 0755))

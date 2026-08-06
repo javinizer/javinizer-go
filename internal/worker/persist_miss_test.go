@@ -22,8 +22,8 @@ func TestSnapshotForPersist_DeletedJob_Persist(t *testing.T) {
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 	job.lifecycle.SetDeleted(true)
 
-	dbJob, ok := snapshotForPersist(job)
-	assert.False(t, ok)
+	dbJob, err := snapshotForPersist(job)
+	assert.NoError(t, err)
 	assert.Nil(t, dbJob)
 }
 
@@ -47,8 +47,8 @@ func TestSnapshotForPersist_AllFieldsPopulated(t *testing.T) {
 	job.cfg.tempDir = t.TempDir()
 	job.cfg.operationMode = "organize"
 
-	dbJob, ok := snapshotForPersist(job)
-	require.True(t, ok)
+	dbJob, err := snapshotForPersist(job)
+	require.NoError(t, err)
 	require.NotNil(t, dbJob)
 	assert.Equal(t, job.ID.String(), dbJob.ID)
 	assert.Equal(t, "/output", dbJob.Destination)
@@ -59,7 +59,7 @@ func TestSnapshotForPersist_AllFieldsPopulated(t *testing.T) {
 
 	// Verify results JSON is a valid envelope
 	var envelope jobpersist.JobResultsEnvelope
-	err := json.Unmarshal([]byte(dbJob.Results), &envelope)
+	err = json.Unmarshal([]byte(dbJob.Results), &envelope)
 	require.NoError(t, err)
 	assert.Contains(t, envelope.Domain, "file1.mp4")
 	assert.Contains(t, envelope.Domain, "file2.mp4")

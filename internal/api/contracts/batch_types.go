@@ -94,6 +94,9 @@ type BatchFileResult struct {
 	Movie          *MovieView        `json:"movie,omitempty"`
 	StartedAt      string            `json:"started_at"`
 	EndedAt        *string           `json:"ended_at,omitempty"`
+	// Revision: server-managed update counter used as the CAS baseline for
+	// PATCH expected_result_revision (POSTER-WRITE-HARDENING D12).
+	Revision uint64 `json:"revision"`
 }
 
 // BatchFileResultSlim is a lightweight per-file result without movie data.
@@ -182,6 +185,9 @@ type BatchRescrapeResponse struct {
 	Movie          *MovieView        `json:"movie"`
 	FieldSources   map[string]string `json:"field_sources,omitempty"`
 	ActressSources map[string]string `json:"actress_sources,omitempty"`
+	// Revision is the fresh post-commit revision of the rescraped result
+	// (D12) — clients advance their CAS baseline from it.
+	Revision *uint64 `json:"revision,omitempty"`
 }
 
 // BatchExcludeRequest represents a request to exclude multiple movies from a batch job

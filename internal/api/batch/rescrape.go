@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
 // rescrapeBatchMovie godoc
@@ -43,6 +45,30 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			writeErrorResponse(c, httpStatus, false, errMsg)
 			return
 		}
+
+		// Atomic admission FIRST (codex P5-B): tombstone-aware 410 must precede
+		// the legacy lookup, or a known-deleted job would 404 via
+		// prepareBatchRequest before the gate can answer 410. The admission
+		// gate (409 on busy phases) is live here too, so the later
+		// rescrapeNotAllowed check is a defense-in-depth duplicate that can go.
+		_, lease, aErr := rt.Deps().GetJobStore().AcquireRescrapeAccess(c.Param("id"))
+		if aErr != nil {
+			switch {
+			case errors.Is(aErr, worker.ErrJobGone):
+				writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
+			case errors.Is(aErr, worker.ErrJobNotFound):
+				writeErrorResponse(c, http.StatusNotFound, true, "Job not found")
+			default:
+				status := models.JobStatusPending
+				var busy *worker.EditPhaseBusyError
+				if errors.As(aErr, &busy) {
+					status = busy.Status
+				}
+				writeErrorResponse(c, http.StatusConflict, false, fmt.Sprintf("Cannot rescrape %s job", status))
+			}
+			return
+		}
+		defer lease()
 
 		// One snapshot so the batch config defaults (prepareBatchRequest), the
 		// workflow factory, and the batch job factory all see the same reload
@@ -125,10 +151,18 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		logging.Infof("[Rescrape] Verified update for job %s, result %s (movieID=%s): status=%s",
 			job.GetID(), resultID, movieID, rr.Status)
 
+		var rev *uint64
+		if rr.FilePath != "" {
+			if res, err := job.GetMovieResult(rr.FilePath); err == nil && res != nil {
+				rv := res.Revision
+				rev = &rv
+			}
+		}
 		c.JSON(http.StatusOK, contracts.BatchRescrapeResponse{
 			Movie:          contracts.MovieViewFromModel(rr.Movie),
 			FieldSources:   rr.FieldSources,
 			ActressSources: rr.ActressSources,
+			Revision:       rev,
 		})
 	}
 }
