@@ -143,6 +143,8 @@ func TestEditAdmissionErrorMatrix(t *testing.T) {
 	assert.Error(t, editAdmissionError("J", models.JobStatusRunning, string(JobPhaseScrape)), "running scrape-phase rejects")
 	assert.Error(t, editAdmissionError("J", models.JobStatusRunning, ""), "running with unknown phase rejects")
 	assert.NoError(t, editAdmissionError("J", models.JobStatusRunning, string(JobPhaseApply)), "running apply-phase admits")
+	// Terminal-looking status with a lingering phase marker = cancelling-but-probably-draining scrape (P1-D): rejects.
+	assert.Error(t, editAdmissionError("J", models.JobStatusCancelled, string(JobPhaseScrape)))
 	assert.NoError(t, editAdmissionError("J", models.JobStatusCompleted, ""))
 	assert.NoError(t, editAdmissionError("J", models.JobStatusFailed, ""))
 	assert.NoError(t, editAdmissionError("J", models.JobStatusCancelled, ""))

@@ -55,40 +55,44 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 			// committed mid-phase must beat the frozen pre-phase movie for
 			// review-editable fields, while phase-side state stays intact.
 			// Falls back to whole-struct write when no prior result exists.
-			unlock := func() {}
-			if rc.editLockFn != nil && rc.fmi.MovieID != "" {
-				unlock = rc.editLockFn(rc.fmi.MovieID)
-			}
-			errUp := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-				if applyWritebackIdentityMismatch(rc.movie, current) {
-					logging.Warnf("[Recovery] skipping write-back for %s — result rekeyed to %s mid-phase", rc.filePath, current.FileMatchInfo.MovieID)
+			// codex P2-C: a rekeyed target must skip the atomic call entirely —
+			// the updater bumps the revision even on a callback no-op.
+			if !writebackPreSkipped(rc.updater, rc.movie, rc.filePath, "Recovery") {
+				unlock := func() {}
+				if rc.editLockFn != nil && rc.fmi.MovieID != "" {
+					unlock = rc.editLockFn(rc.fmi.MovieID)
+				}
+				errUp := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+					if applyWritebackIdentityMismatch(rc.movie, current) {
+						logging.Warnf("[Recovery] skipping write-back for %s — result rekeyed to %s mid-phase", rc.filePath, current.FileMatchInfo.MovieID)
+						return current, nil
+					}
+					current.FileMatchInfo = applyMatchFollowedByLiveIdentity(rc.fmi, current)
+					current.Movie = mergeLiveReviewEdits(rc.movie, rc.movie, current.Movie)
+					current.Status = models.JobStatusFailed
+					current.Error = panicErr.Error()
+					if !rc.startTime.IsZero() {
+						current.StartedAt = rc.startTime
+						current.EndedAt = &now
+					}
 					return current, nil
+				})
+				unlock()
+				if errUp != nil {
+					mr := &resultstore.MovieResult{
+						FileMatchInfo: rc.fmi,
+						Status:        models.JobStatusFailed,
+						Error:         panicErr.Error(),
+					}
+					if rc.movie != nil {
+						mr.Movie = rc.movie
+					}
+					if !rc.startTime.IsZero() {
+						mr.StartedAt = rc.startTime
+						mr.EndedAt = &now
+					}
+					rc.updater.UpdateFileResult(rc.filePath, mr)
 				}
-				current.FileMatchInfo = applyMatchFollowedByLiveIdentity(rc.fmi, current)
-				current.Movie = mergeLiveReviewEdits(rc.movie, rc.movie, current.Movie)
-				current.Status = models.JobStatusFailed
-				current.Error = panicErr.Error()
-				if !rc.startTime.IsZero() {
-					current.StartedAt = rc.startTime
-					current.EndedAt = &now
-				}
-				return current, nil
-			})
-			unlock()
-			if errUp != nil {
-				mr := &resultstore.MovieResult{
-					FileMatchInfo: rc.fmi,
-					Status:        models.JobStatusFailed,
-					Error:         panicErr.Error(),
-				}
-				if rc.movie != nil {
-					mr.Movie = rc.movie
-				}
-				if !rc.startTime.IsZero() {
-					mr.StartedAt = rc.startTime
-					mr.EndedAt = &now
-				}
-				rc.updater.UpdateFileResult(rc.filePath, mr)
 			}
 
 			if rc.broadcast != nil {

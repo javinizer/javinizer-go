@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/logging"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
@@ -132,6 +134,30 @@ func applyWritebackIdentityMismatch(phaseMovie *models.Movie, current *resultsto
 // aligned with a live rekey drift (codex P7-C): when the in-memory result
 // moved to a different movie family mid-phase, the match map must follow it
 // even though the apply was recorded against the pre-phase match.
+// writebackPreSkipped checks the identity BEFORE the mutating AtomicUpdate:
+// AtomicUpdateFileResult bumps the revision even on a callback no-op
+// (codex P2-C: a skip would otherwise advance the revision with no state
+// change, breaking the client's CAS against the just-committed rekey).
+// Returns true to skip the atomic call entirely. The in-callback mismatch
+// check stays in place as the same-race safety net.
+func writebackPreSkipped(updater resultstore.ResultUpdater, movie *models.Movie, filePath, label string) bool {
+	reader, ok := updater.(interface {
+		GetMovieResult(string) (*resultstore.MovieResult, error)
+	})
+	if !ok {
+		return false // unknown seam: the in-callback check remains the guard
+	}
+	cur, err := reader.GetMovieResult(filePath)
+	if err != nil || cur == nil {
+		return false
+	}
+	if applyWritebackIdentityMismatch(movie, cur) {
+		logging.Warnf("[%s] skipping write-back for %s — result rekeyed to %s mid-phase (pre-checked)", label, filePath, cur.FileMatchInfo.MovieID)
+		return true
+	}
+	return false
+}
+
 func applyMatchFollowedByLiveIdentity(fm models.FileMatchInfo, current *resultstore.MovieResult) models.FileMatchInfo {
 	if current != nil && current.FileMatchInfo.MovieID != "" && current.FileMatchInfo.MovieID != fm.MovieID {
 		fm.MovieID = current.FileMatchInfo.MovieID

@@ -294,19 +294,28 @@ func (t *tombstoneRegistry) Contains(id string) bool {
 }
 
 // editAdmissionError gates review edits (POSTER-WRITE-HARDENING D16):
-// admitted: Completed, Organized, Failed, Cancelled, Reverted,
-// Running-with-apply-phase. Rejected 409: Pending; Running-with-scrape;
-// Running with an unknown (unpersisted/legacy) phase marker.
+// admitted: terminal statuses, Running-with-apply-phase; rejected 409 otherwise.
+// Pending rejects regardless of the marker; a non-empty phase marker always
+// rejects — even a terminal-looking status who still has its marker set is a
+// cancelling-but-not-yet-drained phase whose late write-back would clobber
+// the incoming edit (codex P1-D).
 func editAdmissionError(jobID string, status models.JobStatus, currentPhase string) error {
-	switch status {
-	case models.JobStatusPending:
-		return &EditPhaseBusyError{JobID: jobID, Status: status}
-	case models.JobStatusRunning:
+	if status == models.JobStatusRunning {
 		if currentPhase == string(JobPhaseApply) {
 			return nil
 		}
+		// scrape marker, unknown/legacy marker, or no marker at all — an
+		// in-flight or unlabelled running phase never admits edits.
 		return &EditPhaseBusyError{JobID: jobID, Status: status, Phase: currentPhase}
-	default:
-		return nil
 	}
+	if currentPhase != "" {
+		// Terminal-looking status + a lingering phase marker = a cancelled
+		// phase still draining (codex P1-D): its late write-back would clobber
+		// an admitted edit.
+		return &EditPhaseBusyError{JobID: jobID, Status: status, Phase: currentPhase}
+	}
+	if status == models.JobStatusPending {
+		return &EditPhaseBusyError{JobID: jobID, Status: status}
+	}
+	return nil
 }

@@ -92,6 +92,138 @@ func TestControllerRescrapeTailFilePathButNoKeys(t *testing.T) {
 	_ = outcome
 }
 
+// codex P2-C: a settled identity mismatch must NOT invoke the atomic updater
+// (which bumps the revision even for a no-op callback).
+type skipVerifyUpdater struct {
+	resultstore.ResultUpdater
+	result      *resultstore.MovieResult
+	atomicCalls int
+}
+
+func (s *skipVerifyUpdater) AtomicUpdateFileResult(fp string, fn func(*resultstore.MovieResult) (*resultstore.MovieResult, error)) error {
+	s.atomicCalls++
+	return nil
+}
+func (s *skipVerifyUpdater) GetMovieResult(string) (*resultstore.MovieResult, error) {
+	return s.result, nil
+}
+
+func TestWritebackPreSkippedAvoidsAtomic(t *testing.T) {
+	store := &skipVerifyUpdater{result: &resultstore.MovieResult{
+		ResultID:      "res-x",
+		Status:        models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "NEW-7"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "NEW-7"},
+	}}
+	assert.True(t, writebackPreSkipped(store, &models.Movie{ID: "OLD-7"}, "/f/a.mp4", "Apply"))
+	assert.Equal(t, 0, store.atomicCalls, "a skip must not invoke the mutating updater")
+	// matched identity → no skip
+	assert.False(t, writebackPreSkipped(store, &models.Movie{ID: "NEW-7"}, "/f/a.mp4", "Apply"))
+	// read seam unavailable → skip can't be proven, falls through to callback
+	invisible := resultstore.New(1, []string{"/f/a.mp4"})
+	_ = invisible
+	cur2 := &skipVerifyUpdater{}
+	cur2.result = nil
+	assert.False(t, writebackPreSkipped(cur2, &models.Movie{ID: "NEW-7"}, "/f/a.mp4", "Apply"))
+}
+
+// Seam without a read channel: the pre-check can't prove anything, and the
+// in-callback mismatch check carries the skip (safety-net arm).
+type callbackOnlyUpdater struct {
+	inner resultstore.Store
+	calls int
+}
+
+func (u *callbackOnlyUpdater) UpdateFileResult(string, *resultstore.MovieResult) {}
+func (u *callbackOnlyUpdater) SetProvenance(string, *resultstore.ProvenanceData) {}
+func (u *callbackOnlyUpdater) UpdateMovie(string, *models.Movie) error           { return nil }
+func (u *callbackOnlyUpdater) MarkExcluded(string)                               {}
+func (u *callbackOnlyUpdater) AtomicUpdateFileResult(fp string, fn func(*resultstore.MovieResult) (*resultstore.MovieResult, error)) error {
+	u.calls++
+	return u.inner.AtomicUpdateFileResult(fp, fn)
+}
+
+var _ resultstore.ResultUpdater = (*callbackOnlyUpdater)(nil)
+
+func TestCallbackOnlyUpdaterFallsBackToInCallbackCheck(t *testing.T) {
+	inner := resultstore.New(1, []string{"/f/a.mp4"})
+	inner.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-x", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "NEW-8"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "NEW-8"},
+	})
+	u := &callbackOnlyUpdater{inner: inner}
+	require.False(t, writebackPreSkipped(u, &models.Movie{ID: "OLD-8"}, "/f/a.mp4", "Apply"), "no read seam ⇒ no pre-skip")
+	// The callback-level check on the live store still skips the write-back.
+	var sawSkip bool
+	err := u.AtomicUpdateFileResult("/f/a.mp4", func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+		if applyWritebackIdentityMismatch(&models.Movie{ID: "OLD-8"}, current) {
+			sawSkip = true
+			return current, nil
+		}
+		return current, nil
+	})
+	require.NoError(t, err)
+	assert.True(t, sawSkip, "in-callback defense fires under a callback-only seam")
+	assert.Equal(t, 1, u.calls)
+}
+
+// Real flows with a callback-only updater seam: the in-callback mismatch
+// check is the operative skip (no read seam to pre-check through).
+func TestPanicRecoveryCallbackOnlyWriteback(t *testing.T) {
+	inner := resultstore.New(1, []string{"/f/a.mp4"})
+	inner.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-p9", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "NEW-9", Title: "user edit"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "NEW-9"},
+	})
+	u := &callbackOnlyUpdater{inner: inner}
+	outcome := &panicOutcome{}
+	rc := recoveryContext{
+		filePath: "/f/a.mp4",
+		fmi:      models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "OLD-9"},
+		movie:    &models.Movie{ID: "OLD-9", Title: "phase frozen"},
+		updater:  u,
+	}
+	recoverFn := withFileRecovery(rc, outcome)
+	func() {
+		defer recoverFn()
+		panic("wedged")
+	}()
+	assert.Equal(t, 1, u.calls)
+	final, err := inner.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "user edit", final.Movie.Title, "rekeyed result untouched by the panic path")
+}
+
+func TestFailureWritebackCallbackOnly(t *testing.T) {
+	inner := resultstore.New(1, []string{"/f/a.mp4"})
+	inner.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-f9", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "NEW-10", Title: "user edit"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "NEW-10"},
+	})
+	u := &callbackOnlyUpdater{inner: inner}
+	inputs := minimalApplyInputs2(u)
+	afc := &ApplyFileContext{FilePath: "/f/a.mp4", Match: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "OLD-10"}}
+	outcome := interpretApplyResult("/f/a.mp4", &models.Movie{ID: "OLD-10", Title: "phase frozen"}, time.Now(), time.Minute, inputs, ApplyPhaseConfig{}, context.Background(), afc, nil, errors.New("engine wedged"))
+	require.True(t, outcome.Failed)
+	assert.Equal(t, 1, u.calls)
+	final, err := inner.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "user edit", final.Movie.Title)
+}
+
+func minimalApplyInputs2(u *callbackOnlyUpdater) applyPhaseInputs {
+	return applyPhaseInputs{
+		JobID:       models.NewJobID(),
+		Results:     map[string]*resultstore.MovieResult{},
+		Updater:     u,
+		Lifecycle:   &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})},
+		Broadcaster: &stubBroadcaster{},
+	}
+}
+
 // commitResult wrapper: stored result's canonical identity differs from the
 // current lookup key (alias-preference divergence is impossible through one
 // store, but the seam must tolerate it).
