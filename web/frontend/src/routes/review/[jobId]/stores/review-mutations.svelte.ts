@@ -305,13 +305,16 @@ const ops = Array.from(latestByFamily.entries());
 			// codex P3-B: if the refetch itself failed, the pane still carries
 			// PRE-save baselines; deleting overlays now would produce a 409 storm
 			// the next save. Keep them when the refresh failed (retry-prone but correct).
+			// codex P3-D: paused refetches keep dataUpdatedAt while reporting a
+			// prior success status. Gate on an ADVANCED dataUpdatedAt — only a
+			// completed fetch counts as refreshed.
+			const qk = ['batch-job', deps.getJobId()];
+			const before = queryClient.getQueryState(qk)?.dataUpdatedAt ?? 0;
 			await invalidateJobQueries().catch(() => {});
-			// codex P3-C: TanStack resolves invalidateQueries() on refetch failure
-			// by default (throwOnError:false) — a rejected result never lands. Only a
-			// VERIFIED-successful refetch may clear the overlays' baselines.
+			const post = queryClient.getQueryState(qk);
 			const refreshed = (() => {
-				const state = queryClient.getQueryState(['batch-job', deps.getJobId()]);
-				return state?.status === 'success';
+				if (post?.status !== 'success') return false;
+				return (post.dataUpdatedAt ?? 0) > before;
 			})();
 			if (succeeded.length > 0 && refreshed) {
 				const editedMovies = deps.getEditedMovies();

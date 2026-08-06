@@ -53,21 +53,16 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	// Store the cancel func BEFORE markStarted so that a concurrent Cancel()
-	// call sets the status to Cancelled, causing markStarted to fail (status
-	// != expectedFrom) and preventing the goroutine from starting with an
-	// uncancelled context. If markStarted fails, the explicit cancel() call
-	// is a safe no-op on the already-cancelled context.
-	c.job.lifecycle.setCancelFunc(cancel)
-	// Phase transitions QUEUE behind in-flight ops (BeginPhase blocks while
-	// leases are held), then atomically downgrade into the phase-duration
-	// shared lease — phase starts never overlap a committed admission and are
-	// never silently discarded (codex P1-A/P3-A).
+	// codex P1-G: ordering is markStarted-then-bind; a cancelled-but-queued
+	// start never overwrites the running phase cancel handle.
+	// codex P1-G: only the admission winner installs the CancelFunc — a
+	// queued start must never supplant the running phase's cancel handle.
 	entry, err := c.job.admission.BeginPhase()
 	if err != nil {
 		cancel()
 		return err // ErrJobGone when deleted mid-wait (BeginPhase queues behind in-flight ops)
 	}
+	c.job.lifecycle.setCancelFunc(cancel)
 	pd, err := c.markStarted(models.JobStatusPending, JobPhaseScrape)
 	if err != nil {
 		entry.Fail()
@@ -139,13 +134,14 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	c.job.mu.RUnlock()
 
 	ctx, cancel := context.WithCancel(ctx)
-	// Same ordering as StartScrape: setCancelFunc before markStarted.
-	c.job.lifecycle.setCancelFunc(cancel)
+	// codex P1-G: only the admission winner installs the CancelFunc — never
+	// let a queued start overwrite the running phase's cancel handle.
 	entry, err := c.job.admission.BeginPhase()
 	if err != nil {
 		cancel()
 		return err // ErrJobGone when deleted mid-wait (BeginPhase queues behind in-flight ops)
 	}
+	c.job.lifecycle.setCancelFunc(cancel)
 	pd, err := c.markStarted(models.JobStatusCompleted, JobPhaseApply)
 	if err != nil {
 		entry.Fail()
