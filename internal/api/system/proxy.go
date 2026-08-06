@@ -61,10 +61,6 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "target_url must be a valid http(s) URL"})
 			return
 		}
-		if err := ssrf.CheckURL(targetURL); err != nil {
-			c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: err.Error()})
-			return
-		}
 
 		var result ProxyTestResult
 		switch req.Mode {
@@ -76,6 +72,22 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 
 			if !req.Proxy.Enabled || strings.TrimSpace(proxyProfile.URL) == "" {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "proxy.enabled=true and proxy profile with url are required for direct proxy test"})
+				return
+			}
+			// Resolve the profile FIRST: under SOCKS5 the proxy performs its own
+			// DNS, so the API preflight must stay lexical (scheme/literal/local
+			// names); HTTP(S) or unset profiles get the full resolution guard.
+			targetErr := error(nil)
+			if proxyTestPreservesHostnames(proxyProfile) {
+				parsed, _ := url.Parse(targetURL)
+				if parsed == nil || ssrf.IsBlockedHost(parsed.Hostname()) {
+					targetErr = fmt.Errorf("target host is lexically private/blocked")
+				}
+			} else {
+				targetErr = ssrf.CheckURL(targetURL)
+			}
+			if targetErr != nil {
+				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: targetErr.Error()})
 				return
 			}
 			result = TestDirectProxy(c.Request.Context(), targetURL, proxyProfile, apiCfg.ScraperUserAgent)
@@ -90,6 +102,12 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 			scraperProxy := &req.Proxy
 			proxyProfile := models.ResolveScraperProxy(*globalProxy, scraperProxy)
 
+			// FlareSolverr resolves targets server-side; keep the full SSRF
+			// guard (nothing here uses a remote-DNS dialer in this mode).
+			if err := ssrf.CheckURL(targetURL); err != nil {
+				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: err.Error()})
+				return
+			}
 			result = TestFlareSolverr(targetURL, req.FlareSolverr, proxyProfile)
 
 		default:
