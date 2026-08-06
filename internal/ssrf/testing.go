@@ -12,8 +12,13 @@ import (
 // across package boundaries, so build tags cannot move them to _test files).
 // A production caller -- or a test helper forgotten outside a live test --
 // panics loudly instead of silently disabling SSRF validation.
+// isTestingRuntime is the indirection point: testing.Testing() can never
+// return false inside a test binary, so coverage for the panic arm needs a
+// stubbed gate.
+var isTestingRuntime = testing.Testing
+
 func requireTestContext(helper string) {
-	if !testing.Testing() {
+	if !isTestingRuntime() {
 		panic("ssrf: " + helper + " is a test-only bypass and must never run in production")
 	}
 }
