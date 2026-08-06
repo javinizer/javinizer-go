@@ -139,8 +139,13 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 			if !ok {
 				return false
 			}
+			// A rejected entry must NOT be skipped: the stable identity key
+			// (content-independent since the thumbnail digest was dropped)
+			// means a corrected URL at the same identity would be suppressed
+			// forever. Re-validate rejected entries every run; durable
+			// rejections return quickly.
 			if entry.Status == stateStatusRejected && entry.Policy == policyKey {
-				return true
+				return false
 			}
 			return entry.Status == stateStatusOK && entry.Candidate != nil && entry.Thumbnail != nil && cachedCandidateReusable(&entry, minDimension, maxBytes, options.AllowPrivateHosts)
 		}
