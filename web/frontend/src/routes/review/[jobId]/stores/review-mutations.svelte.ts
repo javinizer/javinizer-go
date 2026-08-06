@@ -344,7 +344,10 @@ const ops = Array.from(latestByFamily.entries());
 					// storage full → fall back to clearEditStorage behavior
 					deps.clearEditStorage();
 				}
-			} else {
+			} else if (refreshed) {
+				// codex P3-C: untouched overlays need their session copy intact —
+				// otherwise a pre-refetch page reload loses the pane's retained
+				// edits while the on-screen state still shows them.
 				deps.clearEditStorage();
 			}
 		},

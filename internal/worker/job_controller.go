@@ -100,7 +100,18 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 		defer release()
 		// Clear the phase marker only after the worker's final write — a
 		// cancelled Running phase stays fenced until its last flush (codex r38).
-		defer c.job.lifecycle.SetCurrentPhase("")
+		defer func() {
+			c.job.lifecycle.SetCurrentPhase("")
+			// codex P2-I: persist the cleared marker too — the in-Run defer
+			// carries the marker SET into the final database row; without this
+			// second persist, a restart restores the stale marker and every edit
+			// on the terminated job is rejected by the admission guard.
+			if persistFn != nil {
+				if err := persistFn(); err != nil {
+					logging.Warnf("[BatchJob] %s marker-clear persist on phase end failed: %v", c.job.ID.String(), err)
+				}
+			}
+		}()
 		// Close phaseDone only after Run returns — its deferred persistence
 		// executes on return, after the terminal Mark* it calls mid-body.
 		defer close(pd)
@@ -181,7 +192,18 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	go func() {
 		// Admission lease spans through Run's deferred final persist (D1/D16).
 		defer release()
-		defer c.job.lifecycle.SetCurrentPhase("")
+		defer func() {
+			c.job.lifecycle.SetCurrentPhase("")
+			// codex P2-I: persist the cleared marker too — the in-Run defer
+			// carries the marker SET into the final database row; without this
+			// second persist, a restart restores the stale marker and every edit
+			// on the terminated job is rejected by the admission guard.
+			if persistFn != nil {
+				if err := persistFn(); err != nil {
+					logging.Warnf("[BatchJob] %s marker-clear persist on phase end failed: %v", c.job.ID.String(), err)
+				}
+			}
+		}()
 		defer close(pd)
 		defer cancel()
 		inputs := c.buildApplyInputs(wf, batchCfg, cfg, persistFn)

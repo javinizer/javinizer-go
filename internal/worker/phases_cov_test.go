@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -12,6 +14,77 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
+
+func TestStartScrapeFinalPersistsAfterMarkerClear(t *testing.T) {
+	job := newBatchJob(nil)
+	job.Controller().SetWorkflow(wfmocks.NewMockWorkflowInterface(t))
+	var persists atomic.Int32
+	job.deps.PersistFn = func() error { persists.Add(1); return nil }
+	require.NoError(t, job.Controller().StartScrape(context.Background(), nil, ScrapePhaseConfig{}))
+	// Wait on the lifecycle phase channel: it closes once the phase goroutine's
+	// OWN defer chain (persist + clear-and-persist) has fully unwound.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		job.lifecycle.mu.RLock()
+		pd := job.lifecycle.phaseDone
+		job.lifecycle.mu.RUnlock()
+		if pd != nil {
+			<-pd
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("phase goroutine never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.Equal(t, "", job.lifecycle.CurrentPhase())
+	assert.GreaterOrEqual(t, int(persists.Load()), 2)
+}
+
+func TestPhaseEndPersistWarnsAreSwallowed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		start func(ctx context.Context, job *BatchJob) error
+	}{
+		{"scrape", func(ctx context.Context, job *BatchJob) error {
+			return job.Controller().StartScrape(ctx, nil, ScrapePhaseConfig{})
+		}},
+		{"apply", func(ctx context.Context, job *BatchJob) error {
+			job.lifecycle.mu.Lock()
+			job.lifecycle.Status = models.JobStatusCompleted
+			job.lifecycle.mu.Unlock()
+			return job.Controller().StartApply(ctx, ApplyPhaseConfig{})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job := newBatchJob(nil)
+			job.Controller().SetWorkflow(wfmocks.NewMockWorkflowInterface(t))
+			var persistCalls atomic.Int32
+			job.deps.PersistFn = func() error {
+				if persistCalls.Add(1) == 1 {
+					return nil // phase-entry marker writes must succeed (fail-closed start)
+				}
+				return errors.New("persist refused") // the clear-time final write fails
+			}
+			require.NoError(t, tc.start(context.Background(), job))
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				job.lifecycle.mu.RLock()
+				pd := job.lifecycle.phaseDone
+				job.lifecycle.mu.RUnlock()
+				if pd != nil {
+					<-pd
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("phase goroutine never started")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			assert.Equal(t, "", job.lifecycle.CurrentPhase())
+		})
+	}
+}
 
 // StartScrape must NOT launch when the phase-entry marker fails to persist
 // (D16 fail-closed); the terminal failure is retried durably.
