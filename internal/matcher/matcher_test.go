@@ -627,6 +627,31 @@ func TestMatcher_MatchFile_CustomRegexEmptyCapture(t *testing.T) {
 	assert.Nil(t, result, "custom regex with empty capture group must yield no match (falls back to builtin, which also misses '123')")
 }
 
+func TestMatcher_EZ_CatalogSuffix_StrippedForLetterQuality(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		filename string
+		wantID   string
+	}{
+		{"part e + 4k tag", "SVFLA-001e-4k.mp4", "SVFLA-001"},
+		{"part d + 4k tag", "SVFLA-001d-4k.mp4", "SVFLA-001"},
+		{"part z + 1080p tag", "ABC-123z-1080p.mp4", "ABC-123"},
+		{"catalog suffix Z (no tag)", "IPX-535Z.mp4", "IPX-535Z"},
+		{"catalog suffix E (no tag)", "IPX-535E.mp4", "IPX-535E"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := m.MatchFile(models.FileMatchInfo{Name: tt.filename, Extension: ".mp4"})
+			require.NotNil(t, result)
+			assert.Equal(t, tt.wantID, result.ID)
+		})
+	}
+}
+
 func TestMatcher_PartSuffixVariations(t *testing.T) {
 	cfg := &Config{
 		RegexEnabled: false,

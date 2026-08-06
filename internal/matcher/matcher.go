@@ -122,6 +122,26 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 	// First capture group is the ID.
 	result.ID = strings.ToUpper(id)
 
+	// The built-in ID pattern optionally consumes a trailing E or Z as a catalog
+	// suffix (e.g. IPX-535Z). When that letter immediately precedes a digit-first
+	// quality tag (the letter+trailing part form, e.g. "SVFLA-001e-4k" where 'e' is
+	// part E, not a catalog suffix), strip it from the ID so the part letter is
+	// detected. A bare E/Z without a trailing tag is a legitimate catalog suffix
+	// (e.g. IPX-535Z) and is preserved.
+	if n := len(result.ID); n > 1 && (result.ID[n-1] == 'E' || result.ID[n-1] == 'Z') {
+		baseID := result.ID[:n-1]
+		num, suffix, patternType, trailingPrefix := DetectPartSuffix(filename, baseID)
+		if patternType == PatternLetter && trailingPrefix != "" {
+			result.ID = baseID
+			result.PartNumber = num
+			result.PartSuffix = suffix
+			result.MultipartPattern = patternType
+			result.TrailingPrefix = trailingPrefix
+			result.IsMultiPart = false
+			return result
+		}
+	}
+
 	// Detect part suffix from the rest of the filename
 	num, suffix, patternType, trailingPrefix := DetectPartSuffix(filename, result.ID)
 	result.PartNumber = num
