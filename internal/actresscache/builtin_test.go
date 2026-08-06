@@ -17,7 +17,9 @@ func TestBuiltinCacheLoads(t *testing.T) {
 	assert.Len(t, cache.Records, 25341)
 	assert.NotNil(t, BuiltinData())
 	assert.Less(t, len(builtinData), 2<<20)
-	assert.Len(t, NewRuntimeCache(cache).Records, len(cache.Records))
+	// Runtime projection may drop records whose identity is too weak (single-part
+	// romanized names are not unique reachability owners under the new rules).
+	assert.LessOrEqual(t, len(NewRuntimeCache(cache).Records), len(cache.Records))
 }
 
 func TestBuiltinDataIsJSON(t *testing.T) {

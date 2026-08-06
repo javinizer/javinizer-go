@@ -411,7 +411,7 @@ func TestWaitRetryCancellation(t *testing.T) {
 
 func TestRuntimeReachabilityAndDecodeFailures(t *testing.T) {
 	assert.False(t, runtimeRecordReachable(RuntimeRecord{}, 0, nil, nil, nil))
-	assert.True(t, runtimeRecordReachable(RuntimeRecord{FirstName: "Jane"}, 0, nil, nil, map[string]map[int]struct{}{"jane": {0: {}}}))
+	assert.True(t, runtimeRecordReachable(RuntimeRecord{FirstName: "Jane", LastName: "Doe"}, 0, nil, nil, map[string]map[int]struct{}{"jane doe": {0: {}}}))
 
 	encodeGzip := func(parts ...string) []byte {
 		var data bytes.Buffer
@@ -900,4 +900,29 @@ func TestBuildMergesIncomingAliasIntoExistingCanonicalGroup(t *testing.T) {
 	require.Len(t, records, 1)
 	universe := append([]string{records[0].JapaneseName}, records[0].Aliases...)
 	assert.ElementsMatch(t, []string{"青田 加代子", "野上 律子"}, universe, "both identities survive")
+}
+func TestRegisterGroup(t *testing.T) {
+	groups := make(map[string]map[int]struct{})
+	registerGroup(groups, 0, []string{"a", "b"})
+	assert.Len(t, groups["a"], 1)
+	assert.Contains(t, groups["a"], 0)
+	assert.Contains(t, groups["b"], 0)
+	registerGroup(groups, 1, []string{"a"})
+	assert.Len(t, groups["a"], 2)
+	assert.Contains(t, groups["a"], 1)
+}
+
+func TestErrorFormats(t *testing.T) {
+	he := &HTTPError{StatusCode: 404, URL: "https://example.test/x"}
+	assert.Contains(t, he.Error(), "HTTP 404")
+	assert.Contains(t, he.Error(), "example.test")
+	bf := &BlockedFetchError{URL: "10.0.0.1"}
+	assert.Contains(t, bf.Error(), "10.0.0.1")
+}
+
+func TestNewFetcherShorthand(t *testing.T) {
+	f, err := NewFetcher(&http.Client{}, 0, "test")
+	require.NoError(t, err)
+	require.NotNil(t, f)
+	assert.Equal(t, "test", f.userAgent)
 }

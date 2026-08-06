@@ -728,8 +728,13 @@ func candidateIdentities(candidate Candidate) []string {
 			identities = append(identities, "jp:"+normalized)
 		}
 	}
-	if normalized := normalizeIdentity(candidate.FirstName + " " + candidate.LastName); normalized != "" {
-		identities = append(identities, "name:"+normalized)
+	// A name identity requires BOTH romanized parts: a single-part name (e.g.
+	// just "Ai") is too weak to merge candidates and can wrongly unite
+	// unrelated DMM-backed entries.
+	if strings.TrimSpace(candidate.FirstName) != "" && strings.TrimSpace(candidate.LastName) != "" {
+		if normalized := normalizeIdentity(candidate.FirstName + " " + candidate.LastName); normalized != "" {
+			identities = append(identities, "name:"+normalized)
+		}
 	}
 	if strings.TrimSpace(candidate.SourceID) != "" && strings.TrimSpace(candidate.Source) != "" {
 		identities = append(identities, "source:"+strings.ToLower(strings.TrimSpace(candidate.Source))+":"+normalizeIdentity(candidate.SourceID))
