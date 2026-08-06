@@ -24,7 +24,7 @@ func TestParseOptionsRejectsEveryInvalidBoundary(t *testing.T) {
 		{"--image-delay", "-1ns"},
 		{"--timeout", "0s"},
 		{"--limit", "-1"},
-		{"--min-dimension", "-1"},
+		{"--min-dimension", "-2"},
 		{"--max-image-bytes", "0"},
 	} {
 		_, err := parseOptions(args, &bytes.Buffer{})
@@ -85,4 +85,21 @@ func TestRunReportsBuildAndWriteErrors(t *testing.T) {
 	auditArgs := append(buildArgs(filepath.Join(dir, "state3"), filepath.Join(dir, "cache.gz")), "--audit-output", filepath.Join(blocked, "audit.json"))
 	err = run(t.Context(), auditArgs, &stdout, &stderr)
 	require.ErrorContains(t, err, "write actress audit cache")
+}
+
+// --min-dimension 0 must remain 0 (disable), while the omitted flag flows
+// through as the -1 sentinel that maps to the 64 default.
+func TestParseOptionsPreservesExplicitZeroMinDimension(t *testing.T) {
+	opts, err := parseOptions([]string{}, &bytes.Buffer{})
+	require.NoError(t, err)
+	assert.Equal(t, -1, opts.minDimension)
+
+	opts, err = parseOptions([]string{"--min-dimension", "0"}, &bytes.Buffer{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, opts.minDimension, "explicit zero survives parsing")
+
+	opts, err = parseOptions([]string{"--min-dimension", "128"}, &bytes.Buffer{})
+	require.NoError(t, err)
+	assert.Equal(t, 128, opts.minDimension)
+	_ = opts
 }

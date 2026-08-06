@@ -44,7 +44,7 @@ func Build(ctx context.Context, options BuildOptions) (Cache, BuildReport, error
 
 	// Effective validation policy for this run; reused state must satisfy it.
 	minDimension := options.MinThumbnailDimension
-	if minDimension <= 0 {
+	if minDimension < 0 {
 		minDimension = 64
 	}
 	maxBytes := options.MaxThumbnailBytes
