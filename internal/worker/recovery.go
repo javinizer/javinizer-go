@@ -55,13 +55,15 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 			// committed mid-phase must beat the frozen pre-phase movie for
 			// review-editable fields, while phase-side state stays intact.
 			// Falls back to whole-struct write when no prior result exists.
-			// codex P2-C: a rekeyed target must skip the atomic call entirely —
-			// the updater bumps the revision even on a callback no-op.
+			unlock := func() {}
+			if rc.editLockFn != nil && rc.fmi.MovieID != "" {
+				unlock = rc.editLockFn(rc.fmi.MovieID)
+			}
+			defer unlock()
+			// codex P2-C/D: skip check runs UNDER the family key so a rekey that
+			// won the lock before us is observed; callback check remains the net
+			// for rekeys landing during the atomic write itself.
 			if !writebackPreSkipped(rc.updater, rc.movie, rc.filePath, "Recovery") {
-				unlock := func() {}
-				if rc.editLockFn != nil && rc.fmi.MovieID != "" {
-					unlock = rc.editLockFn(rc.fmi.MovieID)
-				}
 				errUp := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 					if applyWritebackIdentityMismatch(rc.movie, current) {
 						logging.Warnf("[Recovery] skipping write-back for %s — result rekeyed to %s mid-phase", rc.filePath, current.FileMatchInfo.MovieID)
@@ -77,7 +79,6 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 					}
 					return current, nil
 				})
-				unlock()
 				if errUp != nil {
 					mr := &resultstore.MovieResult{
 						FileMatchInfo: rc.fmi,

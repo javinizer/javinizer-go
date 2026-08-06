@@ -294,15 +294,15 @@ func interpretApplyResult(
 		// (early-fail paths in phase tests create rows on demand).
 		// Serialize with concurrent review edits (codex r11 P1): publication of
 		// the merged write-back happens under the movie family key.
-		// A rekeyed target skips the entire atomic call — the updater bumps N+1
-		// even on a callback no-op, which would break the client's CAS chain
-		// (codex P2-C). The pre-check covers the settled case; the in-callback
-		// check stays for the flip-during-lock race.
+		unlock := func() {}
+		if inputs.EditLockFn != nil {
+			unlock = inputs.EditLockFn(afc.Match.MovieID)
+		}
+		defer unlock()
+
+		// codex P2-C/D: settled-rekey skip runs UNDER the family key; the
+		// callback's mismatch return is the net for rekeys landing mid-write.
 		if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
-			unlock := func() {}
-			if inputs.EditLockFn != nil {
-				unlock = inputs.EditLockFn(afc.Match.MovieID)
-			}
 			errUp := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 				if applyWritebackIdentityMismatch(movie, current) {
 					logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
@@ -317,7 +317,6 @@ func interpretApplyResult(
 				current.EndedAt = &now
 				return current, nil
 			})
-			unlock()
 			if errUp != nil {
 				inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
 					FileMatchInfo: afc.Match,
@@ -372,13 +371,13 @@ func interpretApplyResult(
 	}
 
 	if result != nil && result.Movie != nil {
-		// codex P2-C: skip mismatched targets without invoking the mutating
-		// updater (it bumps the revision even for a no-op).
+		unlock := func() {}
+		if inputs.EditLockFn != nil {
+			unlock = inputs.EditLockFn(afc.Match.MovieID)
+		}
+		defer unlock()
+		// codex P2-C/D: settled-rekey skip runs UNDER the family key.
 		if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
-			unlock := func() {}
-			if inputs.EditLockFn != nil {
-				unlock = inputs.EditLockFn(afc.Match.MovieID)
-			}
 			err2 := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 				if applyWritebackIdentityMismatch(movie, current) {
 					logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
@@ -390,7 +389,6 @@ func interpretApplyResult(
 			if err2 != nil {
 				logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err2)
 			}
-			unlock()
 		}
 		outcome.Movie = result.Movie
 	}
