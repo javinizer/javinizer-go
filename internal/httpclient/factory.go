@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	// pinnedSocksForward defined below
 	"context"
 	"fmt"
 	"net"
@@ -76,7 +77,12 @@ func NewTransport(proxyProfile *models.ProxyProfile) (*http.Transport, error) {
 					Password: proxyProfile.Password,
 				}
 			}
-			dialer, err := proxy.SOCKS5("tcp", parsedProxyURL.Host, auth, proxy.Direct)
+			// Pin the SOCKS proxy endpoint at the x/net dialer level: the SOCKS5
+			// dialer calls this forward to connect to the proxy server. Resolving
+			// once + dialing pinned IPs prevents DNS rebinding from redirecting
+			// proxy credentials to an unintended address.
+			forward := &pinnedSocksForward{proxyURL: parsedProxyURL}
+			dialer, err := proxy.SOCKS5("tcp", parsedProxyURL.Host, auth, forward)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create SOCKS5 dialer: %w", err)
 			}
@@ -190,4 +196,21 @@ func NewRestyClientWithFlareSolverr(proxyProfile *models.ProxyProfile, flaresolv
 		Client:       client,
 		FlareSolverr: fs,
 	}, nil
+}
+
+// pinnedSocksForward is the underlying dialer the x/net SOCKS5 client uses
+// to connect to the proxy server itself. It resolves the proxy endpoint
+// ONCE and dials the pinned IP (with failover) so DNS rebinding cannot
+// redirect the proxy connection -- and its credentials -- elsewhere.
+type pinnedSocksForward struct {
+	proxyURL *url.URL
+}
+
+func (f *pinnedSocksForward) Dial(network, addr string) (net.Conn, error) {
+	return f.DialContext(context.Background(), network, addr)
+}
+
+func (f *pinnedSocksForward) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	return ssrf.NativeSOCKSPinnedDial(f.proxyURL, nil, dialer)(ctx, network, addr)
 }
