@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -296,6 +297,29 @@ func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result 
 }
 
 // safeScrapeURL invokes a scraper's direct-URL scrape path (ScrapeURL) with
+// redactErrorURL scrubs any occurrence of rawURL from err's message, replacing
+// it with a redacted copy so signed/credential-bearing URLs never leak into
+// failure messages that batch results and events retain. ScraperError typing is
+// preserved; other errors are re-wrapped as plain errors.
+func redactErrorURL(err error, rawURL string) error {
+	if err == nil || rawURL == "" {
+		return err
+	}
+	redacted := RedactSourceURL(rawURL)
+	if redacted == rawURL || !strings.Contains(err.Error(), rawURL) {
+		return err
+	}
+	if se, ok := models.AsScraperError(err); ok {
+		clone := *se
+		clone.Message = strings.ReplaceAll(clone.Message, rawURL, redacted)
+		if clone.Cause != nil {
+			clone.Cause = redactErrorURL(clone.Cause, rawURL)
+		}
+		return &clone
+	}
+	return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), rawURL, redacted))
+}
+
 // panic recovery, mirroring safeSearch.
 func safeScrapeURL(ctx context.Context, handler models.URLHandler, url string) (result *models.ScraperResult, err error) {
 	defer func() {
@@ -313,6 +337,11 @@ func safeScrapeURL(ctx context.Context, handler models.URLHandler, url string) (
 		result.NormalizeMediaURLs()
 		// Credentials/signed tokens must never reach persisted provenance.
 		result.SourceURL = RedactSourceURL(result.SourceURL)
+	}
+	if err != nil {
+		// The raw URL may appear in HTTP/transport error messages; scrub it
+		// before classification or persistence so signed tokens never leak.
+		err = redactErrorURL(err, url)
 	}
 	return result, err
 }

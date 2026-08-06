@@ -17,16 +17,34 @@ import (
 //
 // Exported so the batch rescrape log (and other manual-input log sites) can
 // share the same redaction as resolveScrapeInput's parse-fail fallback.
-// secretQueryKeys names query parameters that may carry credentials/session
-// material and must never survive into persisted provenance. All other query
-// identifiers (e.g. DMM's id=, JavLibrary's v=, jav321's sn=) are retained so
-// source URLs stay usable/identifying.
-var secretQueryKeys = map[string]bool{
-	"access_token": true, "api_key": true, "apikey": true, "auth": true,
-	"authorization": true, "client_secret": true, "code": true, "key": true,
-	"oauth_token": true, "passwd": true, "password": true, "pwd": true,
-	"refresh_token": true, "secret": true, "session": true, "sid": true,
-	"sig": true, "signature": true, "token": true,
+// isSecretQueryKey reports whether a query parameter may carry credential,
+// session, or signing material. It matches broadly on the lowercased key name
+// (exact match plus substring fragments) so nonstandard signing keys —
+// X-Amz-Signature, X-Amz-Credential, auth_token, session_id — are caught,
+// while non-secret identifiers (DMM's id=, JavLibrary's v=, jav321's sn=)
+// are preserved.
+var secretKeyExact = map[string]bool{
+	"api_key": true, "apikey": true, "auth": true, "code": true,
+	"key": true, "oauth_token": true, "passwd": true, "password": true,
+	"pwd": true, "secret": true, "session": true, "sid": true,
+	"sig": true, "token": true,
+}
+
+var secretKeyFragments = []string{
+	"sign", "secret", "token", "pass", "pwd", "cred", "auth", "session", "oauth",
+}
+
+func isSecretQueryKey(key string) bool {
+	k := strings.ToLower(key)
+	if secretKeyExact[k] {
+		return true
+	}
+	for _, frag := range secretKeyFragments {
+		if strings.Contains(k, frag) {
+			return true
+		}
+	}
+	return false
 }
 
 // RedactSourceURL strips credentials and secret query parameters from a
@@ -41,7 +59,7 @@ func RedactSourceURL(input string) string {
 	u.Fragment = ""
 	q := u.Query()
 	for k := range q {
-		if secretQueryKeys[strings.ToLower(k)] {
+		if isSecretQueryKey(k) {
 			q.Del(k)
 		}
 	}

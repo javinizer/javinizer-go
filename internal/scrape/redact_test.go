@@ -28,3 +28,23 @@ func TestRedactURLQuery(t *testing.T) {
 		})
 	}
 }
+
+func TestRedactSourceURL_NonstandardSecrets(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"X-Amz-Signature and Credential stripped", "https://cdn.example.com/cover.jpg?X-Amz-Signature=abc&X-Amz-Credential=def", "https://cdn.example.com/cover.jpg"},
+		{"auth_token stripped, id preserved", "https://example.com/v/123?auth_token=secret&id=456", "https://example.com/v/123?id=456"},
+		{"session_id stripped, sn preserved", "https://example.com/v/123?session_id=x&sn=IPX-123", "https://example.com/v/123?sn=IPX-123"},
+		{"token stripped, id preserved", "https://example.com/v/123?id=456&token=secret", "https://example.com/v/123?id=456"},
+		{"token stripped, v preserved", "https://www.javlibrary.com/en/?v=javmeABCDE&token=x", "https://www.javlibrary.com/en/?v=javmeABCDE"},
+		{"session_id stripped, sn preserved (jav321)", "https://jp.jav321.com/search?sn=IPX-123&session_id=x", "https://jp.jav321.com/search?sn=IPX-123"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, RedactSourceURL(c.in))
+		})
+	}
+}

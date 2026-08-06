@@ -572,8 +572,15 @@ func (s *scraper) extractTitle(html string, id string) string {
 		title = title[:idx]
 	}
 
-	// Strip the ID prefix (e.g., "IPX-123 " from the beginning)
-	for _, prefix := range []string{id + " ", "[" + id + "] "} {
+	// Strip the canonical product-code prefix (e.g., "ONED-120 " or
+	// "[ONED-120] "). Derive it from the page's video_id div so direct-page
+	// scrapes (where the result ID is the opaque page slug) still clean the
+	// title; fall back to the result ID for search-path scrapes.
+	code := s.extractVideoID(html)
+	if code == "" {
+		code = id
+	}
+	for _, prefix := range []string{code + " ", "[" + code + "] "} {
 		title = strings.TrimPrefix(title, prefix)
 	}
 
@@ -651,6 +658,19 @@ func (s *scraper) extractRuntime(html string) int {
 
 // extractField extracts a field value from a video_info div by its ID
 // Works for video_director, video_maker, video_label
+// extractVideoID extracts the canonical product code from a detail page's
+// <div id="video_id">...</div> (e.g. "ONED-120"). Empty if absent. Used for
+// title cleaning on direct-page scrapes where the result ID is the page slug.
+func (s *scraper) extractVideoID(html string) string {
+	pattern := `id="video_id"[\s\S]*?<td\s+class="text">([^<]+)</td>`
+	re := regexp.MustCompile(pattern)
+	m := re.FindStringSubmatch(html)
+	if len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
 func (s *scraper) extractField(html string, divID string) string {
 	// Pattern: <div id="video_director" ...> ... <a ...>Value</a> ...
 	pattern := fmt.Sprintf(`id="%s"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>`, divID)

@@ -52,6 +52,7 @@ func TestExtractIDFromURL(t *testing.T) {
 		{"with trailing slash", "https://jp.jav321.com/video/ABC-123/", "ABC-123", false},
 		{"invalid URL", "not-a-url", "", true},
 		{"wrong path", "https://jp.jav321.com/search/ABC-123", "", true},
+		{"search URL with sn query", "https://jp.jav321.com/search?sn=IPX-123", "IPX-123", false},
 	}
 
 	for _, tt := range tests {
@@ -229,5 +230,20 @@ func TestHelpers(t *testing.T) {
 	}
 	if got := scraperutil.NormalizeID(" ABC-123 "); got != "abc123" {
 		t.Fatalf("normalizeID = %q, want abc123", got)
+	}
+}
+
+func TestScrapeURL_SearchURLReturnsNotFound(t *testing.T) {
+	s := &scraper{baseURL: "https://jp.jav321.com"}
+	_, err := s.ScrapeURL(context.Background(), "https://jp.jav321.com/search?sn=IPX-123")
+	if err == nil {
+		t.Fatalf("ScrapeURL with search URL expected error, got nil")
+	}
+	se, ok := models.AsScraperError(err)
+	if !ok {
+		t.Fatalf("expected ScraperError, got %T: %v", err, err)
+	}
+	if se.Kind != models.ScraperErrorKindNotFound {
+		t.Errorf("expected NotFound kind, got %v", se.Kind)
 	}
 }

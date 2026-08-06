@@ -342,3 +342,28 @@ func TestIntegration_Search(t *testing.T) {
 	t.Logf("Genres: %v", result.Genres)
 	t.Logf("Actresses: %+v", result.Actresses)
 }
+
+func TestExtractVideoID(t *testing.T) {
+	s := newScraper(&models.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+
+	html := `<div id="video_id" class="item"><table><tbody><tr><td class="header">ID:</td><td class="text">ONED-120</td></tr></tbody></table></div>`
+	assert.Equal(t, "ONED-120", s.extractVideoID(html))
+	assert.Equal(t, "", s.extractVideoID(`<div id="video_info">no video id</div>`))
+}
+
+func TestExtractTitle_DirectPageSlugID(t *testing.T) {
+	s := newScraper(&models.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+
+	// The page slug is the result ID, but the title contains the canonical code.
+	html := `<title>ONED-120 Barely One - JAVLibrary</title><div id="video_id"><table><td class="text">ONED-120</td></table></div>`
+	title := s.extractTitle(html, "javliay67q")
+	assert.Equal(t, "Barely One", title)
+}
