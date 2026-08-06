@@ -431,6 +431,24 @@ func TestPinnedProxyTransportPreservesSOCKSHandshake(t *testing.T) {
 	require.NoError(t, <-serverErr)
 }
 
+func TestPinnedProxyTransportHTTPSJoinsProxyResolutionError(t *testing.T) {
+	proxyURL, err := url.Parse("http://proxy-bad.example:3128")
+	require.NoError(t, err)
+	transport := &pinnedProxyTransport{
+		base: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		lookup: func(_ context.Context, host string) ([]net.IPAddr, error) {
+			if host == "proxy-bad.example" {
+				return nil, errors.New("proxy DNS exploded")
+			}
+			return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
+		},
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://public.example/image.png", nil)
+	require.NoError(t, err)
+	_, err = transport.RoundTrip(req)
+	require.ErrorContains(t, err, "proxy DNS exploded")
+}
+
 func TestPinnedProxyTransportPreservesDNSFailover(t *testing.T) {
 	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
 	require.NoError(t, err)
