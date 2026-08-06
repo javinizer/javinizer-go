@@ -2712,6 +2712,45 @@ func TestValidateMultipartInDirectory_LetterQualityTagFpsShorthandEndToEnd(t *te
 	}
 }
 
+// TestValidateMultipartInDirectory_LetterPrefixTrailingNumberEndToEnd verifies that
+// a one-letter noise prefix followed by a trailing part number (e.g. IPX-535-C-1 + -C-2) is
+// detected as PatternTrailing parts 1 and 2, NOT misclassified as letter part C (which would
+// collapse both to a duplicate and clear their multipart metadata).
+func TestValidateMultipartInDirectory_LetterPrefixTrailingNumberEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	files := []models.FileMatchInfo{
+		{Name: "IPX-535-C-1.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-C-1.mp4"},
+		{Name: "IPX-535-C-2.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-C-2.mp4"},
+	}
+
+	results := matcher.Match(files)
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.MultipartPattern != PatternTrailing {
+			t.Errorf("%s: expected PatternTrailing, got %q", r.File.Name, r.MultipartPattern)
+		}
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	confirmed := 0
+	for _, r := range validated {
+		if r.IsMultiPart {
+			confirmed++
+		}
+	}
+	if confirmed != 2 {
+		t.Errorf("expected both trailing-number siblings to confirm multipart, got %d", confirmed)
+	}
+}
+
 // TestValidateMultipartInDirectory_SGKI071EndToEnd tests the specific regression case
 // that motivated the PatternTrailing implementation: SGKI-071-un-javgg.net-{1,2}.mp4
 // producing duplicate filenames in the preview.

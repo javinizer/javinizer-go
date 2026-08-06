@@ -37,6 +37,8 @@ func TestDetectPartSuffix(t *testing.T) {
 		{"SVFLA-001b-1080p", "SVFLA-001", 2, "-B", PatternLetter},
 		{"IPX-535a-4k-60", "IPX-535", 1, "-A", PatternLetter},
 		{"IPX-535b-4k-60", "IPX-535", 2, "-B", PatternLetter},
+		{"IPX-535-C-1", "IPX-535", 1, "-1", PatternTrailing},
+		{"IPX-535-C-2", "IPX-535", 2, "-2", PatternTrailing},
 
 		// No pattern
 		{"ABC-123", "ABC-123", 0, "", PatternNone},
