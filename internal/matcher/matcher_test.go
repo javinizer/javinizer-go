@@ -2815,6 +2815,34 @@ func TestValidateMultipartInDirectory_LetterPrefixTrailingNumberEndToEnd(t *test
 	}
 }
 
+// TestValidateMultipartInDirectory_BracketedQualityTagEndToEnd verifies that a
+// bracket-wrapped quality tag (e.g. [4k]) after the letter part marker is detected as
+// letter+trailing, so two such siblings confirm as multipart.
+func TestValidateMultipartInDirectory_BracketedQualityTagEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	files := []models.FileMatchInfo{
+		{Name: "SVFLA-001a-[4k].mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001a-[4k].mp4"},
+		{Name: "SVFLA-001b-[4k].mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001b-[4k].mp4"},
+	}
+	results := m.Match(files)
+	require.Len(t, results, 2)
+	for _, r := range results {
+		require.Equal(t, PatternLetter, r.MultipartPattern)
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	confirmed := 0
+	for _, r := range validated {
+		if r.IsMultiPart {
+			confirmed++
+		}
+	}
+	require.Equal(t, 2, confirmed)
+}
+
 // TestValidateMultipartInDirectory_NumericOnlyResolutionEndToEnd verifies that a
 // numeric-only resolution tag (e.g. -1080, -2160, -720) is detected as letter+trailing,
 // so two such siblings confirm as multipart.

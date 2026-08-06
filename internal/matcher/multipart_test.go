@@ -43,6 +43,8 @@ func TestDetectPartSuffix(t *testing.T) {
 		{"SVFLA-001b-4k-h265", "SVFLA-001", 2, "-B", PatternLetter},
 		{"SVFLA-001a-1080", "SVFLA-001", 1, "-A", PatternLetter},
 		{"SVFLA-001b-1080", "SVFLA-001", 2, "-B", PatternLetter},
+		{"SVFLA-001a-[4k]", "SVFLA-001", 1, "-A", PatternLetter},
+		{"SVFLA-001b-[4k]", "SVFLA-001", 2, "-B", PatternLetter},
 
 		// No pattern
 		{"ABC-123", "ABC-123", 0, "", PatternNone},

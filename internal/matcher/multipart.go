@@ -13,7 +13,7 @@ var (
 	rePlainNumber = regexp.MustCompile(`^[-_.\s]?(\d{1,2})$`)
 	// Strict letter-only remainder: optional sep + [a-z] + optional sep
 	reLetterOnlyRemainder = regexp.MustCompile(`(?i)^\s*[-_.\s]?([a-z])\s*$`)
-	reLetterWithTrailing  = regexp.MustCompile(`(?i)^\s*[-_.\s]?([a-z])[-_.\s]+(?:\d{3,}|\d[a-z0-9]*[a-z][a-z0-9]*)(?:[-_.\s]+[a-z0-9]+)*\s*$`)
+	reLetterWithTrailing  = regexp.MustCompile(`(?i)^\s*[-_.\s]?([a-z])[-_.\s]+\[?(?:\d{3,}|\d[a-z0-9]*[a-z][a-z0-9]*)\]?[a-z0-9]*(?:[-_.\s]+\[?[a-z0-9]+\]?)*\s*$`)
 	// Trailing number at end of remainder after separator: ...-1, ..._2, ...3, etc.
 	// Catches part numbers buried behind noise like "-un-javgg.net-1"
 	reTrailingPartNumber = regexp.MustCompile(`[-_.](\d{1,2})$`)
