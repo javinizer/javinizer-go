@@ -446,6 +446,12 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	if movie == nil {
 		return fmt.Errorf("movie is required")
 	}
+	// codex P1-F: an empty ID would restamp every part with a blank matcher
+	// key — the family index stops resolving the family entirely and the
+	// envelope persists poison. Reject before any candidate leg runs.
+	if strings.TrimSpace(movie.ID) == "" {
+		return &EditAdmissionConflictError{Message: "movie ID must not be empty — identity changes belong to rescrape/clear flows"}
+	}
 	filePaths, err := m.familyFilePaths()
 	if err != nil {
 		return err
@@ -878,6 +884,9 @@ func (m *LockedMovieOps) rejectIdentityChangeLocked(filePaths []string, movie *m
 func (m *LockedMovieOps) updateMovieSingleLocked(ctx context.Context, filePath string, movie *models.Movie) error {
 	if movie == nil {
 		return fmt.Errorf("movie is required")
+	}
+	if strings.TrimSpace(movie.ID) == "" {
+		return &EditAdmissionConflictError{Message: "movie ID must not be empty — identity changes belong to rescrape/clear flows"}
 	}
 	renames := make([]ActressRenamePlan, 0, len(movie.Actresses))
 	for _, a := range movie.Actresses {

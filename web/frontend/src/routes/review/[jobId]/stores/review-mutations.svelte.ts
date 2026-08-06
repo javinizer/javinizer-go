@@ -267,7 +267,11 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				const partsRevisions: Record<string, number> = {};
 				for (const [fp, r0] of Object.entries(job?.results ?? {})) {
 					const r = r0 as FileResult;
-					if (r.movie_id === (resultEntry?.movie_id ?? '') && r.result_id && typeof r.revision === 'number') {
+					// codex P2-G: the backend folds movie IDs to lower case — a
+					// case-variant sibling MUST bundle into the family CAS here.
+					const sameFamily =
+						(r.movie_id ?? '').toLowerCase() === (resultEntry?.movie_id ?? '').toLowerCase();
+					if (sameFamily && r.result_id && typeof r.revision === 'number') {
 						partsRevisions[r.result_id] = r.revision;
 					}
 				}

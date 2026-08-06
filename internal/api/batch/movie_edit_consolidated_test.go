@@ -1227,9 +1227,10 @@ func TestUpdateBatchMovie_Miss2_UpsertError(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// Upsert with empty ID should fail — 500
-	assert.Equal(t, 500, w.Code, "Expected 500 for Upsert failure, body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "failed to update movie")
+	// Empty movie IDs are now rejected at the family gate (codex P1-F) — an
+	// in-flight save can no longer restamp the family's matcher key with "".
+	assert.Equal(t, 409, w.Code, "Expected 409 for empty movie ID, body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "movie ID must not be empty")
 }
 
 func TestUpdateBatchMovie_Miss3_InvalidJSON(t *testing.T) {
