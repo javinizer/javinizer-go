@@ -357,6 +357,11 @@ func isRetryableProxyStatus(status int) bool {
 	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
 }
 
+type lookupIPAddrsFunc func(context.Context, string) ([]net.IPAddr, error)
+
+// lookupProxyAddrs is the resolution seam for the native-socks endpoint pin.
+var lookupProxyAddrs lookupIPAddrsFunc = net.DefaultResolver.LookupIPAddr
+
 type pinnedProxyTransport struct {
 	base   *http.Transport
 	lookup func(context.Context, string) ([]net.IPAddr, error)
@@ -488,6 +493,15 @@ func (t *pinnedProxyTransport) RoundTrip(req *http.Request) (*http.Response, err
 	return nil, roundTripErr
 }
 
+// proxyDialProbeHost extracts the authority the policy evaluation should see
+// when probing for native socks routing of rawURL.
+func proxyDialProbeHost(rawURL string) string {
+	if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
+		return parsed.Host
+	}
+	return "probe.invalid"
+}
+
 // validateImageTarget runs the SSRF preflight with the CALLER's context so a
 // canceled/deadline-bound request aborts during DNS instead of waiting out a
 // background resolution.
@@ -540,12 +554,20 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 	if client == nil {
 		return fmt.Errorf("image validator client is nil")
 	}
-	// Remote-DNS transports (SOCKS5 from httpclient, Proxy==nil with a
-	// resolver-owning dialer) get the lexical-only preflight: local DNS cannot
-	// prove what the proxy will resolve.
+	// Remote-DNS transports get the lexical-only preflight: local DNS cannot
+	// prove what the proxy will resolve. Detection covers the factory-marked
+	// shape AND native socks5 proxying (Transport.Proxy = socks5 URL), probed
+	// once against the REAL target URL -- policy funcs answer faithfully.
 	remoteDNS := false
-	if transport, ok := client.Transport.(*http.Transport); ok && ssrf.TransportResolvesRemotely(transport) {
-		remoteDNS = true
+	var nativeSocksURL *url.URL
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		remoteDNS = ssrf.TransportResolvesRemotely(transport)
+		if !remoteDNS && transport.Proxy != nil {
+			if u, err := transport.Proxy(&http.Request{URL: &url.URL{Scheme: "https", Host: proxyDialProbeHost(rawURL)}}); err == nil && ssrf.IsSOCKSProxyURL(u) {
+				nativeSocksURL = u
+				remoteDNS = true
+			}
+		}
 	}
 	if err := validateImageTarget(ctx, rawURL, remoteDNS); err != nil {
 		return err
@@ -555,8 +577,16 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 		// NEVER mutate the caller's live transport: clone, re-mark the clone
 		// (registry membership is pointer-keyed; clones lose it), then wrap.
 		clone := client.Transport.(*http.Transport).Clone()
-		ssrf.MarkRemoteDNSTransport(clone)
-		safeClient.Transport = ssrf.WrapTransportPreservingHostnames(clone)
+		if nativeSocksURL != nil {
+			// Native net/http SOCKS: pin the proxy ENDPOINT (trusted infra),
+			// target hostnames keep flowing to the SOCKS resolver unresolved.
+			fallback := ssrf.DialContextFunc(clone)
+			clone.DialContext = ssrf.NativeSOCKSPinnedDial(nativeSocksURL, lookupProxyAddrs, fallback)
+			safeClient.Transport = clone
+		} else {
+			ssrf.MarkRemoteDNSTransport(clone)
+			safeClient.Transport = ssrf.WrapTransportPreservingHostnames(clone)
+		}
 	} else if client.Transport == nil {
 		defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 		if !ok {

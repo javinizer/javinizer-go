@@ -452,7 +452,9 @@ func MarkRemoteDNSTransport(tr *http.Transport) {
 }
 
 // TransportResolvesRemotely reports whether tr's dial path owns DNS. Check
-// BEFORE cloning a transport -- clones are distinct pointers.
+// BEFORE cloning a transport -- clones are distinct pointers. (Native socks5
+// proxying through Transport.Proxy is NOT probed here -- calling the policy
+// has side effects on stateful/rotating policies.)
 func TransportResolvesRemotely(tr *http.Transport) bool {
 	if tr == nil {
 		return false
