@@ -31,7 +31,7 @@ var secretKeyExact = map[string]bool{
 }
 
 var secretKeyFragments = []string{
-	"sign", "secret", "token", "pass", "pwd", "cred", "auth", "session", "oauth",
+	"sign", "secret", "token", "pass", "pwd", "cred", "auth", "session", "oauth", "key",
 }
 
 func isSecretQueryKey(key string) bool {

@@ -297,10 +297,22 @@ func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result 
 }
 
 // safeScrapeURL invokes a scraper's direct-URL scrape path (ScrapeURL) with
+// urlRedactedError wraps an error with a redacted message while preserving
+// the original error's unwrap chain, so errors.Is(err, context.DeadlineExceeded)
+// and errors.Is(err, context.Canceled) remain detectable after URL scrubbing.
+type urlRedactedError struct {
+	msg   string
+	cause error
+}
+
+func (e *urlRedactedError) Error() string { return e.msg }
+func (e *urlRedactedError) Unwrap() error { return e.cause }
+
 // redactErrorURL scrubs any occurrence of rawURL from err's message, replacing
 // it with a redacted copy so signed/credential-bearing URLs never leak into
 // failure messages that batch results and events retain. ScraperError typing is
-// preserved; other errors are re-wrapped as plain errors.
+// preserved; other errors are re-wrapped as urlRedactedError to preserve the
+// unwrap chain (so context errors remain detectable by errors.Is).
 func redactErrorURL(err error, rawURL string) error {
 	if err == nil || rawURL == "" {
 		return err
@@ -317,7 +329,12 @@ func redactErrorURL(err error, rawURL string) error {
 		}
 		return &clone
 	}
-	return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), rawURL, redacted))
+	// Preserve the unwrap chain so context errors (DeadlineExceeded,
+	// Canceled) remain detectable by errors.Is after URL scrubbing.
+	return &urlRedactedError{
+		msg:   strings.ReplaceAll(err.Error(), rawURL, redacted),
+		cause: err,
+	}
 }
 
 // panic recovery, mirroring safeSearch.
