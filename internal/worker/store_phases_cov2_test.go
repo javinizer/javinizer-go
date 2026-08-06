@@ -375,45 +375,35 @@ func TestDeleteJobPendingDoneTimeout(t *testing.T) {
 	assert.True(t, s.IsTombstoned(job.ID.String()))
 }
 
-// --- exclusion atomic-cancel flip arms ---
+// --- exclusion atomic-cancel predicate arms ---
 
-// flipPendingCancelIfTerminal gates: only when the candidate set covers every
-// stored result and the job is cancellable.
-func TestFlipPendingCancelIfTerminalArms(t *testing.T) {
+// allExcludedTerminal gates on nil lifecycle, non-cancellable status, and
+// accessor-less lookups (the fuller partial/full-coverage matrix lives in
+// exclusion_flip_cov_test.go).
+func TestAllExcludedTerminalArms(t *testing.T) {
 	t.Run("nil lifecycle no-op", func(t *testing.T) {
-		assert.Nil(t, flipPendingCancelIfTerminal(nil, map[string]bool{"/f/a.mp4": true}, nil))
+		assert.False(t, allExcludedTerminal(nil, map[string]bool{"/f/a.mp4": true}, nil))
 	})
-	t.Run("persist status excludes flip", func(t *testing.T) {
-		_ = "x"
+	t.Run("terminal status stays false", func(t *testing.T) {
 		lc := &JobLifecycle{Status: models.JobStatusCompleted, done: make(chan struct{})}
-		assert.Nil(t, flipPendingCancelIfTerminal(lc, map[string]bool{"/f/a.mp4": true}, nil))
-		assert.Equal(t, models.JobStatusCompleted, lc.GetJobStatus())
+		assert.False(t, allExcludedTerminal(lc, map[string]bool{"/f/a.mp4": true}, nil))
 	})
-	t.Run("non-empty result not in the exclusion set", func(t *testing.T) {
+	t.Run("accessor-less lookup stays false", func(t *testing.T) {
+		lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
+		assert.False(t, allExcludedTerminal(lc, map[string]bool{"/f/a.mp4": true}, nil))
+	})
+	t.Run("partially excluded stays false", func(t *testing.T) {
 		store := resultstore.New(2, []string{"/f/a.mp4", "/f/z.mp4"})
 		seedFamilyResult(store, "/f/a.mp4", "res-a", "FC-1", "")
 		seedFamilyResult(store, "/f/z.mp4", "res-z", "FC-2", "")
 		lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
-		assert.Nil(t, flipPendingCancelIfTerminal(lc, map[string]bool{"/f/a.mp4": true}, store))
-	})
-	t.Run("fully excluded flips to cancelled pre-commit", func(t *testing.T) {
-		store := resultstore.New(1, []string{"/f/a.mp4"})
-		seedFamilyResult(store, "/f/a.mp4", "res-a", "FC-3", "")
-		lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
-		restore := flipPendingCancelIfTerminal(lc, map[string]bool{"/f/a.mp4": true}, store)
-		require.NotNil(t, restore)
-		assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus())
-		restore()
-		assert.Equal(t, models.JobStatusRunning, lc.GetJobStatus())
-	})
-	t.Run("accessor-less lookup skips the flip", func(t *testing.T) {
-		lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
-		assert.Nil(t, flipPendingCancelIfTerminal(lc, map[string]bool{"/f/a.mp4": true}, nil))
+		assert.False(t, allExcludedTerminal(lc, map[string]bool{"/f/a.mp4": true}, store))
 	})
 }
 
-// The committer leg now folds the cancel before the tx so the on-disk row is
-// atomically Cancelled (codex P5-A) and rolls the marker back on tx failure.
+// The committer leg folds the cancel into the tx's CANDIDATE envelope so
+// the on-disk row is atomically Cancelled (codex P5-A) — candidate-only
+// since codex r33: the live lifecycle must not be flipped pre-commit.
 func TestExcludeFamilyCommitterFoldCancelIntoTx(t *testing.T) {
 	store := resultstore.New(1, []string{"/f/a.mp4"})
 	seedFamilyResult(store, "/f/a.mp4", "res-a", "FC-F1", "")
@@ -432,7 +422,7 @@ func TestExcludeFamilyCommitterFoldCancelIntoTx(t *testing.T) {
 	m := &LockedMovieOps{pe: pe, movieID: "FC-F1"}
 	require.NoError(t, m.ExcludeFamily(context.Background()))
 	assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus())
-	assert.Equal(t, models.JobStatusCancelled, <-capturedInTx, "the tx's envelope encode observed the cancelled marker")
+	assert.Equal(t, models.JobStatusRunning, <-capturedInTx, "the tx's envelope encode observes the UNFLIPPED live status — Cancelled lands in the candidate row only")
 }
 
 func TestScrapePhaseRunDeferPersistsThroughEmptyRun(t *testing.T) {

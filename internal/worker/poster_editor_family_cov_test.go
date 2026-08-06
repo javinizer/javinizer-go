@@ -364,7 +364,64 @@ func TestUpdateMovieFamilyRelocationRollbackWarnsOnReverseFailure(t *testing.T) 
 	assert.Equal(t, 3, fs.call, "forward pair (2 calls) plus reverse rollback of the already-moved file")
 }
 
+// codex r33 P1: a stored canonical ID carrying traversal components must
+// never reach a filesystem join — the save proceeds, the pair simply stays
+// at its existing name.
+func TestUpdateMovieFamilySkipsRelocationForUnsafeStoredID(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID:      "res-1",
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "../legacy-evil"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "../legacy-evil"},
+	})
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JOB-9", 0o755))
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "../legacy-evil"}
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-SAFE", Title: "t"}))
+	got, err := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "SSNI-SAFE", got.Movie.ID, "the save itself still commits")
+	for _, escaped := range []string{"/tmp/posters/legacy-evil-full.jpg", "/tmp/posters/legacy-evil.jpg", "/tmp/legacy-evil-full.jpg", "/tmp/legacy-evil.jpg"} {
+		_, statErr := fs.Stat(escaped)
+		assert.Error(t, statErr, "unsafe stored ID must never resolve outside the poster dir: %s", escaped)
+	}
+}
+
 // --- stale-pair eviction ---
+
+func TestEvictStalePosterPairUnsafeIDNoop(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JOB-9", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/tmp/posters/sentinelfull.jpg", []byte("keep"), 0o644))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-G"}
+	m.evictStalePosterPair("../../sentine") // would clean to a path outside JOB-9 if joined naively
+	m.evictStalePosterPair("")              // bare-name guard
+	_, err := fs.Stat("/tmp/posters/sentinelfull.jpg")
+	assert.NoError(t, err, "no bytes outside the intended dir are ever removed for unsafe IDs")
+}
+
+func TestIsSafePosterFileID(t *testing.T) {
+	for id, want := range map[string]bool{
+		"SSNI-1":    true,
+		"A.B_C":     true,
+		"":          false,
+		".":         false,
+		"..":        false,
+		"../x":      false,
+		"a/b":       false,
+		"a\\b":      false,
+		"..x":       true, // prefix-dots alone are fine; only separator/base tricks are unsafe
+		"x/../../y": false,
+	} {
+		assert.Equalf(t, want, isSafePosterFileID(id), "id=%q", id)
+	}
+}
 
 func TestEvictStalePosterPairWarnsOnRemoveFailure(t *testing.T) {
 	store, base, dir := familyRelocationSetup(t)

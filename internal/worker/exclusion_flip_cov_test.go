@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
@@ -55,9 +58,10 @@ func TestExcludeFamilyCommitterShareCancelCompletesLifecycle(t *testing.T) {
 	}
 }
 
-// commit-leg tx failure: the pre-commit flipped Cancelled marker must roll
-// back with the transaction so the in-memory job remains its original state.
-func TestExcludeFamilyCommitterTxnFailureRestoresFlip(t *testing.T) {
+// commit-leg tx failure: no transient Cancelled is ever published to the
+// live lifecycle (codex r33) — the in-memory job simply remains its original
+// status; there is nothing to roll back.
+func TestExcludeFamilyCommitterTxnFailureLeavesLiveStatus(t *testing.T) {
 	store := resultstore.New(1, []string{"/f/a.mp4"})
 	seedFamilyResult(store, "/f/a.mp4", "res-x", "FC-T1", "")
 	lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
@@ -72,12 +76,69 @@ func TestExcludeFamilyCommitterTxnFailureRestoresFlip(t *testing.T) {
 	})
 	m := &LockedMovieOps{pe: pe, movieID: "FC-T1"}
 	require.ErrorContains(t, m.ExcludeFamily(context.Background()), "tx wedged")
-	assert.Equal(t, models.JobStatusRunning, lc.GetJobStatus(), "tx failure rolls the pre-commit cancellation back")
+	assert.Equal(t, models.JobStatusRunning, lc.GetJobStatus(), "tx failure leaves the live lifecycle untouched")
 }
 
-// The flip helper must not fire when there are no results to speak of.
-func TestExcludeFamilyFlipEmptySnapshotSkips(t *testing.T) {
+// The terminal predicate must not fire when there are no results to speak of
+// (an empty results snapshot encodes no Cancelled status).
+func TestAllExcludedTerminalEmptySnapshotSkips(t *testing.T) {
 	store := resultstore.New(1, []string{"/f/a.mp4"}) // no results registered
 	lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
-	assert.Nil(t, flipPendingCancelIfTerminal(lc, map[string]bool{"/f/a.mp4": true}, store))
+	assert.False(t, allExcludedTerminal(lc, map[string]bool{"/f/a.mp4": true}, store))
+}
+
+func TestAllExcludedTerminalPredicateMatrix(t *testing.T) {
+	mk := func(status models.JobStatus, results []string) (*JobLifecycle, resultstore.Store) {
+		store := resultstore.New(1, []string{"/f/a.mp4"})
+		for _, fp := range results {
+			seedFamilyResult(store, fp, "res-"+fp, "FC-PM", "")
+		}
+		return &JobLifecycle{Status: status, done: make(chan struct{})}, store
+	}
+	// all covered + cancellable → terminal
+	lc1, s1 := mk(models.JobStatusRunning, []string{"/f/a.mp4"})
+	assert.True(t, allExcludedTerminal(lc1, map[string]bool{"/f/a.mp4": true}, s1))
+	lc2, s2 := mk(models.JobStatusPending, []string{"/f/a.mp4"})
+	assert.True(t, allExcludedTerminal(lc2, map[string]bool{"/f/a.mp4": true}, s2))
+	// a result outside the exclusion set → not terminal
+	lc3, s3 := mk(models.JobStatusRunning, []string{"/f/a.mp4"})
+	seedFamilyResult(s3, "/f/b.mp4", "res-b", "OTHER-1", "")
+	assert.False(t, allExcludedTerminal(lc3, map[string]bool{"/f/a.mp4": true}, s3))
+	// terminal already → predicate stays false (cancelIfAll reads status)
+	lc4, s4 := mk(models.JobStatusCompleted, []string{"/f/a.mp4"})
+	assert.False(t, allExcludedTerminal(lc4, map[string]bool{"/f/a.mp4": true}, s4))
+	// nil lifecycle → false
+	_, s5 := mk(models.JobStatusRunning, []string{"/f/a.mp4"})
+	assert.False(t, allExcludedTerminal(nil, map[string]bool{"/f/a.mp4": true}, s5))
+}
+
+// codex r33 regression: the committed envelope row carries Cancelled while
+// the LIVE lifecycle still reads Running at envelope-encode time — a racing
+// AcquireEditAccess therefore never observes the transient status, and a
+// failing commit cannot persist it.
+func TestExcludeFamilyEncodesCancelledInCandidateOnly(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-cc", "FC-CC", "")
+	lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
+	jobs := mocks.NewMockJobRepositoryInterface(t)
+	var persisted *models.Job
+	jobs.EXPECT().Upsert(mock.Anything, mock.AnythingOfType("*models.Job")).
+		Run(func(_ context.Context, j *models.Job) { persisted = j }).Return(nil)
+	committer := NewEditCommitter(&execTransactor{unit: database.EditUnit{Jobs: jobs}}, newKeyedMutexRegistry(), "JOB-CC", newKeyedMutexRegistry())
+	pe := NewPosterEditor(store, store, nil)
+	var liveAtEncode models.JobStatus
+	pe.attachEnv(&posterEditEnv{
+		committer: committer,
+		envelope: func(map[string]*resultstore.MovieResult, map[string]*resultstore.ProvenanceData, map[string]bool) (*models.Job, error) {
+			liveAtEncode = lc.GetJobStatus()
+			return &models.Job{Status: lc.GetJobStatus()}, nil
+		},
+		lifecycle: lc,
+	})
+	m := &LockedMovieOps{pe: pe, movieID: "FC-CC"}
+	require.NoError(t, m.ExcludeFamily(context.Background()))
+	require.NotNil(t, persisted, "terminal exclusion must persist the envelope row")
+	assert.Equal(t, models.JobStatusCancelled, persisted.Status, "candidate envelope encodes Cancelled")
+	assert.Equal(t, models.JobStatusRunning, liveAtEncode, "live lifecycle must NOT carry the transient Cancelled during the commit")
+	assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus(), "post-commit Cancel() still completes the real transition")
 }

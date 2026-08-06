@@ -370,9 +370,24 @@ func fileFirstMovieResult(m *LockedMovieOps, filePaths []string) *resultstore.Mo
 	return nil
 }
 
+// isSafePosterFileID reports whether id is a bare single-component file
+// stem — safe for filepath.Join under the job poster directory (codex r33:
+// both the incoming rekey ID AND the stored canonical ID must pass this
+// before any filesystem operation touches the pair).
+func isSafePosterFileID(id string) bool {
+	return id != "" && id != "." && id != ".." &&
+		filepath.Base(id) == id && !strings.ContainsAny(id, "/\\")
+}
+
 // evictStalePosterPair removes the installed preview pair for a source that
 // just changed (D7-lite). Post-commit only; misses are no-ops.
 func (m *LockedMovieOps) evictStalePosterPair(posterID string) {
+	if !isSafePosterFileID(posterID) {
+		// codex r33: an unsafe legacy/scraper ID would resolve the removal
+		// outside the job poster directory — never join it.
+		logging.Warnf("stale poster evict skipped: unsafe poster ID %q", posterID)
+		return
+	}
 	env := m.pe.currentEnv()
 	if env == nil || env.tempDir == "" || env.jobID == "" || env.fs == nil {
 		return
@@ -528,9 +543,12 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	// filename shape HERE, before any DB/envelope state moves, so an unsafe
 	// rekey ID is rejected before the transaction starts.
 	if movie != nil {
+		// codex r33: validate UNCONDITIONALLY — an incoming ID that merely
+		// equals the matcher alias skips the earlier conditional check yet
+		// still lands in the relocation join when it differs from the stored
+		// canonical ID.
 		newID := strings.TrimSpace(movie.ID)
-		if newID != "" && !strings.EqualFold(newID, strings.TrimSpace(m.movieID)) &&
-			(filepath.Base(newID) != newID || newID == "." || newID == ".." || strings.ContainsAny(newID, "/\\")) {
+		if newID != "" && !isSafePosterFileID(newID) {
 			return &EditAdmissionConflictError{Message: fmt.Sprintf("movie ID %q is not a safe file name for rekey relocation", newID)}
 		}
 	}
@@ -559,8 +577,16 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	// Relocate the poster pair BEFORE the commit (codex r27): a failed
 	// relocation means no DB/envelope mutation at all; a failed COMMIT after
 	// a successful relocation rolls the pair back via reverse renames.
+	// codex r33 P1: the STORED canonical ID feeds the source joins below —
+	// validate it unconditionally before any filesystem operation. An unsafe
+	// stored ID (legacy/scraper-produced) skips relocation: the save proceeds
+	// and the pair stays at its existing name.
+	canonicalPairSafe := isSafePosterFileID(canonicalOldPosterID)
+	if !canonicalPairSafe {
+		logging.Warnf("poster rekey relocation skipped: stored canonical ID %q is not a safe file name", canonicalOldPosterID)
+	}
 	var relocatedPosterPair []struct{ src, dst string }
-	if newID := strings.TrimSpace(movie.ID); newID != "" && !strings.EqualFold(newID, strings.TrimSpace(canonicalOldPosterID)) {
+	if newID := strings.TrimSpace(movie.ID); newID != "" && canonicalPairSafe && !strings.EqualFold(newID, strings.TrimSpace(canonicalOldPosterID)) {
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil && env.tempDir != "" && env.jobID != "" {
 			dir := filepath.Join(env.tempDir, "posters", env.jobID)
 			failedErr := error(nil)
@@ -678,43 +704,39 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 	return updated, updatedProv, nil
 }
 
-// flipPendingCancelIfTerminal pre-marks a cancellable job cancelled before the
-// commit encodes the envelope, when the candidate exclusion set covers EVERY
-// known result (codex P5-A): the committed row then carries Cancelled
-// atomically — a Pending+all-excluded row surviving a crash is resurrected as
-// Failed by recoverOrphanedJobs. On Commit failure the caller restores the
-// status via the returned function; post-commit cancelIfAll brings the real
-// Cancel() transition (timestamps/done broadcast) as before.
-func flipPendingCancelIfTerminal(lc *JobLifecycle, excluded map[string]bool, lookup resultstore.ResultReadFacade) func() {
+// allExcludedTerminal reports whether the exclusion set covers EVERY known
+// result while the job is still cancellable (codex P5-A): the committed
+// envelope for such an exclusion must carry Cancelled atomically — a
+// Pending+all-excluded row surviving a crash is resurrected as Failed by
+// recoverOrphanedJobs.
+//
+// codex r33 P2: the terminal status is encoded in the CANDIDATE envelope
+// ONLY — never on the live lifecycle pre-commit. AcquireEditAccess admits
+// edits for Cancelled jobs; a transient live flip would admit a racing PATCH
+// mid-commit, and persist that status even when the commit later fails (the
+// old flip's rollback restored memory only).
+func allExcludedTerminal(lc *JobLifecycle, excluded map[string]bool, lookup resultstore.ResultReadFacade) bool {
 	if lc == nil || len(excluded) == 0 {
-		return nil
+		return false
 	}
 	st := lc.GetJobStatus()
 	if st != models.JobStatusPending && st != models.JobStatusRunning {
-		return nil
+		return false
 	}
 	ra, ok := lookup.(resultstore.ResultMapAccessor)
 	if !ok {
-		return nil
+		return false
 	}
 	snap := ra.SnapshotData()
 	if len(snap.Results) == 0 {
-		return nil
+		return false
 	}
 	for fp := range snap.Results {
 		if !excluded[fp] {
-			return nil
+			return false
 		}
 	}
-	lc.mu.Lock()
-	prevStatus := lc.Status
-	lc.Status = models.JobStatusCancelled
-	lc.mu.Unlock()
-	return func() {
-		lc.mu.Lock()
-		lc.Status = prevStatus
-		lc.mu.Unlock()
-	}
+	return true
 }
 
 // ExcludeFamily marks every file of the family excluded and auto-cancels the
@@ -762,17 +784,25 @@ func (m *LockedMovieOps) ExcludeFamily(ctx context.Context) error {
 		// codex P5-A: all-excluded jobs must ATOMICALLY carry the cancelled
 		// status in the committed envelope — the tx's row would otherwise sit
 		// as still-Pending post-cancel and restart-converts to Failed.
-		restore := flipPendingCancelIfTerminal(env.lifecycle, m.excludedSnapshot(filePaths), m.pe.lookup)
+		// codex r33 P2: encode Cancelled in the candidate envelope WITHOUT
+		// publishing it to the live lifecycle; the real transition is the
+		// post-commit Cancel() below.
+		excludedSnap := m.excludedSnapshot(filePaths)
+		terminal := allExcludedTerminal(env.lifecycle, excludedSnap, m.pe.lookup)
 		err := env.committer.Commit(ctx, &EditCommitPlan{
 			EnvelopeFn: func() (*models.Job, error) {
-				return env.envelope(nil, nil, m.excludedSnapshot(filePaths))
+				row, err := env.envelope(nil, nil, excludedSnap)
+				if err != nil || row == nil {
+					return row, err
+				}
+				if terminal {
+					row.Status = models.JobStatusCancelled
+				}
+				return row, nil
 			},
 			Publish: func() error { publish(); return nil },
 		})
 		if err != nil {
-			if restore != nil {
-				restore()
-			}
 			return err
 		}
 		// Auto-cancel (legacy semantic) fires AFTER the exclusion commit. If
