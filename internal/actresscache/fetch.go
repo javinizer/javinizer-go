@@ -277,9 +277,13 @@ func (p *proxyPinningTransport) RoundTrip(req *http.Request) (*http.Response, er
 			req = req.WithContext(context.WithValue(req.Context(), proxyDecisionCtxKey{}, &proxyDecision{proxyURL: decision}))
 		}
 		if proxyURL != nil {
-			// Dial exemption marker is hop-scoped: always refresh it for THIS
-			// hop (redirects re-enter RoundTrip with the stamped decision).
+			// Dial exemption marker is hop-scoped: set it fresh for THIS hop.
 			req = req.WithContext(context.WithValue(req.Context(), proxiedDialCtxKey{}, canonicalProxyDialTarget(proxyURL.Scheme, proxyURL.Hostname(), proxyURL.Port())))
+		} else {
+			// A DIRECT hop must never inherit a prior hop's marker: redirects to
+			// now-direct targets would otherwise ride the old proxy endpoint's
+			// raw dial lane (bypassing public validation) when authorities match.
+			req = req.WithContext(context.WithValue(req.Context(), proxiedDialCtxKey{}, ""))
 		}
 	}
 	if req.URL.Scheme == "http" && proxyURL != nil && hostIPLiteral(req.URL.Hostname()) == nil {
