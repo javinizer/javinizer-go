@@ -60,3 +60,29 @@ func TestRemoteDNSDialBlocksPrivateLiteral(t *testing.T) {
 	assert.Contains(t, err.Error(), "private/internal IP literal")
 	assert.NotErrorIs(t, err, sentinel)
 }
+
+// inet_aton-style forms must not ride the remote-DNS lane to a proxy that
+// normalizes them into loopback.
+func TestRemoteDNSBlocksAlternateIPv4Literals(t *testing.T) {
+	sentinel := errors.New("raw dialer ran")
+	dials := 0
+	transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		dials++
+		return nil, sentinel
+	}}
+	ssrf.MarkRemoteDNSTransport(transport)
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	for _, raw := range []string{
+		"http://2130706433/x",    // 127.0.0.1 as dword
+		"http://127.1/x",         // short form
+		"http://0x7f000001/x",    // hex dword
+		"http://0177.0.0.1/x",    // octal parts
+		"http://169.254.43518/x", // short metadata host
+		"http://0xa9fea9fe/x",    // hex metadata dword
+	} {
+		_, _, err := fetcher.Get(context.Background(), raw, "image/*", 1<<20)
+		require.Error(t, err, raw)
+	}
+	assert.Zero(t, dials, "blocked alternates never reach the remote dialer")
+}
