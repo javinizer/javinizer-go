@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,34 @@ func TestExcludeFamilyLegacyCancelsWhenAllExcluded(t *testing.T) {
 	assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus())
 }
 
+// Marker-flip after the commit must STILL drive the full lifecycle Cancel()
+// (done channel close + CompletedAt + status transition) — Waiting on Done()
+// for a marked job must complete, not hang.
+func TestExcludeFamilyCommitterShareCancelCompletesLifecycle(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "FC-MARK", "")
+	lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
+	committer := NewEditCommitter(&okTransactor{}, newKeyedMutexRegistry(), "JOB-FCM", newKeyedMutexRegistry())
+	pe := NewPosterEditor(store, store, nil)
+	pe.attachEnv(&posterEditEnv{
+		committer: committer,
+		envelope: func(map[string]*resultstore.MovieResult, map[string]*resultstore.ProvenanceData, map[string]bool) (*models.Job, error) {
+			return nil, nil // nil row: upsert leg skips
+		},
+		lifecycle: lc,
+	})
+	m := &LockedMovieOps{pe: pe, movieID: "FC-MARK"}
+	require.NoError(t, m.ExcludeFamily(context.Background()))
+	assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus())
+	assert.True(t, lc.CompletedAt != nil)
+	select {
+	case <-lc.Done():
+		// CompletedAt mirrors Done: cancel completed the transition
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled job's done channel must close after exclusion")
+	}
+}
+
 // commit-leg tx failure: the pre-commit flipped Cancelled marker must roll
 // back with the transaction so the in-memory job remains its original state.
 func TestExcludeFamilyCommitterTxnFailureRestoresFlip(t *testing.T) {
@@ -37,7 +66,7 @@ func TestExcludeFamilyCommitterTxnFailureRestoresFlip(t *testing.T) {
 	pe.attachEnv(&posterEditEnv{
 		committer: committer,
 		envelope: func(map[string]*resultstore.MovieResult, map[string]*resultstore.ProvenanceData, map[string]bool) (*models.Job, error) {
-			return &models.Job{}, nil
+			return nil, nil // nil row: upsert leg skips
 		},
 		lifecycle: lc,
 	})

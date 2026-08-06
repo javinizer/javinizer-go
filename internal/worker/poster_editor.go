@@ -742,8 +742,16 @@ func (m *LockedMovieOps) ExcludeFamily(ctx context.Context) error {
 			return false
 		}
 		if ra, ok := m.pe.lookup.(resultstore.ResultMapAccessor); ok && ra.IsAllExcluded() {
+			// codex P1-F2 follow-up: the P5-A flip marks the job Cancelled in the
+			// envelope ENCODING while leaving the lifecycle transition unfinished
+			// (done channel open, completedAt unset). When the marker flip left
+			// status Cancelled-but-not-cancelled, Cancel() now also completes the
+			// real transition rather than reading terminal-skipping the guard.
+			lc.mu.RLock()
+			markerFlipped := lc.Status == models.JobStatusCancelled && !lc.cancelled
+			lc.mu.RUnlock()
 			status := lc.GetJobStatus()
-			if status == models.JobStatusPending || status == models.JobStatusRunning {
+			if status == models.JobStatusPending || status == models.JobStatusRunning || markerFlipped {
 				lc.Cancel()
 				return true
 			}
