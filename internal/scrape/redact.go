@@ -28,6 +28,7 @@ var secretKeyExact = map[string]bool{
 	"key": true, "oauth_token": true, "passwd": true, "password": true,
 	"pwd": true, "secret": true, "session": true, "sid": true,
 	"sig": true, "token": true,
+	"jwt": true, "bearer": true, "hmac": true,
 }
 
 var secretKeyFragments = []string{

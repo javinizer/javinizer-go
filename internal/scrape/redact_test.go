@@ -45,6 +45,9 @@ func TestRedactSourceURL_NonstandardSecrets(t *testing.T) {
 		{"access_key stripped", "https://example.com/v/123?access_key=secret", "https://example.com/v/123"},
 		{"private_key stripped", "https://example.com/v/123?private_key=secret", "https://example.com/v/123"},
 		{"keyword preserved (non-secret)", "https://www.javlibrary.com/en/vl_searchbyid.php?keyword=IPX-123", "https://www.javlibrary.com/en/vl_searchbyid.php?keyword=IPX-123"},
+		{"jwt stripped", "https://example.com/v/123?jwt=eyJhb...&id=456", "https://example.com/v/123?id=456"},
+		{"bearer stripped", "https://example.com/v/123?bearer=xyz", "https://example.com/v/123"},
+		{"hmac stripped", "https://example.com/v/123?hmac=signature&id=456", "https://example.com/v/123?id=456"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
