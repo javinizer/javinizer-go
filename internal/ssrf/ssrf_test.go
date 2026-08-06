@@ -402,3 +402,28 @@ func TestRemoteDNSRegistryReleasesCollected(t *testing.T) {
 	}, 5*time.Second, 20*time.Millisecond, "collected transports release their marker")
 	assert.True(t, TransportResolvesRemotely(live), "live markers are never evicted")
 }
+
+// net.ParseIP rejects the inet_aton aliases but resolvers/proxies
+// normalize them -- policy must recognize the same forms.
+func TestHostIPLiteralAlternateForms(t *testing.T) {
+	loop := net.IPv4(127, 0, 0, 1)
+	for input, want := range map[string]net.IP{
+		"2130706433":    loop, // dword
+		"127.1":         loop, // short
+		"0x7f000001":    loop, // hex dword
+		"0177.0.0.1":    loop, // octal parts
+		"0177.0.1":      loop, // octal + short
+		"0x7f.0.0.1":    loop, // hex part
+		"169.254.43518": net.IPv4(169, 254, 169, 254),
+		"8.8.8.8":       net.IPv4(8, 8, 8, 8),
+	} {
+		got := HostIPLiteral(input)
+		require.NotNil(t, got, input)
+		assert.Equal(t, want, got, input)
+	}
+	for _, nonIP := range []string{"293.1.1.1", "example.com", "1.2.3.4.5", "0x", "", "1..2.3"} {
+		assert.Nil(t, HostIPLiteral(nonIP), nonIP)
+	}
+	assert.True(t, IsBlockedIP(HostIPLiteral("2130706433")), "dword loopback is blocked")
+	assert.False(t, IsBlockedIP(HostIPLiteral("134744072")), "8.8.8.8 dword stays allowed")
+}

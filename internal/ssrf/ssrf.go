@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -135,7 +136,62 @@ func HostIPLiteral(host string) net.IP {
 		host = host[:i]
 	}
 	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
-	return net.ParseIP(host)
+	if ip := net.ParseIP(host); ip != nil {
+		return ip
+	}
+	// inet_aton-style aliases DNS and proxies normalize: dword (127.0.0.1 as
+	// 2130706433), short forms (127.1), hex (0x7f000001), octal (0177.0.0.1).
+	// Treating them as hostnames would let a remote DNS answer map them onto
+	// loopback/private space, so policy checks must recognize them.
+	return parseIPv4AlternateForms(host)
+}
+
+// parseIPv4AlternateForms accepts the classic inet_aton syntaxes
+// (a.b.c.d / a.b.c / a.b / a, each component decimal, 0x-hex, or 0-octal)
+// that net.ParseIP rejects but resolvers/proxies happily normalize.
+func parseIPv4AlternateForms(host string) net.IP {
+	if host == "" {
+		return nil
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) > 4 {
+		return nil
+	}
+	values := make([]uint64, len(parts))
+	for i, part := range parts {
+		if part == "" {
+			return nil
+		}
+		v, err := strconv.ParseUint(part, 0, 32)
+		if err != nil {
+			return nil
+		}
+		var max uint64
+		if i == len(parts)-1 {
+			// Final component spans every remaining byte (a.b: b is 24-bit,
+			// a alone is 32-bit).
+			shift := uint(8 * (5 - len(parts)))
+			max = (1 << shift) - 1
+		} else {
+			max = 0xff
+		}
+		if v > max {
+			return nil
+		}
+		values[i] = v
+	}
+	b := []byte{0, 0, 0, 0}
+	for i, byteIdx := 0, 0; i < len(values)-1; i, byteIdx = i+1, byteIdx+1 {
+		b[byteIdx] = byte(values[i])
+	}
+	remaining := 4 - (len(values) - 1)
+	last := values[len(values)-1]
+	for j := remaining - 1; j >= 0; j-- {
+		b[len(b)-1-j] = byte(last >> (8 * j))
+	}
+	_ = b
+	netIP := net.IPv4(b[0], b[1], b[2], b[3])
+	return netIP
 }
 
 // BlockedTargetError rejects a URL or address that maps to internal or
