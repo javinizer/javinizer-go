@@ -171,6 +171,9 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 			// second request.
 			if se, ok := models.AsScraperError(err); ok {
 				if se.Kind != models.ScraperErrorKindNotFound {
+					// Normalize the scraper name to the registry name (scraper.Name())
+					// so display labels are consistent with the normal Search failure path.
+					se.Scraper = scraper.Name()
 					outcome = queryOutcome{failure: se}
 					return
 				}

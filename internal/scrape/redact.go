@@ -36,6 +36,10 @@ var secretKeyFragments = []string{
 
 func isSecretQueryKey(key string) bool {
 	k := strings.ToLower(key)
+	// "keyword" is JavLibrary's search query identifier, not a secret.
+	if k == "keyword" {
+		return false
+	}
 	if secretKeyExact[k] {
 		return true
 	}
