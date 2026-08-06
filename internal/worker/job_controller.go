@@ -242,15 +242,12 @@ func (c *jobController) Rescrape(ctx context.Context, cmd RescrapeCmd) (*Rescrap
 			release := c.job.posterEditor.lockRegistry().AcquireMany(keys)
 			setProvenance(outcome)
 			release()
-		} else {
-			setProvenance(outcome)
+			return outcome, nil
 		}
-	} else {
-		setProvenance(outcome)
 	}
-	if err != nil {
-		return outcome, err
-	}
+	// FilePath empty OR its identity vanished before this tail: publish is
+	// safe outside the key (nothing left to collide with).
+	setProvenance(outcome)
 
 	return outcome, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/poster"
@@ -36,6 +37,7 @@ func TestSetDepsFromConfigAllArms(t *testing.T) {
 		HistoryRepo:     historyRepo,
 		Emitter:         events,
 		PersistFn:       func() error { return nil },
+		Logger:          logging.GlobalLogger(),
 	}})
 	require.NotNil(t, job.deps.MovieRepo)
 	require.NotNil(t, job.deps.ActressRepo)
