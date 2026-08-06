@@ -2815,6 +2815,34 @@ func TestValidateMultipartInDirectory_LetterPrefixTrailingNumberEndToEnd(t *test
 	}
 }
 
+// TestValidateMultipartInDirectory_NumericOnlyResolutionEndToEnd verifies that a
+// numeric-only resolution tag (e.g. -1080, -2160, -720) is detected as letter+trailing,
+// so two such siblings confirm as multipart.
+func TestValidateMultipartInDirectory_NumericOnlyResolutionEndToEnd(t *testing.T) {
+	cfg := &Config{RegexEnabled: false}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	files := []models.FileMatchInfo{
+		{Name: "SVFLA-001a-1080.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001a-1080.mp4"},
+		{Name: "SVFLA-001b-1080.mp4", Extension: ".mp4", Path: "/media/JAV/SVFLA-001b-1080.mp4"},
+	}
+	results := m.Match(files)
+	require.Len(t, results, 2)
+	for _, r := range results {
+		require.Equal(t, PatternLetter, r.MultipartPattern)
+	}
+
+	validated := ValidateMultipartInDirectory(results)
+	confirmed := 0
+	for _, r := range validated {
+		if r.IsMultiPart {
+			confirmed++
+		}
+	}
+	require.Equal(t, 2, confirmed)
+}
+
 // TestValidateMultipartInDirectory_CompoundQualitySuffixEndToEnd verifies that a
 // compound quality suffix (e.g. 4k-HDR, 4k-h265) after the letter part marker is detected
 // as letter+trailing, so two such siblings confirm as multipart.
