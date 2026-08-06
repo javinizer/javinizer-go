@@ -170,14 +170,16 @@ func buildScrapeCmd(
 		manualURL = isManualURLInput(trimmed)
 	}
 	if movieID == "" {
-		// Prefer the directory-validated FileMatchInfo.MovieID (set by the scan/match
-		// phase, e.g. a restored E/Z catalog suffix) over the matcher's unvalidated
-		// heuristic — keeps the scrape ID consistent with the validated match result.
-		if fmi.MovieID != "" {
+		// MovieIDOverride (per-file rescrape override) takes precedence over the
+		// validated FileMatchInfo.MovieID, then the matcher fallback.
+		if override, ok := cfg.MovieIDOverride[filePath]; ok {
+			movieID = override
+		} else if fmi.MovieID != "" {
+			// Prefer the directory-validated FileMatchInfo.MovieID (set by the scan/match
+			// phase, e.g. a restored E/Z catalog suffix) over the matcher's unvalidated
+			// heuristic — keeps the scrape ID consistent with the validated match result.
 			movieID = fmi.MovieID
 			movieIDFromMatcher = true
-		} else if override, ok := cfg.MovieIDOverride[filePath]; ok {
-			movieID = override
 		} else {
 			movieID = ""
 			if inputs.Matcher != nil {

@@ -259,6 +259,20 @@ func TestBuildScrapeCmd_PrefersValidatedFileMatchInfoMovieID(t *testing.T) {
 	assert.Equal(t, "IPX-535E", cmd.MovieID, "validated FileMatchInfo.MovieID must take precedence over MatchString's unvalidated heuristic")
 }
 
+func TestBuildScrapeCmd_MovieIDOverrideBeatsFileMatchInfoMovieID(t *testing.T) {
+	const file = "/videos/IPX-535E-4k.mp4"
+	m, err := matcher.NewMatcher(&matcher.Config{RegexEnabled: false})
+	require.NoError(t, err)
+	inputs := scrapePhaseInputs{Matcher: m}
+	fmi := models.FileMatchInfo{MovieID: "IPX-535E", Path: file, Name: "IPX-535E-4k.mp4", Extension: ".mp4"}
+
+	cmd, _ := buildScrapeCmd(file, fmi, inputs, ScrapePhaseConfig{
+		MovieIDOverride: map[string]string{file: "OVERRIDE-001"},
+	})
+
+	assert.Equal(t, "OVERRIDE-001", cmd.MovieID, "MovieIDOverride must take precedence over the validated FileMatchInfo.MovieID")
+}
+
 func TestBuildScrapeCmd_NoManualInputAutoIDsFromMatcher(t *testing.T) {
 	const file = "/videos/ABC-001.mp4"
 	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "ABC-001"}}
