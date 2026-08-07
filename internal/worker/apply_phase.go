@@ -499,6 +499,12 @@ func applyFile(
 		defer taskCancel()
 	}
 
+	// codex r51 P2c: freeze the phase-entry baseline BEFORE the workflow
+	// sees the pointer — stepDisplayTitle & friends mutate cmd.Movie/afc.Movie
+	// (= the same movie), and a mutated "baseline" misclassifies merges as
+	// concurrent review edits, restoring stale fields over the computed ones.
+	frozenBaseline := movie.Clone()
+
 	// Step 1: Build the ApplyCmd.
 	applyCmd, afc, shouldExecute := buildApplyCmd(filePath, movie, fileResult, inputs, cfg, taskCtx)
 	if !shouldExecute {
@@ -514,8 +520,9 @@ func applyFile(
 
 	result, applyErr := wf.Apply(taskCtx, applyCmd)
 
-	// Step 3: Interpret the result.
-	return interpretApplyResult(filePath, movie, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)
+	// Step 3: Interpret the result against the FROZEN baseline (workflow
+	// permutations may have rewritten fields on the live pointer mid-apply).
+	return interpretApplyResult(filePath, frozenBaseline, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)
 }
 
 // trackApplyResults processes collected applyFileOutcomes: increments counters

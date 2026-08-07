@@ -6,11 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
 	wfmocks "github.com/javinizer/javinizer-go/internal/mocks/workflow"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
 func minimalApplyInputs(t *testing.T, store resultstore.Store, withLock bool) applyPhaseInputs {
@@ -27,6 +30,33 @@ func minimalApplyInputs(t *testing.T, store resultstore.Store, withLock bool) ap
 		inputs.EditLockFn = func(movieIDs ...string) func() { return func() {} }
 	}
 	return inputs
+}
+
+// codex r51 P2c: the workflow mutates the handed movie pointer mid-apply
+// (template render assigns DisplayTitle). applyFile must freeze the
+// phase-entry BASELINE first; otherwise the live-vs-baseline merge sees the
+// workflow's own render as a "user edit" and win-back into live state.
+func TestApplyFileBaselineFreezeAgainstWorkflowMutation(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-bz", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "BZ-1", DisplayTitle: "orig"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "BZ-1"},
+	})
+	inputs := minimalApplyInputs(t, store, true)
+	wfm := wfmocks.NewMockWorkflowInterface(t)
+	wfm.EXPECT().Apply(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
+		cmd.Movie.DisplayTitle = "rendered-by-workflow"
+		return &workflow.ApplyResult{Movie: cmd.Movie}, nil
+	})
+	movie := &models.Movie{ID: "BZ-1", DisplayTitle: "orig"}
+	stored, gErr := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, gErr)
+	outcome := applyFile(context.Background(), wfm, "/f/a.mp4", stored, movie, inputs, ApplyPhaseConfig{})
+	_ = outcome
+	final, err := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "rendered-by-workflow", final.Movie.DisplayTitle, "workflow render wins — not treated as a user edit")
 }
 
 // failure write-back: mismatch identity ⇒ skip write-back entirely.
