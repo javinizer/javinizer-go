@@ -272,8 +272,16 @@ func writePromoteWitness(fs afero.Fs, tempDir, jobID, posterID, srcURL, resultID
 	if err != nil {
 		return "", err
 	}
-	if err := afero.WriteFile(fs, p, payload, 0o644); err != nil {
-		return "", fmt.Errorf("promote witness %s: %w", p, err)
+	// codex r53 P2: atomic write via temp+rename so a partial write never
+	// leaves truncated JSON at the final path (which would permanently
+	// block retries via the guarded check).
+	tmp := p + ".tmp"
+	if err := afero.WriteFile(fs, tmp, payload, 0o644); err != nil {
+		return "", fmt.Errorf("promote witness write %s: %w", tmp, err)
+	}
+	if err := fs.Rename(tmp, p); err != nil {
+		_ = fs.Remove(tmp)
+		return "", fmt.Errorf("promote witness rename %s: %w", p, err)
 	}
 	return p, nil
 }
@@ -317,8 +325,13 @@ func writeCropWitness(fs afero.Fs, tempDir, jobID string, w cropWitness) (string
 	if err != nil {
 		return "", err
 	}
-	if err := afero.WriteFile(fs, p, payload, 0o644); err != nil {
-		return "", fmt.Errorf("crop witness %s: %w", p, err)
+	tmp := p + ".tmp"
+	if err := afero.WriteFile(fs, tmp, payload, 0o644); err != nil {
+		return "", fmt.Errorf("crop witness write %s: %w", tmp, err)
+	}
+	if err := fs.Rename(tmp, p); err != nil {
+		_ = fs.Remove(tmp)
+		return "", fmt.Errorf("crop witness rename %s: %w", p, err)
 	}
 	return p, nil
 }

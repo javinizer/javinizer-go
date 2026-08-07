@@ -410,7 +410,7 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 					if errors.Is(werr, errPromoteWitnessPending) {
 						return &worker.EditAdmissionConflictError{Message: werr.Error()}
 					}
-					return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster promote witness: %v", werr)}
+					return fmt.Errorf("poster promote witness: %w", werr)
 				}
 				finalize, pErr := promoteStagedPosterPair(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, stageID, posterID)
 				if pErr != nil {

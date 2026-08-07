@@ -502,6 +502,16 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 			return reversed // witness survives for the next startup retry
 		}
 	}
+	// r53 P2: committed promotion leaves parked .bak files behind — sweep
+	// them BEFORE the witness so a cleanup failure keeps the witness (and a
+	// retry completes the sweep) rather than orphaning large backups.
+	for _, sfx := range []string{"-full.jpg", ".jpg"} {
+		bak := filepath.Join(dir, w.PosterID+sfx+".bak")
+		if rmErr := c.fs.Remove(bak); rmErr != nil && !os.IsNotExist(rmErr) {
+			logging.Warnf("promote reconcile: bak sweep %s: %v", bak, rmErr)
+			return reversed // witness survives for retry
+		}
+	}
 	if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {
 		logging.Warnf("promote witness sweep %s: %v", wpath, rmErr)
 	}

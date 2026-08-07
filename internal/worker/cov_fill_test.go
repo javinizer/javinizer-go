@@ -202,6 +202,28 @@ func TestMarkStartedCancelledBeforeClaim(t *testing.T) {
 
 // --- coverage fills for poster_editor.go ---
 
+// r53 P2: committed promotion must sweep .bak legs before witness.
+func TestReconcilePromoteCommittedSweepsBakLegs(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1-full.jpg.bak"), []byte("oldfull"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg.bak"), []byte("oldcrop"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("new"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://x", 1), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+	_, fbErr := fs.Stat(filepath.Join(dir, "PI-1-full.jpg.bak"))
+	assert.Error(t, fbErr, "full bak swept")
+	_, cbErr := fs.Stat(filepath.Join(dir, "PI-1.jpg.bak"))
+	assert.Error(t, cbErr, "crop bak swept")
+	_, wErr := fs.Stat(filepath.Join(dir, ".promote-PI-1.json"))
+	assert.Error(t, wErr, "witness swept")
+}
+
 // rekey source stat error aborts.
 func TestUpdateMovieFamilyRekeySourceStatError(t *testing.T) {
 	store := resultstore.New(1, []string{"/f/a.mp4"})
