@@ -1435,17 +1435,28 @@ func TestReconcileRekeyWitnessReadFileError(t *testing.T) {
 	assert.Equal(t, 0, n, "unreadable rekey witness skipped")
 }
 
-// temp_dir_cleaner:276-277 — ReadDir error on job dir (file where dir should be)
+type failOpenForDirFS struct {
+	afero.Fs
+	failDir string
+}
+
+func (f failOpenForDirFS) Open(name string) (afero.File, error) {
+	if name == f.failDir {
+		return nil, errors.New("open blocked")
+	}
+	return f.Fs.Open(name)
+}
+
 func TestReconcileRekeyReadDirJobDirError(t *testing.T) {
 	base := afero.NewMemMapFs()
-	require.NoError(t, base.MkdirAll("/tmp/posters", 0o755))
-	// Put a FILE where the job dir should be to force ReadDir error
-	require.NoError(t, afero.WriteFile(base, "/tmp/posters/JOB-FILE", []byte("x"), 0o644))
+	require.NoError(t, base.MkdirAll("/tmp/posters/JOB-FAIL", 0o755))
+	require.NoError(t, afero.WriteFile(base, "/tmp/posters/JOB-FAIL/.rekey-OLD.json", []byte("{}"), 0o644))
 	repo := mocks.NewMockJobRepositoryInterface(t)
-	cl := &TempDirCleaner{fs: base, tempDir: "/tmp", jobRepo: repo}
+	fs := failOpenForDirFS{Fs: base, failDir: "/tmp/posters/JOB-FAIL"}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 	n, err := cl.ReconcileRekeyWitnesses(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, 0, n, "ReadDir error on job dir -> skip")
+	assert.Equal(t, 0, n, "ReadDir error on job dir")
 }
 
 func TestNewJobStoreReconcileFindError(t *testing.T) {
