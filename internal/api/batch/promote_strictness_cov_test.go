@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -246,4 +247,16 @@ func TestWritePromoteWitnessGuardedNilFsRealOS(t *testing.T) {
 func TestPromoteCroppedLegNilFsRealOS(t *testing.T) {
 	err := promoteCroppedLeg(nil, "/nonexistent-path-xyz", "JNIL", "stage-x", "PI-1")
 	require.NoError(t, err, "no staged file → nothing to promote")
+}
+
+type failCreateForBatchFS struct {
+	afero.Fs
+	failSuffix string
+}
+
+func (f failCreateForBatchFS) Create(name string) (afero.File, error) {
+	if strings.HasSuffix(name, f.failSuffix) {
+		return nil, errors.New("create blocked")
+	}
+	return f.Fs.Create(name)
 }

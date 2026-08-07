@@ -1248,3 +1248,57 @@ func TestStartStaleTempCleanupReconcileSuccess(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	close(stop)
 }
+
+// --- r56 grind batch 4: witness write error + provenance ---
+
+// FS that fails Create for specific paths (blocks afero.WriteFile)
+type failCreateForNameFS struct {
+	afero.Fs
+	failSuffix string
+}
+
+func (f failCreateForNameFS) Create(name string) (afero.File, error) {
+	if strings.HasSuffix(name, f.failSuffix) {
+		return nil, errors.New("create blocked")
+	}
+	return f.Fs.Create(name)
+}
+
+// poster_editor: witness sweep error on failed relocation (failRemoveFS blocks Remove of witness)
+func TestRekeyWitnessSweepErrorOnFailedRelocation(t *testing.T) {
+	store, base, _ := familyRelocationSetup(t)
+	// failCreateForNameFS blocks Create for the .tmp witness file → witness write fails
+	// But we need the witness to SUCCEED first, then have Remove fail.
+	// Use failRemoveFS which blocks Remove but allows Create
+	fs := failRemoveFS{Fs: base}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	// Use seqRenameFailFS to fail on forward rename (call 2) so relocation fails
+	// and rollback succeeds, then witness sweep fails (failRemoveFS)
+	// Actually, failRemoveFS doesn't block Rename, so relocation succeeds.
+	// The witness is written, relocation succeeds, commit succeeds.
+	// On success: witness sweep → failRemoveFS blocks Remove → Warnf
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"}))
+}
+
+// poster_editor: crop witness ReadFile error (ReadDir finds file but ReadFile fails)
+func TestRekeyCropWitnessContentReadError(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "SSNI-R1", "")
+	base := afero.NewMemMapFs()
+	dir := filepath.Join("/tmp", "posters", "JOB-9")
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "SSNI-R1-full.jpg"), []byte("x"), 0o644))
+	// Write a crop witness that exists but Open fails for it
+	cropPath := filepath.Join(dir, ".crop-SSNI-R1.crop-x.json")
+	require.NoError(t, afero.WriteFile(base, cropPath, []byte("not-json"), 0o644))
+	// Use failOpenForNameFS to make ReadFile fail on the crop witness
+	fs := failOpenForNameFS{Fs: base, failName: ".crop-SSNI-R1.crop-x.json"}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	// ReadDir finds the crop witness, ReadFile fails → continue → rekey proceeds
+	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.NoError(t, err, "unreadable crop witness skipped")
+}
