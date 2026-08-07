@@ -538,12 +538,23 @@ func (c *TempDirCleaner) reconcileCropWitness(ctx context.Context, dir, jobID, w
 				return 0
 			}
 			promoted++
+		} else if !os.IsNotExist(err) {
+			// r52 P2: a transient stat error must NOT sweep the witness — the
+			// staged bytes may still exist and the next startup must retry.
+			logging.Warnf("crop reconcile: stat %s: %v — witness kept", staged, err)
+			return 0
 		}
 	} else {
 		if rmErr := c.fs.Remove(staged); rmErr != nil && !os.IsNotExist(rmErr) {
 			logging.Warnf("crop reconcile: drop staged %s: %v", staged, rmErr)
 			return 0
 		}
+	}
+	// r52 P2: the staged full-size copy is only needed by the crop operation
+	// itself, never at reconcile time — free it as soon as the crop leg is
+	// settled (applied or dropped).
+	if rmErr := c.fs.Remove(filepath.Join(dir, w.StageID+"-full.jpg")); rmErr != nil && !os.IsNotExist(rmErr) {
+		logging.Warnf("crop reconcile: drop staged full %s: %v", w.StageID+"-full.jpg", rmErr)
 	}
 	if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {
 		logging.Warnf("crop witness sweep %s: %v", wpath, rmErr)

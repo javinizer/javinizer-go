@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -39,6 +41,7 @@ const cropWitnessFixtureURL = "/api/v1/temp/posters/JOB-W1/CP-1.jpg?v=777"
 func seedCropWitness(t *testing.T, fs afero.Fs, dir string, rev uint64) {
 	t.Helper()
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "stage-c1.jpg"), []byte("staged-crop"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "stage-c1-full.jpg"), []byte("staged-full"), 0o644))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "CP-1.jpg"), []byte("old-crop"), 0o644))
 	w, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c1", StageID: "stage-c1", CroppedURL: cropWitnessFixtureURL, PrevRevision: rev})
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-stage-c1.json"), w, 0o644))
@@ -60,6 +63,8 @@ func TestReconcileCropWitnessCommittedPromotesStaged(t *testing.T) {
 	assert.Equal(t, "staged-crop", string(content))
 	_, stErr := fs.Stat(filepath.Join(dir, "stage-c1.jpg"))
 	assert.Error(t, stErr, "staged file consumed")
+	_, stFullErr := fs.Stat(filepath.Join(dir, "stage-c1-full.jpg"))
+	assert.Error(t, stFullErr, "staged full-size copy is swept too (r52 P2b)")
 	_, wErr := fs.Stat(filepath.Join(dir, ".crop-stage-c1.json"))
 	assert.Error(t, wErr, "witness swept")
 }
@@ -79,6 +84,33 @@ func TestReconcileCropWitnessUncommittedDropsStaged(t *testing.T) {
 	assert.Equal(t, "old-crop", string(content), "canonical NEVER touched pre-commit")
 	_, stErr := fs.Stat(filepath.Join(dir, "stage-c1.jpg"))
 	assert.Error(t, stErr, "staged fleet dropped")
+}
+
+// r52 P2a: a transient Stat error on the staged crop leg must KEEP the
+// witness — bytes may still be there; IsNotExist is the only sweep-able one.
+type statFailNameFS struct {
+	afero.Fs
+	name string
+}
+
+func (f statFailNameFS) Stat(name string) (os.FileInfo, error) {
+	if strings.HasSuffix(name, f.name) {
+		return nil, os.ErrPermission
+	}
+	return f.Fs.Stat(name)
+}
+
+func TestReconcileCropWitnessStatErrorRetains(t *testing.T) {
+	base, dir := witnessFixture(t)
+	seedCropWitness(t, base, dir, 4)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(cropWitnessJobRow(t, cropWitnessFixtureURL, 5), nil)
+	fs := statFailNameFS{Fs: base, name: "stage-c1.jpg"}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	_, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	_, wErr := base.Stat(filepath.Join(dir, ".crop-stage-c1.json"))
+	assert.NoError(t, wErr, "witness retained on transient stat error")
 }
 
 // A transient rename failure during reconcile keeps the witness (and the

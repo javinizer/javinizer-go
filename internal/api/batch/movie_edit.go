@@ -6,6 +6,7 @@ import (
 
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -274,6 +275,12 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				logging.Warnf("crop promote %s→%s failed (witness retained for reconciliation): %v", stageID, posterID, pErr)
 			} else {
 				removeCropWitness(fs, cwPath)
+				// r52 P2: free the staged full-size copy left over from the
+				// crop stage (only the crop leg is promoted; the reconcile arm
+				// handles leftovers when the witness survives).
+				if rmErr := fs.Remove(filepath.Join(tmpDir, "posters", jobID, stageID+"-full.jpg")); rmErr != nil && !os.IsNotExist(rmErr) {
+					logging.Warnf("crop staged-full sweep %s: %v", stageID+"-full.jpg", rmErr)
+				}
 			}
 			return nil
 		})
