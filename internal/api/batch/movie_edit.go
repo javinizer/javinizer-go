@@ -436,8 +436,9 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 					}
 					return cerr
 				}
-				removePromoteWitness(rt.Deps().GetFs(), pwPath) // commit landed
-				finalize()
+				finalize() // reap .bak parking FIRST — a crash here strands
+				// backups, but the witness survives to tell the reconciler.
+				removePromoteWitness(rt.Deps().GetFs(), pwPath)
 				return nil
 			})
 			cleanupStagedPosterPair(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, stageID)

@@ -266,7 +266,7 @@ func TestRekeyBlockedByCropWitness(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	dir := filepath.Join("/tmp", "posters", "JOB-9")
 	require.NoError(t, fs.MkdirAll(dir, 0o755))
-	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-SSNI-R1.json"), []byte("{}"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-SSNI-R1.crop-x.json"), []byte(`{"poster_id":"SSNI-R1"}`), 0o644))
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
