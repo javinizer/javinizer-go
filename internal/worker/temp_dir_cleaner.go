@@ -228,6 +228,19 @@ type promoteWitness struct {
 	OldSHA       map[string]string `json:"old_sha,omitempty"`
 }
 
+// cropWitness is the crash-recovery record for the staged manual-crop flow
+// (codex r51 P2/durability): staged crop bytes never touch canonical until
+// the state commit lands.
+const cropWitnessPrefix = ".crop-"
+
+type cropWitness struct {
+	PosterID     string `json:"poster_id"`
+	ResultID     string `json:"result_id"`
+	StageID      string `json:"stage_id"`
+	CroppedURL   string `json:"cropped_url"`
+	PrevRevision uint64 `json:"prev_revision"`
+}
+
 type rekeyWitness struct {
 	OldID string `json:"old_id"`
 	NewID string `json:"new_id"`
@@ -266,11 +279,16 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 			name := e.Name()
 			isRekey := strings.HasPrefix(name, rekeyWitnessPrefix) && strings.HasSuffix(name, ".json")
 			isPromote := strings.HasPrefix(name, promoteWitnessPrefix) && strings.HasSuffix(name, ".json")
-			if !isRekey && !isPromote {
+			isCrop := strings.HasPrefix(name, cropWitnessPrefix) && strings.HasSuffix(name, ".json")
+			if !isRekey && !isPromote && !isCrop {
 				continue
 			}
 			if isPromote {
 				reversed += c.reconcilePromoteWitness(ctx, dir, jobID, filepath.Join(dir, name))
+				continue
+			}
+			if isCrop {
+				reversed += c.reconcileCropWitness(ctx, dir, jobID, filepath.Join(dir, name))
 				continue
 			}
 			wpath := filepath.Join(dir, name)
@@ -476,6 +494,61 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 		logging.Warnf("promote witness sweep %s: %v", wpath, rmErr)
 	}
 	return reversed
+}
+
+// reconcileCropWitness arbitrates a staged manual-crop witness (codex r51):
+// commit landed ⇒ finish the promotion (staged bytes over canonical);
+// otherwise drop the staged leftovers — canonical was never touched
+// pre-commit, so nothing else needs repair. Witness removed only after the
+// promote completes.
+func (c *TempDirCleaner) reconcileCropWitness(ctx context.Context, dir, jobID, wpath string) int {
+	data, err := afero.ReadFile(c.fs, wpath)
+	var w cropWitness
+	if err != nil || json.Unmarshal(data, &w) != nil || w.PosterID == "" || w.ResultID == "" || w.StageID == "" || w.CroppedURL == "" {
+		logging.Warnf("crop witness %s unreadable/corrupt — left in place", wpath)
+		return 0
+	}
+	job, jerr := c.jobRepo.FindByID(ctx, jobID)
+	switch {
+	case errors.Is(jerr, database.ErrNotFound):
+		return 0
+	case jerr != nil:
+		logging.Warnf("crop reconcile: job %s lookup failed: %v", jobID, jerr)
+		return 0
+	}
+	committed := false
+	var results map[string]*resultstore.MovieResult
+	if job != nil && job.ParseResults(&results) == nil {
+		for _, r := range results {
+			if r != nil && r.ResultID == w.ResultID && r.Movie != nil &&
+				strings.EqualFold(r.Movie.ID, w.PosterID) &&
+				r.Movie.Poster.CroppedPosterURL == w.CroppedURL && r.Revision > w.PrevRevision {
+				committed = true
+				break
+			}
+		}
+	}
+	staged := filepath.Join(dir, w.StageID+".jpg")
+	canon := filepath.Join(dir, w.PosterID+".jpg")
+	promoted := 0
+	if committed {
+		if _, err := c.fs.Stat(staged); err == nil {
+			if rnErr := c.fs.Rename(staged, canon); rnErr != nil {
+				logging.Warnf("crop reconcile: complete promote %s→%s: %v — witness kept for retry", staged, canon, rnErr)
+				return 0
+			}
+			promoted++
+		}
+	} else {
+		if rmErr := c.fs.Remove(staged); rmErr != nil && !os.IsNotExist(rmErr) {
+			logging.Warnf("crop reconcile: drop staged %s: %v", staged, rmErr)
+			return 0
+		}
+	}
+	if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {
+		logging.Warnf("crop witness sweep %s: %v", wpath, rmErr)
+	}
+	return promoted
 }
 
 // StartStaleTempCleanup starts a background goroutine that periodically cleans

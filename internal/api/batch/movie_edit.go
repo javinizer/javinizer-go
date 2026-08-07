@@ -6,8 +6,11 @@ import (
 
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/spf13/afero"
 
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -203,14 +206,31 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				cropErr = err
 				return nil //nolint:nilerr // captured to cropErr; mapped to 400 after lock release
 			}
-			backup := backupPosterPair(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, posterID)
-			cropResult, err := snap.PosterManager().CropWithBounds(c.Request.Context(), jobID, posterID, req.X, req.Y, req.Width, req.Height, maxPosterHeight)
-			if err != nil {
-				cropErr = err
-				backup.restore() // manager may have truncated the cropped file before failing (codex P6-C)
-				return nil       //nolint:nilerr // captured to cropErr; mapped to 400 after lock release — keep legacy status
+			// codex r51 P2/durability: the crop writes to a STAGED name and promotes
+			// over the canonical pair only AFTER the state commit lands — a crash
+			// mid-op leaves the canonical untouched (pre-commit) or a staged pair
+			// plus a witness the startup reconciler completes. The crop manager
+			// resolves its source by the handed name, so stage BOTH source legs
+			// first; canonical <posterID>.jpg is never rewritten pre-commit.
+			fs := rt.Deps().GetFs()
+			tmpDir := snap.APIConfig().TempDir
+			dir := filepath.Join(tmpDir, "posters", jobID)
+			stageID := posterID + ".crop-" + fmt.Sprintf("%x", time.Now().UnixNano())
+			for _, leg := range [][2]string{{posterID + "-full.jpg", stageID + "-full.jpg"}, {posterID + ".jpg", stageID + ".jpg"}} {
+				if data, rerr := afero.ReadFile(fs, filepath.Join(dir, leg[0])); rerr == nil {
+					if werr := afero.WriteFile(fs, filepath.Join(dir, leg[1]), data, 0o644); werr != nil {
+						cleanupStagedPosterPair(fs, tmpDir, jobID, stageID)
+						return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster crop staging %s: %v", leg[1], werr)}
+					}
+				}
 			}
-			croppedURL = cropResult.CroppedURL
+			cropResult, err := snap.PosterManager().CropWithBounds(c.Request.Context(), jobID, stageID, req.X, req.Y, req.Width, req.Height, maxPosterHeight)
+			if err != nil {
+				cleanupStagedPosterPair(fs, tmpDir, jobID, stageID)
+				cropErr = err
+				return nil //nolint:nilerr // captured to cropErr; mapped to 400 after lock release
+			}
+			croppedURL = strings.Replace(cropResult.CroppedURL, url.PathEscape(stageID)+".jpg", url.PathEscape(posterID)+".jpg", 1)
 			// Persist the manual crop geometry (normalized 0–1 fractions) next
 			// to the preview URL so the apply phase can reproduce the crop on
 			// the downloaded source image. Bounds are validated in integer
@@ -226,11 +246,36 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 					SourceAspect: float64(cropResult.SourceWidth) / float64(cropResult.SourceHeight),
 				}
 			}
+			// Durable witness BEFORE the commit — authorizes the reconciler to
+			// complete the promote if we crash between commit and promote.
+			var prerev uint64
+			if live, _, found := job.GetFileResultByResultID(resultID); found && live != nil {
+				prerev = live.Revision
+			}
+			cwPath, werr := writeCropWitness(fs, tmpDir, jobID, cropWitness{
+				PosterID: posterID, ResultID: resultID, StageID: stageID,
+				CroppedURL: croppedURL, PrevRevision: prerev,
+			})
+			if werr != nil {
+				cleanupStagedPosterPair(fs, tmpDir, jobID, stageID)
+				return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster crop witness: %v", werr)}
+			}
 			cerr := m.UpdatePosterCrop(croppedURL, bounds, bounds != nil)
 			if cerr != nil {
-				backup.restore()
+				// Commit never landed: canonical untouched — just drop the staged
+				// bytes and the witness.
+				cleanupStagedPosterPair(fs, tmpDir, jobID, stageID)
+				removeCropWitness(fs, cwPath)
+				return cerr
 			}
-			return cerr
+			if pErr := promoteCroppedLeg(fs, tmpDir, jobID, stageID, posterID); pErr != nil {
+				// Committed but promotion failed: KEEP the witness — the startup
+				// reconciler completes the promote against the committed row.
+				logging.Warnf("crop promote %s→%s failed (witness retained for reconciliation): %v", stageID, posterID, pErr)
+			} else {
+				removeCropWitness(fs, cwPath)
+			}
+			return nil
 		})
 		if cropErr != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: cropErr.Error()})

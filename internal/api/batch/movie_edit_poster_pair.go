@@ -253,6 +253,11 @@ func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, r
 	p := filepath.Join(tempDir, "posters", jobID, promoteWitnessName(posterID))
 	if _, err := fs.Stat(p); err == nil {
 		return "", fmt.Errorf("%w for %s — restart to reconcile before retrying", errPromoteWitnessPending, posterID)
+	} else if !os.IsNotExist(err) {
+		// codex r51 P2c: any OTHER stat error may still mean the witness file
+		// exists — overwriting it would blind the reconciler to the pending
+		// state. Fail closed.
+		return "", fmt.Errorf("promote witness check %s: %w", p, err)
 	}
 	return writePromoteWitness(fs, tempDir, jobID, posterID, srcURL, resultID, prevRevision, backup)
 }
@@ -280,6 +285,74 @@ func removePromoteWitness(fs afero.Fs, p string) {
 	if err := fs.Remove(p); err != nil && !os.IsNotExist(err) {
 		logging.Warnf("promote witness sweep %s: %v", p, err)
 	}
+}
+
+// cropWitness is the crash-recovery record for the staged manual-crop flow
+// (codex r51 P2): the manager writes preview bytes to a STAGE name first;
+// only AFTER the state commit lands does promotion move the bytes over the
+// canonical crop. A crash mid-way leaves either an untouched canonical
+// (pre-commit — nothing to repair) or committed-state + staged leftovers
+// (the startup reconciler completes the promote). Wire format is read by
+// worker.TempDirCleaner.
+const cropWitnessPrefix = ".crop-"
+
+type cropWitness struct {
+	PosterID     string `json:"poster_id"`
+	ResultID     string `json:"result_id"`
+	StageID      string `json:"stage_id"`
+	CroppedURL   string `json:"cropped_url"`
+	PrevRevision uint64 `json:"prev_revision"`
+}
+
+func cropWitnessName(stageID string) string {
+	return cropWitnessPrefix + url.PathEscape(stageID) + ".json"
+}
+
+func writeCropWitness(fs afero.Fs, tempDir, jobID string, w cropWitness) (string, error) {
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	p := filepath.Join(tempDir, "posters", jobID, cropWitnessName(w.StageID))
+	payload, err := json.Marshal(w)
+	if err != nil {
+		return "", err
+	}
+	if err := afero.WriteFile(fs, p, payload, 0o644); err != nil {
+		return "", fmt.Errorf("crop witness %s: %w", p, err)
+	}
+	return p, nil
+}
+
+func removeCropWitness(fs afero.Fs, p string) {
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	if err := fs.Remove(p); err != nil && !os.IsNotExist(err) {
+		logging.Warnf("crop witness sweep %s: %v", p, err)
+	}
+}
+
+// promoteCroppedLeg moves the staged cropped poster over the canonical name
+// (rename replaces the destination on both OS and in-memory filesystems). It
+// runs AFTER the state commit — the byte swap is the observable tail of the
+// commit, never its precursor.
+func promoteCroppedLeg(fs afero.Fs, tempDir, jobID, stageID, posterID string) error {
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	dir := filepath.Join(tempDir, "posters", jobID)
+	src := filepath.Join(dir, stageID+".jpg")
+	dst := filepath.Join(dir, posterID+".jpg")
+	if _, err := fs.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil // manager never produced the leg: nothing to promote
+		}
+		return fmt.Errorf("crop promote source stat %s: %w", src, err)
+	}
+	if err := fs.Rename(src, dst); err != nil {
+		return fmt.Errorf("crop promote %s→%s: %w", src, dst, err)
+	}
+	return nil
 }
 
 // cleanupStagedPosterPair removes leftover staged files after a failed
