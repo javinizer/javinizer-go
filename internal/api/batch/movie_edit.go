@@ -347,7 +347,7 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 				// between promote and commit strands uncommitted bytes at canonical
 				// with the old pair only as .bak; the startup reconciler
 				// (worker.ReconcileRekeyWitnesses) arbitrates it against the row.
-				pwPath, werr := writePromoteWitness(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, posterID, req.URL, resultID)
+				pwPath, werr := writePromoteWitness(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, posterID, req.URL, resultID, scalarRev, backup)
 				if werr != nil {
 					backup.restore()
 					return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster promote witness: %v", werr)}

@@ -5,6 +5,8 @@
 package batch
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -185,14 +187,39 @@ const promoteWitnessPrefix = ".promote-"
 type promoteWitness struct {
 	PosterID string `json:"poster_id"`
 	URL      string `json:"url"`
-	// ResultID pins the arbitration to the TARGET result: URL-global matching
-	// misfires when another family legitimately shares the URL (or the target
-	// re-downloads from its existing URL) — codex r48-followup P2.
+	// ResultID pins the arbitration to the TARGET result — URL-global matching
+	// misfires when another family legitimately shares the URL.
 	ResultID string `json:"result_id"`
-	// Restored tracks per-leg reversal completion across startup retries — a
-	// partial reconcile persistence keeps the NEXT startup idempotent (it
-	// never removes an already-restored canon rather than the promoted one).
-	Restored map[string]bool `json:"restored,omitempty"`
+	// PrevRevision is the row's revision captured pre-op: the commit is
+	// provably durable only when the row's revision MOVED past it (codex r49
+	// P2 — same-URL refreshes can't be told apart without a commit token).
+	PrevRevision uint64 `json:"prev_revision"`
+	// OldSHA are the pre-promotion content hashes per leg ("full"/"crop");
+	// absent key ⇒ the canonical had NO existing bytes. Hash-matched canon =
+	// already-restored, mismatched canon = uncommitted new bytes — no
+	// cross-retry bookkeeping that itself needs atomic persistence (r49 P2b).
+	OldSHA map[string]string `json:"old_sha,omitempty"`
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// promoteWitnessHashes captures the pre-op content identities from the
+// already-snapshotted posterPairBackup.
+func promoteWitnessHashes(b *posterPairBackup) map[string]string {
+	m := map[string]string{}
+	if b == nil {
+		return m
+	}
+	if b.fullExisted {
+		m["full"] = sha256Hex(b.fullBytes)
+	}
+	if b.croppedExists {
+		m["crop"] = sha256Hex(b.croppedBytes)
+	}
+	return m
 }
 
 // promoteWitnessName keeps the filename inside the job dir even for hostile
@@ -203,13 +230,13 @@ func promoteWitnessName(posterID string) string {
 	return promoteWitnessPrefix + safe + ".json"
 }
 
-func writePromoteWitness(fs afero.Fs, tempDir, jobID, posterID, srcURL, resultID string) (string, error) {
+func writePromoteWitness(fs afero.Fs, tempDir, jobID, posterID, srcURL, resultID string, prevRevision uint64, backup *posterPairBackup) (string, error) {
 	if fs == nil {
 		fs = afero.NewOsFs()
 	}
 	dir := filepath.Join(tempDir, "posters", jobID)
 	p := filepath.Join(dir, promoteWitnessName(posterID))
-	payload, err := json.Marshal(promoteWitness{PosterID: posterID, URL: srcURL, ResultID: resultID})
+	payload, err := json.Marshal(promoteWitness{PosterID: posterID, URL: srcURL, ResultID: resultID, PrevRevision: prevRevision, OldSHA: promoteWitnessHashes(backup)})
 	if err != nil {
 		return "", err
 	}

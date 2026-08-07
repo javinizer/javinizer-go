@@ -18,7 +18,7 @@ func TestPromoteWitnessTraversalSafeName(t *testing.T) {
 	if err := fs.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	p, err := writePromoteWitness(fs, "/tmp", "JOB-1", "../evil", "https://x/y.jpg", "res-evil")
+	p, err := writePromoteWitness(fs, "/tmp", "JOB-1", "../evil", "https://x/y.jpg", "res-evil", 0, nil)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, ".promote-___evil.json"), p, "stem is scrubbed inside the job dir")
 	got, err := afero.ReadFile(fs, p)

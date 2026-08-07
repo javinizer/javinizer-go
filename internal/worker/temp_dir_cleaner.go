@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -219,13 +221,11 @@ const rekeyWitnessPrefix = ".rekey-"
 const promoteWitnessPrefix = ".promote-"
 
 type promoteWitness struct {
-	PosterID string `json:"poster_id"`
-	URL      string `json:"url"`
-	// ResultID pins arbitration to the TARGET result (never a cross-job /
-	// cross-family URL match). Restored records per-leg reversal completion
-	// so startup retries are idempotent.
-	ResultID string          `json:"result_id"`
-	Restored map[string]bool `json:"restored,omitempty"`
+	PosterID     string            `json:"poster_id"`
+	URL          string            `json:"url"`
+	ResultID     string            `json:"result_id"`
+	PrevRevision uint64            `json:"prev_revision"`
+	OldSHA       map[string]string `json:"old_sha,omitempty"`
 }
 
 type rekeyWitness struct {
@@ -345,6 +345,12 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 	return reversed, nil
 }
 
+// shaContentHex hashes a poster leg for witness arbitration.
+func shaContentHex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 // reconcilePromoteWitness arbitrates one .promote- witness against the
 // durable job row: the commit landed when any stored result's poster source
 // URL equals the witnessed URL (only the witness is swept then). Otherwise
@@ -371,12 +377,18 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 	// Global URL matching misfires when another family shares the URL, or
 	// when the target re-downloads from its existing URL (row carried it
 	// pre-op).
+	// r49 P2a: commit detection needs a token that CANNOT be present
+	// pre-commit — a same-URL refresh row (and any later-sibling edit) reads
+	// identical by identity+URL. Every commit bumps the per-result Revision,
+	// so committed means the TARGET row's revision moved past the captured
+	// one.
 	committed := false
 	var results map[string]*resultstore.MovieResult
 	if job != nil && job.ParseResults(&results) == nil {
 		for _, r := range results {
 			if r != nil && r.ResultID == w.ResultID && r.Movie != nil &&
-				strings.EqualFold(r.Movie.ID, w.PosterID) && r.Movie.Poster.PosterURL == w.URL {
+				strings.EqualFold(r.Movie.ID, w.PosterID) && r.Movie.Poster.PosterURL == w.URL &&
+				r.Revision > w.PrevRevision {
 				committed = true
 				break
 			}
@@ -385,26 +397,16 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 	reversed := 0
 	if !committed {
 		clean := true
-		wRestored := w.Restored
-		if wRestored == nil {
-			wRestored = map[string]bool{}
-		}
-		persistWitness := func() {
-			w.Restored = wRestored
-			if payload, err := json.Marshal(w); err == nil {
-				if err := afero.WriteFile(c.fs, wpath, payload, 0o644); err != nil {
-					logging.Warnf("promote reconcile: witness persist %s: %v", wpath, err)
-				}
-			}
-		}
-		for _, leg := range []struct{ name, sfx string }{{"full", "-full.jpg"}, {"crop", ".jpg"}} {
-			if wRestored[leg.name] {
-				continue // already reversed on an earlier startup (r48-fu P2b)
-			}
+		// r49 P2b: per-leg arbitration is by CONTENT HASH against the
+		// witness's pre-op snapshots — an already-restored canon hashes equal
+		// and survives even when its .bak was consumed by an earlier startup;
+		// mismatching canon bytes are uncommitted and dropped before restoring.
+		for _, leg := range []struct{ key, sfx string }{{"full", "-full.jpg"}, {"crop", ".jpg"}} {
 			canon := filepath.Join(dir, w.PosterID+leg.sfx)
 			bak := canon + ".bak"
-			canonOK, canonErr := c.fs.Stat(canon)
-			bakOK, bakErr := c.fs.Stat(bak)
+			oldSHA := w.OldSHA[leg.key]
+			_, canonErr := c.fs.Stat(canon)
+			_, bakErr := c.fs.Stat(bak)
 			switch {
 			case canonErr != nil && !os.IsNotExist(canonErr):
 				clean = false
@@ -412,16 +414,25 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 				continue
 			case bakErr != nil && !os.IsNotExist(bakErr):
 				clean = false
-				logging.Warnf("promote reconcile: stat %s: %v", bak, bakErr)
+				logging.Warnf("promote reconcile: read %s: %v", bak, bakErr)
 				continue
-			case bakOK != nil:
-				// Old bytes parked — reverse: drop the uncommitted canon (if any),
-				// restore the backup.
-				if canonOK != nil {
-					if rmErr := c.fs.Remove(canon); rmErr != nil {
+			}
+			bakExists := bakErr == nil
+			canonExists := canonErr == nil
+			if bakExists {
+				if canonExists {
+					data, rdErr := afero.ReadFile(c.fs, canon)
+					if rdErr != nil {
 						clean = false
-						logging.Warnf("promote reconcile: drop uncommitted %s: %v", canon, rmErr)
+						logging.Warnf("promote reconcile: read %s: %v", canon, rdErr)
 						continue
+					}
+					if shaContentHex(data) != oldSHA {
+						if rmErr := c.fs.Remove(canon); rmErr != nil {
+							clean = false
+							logging.Warnf("promote reconcile: drop uncommitted %s: %v", canon, rmErr)
+							continue
+						}
 					}
 				}
 				if rnErr := c.fs.Rename(bak, canon); rnErr != nil {
@@ -430,25 +441,35 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 					continue
 				}
 				reversed++
-				wRestored[leg.name] = true
-				persistWitness()
-			case canonOK != nil:
-				// No backup existed pre-op ⇒ canon holds uncommitted new bytes.
+				continue
+			}
+			if !canonExists {
+				continue // leg settled — nothing on either side
+			}
+			if oldSHA == "" {
+				// No pre-op bytes existed ⇒ canon is uncommitted promoted bytes.
 				if rmErr := c.fs.Remove(canon); rmErr != nil {
 					clean = false
 					logging.Warnf("promote reconcile: drop uncommitted %s: %v", canon, rmErr)
-					continue
 				}
-				wRestored[leg.name] = true
-				persistWitness()
-			default:
-				// Neither exists — leg was never staged/promoted; mark done.
-				wRestored[leg.name] = true
-				persistWitness()
+				continue
 			}
+			data, rdErr := afero.ReadFile(c.fs, canon)
+			if rdErr != nil {
+				clean = false
+				logging.Warnf("promote reconcile: read %s: %v", canon, rdErr)
+				continue
+			}
+			if shaContentHex(data) != oldSHA {
+				if rmErr := c.fs.Remove(canon); rmErr != nil {
+					clean = false
+					logging.Warnf("promote reconcile: drop uncommitted %s: %v", canon, rmErr)
+				}
+			}
+			// hash-equal ⇒ already restored on an earlier startup — keep.
 		}
 		if !clean {
-			return reversed // witness (with health map) survives for the next retry
+			return reversed // witness survives for the next startup retry
 		}
 	}
 	if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {
