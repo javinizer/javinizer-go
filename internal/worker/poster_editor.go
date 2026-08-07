@@ -552,8 +552,10 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	// the movie pointer — candidates alias theincoming movie below, so post-
 	// commit reads would see the NEW identity and relocation would no-op (codex r25).
 	canonicalOldPosterID := m.movieID
+	prevRevision := uint64(0)
 	if res := fileFirstMovieResult(m, filePaths); res != nil && res.Movie != nil && res.Movie.ID != "" {
 		canonicalOldPosterID = res.Movie.ID
+		prevRevision = res.Revision
 	}
 	// D6-lite eviction (codex r22): when the PATCH changed the effective
 	// poster source (sanitize already cleared the geometry), the installed
@@ -654,7 +656,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				} else if !errors.Is(err, afero.ErrFileNotFound) {
 					return fmt.Errorf("poster rekey witness check %s: %w", witnessPath, err)
 				}
-				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID})
+				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID, PrevRevision: prevRevision})
 				if err := afero.WriteFile(env.fs, witnessPath, wBytes, 0o644); err != nil {
 					return fmt.Errorf("poster rekey witness %s: %w", witnessPath, err)
 				}

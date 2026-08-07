@@ -242,8 +242,9 @@ type cropWitness struct {
 }
 
 type rekeyWitness struct {
-	OldID string `json:"old_id"`
-	NewID string `json:"new_id"`
+	OldID        string `json:"old_id"`
+	NewID        string `json:"new_id"`
+	PrevRevision uint64 `json:"prev_revision"`
 }
 
 // ReconcileRekeyWitnesses repairs relocation witnesses left behind by a crash
@@ -307,20 +308,31 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 				logging.Warnf("rekey reconcile: job %s lookup failed: %v", jobID, jerr)
 				continue
 			}
-			committed := false
+			oldIDPresent := false
+			newIDCommitted := false
 			var results map[string]*resultstore.MovieResult
 			if job != nil && job.ParseResults(&results) == nil {
 				for _, r := range results {
-					// codex r44 P2: EXACT compare — a case-only rekey crash on a
-					// case-sensitive fs leaves the row at the OLD spelling; fold-
-					// equal matching would misread that as "committed" and sweep
-					// the witness without reversing.
-					if r != nil && r.Movie != nil && r.Movie.ID == w.NewID {
-						committed = true
-						break
+					// codex r52 P2: TWO-GATE committed detection. (1) No result
+					// still carries the OLD spelling — the rekey transitions the
+					// whole family, so any surviving OldID means the commit never
+					// landed. (2) At least one result carries the NEW spelling
+					// with a revision the rekey actually bumped — a case-folded
+					// sibling already at the new spelling has its own (lower)
+					// revision and must not misfire. Together these scope the match
+					// to THIS rekey's transition, not any result that happens to
+					// share the new ID.
+					if r != nil && r.Movie != nil {
+						if r.Movie.ID == w.OldID {
+							oldIDPresent = true
+						}
+						if r.Movie.ID == w.NewID && r.Revision > w.PrevRevision {
+							newIDCommitted = true
+						}
 					}
 				}
 			}
+			committed := !oldIDPresent && newIDCommitted
 			if !committed {
 				// codex r41 P2b: the witness is the ONLY recovery marker for a
 				// mid-relocation crash — sweep it only after every required

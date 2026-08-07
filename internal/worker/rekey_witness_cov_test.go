@@ -23,10 +23,15 @@ import (
 // given movie ID — the arbiter the reconciler reads to decide commit-landed
 // vs pre-commit-crash.
 func witnessJobRow(t *testing.T, movieID string) *models.Job {
+	return witnessJobRowRev(t, movieID, 0)
+}
+
+func witnessJobRowRev(t *testing.T, movieID string, rev uint64) *models.Job {
 	t.Helper()
 	res := map[string]*resultstore.MovieResult{
 		"/f/a.mp4": {
 			ResultID:      "res-1",
+			Revision:      rev,
 			Status:        models.JobStatusCompleted,
 			Movie:         &models.Movie{ID: movieID},
 			FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: movieID},
@@ -78,7 +83,7 @@ func TestReconcileRekeyWitnessesCommittedKeepsNewNames(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-OLD-9.json"), witness, 0o644))
 
 	repo := mocks.NewMockJobRepositoryInterface(t)
-	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRow(t, "NEW-9"), nil)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowRev(t, "NEW-9", 1), nil)
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
 	n, err := cl.ReconcileRekeyWitnesses(context.Background())
@@ -166,6 +171,35 @@ func TestUpdateMovieFamilyRekeyRejectsUnresolvedWitness(t *testing.T) {
 	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-R1"}), "non-rekey updates unaffected")
 	data, _ := afero.ReadFile(fs, filepath.Join(dir, ".rekey-SSNI-R1.json"))
 	assert.Contains(t, string(data), "SSNI-OLD-NEW", "the original witness content is untouched")
+}
+
+// codex r52 P2: a case-folded multipart sibling already at the new spelling
+// must NOT satisfy the committed check -- the old-spelling part still exists,
+// so the rekey never landed.
+func TestReconcileRekeyWitnessesCaseFoldedSiblingNotCommitted(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "ABC-123.jpg"), []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "ABC-123.jpg.bak"), []byte("old"), 0o644))
+	witness, _ := json.Marshal(rekeyWitness{OldID: "abc-123", NewID: "ABC-123", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-abc-123.json"), witness, 0o644))
+
+	res := map[string]*resultstore.MovieResult{
+		"/f/a.mp4": {ResultID: "res-a", Revision: 0, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "abc-123"}, FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "abc-123"}},
+		"/f/b.mp4": {ResultID: "res-b", Revision: 5, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-123"}, FileMatchInfo: models.FileMatchInfo{Path: "/f/b.mp4", MovieID: "ABC-123"}},
+	}
+	payload, merr := json.Marshal(res)
+	require.NoError(t, merr)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(&models.Job{Results: string(payload)}, nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "old spelling still present -- rekey did not commit -- reverse")
+	content, _ := afero.ReadFile(fs, filepath.Join(dir, "abc-123.jpg"))
+	assert.Equal(t, "new", string(content), "original bytes moved back to the old name")
+	_, wErr := fs.Stat(filepath.Join(dir, ".rekey-abc-123.json"))
+	assert.Error(t, wErr, "witness swept after reversal")
 }
 
 // The writer side of the contract: a successful rekey always sweeps its
