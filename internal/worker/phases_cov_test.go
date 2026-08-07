@@ -88,6 +88,33 @@ func TestPhaseEndPersistWarnsAreSwallowed(t *testing.T) {
 
 // StartScrape must NOT launch when the phase-entry marker fails to persist
 // (D16 fail-closed); the terminal failure is retried durably.
+// codex r44 P2: Wait() must join AFTER the marker-clear persist ran —
+// the defer registration order puts close(phaseDone) LAST (LIFO). The
+// marker-clear persist therefore always observes phaseDone STILL OPEN.
+func TestStartScrapeWaitJoinsAfterMarkerClearPersist(t *testing.T) {
+	job := newBatchJob([]string{"/f/a.mp4"})
+	job.Controller().SetWorkflow(wfmocks.NewMockWorkflowInterface(t))
+	openDuringClear := false
+	job.deps.PersistFn = func() error {
+		job.lifecycle.mu.RLock()
+		phase := job.lifecycle.CurrentPhase()
+		pd := job.lifecycle.phaseDone
+		job.lifecycle.mu.RUnlock()
+		if pd == nil || phase != "" {
+			return nil // marker-set or in-run persists — not the terminal one
+		}
+		select {
+		case <-pd:
+		default:
+			openDuringClear = true
+		}
+		return nil
+	}
+	require.NoError(t, job.Controller().StartScrape(context.Background(), nil, ScrapePhaseConfig{}))
+	require.NoError(t, job.Controller().Wait())
+	assert.True(t, openDuringClear, "the marker-clear persist must run before phaseDone closes")
+}
+
 func TestStartScrapeMarkerPersistFailureAborts(t *testing.T) {
 	job := newBatchJob([]string{"/f/a.mp4"})
 	job.Controller().SetWorkflow(wfmocks.NewMockWorkflowInterface(t))

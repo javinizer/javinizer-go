@@ -268,7 +268,11 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 			var results map[string]*resultstore.MovieResult
 			if job != nil && job.ParseResults(&results) == nil {
 				for _, r := range results {
-					if r != nil && r.Movie != nil && strings.EqualFold(r.Movie.ID, w.NewID) {
+					// codex r44 P2: EXACT compare — a case-only rekey crash on a
+					// case-sensitive fs leaves the row at the OLD spelling; fold-
+					// equal matching would misread that as "committed" and sweep
+					// the witness without reversing.
+					if r != nil && r.Movie != nil && r.Movie.ID == w.NewID {
 						committed = true
 						break
 					}

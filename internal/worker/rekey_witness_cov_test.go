@@ -90,6 +90,26 @@ func TestReconcileRekeyWitnessesCommittedKeepsNewNames(t *testing.T) {
 	assert.Error(t, wErr, "leftover witness swept")
 }
 
+// codex r44 P2: a case-ONLY rekey crash on a case-sensitive fs: the durable
+// row carries the OLD spelling; EqualFold arbitration would misread that as
+// "committed" and sweep the witness without reversing.
+func TestReconcileRekeyWitnessesCaseOnlyCrashReverses(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "ABC-123.jpg"), []byte("crop"), 0o644))
+	witness, _ := json.Marshal(rekeyWitness{OldID: "abc-123", NewID: "ABC-123"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-abc-123.json"), witness, 0o644))
+
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRow(t, "abc-123"), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "case-only crash reverses on exact-match arbitration")
+	_, statErr := fs.Stat(filepath.Join(dir, "abc-123.jpg"))
+	assert.NoError(t, statErr)
+}
+
 // An orphaned job directory leaves witness arbitration to the staleness
 // sweep — ReconcileRekeyWitnesses must not touch it.
 func TestReconcileRekeyWitnessesOrphanedJobUntouched(t *testing.T) {

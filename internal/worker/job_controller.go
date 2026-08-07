@@ -103,6 +103,11 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 		// Admission lease spans goroutine start through the FINAL envelope
 		// persist (Run's defer) so DeleteJob's exclusive drain can never
 		// reclaim the job mid-flush (D1/D16).
+		// codex r44 P2: close phaseDone LAST — Wait() must join the ENTIRE
+		// quiesced defer stack (marker-clear persist + lease release), not fire
+		// while the final persist still runs. Defers execute LIFO, so register
+		// the close FIRST.
+		defer close(pd)
 		defer release()
 		// Clear the phase marker only after the worker's final write — a
 		// cancelled Running phase stays fenced until its last flush (codex r38).
@@ -118,9 +123,6 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 				}
 			}
 		}()
-		// Close phaseDone only after Run returns — its deferred persistence
-		// executes on return, after the terminal Mark* it calls mid-body.
-		defer close(pd)
 		defer cancel()
 		inputs := c.buildScrapeInputs(wf, batchCfg, persistFn)
 		c.job.scrapePhase.Run(ctx, inputs, files, cfg)
@@ -212,6 +214,9 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 
 	go func() {
 		// Admission lease spans through Run's deferred final persist (D1/D16).
+		// codex r44 P2: close phaseDone LAST (register first — LIFO) so Wait()
+		// joins the whole quiesced stack incl. the marker-clear persist.
+		defer close(pd)
 		defer release()
 		defer func() {
 			c.job.lifecycle.SetCurrentPhase("")
@@ -225,7 +230,6 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 				}
 			}
 		}()
-		defer close(pd)
 		defer cancel()
 		inputs := c.buildApplyInputs(wf, batchCfg, cfg, persistFn)
 		c.job.applyPhase.Run(ctx, inputs, cfg)
