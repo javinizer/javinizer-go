@@ -662,6 +662,12 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 					if _, err := env.fs.Stat(dst); err == nil {
 						failedErr = fmt.Errorf("poster target %s already exists", dst)
 						break
+					} else if !errors.Is(err, afero.ErrFileNotFound) {
+						// codex r46 P2c: only absence permits the rename — a transient
+						// destination error fed into a rename-REPLACES fs would
+						// destroy existing new-ID bytes with no witness or backup.
+						failedErr = fmt.Errorf("poster rekey target stat %s: %w", dst, err)
+						break
 					}
 					if err := env.fs.Rename(src, dst); err != nil {
 						failedErr = fmt.Errorf("poster rekey move %s→%s: %w", src, dst, err)
@@ -1008,7 +1014,11 @@ func (m *LockedMovieOps) rejectIdentityChangeLocked(filePaths []string, movie *m
 		in := strings.TrimSpace(movie.ContentID)
 		if in != "" {
 			stored := strings.TrimSpace(cur.Movie.ContentID)
-			sameRow := stored != "" && strings.EqualFold(in, stored)
+			// codex r46 P2: EXACT compare — the ContentID column is a case-
+			// sensitive TEXT PRIMARY KEY: a capitalization-only "change" would
+			// otherwise pass as same-row while the upsert writes a NEW row,
+			// stranding associations on the old key.
+			sameRow := stored != "" && in == stored
 			echoOnEmptyStored := stored == "" && strings.EqualFold(in, strings.TrimSpace(cur.Movie.ID))
 			if !sameRow && !echoOnEmptyStored {
 				return &EditAdmissionConflictError{Message: "content_id is the movie primary key; identity changes belong to rescrape flows (HTTP 409)"}

@@ -52,49 +52,40 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 		c.job.results.SetFileMatchInfoMap(cfg.FileMatchInfo)
 	}
 
-	// codex r45 P2: fail fast BEFORE queueing phase intent — a duplicate
-	// launch would otherwise park a pendingPhase behind the winner's lease
-	// only to fail the state gate afterwards, stalling every shared
-	// admission (Running-with-phase jobs stay editable) the whole time.
-	// markStarted below still CAS-guards the check→transition race.
+	// codex r46 P2: atomic launch claim — markStarted CAS-claims the
+	// lifecycle (Pending→Running + marker) BEFORE any phase admission, so a
+	// duplicate/cancelled queued launch never registers pendingPhase behind
+	// the winner's lease.
 	if c.job.admission.IsGone() {
-		return ErrJobGone // gone check first: ADMIT-THEN-STATE order is the
-		// documented contract (deleted jobs never report a state error)
-	}
-	c.job.lifecycle.mu.RLock()
-	preStartScrape := c.job.lifecycle.Status
-	c.job.lifecycle.mu.RUnlock()
-	if preStartScrape != models.JobStatusPending {
-		return fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), models.JobStatusPending, preStartScrape)
+		return ErrJobGone // gone check first (admit-before-state contract)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	// codex P1-G: ordering is markStarted-then-bind; a cancelled-but-queued
-	// start never overwrites the running phase cancel handle.
-	// codex P1-G: only the admission winner installs the CancelFunc — a
-	// queued start must never supplant the running phase's cancel handle.
+	pd, err := c.markStarted(models.JobStatusPending, JobPhaseScrape)
+	if err != nil {
+		cancel()
+		return err // CAS loser: duplicate launch rejected up-front
+	}
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			// codex r36 P2 + r37: client-aborted queued start ⇒ Cancelled
-			// with no Running window, ONLY while still pre-start (Pending),
-			// persisted durably; nil error so callers don't set Failed.
-			if c.job.lifecycle.markAbortedStartFor(models.JobStatusPending) && persistFn != nil {
+			// claimed-but-never-launched: legacy-observable Cancelled, marker
+			// cleared BEFORE the durable persist (codex r36/r37/r45).
+			c.job.lifecycle.Cancel()
+			c.job.lifecycle.SetCurrentPhase("")
+			close(pd)
+			if persistFn != nil {
 				if perr := persistFn(); perr != nil {
 					logging.Warnf("job %s: aborted-scrape cancel persist failed: %v", c.job.ID.String(), perr)
 				}
 			}
 			return nil
 		}
-		return err // ErrJobGone when deleted mid-wait (BeginPhase queues behind in-flight ops)
+		c.job.lifecycle.MarkFailed()
+		close(pd)
+		return err // ErrJobGone when deleted mid-wait
 	}
 	c.job.lifecycle.setCancelFunc(cancel)
-	pd, err := c.markStarted(models.JobStatusPending, JobPhaseScrape)
-	if err != nil {
-		entry.Fail()
-		cancel()
-		return err
-	}
 	release := entry.Downgrade()
 	if persistFn != nil {
 		// D16 fail-closed: the current_phase marker must be durable before
@@ -161,47 +152,45 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	persistFn := c.job.deps.PersistFn
 	c.job.mu.RUnlock()
 
-	// codex r45 P2: duplicate launch fail-fast — never register a queued
-	// phase intent that can only fail the state gate while stalling every
-	// shared admission; markStarted keeps the CAS guard.
+	// codex r46 P2: atomic launch claim. markStarted CAS-claims the lifecycle
+	// BEFORE any phase admission — a duplicate or cancelled queued launch
+	// never gets the chance to register a pendingPhase behind the running
+	// winner (which would stall every shared admission for its whole run).
 	if c.job.admission.IsGone() {
 		return ErrJobGone // gone check first (documented admit-before-state order)
 	}
-	c.job.lifecycle.mu.RLock()
-	preStartApply := c.job.lifecycle.Status
-	c.job.lifecycle.mu.RUnlock()
-	if preStartApply != models.JobStatusCompleted {
-		return fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), models.JobStatusCompleted, preStartApply)
-	}
 	ctx, cancel := context.WithCancel(ctx)
-	// codex P1-G: only the admission winner installs the CancelFunc — never
-	// let a queued start overwrite the running phase's cancel handle.
+	// codex P1-G: the admission winner installs the CancelFunc below — a
+	// queued start never supplants the running phase's cancel handle.
+	pd, err := c.markStarted(models.JobStatusCompleted, JobPhaseApply)
+	if err != nil {
+		cancel()
+		return err // CAS loser: duplicate launch rejected up-front
+	}
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			// codex r36 P2 + r37: the client abandoned the launch while it
-			// queued — record the legacy-observable Cancelled WITHOUT a
-			// Running transition (and ONLY if no other phase started),
-			// persist it durably, and report success so callers don't set
-			// Failed. A persist failure logs; the next envelope persist
-			// re-converges.
-			if c.job.lifecycle.markAbortedStartFor(models.JobStatusCompleted) && persistFn != nil {
+			// claimed-but-never-launched: the legacy-observable Cancelled
+			// terminal with NO Running work — marker cleared FIRST so the
+			// persisted row is edit-admissible again (codex r36/r37/r45).
+			c.job.lifecycle.Cancel()
+			c.job.lifecycle.SetCurrentPhase("")
+			close(pd)
+			if persistFn != nil {
 				if perr := persistFn(); perr != nil {
 					logging.Warnf("job %s: aborted-apply cancel persist failed: %v", c.job.ID.String(), perr)
 				}
 			}
 			return nil
 		}
-		return err // ErrJobGone when deleted mid-wait (BeginPhase queues behind in-flight ops)
-	}
-	c.job.lifecycle.setCancelFunc(cancel)
-	pd, err := c.markStarted(models.JobStatusCompleted, JobPhaseApply)
-	if err != nil {
-		entry.Fail()
-		cancel()
+		// ErrJobGone mid-wait: the delete path owns the row — close the join
+		// channel so Wait() doesn't hang; no envelope write (row going away).
+		c.job.lifecycle.MarkFailed()
+		close(pd)
 		return err
 	}
+	c.job.lifecycle.setCancelFunc(cancel)
 	release := entry.Downgrade()
 
 	// Commit apply-phase config values ONLY after markStarted succeeds, so a

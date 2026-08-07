@@ -135,32 +135,6 @@ func (lc *JobLifecycle) Cancel() {
 	lc.cancelAndMarkCancelled()
 }
 
-// markAbortedStartFor records the terminal Cancelled for a phase launch whose
-// caller context was already cancelled while queued (codex r36 P2 parity):
-// the pre-ctx-aware flow produced the same observable outcome (Completed →
-// Running → Cancelled) — reproduced WITHOUT the Running window.
-//
-// codex r37 P1: gate on the launch's EXPECTED pre-start state. When another
-// launch's phase is already Running, this cancelled queued launch must leave
-// the shared lifecycle alone — flipping it would show Cancelled while the
-// original worker keeps writing (and admission would re-admit edits).
-//
-// Returns true when the transition happened, so the caller persists the
-// terminal state (no phase goroutine exists to defer-persist it, codex r37
-// P2).
-func (lc *JobLifecycle) markAbortedStartFor(expected models.JobStatus) bool {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	if lc.cancelled || lc.deleted || lc.Status != expected {
-		return false
-	}
-	lc.Status = models.JobStatusCancelled
-	lc.CompletedAt = nowTimePtr()
-	lc.clearCurrentPhaseLocked()
-	lc.closeDoneLocked()
-	return true
-}
-
 // MarkFailed transitions the job to failed unless it has already reached a terminal state.
 func (lc *JobLifecycle) MarkFailed() {
 	lc.mu.Lock()

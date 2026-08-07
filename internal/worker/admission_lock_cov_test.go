@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	wfmocks "github.com/javinizer/javinizer-go/internal/mocks/workflow"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
@@ -356,43 +357,38 @@ func TestCompleteRescapePublishesProvenance(t *testing.T) {
 	assert.Equal(t, map[string]string{"studio": "dmm"}, store.GetProvenance("/f/c.mp4").FieldSources)
 }
 
-// --- aborted queued-launch lifecycle gating (codex r37 P1/P2) ---
+// --- claimed-but-aborted queued launches (codex r45/r46) ---
 
-// markAbortedStartFor only transitions when the lifecycle is still in the
-// launch's EXPECTED pre-start state — a Running phase belongs to another
-// live launch and must be left untouched.
-func TestMarkAbortedStartForGates(t *testing.T) {
-	mk := func(s models.JobStatus) *JobLifecycle { return &JobLifecycle{Status: s, done: make(chan struct{})} }
-
-	lc := mk(models.JobStatusPending)
-	assert.True(t, lc.markAbortedStartFor(models.JobStatusPending), "still-pending launch aborts")
-	assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus())
-	select {
-	case <-lc.done:
-	default:
-		t.Fatal("aborted start closes done so Wait() returns")
-	}
-
-	lc2 := mk(models.JobStatusCompleted)
-	assert.True(t, lc2.markAbortedStartFor(models.JobStatusCompleted), "completed job apply launch aborts")
-	assert.Equal(t, models.JobStatusCancelled, lc2.GetJobStatus())
-
-	lcRun := mk(models.JobStatusRunning)
-	assert.False(t, lcRun.markAbortedStartFor(models.JobStatusCompleted), "a running phase is another live launch — never flipped")
-	assert.Equal(t, models.JobStatusRunning, lcRun.GetJobStatus())
-
-	lcWrong := mk(models.JobStatusCompleted)
-	assert.False(t, lcWrong.markAbortedStartFor(models.JobStatusPending), "wrong pre-start state does not transition")
-	assert.Equal(t, models.JobStatusCompleted, lcWrong.GetJobStatus())
-
-	lcTerm := mk(models.JobStatusCancelled)
-	assert.False(t, lcTerm.markAbortedStartFor(models.JobStatusPending), "terminal status untouched")
-
-	lcDel := mk(models.JobStatusPending)
-	lcDel.markDeleted()
-	assert.False(t, lcDel.markAbortedStartFor(models.JobStatusPending), "deleted job untouched")
-
-	assert.False(t, (&JobLifecycle{Status: models.JobStatusPending, cancelled: true, done: make(chan struct{})}).markAbortedStartFor(models.JobStatusPending), "cancelled marker untouched")
+// A launch cancelled WHILE QUEUED (claim ran, BeginPhase parked on a live
+// shared lease) terminates coherently: Cancelled, marker CLEARED before the
+// persist, phaseDone closed so Wait() joins, and pendingPhase drained.
+func TestStartApplyAbortedQueuedLaunchIsCancelledAndPersists(t *testing.T) {
+	job := newBatchJob([]string{"/f/a.mp4"})
+	job.Controller().SetWorkflow(wfmocks.NewMockWorkflowInterface(t))
+	job.lifecycle.Status = models.JobStatusCompleted
+	persists := 0
+	job.deps.PersistFn = func() error { persists++; return nil }
+	rel, err := job.admission.AdmitShared()
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- job.Controller().StartApply(ctx, ApplyPhaseConfig{}) }()
+	assert.Eventually(t, func() bool {
+		job.admission.mu.Lock()
+		defer job.admission.mu.Unlock()
+		return job.admission.pendingPhase == 1
+	}, 2*time.Second, 5*time.Millisecond, "launch parked in the phase queue")
+	cancel()
+	require.NoError(t, <-done, "aborted launch reports success to the caller")
+	assert.Equal(t, models.JobStatusCancelled, job.lifecycle.GetJobStatus())
+	assert.Equal(t, "", job.lifecycle.CurrentPhase(), "marker cleared pre-persist (row stays edit-admissible)")
+	assert.GreaterOrEqual(t, persists, 1, "terminal cancellation persisted without a phase goroutine")
+	job.admission.mu.Lock()
+	pending := job.admission.pendingPhase
+	job.admission.mu.Unlock()
+	assert.Zero(t, pending, "pendingPhase drained on abort")
+	require.ErrorContains(t, job.Controller().Wait(), "cancelled")
+	rel()
 }
 
 // --- apply write-back family lock keys (codex r37 P2) ---
