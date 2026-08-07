@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -440,6 +442,76 @@ func TestRewriteTempPosterURL(t *testing.T) {
 	assert.Equal(t,
 		"/api/v1/temp/posters/J%201/A%2FB.jpg",
 		rewriteTempPosterURL("/api/v1/temp/posters/J%201/C%20D.jpg", "J 1", "C D", "A/B"))
+}
+
+// --- codex r43: case-only rekeys + stat-error abort ---
+
+// capVariantSetup relocates under a case-ONLY spelling change.
+func capVariantStore(t *testing.T) (resultstore.Store, afero.Fs, string) {
+	t.Helper()
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "CAP-1", "cap1-content")
+	fs := afero.NewMemMapFs() // case-SENSITIVE by construction
+	dir := filepath.Join("/tmp", "posters", "JOB-C1")
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "CAP-1-full.jpg"), []byte("full"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "CAP-1.jpg"), []byte("crop"), 0o644))
+	return store, fs, dir
+}
+
+// Case-sensitive fs: a pure-capitalization rekey moves the pair (r43 P2a).
+func TestUpdateMovieFamilyCaseOnlyRekeyRelocatesOnCaseSensitiveFS(t *testing.T) {
+	store, fs, dir := capVariantStore(t)
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-C1"})
+	m := &LockedMovieOps{pe: pe, movieID: "CAP-1"}
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "cap-1"}))
+	_, statErr := fs.Stat(filepath.Join(dir, "cap-1.jpg"))
+	assert.NoError(t, statErr, "pair moved to the new-case identity")
+	_, oldErr := fs.Stat(filepath.Join(dir, "CAP-1.jpg"))
+	assert.Error(t, oldErr, "old-case name released")
+	_, wErr := fs.Stat(filepath.Join(dir, ".rekey-CAP-1.json"))
+	assert.Error(t, wErr, "witness swept after commit")
+}
+
+// Case-insensitive fs: both spellings resolve to the same entry — no move.
+func TestUpdateMovieFamilyCaseOnlyRekeySkipsOnCaseInsensitiveFS(t *testing.T) {
+	store, fs, dir := capVariantStore(t)
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-C1", ciProbe: func(string) bool { return true }})
+	m := &LockedMovieOps{pe: pe, movieID: "CAP-1"}
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "cap-1"}))
+	_, statErr := fs.Stat(filepath.Join(dir, "CAP-1.jpg"))
+	assert.NoError(t, statErr, "pair untouched — same on-disk entry")
+}
+
+// r43 P2b: a transient source-stat error aborts the relocation coherently —
+// no commit, no moved bytes, no silent leg drop.
+type statFailSuffixFS struct {
+	afero.Fs
+	suffix string
+}
+
+func (f statFailSuffixFS) Stat(name string) (os.FileInfo, error) {
+	if strings.HasSuffix(name, f.suffix) {
+		return nil, os.ErrPermission
+	}
+	return f.Fs.Stat(name)
+}
+
+func TestUpdateMovieFamilyRekeyAbortsOnSourceStatError(t *testing.T) {
+	store, base, dir := familyRelocationSetup(t)
+	fs := statFailSuffixFS{Fs: base, suffix: "SSNI-R1-full.jpg"}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.ErrorContains(t, err, "source stat")
+	_, statErr := base.Stat(filepath.Join(dir, "SSNI-R1-full.jpg"))
+	assert.NoError(t, statErr, "nothing moved")
+	got, gErr := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, gErr)
+	assert.Equal(t, "SSNI-R1", got.Movie.ID, "state stays on the old identity")
 }
 
 // --- stale-pair eviction ---

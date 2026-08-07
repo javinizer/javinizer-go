@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/fscase"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
@@ -58,6 +59,9 @@ type posterEditEnv struct {
 	fs      afero.Fs
 	tempDir string
 	jobID   string
+	// ciProbe reports whether dir sits on a case-insensitive fs; nil ⇒
+	// default fscase probe (codex r43 P2 test seam).
+	ciProbe func(dir string) bool
 }
 
 // NewPosterEditor creates a PosterEditor backed by a ResultReadFacade (for
@@ -609,56 +613,83 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	var relocatedPosterPair []struct{ src, dst string }
 	relocatedNewID, relocatedJobID := "", ""
 	rekeyWitnessPath := ""
-	if newID := strings.TrimSpace(movie.ID); newID != "" && canonicalPairSafe && !strings.EqualFold(newID, strings.TrimSpace(canonicalOldPosterID)) {
+	trOld := strings.TrimSpace(canonicalOldPosterID)
+	relocateArmed := func(env *posterEditEnv, dir, newID string) bool {
+		// codex r43 P2a: byte-different fold-EQUAL rekeys (pure capitalization
+		// change) must still relocate on case-SENSITIVE filesystems — the
+		// committed row now names the new spelling, and crops/stat lookups are
+		// case-exact there. On case-insensitive filesystems both spellings
+		// resolve to the same entry: nothing to move.
+		if strings.EqualFold(newID, trOld) {
+			ciProbe := env.ciProbe
+			if ciProbe == nil {
+				ciProbe = fscase.NewFSCaseCache(env.fs).IsCaseInsensitive
+			}
+			if ciProbe(dir) {
+				return false
+			}
+		}
+		return true
+	}
+	if newID := strings.TrimSpace(movie.ID); newID != "" && canonicalPairSafe && newID != trOld {
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil && env.tempDir != "" && env.jobID != "" {
 			dir := filepath.Join(env.tempDir, "posters", env.jobID)
-			// codex r40 P2: durable witness BEFORE the first rename — a crash
-			// between rename and commit leaves the pair at the NEW identity
-			// while the durable row still references the old one; the startup
-			// reconciler (ReconcileRekeyWitnesses) arbitrates from the job row.
-			witnessPath := filepath.Join(dir, rekeyWitnessPrefix+canonicalOldPosterID+".json")
-			wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID})
-			if err := afero.WriteFile(env.fs, witnessPath, wBytes, 0o644); err != nil {
-				return fmt.Errorf("poster rekey witness %s: %w", witnessPath, err)
-			}
-			rekeyWitnessPath = witnessPath
-			failedErr := error(nil)
-			for _, suffix := range []string{"-full.jpg", ".jpg"} {
-				src := filepath.Join(dir, canonicalOldPosterID+suffix)
-				dst := filepath.Join(dir, newID+suffix)
-				if _, err := env.fs.Stat(src); err != nil {
-					continue
+			if relocateArmed(env, dir, newID) {
+				// codex r40 P2: durable witness BEFORE the first rename — a crash
+				// between rename and commit leaves the pair at the NEW identity
+				// while the durable row still references the old one; the startup
+				// reconciler (ReconcileRekeyWitnesses) arbitrates from the job row.
+				witnessPath := filepath.Join(dir, rekeyWitnessPrefix+canonicalOldPosterID+".json")
+				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID})
+				if err := afero.WriteFile(env.fs, witnessPath, wBytes, 0o644); err != nil {
+					return fmt.Errorf("poster rekey witness %s: %w", witnessPath, err)
 				}
-				if _, err := env.fs.Stat(dst); err == nil {
-					failedErr = fmt.Errorf("poster target %s already exists", dst)
-					break
-				}
-				if err := env.fs.Rename(src, dst); err != nil {
-					failedErr = fmt.Errorf("poster rekey move %s→%s: %w", src, dst, err)
-					break
-				}
-				relocatedPosterPair = append(relocatedPosterPair, struct{ src, dst string }{src, dst})
-			}
-			if failedErr != nil {
-				// Roll back partially moved pairs before any DB write; the state
-				// stays on the old ID, coherently rejected. The witness survives
-				// an INCOMPLETE rollback so the reconciler can finish it (r40).
-				rollbackComplete := true
-				for _, mv := range relocatedPosterPair {
-					if rbErr := env.fs.Rename(mv.dst, mv.src); rbErr != nil {
-						rollbackComplete = false
-						logging.Warnf("poster rekey rollback %s→%s failed: %v", mv.dst, mv.src, rbErr)
+				rekeyWitnessPath = witnessPath
+				failedErr := error(nil)
+				for _, suffix := range []string{"-full.jpg", ".jpg"} {
+					src := filepath.Join(dir, canonicalOldPosterID+suffix)
+					dst := filepath.Join(dir, newID+suffix)
+					if _, err := env.fs.Stat(src); err != nil {
+						if errors.Is(err, afero.ErrFileNotFound) {
+							continue // leg never existed — nothing to move
+						}
+						// codex r43 P2b: a TRANSIENT stat error must not silently
+						// drop the leg — abort coherently with any partial renames
+						// rolled back below.
+						failedErr = fmt.Errorf("poster rekey source stat %s: %w", src, err)
+						break
 					}
-				}
-				if rollbackComplete {
-					if rmErr := env.fs.Remove(witnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
-						logging.Warnf("poster rekey witness sweep %s: %v", witnessPath, rmErr)
+					if _, err := env.fs.Stat(dst); err == nil {
+						failedErr = fmt.Errorf("poster target %s already exists", dst)
+						break
 					}
+					if err := env.fs.Rename(src, dst); err != nil {
+						failedErr = fmt.Errorf("poster rekey move %s→%s: %w", src, dst, err)
+						break
+					}
+					relocatedPosterPair = append(relocatedPosterPair, struct{ src, dst string }{src, dst})
 				}
-				return failedErr
-			}
-			if len(relocatedPosterPair) > 0 {
-				relocatedNewID, relocatedJobID = newID, env.jobID
+				if failedErr != nil {
+					// Roll back partially moved pairs before any DB write; the state
+					// stays on the old ID, coherently rejected. The witness survives
+					// an INCOMPLETE rollback so the reconciler can finish it (r40).
+					rollbackComplete := true
+					for _, mv := range relocatedPosterPair {
+						if rbErr := env.fs.Rename(mv.dst, mv.src); rbErr != nil {
+							rollbackComplete = false
+							logging.Warnf("poster rekey rollback %s→%s failed: %v", mv.dst, mv.src, rbErr)
+						}
+					}
+					if rollbackComplete {
+						if rmErr := env.fs.Remove(witnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+							logging.Warnf("poster rekey witness sweep %s: %v", witnessPath, rmErr)
+						}
+					}
+					return failedErr
+				}
+				if len(relocatedPosterPair) > 0 {
+					relocatedNewID, relocatedJobID = newID, env.jobID
+				}
 			}
 		}
 	}
@@ -1178,8 +1209,18 @@ func (pe *PosterEditor) ApplyFieldOverride(ctx context.Context, resultID, movieI
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
 		keySet := []string{key}
-		if res, _, found := pe.lookup.GetFileResultByResultID(resultID); found && res != nil && res.Movie != nil && res.Movie.ID != "" && !strings.EqualFold(strings.TrimSpace(res.Movie.ID), strings.TrimSpace(key)) {
-			keySet = append(keySet, res.Movie.ID)
+		if res, _, found := pe.lookup.GetFileResultByResultID(resultID); found && res != nil && res.Movie != nil {
+			if res.Movie.ID != "" && !strings.EqualFold(strings.TrimSpace(res.Movie.ID), strings.TrimSpace(key)) {
+				keySet = append(keySet, res.Movie.ID)
+			}
+			// codex r43 P2c: overrides upsert the SAME primary-key movie row as
+			// whole-movie PATCHes / rescrape commits, which fold the stored
+			// content-id ("cid:") into their key sets — without it two jobs
+			// sharing a ContentID (different matcher IDs) acquire disjoint
+			// locks and race competing transactions.
+			if c := strings.TrimSpace(res.Movie.ContentID); c != "" {
+				keySet = append(keySet, "cid:"+c)
+			}
 		}
 		reg := pe.lockRegistry()
 		release := reg.AcquireMany(keySet)
