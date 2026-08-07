@@ -564,7 +564,6 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	sourceChanged := have && effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL) != effectivePosterSourceOf(curPosterURL, curCoverURL)
 	// Evict at the PRE-COMMIT canonical identity (the installed pair lives
 	// there — candidates alias the NEW movie after commit, so reading them
-	// then would evict the wrong name).
 	// Pre-commit path traversal hygiene (codex r26): an accepted family rekey
 	// writes ⟨newID⟩-full.jpg etc. under the job's poster dir — validate the
 	// filename shape HERE, before any DB/envelope state moves, so an unsafe
@@ -656,9 +655,23 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				} else if !errors.Is(err, afero.ErrFileNotFound) {
 					return fmt.Errorf("poster rekey witness check %s: %w", witnessPath, err)
 				}
+				// codex r54 P2: also check promote/crop witnesses for the same poster
+				for _, prefix := range []string{".promote-", ".crop-"} {
+					wp := filepath.Join(dir, prefix+canonicalOldPosterID+".json")
+					if _, err := env.fs.Stat(wp); err == nil {
+						return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s witness unresolved (%s): restart to reconcile before rekeying", canonicalOldPosterID, prefix)}
+					} else if !errors.Is(err, afero.ErrFileNotFound) {
+						return fmt.Errorf("poster witness check %s: %w", wp, err)
+					}
+				}
 				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID, PrevRevision: prevRevision})
-				if err := afero.WriteFile(env.fs, witnessPath, wBytes, 0o644); err != nil {
-					return fmt.Errorf("poster rekey witness %s: %w", witnessPath, err)
+				tmpPath := witnessPath + ".tmp"
+				if err := afero.WriteFile(env.fs, tmpPath, wBytes, 0o644); err != nil {
+					return fmt.Errorf("poster rekey witness write %s: %w", tmpPath, err)
+				}
+				if err := env.fs.Rename(tmpPath, witnessPath); err != nil {
+					_ = env.fs.Remove(tmpPath)
+					return fmt.Errorf("poster rekey witness rename %s: %w", witnessPath, err)
 				}
 				rekeyWitnessPath = witnessPath
 				failedErr := error(nil)
@@ -757,8 +770,6 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		}
 	}
 	if err == nil && stalePosterID != "" {
-		// Post-commit eviction targets whatever name the stale bytes still
-		// live under (relocated ⇒ new name; not relocated ⇒ old name).
 		evictTarget := stalePosterID
 		if len(relocatedPosterPair) > 0 && strings.TrimSpace(movie.ID) != "" {
 			evictTarget = strings.TrimSpace(movie.ID)

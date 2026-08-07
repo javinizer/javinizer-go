@@ -191,7 +191,7 @@ func TestUpdateMovieFamilyRelocationSkipsMissingFullSuffix(t *testing.T) {
 
 func TestUpdateMovieFamilyCommitRollbackWarnsWhenReverseFails(t *testing.T) {
 	store, base, _ := familyRelocationSetup(t)
-	fs := &seqRenameFailFS{Fs: base, failOn: map[int]bool{3: true}}
+	fs := &seqRenameFailFS{Fs: base, failOn: map[int]bool{4: true}}
 	store2Unused := store
 	_ = store2Unused
 	pe := newEditorForStore(store)
@@ -202,5 +202,5 @@ func TestUpdateMovieFamilyCommitRollbackWarnsWhenReverseFails(t *testing.T) {
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
 	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.ErrorContains(t, err, "tx wedged")
-	assert.Equal(t, 4, fs.call, "forward pair, then two reverse rollback attempts (first failed, second ok)")
+	assert.Equal(t, 5, fs.call, "forward pair, then two reverse rollback attempts (first failed, second ok)")
 }

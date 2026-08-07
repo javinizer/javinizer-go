@@ -357,13 +357,13 @@ func TestUpdateMovieFamilyCommitFailureRollsBackRelocation(t *testing.T) {
 
 func TestUpdateMovieFamilyRelocationRollbackWarnsOnReverseFailure(t *testing.T) {
 	store, base, _ := familyRelocationSetup(t)
-	fs := &seqRenameFailFS{Fs: base, failOn: map[int]bool{2: true, 3: true}}
+	fs := &seqRenameFailFS{Fs: base, failOn: map[int]bool{3: true, 4: true}}
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
 	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.ErrorContains(t, err, "simulated rename failure")
-	assert.Equal(t, 3, fs.call, "forward pair (2 calls) plus reverse rollback of the already-moved file")
+	assert.Equal(t, 4, fs.call, "forward pair (2 calls) plus reverse rollback of the already-moved file")
 }
 
 // codex r33 P1: a stored canonical ID carrying traversal components must
