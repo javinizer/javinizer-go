@@ -1415,7 +1415,7 @@ func TestReconcileCropSweepErrorsAfterPromoteSuccess(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".crop-stage-x.json"), witness, 0o644))
 	repo := mocks.NewMockJobRepositoryInterface(t)
 	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(cropWitnessJobRow(t, cropWitnessFixtureURL, 1), nil)
-	failFs := selectiveFailRemoveFS{Fs: base, failSuffix: ".json"}
+	failFs := failRemoveFS{Fs: base}
 	cl := &TempDirCleaner{fs: failFs, tempDir: "/tmp", jobRepo: repo}
 	n, err := cl.ReconcileRekeyWitnesses(context.Background())
 	require.NoError(t, err)
@@ -1428,7 +1428,7 @@ func TestReconcileRekeyWitnessReadFileError(t *testing.T) {
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".rekey-OLD.json"), []byte("{}"), 0o644))
 	repo := mocks.NewMockJobRepositoryInterface(t)
-	fs := failOpenForNameFS{Fs: base, failName: ".rekey-OLD.json"}
+	fs := failOpenForNameFS{Fs: base, failName: filepath.Join("/tmp/posters/JOB-W1", ".rekey-OLD.json")}
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 	n, err := cl.ReconcileRekeyWitnesses(context.Background())
 	require.NoError(t, err)
@@ -1440,9 +1440,8 @@ func TestNewJobStoreReconcileFindError(t *testing.T) {
 	repo.EXPECT().FindByID(mock.Anything, mock.Anything).Return(nil, errors.New("db down")).Maybe()
 	repo.EXPECT().List(mock.Anything).Return([]models.Job{}, nil)
 	fs := afero.NewMemMapFs()
-	fs.MkdirAll("/tmp/posters/J-RF", 0o755)
-	witness, _ := json.Marshal(rekeyWitness{OldID: "OLD", NewID: "NEW", PrevRevision: 0})
-	afero.WriteFile(fs, "/tmp/posters/J-RF/.rekey-OLD.json", witness, 0o644)
+	// Put a FILE where the posters dir should be to force ReadDir error
+	afero.WriteFile(fs, "/tmp/posters", []byte("x"), 0o644)
 	s := NewJobStore(repo, nil, nil, "/tmp", nil, fs)
 	require.NotNil(t, s)
 }
