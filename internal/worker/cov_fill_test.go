@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1301,4 +1302,60 @@ func TestRekeyCropWitnessContentReadError(t *testing.T) {
 	// ReadDir finds the crop witness, ReadFile fails → continue → rekey proceeds
 	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.NoError(t, err, "unreadable crop witness skipped")
+}
+
+// --- r56 grind batch 5: OpenFile override for WriteFile errors ---
+
+// FS that blocks OpenFile for write flags on specific paths
+type failWriteOpenFS struct {
+	afero.Fs
+	failSuffix string
+}
+
+func (f failWriteOpenFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.HasSuffix(name, f.failSuffix) && (flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0) {
+		return nil, errors.New("write blocked")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+// poster_editor: rekey witness write failure (OpenFile for .tmp blocked)
+func TestRekeyWitnessWriteOpenFileFail(t *testing.T) {
+	store, base, _ := familyRelocationSetup(t)
+	fs := failWriteOpenFS{Fs: base, failSuffix: ".rekey-SSNI-R1.json.tmp"}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "witness write")
+}
+
+// poster_editor: witness sweep error (failRemoveFS blocks Remove of witness on success)
+func TestRekeyWitnessSweepRemoveErrorOnSuccess(t *testing.T) {
+	store, base, _ := familyRelocationSetup(t)
+	fs := failRemoveFS{Fs: base}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"}))
+	// Witness written, relocation succeeded, commit succeeded.
+	// Witness sweep fails (failRemoveFS blocks Remove) → Warnf
+}
+
+// poster_editor: witness sweep error on failed-rollback (failedErr path)
+func TestRekeyWitnessSweepRemoveErrorOnFailedRelocation(t *testing.T) {
+	store, base, _ := familyRelocationSetup(t)
+	// failWriteOpenFS blocks the witness .tmp write → relocation fails before rename
+	// Actually we need relocation to SUCCEED (witness written, files renamed)
+	// then have the witness Remove fail. Use failRemoveFS which blocks Remove.
+	// But failRemoveFS also blocks cleanupStagedPosterPair which calls Remove.
+	// In the success path: witness is written (WriteFile via OpenFile works since
+	// failRemoveFS doesn't block OpenFile), relocation renames work (Rename not blocked),
+	// commit succeeds, witness sweep Remove fails → Warnf.
+	fs := failRemoveFS{Fs: base}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"}))
 }

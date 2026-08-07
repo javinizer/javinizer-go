@@ -260,3 +260,35 @@ func (f failCreateForBatchFS) Create(name string) (afero.File, error) {
 	}
 	return f.Fs.Create(name)
 }
+
+// writePromoteWitness write error (OpenFile for .tmp blocked)
+func TestWritePromoteWriteFileError(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JWE", 0o755))
+	failWrite := &failWriteOpenBatchFS{Fs: fs, failSuffix: ".tmp"}
+	_, err := writePromoteWitness(failWrite, "/tmp", "JWE", "PI-1", "https://x", "res-1", 0, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "promote witness write")
+}
+
+// writeCropWitness write error
+func TestWriteCropWriteFileError(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JCE", 0o755))
+	failWrite := &failWriteOpenBatchFS{Fs: fs, failSuffix: ".tmp"}
+	_, err := writeCropWitness(failWrite, "/tmp", "JCE", cropWitness{PosterID: "CP-1", ResultID: "res-c", StageID: "stage-1", CroppedURL: "https://x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "crop witness write")
+}
+
+type failWriteOpenBatchFS struct {
+	afero.Fs
+	failSuffix string
+}
+
+func (f failWriteOpenBatchFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.HasSuffix(name, f.failSuffix) && (flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0) {
+		return nil, errors.New("write blocked")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
