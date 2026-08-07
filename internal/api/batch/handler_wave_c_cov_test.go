@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -238,5 +241,62 @@ func TestPosterCrop_PromoteFailureRetainsWitness(t *testing.T) {
 	deps, job, router := cropJobFixture(t, "CROPE-7")
 	deps.Fs = &seqRenameFailHandlerFS{Fs: deps.GetFs(), failOn: 2}
 	w := postCrop(t, router, job, "CROPE-7", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
+	_ = w
+}
+
+// --- r56 from-URL coverage: witness pending + promote failure + restore ---
+
+// Build a from-URL fixture where GetFileResultByResultID allows 2 calls.
+
+// --- r56 from-URL coverage: real-job based error paths ---
+
+func fromURLFixtureRealJob(t *testing.T, movieID string) (*coreDepsOut, *worker.BatchJob, *gin.Engine, *httptest.Server) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	deps := createTestDeps(t, &config.Config{System: config.SystemConfig{TempDir: "data/temp"}}, "")
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/" + movieID + ".mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted)
+
+	imgSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		img := image.NewRGBA(image.Rect(0, 0, 64, 96))
+		w.Header().Set("Content-Type", "image/jpeg")
+		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 90})
+	}))
+	t.Cleanup(imgSrv.Close)
+
+	job.ResultsWriter().UpdateFileResult("/path/to/"+movieID+".mp4", &resultstore.MovieResult{
+		ResultID:      movieID,
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/" + movieID + ".mp4", MovieID: movieID},
+		Movie:         &models.Movie{ID: movieID},
+		Status:        models.JobStatusCompleted,
+	})
+
+	rt := testkit.GetTestRuntime(deps)
+	rt.GetRuntime().GetPosterManager(func() poster.PosterManagerInterface {
+		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}).
+			WithSSRFCheck(func(string) error { return nil })
+	})
+
+	router := gin.New()
+	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(rt))
+	return deps, job, router, imgSrv
+}
+
+// from-URL: pre-existing promote witness → 409
+func TestPosterFromURL_WitnessPending409(t *testing.T) {
+	deps, job, router, ts := fromURLFixtureRealJob(t, "URLC-8")
+	posterDir := filepath.Join("data/temp", "posters", job.GetID())
+	deps.GetFs().MkdirAll(posterDir, 0o755)
+	afero.WriteFile(deps.GetFs(), filepath.Join(posterDir, ".promote-URLC-8.json"), []byte("{}"), 0o644)
+	w := postFromURLRequest(t, router, job, "URLC-8", ts.URL+"/pic.jpg")
+	assert.Equal(t, 409, w.Code, "witness pending: %s", w.Body.String())
+}
+
+// from-URL: promote failure + restore succeeds (witness removed)
+func TestPosterFromURL_PromoteFailureRestoreSucceeds(t *testing.T) {
+	deps, job, router, ts := fromURLFixtureRealJob(t, "URLC-9")
+	// brokenFS fails rename at call 2 (witness tmp->final = call 1, promote rename = call 2)
+	deps.Fs = &brokenFS{Fs: deps.GetFs(), failRenameAt: map[int]bool{2: true}}
+	w := postFromURLRequest(t, router, job, "URLC-9", ts.URL+"/pic.jpg")
 	_ = w
 }
