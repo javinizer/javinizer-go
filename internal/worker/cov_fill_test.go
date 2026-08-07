@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1055,4 +1056,145 @@ func TestRekeyCropWitnessReadDirError(t *testing.T) {
 	// The rekey should proceed (not blocked by the unreadable crop witness)
 	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.NoError(t, err, "unreadable crop witness is skipped, not blocking")
+}
+
+// --- r56 grind batch 2: poster_editor witness sweep + promote reconcile read/remove ---
+
+// poster_editor: witness sweep failure (failRemoveFS on env.fs)
+func TestRekeyWitnessSweepFailureOnSuccess(t *testing.T) {
+	store, base, dir := familyRelocationSetup(t)
+	_ = dir
+	fs := failRemoveFS{Fs: base}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"}))
+	// Witness sweep failed but commit succeeded — witness file may remain
+	// (failRemoveFS blocks Remove) but the save itself is fine
+}
+
+// poster_editor: commit-failure rollback witness sweep failure
+func TestRekeyCommitRollbackWitnessSweepFailure(t *testing.T) {
+	store, base, dir := familyRelocationSetup(t)
+	committer := NewEditCommitter(failTransactor{err: errors.New("tx wedged")}, newKeyedMutexRegistry(), "JOB-9", newKeyedMutexRegistry())
+	fs := failRemoveFS{Fs: base}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9", committer: committer, envelope: func(map[string]*resultstore.MovieResult, map[string]*resultstore.ProvenanceData, map[string]bool) (*models.Job, error) {
+		return &models.Job{}, nil
+	}})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.ErrorContains(t, err, "tx wedged")
+	// rollback succeeded (Rename works), but witness Remove failed (failRemoveFS)
+	// → witness survives (rollbackComplete=true but Remove fails)
+	_, wErr := base.Stat(filepath.Join(dir, ".rekey-SSNI-R1.json"))
+	assert.NoError(t, wErr, "witness kept when sweep fails")
+}
+
+// promote reconcile: canon read fails (need Open to fail on specific file)
+// Use a wrapper that fails Open for canon files
+type failOpenForNameFS struct {
+	afero.Fs
+	failName string
+}
+
+func (f failOpenForNameFS) Open(name string) (afero.File, error) {
+	if strings.HasSuffix(name, f.failName) {
+		return nil, errors.New("open blocked")
+	}
+	return f.Fs.Open(name)
+}
+
+func TestReconcilePromoteCanonReadFail(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1.jpg"), []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1.jpg.bak"), []byte("old"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0, OldSHA: map[string]string{"crop": shaContentHex([]byte("old"))}})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://old", 0), nil)
+	_ = dir
+	// Open fails on PI-1.jpg → afero.ReadFile fails → clean=false → witness survives
+	fs := failOpenForNameFS{Fs: base, failName: "PI-1.jpg"}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "canon read fail -> clean=false -> witness survives")
+}
+
+// promote reconcile: canon remove fails (failRemoveFS blocks Remove for canon)
+func TestReconcilePromoteCanonRemoveFail(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1.jpg"), []byte("new-uncommitted"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1.jpg.bak"), []byte("old"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0, OldSHA: map[string]string{"crop": shaContentHex([]byte("old"))}})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://old", 0), nil)
+	fs := failRemoveFS{Fs: base}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "canon remove fail -> clean=false -> witness survives")
+}
+
+// promote reconcile: bak rename fails (noRenameFs blocks rename of bak→canon)
+func TestReconcilePromoteBakRenameFail(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1.jpg"), []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1.jpg.bak"), []byte("old"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0, OldSHA: map[string]string{"crop": shaContentHex([]byte("old"))}})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://old", 0), nil)
+	fs := noRenameFs{Fs: base}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "bak rename fail -> clean=false")
+}
+
+// promote reconcile: uncommitted, no bak, oldSHA non-empty, canon hash mismatch, remove fails
+func TestReconcilePromoteNoBakHashMismatchRemoveFail(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1-full.jpg"), []byte("new-uncommitted"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0, OldSHA: map[string]string{"full": shaContentHex([]byte("old-full"))}})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://old", 0), nil)
+	fs := failRemoveFS{Fs: base}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "remove fail -> clean=false")
+}
+
+// promote reconcile: uncommitted, no bak, oldSHA non-empty, canon read fails
+func TestReconcilePromoteNoBakCanonReadFail(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1-full.jpg"), []byte("new-uncommitted"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0, OldSHA: map[string]string{"full": shaContentHex([]byte("old-full"))}})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://old", 0), nil)
+	fs := failOpenForNameFS{Fs: base, failName: "PI-1-full.jpg"}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "canon read fail -> clean=false")
+}
+
+// promote reconcile: uncommitted, no bak, oldSHA empty, canon remove fails
+func TestReconcilePromoteNoBakOldSHAEmptyRemoveFail(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1-full.jpg"), []byte("new"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0, OldSHA: map[string]string{}})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://old", 0), nil)
+	fs := failRemoveFS{Fs: base}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "remove fail -> clean=false")
 }
