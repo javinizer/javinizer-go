@@ -155,7 +155,7 @@ func TestIntegration_ApplyPhase_ThroughBatchJob(t *testing.T) {
 	job.cfg.destination = "/output"
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{
@@ -337,7 +337,7 @@ func TestIntegration_ApplyPhase_WFOverride_ThroughBatchJob(t *testing.T) {
 	job.controller.SetWorkflow(overrideWF)
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{
@@ -377,7 +377,7 @@ func TestIntegration_ApplyPhase_NilWF_OverrideSucceeds(t *testing.T) {
 	job.deps.BatchCfg = BatchJobConfig{MaxWorkers: 1}
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{

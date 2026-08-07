@@ -60,16 +60,15 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 		return ErrJobGone // gone check first (admit-before-state contract)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	pd, err := c.markStarted(models.JobStatusPending, JobPhaseScrape)
+	pd, err := c.markStarted(models.JobStatusPending, JobPhaseScrape, cancel)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			cancel()
+			return nil // cancelled before the claim — nothing runs
+		}
 		cancel()
 		return err // CAS loser: duplicate launch rejected up-front
 	}
-	// codex r47 P1: bind the claimed launch's cancel BEFORE queueing — a
-	// /cancel landing while BeginPhase parks must abort THIS wait too, or
-	// the phase would start fresh after the lease released post-cancel.
-	// Safe here: markStarted guarantees exactly one in-flight claimant.
-	c.job.lifecycle.setCancelFunc(cancel)
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
@@ -166,14 +165,15 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	ctx, cancel := context.WithCancel(ctx)
 	// codex P1-G: the admission winner installs the CancelFunc below — a
 	// queued start never supplants the running phase's cancel handle.
-	pd, err := c.markStarted(models.JobStatusCompleted, JobPhaseApply)
+	pd, err := c.markStarted(models.JobStatusCompleted, JobPhaseApply, cancel)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			cancel()
+			return nil
+		}
 		cancel()
 		return err // CAS loser: duplicate launch rejected up-front
 	}
-	// codex r47 P1: bind the claimed launch's cancel BEFORE queueing — Safe:
-	// markStarted guarantees exactly one in-flight claimant.
-	c.job.lifecycle.setCancelFunc(cancel)
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
@@ -329,13 +329,22 @@ func (c *jobController) Wait() error {
 // returns an error without modifying state.
 // This prevents the TOCTOU race where an API handler checks status == Completed but
 // another concurrent request transitions the job before this call acquires the lock.
-func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhase) (chan struct{}, error) {
+// codex r47-followup P1: the claim installs the phase's cancel handle in the
+// SAME critical section — a cancellation racing claim→bind previously marked
+// the job Cancelled while leaving this launch's ctx unbound, so BeginPhase
+// would start work after cancellation.
+func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhase, cancelFunc context.CancelFunc) (chan struct{}, error) {
 	c.job.lifecycle.mu.Lock()
 	if c.job.lifecycle.Status != expectedFrom {
 		actual := c.job.lifecycle.Status
 		c.job.lifecycle.mu.Unlock()
 		return nil, fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), expectedFrom, actual)
 	}
+	if c.job.lifecycle.cancelled {
+		c.job.lifecycle.mu.Unlock()
+		return nil, context.Canceled // a cancel landed before the claim
+	}
+	c.job.lifecycle.CancelFunc = cancelFunc
 	c.job.lifecycle.Status = models.JobStatusRunning
 	c.job.lifecycle.currentPhase = string(phase)
 	c.job.lifecycle.CompletedAt = nil

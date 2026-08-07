@@ -216,7 +216,7 @@ func TestStartApply_Miss_NoWorkflow(t *testing.T) {
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 	// StartApply requires Completed status (API-1+2: CAS fix for double-start race)
-	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{})
@@ -257,7 +257,7 @@ func TestStartApply_Miss_CfgWFOverride(t *testing.T) {
 	job.deps.WF = &noopWorkflowForMissTest{}
 
 	// StartApply requires Completed status (API-1+2: CAS fix for double-start race)
-	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{

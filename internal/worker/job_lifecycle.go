@@ -73,12 +73,6 @@ func (lc *JobLifecycle) IsDeleted() bool {
 	return lc.deleted
 }
 
-func (lc *JobLifecycle) setCancelFunc(cancelFunc context.CancelFunc) {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	lc.CancelFunc = cancelFunc
-}
-
 func (lc *JobLifecycle) cancelAndMarkCancelled() {
 	lc.mu.Lock()
 	if lc.cancelled {

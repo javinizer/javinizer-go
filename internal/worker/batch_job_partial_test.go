@@ -211,7 +211,7 @@ func TestBatchJob_ExcludeFile_CancelFuncCalled(t *testing.T) {
 	})
 
 	cancelCalled := false
-	job.lifecycle.setCancelFunc(func() { cancelCalled = true })
+	job.lifecycle.CancelFunc = func() { cancelCalled = true }
 
 	excludeFile(job, "file1.mp4")
 	assert.Equal(t, models.JobStatusCancelled, job.lifecycle.GetJobStatus())

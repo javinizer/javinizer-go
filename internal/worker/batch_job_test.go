@@ -496,7 +496,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = true
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 
 		// Call StartApply with Update: nil — should preserve job.cfg.update = true
@@ -518,7 +518,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = false
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -539,7 +539,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = false
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 
 		updateTrue := true
@@ -561,7 +561,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = true
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 
 		updateFalse := false

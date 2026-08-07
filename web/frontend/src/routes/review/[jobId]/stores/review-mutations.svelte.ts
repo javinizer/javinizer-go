@@ -246,7 +246,10 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				const resultId = resultEntry?.result_id;
 				if (!resultId) continue;
 				const movieId = resultEntry?.movie_id ?? '';
-				const key = movieId !== '' ? movieId : '__unpathed__' + filePath;
+				// codex r43 FE P2: family dedup must fold case like sameFamily
+				// (and the backend resultstore index) — raw keys race two saves on
+				// case-variant multipart siblings (one 409s or overlays persist).
+				const key = movieId !== '' ? movieId.toLowerCase() : '__unpathed__' + filePath;
 				// Map.set on an existing key keeps the ORIGINAL insertion
 				// position; delete+set moves the entry to the tail so sibling
 				// edit order A,B,A resolves to A's newest overlay (codex r9-II).
