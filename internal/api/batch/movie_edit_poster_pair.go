@@ -230,6 +230,16 @@ func promoteWitnessHashes(b *posterPairBackup) map[string]string {
 	return m
 }
 
+// mustMarshal panics on marshal failure -- these witness structs are simple
+// types that never fail to marshal, so the error check is dead code.
+func mustMarshal(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(fmt.Sprintf("marshal failure: %v", err))
+	}
+	return b
+}
+
 // promoteWitnessName keeps the filename inside the job dir AND collision-free
 // (codex r50 P2): PathEscape is injective — "A.B" stays distinct from "A_B",
 // and traversal attempts become opaque %2F paths under the job dir (the
@@ -268,10 +278,7 @@ func writePromoteWitness(fs afero.Fs, tempDir, jobID, posterID, srcURL, resultID
 	}
 	dir := filepath.Join(tempDir, "posters", jobID)
 	p := filepath.Join(dir, promoteWitnessName(posterID))
-	payload, err := json.Marshal(promoteWitness{PosterID: posterID, URL: srcURL, ResultID: resultID, PrevRevision: prevRevision, OldSHA: promoteWitnessHashes(backup)})
-	if err != nil {
-		return "", err
-	}
+	payload := mustMarshal(promoteWitness{PosterID: posterID, URL: srcURL, ResultID: resultID, PrevRevision: prevRevision, OldSHA: promoteWitnessHashes(backup)})
 	// codex r53 P2: atomic write via temp+rename so a partial write never
 	// leaves truncated JSON at the final path (which would permanently
 	// block retries via the guarded check).
@@ -321,10 +328,7 @@ func writeCropWitness(fs afero.Fs, tempDir, jobID string, w cropWitness) (string
 		fs = afero.NewOsFs()
 	}
 	p := filepath.Join(tempDir, "posters", jobID, cropWitnessName(w.StageID))
-	payload, err := json.Marshal(w)
-	if err != nil {
-		return "", err
-	}
+	payload := mustMarshal(w)
 	tmp := p + ".tmp"
 	if err := afero.WriteFile(fs, tmp, payload, 0o644); err != nil {
 		return "", fmt.Errorf("crop witness write %s: %w", tmp, err)
