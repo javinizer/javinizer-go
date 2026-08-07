@@ -19,7 +19,7 @@ type statErrTargetFS struct {
 }
 
 func (f statErrTargetFS) Stat(name string) (os.FileInfo, error) {
-	if name == f.target {
+	if filepath.ToSlash(name) == filepath.ToSlash(f.target) {
 		return nil, os.ErrPermission
 	}
 	return f.Fs.Stat(name)
