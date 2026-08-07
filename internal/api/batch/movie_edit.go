@@ -343,9 +343,19 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 					backup.restore()
 					return &worker.EditAdmissionConflictError{Message: "poster source changed while downloading; retry"}
 				}
+				// codex r48 P2: durable promotion witness BEFORE promote — a crash
+				// between promote and commit strands uncommitted bytes at canonical
+				// with the old pair only as .bak; the startup reconciler
+				// (worker.ReconcileRekeyWitnesses) arbitrates it against the row.
+				pwPath, werr := writePromoteWitness(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, posterID, req.URL)
+				if werr != nil {
+					backup.restore()
+					return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster promote witness: %v", werr)}
+				}
 				finalize, pErr := promoteStagedPosterPair(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, stageID, posterID)
 				if pErr != nil {
 					backup.restore()
+					removePromoteWitness(rt.Deps().GetFs(), pwPath)
 					return pErr
 				}
 				// Commit failure also finalizes: it removes the parked .bak
@@ -356,8 +366,10 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 				if cerr != nil {
 					backup.restore()
 					finalize() // reap the .bak parking spots — commit did not land
+					removePromoteWitness(rt.Deps().GetFs(), pwPath)
 					return cerr
 				}
+				removePromoteWitness(rt.Deps().GetFs(), pwPath) // commit landed
 				finalize()
 				return nil
 			})

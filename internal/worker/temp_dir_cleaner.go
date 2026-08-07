@@ -209,6 +209,20 @@ func ClearMissingTempPosters(fs afero.Fs, tempDir, jobID string, results map[str
 // references the old one. The witness names both identities.
 const rekeyWitnessPrefix = ".rekey-"
 
+// promoteWitness is the recovery record for a staged poster promotion that
+// crashed post-promote/pre-commit (codex r48 P2) — canonical holds
+// uncommitted NEW bytes, the pre-promotion pair is parked as <name>.bak,
+// and the durable row still holds the OLD poster source.
+//
+// Wire contract with internal/api/batch (movie_edit_poster_pair.go); the
+// filename encodes nothing trusted — PosterID comes from the content.
+const promoteWitnessPrefix = ".promote-"
+
+type promoteWitness struct {
+	PosterID string `json:"poster_id"`
+	URL      string `json:"url"`
+}
+
 type rekeyWitness struct {
 	OldID string `json:"old_id"`
 	NewID string `json:"new_id"`
@@ -245,7 +259,13 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if !strings.HasPrefix(name, rekeyWitnessPrefix) || !strings.HasSuffix(name, ".json") {
+			isRekey := strings.HasPrefix(name, rekeyWitnessPrefix) && strings.HasSuffix(name, ".json")
+			isPromote := strings.HasPrefix(name, promoteWitnessPrefix) && strings.HasSuffix(name, ".json")
+			if !isRekey && !isPromote {
+				continue
+			}
+			if isPromote {
+				reversed += c.reconcilePromoteWitness(ctx, dir, jobID, filepath.Join(dir, name))
 				continue
 			}
 			wpath := filepath.Join(dir, name)
@@ -318,6 +338,76 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 		}
 	}
 	return reversed, nil
+}
+
+// reconcilePromoteWitness arbitrates one .promote- witness against the
+// durable job row: the commit landed when any stored result's poster source
+// URL equals the witnessed URL (only the witness is swept then). Otherwise
+// the promote was post-commit-crash: drop the uncommitted canonical bytes
+// and restore the parked .bak pair. The witness survives unless every needed
+// reversal succeeded (r48 mirror of the rekey rule).
+func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID, wpath string) int {
+	data, err := afero.ReadFile(c.fs, wpath)
+	var w promoteWitness
+	if err != nil || json.Unmarshal(data, &w) != nil || w.PosterID == "" || w.URL == "" {
+		logging.Warnf("promote witness %s unreadable/corrupt — left in place", wpath)
+		return 0
+	}
+	job, jerr := c.jobRepo.FindByID(ctx, jobID)
+	switch {
+	case errors.Is(jerr, database.ErrNotFound):
+		return 0 // orphaned dir: the staleness sweep owns removal
+	case jerr != nil:
+		logging.Warnf("promote reconcile: job %s lookup failed: %v", jobID, jerr)
+		return 0
+	}
+	committed := false
+	var results map[string]*resultstore.MovieResult
+	if job != nil && job.ParseResults(&results) == nil {
+		for _, r := range results {
+			if r != nil && r.Movie != nil && r.Movie.Poster.PosterURL == w.URL {
+				committed = true
+				break
+			}
+		}
+	}
+	reversed := 0
+	if !committed {
+		clean := true
+		for _, sfx := range []string{"-full.jpg", ".jpg"} {
+			canon := filepath.Join(dir, w.PosterID+sfx)
+			bak := canon + ".bak"
+			if _, statErr := c.fs.Stat(canon); statErr == nil {
+				if rmErr := c.fs.Remove(canon); rmErr != nil {
+					clean = false
+					logging.Warnf("promote reconcile: drop uncommitted %s: %v", canon, rmErr)
+					continue
+				}
+			} else if !os.IsNotExist(statErr) {
+				clean = false
+				logging.Warnf("promote reconcile: stat %s: %v", canon, statErr)
+				continue
+			}
+			if _, statErr := c.fs.Stat(bak); statErr == nil {
+				if rnErr := c.fs.Rename(bak, canon); rnErr != nil {
+					clean = false
+					logging.Warnf("promote reconcile: restore %s→%s: %v", bak, canon, rnErr)
+				} else {
+					reversed++
+				}
+			} else if !os.IsNotExist(statErr) {
+				clean = false
+				logging.Warnf("promote reconcile: stat %s: %v", bak, statErr)
+			}
+		}
+		if !clean {
+			return reversed // witness survives for the next startup retry
+		}
+	}
+	if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {
+		logging.Warnf("promote witness sweep %s: %v", wpath, rmErr)
+	}
+	return reversed
 }
 
 // StartStaleTempCleanup starts a background goroutine that periodically cleans

@@ -80,9 +80,12 @@ func (lc *JobLifecycle) cancelAndMarkCancelled() {
 		lc.mu.Unlock()
 		return
 	}
-	lc.cancelled = true
 	cancelFunc := lc.CancelFunc
 	if lc.Status == models.JobStatusCompleted || lc.Status == models.JobStatusFailed || lc.Status == models.JobStatusOrganized || lc.Status == models.JobStatusReverted {
+		// codex r48 P2: a cancel RACING terminal completion must not pin
+		// cancelled=true on a COMPLETED job — the flag would permanently
+		// reject later phase launches (Cancel() semantics are live-phase
+		// scoped; the job already settled cleanly).
 		lc.clearCurrentPhaseLocked()
 		lc.mu.Unlock()
 		if cancelFunc != nil {
@@ -90,6 +93,7 @@ func (lc *JobLifecycle) cancelAndMarkCancelled() {
 		}
 		return
 	}
+	lc.cancelled = true
 	lc.Status = models.JobStatusCancelled
 	// codex r38: keep currentPhase set while the phase goroutine drains —
 	// clearing it here would admit edits mid-drain and let late scrape

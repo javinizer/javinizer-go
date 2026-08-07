@@ -5,6 +5,7 @@
 package batch
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -160,6 +161,51 @@ func promoteStagedPosterPair(fs afero.Fs, tempDir, jobID, stageID, posterID stri
 			}
 		}
 	}, nil
+}
+
+// promoteWitness is the recovery record for a staged-pair promotion that
+// crashed AFTER promote but BEFORE the state commit (codex r48 P2): the
+// canonical names hold uncommitted new bytes, the previous pair exists only
+// as .bak, and the durable row still describes the old poster. The wire
+// format is read by worker.TempDirCleaner.ReconcileRekeyWitnesses.
+const promoteWitnessPrefix = ".promote-"
+
+type promoteWitness struct {
+	PosterID string `json:"poster_id"`
+	URL      string `json:"url"`
+}
+
+// promoteWitnessName keeps the filename inside the job dir even for hostile
+// poster IDs (the reconciler parses the poster ID from the CONTENT, never
+// from the filename).
+func promoteWitnessName(posterID string) string {
+	safe := strings.NewReplacer("/", "_", "\\", "_", ".", "_").Replace(posterID)
+	return promoteWitnessPrefix + safe + ".json"
+}
+
+func writePromoteWitness(fs afero.Fs, tempDir, jobID, posterID, srcURL string) (string, error) {
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	dir := filepath.Join(tempDir, "posters", jobID)
+	p := filepath.Join(dir, promoteWitnessName(posterID))
+	payload, err := json.Marshal(promoteWitness{PosterID: posterID, URL: srcURL})
+	if err != nil {
+		return "", err
+	}
+	if err := afero.WriteFile(fs, p, payload, 0o644); err != nil {
+		return "", fmt.Errorf("promote witness %s: %w", p, err)
+	}
+	return p, nil
+}
+
+func removePromoteWitness(fs afero.Fs, p string) {
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	if err := fs.Remove(p); err != nil && !os.IsNotExist(err) {
+		logging.Warnf("promote witness sweep %s: %v", p, err)
+	}
 }
 
 // cleanupStagedPosterPair removes leftover staged files after a failed
