@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -162,6 +163,12 @@ func promoteStagedPosterPair(fs afero.Fs, tempDir, jobID, stageID, posterID stri
 				return nil, fmt.Errorf("park previous poster %s: %w", mv.dst, err)
 			}
 			parked = append(parked, bak)
+		} else if !os.IsNotExist(err) {
+			// codex r51 P2: only ABSENCE permits the rename — on overwrite-
+			// replacing filesystems a transient stat error otherwise skips the
+			// park and the rename destroys the old bytes with no .bak.
+			rollbackPromote()
+			return nil, fmt.Errorf("promote target stat %s: %w", mv.dst, err)
 		}
 		if err := fs.Rename(mv.src, mv.dst); err != nil {
 			rollbackPromote()
@@ -229,6 +236,25 @@ func promoteWitnessHashes(b *posterPairBackup) map[string]string {
 // reconciler parses the poster ID from the CONTENT, never the filename).
 func promoteWitnessName(posterID string) string {
 	return promoteWitnessPrefix + url.PathEscape(posterID) + ".json"
+}
+
+// errPromoteWitnessPending marks a retry against an UNRESOLVED promote
+// witness (a prior op left .bak + witness for the startup reconciler) —
+// the handler maps it to HTTP 409 (codex r51 P2).
+var errPromoteWitnessPending = errors.New("promote witness outstanding")
+
+// writePromoteWitnessGuarded refuses to overwrite an outstanding witness:
+// the prior operation might have restored SOME legs already — re-snapshotting
+// the half-restored pair as "old" would corrupt the reconciliation baseline.
+func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, resultID string, prevRevision uint64, backup *posterPairBackup) (string, error) {
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	p := filepath.Join(tempDir, "posters", jobID, promoteWitnessName(posterID))
+	if _, err := fs.Stat(p); err == nil {
+		return "", fmt.Errorf("%w for %s — restart to reconcile before retrying", errPromoteWitnessPending, posterID)
+	}
+	return writePromoteWitness(fs, tempDir, jobID, posterID, srcURL, resultID, prevRevision, backup)
 }
 
 func writePromoteWitness(fs afero.Fs, tempDir, jobID, posterID, srcURL, resultID string, prevRevision uint64, backup *posterPairBackup) (string, error) {

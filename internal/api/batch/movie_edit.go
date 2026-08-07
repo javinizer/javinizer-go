@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"fmt"
 
 	"net/http"
@@ -347,9 +348,16 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 				// between promote and commit strands uncommitted bytes at canonical
 				// with the old pair only as .bak; the startup reconciler
 				// (worker.ReconcileRekeyWitnesses) arbitrates it against the row.
-				pwPath, werr := writePromoteWitness(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, posterID, req.URL, resultID, scalarRev, backup)
+				// codex r51 P2: refuse promotion when a witness is ALREADY
+				// outstanding (an incomplete restore left .bak + witness for the
+				// startup reconciler) — overwriting it would re-snapshot the
+				// partially-restored pair as the "old" state.
+				pwPath, werr := writePromoteWitnessGuarded(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, posterID, req.URL, resultID, scalarRev, backup)
 				if werr != nil {
 					backup.restore()
+					if errors.Is(werr, errPromoteWitnessPending) {
+						return &worker.EditAdmissionConflictError{Message: werr.Error()}
+					}
 					return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster promote witness: %v", werr)}
 				}
 				finalize, pErr := promoteStagedPosterPair(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, stageID, posterID)
