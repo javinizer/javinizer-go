@@ -75,6 +75,9 @@ describe('FormTemplateInput', () => {
 		expect(chips).not.toContain('<INDEX>');
 		expect(chips).toContain('<RELEASEDATE>');
 		expect(chips).toContain('<RESOLUTION>');
+		expect(chips).toContain('<SET>');
+		expect(chips).not.toContain('<PART>');
+		expect(chips).not.toContain('<PARTSUFFIX>');
 	});
 
 	it('renders a custom tag set when the tags prop is provided', async () => {

@@ -38,6 +38,7 @@
 		'<MAKER>',
 		'<LABEL>',
 		'<SERIES>',
+		'<SET>',
 		'<DIRECTOR>',
 		'<YEAR>',
 		'<RELEASEDATE>',
@@ -46,8 +47,6 @@
 		'<ACTORS>',
 		'<ACTRESS>',
 		'<GENRES>',
-		'<PART>',
-		'<PARTSUFFIX>',
 		'<RESOLUTION>'
 	];
 
