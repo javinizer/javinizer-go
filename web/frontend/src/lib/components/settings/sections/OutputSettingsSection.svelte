@@ -33,8 +33,7 @@
 		'<ACTRESS>',
 		'<GENRES>',
 		'<PART>',
-		'<PARTSUFFIX>',
-		'<RESOLUTION>'
+		'<PARTSUFFIX>'
 	];
 	const MEDIA_TEMPLATE_TAGS = ['<ID>', '<PART>', '<PARTSUFFIX>'];
 	const SCREENSHOT_TEMPLATE_TAGS = ['<ID>', '<INDEX>', '<INDEX:2>'];
