@@ -88,6 +88,45 @@ func TestPhaseEndPersistWarnsAreSwallowed(t *testing.T) {
 
 // StartScrape must NOT launch when the phase-entry marker fails to persist
 // (D16 fail-closed); the terminal failure is retried durably.
+// codex r45 P2: a duplicate StartApply behind a held shared lease must
+// reject IMMEDIATELY — never queue pendingPhase ahead of legitimate
+// admissions for the winner phase's full duration.
+func TestStartApplyDuplicateLaunchFailsFast(t *testing.T) {
+	job := newBatchJob([]string{"/f/a.mp4"})
+	job.lifecycle.Status = models.JobStatusRunning
+	job.lifecycle.CurrentPhase() // marker via setters below
+	job.lifecycle.SetCurrentPhase(string(JobPhaseApply))
+	job.Controller().SetWorkflow(wfmocks.NewMockWorkflowInterface(t))
+	rel, err := job.admission.AdmitShared()
+	require.NoError(t, err)
+	start := time.Now()
+	err = job.Controller().StartApply(context.Background(), ApplyPhaseConfig{})
+	elapsed := time.Since(start)
+	require.ErrorContains(t, err, "expected status")
+	assert.Less(t, elapsed, 500*time.Millisecond, "reject happens before the phase wait queue")
+	rel2, err2 := job.admission.AdmitShared()
+	require.NoError(t, err2, "no pendingPhase was ever registered by the rejected launch")
+	rel2()
+	rel()
+}
+
+func TestStartScrapeDuplicateLaunchFailsFast(t *testing.T) {
+	job := newBatchJob([]string{"/f/a.mp4"})
+	job.lifecycle.Status = models.JobStatusRunning
+	job.lifecycle.SetCurrentPhase(string(JobPhaseScrape))
+	job.Controller().SetWorkflow(wfmocks.NewMockWorkflowInterface(t))
+	rel, err := job.admission.AdmitShared()
+	require.NoError(t, err)
+	start := time.Now()
+	err = job.Controller().StartScrape(context.Background(), []string{"/f/a.mp4"}, ScrapePhaseConfig{})
+	assert.Less(t, time.Since(start), 500*time.Millisecond)
+	require.ErrorContains(t, err, "expected status")
+	rel2, _ := job.admission.AdmitShared()
+	require.NotNil(t, rel2)
+	rel2()
+	rel()
+}
+
 // codex r44 P2: Wait() must join AFTER the marker-clear persist ran —
 // the defer registration order puts close(phaseDone) LAST (LIFO). The
 // marker-clear persist therefore always observes phaseDone STILL OPEN.

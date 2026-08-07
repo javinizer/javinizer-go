@@ -52,6 +52,21 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 		c.job.results.SetFileMatchInfoMap(cfg.FileMatchInfo)
 	}
 
+	// codex r45 P2: fail fast BEFORE queueing phase intent — a duplicate
+	// launch would otherwise park a pendingPhase behind the winner's lease
+	// only to fail the state gate afterwards, stalling every shared
+	// admission (Running-with-phase jobs stay editable) the whole time.
+	// markStarted below still CAS-guards the check→transition race.
+	if c.job.admission.IsGone() {
+		return ErrJobGone // gone check first: ADMIT-THEN-STATE order is the
+		// documented contract (deleted jobs never report a state error)
+	}
+	c.job.lifecycle.mu.RLock()
+	preStartScrape := c.job.lifecycle.Status
+	c.job.lifecycle.mu.RUnlock()
+	if preStartScrape != models.JobStatusPending {
+		return fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), models.JobStatusPending, preStartScrape)
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	// codex P1-G: ordering is markStarted-then-bind; a cancelled-but-queued
 	// start never overwrites the running phase cancel handle.
@@ -146,6 +161,18 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	persistFn := c.job.deps.PersistFn
 	c.job.mu.RUnlock()
 
+	// codex r45 P2: duplicate launch fail-fast — never register a queued
+	// phase intent that can only fail the state gate while stalling every
+	// shared admission; markStarted keeps the CAS guard.
+	if c.job.admission.IsGone() {
+		return ErrJobGone // gone check first (documented admit-before-state order)
+	}
+	c.job.lifecycle.mu.RLock()
+	preStartApply := c.job.lifecycle.Status
+	c.job.lifecycle.mu.RUnlock()
+	if preStartApply != models.JobStatusCompleted {
+		return fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), models.JobStatusCompleted, preStartApply)
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	// codex P1-G: only the admission winner installs the CancelFunc — never
 	// let a queued start overwrite the running phase's cancel handle.
