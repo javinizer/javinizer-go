@@ -26,17 +26,21 @@ import (
 // Per P-8: temp dir cleanup is delegated to TempDirCleaner rather than
 // implemented directly on JobStore.
 type JobStore struct {
-	jobs              map[models.JobID]*BatchJob
-	jobRepo           database.JobRepositoryInterface
-	batchFileOpRepo   database.BatchFileOperationRepositoryInterface
-	movieRepo         database.MovieRepositoryInterface
-	actressRepo       database.ActressRepositoryInterface
-	historyRepo       database.HistoryRepositoryInterface
-	persistence       JobPersistencer
-	envLocks          *keyedMutexRegistry // POSTER-WRITE-HARDENING D2: per-job envelope persist lock
-	movieLocks        *keyedMutexRegistry // POSTER-WRITE-HARDENING D15: process-wide family lock registry shared by every job
-	tombstones        *tombstoneRegistry  // POSTER-WRITE-HARDENING D3: deleted-job 410 registry
-	editTx            EditTransactor      // POSTER-WRITE-HARDENING D4: composite tx seam (nil ⇒ legacy best-effort persists)
+	jobs            map[models.JobID]*BatchJob
+	jobRepo         database.JobRepositoryInterface
+	batchFileOpRepo database.BatchFileOperationRepositoryInterface
+	movieRepo       database.MovieRepositoryInterface
+	actressRepo     database.ActressRepositoryInterface
+	historyRepo     database.HistoryRepositoryInterface
+	persistence     JobPersistencer
+	envLocks        *keyedMutexRegistry // POSTER-WRITE-HARDENING D2: per-job envelope persist lock
+	movieLocks      *keyedMutexRegistry // POSTER-WRITE-HARDENING D15: process-wide family lock registry shared by every job
+	// codex r38 P2: actress-row keys live on a DISJOINT registry — a movie
+	// rekeyed to a colliding ID like "actress:123" must never share a mutex
+	// with the actress-rename leg (same-registry re-lock deadlocks).
+	actressLocks      *keyedMutexRegistry
+	tombstones        *tombstoneRegistry // POSTER-WRITE-HARDENING D3: deleted-job 410 registry
+	editTx            EditTransactor     // POSTER-WRITE-HARDENING D4: composite tx seam (nil ⇒ legacy best-effort persists)
 	tempDir           string
 	templateEngine    template.EngineInterface
 	fs                afero.Fs
@@ -109,12 +113,13 @@ func WithHistoryRepo(r database.HistoryRepositoryInterface) JobStoreOption {
 // two separate functions.
 func NewInMemoryJobStore(opts ...JobStoreOption) *JobStore {
 	s := &JobStore{
-		jobs:        make(map[models.JobID]*BatchJob),
-		persistence: noopJobPersistence{},
-		envLocks:    newKeyedMutexRegistry(),
-		movieLocks:  newKeyedMutexRegistry(),
-		tombstones:  newTombstoneRegistry(0),
-		tempCleaner: NewTempDirCleaner(nil, "", nil),
+		jobs:         make(map[models.JobID]*BatchJob),
+		persistence:  noopJobPersistence{},
+		envLocks:     newKeyedMutexRegistry(),
+		movieLocks:   newKeyedMutexRegistry(),
+		actressLocks: newKeyedMutexRegistry(),
+		tombstones:   newTombstoneRegistry(0),
+		tempCleaner:  NewTempDirCleaner(nil, "", nil),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -146,6 +151,7 @@ func NewJobStore(jobRepo database.JobRepositoryInterface, batchFileOpRepo databa
 		},
 		envLocks:       newKeyedMutexRegistry(),
 		movieLocks:     newKeyedMutexRegistry(),
+		actressLocks:   newKeyedMutexRegistry(),
 		tombstones:     newTombstoneRegistry(0),
 		tempDir:        tempDir,
 		templateEngine: engine,
@@ -230,7 +236,7 @@ func (s *JobStore) attachEditDeps(job *BatchJob) {
 	}
 	var committer *EditCommitter
 	if s.editTx != nil {
-		committer = NewEditCommitter(s.editTx, s.envLocks, job.ID.String(), s.movieLocks)
+		committer = NewEditCommitter(s.editTx, s.envLocks, job.ID.String(), s.actressLocks)
 	}
 	job.posterEditor.setLockRegistry(s.movieLocks)
 	job.posterEditor.attachEnv(&posterEditEnv{

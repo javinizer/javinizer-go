@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	wfmocks "github.com/javinizer/javinizer-go/internal/mocks/workflow"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -66,6 +67,40 @@ func TestJobStoreAttachEditDepsNilGuards(t *testing.T) {
 	s := freshStore(t)
 	s.attachEditDeps(nil)
 	s.attachEditDeps(&BatchJob{})
+}
+
+// codex r38 P2: the actress-rename leg runs on a registry DISJOINT from the
+// movie family locks — a movie rekeyed to "actress:<id>" must never share a
+// mutex with the actress-row key the committer acquires inside the held
+// family section (same-registry re-lock deadlocks).
+func TestActressRenameLocksDisjointFromMovieLocks(t *testing.T) {
+	s := freshStore(t)
+	actresses := mocks.NewMockActressRepositoryInterface(t)
+	actresses.EXPECT().FindByID(mock.Anything, uint(7)).Return(nil, database.ErrNotFound)
+	s.editTx = &execTransactor{unit: database.EditUnit{Actresses: actresses}}
+	job := seedJobLifecycle(t, s, models.JobStatusCompleted, "")
+	require.NotNil(t, job.posterEditor, "seeded job carries an editor")
+	s.attachEditDeps(job)
+	env := job.posterEditor.currentEnv()
+	require.NotNil(t, env)
+	require.NotNil(t, env.committer)
+	assert.NotSame(t, s.movieLocks, env.committer.famLocks, "actress-row keys must not share the movie-key registry")
+	assert.Same(t, s.actressLocks, env.committer.famLocks)
+
+	// Behavioral proof: with the family key "actress:7" HELD on the movie
+	// registry (as withKeyedSection holds it for a rekeyed movie), a commit
+	// whose renames touch actress ID 7 completes instead of deadlocking.
+	release := s.movieLocks.Acquire("actress:7")
+	defer release()
+	plan := &EditCommitPlan{Renames: []ActressRenamePlan{{ID: 7, FirstName: "x", LastName: "y"}}}
+	done := make(chan error, 1)
+	go func() { done <- env.committer.Commit(context.Background(), plan) }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("commit deadlocked: actress key collided with the held movie key")
+	}
 }
 
 func TestAdmissionsOnGoneBarrier(t *testing.T) {
