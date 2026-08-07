@@ -275,20 +275,37 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 				}
 			}
 			if !committed {
+				// codex r41 P2b: the witness is the ONLY recovery marker for a
+				// mid-relocation crash — sweep it only after every required
+				// reverse rename SUCCEEDED; a transient Stat/Rename failure
+				// keeps it for the next startup.
+				reversalClean := true
 				for _, sfx := range []string{"-full.jpg", ".jpg"} {
 					newPath := filepath.Join(dir, w.NewID+sfx)
 					oldPath := filepath.Join(dir, w.OldID+sfx)
 					if _, err := c.fs.Stat(newPath); err != nil {
+						if !os.IsNotExist(err) {
+							reversalClean = false
+							logging.Warnf("rekey reconcile stat %s: %v", newPath, err)
+						}
 						continue
 					}
-					if _, err := c.fs.Stat(oldPath); !os.IsNotExist(err) {
+					if _, err := c.fs.Stat(oldPath); err == nil {
 						continue // old bytes still there — nothing to reverse
+					} else if !os.IsNotExist(err) {
+						reversalClean = false
+						logging.Warnf("rekey reconcile stat %s: %v", oldPath, err)
+						continue
 					}
 					if rnErr := c.fs.Rename(newPath, oldPath); rnErr != nil {
+						reversalClean = false
 						logging.Warnf("rekey reconcile rename back %s→%s: %v", newPath, oldPath, rnErr)
 						continue
 					}
 					reversed++
+				}
+				if !reversalClean {
+					continue // witness preserved for the next startup retry
 				}
 			}
 			if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {

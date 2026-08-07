@@ -164,6 +164,18 @@ func NewJobStore(jobRepo database.JobRepositoryInterface, batchFileOpRepo databa
 		opt(s)
 	}
 
+	// codex r41 P2: reconcile rekey witnesses SYNCHRONOUSLY before job
+	// reconstruction — ClearMissingTempPosters runs inside reconstruction
+	// and would clear the old crop URL while the relocated bytes still sit
+	// at the new ID. The periodic stale-cleanup goroutine is not started by
+	// the production bootstrap, so this must not ride on
+	// StartStaleTempCleanup.
+	if n, err := s.tempCleaner.ReconcileRekeyWitnesses(context.Background()); err != nil {
+		logging.Warnf("rekey witness reconciliation failed at startup: %v", err)
+	} else if n > 0 {
+		logging.Infof("reversed %d orphaned poster rekey relocation(s) at startup", n)
+	}
+
 	s.loadFromDatabase()
 
 	return s
