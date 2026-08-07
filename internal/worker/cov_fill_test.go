@@ -1435,6 +1435,19 @@ func TestReconcileRekeyWitnessReadFileError(t *testing.T) {
 	assert.Equal(t, 0, n, "unreadable rekey witness skipped")
 }
 
+// temp_dir_cleaner:276-277 — ReadDir error on job dir (file where dir should be)
+func TestReconcileRekeyReadDirJobDirError(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/tmp/posters", 0o755))
+	// Put a FILE where the job dir should be to force ReadDir error
+	require.NoError(t, afero.WriteFile(base, "/tmp/posters/JOB-FILE", []byte("x"), 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	cl := &TempDirCleaner{fs: base, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "ReadDir error on job dir -> skip")
+}
+
 func TestNewJobStoreReconcileFindError(t *testing.T) {
 	repo := mocks.NewMockJobRepositoryInterface(t)
 	repo.EXPECT().FindByID(mock.Anything, mock.Anything).Return(nil, errors.New("db down")).Maybe()
