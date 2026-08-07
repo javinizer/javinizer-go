@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -607,9 +608,20 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	}
 	var relocatedPosterPair []struct{ src, dst string }
 	relocatedNewID, relocatedJobID := "", ""
+	rekeyWitnessPath := ""
 	if newID := strings.TrimSpace(movie.ID); newID != "" && canonicalPairSafe && !strings.EqualFold(newID, strings.TrimSpace(canonicalOldPosterID)) {
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil && env.tempDir != "" && env.jobID != "" {
 			dir := filepath.Join(env.tempDir, "posters", env.jobID)
+			// codex r40 P2: durable witness BEFORE the first rename — a crash
+			// between rename and commit leaves the pair at the NEW identity
+			// while the durable row still references the old one; the startup
+			// reconciler (ReconcileRekeyWitnesses) arbitrates from the job row.
+			witnessPath := filepath.Join(dir, rekeyWitnessPrefix+canonicalOldPosterID+".json")
+			wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID})
+			if err := afero.WriteFile(env.fs, witnessPath, wBytes, 0o644); err != nil {
+				return fmt.Errorf("poster rekey witness %s: %w", witnessPath, err)
+			}
+			rekeyWitnessPath = witnessPath
 			failedErr := error(nil)
 			for _, suffix := range []string{"-full.jpg", ".jpg"} {
 				src := filepath.Join(dir, canonicalOldPosterID+suffix)
@@ -629,10 +641,18 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 			}
 			if failedErr != nil {
 				// Roll back partially moved pairs before any DB write; the state
-				// stays on the old ID, coherently rejected.
+				// stays on the old ID, coherently rejected. The witness survives
+				// an INCOMPLETE rollback so the reconciler can finish it (r40).
+				rollbackComplete := true
 				for _, mv := range relocatedPosterPair {
 					if rbErr := env.fs.Rename(mv.dst, mv.src); rbErr != nil {
+						rollbackComplete = false
 						logging.Warnf("poster rekey rollback %s→%s failed: %v", mv.dst, mv.src, rbErr)
+					}
+				}
+				if rollbackComplete {
+					if rmErr := env.fs.Remove(witnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+						logging.Warnf("poster rekey witness sweep %s: %v", witnessPath, rmErr)
 					}
 				}
 				return failedErr
@@ -656,14 +676,32 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	})
 	if err != nil && len(relocatedPosterPair) > 0 {
 		// Commit failed → state stays on the old identity; return the pair.
+		// The witness survives an INCOMPLETE rollback (codex r40 P2) so the
+		// startup reconciler can arbitrate the leftover new-ID files.
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil {
+			rollbackComplete := true
 			for _, mv := range relocatedPosterPair {
 				if rbErr := env.fs.Rename(mv.dst, mv.src); rbErr != nil {
+					rollbackComplete = false
 					logging.Warnf("poster rekey rollback %s→%s failed: %v", mv.dst, mv.src, rbErr)
+				}
+			}
+			if rollbackComplete && rekeyWitnessPath != "" {
+				if rmErr := env.fs.Remove(rekeyWitnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+					logging.Warnf("poster rekey witness sweep %s: %v", rekeyWitnessPath, rmErr)
 				}
 			}
 		}
 		return err
+	}
+	if err == nil && rekeyWitnessPath != "" {
+		// Commit landed: the witness's job is done (files remain at the new
+		// identity, coherent with the durable row).
+		if env := m.pe.currentEnv(); env != nil && env.fs != nil {
+			if rmErr := env.fs.Remove(rekeyWitnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+				logging.Warnf("poster rekey witness sweep %s: %v", rekeyWitnessPath, rmErr)
+			}
+		}
 	}
 	if err == nil && stalePosterID != "" {
 		// Post-commit eviction targets whatever name the stale bytes still

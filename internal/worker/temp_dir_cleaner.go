@@ -2,10 +2,12 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -199,13 +201,118 @@ func ClearMissingTempPosters(fs afero.Fs, tempDir, jobID string, results map[str
 	}
 }
 
+// rekeyWitness is the recovery record for a whole-movie rekey's poster-pair
+// relocation (POSTER-WRITE-HARDENING codex r40 P2): the rekey path renames
+// the pair BEFORE the state commit (a failed relocation must leave no DB
+// mutation, and a failed commit rolls the renames back), so a crash in that
+// window leaves files at the NEW identity while the durable row still
+// references the old one. The witness names both identities.
+const rekeyWitnessPrefix = ".rekey-"
+
+type rekeyWitness struct {
+	OldID string `json:"old_id"`
+	NewID string `json:"new_id"`
+}
+
+// ReconcileRekeyWitnesses repairs relocation witnesses left behind by a crash
+// (or a partially-failed rollback). For each witness the DURABLE job row is
+// the arbiter: when the committed results already reference the new ID the
+// commit landed and only the leftover witness is swept; otherwise the pair
+// files still at the NEW name are renamed back to the OLD identity so the
+// stored poster URLs resolve again.
+func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, error) {
+	if c.fs == nil || c.jobRepo == nil {
+		return 0, nil
+	}
+	postersDir := filepath.Join(c.tempDir, "posters")
+	jobDirs, err := afero.ReadDir(c.fs, postersDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read posters dir for rekey reconcile: %w", err)
+	}
+	reversed := 0
+	for _, je := range jobDirs {
+		if !je.IsDir() {
+			continue
+		}
+		jobID := je.Name()
+		dir := filepath.Join(postersDir, jobID)
+		entries, rerr := afero.ReadDir(c.fs, dir)
+		if rerr != nil {
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if !strings.HasPrefix(name, rekeyWitnessPrefix) || !strings.HasSuffix(name, ".json") {
+				continue
+			}
+			wpath := filepath.Join(dir, name)
+			data, rdErr := afero.ReadFile(c.fs, wpath)
+			var w rekeyWitness
+			if rdErr != nil || json.Unmarshal(data, &w) != nil || w.OldID == "" || w.NewID == "" {
+				logging.Warnf("rekey witness %s unreadable/corrupt — left in place", wpath)
+				continue
+			}
+			job, jerr := c.jobRepo.FindByID(ctx, jobID)
+			switch {
+			case errors.Is(jerr, database.ErrNotFound):
+				// Orphaned directory — the staleness sweep owns whole-dir removal.
+				continue
+			case jerr != nil:
+				logging.Warnf("rekey reconcile: job %s lookup failed: %v", jobID, jerr)
+				continue
+			}
+			committed := false
+			var results map[string]*resultstore.MovieResult
+			if job != nil && job.ParseResults(&results) == nil {
+				for _, r := range results {
+					if r != nil && r.Movie != nil && strings.EqualFold(r.Movie.ID, w.NewID) {
+						committed = true
+						break
+					}
+				}
+			}
+			if !committed {
+				for _, sfx := range []string{"-full.jpg", ".jpg"} {
+					newPath := filepath.Join(dir, w.NewID+sfx)
+					oldPath := filepath.Join(dir, w.OldID+sfx)
+					if _, err := c.fs.Stat(newPath); err != nil {
+						continue
+					}
+					if _, err := c.fs.Stat(oldPath); !os.IsNotExist(err) {
+						continue // old bytes still there — nothing to reverse
+					}
+					if rnErr := c.fs.Rename(newPath, oldPath); rnErr != nil {
+						logging.Warnf("rekey reconcile rename back %s→%s: %v", newPath, oldPath, rnErr)
+						continue
+					}
+					reversed++
+				}
+			}
+			if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {
+				logging.Warnf("rekey witness sweep %s: %v", wpath, rmErr)
+			}
+		}
+	}
+	return reversed, nil
+}
+
 // StartStaleTempCleanup starts a background goroutine that periodically cleans
 // up stale temp poster directories. Returns a stop channel that should be closed
 // on shutdown to stop the cleanup loop.
 func (c *TempDirCleaner) StartStaleTempCleanup() chan struct{} {
 	stop := make(chan struct{})
 	go func() {
-		// Run immediately on startup
+		// Run immediately on startup: rekey-witness reconciliation FIRST (a
+		// crash-mid-relocation must be reversed BEFORE the staleness sweep
+		// could consider the directory), then the stale sweep itself.
+		if n, err := c.ReconcileRekeyWitnesses(context.Background()); err != nil {
+			logging.Warnf("Rekey witness reconciliation failed on startup: %v", err)
+		} else if n > 0 {
+			logging.Infof("Reversed %d orphaned poster rekey relocation(s)", n)
+		}
 		if removed, err := c.CleanupStaleTempDirs(context.Background()); err != nil {
 			logging.Warnf("Stale temp cleanup failed on startup: %v", err)
 		} else if removed > 0 {
