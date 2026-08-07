@@ -209,3 +209,41 @@ func TestPosterPairBackupRestoreFullWriteFail(t *testing.T) {
 	}
 	assert.True(t, b2.restore(), "both existed with writable fs → complete")
 }
+
+// writePromoteWitness nil-fs fallback (creates on OS fs via NewOsFs)
+func TestWritePromoteWitnessNilFsRealOS(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "posters", "JNIL"), 0o755))
+	p, err := writePromoteWitness(nil, tmpDir, "JNIL", "PI-1", "https://x", "res-1", 0, nil)
+	require.NoError(t, err)
+	assert.Contains(t, p, ".promote-PI-1.json")
+	_, statErr := os.Stat(p)
+	assert.NoError(t, statErr)
+	os.Remove(p)
+}
+
+// writeCropWitness nil-fs fallback
+func TestWriteCropWitnessNilFsRealOS(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "posters", "JNIL"), 0o755))
+	p, err := writeCropWitness(nil, tmpDir, "JNIL", cropWitness{PosterID: "CP-1", ResultID: "res-c", StageID: "stage-1", CroppedURL: "https://x"})
+	require.NoError(t, err)
+	assert.Contains(t, p, ".crop-stage-1.json")
+	os.Remove(p)
+}
+
+// writePromoteWitnessGuarded nil-fs fallback
+func TestWritePromoteWitnessGuardedNilFsRealOS(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "posters", "JNILG"), 0o755))
+	p, err := writePromoteWitnessGuarded(nil, tmpDir, "JNILG", "PI-1", "https://x", "res-1", 0, nil)
+	require.NoError(t, err)
+	assert.Contains(t, p, ".promote-PI-1.json")
+	os.Remove(p)
+}
+
+// promoteCroppedLeg nil-fs fallback
+func TestPromoteCroppedLegNilFsRealOS(t *testing.T) {
+	err := promoteCroppedLeg(nil, "/nonexistent-path-xyz", "JNIL", "stage-x", "PI-1")
+	require.NoError(t, err, "no staged file → nothing to promote")
+}

@@ -1198,3 +1198,53 @@ func TestReconcilePromoteNoBakOldSHAEmptyRemoveFail(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, n, "remove fail -> clean=false")
 }
+
+// --- r56 grind batch 3: remaining gaps ---
+
+// temp_dir_cleaner.go: crop witness ReadFile rerr (line 276-277)
+// A crop witness file that can't be read (directory instead of file)
+func TestReconcileRekeyCropWitnessReadFail(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/posters/JOB-W1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	// Create a directory where the rekey witness file would be to force ReadFile error
+	require.NoError(t, base.MkdirAll(filepath.Join(dir, ".rekey-OLD.json"), 0o755))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	cl := &TempDirCleaner{fs: base, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "unreadable rekey witness skipped")
+}
+
+// temp_dir_cleaner.go: promote witness sweep error in committed path (line 515-517)
+func TestReconcilePromoteCommittedSweepError(t *testing.T) {
+	base, _ := witnessFixture(t)
+	dir := "/tmp/posters/JOB-W1"
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1.jpg"), []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1-full.jpg.bak"), []byte("old"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://x", 1), nil)
+	fs := failRemoveFS{Fs: base}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+// temp_dir_cleaner.go: StartStaleTempCleanup with n>0 (reconcile succeeds)
+func TestStartStaleTempCleanupReconcileSuccess(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/posters/JOB-S"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "NEW-full.jpg"), []byte("new"), 0o644))
+	witness, _ := json.Marshal(rekeyWitness{OldID: "OLD", NewID: "NEW", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".rekey-OLD.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-S").Return(witnessJobRowRev(t, "OLD", 0), nil)
+	cl := &TempDirCleaner{fs: base, tempDir: "/tmp", jobRepo: repo}
+	stop := cl.StartStaleTempCleanup()
+	time.Sleep(300 * time.Millisecond)
+	close(stop)
+}
