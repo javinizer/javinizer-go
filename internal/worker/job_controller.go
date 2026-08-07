@@ -65,6 +65,11 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 		cancel()
 		return err // CAS loser: duplicate launch rejected up-front
 	}
+	// codex r47 P1: bind the claimed launch's cancel BEFORE queueing — a
+	// /cancel landing while BeginPhase parks must abort THIS wait too, or
+	// the phase would start fresh after the lease released post-cancel.
+	// Safe here: markStarted guarantees exactly one in-flight claimant.
+	c.job.lifecycle.setCancelFunc(cancel)
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
@@ -85,7 +90,6 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 		close(pd)
 		return err // ErrJobGone when deleted mid-wait
 	}
-	c.job.lifecycle.setCancelFunc(cancel)
 	release := entry.Downgrade()
 	if persistFn != nil {
 		// D16 fail-closed: the current_phase marker must be durable before
@@ -167,6 +171,9 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		cancel()
 		return err // CAS loser: duplicate launch rejected up-front
 	}
+	// codex r47 P1: bind the claimed launch's cancel BEFORE queueing — Safe:
+	// markStarted guarantees exactly one in-flight claimant.
+	c.job.lifecycle.setCancelFunc(cancel)
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
@@ -190,7 +197,6 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		close(pd)
 		return err
 	}
-	c.job.lifecycle.setCancelFunc(cancel)
 	release := entry.Downgrade()
 
 	// Commit apply-phase config values ONLY after markStarted succeeds, so a

@@ -91,6 +91,32 @@ func TestPhaseEndPersistWarnsAreSwallowed(t *testing.T) {
 // codex r45 P2: a duplicate StartApply behind a held shared lease must
 // reject IMMEDIATELY — never queue pendingPhase ahead of legitimate
 // admissions for the winner phase's full duration.
+// codex r47 P1: /cancel while the claimed launch waits in BeginPhase must
+// retire the launch — releasing the lease afterwards must NOT start any
+// phase work.
+func TestStartApplyCancelledWhileQueuedNeverRuns(t *testing.T) {
+	job := newBatchJob([]string{"/f/a.mp4"})
+	job.Controller().SetWorkflow(wfmocks.NewMockWorkflowInterface(t))
+	job.lifecycle.Status = models.JobStatusCompleted
+	job.deps.PersistFn = func() error { return nil }
+	rel, err := job.admission.AdmitShared()
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() { done <- job.Controller().StartApply(context.Background(), ApplyPhaseConfig{}) }()
+	assert.Eventually(t, func() bool {
+		job.admission.mu.Lock()
+		defer job.admission.mu.Unlock()
+		return job.admission.pendingPhase == 1
+	}, 2*time.Second, 5*time.Millisecond, "launch parked in the phase queue")
+	job.lifecycle.Cancel() // user-facing /cancel while queued
+	require.NoError(t, <-done)
+	assert.Equal(t, models.JobStatusCancelled, job.lifecycle.GetJobStatus())
+	rel() // the held lease releases — the phase must NOT begin behind the cancel
+	time.Sleep(150 * time.Millisecond)
+	assert.Equal(t, models.JobStatusCancelled, job.lifecycle.GetJobStatus(), "no phase transitions after cancellation")
+	require.ErrorContains(t, job.Controller().Wait(), "cancelled")
+}
+
 func TestStartApplyDuplicateLaunchFailsFast(t *testing.T) {
 	job := newBatchJob([]string{"/f/a.mp4"})
 	job.lifecycle.Status = models.JobStatusRunning
