@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,3 +57,74 @@ func TestWritePromoteWitnessGuardedRejectsUnresolved(t *testing.T) {
 	_, err = writePromoteWitnessGuarded(fs, "/tmp", "JG", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
 	require.NoError(t, err, "sweeping the witness readmits the operation")
 }
+
+func TestWritePromoteGuardedStatError(t *testing.T) {
+	fs := statErrTargetFS{Fs: afero.NewMemMapFs(), target: "/tmp/posters/JG/.promote-PI-1.json"}
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG", "PI-1", "https://x", "res-1", 0, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "promote witness check")
+}
+
+func TestWritePromoteWitnessNilFs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JN", 0o755))
+	p, err := writePromoteWitness(fs, "/tmp", "JN", "PI-1", "https://x", "res-1", 0, nil)
+	require.NoError(t, err)
+	assert.Contains(t, p, ".promote-PI-1.json")
+}
+
+func TestRemovePromoteWitnessNilFs(t *testing.T) {
+	removePromoteWitness(nil, "/nonexistent/path")
+}
+
+func TestWriteCropWitnessNilFs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JC", 0o755))
+	p, err := writeCropWitness(fs, "/tmp", "JC", cropWitness{PosterID: "CP-1", ResultID: "res-c", StageID: "stage-1", CroppedURL: "https://x"})
+	require.NoError(t, err)
+	assert.Contains(t, p, ".crop-stage-1.json")
+}
+
+func TestRemoveCropWitnessNilFs(t *testing.T) {
+	removeCropWitness(nil, "/nonexistent/path")
+}
+
+func TestPromoteCroppedLegNoStagedFile(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JX", 0o755))
+	err := promoteCroppedLeg(fs, "/tmp", "JX", "stage-x", "PI-1")
+	require.NoError(t, err)
+}
+
+func TestPromoteCroppedLegStatError(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/tmp/posters/JY", 0o755))
+	require.NoError(t, afero.WriteFile(base, "/tmp/posters/JY/stage-x.jpg", []byte("x"), 0o644))
+	fs := statErrTargetFS{Fs: base, target: "/tmp/posters/JY/stage-x.jpg"}
+	err := promoteCroppedLeg(fs, "/tmp", "JY", "stage-x", "PI-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source stat")
+}
+
+func TestPosterPairBackupRestoreUnreadable(t *testing.T) {
+	b := &posterPairBackup{
+		fs:          afero.NewMemMapFs(),
+		fullPath:    "/nonexistent/full.jpg",
+		fullExisted: false, fullUnreadable: true,
+	}
+	assert.False(t, b.restore())
+}
+
+func TestPromoteCroppedLegRenameError(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/tmp/posters/JZ", 0o755))
+	require.NoError(t, afero.WriteFile(base, "/tmp/posters/JZ/stage-x.jpg", []byte("x"), 0o644))
+	fs := noRenameBatchFs{Fs: base}
+	err := promoteCroppedLeg(fs, "/tmp", "JZ", "stage-x", "PI-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "crop promote")
+}
+
+type noRenameBatchFs struct{ afero.Fs }
+
+func (noRenameBatchFs) Rename(string, string) error { return errors.New("rename blocked") }
