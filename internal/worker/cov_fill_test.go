@@ -630,3 +630,180 @@ func TestStartStaleTempCleanupImmediateClose(t *testing.T) {
 	stop := cl.StartStaleTempCleanup()
 	close(stop)
 }
+
+// --- r55 safe coverage fills ---
+
+type failRemoveFS struct{ afero.Fs }
+
+func (failRemoveFS) Remove(string) error { return errors.New("remove blocked") }
+
+// promote reconcile: bak sweep failure retains witness
+func TestReconcilePromoteBakSweepFailRetains(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1.jpg"), []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "PI-1-full.jpg.bak"), []byte("old"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://x", 1), nil)
+	fs := failRemoveFS{Fs: base}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+	_, wErr := base.Stat(filepath.Join(dir, ".promote-PI-1.json"))
+	assert.NoError(t, wErr, "witness retained when bak sweep fails")
+}
+
+// promote reconcile: uncommitted, no bak, canon hash match
+func TestReconcilePromoteNoBakCanonHashMatch(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("old-bytes"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0, OldSHA: map[string]string{"crop": shaContentHex([]byte("old-bytes"))}})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://old", 0), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+// promote reconcile: uncommitted, no bak, canon hash mismatch (drop)
+func TestReconcilePromoteNoBakCanonHashMismatchDrop(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1-full.jpg"), []byte("new-uncommitted"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0, OldSHA: map[string]string{"full": shaContentHex([]byte("old-full"))}})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://old", 0), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+	_, cErr := fs.Stat(filepath.Join(dir, "PI-1-full.jpg"))
+	assert.Error(t, cErr, "uncommitted canon dropped")
+}
+
+// crop reconcile: uncommitted, staged remove fails
+func TestReconcileCropUncommittedStagedRemoveFail(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "stage-x.jpg"), []byte("new"), 0o644))
+	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".crop-stage-x.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(cropWitnessJobRow(t, "https://old", 0), nil)
+	fs := failRemoveFS{Fs: base}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+	_, wErr := base.Stat(filepath.Join(dir, ".crop-stage-x.json"))
+	assert.NoError(t, wErr, "witness retained when staged remove fails")
+}
+
+// crop reconcile: corrupt crop witness (missing fields)
+func TestReconcileCropWitnessMissingFields(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-stage-x.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+// promote reconcile: corrupt promote witness (missing fields)
+func TestReconcilePromoteWitnessMissingFields(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+// rekey reconcile: job lookup error
+func TestReconcileRekeyJobLookupError(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	witness, _ := json.Marshal(rekeyWitness{OldID: "OLD", NewID: "NEW", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-OLD.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(nil, errors.New("db down"))
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+// rekey reconcile: stat error on newPath
+func TestReconcileRekeyNewPathStatError(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "NEW-full.jpg"), []byte("new"), 0o644))
+	witness, _ := json.Marshal(rekeyWitness{OldID: "OLD", NewID: "NEW", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".rekey-OLD.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowRev(t, "OLD", 0), nil)
+	fs := statFailSuffixFS{Fs: base, suffix: "NEW-full.jpg"}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "stat error -> reversal not clean -> witness survives")
+}
+
+// rekey reconcile: rename back fails
+func TestReconcileRekeyRenameBackFails(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "NEW-full.jpg"), []byte("new"), 0o644))
+	witness, _ := json.Marshal(rekeyWitness{OldID: "OLD", NewID: "NEW", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".rekey-OLD.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowRev(t, "OLD", 0), nil)
+	fs := noRenameFs{Fs: base}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "rename back fails -> not clean")
+	_, wErr := base.Stat(filepath.Join(dir, ".rekey-OLD.json"))
+	assert.NoError(t, wErr, "witness kept when rename back fails")
+}
+
+// rekey reconcile: old bytes still there (no reversal needed)
+func TestReconcileRekeyOldBytesStillThere(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "NEW-full.jpg"), []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "OLD-full.jpg"), []byte("old"), 0o644))
+	witness, _ := json.Marshal(rekeyWitness{OldID: "OLD", NewID: "NEW", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".rekey-OLD.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowRev(t, "OLD", 0), nil)
+	cl := &TempDirCleaner{fs: base, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "old bytes still there -> nothing to reverse")
+}
+
+// promote reconcile: committed with bak legs to sweep (both bak legs present)
+func TestReconcilePromoteCommittedSweepsBothBakLegs(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1-full.jpg.bak"), []byte("old-full"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg.bak"), []byte("old-crop"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("new"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://x", 1), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+	for _, bak := range []string{"PI-1-full.jpg.bak", "PI-1.jpg.bak"} {
+		_, bErr := fs.Stat(filepath.Join(dir, bak))
+		assert.Error(t, bErr, "bak swept: %s", bak)
+	}
+	_, wErr := fs.Stat(filepath.Join(dir, ".promote-PI-1.json"))
+	assert.Error(t, wErr, "witness swept")
+}
