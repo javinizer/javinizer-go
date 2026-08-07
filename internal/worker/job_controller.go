@@ -433,7 +433,7 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 
 	return applyPhaseInputs{
 		JobID:           c.job.ID,
-		EditLockFn:      func(movieID string) func() { return c.job.posterEditor.lockRegistry().Acquire(movieID) },
+		EditLockFn:      func(movieIDs ...string) func() { return c.job.posterEditor.lockRegistry().AcquireMany(movieIDs) },
 		Concurrency:     newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
 		NFOEnabled:      batchCfg.NFOEnabled,
 		WF:              wf,

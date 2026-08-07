@@ -23,8 +23,8 @@ type recoverableOutcome interface {
 type recoveryContext struct {
 	filePath   string
 	fmi        models.FileMatchInfo
-	editLockFn func(movieID string) func() // optional: serializes write-back with review edits (codex r11)
-	movie      *models.Movie               // optional: prior scrape-phase Movie to preserve on apply panic (mirrors fix in interpretApplyResult's err branch)
+	editLockFn func(movieIDs ...string) func() // optional: serializes write-back with review edits (codex r11; variadic per codex r42 total-order rule)
+	movie      *models.Movie                   // optional: prior scrape-phase Movie to preserve on apply panic (mirrors fix in interpretApplyResult's err branch)
 	updater    resultstore.ResultUpdater
 	broadcast  func(panicErr string) // optional: send a JobEvent on panic (apply phase uses this)
 	startTime  time.Time             // optional: included in MovieResult if non-zero

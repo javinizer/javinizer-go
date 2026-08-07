@@ -147,8 +147,8 @@ func TestWithFileRecoveryApplysExistingLockedPanicMerge(t *testing.T) {
 		fmi:      models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "PAN-1"},
 		movie:    &models.Movie{ID: "PAN-1", Title: "pre-phase frozen baseline"},
 		updater:  store,
-		editLockFn: func(movieID string) func() {
-			assert.Equal(t, "PAN-1", movieID)
+		editLockFn: func(movieIDs ...string) func() {
+			require.Equal(t, []string{"PAN-1"}, movieIDs)
 			locked = true
 			return func() { locked = false }
 		},

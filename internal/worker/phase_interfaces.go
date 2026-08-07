@@ -132,7 +132,10 @@ type applyPhaseInputs struct {
 	// per-file apply write-backs run under it, so a mid-phase committed review
 	// PATCH and the phase's result publication serialize rather than
 	// interleave stale candidates (codex r11). nil ⇒ skip locking.
-	EditLockFn  func(movieID string) (release func())
+	// codex r42: variadic so multi-key acquisitions route through the
+	// registry's folded total order (AcquireMany) — caller-side ordering
+	// reproduces sort rules that diverge under case folding and deadlock.
+	EditLockFn  func(movieIDs ...string) (release func())
 	Concurrency concurrencyConfig
 	NFOEnabled  bool
 	WF          workflow.WorkflowInterface

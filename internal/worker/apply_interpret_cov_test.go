@@ -24,7 +24,7 @@ func minimalApplyInputs(t *testing.T, store resultstore.Store, withLock bool) ap
 		Lifecycle:   &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})},
 	}
 	if withLock {
-		inputs.EditLockFn = func(movieID string) func() { return func() {} }
+		inputs.EditLockFn = func(movieIDs ...string) func() { return func() {} }
 	}
 	return inputs
 }

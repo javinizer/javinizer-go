@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -169,28 +168,18 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 // (FileMatchInfo.MovieID), while buildApplyCmd rewrote afc.Match.MovieID to
 // the canonical Movie.ID — applying under the canonical key alone lets the
 // atomic write-back run between an edit's candidate snapshot and its
-// post-transaction publication on the alias key. Keys are acquired in a
-// deterministic order so nested acquisition cannot deadlock.
+// post-transaction publication on the alias key.
+//
+// codex r42 P2: the lock acquisition MUST route through the registry's ONE
+// total order (AcquireMany folds keys uppercase then sorts). Any caller-side
+// ordering rule reproduces a DIFFERENT comparison (e.g. lowercase sort
+// orders "z" AFTER "_" while the fold orders "Z" BEFORE "_") — a concurrent
+// multi-key review edit then deadlocks against this write-back.
 func applyFamilyLock(inputs applyPhaseInputs, aliasID, canonicalID string) func() {
 	if inputs.EditLockFn == nil {
 		return func() {}
 	}
-	alias := strings.TrimSpace(aliasID)
-	canon := strings.TrimSpace(canonicalID)
-	// Single-identity shapes collapse to the one meaningful key.
-	switch {
-	case alias == "":
-		return inputs.EditLockFn(canon)
-	case canon == "" || strings.EqualFold(alias, canon):
-		return inputs.EditLockFn(alias)
-	}
-	first, second := alias, canon
-	if strings.ToLower(canon) < strings.ToLower(alias) {
-		first, second = canon, alias
-	}
-	unlockFirst := inputs.EditLockFn(first)
-	unlockSecond := inputs.EditLockFn(second)
-	return func() { unlockSecond(); unlockFirst() }
+	return inputs.EditLockFn(aliasID, canonicalID)
 }
 
 // applyFamilyKeyIDs extracts the matcher alias (edit-lock identity) and the

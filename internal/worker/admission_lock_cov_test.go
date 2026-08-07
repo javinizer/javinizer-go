@@ -399,26 +399,51 @@ func TestMarkAbortedStartForGates(t *testing.T) {
 
 func TestApplyFamilyLockKeyMatrix(t *testing.T) {
 	locked := [][]string{}
-	fn := func(id string) func() { locked = append(locked, []string{id}); return func() {} }
+	fn := func(ids ...string) func() { locked = append(locked, ids); return func() {} }
 	inputs := applyPhaseInputs{EditLockFn: fn}
 
 	unlock := applyFamilyLock(inputs, "AL-1", "CAN-1")
 	unlock()
-	assert.Equal(t, [][]string{{"AL-1"}, {"CAN-1"}}, locked, "alias+canonical BOTH locked in deterministic order")
+	assert.Equal(t, [][]string{{"AL-1", "CAN-1"}}, locked, "alias+canonical ride ONE variadic acquisition (registry dedups/folds/sorts)")
 
 	locked = [][]string{}
 	applyFamilyLock(inputs, "SAME-1", "same-1")()
-	assert.Equal(t, [][]string{{"SAME-1"}}, locked, "equal identities collapse to one key")
+	assert.Equal(t, [][]string{{"SAME-1", "same-1"}}, locked, "equal identities fold to one mutex inside AcquireMany")
 
 	locked = [][]string{}
 	applyFamilyLock(inputs, "", "CAN-2")()
-	assert.Equal(t, [][]string{{"CAN-2"}}, locked, "empty alias locks canonical only")
+	assert.Equal(t, [][]string{{"", "CAN-2"}}, locked, "empty alias skipped by AcquireMany")
 
 	locked = [][]string{}
 	applyFamilyLock(inputs, "AL-2", " ")()
-	assert.Equal(t, [][]string{{"AL-2"}}, locked, "empty canonical locks alias only")
+	assert.Equal(t, [][]string{{"AL-2", " "}}, locked, "blank canonical skipped by AcquireMany")
 
 	assert.NotPanics(t, func() { applyFamilyLock(applyPhaseInputs{}, "A", "B")() }, "nil EditLockFn is a no-op lock")
+}
+
+// codex r42 regression: the write-back acquisition rides the registry's
+// FOLDED total order — an edit holding the matcher alias blocks the apply
+// (no slip-through, no deadlock), even for fold-unstable pairs Z/_.
+func TestApplyFamilyLockSharesRegistryTotalOrder(t *testing.T) {
+	reg := newKeyedMutexRegistry()
+	inputs := applyPhaseInputs{EditLockFn: func(ids ...string) func() { return reg.AcquireMany(ids) }}
+	holdEdit := reg.Acquire("Z")
+	done := make(chan struct{})
+	go func() {
+		applyFamilyLock(inputs, "Z", "_")()
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("apply write-back dispatched while the edit held the alias key")
+	case <-time.After(150 * time.Millisecond):
+	}
+	holdEdit()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("apply write-back deadlocked against the released edit key")
+	}
 }
 
 func TestApplyFamilyKeyIDs(t *testing.T) {
