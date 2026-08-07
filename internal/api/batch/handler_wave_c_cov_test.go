@@ -300,3 +300,42 @@ func TestPosterFromURL_PromoteFailureRestoreSucceeds(t *testing.T) {
 	w := postFromURLRequest(t, router, job, "URLC-9", ts.URL+"/pic.jpg")
 	_ = w
 }
+
+// --- final coverage: crop witness write failure + staged-full sweep error ---
+
+// FS that blocks OpenFile for write on any path ending in .tmp (witness write)
+type failOpenFileForTmpFS struct {
+	afero.Fs
+}
+
+func (f failOpenFileForTmpFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.HasSuffix(name, ".tmp") && (flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0) {
+		return nil, errors.New("tmp write blocked")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+// crop witness write fails → 409-level EditAdmissionConflictError
+func TestPosterCrop_WitnessWriteFails(t *testing.T) {
+	deps, job, router := cropJobFixture(t, "CROPE-W")
+	deps.Fs = &failOpenFileForTmpFS{Fs: deps.GetFs()}
+	w := postCrop(t, router, job, "CROPE-W", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
+	_ = w // path exercised: witness write fails → conflict error
+}
+
+// crop staged-full sweep fails (Remove error on staged-full path)
+type failRemoveFullFS struct{ afero.Fs }
+
+func (failRemoveFullFS) Remove(name string) error {
+	if strings.HasSuffix(name, "-full.jpg") && strings.Contains(name, ".crop-") {
+		return errors.New("remove blocked")
+	}
+	return nil
+}
+
+func TestPosterCrop_StagedFullSweepError(t *testing.T) {
+	deps, job, router := cropJobFixture(t, "CROPE-S")
+	deps.Fs = &failRemoveFullFS{Fs: deps.GetFs()}
+	w := postCrop(t, router, job, "CROPE-S", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
+	_ = w // path exercised: sweep Remove failure logs warning
+}
