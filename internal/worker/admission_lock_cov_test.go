@@ -355,3 +355,85 @@ func TestCompleteRescapePublishesProvenance(t *testing.T) {
 	require.NotNil(t, store.GetProvenance("/f/c.mp4"), "bare-store fallback publishes provenance after commit")
 	assert.Equal(t, map[string]string{"studio": "dmm"}, store.GetProvenance("/f/c.mp4").FieldSources)
 }
+
+// --- aborted queued-launch lifecycle gating (codex r37 P1/P2) ---
+
+// markAbortedStartFor only transitions when the lifecycle is still in the
+// launch's EXPECTED pre-start state — a Running phase belongs to another
+// live launch and must be left untouched.
+func TestMarkAbortedStartForGates(t *testing.T) {
+	mk := func(s models.JobStatus) *JobLifecycle { return &JobLifecycle{Status: s, done: make(chan struct{})} }
+
+	lc := mk(models.JobStatusPending)
+	assert.True(t, lc.markAbortedStartFor(models.JobStatusPending), "still-pending launch aborts")
+	assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus())
+	select {
+	case <-lc.done:
+	default:
+		t.Fatal("aborted start closes done so Wait() returns")
+	}
+
+	lc2 := mk(models.JobStatusCompleted)
+	assert.True(t, lc2.markAbortedStartFor(models.JobStatusCompleted), "completed job apply launch aborts")
+	assert.Equal(t, models.JobStatusCancelled, lc2.GetJobStatus())
+
+	lcRun := mk(models.JobStatusRunning)
+	assert.False(t, lcRun.markAbortedStartFor(models.JobStatusCompleted), "a running phase is another live launch — never flipped")
+	assert.Equal(t, models.JobStatusRunning, lcRun.GetJobStatus())
+
+	lcWrong := mk(models.JobStatusCompleted)
+	assert.False(t, lcWrong.markAbortedStartFor(models.JobStatusPending), "wrong pre-start state does not transition")
+	assert.Equal(t, models.JobStatusCompleted, lcWrong.GetJobStatus())
+
+	lcTerm := mk(models.JobStatusCancelled)
+	assert.False(t, lcTerm.markAbortedStartFor(models.JobStatusPending), "terminal status untouched")
+
+	lcDel := mk(models.JobStatusPending)
+	lcDel.markDeleted()
+	assert.False(t, lcDel.markAbortedStartFor(models.JobStatusPending), "deleted job untouched")
+
+	assert.False(t, (&JobLifecycle{Status: models.JobStatusPending, cancelled: true, done: make(chan struct{})}).markAbortedStartFor(models.JobStatusPending), "cancelled marker untouched")
+}
+
+// --- apply write-back family lock keys (codex r37 P2) ---
+
+func TestApplyFamilyLockKeyMatrix(t *testing.T) {
+	locked := [][]string{}
+	fn := func(id string) func() { locked = append(locked, []string{id}); return func() {} }
+	inputs := applyPhaseInputs{EditLockFn: fn}
+
+	unlock := applyFamilyLock(inputs, "AL-1", "CAN-1")
+	unlock()
+	assert.Equal(t, [][]string{{"AL-1"}, {"CAN-1"}}, locked, "alias+canonical BOTH locked in deterministic order")
+
+	locked = [][]string{}
+	applyFamilyLock(inputs, "SAME-1", "same-1")()
+	assert.Equal(t, [][]string{{"SAME-1"}}, locked, "equal identities collapse to one key")
+
+	locked = [][]string{}
+	applyFamilyLock(inputs, "", "CAN-2")()
+	assert.Equal(t, [][]string{{"CAN-2"}}, locked, "empty alias locks canonical only")
+
+	locked = [][]string{}
+	applyFamilyLock(inputs, "AL-2", " ")()
+	assert.Equal(t, [][]string{{"AL-2"}}, locked, "empty canonical locks alias only")
+
+	assert.NotPanics(t, func() { applyFamilyLock(applyPhaseInputs{}, "A", "B")() }, "nil EditLockFn is a no-op lock")
+}
+
+func TestApplyFamilyKeyIDs(t *testing.T) {
+	afc := &ApplyFileContext{
+		Match: models.FileMatchInfo{MovieID: "CAN-3"},
+		MovieResult: &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{MovieID: "AL-3"},
+		},
+	}
+	alias, canon := applyFamilyKeyIDs(afc)
+	assert.Equal(t, "AL-3", alias, "matcher alias comes from the stored result, not the rewritten cmd")
+	assert.Equal(t, "CAN-3", canon)
+
+	nilMR := &ApplyFileContext{Match: models.FileMatchInfo{MovieID: "CAN-4"}}
+	a2, c2 := applyFamilyKeyIDs(nilMR)
+	assert.Equal(t, "", a2)
+	assert.Equal(t, "CAN-4", c2)
+}

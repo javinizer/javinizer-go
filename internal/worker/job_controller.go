@@ -61,9 +61,14 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 	if err != nil {
 		cancel()
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			// codex r36 P2: client-aborted queued start ⇒ Cancelled with no
-			// Running window; nil error so callers don't cascade to Failed.
-			c.job.lifecycle.markAbortedStart()
+			// codex r36 P2 + r37: client-aborted queued start ⇒ Cancelled
+			// with no Running window, ONLY while still pre-start (Pending),
+			// persisted durably; nil error so callers don't set Failed.
+			if c.job.lifecycle.markAbortedStartFor(models.JobStatusPending) && persistFn != nil {
+				if perr := persistFn(); perr != nil {
+					logging.Warnf("job %s: aborted-scrape cancel persist failed: %v", c.job.ID.String(), perr)
+				}
+			}
 			return nil
 		}
 		return err // ErrJobGone when deleted mid-wait (BeginPhase queues behind in-flight ops)
@@ -146,10 +151,17 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	if err != nil {
 		cancel()
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			// codex r36 P2: the client abandoned the launch while it queued —
-			// record the legacy-observable Cancelled WITHOUT a Running
-			// transition, and report success so callers don't set Failed.
-			c.job.lifecycle.markAbortedStart()
+			// codex r36 P2 + r37: the client abandoned the launch while it
+			// queued — record the legacy-observable Cancelled WITHOUT a
+			// Running transition (and ONLY if no other phase started),
+			// persist it durably, and report success so callers don't set
+			// Failed. A persist failure logs; the next envelope persist
+			// re-converges.
+			if c.job.lifecycle.markAbortedStartFor(models.JobStatusCompleted) && persistFn != nil {
+				if perr := persistFn(); perr != nil {
+					logging.Warnf("job %s: aborted-apply cancel persist failed: %v", c.job.ID.String(), perr)
+				}
+			}
 			return nil
 		}
 		return err // ErrJobGone when deleted mid-wait (BeginPhase queues behind in-flight ops)

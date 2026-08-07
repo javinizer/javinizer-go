@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -163,6 +164,45 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 // It resolves the destination path, builds the command, and runs the
 // PreApply hook if configured (which may mutate the ApplyFileContext and
 // thus the returned ApplyCmd fields).
+// applyFamilyLock serializes an apply write-back against review edits on ALL
+// identity keys (codex r37 P2): edits lock the MATCHER alias
+// (FileMatchInfo.MovieID), while buildApplyCmd rewrote afc.Match.MovieID to
+// the canonical Movie.ID — applying under the canonical key alone lets the
+// atomic write-back run between an edit's candidate snapshot and its
+// post-transaction publication on the alias key. Keys are acquired in a
+// deterministic order so nested acquisition cannot deadlock.
+func applyFamilyLock(inputs applyPhaseInputs, aliasID, canonicalID string) func() {
+	if inputs.EditLockFn == nil {
+		return func() {}
+	}
+	alias := strings.TrimSpace(aliasID)
+	canon := strings.TrimSpace(canonicalID)
+	// Single-identity shapes collapse to the one meaningful key.
+	switch {
+	case alias == "":
+		return inputs.EditLockFn(canon)
+	case canon == "" || strings.EqualFold(alias, canon):
+		return inputs.EditLockFn(alias)
+	}
+	first, second := alias, canon
+	if strings.ToLower(canon) < strings.ToLower(alias) {
+		first, second = canon, alias
+	}
+	unlockFirst := inputs.EditLockFn(first)
+	unlockSecond := inputs.EditLockFn(second)
+	return func() { unlockSecond(); unlockFirst() }
+}
+
+// applyFamilyKeyIDs extracts the matcher alias (edit-lock identity) and the
+// canonical Movie.ID (apply-rewritten identity) for a write-back.
+func applyFamilyKeyIDs(afc *ApplyFileContext) (aliasID, canonicalID string) {
+	canonicalID = afc.Match.MovieID
+	if afc.MovieResult != nil {
+		aliasID = afc.MovieResult.FileMatchInfo.MovieID
+	}
+	return aliasID, canonicalID
+}
+
 func buildApplyCmd(
 	filePath string,
 	movie *models.Movie,
@@ -294,10 +334,10 @@ func interpretApplyResult(
 		// (early-fail paths in phase tests create rows on demand).
 		// Serialize with concurrent review edits (codex r11 P1): publication of
 		// the merged write-back happens under the movie family key.
-		unlock := func() {}
-		if inputs.EditLockFn != nil {
-			unlock = inputs.EditLockFn(afc.Match.MovieID)
-		}
+		// codex r37 P2: lock BOTH identity keys — edits hold the matcher
+		// alias while afc.Match.MovieID was rewritten to the canonical ID.
+		aliasID, canonicalID := applyFamilyKeyIDs(afc)
+		unlock := applyFamilyLock(inputs, aliasID, canonicalID)
 		defer unlock()
 
 		// codex P2-C/D: settled-rekey skip runs UNDER the family key; the
@@ -371,10 +411,9 @@ func interpretApplyResult(
 	}
 
 	if result != nil && result.Movie != nil {
-		unlock := func() {}
-		if inputs.EditLockFn != nil {
-			unlock = inputs.EditLockFn(afc.Match.MovieID)
-		}
+		// codex r37 P2: lock BOTH identity keys — edits hold the matcher alias.
+		aliasID, canonicalID := applyFamilyKeyIDs(afc)
+		unlock := applyFamilyLock(inputs, aliasID, canonicalID)
 		defer unlock()
 		// codex P2-C/D: settled-rekey skip runs UNDER the family key.
 		if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
