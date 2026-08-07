@@ -576,6 +576,11 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		if newID != "" && !isSafePosterFileID(newID) {
 			return &EditAdmissionConflictError{Message: fmt.Sprintf("movie ID %q is not a safe file name for rekey relocation", newID)}
 		}
+		// codex r48 P2: keep ONE spelling everywhere — validation, relocation,
+		// witness URLs AND the committed row use the trimmed identity, never
+		// an un-normalized payload (whitespace-drifting IDs would move bytes
+		// under "NEW" while persisting " NEW ").
+		movie.ID = newID
 	}
 	stalePosterID := ""
 	if sourceChanged {

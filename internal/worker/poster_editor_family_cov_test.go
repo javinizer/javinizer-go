@@ -530,6 +530,25 @@ func TestEvictStalePosterPairUnsafeIDNoop(t *testing.T) {
 	assert.NoError(t, err, "no bytes outside the intended dir are ever removed for unsafe IDs")
 }
 
+// codex r48 P2: a padded rekey ID is normalized ONCE — the committed row,
+// FileMatchInfo, relocated bytes, and rewritten URLs all carry the trimmed
+// spelling.
+func TestUpdateMovieFamilyRekeyNormalizesWhitespaceID(t *testing.T) {
+	store, fs, dir := familyRelocationSetup(t)
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	movie := &models.Movie{ID: "  SSNI-N9  "}
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), movie))
+	assert.Equal(t, "SSNI-N9", movie.ID, "payload normalized in place")
+	_, statErr := fs.Stat(filepath.Join(dir, "SSNI-N9.jpg"))
+	assert.NoError(t, statErr, "bytes at the trimmed identity")
+	got, err := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "SSNI-N9", got.Movie.ID)
+	assert.Equal(t, "SSNI-N9", got.FileMatchInfo.MovieID)
+}
+
 func TestIsSafePosterFileID(t *testing.T) {
 	for id, want := range map[string]bool{
 		"SSNI-1":    true,
