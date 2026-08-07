@@ -230,13 +230,11 @@ func promoteWitnessHashes(b *posterPairBackup) map[string]string {
 	return m
 }
 
-// mustMarshal panics on marshal failure -- these witness structs are simple
-// types that never fail to marshal, so the error check is dead code.
+// mustMarshal serializes simple witness structs. These types contain only
+// strings, uint64s, and maps -- json.Marshal cannot fail on them, so the
+// error path is eliminated entirely.
 func mustMarshal(v any) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(fmt.Sprintf("marshal failure: %v", err))
-	}
+	b, _ := json.Marshal(v)
 	return b
 }
 

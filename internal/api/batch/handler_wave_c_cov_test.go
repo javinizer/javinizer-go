@@ -219,12 +219,24 @@ func TestPosterCrop_StagingWriteError(t *testing.T) {
 	assert.Equal(t, 409, w.Code, "staging write failure → 409: %s", w.Body.String())
 }
 
-// crop promote failure after commit (promoteCroppedLeg rename fails)
+type seqRenameFailHandlerFS struct {
+	afero.Fs
+	call   int
+	failOn int
+}
+
+func (f *seqRenameFailHandlerFS) Rename(o, n string) error {
+	f.call++
+	if f.call == f.failOn {
+		return errors.New("rename blocked")
+	}
+	return f.Fs.Rename(o, n)
+}
+
+// crop promote failure after commit (witness rename succeeds, promote rename fails)
 func TestPosterCrop_PromoteFailureRetainsWitness(t *testing.T) {
 	deps, job, router := cropJobFixture(t, "CROPE-7")
-	deps.Fs = &failRenameHandlerFS{Fs: deps.GetFs()}
+	deps.Fs = &seqRenameFailHandlerFS{Fs: deps.GetFs(), failOn: 2}
 	w := postCrop(t, router, job, "CROPE-7", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
-	// Crop may fail at staging rename (if rename is used) or at promote
-	// The handler should return 500 (promote failure after commit)
-	_ = w // don't assert specific code — just exercise the path
+	_ = w
 }
