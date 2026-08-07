@@ -221,6 +221,11 @@ const promoteWitnessPrefix = ".promote-"
 type promoteWitness struct {
 	PosterID string `json:"poster_id"`
 	URL      string `json:"url"`
+	// ResultID pins arbitration to the TARGET result (never a cross-job /
+	// cross-family URL match). Restored records per-leg reversal completion
+	// so startup retries are idempotent.
+	ResultID string          `json:"result_id"`
+	Restored map[string]bool `json:"restored,omitempty"`
 }
 
 type rekeyWitness struct {
@@ -361,11 +366,17 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 		logging.Warnf("promote reconcile: job %s lookup failed: %v", jobID, jerr)
 		return 0
 	}
+	// r48-followup P2a: arbitration is TARGET-scoped — the match is the row
+	// where result ID, canonical poster ID AND the witnessed URL all agree.
+	// Global URL matching misfires when another family shares the URL, or
+	// when the target re-downloads from its existing URL (row carried it
+	// pre-op).
 	committed := false
 	var results map[string]*resultstore.MovieResult
 	if job != nil && job.ParseResults(&results) == nil {
 		for _, r := range results {
-			if r != nil && r.Movie != nil && r.Movie.Poster.PosterURL == w.URL {
+			if r != nil && r.ResultID == w.ResultID && r.Movie != nil &&
+				strings.EqualFold(r.Movie.ID, w.PosterID) && r.Movie.Poster.PosterURL == w.URL {
 				committed = true
 				break
 			}
@@ -374,34 +385,70 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 	reversed := 0
 	if !committed {
 		clean := true
-		for _, sfx := range []string{"-full.jpg", ".jpg"} {
-			canon := filepath.Join(dir, w.PosterID+sfx)
+		wRestored := w.Restored
+		if wRestored == nil {
+			wRestored = map[string]bool{}
+		}
+		persistWitness := func() {
+			w.Restored = wRestored
+			if payload, err := json.Marshal(w); err == nil {
+				if err := afero.WriteFile(c.fs, wpath, payload, 0o644); err != nil {
+					logging.Warnf("promote reconcile: witness persist %s: %v", wpath, err)
+				}
+			}
+		}
+		for _, leg := range []struct{ name, sfx string }{{"full", "-full.jpg"}, {"crop", ".jpg"}} {
+			if wRestored[leg.name] {
+				continue // already reversed on an earlier startup (r48-fu P2b)
+			}
+			canon := filepath.Join(dir, w.PosterID+leg.sfx)
 			bak := canon + ".bak"
-			if _, statErr := c.fs.Stat(canon); statErr == nil {
+			canonOK, canonErr := c.fs.Stat(canon)
+			bakOK, bakErr := c.fs.Stat(bak)
+			switch {
+			case canonErr != nil && !os.IsNotExist(canonErr):
+				clean = false
+				logging.Warnf("promote reconcile: stat %s: %v", canon, canonErr)
+				continue
+			case bakErr != nil && !os.IsNotExist(bakErr):
+				clean = false
+				logging.Warnf("promote reconcile: stat %s: %v", bak, bakErr)
+				continue
+			case bakOK != nil:
+				// Old bytes parked — reverse: drop the uncommitted canon (if any),
+				// restore the backup.
+				if canonOK != nil {
+					if rmErr := c.fs.Remove(canon); rmErr != nil {
+						clean = false
+						logging.Warnf("promote reconcile: drop uncommitted %s: %v", canon, rmErr)
+						continue
+					}
+				}
+				if rnErr := c.fs.Rename(bak, canon); rnErr != nil {
+					clean = false
+					logging.Warnf("promote reconcile: restore %s→%s: %v", bak, canon, rnErr)
+					continue
+				}
+				reversed++
+				wRestored[leg.name] = true
+				persistWitness()
+			case canonOK != nil:
+				// No backup existed pre-op ⇒ canon holds uncommitted new bytes.
 				if rmErr := c.fs.Remove(canon); rmErr != nil {
 					clean = false
 					logging.Warnf("promote reconcile: drop uncommitted %s: %v", canon, rmErr)
 					continue
 				}
-			} else if !os.IsNotExist(statErr) {
-				clean = false
-				logging.Warnf("promote reconcile: stat %s: %v", canon, statErr)
-				continue
-			}
-			if _, statErr := c.fs.Stat(bak); statErr == nil {
-				if rnErr := c.fs.Rename(bak, canon); rnErr != nil {
-					clean = false
-					logging.Warnf("promote reconcile: restore %s→%s: %v", bak, canon, rnErr)
-				} else {
-					reversed++
-				}
-			} else if !os.IsNotExist(statErr) {
-				clean = false
-				logging.Warnf("promote reconcile: stat %s: %v", bak, statErr)
+				wRestored[leg.name] = true
+				persistWitness()
+			default:
+				// Neither exists — leg was never staged/promoted; mark done.
+				wRestored[leg.name] = true
+				persistWitness()
 			}
 		}
 		if !clean {
-			return reversed // witness survives for the next startup retry
+			return reversed // witness (with health map) survives for the next retry
 		}
 	}
 	if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {

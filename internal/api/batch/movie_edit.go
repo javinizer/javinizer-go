@@ -347,15 +347,19 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 				// between promote and commit strands uncommitted bytes at canonical
 				// with the old pair only as .bak; the startup reconciler
 				// (worker.ReconcileRekeyWitnesses) arbitrates it against the row.
-				pwPath, werr := writePromoteWitness(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, posterID, req.URL)
+				pwPath, werr := writePromoteWitness(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, posterID, req.URL, resultID)
 				if werr != nil {
 					backup.restore()
 					return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster promote witness: %v", werr)}
 				}
 				finalize, pErr := promoteStagedPosterPair(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, stageID, posterID)
 				if pErr != nil {
-					backup.restore()
-					removePromoteWitness(rt.Deps().GetFs(), pwPath)
+					// codex r48-followup P2: sweep the witness ONLY when the byte
+					// restore is complete — a partial restore keeps .bak + witness
+					// for the startup reconciler.
+					if backup.restore() {
+						removePromoteWitness(rt.Deps().GetFs(), pwPath)
+					}
 					return pErr
 				}
 				// Commit failure also finalizes: it removes the parked .bak
@@ -364,9 +368,12 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 				croppedURL = strings.Replace(posterResult.CroppedURL, url.PathEscape(stageID)+".jpg", url.PathEscape(posterID)+".jpg", 1)
 				cerr := m.UpdatePosterFromURL(c.Request.Context(), req.URL, croppedURL)
 				if cerr != nil {
-					backup.restore()
-					finalize() // reap the .bak parking spots — commit did not land
-					removePromoteWitness(rt.Deps().GetFs(), pwPath)
+					// reap parking + witness ONLY on a complete restore (r48-fu P2):
+					// partial restores leave markers for the startup reconciler.
+					if backup.restore() {
+						finalize()
+						removePromoteWitness(rt.Deps().GetFs(), pwPath)
+					}
 					return cerr
 				}
 				removePromoteWitness(rt.Deps().GetFs(), pwPath) // commit landed

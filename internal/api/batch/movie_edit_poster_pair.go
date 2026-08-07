@@ -71,27 +71,39 @@ func backupPosterPair(fs afero.Fs, tempDir, jobID, posterID string) *posterPairB
 }
 
 // restore rewinds the two poster files to their pre-op bytes: existing files
-// are rewritten, previously-absent ones are removed. Best-effort: restore
-// failures are logged (the next sweep reconciles leftovers).
-func (b *posterPairBackup) restore() {
+// are rewritten, previously-absent ones are removed. Reports TRUE only when
+// every required leg succeeded (codex r48-followup P2): callers must not
+// reap the .bak parking or the recovery witness on a partial restore — the
+// startup reconciler retries from those markers.
+func (b *posterPairBackup) restore() bool {
+	complete := true
 	if !b.fullExisted && !b.fullUnreadable {
 		if err := b.fs.Remove(b.fullPath); err != nil && !os.IsNotExist(err) {
+			complete = false
 			logging.Warnf("poster rollback: remove %s: %v", b.fullPath, err)
 		}
 	} else if b.fullExisted {
 		if err := afero.WriteFile(b.fs, b.fullPath, b.fullBytes, 0o644); err != nil {
+			complete = false
 			logging.Warnf("poster rollback: restore %s: %v", b.fullPath, err)
 		}
+	} else {
+		complete = false // unreadable bytes can never be restored
 	}
 	if !b.croppedExists && !b.croppedUnreadable {
 		if err := b.fs.Remove(b.croppedPath); err != nil && !os.IsNotExist(err) {
+			complete = false
 			logging.Warnf("poster rollback: remove %s: %v", b.croppedPath, err)
 		}
 	} else if b.croppedExists {
 		if err := afero.WriteFile(b.fs, b.croppedPath, b.croppedBytes, 0o644); err != nil {
+			complete = false
 			logging.Warnf("poster rollback: restore %s: %v", b.croppedPath, err)
 		}
+	} else {
+		complete = false
 	}
+	return complete
 }
 
 // promoteStagedPosterPair atomically renames the staged poster files into
@@ -173,6 +185,14 @@ const promoteWitnessPrefix = ".promote-"
 type promoteWitness struct {
 	PosterID string `json:"poster_id"`
 	URL      string `json:"url"`
+	// ResultID pins the arbitration to the TARGET result: URL-global matching
+	// misfires when another family legitimately shares the URL (or the target
+	// re-downloads from its existing URL) — codex r48-followup P2.
+	ResultID string `json:"result_id"`
+	// Restored tracks per-leg reversal completion across startup retries — a
+	// partial reconcile persistence keeps the NEXT startup idempotent (it
+	// never removes an already-restored canon rather than the promoted one).
+	Restored map[string]bool `json:"restored,omitempty"`
 }
 
 // promoteWitnessName keeps the filename inside the job dir even for hostile
@@ -183,13 +203,13 @@ func promoteWitnessName(posterID string) string {
 	return promoteWitnessPrefix + safe + ".json"
 }
 
-func writePromoteWitness(fs afero.Fs, tempDir, jobID, posterID, srcURL string) (string, error) {
+func writePromoteWitness(fs afero.Fs, tempDir, jobID, posterID, srcURL, resultID string) (string, error) {
 	if fs == nil {
 		fs = afero.NewOsFs()
 	}
 	dir := filepath.Join(tempDir, "posters", jobID)
 	p := filepath.Join(dir, promoteWitnessName(posterID))
-	payload, err := json.Marshal(promoteWitness{PosterID: posterID, URL: srcURL})
+	payload, err := json.Marshal(promoteWitness{PosterID: posterID, URL: srcURL, ResultID: resultID})
 	if err != nil {
 		return "", err
 	}

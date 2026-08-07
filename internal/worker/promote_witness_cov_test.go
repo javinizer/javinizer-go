@@ -39,7 +39,7 @@ func TestReconcilePromoteWitnessRestoresBackup(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("new-uncommitted"), 0o644))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg.bak"), []byte("old-bytes"), 0o644))
-	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://new.example/p.jpg"})
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://new.example/p.jpg", ResultID: "res-1"})
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
 
 	repo := mocks.NewMockJobRepositoryInterface(t)
@@ -62,7 +62,7 @@ func TestReconcilePromoteWitnessRestoresBackup(t *testing.T) {
 func TestReconcilePromoteWitnessCommittedKeeps(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("new"), 0o644))
-	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://new.example/p.jpg"})
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://new.example/p.jpg", ResultID: "res-1"})
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
 
 	repo := mocks.NewMockJobRepositoryInterface(t)
@@ -76,6 +76,57 @@ func TestReconcilePromoteWitnessCommittedKeeps(t *testing.T) {
 	assert.Equal(t, "new", string(content))
 	_, wErr := fs.Stat(filepath.Join(dir, ".promote-PI-1.json"))
 	assert.Error(t, wErr)
+}
+
+// Case misfire guard: SAME URL on a DIFFERENT result (or result id)
+// must NOT count as committed (r48-followup P2a).
+func TestReconcilePromoteWitnessSameURLOtherResult(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg.bak"), []byte("old"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://shared.example/p.jpg", ResultID: "res-target"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+
+	// Another result already carries that URL; target's row does not.
+	res := map[string]*resultstore.MovieResult{
+		"/f/a.mp4": {ResultID: "res-other", Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ZZ-9", Poster: models.PosterState{PosterURL: "https://shared.example/p.jpg"}}, FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "ZZ-9"}},
+		"/f/b.mp4": {ResultID: "res-target", Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "PI-1", Poster: models.PosterState{PosterURL: "https://old.example/p.jpg"}}, FileMatchInfo: models.FileMatchInfo{Path: "/f/b.mp4", MovieID: "PI-1"}},
+	}
+	payload, merr := json.Marshal(res)
+	require.NoError(t, merr)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(&models.Job{Results: string(payload)}, nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "URL match on ANOTHER result must not sweep the witness un-reversed")
+	content, _ := afero.ReadFile(fs, filepath.Join(dir, "PI-1.jpg"))
+	assert.Equal(t, "old", string(content))
+}
+
+// Retry idempotency (r48-followup P2b): a witness persisted mid-reversal
+// with the full leg done must NOT have its already-restored canon dropped
+// on the next startup.
+func TestReconcilePromoteWitnessRestoredLegsIdempotent(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1-full.jpg"), []byte("restored-old-full"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("new-crop-uncommitted"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg.bak"), []byte("old-crop"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://new.example/p.jpg", ResultID: "res-1", Restored: map[string]bool{"full": true}})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPoster(t, "https://old.example/p.jpg"), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "only the unfinished crop leg reverses")
+	full, _ := afero.ReadFile(fs, filepath.Join(dir, "PI-1-full.jpg"))
+	assert.Equal(t, "restored-old-full", string(full), "already-restored canon preserved across STARTUPS")
+	crop, _ := afero.ReadFile(fs, filepath.Join(dir, "PI-1.jpg"))
+	assert.Equal(t, "old-crop", string(crop), "crop restored from bak")
+	_, wErr := fs.Stat(filepath.Join(dir, ".promote-PI-1.json"))
+	assert.Error(t, wErr, "witness swept once every leg reversed")
 }
 
 // Cancel-on-terminal keeps no pinned cancelled flag (codex r48 P2): an apply
