@@ -15,6 +15,29 @@
 	}
 
 	let { config, inputClass, selectClass }: Props = $props();
+
+	const NAMING_TEMPLATE_TAGS = [
+		'<ID>',
+		'<TITLE>',
+		'<ORIGINALTITLE>',
+		'<STUDIO>',
+		'<MAKER>',
+		'<LABEL>',
+		'<SERIES>',
+		'<DIRECTOR>',
+		'<YEAR>',
+		'<RELEASEDATE>',
+		'<RUNTIME>',
+		'<RATING>',
+		'<ACTORS>',
+		'<ACTRESS>',
+		'<GENRES>',
+		'<PART>',
+		'<PARTSUFFIX>',
+		'<RESOLUTION>'
+	];
+	const MEDIA_TEMPLATE_TAGS = ['<ID>', '<PART>', '<PARTSUFFIX>'];
+	const SCREENSHOT_TEMPLATE_TAGS = ['<ID>', '<INDEX>', '<INDEX:2>'];
 </script>
 
 <SettingsSection title={m.settings_output_title()} description={m.settings_output_desc()} defaultExpanded={false}>
@@ -163,6 +186,7 @@
 			id="folder-format"
 			layout="stacked"
 			showTagList={true}
+			tags={NAMING_TEMPLATE_TAGS}
 			onchange={(val) => {
 				config.output.folder_format = val;
 			}}
@@ -181,6 +205,7 @@
 			id="file-format"
 			layout="stacked"
 			showTagList={true}
+			tags={NAMING_TEMPLATE_TAGS}
 			onchange={(val) => {
 				config.output.file_format = val;
 			}}
@@ -196,6 +221,7 @@
 				value={config.output.poster_format ?? '<ID>-poster.jpg'}
 				placeholder="<ID>-poster.jpg"
 				showTagList={true}
+				tags={MEDIA_TEMPLATE_TAGS}
 				onchange={(val) => {
 					config.output.poster_format = val;
 				}}
@@ -226,6 +252,8 @@
 				description={m.settings_output_screenshot_format_desc()}
 				value={config.output.screenshot_format ?? 'fanart'}
 				placeholder="fanart"
+				showTagList={true}
+				tags={SCREENSHOT_TEMPLATE_TAGS}
 				onchange={(val) => {
 					config.output.screenshot_format = val;
 				}}

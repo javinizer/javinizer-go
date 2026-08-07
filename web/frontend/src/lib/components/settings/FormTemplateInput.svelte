@@ -11,6 +11,7 @@
 		disabled?: boolean;
 		showTagList?: boolean;
 		layout?: 'row' | 'stacked';
+		tags?: string[];
 		id?: string;
 	}
 
@@ -23,10 +24,11 @@
 		disabled = false,
 		showTagList = false,
 		layout = 'row',
+		tags,
 		id = `template-${generateUUID()}`
 	}: Props = $props();
 
-	const TEMPLATE_TAGS = [
+	const DEFAULT_TEMPLATE_TAGS = [
 		'<ID>',
 		'<TITLE>',
 		'<ORIGINALTITLE>',
@@ -44,9 +46,10 @@
 		'<GENRES>',
 		'<PART>',
 		'<PARTSUFFIX>',
-		'<INDEX>',
 		'<RESOLUTION>'
 	];
+
+	const effectiveTags = $derived(tags ?? DEFAULT_TEMPLATE_TAGS);
 
 	let showTags = $state(false);
 	let inputEl: HTMLInputElement | undefined = $state();
@@ -94,7 +97,7 @@
 			<div class="mt-2 p-3 bg-accent/50 rounded-md">
 				<p class="text-xs font-medium text-foreground mb-2">{m.form_available_template_tags()}</p>
 				<div class="flex flex-wrap gap-2">
-					{#each TEMPLATE_TAGS as tag (tag)}
+					{#each effectiveTags as tag (tag)}
 						<button
 							type="button"
 							onclick={() => insertTag(tag)}

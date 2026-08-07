@@ -64,4 +64,27 @@ describe('FormTemplateInput', () => {
 		const { container } = render(FormTemplateInput, { props: makeProps({ showTagList: false }) });
 		expect(container.textContent).not.toContain('Show available tags');
 	});
+
+	it('does not offer <INDEX> in the default tag list (it only resolves for screenshots)', async () => {
+		const { container } = render(FormTemplateInput, { props: makeProps({ value: '' }) });
+		await fireEvent.click(buttonByText(container, 'Show available tags'));
+		await waitFor(() => expect(container.querySelector('button.font-mono')).toBeTruthy());
+		const chips = Array.from(container.querySelectorAll('button.font-mono')).map(
+			(b) => b.textContent,
+		);
+		expect(chips).not.toContain('<INDEX>');
+		expect(chips).toContain('<RELEASEDATE>');
+	});
+
+	it('renders a custom tag set when the tags prop is provided', async () => {
+		const { container } = render(FormTemplateInput, {
+			props: makeProps({ value: '', tags: ['<ID>', '<INDEX>'] }),
+		});
+		await fireEvent.click(buttonByText(container, 'Show available tags'));
+		await waitFor(() => expect(buttonByText(container, '<INDEX>')).toBeTruthy());
+		const chips = Array.from(container.querySelectorAll('button.font-mono')).map(
+			(b) => b.textContent,
+		);
+		expect(chips).toEqual(['<ID>', '<INDEX>']);
+	});
 });
