@@ -155,41 +155,39 @@
 			}}
 		/>
 
-		<div>
-			<label class="block text-sm font-medium mb-2" for="folder-format">{m.settings_output_folder_template_label()}</label>
-			<input
-				id="folder-format"
-				type="text"
-				bind:value={config.output.folder_format}
-				class="{inputClass} font-mono text-sm"
-				placeholder="<ID> - <TITLE>"
-			/>
-			<p class="text-xs text-muted-foreground mt-1">
-				{m.settings_output_folder_template_desc()}
+		<FormTemplateInput
+			label={m.settings_output_folder_template_label()}
+			description={m.settings_output_folder_template_desc()}
+			value={config.output.folder_format ?? ''}
+			placeholder="<ID> - <TITLE>"
+			id="folder-format"
+			layout="stacked"
+			showTagList={true}
+			onchange={(val) => {
+				config.output.folder_format = val;
+			}}
+		/>
+		{#if !config.output.folder_format}
+			<p class="text-xs text-primary mt-1">
+				{m.settings_output_folder_template_none()}
 			</p>
-			{#if !config.output.folder_format}
-				<p class="text-xs text-primary mt-1">
-					{m.settings_output_folder_template_none()}
-				</p>
-			{/if}
-		</div>
+		{/if}
 
-		<div>
-			<label class="block text-sm font-medium mb-2" for="file-format">{m.settings_output_file_template_label()}</label>
-			<input
-				id="file-format"
-				type="text"
-				bind:value={config.output.file_format}
-				class="{inputClass} font-mono text-sm"
-				placeholder="<ID><PARTSUFFIX>"
-			/>
-			<p class="text-xs text-muted-foreground mt-1">
-				{m.settings_output_file_template_desc()}
-			</p>
-			<p class="text-xs text-muted-foreground">
-				{m.settings_output_file_template_examples()}
-			</p>
-		</div>
+		<FormTemplateInput
+			label={m.settings_output_file_template_label()}
+			description={m.settings_output_file_template_desc()}
+			value={config.output.file_format ?? ''}
+			placeholder="<ID><PARTSUFFIX>"
+			id="file-format"
+			layout="stacked"
+			showTagList={true}
+			onchange={(val) => {
+				config.output.file_format = val;
+			}}
+		/>
+		<p class="text-xs text-muted-foreground">
+			{m.settings_output_file_template_examples()}
+		</p>
 
 		<SettingsSubsection title={m.settings_output_media_subsection()}>
 			<FormTemplateInput

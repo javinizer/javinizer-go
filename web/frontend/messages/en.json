@@ -2077,7 +2077,7 @@
   "settings_output_file_template_desc": "Multi-part support: <PART> (part number), <PARTSUFFIX> (original suffix), <IF:MULTIPART>...</IF>",
   "settings_output_file_template_examples": "Examples: <ID><PARTSUFFIX> or <ID>-CD<PART:2> or <ID><IF:MULTIPART>-pt<PART></IF>",
   "settings_output_file_template_label": "File Naming Template",
-  "settings_output_folder_template_desc": "Available tags: <ID>, <TITLE>, <STUDIO>, <YEAR>, <ACTRESS>, <ACTRESSES>, <ACTORNAME>",
+  "settings_output_folder_template_desc": "Available tags: <ID>, <TITLE>, <STUDIO>, <YEAR>, <RELEASEDATE>, <ACTRESS>, <ACTRESSES>, <ACTORNAME>. Use <RELEASEDATE:YYYY-MM-DD> for custom date formats.",
   "settings_output_folder_template_label": "Folder Naming Template",
   "settings_output_folder_template_none": "No folder template — Organize mode will not create movie subfolders. When destination matches source, Rename file only mode is used automatically.",
   "settings_output_group_actress_desc": "Replace multiple actresses with a group folder name in templates (e.g., '@Group')",

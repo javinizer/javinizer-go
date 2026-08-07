@@ -2079,7 +2079,7 @@
   "settings_output_file_template_desc": "マルチパート対応: <PART> (パート番号)、<PARTSUFFIX> (元のサフィックス)、<IF:MULTIPART>...</IF>",
   "settings_output_file_template_examples": "例: <ID><PARTSUFFIX> または <ID>-CD<PART:2> または <ID><IF:MULTIPART>-pt<PART></IF>",
   "settings_output_file_template_label": "ファイル命名テンプレート",
-  "settings_output_folder_template_desc": "利用可能タグ: <ID>、<TITLE>、<STUDIO>、<YEAR>、<ACTRESS>、<ACTRESSES>、<ACTORNAME>",
+  "settings_output_folder_template_desc": "利用可能タグ: <ID>、<TITLE>、<STUDIO>、<YEAR>、<RELEASEDATE>、<ACTRESS>、<ACTRESSES>、<ACTORNAME>。<RELEASEDATE:YYYY-MM-DD> で日付形式をカスタマイズできます。",
   "settings_output_folder_template_label": "フォルダー命名テンプレート",
   "settings_output_folder_template_none": "フォルダーテンプレートなし — 整理モードは動画サブフォルダーを作成しません。出力先がソースと一致する場合、ファイル名のみ変更モードが自動的に使用されます。",
   "settings_output_group_actress_desc": "テンプレート内で複数の女優をグループフォルダー名で置換 (例: '@Group')",

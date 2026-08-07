@@ -1419,7 +1419,7 @@
   "settings_output_file_template_desc": "[ Mültí-pårt süppört: <PÅRT> (pårt ñümbër), <PÅRTŠÜFFÍX> (örígíñål süffíx), <ÍF:MÜLTÍPÅRT>...</ÍF> ]",
   "settings_output_file_template_examples": "[ Ëxåmplës: <ÍD><PÅRTŠÜFFÍX> ör <ÍD>-ÇD<PÅRT:2> ör <ÍD><ÍF:MÜLTÍPÅRT>-pt<PÅRT></ÍF> ]",
   "settings_output_file_template_label": "[ Fílë Ñåmíñg Tëmplåtë ]",
-  "settings_output_folder_template_desc": "[ Åvåílåblë tågs: <ÍD>, <TÍTLË>, <ŠTÜDÍÖ>, <YËÅR>, <ÅÇTRËŠŠ>, <ÅÇTRËŠŠËŠ>, <ÅÇTÖRÑÅMË> ]",
+  "settings_output_folder_template_desc": "[ Åvåílåblë tågs: <ÍD>, <TÍTLË>, <ŠTÜDÍÖ>, <YËÅR>, <RËLËÅŠËDÅTË>, <ÅÇTRËŠŠ>, <ÅÇTRËŠŠËŠ>, <ÅÇTÖRÑÅMË>. Üsë <RËLËÅŠËDÅTË:YYYY-MM-DD> för çüstöm dåtë förmåts. ]",
   "settings_output_folder_template_label": "[ Földër Ñåmíñg Tëmplåtë ]",
   "settings_output_folder_template_none": "[ Ñö földër tëmplåtë — Örgåñízë mödë wíll ñöt çrëåtë mövíë sübföldërs. Whëñ dëstíñåtíöñ måtçhës söürçë, Rëñåmë fílë öñly mödë ís üsëd åütömåtíçålly. ]",
   "settings_output_group_actress_desc": "[ Rëplåçë mültíplë åçtrëssës wíth å gröüp földër ñåmë íñ tëmplåtës (ë.g., '@Gröüp') ]",

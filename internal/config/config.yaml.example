@@ -385,6 +385,9 @@ file_matching:
     regex_pattern: ([a-zA-Z|tT28]+-\d+[zZ]?[eE]?)(?:-pt)?(\d{1,2})?
 output:
     folder_format: <ID> [<STUDIO>] - <TITLE> (<YEAR>)
+    # Date tags: <YEAR> (4-digit year) or <RELEASEDATE> (full release date, e.g. 2020-09-13).
+    # <RELEASEDATE> supports custom formats: <RELEASEDATE:YYYY-MM-DD>, <RELEASEDATE:YYYYMMDD>, <RELEASEDATE:MM-DD-YYYY>.
+    # Example: <ID> - <TITLE> (<RELEASEDATE:YYYY-MM-DD>)
     # Multi-language template tags (for translated metadata):
     #   <TITLE:EN>      - English title translation
     #   <TITLE:JA>      - Japanese title translation

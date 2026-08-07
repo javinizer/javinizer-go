@@ -2079,7 +2079,7 @@
   "settings_output_file_template_desc": "多片段支援：<PART>（片段編號）、<PARTSUFFIX>（原始後綴）、<IF:MULTIPART>...</IF>",
   "settings_output_file_template_examples": "範例：<ID><PARTSUFFIX> 或 <ID>-CD<PART:2> 或 <ID><IF:MULTIPART>-pt<PART></IF>",
   "settings_output_file_template_label": "檔案命名範本",
-  "settings_output_folder_template_desc": "可用標籤：<ID>、<TITLE>、<STUDIO>、<YEAR>、<ACTRESS>、<ACTRESSES>、<ACTORNAME>",
+  "settings_output_folder_template_desc": "可用標籤：<ID>、<TITLE>、<STUDIO>、<YEAR>、<RELEASEDATE>、<ACTRESS>、<ACTRESSES>、<ACTORNAME>。使用 <RELEASEDATE:YYYY-MM-DD> 自訂日期格式。",
   "settings_output_folder_template_label": "資料夾命名範本",
   "settings_output_folder_template_none": "無資料夾範本 — 整理模式將不會建立影片子資料夾。當目的地與來源相同時，會自動使用僅重新命名檔案模式。",
   "settings_output_group_actress_desc": "在範本中以群組資料夾名稱取代多位女優（例如 '@Group'）",

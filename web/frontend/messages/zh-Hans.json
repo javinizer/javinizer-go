@@ -2079,7 +2079,7 @@
   "settings_output_file_template_desc": "多部分支持：<PART>（部分编号）、<PARTSUFFIX>（原始后缀）、<IF:MULTIPART>...</IF>",
   "settings_output_file_template_examples": "示例：<ID><PARTSUFFIX> 或 <ID>-CD<PART:2> 或 <ID><IF:MULTIPART>-pt<PART></IF>",
   "settings_output_file_template_label": "文件命名模板",
-  "settings_output_folder_template_desc": "可用标签：<ID>、<TITLE>、<STUDIO>、<YEAR>、<ACTRESS>、<ACTRESSES>、<ACTORNAME>",
+  "settings_output_folder_template_desc": "可用标签：<ID>、<TITLE>、<STUDIO>、<YEAR>、<RELEASEDATE>、<ACTRESS>、<ACTRESSES>、<ACTORNAME>。使用 <RELEASEDATE:YYYY-MM-DD> 自定义日期格式。",
   "settings_output_folder_template_label": "文件夹命名模板",
   "settings_output_folder_template_none": "无文件夹模板 — 整理模式将不会创建影片子文件夹。当目标与源相同时，将自动使用仅重命名文件模式。",
   "settings_output_group_actress_desc": "在模板中用组文件夹名替换多个女优（例如「@Group」）",
