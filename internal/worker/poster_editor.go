@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -379,6 +380,25 @@ func isSafePosterFileID(id string) bool {
 		filepath.Base(id) == id && !strings.ContainsAny(id, "/\\")
 }
 
+// rewriteTempPosterURL rewrites a /api/v1/temp/posters/<job>/<id>.jpg URL to
+// the rekeyed identity (codex r39 P2): the bytes moved with the relocation,
+// so the stored crop URL must follow or the review UI shows a broken poster
+// until the next manual crop.
+func rewriteTempPosterURL(rawURL, jobID, oldID, newID string) string {
+	if rawURL == "" {
+		return rawURL
+	}
+	path, suffix := rawURL, ""
+	if i := strings.Index(rawURL, "?"); i >= 0 {
+		path, suffix = rawURL[:i], rawURL[i:]
+	}
+	oldSegment := "/" + url.PathEscape(jobID) + "/" + url.PathEscape(oldID) + ".jpg"
+	if !strings.HasSuffix(path, oldSegment) {
+		return rawURL
+	}
+	return path[:len(path)-len(oldSegment)] + "/" + url.PathEscape(jobID) + "/" + url.PathEscape(newID) + ".jpg" + suffix
+}
+
 // evictStalePosterPair removes the installed preview pair for a source that
 // just changed (D7-lite). Post-commit only; misses are no-ops.
 func (m *LockedMovieOps) evictStalePosterPair(posterID string) {
@@ -586,6 +606,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		logging.Warnf("poster rekey relocation skipped: stored canonical ID %q is not a safe file name", canonicalOldPosterID)
 	}
 	var relocatedPosterPair []struct{ src, dst string }
+	relocatedNewID, relocatedJobID := "", ""
 	if newID := strings.TrimSpace(movie.ID); newID != "" && canonicalPairSafe && !strings.EqualFold(newID, strings.TrimSpace(canonicalOldPosterID)) {
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil && env.tempDir != "" && env.jobID != "" {
 			dir := filepath.Join(env.tempDir, "posters", env.jobID)
@@ -616,7 +637,17 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				}
 				return failedErr
 			}
+			if len(relocatedPosterPair) > 0 {
+				relocatedNewID, relocatedJobID = newID, env.jobID
+			}
 		}
+	}
+	// codex r39 P2: the bytes moved to the new identity — rewrite the stored
+	// temp-poster URLs NOW (pre-commit) so a saved + restarted session shows
+	// the crop instead of a dangling pointer at the removed old-ID path.
+	if relocatedNewID != "" {
+		movie.Poster.CroppedPosterURL = rewriteTempPosterURL(movie.Poster.CroppedPosterURL, relocatedJobID, canonicalOldPosterID, relocatedNewID)
+		movie.Poster.OriginalCroppedPosterURL = rewriteTempPosterURL(movie.Poster.OriginalCroppedPosterURL, relocatedJobID, canonicalOldPosterID, relocatedNewID)
 	}
 
 	err = m.commitCandidate(ctx, candidates, nil, func(plan *EditCommitPlan) {

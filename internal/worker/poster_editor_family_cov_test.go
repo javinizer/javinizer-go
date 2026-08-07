@@ -390,6 +390,58 @@ func TestUpdateMovieFamilySkipsRelocationForUnsafeStoredID(t *testing.T) {
 	}
 }
 
+// codex r39 P2: a rekey relocation moves the pair bytes; the stored crop
+// URLs must follow or the review UI renders a broken poster after the save.
+func TestUpdateMovieFamilyRekeyRewritesCropURLs(t *testing.T) {
+	store, fs, dir := familyRelocationSetup(t)
+	const oldURL = "/api/v1/temp/posters/JOB-9/SSNI-R1.jpg?v=111"
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-1", Status: models.JobStatusCompleted,
+		Movie: &models.Movie{ID: "SSNI-R1", Poster: models.PosterState{
+			PosterURL:                "https://img.example/same.jpg",
+			CroppedPosterURL:         oldURL,
+			OriginalCroppedPosterURL: oldURL,
+			PosterCropBounds:         &models.CropBounds{X: 1, Y: 2, Width: 3, Height: 4},
+		}},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "SSNI-R1"},
+	})
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	movie := &models.Movie{ID: "SSNI-N9", Poster: models.PosterState{
+		PosterURL:                "https://img.example/same.jpg", // unchanged source: no eviction
+		CroppedPosterURL:         oldURL,
+		OriginalCroppedPosterURL: oldURL,
+		PosterCropBounds:         &models.CropBounds{X: 1, Y: 2, Width: 3, Height: 4},
+	}}
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), movie))
+	assert.Contains(t, movie.Poster.CroppedPosterURL, "/api/v1/temp/posters/JOB-9/SSNI-N9.jpg", "crop URL follows the relocated bytes")
+	assert.Contains(t, movie.Poster.OriginalCroppedPosterURL, "SSNI-N9.jpg", "original/reset crop URL follows too")
+	assert.NotContains(t, movie.Poster.CroppedPosterURL, "SSNI-R1")
+	_, statErr := fs.Stat(filepath.Join(dir, "SSNI-N9.jpg"))
+	assert.NoError(t, statErr, "pair moved to the new identity")
+}
+
+func TestRewriteTempPosterURL(t *testing.T) {
+	assert.Equal(t,
+		"/api/v1/temp/posters/J-1/IPX-9.jpg?v=42",
+		rewriteTempPosterURL("/api/v1/temp/posters/J-1/OLD-1.jpg?v=42", "J-1", "OLD-1", "IPX-9"))
+	// no query string
+	assert.Equal(t,
+		"/api/v1/temp/posters/J-1/NEW.jpg",
+		rewriteTempPosterURL("/api/v1/temp/posters/J-1/OLD.jpg", "J-1", "OLD", "NEW"))
+	// non-poster URLs and mismatched segments pass through untouched
+	assert.Equal(t, "https://cdn.example/x.jpg",
+		rewriteTempPosterURL("https://cdn.example/x.jpg", "J-1", "OLD", "NEW"))
+	assert.Equal(t, "/api/v1/temp/posters/J-2/OLD.jpg",
+		rewriteTempPosterURL("/api/v1/temp/posters/J-2/OLD.jpg", "J-1", "OLD", "NEW"), "other job's URL untouched")
+	assert.Equal(t, "", rewriteTempPosterURL("", "J-1", "OLD", "NEW"))
+	// IDs round-trip through PathEscape, matching manager.go's encoding.
+	assert.Equal(t,
+		"/api/v1/temp/posters/J%201/A%2FB.jpg",
+		rewriteTempPosterURL("/api/v1/temp/posters/J%201/C%20D.jpg", "J 1", "C D", "A/B"))
+}
+
 // --- stale-pair eviction ---
 
 func TestEvictStalePosterPairUnsafeIDNoop(t *testing.T) {
