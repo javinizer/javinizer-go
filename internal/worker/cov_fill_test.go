@@ -176,7 +176,7 @@ func TestReconcileCropJobLookupError(t *testing.T) {
 // witness swept.
 func TestReconcileCropCommittedStagedAbsent(t *testing.T) {
 	fs, dir := witnessFixture(t)
-	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
+	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c1", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-stage-x.json"), witness, 0o644))
 	repo := mocks.NewMockJobRepositoryInterface(t)
 	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(cropWitnessJobRow(t, cropWitnessFixtureURL, 1), nil)
@@ -612,7 +612,7 @@ func TestReconcileCropUncommittedSweepsFull(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "stage-x.jpg"), []byte("new"), 0o644))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "stage-x-full.jpg"), []byte("full"), 0o644))
-	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
+	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c1", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-stage-x.json"), witness, 0o644))
 	repo := mocks.NewMockJobRepositoryInterface(t)
 	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(cropWitnessJobRow(t, "https://old", 0), nil)
@@ -691,7 +691,7 @@ func TestReconcilePromoteNoBakCanonHashMismatchDrop(t *testing.T) {
 func TestReconcileCropUncommittedStagedRemoveFail(t *testing.T) {
 	base, dir := witnessFixture(t)
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "stage-x.jpg"), []byte("new"), 0o644))
-	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
+	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c1", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".crop-stage-x.json"), witness, 0o644))
 	repo := mocks.NewMockJobRepositoryInterface(t)
 	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(cropWitnessJobRow(t, "https://old", 0), nil)
@@ -1000,7 +1000,7 @@ func TestReconcileCropWitnessSweepError(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dir := "/tmp/posters/JOB-W1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
-	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
+	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c1", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".crop-stage-x.json"), witness, 0o644))
 	repo := mocks.NewMockJobRepositoryInterface(t)
 	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(cropWitnessJobRow(t, "https://old", 0), nil)
@@ -1018,7 +1018,7 @@ func TestReconcileCropStagedFullSweepError(t *testing.T) {
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "stage-x.jpg"), []byte("new"), 0o644))
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "stage-x-full.jpg"), []byte("full"), 0o644))
-	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
+	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c1", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".crop-stage-x.json"), witness, 0o644))
 	repo := mocks.NewMockJobRepositoryInterface(t)
 	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(cropWitnessJobRow(t, "https://old", 0), nil)
@@ -1358,4 +1358,106 @@ func TestRekeyWitnessSweepRemoveErrorOnFailedRelocation(t *testing.T) {
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
 	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"}))
+}
+
+// --- r56 grind batch 6 ---
+
+type selectiveFailRemoveFS struct {
+	afero.Fs
+	failSuffix string
+}
+
+func (f selectiveFailRemoveFS) Remove(name string) error {
+	if strings.HasSuffix(name, f.failSuffix) {
+		return errors.New("remove blocked")
+	}
+	return f.Fs.Remove(name)
+}
+
+func TestRekeyWitnessSweepErrorInFailedRelocationRollback(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "SSNI-R1", "")
+	baseFS := afero.NewMemMapFs()
+	dir := filepath.Join("/tmp", "posters", "JOB-9")
+	require.NoError(t, baseFS.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(baseFS, filepath.Join(dir, "SSNI-R1-full.jpg"), []byte("x"), 0o644))
+	seqFS := &seqRenameFailFS{Fs: baseFS, failOn: map[int]bool{2: true}}
+	fs := selectiveFailRemoveFS{Fs: seqFS, failSuffix: ".rekey-SSNI-R1.json"}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err, "forward rename fails")
+}
+
+func TestReconcilePromoteWitnessSweepErrorAfterBakSweepSuccess(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1-full.jpg.bak"), []byte("old"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x", ResultID: "res-1", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(witnessJobRowPosterRev(t, "https://x", 1), nil)
+	failFs := selectiveFailRemoveFS{Fs: fs, failSuffix: ".promote-PI-1.json"}
+	cl := &TempDirCleaner{fs: failFs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+	_, fbErr := fs.Stat(filepath.Join(dir, "PI-1-full.jpg.bak"))
+	assert.Error(t, fbErr, "bak swept")
+}
+
+func TestReconcileCropSweepErrorsAfterPromoteSuccess(t *testing.T) {
+	base, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "stage-x.jpg"), []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "stage-x-full.jpg"), []byte("full"), 0o644))
+	witness, _ := json.Marshal(cropWitness{PosterID: "CP-1", ResultID: "res-c1", StageID: "stage-x", CroppedURL: cropWitnessFixtureURL, PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".crop-stage-x.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(cropWitnessJobRow(t, cropWitnessFixtureURL, 1), nil)
+	failFs := selectiveFailRemoveFS{Fs: base, failSuffix: ".json"}
+	cl := &TempDirCleaner{fs: failFs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "promote succeeded despite Remove failures")
+}
+
+func TestReconcileRekeyWitnessReadFileError(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/posters/JOB-W1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".rekey-OLD.json"), []byte("{}"), 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	fs := failOpenForNameFS{Fs: base, failName: ".rekey-OLD.json"}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "unreadable rekey witness skipped")
+}
+
+func TestNewJobStoreReconcileFindError(t *testing.T) {
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, mock.Anything).Return(nil, errors.New("db down")).Maybe()
+	repo.EXPECT().List(mock.Anything).Return([]models.Job{}, nil)
+	fs := afero.NewMemMapFs()
+	fs.MkdirAll("/tmp/posters/J-RF", 0o755)
+	witness, _ := json.Marshal(rekeyWitness{OldID: "OLD", NewID: "NEW", PrevRevision: 0})
+	afero.WriteFile(fs, "/tmp/posters/J-RF/.rekey-OLD.json", witness, 0o644)
+	s := NewJobStore(repo, nil, nil, "/tmp", nil, fs)
+	require.NotNil(t, s)
+}
+
+func TestCommitResultWithProvenanceViaFamilyKeyedFixed(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	result := &resultstore.MovieResult{
+		ResultID: "res-1", Status: models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "X-1"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "X-1"},
+	}
+	store.UpdateFileResult("/f/a.mp4", result)
+	current, _ := store.GetMovieResult("/f/a.mp4")
+	fkr := &familyKeyedResultMap{ResultMapAccessor: store, registry: newKeyedMutexRegistry()}
+	prov := &resultstore.ProvenanceData{FieldSources: map[string]string{"title": "test"}}
+	err := commitResultWithProvenance(fkr, "/f/a.mp4", result, current.Revision, prov)
+	assert.NoError(t, err)
 }
