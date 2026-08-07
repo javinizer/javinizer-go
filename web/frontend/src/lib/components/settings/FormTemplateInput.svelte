@@ -12,6 +12,7 @@
 		showTagList?: boolean;
 		layout?: 'row' | 'stacked';
 		tags?: string[];
+		clickableTags?: boolean;
 		id?: string;
 	}
 
@@ -25,6 +26,7 @@
 		showTagList = false,
 		layout = 'row',
 		tags,
+		clickableTags = true,
 		id = `template-${generateUUID()}`
 	}: Props = $props();
 
@@ -98,11 +100,15 @@
 				<p class="text-xs font-medium text-foreground mb-2">{m.form_available_template_tags()}</p>
 				<div class="flex flex-wrap gap-2">
 					{#each effectiveTags as tag (tag)}
-						<button
-							type="button"
-							onclick={() => insertTag(tag)}
-							class="text-xs bg-background px-2 py-1 rounded border border-border hover:border-primary hover:text-primary transition-colors cursor-pointer font-mono"
-						>{tag}</button>
+						{#if clickableTags}
+							<button
+								type="button"
+								onclick={() => insertTag(tag)}
+								class="text-xs bg-background px-2 py-1 rounded border border-border hover:border-primary hover:text-primary transition-colors cursor-pointer font-mono"
+							>{tag}</button>
+						{:else}
+							<code class="text-xs bg-background px-2 py-1 rounded border border-border font-mono">{tag}</code>
+						{/if}
 					{/each}
 				</div>
 			</div>

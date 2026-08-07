@@ -203,6 +203,7 @@
 				value={(Array.isArray(config.metadata.nfo?.tag) ? config.metadata.nfo.tag.join(', ') : config.metadata.nfo?.tag) ?? '<SET>'}
 				placeholder="<SET>"
 				showTagList={true}
+				clickableTags={false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
 					config.metadata.nfo.tag = val

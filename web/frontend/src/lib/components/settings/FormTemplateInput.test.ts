@@ -87,4 +87,18 @@ describe('FormTemplateInput', () => {
 		);
 		expect(chips).toEqual(['<ID>', '<INDEX>']);
 	});
+
+	it('renders non-clickable chips when clickableTags is false', async () => {
+		const onchange = vi.fn();
+		const { container } = render(FormTemplateInput, {
+			props: makeProps({ value: '', onchange, clickableTags: false }),
+		});
+		await fireEvent.click(buttonByText(container, 'Show available tags'));
+		await waitFor(() => expect(container.querySelector('code.font-mono')).toBeTruthy());
+		expect(container.querySelectorAll('button.font-mono').length).toBe(0);
+		expect(container.querySelectorAll('code.font-mono').length).toBeGreaterThan(0);
+		const code = container.querySelector('code.font-mono') as HTMLElement;
+		await fireEvent.click(code);
+		expect(onchange).not.toHaveBeenCalled();
+	});
 });
