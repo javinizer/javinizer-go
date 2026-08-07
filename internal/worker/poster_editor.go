@@ -645,6 +645,15 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				// while the durable row still references the old one; the startup
 				// reconciler (ReconcileRekeyWitnesses) arbitrates from the job row.
 				witnessPath := filepath.Join(dir, rekeyWitnessPrefix+canonicalOldPosterID+".json")
+				// codex r50 P2: an UNRESOLVED witness means a past mid-relocation
+				// crash (or incomplete rollback) already moved some legs to another
+				// identity — overwriting it would orphan those bytes beyond
+				// recovery. The startup reconciler clears witnesses; reject until then.
+				if _, err := env.fs.Stat(witnessPath); err == nil {
+					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster rekey witness unresolved for %s: the previous rekey left stranded moves — restart to reconcile before rekeying again", canonicalOldPosterID)}
+				} else if !errors.Is(err, afero.ErrFileNotFound) {
+					return fmt.Errorf("poster rekey witness check %s: %w", witnessPath, err)
+				}
 				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID})
 				if err := afero.WriteFile(env.fs, witnessPath, wBytes, 0o644); err != nil {
 					return fmt.Errorf("poster rekey witness %s: %w", witnessPath, err)

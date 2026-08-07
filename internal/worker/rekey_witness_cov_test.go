@@ -151,6 +151,23 @@ func TestReconcileRekeyWitnessesNilGuards(t *testing.T) {
 	}())
 }
 
+// codex r50 P2: a rekey MUST refuse to step on an unresolved witness — the
+// previous rekey's stranded moves would lose their only recovery record.
+func TestUpdateMovieFamilyRekeyRejectsUnresolvedWitness(t *testing.T) {
+	store, fs, dir := familyRelocationSetup(t)
+	witness, _ := json.Marshal(rekeyWitness{OldID: "SSNI-R1", NewID: "SSNI-OLD-NEW"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-SSNI-R1.json"), witness, 0o644))
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	var conflict *EditAdmissionConflictError
+	require.ErrorAs(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-NEW2"}), &conflict)
+	// same-identity saves (no relocation arm) must still work
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-R1"}), "non-rekey updates unaffected")
+	data, _ := afero.ReadFile(fs, filepath.Join(dir, ".rekey-SSNI-R1.json"))
+	assert.Contains(t, string(data), "SSNI-OLD-NEW", "the original witness content is untouched")
+}
+
 // The writer side of the contract: a successful rekey always sweeps its
 // witness, so a clean save leaves nothing for the reconciler to arbitrate.
 func TestUpdateMovieFamilyRekeySweepsWitnessOnSuccess(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -222,12 +223,12 @@ func promoteWitnessHashes(b *posterPairBackup) map[string]string {
 	return m
 }
 
-// promoteWitnessName keeps the filename inside the job dir even for hostile
-// poster IDs (the reconciler parses the poster ID from the CONTENT, never
-// from the filename).
+// promoteWitnessName keeps the filename inside the job dir AND collision-free
+// (codex r50 P2): PathEscape is injective — "A.B" stays distinct from "A_B",
+// and traversal attempts become opaque %2F paths under the job dir (the
+// reconciler parses the poster ID from the CONTENT, never the filename).
 func promoteWitnessName(posterID string) string {
-	safe := strings.NewReplacer("/", "_", "\\", "_", ".", "_").Replace(posterID)
-	return promoteWitnessPrefix + safe + ".json"
+	return promoteWitnessPrefix + url.PathEscape(posterID) + ".json"
 }
 
 func writePromoteWitness(fs afero.Fs, tempDir, jobID, posterID, srcURL, resultID string, prevRevision uint64, backup *posterPairBackup) (string, error) {

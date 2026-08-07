@@ -20,7 +20,9 @@ func TestPromoteWitnessTraversalSafeName(t *testing.T) {
 	}
 	p, err := writePromoteWitness(fs, "/tmp", "JOB-1", "../evil", "https://x/y.jpg", "res-evil", 0, nil)
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(dir, ".promote-___evil.json"), p, "stem is scrubbed inside the job dir")
+	assert.Equal(t, filepath.Join(dir, ".promote-..%2Fevil.json"), p, "traversal is escaped in place")
+	// codex r50 P2: injective encoding — A.B and A_B must never share a name.
+	assert.NotEqual(t, promoteWitnessName("A.B"), promoteWitnessName("A_B"))
 	got, err := afero.ReadFile(fs, p)
 	require.NoError(t, err)
 	var w promoteWitness
