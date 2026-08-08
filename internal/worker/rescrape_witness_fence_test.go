@@ -544,6 +544,22 @@ func TestMarkerSweepWedgeKeepsMarker(t *testing.T) {
 	assert.NoError(t, err, "wedged sweep keeps the marker for the next startup")
 }
 
+// audit F-R22-1: a stranded sentinel whose ID contains ".rsbak." sweeps at
+// startup (the exclusion tests PARSE — its tail has 3 segments, not hex.hex).
+func TestMarkerBranchHandlesDottedRsbakIDs(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-X.rsbak.aa.a1.b2"), []byte("{}"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "X.rsbak.aa.jpg.rsbak.a1.b2"), []byte("parked"), 0o644))
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	healed := cl.reconcileParkedPosterBackups(dir)
+	assert.Equal(t, 2, healed, "parked leg re-homed AND stranded marker swept")
+	_, mErr := fs.Stat(filepath.Join(dir, ".inflight-X.rsbak.aa.a1.b2"))
+	assert.Error(t, mErr, "marker swept (parked-parse rejected its tail)")
+	got, err := afero.ReadFile(fs, filepath.Join(dir, "X.rsbak.aa.jpg"))
+	require.NoError(t, err)
+	assert.Equal(t, "parked", string(got), "parked leg re-homed")
+}
+
 // audit F-R20-2 shape coverage: hex-hex tail anchor is exact.
 func TestMarkerAnchoredShapeMatrix(t *testing.T) {
 	assert.True(t, markerAnchored(".inflight-x.1.2"), "1-char nonce halves are valid")

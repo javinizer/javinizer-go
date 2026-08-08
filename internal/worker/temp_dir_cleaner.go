@@ -512,7 +512,15 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(dir string) int {
 		// anchor therefore requires that the name does NOT ALSO parse as a
 		// parked leg (whose ".rsbak."+nonce tail is subshape-compatible).
 		// Otherwise a leading-dot ID's parked bytes get eaten as "markers".
-		if markerAnchored(name) && !strings.Contains(name, ".rsbak.") {
+		// audit F-R21-1 + F-R22-1: the marker branch's exclusion must parse,
+		// not substring: a name whose .rsbak. tail is hex.hex is a parked leg
+		// (re-home, never sweep); a marker whose ID CONTAINS ".rsbak." has a
+		// 3+-segment tail → parked-parse rejects → marker branch fires.
+		parkedParse := false
+		if ridx := strings.LastIndex(name, ".rsbak."); ridx >= 0 {
+			parkedParse = isBackupNonce(name[ridx+len(".rsbak."):])
+		}
+		if markerAnchored(name) && !parkedParse {
 			// audit F-R19-1 aftermath: stranded in-flight markers (crash) — a
 			// restarted process has no live generation windows; delete.
 			if rmErr := c.fs.Remove(filepath.Join(dir, name)); rmErr != nil {
