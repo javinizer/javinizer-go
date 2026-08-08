@@ -407,3 +407,22 @@ func TestStaleRetryExpiredLease(t *testing.T) {
 	require.Equal(t, models.ActressSyncTaskPending, stored[0].Status)
 	require.Equal(t, 1, stored[0].StaleRetryCount)
 }
+
+// replaceThumbnail compares the CAS predicate against the raw stored value:
+// a legacy thumb_url padded with whitespace must still match and be repaired.
+func TestReplaceThumbnailWhitespaceRawPredicate(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	ctx := context.Background()
+	actress := &models.Actress{DMMID: 55, JapaneseName: "\u5973\u512a", ThumbURL: "\thttps://pics.dmm.co.jp/mono/actjpgs/abc.jpg\n"}
+	require.NoError(t, repo.Create(ctx, actress))
+
+	// The caller echoes back exactly what the row held (whitespace included).
+	ok, err := repo.ReplaceThumbnail(ctx, actress.ID, 55, actress.ThumbURL, "https://pics.dmm.co.jp/mono/actjpgs/def.jpg")
+	require.NoError(t, err)
+	require.True(t, ok, "whitespace-padded stored value must match its own CAS predicate")
+
+	stored, err := repo.FindByDMMID(ctx, 55)
+	require.NoError(t, err)
+	require.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/def.jpg", stored.ThumbURL)
+}

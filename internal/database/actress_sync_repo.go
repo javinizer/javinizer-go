@@ -1218,6 +1218,10 @@ func (r *ActressRepository) ReplaceThumbnailForSyncTask(ctx context.Context, id 
 }
 
 func (r *ActressRepository) replaceThumbnail(ctx context.Context, id uint, dmmID int, expected, replacement, taskID, leaseToken string) (bool, error) {
+	// Validation trims, but the CAS predicate must compare against the raw
+	// stored value: a legacy thumb_url with surrounding whitespace would
+	// otherwise never match its own row and the sync could never repair it.
+	rawExpected := expected
 	expected = strings.TrimSpace(expected)
 	replacement = strings.TrimSpace(replacement)
 	if id == 0 || dmmID <= 0 || expected == "" || replacement == "" || models.IsKnownInvalidDMMActressThumbnail(replacement) {
@@ -1230,7 +1234,7 @@ func (r *ActressRepository) replaceThumbnail(ctx context.Context, id uint, dmmID
 			if err := ensureSyncTaskLeaseTx(tx, taskID, leaseToken); err != nil {
 				return err
 			}
-			result := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = ? AND thumb_url = ?", id, dmmID, expected).Update("thumb_url", replacement)
+			result := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = ? AND thumb_url = ?", id, dmmID, rawExpected).Update("thumb_url", replacement)
 			if result.Error != nil {
 				return result.Error
 			}
