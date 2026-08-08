@@ -345,6 +345,8 @@ func DefaultConfig(priorities []string, defaults map[string]*models.ScraperSetti
 			VersionCheckEnabled:       true,
 			VersionCheckIntervalHours: 24,
 			TempDir:                   DefaultTempDir,
+			ImageCacheEnabled:         true,
+			ImageCacheTTLHours:        168,
 		},
 		// VersionCheckStableOnly is intentionally omitted: its zero value (false)
 		// is the correct default (prereleases allowed). Existing configs that

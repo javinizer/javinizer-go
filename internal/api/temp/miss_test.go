@@ -48,6 +48,7 @@ func TestServeTempPoster_JobStoreWithTempDir(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(posterDir, "poster.jpg"), []byte("jpeg"), 0644))
 
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	cfg.System.TempDir = defaultTempDir
 
 	// Create a mock JobStore that returns a job with TempDir
@@ -108,6 +109,7 @@ func TestServeTempImage_EmptyURLParam(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	deps := newTestDeps(cfg)
 
 	router := gin.New()
@@ -126,6 +128,7 @@ func TestServeTempImage_FTPScheme(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	deps := newTestDeps(cfg)
 
 	router := gin.New()
@@ -144,6 +147,7 @@ func TestServeTempImage_MissingHost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	deps := newTestDeps(cfg)
 
 	router := gin.New()
@@ -166,6 +170,7 @@ func TestServeTempImage_PrivateIPBlocked(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	deps := newTestDeps(cfg)
 
 	router := gin.New()
@@ -193,6 +198,7 @@ func TestServeTempImage_UpstreamNon200Status(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	deps := newTestDeps(cfg)
 
 	router := gin.New()
@@ -223,6 +229,7 @@ func TestServeTempImage_SuccessWithNoContentType(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	cfg.Scrapers.Referer = ""
 	deps := newTestDeps(cfg)
 
@@ -259,6 +266,7 @@ func TestServeTempImage_CustomUserAgent(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	cfg.Scrapers.UserAgent = "TestAgent/1.0"
 	deps := newTestDeps(cfg)
 

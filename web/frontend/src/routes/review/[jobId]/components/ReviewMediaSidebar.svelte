@@ -59,7 +59,7 @@
 						<div class="w-full max-w-60 mx-auto aspect-2/3 overflow-hidden rounded border relative">
 							{#if currentMovie.should_crop_poster && !currentMovie.cropped_poster_url}
 								<img
-									src={displayPosterUrl}
+									src={previewImageURL(displayPosterUrl)}
 									alt={m.review_poster_alt()}
 									class="absolute h-full"
 									style="right: 0; width: auto; min-width: 211.8%; object-fit: cover; object-position: right center;"
@@ -67,7 +67,7 @@
 								/>
 							{:else}
 								<img
-									src={displayPosterUrl}
+									src={previewImageURL(displayPosterUrl)}
 									alt={m.review_poster_alt()}
 									class="w-full h-full object-contain"
 									onerror={(e) => { (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_SVG; }}

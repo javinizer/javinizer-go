@@ -852,6 +852,8 @@ export interface SystemConfig {
 	version_check_enabled: boolean;
 	version_check_interval_hours: number;
 	temp_dir: string;
+	image_cache_enabled: boolean;
+	image_cache_ttl_hours: number;
 }
 
 export interface ProxyProfile {

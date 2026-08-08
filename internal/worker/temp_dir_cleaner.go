@@ -230,3 +230,80 @@ func (c *TempDirCleaner) StartStaleTempCleanup() chan struct{} {
 	}()
 	return stop
 }
+
+// CleanupStaleImageCache removes expired entries from the image cache directory.
+// It walks {tempDir}/image-cache/ (shard dirs then files) and removes files whose
+// mtime is older than ttl, plus orphan temp files from {tempDir}/image-cache/.tmp/.
+// No-op when ttl <= 0 or the dir does not exist. Per-file removal failures are
+// logged and skipped; the walk continues, and an error is returned only if the
+// top-level directory traversal fails.
+func CleanupStaleImageCache(fs afero.Fs, tempDir string, ttl time.Duration) (int, error) {
+	if ttl <= 0 || fs == nil {
+		return 0, nil
+	}
+	root := filepath.Join(tempDir, "image-cache")
+	entries, err := afero.ReadDir(fs, root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read image-cache dir: %w", err)
+	}
+	cutoff := time.Now().Add(-ttl)
+	removed := 0
+	for _, shard := range entries {
+		if !shard.IsDir() || shard.Name() == ".tmp" {
+			continue
+		}
+		shardPath := filepath.Join(root, shard.Name())
+		files, ferr := afero.ReadDir(fs, shardPath)
+		if ferr != nil {
+			if os.IsNotExist(ferr) {
+				continue
+			}
+			logging.Warnf("CleanupStaleImageCache: failed to read shard %s: %v", shardPath, ferr)
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() {
+				continue
+			}
+			if f.ModTime().Before(cutoff) {
+				fp := filepath.Join(shardPath, f.Name())
+				info, statErr := fs.Stat(fp)
+				if statErr != nil || !info.ModTime().Before(cutoff) {
+					continue
+				}
+				if rerr := fsutil.AferoRemoveAll(fs, fp); rerr != nil {
+					logging.Warnf("CleanupStaleImageCache: failed to remove %s: %v", fp, rerr)
+				} else {
+					removed++
+				}
+			}
+		}
+		remaining, rerr := afero.ReadDir(fs, shardPath)
+		if rerr == nil && len(remaining) == 0 {
+			_ = fsutil.AferoRemoveAll(fs, shardPath)
+		}
+	}
+	tmpDir := filepath.Join(root, ".tmp")
+	tmpEntries, terr := afero.ReadDir(fs, tmpDir)
+	if terr == nil {
+		for _, f := range tmpEntries {
+			if f.IsDir() || !f.ModTime().Before(cutoff) {
+				continue
+			}
+			fp := filepath.Join(tmpDir, f.Name())
+			info, statErr := fs.Stat(fp)
+			if statErr != nil || !info.ModTime().Before(cutoff) {
+				continue
+			}
+			if rerr := fsutil.AferoRemoveAll(fs, fp); rerr != nil {
+				logging.Warnf("CleanupStaleImageCache: failed to remove temp %s: %v", fp, rerr)
+			} else {
+				removed++
+			}
+		}
+	}
+	return removed, nil
+}
