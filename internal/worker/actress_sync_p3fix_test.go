@@ -105,3 +105,26 @@ func TestCacheSkippedUnderActressPriority(t *testing.T) {
 	require.NoError(t, stErr)
 	require.Empty(t, stored.ThumbURL, "cache must be suppressed under actress:[__skip__]")
 }
+
+// Codex P2 (round 3): the REVALIDATION cache-fallback path must honor the same
+// actress-priority gate — __skip__ suppresses it too, not just the initial fill.
+func TestRevalidationCacheSkippedUnderActressPriority(t *testing.T) {
+	db, repo, movieRepo, actress := newActressSyncFixture(t, &models.Actress{DMMID: 5151, JapaneseName: "src", ThumbURL: ""})
+	_ = movieRepo
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	lookupCache := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		if dmmID == 5151 {
+			return models.ActressInfo{DMMID: 5151, ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/y.jpg"}, true
+		}
+		return models.ActressInfo{}, false
+	}
+	_, err := SyncActressMetadata(context.Background(), actress.ID, repo, movieRepo, nil, ActressSyncOptions{
+		Revalidate:           true,
+		ActressFieldPriority: []string{"__skip__"},
+		LookupCache:          lookupCache,
+	})
+	require.NoError(t, err)
+	stored, stErr := repo.FindByDMMID(context.Background(), 5151)
+	require.NoError(t, stErr)
+	require.Empty(t, stored.ThumbURL, "revalidate path must also be suppressed by actress:[__skip__]")
+}

@@ -67,6 +67,16 @@ func newScraperWithClient(settings *models.ScraperSettings, client *resty.Client
 }
 
 // buildClient ...
+// redirectAllowlist builds the set of hostnames redirects may target: the
+// canonical minnano-av.com hosts plus any configured mirror base.
+func redirectAllowlist(baseURL string) map[string]struct{} {
+	allowed := map[string]struct{}{"minnano-av.com": {}, "www.minnano-av.com": {}}
+	if u, err := url.Parse(strings.TrimSpace(baseURL)); err == nil && u.Hostname() != "" {
+		allowed[strings.ToLower(u.Hostname())] = struct{}{}
+	}
+	return allowed
+}
+
 func buildClient(settings *models.ScraperSettings, globalProxy *models.ProxyConfig) *resty.Client {
 	timeout := time.Duration(settings.Timeout) * time.Second
 	if timeout <= 0 {
@@ -92,13 +102,16 @@ func buildClient(settings *models.ScraperSettings, globalProxy *models.ProxyConf
 	// Search/resolves may only ever land on MinnanoAV itself: a spoofed or
 	// compromised page must not redirect the backend to loopback, private,
 	// or cloud-metadata endpoints (SSRF), and chains stay bounded.
+	allowed := redirectAllowlist(settings.BaseURL)
 	client.SetRedirectPolicy(resty.RedirectPolicyFunc(func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return fmt.Errorf("minnanoav: stopped after 5 redirects")
 		}
 		host := strings.ToLower(req.URL.Hostname())
-		if host == "minnano-av.com" || strings.HasSuffix(host, ".minnano-av.com") {
-			return nil
+		for ok := range allowed {
+			if host == ok || strings.HasSuffix(host, "."+ok) {
+				return nil
+			}
 		}
 		return fmt.Errorf("minnanoav: refusing redirect to %s", req.URL.Redacted())
 	}))

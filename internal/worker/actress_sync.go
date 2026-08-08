@@ -358,7 +358,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			}
 		}
 	}
-	if revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID {
+	if revalidate && cacheAllowed && cacheHit && cacheMatch.DMMID == actress.DMMID {
 		if fallback := cacheFallbackMatch(actress, matches, cacheMatch); len(actressInfoFields(fallback)) > 0 {
 			// The runtime cache is built from DMM-sourced data.
 			appendMatch(fallback, "dmm")

@@ -238,3 +238,14 @@ func TestSearchActressWithResponseMissingRequestURL(t *testing.T) {
 	// net/http attaches the original request when a transport omits it; this assertion documents the safe outcome.
 	require.NoError(t, err)
 }
+
+// Codex P2 (round 3): configured mirrors are allowed redirect targets.
+func TestRedirectAllowlistIncludesConfiguredMirror(t *testing.T) {
+	allow := redirectAllowlist("")
+	require.Contains(t, allow, "minnano-av.com")
+	require.Contains(t, allow, "www.minnano-av.com")
+
+	mirror := redirectAllowlist("https://mirror.example.com/base")
+	require.Contains(t, mirror, "mirror.example.com")
+	require.NotContains(t, mirror, "other-mirror.example.com")
+}

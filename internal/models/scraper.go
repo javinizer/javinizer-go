@@ -64,6 +64,13 @@ func (r *ScraperResult) Clone() *ScraperResult {
 	if r.Actresses != nil {
 		copied.Actresses = make([]ActressInfo, len(r.Actresses))
 		copy(copied.Actresses, r.Actresses)
+		for i := range copied.Actresses {
+			if r.Actresses[i].Aliases != nil {
+				aliases := make([]string, len(r.Actresses[i].Aliases))
+				copy(aliases, r.Actresses[i].Aliases)
+				copied.Actresses[i].Aliases = aliases
+			}
+		}
 	}
 	if r.Genres != nil {
 		copied.Genres = make([]string, len(r.Genres))
