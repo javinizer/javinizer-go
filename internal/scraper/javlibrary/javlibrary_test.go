@@ -60,6 +60,7 @@ func TestExtractIDFromURL(t *testing.T) {
 		{"html page yields stable derived id", "https://www.javlibrary.com/en/javliay67q.html", "javliay67q", false},
 		{"html page with ja yields stable derived id", "https://www.javlibrary.com/ja/javc4dd12.html", "javc4dd12", false},
 		{"short html page yields derived id", "https://www.javlibrary.com/ab.html", "ab", false},
+		{"non-html extension stripped", "https://www.javlibrary.com/en/abcde.json", "abcde", false},
 	}
 
 	for _, tt := range tests {
@@ -356,6 +357,10 @@ func TestExtractVideoID(t *testing.T) {
 	// Bounded regex: a later td.text outside video_id must not be captured.
 	badHTML := `<div id="video_title"></div><div id="video_release_date"><table><td class="text">2024-01-01</td></table></div>`
 	assert.Equal(t, "", s.extractVideoID(badHTML), "must not capture td.text outside video_id element")
+
+	// video_id div exists but has no td.text element inside → return empty
+	emptyVidHTML := `<div id="video_id"><table><tr><td class="header">ID:</td></tr></table></div>`
+	assert.Equal(t, "", s.extractVideoID(emptyVidHTML), "must return empty when video_id has no td.text")
 }
 
 func TestExtractTitle_DirectPageSlugID(t *testing.T) {
