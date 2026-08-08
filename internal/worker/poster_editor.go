@@ -505,6 +505,26 @@ func posterWitnessConflict(fs afero.Fs, tempDir, jobID, posterID string) error {
 	return nil
 }
 
+// rescrapeInFlightBackupPresent reports whether the dir holds a rescrape
+// park backup for posterID (F-R8-2's in-flight marker). Dir-read errors fail
+// CLOSED (error out) — a wedged listing must never silently drop the fence.
+func rescrapeInFlightBackupPresent(fs afero.Fs, dir, posterID string) (bool, error) {
+	rEntries, rerr := afero.ReadDir(fs, dir)
+	if rerr != nil {
+		if errors.Is(rerr, afero.ErrFileNotFound) {
+			return false, nil
+		}
+		return false, rerr
+	}
+	for _, e := range rEntries {
+		n := e.Name()
+		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // rewriteTempPosterURL rewrites a /api/v1/temp/posters/<job>/<id>.jpg URL to
 // the rekeyed identity (codex r39 P2): the bytes moved with the relocation,
 // so the stored crop URL must follow or the review UI shows a broken poster
@@ -673,9 +693,15 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	// commit reads would see the NEW identity and relocation would no-op (codex r25).
 	canonicalOldPosterID := m.movieID
 	prevRevision := uint64(0)
+	ownerResultID := ""
 	if res := fileFirstMovieResult(m, filePaths); res != nil && res.Movie != nil && res.Movie.ID != "" {
 		canonicalOldPosterID = res.Movie.ID
 		prevRevision = res.Revision
+		// audit F-R8-1: pin, canonical identity, and revision ALL come from the
+		// same result object — a movie-less sibling part (failed scrape) can
+		// never supply a divergent pin that would make startup arbitration
+		// reverse a committed rekey.
+		ownerResultID = res.ResultID
 	}
 	// D6-lite eviction (codex r22): when the PATCH changed the effective
 	// poster source (sanitize already cleared the geometry), the installed
@@ -799,14 +825,15 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 					}
 					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster pair %s is shared with family %s — rekey refused while a sibling references it", canonicalOldPosterID, famAlias)}
 				}
-				// Pin the initiating result (audit F-R7-1) so the reconciler's
-				// committed-gates scope to THIS family instead of a global scan.
-				ownerResultID := ""
-				for _, fp := range filePaths {
-					if cur, gerr := m.pe.lookup.GetMovieResult(fp); gerr == nil && cur != nil && cur.ResultID != "" {
-						ownerResultID = cur.ResultID
-						break
-					}
+				// audit F-R8-2: parked rescrape backups mean the canonical bytes
+				// belong to an IN-FLIGHT generation — relocating them mid-flight
+				// steals the bytes and bypasses every rescrape rollback arm.
+				inFlight, bErr := rescrapeInFlightBackupPresent(env.fs, dir, canonicalOldPosterID)
+				if bErr != nil {
+					return fmt.Errorf("poster rekey backup-scan %s: %w", dir, bErr)
+				}
+				if inFlight {
+					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster pair %s has an in-flight rescrape — retry after it completes", canonicalOldPosterID)}
 				}
 				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID, PrevRevision: prevRevision, ResultID: ownerResultID})
 				tmpPath := witnessPath + ".tmp"

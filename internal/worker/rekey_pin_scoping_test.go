@@ -33,6 +33,96 @@ func TestRekeyDestinationScanWedgeFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "destination check", "destination scan wedge rejects the rekey")
 }
 
+// audit F-R8-1: the witness pin, canonical ID and revision all derive from
+// ONE result (the first MOVIE-BEARING family part) — a movie-less failed
+// sibling part must never supply a divergent pin.
+func TestRekeyWitnessPinSkipsMovielessPart(t *testing.T) {
+	store3 := resultstore.New(2, []string{"/f/a.mp4", "/f/b.mp4"})
+	store3.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-bad", Status: models.JobStatusFailed, Revision: 1,
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "MIX-9"}, // Movie nil (failed scrape)
+	})
+	seedFamilyResult(store3, "/f/b.mp4", "res-ok", "MIX-9", "")
+	cur, curErr := store3.GetMovieResult("/f/b.mp4")
+	require.NoError(t, curErr)
+	okRevision := cur.Revision
+
+	base3 := afero.NewMemMapFs()
+	dir3 := filepath.Join("/tmp", "posters", "JOB-PN")
+	require.NoError(t, base3.MkdirAll(dir3, 0o755))
+	require.NoError(t, afero.WriteFile(base3, filepath.Join(dir3, "MIX-9.jpg"), []byte("x"), 0o644))
+	committer3 := NewEditCommitter(failTransactor{err: errors.New("tx wedged")}, newKeyedMutexRegistry(), "JOB-PN", newKeyedMutexRegistry())
+	pe3 := newEditorForStore(store3)
+	fsWedge := &seqRenameFailFS{Fs: base3, failOn: map[int]bool{3: true}}
+	pe3.attachEnv(&posterEditEnv{fs: fsWedge, tempDir: "/tmp", jobID: "JOB-PN", committer: committer3, envelope: func(map[string]*resultstore.MovieResult, map[string]*resultstore.ProvenanceData, map[string]bool) (*models.Job, error) {
+		return &models.Job{}, nil
+	}})
+	m3 := &LockedMovieOps{pe: pe3, movieID: "MIX-9"}
+	require.Error(t, m3.UpdateMovieFamily(context.Background(), &models.Movie{ID: "MIX-N9"}))
+	data, rerr := afero.ReadFile(base3, filepath.Join(dir3, ".rekey-MIX-9.json"))
+	require.NoError(t, rerr, "witness retained")
+	var w rekeyWitness
+	require.NoError(t, json.Unmarshal(data, &w))
+	assert.Equal(t, "res-ok", w.ResultID, "pin follows the MOVIE-bearing part, not the failed sibling")
+	assert.Equal(t, okRevision, w.PrevRevision, "revision matches the pinned part")
+}
+
+// audit F-R8-2: relocation refuses while a rescrape's parked backups for the
+// canonical ID exist (in-flight generation owns those bytes).
+func TestRekeyRefusedWhileParkedBackupsPending(t *testing.T) {
+	store, fs, dir := familyRelocationSetup(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "SSNI-R1.jpg.rsbak.a1.b2"), []byte("parked"), 0o644))
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+	assert.Contains(t, err.Error(), "in-flight rescrape")
+
+	// full-leg shape fences too
+	require.NoError(t, fs.Remove(filepath.Join(dir, "SSNI-R1.jpg.rsbak.a1.b2")))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "SSNI-R1-full.jpg.rsbak.c3.d4"), []byte("parked"), 0o644))
+	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.ErrorAs(t, err, &cfe)
+
+	// Wedge ONLY the FOURTH dir scan: fence rekey scan #1, fence crop scan #2,
+	// migration destination scan #3, relocation backup scan #4 (wedge here).
+	fs2 := &openFailAfterNFS{Fs: fs, suffix: dir, allow: 3}
+	pe.attachEnv(&posterEditEnv{fs: fs2, tempDir: "/tmp", jobID: "JOB-9"})
+	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "backup-scan", "the in-relocation scan's error arm ran (not a fence scan's)")
+
+	// Check the fence-stage fallback: wedges on the FIRST scan surface as a
+	// witness-scan error, never admission.
+	fs3 := openFailSuffixFS{Fs: fs, suffix: dir}
+	pe.attachEnv(&posterEditEnv{fs: fs3, tempDir: "/tmp", jobID: "JOB-9"})
+	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err)
+
+	// The true F-R8-2 in-flight marker verification done: clear the last park
+	// and the same rekey proceeds (witness written, committed, swept).
+	require.NoError(t, fs.Remove(filepath.Join(dir, "SSNI-R1-full.jpg.rsbak.c3.d4")))
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"}), "parks cleared ⇒ relocation proceeds")
+}
+
+// F-R8-2 helper edges: dir read wedge fails closed; absence is not in-flight.
+func TestRescrapeInFlightBackupPresentEdges(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	hit, err := rescrapeInFlightBackupPresent(fs, "/no/such/dir", "PI-1")
+	assert.False(t, hit)
+	assert.NoError(t, err)
+
+	dir := "/tmp/posters/JPI"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	fsWedge := openFailSuffixFS{Fs: fs, suffix: dir}
+	_, err = rescrapeInFlightBackupPresent(fsWedge, dir, "PI-1")
+	assert.Error(t, err, "read wedge fails closed")
+}
+
 // audit F-R7-1: relocation pins the initiating ResultID in the witness.
 func TestRekeyWitnessPinnedResultID(t *testing.T) {
 	store3 := resultstore.New(1, []string{"/f/a.mp4"})

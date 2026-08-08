@@ -125,11 +125,19 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			fieldSources = prov.FieldSources
 			actressSources = prov.ActressSources
 		}
+		// audit F-R8-3: ApplyFieldOverride's result was read INSIDE the family
+		// key post-commit — echoing it directly sidesteps the off-key echo race
+		// (a concurrent commit in the gap would misheal the CAS baseline).
+		var revEcho *uint64
+		if result != nil {
+			rv := result.Revision
+			revEcho = &rv
+		}
 		c.JSON(http.StatusOK, contracts.FieldOverrideResponse{
 			Movie:          movieView,
 			FieldSources:   fieldSources,
 			ActressSources: actressSources,
-			Revision:       currentResultRevision(job, resultID),
+			Revision:       revEcho,
 		})
 	}
 }
