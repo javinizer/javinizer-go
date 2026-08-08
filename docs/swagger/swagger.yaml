@@ -2119,6 +2119,12 @@ definitions:
           fetched image bytes to disk under {tempDir}/image-cache/ so that an image
           fetched once while online remains available when the source is unreachable.
         type: boolean
+      image_cache_max_size_mb:
+        description: |-
+          ImageCacheMaxSizeMB bounds the total on-disk size of the preview image cache
+          in megabytes (default: 512). Once a commit pushes the cache over the limit,
+          the oldest entries are evicted. 0 disables the quota.
+        type: integer
       image_cache_ttl_hours:
         description: |-
           ImageCacheTTLHours is the cache entry lifetime in hours (default: 168 = 7 days).

@@ -464,3 +464,16 @@ func TestValidateConfigExcludingTranslationCredentials_ImageCacheEnabledRequires
 	cfg.System.ImageCacheTTLHours = 24
 	assert.NoError(t, validateConfigExcludingTranslationCredentials(cfg))
 }
+
+func TestValidateConfigExcludingTranslationCredentials_ImageCacheMaxSize(t *testing.T) {
+	cfg := DefaultConfig(nil, nil)
+	cfg.System.ImageCacheMaxSizeMB = -1
+	err := validateConfigExcludingTranslationCredentials(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "image_cache_max_size_mb")
+
+	cfg = DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = true
+	cfg.System.ImageCacheMaxSizeMB = 0
+	assert.NoError(t, validateConfigExcludingTranslationCredentials(cfg), "0 disables the quota and must stay legal when caching is enabled")
+}

@@ -155,6 +155,7 @@
 //	cfg.System.VersionCheckEnabled          → api/core
 //	cfg.System.ImageCacheEnabled            → api/core
 //	cfg.System.ImageCacheTTLHours           → api/core
+//	cfg.System.ImageCacheMaxSizeMB          → api/core
 //
 // To update this index: grep for "Config-bridge reads:" across internal/ and
 // rebuild the tables above.

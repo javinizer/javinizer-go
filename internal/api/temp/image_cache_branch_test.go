@@ -481,3 +481,29 @@ func TestBranch_FetchAndCache_PersistFail_DrainRejectsGarbage(t *testing.T) {
 	assert.True(t, result.persistFailed)
 	assert.Empty(t, result.body, "junk drained from the failed persist must not be served")
 }
+
+func TestBranch_EvictImageCacheToSize(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "image-cache", "ab", "a.jpg")
+	require.NoError(t, mem.MkdirAll(filepath.Dir(seed), 0o755))
+	require.NoError(t, afero.WriteFile(mem, seed, make([]byte, 2048), 0o644))
+
+	evictImageCacheToSize(mem, dir, 0)
+	exists, _ := afero.Exists(mem, seed)
+	assert.True(t, exists, "zero quota is a no-op")
+
+	evictImageCacheToSize(mem, dir, 1)
+	exists, _ = afero.Exists(mem, seed)
+	assert.True(t, exists, "2 KB stays under a 1 MB quota")
+
+	big := filepath.Join(dir, "image-cache", "cd", "b.jpg")
+	require.NoError(t, mem.MkdirAll(filepath.Dir(big), 0o755))
+	require.NoError(t, afero.WriteFile(mem, big, make([]byte, 2<<20), 0o644))
+	evictImageCacheToSize(mem, dir, 1)
+	exists, _ = afero.Exists(mem, seed)
+	assert.False(t, exists, "oldest entry evicted once over quota")
+
+	broken := &openErrFs{Fs: mem, target: filepath.Join(dir, "image-cache")}
+	evictImageCacheToSize(broken, dir, 1)
+}

@@ -62,6 +62,7 @@ type APIConfig struct {
 	VersionCheckEnabled bool   // cfg.System.VersionCheckEnabled
 	ImageCacheEnabled   bool   // cfg.System.ImageCacheEnabled
 	ImageCacheTTLHours  int    // cfg.System.ImageCacheTTLHours
+	ImageCacheMaxSizeMB int    // cfg.System.ImageCacheMaxSizeMB
 
 	// Logging
 	LogLevel string // cfg.Logging.Level
@@ -111,11 +112,12 @@ type ScannerNarrowConfig struct {
 // TempNarrowConfig holds the fields consumed by temp handlers that serve
 // ephemeral poster images and proxy remote images for the preview UI.
 type TempNarrowConfig struct {
-	TempDir            string // temp directory for batch artifacts
-	ScraperUserAgent   string // user-agent for proxied image requests
-	ScraperReferer     string // referer for proxied image requests
-	ImageCacheEnabled  bool   // server-side image cache on/off
-	ImageCacheTTLHours int    // cache TTL in hours
+	TempDir             string // temp directory for batch artifacts
+	ScraperUserAgent    string // user-agent for proxied image requests
+	ScraperReferer      string // referer for proxied image requests
+	ImageCacheEnabled   bool   // server-side image cache on/off
+	ImageCacheTTLHours  int    // cache TTL in hours
+	ImageCacheMaxSizeMB int    // image cache disk quota in MB (0 disables)
 }
 
 // MatcherNarrowConfig holds the fields consumed by the runtime manager
@@ -170,11 +172,12 @@ func (c APIConfig) ScannerConfig() *ScannerNarrowConfig {
 // that serve ephemeral poster images and proxy remote images.
 func (c APIConfig) TempConfig() *TempNarrowConfig {
 	return &TempNarrowConfig{
-		TempDir:            c.TempDir,
-		ScraperUserAgent:   c.ScraperUserAgent,
-		ScraperReferer:     c.ScraperReferer,
-		ImageCacheEnabled:  c.ImageCacheEnabled,
-		ImageCacheTTLHours: c.ImageCacheTTLHours,
+		TempDir:             c.TempDir,
+		ScraperUserAgent:    c.ScraperUserAgent,
+		ScraperReferer:      c.ScraperReferer,
+		ImageCacheEnabled:   c.ImageCacheEnabled,
+		ImageCacheTTLHours:  c.ImageCacheTTLHours,
+		ImageCacheMaxSizeMB: c.ImageCacheMaxSizeMB,
 	}
 }
 
@@ -209,6 +212,7 @@ func (c APIConfig) MatcherConfig() *MatcherNarrowConfig {
 // cfg.Matching.RegexEnabled, cfg.Matching.RegexPattern,
 // cfg.System.TempDir, cfg.System.VersionCheckEnabled,
 // cfg.System.ImageCacheEnabled, cfg.System.ImageCacheTTLHours,
+// cfg.System.ImageCacheMaxSizeMB,
 // cfg.Logging.Level, cfg.Database.DSN, cfg.Database.LogLevel
 func ConfigFromAppConfig(cfg *config.Config) APIConfig {
 	if cfg == nil {
@@ -250,6 +254,7 @@ func ConfigFromAppConfig(cfg *config.Config) APIConfig {
 		VersionCheckEnabled: cfg.System.VersionCheckEnabled,
 		ImageCacheEnabled:   cfg.System.ImageCacheEnabled,
 		ImageCacheTTLHours:  cfg.System.ImageCacheTTLHours,
+		ImageCacheMaxSizeMB: cfg.System.ImageCacheMaxSizeMB,
 		LogLevel:            cfg.Logging.Level,
 		DatabaseDSN:         cfg.Database.DSN,
 		DatabaseLogLevel:    cfg.Database.LogLevel,

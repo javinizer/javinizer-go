@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -532,4 +533,54 @@ func TestRedactImageURL(t *testing.T) {
 			assert.NotContains(t, got, "user:pass")
 		})
 	}
+}
+
+func TestBranch_CacheFill_EvictsOldestWhenOverQuota(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	payload := append([]byte("\xff\xd8\xff\xe0"), make([]byte, 600_000)...)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(upstream.Close)
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = true
+	cfg.System.ImageCacheTTLHours = 24
+	cfg.System.ImageCacheMaxSizeMB = 1
+	cfg.System.TempDir = t.TempDir()
+	fs := afero.NewMemMapFs()
+	deps := &core.APIDeps{Fs: fs}
+	rt := core.NewAPIRuntime(deps)
+	rt.SetConfig(cfg)
+	testkit.SetTestRuntime(deps, rt)
+
+	w1 := serveImageRequest(t, deps, upstream.URL+"/first.jpg")
+	require.Equal(t, http.StatusOK, w1.Code)
+
+	w2 := serveImageRequest(t, deps, upstream.URL+"/second.jpg")
+	require.Equal(t, http.StatusOK, w2.Code)
+
+	var files []string
+	_ = afero.Walk(fs, "/", func(p string, info os.FileInfo, werr error) error {
+		if werr == nil && info != nil && !info.IsDir() && filepath.Ext(p) == ".jpg" {
+			files = append(files, p)
+		}
+		return nil
+	})
+	require.Len(t, files, 1, "the oldest fill must be evicted by the 1MB quota after the second commit")
+
+	w1again := serveImageRequest(t, deps, upstream.URL+"/first.jpg")
+	require.Equal(t, http.StatusOK, w1again.Code)
+	var filesAfter []string
+	_ = afero.Walk(fs, "/", func(p string, info os.FileInfo, werr error) error {
+		if werr == nil && info != nil && !info.IsDir() && filepath.Ext(p) == ".jpg" {
+			filesAfter = append(filesAfter, p)
+		}
+		return nil
+	})
+	assert.Len(t, filesAfter, 1, "re-filling the evicted URL re-evicts the survivor; cache stays within quota")
 }

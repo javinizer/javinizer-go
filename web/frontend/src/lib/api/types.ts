@@ -854,6 +854,7 @@ export interface SystemConfig {
 	temp_dir: string;
 	image_cache_enabled: boolean;
 	image_cache_ttl_hours: number;
+	image_cache_max_size_mb: number;
 }
 
 export interface ProxyProfile {

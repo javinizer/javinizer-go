@@ -1414,6 +1414,7 @@ system:
   temp_dir: data/temp
   image_cache_enabled: true
   image_cache_ttl_hours: 168
+  image_cache_max_size_mb: 512
 ```
 
 ### NFO Defaults

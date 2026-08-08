@@ -347,6 +347,7 @@ func DefaultConfig(priorities []string, defaults map[string]*models.ScraperSetti
 			TempDir:                   DefaultTempDir,
 			ImageCacheEnabled:         true,
 			ImageCacheTTLHours:        168,
+			ImageCacheMaxSizeMB:       512,
 		},
 		// VersionCheckStableOnly is intentionally omitted: its zero value (false)
 		// is the correct default (prereleases allowed). Existing configs that

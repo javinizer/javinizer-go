@@ -197,6 +197,10 @@ type SystemConfig struct {
 	// computes a time.Duration from it even when caching is disabled. When enabled,
 	// must be >= 1; when disabled, 0 is legal (sweep no-op).
 	ImageCacheTTLHours int `yaml:"image_cache_ttl_hours" json:"image_cache_ttl_hours"`
+	// ImageCacheMaxSizeMB bounds the total on-disk size of the preview image cache
+	// in megabytes (default: 512). Once a commit pushes the cache over the limit,
+	// the oldest entries are evicted. 0 disables the quota.
+	ImageCacheMaxSizeMB int `yaml:"image_cache_max_size_mb" json:"image_cache_max_size_mb"`
 }
 
 // MarshalYAML keeps Config marshaling explicit and ensures ScrapersConfig custom
@@ -449,6 +453,9 @@ func ValidateConfig(cfg *Config) error {
 	}
 	if cfg.System.ImageCacheEnabled && cfg.System.ImageCacheTTLHours < 1 {
 		return fmt.Errorf("system.image_cache_ttl_hours must be >= 1 when image caching is enabled")
+	}
+	if cfg.System.ImageCacheMaxSizeMB < 0 {
+		return fmt.Errorf("system.image_cache_max_size_mb must be >= 0 (0 disables the quota)")
 	}
 
 	// Validate logging rotation settings

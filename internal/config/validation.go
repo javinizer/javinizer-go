@@ -391,6 +391,9 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 	if cfg.System.ImageCacheEnabled && cfg.System.ImageCacheTTLHours < 1 {
 		return fmt.Errorf("system.image_cache_ttl_hours must be >= 1 when image caching is enabled")
 	}
+	if cfg.System.ImageCacheMaxSizeMB < 0 {
+		return fmt.Errorf("system.image_cache_max_size_mb must be >= 0 (0 disables the quota)")
+	}
 
 	if cfg.Logging.MaxSizeMB < 0 {
 		return fmt.Errorf("logging.max_size_mb must be >= 0")

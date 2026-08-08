@@ -167,5 +167,15 @@
 			disabled={!config.system.image_cache_enabled}
 			onchange={(val) => { config.system.image_cache_ttl_hours = val; }}
 		/>
+		<FormNumberInput
+			id="system-image-cache-max-size"
+			label={m.settings_server_image_cache_max_size_label()}
+			description={m.settings_server_image_cache_max_size_desc()}
+			value={config.system.image_cache_max_size_mb}
+			min={0}
+			max={1048576}
+			disabled={!config.system.image_cache_enabled}
+			onchange={(val) => { config.system.image_cache_max_size_mb = val; }}
+		/>
 	</div>
 </SettingsSection>

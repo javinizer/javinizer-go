@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -310,4 +311,69 @@ func CleanupStaleImageCache(fs afero.Fs, tempDir string, ttl time.Duration) (int
 		}
 	}
 	return removed, nil
+}
+
+// EvictImageCacheToSize removes oldest-first entries from {tempDir}/image-cache/
+// until the total size of shard entries is within limitBytes. The .tmp staging
+// directory is never counted or evicted (in-flight writes live there). Per-file
+// failures are logged and the sweep continues. Returns the pre-eviction total and
+// the number of entries removed.
+func EvictImageCacheToSize(fs afero.Fs, tempDir string, limitBytes int64) (int64, int, error) {
+	if limitBytes <= 0 || fs == nil {
+		return 0, 0, nil
+	}
+	root := filepath.Join(tempDir, "image-cache")
+	entries, err := afero.ReadDir(fs, root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, nil
+		}
+		return 0, 0, fmt.Errorf("read image-cache dir: %w", err)
+	}
+	type artifact struct {
+		path  string
+		mtime time.Time
+		size  int64
+	}
+	var artifacts []artifact
+	var total int64
+	for _, shard := range entries {
+		if !shard.IsDir() || shard.Name() == ".tmp" {
+			continue
+		}
+		files, ferr := afero.ReadDir(fs, filepath.Join(root, shard.Name()))
+		if ferr != nil {
+			if os.IsNotExist(ferr) {
+				continue
+			}
+			logging.Warnf("EvictImageCacheToSize: failed to read shard %s: %v", shard.Name(), ferr)
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() {
+				continue
+			}
+			artifacts = append(artifacts, artifact{path: filepath.Join(root, shard.Name(), f.Name()), mtime: f.ModTime(), size: f.Size()})
+			total += f.Size()
+		}
+	}
+	if total <= limitBytes {
+		return total, 0, nil
+	}
+	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].mtime.Before(artifacts[j].mtime) })
+	over := total - limitBytes
+	var freed int64
+	removed := 0
+	for _, a := range artifacts {
+		if freed >= over {
+			break
+		}
+		if rerr := fsutil.AferoRemoveAll(fs, a.path); rerr != nil {
+			logging.Warnf("EvictImageCacheToSize: failed to remove %s: %v", a.path, rerr)
+			continue
+		}
+		freed += a.size
+		removed++
+	}
+	return total, removed, nil
 }

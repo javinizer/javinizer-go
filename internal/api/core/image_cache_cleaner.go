@@ -32,6 +32,13 @@ func startImageCacheCleanup(rt *APIRuntime, opts imageCacheCleanupOptions) {
 		} else if removed > 0 {
 			logging.Infof("Cleaned up %d expired image cache entr(ies)", removed)
 		}
+		if tempCfg.ImageCacheMaxSizeMB > 0 {
+			if _, evicted, verr := worker.EvictImageCacheToSize(fs, tempCfg.TempDir, int64(tempCfg.ImageCacheMaxSizeMB)<<20); verr != nil {
+				logging.Warnf("Image cache size enforcement failed: %v", verr)
+			} else if evicted > 0 {
+				logging.Infof("Evicted %d image cache entr(ies) to enforce the %d MB quota", evicted, tempCfg.ImageCacheMaxSizeMB)
+			}
+		}
 	}
 
 	go sweep()

@@ -93,3 +93,36 @@ func TestStartImageCacheCleanup_PreservesFreshEntries(t *testing.T) {
 	exists, _ := afero.Exists(fs, fresh)
 	assert.True(t, exists, "fresh entry should be preserved")
 }
+
+func TestStartImageCacheCleanup_EvictsOverQuotaEntries(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = true
+	cfg.System.ImageCacheTTLHours = 168
+	cfg.System.ImageCacheMaxSizeMB = 1
+	cfg.System.TempDir = t.TempDir()
+	fs := afero.NewMemMapFs()
+
+	payload := make([]byte, 700_000)
+	oldest := cfg.System.TempDir + "/image-cache/ab/old.jpg"
+	require.NoError(t, fs.MkdirAll(cfg.System.TempDir+"/image-cache/ab", 0o755))
+	require.NoError(t, afero.WriteFile(fs, oldest, payload, 0o644))
+	past := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, fs.Chtimes(oldest, past, past))
+	newest := cfg.System.TempDir + "/image-cache/cd/new.jpg"
+	require.NoError(t, fs.MkdirAll(cfg.System.TempDir+"/image-cache/cd", 0o755))
+	require.NoError(t, afero.WriteFile(fs, newest, payload, 0o644))
+
+	deps := &APIDeps{Fs: fs}
+	rt := NewAPIRuntime(deps)
+	rt.SetConfig(cfg)
+
+	startImageCacheCleanup(rt, imageCacheCleanupOptions{interval: time.Hour})
+	require.Eventually(t, func() bool {
+		exists, _ := afero.Exists(fs, oldest)
+		return !exists
+	}, 2*time.Second, 10*time.Millisecond, "startup sweep must evict the oldest entry to enforce the size quota")
+	rt.Shutdown()
+
+	exists, _ := afero.Exists(fs, newest)
+	assert.True(t, exists, "the newest entry survives")
+}

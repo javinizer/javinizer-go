@@ -18,6 +18,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/spf13/afero"
 	"golang.org/x/sync/singleflight"
 )
@@ -409,4 +410,15 @@ func fetchBodyToMemory(ctx context.Context, client *http.Client, fetchURL, userA
 		return nil, "", fmt.Errorf("uncacheable content type %q", ct)
 	}
 	return body, ct, nil
+}
+
+func evictImageCacheToSize(fs afero.Fs, cacheDir string, maxSizeMB int) {
+	if maxSizeMB <= 0 {
+		return
+	}
+	if _, removed, err := worker.EvictImageCacheToSize(fs, cacheDir, int64(maxSizeMB)<<20); err != nil {
+		logging.Warnf("image cache: size eviction failed: %v", err)
+	} else if removed > 0 {
+		logging.Infof("image cache: evicted %d entr(ies) to enforce the %d MB quota", removed, maxSizeMB)
+	}
 }
