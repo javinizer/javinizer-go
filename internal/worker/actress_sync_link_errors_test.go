@@ -36,6 +36,11 @@ func TestLinkedActressCandidatesDistinguishesMissesFromOutages(t *testing.T) {
 	require.Error(t, err, "with nothing usable, an outage must reach the caller")
 
 	candidates, err = linkedActressCandidates(context.Background(), movies, actress.ID, []models.Scraper{good, outage})
-	require.NoError(t, err, "partial success proceeds with usable candidates")
+	// Partial success: candidates kept, and the transient failure carries a
+	// marker so callers can still route to retry if every candidate is later
+	// filtered out (codex round 9).
+	require.Error(t, err)
+	var partial partialCandidatesError
+	require.True(t, errors.As(err, &partial), "degraded success must carry the marker")
 	require.NotEmpty(t, candidates)
 }

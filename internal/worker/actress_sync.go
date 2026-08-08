@@ -226,7 +226,19 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		}
 		actress = recovered
 		for _, recoveredMatch := range recoveredMatches {
-			appendMatch(recoveredMatch, "")
+			// Screen recovered thumbnails with the same validator (and the
+			// originating scraper's session when it carries one) — recovery
+			// isn't exempt from SSRF/image policy (codex round 9), and the
+			// recovered match keeps its source rank (fix: lost source string).
+			if strings.TrimSpace(recoveredMatch.info.ThumbURL) != "" {
+				if v := validateThumbnail; v != nil {
+					if validateErr := validateActressThumbnail(ctx, recoveredMatch.scraper, v, recoveredMatch.info.ThumbURL); validateErr != nil {
+						logging.Debugf("Actress sync: recovery %s rejected thumbnail %q: %v", recoveredMatch.source, recoveredMatch.info.ThumbURL, validateErr)
+						recoveredMatch.info.ThumbURL = ""
+					}
+				}
+			}
+			appendMatch(recoveredMatch.info, recoveredMatch.source)
 		}
 		result.UpdatedFields = append(result.UpdatedFields, recoveredFields...)
 	}
@@ -425,13 +437,17 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			return nil, linkedErr
 		}
 		for _, linkedMatch := range linkedMatches {
-			// Codex P2 (round 7): linked-match thumbnails must pass the same
-			// screening as resolver results — speculative URLs built from a
-			// movie's stills must not persist unchecked.
-			if strings.TrimSpace(linkedMatch.info.ThumbURL) != "" && validateThumbnail != nil {
-				if validateErr := validateThumbnail(ctx, linkedMatch.info.ThumbURL); validateErr != nil {
-					logging.Debugf("Actress sync: linked fallback rejected thumbnail %q for DMM ID %d: %v", linkedMatch.info.ThumbURL, actress.DMMID, validateErr)
-					linkedMatch.info.ThumbURL = ""
+			// Codex P2 (round 7 + round 9): linked-match thumbnails are
+			// screened through the synonymous validator the resolver loop
+			// uses (the scraper's session-aware one when it has one), so a
+			// proxy/UA-restricted scraper doesn't lose usable shots to the
+			// global fallback.
+			if strings.TrimSpace(linkedMatch.info.ThumbURL) != "" {
+				if v := validateThumbnail; v != nil {
+					if validateErr := validateActressThumbnail(ctx, linkedMatch.scraper, v, linkedMatch.info.ThumbURL); validateErr != nil {
+						logging.Debugf("Actress sync: linked fallback rejected thumbnail %q for DMM ID %d: %v", linkedMatch.info.ThumbURL, actress.DMMID, validateErr)
+						linkedMatch.info.ThumbURL = ""
+					}
 				}
 			}
 			appendMatch(linkedMatch.info, linkedMatch.source)
@@ -566,7 +582,7 @@ type linkedIdentityRecoveryOptions struct {
 }
 
 // recoverMissingDMMIdentity ...
-func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, actressRepo *database.ActressRepository, movieRepo *database.MovieRepository, scrapers []models.Scraper, mergeActresses func(uint, uint) (*database.ActressMergeResult, error), assignDMMID func(uint, int) (bool, error), sourceOptions ...linkedIdentityRecoveryOptions) (*models.Actress, []models.ActressInfo, []string, error) {
+func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, actressRepo *database.ActressRepository, movieRepo *database.MovieRepository, scrapers []models.Scraper, mergeActresses func(uint, uint) (*database.ActressMergeResult, error), assignDMMID func(uint, int) (bool, error), sourceOptions ...linkedIdentityRecoveryOptions) (*models.Actress, []sourcedActressMatch, []string, error) {
 	expectedSource := models.Actress{}
 	var mergeActressesWithSource func(uint, uint, models.Actress) (*database.ActressMergeResult, error)
 	var mergeActressesWithTargetSource func(uint, uint, models.Actress, models.Actress) (*database.ActressMergeResult, error)
@@ -625,17 +641,17 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	matchesByDMM := make(map[int]models.ActressInfo)
+	matchesByDMM := make(map[int]sourcedActressMatch)
 	for _, candidate := range candidates {
 		if candidate.info.DMMID > 0 && identityCandidateMatches(names, candidate.info) {
-			matchesByDMM[candidate.info.DMMID] = candidate.info
+			matchesByDMM[candidate.info.DMMID] = candidate
 		}
 	}
 	if len(matchesByDMM) != 1 {
 		return nil, nil, nil, nil
 	}
 	var dmmID int
-	var match models.ActressInfo
+	var match sourcedActressMatch
 	for dmmID, match = range matchesByDMM {
 		break
 	}
@@ -648,7 +664,7 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 		if mergeErr != nil {
 			return nil, nil, nil, mergeErr
 		}
-		return &merged.MergedActress, []models.ActressInfo{match}, []string{"merged_duplicate"}, nil
+		return &merged.MergedActress, []sourcedActressMatch{match}, []string{"merged_duplicate"}, nil
 	}
 	if findErr != nil && !database.IsNotFound(findErr) {
 		return nil, nil, nil, findErr
@@ -663,7 +679,7 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 			return nil, nil, nil, fmt.Errorf("reload canonical actress after DMM ID assignment race: %w", reloadErr)
 		}
 		if canonical.ID == actress.ID {
-			return canonical, []models.ActressInfo{match}, []string{"dmm_id"}, nil
+			return canonical, []sourcedActressMatch{match}, []string{"dmm_id"}, nil
 		}
 		if !canMergeMissingDMMActress(actress, canonical) {
 			return nil, nil, nil, nil
@@ -672,7 +688,7 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 		if mergeErr != nil {
 			return nil, nil, nil, mergeErr
 		}
-		return &merged.MergedActress, []models.ActressInfo{match}, []string{"merged_duplicate"}, nil
+		return &merged.MergedActress, []sourcedActressMatch{match}, []string{"merged_duplicate"}, nil
 	}
 	if !assigned {
 		return nil, nil, nil, nil
@@ -681,7 +697,7 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 	if loadErr != nil {
 		return nil, nil, nil, loadErr
 	}
-	return updated, []models.ActressInfo{match}, []string{"dmm_id"}, nil
+	return updated, []sourcedActressMatch{match}, []string{"dmm_id"}, nil
 }
 
 // lookupActressCache ...
@@ -870,8 +886,9 @@ func canMergeMissingDMMActress(target, canonical *models.Actress) bool {
 // sourcedActressMatch remembers which scraper produced a linked-movie
 // candidate so configured priorities still apply to fallback resolution.
 type sourcedActressMatch struct {
-	info   models.ActressInfo
-	source string
+	info    models.ActressInfo
+	source  string
+	scraper models.Scraper // originating scraper — needed so thumbnail screening can reuse its session (codex round 9)
 }
 
 // linkedActressCandidates ...
@@ -909,7 +926,7 @@ func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepos
 			}
 			if scraped != nil {
 				for _, result := range scraped.Actresses {
-					candidates = append(candidates, sourcedActressMatch{info: result, source: strings.ToLower(strings.TrimSpace(scraper.Name()))})
+					candidates = append(candidates, sourcedActressMatch{info: result, source: strings.ToLower(strings.TrimSpace(scraper.Name())), scraper: scraper})
 				}
 			}
 		}
@@ -918,11 +935,21 @@ func linkedActressCandidates(ctx context.Context, movieRepo *database.MovieRepos
 		if len(candidates) == 0 {
 			return nil, joined
 		}
-		// Partial failures with usable matches: degrade gracefully.
+		// Partial failures with usable matches: degrade gracefully, but surface
+		// the aggregate so a caller whose filter empties the set falls into the
+		// retry path instead of a bogus skip (codex P2 round 9).
 		logging.Debugf("Actress sync: linked-movie identity used %d candidates despite scraper failures: %v", len(candidates), joined)
+		return candidates, partialCandidatesError{err: joined}
 	}
 	return candidates, nil
 }
+
+// partialCandidatesError marks a usable candidate set that rode past transient
+// scraper failures; surfaced when the caller's filter empties the set.
+type partialCandidatesError struct{ err error }
+
+func (e partialCandidatesError) Error() string { return e.err.Error() }
+func (e partialCandidatesError) Unwrap() error { return e.err }
 
 // needsLinkedActressFallback ...
 func needsLinkedActressFallback(actress *models.Actress, matches []rankedActressMatch, deterministic bool) bool {
@@ -953,6 +980,22 @@ func needsLinkedActressFallback(actress *models.Actress, matches []rankedActress
 func linkedActressMatches(ctx context.Context, movieRepo *database.MovieRepository, actressID uint, dmmID int, scrapers []models.Scraper) ([]sourcedActressMatch, error) {
 	candidates, err := linkedActressCandidates(ctx, movieRepo, actressID, scrapers)
 	if err != nil {
+		// A degraded-but-usable set rides a partial marker: filtering may still
+		// discard every candidate as "other cast member", and that must land in
+		// the retry path rather than a mislabeled skip.
+		var partial partialCandidatesError
+		if errors.As(err, &partial) && len(candidates) > 0 {
+			matches := make([]sourcedActressMatch, 0)
+			for _, candidate := range candidates {
+				if candidate.info.DMMID == dmmID {
+					matches = append(matches, candidate)
+				}
+			}
+			if len(matches) == 0 {
+				return nil, err
+			}
+			return matches, nil
+		}
 		return nil, err
 	}
 	matches := make([]sourcedActressMatch, 0)
