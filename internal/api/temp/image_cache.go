@@ -23,6 +23,8 @@ import (
 
 const maxImageProxyResponseSize = 50 * 1024 * 1024
 
+var randRead = rand.Read
+
 const defaultContentType = "image/jpeg"
 
 var imageCacheGroup singleflight.Group
@@ -212,7 +214,7 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 		return fetchResult{err: fmt.Errorf("mkdir tmp: %w", err), persistFailed: true}
 	}
 	rb := make([]byte, 8)
-	if _, err := rand.Read(rb); err != nil {
+	if _, err := randRead(rb); err != nil {
 		return fetchResult{err: fmt.Errorf("rand: %w", err)}
 	}
 	tmpPath := filepath.Join(tmpD, hex.EncodeToString(rb))
@@ -221,10 +223,15 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 		logging.Warnf("image cache: create temp failed: %v", err)
 		return fetchResult{err: fmt.Errorf("create temp: %w", err), persistFailed: true}
 	}
-	n, copyErr := io.Copy(f, io.LimitReader(resp.Body, maxImageProxyResponseSize+1))
+	werr := &writeTracker{w: f}
+	n, copyErr := io.Copy(werr, io.LimitReader(resp.Body, maxImageProxyResponseSize+1))
 	_ = f.Close()
 	if copyErr != nil {
 		_ = fs.Remove(tmpPath)
+		if werr.writeErr {
+			logging.Warnf("image cache: disk write failed, will fall back to uncached: %v", copyErr)
+			return fetchResult{err: fmt.Errorf("write temp: %w", copyErr), persistFailed: true}
+		}
 		return fetchResult{err: fmt.Errorf("write temp: %w", copyErr)}
 	}
 	if n > maxImageProxyResponseSize {
@@ -247,6 +254,19 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 		}
 	}
 	return fetchResult{cachedPath: dstPath, contentType: normalizedCT}
+}
+
+type writeTracker struct {
+	w        io.Writer
+	writeErr bool
+}
+
+func (t *writeTracker) Write(p []byte) (int, error) {
+	n, err := t.w.Write(p)
+	if err != nil {
+		t.writeErr = true
+	}
+	return n, err
 }
 
 func atomicRename(fs afero.Fs, src, dst string) error {

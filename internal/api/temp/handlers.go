@@ -265,8 +265,6 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 			return
 		}
-
-		c.JSON(http.StatusBadGateway, gin.H{"error": "image fetch failed"})
 	}
 }
 
