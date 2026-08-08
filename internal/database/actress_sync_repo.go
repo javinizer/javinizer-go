@@ -163,6 +163,11 @@ func (r *ActressSyncRepository) pruneTerminalJobsTx(tx *gorm.DB) error {
 func (r *ActressSyncRepository) FindJob(id string) (*models.ActressSyncJob, error) {
 	var job models.ActressSyncJob
 	if err := r.db.First(&job, "id = ?", id).Error; err != nil {
+		// Map to the repository sentinel like BaseRepository.FindByID: unknown
+		// or pruned jobs are ErrNotFound (404), not a database failure.
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("find actress sync job %v: %w", id, ErrNotFound)
+		}
 		return nil, wrapDBErr("find", "actress sync job", err)
 	}
 	return &job, nil

@@ -208,3 +208,44 @@ func TestReassignConflictRowsAffectedGuard(t *testing.T) {
 	_, err = repo.MergeForSyncTask(ctx, target.ID, source.ID, nil, claimed.ID, claimed.LeaseToken)
 	require.ErrorContains(t, err, "was not pending during reassign")
 }
+
+// Codex P2: FindJob maps unknown/pruned IDs to ErrNotFound so API callers
+// can 404 instead of misclassifying as a database failure — same convention
+// as BaseRepository.FindByID.
+func TestFindJobNotFoundSentinel(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressSyncRepository(db)
+	_, err := repo.FindJob(uuid.NewString())
+	require.ErrorIs(t, err, ErrNotFound)
+	require.NotErrorIs(t, err, gorm.ErrRecordNotFound, "raw gorm sentinel must not leak once mapped")
+	// Fresh-terminal-pruned jobs behave the same way.
+	prunedJob := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobCompleted, Scope: "selected", CreatedAt: time.Now().UTC()}
+	require.NoError(t, repo2CreateTerminal(t, repo, prunedJob))
+	_, err = repo.FindJob(prunedJob.ID)
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// repo2CreateTerminal inserts 21 terminal jobs so the oldest is pruned.
+func repo2CreateTerminal(t *testing.T, repo *ActressSyncRepository, target *models.ActressSyncJob) error {
+	t.Helper()
+	now := time.Now().UTC()
+	require.NoError(t, dbCreateTerminal(t, repo.db, target, now))
+	return nil
+}
+
+func dbCreateTerminal(t *testing.T, db *DB, job *models.ActressSyncJob, now time.Time) error {
+	t.Helper()
+	for i := 0; i < 21; i++ {
+		j := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobCompleted, Scope: "missing", CreatedAt: now.Add(time.Duration(i) * time.Second), CompletedAt: &now}
+		require.NoError(t, db.Create(j).Error)
+		require.NoError(t, repo3Refresh(t, db, j.ID, now))
+	}
+	return nil
+}
+
+func repo3Refresh(t *testing.T, db *DB, jobID string, now time.Time) error {
+	t.Helper()
+	return db.Transaction(func(tx *gorm.DB) error {
+		return NewActressSyncRepository(db).refreshJobTx(tx, jobID, now)
+	})
+}
