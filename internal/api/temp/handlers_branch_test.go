@@ -495,3 +495,22 @@ func TestBranch_PersistFailure_RefetchFails(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "failed to fetch image")
 	assert.Equal(t, int32(2), atomic.LoadInt32(&hits), "exactly one refetch attempt inside the shared flight")
 }
+
+func TestBranch_PersistFailureWithStale_PrefersFreshMemoryBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+	upstream := testUpstream("fresh-fallback-body")
+	t.Cleanup(upstream.Close)
+
+	mem := afero.NewMemMapFs()
+	fs := &mkdirSuffixFailFs{Fs: mem, suffix: ".tmp"}
+	deps := newImageCacheDeps(t, fs)
+	rawURL := upstream.URL + "/gradual.jpg"
+	seedCacheEntry(t, mem, depsTempDir(t, deps), rawURL, "stale-should-lose", 2)
+
+	w := serveImageRequest(t, deps, rawURL)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, jpegStr("fresh-fallback-body"), w.Body.String(), "successful degraded fetch must beat the stale disk entry")
+	assert.Equal(t, "private, max-age=300", w.Header().Get("Cache-Control"))
+}

@@ -65,6 +65,8 @@ const (
 	imageTypeGif  = "image/gif"
 	imageTypeAvif = "image/avif"
 	imageTypeApng = "image/apng"
+
+	octetStream = "application/octet-stream"
 )
 
 func extForContentType(contentType string) string {
@@ -191,7 +193,7 @@ type fetchResult struct {
 
 func sniffImageType(head []byte) string {
 	sniffed := http.DetectContentType(head)
-	if sniffed != "application/octet-stream" || len(head) < 12 {
+	if sniffed != octetStream || len(head) < 12 {
 		return sniffed
 	}
 	if string(head[0:4]) == "RIFF" && string(head[8:12]) == "WEBP" {
@@ -234,14 +236,14 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 	}
 
 	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0]))
-	if mediaType != "" && !isCacheableMediaType(mediaType) {
+	if mediaType != "" && mediaType != octetStream && !isCacheableMediaType(mediaType) {
 		if strings.HasPrefix(mediaType, "image/") {
 			return fetchResult{err: fmt.Errorf("unsupported image content type %q", mediaType)}
 		}
 		return fetchResult{err: fmt.Errorf("non-image content type %q", mediaType)}
 	}
 	var head []byte
-	if mediaType == "" {
+	if mediaType == "" || mediaType == octetStream {
 		buf := make([]byte, 512)
 		hn, _ := io.ReadAtLeast(resp.Body, buf, 1)
 		head = buf[:hn]
@@ -385,7 +387,7 @@ func fetchBodyToMemory(ctx context.Context, client *http.Client, fetchURL, userA
 	if len(body) > maxImageProxyResponseSize {
 		return nil, "", fmt.Errorf("response exceeds %d byte cap", maxImageProxyResponseSize)
 	}
-	if mediaType == "" {
+	if mediaType == "" || mediaType == octetStream {
 		mediaType = sniffImageType(body)
 	}
 	if !isCacheableMediaType(mediaType) {

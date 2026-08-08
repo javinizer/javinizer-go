@@ -389,3 +389,50 @@ func TestBranch_FetchAndCache_HeaderlessBinaryGarbageRejected(t *testing.T) {
 	require.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "uncacheable content in headerless response")
 }
+
+func TestBranch_FetchAndCache_OctetStreamCT_SniffedAsImage(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write(jpegBytes("octet-body"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := afero.NewMemMapFs()
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "ua", "")
+	require.NoError(t, result.err)
+	assert.Equal(t, "image/jpeg", result.contentType)
+	assert.Contains(t, result.cachedPath, ".jpg")
+}
+
+func TestBranch_FetchAndCache_OctetStreamCT_WithGarbageRejected(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("<html>actually an error page</html>"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := afero.NewMemMapFs()
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/x", upstream.URL+"/x", client, "ua", "")
+	require.Error(t, result.err)
+	assert.Contains(t, result.err.Error(), "uncacheable content")
+	assert.Empty(t, result.cachedPath)
+	assert.Empty(t, result.body)
+}
+
+func TestBranch_FetchBodyToMemory_OctetStreamSniffed(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return fakeImageResponse(req, http.StatusOK, "application/octet-stream", jpegBytes("via-sniff")), nil
+	})}
+	body, gotCT, err := fetchBodyToMemory(context.Background(), client, "http://example.com/bin", "ua", "")
+	require.NoError(t, err)
+	assert.Equal(t, jpegBytes("via-sniff"), body)
+	assert.Equal(t, "image/jpeg", gotCT)
+}

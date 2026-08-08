@@ -229,16 +229,16 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 		_ = ferr
 
 		if result.err != nil {
+			if result.persistFailed && len(result.body) > 0 {
+				c.Header("Cache-Control", "private, max-age=300")
+				c.Header("X-Content-Type-Options", "nosniff")
+				c.Data(http.StatusOK, result.contentType, result.body)
+				return
+			}
 			if stalePath != "" && tryServeStale(c, fs, stalePath, staleCT) {
 				return
 			}
 			if result.persistFailed {
-				if len(result.body) > 0 {
-					c.Header("Cache-Control", "private, max-age=300")
-					c.Header("X-Content-Type-Options", "nosniff")
-					c.Data(http.StatusOK, result.contentType, result.body)
-					return
-				}
 				logging.Warnf("image cache: persist failed for %s: %v", normalizedURL, result.err)
 				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
 				return
