@@ -1406,7 +1406,9 @@ func (r *ActressRepository) assignDMMIDIfMissing(ctx context.Context, id uint, d
 			// NULL counts as missing here too (legacy rows, direct imports).
 			query := tx.Model(&models.Actress{}).Where("id = ? AND COALESCE(dmm_id, 0) = 0", id)
 			if expectedSource.ID > 0 {
-				query = query.Where("first_name = ? AND last_name = ? AND japanese_name = ? AND thumb_url = ? AND aliases = ?", expectedSource.FirstName, expectedSource.LastName, expectedSource.JapaneseName, expectedSource.ThumbURL, expectedSource.Aliases)
+				// Nullable legacy columns scan as "" but store NULL; bare equality
+				// would never match and the assign would silently no-op.
+				query = query.Where("COALESCE(first_name,'') = ? AND COALESCE(last_name,'') = ? AND COALESCE(japanese_name,'') = ? AND COALESCE(thumb_url,'') = ? AND COALESCE(aliases,'') = ?", expectedSource.FirstName, expectedSource.LastName, expectedSource.JapaneseName, expectedSource.ThumbURL, expectedSource.Aliases)
 			}
 			result := query.Update("dmm_id", dmmID)
 			if result.Error != nil {

@@ -325,8 +325,13 @@ func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *D
 				}
 			}
 			if plan.Versioned || hasSourceMergeResolution(plan.Resolutions) {
-				targetChanged := !plan.TargetUpdatedAt.IsZero() && !target.UpdatedAt.Equal(plan.TargetUpdatedAt)
-				sourceChanged := !plan.SourceUpdatedAt.IsZero() && !source.UpdatedAt.Equal(plan.SourceUpdatedAt)
+				// Zero snapshot vs now-stamped row is ALSO a change: legacy rows
+				// may carry NULL updated_at at plan time and gain one under a
+				// concurrent edit; skipping the check would overwrite it.
+				targetChanged := plan.TargetUpdatedAt.IsZero() != target.UpdatedAt.IsZero() ||
+					(!plan.TargetUpdatedAt.IsZero() && !target.UpdatedAt.Equal(plan.TargetUpdatedAt))
+				sourceChanged := plan.SourceUpdatedAt.IsZero() != source.UpdatedAt.IsZero() ||
+					(!plan.SourceUpdatedAt.IsZero() && !source.UpdatedAt.Equal(plan.SourceUpdatedAt))
 				if targetChanged || sourceChanged {
 					return ErrActressMergeStalePlan
 				}

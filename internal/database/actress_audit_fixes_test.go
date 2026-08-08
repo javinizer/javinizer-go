@@ -249,3 +249,49 @@ func repo3Refresh(t *testing.T, db *DB, jobID string, now time.Time) error {
 		return NewActressSyncRepository(db).refreshJobTx(tx, jobID, now)
 	})
 }
+
+// Codex P2: legacy rows can have NULL identity columns which scan as "" but
+// never match bare equality — the source fence must COALESCE them.
+func TestAssignDMMIDNullIdentityFence(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	ctx := context.Background()
+	// Row with NULL first/last/thumb/aliases and only japanese_name set.
+	require.NoError(t, db.Exec("INSERT INTO actresses (japanese_name, created_at, updated_at) VALUES (?, ?, ?)",
+		"\u30a2\u30a4\u30c9\u30eb", time.Now().UTC(), time.Now().UTC()).Error)
+	var legacy models.Actress
+	require.NoError(t, db.Where("japanese_name = ?", "\u30a2\u30a4\u30c9\u30eb").First(&legacy).Error)
+
+	ok, err := repo.AssignDMMIDIfMissingWithSource(ctx, legacy.ID, 7777, legacy)
+	require.NoError(t, err)
+	require.True(t, ok, "NULL identity columns must match via COALESCE")
+	reloaded, err := repo.FindByDMMID(ctx, 7777)
+	require.NoError(t, err)
+	require.Equal(t, legacy.ID, reloaded.ID)
+}
+
+// Codex P2: a row whose snapshot had NULL updated_at gains a timestamp on
+// edit; with source resolutions that must surface as a stale plan instead of
+// silently overwriting the concurrent edit.
+func TestMergeStalePlanNullTimestampDetection(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	ctx := context.Background()
+	// Both rows with NULL updated_at.
+	require.NoError(t, db.Exec("INSERT INTO actresses (japanese_name, created_at, updated_at) VALUES (?, ?, NULL)", "tgt", time.Now().UTC()).Error)
+	require.NoError(t, db.Exec("INSERT INTO actresses (japanese_name, created_at, updated_at) VALUES (?, ?, NULL)", "src", time.Now().UTC()).Error)
+	var target, source models.Actress
+	require.NoError(t, db.First(&target, "japanese_name = ?", "tgt").Error)
+	require.NoError(t, db.First(&source, "japanese_name = ?", "src").Error)
+	require.True(t, target.UpdatedAt.IsZero(), "fixture: NULL updated_at")
+	require.True(t, source.UpdatedAt.IsZero())
+
+	plan, err := repo.merger.PlanMerge(ctx, target.ID, source.ID, map[string]string{"japanese_name": "source"})
+	require.NoError(t, err)
+
+	// Concurrent edit sneaks in: row gains a real timestamp after planning.
+	require.NoError(t, db.Exec("UPDATE actresses SET updated_at = ? WHERE id = ?", time.Now().UTC(), source.ID).Error)
+
+	_, err = repo.merger.ExecuteMerge(ctx, plan, db)
+	require.ErrorIs(t, err, ErrActressMergeStalePlan, "zero-snapshot then stamped row must count as changed")
+}
