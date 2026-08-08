@@ -274,13 +274,15 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	// (MinnanoAV/JavDB) needs to contribute its remaining fields.
 	known := resolverInput
 	var resolverFailures []string
+	var revisit []models.Scraper
+	initialJapaneseName := strings.TrimSpace(actress.JapaneseName)
 	if revalidate || actressNeedsMetadata(actress) {
 		for _, scraper := range metadataScrapers {
 			name := strings.ToLower(strings.TrimSpace(scraper.Name()))
 			if resolver, ok := scraper.(models.ActressMetadataResolver); ok {
 				logging.Debugf("Actress sync: resolving DMM ID %d with %s", actress.DMMID, name)
 				sourceInput := known
-				if name != "javdb" {
+				if name != resolverNameJavDB {
 					sourceInput.ThumbURL = ""
 				}
 				metadata, resolverErr := resolver.ResolveActressMetadata(ctx, sourceInput)
@@ -317,6 +319,12 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 				}
 				fields := actressInfoFields(metadata)
 				if len(fields) == 0 {
+					// Name-keyed sources (javdb, minnanoav) can only resolve when a
+					// Japanese name is known. If we ran them with none, queue a single
+					// revisit once a later resolver teaches the identity (codex P2).
+					if nameIsKeyed(name) && strings.TrimSpace(sourceInput.JapaneseName) == "" {
+						revisit = append(revisit, scraper)
+					}
 					logging.Debugf("Actress sync: %s returned no metadata for DMM ID %d", name, actress.DMMID)
 				} else {
 					logging.Debugf("Actress sync: %s returned fields for DMM ID %d: %s", name, actress.DMMID, strings.Join(fields, ", "))
@@ -351,6 +359,39 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 					priority := thumbnailRank(name)
 					if priority < preferredThumbnailPriority {
 						preferredThumbnail = thumbnail
+						preferredThumbnailSource = name
+						preferredThumbnailPriority = priority
+					}
+				}
+			}
+		}
+	}
+	// One revisit of name-keyed resolvers: a DMM-style source may have taught
+	// us the Japanese name after they ran with an empty one.
+	if len(revisit) > 0 && initialJapaneseName == "" && strings.TrimSpace(known.JapaneseName) != "" {
+		for _, scraper := range revisit {
+			name := strings.ToLower(strings.TrimSpace(scraper.Name()))
+			resolver, ok := scraper.(models.ActressMetadataResolver)
+			if !ok {
+				continue
+			}
+			logging.Debugf("Actress sync: revisiting %s with learned Japanese name for DMM ID %d", name, actress.DMMID)
+			metadata, resolverErr := resolver.ResolveActressMetadata(ctx, known)
+			if resolverErr != nil {
+				logging.Warnf("Actress sync: revisit %s failed for DMM ID %d: %v", name, actress.DMMID, resolverErr)
+				continue
+			}
+			if metadata.DMMID != actress.DMMID {
+				continue
+			}
+			metadata = filterActressResolverFields(scraper, metadata)
+			if fields := actressInfoFields(metadata); len(fields) > 0 {
+				logging.Debugf("Actress sync: revisit %s contributed fields for DMM ID %d: %s", name, actress.DMMID, strings.Join(fields, ", "))
+				appendMatch(metadata, name)
+				if strings.TrimSpace(metadata.ThumbURL) != "" && !models.IsKnownInvalidDMMActressThumbnail(metadata.ThumbURL) && models.ResolverSupportsActressField(scraper, "actress_url") {
+					priority := thumbnailRank(name)
+					if priority < preferredThumbnailPriority {
+						preferredThumbnail = strings.TrimSpace(metadata.ThumbURL)
 						preferredThumbnailSource = name
 						preferredThumbnailPriority = priority
 					}
@@ -918,6 +959,21 @@ func actressMetadataScrapers(registry scraperutil.ScraperInstancesInterface, scr
 		}
 	}
 	return orderScrapersByConfiguredPriority(result, priority)
+}
+
+const (
+	// Name-keyed resolvers: resolve only from a known Japanese name.
+	resolverNameJavDB     = "javdb"
+	resolverNameMinnanoAV = "minnanoav"
+)
+
+// nameIsKeyed identifies resolvers whose lookup needs a Japanese name.
+func nameIsKeyed(name string) bool {
+	switch name {
+	case resolverNameJavDB, resolverNameMinnanoAV:
+		return true
+	}
+	return false
 }
 
 // filterActressResolverFields clears fields the resolver does not advertise

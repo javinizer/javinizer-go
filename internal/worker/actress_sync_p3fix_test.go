@@ -3,10 +3,13 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -127,4 +130,72 @@ func TestRevalidationCacheSkippedUnderActressPriority(t *testing.T) {
 	stored, stErr := repo.FindByDMMID(context.Background(), 5151)
 	require.NoError(t, stErr)
 	require.Empty(t, stored.ThumbURL, "revalidate path must also be suppressed by actress:[__skip__]")
+}
+
+// Codex P2 (round 4): transient scraper failures (429/5xx/unavailable) are
+// requeueable via ConsumeAttempt cap; NotFound/Blocked stay terminal.
+func TestIsRetryableActressSyncError(t *testing.T) {
+	require.False(t, isRetryableActressSyncError(nil))
+	require.False(t, isRetryableActressSyncError(fmt.Errorf("plain")))
+	require.False(t, isRetryableActressSyncError(&models.ScraperError{Kind: models.ScraperErrorKindNotFound}))
+	require.False(t, isRetryableActressSyncError(&models.ScraperError{Kind: models.ScraperErrorKindBlocked}))
+	require.True(t, isRetryableActressSyncError(&models.ScraperError{Kind: models.ScraperErrorKindRateLimited, Retryable: true}))
+	require.True(t, isRetryableActressSyncError(&models.ScraperError{Kind: models.ScraperErrorKindUnavailable}))
+	// Wrapped through errors.Join/fmt chains must still classify.
+	joined := fmt.Errorf("wrap: %w", &models.ScraperError{Kind: models.ScraperErrorKindRateLimited, StatusCode: 429})
+	require.True(t, isRetryableActressSyncError(joined))
+}
+
+// Codex P2 (round 4): name-keyed resolvers that produced nothing under an
+// empty Japanese name get one revisit once a later resolver taught the identity.
+func TestNameKeyedResolverRevisitedAfterDMMIdentity(t *testing.T) {
+	db, repo, movieRepo, actress := newActressSyncFixture(t, &models.Actress{DMMID: 6001, JapaneseName: ""})
+	_ = movieRepo
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+
+	dmmWire := &actressMetadataWire{actressSyncScraper: actressSyncScraper{name: "dmm"}}
+	javdbCalls := 0
+	metaStubResolvers["dmm"] = func(models.ActressInfo) models.ActressInfo {
+		return models.ActressInfo{DMMID: 6001, JapaneseName: "学習済み"}
+	}
+	javdbWire := &actressMetadataWire{actressSyncScraper: actressSyncScraper{name: "javdb"}}
+	metaStubResolvers["javdb"] = func(in models.ActressInfo) models.ActressInfo {
+		javdbCalls++
+		if strings.TrimSpace(in.JapaneseName) == "" {
+			return models.ActressInfo{DMMID: 6001}
+		}
+		return models.ActressInfo{DMMID: 6001, FirstName: "Re", LastName: "Visited"}
+	}
+	t.Cleanup(func() { delete(metaStubResolvers, "dmm"); delete(metaStubResolvers, "javdb") })
+
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(dmmWire)
+	registry.RegisterInstance(javdbWire)
+
+	_, err := SyncActressMetadata(context.Background(), actress.ID, repo, movieRepo, registry, ActressSyncOptions{
+		ScrapersPriority: []string{"javdb", "dmm"},
+		LookupCache: func(int, string, string, string) (models.ActressInfo, bool) {
+			return models.ActressInfo{}, false
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, javdbCalls, "name-keyed resolver must be revisited after DMM taught the name")
+	stored, stErr := repo.FindByDMMID(context.Background(), 6001)
+	require.NoError(t, stErr)
+	require.Equal(t, "Re", stored.FirstName)
+	require.Equal(t, "Visited", stored.LastName)
+}
+
+var metaStubResolvers = map[string]func(models.ActressInfo) models.ActressInfo{}
+
+// actressMetadataWire is the thin interface adaptor the sync loop calls.
+// It exists solely so pinned tests can inject per-name metadata behavior
+// without reimplementing the full scraper contract.
+type actressMetadataWire struct{ actressSyncScraper }
+
+func (w *actressMetadataWire) ResolveActressMetadata(_ context.Context, in models.ActressInfo) (models.ActressInfo, error) {
+	if fn, ok := metaStubResolvers[w.Name()]; ok && fn != nil {
+		return fn(in), nil
+	}
+	return models.ActressInfo{}, nil
 }

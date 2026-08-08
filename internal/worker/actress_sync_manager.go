@@ -524,6 +524,24 @@ func (m *ActressSyncManager) requeueStaleTask(task *models.ActressSyncTask, err 
 	return true
 }
 
+// isRetryableActressSyncError classifies a task failure as worth retrying
+// through the three-attempt path: 429/5xx, temporary unavailability, or any
+// ScraperError flagged Retryable/Temporary. Identity/lease/cancellation
+// errors are settled elsewhere and never consume an attempt.
+func isRetryableActressSyncError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var se *models.ScraperError
+	if errors.As(err, &se) && se != nil {
+		if se.Kind == models.ScraperErrorKindNotFound || se.Kind == models.ScraperErrorKindBlocked {
+			return false
+		}
+		return se.Retryable || se.Temporary || se.Kind == models.ScraperErrorKindRateLimited || se.Kind == models.ScraperErrorKindUnavailable
+	}
+	return false
+}
+
 func mergeActressesWithSourceCallback(ctx context.Context, repo *database.ActressRepository, task *models.ActressSyncTask) func(uint, uint, models.Actress) (*database.ActressMergeResult, error) {
 	return func(targetID, sourceID uint, expectedSource models.Actress) (*database.ActressMergeResult, error) {
 		return mergeActressesWithSourceForTask(ctx, repo, task, targetID, sourceID, expectedSource)
@@ -644,6 +662,20 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 		// identity-change / stale-plan are stale retries (persisted counter,
 		// repo terminal-fails past 3) — neither burns the attempt.
 		if m.requeueCanonicalTask(task, err) || m.requeueStaleTask(task, err) {
+			return
+		}
+		// Codex P2 (round 4): ordinary transient scraper failures (429/5xx,
+		// temporary unavailability) must retry through ConsumeAttempt — the
+		// three-attempt cap exists for exactly this. Terminal failure is last
+		// resort only after the cap.
+		if isRetryableActressSyncError(err) {
+			writeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if _, requeueErr := m.repo.RequeueTask(writeCtx, task.ID, task.LeaseToken, database.ActressSyncRequeueOptions{ConsumeAttempt: true}); requeueErr != nil {
+				if !errors.Is(requeueErr, database.ErrActressSyncLeaseLost) {
+					logging.Warnf("Actress sync retry requeue failed: %v", requeueErr)
+				}
+			}
 			return
 		}
 		task.Status, task.Outcome, task.ErrorMessage = models.ActressSyncTaskFailed, actressSyncOutcomeFailed, err.Error()
