@@ -47,6 +47,66 @@ func TestInterpretApplyResultFailureSkipsWritebackWhenPromoteWitnessUnresolved(t
 	assert.Equal(t, models.JobStatusRunning, final.Status, "failure status write-back skipped")
 }
 
+// codex P2: apply panics are intercepted by withFileRecovery, NOT the
+// interpret failure branch — this recovery write-back must fence behind an
+// unresolved promote witness too, or its revision bump flips arbitration.
+func TestRecoveryPanicSkipsWritebackWhenPromoteWitnessUnresolved(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-rc", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "PAN-9", Title: "live"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "PAN-9"},
+	})
+	before, err := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	outcome := &applyFileOutcome{}
+	rc := recoveryContext{
+		filePath:         "/f/a.mp4",
+		fmi:              models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "PAN-9"},
+		movie:            &models.Movie{ID: "PAN-9"},
+		updater:          store,
+		promoteWitnessFn: func(id string) bool { return id == "PAN-9" },
+	}
+	recoverFn := withFileRecovery(rc, outcome)
+	func() {
+		defer recoverFn()
+		panic("boom")
+	}()
+	assert.True(t, outcome.Failed)
+	final, err := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, before.Revision, final.Revision, "panic recovery write-back fenced")
+	assert.Equal(t, models.JobStatusRunning, final.Status)
+}
+
+// Fence identity falls back to the movie ID when the match carries none.
+func TestRecoveryFenceFallsBackToMovieID(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/b.mp4"})
+	store.UpdateFileResult("/f/b.mp4", &resultstore.MovieResult{
+		ResultID: "res-rf", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "PAN-10", Title: "live"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/b.mp4"},
+	})
+	before, err := store.GetMovieResult("/f/b.mp4")
+	require.NoError(t, err)
+	outcome := &applyFileOutcome{}
+	rc := recoveryContext{
+		filePath:         "/f/b.mp4",
+		fmi:              models.FileMatchInfo{Path: "/f/b.mp4"},
+		movie:            &models.Movie{ID: "PAN-10"},
+		updater:          store,
+		promoteWitnessFn: func(id string) bool { return id == "PAN-10" },
+	}
+	recoverFn := withFileRecovery(rc, outcome)
+	func() {
+		defer recoverFn()
+		panic("boom")
+	}()
+	final, err := store.GetMovieResult("/f/b.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, before.Revision, final.Revision, "fenced via fallback movie-ID probe")
+}
+
 func TestHasUnresolvedPromoteWitness(t *testing.T) {
 	pe := newEditorForStore(resultstore.New(1, []string{"/f/a.mp4"}))
 	assert.False(t, pe.hasUnresolvedPromoteWitness("PI-1"), "nil env")

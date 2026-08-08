@@ -314,7 +314,11 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 			newIDCommitted := false
 			var results map[string]*resultstore.MovieResult
 			if job != nil {
-				results = arbitrateResults(job)
+				if res, ok := arbitrateResults(job); ok {
+					results = res
+				} else {
+					continue
+				}
 				for _, r := range results {
 					// codex r52 P2: TWO-GATE committed detection. (1) No result
 					// still carries the OLD spelling — the rekey transitions the
@@ -384,9 +388,17 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 // envelope keys into zero-valued entries, misclassifying EVERY production
 // witness as uncommitted and reversing committed rekeys/promotions/crops.
 // Decode handles the legacy result formats transparently.
-func arbitrateResults(job *models.Job) map[string]*resultstore.MovieResult {
-	snap, _ := jobpersist.Decode(job)
-	return snap.Results
+func arbitrateResults(job *models.Job) (map[string]*resultstore.MovieResult, bool) {
+	snap, errs := jobpersist.Decode(job)
+	if len(errs) > 0 {
+		// audit F3: an undecodable Results column must NOT arbitrate — Decode
+		// returns an EMPTY map on failure, which would run every witness's
+		// uncommitted/reversal arm against possibly-committed state. Keep the
+		// witness and defer to manual repair.
+		logging.Warnf("witness arbitration skipped for job %s: results decode failed: %v", job.ID, errs)
+		return nil, false
+	}
+	return snap.Results, true
 }
 
 // shaContentHex hashes a poster leg for witness arbitration.
@@ -429,7 +441,11 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 	committed := false
 	var results map[string]*resultstore.MovieResult
 	if job != nil {
-		results = arbitrateResults(job)
+		if res, ok := arbitrateResults(job); ok {
+			results = res
+		} else {
+			return 0
+		}
 		for _, r := range results {
 			if r != nil && r.ResultID == w.ResultID && r.Movie != nil &&
 				strings.EqualFold(r.Movie.ID, w.PosterID) && r.Movie.Poster.PosterURL == w.URL &&
@@ -556,7 +572,11 @@ func (c *TempDirCleaner) reconcileCropWitness(ctx context.Context, dir, jobID, w
 	committed := false
 	var results map[string]*resultstore.MovieResult
 	if job != nil {
-		results = arbitrateResults(job)
+		if res, ok := arbitrateResults(job); ok {
+			results = res
+		} else {
+			return 0
+		}
 		for _, r := range results {
 			if r != nil && r.ResultID == w.ResultID && r.Movie != nil &&
 				strings.EqualFold(r.Movie.ID, w.PosterID) &&

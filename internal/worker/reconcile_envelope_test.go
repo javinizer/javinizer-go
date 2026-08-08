@@ -25,6 +25,67 @@ func envelopeRow(t *testing.T, jobID string, results map[string]*resultstore.Mov
 	return job
 }
 
+// corruptResultsRow returns an envelope-shaped row whose Results column is
+// deliberately truncated (audit F3: decode must fail → arbitration skips).
+func corruptResultsRow(t *testing.T, jobID string, results map[string]*resultstore.MovieResult) *models.Job {
+	t.Helper()
+	job := envelopeRow(t, jobID, results)
+	job.Results = "{\"domain\": {\"/f/a.mp4\": {"
+	return job
+}
+
+// audit F3: undecodable Results ⇒ witnesses are KEPT and nothing is reversed.
+func TestReconcileRekeyDecodeFailureKeepsWitness(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "NEW-9-full.jpg"), []byte("full"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "NEW-9.jpg"), []byte("crop"), 0o644))
+	witness, _ := json.Marshal(rekeyWitness{OldID: "OLD-9", NewID: "NEW-9", PrevRevision: 0})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-OLD-9.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(corruptResultsRow(t, "JOB-W1", nil), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "no reversal on decode failure")
+	_, fullErr := fs.Stat(filepath.Join(dir, "NEW-9-full.jpg"))
+	assert.NoError(t, fullErr, "new-ID bytes untouched")
+	_, wErr := fs.Stat(filepath.Join(dir, ".rekey-OLD-9.json"))
+	assert.NoError(t, wErr, "witness kept for repair")
+}
+
+func TestReconcilePromoteDecodeFailureKeepsWitness(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("new-bytes"), 0o644))
+	witness, _ := json.Marshal(promoteWitness{PosterID: "PI-1", URL: "https://x/p.jpg", ResultID: "res-1"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(corruptResultsRow(t, "JOB-W1", nil), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	_, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	got, rerr := afero.ReadFile(fs, filepath.Join(dir, "PI-1.jpg"))
+	require.NoError(t, rerr)
+	assert.Equal(t, "new-bytes", string(got), "canon untouched on decode failure")
+	_, wErr := fs.Stat(filepath.Join(dir, ".promote-PI-1.json"))
+	assert.NoError(t, wErr, "witness kept for repair")
+}
+
+func TestReconcileCropDecodeFailureKeepsStaged(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.crop-9.jpg"), []byte("staged-crop"), 0o644))
+	witness, _ := json.Marshal(cropWitness{PosterID: "PI-1", ResultID: "res-1", StageID: "PI-1.crop-9", CroppedURL: "/x/PI-1.jpg"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-PI-1.crop-9.json"), witness, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(corruptResultsRow(t, "JOB-W1", nil), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	_, err := cl.ReconcileRekeyWitnesses(context.Background())
+	require.NoError(t, err)
+	_, sErr := fs.Stat(filepath.Join(dir, "PI-1.crop-9.jpg"))
+	assert.NoError(t, sErr, "staged bytes kept — not dropped on decode failure")
+	_, wErr := fs.Stat(filepath.Join(dir, ".crop-PI-1.crop-9.json"))
+	assert.NoError(t, wErr, "witness kept for repair")
+}
+
 // P1 regression: a committed REKEY arbitrated against an envelope row must be
 // recognized as committed (witness swept, new-ID bytes kept) — with the raw
 // parse every production witness read as uncommitted and got REVERSED.

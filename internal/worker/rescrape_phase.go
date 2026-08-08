@@ -205,7 +205,12 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 		return nil
 	}
 	if err != nil {
-		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+		// audit F1: witness-fence rejections must not destroy canonical bytes
+		// the failed rescrape never wrote.
+		var cfe *EditAdmissionConflictError
+		if !errors.As(err, &cfe) {
+			CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+		}
 		if lc.inputs.HistoryRepo != nil {
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
@@ -220,8 +225,15 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 		return nil, nil
 	}
 	switch outcome.Status {
-	case models.RescrapeStatusGone, models.RescrapeStatusConflict, models.RescrapeStatusFailed:
+	case models.RescrapeStatusGone, models.RescrapeStatusFailed:
 		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+	case models.RescrapeStatusConflict:
+		// audit F1: a CAS-conflicted rescrape no longer owns the canonical
+		// pair — a concurrent winner (from-URL/crop) may. Delete only bytes
+		// THIS rescrape generated.
+		if cleanupMovie() != nil && movieResult != nil && movieResult.PosterGenerated {
+			CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+		}
 		if lc.inputs.HistoryRepo != nil {
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
@@ -366,6 +378,26 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// posters and CommitResult even if cancellation fired mid-scrape.
 		if err := ctx.Err(); err != nil {
 			return nil, movieResult, err
+		}
+
+		// audit F1: a witness outstanding means canonical poster bytes are
+		// mid-recovery (witness-holder owns them until restart reconcile) —
+		// generating over them would clobber recoverable state. Decline early;
+		// the commit-leg probe (familyKeyedResultMap) is the under-key net.
+		if movieResult.Movie != nil {
+			seen := map[string]struct{}{}
+			for _, pid := range []string{strings.TrimSpace(lookup.OldMovieID), strings.TrimSpace(movieResult.Movie.ID)} {
+				if pid == "" {
+					continue
+				}
+				if _, dup := seen[strings.ToLower(pid)]; dup {
+					continue
+				}
+				seen[strings.ToLower(pid)] = struct{}{}
+				if cerr := posterWitnessConflict(inputs.Fs, inputs.TempDir, inputs.JobID.String(), pid); cerr != nil {
+					return nil, movieResult, cerr
+				}
+			}
 		}
 
 		// Poster generation

@@ -495,12 +495,13 @@ func applyFile(
 		// path. Constructing a fresh struct here would silently zero multipart
 		// metadata for any file that panicked mid-apply, so /review/[jobId]
 		// would then show the file as single-part.
-		fmi:        fileResult.FileMatchInfo,
-		movie:      fileResult.Movie,
-		updater:    inputs.Updater,
-		broadcast:  broadcastFailure(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply, "Apply"),
-		startTime:  startTime,
-		editLockFn: inputs.EditLockFn,
+		fmi:              fileResult.FileMatchInfo,
+		movie:            fileResult.Movie,
+		updater:          inputs.Updater,
+		broadcast:        broadcastFailure(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply, "Apply"),
+		startTime:        startTime,
+		editLockFn:       inputs.EditLockFn,
+		promoteWitnessFn: inputs.PromoteWitnessFn,
 	}
 	defer withFileRecovery(rc, &outcome)()
 

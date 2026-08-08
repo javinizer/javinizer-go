@@ -145,6 +145,15 @@ describe('siblingResultFilePaths', () => {
 		expect(siblingResultFilePaths(results, 'nope')).toEqual([]);
 		expect(siblingResultFilePaths(undefined, 'r1')).toEqual([]);
 	});
+
+	it('folds case across multipart siblings (audit F6)', () => {
+		const mixed = {
+			'/f/ABC-123.mp4': { result_id: 'ra', movie_id: 'ABC-123' },
+			'/f/abc-123-cd2.mp4': { result_id: 'rb', movie_id: 'abc-123' },
+			'/f/other.mp4': { result_id: 'rc', movie_id: 'OTHER-1' },
+		};
+		expect(siblingResultFilePaths(mixed, 'ra')).toEqual(['/f/ABC-123.mp4', '/f/abc-123-cd2.mp4']);
+	});
 });
 
 describe('rescrapeClearedMovieKeys', () => {

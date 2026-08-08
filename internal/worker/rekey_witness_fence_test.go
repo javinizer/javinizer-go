@@ -119,6 +119,34 @@ func TestPosterWitnessFenceEnvEdges(t *testing.T) {
 	assert.NoError(t, posterWitnessFence(&posterEditEnv{fs: afero.NewMemMapFs(), tempDir: "/tmp", jobID: "J"}, ""))
 }
 
+// audit F7: the single-save surface (UpdateMovie → updateMovieSingleLocked)
+// advances the revision like UpdateMovieFamily — it must be fenced too.
+func TestUpdateMovieSingleFencedByPromoteWitness(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "SSNI-R1", "")
+	fs := afero.NewMemMapFs()
+	dir := filepath.Join("/tmp", "posters", "JOB-9")
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-SSNI-R1.json"), []byte("{}"), 0o644))
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	err := m.updateMovieSingleLocked(context.Background(), "/f/a.mp4", &models.Movie{ID: "SSNI-R1", Title: "x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "promote witness unresolved")
+}
+
+// audit F5: stat probe on the rekey witness fails closed (transient error
+// isn't absence).
+func TestPosterWitnessFenceRekeyStatErrorFailsClosed(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	require.NoError(t, mem.MkdirAll("/tmp/posters/JOB-9", 0o755))
+	fs := statFailSuffixFS{Fs: mem, suffix: ".rekey-SSNI-R1.json"}
+	err := posterWitnessFence(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"}, "SSNI-R1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rekey witness check")
+}
+
 // codex P2 fail-closed: a directory LISTING error (not mere absence) also
 // fails the scan closed.
 func TestRekeyCropWitnessScanDirErrorFailsClosed(t *testing.T) {

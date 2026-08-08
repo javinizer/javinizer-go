@@ -167,8 +167,10 @@ func TestUpdateMovieFamilyRekeyRejectsUnresolvedWitness(t *testing.T) {
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
 	var conflict *EditAdmissionConflictError
 	require.ErrorAs(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-NEW2"}), &conflict)
-	// same-identity saves (no relocation arm) must still work
-	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-R1"}), "non-rekey updates unaffected")
+	// audit F5: same-identity saves are ALSO fenced now — a plain PATCH's
+	// post-commit eviction could delete old-ID legs while a move is stranded,
+	// and the reconciler would then resurrect the stale leg.
+	require.ErrorAs(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-R1"}), &conflict, "non-rekey edits fenced while the rekey witness is unresolved")
 	data, _ := afero.ReadFile(fs, filepath.Join(dir, ".rekey-SSNI-R1.json"))
 	assert.Contains(t, string(data), "SSNI-OLD-NEW", "the original witness content is untouched")
 }

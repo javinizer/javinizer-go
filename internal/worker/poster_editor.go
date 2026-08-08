@@ -414,17 +414,37 @@ func (pe *PosterEditor) hasUnresolvedPromoteWitness(posterID string) bool {
 // preserving uncommitted (or deleting recoverable staged) bytes. Fence ALL
 // revision-advancing edits uniformly; scan errors fail closed.
 func posterWitnessFence(env *posterEditEnv, posterID string) error {
-	if env == nil || env.fs == nil || env.tempDir == "" || env.jobID == "" || posterID == "" {
+	if env == nil {
 		return nil
 	}
-	dir := filepath.Join(env.tempDir, "posters", env.jobID)
+	return posterWitnessConflict(env.fs, env.tempDir, env.jobID, posterID)
+}
+
+// posterWitnessConflict is the raw-seams core of posterWitnessFence (audit
+// F1): rescrape plumbing carries fs/tempDir/jobID without a posterEditEnv.
+func posterWitnessConflict(fs afero.Fs, tempDir, jobID, posterID string) error {
+	if fs == nil || tempDir == "" || jobID == "" || posterID == "" {
+		return nil
+	}
+	dir := filepath.Join(tempDir, "posters", jobID)
 	pw := filepath.Join(dir, ".promote-"+url.PathEscape(posterID)+".json")
-	if _, err := env.fs.Stat(pw); err == nil {
+	if _, err := fs.Stat(pw); err == nil {
 		return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s promote witness unresolved: restart to reconcile", posterID)}
 	} else if !errors.Is(err, afero.ErrFileNotFound) {
 		return fmt.Errorf("poster promote witness check: %w", err)
 	}
-	entries, err := afero.ReadDir(env.fs, dir)
+	// audit F5: the self-rekey witness also fences NON-rekey edits — a plain
+	// PATCH's post-commit eviction could delete the old-ID pair while a leg
+	// is stranded mid-relocation, and the startup reconciler would then
+	// resurrect the stale leg beside missing bytes. (The relocation block
+	// keeps its own identical check as defense-in-depth.)
+	rw := filepath.Join(dir, ".rekey-"+posterID+".json")
+	if _, err := fs.Stat(rw); err == nil {
+		return &EditAdmissionConflictError{Message: fmt.Sprintf("poster rekey witness unresolved for %s: the previous rekey left stranded moves — restart to reconcile before rekeying again", posterID)}
+	} else if !errors.Is(err, afero.ErrFileNotFound) {
+		return fmt.Errorf("poster rekey witness check %s: %w", rw, err)
+	}
+	entries, err := afero.ReadDir(fs, dir)
 	if err != nil && !errors.Is(err, afero.ErrFileNotFound) {
 		return fmt.Errorf("poster crop witness scan %s: %w", dir, err)
 	}
@@ -433,7 +453,7 @@ func posterWitnessFence(env *posterEditEnv, posterID string) error {
 		if !strings.HasPrefix(name, ".crop-") || !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		data, rerr := afero.ReadFile(env.fs, filepath.Join(dir, name))
+		data, rerr := afero.ReadFile(fs, filepath.Join(dir, name))
 		if rerr != nil {
 			return fmt.Errorf("poster crop witness scan %s: %w", name, rerr)
 		}
@@ -1154,6 +1174,11 @@ func (m *LockedMovieOps) updateMovieSingleLocked(ctx context.Context, filePath s
 		return fmt.Errorf("%w: %s", ErrMovieFamilyEmpty, filePath)
 	}
 	if err := m.rejectIdentityChangeLocked([]string{filePath}, movie); err != nil {
+		return err
+	}
+	// audit F7: the single-save surface advances the revision exactly like
+	// UpdateMovieFamily — fence it behind outstanding poster witnesses too.
+	if err := posterWitnessFence(m.pe.currentEnv(), movie.ID); err != nil {
 		return err
 	}
 	backupCoverOriginal(current.Movie, movie)

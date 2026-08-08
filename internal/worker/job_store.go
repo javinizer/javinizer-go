@@ -410,6 +410,10 @@ func (s *JobStore) recoverOrphanedJobs() {
 		job.lifecycle.mu.Unlock()
 
 		job.lifecycle.MarkFailed()
+		// audit F4: this row's phase goroutine died with the old process — the
+		// marker would otherwise persist on a terminal row and 409 edits
+		// forever. Clear it BEFORE persisting the recovered state.
+		job.lifecycle.SetCurrentPhase("")
 		if err := s.persistence.PersistJob(job); err != nil {
 			logging.Warnf("Failed to persist recovered job %s: %v", id, err)
 		}

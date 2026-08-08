@@ -258,6 +258,13 @@ func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, r
 	if fs == nil {
 		fs = afero.NewOsFs()
 	}
+	// audit F2: a leg that EXISTS but is unreadable never reaches OldSHA —
+	// the reconciler would later misread "no key" as "no pre-op bytes" and
+	// delete a canon the failed promote never touched (killing manual crops).
+	// Refuse to witness such a promote at all.
+	if backup != nil && (backup.fullUnreadable || backup.croppedUnreadable) {
+		return "", fmt.Errorf("poster pair unreadable at backup (full=%v crop=%v) — refusing to witness an unrecoverable promote; retry when the files are readable", backup.fullUnreadable, backup.croppedUnreadable)
+	}
 	dir := filepath.Join(tempDir, "posters", jobID)
 	p := filepath.Join(dir, promoteWitnessName(posterID))
 	if _, err := fs.Stat(p); err == nil {

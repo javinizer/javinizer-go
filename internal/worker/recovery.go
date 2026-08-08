@@ -2,6 +2,7 @@ package worker
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -25,9 +26,14 @@ type recoveryContext struct {
 	fmi        models.FileMatchInfo
 	editLockFn func(movieIDs ...string) func() // optional: serializes write-back with review edits (codex r11; variadic per codex r42 total-order rule)
 	movie      *models.Movie                   // optional: prior scrape-phase Movie to preserve on apply panic (mirrors fix in interpretApplyResult's err branch)
-	updater    resultstore.ResultUpdater
-	broadcast  func(panicErr string) // optional: send a JobEvent on panic (apply phase uses this)
-	startTime  time.Time             // optional: included in MovieResult if non-zero
+	// promoteWitnessFn reports an unresolved .promote- witness for the family
+	// (codex P2: panics never funnel through the interpret failure branch —
+	// this recovery write-back is the ONLY panic publication, so it must
+	// fence or its revision bump flips startup arbitration to committed).
+	promoteWitnessFn func(posterID string) bool
+	updater          resultstore.ResultUpdater
+	broadcast        func(panicErr string) // optional: send a JobEvent on panic (apply phase uses this)
+	startTime        time.Time             // optional: included in MovieResult if non-zero
 }
 
 // withFileRecovery wraps a business-logic function with panic recovery.
@@ -60,10 +66,16 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 				unlock = rc.editLockFn(rc.fmi.MovieID)
 			}
 			defer unlock()
+			fenceID := strings.TrimSpace(rc.fmi.MovieID)
+			if fenceID == "" && rc.movie != nil {
+				fenceID = strings.TrimSpace(rc.movie.ID)
+			}
 			// codex P2-C/D: skip check runs UNDER the family key so a rekey that
 			// won the lock before us is observed; callback check remains the net
 			// for rekeys landing during the atomic write itself.
-			if !writebackPreSkipped(rc.updater, rc.movie, rc.filePath, "Recovery") {
+			if fenceID != "" && rc.promoteWitnessFn != nil && rc.promoteWitnessFn(fenceID) {
+				logging.Warnf("[Recovery] skipping write-back for %s — promote witness for %s unresolved; restart reconciles", rc.filePath, fenceID)
+			} else if !writebackPreSkipped(rc.updater, rc.movie, rc.filePath, "Recovery") {
 				errUp := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 					if applyWritebackIdentityMismatch(rc.movie, current) {
 						logging.Warnf("[Recovery] skipping write-back for %s — result rekeyed to %s mid-phase", rc.filePath, current.FileMatchInfo.MovieID)

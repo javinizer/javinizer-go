@@ -114,6 +114,20 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 	// Restore the durable phase marker (D16): legacy envelopes predating the
 	// marker decode "" and read conservatively-busy for edits on Running rows.
 	batchJob.lifecycle.currentPhase = snapshot.CurrentPhase
+	// audit F4: a TERMINAL row with a marker is poison across restarts — no
+	// phase goroutine survives the process boundary to clear it, so every
+	// future edit 409s forever (EditPhaseBusyError). Clear + re-persist once.
+	if snapshot.CurrentPhase != "" {
+		switch snapshot.Status {
+		case models.JobStatusCompleted, models.JobStatusOrganized, models.JobStatusFailed, models.JobStatusCancelled, models.JobStatusReverted:
+			batchJob.lifecycle.currentPhase = ""
+			if s.persistence != nil {
+				if perr := s.persistence.PersistJob(batchJob); perr != nil {
+					logging.Warnf("reconstructBatchJob: clearing stale phase marker for %s failed: %v", jobID, perr)
+				}
+			}
+		}
+	}
 
 	batchJob.mu.Lock()
 	if s.reconMatcher != nil {

@@ -504,7 +504,14 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 		PosterGen:   pg,
 		HistoryRepo: histRepo,
 		// Commit leg wraps through the family lock (codex r20): the scrape's network section stays unlocked; CommitResult serializes with concurrent family edits on the process-wide registry.
-		ResultMap:   &familyKeyedResultMap{ResultMapAccessor: c.job.results, updater: c.job.results, registry: c.job.posterEditor.lockRegistry()},
+		ResultMap: &familyKeyedResultMap{
+			ResultMapAccessor: c.job.results,
+			updater:           c.job.results,
+			registry:          c.job.posterEditor.lockRegistry(),
+			fs:                c.job.fs,
+			tempDir:           c.job.cfg.tempDir,
+			jobID:             c.job.ID.String(),
+		},
 		Lifecycle:   c.job.lifecycle,
 		persister:   persistFunc(pfn),
 		Finder:      c.job.results,

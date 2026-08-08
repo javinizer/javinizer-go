@@ -234,6 +234,24 @@ func TestWritePromoteGuardedRekeyStatErrorFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "rekey witness check")
 }
 
+// audit F2: a backup with an unreadable leg must refuse the witness outright
+// — OldSHA would omit the leg and the reconciler would delete a canon the
+// promote never touched.
+func TestWritePromoteGuardedRefusesUnreadableBackup(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JG-UB"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("crop"), 0o644))
+	backup := &posterPairBackup{croppedUnreadable: true}
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-UB", "PI-1", "https://x", "res-1", 0, backup)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unreadable")
+	backupOK := &posterPairBackup{}
+	p, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-UB", "PI-1", "https://x", "res-1", 0, backupOK)
+	require.NoError(t, err)
+	assert.Contains(t, p, ".promote-PI-1.json")
+}
+
 // codex P2: a NON-absence read error on the canonical full-size source must
 // abort the crop (409) rather than silently falling back to the cropped leg
 // while the UI measured coordinates against full size.

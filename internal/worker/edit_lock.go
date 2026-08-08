@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/spf13/afero"
+
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
@@ -105,6 +107,12 @@ type familyKeyedResultMap struct {
 	// result commit (codex r36 P1); nil in bare test fixtures.
 	updater  resultstore.ResultUpdater
 	registry *keyedMutexRegistry
+	// fs/tempDir/jobID feed the witness fence (audit F1): the rescrape commit
+	// leg must not advance a family's revision while a promote/crop/rekey
+	// witness is unresolved. Nil fs ⇒ no probe (bare test fixtures).
+	fs      afero.Fs
+	tempDir string
+	jobID   string
 }
 
 // commitKeys computes the full identity key set for a commit: the matcher
@@ -154,6 +162,32 @@ func (w *familyKeyedResultMap) CommitResult(filePath string, result *resultstore
 func (w *familyKeyedResultMap) CommitResultWithProvenance(filePath string, result *resultstore.MovieResult, expectedRevision uint64, prov *resultstore.ProvenanceData) error {
 	release := w.registry.AcquireMany(w.commitKeys(filePath, result))
 	defer release()
+	// audit F1: re-probe witnesses UNDER the family key — a fence-exempt
+	// rescrape commit would otherwise advance the revision while canonical
+	// bytes are mid-recovery, misflipping startup arbitration to committed.
+	if w.fs != nil {
+		seen := map[string]struct{}{}
+		var storedID string
+		if cur, err := w.GetMovieResult(filePath); err == nil && cur != nil && cur.Movie != nil {
+			storedID = strings.TrimSpace(cur.Movie.ID)
+		}
+		var newID string
+		if result != nil && result.Movie != nil {
+			newID = strings.TrimSpace(result.Movie.ID)
+		}
+		for _, pid := range []string{storedID, newID} {
+			if pid == "" {
+				continue
+			}
+			if _, dup := seen[strings.ToLower(pid)]; dup {
+				continue
+			}
+			seen[strings.ToLower(pid)] = struct{}{}
+			if err := posterWitnessConflict(w.fs, w.tempDir, w.jobID, pid); err != nil {
+				return err
+			}
+		}
+	}
 	if err := w.ResultMapAccessor.CommitResult(filePath, result, expectedRevision); err != nil {
 		return err
 	}
