@@ -335,6 +335,41 @@ func TestWithRescrapeStatusConflictVerifyMissingCanonAllowsLegacy(t *testing.T) 
 	assert.Equal(t, "parked", string(got), "legacy allow when canonical unreadable")
 }
 
+// audit F-R18-1: the success-arm orphan sweep must skip an ID whose in-flight
+// marker is present — a concurrent rescrape's uncommitted bytes live there.
+func TestOrphanSweepSkipsInFlightMarker(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "NEW-9", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+	// in-flight sibling's bytes at the orphan ID + its park marker
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "OLD-9.jpg"), []byte("sibling-live"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "OLD-9.jpg.rsbak.a1.b2"), []byte("parked-by-sibling"), 0o644))
+
+	outcome := &RescrapeResult{Status: models.RescrapeStatusSuccess, OrphanedMovieIDs: []string{"OLD-9"}}
+	_, err := withRescrapeStatus(lc, func(_ *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		return outcome, &resultstore.MovieResult{Movie: &models.Movie{ID: "NEW-9"}}, nil
+	})
+	require.NoError(t, err)
+	got, rerr := afero.ReadFile(fs, filepath.Join(dir, "OLD-9.jpg"))
+	require.NoError(t, rerr, "in-flight sibling's bytes never swept")
+	assert.Equal(t, "sibling-live", string(got))
+	_, err2 := fs.Stat(filepath.Join(dir, "OLD-9.jpg.rsbak.a1.b2"))
+	assert.NoError(t, err2, "park marker survives (its owner disposes it)")
+
+	// Marker cleared, bytes become sweepable
+	require.NoError(t, fs.Remove(filepath.Join(dir, "OLD-9.jpg.rsbak.a1.b2")))
+	_, err = withRescrapeStatus(lc, func(_ *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		return outcome, &resultstore.MovieResult{Movie: &models.Movie{ID: "NEW-9"}}, nil
+	})
+	require.NoError(t, err)
+	_, err3 := fs.Stat(filepath.Join(dir, "OLD-9.jpg"))
+	assert.Error(t, err3, "no marker ⇒ orphan sweep fires")
+}
+
 // audit F-R4-1: Gone must NOT restore parked bytes (that resurrects exactly
 // the pre-op state Gone exists to purge); parked backups are discarded.
 func TestWithRescrapeStatusGonePurgesAndDiscardsParked(t *testing.T) {

@@ -383,10 +383,26 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 			release = lc.inputs.EditLockFn(outcome.OrphanedMovieIDs...)
 		}
 		stillOrphaned := make([]string, 0, len(outcome.OrphanedMovieIDs))
+		var pdir string
+		if lc.inputs.Fs != nil && lc.inputs.TempDir != "" {
+			pdir = filepath.Join(lc.inputs.TempDir, "posters", lc.inputs.JobID.String())
+		}
 		for _, id := range outcome.OrphanedMovieIDs {
-			if !anyResultUsesMovieID(lc.inputs.ResultMap, id) {
-				stillOrphaned = append(stillOrphaned, id)
+			if anyResultUsesMovieID(lc.inputs.ResultMap, id) {
+				continue
 			}
+			if pdir != "" {
+				// audit F-R18-1: in-flight generation marker — a sibling op's
+				// uncommitted bytes sit at this ID's canonical names; row-only
+				// orphan probing structurally cannot see them. Skip it.
+				if inFlight, perr := rescrapeInFlightBackupPresent(lc.inputs.Fs, pdir, id); perr != nil {
+					logging.Warnf("orphan sweep marker probe for %s failed (%v) — kept (undecidable)", id, perr)
+					continue
+				} else if inFlight {
+					continue
+				}
+			}
+			stillOrphaned = append(stillOrphaned, id)
 		}
 		CleanupPosterPaths(lc.inputs.Fs, OrphanedPosterPaths(stillOrphaned, newMovieID, lc.inputs.TempDir, lc.inputs.JobID, lc.inputs.FsCaseCache))
 		release()
