@@ -184,6 +184,35 @@ func TestWriteCropWitnessGuardedRekeyStatErrorFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "crop witness scan")
 }
 
+// codex P2: an outstanding CROP witness for the same poster fences the
+// from-URL promote — otherwise startup could promote stale staged crop bytes
+// over the freshly downloaded poster.
+func TestWritePromoteGuardedFencesCropWitness(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JG-CF"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-PI-1.crop-old.json"), []byte("{\"poster_id\":\"PI-1\"}"), 0o644))
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-CF", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
+	require.ErrorIs(t, err, errPromoteWitnessPending)
+	assert.Contains(t, err.Error(), "crop witness")
+	// Once reconciled (witness removed) the download is readmitted.
+	removeCropWitness(fs, filepath.Join(dir, ".crop-PI-1.crop-old.json"))
+	_, err = writePromoteWitnessGuarded(fs, "/tmp", "JG-CF", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
+	require.NoError(t, err)
+}
+
+// A transient read error inside the promote guard's crop scan fails closed.
+func TestWritePromoteGuardedCropScanReadError(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := "/tmp/posters/JG-CE"
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, ".crop-PI-1.crop-x.json"), []byte("{}"), 0o644))
+	fs := &brokenFS{Fs: mem, failOpen: func(n string) bool { return strings.HasSuffix(n, ".json") }}
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-CE", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "crop witness scan")
+}
+
 // codex P2: a NON-absence read error on the canonical full-size source must
 // abort the crop (409) rather than silently falling back to the cropped leg
 // while the UI measured coordinates against full size.

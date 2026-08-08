@@ -258,7 +258,8 @@ func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, r
 	if fs == nil {
 		fs = afero.NewOsFs()
 	}
-	p := filepath.Join(tempDir, "posters", jobID, promoteWitnessName(posterID))
+	dir := filepath.Join(tempDir, "posters", jobID)
+	p := filepath.Join(dir, promoteWitnessName(posterID))
 	if _, err := fs.Stat(p); err == nil {
 		return "", fmt.Errorf("%w for %s — restart to reconcile before retrying", errPromoteWitnessPending, posterID)
 	} else if !os.IsNotExist(err) {
@@ -266,6 +267,16 @@ func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, r
 		// exists — overwriting it would blind the reconciler to the pending
 		// state. Fail closed.
 		return "", fmt.Errorf("promote witness check %s: %w", p, err)
+	}
+	// codex P2: an unresolved CROP witness also fences the download. When the
+	// crop committed but its promote exhausted retries, promoting new bytes
+	// at the same canonical URL makes startup reconciliation misclassify the
+	// older crop as committed and promote its STALE staged bytes over the new
+	// poster.
+	if cropName, cerr := cropWitnessConflict(fs, dir, posterID); cerr != nil {
+		return "", cerr
+	} else if cropName != "" {
+		return "", fmt.Errorf("%w for %s (crop witness %s) — restart to reconcile before retrying", errPromoteWitnessPending, posterID, cropName)
 	}
 	return writePromoteWitness(fs, tempDir, jobID, posterID, srcURL, resultID, prevRevision, backup)
 }
@@ -321,6 +332,40 @@ func cropWitnessName(stageID string) string {
 	return cropWitnessPrefix + url.PathEscape(stageID) + ".json"
 }
 
+// cropWitnessConflict scans the poster dir for crop witnesses naming
+// posterID, returning the conflicting witness filename ("" when none). Both
+// admission guards (crop write + from-URL promote) share this scan so a
+// committed-but-unpromoted crop blocks BOTH follow-up mutations. Corrupt
+// payloads defer to the reconciler; scan errors fail CLOSED (codex P2).
+func cropWitnessConflict(fs afero.Fs, dir, posterID string) (string, error) {
+	entries, err := afero.ReadDir(fs, dir)
+	switch {
+	case err == nil:
+	case os.IsNotExist(err):
+		return "", nil
+	default:
+		return "", fmt.Errorf("crop witness scan %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, cropWitnessPrefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, rerr := afero.ReadFile(fs, filepath.Join(dir, name))
+		if rerr != nil {
+			return "", fmt.Errorf("crop witness scan %s: %w", name, rerr)
+		}
+		var foreign cropWitness
+		if jerr := json.Unmarshal(data, &foreign); jerr != nil {
+			continue
+		}
+		if foreign.PosterID == posterID {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
 // errCropWitnessPending fences a crop when an EARLIER crop witness for the
 // same poster is still unresolved (codex P2: the promote-failure branch
 // retains its witness for the startup reconciler; production runs no periodic
@@ -354,30 +399,12 @@ func writeCropWitnessGuarded(fs afero.Fs, tempDir, jobID string, w cropWitness) 
 			return "", fmt.Errorf("crop witness scan %s: %w", p, serr)
 		}
 	}
-	entries, err := afero.ReadDir(fs, dir)
-	switch {
-	case err == nil:
-		for _, e := range entries {
-			name := e.Name()
-			if !strings.HasPrefix(name, cropWitnessPrefix) || !strings.HasSuffix(name, ".json") {
-				continue
-			}
-			data, rerr := afero.ReadFile(fs, filepath.Join(dir, name))
-			if rerr != nil {
-				return "", fmt.Errorf("crop witness scan %s: %w", name, rerr)
-			}
-			var foreign cropWitness
-			if jerr := json.Unmarshal(data, &foreign); jerr != nil {
-				continue
-			}
-			if foreign.PosterID == w.PosterID {
-				return "", fmt.Errorf("%w for %s — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
-			}
-		}
-	case os.IsNotExist(err):
-		// no poster dir yet — nothing outstanding to fence against
-	default:
-		return "", fmt.Errorf("crop witness scan %s: %w", dir, err)
+	conflict, cerr := cropWitnessConflict(fs, dir, w.PosterID)
+	if cerr != nil {
+		return "", cerr
+	}
+	if conflict != "" {
+		return "", fmt.Errorf("%w for %s — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
 	}
 	return writeCropWitness(fs, tempDir, jobID, w)
 }
