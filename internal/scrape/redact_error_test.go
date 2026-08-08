@@ -37,8 +37,8 @@ func TestRedactErrorURL_PreservesScraperError(t *testing.T) {
 	rawURL := "https://example.com/page?token=secret"
 	se := &models.ScraperError{
 		Scraper: "TestScraper",
-		Kind:     models.ScraperErrorKindUnknown,
-		Message:  fmt.Sprintf("failed to fetch %s", rawURL),
+		Kind:    models.ScraperErrorKindUnknown,
+		Message: fmt.Sprintf("failed to fetch %s", rawURL),
 	}
 
 	redacted := redactErrorURL(se, rawURL)
