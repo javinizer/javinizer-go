@@ -159,21 +159,9 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		logging.Infof("[Rescrape] Verified update for job %s, result %s (movieID=%s): status=%s",
 			job.GetID(), resultID, movieID, rr.Status)
 
-		// audit F-R14-1: the revision echo RE-ACQUIRES the family key so a
-		// racing commit can never land between the op's release and this read
-		// and heal the client's CAS baseline past unseen content.
-		var rev *uint64
-		if rr.FilePath != "" {
-			if lerr := job.WithMovieEditLock(movieID, func(m *worker.LockedMovieOps) error {
-				if res, gerr := job.GetMovieResult(rr.FilePath); gerr == nil && res != nil {
-					rv := res.Revision
-					rev = &rv
-				}
-				return nil
-			}); lerr != nil {
-				logging.Warnf("[Rescrape] revision echo read skipped for %s: %v", movieID, lerr)
-			}
-		}
+		// audit F-R15-1: the outcome carries the post-commit revision landed
+		// inside the keyed section — no re-acquisition needed, no racer echo.
+		rev := rr.Revision
 		c.JSON(http.StatusOK, contracts.BatchRescrapeResponse{
 			Movie:          contracts.MovieViewFromModel(rr.Movie),
 			FieldSources:   rr.FieldSources,

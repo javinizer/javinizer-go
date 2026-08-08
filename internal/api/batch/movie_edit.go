@@ -118,26 +118,16 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// Dual-key-locked family commit (D1): identity-changing PATCHes hold
 		// old+new keys atomically; the omitted-bounds carry re-reads stored
 		// geometry INSIDE the keys (never the handler's pre-lock read).
-		opErr := job.UpdateMovieFamily(c.Request.Context(), movieID, resultID, movie, worker.FamilySaveOptions{CarryCropGeometry: !req.PosterCropBoundsFieldPresent, ExpectedResultRevision: req.ExpectedResultRevision, ExpectedResultRevisions: req.ExpectedResultRevisions})
+		opRev, opFam, opErr := job.UpdateMovieFamilyWithEcho(c.Request.Context(), movieID, resultID, movie, worker.FamilySaveOptions{CarryCropGeometry: !req.PosterCropBoundsFieldPresent, ExpectedResultRevision: req.ExpectedResultRevision, ExpectedResultRevisions: req.ExpectedResultRevisions})
 		if opErr != nil {
 			logging.Errorf("Failed to update movie family %s: %v", movieID, opErr)
 			writeEditOpError(c, fmt.Errorf("failed to update movie: %w", opErr))
 			return
 		}
 
-		// audit F-R14-1: echo reads RE-ACQUIRE the family key — a racing same-
-		// family commit can otherwise land between the op's release and this
-		// read, healing the client's CAS baseline past content it never saw.
-		var revEcho *uint64
-		var famEcho map[string]uint64
-		if lerr := job.WithMovieEditLock(movieID, func(m *worker.LockedMovieOps) error {
-			revEcho = currentResultRevision(job, resultID)
-			famEcho = familyRevisions(job, resultID)
-			return nil
-		}); lerr != nil {
-			logging.Warnf("Batch save %s: echo read skipped: %v", movieID, lerr)
-		}
-		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie), Revision: revEcho, Revisions: famEcho})
+		// audit F-R15-1: the echo comes from the OP's own keyed section —
+		// revision content the client adopts always matches OUR saved state.
+		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie), Revision: opRev, Revisions: opFam})
 	}
 }
 

@@ -126,6 +126,10 @@ type RescrapeResult struct {
 	Error            string                  // Human-readable error for "failed" status
 	OrphanedMovieIDs []string                // IDs that became orphaned during rescrape cleanup
 	FilePath         string                  // File path that was rescraped (for provenance propagation)
+	// Revision is the post-commit landing revision of the saved result,
+	// captured inside the commit's keyed section (audit F-R15-1): the CAS
+	// echo never reads off-key, so a racer's commit cannot be mishealed.
+	Revision *uint64
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +170,12 @@ type JobEditor interface {
 	// onto the payload — a crop committed concurrently can never be silently
 	// reverted by a stale pre-lock read.
 	UpdateMovieFamily(ctx context.Context, movieID, resultID string, movie *models.Movie, opts FamilySaveOptions) error
+
+	// UpdateMovieFamilyWithEcho is UpdateMovieFamily PLUS the post-commit
+	// revision echo captured INSIDE the keyed section (audit F-R15-1): the
+	// CAS echo never reflects a racer's commit landing in the
+	// release→read gap.
+	UpdateMovieFamilyWithEcho(ctx context.Context, movieID, resultID string, movie *models.Movie, opts FamilySaveOptions) (*uint64, map[string]uint64, error)
 
 	ExcludeFile(filePath string)
 
@@ -396,6 +406,11 @@ func (je *jobEditorImpl) UpdateMovie(ctx context.Context, filePath string, movie
 // one acquisition of the family key (D1).
 func (je *jobEditorImpl) UpdateMovieFamily(ctx context.Context, movieID, resultID string, movie *models.Movie, opts FamilySaveOptions) error {
 	return je.editor().UpdateMovieFamily(ctx, movieID, resultID, movie, opts)
+}
+
+// UpdateMovieFamilyWithEcho forwards the in-key echo variant (audit F-R15-1).
+func (je *jobEditorImpl) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, resultID string, movie *models.Movie, opts FamilySaveOptions) (*uint64, map[string]uint64, error) {
+	return je.editor().UpdateMovieFamilyWithEcho(ctx, movieID, resultID, movie, opts)
 }
 
 // ExcludeFile marks a file as excluded from the job and, if all files are excluded,

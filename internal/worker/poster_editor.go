@@ -1363,7 +1363,18 @@ type FamilySaveOptions struct {
 // lexical order (D1 dual-key rule) so a concurrent op on either identity
 // can never interleave a partially-published rekey (codex P3-B).
 func (pe *PosterEditor) UpdateMovieFamily(ctx context.Context, movieID, resultID string, movie *models.Movie, opts FamilySaveOptions) error {
-	return pe.withKeyedSection(movieID, movie, func(m *LockedMovieOps) error {
+	_, _, err := pe.UpdateMovieFamilyWithEcho(ctx, movieID, resultID, movie, opts)
+	return err
+}
+
+// UpdateMovieFamilyWithEcho is UpdateMovieFamily plus the CAS echo — the
+// revisions are captured post-commit INSIDE the keyed section (audit
+// F-R15-1), so an echo never reflects a racer's commit landing in the
+// release→read gap.
+func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, resultID string, movie *models.Movie, opts FamilySaveOptions) (*uint64, map[string]uint64, error) {
+	var echoRev *uint64
+	var echoFam map[string]uint64
+	err := pe.withKeyedSection(movieID, movie, func(m *LockedMovieOps) error {
 		if opts.ExpectedResultRevision != nil {
 			if cur, _, ok := m.pe.lookup.GetFileResultByResultID(resultID); ok && cur.Revision != *opts.ExpectedResultRevision {
 				return &EditAdmissionConflictError{Message: fmt.Sprintf("result revision stale: expected %d, found %d", *opts.ExpectedResultRevision, cur.Revision)}
@@ -1392,8 +1403,29 @@ func (pe *PosterEditor) UpdateMovieFamily(ctx context.Context, movieID, resultID
 				}
 			}
 		}
-		return m.UpdateMovieFamily(ctx, movie)
+		if err := m.UpdateMovieFamily(ctx, movie); err != nil {
+			return err
+		}
+		// in-key echo capture (audit F-R15-1): result + folded-family map at
+		// their post-commit values — never a racer that already landed.
+		if stored, _, ok := m.pe.lookup.GetFileResultByResultID(resultID); ok && stored != nil {
+			rv := stored.Revision
+			echoRev = &rv
+			famID := strings.TrimSpace(stored.FileMatchInfo.MovieID)
+			if famID == "" && stored.Movie != nil {
+				famID = strings.TrimSpace(stored.Movie.ID)
+			}
+			fam := map[string]uint64{}
+			for _, r2 := range m.pe.lookup.GetMovieResultsForMovieID(famID) {
+				if r2 != nil && r2.ResultID != "" {
+					fam[r2.ResultID] = r2.Revision
+				}
+			}
+			echoFam = fam
+		}
+		return nil
 	})
+	return echoRev, echoFam, err
 }
 
 // withKeyedSection acquires the family key — plus the incoming movie's new

@@ -251,6 +251,9 @@ func (s *stubControlledJob) GetCurrentPhase() string                            
 func (s *stubControlledJob) UpdateMovieFamily(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) error {
 	return nil
 }
+func (s *stubControlledJob) UpdateMovieFamilyWithEcho(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) (*uint64, map[string]uint64, error) {
+	return nil, nil, nil
+}
 func (s *stubControlledJob) ExcludeMovieFamily(context.Context, string) error { return nil }
 func (s *stubControlledJob) WithMovieEditLock(_ string, fn func(*worker.LockedMovieOps) error) error {
 	return fn(&worker.LockedMovieOps{})

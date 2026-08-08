@@ -18,6 +18,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// JobEditor-seam coverage: the WithEcho passthrough delegates to the editor
+// inside the section and surfaces the echo.
+func TestJobEditorImplWithEchoDelegates(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "JEDO-1", "")
+	ed := &jobEditorImpl{store: store, lifecycle: &JobLifecycle{Status: models.JobStatusCompleted, done: make(chan struct{})}}
+	rev, fam, err := ed.UpdateMovieFamilyWithEcho(context.Background(), "JEDO-1", "res-1", &models.Movie{ID: "JEDO-1", Title: "echo"}, FamilySaveOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, rev)
+	require.Len(t, fam, 1)
+	live, lerr := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, lerr)
+	assert.Equal(t, live.Revision, *rev, "echo = committed revision")
+}
+
 // audit F-R12-1: patch key selection must include the STORED canonical
 // Movie.ID — otherwise the key-held rescrape generation window (named by the
 // canonical byte marker) and the rekey relocation collide.
@@ -245,6 +260,36 @@ func TestRescrapeParkFailureAbortsGeneration(t *testing.T) {
 	got, rerr := afero.ReadFile(fs, filepath.Join(dir, "PF-9.jpg"))
 	require.NoError(t, rerr)
 	assert.Equal(t, "committed", string(got), "pre-existing bytes never moved nor overwritten")
+}
+
+// audit F-R15-1: the echo variant returns post-commit revisions captured
+// within the keyed section — they match the COMMITTED state, provably.
+func TestUpdateMovieFamilyWithEchoCapturesCommitRevision(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "MIX-7", "")
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: afero.NewMemMapFs(), tempDir: "/tmp", jobID: "JOB-E"})
+	before, berr := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, berr)
+	rev, fam, err := pe.UpdateMovieFamilyWithEcho(context.Background(), "MIX-7", "res-1", &models.Movie{ID: "MIX-7", Title: "echo title"}, FamilySaveOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, rev)
+	after, gerr := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, gerr)
+	assert.Equal(t, before.Revision+1, *rev, "echo = landed revision")
+	assert.Equal(t, *rev, after.Revision, "echo matches committed state")
+	require.Len(t, fam, 1)
+	assert.Equal(t, after.Revision, fam["res-1"])
+}
+
+// nil-echo variant: updateMovieFamily delegates reject identity, echo nil.
+func TestUpdateMovieFamilyWithEchoFailureReturnsNil(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	pe := newEditorForStore(store)
+	rev, fam, err := pe.UpdateMovieFamilyWithEcho(context.Background(), "GONE-7", "res-x", &models.Movie{ID: "GONE-7"}, FamilySaveOptions{})
+	require.Error(t, err)
+	assert.Nil(t, rev)
+	assert.Nil(t, fam)
 }
 
 // audit F-R7-1: relocation pins the initiating ResultID in the witness.

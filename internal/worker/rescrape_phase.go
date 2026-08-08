@@ -180,6 +180,11 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 	}
 
 	rescrapeResult := &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Status: models.RescrapeStatusSuccess}
+	// audit F-R15-1: carry the COMMITTED revision — the commit's update phase
+	// mutated result.Revision in the keyed section, so this echo reflects OUR
+	// landing, never whatever a racer did next.
+	rv := result.Revision
+	rescrapeResult.Revision = &rv
 	auditRescrapeSuccess(inputs, movieID, filePath)
 	return rescrapeResult, nil
 }
