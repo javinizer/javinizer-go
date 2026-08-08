@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	xhtml "golang.org/x/net/html"
 )
 
@@ -103,18 +104,36 @@ func buildClient(settings *models.ScraperSettings, globalProxy *models.ProxyConf
 	// compromised page must not redirect the backend to loopback, private,
 	// or cloud-metadata endpoints (SSRF), and chains stay bounded.
 	allowed := redirectAllowlist(settings.BaseURL)
+	// Codex round 11: per-hop SSRF revalidation — the allowlist admits hosts,
+	// but DNS can still rebind them to private/loopback before dial. Every
+	// redirect (and via the pinned dialer every request) is re-checked.
 	client.SetRedirectPolicy(resty.RedirectPolicyFunc(func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return fmt.Errorf("minnanoav: stopped after 5 redirects")
 		}
 		host := strings.ToLower(req.URL.Hostname())
+		matched := false
 		for ok := range allowed {
 			if host == ok || strings.HasSuffix(host, "."+ok) {
-				return nil
+				matched = true
+				break
 			}
 		}
-		return fmt.Errorf("minnanoav: refusing redirect to %s", req.URL.Redacted())
+		if !matched {
+			return fmt.Errorf("minnanoav: refusing redirect to %s", req.URL.Redacted())
+		}
+		// Hostname allowlist is checked per hop; DNS-level revalidation happens
+		// at dial time (pinned transport), protecting against rebinding.
+		return nil
 	}))
+	// Pin the dialer: each request resolves the host and refuses private/
+	// loopback answers (DNS rebinding defense for configured mirrors).
+	if base, ok := client.GetClient().Transport.(*http.Transport); ok {
+		pinned, err := ssrf.NewPinnedDialTransport(base)
+		if err == nil {
+			client.SetTransport(pinned)
+		}
+	}
 	return client
 }
 

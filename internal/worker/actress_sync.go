@@ -639,7 +639,14 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 	}
 	candidates, err := linkedActressCandidates(ctx, movieRepo, actress.ID, scrapers)
 	if err != nil {
-		return nil, nil, nil, err
+		// Tolerate degraded sets that still carry data (codex round 11): the
+		// partial marker means some scrapers failed but the usable ones are
+		// kept; discarding them wastes a recoverable identity.
+		var partial partialCandidatesError
+		if !errors.As(err, &partial) {
+			return nil, nil, nil, err
+		}
+		// fall through with the usable candidates
 	}
 	matchesByDMM := make(map[int]sourcedActressMatch)
 	for _, candidate := range candidates {
@@ -648,6 +655,12 @@ func recoverMissingDMMIdentity(ctx context.Context, actress *models.Actress, act
 		}
 	}
 	if len(matchesByDMM) != 1 {
+		// An empty narrowing after a partial failure is NOT "no identity":
+		// the surviving candidates pointed elsewhere and the transient source
+		// carried the real one. Retry instead of terminal-skip.
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		return nil, nil, nil, nil
 	}
 	var dmmID int
