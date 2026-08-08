@@ -140,7 +140,9 @@ func (m *ActressSyncManager) Start() {
 }
 
 func (m *ActressSyncManager) startLocked() {
-	if m.started {
+	if m.started || m.permanentlyStopped.Load() {
+		// The latch is checked while holding the lock — an earlier concurrent
+		// check is not enough (Shutdown may win between load and entry).
 		return
 	}
 	jobs, err := m.repo.ListActiveJobs()
