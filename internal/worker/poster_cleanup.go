@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -36,6 +37,82 @@ func CleanupMoviePosters(fs afero.Fs, tempDir string, jobID models.JobID, movie 
 			filepath.Join(tempDir, "posters", jobID.String(), movie.ID+".jpg"),
 			filepath.Join(tempDir, "posters", jobID.String(), movie.ID+"-full.jpg"),
 		})
+	}
+}
+
+// rescrapePosterBackup parks the pre-generation canonical pair aside
+// (<id>.rsbak) so a failed/conflicted rescrape can RESTORE the committed
+// state's bytes instead of leaving the loser's bytes at canonical names
+// (audit F-R3-2a). Crash leftovers are inert litter the staleness sweep owns.
+type rescrapePosterBackup struct {
+	fs      afero.Fs
+	full    string
+	crop    string
+	hadFull bool
+	hadCrop bool
+}
+
+// parkCanonicalPosterPair moves pre-existing canonical legs aside. Stat
+// errors are fail-closed (audit F-R3-1): an unreadable-but-existing leg marks
+// had=true so later cleanup never treats the leg as op-created.
+func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup {
+	b := &rescrapePosterBackup{fs: fs, full: filepath.Join(dir, id+"-full.jpg"), crop: filepath.Join(dir, id+".jpg")}
+	if fs == nil || dir == "" || id == "" {
+		return b
+	}
+	legs := []struct {
+		path string
+		had  *bool
+	}{{b.full, &b.hadFull}, {b.crop, &b.hadCrop}}
+	for _, leg := range legs {
+		if _, err := fs.Stat(leg.path); err != nil {
+			if !os.IsNotExist(err) {
+				logging.Warnf("rescrape pair backup stat %s: %v — treated as pre-existing", leg.path, err)
+				*leg.had = true
+			}
+			continue
+		}
+		if err := fs.Rename(leg.path, leg.path+".rsbak"); err != nil {
+			logging.Warnf("rescrape pair backup park %s: %v", leg.path, err)
+			continue
+		}
+		*leg.had = true
+	}
+	return b
+}
+
+// restore returns parked bytes to their canonical names (removing whatever
+// the failed op wrote there first). Best-effort, logged.
+func (b *rescrapePosterBackup) restore() {
+	if b == nil || b.fs == nil {
+		return
+	}
+	legs := []struct {
+		path string
+		had  bool
+	}{{b.full, b.hadFull}, {b.crop, b.hadCrop}}
+	for _, leg := range legs {
+		if !leg.had {
+			continue
+		}
+		bak := leg.path + ".rsbak"
+		if _, err := b.fs.Stat(bak); err != nil {
+			continue
+		}
+		_ = b.fs.Remove(leg.path)
+		if err := b.fs.Rename(bak, leg.path); err != nil {
+			logging.Warnf("rescrape pair restore %s: %v", leg.path, err)
+		}
+	}
+}
+
+// discard drops parked bytes after a successful operation.
+func (b *rescrapePosterBackup) discard() {
+	if b == nil || b.fs == nil {
+		return
+	}
+	for _, p := range []string{b.full + ".rsbak", b.crop + ".rsbak"} {
+		_ = b.fs.Remove(p)
 	}
 }
 

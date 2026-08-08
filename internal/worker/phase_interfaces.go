@@ -191,6 +191,12 @@ type rescrapePhaseInputs struct {
 	Fs          afero.Fs               // for poster cleanup
 	TempDir     string                 // for poster cleanup paths
 	FsCaseCache *fscase.FSCaseCache    // for orphaned poster detection
+
+	// EditLockFn acquires per-family edit keys (audit F-R3-1/R3-3): poster
+	// cleanup decisions (conflict closeout, orphan sweep) are revalidated
+	// UNDER the key so a concurrent commit can never interleave between the
+	// ownership check and the delete. nil ⇒ no revalidation (test seams).
+	EditLockFn func(movieIDs ...string) (release func())
 }
 
 // Compile-time assertions that concrete types satisfy the interfaces.

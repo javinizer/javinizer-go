@@ -512,6 +512,7 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 			tempDir:           c.job.cfg.tempDir,
 			jobID:             c.job.ID.String(),
 		},
+		EditLockFn:  func(ids ...string) func() { return c.job.posterEditor.lockRegistry().AcquireMany(ids) },
 		Lifecycle:   c.job.lifecycle,
 		persister:   persistFunc(pfn),
 		Finder:      c.job.results,

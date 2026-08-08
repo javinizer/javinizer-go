@@ -398,9 +398,18 @@ func (pe *PosterEditor) hasUnresolvedPromoteWitness(posterID string) bool {
 	// audit R2: ALL witness kinds fence the write-back — a crop witness's
 	// arbitration discriminator degenerates to revision-only once the row
 	// carries the deterministic crop URL, so a bumped revision would flip an
-	// UNCOMMITTED crop to committed. posterWitnessConflict fails closed on
-	// probe errors (any error fences conservatively).
-	return posterWitnessConflict(env.fs, env.tempDir, env.jobID, posterID) != nil
+	// UNCOMMITTED crop to committed. Probe errors fence conservatively too
+	// (audit R3-4), but get a DISTINCT warning so a skipped apply write-back
+	// is distinguishable from a genuine outstanding-witness fence.
+	err := posterWitnessConflict(env.fs, env.tempDir, env.jobID, posterID)
+	if err == nil {
+		return false
+	}
+	var cfe *EditAdmissionConflictError
+	if !errors.As(err, &cfe) {
+		logging.Warnf("poster witness probe failed for %s (%v) — fencing write-back conservatively", posterID, err)
+	}
+	return true
 }
 
 // posterWitnessFence refuses edits while a promote or crop witness for

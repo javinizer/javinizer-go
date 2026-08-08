@@ -234,11 +234,34 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 		return nil, fmt.Errorf("image too large (max 50 MB)")
 	}
 
+	// audit F-R3-2b: park PRE-EXISTING canonical legs before overwriting — a
+	// failed download must restore the committed state's bytes, not destroy
+	// them (a 200-but-undecodable body previously deleted a healthy pair).
+	fullParked := tempFullPath + ".dlbak"
+	hadFull := false
+	if _, stErr := pm.fs.Stat(tempFullPath); stErr == nil {
+		if rnErr := pm.fs.Rename(tempFullPath, fullParked); rnErr != nil {
+			_ = pm.fs.Remove(tempDownloadPath)
+			return nil, fmt.Errorf("failed to park previous full poster: %w", rnErr)
+		}
+		hadFull = true
+	}
 	// Remove any previous full image, then atomically rename.
 	_ = pm.fs.Remove(tempFullPath)
 	if err := pm.fs.Rename(tempDownloadPath, tempFullPath); err != nil {
 		_ = pm.fs.Remove(tempDownloadPath)
+		if hadFull {
+			_ = pm.fs.Rename(fullParked, tempFullPath)
+		}
 		return nil, fmt.Errorf("failed to finalize image download: %w", err)
+	}
+
+	cropParked := tempCroppedPath + ".dlbak"
+	hadCrop := false
+	if _, stErr := pm.fs.Stat(tempCroppedPath); stErr == nil {
+		if rnErr := pm.fs.Rename(tempCroppedPath, cropParked); rnErr == nil {
+			hadCrop = true
+		}
 	}
 
 	// After rename, tempFullPath exists and must be cleaned up if we
@@ -248,7 +271,16 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 		if !success {
 			_ = pm.fs.Remove(tempFullPath)
 			_ = pm.fs.Remove(tempCroppedPath)
+			if hadFull {
+				_ = pm.fs.Rename(fullParked, tempFullPath)
+			}
+			if hadCrop {
+				_ = pm.fs.Rename(cropParked, tempCroppedPath)
+			}
+			return
 		}
+		_ = pm.fs.Remove(fullParked)
+		_ = pm.fs.Remove(cropParked)
 	}()
 
 	// Attempt automatic crop; fall back to a full-image copy on failure.
