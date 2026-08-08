@@ -27,7 +27,7 @@ import {
 	rescrapeClearedMovieKeys,
 	siblingResultFilePaths,
 } from './poster-crop-sync';
-import { buildMovieToSave } from './save-helpers';
+import { buildMovieToSave, rebaseOverlayOntoMovie } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
 interface ReviewMutationsDeps {
@@ -260,6 +260,15 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				// clear below. FS paths stay stable through renames.
 				familyPathsByKey.set(key, [...(familyPathsByKey.get(key) ?? []), filePath]);
 			}
+			// codex P1 (rebase): capture each edited path's PRE-SAVE server baseline.
+			// When a save is rejected and the refetch installs newer revisions, keeping
+			// the stale whole-movie overlay against the fresh baseline would let the
+			// next save pass CAS and clobber the concurrent edit — onSuccess rebases
+			// the user's field deltas onto the refreshed movie instead.
+			const preSaveServer = new Map<string, Movie | undefined>();
+			for (const fp of deps.getEditedMovies().keys()) {
+				preSaveServer.set(fp, (job?.results?.[fp] as FileResult | undefined)?.movie);
+			}
 			const savePromises = Array.from(latestByFamily.entries()).map(([key, [filePath, movie]]) => {
 				const resultEntry = job?.results?.[filePath];
 				if (!resultEntry?.result_id) return null;
@@ -292,14 +301,21 @@ const ops = Array.from(latestByFamily.entries());
 			// codex P2-F: paths come by family-key lookup — latestByFamily reorders
 			// (delete+set) on interleaved sibling edits, so positional indexing of
 			// familyPathsByKey would misalign them.
-			return settled.map((s, i) => ({
-				key: ops[i]?.[0] ?? '',
-				status: s.status,
-				paths: familyPathsByKey.get(ops[i]?.[0] ?? '') ?? [],
-			}));
+			return {
+				rows: settled.map((s, i) => ({
+					key: ops[i]?.[0] ?? '',
+					status: s.status,
+					paths: familyPathsByKey.get(ops[i]?.[0] ?? '') ?? [],
+				})),
+				preSaveServer,
+			};
 		},
-		onSuccess: async (results: Array<{ key: string; status: string; paths: string[] }>) => {
-			const ops0 = results ?? [];
+		onSuccess: async (payload: {
+			rows: Array<{ key: string; status: string; paths: string[] }>;
+			preSaveServer: Map<string, Movie | undefined>;
+		}) => {
+			const ops0 = payload.rows ?? [];
+			const preSaveServer = payload.preSaveServer;
 			const failed = ops0.filter((r) => r.status === 'rejected');
 			const succeeded = ops0.filter((r) => r.status === 'fulfilled');
 			// Always refetch after this batch: even the all-rejected case must
@@ -332,6 +348,23 @@ const ops = Array.from(latestByFamily.entries());
 				// Partial failure: clean families were cleared above; rejected
 				// overlays stay + baseline advance via refetch, so retry works.
 				deps.toastError(m.review_save_edits_failed({ error: `${failed.length} movie(s) rejected` }));
+			}
+			if (failed.length > 0 && refreshed) {
+				// codex P1: rebase rejected overlays onto the refreshed server movie —
+				// otherwise the next save pairs the stale overlay with a FRESH CAS
+				// revision and silently overwrites whatever the concurrent op changed.
+				const freshJob = queryClient.getQueryData<BatchJobResponse>(qk);
+				const editedMovies = deps.getEditedMovies();
+				for (const bad of failed) {
+					for (const fp of bad.paths) {
+						const overlay = editedMovies.get(fp);
+						const baseline = preSaveServer.get(fp);
+						const freshMovie = (freshJob?.results?.[fp] as FileResult | undefined)?.movie;
+						if (overlay && baseline && freshMovie) {
+							editedMovies.set(fp, rebaseOverlayOntoMovie(baseline, overlay, freshMovie));
+						}
+					}
+				}
 			}
 			deps.clearPosterPreviewOverrides();
 			// codex r39: keep REJECTED edits reload-safe — write only the
