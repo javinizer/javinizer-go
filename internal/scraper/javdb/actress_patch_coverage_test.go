@@ -78,7 +78,9 @@ func TestResolveActressMetadataCoversFailureAndFallbackPaths(t *testing.T) {
 	}})
 	got, fallbackErr := fallback.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, JapaneseName: " 安倍亜沙美 ", ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"})
 	require.NoError(t, fallbackErr)
-	require.Equal(t, "安倍亜沙美", got.JapaneseName)
+	// codex round 14: an empty parsed profile must NOT echo the stored name
+	// back as resolver evidence (would fabricate verified_no_changes).
+	require.Empty(t, got.JapaneseName)
 }
 
 func TestFindActorIDCoversInputFetchParseAndCandidateBranches(t *testing.T) {

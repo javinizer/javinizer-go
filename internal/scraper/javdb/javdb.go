@@ -293,9 +293,7 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 	}
 
 	metadata = extractJavDBActorMetadata(doc, actress.DMMID, actorID)
-	if metadata.JapaneseName == "" {
-		metadata.JapaneseName = strings.TrimSpace(actress.JapaneseName)
-	}
+	// Codex round 14: stored names must not masquerade as evidence.
 	return metadata, nil
 }
 

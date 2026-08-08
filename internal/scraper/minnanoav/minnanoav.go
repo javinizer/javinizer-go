@@ -95,8 +95,14 @@ func buildClient(settings *models.ScraperSettings, globalProxy *models.ProxyConf
 	client, err := httpclient.NewRestyClient(proxyProfile, timeout, retries)
 	if err != nil {
 		logging.Warnf("MinnanoAV: failed to create HTTP client, falling back to no-proxy: %v", err)
-		return httpclient.NewRestyClientNoProxy(timeout, retries)
+		client = httpclient.NewRestyClientNoProxy(timeout, retries)
 	}
+	// codex round 14: a 200 with a nil transport error skips resty's built-in
+	// retry gate; explicitly list retryable conditions. Must be applied to the
+	// final client (proxy or fallback).
+	client.AddRetryCondition(func(r *resty.Response, err error) bool {
+		return err != nil || r == nil || r.StatusCode() == http.StatusTooManyRequests || r.StatusCode() >= 500
+	})
 	client.SetHeaders(httpclient.StandardHTMLHeaders())
 	if ua := strings.TrimSpace(settings.UserAgent); ua != "" {
 		client.SetHeader("User-Agent", ua)
