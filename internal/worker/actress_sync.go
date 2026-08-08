@@ -378,7 +378,10 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			logging.Debugf("Actress sync: revisiting %s with learned Japanese name for DMM ID %d", name, actress.DMMID)
 			metadata, resolverErr := resolver.ResolveActressMetadata(ctx, known)
 			if resolverErr != nil {
+				// Surface the revisit failure exactly like a first-pass failure,
+				// so the task report doesn't claim success after a transient lookup.
 				logging.Warnf("Actress sync: revisit %s failed for DMM ID %d: %v", name, actress.DMMID, resolverErr)
+				resolverFailures = append(resolverFailures, name)
 				continue
 			}
 			if metadata.DMMID != actress.DMMID {
@@ -387,14 +390,26 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			metadata = filterActressResolverFields(scraper, metadata)
 			if fields := actressInfoFields(metadata); len(fields) > 0 {
 				logging.Debugf("Actress sync: revisit %s contributed fields for DMM ID %d: %s", name, actress.DMMID, strings.Join(fields, ", "))
-				appendMatch(metadata, name)
-				if strings.TrimSpace(metadata.ThumbURL) != "" && !models.IsKnownInvalidDMMActressThumbnail(metadata.ThumbURL) && models.ResolverSupportsActressField(scraper, "actress_url") {
-					priority := thumbnailRank(name)
-					if priority < preferredThumbnailPriority {
-						preferredThumbnail = strings.TrimSpace(metadata.ThumbURL)
-						preferredThumbnailSource = name
-						preferredThumbnailPriority = priority
-					}
+			}
+			// Mirror the initial pass: strip thumbnail when it can't win.
+			if !revalidate && !actressThumbnailNeedsResolution(actress.ThumbURL) {
+				metadata.ThumbURL = ""
+			}
+			// Apply the same thumbnail screening the initial pass applies: a
+			// rejected URL must not persist or win the preferred slot.
+			if strings.TrimSpace(metadata.ThumbURL) != "" && validateThumbnail != nil {
+				if validateErr := validateActressThumbnail(ctx, scraper, validateThumbnail, metadata.ThumbURL); validateErr != nil {
+					logging.Debugf("Actress sync: revisit %s rejected thumbnail for DMM ID %d: %v", name, actress.DMMID, validateErr)
+					metadata.ThumbURL = ""
+				}
+			}
+			appendMatch(metadata, name)
+			if strings.TrimSpace(metadata.ThumbURL) != "" && !models.IsKnownInvalidDMMActressThumbnail(metadata.ThumbURL) && models.ResolverSupportsActressField(scraper, "actress_url") {
+				priority := thumbnailRank(name)
+				if priority < preferredThumbnailPriority {
+					preferredThumbnail = strings.TrimSpace(metadata.ThumbURL)
+					preferredThumbnailSource = name
+					preferredThumbnailPriority = priority
 				}
 			}
 		}
