@@ -116,7 +116,7 @@ func TestDownloadFromURL_FinalizeFailureRestoresPair(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/BAD-3-full.jpg", []byte("originalfull"), 0o644))
 	target := dir + "/BAD-3-full.jpg"
 	fs := renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
-		return n == target && !strings.HasSuffix(o, ".dlbak") // finalize (and restore) fail; park succeeds
+		return n == filepath.ToSlash(target) && !strings.HasSuffix(o, ".dlbak") // finalize (and restore) fail; park succeeds
 	}}
 	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "BAD-3", srv.URL+"/img.jpg", "", "")
@@ -166,7 +166,7 @@ func TestDownloadFromURL_CropParkFailureRestoreWarns(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/BAD-5.jpg", []byte("origcrop"), 0o644))
 	wedged := func(o, n string) bool {
 		return strings.HasSuffix(n, "BAD-5.jpg.dlbak") ||
-			(strings.HasSuffix(o, ".dlbak") && n == dir+"/BAD-5-full.jpg")
+			(strings.HasSuffix(o, ".dlbak") && n == filepath.ToSlash(dir)+"/BAD-5-full.jpg")
 	}
 	fs := renameFailWhereFS{Fs: base, fail: wedged}
 	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
@@ -193,7 +193,7 @@ func TestDownloadFromURL_DeferRestoreWarns(t *testing.T) {
 		Fs:               base,
 		failCreateSuffix: "BAD-6.jpg",
 		failRename: func(o, n string) bool {
-			return strings.HasSuffix(o, ".dlbak") && (n == dir+"/BAD-6-full.jpg" || n == dir+"/BAD-6.jpg")
+			return strings.HasSuffix(o, ".dlbak") && (n == filepath.ToSlash(dir)+"/BAD-6-full.jpg" || n == filepath.ToSlash(dir)+"/BAD-6.jpg")
 		},
 	}
 	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
@@ -212,7 +212,7 @@ type doubleWedgeFS struct {
 }
 
 func (f *doubleWedgeFS) Create(n string) (afero.File, error) {
-	if strings.HasSuffix(n, f.failCreateSuffix) {
+	if strings.HasSuffix(filepath.ToSlash(n), f.failCreateSuffix) {
 		return nil, errors.New("create wedged")
 	}
 	return f.Fs.Create(n)

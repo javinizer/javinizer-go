@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -402,10 +403,54 @@ func TestRescapePosterBackupDisposeWarns(t *testing.T) {
 		cropBak: requiredPath,
 		hadCrop: true,
 	}
-	b.fs = removeFailFS{Fs: base}                   // Remove wedges → warn-only
-	b.restore(func(p string) bool { return false }) // say: canon isn't ours
+	b.fs = removeFailFS{Fs: base}                                  // Remove wedges → warn-only
+	b.restore(func(p string) (bool, bool) { return false, false }) // canon provably not ours ⇒ dispose
 	_, err := base.Stat(requiredPath)
 	assert.NoError(t, err, "wedged dispose keeps the parked copy")
+}
+
+// codex P2: indeterminate canon read during closeout verify skips the rewind
+// — parked copy retained for the reconciler.
+func TestVerifySkipOnUnreadableCanonKeepsParked(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-1", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+	canon := filepath.Join(dir, "UPI-1.jpg")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op"), 0o644))
+	parked := parkCanonicalPosterPair(fs, dir, "UPI-1")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("ours-gen"), 0o644))
+	// fs wrapper where ReadFile fails for the canonical leg ONLY
+	wedged := &brokenWitnessFS{Fs: fs, readFailSuffix: "UPI-1.jpg"}
+	lc.inputs.Fs = wedged
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.parked = parked
+		scope.genSHA = map[string]string{"UPI-1.jpg": shaContentHex([]byte("ours-gen"))}
+		scope.preExistedPair = true
+		return &RescrapeResult{Status: models.RescrapeStatusConflict}, &resultstore.MovieResult{Movie: &models.Movie{ID: "UPI-1"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}, nil
+	})
+	require.NoError(t, err)
+	got, rerr := afero.ReadFile(fs, canon)
+	require.NoError(t, rerr)
+	assert.Equal(t, "ours-gen", string(got), "undecidable canon: no rewind")
+	_, statErr := fs.Stat(parked.cropBak)
+	assert.NoError(t, statErr, "parked copy kept for reconciliation")
+}
+
+// brokenWitnessFS fails ReadFile for one name suffix (fs stat renames untouched).
+type brokenWitnessFS struct {
+	afero.Fs
+	readFailSuffix string
+}
+
+func (f *brokenWitnessFS) Open(n string) (afero.File, error) {
+	if strings.HasSuffix(filepath.ToSlash(n), f.readFailSuffix) {
+		return nil, errors.New("read wedged")
+	}
+	return f.Fs.Open(n)
 }
 
 // audit F-R10-2: when a closeout's content-verify refuses the rewind (canon

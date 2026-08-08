@@ -23,7 +23,7 @@ type openFailSuffixFS struct {
 }
 
 func (f openFailSuffixFS) Open(n string) (afero.File, error) {
-	if strings.HasSuffix(n, f.suffix) {
+	if strings.HasSuffix(filepath.ToSlash(n), f.suffix) {
 		return nil, errors.New("open wedged")
 	}
 	return f.Fs.Open(n)
@@ -208,7 +208,7 @@ type openFailAfterNFS struct {
 }
 
 func (f *openFailAfterNFS) Open(p string) (afero.File, error) {
-	if strings.HasSuffix(p, f.suffix) {
+	if strings.HasSuffix(filepath.ToSlash(p), f.suffix) {
 		f.count++
 		if f.count > f.allow {
 			return nil, errors.New("open wedged")

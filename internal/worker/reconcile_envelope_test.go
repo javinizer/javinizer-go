@@ -120,6 +120,21 @@ func TestReconcileParkedPosterBackupsWarns(t *testing.T) {
 	assert.NoError(t, err2, "wedged restore keeps the parked copy")
 }
 
+// codex P2: a transient canonical stat error keeps BOTH copies (never rename
+// over the unknown).
+func TestReconcileParkedTransientCanonStatKeepsBoth(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "TS-1.jpg"), []byte("current"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "TS-1.jpg.rsbak.a1.b2"), []byte("parked"), 0o644))
+	wedged := statFailSuffixFS{Fs: fs, suffix: "TS-1.jpg"}
+	cl := &TempDirCleaner{fs: wedged, tempDir: "/tmp", jobRepo: nil}
+	assert.Equal(t, 0, cl.reconcileParkedPosterBackups(dir))
+	_, err := fs.Stat(filepath.Join(dir, "TS-1.jpg"))
+	assert.NoError(t, err, "canonical kept")
+	_, err2 := fs.Stat(filepath.Join(dir, "TS-1.jpg.rsbak.a1.b2"))
+	assert.NoError(t, err2, "parked kept")
+}
+
 // audit F-R5-3: dotted poster ids containing ".dlbak"/".rsbak." are live
 // canonical files, never parked backups — the anchored parse must leave them
 // alone, and witness FILES must never be reclassified either.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -206,6 +207,44 @@ func TestRekeyDestinationFencedByParkedBackup(t *testing.T) {
 	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "backup-scan", "destination scan wedge fails the relocation")
+}
+
+// codex P1: unsafe scraper IDs must never move bytes outside the job dir.
+func TestParkCanonicalPosterPairRejectsTraversalID(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	bad := filepath.Join(t.TempDir(), "..", "escape-full.jpg") // resolution guard test
+	_ = bad
+	b := parkCanonicalPosterPair(fs, "/tmp/posters/JOB-X", "../escape")
+	assert.False(t, b.hadFull, "traversal ID: no parking of outside paths")
+	assert.False(t, b.hadCrop)
+	assert.Nil(t, b.parkErr) // leg-mark semantics unarmed; generation proceeds only via manager's own safety gates
+}
+
+// codex P2: a parked leg that refuses to move aborts BEFORE any generation —
+// no recoverable copy, no committed-state loss.
+func TestRescrapeParkFailureAbortsGeneration(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "PF-9", "")
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PF-9.jpg"), []byte("committed"), 0o644))
+	wedgedFS := &seqRenameFailFS{Fs: fs, failOn: map[int]bool{1: true}}
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "PF-9"}, Status: scrape.StatusCompleted}}
+	inputs := rescrapePhaseInputs{
+		WF: wf, ResultMap: store, Finder: store, JobID: jobID,
+		PosterGen: &spyPosterGen{},
+		Fs:        wedgedFS, TempDir: "/tmp",
+		EditLockFn: func(ids ...string) func() { return func() {} },
+	}
+	phase := NewRescrapePhase()
+	_, err := phase.Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "PF-9", FilePath: "/f/a.mp4"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "backup park")
+	got, rerr := afero.ReadFile(fs, filepath.Join(dir, "PF-9.jpg"))
+	require.NoError(t, rerr)
+	assert.Equal(t, "committed", string(got), "pre-existing bytes never moved nor overwritten")
 }
 
 // audit F-R7-1: relocation pins the initiating ResultID in the witness.

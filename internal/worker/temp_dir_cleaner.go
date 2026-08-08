@@ -510,6 +510,12 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(dir string) int {
 			}
 			healed++
 			continue
+		} else if !errors.Is(statErr, afero.ErrFileNotFound) {
+			// codex P2: a transient canonical stat error must NOT fall through
+			// to the rename — the possibly-existing newer bytes would be
+			// replaced by the stale parked copy.
+			logging.Warnf("parked backup sweep %s: canonical indeterminate (%v) — kept both", parked, statErr)
+			continue
 		}
 		if rnErr := c.fs.Rename(parked, canonPath); rnErr != nil {
 			logging.Warnf("parked backup restore %s→%s: %v", parked, canonPath, rnErr)

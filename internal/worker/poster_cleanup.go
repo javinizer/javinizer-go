@@ -57,6 +57,10 @@ type rescrapePosterBackup struct {
 	cropBak string
 	hadFull bool
 	hadCrop bool
+	// parkErr carries the "abandon parking" signal to the caller (audit
+	// codex-P2: a leg that refuses to move leaves generation WITHOUT a
+	// recoverable copy — the rescrape must abort generation instead).
+	parkErr error
 }
 
 var rescrapeBackupSeq atomic.Int64
@@ -67,6 +71,14 @@ var rescrapeBackupSeq atomic.Int64
 func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup {
 	b := &rescrapePosterBackup{fs: fs}
 	if fs == nil || dir == "" || id == "" {
+		return b
+	}
+	// codex P1 (@poster_cleanup): park paths derive directly from the ID —
+	// isSafePosterFileID gates filepath construction, NOT the scraper-shaped
+	// manager validation that runs later, so a "../"-style ID never moves
+	// bytes outside the job's poster dir.
+	if !isSafePosterFileID(id) {
+		logging.Warnf("rescrape pair backup skipped: unsafe poster ID %q", id)
 		return b
 	}
 	b.full = filepath.Join(dir, id+"-full.jpg")
@@ -88,7 +100,10 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup 
 			continue
 		}
 		if err := fs.Rename(leg.path, leg.bak); err != nil {
-			logging.Warnf("rescrape pair backup park %s: %v", leg.path, err)
+			logging.Warnf("rescrape pair backup park %s: %v — refusing generation", leg.path, err)
+			// codex P2 (@poster_cleanup): a failed park on an EXISTING leg must
+			// abort generation — no recoverable copy would survive the loss.
+			b.parkErr = fmt.Errorf("poster backup park %s: %w", leg.path, err)
 			continue
 		}
 		*leg.had = true
@@ -99,9 +114,11 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup 
 // restore returns parked bytes to their canonical names (removing whatever
 // the failed op wrote there first). Best-effort, logged. When verify is
 // non-nil it is consulted PER-LEG against the CURRENT canonical content
-// (audit F-R5-1): a false verdict skips the rewind — a concurrent winner's
-// committed bytes never get rewound to the pre-op state.
-func (b *rescrapePosterBackup) restore(verify func(legPath string) bool) {
+// (audit F-R5-1): allowed=false+undecidable=false ⇒ a concurrent winner's
+// committed bytes sit there (dispose the obsolete copy); undecidable=true ⇒
+// canonical content couldn't be read — keep the parked copy for arbitration
+// (codex P2, never rewind blind).
+func (b *rescrapePosterBackup) restore(verify func(legPath string) (allowed bool, undecidable bool)) {
 	if b == nil || b.fs == nil {
 		return
 	}
@@ -117,15 +134,24 @@ func (b *rescrapePosterBackup) restore(verify func(legPath string) bool) {
 		if _, err := b.fs.Stat(leg.bak); err != nil {
 			continue
 		}
-		if verify != nil && !verify(leg.path) {
-			// audit F-R10-2: canonical holds NEWER committed bytes — the parked
-			// pre-op copy is obsolete: dispose it so the parked-marker fences
-			// don't brick poster admissions until restart.
-			if rmErr := b.fs.Remove(leg.bak); rmErr != nil {
-				logging.Warnf("rescrape parked dispose %s: %v", leg.bak, rmErr)
+		if verify != nil {
+			allowed, undecidable := verify(leg.path)
+			if !allowed && undecidable {
+				// codex P2: canonical unreadable — NEVER rewind blind and never
+				// dispose the only recovery copy; the reconciler arbitrates later.
+				logging.Warnf("rescrape pair restore %s skipped: canonical undecidable — parked copy kept for arbitration", leg.path)
+				continue
 			}
-			logging.Warnf("rescrape pair restore %s skipped: canonical holds newer committed bytes — parked copy disposed", leg.path)
-			continue
+			if !allowed {
+				// audit F-R10-2: canonical holds NEWER committed bytes — the parked
+				// pre-op copy is obsolete: dispose it so the parked-marker fences
+				// don't brick poster admissions until restart.
+				if rmErr := b.fs.Remove(leg.bak); rmErr != nil {
+					logging.Warnf("rescrape parked dispose %s: %v", leg.bak, rmErr)
+				}
+				logging.Warnf("rescrape pair restore %s skipped: canonical holds newer committed bytes — parked copy disposed", leg.path)
+				continue
+			}
 		}
 		_ = b.fs.Remove(leg.path)
 		if err := b.fs.Rename(leg.bak, leg.path); err != nil {
