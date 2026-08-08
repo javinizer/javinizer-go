@@ -13,6 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestJavDBActressFieldsDeclareOnlyJapaneseAndURL(t *testing.T) {
+	assert.Equal(t, []string{"actress_japanese_name", "actress_url", "actress_first_name", "actress_last_name"}, (&scraper{}).ActressFields())
+}
+
 func TestNewScraper(t *testing.T) {
 	scraper := newScraper(&models.ScraperSettings{Enabled: true}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 	require.NotNil(t, scraper)

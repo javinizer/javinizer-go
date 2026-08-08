@@ -266,6 +266,11 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 			}
 			ss.SetEnabledPresence(scraperYAMLHasEnabledKey(valNode))
+			// rate_limit presence matters: explicit 0 means "no delay", which
+			// differs from omitted (conservative 1s default).
+			// Canonical key only: aliases never count as explicit presence, so
+			// request_delay can still fill a genuinely omitted rate_limit.
+			ss.SetRateLimitPresence(scraperYAMLHasKey(valNode, "rate_limit"))
 
 			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
 			// Walk the node content to find alias keys and apply them if the canonical
@@ -291,18 +296,22 @@ func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.Scraper
 	if valNode.Kind != yaml.MappingNode {
 		return
 	}
+	// Canonical presence (not merely a zero decode) wins: an explicit
+	// rate_limit: 0 is a real choice; the deprecated alias must not overwrite
+	// it (codex P2 round 7).
+	hasRetryKey := scraperYAMLHasKey(valNode, "retry_count")
 	for i := 0; i < len(valNode.Content); i += 2 {
 		k := valNode.Content[i].Value
 		switch k {
 		case "request_delay":
-			if ss.RateLimit == 0 {
+			if ss.RateLimit == 0 && !ss.RateLimitIsExplicit() {
 				var v int
 				if err := valNode.Content[i+1].Decode(&v); err == nil {
 					ss.RateLimit = v
 				}
 			}
 		case "max_retries":
-			if ss.RetryCount == 0 {
+			if !hasRetryKey && ss.RetryCount == 0 {
 				var v int
 				if err := valNode.Content[i+1].Decode(&v); err == nil {
 					ss.RetryCount = v
@@ -313,12 +322,19 @@ func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.Scraper
 }
 
 func scraperYAMLHasEnabledKey(valNode *yaml.Node) bool {
+	return scraperYAMLHasKey(valNode, "enabled")
+}
+
+// scraperYAMLHasKey reports whether a mapping node carries any of the given keys.
+func scraperYAMLHasKey(valNode *yaml.Node, keys ...string) bool {
 	if valNode == nil || valNode.Kind != yaml.MappingNode {
 		return false
 	}
 	for i := 0; i+1 < len(valNode.Content); i += 2 {
-		if valNode.Content[i].Value == "enabled" {
-			return true
+		for _, key := range keys {
+			if valNode.Content[i].Value == key {
+				return true
+			}
 		}
 	}
 	return false

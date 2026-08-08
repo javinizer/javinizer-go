@@ -656,7 +656,7 @@ func TestExtractActressesFromStreamingPage_CastSectionPriority(t *testing.T) {
 	require.Len(t, actresses, 1)
 	assert.Equal(t, 1056227, actresses[0].DMMID)
 	assert.Equal(t, "広瀬結香", actresses[0].JapaneseName)
-	assert.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/hirose_yuuka.jpg", actresses[0].ThumbURL)
+	assert.Equal(t, "https://awsimgsrc.dmm.co.jp/pics_dig/mono/actjpgs/hirose_yuuka.jpg", actresses[0].ThumbURL)
 }
 
 func TestExtractActressesFromStreamingPage_HeadingFallback(t *testing.T) {
@@ -687,7 +687,7 @@ func TestExtractActressesFromStreamingPage_HeadingFallback(t *testing.T) {
 	require.Len(t, actresses, 1)
 	assert.Equal(t, 2001, actresses[0].DMMID)
 	assert.Equal(t, "主演女優", actresses[0].JapaneseName)
-	assert.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/test_cast.jpg", actresses[0].ThumbURL)
+	assert.Equal(t, "https://awsimgsrc.dmm.co.jp/pics_dig/mono/actjpgs/test_cast.jpg", actresses[0].ThumbURL)
 }
 
 func TestExtractActressesFromStreamingPage_SkipsRecommendationOnlyLinks(t *testing.T) {

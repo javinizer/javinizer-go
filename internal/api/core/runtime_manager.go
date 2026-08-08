@@ -161,6 +161,12 @@ type APIRuntime struct {
 	serverCtxOnce sync.Once
 	serverCtx     context.Context
 	serverCancel  context.CancelFunc
+
+	// actress-sync singleton: lazily ensured on demand (API-1: NEVER here),
+	// latched shut by Shutdown so nothing resurrects it afterwards (CON-08).
+	actressSyncMu      sync.Mutex
+	actressSyncManager *worker.ActressSyncManager
+	actressSyncStopped bool
 }
 
 // NewAPIRuntime creates an APIRuntime that manages the given APIDeps.

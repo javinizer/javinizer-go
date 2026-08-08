@@ -582,12 +582,15 @@ func ValidateRemoteImageWithSafeClient(ctx context.Context, client *http.Client,
 	if transport, ok := client.Transport.(*http.Transport); ok {
 		remoteDNS = ssrf.TransportResolvesRemotely(transport)
 		if !remoteDNS && transport.Proxy != nil {
-			probeURL, _ := url.Parse(strings.TrimSpace(rawURL))
-			probeReq := &http.Request{Method: http.MethodGet, URL: probeURL}
-			probeReq.Header = http.Header{"User-Agent": {userAgent}}
-			if u, err := transport.Proxy(probeReq); err == nil && ssrf.IsSOCKSProxyURL(u) {
-				nativeSocksURL = u
-				remoteDNS = true
+			// Garbage URLs (e.g. "://bad") leave probeURL nil; ProxyFromEnvironment
+			// dereferences Request.URL and would panic otherwise.
+			if probeURL, perr := url.Parse(strings.TrimSpace(rawURL)); perr == nil && probeURL != nil {
+				probeReq := &http.Request{Method: http.MethodGet, URL: probeURL}
+				probeReq.Header = http.Header{"User-Agent": {userAgent}}
+				if u, err := transport.Proxy(probeReq); err == nil && ssrf.IsSOCKSProxyURL(u) {
+					nativeSocksURL = u
+					remoteDNS = true
+				}
 			}
 		}
 	}

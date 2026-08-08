@@ -2313,6 +2313,10 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_models.ActressInfo:
     properties:
+      aliases:
+        items:
+          type: string
+        type: array
       dmm_id:
         description: DMM actress ID for unique identification
         type: integer
