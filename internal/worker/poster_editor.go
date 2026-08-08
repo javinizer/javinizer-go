@@ -846,20 +846,12 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 					}
 					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster pair %s is shared with family %s — rekey refused while a sibling references it", canonicalOldPosterID, famAlias)}
 				}
-				// audit F-R8-2: parked rescrape backups mean the canonical bytes
-				// belong to an IN-FLIGHT generation — relocating them mid-flight
-				// steals the bytes and bypasses every rescrape rollback arm.
-				inFlight, bErr := rescrapeInFlightBackupPresent(env.fs, dir, canonicalOldPosterID)
-				if bErr != nil {
-					return fmt.Errorf("poster rekey backup-scan %s: %w", dir, bErr)
-				}
-				if inFlight {
-					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster pair %s has an in-flight rescrape — retry after it completes", canonicalOldPosterID)}
-				}
-				// audit F-R9-1: probe the destination too — an in-flight
-				// rescrape of a DIFFERENT family may have litter parked at the
-				// destination; its losing closeout would restore-over our
-				// freshly committed pair.
+				// audit F-R8-2/F-R10-3: the SOURCE side is covered by the
+				// witness fence's parked probe (posterWitnessConflict runs
+				// BEFORE this block); here we probe only the DESTINATION —
+				// an in-flight rescrape of a DIFFERENT family may have litter
+				// parked at the destination whose losing closeout would
+				// restore over our freshly committed pair.
 				inFlight2, bErr2 := rescrapeInFlightBackupPresent(env.fs, dir, newID)
 				if bErr2 != nil {
 					return fmt.Errorf("poster rekey backup-scan %s: %w", dir, bErr2)
@@ -1426,6 +1418,14 @@ func (pe *PosterEditor) lockKeysFor(movieID string, movie *models.Movie) []strin
 	if res, _ := pe.lookup.FindMovieResultForMovieID(movieID); res != nil && res.Movie != nil {
 		if c := strings.TrimSpace(res.Movie.ContentID); c != "" {
 			keys = append(keys, "cid:"+c)
+		}
+		// audit F-R12-1: the STORED canonical movie ID keys the same byte set a
+		// rescrape's key-held generation window names — omitting it let a rekey
+		// PATCH steal an in-flight rescrape's bytes onto the committed row
+		// (alias≠canonical families make this live). identityKeysFor /
+		// commitKeys already include it; dedup folds repetition in AcquireMany.
+		if id := strings.TrimSpace(res.Movie.ID); id != "" && !strings.EqualFold(id, strings.TrimSpace(movieID)) {
+			keys = append(keys, id)
 		}
 	}
 	return keys

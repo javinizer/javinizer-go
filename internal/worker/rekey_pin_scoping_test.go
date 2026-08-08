@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/mocks"
@@ -15,6 +16,42 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+// audit F-R12-1: patch key selection must include the STORED canonical
+// Movie.ID — otherwise the key-held rescrape generation window (named by the
+// canonical byte marker) and the rekey relocation collide.
+func TestLockKeysForIncludesStoredCanonicalMovieID(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	// Alias≠canonical family: matcher alias is the family key, canonical Movie.ID
+	// names the bytes — resolvable both ways at insert time.
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID:      "res-1",
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "CANON-1", ContentID: "cid-1"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "ALIAS-1"},
+	})
+	pe := newEditorForStore(store)
+	keys := pe.lockKeysFor("ALIAS-1", &models.Movie{ID: "NEW-1"})
+	lower := []string{}
+	for _, k := range keys {
+		lower = append(lower, strings.ToLower(strings.TrimSpace(k)))
+	}
+	assert.Contains(t, lower, "alias-1", "matcher alias surfaces")
+	assert.Contains(t, lower, "canon-1", "stored canonical surfaces (F-R12-1)")
+	assert.Contains(t, lower, "new-1", "incoming ID surfaces")
+	assert.Contains(t, lower, "cid:cid-1", "content-id surfaces")
+	_ = keys
+	// Same-case: incoming == stored folds to one logical key.
+	sameKeys := pe.lockKeysFor("ALIAS-1", &models.Movie{ID: "CANON-1"})
+	folded := map[string]struct{}{}
+	for _, k := range sameKeys {
+		folded[strings.ToLower(strings.TrimSpace(k))] = struct{}{}
+	}
+	for _, want := range []string{"alias-1", "canon-1", "cid:cid-1"} {
+		_, ok := folded[want]
+		assert.True(t, ok, "%s present in saved keys", want)
+	}
+}
 
 // The destination-scan wedge inside relocation hard-errors (fail closed).
 func TestRekeyDestinationScanWedgeFailsClosed(t *testing.T) {
@@ -110,6 +147,25 @@ func TestRekeyRefusedWhileParkedBackupsPending(t *testing.T) {
 	// rekey proceeds (witness written, committed, swept).
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
 	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"}), "parks cleared ⇒ relocation proceeds")
+}
+
+// The destination backup-scan wedge (sixth dir scan) hard-errors the
+// relocation (fail closed). Probe order: fence rekey#1, fence parked#2,
+// fence crop#3, migration destination#4, source backup#5, destination#6.
+func TestRekeyDestinationBackupScanWedgeFailsClosed(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-1", "SSNI-R1", "")
+	mem := afero.NewMemMapFs()
+	dir := filepath.Join("/tmp", "posters", "JOB-DX")
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, "SSNI-R1-full.jpg"), []byte("x"), 0o644))
+	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 4}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-DX"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "backup-scan")
 }
 
 // F-R8-2 helper edges: dir read wedge fails closed; absence is not in-flight.
