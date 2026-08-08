@@ -128,6 +128,14 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 
 		rescrapeResult, err := orch.Rescrape(c.Request.Context(), job.GetID(), movieID, filePath, &req)
 		if err != nil {
+			// audit F-R14-2: typed admission-conflict errors must reach the
+			// client as 409, not flattened into a generic 500 — the frontend's
+			// conflict handling keys off status.
+			var cfe *worker.EditAdmissionConflictError
+			if errors.As(err, &cfe) {
+				writeErrorResponse(c, http.StatusConflict, true, cfe.Error())
+				return
+			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Rescrape failed: %v", err)})
 			return
 		}
@@ -151,11 +159,19 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		logging.Infof("[Rescrape] Verified update for job %s, result %s (movieID=%s): status=%s",
 			job.GetID(), resultID, movieID, rr.Status)
 
+		// audit F-R14-1: the revision echo RE-ACQUIRES the family key so a
+		// racing commit can never land between the op's release and this read
+		// and heal the client's CAS baseline past unseen content.
 		var rev *uint64
 		if rr.FilePath != "" {
-			if res, err := job.GetMovieResult(rr.FilePath); err == nil && res != nil {
-				rv := res.Revision
-				rev = &rv
+			if lerr := job.WithMovieEditLock(movieID, func(m *worker.LockedMovieOps) error {
+				if res, gerr := job.GetMovieResult(rr.FilePath); gerr == nil && res != nil {
+					rv := res.Revision
+					rev = &rv
+				}
+				return nil
+			}); lerr != nil {
+				logging.Warnf("[Rescrape] revision echo read skipped for %s: %v", movieID, lerr)
 			}
 		}
 		c.JSON(http.StatusOK, contracts.BatchRescrapeResponse{

@@ -125,7 +125,19 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie), Revision: currentResultRevision(job, resultID), Revisions: familyRevisions(job, resultID)})
+		// audit F-R14-1: echo reads RE-ACQUIRE the family key — a racing same-
+		// family commit can otherwise land between the op's release and this
+		// read, healing the client's CAS baseline past content it never saw.
+		var revEcho *uint64
+		var famEcho map[string]uint64
+		if lerr := job.WithMovieEditLock(movieID, func(m *worker.LockedMovieOps) error {
+			revEcho = currentResultRevision(job, resultID)
+			famEcho = familyRevisions(job, resultID)
+			return nil
+		}); lerr != nil {
+			logging.Warnf("Batch save %s: echo read skipped: %v", movieID, lerr)
+		}
+		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(movie), Revision: revEcho, Revisions: famEcho})
 	}
 }
 
