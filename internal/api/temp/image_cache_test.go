@@ -156,7 +156,7 @@ func TestImageCache_ContentTypeNormalization(t *testing.T) {
 	assert.Equal(t, "image/webp", w2.Header().Get("Content-Type"), "normalized on hit")
 }
 
-func TestImageCache_SVGNeutralizedOnMiss(t *testing.T) {
+func TestImageCache_SVGRejectedOnMiss(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
@@ -166,13 +166,15 @@ func TestImageCache_SVGNeutralizedOnMiss(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 
-	deps, _, _ := newCacheTestDeps(t, true, 168)
+	deps, fs, tempDir := newCacheTestDeps(t, true, 168)
 	router := cacheTestRouter(deps)
 
 	w := requestImage(router, upstream.URL+"/img.svg")
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "image/jpeg", w.Header().Get("Content-Type"), "SVG should be neutralized to image/jpeg")
-	assert.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Contains(t, w.Body.String(), "failed to fetch image")
+
+	exists, _ := afero.Exists(fs, filepath.Join(tempDir, "image-cache"))
+	assert.False(t, exists, "rejected SVG must not be persisted")
 }
 
 func TestImageCache_StaleIfErrorServesStaleBytes(t *testing.T) {

@@ -1,8 +1,11 @@
 package temp
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -189,7 +192,116 @@ func TestBranch_FetchAndCache_RejectsHeaderlessHTML(t *testing.T) {
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
 	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img", upstream.URL+"/img", client, "ua", "")
 	require.Error(t, result.err)
-	assert.Contains(t, result.err.Error(), "non-image content")
+	assert.Contains(t, result.err.Error(), "uncacheable content")
 	assert.Empty(t, result.cachedPath)
 	assert.Empty(t, result.tempPath)
+}
+
+func fakeImageResponse(req *http.Request, status int, contentType string, body []byte) *http.Response {
+	h := make(http.Header)
+	if contentType != "" {
+		h.Set("Content-Type", contentType)
+	}
+	return &http.Response{
+		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		StatusCode: status,
+		Header:     h,
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    req,
+	}
+}
+
+func TestBranch_FetchBodyToMemory_Success(t *testing.T) {
+	var gotReferer string
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		gotReferer = req.Header.Get("Referer")
+		return fakeImageResponse(req, http.StatusOK, "image/png", []byte("png-bytes")), nil
+	})}
+
+	body, err := fetchBodyToMemory(context.Background(), client, "http://example.com/a.png", "ua", "https://ref.example/x")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("png-bytes"), body)
+	assert.Equal(t, "https://ref.example/x", gotReferer)
+}
+
+func TestBranch_FetchBodyToMemory_CreateRequestError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, errors.New("must not be called")
+	})}
+	_, err := fetchBodyToMemory(context.Background(), client, "://bad-url", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create request")
+}
+
+func TestBranch_FetchBodyToMemory_DoError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, errors.New("dial failed")
+	})}
+	_, err := fetchBodyToMemory(context.Background(), client, "http://example.com/a.png", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fetch")
+}
+
+func TestBranch_FetchBodyToMemory_Non200(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return fakeImageResponse(req, http.StatusServiceUnavailable, "image/png", []byte("x")), nil
+	})}
+	_, err := fetchBodyToMemory(context.Background(), client, "http://example.com/a.png", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-200")
+}
+
+func TestBranch_FetchBodyToMemory_RejectsNonImageCT(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return fakeImageResponse(req, http.StatusOK, "text/html", []byte("<html>")), nil
+	})}
+	_, err := fetchBodyToMemory(context.Background(), client, "http://example.com/a", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "uncacheable content type")
+}
+
+func TestBranch_FetchBodyToMemory_OversizeRejected(t *testing.T) {
+	big := make([]byte, maxImageProxyResponseSize+16)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return fakeImageResponse(req, http.StatusOK, "image/jpeg", big), nil
+	})}
+	_, err := fetchBodyToMemory(context.Background(), client, "http://example.com/big.jpg", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds")
+}
+
+func TestBranch_FetchBodyToMemory_HeaderlessSniffOK(t *testing.T) {
+	pngMagic := append([]byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, make([]byte, 300)...)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return fakeImageResponse(req, http.StatusOK, "", pngMagic), nil
+	})}
+	body, err := fetchBodyToMemory(context.Background(), client, "http://example.com/raw", "ua", "")
+	require.NoError(t, err)
+	assert.Equal(t, pngMagic, body)
+}
+
+func TestBranch_FetchBodyToMemory_HeaderlessSniffRejectsText(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return fakeImageResponse(req, http.StatusOK, "", []byte("plain text challenge")), nil
+	})}
+	_, err := fetchBodyToMemory(context.Background(), client, "http://example.com/raw", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "uncacheable content type")
+}
+
+func TestBranch_FetchBodyToMemory_ReadError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		h := make(http.Header)
+		h.Set("Content-Type", "image/jpeg")
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Header:     h,
+			Body:       errReadBody{},
+			Request:    req,
+		}, nil
+	})}
+	_, err := fetchBodyToMemory(context.Background(), client, "http://example.com/x.jpg", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read body")
 }

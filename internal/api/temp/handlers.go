@@ -215,7 +215,14 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
 
 		v, ferr, _ := imageCacheGroup.Do(normalizedURL, func() (any, error) {
-			return fetchAndCache(c.Request.Context(), fs, cacheDir, normalizedURL, fetchURL, httpClient, userAgent, referer), nil
+			res := fetchAndCache(c.Request.Context(), fs, cacheDir, normalizedURL, fetchURL, httpClient, userAgent, referer)
+			if res.persistFailed {
+				body, berr := fetchBodyToMemory(c.Request.Context(), httpClient, fetchURL, userAgent, referer)
+				if berr == nil {
+					res.body = body
+				}
+			}
+			return res, nil
 		})
 		result := v.(fetchResult)
 		_ = ferr
@@ -225,8 +232,14 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 				return
 			}
 			if result.persistFailed {
-				logging.Warnf("image cache: persist failed for %s: %v, falling back to uncached", normalizedURL, result.err)
-				serveTempImageUncached(c, tempCfg, fetchURL, rawURL)
+				if len(result.body) > 0 {
+					c.Header("Cache-Control", "private, max-age=300")
+					c.Header("X-Content-Type-Options", "nosniff")
+					c.Data(http.StatusOK, result.contentType, result.body)
+					return
+				}
+				logging.Warnf("image cache: persist failed for %s: %v", normalizedURL, result.err)
+				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
 				return
 			}
 			logging.Warnf("image cache: fetch failed for %s: %v", normalizedURL, result.err)
@@ -329,6 +342,7 @@ func serveTempImageUncached(c *gin.Context, tempCfg *core.TempNarrowConfig, down
 
 	c.Header("Content-Type", contentType)
 	c.Header("Cache-Control", "private, max-age=300")
+	c.Header("X-Content-Type-Options", "nosniff")
 
 	if _, err := io.Copy(c.Writer, io.LimitReader(resp.Body, maxImageProxyResponseSize)); err != nil {
 		c.AbortWithStatus(http.StatusBadGateway)

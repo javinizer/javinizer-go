@@ -287,7 +287,7 @@ func CleanupStaleImageCache(fs afero.Fs, tempDir string, ttl time.Duration) (int
 		}
 		remaining, rerr := afero.ReadDir(fs, shardPath)
 		if rerr == nil && len(remaining) == 0 {
-			_ = fsutil.AferoRemoveAll(fs, shardPath)
+			_ = fs.Remove(shardPath)
 		}
 	}
 	tmpDir := filepath.Join(root, ".tmp")

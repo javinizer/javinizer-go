@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -264,6 +265,7 @@ func TestBranch_Uncached_EmptyContentTypeUsesDefault(t *testing.T) {
 	serveTempImageUncached(c, &core.TempNarrowConfig{}, srv.URL+"/x", srv.URL+"/x")
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, defaultContentType, w.Header().Get("Content-Type"))
+	assert.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
 }
 
 func TestBranch_Uncached_CopyFailureAborts(t *testing.T) {
@@ -421,4 +423,71 @@ func TestBranch_CachedFill_MaxAgeCappedAt24h(t *testing.T) {
 	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "private, max-age=86400", w.Header().Get("Cache-Control"))
+}
+
+func TestBranch_PersistFailure_SharedAcrossWaiters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	var hits int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		time.Sleep(120 * time.Millisecond)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("shared-body"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := &mkdirSuffixFailFs{Fs: afero.NewMemMapFs(), suffix: ".tmp"}
+	deps := newImageCacheDeps(t, fs)
+	router := gin.New()
+	router.GET("/temp/image", serveTempImage(testkit.GetTestRuntime(deps)))
+
+	const waiters = 5
+	results := make([]*httptest.ResponseRecorder, waiters)
+	var wg sync.WaitGroup
+	for i := 0; i < waiters; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodGet, "/temp/image?url="+url.QueryEscape(upstream.URL+"/img.jpg"), nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			results[idx] = w
+		}(i)
+	}
+	wg.Wait()
+
+	hitCount := atomic.LoadInt32(&hits)
+	assert.Equal(t, int32(2), hitCount, "N concurrent waiters must cost exactly one flight fetch plus one shared memory refetch")
+	for _, w := range results {
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "shared-body", w.Body.String())
+	}
+}
+
+func TestBranch_PersistFailure_RefetchFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	var hits int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&hits, 1) == 1 {
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write([]byte("once"))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := &mkdirSuffixFailFs{Fs: afero.NewMemMapFs(), suffix: ".tmp"}
+	deps := newImageCacheDeps(t, fs)
+
+	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Contains(t, w.Body.String(), "failed to fetch image")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&hits), "exactly one refetch attempt inside the shared flight")
 }

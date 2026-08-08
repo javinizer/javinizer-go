@@ -35,7 +35,7 @@ func TestCoverageFinal_Get_ReadDirErr(t *testing.T) {
 	assert.Equal(t, CacheAbsent, state)
 }
 
-func TestCoverageFinal_FetchAndCache_SVGFallsBackToJpeg(t *testing.T) {
+func TestCoverageFinal_FetchAndCache_SVGRejectedNotMislabeled(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
@@ -50,9 +50,10 @@ func TestCoverageFinal_FetchAndCache_SVGFallsBackToJpeg(t *testing.T) {
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
 
 	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.svg", upstream.URL+"/img.svg", client, "test-agent", "")
-	require.NoError(t, result.err)
-	assert.Equal(t, "image/jpeg", result.contentType)
-	assert.Contains(t, result.cachedPath, ".jpg")
+	require.Error(t, result.err)
+	assert.Contains(t, result.err.Error(), "unsupported image content type")
+	assert.Empty(t, result.cachedPath)
+	assert.Empty(t, result.tempPath)
 }
 
 func TestCoverageFinal_AtomicRename_IsExistRetry(t *testing.T) {

@@ -170,3 +170,39 @@ func TestCleanupBranch_TmpRemoveFailureWarned(t *testing.T) {
 	exists, _ := afero.Exists(mem, entry)
 	assert.True(t, exists)
 }
+
+type plantOnShardRemoveFs struct {
+	afero.Fs
+	shardDir string
+	planted  bool
+}
+
+func (f *plantOnShardRemoveFs) Remove(name string) error {
+	if name == f.shardDir && !f.planted {
+		f.planted = true
+		fresher := filepath.Join(f.shardDir, "just-landed.jpg")
+		if err := afero.WriteFile(f.Fs, fresher, []byte("fresh"), 0o644); err != nil {
+			return err
+		}
+	}
+	return f.Fs.Remove(name)
+}
+
+func TestCleanupBranch_ShardDirRemovalSurvivesConcurrentFill(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	tempDir := t.TempDir()
+	expired := seedExpiredShardEntry(t, mem, tempDir, "ab", "deadbeef.jpg")
+	shardDir := filepath.Join(tempDir, "image-cache", "ab")
+	fs := &plantOnShardRemoveFs{Fs: mem, shardDir: shardDir}
+
+	removed, err := CleanupStaleImageCache(fs, tempDir, 168*time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed, "expired entry still removed")
+
+	planted := filepath.Join(shardDir, "just-landed.jpg")
+	exists, _ := afero.Exists(mem, planted)
+	assert.True(t, exists, "fresh entry renamed into the shard mid-sweep must survive (fs.Remove refuses non-empty dirs)")
+	assert.True(t, fs.planted)
+	exists, _ = afero.Exists(mem, expired)
+	assert.False(t, exists)
+}
