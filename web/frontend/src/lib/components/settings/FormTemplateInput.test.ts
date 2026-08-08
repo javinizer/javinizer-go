@@ -60,6 +60,19 @@ describe('FormTemplateInput', () => {
 		expect(input.value).toContain('<RELEASEDATE>');
 	});
 
+	it('appends (not prepends) a tag when the input has not been focused', async () => {
+		const onchange = vi.fn();
+		const { container } = render(FormTemplateInput, {
+			props: makeProps({ value: '<ID> - <TITLE>', onchange }),
+		});
+		// Do NOT focus the input first — selectionStart is 0, not null.
+		await fireEvent.click(buttonByText(container, 'Show available tags'));
+		await fireEvent.click(buttonByText(container, '<RELEASEDATE>'));
+		expect(onchange).toHaveBeenCalledWith('<ID> - <TITLE><RELEASEDATE>');
+		const input = container.querySelector('input') as HTMLInputElement;
+		expect(input.value).toBe('<ID> - <TITLE><RELEASEDATE>');
+	});
+
 	it('hides the tag picker when showTagList is false', () => {
 		const { container } = render(FormTemplateInput, { props: makeProps({ showTagList: false }) });
 		expect(container.textContent).not.toContain('Show available tags');

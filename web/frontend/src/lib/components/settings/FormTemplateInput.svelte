@@ -54,6 +54,7 @@
 
 	let showTags = $state(false);
 	let inputEl: HTMLInputElement | undefined = $state();
+	let hasSelection = $state(false);
 
 	function handleInput(event: Event) {
 		const target = event.target as HTMLInputElement;
@@ -72,12 +73,13 @@
 			onchange(fallback);
 			return;
 		}
-		const start = input.selectionStart ?? value.length;
-		const end = input.selectionEnd ?? value.length;
-		const next = value.slice(0, start) + tag + value.slice(end);
+		const pos = hasSelection ? (input.selectionStart ?? value.length) : value.length;
+		const end = hasSelection ? (input.selectionEnd ?? pos) : pos;
+		const next = value.slice(0, pos) + tag + value.slice(end);
 		value = next;
 		onchange(next);
-		const caret = start + tag.length;
+		const caret = pos + tag.length;
+		hasSelection = true;
 		queueMicrotask(() => {
 			input.focus();
 			input.setSelectionRange(caret, caret);
@@ -126,6 +128,7 @@
 			{id}
 			bind:value
 			oninput={handleInput}
+			onfocus={() => (hasSelection = true)}
 			{placeholder}
 			{disabled}
 			aria-describedby={description ? `${id}-desc` : undefined}
@@ -154,6 +157,7 @@
 				{id}
 				bind:value
 				oninput={handleInput}
+				onfocus={() => (hasSelection = true)}
 				{placeholder}
 				{disabled}
 				aria-describedby={description ? `${id}-desc` : undefined}
