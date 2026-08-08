@@ -297,7 +297,7 @@
 							onOpenTrailerModal={() => (s.showTrailerModal = true)}
 							onOpenPosterViewer={() => {
 								if (!s.displayPosterUrl) return;
-								s.imageViewerImages = [s.displayPosterUrl];
+								s.imageViewerImages = [s.reviewPageController.previewImageURL(s.displayPosterUrl)];
 								s.imageViewerIndex = 0;
 								s.imageViewerTitle = m.review_poster();
 								s.showImageViewer = true;

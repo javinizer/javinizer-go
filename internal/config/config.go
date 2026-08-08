@@ -187,6 +187,20 @@ type SystemConfig struct {
 	// Can be overridden with JAVINIZER_TEMP_DIR environment variable.
 	// Subdirectory "posters/{jobID}" is created for batch job temp posters.
 	TempDir string `yaml:"temp_dir" json:"temp_dir"`
+	// ImageCacheEnabled controls server-side caching of fetched preview images
+	// by the /api/v1/temp/image proxy. When true (default), the proxy persists
+	// fetched image bytes to disk under {tempDir}/image-cache/ so that an image
+	// fetched once while online remains available when the source is unreachable.
+	ImageCacheEnabled bool `yaml:"image_cache_enabled" json:"image_cache_enabled"`
+	// ImageCacheTTLHours is the cache entry lifetime in hours (default: 168 = 7 days).
+	// The cap (<=87600) is enforced unconditionally because the unconditional sweep
+	// computes a time.Duration from it even when caching is disabled. When enabled,
+	// must be >= 1; when disabled, 0 is legal (sweep no-op).
+	ImageCacheTTLHours int `yaml:"image_cache_ttl_hours" json:"image_cache_ttl_hours"`
+	// ImageCacheMaxSizeMB bounds the total on-disk size of the preview image cache
+	// in megabytes (default: 512). Once a commit pushes the cache over the limit,
+	// the oldest entries are evicted. 0 disables the quota.
+	ImageCacheMaxSizeMB int `yaml:"image_cache_max_size_mb" json:"image_cache_max_size_mb"`
 }
 
 // MarshalYAML keeps Config marshaling explicit and ensures ScrapersConfig custom
@@ -433,6 +447,15 @@ func ValidateConfig(cfg *Config) error {
 	// Allow 0 to mean "use default" (handled by DefaultConfig and migrations)
 	if cfg.System.VersionCheckIntervalHours != 0 && (cfg.System.VersionCheckIntervalHours < 1 || cfg.System.VersionCheckIntervalHours > 168) {
 		return fmt.Errorf("system.version_check_interval_hours must be between 1 and 168 (1 week), or 0 for default")
+	}
+	if cfg.System.ImageCacheTTLHours < 0 || cfg.System.ImageCacheTTLHours > 87600 {
+		return fmt.Errorf("system.image_cache_ttl_hours must be between 0 and 87600 (10 years)")
+	}
+	if cfg.System.ImageCacheEnabled && cfg.System.ImageCacheTTLHours < 1 {
+		return fmt.Errorf("system.image_cache_ttl_hours must be >= 1 when image caching is enabled")
+	}
+	if cfg.System.ImageCacheMaxSizeMB < 0 {
+		return fmt.Errorf("system.image_cache_max_size_mb must be >= 0 (0 disables the quota)")
 	}
 
 	// Validate logging rotation settings

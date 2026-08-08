@@ -2112,6 +2112,26 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_config.SystemConfig:
     properties:
+      image_cache_enabled:
+        description: |-
+          ImageCacheEnabled controls server-side caching of fetched preview images
+          by the /api/v1/temp/image proxy. When true (default), the proxy persists
+          fetched image bytes to disk under {tempDir}/image-cache/ so that an image
+          fetched once while online remains available when the source is unreachable.
+        type: boolean
+      image_cache_max_size_mb:
+        description: |-
+          ImageCacheMaxSizeMB bounds the total on-disk size of the preview image cache
+          in megabytes (default: 512). Once a commit pushes the cache over the limit,
+          the oldest entries are evicted. 0 disables the quota.
+        type: integer
+      image_cache_ttl_hours:
+        description: |-
+          ImageCacheTTLHours is the cache entry lifetime in hours (default: 168 = 7 days).
+          The cap (<=87600) is enforced unconditionally because the unconditional sweep
+          computes a time.Duration from it even when caching is disabled. When enabled,
+          must be >= 1; when disabled, 0 is legal (sweep no-op).
+        type: integer
       temp_dir:
         description: |-
           TempDir is the base directory for temporary files (default: "data/temp").
@@ -5758,7 +5778,8 @@ paths:
   /api/v1/temp/image:
     get:
       description: Proxies remote images for preview UI, handling hotlink protection
-        and CORS issues.
+        and CORS issues. When image caching is enabled, fetched images are persisted
+        server-side with stale-if-error semantics.
       parameters:
       - description: Image URL
         in: query
@@ -5772,6 +5793,10 @@ paths:
             type: file
         "400":
           description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "403":
+          description: Forbidden
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "502":

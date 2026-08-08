@@ -2620,5 +2620,11 @@
   "browse_plan_preset_conservative": "コンサバティブ",
   "browse_plan_preset_gap_fill": "ギャップ補完",
   "browse_plan_preset_aggressive": "アグレッシブ",
-  "review_media_replace_warning": "既存メディアの置き換えは破壊的で、整理のロールバック対象外です。適用前に内容を確認してください。"
+  "review_media_replace_warning": "既存メディアの置き換えは破壊的で、整理のロールバック対象外です。適用前に内容を確認してください。",
+  "settings_server_image_cache_enable_label": "プレビュー画像をキャッシュ",
+  "settings_server_image_cache_enable_desc": "有効にすると、プロキシが取得したプレビュー画像をサーバー側でキャッシュし、ソースにアクセスできない場合でも利用できるようにします。",
+  "settings_server_image_cache_max_size_label": "画像キャッシュ最大サイズ（MB）",
+  "settings_server_image_cache_max_size_desc": "プレビュー画像キャッシュのディスク割り当て量（MB）。超過時は最も古いエントリから削除されます。0 で無制限。",
+  "settings_server_image_cache_ttl_label": "画像キャッシュTTL（時間）",
+  "settings_server_image_cache_ttl_desc": "キャッシュされたプレビュー画像が最新である期間（時間）。期限切れのエントリは再取得され、再取得が失敗した場合はstale-if-errorで提供されます。"
 }

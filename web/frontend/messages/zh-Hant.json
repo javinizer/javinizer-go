@@ -2620,5 +2620,11 @@
   "browse_plan_preset_conservative": "保守",
   "browse_plan_preset_gap_fill": "填補空缺",
   "browse_plan_preset_aggressive": "積極",
-  "review_media_replace_warning": "取代現有媒體具破壞性，且不在整理回復範圍內。套用前請確認這些影響。"
+  "review_media_replace_warning": "取代現有媒體具破壞性，且不在整理回復範圍內。套用前請確認這些影響。",
+  "settings_server_image_cache_enable_label": "快取預覽圖像",
+  "settings_server_image_cache_enable_desc": "啟用後，代理獲取的預覽圖像將被快取到伺服器端，以便在來源無法存取時仍可使用。",
+  "settings_server_image_cache_max_size_label": "圖像快取最大大小（MB）",
+  "settings_server_image_cache_max_size_desc": "預覽圖像快取的磁碟配額（MB）。超過限制時將逐出最舊的項目。0 表示無限制。",
+  "settings_server_image_cache_ttl_label": "圖像快取TTL（小時）",
+  "settings_server_image_cache_ttl_desc": "快取的預覽圖像保持新鮮的時間（小時）。過期的項目將重新獲取；如果重新獲取失敗，則通過stale-if-error提供。"
 }

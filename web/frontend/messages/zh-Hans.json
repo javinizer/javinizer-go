@@ -2620,5 +2620,11 @@
   "browse_plan_preset_conservative": "保守",
   "browse_plan_preset_gap_fill": "填充空缺",
   "browse_plan_preset_aggressive": "激进",
-  "review_media_replace_warning": "替换现有媒体具有破坏性，且不在整理回滚范围内。应用前请确认这些影响。"
+  "review_media_replace_warning": "替换现有媒体具有破坏性，且不在整理回滚范围内。应用前请确认这些影响。",
+  "settings_server_image_cache_enable_label": "缓存预览图像",
+  "settings_server_image_cache_enable_desc": "启用后，代理获取的预览图像将被缓存到服务端，以便在源无法访问时仍可使用。",
+  "settings_server_image_cache_max_size_label": "图像缓存最大大小（MB）",
+  "settings_server_image_cache_max_size_desc": "预览图像缓存的磁盘配额（MB）。超过限制时将逐出最旧的条目。0 表示无限制。",
+  "settings_server_image_cache_ttl_label": "图像缓存TTL（小时）",
+  "settings_server_image_cache_ttl_desc": "缓存的预览图像保持新鲜的时间（小时）。过期的条目将重新获取；如果重新获取失败，则通过stale-if-error提供。"
 }

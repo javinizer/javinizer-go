@@ -82,6 +82,9 @@ system:
     # Base directory for temporary files (posters, etc.)
     # Can be overridden with JAVINIZER_TEMP_DIR environment variable
     temp_dir: data/temp
+    image_cache_enabled: true
+    image_cache_ttl_hours: 168
+    image_cache_max_size_mb: 512
 scrapers:
     user_agent: "" # Default: Chrome UA. r18dev uses Javinizer UA automatically.
     # Referer header for CDN compatibility (required by DMM/R18 CDN)

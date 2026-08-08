@@ -3,6 +3,8 @@
 	import { onMount } from 'svelte';
 	import { RefreshCw, ArrowUpCircle } from 'lucide-svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
+	import FormToggle from '$lib/components/settings/FormToggle.svelte';
+	import FormNumberInput from '$lib/components/settings/FormNumberInput.svelte';
 	import UpgradeAction from '$lib/components/UpgradeAction.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
@@ -146,5 +148,34 @@
 			/>
 			<p class="text-xs text-muted-foreground mt-1">{m.settings_server_temp_dir_desc()}</p>
 		</div>
+	</div>
+	<div class="space-y-4">
+		<FormToggle
+			id="system-image-cache-enabled"
+			label={m.settings_server_image_cache_enable_label()}
+			description={m.settings_server_image_cache_enable_desc()}
+			checked={config.system.image_cache_enabled}
+			onchange={(val) => { config.system.image_cache_enabled = val; }}
+		/>
+		<FormNumberInput
+			id="system-image-cache-ttl"
+			label={m.settings_server_image_cache_ttl_label()}
+			description={m.settings_server_image_cache_ttl_desc()}
+			value={config.system.image_cache_ttl_hours}
+			min={1}
+			max={87600}
+			disabled={!config.system.image_cache_enabled}
+			onchange={(val) => { config.system.image_cache_ttl_hours = val; }}
+		/>
+		<FormNumberInput
+			id="system-image-cache-max-size"
+			label={m.settings_server_image_cache_max_size_label()}
+			description={m.settings_server_image_cache_max_size_desc()}
+			value={config.system.image_cache_max_size_mb}
+			min={0}
+			max={1048576}
+			disabled={!config.system.image_cache_enabled}
+			onchange={(val) => { config.system.image_cache_max_size_mb = val; }}
+		/>
 	</div>
 </SettingsSection>

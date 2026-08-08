@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -229,4 +230,150 @@ func (c *TempDirCleaner) StartStaleTempCleanup() chan struct{} {
 		}
 	}()
 	return stop
+}
+
+// CleanupStaleImageCache removes expired entries from the image cache directory.
+// It walks {tempDir}/image-cache/ (shard dirs then files) and removes files whose
+// mtime is older than a retention grace of ttl + max(ttl, 24h), so entries that
+// crossed their freshness TTL survive the sweep and remain available for the
+// stale-if-error fallback. Orphan partial downloads in
+// {tempDir}/image-cache/.tmp/ are removed once older than ttl itself.
+// No-op when ttl <= 0 or the dir does not exist. Per-file removal failures are
+// logged and skipped; the walk continues, and an error is returned only if the
+// top-level directory traversal fails.
+func CleanupStaleImageCache(fs afero.Fs, tempDir string, ttl time.Duration) (int, error) {
+	if ttl <= 0 || fs == nil {
+		return 0, nil
+	}
+	root := filepath.Join(tempDir, "image-cache")
+	entries, err := afero.ReadDir(fs, root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read image-cache dir: %w", err)
+	}
+	retentionCutoff := time.Now().Add(-(ttl + max(ttl, 24*time.Hour)))
+	cutoff := time.Now().Add(-ttl)
+	removed := 0
+	for _, shard := range entries {
+		if !shard.IsDir() || shard.Name() == ".tmp" {
+			continue
+		}
+		shardPath := filepath.Join(root, shard.Name())
+		files, ferr := afero.ReadDir(fs, shardPath)
+		if ferr != nil {
+			if os.IsNotExist(ferr) {
+				continue
+			}
+			logging.Warnf("CleanupStaleImageCache: failed to read shard %s: %v", shardPath, ferr)
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() {
+				continue
+			}
+			if f.ModTime().Before(retentionCutoff) {
+				fp := filepath.Join(shardPath, f.Name())
+				info, statErr := fs.Stat(fp)
+				if statErr != nil || !info.ModTime().Before(retentionCutoff) {
+					continue
+				}
+				if rerr := fsutil.AferoRemoveAll(fs, fp); rerr != nil {
+					logging.Warnf("CleanupStaleImageCache: failed to remove %s: %v", fp, rerr)
+				} else {
+					removed++
+				}
+			}
+		}
+		remaining, rerr := afero.ReadDir(fs, shardPath)
+		if rerr == nil && len(remaining) == 0 {
+			_ = fs.Remove(shardPath)
+		}
+	}
+	tmpDir := filepath.Join(root, ".tmp")
+	tmpEntries, terr := afero.ReadDir(fs, tmpDir)
+	if terr == nil {
+		for _, f := range tmpEntries {
+			if f.IsDir() || !f.ModTime().Before(cutoff) {
+				continue
+			}
+			fp := filepath.Join(tmpDir, f.Name())
+			info, statErr := fs.Stat(fp)
+			if statErr != nil || !info.ModTime().Before(cutoff) {
+				continue
+			}
+			if rerr := fsutil.AferoRemoveAll(fs, fp); rerr != nil {
+				logging.Warnf("CleanupStaleImageCache: failed to remove temp %s: %v", fp, rerr)
+			} else {
+				removed++
+			}
+		}
+	}
+	return removed, nil
+}
+
+// EvictImageCacheToSize removes oldest-first entries from {tempDir}/image-cache/
+// until the total size of shard entries is within limitBytes. The .tmp staging
+// directory is never counted or evicted (in-flight writes live there). Per-file
+// failures are logged and the sweep continues. Returns the pre-eviction total and
+// the number of entries removed.
+func EvictImageCacheToSize(fs afero.Fs, tempDir string, limitBytes int64) (int64, int, error) {
+	if limitBytes <= 0 || fs == nil {
+		return 0, 0, nil
+	}
+	root := filepath.Join(tempDir, "image-cache")
+	entries, err := afero.ReadDir(fs, root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, nil
+		}
+		return 0, 0, fmt.Errorf("read image-cache dir: %w", err)
+	}
+	type artifact struct {
+		path  string
+		mtime time.Time
+		size  int64
+	}
+	var artifacts []artifact
+	var total int64
+	for _, shard := range entries {
+		if !shard.IsDir() || shard.Name() == ".tmp" {
+			continue
+		}
+		files, ferr := afero.ReadDir(fs, filepath.Join(root, shard.Name()))
+		if ferr != nil {
+			if os.IsNotExist(ferr) {
+				continue
+			}
+			logging.Warnf("EvictImageCacheToSize: failed to read shard %s: %v", shard.Name(), ferr)
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() {
+				continue
+			}
+			artifacts = append(artifacts, artifact{path: filepath.Join(root, shard.Name(), f.Name()), mtime: f.ModTime(), size: f.Size()})
+			total += f.Size()
+		}
+	}
+	if total <= limitBytes {
+		return total, 0, nil
+	}
+	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].mtime.Before(artifacts[j].mtime) })
+	over := total - limitBytes
+	var freed int64
+	removed := 0
+	for _, a := range artifacts {
+		if freed >= over {
+			break
+		}
+		if rerr := fsutil.AferoRemoveAll(fs, a.path); rerr != nil {
+			logging.Warnf("EvictImageCacheToSize: failed to remove %s: %v", a.path, rerr)
+			continue
+		}
+		freed += a.size
+		removed++
+	}
+	return total, removed, nil
 }

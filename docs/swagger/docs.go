@@ -3665,7 +3665,7 @@ const docTemplate = `{
         },
         "/api/v1/temp/image": {
             "get": {
-                "description": "Proxies remote images for preview UI, handling hotlink protection and CORS issues.",
+                "description": "Proxies remote images for preview UI, handling hotlink protection and CORS issues. When image caching is enabled, fetched images are persisted server-side with stale-if-error semantics.",
                 "tags": [
                     "temp"
                 ],
@@ -3688,6 +3688,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -7113,6 +7119,18 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_config.SystemConfig": {
             "type": "object",
             "properties": {
+                "image_cache_enabled": {
+                    "description": "ImageCacheEnabled controls server-side caching of fetched preview images\nby the /api/v1/temp/image proxy. When true (default), the proxy persists\nfetched image bytes to disk under {tempDir}/image-cache/ so that an image\nfetched once while online remains available when the source is unreachable.",
+                    "type": "boolean"
+                },
+                "image_cache_max_size_mb": {
+                    "description": "ImageCacheMaxSizeMB bounds the total on-disk size of the preview image cache\nin megabytes (default: 512). Once a commit pushes the cache over the limit,\nthe oldest entries are evicted. 0 disables the quota.",
+                    "type": "integer"
+                },
+                "image_cache_ttl_hours": {
+                    "description": "ImageCacheTTLHours is the cache entry lifetime in hours (default: 168 = 7 days).\nThe cap (\u003c=87600) is enforced unconditionally because the unconditional sweep\ncomputes a time.Duration from it even when caching is disabled. When enabled,\nmust be \u003e= 1; when disabled, 0 is legal (sweep no-op).",
+                    "type": "integer"
+                },
                 "temp_dir": {
                     "description": "TempDir is the base directory for temporary files (default: \"data/temp\").\nCan be overridden with JAVINIZER_TEMP_DIR environment variable.\nSubdirectory \"posters/{jobID}\" is created for batch job temp posters.",
                     "type": "string"

@@ -1365,3 +1365,12 @@ func TestPriorityConfig_UnmarshalJSON_FieldNonStringElement(t *testing.T) {
 	assert.Equal(t, []string{"r18dev"}, p.Fields["series"],
 		"non-string element must be skipped, string element kept")
 }
+
+func TestValidate_ImageCacheMaxSizeNegative(t *testing.T) {
+	cfg := DefaultConfig(nil, nil)
+	cfg.System.ImageCacheMaxSizeMB = -1
+
+	err := cfg.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "image_cache_max_size_mb")
+}

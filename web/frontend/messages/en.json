@@ -2620,5 +2620,11 @@
   "browse_plan_preset_conservative": "Conservative",
   "browse_plan_preset_gap_fill": "Gap fill",
   "browse_plan_preset_aggressive": "Aggressive",
-  "review_media_replace_warning": "Replacing existing media is destructive and is not covered by organize rollback. Verify these effects before applying."
+  "review_media_replace_warning": "Replacing existing media is destructive and is not covered by organize rollback. Verify these effects before applying.",
+  "settings_server_image_cache_enable_label": "Cache Preview Images",
+  "settings_server_image_cache_enable_desc": "When enabled, preview images fetched by the proxy are cached server-side so they remain available when the source is unreachable.",
+  "settings_server_image_cache_max_size_label": "Image Cache Max Size (MB)",
+  "settings_server_image_cache_max_size_desc": "Disk quota for the preview image cache in megabytes. Oldest entries are evicted when exceeded. 0 disables the limit.",
+  "settings_server_image_cache_ttl_label": "Image Cache TTL (hours)",
+  "settings_server_image_cache_ttl_desc": "How long cached preview images remain fresh (hours). Expired entries are re-fetched; stale-if-error serves them if the re-fetch fails."
 }

@@ -297,3 +297,35 @@ func TestValidateProxyProfileRef(t *testing.T) {
 		assert.NoError(t, validateProxyProfileRef("test.proxy", cfg, profiles))
 	})
 }
+
+func TestValidateConfig_ImageCacheTTL(t *testing.T) {
+	cases := []struct {
+		name    string
+		enabled bool
+		ttl     int
+		wantErr bool
+	}{
+		{"enabled+ttl=0 rejected", true, 0, true},
+		{"enabled+ttl=-1 rejected", true, -1, true},
+		{"enabled+ttl=87601 rejected", true, 87601, true},
+		{"enabled+ttl=1 accepted", true, 1, false},
+		{"enabled+ttl=87600 accepted", true, 87600, false},
+		{"disabled+ttl=87601 rejected (unconditional cap)", false, 87601, true},
+		{"disabled+ttl=-1 rejected", false, -1, true},
+		{"disabled+ttl=0 accepted", false, 0, false},
+		{"disabled+ttl=87600 accepted", false, 87600, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultConfig(nil, nil)
+			cfg.System.ImageCacheEnabled = tc.enabled
+			cfg.System.ImageCacheTTLHours = tc.ttl
+			err := cfg.Validate()
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}

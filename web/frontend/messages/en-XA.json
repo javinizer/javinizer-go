@@ -1959,5 +1959,11 @@
   "browse_plan_preset_conservative": "[ Çöñsërvåtívë ]",
   "browse_plan_preset_gap_fill": "[ Gåp fíll ]",
   "browse_plan_preset_aggressive": "[ Åggrëssívë ]",
-  "review_media_replace_warning": "[ Rëplåçíñg ëxístíñg mëdíå ís dëstrüçtívë åñd ís ñöt çövërëd by örgåñízë röllbåçk. Vërífy thësë ëffëçts bëförë åpplyíñg. ]"
+  "review_media_replace_warning": "[ Rëplåçíñg ëxístíñg mëdíå ís dëstrüçtívë åñd ís ñöt çövërëd by örgåñízë röllbåçk. Vërífy thësë ëffëçts bëförë åpplyíñg. ]",
+  "settings_server_image_cache_enable_label": "[ Cäçhé Prévéw Ímägés ]",
+  "settings_server_image_cache_enable_desc": "[ Whén éñäbléd, prévéw ímägés fétchéd by thé próxy äré cächéd sërvër-sídé so théy rémäïñ äväïläblé whén thé sourcé ïs unréächäblé. ]",
+  "settings_server_image_cache_max_size_label": "[ Ímägé Cäché Mäx Sïzé (MB) ]",
+  "settings_server_image_cache_max_size_desc": "[ Dïsk quötä för thé prévïéw ïmägé cäché ïn mégäbytés. Öldést éntrïés äré évïctéd whén éxcéédéd. 0 dïsäblés thé lïmït. ]",
+  "settings_server_image_cache_ttl_label": "[ Ímägé Cäché TTL (höurs) ]",
+  "settings_server_image_cache_ttl_desc": "[ Höw loñg cächéd prévéw ímägés rémäïñ frésh (höurs). Expiréd éntréés äré ré-fétchéd; stälé-ïf-érrör sërvés thém ïf thé ré-fétch fäïls. ]"
 }
