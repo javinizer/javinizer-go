@@ -313,7 +313,7 @@ func TestCoverage_FetchAndCacheMkdirShardError(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("test"))
+		w.Write(jpegBytes("test"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -332,7 +332,7 @@ func TestCoverage_FetchAndCacheCreateTempError(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("test"))
+		w.Write(jpegBytes("test"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -351,7 +351,7 @@ func TestCoverage_FetchAndCacheRenameFailureDegrades(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("persist-fail-test"))
+		w.Write(jpegBytes("persist-fail-test"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -396,7 +396,7 @@ func TestCoverage_FetchAndCacheOldExtCleanup(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte("new-png"))
+		w.Write(pngBytes("new-png"))
 	}))
 	t.Cleanup(upstream.Close)
 

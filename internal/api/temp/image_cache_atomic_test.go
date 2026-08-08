@@ -96,7 +96,7 @@ func TestFetch_GenericRenameError_ReturnsError(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte("rename-fail-test"))
+		_, _ = w.Write(jpegBytes("rename-fail-test"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -110,5 +110,5 @@ func TestFetch_GenericRenameError_ReturnsError(t *testing.T) {
 	assert.NotEmpty(t, result.tempPath)
 	content, readErr := afero.ReadFile(fs, result.tempPath)
 	require.NoError(t, readErr)
-	assert.Equal(t, []byte("rename-fail-test"), content)
+	assert.Equal(t, jpegBytes("rename-fail-test"), content)
 }

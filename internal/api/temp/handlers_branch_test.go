@@ -90,7 +90,7 @@ func seedCacheEntry(t *testing.T, fs afero.Fs, tempDir, normalizedURL, content s
 func testUpstream(payload string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte(payload))
+		_, _ = w.Write(jpegBytes(payload))
 	}))
 }
 
@@ -146,7 +146,7 @@ func TestBranch_RenameFailure_ServesFromTemp(t *testing.T) {
 
 	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "temp-body", w.Body.String())
+	assert.Equal(t, jpegStr("temp-body"), w.Body.String())
 	assert.Equal(t, "private, max-age=300", w.Header().Get("Cache-Control"))
 }
 
@@ -158,9 +158,10 @@ func TestBranch_RenameFailure_TempOpenFailure(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	hooked := &openHookFs{
-		Fs:    afero.NewMemMapFs(),
-		mode:  "error",
-		match: isTmpCacheFile,
+		Fs:        afero.NewMemMapFs(),
+		mode:      "error",
+		failAfter: 1,
+		match:     isTmpCacheFile,
 	}
 	fs := &renameAlwaysFailFs{Fs: hooked}
 	deps := newImageCacheDeps(t, fs)
@@ -178,9 +179,10 @@ func TestBranch_RenameFailure_TempCopyFailure(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	hooked := &openHookFs{
-		Fs:    afero.NewMemMapFs(),
-		mode:  "readfail",
-		match: isTmpCacheFile,
+		Fs:        afero.NewMemMapFs(),
+		mode:      "readfail",
+		failAfter: 1,
+		match:     isTmpCacheFile,
 	}
 	fs := &renameAlwaysFailFs{Fs: hooked}
 	deps := newImageCacheDeps(t, fs)
@@ -275,14 +277,14 @@ func TestBranch_Uncached_CopyFailureAborts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Header().Set("Content-Length", "1000")
-		_, _ = w.Write([]byte("abc"))
+		_, _ = w.Write(jpegBytes("abc"))
 	}))
 	t.Cleanup(srv.Close)
 
 	w := httptest.NewRecorder()
 	c := newGinTestContext(w)
 	serveTempImageUncached(c, &core.TempNarrowConfig{}, srv.URL+"/x", srv.URL+"/x")
-	assert.Equal(t, "abc", w.Body.String())
+	assert.Equal(t, jpegStr("abc"), w.Body.String())
 }
 
 func TestBranch_PersistFailure_FallsBackToUncached(t *testing.T) {
@@ -297,7 +299,7 @@ func TestBranch_PersistFailure_FallsBackToUncached(t *testing.T) {
 
 	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "fallback-body", w.Body.String())
+	assert.Equal(t, jpegStr("fallback-body"), w.Body.String())
 }
 
 func TestBranch_NonImageUpstream_ServesStaleEntry(t *testing.T) {
@@ -306,7 +308,7 @@ func TestBranch_NonImageUpstream_ServesStaleEntry(t *testing.T) {
 	t.Cleanup(cleanup)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		_, _ = w.Write([]byte("<html>bot check</html>"))
+		_, _ = w.Write(jpegBytes("<html>bot check</html>"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -369,7 +371,7 @@ func TestBranch_QueryOrderDistinctCacheKeys(t *testing.T) {
 	t.Cleanup(cleanup)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte("body:" + r.URL.RawQuery))
+		_, _ = w.Write(jpegBytes("body:" + r.URL.RawQuery))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -377,11 +379,11 @@ func TestBranch_QueryOrderDistinctCacheKeys(t *testing.T) {
 
 	w1 := serveImageRequest(t, deps, upstream.URL+"/img?a=1&b=2")
 	assert.Equal(t, http.StatusOK, w1.Code)
-	assert.Equal(t, "body:a=1&b=2", w1.Body.String())
+	assert.Equal(t, jpegStr("body:a=1&b=2"), w1.Body.String())
 
 	w2 := serveImageRequest(t, deps, upstream.URL+"/img?b=2&a=1")
 	assert.Equal(t, http.StatusOK, w2.Code)
-	assert.Equal(t, "body:b=2&a=1", w2.Body.String(), "differently-ordered query strings must not share a cache entry")
+	assert.Equal(t, jpegStr("body:b=2&a=1"), w2.Body.String(), "differently-ordered query strings must not share a cache entry")
 }
 
 func TestBranch_CachedFill_MaxAgeBoundedByConfigTTL(t *testing.T) {
@@ -435,7 +437,7 @@ func TestBranch_PersistFailure_SharedAcrossWaiters(t *testing.T) {
 		atomic.AddInt32(&hits, 1)
 		time.Sleep(120 * time.Millisecond)
 		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte("shared-body"))
+		_, _ = w.Write(jpegBytes("shared-body"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -463,7 +465,7 @@ func TestBranch_PersistFailure_SharedAcrossWaiters(t *testing.T) {
 	assert.Equal(t, int32(2), hitCount, "N concurrent waiters must cost exactly one flight fetch plus one shared memory refetch")
 	for _, w := range results {
 		require.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "shared-body", w.Body.String())
+		assert.Equal(t, jpegStr("shared-body"), w.Body.String())
 	}
 }
 
@@ -476,7 +478,7 @@ func TestBranch_PersistFailure_RefetchFails(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if atomic.AddInt32(&hits, 1) == 1 {
 			w.Header().Set("Content-Type", "image/jpeg")
-			_, _ = w.Write([]byte("once"))
+			_, _ = w.Write(jpegBytes("once"))
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)

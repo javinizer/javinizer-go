@@ -58,20 +58,29 @@ func pathFor(cacheDir, rawURL string) (shardDir, hashPrefix string) {
 	return filepath.Join(cacheRoot(cacheDir), hash[:2]), hash
 }
 
+const (
+	imageTypeJpeg = "image/jpeg"
+	imageTypePng  = "image/png"
+	imageTypeWebp = "image/webp"
+	imageTypeGif  = "image/gif"
+	imageTypeAvif = "image/avif"
+	imageTypeApng = "image/apng"
+)
+
 func extForContentType(contentType string) string {
 	mediaType, _, _ := mime.ParseMediaType(strings.TrimSpace(contentType))
 	switch mediaType {
-	case "image/jpeg":
+	case imageTypeJpeg:
 		return ".jpg"
-	case "image/png":
+	case imageTypePng:
 		return ".png"
-	case "image/webp":
+	case imageTypeWebp:
 		return ".webp"
-	case "image/gif":
+	case imageTypeGif:
 		return ".gif"
-	case "image/avif":
+	case imageTypeAvif:
 		return ".avif"
-	case "image/apng":
+	case imageTypeApng:
 		return ".png"
 	default:
 		return ".jpg"
@@ -81,15 +90,15 @@ func extForContentType(contentType string) string {
 func contentTypeForExt(ext string) string {
 	switch strings.ToLower(ext) {
 	case ".jpg":
-		return "image/jpeg"
+		return imageTypeJpeg
 	case ".png":
-		return "image/png"
+		return imageTypePng
 	case ".webp":
-		return "image/webp"
+		return imageTypeWebp
 	case ".gif":
-		return "image/gif"
+		return imageTypeGif
 	case ".avif":
-		return "image/avif"
+		return imageTypeAvif
 	default:
 		return defaultContentType
 	}
@@ -181,6 +190,20 @@ type fetchResult struct {
 	persistFailed bool
 }
 
+func sniffImageType(head []byte) string {
+	sniffed := http.DetectContentType(head)
+	if sniffed != "application/octet-stream" || len(head) < 12 {
+		return sniffed
+	}
+	if string(head[0:4]) == "RIFF" && string(head[8:12]) == "WEBP" {
+		return imageTypeWebp
+	}
+	if string(head[4:8]) == "ftyp" && (string(head[8:12]) == "avif" || string(head[8:12]) == "avis") {
+		return imageTypeAvif
+	}
+	return sniffed
+}
+
 func isCacheableMediaType(mediaType string) bool {
 	switch mediaType {
 	case "image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/apng":
@@ -196,7 +219,7 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 		return fetchResult{err: fmt.Errorf("create request: %w", err)}
 	}
 	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/jpeg,image/png,image/gif")
+	req.Header.Set("Accept", imageTypeAvif+","+imageTypeWebp+","+imageTypeApng+","+imageTypeJpeg+","+imageTypePng+","+imageTypeGif)
 	if referer != "" {
 		req.Header.Set("Referer", referer)
 	}
@@ -211,8 +234,7 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 		return fetchResult{err: fmt.Errorf("image source returned non-200 status")}
 	}
 
-	upstreamCT := resp.Header.Get("Content-Type")
-	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(upstreamCT, ";", 2)[0]))
+	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0]))
 	if mediaType != "" && !isCacheableMediaType(mediaType) {
 		if strings.HasPrefix(mediaType, "image/") {
 			return fetchResult{err: fmt.Errorf("unsupported image content type %q", mediaType)}
@@ -224,13 +246,11 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 		buf := make([]byte, 512)
 		hn, _ := io.ReadAtLeast(resp.Body, buf, 1)
 		head = buf[:hn]
-		sniffed := http.DetectContentType(head)
+		sniffed := sniffImageType(head)
 		if !isCacheableMediaType(sniffed) {
 			return fetchResult{err: fmt.Errorf("uncacheable content in headerless response (sniffed %q)", sniffed)}
 		}
-		upstreamCT = sniffed
 	}
-	normalizedCT := contentTypeForExt(extForContentType(upstreamCT))
 
 	shardDir, hashPrefix := pathFor(cacheDir, cacheKey)
 	if err := fs.MkdirAll(shardDir, 0o755); err != nil {
@@ -272,7 +292,22 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 		return fetchResult{err: fmt.Errorf("response exceeds %d byte cap", maxImageProxyResponseSize)}
 	}
 
-	ext := extForContentType(upstreamCT)
+	hf, herr := fs.Open(tmpPath)
+	if herr != nil {
+		_ = fs.Remove(tmpPath)
+		return fetchResult{err: fmt.Errorf("verify temp: %w", herr), persistFailed: true}
+	}
+	vbuf := make([]byte, 512)
+	vn, _ := hf.Read(vbuf)
+	_ = hf.Close()
+	persisted := sniffImageType(vbuf[:vn])
+	if !isCacheableMediaType(persisted) {
+		_ = fs.Remove(tmpPath)
+		return fetchResult{err: fmt.Errorf("invalid image content (sniffed %q)", persisted)}
+	}
+	normalizedCT := contentTypeForExt(extForContentType(persisted))
+
+	ext := extForContentType(persisted)
 	dstPath := filepath.Join(shardDir, hashPrefix+ext)
 	if err := atomicRename(fs, tmpPath, dstPath); err != nil {
 		logging.Warnf("image cache: rename %s -> %s failed, serving from temp: %v", tmpPath, dstPath, err)
@@ -323,7 +358,7 @@ func fetchBodyToMemory(ctx context.Context, client *http.Client, fetchURL, userA
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/jpeg,image/png,image/gif")
+	req.Header.Set("Accept", imageTypeAvif+","+imageTypeWebp+","+imageTypeApng+","+imageTypeJpeg+","+imageTypePng+","+imageTypeGif)
 	if referer != "" {
 		req.Header.Set("Referer", referer)
 	}

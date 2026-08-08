@@ -19,7 +19,7 @@ func TestRandFailure_FetchAndCache_ReturnsError(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("rand-fail-test"))
+		w.Write(jpegBytes("rand-fail-test"))
 	}))
 	t.Cleanup(upstream.Close)
 

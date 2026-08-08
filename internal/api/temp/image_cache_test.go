@@ -23,6 +23,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testJpegMagic = "\xff\xd8\xff\xe0"
+
+func jpegBytes(s string) []byte { return append([]byte(testJpegMagic), s...) }
+func jpegStr(s string) string   { return testJpegMagic + s }
+
 func newCacheTestDeps(t *testing.T, enabled bool, ttlHours int) (*core.APIDeps, afero.Fs, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -68,7 +73,7 @@ func TestImageCache_FreshHitServesFromDiskNoFetch(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&fetchCount, 1)
 		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte("fake-png-data"))
+		w.Write(pngBytes("fake-png-data"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -93,7 +98,7 @@ func TestImageCache_OfflineHitServedFromDisk(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("offline-test-data"))
+		w.Write(jpegBytes("offline-test-data"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -119,7 +124,7 @@ func TestImageCache_DisabledNoDiskWrites(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("uncached"))
+		w.Write(jpegBytes("uncached"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -140,7 +145,7 @@ func TestImageCache_ContentTypeNormalization(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/webp; charset=UTF-8")
-		w.Write([]byte("webp-data"))
+		w.Write(webpBytes("webp-data"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -162,7 +167,7 @@ func TestImageCache_SVGRejectedOnMiss(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Write([]byte("<svg></svg>"))
+		w.Write(jpegBytes("<svg></svg>"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -183,7 +188,7 @@ func TestImageCache_StaleIfErrorServesStaleBytes(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("stale-data"))
+		w.Write(jpegBytes("stale-data"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -219,7 +224,7 @@ func TestImageCache_ConcurrentCoalescing(t *testing.T) {
 		atomic.AddInt32(&fetchCount, 1)
 		time.Sleep(100 * time.Millisecond)
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("coalesced"))
+		w.Write(jpegBytes("coalesced"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -275,7 +280,7 @@ func TestImageCache_SessionParamDoesNotFragment(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&fetchCount, 1)
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("session-test"))
+		w.Write(jpegBytes("session-test"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -303,7 +308,7 @@ func TestImageCache_AvifPreserved(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/avif")
-		w.Write([]byte("avif-data"))
+		w.Write(avifBytes("avif-data"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -325,7 +330,7 @@ func TestImageCache_ApngMappedToPng(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/apng")
-		w.Write([]byte("apng-data"))
+		w.Write(pngBytes("apng-data"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -346,7 +351,7 @@ func TestImageCache_StaleRefreshOverwritesEntry(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	var data atomic.Value
-	data.Store([]byte("old-data"))
+	data.Store(jpegBytes("old-data"))
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(data.Load().([]byte))
@@ -367,7 +372,7 @@ func TestImageCache_StaleRefreshOverwritesEntry(t *testing.T) {
 	pastTime := time.Now().Add(-200 * time.Hour)
 	require.NoError(t, fs.Chtimes(entryPath, pastTime, pastTime))
 
-	data.Store([]byte("new-data"))
+	data.Store(jpegBytes("new-data"))
 
 	w2 := requestImage(router, imgURL)
 	require.Equal(t, http.StatusOK, w2.Code)
@@ -400,7 +405,7 @@ func TestImageCache_SSRFFailureWithStaleServesStale(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("cached-while-online"))
+		w.Write(jpegBytes("cached-while-online"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -436,7 +441,7 @@ func TestImageCache_LeaderDisconnectDoesNotCancelSharedFetch(t *testing.T) {
 		atomic.AddInt32(&fetchStarted, 1)
 		time.Sleep(200 * time.Millisecond)
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("leader-disconnect-test"))
+		w.Write(jpegBytes("leader-disconnect-test"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -459,3 +464,11 @@ func TestImageCache_LeaderDisconnectDoesNotCancelSharedFetch(t *testing.T) {
 	require.Equal(t, http.StatusOK, w2.Code, "follower should still get the image after leader disconnect")
 	assert.Contains(t, w2.Body.String(), "leader-disconnect-test")
 }
+
+const testPngMagic = "\x89PNG\r\n\x1a\n"
+const testWebpHeader = "RIFF\x00\x00\x00\x00WEBP"
+const testAvifHeader = "\x00\x00\x00\x1cftypavif"
+
+func pngBytes(s string) []byte  { return append([]byte(testPngMagic), s...) }
+func webpBytes(s string) []byte { return append([]byte(testWebpHeader), s...) }
+func avifBytes(s string) []byte { return append([]byte(testAvifHeader), s...) }

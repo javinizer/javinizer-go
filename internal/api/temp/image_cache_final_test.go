@@ -41,7 +41,7 @@ func TestCoverageFinal_FetchAndCache_SVGRejectedNotMislabeled(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Write([]byte("<svg></svg>"))
+		w.Write(jpegBytes("<svg></svg>"))
 	}))
 	t.Cleanup(upstream.Close)
 

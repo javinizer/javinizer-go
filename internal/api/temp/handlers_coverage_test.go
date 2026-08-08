@@ -74,7 +74,7 @@ func TestHandlerCoverage_DisabledNoWrites(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("data"))
+		w.Write(jpegBytes("data"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -92,7 +92,7 @@ func TestHandlerCoverage_HitCacheControl(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("hit-data"))
+		w.Write(jpegBytes("hit-data"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -135,7 +135,7 @@ func TestHandlerCoverage_UncachedSuccess(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte("png-data"))
+		w.Write(pngBytes("png-data"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -152,7 +152,7 @@ func TestHandlerCoverage_TempPathOpenError(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("data"))
+		w.Write(jpegBytes("data"))
 	}))
 	t.Cleanup(upstream.Close)
 

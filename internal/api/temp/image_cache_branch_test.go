@@ -114,7 +114,7 @@ func TestBranch_FetchAndCache_MkdirTmpError(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte("img"))
+		_, _ = w.Write(jpegBytes("img"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -161,7 +161,7 @@ func TestBranch_FetchAndCache_RejectsNonImageContentType(t *testing.T) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<html>challenge</html>"))
+		_, _ = w.Write(jpegBytes("<html>challenge</html>"))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -304,4 +304,89 @@ func TestBranch_FetchBodyToMemory_ReadError(t *testing.T) {
 	_, err := fetchBodyToMemory(context.Background(), client, "http://example.com/x.jpg", "ua", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read body")
+}
+
+func TestBranch_FetchAndCache_HeaderlessAvisBrandAccepted(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	avisBytes := append([]byte("\x00\x00\x00\x1cftypavis"), make([]byte, 64)...)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Content-Type"] = nil
+		_, _ = w.Write(avisBytes)
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := afero.NewMemMapFs()
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/clip.avif", upstream.URL+"/clip.avif", client, "ua", "")
+	require.NoError(t, result.err)
+	assert.Equal(t, "image/avif", result.contentType)
+	assert.Contains(t, result.cachedPath, ".avif")
+}
+
+func TestBranch_FetchAndCache_VerifyTempOpenFailure(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(jpegBytes("verify"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	hooked := &openHookFs{Fs: afero.NewMemMapFs(), mode: "error", match: isTmpCacheFile}
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), hooked, t.TempDir(), upstream.URL+"/x.jpg", upstream.URL+"/x.jpg", client, "ua", "")
+	require.Error(t, result.err)
+	assert.True(t, result.persistFailed)
+	assert.Contains(t, result.err.Error(), "verify temp")
+}
+
+func TestBranch_FetchAndCache_RejectsDeclaredImageButGarbageBytes(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("this is not actually an image"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := afero.NewMemMapFs()
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/fake.jpg", upstream.URL+"/fake.jpg", client, "ua", "")
+	require.Error(t, result.err)
+	assert.Contains(t, result.err.Error(), "invalid image content")
+	assert.Empty(t, result.cachedPath)
+	assert.Empty(t, result.tempPath)
+	var files []string
+	_ = afero.Walk(fs, "/", func(_ string, info os.FileInfo, _ error) error {
+		if info != nil && !info.IsDir() {
+			files = append(files, info.Name())
+		}
+		return nil
+	})
+	assert.Empty(t, files, "rejected content must not leave any persisted file")
+}
+
+func TestBranch_FetchAndCache_HeaderlessBinaryGarbageRejected(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	junk := make([]byte, 128)
+	for i := range junk {
+		junk[i] = byte(i*37 + 11)
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Content-Type"] = nil
+		_, _ = w.Write(junk)
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := afero.NewMemMapFs()
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/blob", upstream.URL+"/blob", client, "ua", "")
+	require.Error(t, result.err)
+	assert.Contains(t, result.err.Error(), "uncacheable content in headerless response")
 }
