@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -64,8 +65,40 @@ func TestSetString_UnmarshalEmptySet(t *testing.T) {
 	assert.Empty(t, movie.Set)
 }
 
-func TestSetString_UnmarshalSkipsUnknownChildren(t *testing.T) {
+func TestSetString_UnmarshalSelfClosingEmptySet(t *testing.T) {
+	xmlStr := `<movie><title>Test</title><set/></movie>`
+	var movie Movie
+	err := xml.Unmarshal([]byte(xmlStr), &movie)
+	require.NoError(t, err)
+	assert.Empty(t, movie.Set)
+}
+
+func TestSetString_UnmarshalUnknownChildrenBeforeName(t *testing.T) {
 	xmlStr := `<movie><set><overview>Extra</overview><name>Real Series</name></set></movie>`
+	var movie Movie
+	err := xml.Unmarshal([]byte(xmlStr), &movie)
+	require.NoError(t, err)
+	assert.Equal(t, "Real Series", string(movie.Set))
+}
+
+func TestSetString_UnmarshalUnknownChildrenAfterName(t *testing.T) {
+	xmlStr := `<movie><set><name>Real Series</name><overview>Extra</overview></set></movie>`
+	var movie Movie
+	err := xml.Unmarshal([]byte(xmlStr), &movie)
+	require.NoError(t, err)
+	assert.Equal(t, "Real Series", string(movie.Set))
+}
+
+func TestSetString_UnmarshalNameWinsOverTrailingChardata(t *testing.T) {
+	xmlStr := `<movie><set><name>Real Series</name>trailing text</set></movie>`
+	var movie Movie
+	err := xml.Unmarshal([]byte(xmlStr), &movie)
+	require.NoError(t, err)
+	assert.Equal(t, "Real Series", string(movie.Set))
+}
+
+func TestSetString_UnmarshalNameWinsOverLeadingChardata(t *testing.T) {
+	xmlStr := `<movie><set>leading text<name>Real Series</name></set></movie>`
 	var movie Movie
 	err := xml.Unmarshal([]byte(xmlStr), &movie)
 	require.NoError(t, err)
@@ -92,4 +125,49 @@ func TestSetString_LegacyRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, strings.Contains(string(remarshaled), "<name>Legacy Series</name>"),
 		"remarshaled NFO should use the tiered format even when parsed from legacy flat form")
+}
+
+func TestSetString_UnmarshalFirstChardataWinsForMixedFlat(t *testing.T) {
+	xmlStr := `<movie><set>abc<overview/>def</set></movie>`
+	var movie Movie
+	err := xml.Unmarshal([]byte(xmlStr), &movie)
+	require.NoError(t, err)
+	assert.Equal(t, "abc", string(movie.Set),
+		"degenerate mixed flat+unknown content: first non-empty chardata wins (deterministic, spec-silent)")
+}
+
+func TestSetString_UnmarshalEmptyNameWinsOverFlat(t *testing.T) {
+	xmlStr := `<movie><set>Flat Collection<name></name></set></movie>`
+	var movie Movie
+	err := xml.Unmarshal([]byte(xmlStr), &movie)
+	require.NoError(t, err)
+	assert.Empty(t, movie.Set,
+		"empty <name> child value wins per spec (name wins regardless of order); degenerate input")
+}
+
+func TestSetString_WriteNFOEscaping(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	gen := NewGenerator(fs, &Config{})
+	nfo := &Movie{
+		Title: "Test",
+		Set:   SetString(`Bob's "Best" <Series> & Co`),
+	}
+
+	err := gen.WriteNFO(nfo, "/test.nfo")
+	require.NoError(t, err)
+
+	data, err := afero.ReadFile(fs, "/test.nfo")
+	require.NoError(t, err)
+	output := string(data)
+
+	assert.Contains(t, output, `<name>Bob's "Best" &lt;Series&gt; &amp; Co</name>`,
+		"set name in <name> chardata: quotes/apostrophes literal (unescaped by unescapeQuotesInText), angle brackets/ampersands escaped")
+	assert.NotContains(t, output, `&#34;`, "double quotes in <name> must not be numeric-escaped")
+	assert.NotContains(t, output, `&#39;`, "apostrophes in <name> must not be numeric-escaped")
+
+	parsed, perr := ParseNFO(fs, "/test.nfo")
+	require.NoError(t, perr)
+	require.NotNil(t, parsed.Movie)
+	assert.Equal(t, `Bob's "Best" <Series> & Co`, parsed.Movie.Series,
+		"set name with special characters must round-trip exactly through WriteNFO+ParseNFO")
 }

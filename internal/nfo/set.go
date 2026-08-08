@@ -33,8 +33,14 @@ func (s SetString) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
 }
 
 // UnmarshalXML accepts both the tiered <set><name>...</name></set> form and
-// the legacy flat <set>Name</set> form.
+// the legacy flat <set>Name</set> form. When a <set> element contains both a
+// <name> child and bare character data, the <name> child value wins regardless
+// of document order. Other child elements (e.g. <overview>) are skipped.
+// Values are trimmed of surrounding whitespace.
 func (s *SetString) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var flat string
+	var name string
+	hasName := false
 	for {
 		tok, err := d.Token()
 		if err != nil {
@@ -42,20 +48,26 @@ func (s *SetString) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 		}
 		switch t := tok.(type) {
 		case xml.CharData:
-			if v := strings.TrimSpace(string(t)); v != "" {
-				*s = SetString(v)
+			if v := strings.TrimSpace(string(t)); v != "" && flat == "" {
+				flat = v
 			}
 		case xml.StartElement:
 			if t.Name.Local == "name" {
-				var name string
-				if err := d.DecodeElement(&name, &t); err != nil {
+				var n string
+				if err := d.DecodeElement(&n, &t); err != nil {
 					return err
 				}
-				*s = SetString(strings.TrimSpace(name))
+				name = strings.TrimSpace(n)
+				hasName = true
 			} else if err := d.Skip(); err != nil {
 				return err
 			}
 		case xml.EndElement:
+			if hasName {
+				*s = SetString(name)
+			} else {
+				*s = SetString(flat)
+			}
 			return nil
 		}
 	}
