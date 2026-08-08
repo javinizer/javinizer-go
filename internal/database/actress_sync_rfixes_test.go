@@ -461,3 +461,45 @@ func TestRequeueConsumeAttemptCapTerminal(t *testing.T) {
 	require.Equal(t, models.ActressSyncJobCompleted, storedJob.Status)
 	require.Equal(t, 1, storedJob.Failed)
 }
+
+// Codex P1: lease recovery must compare UTC-to-UTC even when the caller's
+// clock carries a local zone — a local-offset `now` sorts the stored UTC
+// lease text incorrectly and leaves expired tasks stranded (or recovers live
+// ones early, depending on offset sign).
+func TestRecoverExpiredLeasesLocalTimeNow(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo, _, claimed := claimActressCoverageTask(t, db, nil)
+	// Lease text is UTC (repo-normalized); backdate directly in UTC.
+	require.NoError(t, db.Model(&models.ActressSyncTask{}).Where("id = ?", claimed.ID).
+		Update("lease_expires_at", time.Now().UTC().Add(-time.Hour)).Error)
+	// Caller hands a LOCAL-time now (e.g. machine TZ=Asia/Tokyo).
+	require.NoError(t, repo.RecoverExpiredLeases(time.Now()))
+	stored, err := repo.ListTasks(claimed.JobID, 0)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncTaskPending, stored[0].Status, "expired lease must be recovered under local-time callers")
+}
+
+// Codex P2: a misspelled/obsolete non-empty filter must be rejected, not
+// silently dropped into an unfiltered full-dataset page.
+func TestUnknownActressFilterRejected(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, &models.Actress{JapaneseName: "\u5973\u512a"}))
+	bogons := []string{"missing_thumbanil", "has-dmm"}
+	for _, bogus := range bogons {
+		_, err := repo.ListFiltered(ctx, bogus, 50, 0, "name", "asc")
+		require.ErrorIs(t, err, ErrInvalidLookup, "ListFiltered(%q)", bogus)
+		_, err = repo.SearchFiltered(ctx, "a", bogus, 50, 0, "name", "asc")
+		require.ErrorIs(t, err, ErrInvalidLookup, "SearchFiltered(%q)", bogus)
+		_, err = repo.CountFiltered(ctx, bogus)
+		require.ErrorIs(t, err, ErrInvalidLookup, "CountFiltered(%q)", bogus)
+		_, err = repo.CountSearchFiltered(ctx, "a", bogus)
+		require.ErrorIs(t, err, ErrInvalidLookup, "CountSearchFiltered(%q)", bogus)
+	}
+	// Registered and empty filters still work.
+	_, err := repo.ListFiltered(ctx, "missing_dmm", 50, 0, "name", "asc")
+	require.NoError(t, err)
+	_, err = repo.ListFiltered(ctx, "", 50, 0, "name", "asc")
+	require.NoError(t, err)
+}

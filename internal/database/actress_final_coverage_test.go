@@ -55,7 +55,7 @@ func TestActressSyncRecoveryAndReleaseErrorPaths(t *testing.T) {
 	t.Run("recovery transition update fails", func(t *testing.T) {
 		db := newDatabaseTestDB(t)
 		repo, _, task := claimActressCoverageTask(t, db, nil)
-		require.NoError(t, db.Model(&models.ActressSyncTask{}).Where("id = ?", task.ID).Update("lease_expires_at", time.Now().Add(-time.Hour)).Error)
+		require.NoError(t, db.Model(&models.ActressSyncTask{}).Where("id = ?", task.ID).Update("lease_expires_at", time.Now().UTC().Add(-time.Hour)).Error)
 		remove := forceUpdateError(t, db)
 		defer remove()
 		require.ErrorIs(t, repo.RecoverExpiredLeases(time.Now()), errForcedActressCoverage)
@@ -323,7 +323,7 @@ func TestActressSyncRepositoryInjectedDatabaseBranches(t *testing.T) {
 		remove()
 
 		repo, _, task := claimActressCoverageTask(t, db, nil)
-		require.NoError(t, db.Model(&models.ActressSyncTask{}).Where("id = ?", task.ID).Update("lease_expires_at", time.Now().Add(-time.Hour)).Error)
+		require.NoError(t, db.Model(&models.ActressSyncTask{}).Where("id = ?", task.ID).Update("lease_expires_at", time.Now().UTC().Add(-time.Hour)).Error)
 		name := "coverage:refresh:" + uuid.NewString()
 		require.NoError(t, db.DB.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
 			if tx.Statement.Table == "actress_sync_jobs" {

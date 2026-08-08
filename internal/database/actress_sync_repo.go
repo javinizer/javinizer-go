@@ -276,6 +276,7 @@ func (r *ActressSyncRepository) ClaimNext(owner string, leaseUntil time.Time) (*
 
 // RecoverExpiredLeases ...
 func (r *ActressSyncRepository) RecoverExpiredLeases(now time.Time) error {
+	now = now.UTC() // leases are written UTC; text DATETIME compares are offset-blind
 	return retryOnLocked(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
 			var tasks []models.ActressSyncTask

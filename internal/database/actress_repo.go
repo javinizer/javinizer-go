@@ -240,6 +240,21 @@ func ValidActressFilter(filter string) (string, bool) {
 	return clause, ok
 }
 
+// resolveActressFilter maps a caller filter to its SQL clause. An empty
+// filter means no constraint; an unknown non-empty filter is rejected rather
+// than silently dropped — an unfiltered page would masquerade as a filtered
+// one and mislead API callers.
+func resolveActressFilter(filter string) (string, error) {
+	if strings.TrimSpace(filter) == "" {
+		return "", nil
+	}
+	clause, ok := ValidActressFilter(filter)
+	if !ok {
+		return "", wrapDBErr("filter", "actresses", ErrInvalidLookup)
+	}
+	return clause, nil
+}
+
 // ListFiltered ...
 func (r *ActressRepository) ListFiltered(ctx context.Context, filter string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error) {
 	// actresses ...
@@ -248,12 +263,16 @@ func (r *ActressRepository) ListFiltered(ctx context.Context, filter string, lim
 	if err != nil {
 		return nil, err
 	}
+	clause, err := resolveActressFilter(filter)
+	if err != nil {
+		return nil, err
+	}
 	dbq := r.GetDB().WithContext(ctx)
-	if clause, ok := ValidActressFilter(filter); ok {
+	if clause != "" {
 		dbq = dbq.Where(clause)
 	}
-	for _, clause := range actressOrderClauses(sortBy, sortOrder) {
-		dbq = dbq.Order(clause)
+	for _, orderClause := range actressOrderClauses(sortBy, sortOrder) {
+		dbq = dbq.Order(orderClause)
 	}
 	err = dbq.Limit(limit).Offset(offset).Find(&actresses).Error
 	if err != nil {
@@ -271,13 +290,17 @@ func (r *ActressRepository) SearchFiltered(ctx context.Context, query, filter st
 		return nil, err
 	}
 	searchPattern := "%" + query + "%"
+	clause, err := resolveActressFilter(filter)
+	if err != nil {
+		return nil, err
+	}
 	dbq := r.GetDB().WithContext(ctx).Where(actressSearchCondition,
 		searchPattern, searchPattern, searchPattern, searchPattern)
-	if clause, ok := ValidActressFilter(filter); ok {
+	if clause != "" {
 		dbq = dbq.Where(clause)
 	}
-	for _, clause := range actressOrderClauses(sortBy, sortOrder) {
-		dbq = dbq.Order(clause)
+	for _, orderClause := range actressOrderClauses(sortBy, sortOrder) {
+		dbq = dbq.Order(orderClause)
 	}
 	err = dbq.Limit(limit).Offset(offset).Find(&actresses).Error
 	if err != nil {
@@ -290,11 +313,15 @@ func (r *ActressRepository) SearchFiltered(ctx context.Context, query, filter st
 func (r *ActressRepository) CountFiltered(ctx context.Context, filter string) (int64, error) {
 	// count ...
 	var count int64
+	clause, err := resolveActressFilter(filter)
+	if err != nil {
+		return 0, err
+	}
 	dbq := r.GetDB().WithContext(ctx).Model(&models.Actress{})
-	if clause, ok := ValidActressFilter(filter); ok {
+	if clause != "" {
 		dbq = dbq.Where(clause)
 	}
-	err := dbq.Count(&count).Error
+	err = dbq.Count(&count).Error
 	if err != nil {
 		return 0, wrapDBErr("count", "actresses", err)
 	}
@@ -309,10 +336,14 @@ func (r *ActressRepository) CountSearchFiltered(ctx context.Context, query, filt
 	dbq := r.GetDB().WithContext(ctx).Model(&models.Actress{}).
 		Where(actressSearchCondition,
 			searchPattern, searchPattern, searchPattern, searchPattern)
-	if clause, ok := ValidActressFilter(filter); ok {
+	clause, err := resolveActressFilter(filter)
+	if err != nil {
+		return 0, err
+	}
+	if clause != "" {
 		dbq = dbq.Where(clause)
 	}
-	err := dbq.Count(&count).Error
+	err = dbq.Count(&count).Error
 	if err != nil {
 		return 0, wrapDBErr("count", "search actresses", err)
 	}
