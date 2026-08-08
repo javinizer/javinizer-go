@@ -175,3 +175,17 @@ func TestValidateActressThumbnailUsesConfiguredAndDefaultUserAgent(t *testing.T)
 	require.Contains(t, userAgents, config.DefaultUserAgent)
 	require.Contains(t, userAgents, "coverage-agent")
 }
+
+// Codex P2 (round 8): JavDB profiles carry romanized names — the capability
+// list must advertise them so the engine doesn't filter the parsed values out.
+func TestJavDBActressFieldsAdvertisesRomanizedNames(t *testing.T) {
+	s := &scraper{}
+	fields := map[string]bool{}
+	for _, f := range s.ActressFields() {
+		fields[f] = true
+	}
+	require.True(t, fields["actress_japanese_name"])
+	require.True(t, fields["actress_url"])
+	require.True(t, fields["actress_first_name"], "parser emits it; it must not be filtered")
+	require.True(t, fields["actress_last_name"], "parser emits it; it must not be filtered")
+}

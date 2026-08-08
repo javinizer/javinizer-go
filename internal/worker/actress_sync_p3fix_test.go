@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -224,4 +226,20 @@ func TestCacheAllowanceHonorsDMM(t *testing.T) {
 	require.True(t, cacheAllowedForPriority(false, []string{"DMM", "javdb"}))
 	require.False(t, cacheAllowedForPriority(false, []string{"javdb", "minnanoav"}))
 	require.False(t, cacheAllowedForPriority(true, []string{"dmm"}))
+}
+
+// Codex P2 (round 8): bare fmt.Errorf-wrapped transport errors classify as retryable.
+func TestRetryableUntypedTransportLeaves(t *testing.T) {
+	plain := fmt.Errorf("DMM fetch: %w", &net.DNSError{IsTemporary: true})
+	require.True(t, isRetryableActressSyncError(plain), "temporary DNS leaf inside fmt wrapper")
+
+	reset := fmt.Errorf("r18.dev: %w", &url.Error{Op: "Get", URL: "https://x", Err: errors.New("connection reset by peer")})
+	require.True(t, isRetryableActressSyncError(reset))
+
+	// blocked typed leaf + untyped retryable leaf in one join ⇒ retryable.
+	joined := errors.Join(
+		&models.ScraperError{Kind: models.ScraperErrorKindBlocked},
+		fmt.Errorf("javdb: %w", &url.Error{Op: "Get", Err: &net.DNSError{IsTemporary: true}}),
+	)
+	require.True(t, isRetryableActressSyncError(joined))
 }

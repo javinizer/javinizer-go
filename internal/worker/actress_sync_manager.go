@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -557,22 +559,53 @@ func isRetryableActressSyncError(err error) bool {
 			continue
 		}
 		seen[cur] = struct{}{}
+		// Typed scraper failure — the primary contract.
 		var se *models.ScraperError
-		if !errors.As(cur, &se) || se == nil {
-			if u, ok := cur.(unwrapper); ok {
-				stack = append(stack, u.Unwrap()...)
+		if errors.As(cur, &se) && se != nil {
+			switch {
+			case se.Kind == models.ScraperErrorKindNotFound, se.Kind == models.ScraperErrorKindBlocked:
+				// hard terminal; keep looking at siblings
+			case se.Retryable || se.Temporary || se.Kind == models.ScraperErrorKindRateLimited || se.Kind == models.ScraperErrorKindUnavailable:
+				return true
 			}
-			continue
 		}
-		switch {
-		case se.Kind == models.ScraperErrorKindNotFound, se.Kind == models.ScraperErrorKindBlocked:
-			// A hard catalog-miss leaves the aggregate's retry verdict alone.
-		case se.Retryable || se.Temporary || se.Kind == models.ScraperErrorKindRateLimited || se.Kind == models.ScraperErrorKindUnavailable:
+		// Codex P2 (round 8): scraper search/fetch paths historically wrap bare
+		// net/transport failure (connection reset, temporary DNS) in a plain
+		// fmt.Errorf. Those leaves must classify too — with or without the
+		// *url.Error wrapper.
+		var ne net.Error
+		if errors.As(cur, &ne) && ne != nil && (ne.Timeout() || (interface{ Temporary() bool })(ne) != nil && (ne.(interface{ Temporary() bool })).Temporary()) {
+			return true
+		}
+		var ue *url.Error
+		if errors.As(cur, &ue) && ue != nil && isTransientNetErrorText(ue.Err) {
 			return true
 		}
 		if u, ok := cur.(unwrapper); ok {
 			stack = append(stack, u.Unwrap()...)
 		}
+	}
+	return false
+}
+
+// isTransientNetErrorText detects retryable leaves wrapped without typing.
+func isTransientNetErrorText(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "connection reset"),
+		strings.Contains(msg, "connection refused"),
+		strings.Contains(msg, "no such host"),
+		strings.Contains(msg, "timeout"),
+		strings.Contains(msg, "temporary failure"),
+		strings.Contains(msg, "eof"):
+		return true
 	}
 	return false
 }

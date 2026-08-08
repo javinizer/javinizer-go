@@ -26,14 +26,17 @@ func (s *noMovieSearchStub) SupportsMovieSearch() bool                      { re
 
 // Boot-time warning must cover YAML-authored exclusively-actress-only
 // overrides, which bypass the API save-time rejection.
-func TestActressOnlyPriorityWarning(t *testing.T) {
+// The sync engine drives actress metadata via direct resolver calls — an
+// actress[-field] override containing only actress-only providers is SUPPORTED
+// and must not warn (codex round 8). Other fields keep warning as before.
+func TestActressPriorityExemptTheWarning(t *testing.T) {
 	registry := scraperutil.NewScraperRegistry()
 	registry.RegisterInstance(&noMovieSearchStub{name: "minnanoav"})
 
 	cfg := config.DefaultConfig(nil, nil)
 	require.Empty(t, actressOnlyPriorityWarnings(registry, cfg))
 	cfg.Metadata.Priority.Fields = map[string][]string{"actress": {"minnanoav"}}
-	require.NotEmpty(t, actressOnlyPriorityWarnings(registry, cfg))
+	require.Empty(t, actressOnlyPriorityWarnings(registry, cfg), "actress field is exempt: direct resolver calls, movie search irrelevant")
 	cfg.Metadata.Priority.Fields["actress"] = []string{"__skip__"}
 	require.Empty(t, actressOnlyPriorityWarnings(registry, cfg))
 	require.Empty(t, actressOnlyPriorityWarnings(nil, cfg))

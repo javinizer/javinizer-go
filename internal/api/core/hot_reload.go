@@ -129,6 +129,12 @@ func actressOnlyPriorityWarnings(reg *scraperutil.ScraperRegistry, cfg *config.C
 		if len(override) == 1 && strings.EqualFold(strings.TrimSpace(override[0]), "__skip__") {
 			continue
 		}
+		// The actress field is driven by the sync engine's direct
+		// ActressMetadataResolver calls, not movie search — an actress-only
+		// provider list is a supported configuration there (codex r8).
+		if strings.EqualFold(field, "actress") {
+			continue
+		}
 		recognized, capable := false, false
 		for _, name := range override {
 			inst, found := reg.GetInstance(strings.ToLower(strings.TrimSpace(name)))
