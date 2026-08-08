@@ -171,6 +171,12 @@ func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*m
 	}
 	// Skip content-ID resolution in raw mode — it reads/writes the DB cache,
 	// which contradicts the no-persistence contract.
+	// Check context before any work to handle pre-cancelled/expired contexts.
+	select {
+	case <-ctx.Done():
+		return nil, classifyContextErrorForRaw(ctx.Err())
+	default:
+	}
 	// Resolve URL-shaped inputs to their extracted ID so the Search fallback
 	// receives the product code, not the raw URL.
 	resolvedID := movieID
