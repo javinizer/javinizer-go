@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -331,7 +332,12 @@ func interpretApplyResult(
 
 		// codex P2-C/D: settled-rekey skip runs UNDER the family key; the
 		// callback's mismatch return is the net for rekeys landing mid-write.
-		if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
+		// codex P2: fence the FAILURE write-back (and panic-converted failures
+		// land here too) behind outstanding promote witnesses — its revision
+		// bump would make startup arbitrate the failed refresh as committed.
+		if mid := strings.TrimSpace(movie.ID); mid != "" && inputs.PromoteWitnessFn != nil && inputs.PromoteWitnessFn(mid) {
+			logging.Warnf("[Apply] skipping failure write-back for %s — promote witness for %s unresolved; restart reconciles", filePath, mid)
+		} else if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
 			errUp := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 				if applyWritebackIdentityMismatch(movie, current) {
 					logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)

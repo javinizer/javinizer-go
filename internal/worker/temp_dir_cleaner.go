@@ -15,7 +15,9 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/poster"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/spf13/afero"
 )
@@ -311,7 +313,8 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 			oldIDPresent := false
 			newIDCommitted := false
 			var results map[string]*resultstore.MovieResult
-			if job != nil && job.ParseResults(&results) == nil {
+			if job != nil {
+				results = arbitrateResults(job)
 				for _, r := range results {
 					// codex r52 P2: TWO-GATE committed detection. (1) No result
 					// still carries the OLD spelling — the rekey transitions the
@@ -375,6 +378,17 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 	return reversed, nil
 }
 
+// arbitrateResults decodes the persisted job row through the persistence
+// codec (codex P1): production rows are jobpersist ENVELOPES
+// ({"domain": ..., "provenance": ...}) — a raw ParseResults would "parse" the
+// envelope keys into zero-valued entries, misclassifying EVERY production
+// witness as uncommitted and reversing committed rekeys/promotions/crops.
+// Decode handles the legacy result formats transparently.
+func arbitrateResults(job *models.Job) map[string]*resultstore.MovieResult {
+	snap, _ := jobpersist.Decode(job)
+	return snap.Results
+}
+
 // shaContentHex hashes a poster leg for witness arbitration.
 func shaContentHex(b []byte) string {
 	sum := sha256.Sum256(b)
@@ -414,7 +428,8 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 	// one.
 	committed := false
 	var results map[string]*resultstore.MovieResult
-	if job != nil && job.ParseResults(&results) == nil {
+	if job != nil {
+		results = arbitrateResults(job)
 		for _, r := range results {
 			if r != nil && r.ResultID == w.ResultID && r.Movie != nil &&
 				strings.EqualFold(r.Movie.ID, w.PosterID) && r.Movie.Poster.PosterURL == w.URL &&
@@ -540,7 +555,8 @@ func (c *TempDirCleaner) reconcileCropWitness(ctx context.Context, dir, jobID, w
 	}
 	committed := false
 	var results map[string]*resultstore.MovieResult
-	if job != nil && job.ParseResults(&results) == nil {
+	if job != nil {
+		results = arbitrateResults(job)
 		for _, r := range results {
 			if r != nil && r.ResultID == w.ResultID && r.Movie != nil &&
 				strings.EqualFold(r.Movie.ID, w.PosterID) &&

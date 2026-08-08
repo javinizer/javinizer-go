@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,6 +14,38 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// codex P2: a transient Stat error on the witness probe must fence the
+// write-back (return true), not admit it as "no witness".
+func TestHasUnresolvedPromoteWitnessStatErrorFences(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	require.NoError(t, mem.MkdirAll("/tmp/posters/JOB-9", 0o755))
+	pe := newEditorForStore(resultstore.New(1, []string{"/f/a.mp4"}))
+	pe.attachEnv(&posterEditEnv{fs: statFailSuffixFS{Fs: mem, suffix: ".promote-PI-1.json"}, tempDir: "/tmp", jobID: "JOB-9"})
+	assert.True(t, pe.hasUnresolvedPromoteWitness("PI-1"), "probe error => conservatively fenced")
+}
+
+// codex P2: apply FAILURE write-backs bump the revision too — fence them
+// behind an unresolved promote witness just like the success path.
+func TestInterpretApplyResultFailureSkipsWritebackWhenPromoteWitnessUnresolved(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-ff", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "OK-3", Title: "live"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "OK-3"},
+	})
+	before, err := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	inputs := minimalApplyInputs(t, store, true)
+	inputs.PromoteWitnessFn = func(posterID string) bool { return posterID == "OK-3" }
+	afc := &ApplyFileContext{FilePath: "/f/a.mp4", Match: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "OK-3"}}
+	outcome := interpretApplyResult("/f/a.mp4", &models.Movie{ID: "OK-3"}, time.Now(), time.Minute, inputs, ApplyPhaseConfig{}, context.Background(), afc, nil, errors.New("apply engine wedged"))
+	assert.True(t, outcome.Failed)
+	final, err := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, before.Revision, final.Revision, "failure write-back skipped — revision untouched")
+	assert.Equal(t, models.JobStatusRunning, final.Status, "failure status write-back skipped")
+}
 
 func TestHasUnresolvedPromoteWitness(t *testing.T) {
 	pe := newEditorForStore(resultstore.New(1, []string{"/f/a.mp4"}))

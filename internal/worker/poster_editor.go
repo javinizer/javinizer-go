@@ -397,6 +397,12 @@ func (pe *PosterEditor) hasUnresolvedPromoteWitness(posterID string) bool {
 	}
 	p := filepath.Join(env.tempDir, "posters", env.jobID, ".promote-"+url.PathEscape(posterID)+".json")
 	_, err := env.fs.Stat(p)
+	if err != nil && !errors.Is(err, afero.ErrFileNotFound) {
+		// codex P2 fail-closed: a transient probe error could mean an EXISTING
+		// witness — admit nothing; the write-back's revision bump would
+		// misarbitrate a failed refresh as committed.
+		return true
+	}
 	return err == nil
 }
 
