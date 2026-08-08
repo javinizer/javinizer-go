@@ -29,14 +29,16 @@ func (s *stubScrapeWithURLHandler) Search(_ context.Context, id string) (*models
 	}
 	return nil, errors.New("not found")
 }
-func (s *stubScrapeWithURLHandler) GetURL(_ context.Context, _ string) (string, error) { return "", nil }
-func (s *stubScrapeWithURLHandler) IsEnabled() bool                                    { return s.enabled }
-func (s *stubScrapeWithURLHandler) Close() error                                       { return nil }
+func (s *stubScrapeWithURLHandler) GetURL(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+func (s *stubScrapeWithURLHandler) IsEnabled() bool { return s.enabled }
+func (s *stubScrapeWithURLHandler) Close() error    { return nil }
 func (s *stubScrapeWithURLHandler) Config() *models.ScraperSettings {
 	return &models.ScraperSettings{Enabled: s.enabled}
 }
-func (s *stubScrapeWithURLHandler) CanHandleURL(string) bool                    { return s.canHandle }
-func (s *stubScrapeWithURLHandler) ExtractIDFromURL(string) (string, error)    { return "URL-123", nil }
+func (s *stubScrapeWithURLHandler) CanHandleURL(string) bool                { return s.canHandle }
+func (s *stubScrapeWithURLHandler) ExtractIDFromURL(string) (string, error) { return "URL-123", nil }
 func (s *stubScrapeWithURLHandler) ScrapeURL(context.Context, string) (*models.ScraperResult, error) {
 	return nil, models.NewScraperNotFoundError(s.name, "not a direct page")
 }

@@ -21,16 +21,16 @@ type urlHandlerScraper struct {
 	canHandle bool
 }
 
-func (s *urlHandlerScraper) Name() string                         { return s.name }
+func (s *urlHandlerScraper) Name() string { return s.name }
 func (s *urlHandlerScraper) Search(context.Context, string) (*models.ScraperResult, error) {
 	return nil, errors.New("search not implemented")
 }
 func (s *urlHandlerScraper) GetURL(context.Context, string) (string, error) { return "", nil }
-func (s *urlHandlerScraper) IsEnabled() bool                                 { return s.enabled }
-func (s *urlHandlerScraper) Config() *models.ScraperSettings                 { return nil }
-func (s *urlHandlerScraper) Close() error                                    { return nil }
-func (s *urlHandlerScraper) CanHandleURL(string) bool                         { return s.canHandle }
-func (s *urlHandlerScraper) ExtractIDFromURL(string) (string, error)         { return "extracted", nil }
+func (s *urlHandlerScraper) IsEnabled() bool                                { return s.enabled }
+func (s *urlHandlerScraper) Config() *models.ScraperSettings                { return nil }
+func (s *urlHandlerScraper) Close() error                                   { return nil }
+func (s *urlHandlerScraper) CanHandleURL(string) bool                       { return s.canHandle }
+func (s *urlHandlerScraper) ExtractIDFromURL(string) (string, error)        { return "extracted", nil }
 func (s *urlHandlerScraper) ScrapeURL(_ context.Context, _ string) (*models.ScraperResult, error) {
 	if s.panicVal != nil {
 		panic(s.panicVal)
@@ -47,9 +47,9 @@ func TestQuerySingle_URLDirectScrapeSuccess(t *testing.T) {
 		enabled:   true,
 		canHandle: true,
 		result: &models.ScraperResult{
-			ID:      "ONED-120",
-			Title:   "Test Movie",
-			Source:  "test-scraper",
+			ID:        "ONED-120",
+			Title:     "Test Movie",
+			Source:    "test-scraper",
 			SourceURL: "https://example.com/page",
 		},
 	}
