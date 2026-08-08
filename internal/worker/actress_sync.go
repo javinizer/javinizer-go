@@ -864,10 +864,14 @@ func identityCandidateMatches(names []string, candidate models.ActressInfo) bool
 	firstName := strings.TrimSpace(candidate.FirstName)
 	lastName := strings.TrimSpace(candidate.LastName)
 	if firstName != "" && lastName != "" {
-		return identityNameMatches(names, firstName+" "+lastName) ||
-			identityNameMatches(names, lastName+" "+firstName)
+		if identityNameMatches(names, firstName+" "+lastName) || identityNameMatches(names, lastName+" "+firstName) {
+			return true
+		}
 	}
-	return false
+	// Singleton fallback: some catalogs store a one-token Latin name under
+	// FirstName. The candidate predicate admits those singleton rows, and
+	// without this they'd be silently discarded (codex phase 3, latest head).
+	return identityNameMatches(names, firstName) || identityNameMatches(names, lastName)
 }
 
 // identityNameMatches ...

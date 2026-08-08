@@ -108,9 +108,13 @@ func TestFilterActressResolverFieldsClearsUndeclared(t *testing.T) {
 
 func TestActressIdentityNamesAndCandidatesSingleFields(t *testing.T) {
 	// FirstName-only and LastName-only actresses both need candidate matching.
+	// Phase-3 codex ruling: singleton field IS a valid match (previously
+	// rejected was a phase-1-era over-tightening that silently dropped the
+	// candidate and ended with missing_dmm_id).
 	firstOnly := actressIdentityNames(&models.Actress{JapaneseName: "無名", FirstName: "Mona"})
 	require.Contains(t, firstOnly, "Mona")
-	require.True(t, identityCandidateMatches(firstOnly, models.ActressInfo{FirstName: "Mona", LastName: ""}) == false)
+	require.True(t, identityCandidateMatches(firstOnly, models.ActressInfo{FirstName: "Mona", LastName: ""}),
+		"singleton romanized name must match")
 
 	full := actressIdentityNames(&models.Actress{JapaneseName: "橋本もな", FirstName: "Mona", LastName: "Hashimoto"})
 	require.Contains(t, full, "Mona Hashimoto")
@@ -167,4 +171,15 @@ func TestActressSyncThumbnailRankSeeds(t *testing.T) {
 	require.Equal(t, 0, rank("dmm"))
 	require.Less(t, rank("dmm"), rank("javdb"))
 	require.Greater(t, rank("minnanoav"), rank("javdb"))
+}
+
+// Codex late-stage finding: candidate with only FirstName must match a
+// missing-ID actress carrying that singleton, not silently drop to missing.
+func TestIdentityCandidateMatchesSingletonFirstName(t *testing.T) {
+	names := actressIdentityNames(&models.Actress{FirstName: "Mona"})
+	require.True(t, identityCandidateMatches(names, models.ActressInfo{FirstName: "Mona"}))
+	require.True(t, identityCandidateMatches(names, models.ActressInfo{FirstName: "Mona"}))
+	require.False(t, identityCandidateMatches(names, models.ActressInfo{FirstName: "Other"}))
+	// Baseline: full-name pair still matches existing contract.
+	require.True(t, identityCandidateMatches(names, models.ActressInfo{FirstName: "Mona", LastName: "Hashimoto"}))
 }
