@@ -79,7 +79,7 @@ func TestBranch_Get_OpenFailureAfterResolveReturnsAbsent(t *testing.T) {
 	require.NoError(t, afero.WriteFile(mem, entry, []byte("data"), 0o644))
 
 	fs := &openErrFs{Fs: mem, target: entry}
-	file, ct, state := get(fs, cacheDir, rawURL, time.Hour)
+	file, ct, _, state := get(fs, cacheDir, rawURL, time.Hour)
 	assert.Nil(t, file)
 	assert.Empty(t, ct)
 	assert.Equal(t, CacheAbsent, state)
@@ -150,4 +150,27 @@ func TestBranch_FetchAndCache_ReadSideCopyError(t *testing.T) {
 	require.Error(t, result.err)
 	assert.False(t, result.persistFailed, "read-side failures must not mark the run as persist-failed")
 	assert.Contains(t, result.err.Error(), "write temp")
+}
+
+func TestBranch_FetchAndCache_RejectsNonImageContentType(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<html>challenge</html>"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := afero.NewMemMapFs()
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img", upstream.URL+"/img", client, "ua", "")
+	require.Error(t, result.err)
+	assert.Contains(t, result.err.Error(), "non-image content type")
+	assert.False(t, result.persistFailed)
+	assert.Empty(t, result.cachedPath)
+	assert.Empty(t, result.tempPath)
+
+	entries, _ := afero.ReadDir(fs, "/")
+	assert.Empty(t, entries, "nothing must be written for non-image responses")
 }

@@ -58,7 +58,7 @@ func TestCleanupStaleImageCache_StatRecheckSkips(t *testing.T) {
 	entry := shardDir + "/deadbeef.jpg"
 	require.NoError(t, afero.WriteFile(fs, entry, []byte("data"), 0o644))
 
-	pastTime := time.Now().Add(-200 * time.Hour)
+	pastTime := time.Now().Add(-400 * time.Hour)
 	require.NoError(t, fs.Chtimes(entry, pastTime, pastTime))
 
 	// Between ReadDir and Stat, update the mtime to be fresh
@@ -78,7 +78,7 @@ func TestCleanupStaleImageCache_RemovesEmptyShardAndOrphanTemps(t *testing.T) {
 	require.NoError(t, fs.MkdirAll(shardDir, 0o755))
 	expired := shardDir + "/deadbeef.jpg"
 	require.NoError(t, afero.WriteFile(fs, expired, []byte("old"), 0o644))
-	pastTime := time.Now().Add(-200 * time.Hour)
+	pastTime := time.Now().Add(-400 * time.Hour)
 	require.NoError(t, fs.Chtimes(expired, pastTime, pastTime))
 
 	tmpDir := tempDir + "/image-cache/.tmp"
@@ -93,4 +93,23 @@ func TestCleanupStaleImageCache_RemovesEmptyShardAndOrphanTemps(t *testing.T) {
 
 	exists, _ := afero.DirExists(fs, shardDir)
 	assert.False(t, exists, "empty shard should be removed")
+}
+
+func TestCleanupStaleImageCache_RetainsEntryWithinGracePeriod(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	tempDir := t.TempDir()
+
+	shardDir := tempDir + "/image-cache/ab"
+	require.NoError(t, fs.MkdirAll(shardDir, 0o755))
+	staleButRetained := shardDir + "/deadbeef.jpg"
+	require.NoError(t, afero.WriteFile(fs, staleButRetained, []byte("stale"), 0o644))
+	pastFreshnessWithinGrace := time.Now().Add(-200 * time.Hour)
+	require.NoError(t, fs.Chtimes(staleButRetained, pastFreshnessWithinGrace, pastFreshnessWithinGrace))
+
+	removed, err := CleanupStaleImageCache(fs, tempDir, 168*time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, 0, removed, "entry past freshness TTL but within retention grace must survive the sweep")
+
+	exists, _ := afero.Exists(fs, staleButRetained)
+	assert.True(t, exists, "retained entry stays available for stale-if-error serving")
 }

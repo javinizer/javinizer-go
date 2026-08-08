@@ -149,25 +149,26 @@ func resolveAllEntries(fs afero.Fs, shardDir, hashPrefix string) ([]string, stri
 	return paths, bestExt, true
 }
 
-func get(fs afero.Fs, cacheDir, rawURL string, ttl time.Duration) (file afero.File, contentType string, state CacheState) {
+func get(fs afero.Fs, cacheDir, rawURL string, ttl time.Duration) (file afero.File, contentType string, remaining time.Duration, state CacheState) {
 	shardDir, hashPrefix := pathFor(cacheDir, rawURL)
 	path, ext, ok := resolveEntry(fs, shardDir, hashPrefix)
 	if !ok {
-		return nil, "", CacheAbsent
+		return nil, "", 0, CacheAbsent
 	}
 	info, err := fs.Stat(path)
 	if err != nil {
-		return nil, "", CacheAbsent
+		return nil, "", 0, CacheAbsent
 	}
 	file, err = fs.Open(path)
 	if err != nil {
-		return nil, "", CacheAbsent
+		return nil, "", 0, CacheAbsent
 	}
 	contentType = contentTypeForExt(ext)
-	if time.Since(info.ModTime()) < ttl {
-		return file, contentType, CacheFresh
+	remaining = ttl - time.Since(info.ModTime())
+	if remaining > 0 {
+		return file, contentType, remaining, CacheFresh
 	}
-	return file, contentType, CacheStale
+	return file, contentType, remaining, CacheStale
 }
 
 type fetchResult struct {
@@ -201,6 +202,10 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 	}
 
 	upstreamCT := resp.Header.Get("Content-Type")
+	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(upstreamCT, ";", 2)[0]))
+	if mediaType != "" && !strings.HasPrefix(mediaType, "image/") {
+		return fetchResult{err: fmt.Errorf("non-image content type %q", mediaType)}
+	}
 	normalizedCT := contentTypeForExt(extForContentType(upstreamCT))
 
 	shardDir, hashPrefix := pathFor(cacheDir, cacheKey)

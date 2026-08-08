@@ -30,7 +30,7 @@ func TestCoverageFinal_Get_ReadDirErr(t *testing.T) {
 	entryPath := filepath.Join(shardDir, hashPrefix+".jpg")
 	require.NoError(t, afero.WriteFile(fs, entryPath, []byte("data"), 0o644))
 	require.NoError(t, fs.Remove(entryPath))
-	file, _, state := get(fs, tempDir, rawURL, time.Hour)
+	file, _, _, state := get(fs, tempDir, rawURL, time.Hour)
 	assert.Nil(t, file)
 	assert.Equal(t, CacheAbsent, state)
 }

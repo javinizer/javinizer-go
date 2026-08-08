@@ -55,7 +55,7 @@ func seedExpiredShardEntry(t *testing.T, fs afero.Fs, tempDir, shard, name strin
 	require.NoError(t, fs.MkdirAll(shardDir, 0o755))
 	entry := filepath.Join(shardDir, name)
 	require.NoError(t, afero.WriteFile(fs, entry, []byte("old"), 0o644))
-	past := time.Now().Add(-200 * time.Hour)
+	past := time.Now().Add(-400 * time.Hour)
 	require.NoError(t, fs.Chtimes(entry, past, past))
 	return entry
 }
@@ -140,7 +140,7 @@ func seedExpiredTmpEntry(t *testing.T, fs afero.Fs, tempDir, name string) string
 	require.NoError(t, fs.MkdirAll(tmpDir, 0o755))
 	entry := filepath.Join(tmpDir, name)
 	require.NoError(t, afero.WriteFile(fs, entry, []byte("partial"), 0o644))
-	past := time.Now().Add(-200 * time.Hour)
+	past := time.Now().Add(-400 * time.Hour)
 	require.NoError(t, fs.Chtimes(entry, past, past))
 	return entry
 }

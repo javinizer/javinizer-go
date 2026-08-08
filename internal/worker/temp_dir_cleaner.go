@@ -233,7 +233,10 @@ func (c *TempDirCleaner) StartStaleTempCleanup() chan struct{} {
 
 // CleanupStaleImageCache removes expired entries from the image cache directory.
 // It walks {tempDir}/image-cache/ (shard dirs then files) and removes files whose
-// mtime is older than ttl, plus orphan temp files from {tempDir}/image-cache/.tmp/.
+// mtime is older than a retention grace of ttl + max(ttl, 24h), so entries that
+// crossed their freshness TTL survive the sweep and remain available for the
+// stale-if-error fallback. Orphan partial downloads in
+// {tempDir}/image-cache/.tmp/ are removed once older than ttl itself.
 // No-op when ttl <= 0 or the dir does not exist. Per-file removal failures are
 // logged and skipped; the walk continues, and an error is returned only if the
 // top-level directory traversal fails.
@@ -249,6 +252,7 @@ func CleanupStaleImageCache(fs afero.Fs, tempDir string, ttl time.Duration) (int
 		}
 		return 0, fmt.Errorf("read image-cache dir: %w", err)
 	}
+	retentionCutoff := time.Now().Add(-(ttl + max(ttl, 24*time.Hour)))
 	cutoff := time.Now().Add(-ttl)
 	removed := 0
 	for _, shard := range entries {
@@ -268,10 +272,10 @@ func CleanupStaleImageCache(fs afero.Fs, tempDir string, ttl time.Duration) (int
 			if f.IsDir() {
 				continue
 			}
-			if f.ModTime().Before(cutoff) {
+			if f.ModTime().Before(retentionCutoff) {
 				fp := filepath.Join(shardPath, f.Name())
 				info, statErr := fs.Stat(fp)
-				if statErr != nil || !info.ModTime().Before(cutoff) {
+				if statErr != nil || !info.ModTime().Before(retentionCutoff) {
 					continue
 				}
 				if rerr := fsutil.AferoRemoveAll(fs, fp); rerr != nil {

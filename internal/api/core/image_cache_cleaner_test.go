@@ -55,7 +55,7 @@ func TestStartImageCacheCleanup_RemovesExpiredEntries(t *testing.T) {
 	require.NoError(t, fs.MkdirAll(shardDir, 0o755))
 	expired := shardDir + "/deadbeef1234.jpg"
 	require.NoError(t, afero.WriteFile(fs, expired, []byte("old"), 0o644))
-	pastTime := time.Now().Add(-200 * time.Hour)
+	pastTime := time.Now().Add(-400 * time.Hour)
 	require.NoError(t, fs.Chtimes(expired, pastTime, pastTime))
 
 	deps := &APIDeps{Fs: fs}

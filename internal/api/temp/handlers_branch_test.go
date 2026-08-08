@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -295,4 +296,67 @@ func TestBranch_PersistFailure_FallsBackToUncached(t *testing.T) {
 	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "fallback-body", w.Body.String())
+}
+
+func TestBranch_NonImageUpstream_ServesStaleEntry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>bot check</html>"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	mem := afero.NewMemMapFs()
+	rawURL := upstream.URL + "/blocked.jpg"
+	deps := newImageCacheDeps(t, mem)
+	seedCacheEntry(t, mem, depsTempDir(t, deps), rawURL, "stale-image-bytes", 2)
+
+	w := serveImageRequest(t, deps, rawURL)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "stale-image-bytes", w.Body.String())
+	assert.Equal(t, "no-cache", w.Header().Get("Cache-Control"))
+}
+
+func TestBranch_FreshCacheHit_MaxAgeBoundedByRemainingTTL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mem := afero.NewMemMapFs()
+	rawURL := "http://93.184.216.34/bounded.jpg"
+	deps := newImageCacheDeps(t, mem)
+
+	entry := seedCacheEntry(t, mem, depsTempDir(t, deps), rawURL, "fresh", 0)
+	halfTTLAgo := time.Now().Add(-30 * time.Minute)
+	require.NoError(t, mem.Chtimes(entry, halfTTLAgo, halfTTLAgo))
+
+	w := serveImageRequest(t, deps, rawURL)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	cc := w.Header().Get("Cache-Control")
+	require.True(t, strings.HasPrefix(cc, "private, max-age="), "unexpected Cache-Control %q", cc)
+	maxAge, err := strconv.Atoi(strings.TrimPrefix(cc, "private, max-age="))
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, maxAge, 1750)
+	assert.LessOrEqual(t, maxAge, 1800, "browser max-age must not outlive the remaining server TTL")
+}
+
+func TestBranch_FreshCacheHit_MaxAgeCappedAt24h(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mem := afero.NewMemMapFs()
+	rawURL := "http://93.184.216.34/capped.jpg"
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = true
+	cfg.System.ImageCacheTTLHours = 168
+	cfg.System.TempDir = t.TempDir()
+	deps := &core.APIDeps{Fs: mem}
+	rt := core.NewAPIRuntime(deps)
+	rt.SetConfig(cfg)
+	testkit.SetTestRuntime(deps, rt)
+
+	seedCacheEntry(t, mem, cfg.System.TempDir, rawURL, "fresh", 0)
+
+	w := serveImageRequest(t, deps, rawURL)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "private, max-age=86400", w.Header().Get("Cache-Control"))
 }

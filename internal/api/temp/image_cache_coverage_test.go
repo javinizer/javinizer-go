@@ -180,7 +180,7 @@ func TestCoverage_ResolveAllEntriesMissingDir(t *testing.T) {
 func TestCoverage_GetAbsent(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	tempDir := t.TempDir()
-	file, _, state := get(fs, tempDir, "http://example.com/img.jpg", time.Hour)
+	file, _, _, state := get(fs, tempDir, "http://example.com/img.jpg", time.Hour)
 	assert.Nil(t, file)
 	assert.Equal(t, CacheAbsent, state)
 }
@@ -195,7 +195,7 @@ func TestCoverage_GetStatError(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, entryPath, []byte("data"), 0o644))
 
 	failingStat := &failingFs{Fs: fs, statErr: errors.New("stat failed")}
-	file, _, state := get(failingStat, tempDir, rawURL, time.Hour)
+	file, _, _, state := get(failingStat, tempDir, rawURL, time.Hour)
 	assert.Nil(t, file)
 	assert.Equal(t, CacheAbsent, state)
 }
@@ -210,7 +210,7 @@ func TestCoverage_GetOpenError(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, entryPath, []byte("data"), 0o644))
 
 	failingOpen := &failingFs{Fs: fs, openErr: errors.New("open failed")}
-	file, _, state := get(failingOpen, tempDir, rawURL, time.Hour)
+	file, _, _, state := get(failingOpen, tempDir, rawURL, time.Hour)
 	assert.Nil(t, file)
 	assert.Equal(t, CacheAbsent, state)
 }

@@ -18,7 +18,7 @@ func TestCleanupStaleImageCache_RemovesExpiredEntries(t *testing.T) {
 
 	expired := shardDir + "/" + "abcd1234.jpg"
 	require.NoError(t, afero.WriteFile(fs, expired, []byte("old"), 0o644))
-	pastTime := time.Now().Add(-200 * time.Hour)
+	pastTime := time.Now().Add(-400 * time.Hour)
 	require.NoError(t, fs.Chtimes(expired, pastTime, pastTime))
 
 	fresh := shardDir + "/" + "efgh5678.png"
@@ -44,7 +44,7 @@ func TestCleanupStaleImageCache_RemovesEmptyShardDirs(t *testing.T) {
 
 	expired := shardDir + "/deadbeef.jpg"
 	require.NoError(t, afero.WriteFile(fs, expired, []byte("old"), 0o644))
-	pastTime := time.Now().Add(-200 * time.Hour)
+	pastTime := time.Now().Add(-400 * time.Hour)
 	require.NoError(t, fs.Chtimes(expired, pastTime, pastTime))
 
 	removed, err := CleanupStaleImageCache(fs, tempDir, 168*time.Hour)

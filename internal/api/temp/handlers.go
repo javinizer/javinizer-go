@@ -1,6 +1,7 @@
 package temp
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -177,11 +178,15 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 		keyURL.Fragment = ""
 		keyURL.RawQuery = keyURL.Query().Encode()
 		normalizedURL := keyURL.String()
-		file, contentType, state := get(fs, cacheDir, normalizedURL, ttl)
+		file, contentType, remaining, state := get(fs, cacheDir, normalizedURL, ttl)
 		if state == CacheFresh {
 			defer func() { _ = file.Close() }()
+			maxAge := int64(remaining.Seconds())
+			if maxAge > 86400 {
+				maxAge = 86400
+			}
 			c.Header("Content-Type", contentType)
-			c.Header("Cache-Control", "private, max-age=86400")
+			c.Header("Cache-Control", fmt.Sprintf("private, max-age=%d", maxAge))
 			c.Header("X-Content-Type-Options", "nosniff")
 			if _, err := io.Copy(c.Writer, file); err != nil {
 				c.AbortWithStatus(http.StatusBadGateway)
