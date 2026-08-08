@@ -244,6 +244,29 @@ func TestReconcileParkedWitnessBeltEdgeBranches(t *testing.T) {
 	assert.NoError(t, err2, "escaped-promote witness (%zz base) fences the sweep")
 }
 
+// audit F-R21-1: parked legs of a leading-dot ID carry .rsbak.<nonce> tails —
+// they must never be misread as in-flight sentinels and swept instead of
+// re-homed. The marker branch refuses names that ALSO parse as park legs.
+func TestLeadingDotIDParkedLegsRehomedNotMisSwept(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-EVIL-full.jpg.rsbak.a1.b2"), []byte("parked-full"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-EVIL.jpg.rsbak.a1.b2"), []byte("parked-crop"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-EVIL.a1.b2"), []byte("{}"), 0o644))
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	healed := cl.reconcileParkedPosterBackups(dir)
+	assert.Equal(t, 3, healed, "2 parked legs re-homed + 1 marker swept")
+	got, err := afero.ReadFile(fs, filepath.Join(dir, ".inflight-EVIL.jpg"))
+	require.NoError(t, err)
+	assert.Equal(t, "parked-crop", string(got), "parked crop re-homed")
+	got2, err2 := afero.ReadFile(fs, filepath.Join(dir, ".inflight-EVIL-full.jpg"))
+	require.NoError(t, err2)
+	assert.Equal(t, "parked-full", string(got2), "parked full re-homed")
+	_, sErr := fs.Stat(filepath.Join(dir, ".inflight-EVIL-full.jpg.rsbak.a1.b2"))
+	assert.Error(t, sErr, "parked names consumed")
+	_, mErr := fs.Stat(filepath.Join(dir, ".inflight-EVIL.a1.b2"))
+	assert.Error(t, mErr, "marker swept")
+}
+
 // audit F-R4-5: startup reconciliation re-homes parked backup legs stranded
 // by a crash/panic between park and restore.
 func TestReconcileParkedPosterBackups(t *testing.T) {

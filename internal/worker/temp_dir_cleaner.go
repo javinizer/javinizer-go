@@ -508,10 +508,11 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(dir string) int {
 	for _, e := range entries {
 		name := e.Name()
 		var canon string
-		// audit F-R20-2: only nonce-anchored ".inflight-" names are sweep
-		// disposal targets — a leading-dot-canonical file must never be
-		// misread as a marker.
-		if markerAnchored(name) {
+		// audit F-R20-2 + F-R21-1: the marker branch runs FIRST — its
+		// anchor therefore requires that the name does NOT ALSO parse as a
+		// parked leg (whose ".rsbak."+nonce tail is subshape-compatible).
+		// Otherwise a leading-dot ID's parked bytes get eaten as "markers".
+		if markerAnchored(name) && !strings.Contains(name, ".rsbak.") {
 			// audit F-R19-1 aftermath: stranded in-flight markers (crash) — a
 			// restarted process has no live generation windows; delete.
 			if rmErr := c.fs.Remove(filepath.Join(dir, name)); rmErr != nil {
