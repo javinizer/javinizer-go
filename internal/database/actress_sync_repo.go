@@ -1403,8 +1403,10 @@ func (r *ActressRepository) assignDMMIDIfMissing(ctx context.Context, id uint, d
 			if err := ensureSyncTaskLeaseTx(tx, taskID, leaseToken); err != nil {
 				return err
 			}
-			// NULL counts as missing here too (legacy rows, direct imports).
-			query := tx.Model(&models.Actress{}).Where("id = ? AND COALESCE(dmm_id, 0) = 0", id)
+			// Non-positive counts as missing: NULL (legacy rows, direct imports)
+			// and negative surrogate IDs (scraper aggregation) alike — matching
+			// the candidate/filter classification so scheduled rows stay repairable.
+			query := tx.Model(&models.Actress{}).Where("id = ? AND COALESCE(dmm_id, 0) <= 0", id)
 			if expectedSource.ID > 0 {
 				// Nullable legacy columns scan as "" but store NULL; bare equality
 				// would never match and the assign would silently no-op.

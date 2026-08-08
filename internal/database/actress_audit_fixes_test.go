@@ -295,3 +295,41 @@ func TestMergeStalePlanNullTimestampDetection(t *testing.T) {
 	_, err = repo.merger.ExecuteMerge(ctx, plan, db)
 	require.ErrorIs(t, err, ErrActressMergeStalePlan, "zero-snapshot then stamped row must count as changed")
 }
+
+// Codex P2: a negative surrogate DMM ID (scraper aggregation) is classified
+// missing by the candidate/filter predicates, so the assign fence must accept
+// it too — otherwise such rows are scheduled but can never be repaired.
+func TestAssignDMMIDNegativeSurrogate(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	ctx := context.Background()
+	require.NoError(t, db.Exec("INSERT INTO actresses (japanese_name, dmm_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+		"\u4ee3\u7406", -7, time.Now().UTC(), time.Now().UTC()).Error)
+	var neg models.Actress
+	require.NoError(t, db.Where("japanese_name = ?", "\u4ee3\u7406").First(&neg).Error)
+
+	candidates, err := repo.ListSyncCandidates(ctx)
+	require.NoError(t, err)
+	isCandidate := false
+	for _, a := range candidates {
+		if a.ID == neg.ID {
+			isCandidate = true
+		}
+	}
+	require.True(t, isCandidate, "negative dmm_id row must be a sync candidate")
+
+	ok, err := repo.AssignDMMIDIfMissing(ctx, neg.ID, 8888)
+	require.NoError(t, err)
+	require.True(t, ok, "negative-s surrogate row must be assignable")
+	reloaded, err := repo.FindByDMMID(ctx, 8888)
+	require.NoError(t, err)
+	require.Equal(t, neg.ID, reloaded.ID)
+
+	// A real DMM ID must never be overwritten.
+	assigned, err := repo.AssignDMMIDIfMissing(ctx, neg.ID, 9999)
+	require.NoError(t, err)
+	require.False(t, assigned)
+	still, err := repo.FindByDMMID(ctx, 8888)
+	require.NoError(t, err)
+	require.Equal(t, neg.ID, still.ID)
+}
