@@ -46,6 +46,10 @@ CREATE TABLE actress_sync_tasks (
 CREATE INDEX idx_actress_sync_tasks_job_id ON actress_sync_tasks(job_id);
 CREATE INDEX idx_actress_sync_tasks_status ON actress_sync_tasks(status);
 CREATE INDEX idx_actress_sync_tasks_lease ON actress_sync_tasks(lease_expires_at);
+-- Full-library syncs hot-path per-actress lookups (CreateJob dedupe scan,
+-- ClaimNext EXISTS predicates); without this the scheduler degrades
+-- quadratically as task history grows.
+CREATE INDEX idx_actress_sync_tasks_actress_status ON actress_sync_tasks(actress_id, status);
 CREATE UNIQUE INDEX idx_actress_sync_tasks_active_key ON actress_sync_tasks(dedupe_key) WHERE status IN ('pending', 'running');
 -- +goose StatementEnd
 
