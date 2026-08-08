@@ -253,15 +253,32 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 		}
 	}
 
+	drainForDegrade := func() ([]byte, string) {
+		rest, _ := io.ReadAll(io.LimitReader(resp.Body, maxImageProxyResponseSize+1-int64(len(head))))
+		full := make([]byte, 0, len(head)+len(rest))
+		full = append(full, head...)
+		full = append(full, rest...)
+		if len(full) == 0 || len(full) > maxImageProxyResponseSize {
+			return nil, ""
+		}
+		ct := sniffImageType(full)
+		if !isCacheableMediaType(ct) {
+			return nil, ""
+		}
+		return full, ct
+	}
+
 	shardDir, hashPrefix := pathFor(cacheDir, cacheKey)
 	if err := fs.MkdirAll(shardDir, 0o755); err != nil {
 		logging.Warnf("image cache: mkdir shard failed: %v", err)
-		return fetchResult{err: fmt.Errorf("mkdir shard: %w", err), persistFailed: true}
+		body, dct := drainForDegrade()
+		return fetchResult{err: fmt.Errorf("mkdir shard: %w", err), persistFailed: true, body: body, contentType: dct}
 	}
 	tmpD := tempDir(cacheDir)
 	if err := fs.MkdirAll(tmpD, 0o755); err != nil {
 		logging.Warnf("image cache: mkdir tmp failed: %v", err)
-		return fetchResult{err: fmt.Errorf("mkdir tmp: %w", err), persistFailed: true}
+		body, dct := drainForDegrade()
+		return fetchResult{err: fmt.Errorf("mkdir tmp: %w", err), persistFailed: true, body: body, contentType: dct}
 	}
 	rb := make([]byte, 8)
 	if _, err := randRead(rb); err != nil {
@@ -271,7 +288,8 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 	f, err := fs.Create(tmpPath)
 	if err != nil {
 		logging.Warnf("image cache: create temp failed: %v", err)
-		return fetchResult{err: fmt.Errorf("create temp: %w", err), persistFailed: true}
+		body, dct := drainForDegrade()
+		return fetchResult{err: fmt.Errorf("create temp: %w", err), persistFailed: true, body: body, contentType: dct}
 	}
 	werr := &writeTracker{w: f}
 	src := io.LimitReader(resp.Body, maxImageProxyResponseSize+1)
@@ -379,7 +397,6 @@ func fetchBodyToMemory(ctx context.Context, client *http.Client, fetchURL, userA
 		return nil, "", fmt.Errorf("image source returned non-200 status")
 	}
 
-	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0]))
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImageProxyResponseSize+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("read body: %w", err)
@@ -387,11 +404,9 @@ func fetchBodyToMemory(ctx context.Context, client *http.Client, fetchURL, userA
 	if len(body) > maxImageProxyResponseSize {
 		return nil, "", fmt.Errorf("response exceeds %d byte cap", maxImageProxyResponseSize)
 	}
-	if mediaType == "" || mediaType == octetStream {
-		mediaType = sniffImageType(body)
+	ct := sniffImageType(body)
+	if !isCacheableMediaType(ct) {
+		return nil, "", fmt.Errorf("uncacheable content type %q", ct)
 	}
-	if !isCacheableMediaType(mediaType) {
-		return nil, "", fmt.Errorf("uncacheable content type %q", mediaType)
-	}
-	return body, mediaType, nil
+	return body, ct, nil
 }

@@ -239,11 +239,11 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 				return
 			}
 			if result.persistFailed {
-				logging.Warnf("image cache: persist failed for %s: %v", normalizedURL, result.err)
+				logging.Warnf("image cache: persist failed for %s: %v", redactImageURL(normalizedURL), result.err)
 				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
 				return
 			}
-			logging.Warnf("image cache: fetch failed for %s: %v", normalizedURL, result.err)
+			logging.Warnf("image cache: fetch failed for %s: %v", redactImageURL(normalizedURL), result.err)
 			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
 			return
 		}
@@ -366,4 +366,15 @@ func cacheControlForTTL(remaining time.Duration) string {
 		maxAge = 86400
 	}
 	return fmt.Sprintf("private, max-age=%d", maxAge)
+}
+
+func redactImageURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.ForceQuery = false
+	return u.String()
 }

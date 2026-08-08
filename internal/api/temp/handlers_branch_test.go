@@ -464,7 +464,7 @@ func TestBranch_PersistFailure_SharedAcrossWaiters(t *testing.T) {
 	wg.Wait()
 
 	hitCount := atomic.LoadInt32(&hits)
-	assert.Equal(t, int32(2), hitCount, "N concurrent waiters must cost exactly one flight fetch plus one shared memory refetch")
+	assert.Equal(t, int32(1), hitCount, "N concurrent waiters cost exactly one upstream fetch; the drained response is shared in memory")
 	for _, w := range results {
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, jpegStr("shared-body"), w.Body.String())
@@ -487,13 +487,13 @@ func TestBranch_PersistFailure_RefetchFails(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 
-	fs := &mkdirSuffixFailFs{Fs: afero.NewMemMapFs(), suffix: ".tmp"}
-	deps := newImageCacheDeps(t, fs)
+	hooked := &openHookFs{Fs: afero.NewMemMapFs(), mode: "error", match: isTmpCacheFile}
+	deps := newImageCacheDeps(t, hooked)
 
 	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
 	assert.Equal(t, http.StatusBadGateway, w.Code)
 	assert.Contains(t, w.Body.String(), "failed to fetch image")
-	assert.Equal(t, int32(2), atomic.LoadInt32(&hits), "exactly one refetch attempt inside the shared flight")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&hits), "in-flight bytes already consumed by the failed persist; exactly one shared refetch is attempted")
 }
 
 func TestBranch_PersistFailureWithStale_PrefersFreshMemoryBody(t *testing.T) {
@@ -513,4 +513,23 @@ func TestBranch_PersistFailureWithStale_PrefersFreshMemoryBody(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, jpegStr("fresh-fallback-body"), w.Body.String(), "successful degraded fetch must beat the stale disk entry")
 	assert.Equal(t, "private, max-age=300", w.Header().Get("Cache-Control"))
+}
+
+func TestRedactImageURL(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"strips userinfo and query", "https://user:pass@cdn.example.com/img.jpg?sig=abc123&exp=9", "https://cdn.example.com/img.jpg"},
+		{"plain url unchanged", "https://cdn.example.com/img.jpg", "https://cdn.example.com/img.jpg"},
+		{"fragment kept, query stripped", "https://cdn.example.com/img.jpg?sig=x#frag", "https://cdn.example.com/img.jpg#frag"},
+		{"invalid url redacted wholesale", "://nope", "<invalid-url>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactImageURL(tc.in)
+			assert.Equal(t, tc.want, got)
+			assert.NotContains(t, got, "sig=")
+			assert.NotContains(t, got, "user:pass")
+		})
+	}
 }

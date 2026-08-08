@@ -213,12 +213,12 @@ func TestBranch_FetchBodyToMemory_Success(t *testing.T) {
 	var gotReferer string
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		gotReferer = req.Header.Get("Referer")
-		return fakeImageResponse(req, http.StatusOK, "image/png", []byte("png-bytes")), nil
+		return fakeImageResponse(req, http.StatusOK, "image/png", pngBytes("png-bytes")), nil
 	})}
 
 	body, gotCT, err := fetchBodyToMemory(context.Background(), client, "http://example.com/a.png", "ua", "https://ref.example/x")
 	require.NoError(t, err)
-	assert.Equal(t, []byte("png-bytes"), body)
+	assert.Equal(t, pngBytes("png-bytes"), body)
 	assert.Equal(t, "image/png", gotCT)
 	assert.Equal(t, "https://ref.example/x", gotReferer)
 }
@@ -435,4 +435,49 @@ func TestBranch_FetchBodyToMemory_OctetStreamSniffed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, jpegBytes("via-sniff"), body)
 	assert.Equal(t, "image/jpeg", gotCT)
+}
+
+func TestBranch_FetchBodyToMemory_RejectsGarbageWithImageCT(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return fakeImageResponse(req, http.StatusOK, "image/jpeg", []byte("totally not a jpeg")), nil
+	})}
+	_, _, err := fetchBodyToMemory(context.Background(), client, "http://example.com/x", "ua", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "uncacheable content type")
+}
+
+func TestBranch_FetchAndCache_PersistFail_DrainUnusable_RefetchEmpty(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := &atomicStubFs{Fs: afero.NewMemMapFs(), mkdirErr: errors.New("read-only fs")}
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/empty.jpg", upstream.URL+"/empty.jpg", client, "ua", "")
+	require.Error(t, result.err)
+	assert.True(t, result.persistFailed)
+	assert.Empty(t, result.body, "an empty upstream body cannot be salvaged for degraded serving")
+}
+
+func TestBranch_FetchAndCache_PersistFail_DrainRejectsGarbage(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("declared image, actually junk"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := &atomicStubFs{Fs: afero.NewMemMapFs(), mkdirErr: errors.New("read-only fs")}
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/junk.jpg", upstream.URL+"/junk.jpg", client, "ua", "")
+	require.Error(t, result.err)
+	assert.True(t, result.persistFailed)
+	assert.Empty(t, result.body, "junk drained from the failed persist must not be served")
 }
