@@ -541,4 +541,3 @@ func TestParseDetailPage_FullData(t *testing.T) {
 		t.Fatalf("TrailerURL = %q", result.TrailerURL)
 	}
 }
-
