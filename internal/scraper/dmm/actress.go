@@ -518,9 +518,9 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 		return models.ActressInfo{DMMID: actress.DMMID}, nil
 	}
 	metadata := extractActressProfileMetadata(profileDoc, actress.DMMID)
-	if metadata.JapaneseName == "" {
-		metadata.JapaneseName = actress.JapaneseName
-	}
+	// Codex round 13: do NOT echo the stored name back into resolver evidence —
+	// a challenge/reshaped page would otherwise masquerade as metadata and the
+	// engine's verification path would mark it "verified".
 	if actress.ThumbURL == "" || models.IsKnownInvalidDMMActressThumbnail(actress.ThumbURL) {
 		metadata.ThumbURL = s.tryActressThumbURLsWithProfileDoc(ctx, actress.FirstName, actress.LastName, actress.DMMID, profileDoc)
 	}

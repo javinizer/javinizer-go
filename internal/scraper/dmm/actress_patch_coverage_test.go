@@ -128,11 +128,13 @@ func TestResolveActressThumbnailAndMetadataBranches(t *testing.T) {
 	s.client.SetTransport(actressRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return actressResponse(req, http.StatusOK, []byte(`<h1 class="list-title"></h1>`)), nil
 	}))
+	// codex P2 round 13: an unparseable profile page must NOT echo the stored
+	// name back — otherwise a reshaped page falsely verifies as evidence.
 	got, err = s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 10, JapaneseName: "fallback", ThumbURL: "keep.jpg"})
 	require.NoError(t, err)
-	require.Equal(t, "fallback", got.JapaneseName)
+	require.Empty(t, got.JapaneseName, "unparseable page must not echo stored name")
 	got, err = s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 10, JapaneseName: "fallback"})
-	require.Equal(t, "fallback", got.JapaneseName)
+	require.Empty(t, got.JapaneseName)
 }
 
 func TestFetchActressDocumentsBrowserAndHTTPFailures(t *testing.T) {
