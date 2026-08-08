@@ -16,6 +16,36 @@ import (
 	"github.com/spf13/afero"
 )
 
+// redactLogURL strips userinfo and secret query parameters from a URL for
+// safe logging. Non-secret identifiers are preserved.
+func redactLogURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	u.User = nil
+	u.Fragment = ""
+	q := u.Query()
+	for k := range q {
+		lk := strings.ToLower(k)
+		if lk == "keyword" {
+			continue
+		}
+		for _, frag := range []string{"sign", "secret", "token", "pass", "pwd", "cred", "auth", "session", "oauth", "key"} {
+			if strings.Contains(lk, frag) {
+				q.Del(k)
+				break
+			}
+		}
+	}
+	if len(q) > 0 {
+		u.RawQuery = q.Encode()
+	} else {
+		u.RawQuery = ""
+	}
+	return u.String()
+}
+
 func validateBrowserURL(rawURL string) error {
 	if rawURL == "" {
 		return fmt.Errorf("browser URL is required")
@@ -55,7 +85,7 @@ func fetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyP
 		return "", err
 	}
 
-	logging.Debugf("DMM Browser: Starting browser for %s (timeout: %ds)", url, timeout)
+	logging.Debugf("DMM Browser: Starting browser for %s (timeout: %ds)", redactLogURL(url), timeout)
 
 	// Create allocator options
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
