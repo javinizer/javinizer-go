@@ -1,13 +1,21 @@
 package ssrf
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
+	"weak"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsPrivateIP(t *testing.T) {
@@ -26,7 +34,7 @@ func TestIsPrivateIP(t *testing.T) {
 		{"public 1.1.1.1", "1.1.1.1", false},
 		{"IPv6 loopback", "::1", true},
 		{"IPv6 link-local", "fe80::1", true},
-		{"nil IP", "", false},
+		{"nil IP", "", true},
 		{"unspecified 0.0.0.0", "0.0.0.0", true},
 		{"172.15.x not RFC1918", "172.15.0.1", false},
 		{"172.32.x not RFC1918", "172.32.0.1", false},
@@ -35,8 +43,8 @@ func TestIsPrivateIP(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.ip == "" {
-				if isPrivateIP(nil) != tc.wantPriv {
-					t.Errorf("isPrivateIP(nil) = %v, want %v", !tc.wantPriv, tc.wantPriv)
+				if IsBlockedIP(nil) != tc.wantPriv {
+					t.Errorf("IsBlockedIP(nil) = %v, want %v", !tc.wantPriv, tc.wantPriv)
 				}
 				return
 			}
@@ -44,15 +52,23 @@ func TestIsPrivateIP(t *testing.T) {
 			if ip == nil {
 				t.Fatalf("failed to parse IP %q", tc.ip)
 			}
-			got := isPrivateIP(ip)
+			got := IsBlockedIP(ip)
 			if got != tc.wantPriv {
-				t.Errorf("isPrivateIP(%s) = %v, want %v", tc.ip, got, tc.wantPriv)
+				t.Errorf("IsBlockedIP(%s) = %v, want %v", tc.ip, got, tc.wantPriv)
 			}
 		})
 	}
 }
 
 func TestCheckURL(t *testing.T) {
+	// Resolver stub: no subtest may perform real DNS (offline CI must pass).
+	cleanup := setLookupIPForTest(func(host string) ([]net.IP, error) {
+		if host == "example.com" {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		}
+		return nil, fmt.Errorf("test resolver: unexpected host %q", host)
+	})
+	defer cleanup()
 	testCases := []struct {
 		name    string
 		url     string
@@ -132,13 +148,19 @@ func TestNewSSRFSafeClient_BlocksRedirectToPrivateIP(t *testing.T) {
 	})
 	defer cleanup()
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example.com/redirect", nil)
+	// The redirect origin is the local listener (allowlisted loopback); only
+	// its 302 target is private. Asserts the actual block, not a dial error.
+	undo := AllowHostForTest("127.0.0.1")
+	defer undo()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, redirectServer.URL+"/go", nil)
 	if err != nil {
 		t.Fatalf("failed to create request: %v", err)
 	}
 	_, err = client.Do(req)
 	if err == nil {
 		t.Error("expected error for redirect to private IP, got nil")
+	} else if !strings.Contains(err.Error(), "SSRF blocked") {
+		t.Errorf("expected SSRF block on the redirect target, got: %v", err)
 	}
 }
 
@@ -182,6 +204,23 @@ func TestCheckRedirect_AllowsPublicIP(t *testing.T) {
 	err := checkRedirect(req, via)
 	if err != nil {
 		t.Errorf("expected no error for public IP redirect, got: %v", err)
+	}
+}
+
+func TestWrapTransportWithSSRFCheckClearsUnpinnableTLSDialers(t *testing.T) {
+	transport := &http.Transport{
+		DialTLSContext: func(context.Context, string, string) (net.Conn, error) { return nil, context.DeadlineExceeded },
+		DialTLS:        func(string, string) (net.Conn, error) { return nil, context.DeadlineExceeded }, //nolint:staticcheck // cleared intentionally
+	}
+	WrapTransportWithSSRFCheck(transport)
+	if transport.DialTLSContext != nil {
+		t.Error("DialTLSContext must be cleared by the pinning wrapper")
+	}
+	if transport.DialTLS != nil { //nolint:staticcheck // verifying the clear
+		t.Error("DialTLS must be cleared by the pinning wrapper")
+	}
+	if transport.DialContext == nil {
+		t.Error("DialContext must be installed by the pinning wrapper")
 	}
 }
 
@@ -244,4 +283,280 @@ func TestCheckURL_FailedResolve(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for failed DNS resolution, got nil")
 	}
+}
+
+func TestUnverifiableHostErrorText(t *testing.T) {
+	e := &UnverifiableHostError{Host: "h.test", Err: fmt.Errorf("dns down")}
+	s := e.Error()
+	if !strings.Contains(s, "SSRF unverifiable") || !strings.Contains(s, "h.test") || !strings.Contains(s, "dns down") {
+		t.Fatalf("unexpected error text: %s", s)
+	}
+	inner := errors.New("inner cause")
+	wrapped := &UnverifiableHostError{Host: "h.test", Err: inner}
+	if !errors.Is(wrapped, inner) {
+		t.Fatal("Unwrap must expose the inner resolver error")
+	}
+}
+func TestDialContextFuncAdaptsLegacyDial(t *testing.T) {
+	// DialContext wins when present.
+	ctxSpy := 0
+	legacyCalled := false
+	transport := &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) { ctxSpy++; return nil, errors.New("ctx") },
+		Dial:        func(string, string) (net.Conn, error) { legacyCalled = true; return nil, nil }, //nolint:staticcheck // fixture for the legacy path
+	}
+	_, err := DialContextFunc(transport)(context.Background(), "tcp", "x:443")
+	require.ErrorContains(t, err, "ctx")
+	assert.False(t, legacyCalled, "DialContext takes precedence")
+
+	// Legacy-only transports are ADAPTED (not discarded).
+	sentinel := errors.New("legacy dialer routed it")
+	legacy := &http.Transport{Dial: func(network, addr string) (net.Conn, error) { //nolint:staticcheck // fixture
+		assert.Equal(t, "tcp", network)
+		assert.Equal(t, "host.example:443", addr)
+		return nil, sentinel
+	}}
+	_, err = DialContextFunc(legacy)(context.Background(), "tcp", "host.example:443")
+	require.ErrorIs(t, err, sentinel)
+
+	// Legacy dials that outlive the request context are abandoned with the
+	// context error (legacy Dial has no cancellation).
+	settle := make(chan struct{})
+	t.Cleanup(func() { close(settle) })
+	slow := &http.Transport{Dial: func(string, string) (net.Conn, error) { //nolint:staticcheck // fixture
+		<-settle // blocks until the test ends; the adapter abandons it first
+		return nil, errors.New("abandoned dial finally settled")
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = DialContextFunc(slow)(ctx, "tcp", "never:443")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 2*time.Second)
+
+	// Neither: a default dialer is returned.
+	assert.NotNil(t, DialContextFunc(&http.Transport{}))
+}
+
+// A canceled caller abandons the legacy dial; when it completes LATE with a
+// live connection, that connection must be closed instead of leaking an fd.
+func TestDialContextFuncClosesLateLegacyResults(t *testing.T) {
+	connA, connB := net.Pipe()
+	defer func() { _ = connB.Close() }()
+	release := make(chan struct{})
+	legacy := &http.Transport{Dial: func(string, string) (net.Conn, error) { //nolint:staticcheck // fixture
+		<-release
+		return connA, nil
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := DialContextFunc(legacy)(ctx, "tcp", "late.example:443")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	close(release)
+	require.Eventually(t, func() bool {
+		_, werr := connA.Write([]byte{0})
+		return werr != nil
+	}, 2*time.Second, 5*time.Millisecond, "late legacy result must be closed once abandoned")
+}
+
+// NewPinnedDialTransport must honor a legacy-only Dial hook (not discard it
+// for a default dialer), and the hook receives the PINNED address.
+func TestNewPinnedDialTransportHonorsLegacyDial(t *testing.T) {
+	cleanup := SetLookupIPForTest(func(string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	})
+	defer cleanup()
+	sentinel := errors.New("legacy dialed")
+	var dialed string
+	base := &http.Transport{Dial: func(network, addr string) (net.Conn, error) { //nolint:staticcheck // exercising the legacy seam
+		dialed = addr
+		return nil, sentinel
+	}}
+	wrapped, err := NewPinnedDialTransport(base)
+	require.NoError(t, err)
+	_, err = wrapped.DialContext(context.Background(), "tcp", "media.example:443")
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, "93.184.216.34:443", dialed)
+}
+
+// Live transports must keep their markers; dead ones must be released by the
+// runtime cleanup -- never evicted while alive, never retained after death.
+func TestRemoteDNSRegistryReleasesCollected(t *testing.T) {
+	MarkRemoteDNSTransport(nil) // no-op guard
+	live := &http.Transport{}
+	MarkRemoteDNSTransport(live)
+	MarkRemoteDNSTransport(live) // idempotent re-mark
+	assert.False(t, TransportResolvesRemotely(nil))
+	defer func() { _ = live }() // keep alive past this test
+
+	var dead weak.Pointer[http.Transport]
+	func() {
+		tmp := &http.Transport{}
+		MarkRemoteDNSTransport(tmp)
+		dead = weak.Make(tmp)
+		require.True(t, TransportResolvesRemotely(tmp))
+	}()
+	require.Eventually(t, func() bool {
+		runtime.GC()
+		return dead.Value() == nil && !RemoteDNSHasWeakEntryForTest(dead)
+	}, 5*time.Second, 20*time.Millisecond, "collected transports release their marker")
+	assert.True(t, TransportResolvesRemotely(live), "live markers are never evicted")
+}
+
+// net.ParseIP rejects the inet_aton aliases but resolvers/proxies
+// normalize them -- policy must recognize the same forms.
+func TestHostIPLiteralAlternateForms(t *testing.T) {
+	loop := net.IPv4(127, 0, 0, 1)
+	for input, want := range map[string]net.IP{
+		"2130706433":    loop, // dword
+		"127.1":         loop, // short
+		"0x7f000001":    loop, // hex dword
+		"0177.0.0.1":    loop, // octal parts
+		"0177.0.1":      loop, // octal + short
+		"0x7f.0.0.1":    loop, // hex part
+		"169.254.43518": net.IPv4(169, 254, 169, 254),
+		"8.8.8.8":       net.IPv4(8, 8, 8, 8),
+	} {
+		got := HostIPLiteral(input)
+		require.NotNil(t, got, input)
+		assert.Equal(t, want, got, input)
+	}
+	for _, nonIP := range []string{"293.1.1.1", "example.com", "1.2.3.4.5", "0x", "", "1..2.3"} {
+		assert.Nil(t, HostIPLiteral(nonIP), nonIP)
+	}
+	assert.True(t, IsBlockedIP(HostIPLiteral("2130706433")), "dword loopback is blocked")
+	assert.False(t, IsBlockedIP(HostIPLiteral("134744072")), "8.8.8.8 dword stays allowed")
+}
+func TestIsSOCKSProxyURL(t *testing.T) {
+	assert.False(t, IsSOCKSProxyURL(nil))
+	assert.True(t, IsSOCKSProxyURL(&url.URL{Scheme: "socks5"}))
+	assert.True(t, IsSOCKSProxyURL(&url.URL{Scheme: "SOCKS5H"}))
+	assert.False(t, IsSOCKSProxyURL(&url.URL{Scheme: "http"}))
+}
+
+func TestCanonicalProxyEndpointDefaults(t *testing.T) {
+	assert.Equal(t, "proxy.example:1080", CanonicalProxyEndpoint(&url.URL{Scheme: "socks5", Host: "proxy.example"}))
+	assert.Equal(t, "proxy.example:443", CanonicalProxyEndpoint(&url.URL{Scheme: "https", Host: "proxy.example"}))
+	assert.Equal(t, "proxy.example:80", CanonicalProxyEndpoint(&url.URL{Scheme: "http", Host: "proxy.example"}))
+	assert.Equal(t, "proxy.example:8443", CanonicalProxyEndpoint(&url.URL{Scheme: "http", Host: "proxy.example:8443"}))
+}
+
+func TestNativeSOCKSPinnedDialBehavior(t *testing.T) {
+	lookup := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host == "socks.example" {
+			return []net.IPAddr{{IP: net.ParseIP("203.0.113.9"), Zone: ""}, {IP: net.ParseIP("203.0.113.10")}}, nil
+		}
+		return nil, errors.New("unknown")
+	}
+	fallbackSentinel := errors.New("fallback observed")
+	var dialed []string
+	fallback := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		if addr == "203.0.113.9:1080" {
+			return nil, errors.New("first answer dead")
+		}
+		return nil, fallbackSentinel
+	}
+	dial := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "socks.example:1080"}, lookup, fallback)
+
+	// Proxy endpoint: resolved once (pin the fallback answer).
+	_, err := dial(context.Background(), "tcp", "socks.example:1080")
+	require.ErrorIs(t, err, fallbackSentinel)
+	assert.Equal(t, []string{"203.0.113.9:1080", "203.0.113.10:1080"}, dialed, "failover across proxy answers")
+
+	// Direct (non-proxy) traffic passes through with hostname intact.
+	dialed = nil
+	_, _ = dial(context.Background(), "tcp", "media.example:443")
+	assert.Equal(t, []string{"media.example:443"}, dialed)
+
+	// Private literals blocked before any resolution/decision.
+	dialed = nil
+	_, err = dial(context.Background(), "tcp", "10.9.9.9:80")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "private")
+	assert.Empty(t, dialed)
+
+	// Resolution failure propagates (on the endpoint-matching path).
+	dialFail := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "other.example:8080"}, lookup, fallback)
+	_, err = dialFail(context.Background(), "tcp", "other.example:8080")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolve configured socks proxy")
+}
+
+// Leg coverage: malformed addr, literal endpoint passthrough, default
+// resolver seam, empty answers, resolution failure, failover.
+func TestNativeSOCKSPinnedDialEdgeLegs(t *testing.T) {
+	sentinel := errors.New("fallback observed")
+	mkFallback := func(spy *[]string) func(context.Context, string, string) (net.Conn, error) {
+		return func(_ context.Context, _, addr string) (net.Conn, error) {
+			*spy = append(*spy, addr)
+			return nil, sentinel
+		}
+	}
+	lookup := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.9")}}, nil
+	}
+	var dialed []string
+	dial := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "socks.example:1080"}, lookup, mkFallback(&dialed))
+
+	// Malformed dial authority.
+	_, err := dial(context.Background(), "tcp", "garbage")
+	require.ErrorContains(t, err, "invalid address")
+
+	// Literal proxy endpoint: passthrough, no resolution.
+	_, _ = dial(context.Background(), "tcp", "8.8.8.8:1080")
+	assert.Contains(t, dialed, "8.8.8.8:1080")
+
+	// Default-resolver seam engaged when lookup==nil: probe via error text.
+	dialNoLookup := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "nonexistent.probe.invalid:1080"}, nil, mkFallback(&dialed))
+	_, err = dialNoLookup(context.Background(), "tcp", "nonexistent.probe.invalid:1080")
+	require.Error(t, err)
+
+	// Empty resolver answers.
+	dialEmpty := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "empty.example:1080"}, func(context.Context, string) ([]net.IPAddr, error) { return nil, nil }, mkFallback(&dialed))
+	_, err = dialEmpty(context.Background(), "tcp", "empty.example:1080")
+	require.ErrorContains(t, err, "no addresses")
+}
+func TestNativeSOCKSPinnedDialLiteralEndpointAndSuccess(t *testing.T) {
+	sentinel := errors.New("unreached")
+	var dialed []string
+	fallbackRec := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		return nil, sentinel
+	}
+
+	// Literal proxy endpoint: no resolution, same addr forwarded.
+	dialLit := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "8.8.8.8:1080"}, func(context.Context, string) ([]net.IPAddr, error) {
+		t.Fatal("literal endpoint must not resolve")
+		return nil, nil
+	}, fallbackRec)
+	_, _ = dialLit(context.Background(), "tcp", "8.8.8.8:1080")
+	assert.Equal(t, []string{"8.8.8.8:1080"}, dialed)
+
+	// Successful pinned dial returns the connection.
+	conn1, conn2 := net.Pipe()
+	defer func() { _ = conn2.Close() }()
+	fallbackOK := func(context.Context, string, string) (net.Conn, error) { return conn1, nil }
+	dial := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "socks.example:1080"},
+		func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("203.0.113.9")}}, nil
+		}, fallbackOK)
+	got, err := dial(context.Background(), "tcp", "socks.example:1080")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	_ = got.Close()
+}
+
+// A nil lookup falls back to the default resolver; literal proxy endpoints
+// skip resolution entirely so this leg is reachable without DNS.
+func TestNativeSOCKSPinnedDialNilLookupLiteral(t *testing.T) {
+	sentinel := errors.New("dialed")
+	dialed := ""
+	dial := NativeSOCKSPinnedDial(&url.URL{Scheme: "socks5", Host: "127.0.0.1:1080"}, nil, func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = addr
+		return nil, sentinel
+	})
+	_, err := dial(context.Background(), "tcp", "127.0.0.1:1080")
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, "127.0.0.1:1080", dialed)
 }

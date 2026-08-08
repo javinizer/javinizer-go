@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	// pinnedSocksForward defined below
 	"context"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"golang.org/x/net/proxy"
 )
 
@@ -75,7 +77,12 @@ func NewTransport(proxyProfile *models.ProxyProfile) (*http.Transport, error) {
 					Password: proxyProfile.Password,
 				}
 			}
-			dialer, err := proxy.SOCKS5("tcp", parsedProxyURL.Host, auth, proxy.Direct)
+			// Pin the SOCKS proxy endpoint at the x/net dialer level: the SOCKS5
+			// dialer calls this forward to connect to the proxy server. Resolving
+			// once + dialing pinned IPs prevents DNS rebinding from redirecting
+			// proxy credentials to an unintended address.
+			forward := &pinnedSocksForward{proxyURL: parsedProxyURL}
+			dialer, err := proxy.SOCKS5("tcp", parsedProxyURL.Host, auth, forward)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create SOCKS5 dialer: %w", err)
 			}
@@ -91,6 +98,11 @@ func NewTransport(proxyProfile *models.ProxyProfile) (*http.Transport, error) {
 			}
 			// Clear transport.Proxy to prevent HTTP_PROXY env vars from overriding SOCKS5
 			transport.Proxy = nil
+			// Transport.Proxy is nil yet the dialer owns DNS: announce remote-DNS
+			// ownership so SSRF wrappers preserve hostnames (policy layers cannot
+			// detect this structurally -- Go erases named func types at field
+			// assignment).
+			ssrf.MarkRemoteDNSTransport(transport)
 		} else {
 			// HTTP/HTTPS proxy
 			transport.Proxy = http.ProxyURL(parsedProxyURL)
@@ -184,4 +196,21 @@ func NewRestyClientWithFlareSolverr(proxyProfile *models.ProxyProfile, flaresolv
 		Client:       client,
 		FlareSolverr: fs,
 	}, nil
+}
+
+// pinnedSocksForward is the underlying dialer the x/net SOCKS5 client uses
+// to connect to the proxy server itself. It resolves the proxy endpoint
+// ONCE and dials the pinned IP (with failover) so DNS rebinding cannot
+// redirect the proxy connection -- and its credentials -- elsewhere.
+type pinnedSocksForward struct {
+	proxyURL *url.URL
+}
+
+func (f *pinnedSocksForward) Dial(network, addr string) (net.Conn, error) {
+	return f.DialContext(context.Background(), network, addr)
+}
+
+func (f *pinnedSocksForward) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	return ssrf.NativeSOCKSPinnedDial(f.proxyURL, nil, dialer)(ctx, network, addr)
 }
