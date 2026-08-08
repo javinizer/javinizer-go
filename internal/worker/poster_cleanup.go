@@ -97,8 +97,11 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup 
 }
 
 // restore returns parked bytes to their canonical names (removing whatever
-// the failed op wrote there first). Best-effort, logged.
-func (b *rescrapePosterBackup) restore() {
+// the failed op wrote there first). Best-effort, logged. When verify is
+// non-nil it is consulted PER-LEG against the CURRENT canonical content
+// (audit F-R5-1): a false verdict skips the rewind — a concurrent winner's
+// committed bytes never get rewound to the pre-op state.
+func (b *rescrapePosterBackup) restore(verify func(legPath string) bool) {
 	if b == nil || b.fs == nil {
 		return
 	}
@@ -112,6 +115,10 @@ func (b *rescrapePosterBackup) restore() {
 			continue
 		}
 		if _, err := b.fs.Stat(leg.bak); err != nil {
+			continue
+		}
+		if verify != nil && !verify(leg.path) {
+			logging.Warnf("rescrape pair restore %s skipped: canonical no longer holds this op's bytes", leg.path)
 			continue
 		}
 		_ = b.fs.Remove(leg.path)

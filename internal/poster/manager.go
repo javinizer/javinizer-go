@@ -252,7 +252,9 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 	if err := pm.fs.Rename(tempDownloadPath, tempFullPath); err != nil {
 		_ = pm.fs.Remove(tempDownloadPath)
 		if hadFull {
-			_ = pm.fs.Rename(fullParked, tempFullPath)
+			if rrErr := pm.fs.Rename(fullParked, tempFullPath); rrErr != nil {
+				logging.Warnf("poster restore %s: %v", tempFullPath, rrErr)
+			}
 		}
 		return nil, fmt.Errorf("failed to finalize image download: %w", err)
 	}

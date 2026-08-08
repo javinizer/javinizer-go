@@ -93,12 +93,12 @@ func TestRescapePosterBackupRestoreMissingBak(t *testing.T) {
 		fs:      mem,
 		full:    "/tmp/posters/JM/NO-1-full.jpg",
 		crop:    "/tmp/posters/JM/NO-1.jpg",
-		fullBak: "/tmp/posters/JM/NO-1-full.jpg.rsbak.zzz",
-		cropBak: "/tmp/posters/JM/NO-1.jpg.rsbak.zzz",
+		fullBak: "/tmp/posters/JM/NO-1-full.jpg.rsbak.a1.b2",
+		cropBak: "/tmp/posters/JM/NO-1.jpg.rsbak.a1.b2",
 		hadFull: true,
 		hadCrop: true,
 	}
-	b.restore() // both baks missing → skip quietly (stat-miss continue arc)
+	b.restore(nil) // both baks missing → skip quietly (stat-miss continue arc)
 }
 
 // audit F-R4-5: sweep warn arcs — Remove wedge keeps the litter in place;
@@ -106,18 +106,105 @@ func TestRescapePosterBackupRestoreMissingBak(t *testing.T) {
 func TestReconcileParkedPosterBackupsWarns(t *testing.T) {
 	base, dir := witnessFixture(t)
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "WP-1.jpg"), []byte("live"), 0o644))
-	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "WP-1.jpg.rsbak.abc"), []byte("stale"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "WP-1.jpg.rsbak.a1.b2"), []byte("stale"), 0o644))
 	cl := &TempDirCleaner{fs: removeFailFS{Fs: base}, tempDir: "/tmp", jobRepo: nil}
 	assert.Equal(t, 0, cl.reconcileParkedPosterBackups(dir))
-	_, err := base.Stat(filepath.Join(dir, "WP-1.jpg.rsbak.abc"))
+	_, err := base.Stat(filepath.Join(dir, "WP-1.jpg.rsbak.a1.b2"))
 	assert.NoError(t, err, "wedged remove keeps the litter")
 
 	base2, dir2 := witnessFixture(t)
-	require.NoError(t, afero.WriteFile(base2, filepath.Join(dir2, "WP-2-2-2-full.jpg.rsbak.abc"), []byte("committed"), 0o644))
+	require.NoError(t, afero.WriteFile(base2, filepath.Join(dir2, "WP-2-2-2-full.jpg.rsbak.a1.b2"), []byte("committed"), 0o644))
 	cl2 := &TempDirCleaner{fs: &seqRenameFailFS{Fs: base2, failOn: map[int]bool{1: true}}, tempDir: "/tmp", jobRepo: nil}
 	assert.Equal(t, 0, cl2.reconcileParkedPosterBackups(dir2))
-	_, err2 := base2.Stat(filepath.Join(dir2, "WP-2-2-2-full.jpg.rsbak.abc"))
+	_, err2 := base2.Stat(filepath.Join(dir2, "WP-2-2-2-full.jpg.rsbak.a1.b2"))
 	assert.NoError(t, err2, "wedged restore keeps the parked copy")
+}
+
+// audit F-R5-3: dotted poster ids containing ".dlbak"/".rsbak." are live
+// canonical files, never parked backups — the anchored parse must leave them
+// alone, and witness FILES must never be reclassified either.
+func TestReconcileParkedDottedIDsNotMisparsed(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "foo.dlbak.jpg"), []byte("live-canon"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "x.rsbak.y-full.jpg"), []byte("live-full"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-see.dlbak.json"), []byte("{bad-json"), 0o644))
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	healed := cl.reconcileParkedPosterBackups(dir)
+	assert.Equal(t, 0, healed, "no dotted names reclassified")
+	for _, n := range []string{"foo.dlbak.jpg", "x.rsbak.y-full.jpg", ".promote-see.dlbak.json"} {
+		_, err := fs.Stat(filepath.Join(dir, n))
+		assert.NoError(t, err, "%s survives", n)
+	}
+	_, err := fs.Stat(filepath.Join(dir, "foo"))
+	assert.Error(t, err, "no bogus canon created")
+}
+
+// audit F-R5-2: a poster with ANY unresolved witness is skipped by the sweep
+// entirely — the arbitrators own those bytes.
+func TestReconcileParkedSkipsWitnessedPosters(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	// parked stale litter + live canon + unresolved promote witness
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg"), []byte("current"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg.rsbak.a1.b2"), []byte("stale"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), []byte("{}"), 0o644))
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	healed := cl.reconcileParkedPosterBackups(dir)
+	assert.Equal(t, 0, healed, "witnessed poster swept neither way")
+	_, err := fs.Stat(filepath.Join(dir, "PI-1.jpg.rsbak.a1.b2"))
+	assert.NoError(t, err, "parked copy kept until arbitration resolves")
+	got, _ := afero.ReadFile(fs, filepath.Join(dir, "PI-1.jpg"))
+	assert.Equal(t, "current", string(got))
+}
+
+// The crop-witness belt reads poster IDs from witness CONTENT (content
+// authority, not filename).
+func TestReconcileParkedSkipsCropWitnessedPoster(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-9.jpg.rsbak.a1.b2"), []byte("stale"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-PI-9.crop-x.json"), []byte("{\"poster_id\":\"PI-9\"}"), 0o644))
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	assert.Equal(t, 0, cl.reconcileParkedPosterBackups(dir))
+	_, err := fs.Stat(filepath.Join(dir, "PI-9.jpg.rsbak.a1.b2"))
+	assert.NoError(t, err)
+	// corrupt crop witness: unreadable content belt skipped (no fence), parked healed
+	require.NoError(t, fs.Remove(filepath.Join(dir, ".crop-PI-9.crop-x.json")))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-PI-9.crop-y.json"), []byte("{corrupt"), 0o644))
+	assert.Equal(t, 1, cl.reconcileParkedPosterBackups(dir), "corrupt witness does not fence")
+}
+
+func TestIsBackupNonce(t *testing.T) {
+	assert.True(t, isBackupNonce("a1.b2"))
+	assert.True(t, isBackupNonce("19c34abc.1f"))
+	assert.False(t, isBackupNonce("abc"))
+	assert.False(t, isBackupNonce("a1.b2."))
+	assert.False(t, isBackupNonce(".rsbak"))
+	assert.False(t, isBackupNonce("G1.b2"))
+	assert.False(t, isBackupNonce("a1.B2"))
+	assert.False(t, isBackupNonce("a1.b2.c3"))
+}
+
+// Belt edge branches: bad-escape promote names fence by raw base; unreadable
+// crop witnesses skip their content probe without fencing anything.
+func TestReconcileParkedWitnessBeltEdgeBranches(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-%zz.json"), []byte("{}"), 0o644))              // invalid escape
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-x.json"), []byte("not-json"), 0o644))             // unreadable content
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-y.json"), []byte("{\"poster_id\":\"\"}"), 0o644)) // empty id
+	// valid parked target for raw-named promote fence: base "%zz" after unescape fails → raw key "%zz"
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "%zz.jpg.rsbak.a1.b2"), []byte("stale"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "OTHER-1.jpg.rsbak.a1.b2"), []byte("restore"), 0o644))
+	// unreadable crop witness: belt content-scan errors out → continue, NO fence
+	fsFailingRead := openFailSuffixFS{Fs: fs, suffix: ".crop-y.json"}
+	clFail := &TempDirCleaner{fs: fsFailingRead, tempDir: "/tmp", jobRepo: nil}
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "RD-1.jpg.rsbak.a1.b2"), []byte("restore"), 0o644))
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	healed := cl.reconcileParkedPosterBackups(dir)
+	assert.Equal(t, 2, healed, "only the unwitnessed parked legs heal")
+	clFail.reconcileParkedPosterBackups(dir) // exercises the read-fail continue arc
+	_, err := fs.Stat(filepath.Join(dir, "OTHER-1.jpg"))
+	assert.NoError(t, err)
+	_, err2 := fs.Stat(filepath.Join(dir, "%zz.jpg.rsbak.a1.b2"))
+	assert.NoError(t, err2, "escaped-promote witness (%zz base) fences the sweep")
 }
 
 // audit F-R4-5: startup reconciliation re-homes parked backup legs stranded
@@ -125,10 +212,10 @@ func TestReconcileParkedPosterBackupsWarns(t *testing.T) {
 func TestReconcileParkedPosterBackups(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	// canonical missing → restore parked bytes
-	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "RK-1.jpg.rsbak.abc"), []byte("committed-crop"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "RK-1.jpg.rsbak.a1.b2"), []byte("committed-crop"), 0o644))
 	// canonical present → parked litter removed
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "RK-2.jpg"), []byte("live"), 0o644))
-	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "RK-2.jpg.rsbak.def"), []byte("stale"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "RK-2.jpg.rsbak.a1.b2"), []byte("stale"), 0o644))
 	// legacy plain .dlbak (pre-nonce manager parks) handled too
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "RK-3-full.jpg.dlbak"), []byte("committed-full"), 0o644))
 	// unrelated files untouched
@@ -143,7 +230,7 @@ func TestReconcileParkedPosterBackups(t *testing.T) {
 	assert.Equal(t, "committed-full", string(got), "legacy .dlbak restored")
 	live, _ := afero.ReadFile(fs, filepath.Join(dir, "RK-2.jpg"))
 	assert.Equal(t, "live", string(live), "present canonical untouched")
-	_, parkErr := fs.Stat(filepath.Join(dir, "RK-2.jpg.rsbak.def"))
+	_, parkErr := fs.Stat(filepath.Join(dir, "RK-2.jpg.rsbak.a1.b2"))
 	assert.Error(t, parkErr, "inferior parked litter removed")
 	readme, _ := afero.ReadFile(fs, filepath.Join(dir, "README.txt"))
 	assert.Equal(t, "x", string(readme), "unrelated files untouched")

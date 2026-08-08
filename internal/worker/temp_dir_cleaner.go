@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -278,7 +279,6 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 		if rerr != nil {
 			continue
 		}
-		reversed += c.reconcileParkedPosterBackups(dir)
 		for _, e := range entries {
 			name := e.Name()
 			isRekey := strings.HasPrefix(name, rekeyWitnessPrefix) && strings.HasSuffix(name, ".json")
@@ -379,6 +379,10 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 				logging.Warnf("rekey witness sweep %s: %v", wpath, rmErr)
 			}
 		}
+		// audit F-R5-2: parked-backup re-homing runs AFTER witness arbitration —
+		// never before: the sweep's canonical-present litter-drop would otherwise
+		// destroy bytes and markers a pending witness still needs.
+		reversed += c.reconcileParkedPosterBackups(dir)
 	}
 	return reversed, nil
 }
@@ -402,26 +406,70 @@ func arbitrateResults(job *models.Job) (map[string]*resultstore.MovieResult, boo
 	return snap.Results, true
 }
 
-// reconcileParkedPosterBackups re-homes .rsbak*/.dlbak* legs a crash or
+// reconcileParkedPosterBackups re-homes .rsbak.*/.dlbak legs a crash or
 // panic stranded (audit F-R4-5): parked bytes are the ONLY copy of the
-// committed pair in that window. Rules: canonical missing ⇒ rename back;
-// canonical present ⇒ the parked leg is newer-inferior litter, remove it.
-// Every step is logged and per-leg idempotent across restarts.
+// committed pair in that window. Runs AFTER witness arbitration (F-R5-2) and
+// skips any poster with an unresolved witness — the arbitrators own those
+// bytes. Parses are anchored: dotted ids containing ".dlbak"/".rsbak." are
+// never reclassified (F-R5-3), nor are witness FILES ever.
 func (c *TempDirCleaner) reconcileParkedPosterBackups(dir string) int {
 	entries, err := afero.ReadDir(c.fs, dir)
 	if err != nil {
 		return 0
 	}
+	// Witness belt (F-R5-2): unresolved witness ⇒ arbitrators own the poster.
+	witnessed := map[string]struct{}{}
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case strings.HasPrefix(name, promoteWitnessPrefix) && strings.HasSuffix(name, ".json"):
+			base := strings.TrimSuffix(strings.TrimPrefix(name, promoteWitnessPrefix), ".json")
+			if id, uerr := url.PathUnescape(base); uerr == nil {
+				witnessed[id] = struct{}{}
+			} else {
+				witnessed[base] = struct{}{}
+			}
+		case strings.HasPrefix(name, rekeyWitnessPrefix) && strings.HasSuffix(name, ".json"):
+			witnessed[strings.TrimSuffix(strings.TrimPrefix(name, rekeyWitnessPrefix), ".json")] = struct{}{}
+		case strings.HasPrefix(name, cropWitnessPrefix) && strings.HasSuffix(name, ".json"):
+			data, rerr := afero.ReadFile(c.fs, filepath.Join(dir, name))
+			if rerr != nil {
+				continue
+			}
+			var cw cropWitness
+			if json.Unmarshal(data, &cw) == nil && cw.PosterID != "" {
+				witnessed[cw.PosterID] = struct{}{}
+			}
+		}
+	}
 	healed := 0
 	for _, e := range entries {
 		name := e.Name()
 		var canon string
-		if i := strings.Index(name, ".rsbak."); i > 0 {
-			canon = name[:i]
-		} else if j := strings.Index(name, ".dlbak"); j > 0 {
-			canon = name[:j]
-		} else {
-			continue
+		switch {
+		case strings.HasPrefix(name, promoteWitnessPrefix) || strings.HasPrefix(name, rekeyWitnessPrefix) || strings.HasPrefix(name, cropWitnessPrefix):
+			continue // witness files are never parked backups (F-R5-3 belt)
+		case strings.HasSuffix(name, ".dlbak"):
+			canon = strings.TrimSuffix(name, ".dlbak") // legacy + manager park
+		default:
+			// nonce-anchored rescrape park: <id>.jpg.rsbak.<hex>.<hex> — the
+			// LAST hit with a hex.hex tail, so ids containing ".rsbak." don't
+			// misparse (F-R5-3).
+			idx := strings.LastIndex(name, ".rsbak.")
+			if idx < 0 || !isBackupNonce(name[idx+len(".rsbak."):]) {
+				continue
+			}
+			canon = name[:idx]
+		}
+		base := canon
+		switch {
+		case strings.HasSuffix(base, "-full.jpg"):
+			base = strings.TrimSuffix(base, "-full.jpg")
+		default:
+			base = strings.TrimSuffix(base, ".jpg")
+		}
+		if _, fenced := witnessed[base]; fenced {
+			continue // arbitrators own this poster (F-R5-2)
 		}
 		parked := filepath.Join(dir, name)
 		canonPath := filepath.Join(dir, canon)
@@ -440,6 +488,23 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(dir string) int {
 		healed++
 	}
 	return healed
+}
+
+// isBackupNonce matches the "<hex>.<hex>" park-path tail, preventing dotted
+// poster ids from misclassifying as backups (audit F-R5-3).
+func isBackupNonce(s string) bool {
+	parts := strings.Split(s, ".")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	for _, p := range parts {
+		for _, ch := range p {
+			if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // shaContentHex hashes a poster leg for witness arbitration.
