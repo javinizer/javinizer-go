@@ -84,9 +84,10 @@ func buildClient(settings *models.ScraperSettings, globalProxy *models.ProxyConf
 		timeout = 30 * time.Second
 	}
 	retries := settings.RetryCount
-	if retries <= 0 {
-		retries = 3
+	if retries < 0 {
+		retries = 0
 	}
+	// Explicit `retry_count: 0` disables retries (codex round 12).
 	if globalProxy == nil {
 		globalProxy = &models.ProxyConfig{}
 	}
@@ -126,12 +127,16 @@ func buildClient(settings *models.ScraperSettings, globalProxy *models.ProxyConf
 		// at dial time (pinned transport), protecting against rebinding.
 		return nil
 	}))
-	// Pin the dialer: each request resolves the host and refuses private/
-	// loopback answers (DNS rebinding defense for configured mirrors).
-	if base, ok := client.GetClient().Transport.(*http.Transport); ok {
-		pinned, err := ssrf.NewPinnedDialTransport(base)
-		if err == nil {
-			client.SetTransport(pinned)
+	// Pin the dialer ONLY for the direct path: with a configured proxy the
+	// connection target IS the proxy (trusted infra, often loopback) — pinning
+	// it would reject every request. Proxy destinations are instead validated
+	// by the redirect policy's per-hop allowlist above (codex round 12).
+	if proxyProfile.URL == "" {
+		if base, ok := client.GetClient().Transport.(*http.Transport); ok {
+			pinned, err := ssrf.NewPinnedDialTransport(base)
+			if err == nil {
+				client.SetTransport(pinned)
+			}
 		}
 	}
 	return client
