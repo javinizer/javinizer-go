@@ -1,6 +1,7 @@
 package temp
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -206,6 +207,17 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 	if mediaType != "" && !strings.HasPrefix(mediaType, "image/") {
 		return fetchResult{err: fmt.Errorf("non-image content type %q", mediaType)}
 	}
+	var head []byte
+	if mediaType == "" {
+		buf := make([]byte, 512)
+		hn, _ := io.ReadAtLeast(resp.Body, buf, 1)
+		head = buf[:hn]
+		sniffed := http.DetectContentType(head)
+		if !strings.HasPrefix(sniffed, "image/") {
+			return fetchResult{err: fmt.Errorf("non-image content in headerless response (sniffed %q)", sniffed)}
+		}
+		upstreamCT = sniffed
+	}
 	normalizedCT := contentTypeForExt(extForContentType(upstreamCT))
 
 	shardDir, hashPrefix := pathFor(cacheDir, cacheKey)
@@ -229,7 +241,11 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 		return fetchResult{err: fmt.Errorf("create temp: %w", err), persistFailed: true}
 	}
 	werr := &writeTracker{w: f}
-	n, copyErr := io.Copy(werr, io.LimitReader(resp.Body, maxImageProxyResponseSize+1))
+	src := io.LimitReader(resp.Body, maxImageProxyResponseSize+1)
+	if head != nil {
+		src = io.MultiReader(bytes.NewReader(head), io.LimitReader(resp.Body, maxImageProxyResponseSize+1-int64(len(head))))
+	}
+	n, copyErr := io.Copy(werr, src)
 	_ = f.Close()
 	if copyErr != nil {
 		_ = fs.Remove(tmpPath)

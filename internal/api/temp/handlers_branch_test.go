@@ -381,3 +381,44 @@ func TestBranch_QueryOrderDistinctCacheKeys(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w2.Code)
 	assert.Equal(t, "body:b=2&a=1", w2.Body.String(), "differently-ordered query strings must not share a cache entry")
 }
+
+func TestBranch_CachedFill_MaxAgeBoundedByConfigTTL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+	upstream := testUpstream("fill-body")
+	t.Cleanup(upstream.Close)
+
+	deps := newImageCacheDeps(t, afero.NewMemMapFs())
+
+	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	cc := w.Header().Get("Cache-Control")
+	require.True(t, strings.HasPrefix(cc, "private, max-age="), "unexpected Cache-Control %q", cc)
+	maxAge, err := strconv.Atoi(strings.TrimPrefix(cc, "private, max-age="))
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, maxAge, 3550)
+	assert.LessOrEqual(t, maxAge, 3600, "cache-fill response must not outlive the configured TTL")
+}
+
+func TestBranch_CachedFill_MaxAgeCappedAt24h(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+	upstream := testUpstream("fill-body")
+	t.Cleanup(upstream.Close)
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = true
+	cfg.System.ImageCacheTTLHours = 168
+	cfg.System.TempDir = t.TempDir()
+	deps := &core.APIDeps{Fs: afero.NewMemMapFs()}
+	rt := core.NewAPIRuntime(deps)
+	rt.SetConfig(cfg)
+	testkit.SetTestRuntime(deps, rt)
+
+	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "private, max-age=86400", w.Header().Get("Cache-Control"))
+}

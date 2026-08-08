@@ -174,3 +174,22 @@ func TestBranch_FetchAndCache_RejectsNonImageContentType(t *testing.T) {
 	entries, _ := afero.ReadDir(fs, "/")
 	assert.Empty(t, entries, "nothing must be written for non-image responses")
 }
+
+func TestBranch_FetchAndCache_RejectsHeaderlessHTML(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "")
+		_, _ = w.Write([]byte("<html><body>bot check</body></html>"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	fs := afero.NewMemMapFs()
+	client := ssrf.NewSSRFSafeClient(30 * time.Second)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img", upstream.URL+"/img", client, "ua", "")
+	require.Error(t, result.err)
+	assert.Contains(t, result.err.Error(), "non-image content")
+	assert.Empty(t, result.cachedPath)
+	assert.Empty(t, result.tempPath)
+}

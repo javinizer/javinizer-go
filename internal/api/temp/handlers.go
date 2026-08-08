@@ -180,12 +180,8 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 		file, contentType, remaining, state := get(fs, cacheDir, normalizedURL, ttl)
 		if state == CacheFresh {
 			defer func() { _ = file.Close() }()
-			maxAge := int64(remaining.Seconds())
-			if maxAge > 86400 {
-				maxAge = 86400
-			}
 			c.Header("Content-Type", contentType)
-			c.Header("Cache-Control", fmt.Sprintf("private, max-age=%d", maxAge))
+			c.Header("Cache-Control", cacheControlForTTL(remaining))
 			c.Header("X-Content-Type-Options", "nosniff")
 			if _, err := io.Copy(c.Writer, file); err != nil {
 				c.AbortWithStatus(http.StatusBadGateway)
@@ -240,7 +236,7 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 
 		if result.cachedPath != "" {
 			c.Header("Content-Type", result.contentType)
-			c.Header("Cache-Control", "private, max-age=86400")
+			c.Header("Cache-Control", cacheControlForTTL(ttl))
 			c.Header("X-Content-Type-Options", "nosniff")
 			cachedFile, openErr := fs.Open(result.cachedPath)
 			if openErr != nil {
@@ -357,4 +353,12 @@ func isSafePathSegment(s string) bool {
 		return false
 	}
 	return s == filepath.Base(s)
+}
+
+func cacheControlForTTL(remaining time.Duration) string {
+	maxAge := int64(remaining.Seconds())
+	if maxAge > 86400 {
+		maxAge = 86400
+	}
+	return fmt.Sprintf("private, max-age=%d", maxAge)
 }

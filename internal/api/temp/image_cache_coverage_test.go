@@ -365,13 +365,14 @@ func TestCoverage_FetchAndCacheRenameFailureDegrades(t *testing.T) {
 	assert.False(t, result.persistFailed)
 }
 
-func TestCoverage_FetchAndCacheBadContentType(t *testing.T) {
+func TestCoverage_FetchAndCacheSniffsHeaderlessJpeg(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 200)...)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "")
-		w.Write([]byte("no-ct"))
+		w.Write(jpegBytes)
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -383,6 +384,10 @@ func TestCoverage_FetchAndCacheBadContentType(t *testing.T) {
 	require.NoError(t, result.err)
 	assert.Equal(t, "image/jpeg", result.contentType)
 	assert.NotEmpty(t, result.cachedPath)
+
+	cached, err := afero.ReadFile(fs, result.cachedPath)
+	require.NoError(t, err)
+	assert.Equal(t, jpegBytes, cached, "sniffed head bytes must be preserved in the cached file")
 }
 
 func TestCoverage_FetchAndCacheOldExtCleanup(t *testing.T) {
