@@ -421,3 +421,32 @@ func TestRedactPageURL(t *testing.T) {
 	result2 := redactPageURL("://invalid")
 	assert.Equal(t, "://invalid", result2)
 }
+
+func TestLanguageFromURL(t *testing.T) {
+	assert.Equal(t, "en", languageFromURL("https://www.javlibrary.com/en/javliay67q.html", "ja"))
+	assert.Equal(t, "ja", languageFromURL("https://www.javlibrary.com/ja/?v=javmeABCDE", "en"))
+	assert.Equal(t, "en", languageFromURL("https://www.javlibrary.com/en/?v=javmeABCDE", "ja"))
+	// Fallback when no language in path
+	assert.Equal(t, "ja", languageFromURL("https://www.javlibrary.com/?v=javmeABCDE", "ja"))
+	// Invalid URL returns fallback
+	assert.Equal(t, "en", languageFromURL("://invalid", "en"))
+}
+
+func TestPageIDFromURL(t *testing.T) {
+	// ?v= query parameter
+	assert.Equal(t, "javmeABCDE", pageIDFromURL("https://www.javlibrary.com/en/?v=javmeABCDE"))
+	// .html path basename
+	assert.Equal(t, "javliay67q", pageIDFromURL("https://www.javlibrary.com/en/javliay67q.html"))
+	// Path with extension stripped
+	assert.Equal(t, "test123", pageIDFromURL("https://www.javlibrary.com/en/test123.html"))
+	// Invalid URL returns empty
+	assert.Equal(t, "", pageIDFromURL("://invalid"))
+	// No path segments
+	assert.Equal(t, "", pageIDFromURL("https://www.javlibrary.com/"))
+}
+
+func TestIsDirectPageURL_ErrorBranch(t *testing.T) {
+	// Invalid URL should return false (covers parse error branch)
+	assert.False(t, isDirectPageURL("://invalid-url"))
+	assert.False(t, isDirectPageURL(""))
+}
