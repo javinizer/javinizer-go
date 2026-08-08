@@ -76,6 +76,10 @@ func RedactSourceURL(input string) string {
 	return u.String()
 }
 
+// RedactURLQuery strips the query (and fragment) from a URL-shaped raw input
+// before it reaches logs, failure JobEvents, or persisted provenance. Query
+// strings may carry tokens; the redacted value keeps only scheme+host+path so
+// a row is still identifiable without leaking secrets.
 func RedactURLQuery(input string) string {
 	if input == "" {
 		return ""
