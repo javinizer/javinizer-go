@@ -196,17 +196,17 @@ func TestParseScene_EmptyCodeFallback(t *testing.T) {
 		language: "en",
 	}
 
-	// scene.Code is empty → ID and ContentID fall back to searchID
+	// scene.Code is empty and searchID is also empty → ID and ContentID stay empty
 	sc := &scene{
 		ID:    "scene789",
 		Code:  "",
-		Title: "Fallback Movie",
+		Title: "Empty Movie",
 	}
 
-	result, err := s.parseScene(sc, "FALLBACK-001")
+	result, err := s.parseScene(sc, "")
 	require.NoError(t, err)
-	assert.Equal(t, "FALLBACK-001", result.ID, "ID should fall back to searchID when scene.Code is empty")
-	assert.Equal(t, "FALLBACK-001", result.ContentID, "ContentID should equal ID")
+	assert.Equal(t, "", result.ID, "ID should be empty when both scene.Code and searchID are empty")
+	assert.Equal(t, "", result.ContentID, "ContentID should equal ID")
 }
 
 // --- parseScene: images with poster keyword ---
