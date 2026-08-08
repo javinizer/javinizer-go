@@ -438,3 +438,29 @@ func TestValidateConfigExcludingTranslationCredentials_ProxyProfileError(t *test
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "default_profile")
 }
+
+func TestValidateConfigExcludingTranslationCredentials_ImageCacheTTLRange(t *testing.T) {
+	cfg := DefaultConfig(nil, nil)
+	cfg.System.ImageCacheTTLHours = -1
+	err := validateConfigExcludingTranslationCredentials(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "image_cache_ttl_hours")
+
+	cfg = DefaultConfig(nil, nil)
+	cfg.System.ImageCacheTTLHours = 87601
+	err = validateConfigExcludingTranslationCredentials(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "image_cache_ttl_hours")
+}
+
+func TestValidateConfigExcludingTranslationCredentials_ImageCacheEnabledRequiresTTL(t *testing.T) {
+	cfg := DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = true
+	cfg.System.ImageCacheTTLHours = 0
+	err := validateConfigExcludingTranslationCredentials(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "image_cache_ttl_hours")
+
+	cfg.System.ImageCacheTTLHours = 24
+	assert.NoError(t, validateConfigExcludingTranslationCredentials(cfg))
+}
