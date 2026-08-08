@@ -113,3 +113,17 @@ func TestRedactErrorURL_RedactedEqualsRaw(t *testing.T) {
 	result := redactErrorURL(err, rawURL)
 	assert.Equal(t, err, result)
 }
+
+func TestQueryRaw_CancelledContext(t *testing.T) {
+	reg := scraperutil.NewScraperRegistry()
+	reg.RegisterInstance(&stubScrape{name: "test", enabled: true})
+	engine := NewQueryOnly(reg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := engine.QueryRaw(ctx, "TEST-001", "test")
+	require.Nil(t, result)
+	require.NotNil(t, err)
+	assert.Equal(t, models.ScraperErrorKindUnavailable, err.Kind)
+}
