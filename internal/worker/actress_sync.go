@@ -230,10 +230,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		}
 		result.UpdatedFields = append(result.UpdatedFields, recoveredFields...)
 	}
-	// The field-priority override is exclusive: with an explicit actress
-	// priority config the cache may NOT supply fields (would bypass the
-	// configured source ranking or the __skip__ suppression sentinel).
-	cacheAllowed := !actressSyncSkipSentinel(actressFieldPriority) && len(actressFieldPriority) == 0
+	cacheAllowed := cacheAllowedForPriority(actressSyncSkipSentinel(actressFieldPriority), actressFieldPriority)
 	if !revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID && cacheAllowed {
 		fields, fillErr := fillMetadata(actress.ID, actress.DMMID, cacheMatch)
 		if fillErr != nil {
@@ -981,6 +978,29 @@ const (
 	resolverNameJavDB     = "javdb"
 	resolverNameMinnanoAV = "minnanoav"
 )
+
+// priorityListContains reports whether a configured priority list names the
+// given source (case-insensitive, trimmed). Used to admit the built-in cache
+// when DMM is an eligible source without unpacking full ranking.
+func priorityListContains(priority []string, name string) bool {
+	for _, entry := range priority {
+		if strings.EqualFold(strings.TrimSpace(entry), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// cacheAllowedForPriority reports whether the built-in (DMM-sourced) actress
+// cache may write fields. Skipped under __skip__; under an explicit priority it
+// is admitted iff DMM itself is (the cache is a snapshot of DMM-sourced data,
+// so it rides DMM's admission). Under no explicit priority it is admitted.
+func cacheAllowedForPriority(skipped bool, priority []string) bool {
+	if skipped {
+		return false
+	}
+	return len(priority) == 0 || priorityListContains(priority, "dmm")
+}
 
 // nameIsKeyed identifies resolvers whose lookup needs a Japanese name.
 func nameIsKeyed(name string) bool {

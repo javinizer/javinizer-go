@@ -532,12 +532,38 @@ func isRetryableActressSyncError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var se *models.ScraperError
-	if errors.As(err, &se) && se != nil {
-		if se.Kind == models.ScraperErrorKindNotFound || se.Kind == models.ScraperErrorKindBlocked {
-			return false
+	// Walk EVERY leaf of an errors.Join aggregate: a blocked look-up followed
+	// by a retryable 429 must still retry — scrutinising only the first match
+	// would terminal-fail an otherwise recoverable task (codex P2 round 6).
+	type unwrapper interface{ Unwrap() []error }
+	stack := []error{err}
+	seen := map[error]struct{}{}
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if cur == nil {
+			continue
 		}
-		return se.Retryable || se.Temporary || se.Kind == models.ScraperErrorKindRateLimited || se.Kind == models.ScraperErrorKindUnavailable
+		if _, dup := seen[cur]; dup {
+			continue
+		}
+		seen[cur] = struct{}{}
+		var se *models.ScraperError
+		if !errors.As(cur, &se) || se == nil {
+			if u, ok := cur.(unwrapper); ok {
+				stack = append(stack, u.Unwrap()...)
+			}
+			continue
+		}
+		switch {
+		case se.Kind == models.ScraperErrorKindNotFound, se.Kind == models.ScraperErrorKindBlocked:
+			// A hard catalog-miss leaves the aggregate's retry verdict alone.
+		case se.Retryable || se.Temporary || se.Kind == models.ScraperErrorKindRateLimited || se.Kind == models.ScraperErrorKindUnavailable:
+			return true
+		}
+		if u, ok := cur.(unwrapper); ok {
+			stack = append(stack, u.Unwrap()...)
+		}
 	}
 	return false
 }

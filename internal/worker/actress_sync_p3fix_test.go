@@ -199,3 +199,29 @@ func (w *actressMetadataWire) ResolveActressMetadata(_ context.Context, in model
 	}
 	return models.ActressInfo{}, nil
 }
+
+// Codex P2 (round 6): an errors.Join aggregate yields retryable-unset when the
+// first authoritative leaf was NotFound/Blocked AND a later leaf is 429.
+func TestRetryableJoinedErrorsInspected(t *testing.T) {
+	joined := errors.Join(
+		&models.ScraperError{Kind: models.ScraperErrorKindNotFound},
+		&models.ScraperError{Kind: models.ScraperErrorKindRateLimited, StatusCode: 429, Retryable: true},
+	)
+	require.True(t, isRetryableActressSyncError(joined), "any retryable leaf in a join must retry")
+
+	allBlocked := errors.Join(
+		&models.ScraperError{Kind: models.ScraperErrorKindNotFound},
+		&models.ScraperError{Kind: models.ScraperErrorKindBlocked},
+	)
+	require.False(t, isRetryableActressSyncError(allBlocked))
+}
+
+// Codex P2 (round 6): cache is DMM-sourced by construction; dmm-prioritized
+// configurations must still accept cache metadata.
+func TestCacheAllowanceHonorsDMM(t *testing.T) {
+	require.True(t, cacheAllowedForPriority(false, nil))
+	require.True(t, cacheAllowedForPriority(false, []string{"dmm"}))
+	require.True(t, cacheAllowedForPriority(false, []string{"DMM", "javdb"}))
+	require.False(t, cacheAllowedForPriority(false, []string{"javdb", "minnanoav"}))
+	require.False(t, cacheAllowedForPriority(true, []string{"dmm"}))
+}
