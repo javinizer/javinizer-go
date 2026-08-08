@@ -160,7 +160,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
 	}
 
-	logging.Debugf("R18.dev ScrapeURL: Extracted ID %s from URL %s", id, urlStr)
+	logging.Debugf("R18.dev ScrapeURL: Extracted ID %s from URL %s", id, redactLogURL(urlStr))
 
 	resp, err := s.doRequestWithRetryCtx(ctx, urlStr)
 	if err != nil {
@@ -193,6 +193,36 @@ func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 }
 
 // ResolveDownloadProxyForHost declares R18.dev-owned media hosts for downloader proxy routing.
+// redactLogURL strips userinfo and secret query parameters from a URL for
+// safe logging. Non-secret identifiers are preserved.
+func redactLogURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	u.User = nil
+	u.Fragment = ""
+	q := u.Query()
+	for k := range q {
+		lk := strings.ToLower(k)
+		if lk == "keyword" {
+			continue
+		}
+		for _, frag := range []string{"sign", "secret", "token", "pass", "pwd", "cred", "auth", "session", "oauth", "key"} {
+			if strings.Contains(lk, frag) {
+				q.Del(k)
+				break
+			}
+		}
+	}
+	if len(q) > 0 {
+		u.RawQuery = q.Encode()
+	} else {
+		u.RawQuery = ""
+	}
+	return u.String()
+}
+
 func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
