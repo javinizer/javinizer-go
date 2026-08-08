@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
@@ -300,7 +301,7 @@ func TestWithRescrapeStatusConflictRestoreContentVerified(t *testing.T) {
 	got, _ = afero.ReadFile(fs, canon)
 	assert.Equal(t, "winner-D", string(got), "winner's bytes never rewound")
 	_, statErr := fs.Stat(parked2.cropBak)
-	assert.NoError(t, statErr, "skipping restore keeps the parked copy for arbitration")
+	assert.Error(t, statErr, "verify-skipped parked copy is DISPOSED (F-R10-2) — fences unlock")
 }
 
 // verify() rerr branch: fingerprint set but canonical missing at closeout —
@@ -384,6 +385,114 @@ func TestWithRescrapeStatusFenceErrorSkipsRestore(t *testing.T) {
 	assert.Equal(t, "gen-bytes", string(got), "fence path leaves bytes untouched for the reconciler")
 	_, parkErr := fs.Stat(parked.cropBak)
 	assert.NoError(t, parkErr, "parked copy persists for manual repair")
+}
+
+// F-R10-2 dispose warn: a wedged Remove on the obsolete parked copy is
+// logged, not fatal — the winner's bytes still stand.
+func TestRescapePosterBackupDisposeWarns(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/tmp/posters/JDW", 0o755))
+	require.NoError(t, afero.WriteFile(base, "/tmp/posters/JDW/CV-9.jpg", []byte("winner"), 0o644))
+	requiredPath := "/tmp/posters/JDW/CV-9.jpg.rsbak.a1.b2"
+	require.NoError(t, afero.WriteFile(base, requiredPath, []byte("preop"), 0o644))
+	b := &rescrapePosterBackup{
+		fs:      &seqRenameFailFS{Fs: base, failOn: map[int]bool{}},
+		full:    "/tmp/posters/JDW/CV-9-full.jpg",
+		crop:    "/tmp/posters/JDW/CV-9.jpg",
+		cropBak: requiredPath,
+		hadCrop: true,
+	}
+	b.fs = removeFailFS{Fs: base}                   // Remove wedges → warn-only
+	b.restore(func(p string) bool { return false }) // say: canon isn't ours
+	_, err := base.Stat(requiredPath)
+	assert.NoError(t, err, "wedged dispose keeps the parked copy")
+}
+
+// audit F-R10-2: when a closeout's content-verify refuses the rewind (canon
+// holds winner bytes), the parked pre-op copy is OBSOLETE — disposed, never
+// left to brick every poster admission as "in-flight rescrape".
+func TestWithRescrapeStatusConflictVerifySkipDisposesParked(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-1", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+	canon := filepath.Join(dir, "CV-2.jpg")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op-C0"), 0o644))
+	parked := parkCanonicalPosterPair(fs, dir, "CV-2")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("ours-gen"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("winner-committed"), 0o644))
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.parked = parked
+		scope.genSHA = map[string]string{"CV-2.jpg": shaContentHex([]byte("ours-gen"))}
+		scope.preExistedPair = true
+		return &RescrapeResult{Status: models.RescrapeStatusConflict}, &resultstore.MovieResult{Movie: &models.Movie{ID: "CV-2"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}, nil
+	})
+	require.NoError(t, err)
+	got, _ := afero.ReadFile(fs, canon)
+	assert.Equal(t, "winner-committed", string(got), "winner bytes stand")
+	_, statErr := fs.Stat(parked.cropBak)
+	assert.Error(t, statErr, "verify-skipped parked copy disposed — fences unlock")
+	hit, _ := rescrapeInFlightBackupPresent(fs, dir, "CV-2")
+	assert.False(t, hit, "no in-flight marker left behind")
+}
+
+// audit F-R10-3: an in-flight rescrape's parked marker fences EVERY
+// revision-advancing edit through posterWitnessConflict.
+func TestPosterWitnessFenceFencesParkedBackup(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JOB-PK"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg.rsbak.a1.b2"), []byte("parked"), 0o644))
+	err := posterWitnessConflict(fs, "/tmp", "JOB-PK", "PI-1")
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+	assert.Contains(t, err.Error(), "in-flight rescrape")
+
+	// unrelated ID unaffected
+	require.NoError(t, posterWitnessConflict(fs, "/tmp", "JOB-PK", "OTHER-1"))
+}
+
+// audit F-R10-1: park + generation run UNDER the family key — the lock is
+// acquired before generation starts and released after it finishes.
+func TestRescrapeHoldsFamilyKeyThroughParkAndGenerate(t *testing.T) {
+	store := resultstore.New(1, []string{"f1.mp4"})
+	seedFamilyResult(store, "f1.mp4", "res-1", "KEY-1", "")
+	var heldDuringGen bool
+	var rhoacquiredAt, rhoReleasedAt time.Time
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "KEY-1"}, Status: scrape.StatusCompleted}}
+	gen := &spyPosterGen{
+		onGenerate: func() {
+			heldDuringGen = !rhoacquiredAt.IsZero() && rhoReleasedAt.IsZero()
+		},
+	}
+	inputs := rescrapePhaseInputs{
+		WF: wf, ResultMap: store, Finder: store, JobID: models.NewJobID(),
+		PosterGen: gen,
+		EditLockFn: func(ids ...string) func() {
+			rhoacquiredAt = time.Now()
+			return func() { rhoReleasedAt = time.Now() }
+		},
+		Fs: afero.NewMemMapFs(), TempDir: "/tmp",
+	}
+	phase := NewRescrapePhase()
+	res, err := phase.Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "KEY-1", FilePath: "f1.mp4"})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.True(t, heldDuringGen, "generation ran while the family key was held")
+	assert.False(t, rhoacquiredAt.IsZero(), "key acquired")
+}
+
+type spyPosterGen struct{ onGenerate func() }
+
+func (s *spyPosterGen) GeneratePoster(_ context.Context, _ string, _ *models.Movie) error {
+	if s.onGenerate != nil {
+		s.onGenerate()
+	}
+	return nil
 }
 
 // --- guard/backup matrix for poster_cleanup.go + predicate edges ---

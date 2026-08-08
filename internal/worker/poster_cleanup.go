@@ -118,7 +118,13 @@ func (b *rescrapePosterBackup) restore(verify func(legPath string) bool) {
 			continue
 		}
 		if verify != nil && !verify(leg.path) {
-			logging.Warnf("rescrape pair restore %s skipped: canonical no longer holds this op's bytes", leg.path)
+			// audit F-R10-2: canonical holds NEWER committed bytes — the parked
+			// pre-op copy is obsolete: dispose it so the parked-marker fences
+			// don't brick poster admissions until restart.
+			if rmErr := b.fs.Remove(leg.bak); rmErr != nil {
+				logging.Warnf("rescrape parked dispose %s: %v", leg.bak, rmErr)
+			}
+			logging.Warnf("rescrape pair restore %s skipped: canonical holds newer committed bytes — parked copy disposed", leg.path)
 			continue
 		}
 		_ = b.fs.Remove(leg.path)

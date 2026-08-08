@@ -137,6 +137,19 @@ func TestUpdateMovieSingleFencedByPromoteWitness(t *testing.T) {
 	assert.Contains(t, err.Error(), "promote witness unresolved")
 }
 
+// The parked-marker probe inside the full witness fence fails closed.
+func TestPosterWitnessConflictParkedScanErrorFailsClosed(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := "/tmp/posters/JXP"
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 2} // promote stat + rekey scan ok; parked scan wedges
+	err := posterWitnessConflict(fs, "/tmp", "JXP", "PI-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "backup-scan")
+	fresh := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 2} // fresh counter: same gating layout
+	require.NoError(t, posterWitnessConflictCore(fresh, "/tmp", "JXP", "PI-1"), "core never reads the parked probe")
+}
+
 // audit F-R6-1: inbound fence matches NewID by content — an edit or rescrape
 // resolving INTO a pending witness's destination is refused.
 func TestFenceMatchesRekeyWitnessNewID(t *testing.T) {

@@ -462,7 +462,28 @@ func rekeyWitnessIDsFor(fs afero.Fs, dir, posterID string) (bool, error) {
 
 // posterWitnessConflict is the raw-seams core of posterWitnessFence (audit
 // F1): rescrape plumbing carries fs/tempDir/jobID without a posterEditEnv.
+// posterWitnessConflict is the full edit-side witness fence: the three
+// witness kinds (core) PLUS in-flight rescrape park markers (F-R10-3).
 func posterWitnessConflict(fs afero.Fs, tempDir, jobID, posterID string) error {
+	if err := posterWitnessConflictCore(fs, tempDir, jobID, posterID); err != nil {
+		return err
+	}
+	if fs == nil || tempDir == "" || jobID == "" || posterID == "" {
+		return nil
+	}
+	dir := filepath.Join(tempDir, "posters", jobID)
+	if parked, perr := rescrapeInFlightBackupPresent(fs, dir, posterID); perr != nil {
+		return fmt.Errorf("poster rekey backup-scan: %w", perr)
+	} else if parked {
+		return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s has an in-flight rescrape — retry after it completes", posterID)}
+	}
+	return nil
+}
+
+// posterWitnessConflictCore probes promote/rekey/crop witnesses only — the
+// rescrape pipeline's own probes use it (rescrape-vs-rescrape last-writer-
+// wins stays legal: F-R10-1 keys the generation byte windows).
+func posterWitnessConflictCore(fs afero.Fs, tempDir, jobID, posterID string) error {
 	if fs == nil || tempDir == "" || jobID == "" || posterID == "" {
 		return nil
 	}

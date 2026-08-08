@@ -24,7 +24,9 @@ func TestRekeyDestinationScanWedgeFailsClosed(t *testing.T) {
 	dir := filepath.Join("/tmp", "posters", "JOB-DW")
 	require.NoError(t, mem.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, ".rekey-x.json"), []byte("{\"old_id\":\"UNREL\",\"new_id\":\"UNREL2\"}"), 0o644))
-	fs := &openFailAfterNFS{Fs: mem, suffix: "/tmp/posters/JOB-DW", allow: 2} // fence's rekey+crop scans succeed; destination scan wedges
+	// probe order: fence rekey #1, fence parked #2, fence crop #3 — wedge #4
+	// is the relocation's destination content scan.
+	fs := &openFailAfterNFS{Fs: mem, suffix: "/tmp/posters/JOB-DW", allow: 3}
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-DW"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
@@ -87,9 +89,11 @@ func TestRekeyRefusedWhileParkedBackupsPending(t *testing.T) {
 	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.ErrorAs(t, err, &cfe)
 
-	// Wedge ONLY the FOURTH dir scan: fence rekey scan #1, fence crop scan #2,
-	// migration destination scan #3, relocation backup scan #4 (wedge here).
-	fs2 := &openFailAfterNFS{Fs: fs, suffix: dir, allow: 3}
+	// Clean the in-flight marker first, then wedge ONLY the FIFTH dir scan:
+	// fence rekey #1, fence parked #2, fence crop #3, migration destination #4,
+	// relocation backup #5 (wedge here).
+	require.NoError(t, fs.Remove(filepath.Join(dir, "SSNI-R1-full.jpg.rsbak.c3.d4")))
+	fs2 := &openFailAfterNFS{Fs: fs, suffix: dir, allow: 4}
 	pe.attachEnv(&posterEditEnv{fs: fs2, tempDir: "/tmp", jobID: "JOB-9"})
 	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.Error(t, err)
@@ -102,9 +106,8 @@ func TestRekeyRefusedWhileParkedBackupsPending(t *testing.T) {
 	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.Error(t, err)
 
-	// The true F-R8-2 in-flight marker verification done: clear the last park
-	// and the same rekey proceeds (witness written, committed, swept).
-	require.NoError(t, fs.Remove(filepath.Join(dir, "SSNI-R1-full.jpg.rsbak.c3.d4")))
+	// The true F-R8-2 marker verification done — parks cleared above; the same
+	// rekey proceeds (witness written, committed, swept).
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
 	require.NoError(t, m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"}), "parks cleared ⇒ relocation proceeds")
 }

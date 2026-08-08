@@ -496,63 +496,83 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			return nil, movieResult, err
 		}
 
-		// audit F1: a witness outstanding means canonical poster bytes are
-		// mid-recovery (witness-holder owns them until restart reconcile) —
-		// generating over them would clobber recoverable state. Decline early;
-		// the commit-leg probe (familyKeyedResultMap) is the under-key net.
+		// audit F-R10-1: witness probes + park + generation run UNDER the
+		// family key — the keyless window let a committed relocation/promote
+		// land between our witness probe and our byte overwrite (steal), or
+		// let our generation overwrite a freshly promoted pair (clobber).
+		// The commit leg keys up separately afterwards, as before.
+		release := func() {}
+		genID := ""
 		if movieResult.Movie != nil {
-			seen := map[string]struct{}{}
-			for _, pid := range []string{strings.TrimSpace(lookup.OldMovieID), strings.TrimSpace(movieResult.Movie.ID)} {
-				if pid == "" {
-					continue
-				}
-				if _, dup := seen[strings.ToLower(pid)]; dup {
-					continue
-				}
-				seen[strings.ToLower(pid)] = struct{}{}
-				if cerr := posterWitnessConflict(inputs.Fs, inputs.TempDir, inputs.JobID.String(), pid); cerr != nil {
-					return nil, movieResult, cerr
-				}
-			}
+			genID = strings.TrimSpace(movieResult.Movie.ID)
 		}
-
-		// audit F-R3-1: record byte-ownership BEFORE generating — cleanup may
-		// only delete what this op created, and transient stat errors read as
-		// PRE-EXISTING (fail closed), never absent.
-		if movieResult.Movie != nil && inputs.Fs != nil && inputs.TempDir != "" {
-			pdir := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
-			fullPath := filepath.Join(pdir, movieResult.Movie.ID+"-full.jpg")
-			cropPath := filepath.Join(pdir, movieResult.Movie.ID+".jpg")
-			_, fe := inputs.Fs.Stat(fullPath)
-			_, ce := inputs.Fs.Stat(cropPath)
-			if fe == nil || ce == nil ||
-				(fe != nil && !os.IsNotExist(fe)) || (ce != nil && !os.IsNotExist(ce)) {
-				scope.preExistedPair = true
-			}
-			// audit F-R3-2a: park pre-existing canonical bytes aside so the
-			// closeout can restore committed state if this rescrape loses.
-			scope.parked = parkCanonicalPosterPair(inputs.Fs, pdir, movieResult.Movie.ID)
+		if inputs.EditLockFn != nil && genID != "" {
+			release = inputs.EditLockFn(genID)
 		}
-
-		// Poster generation
-		if inputs.PosterGen != nil && movieResult.Movie != nil {
-			if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
-				s := posterErr.Error()
-				movieResult.PosterError = &s
-			}
-			movieResult.PosterGenerated = true
-		}
-
-		// audit F-R5-1: fingerprint whatever the generation wrote at canonical —
-		// the closeout's restore rewinds only while those exact bytes sit there.
-		if movieResult.PosterGenerated && movieResult.Movie != nil && movieResult.PosterError == nil && inputs.Fs != nil && inputs.TempDir != "" {
-			pdir2 := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
-			scope.genSHA = map[string]string{}
-			for _, lp := range []string{filepath.Join(pdir2, movieResult.Movie.ID+"-full.jpg"), filepath.Join(pdir2, movieResult.Movie.ID+".jpg")} {
-				if data, rerr := afero.ReadFile(inputs.Fs, lp); rerr == nil {
-					scope.genSHA[filepath.Base(lp)] = shaContentHex(data)
+		heldErr := func() error {
+			// audit F1: a witness outstanding means canonical poster bytes are
+			// mid-recovery (witness-holder owns them until restart reconcile) —
+			// generating over them would clobber recoverable state. Decline early;
+			// the commit-leg probe (familyKeyedResultMap) is the under-key net.
+			if movieResult.Movie != nil {
+				seen := map[string]struct{}{}
+				for _, pid := range []string{strings.TrimSpace(lookup.OldMovieID), strings.TrimSpace(movieResult.Movie.ID)} {
+					if pid == "" {
+						continue
+					}
+					if _, dup := seen[strings.ToLower(pid)]; dup {
+						continue
+					}
+					seen[strings.ToLower(pid)] = struct{}{}
+					if cerr := posterWitnessConflictCore(inputs.Fs, inputs.TempDir, inputs.JobID.String(), pid); cerr != nil {
+						return cerr
+					}
 				}
 			}
+
+			// audit F-R3-1: record byte-ownership BEFORE generating — cleanup may
+			// only delete what this op created, and transient stat errors read as
+			// PRE-EXISTING (fail closed), never absent.
+			if movieResult.Movie != nil && inputs.Fs != nil && inputs.TempDir != "" {
+				pdir := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
+				fullPath := filepath.Join(pdir, movieResult.Movie.ID+"-full.jpg")
+				cropPath := filepath.Join(pdir, movieResult.Movie.ID+".jpg")
+				_, fe := inputs.Fs.Stat(fullPath)
+				_, ce := inputs.Fs.Stat(cropPath)
+				if fe == nil || ce == nil ||
+					(fe != nil && !os.IsNotExist(fe)) || (ce != nil && !os.IsNotExist(ce)) {
+					scope.preExistedPair = true
+				}
+				// audit F-R3-2a: park pre-existing canonical bytes aside so the
+				// closeout can restore committed state if this rescrape loses.
+				scope.parked = parkCanonicalPosterPair(inputs.Fs, pdir, movieResult.Movie.ID)
+			}
+
+			// Poster generation
+			if inputs.PosterGen != nil && movieResult.Movie != nil {
+				if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
+					s := posterErr.Error()
+					movieResult.PosterError = &s
+				}
+				movieResult.PosterGenerated = true
+			}
+
+			// audit F-R5-1: fingerprint whatever the generation wrote at canonical —
+			// the closeout's restore rewinds only while those exact bytes sit there.
+			if movieResult.PosterGenerated && movieResult.Movie != nil && movieResult.PosterError == nil && inputs.Fs != nil && inputs.TempDir != "" {
+				pdir2 := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
+				scope.genSHA = map[string]string{}
+				for _, lp := range []string{filepath.Join(pdir2, movieResult.Movie.ID+"-full.jpg"), filepath.Join(pdir2, movieResult.Movie.ID+".jpg")} {
+					if data, rerr := afero.ReadFile(inputs.Fs, lp); rerr == nil {
+						scope.genSHA[filepath.Base(lp)] = shaContentHex(data)
+					}
+				}
+			}
+			return nil
+		}()
+		release()
+		if heldErr != nil {
+			return nil, movieResult, heldErr
 		}
 
 		// Re-check after poster generation before committing.

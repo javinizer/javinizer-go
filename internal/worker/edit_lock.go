@@ -183,7 +183,7 @@ func (w *familyKeyedResultMap) CommitResultWithProvenance(filePath string, resul
 				continue
 			}
 			seen[strings.ToLower(pid)] = struct{}{}
-			if err := posterWitnessConflict(w.fs, w.tempDir, w.jobID, pid); err != nil {
+			if err := posterWitnessConflictCore(w.fs, w.tempDir, w.jobID, pid); err != nil {
 				return err
 			}
 		}
