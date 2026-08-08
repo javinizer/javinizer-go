@@ -385,6 +385,47 @@ func isSafePosterFileID(id string) bool {
 		filepath.Base(id) == id && !strings.ContainsAny(id, "/\\")
 }
 
+// posterWitnessFence refuses edits while a promote or crop witness for
+// posterID is unresolved (codex P2 arbitration-integrity): an UNRELATED
+// same-family PATCH would advance the result revision while the durable row
+// still names the witness's URL, so at restart the reconciler would
+// misclassify the pending promote/crop as committed and sweep the witness,
+// preserving uncommitted (or deleting recoverable staged) bytes. Fence ALL
+// revision-advancing edits uniformly; scan errors fail closed.
+func posterWitnessFence(env *posterEditEnv, posterID string) error {
+	if env == nil || env.fs == nil || env.tempDir == "" || env.jobID == "" || posterID == "" {
+		return nil
+	}
+	dir := filepath.Join(env.tempDir, "posters", env.jobID)
+	pw := filepath.Join(dir, ".promote-"+url.PathEscape(posterID)+".json")
+	if _, err := env.fs.Stat(pw); err == nil {
+		return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s promote witness unresolved: restart to reconcile", posterID)}
+	} else if !errors.Is(err, afero.ErrFileNotFound) {
+		return fmt.Errorf("poster promote witness check: %w", err)
+	}
+	entries, err := afero.ReadDir(env.fs, dir)
+	if err != nil && !errors.Is(err, afero.ErrFileNotFound) {
+		return fmt.Errorf("poster crop witness scan %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, ".crop-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, rerr := afero.ReadFile(env.fs, filepath.Join(dir, name))
+		if rerr != nil {
+			return fmt.Errorf("poster crop witness scan %s: %w", name, rerr)
+		}
+		var cw struct {
+			PosterID string `json:"poster_id"`
+		}
+		if json.Unmarshal(data, &cw) == nil && cw.PosterID == posterID {
+			return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s crop witness unresolved: restart to reconcile", posterID)}
+		}
+	}
+	return nil
+}
+
 // rewriteTempPosterURL rewrites a /api/v1/temp/posters/<job>/<id>.jpg URL to
 // the rekeyed identity (codex r39 P2): the bytes moved with the relocation,
 // so the stored crop URL must follow or the review UI shows a broken poster
@@ -616,6 +657,14 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	if !canonicalPairSafe {
 		logging.Warnf("poster rekey relocation skipped: stored canonical ID %q is not a safe file name", canonicalOldPosterID)
 	}
+	// codex P2 arbitration fence: refuse EVERY same-family commit (plain PATCH
+	// included) while a promote/crop witness for this poster is unresolved —
+	// otherwise the revision advance would make a pending witness arbitrate as
+	// committed at the next startup. The relocation block keeps only the
+	// rekey-specific self-witness check.
+	if err := posterWitnessFence(m.pe.currentEnv(), canonicalOldPosterID); err != nil {
+		return err
+	}
 	var relocatedPosterPair []struct{ src, dst string }
 	relocatedNewID, relocatedJobID := "", ""
 	rekeyWitnessPath := ""
@@ -654,39 +703,6 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster rekey witness unresolved for %s: the previous rekey left stranded moves — restart to reconcile before rekeying again", canonicalOldPosterID)}
 				} else if !errors.Is(err, afero.ErrFileNotFound) {
 					return fmt.Errorf("poster rekey witness check %s: %w", witnessPath, err)
-				}
-				// codex r54 P2: also check promote/crop witnesses for the same poster
-				// r56 P2: promote witnesses are named by posterID, but crop witnesses are
-				// named by stageID. Check promote by exact path; scan the dir for crop
-				// witnesses whose content references this posterID.
-				if _, err := env.fs.Stat(filepath.Join(dir, ".promote-"+url.PathEscape(canonicalOldPosterID)+".json")); err == nil {
-					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s promote witness unresolved: restart to reconcile", canonicalOldPosterID)}
-				} else if !errors.Is(err, afero.ErrFileNotFound) {
-					return fmt.Errorf("poster promote witness check: %w", err)
-				}
-				entries, derr := afero.ReadDir(env.fs, dir)
-				if derr != nil && !errors.Is(derr, afero.ErrFileNotFound) {
-					return fmt.Errorf("poster crop witness scan %s: %w", dir, derr)
-				}
-				for _, e := range entries {
-					name := e.Name()
-					if !strings.HasPrefix(name, ".crop-") || !strings.HasSuffix(name, ".json") {
-						continue
-					}
-					data, rerr := afero.ReadFile(env.fs, filepath.Join(dir, name))
-					if rerr != nil {
-						// codex P2 fail-closed: a transient read error must NOT
-						// silently admit the rekey — if that witness holds a
-						// committed-but-unpromoted crop, startup would delete its
-						// staged bytes once the durable row names the new ID.
-						return fmt.Errorf("poster crop witness scan %s: %w", name, rerr)
-					}
-					var cw struct {
-						PosterID string `json:"poster_id"`
-					}
-					if len(data) > 0 && json.Unmarshal(data, &cw) == nil && cw.PosterID == canonicalOldPosterID {
-						return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s crop witness unresolved: restart to reconcile", canonicalOldPosterID)}
-					}
 				}
 				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID, PrevRevision: prevRevision})
 				tmpPath := witnessPath + ".tmp"
@@ -834,6 +850,12 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 	// family key — refuse; the wrapper retries under the fresh key.
 	if result.FileMatchInfo.MovieID != "" && !strings.EqualFold(result.FileMatchInfo.MovieID, m.movieID) {
 		return nil, nil, fmt.Errorf("%w: %s now belongs to %s", ErrFamilyRekeyed, resultID, result.FileMatchInfo.MovieID)
+	}
+	// codex P2 arbitration fence (mirrors UpdateMovieFamily): a field-level
+	// cherry-pick advances this result's revision too — refuse it while a
+	// promote/crop witness for its poster is unresolved.
+	if err := posterWitnessFence(m.pe.currentEnv(), result.Movie.ID); err != nil {
+		return nil, nil, err
 	}
 	prov := m.pe.lookup.GetProvenance(filePath)
 	if prov == nil {
