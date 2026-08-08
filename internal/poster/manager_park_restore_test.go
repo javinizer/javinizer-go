@@ -8,6 +8,7 @@ import (
 	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,7 +30,7 @@ type createFailSuffixFS struct {
 }
 
 func (f createFailSuffixFS) Create(n string) (afero.File, error) {
-	if strings.HasSuffix(n, f.suffix) {
+	if strings.HasSuffix(filepath.ToSlash(n), f.suffix) {
 		return nil, errors.New("create wedged")
 	}
 	return f.Fs.Create(n)
@@ -69,8 +70,11 @@ type renameFailWhereFS struct {
 	fail func(old, new string) bool
 }
 
+// Comparison is path-separator-tolerant: MemMapFs paths are always
+// "/"...'-separated even on Windows, while the manager joins with
+// filepath.Join (backslashes there). Normalize both ends.
 func (f renameFailWhereFS) Rename(o, n string) error {
-	if f.fail(o, n) {
+	if f.fail(filepath.ToSlash(o), filepath.ToSlash(n)) {
 		return errors.New("rename wedged")
 	}
 	return f.Fs.Rename(o, n)
