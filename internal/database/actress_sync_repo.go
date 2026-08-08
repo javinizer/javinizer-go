@@ -50,6 +50,14 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 	if len(tasks) == 0 {
 		return ErrActressSyncNoCandidates
 	}
+	// P0: with SQLite foreign keys disabled a mismatched task.JobID would
+	// silently orphan rows — bind empty IDs and reject mismatches up front.
+	for i := range tasks {
+		if tasks[i].JobID != "" && tasks[i].JobID != job.ID {
+			return fmt.Errorf("task %s belongs to job %s, not %s: %w", tasks[i].ID, tasks[i].JobID, job.ID, ErrInvalidLookup)
+		}
+		tasks[i].JobID = job.ID
+	}
 	err := retryOnLocked(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(job).Error; err != nil {
@@ -213,6 +221,7 @@ func (r *ActressSyncRepository) CountTasks(jobID, view string) (int64, error) {
 
 // ClaimNext ...
 func (r *ActressSyncRepository) ClaimNext(owner string, leaseUntil time.Time) (*models.ActressSyncTask, error) {
+	leaseUntil = leaseUntil.UTC() // callers may hand local-time values; storage+comparison are UTC
 	var claimed models.ActressSyncTask
 	err := retryOnLocked(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
@@ -815,6 +824,7 @@ func appendSyncTaskFields(existing, additional []string) (string, error) {
 
 // Heartbeat ...
 func (r *ActressSyncRepository) Heartbeat(id, token string, until time.Time) error {
+	until = until.UTC() // callers may hand local-time values; storage+comparison are UTC
 	return retryOnLocked(func() error {
 		now := time.Now().UTC()
 		res := r.db.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", id, models.ActressSyncTaskRunning, token, now).Updates(map[string]any{"heartbeat_at": now, "lease_expires_at": until})
@@ -894,9 +904,15 @@ func (r *ActressSyncRepository) RequeueTask(ctx context.Context, taskID, leaseTo
 				updates["outcome"] = "cancelled"
 				updates["completed_at"] = now
 			}
-			result := tx.Model(&models.ActressSyncTask{}).
-				Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > ?", taskID, models.ActressSyncTaskRunning, leaseToken, now).
-				Updates(updates)
+			// Fence on the immutable lease token; the expiry check is liveness
+			// only — StaleRetry exists to recover already-expired leases, so it
+			// must not be gated on them.
+			query := tx.Model(&models.ActressSyncTask{}).
+				Where("id = ? AND status = ? AND lease_token = ?", taskID, models.ActressSyncTaskRunning, leaseToken)
+			if !opts.StaleRetry {
+				query = query.Where("lease_expires_at > ?", now)
+			}
+			result := query.Updates(updates)
 			if result.Error != nil {
 				return result.Error
 			}
@@ -929,7 +945,7 @@ func (r *ActressSyncRepository) CompleteTask(task *models.ActressSyncTask, token
 				return err
 			}
 			var job models.ActressSyncJob
-			if err := tx.Select("cancel_requested").First(&job, "id = ?", task.JobID).Error; err != nil {
+			if err := tx.Select("cancel_requested").First(&job, "id = ?", current.JobID).Error; err != nil {
 				return err
 			}
 			if job.CancelRequested && task.Status != models.ActressSyncTaskCancelled {
@@ -958,7 +974,7 @@ func (r *ActressSyncRepository) CompleteTask(task *models.ActressSyncTask, token
 			if res.RowsAffected != 1 {
 				return errActressSyncLeaseLost
 			}
-			return r.refreshJobTx(tx, task.JobID, now)
+			return r.refreshJobTx(tx, current.JobID, now)
 		})
 	})
 }

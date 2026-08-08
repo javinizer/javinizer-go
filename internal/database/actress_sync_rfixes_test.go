@@ -322,3 +322,88 @@ func TestPagedErrorBranches(t *testing.T) {
 		require.ErrorIs(t, err, errForcedActressCoverage)
 	})
 }
+
+// Review P0: CreateJob binds empty task JobIDs and rejects mismatched ones
+// (SQLite FK enforcement is off, so nothing else would catch orphans).
+func TestCreateJobBindsTaskJobID(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressSyncRepository(db)
+	now := time.Now().UTC()
+
+	// Mismatch is rejected fast.
+	job := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now}
+	bad := models.ActressSyncTask{ID: uuid.NewString(), JobID: uuid.NewString(), Label: "bad", DedupeKey: "actress:bad:" + uuid.NewString(), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	require.ErrorIs(t, repo.CreateJob(job, []models.ActressSyncTask{bad}), ErrInvalidLookup)
+
+	// Empty JobID is bound to the job's ID.
+	job2 := &models.ActressSyncJob{ID: uuid.NewString(), Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: now}
+	ok := models.ActressSyncTask{ID: uuid.NewString(), Label: "ok", DedupeKey: "actress:ok:" + uuid.NewString(), Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: now}
+	require.NoError(t, repo.CreateJob(job2, []models.ActressSyncTask{ok}))
+	tasks, err := repo.ListTasks(job2.ID, 0)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, job2.ID, tasks[0].JobID)
+}
+
+// Review P1: callers may hand local-time lease values; storage/comparison
+// must stay sound (all timestamps normalized to UTC).
+func TestLocalTimeLeaseValues(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo, job, task := newActressSyncJobAndTask(t, db, nil, "tz:"+uuid.NewString())
+	_ = job
+	la, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+	localExpiry := time.Now().In(la).Add(time.Hour) // same instant in UTC, local wall clock
+	claimed, err := repo.ClaimNext("owner", localExpiry)
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	require.Equal(t, task.ID, claimed.ID)
+	// Heartbeat with another local-time value must succeed on a live lease.
+	require.NoError(t, repo.Heartbeat(claimed.ID, claimed.LeaseToken, time.Now().In(la).Add(2*time.Hour)))
+	// And requeue must fence normally.
+	_, err = repo.RequeueTask(context.Background(), claimed.ID, claimed.LeaseToken, ActressSyncRequeueOptions{})
+	require.NoError(t, err)
+}
+
+// Review P1: CompleteTask must act on the stored row's job, never on a
+// caller-forged JobID — cancellation fencing cannot be bypassed.
+func TestCompleteTaskUsesStoredJobID(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo, job, claimed := claimActressCoverageTask(t, db, nil)
+	// Forge a caller copy whose JobID points at a different (live) job.
+	forged := *claimed
+	forged.JobID = uuid.NewString()
+	forged.Status = models.ActressSyncTaskCompleted
+	forged.Outcome = "updated"
+	// Cancel the REAL job after the claim; completion must still fence on it.
+	require.NoError(t, repo.CancelJob(job.ID))
+	require.NoError(t, repo.CompleteTask(&forged, claimed.LeaseToken))
+	stored, err := repo.ListTasks(job.ID, 0)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncTaskCancelled, stored[0].Status,
+		"late cancellation of the authoritative job must win over forged input")
+	storedJob, err := repo.FindJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncJobCancelled, storedJob.Status)
+}
+
+// Review P1: StaleRetry exists to recover already-expired leases, so it must
+// not be gated on lease_expires_at > now.
+func TestStaleRetryExpiredLease(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo, _, claimed := claimActressCoverageTask(t, db, nil)
+	// Back-date the lease so it is already expired.
+	past := time.Now().UTC().Add(-time.Hour)
+	require.NoError(t, db.Model(&models.ActressSyncTask{}).Where("id = ?", claimed.ID).Update("lease_expires_at", past).Error)
+	// Non-stale requeue is gated on liveness and fails.
+	_, err := repo.RequeueTask(context.Background(), claimed.ID, claimed.LeaseToken, ActressSyncRequeueOptions{})
+	require.ErrorIs(t, err, ErrActressSyncLeaseLost)
+	// StaleRetry succeeds despite expiry and bumps the counter.
+	count, err := repo.RequeueTask(context.Background(), claimed.ID, claimed.LeaseToken, ActressSyncRequeueOptions{StaleRetry: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	stored, err := repo.ListTasks(claimed.JobID, 0)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncTaskPending, stored[0].Status)
+	require.Equal(t, 1, stored[0].StaleRetryCount)
+}
