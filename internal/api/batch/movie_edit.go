@@ -190,6 +190,8 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		var bounds *models.CropBounds
 		var croppedURL string
 		var cropErr error
+		var echoRev *uint64
+		var echoFam map[string]uint64
 		opErr := job.WithMovieEditLock(movieID, func(m *worker.LockedMovieOps) error {
 			// Re-resolve the result family INSIDE the key (codex r38): if a
 			// rekey moved the result to another movie between the handler's
@@ -295,6 +297,11 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 					logging.Warnf("crop staged-full sweep %s: %v", stageID+"-full.jpg", rmErr)
 				}
 			}
+			// audit F-R7-2: capture the CAS echo INSIDE the family key — reading
+			// revisions after release would race a concurrent commit, healing
+			// the client's baseline past content it never adopted.
+			echoRev = currentResultRevision(job, resultID)
+			echoFam = familyRevisions(job, resultID)
 			return nil
 		})
 		if cropErr != nil {
@@ -310,7 +317,7 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 
 		// Echo the server-side baseline snapshot so the client Reset flow
 		// restores exactly what the server would (no client-side guessing).
-		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL, PosterCropBounds: bounds, ShouldCropPoster: false, PosterCropSourceFull: bounds != nil, Revision: currentResultRevision(job, resultID), Revisions: familyRevisions(job, resultID)}
+		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL, PosterCropBounds: bounds, ShouldCropPoster: false, PosterCropSourceFull: bounds != nil, Revision: echoRev, Revisions: echoFam}
 		if stored, _, found2 := lookupResultByResultID(job, resultID); found2 && stored.Movie != nil {
 			resp.OriginalPosterURL = stored.Movie.Poster.OriginalPosterURL
 			resp.OriginalCroppedPosterURL = stored.Movie.Poster.OriginalCroppedPosterURL
@@ -387,6 +394,8 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		stageID := posterID + ".stage-" + fmt.Sprintf("%x", time.Now().UnixNano())
 		var dlErr error
 		var croppedURL string
+		var echoRev *uint64
+		var echoFam map[string]uint64
 		posterResult, err := snap.PosterManager().DownloadFromURL(c.Request.Context(), jobID, stageID, req.URL, batchCfg.ScraperUserAgent, batchCfg.ScraperReferer)
 		if err != nil {
 			dlErr = err
@@ -452,6 +461,9 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 				finalize() // reap .bak parking FIRST — a crash here strands
 				// backups, but the witness survives to tell the reconciler.
 				removePromoteWitness(rt.Deps().GetFs(), pwPath)
+				// audit F-R7-2: CAS echo inside the key (see crop handler).
+				echoRev = currentResultRevision(job, resultID)
+				echoFam = familyRevisions(job, resultID)
 				return nil
 			})
 			cleanupStagedPosterPair(rt.Deps().GetFs(), snap.APIConfig().TempDir, jobID, stageID)
@@ -475,8 +487,8 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		c.JSON(http.StatusOK, contracts.PosterFromURLResponse{
 			CroppedPosterURL: croppedURL,
 			PosterURL:        req.URL,
-			Revision:         currentResultRevision(job, resultID),
-			Revisions:        familyRevisions(job, resultID),
+			Revision:         echoRev,
+			Revisions:        echoFam,
 		})
 	}
 }

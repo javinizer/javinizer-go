@@ -248,6 +248,11 @@ type rekeyWitness struct {
 	OldID        string `json:"old_id"`
 	NewID        string `json:"new_id"`
 	PrevRevision uint64 `json:"prev_revision"`
+	// ResultID pins the transitioning result so arbitration can scope the
+	// OLD-ID presence gate to THIS family (audit F-R7-1): a sibling family
+	// legitimately sharing the canonical Movie.ID must not flip "committed"
+	// detection to false forever. Empty ⇒ legacy global scan.
+	ResultID string `json:"result_id,omitempty"`
 }
 
 // ReconcileRekeyWitnesses repairs relocation witnesses left behind by a crash
@@ -330,13 +335,22 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 					// revision and must not misfire. Together these scope the match
 					// to THIS rekey's transition, not any result that happens to
 					// share the new ID.
-					if r != nil && r.Movie != nil {
-						if r.Movie.ID == w.OldID {
-							oldIDPresent = true
-						}
-						if r.Movie.ID == w.NewID && r.Revision > w.PrevRevision {
-							newIDCommitted = true
-						}
+					if r == nil || r.Movie == nil {
+						continue
+					}
+					// audit F-R7-1: a pinned ResultID scopes the committed gates
+					// to the TRANSITIONING result — a sibling family legitimately
+					// sharing the canonical Movie.ID must not flip the OLD
+					// presence gate to false forever. Legacy witnesses (empty
+					// ResultID) keep the global scan.
+					if w.ResultID != "" && r.ResultID != w.ResultID {
+						continue
+					}
+					if r.Movie.ID == w.OldID {
+						oldIDPresent = true
+					}
+					if r.Movie.ID == w.NewID && r.Revision > w.PrevRevision {
+						newIDCommitted = true
 					}
 				}
 			}

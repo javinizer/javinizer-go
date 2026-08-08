@@ -778,11 +778,6 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				// crash (or incomplete rollback) already moved some legs to another
 				// identity — overwriting it would orphan those bytes beyond
 				// recovery. The startup reconciler clears witnesses; reject until then.
-				if _, err := env.fs.Stat(witnessPath); err == nil {
-					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster rekey witness unresolved for %s: the previous rekey left stranded moves — restart to reconcile before rekeying again", canonicalOldPosterID)}
-				} else if !errors.Is(err, afero.ErrFileNotFound) {
-					return fmt.Errorf("poster rekey witness check %s: %w", witnessPath, err)
-				}
 				// audit F-R6-1: the NEW identity must be free of ANY pending
 				// rekey witness (as its Old OR New leg) — a stranded foreign
 				// relocation's reversal would otherwise steal this pair.
@@ -791,7 +786,29 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				} else if hit {
 					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster rekey destination %s has an unresolved witness — restart to reconcile", newID)}
 				}
-				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID, PrevRevision: prevRevision})
+				// audit F-R7-1: refuse the relocation when a SIBLING family
+				// shares the old canonical ID — its parts share the same bytes
+				// and the pinned arbitration gates would misread forever.
+				for _, sib := range m.pe.lookup.SnapshotData().Results {
+					if sib == nil || sib.Movie == nil || !strings.EqualFold(strings.TrimSpace(sib.Movie.ID), canonicalOldPosterID) {
+						continue
+					}
+					famAlias := strings.TrimSpace(sib.FileMatchInfo.MovieID)
+					if famAlias == "" || strings.EqualFold(famAlias, m.movieID) {
+						continue
+					}
+					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster pair %s is shared with family %s — rekey refused while a sibling references it", canonicalOldPosterID, famAlias)}
+				}
+				// Pin the initiating result (audit F-R7-1) so the reconciler's
+				// committed-gates scope to THIS family instead of a global scan.
+				ownerResultID := ""
+				for _, fp := range filePaths {
+					if cur, gerr := m.pe.lookup.GetMovieResult(fp); gerr == nil && cur != nil && cur.ResultID != "" {
+						ownerResultID = cur.ResultID
+						break
+					}
+				}
+				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID, PrevRevision: prevRevision, ResultID: ownerResultID})
 				tmpPath := witnessPath + ".tmp"
 				if err := afero.WriteFile(env.fs, tmpPath, wBytes, 0o644); err != nil {
 					return fmt.Errorf("poster rekey witness write %s: %w", tmpPath, err)
@@ -1226,10 +1243,18 @@ func (m *LockedMovieOps) updateMovieSingleLocked(ctx context.Context, filePath s
 	if err := m.rejectIdentityChangeLocked([]string{filePath}, movie); err != nil {
 		return err
 	}
-	// audit F7: the single-save surface advances the revision exactly like
-	// UpdateMovieFamily — fence it behind outstanding poster witnesses too.
+	// audit F7+R7-3: the single-save surface advances the revision exactly
+	// like UpdateMovieFamily — fence it behind outstanding poster witnesses
+	// for BOTH identities: the incoming ID (preserves family-mirror semantics)
+	// and the STORED one (a rekey-via-single-save would otherwise skip the
+	// pending-witness fence at the old identity).
 	if err := posterWitnessFence(m.pe.currentEnv(), movie.ID); err != nil {
 		return err
+	}
+	if current.Movie != nil && !strings.EqualFold(strings.TrimSpace(current.Movie.ID), strings.TrimSpace(movie.ID)) {
+		if err := posterWitnessFence(m.pe.currentEnv(), current.Movie.ID); err != nil {
+			return err
+		}
 	}
 	backupCoverOriginal(current.Movie, movie)
 	var have bool

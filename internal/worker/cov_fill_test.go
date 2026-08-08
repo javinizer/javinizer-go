@@ -430,7 +430,8 @@ func TestRekeyWitnessCheckStatError(t *testing.T) {
 	dir := filepath.Join("/tmp", "posters", "JOB-9")
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "SSNI-R1-full.jpg"), []byte("x"), 0o644))
-	fs := statFailSuffixFS{Fs: base, suffix: ".rekey-SSNI-R1.json"}
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".rekey-SSNI-R1.json"), []byte("{\"old_id\":\"UNREL-1\",\"new_id\":\"UNREL-2\"}"), 0o644))
+	fs := openFailSuffixFS{Fs: base, suffix: ".rekey-SSNI-R1.json"}
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
