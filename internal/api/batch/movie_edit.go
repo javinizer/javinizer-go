@@ -253,7 +253,7 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			if live, _, found := job.GetFileResultByResultID(resultID); found && live != nil {
 				prerev = live.Revision
 			}
-			cwPath, werr := writeCropWitness(fs, tmpDir, jobID, cropWitness{
+			cwPath, werr := writeCropWitnessGuarded(fs, tmpDir, jobID, cropWitness{
 				PosterID: posterID, ResultID: resultID, StageID: stageID,
 				CroppedURL: croppedURL, PrevRevision: prerev,
 			})
@@ -269,10 +269,13 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				removeCropWitness(fs, cwPath)
 				return cerr
 			}
-			if pErr := promoteCroppedLeg(fs, tmpDir, jobID, stageID, posterID); pErr != nil {
-				// Committed but promotion failed: KEEP the witness — the startup
-				// reconciler completes the promote against the committed row.
-				logging.Warnf("crop promote %s→%s failed (witness retained for reconciliation): %v", stageID, posterID, pErr)
+			if pErr := promoteCroppedLegWithRetry(fs, tmpDir, jobID, stageID, posterID); pErr != nil {
+				// Committed but promotion failed even after immediate retries: KEEP
+				// the witness — the startup reconciler completes the promote, and
+				// the guarded witness write FENCES any later crop for this poster
+				// (409) until reconciliation, so a stale stage can never promote
+				// over a newer crop (codex P2 fence-followup).
+				logging.Warnf("crop promote %s→%s failed after retries (witness retained; crops fenced until reconciliation): %v", stageID, posterID, pErr)
 			} else {
 				removeCropWitness(fs, cwPath)
 				// r52 P2: free the staged full-size copy left over from the

@@ -222,26 +222,18 @@ func TestPosterCrop_StagingWriteError(t *testing.T) {
 	assert.Equal(t, 409, w.Code, "staging write failure → 409: %s", w.Body.String())
 }
 
-type seqRenameFailHandlerFS struct {
-	afero.Fs
-	call   int
-	failOn int
-}
-
-func (f *seqRenameFailHandlerFS) Rename(o, n string) error {
-	f.call++
-	if f.call == f.failOn {
-		return errors.New("rename blocked")
-	}
-	return f.Fs.Rename(o, n)
-}
-
-// crop promote failure after commit (witness rename succeeds, promote rename fails)
+// crop promote failure after commit: the witness write (rename #1) succeeds;
+// every promote attempt (renames #2-#4, bounded retry) fails — the commit has
+// landed, so the response stays 200 with the witness retained to fence this
+// poster's crops until reconciliation (codex P2 fence-followup).
 func TestPosterCrop_PromoteFailureRetainsWitness(t *testing.T) {
 	deps, job, router := cropJobFixture(t, "CROPE-7")
-	deps.Fs = &seqRenameFailHandlerFS{Fs: deps.GetFs(), failOn: 2}
+	deps.Fs = &brokenFS{Fs: deps.GetFs(), failRenameAt: map[int]bool{2: true, 3: true, 4: true}}
 	w := postCrop(t, router, job, "CROPE-7", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
-	_ = w
+	require.Equal(t, 200, w.Code, "commit landed; only the byte promote failed: %s", w.Body.String())
+	matches, gerr := filepath.Glob(filepath.Join("data/temp/posters", job.GetID(), ".crop-*.json"))
+	require.NoError(t, gerr)
+	require.NotEmpty(t, matches, "unresolved witness must survive to fence subsequent crops")
 }
 
 // --- r56 from-URL coverage: witness pending + promote failure + restore ---

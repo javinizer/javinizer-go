@@ -778,6 +778,18 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		}
 		return err
 	}
+
+	if err != nil && rekeyWitnessPath != "" {
+		// codex P2 zero-legs: the commit failed with NO pair moved, so nothing
+		// exists for the startup reconciler to arbitrate. A lingered witness
+		// would poison every retry as an unresolved rekey until restart —
+		// sweep it unconditionally here.
+		if env := m.pe.currentEnv(); env != nil && env.fs != nil {
+			if rmErr := env.fs.Remove(rekeyWitnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+				logging.Warnf("poster rekey witness sweep %s: %v", rekeyWitnessPath, rmErr)
+			}
+		}
+	}
 	if err == nil && rekeyWitnessPath != "" {
 		// Commit landed: the witness's job is done (files remain at the new
 		// identity, coherent with the durable row).

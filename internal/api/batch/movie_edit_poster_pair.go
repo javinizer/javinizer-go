@@ -321,6 +321,68 @@ func cropWitnessName(stageID string) string {
 	return cropWitnessPrefix + url.PathEscape(stageID) + ".json"
 }
 
+// errCropWitnessPending fences a crop when an EARLIER crop witness for the
+// same poster is still unresolved (codex P2: the promote-failure branch
+// retains its witness for the startup reconciler; production runs no periodic
+// reconciliation). Without the fence a second crop could commit and promote
+// successfully, after which startup would treat the older witness as
+// committed (identical canonical URL) and promote its STALE staged bytes
+// over the newer crop. The handler maps this to HTTP 409 — restart to
+// reconcile before retrying.
+var errCropWitnessPending = errors.New("crop witness outstanding")
+
+// writeCropWitnessGuarded refuses to create a crop witness while one for the
+// same poster is already outstanding, mirroring writePromoteWitnessGuarded.
+// Unknown/corrupt foreign witnesses are skipped (the reconciler owns them);
+// transient scan errors fail CLOSED so a half-counted fence is impossible.
+func writeCropWitnessGuarded(fs afero.Fs, tempDir, jobID string, w cropWitness) (string, error) {
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	dir := filepath.Join(tempDir, "posters", jobID)
+	entries, err := afero.ReadDir(fs, dir)
+	switch {
+	case err == nil:
+		for _, e := range entries {
+			name := e.Name()
+			if !strings.HasPrefix(name, cropWitnessPrefix) || !strings.HasSuffix(name, ".json") {
+				continue
+			}
+			data, rerr := afero.ReadFile(fs, filepath.Join(dir, name))
+			if rerr != nil {
+				return "", fmt.Errorf("crop witness scan %s: %w", name, rerr)
+			}
+			var foreign cropWitness
+			if jerr := json.Unmarshal(data, &foreign); jerr != nil {
+				continue
+			}
+			if foreign.PosterID == w.PosterID {
+				return "", fmt.Errorf("%w for %s — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
+			}
+		}
+	case os.IsNotExist(err):
+		// no poster dir yet — nothing outstanding to fence against
+	default:
+		return "", fmt.Errorf("crop witness scan %s: %w", dir, err)
+	}
+	return writeCropWitness(fs, tempDir, jobID, w)
+}
+
+// cropPromoteMaxAttempts bounds the immediate promote retry so a transient
+// rename failure never strands a crop behind the witness fence.
+const cropPromoteMaxAttempts = 3
+
+// promoteCroppedLegWithRetry retries the post-commit promote a bounded number
+// of times before yielding to the witness+fence path (codex P2: retry
+// immediately instead of deferring every transient failure to restart).
+func promoteCroppedLegWithRetry(fs afero.Fs, tempDir, jobID, stageID, posterID string) error {
+	err := promoteCroppedLeg(fs, tempDir, jobID, stageID, posterID)
+	for attempt := 1; err != nil && attempt < cropPromoteMaxAttempts; attempt++ {
+		err = promoteCroppedLeg(fs, tempDir, jobID, stageID, posterID)
+	}
+	return err
+}
+
 func writeCropWitness(fs afero.Fs, tempDir, jobID string, w cropWitness) (string, error) {
 	if fs == nil {
 		fs = afero.NewOsFs()
