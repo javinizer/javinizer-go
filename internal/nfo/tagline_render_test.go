@@ -95,18 +95,20 @@ func TestMovieToNFO_TagsTemplating(t *testing.T) {
 		assert.Contains(t, nfo.Tags, "Pool")
 	})
 
-	t.Run("caller tag templates expand per movie", func(t *testing.T) {
+	t.Run("caller (database) tags pass through verbatim", func(t *testing.T) {
 		g := NewGenerator(afero.NewMemMapFs(), &Config{FirstNameOrder: true})
 		nfo := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"<MAKER>"})
-		assert.Contains(t, nfo.Tags, "Idea Pocket")
+		assert.Contains(t, nfo.Tags, "<MAKER>")
+		assert.NotContains(t, nfo.Tags, "Idea Pocket")
 	})
 
-	t.Run("broken tag templates are dropped, siblings kept", func(t *testing.T) {
+	t.Run("broken config tag templates dropped; caller tags kept verbatim", func(t *testing.T) {
 		g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"<IF:ID>oops", "Kept"}, FirstNameOrder: true})
 		nfo := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"<NOTAREALTAG>", "AlsoKept"})
 		assert.Contains(t, nfo.Tags, "Kept")
+		assert.Contains(t, nfo.Tags, "<NOTAREALTAG>")
 		assert.Contains(t, nfo.Tags, "AlsoKept")
-		assert.Len(t, nfo.Tags, 2)
+		assert.Len(t, nfo.Tags, 3)
 	})
 
 	t.Run("template result deduped against existing tag", func(t *testing.T) {

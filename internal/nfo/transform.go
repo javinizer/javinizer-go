@@ -314,9 +314,10 @@ func (g *Generator) mergeTags(ctx context.Context, movie *models.Movie, actors [
 		}
 	}
 
-	// Caller-provided tags (template-expanded, e.g. "<ID>")
+	// Caller-provided tags are pre-resolved database values written verbatim;
+	// only g.config.Tag is advertised as template-aware.
 	for _, tag := range callerTags {
-		addTag(g.renderConfiguredText(ctx, movie, "tag", tag))
+		addTag(tag)
 	}
 
 	// Config tags (template-expanded — the Web UI advertises them as templates)
