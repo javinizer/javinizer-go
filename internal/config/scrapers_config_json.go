@@ -84,6 +84,14 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 				}
 			}
 
+			// Presence BEFORE alias resolution: an explicit canonical zero must
+			// already count as "the user chose this" when aliases apply (codex
+			// P2 round 7).
+			_, explicitEnabled := scraperRaw["enabled"]
+			ss.SetEnabledPresence(explicitEnabled)
+			if _, explicitRate := scraperRaw["rate_limit"]; explicitRate {
+				ss.SetRateLimitPresence(true)
+			}
 			if hasAliases {
 				// Decode without strict mode, then apply aliases,
 				// then validate remaining keys.
@@ -106,11 +114,6 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 					return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 				}
 			}
-			_, explicitEnabled := scraperRaw["enabled"]
-			ss.SetEnabledPresence(explicitEnabled)
-			_, explicitRate := scraperRaw["rate_limit"]
-			_, aliasRate := scraperRaw["request_delay"]
-			ss.SetRateLimitPresence(explicitRate || aliasRate)
 
 			s.Overrides[key] = &ss
 		}
@@ -122,13 +125,15 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 // applyJSONAliases handles deprecated JSON aliases request_delay→rate_limit
 // and max_retries→retry_count.
 func (s *ScrapersConfig) applyJSONAliases(raw map[string]json.RawMessage, ss *models.ScraperSettings) {
-	if rd, ok := raw["request_delay"]; ok && ss.RateLimit == 0 {
+	// Canonical presence beats the alias: explicit rate_limit: 0 is a choice.
+	if rd, ok := raw["request_delay"]; ok && ss.RateLimit == 0 && !ss.RateLimitIsExplicit() {
 		var v int
 		if err := json.Unmarshal(rd, &v); err == nil {
 			ss.RateLimit = v
 		}
 	}
-	if mr, ok := raw["max_retries"]; ok && ss.RetryCount == 0 {
+	_, canonicalRetry := raw["retry_count"]
+	if mr, ok := raw["max_retries"]; ok && !canonicalRetry && ss.RetryCount == 0 {
 		var v int
 		if err := json.Unmarshal(mr, &v); err == nil {
 			ss.RetryCount = v

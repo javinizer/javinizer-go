@@ -228,7 +228,11 @@ func (m *ActressSyncManager) Shutdown() {
 	if m == nil {
 		return
 	}
+	// Latch first, under the same lock CreateJob fences on, so a concurrent
+	// persist+start can't sneak past (codex P2 round 7).
+	m.mu.Lock()
 	m.permanentlyStopped.Store(true)
+	m.mu.Unlock()
 	m.Stop()
 }
 
@@ -416,6 +420,11 @@ func (m *ActressSyncManager) CreateJob(ctx context.Context, req ActressSyncCreat
 	if m == nil || m.repo == nil || m.deps.ActressRepo == nil {
 		return nil, nil, ErrActressSyncManagerUnavailable
 	}
+	// Fenced against Shutdown: the latch store, the job persist, and the
+	// dispatcher start all run under mu so a CreateJob can never accept work
+	// after Shutdown has latched (codex P2 round 7).
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.permanentlyStopped.Load() {
 		return nil, nil, ErrActressSyncManagerUnavailable
 	}
@@ -482,7 +491,7 @@ func (m *ActressSyncManager) CreateJob(ctx context.Context, req ActressSyncCreat
 	if err := m.repo.CreateJob(job, tasks); err != nil {
 		return nil, skippedIDs, err
 	}
-	m.Start()
+	m.startLocked() // inline: Start() re-locks mu
 	m.signal()
 	return job, skippedIDs, nil
 }

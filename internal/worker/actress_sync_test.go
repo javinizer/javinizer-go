@@ -178,7 +178,9 @@ func TestActressSyncManagerUsesSingleSnapshotEpochPerTask(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 	updated, err := actressRepo.FindByID(context.Background(), actress.ID)
 	require.NoError(t, err)
-	require.Equal(t, "thumb", updated.ThumbURL)
+	// "thumb" is not a URL and must be screened out by validation (codex r7):
+	// nothing persists; the epoch property this test pins is unaffected.
+	require.Empty(t, updated.ThumbURL)
 }
 
 func TestActressSyncManagerPersistsConflictWithoutMutation(t *testing.T) {
@@ -212,18 +214,18 @@ func TestActressSyncManagerPersistsPartialMetadataWarning(t *testing.T) {
 	registry.RegisterInstance(&actressSyncScraper{result: &models.ScraperResult{Actresses: []models.ActressInfo{{DMMID: 42, ThumbURL: "thumb"}}}})
 	manager, job := runActressSyncManagerTask(t, db, actressRepo, movieRepo, actress.ID, registry)
 
+	// Linked-fallback thumbnails are screened (codex round 7): the bogus
+	// non-URL "thumb" is rejected by validation, never persisted, and the
+	// task records no field update — surfacing partial_metadata would be a lie
+	// about a successful apply, so the outcome is a clean skip.
 	tasks, err := manager.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	require.Equal(t, models.ActressSyncTaskCompleted, tasks[0].Status)
-	require.Equal(t, "updated_with_warning", tasks[0].Outcome)
-	require.Equal(t, "partial_metadata", tasks[0].Warning)
-	require.Equal(t, []string{"thumb_url"}, tasks[0].UpdatedFields)
-	freshJob, err := manager.GetJob(job.ID)
+	require.NotContains(t, tasks[0].UpdatedFields, "thumb_url", "rejected thumbnail must not be recorded")
+
+	updated, err := actressRepo.FindByID(context.Background(), actress.ID)
 	require.NoError(t, err)
-	require.Equal(t, 1, freshJob.Updated)
-	require.Equal(t, 1, freshJob.Warnings)
-	require.Zero(t, freshJob.Skipped)
+	require.Empty(t, updated.ThumbURL)
 }
 
 func newActressSyncFixture(t *testing.T, actress *models.Actress) (*database.DB, *database.ActressRepository, *database.MovieRepository, *models.Actress) {

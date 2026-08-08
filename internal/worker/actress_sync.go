@@ -425,6 +425,15 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			return nil, linkedErr
 		}
 		for _, linkedMatch := range linkedMatches {
+			// Codex P2 (round 7): linked-match thumbnails must pass the same
+			// screening as resolver results — speculative URLs built from a
+			// movie's stills must not persist unchecked.
+			if strings.TrimSpace(linkedMatch.info.ThumbURL) != "" && validateThumbnail != nil {
+				if validateErr := validateThumbnail(ctx, linkedMatch.info.ThumbURL); validateErr != nil {
+					logging.Debugf("Actress sync: linked fallback rejected thumbnail %q for DMM ID %d: %v", linkedMatch.info.ThumbURL, actress.DMMID, validateErr)
+					linkedMatch.info.ThumbURL = ""
+				}
+			}
 			appendMatch(linkedMatch.info, linkedMatch.source)
 		}
 	}
