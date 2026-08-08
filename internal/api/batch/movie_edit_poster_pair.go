@@ -402,9 +402,11 @@ func parkedBackupConflictFor(fs afero.Fs, dir, posterID string) (bool, error) {
 		}
 		return false, fmt.Errorf("rescrape backup scan %s: %w", dir, err)
 	}
+	inflightPrefix := ".inflight-" + url.PathEscape(posterID) + "."
 	for _, e := range entries {
 		n := e.Name()
-		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") {
+		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") ||
+			strings.HasPrefix(n, inflightPrefix) {
 			return true, nil
 		}
 	}

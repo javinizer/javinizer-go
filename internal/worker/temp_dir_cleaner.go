@@ -476,6 +476,16 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(dir string) int {
 	for _, e := range entries {
 		name := e.Name()
 		var canon string
+		if strings.HasPrefix(name, ".inflight-") {
+			// audit F-R19-1 aftermath: stranded in-flight markers (crash) — a
+			// restarted process has no live generation windows; delete.
+			if rmErr := c.fs.Remove(filepath.Join(dir, name)); rmErr != nil {
+				logging.Warnf("in-flight marker sweep %s: %v", name, rmErr)
+				continue
+			}
+			healed++
+			continue
+		}
 		switch {
 		case strings.HasPrefix(name, promoteWitnessPrefix) || strings.HasPrefix(name, rekeyWitnessPrefix) || strings.HasPrefix(name, cropWitnessPrefix):
 			continue // witness files are never parked backups (F-R5-3 belt)

@@ -537,9 +537,11 @@ func rescrapeInFlightBackupPresent(fs afero.Fs, dir, posterID string) (bool, err
 		}
 		return false, rerr
 	}
+	inflightPrefix := ".inflight-" + url.PathEscape(posterID) + "."
 	for _, e := range rEntries {
 		n := e.Name()
-		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") {
+		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") ||
+			strings.HasPrefix(n, inflightPrefix) {
 			return true, nil
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -531,6 +532,117 @@ func TestWithRescrapeStatusFailedGenerationRestoresParkedPair(t *testing.T) {
 	require.NoError(t, err)
 	got2, _ := afero.ReadFile(fs, canon)
 	assert.Equal(t, "fresh-bytes", string(got2), "healthy generation: discard stands")
+}
+
+// Marker write failure degrades to no-marker (never bricked parking); the op
+// proceeds with legacy rsbak-only markers.
+func TestParkCanonicalPosterPairMarkerWriteFailure(t *testing.T) {
+	fs := &inflightFailFS{Fs: afero.NewMemMapFs()}
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JMW", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/tmp/posters/JMW/PI-W.jpg", []byte("x"), 0o644))
+	b := parkCanonicalPosterPair(fs, "/tmp/posters/JMW", "PI-W")
+	require.NotNil(t, b)
+	assert.Empty(t, b.markerPath, "wedged sentinel write degrades headlessly")
+	// the legs still parked fine
+	_, ferr := fs.Stat("/tmp/posters/JMW/PI-W-full.jpg.rsbak.a1.b2") // unknown nonce — just confirm SOME rsbak matches
+	_ = ferr
+	hit, herr := rescrapeInFlightBackupPresent(fs, "/tmp/posters/JMW", "PI-W")
+	require.NoError(t, herr)
+	assert.True(t, hit, "rsbak marker landed")
+}
+
+type inflightFailFS struct{ afero.Fs }
+
+func (f *inflightFailFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.Contains(name, ".inflight-") && flag&(os.O_WRONLY|os.O_CREATE|os.O_TRUNC|os.O_APPEND|os.O_RDWR) != 0 {
+		return nil, errors.New("sentinel write wedged")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+// audit F-R19-1/2: the unconditional in-flight sentinel marks generation even
+// when nothing was parked, and closeout settles it with the pair; stranded
+// sentinels die at startup reconciliation.
+func TestRescrapeInFlightSentinelLifecycle(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JIF", 0o755))
+
+	// park with zero pre-existing legs still writes the sentinel
+	b := parkCanonicalPosterPair(fs, "/tmp/posters/JIF", "PI-4")
+	require.NotEmpty(t, b.markerPath, "marker written even when no parkable legs")
+	hit, err := rescrapeInFlightBackupPresent(fs, "/tmp/posters/JIF", "PI-4")
+	require.NoError(t, err)
+	assert.True(t, hit, "sentinel marks in-flight even with empty park")
+	_, statErr := fs.Stat(b.markerPath)
+	require.NoError(t, statErr)
+
+	// closeout settle removes it
+	b.restore(nil)
+	_, statErr = fs.Stat(b.markerPath)
+	assert.Error(t, statErr, "restore settles the marker")
+
+	// stranded marker dies at startup reconciliation
+	b2 := parkCanonicalPosterPair(fs, "/tmp/posters/JIF", "PI-5")
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	healed := cl.reconcileParkedPosterBackups("/tmp/posters/JIF")
+	assert.GreaterOrEqual(t, healed, 1, "stranded marker swept")
+	_, statErr = fs.Stat(b2.markerPath)
+	assert.Error(t, statErr)
+}
+
+// audit F-R19-2: a losing closeout deletes ONLY legs whose CURRENT bytes match
+// our fingerprints — a sibling's overwrite is never disposed.
+func TestCloseoutDeleteGatedByFingerprint(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-1", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+
+	canonFull := filepath.Join(dir, "GATE-1-full.jpg")
+	canonCrop := filepath.Join(dir, "GATE-1.jpg")
+	// ours: full only (handwritable)
+	require.NoError(t, afero.WriteFile(fs, canonFull, []byte("our-full"), 0o644))
+	// sibling wrote BOTH
+	mineSHA := shaContentHex([]byte("our-full"))
+
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.genSHA = map[string]string{"GATE-1-full.jpg": mineSHA}
+		scope.preExistedPair = false
+		return &RescrapeResult{Status: models.RescrapeStatusConflict}, &resultstore.MovieResult{Movie: &models.Movie{ID: "GATE-1"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}, nil
+	})
+	require.NoError(t, err)
+	_, statDel := fs.Stat(canonFull)
+	assert.Error(t, statDel, "fingerprint-matched own bytes removed by the gated delete")
+	// sanity: no crop leg — never invented
+	_, cerr := fs.Stat(canonCrop)
+	assert.Error(t, cerr)
+
+	// fingerprint mismatch: a sibling's bytes must stay
+	require.NoError(t, afero.WriteFile(fs, canonFull, []byte("sibling-full"), 0o644))
+	_, err = withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.genSHA = map[string]string{"GATE-1-full.jpg": mineSHA}
+		scope.preExistedPair = false
+		return &RescrapeResult{Status: models.RescrapeStatusConflict}, &resultstore.MovieResult{Movie: &models.Movie{ID: "GATE-1"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}, nil
+	})
+	require.NoError(t, err)
+	got2, _ := afero.ReadFile(fs, canonFull)
+	assert.Equal(t, "sibling-full", string(got2), "sibling bytes never deleted by the losing closeout")
+}
+
+// audit F-R19-1: worker fence probes the inflight sentinel.
+func TestPosterWitnessFenceFencesInflightSentinel(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JIF-X"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-PI-1.abc123.df"), []byte("{}"), 0o644))
+	err := posterWitnessConflict(fs, "/tmp", "JIF-X", "PI-1")
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+	assert.Contains(t, err.Error(), "in-flight rescrape")
 }
 
 // audit F-R10-2: when a closeout's content-verify refuses the rewind (canon

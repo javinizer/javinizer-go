@@ -2,6 +2,7 @@ package worker
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,10 @@ type rescrapePosterBackup struct {
 	// codex-P2: a leg that refuses to move leaves generation WITHOUT a
 	// recoverable copy — the rescrape must abort generation instead).
 	parkErr error
+	// markerPath is the per-op in-flight sentinel (audit F-R19-1): written
+	// even when the op parked NOTHING, so orphan sweeps + edit fences can
+	// never see an in-flight generation's bytes as deleteable litter.
+	markerPath string
 }
 
 var rescrapeBackupSeq atomic.Int64
@@ -86,6 +91,14 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup 
 	nonce := fmt.Sprintf("%x.%x", time.Now().UnixNano(), rescrapeBackupSeq.Add(1))
 	b.fullBak = b.full + ".rsbak." + nonce
 	b.cropBak = b.crop + ".rsbak." + nonce
+	// audit F-R19-1: ALWAYS write the in-flight sentinel — "nothing to park"
+	// no longer reads as "nothing in flight". Startup reconciliation removes
+	// stranded sentinels (a live process can't hold one across a restart).
+	b.markerPath = filepath.Join(dir, ".inflight-"+url.PathEscape(id)+"."+nonce)
+	if mErr := afero.WriteFile(b.fs, b.markerPath, nil, 0o644); mErr != nil {
+		logging.Warnf("in-flight marker write %s: %v", b.markerPath, mErr)
+		b.markerPath = ""
+	}
 	legs := []struct {
 		path string
 		bak  string
@@ -158,6 +171,12 @@ func (b *rescrapePosterBackup) restore(verify func(legPath string) (allowed bool
 			logging.Warnf("rescrape pair restore %s: %v", leg.path, err)
 		}
 	}
+	// audit F-R19-1 lifecycle: the in-flight sentinel belongs to this op —
+	// once its bytes are settled (restored/disposed), the marker's purpose is
+	// spent. Crash-tolerant restart also sweeps stranded markers.
+	if b.markerPath != "" {
+		_ = b.fs.Remove(b.markerPath)
+	}
 }
 
 // discard drops parked bytes after a successful operation.
@@ -165,7 +184,7 @@ func (b *rescrapePosterBackup) discard() {
 	if b == nil || b.fs == nil {
 		return
 	}
-	for _, p := range []string{b.fullBak, b.cropBak} {
+	for _, p := range []string{b.fullBak, b.cropBak, b.markerPath} {
 		_ = b.fs.Remove(p)
 	}
 }

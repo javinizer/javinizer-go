@@ -320,6 +320,28 @@ func TestWritePromoteGuardedParkedScanErrorFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "rescrape backup scan")
 }
 
+// audit F-R19-1: the batch admission guards also respect the worker's
+// in-flight sentinel (".inflight-<posterID>.<nonce>").
+func TestWriteCropWitnessGuardedFencesInflightSentinel(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JIF-B"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-PI-1.abc123.df"), []byte("{}"), 0o644))
+	_, err := writeCropWitnessGuarded(fs, "/tmp", "JIF-B", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
+	require.ErrorIs(t, err, errCropWitnessPending)
+	assert.Contains(t, err.Error(), "in-flight rescrape")
+}
+
+func TestWritePromoteGuardedFencesInflightSentinel(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JIF-P"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-PI-1.abc123.df"), []byte("{}"), 0o644))
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JIF-P", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
+	require.ErrorIs(t, err, errPromoteWitnessPending)
+	assert.Contains(t, err.Error(), "in-flight rescrape")
+}
+
 // audit F-R9-2: parked rescrape backups fence both write guards — a losing
 // rescrape's legacy restore could otherwise clobber freshly committed bytes.
 func TestWriteCropWitnessGuardedFencesParkedBackup(t *testing.T) {

@@ -290,7 +290,32 @@ func closeoutRescrapePosterBytes(inputs rescrapePhaseInputs, scope *rescrapeGenS
 	}
 	scope.parked.restore(verify)
 	if rescrapeOwnsPosterLegs(inputs, scope, mr, mv.ID) {
-		CleanupMoviePosters(inputs.Fs, inputs.TempDir, inputs.JobID, mv)
+		if len(scope.genSHA) > 0 {
+			// audit F-R19-2: remove ONLY legs whose CURRENT bytes provably
+			// match OUR generation output — whatever else sits at the name is
+			// a sibling's, never ours to delete.
+			pdir := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
+			for _, sfx := range []string{"-full.jpg", ".jpg"} {
+				base := mv.ID + sfx
+				want, ok := scope.genSHA[base]
+				if !ok {
+					continue
+				}
+				lp := filepath.Join(pdir, base)
+				data, rdErr := afero.ReadFile(inputs.Fs, lp)
+				if rdErr != nil {
+					continue
+				}
+				if shaContentHex(data) != want {
+					continue
+				}
+				if rmErr := inputs.Fs.Remove(lp); rmErr != nil && !os.IsNotExist(rmErr) {
+					logging.Warnf("rescrape own-leg delete %s: %v", lp, rmErr)
+				}
+			}
+		} else {
+			CleanupMoviePosters(inputs.Fs, inputs.TempDir, inputs.JobID, mv)
+		}
 	}
 }
 
