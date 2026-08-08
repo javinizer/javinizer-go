@@ -189,18 +189,18 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		var stalePath string
+		var staleFile afero.File
 		var staleCT string
 		if state == CacheStale {
-			shardDir, hashPrefix := pathFor(cacheDir, normalizedURL)
-			staleExt := ""
-			stalePath, staleExt, _ = resolveEntry(fs, shardDir, hashPrefix)
-			staleCT = contentTypeForExt(staleExt)
-			_ = file.Close()
+			staleFile = file
+			staleCT = contentType
+		}
+		if staleFile != nil {
+			defer func() { _ = staleFile.Close() }()
 		}
 
 		if err := ssrf.CheckURL(rawURL); err != nil {
-			if stalePath != "" && tryServeStale(c, fs, stalePath, staleCT) {
+			if staleFile != nil && serveStaleFile(c, staleFile, staleCT) {
 				return
 			}
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
@@ -235,7 +235,7 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 				c.Data(http.StatusOK, result.contentType, result.body)
 				return
 			}
-			if stalePath != "" && tryServeStale(c, fs, stalePath, staleCT) {
+			if staleFile != nil && serveStaleFile(c, staleFile, staleCT) {
 				return
 			}
 			if result.persistFailed {
@@ -273,17 +273,12 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 	}
 }
 
-func tryServeStale(c *gin.Context, fs afero.Fs, path, contentType string) bool {
-	f, err := fs.Open(path)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = f.Close() }()
+func serveStaleFile(c *gin.Context, f afero.File, contentType string) bool {
 	c.Header("Content-Type", contentType)
 	c.Header("Cache-Control", "no-cache")
 	c.Header("X-Content-Type-Options", "nosniff")
 	if _, err := io.Copy(c.Writer, f); err != nil {
-		logging.Warnf("image cache: failed to serve stale entry %s: %v", path, err)
+		logging.Warnf("image cache: failed to serve stale entry: %v", err)
 		return false
 	}
 	return true

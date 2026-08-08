@@ -201,7 +201,7 @@ func TestBranch_StaleEntry_OpenFailureFallsToForbidden(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mem := afero.NewMemMapFs()
 	rawURL := "http://127.0.0.1:9/stale-open.jpg"
-	hooked := &openHookFs{Fs: mem, mode: "error", failAfter: 1, match: func(name string) bool {
+	hooked := &openHookFs{Fs: mem, mode: "error", match: func(name string) bool {
 		return strings.HasSuffix(name, ".jpg")
 	}}
 	deps := newImageCacheDeps(t, hooked)
@@ -215,7 +215,7 @@ func TestBranch_StaleEntry_CopyFailureFallsToForbidden(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mem := afero.NewMemMapFs()
 	rawURL := "http://127.0.0.1:9/stale-copy.jpg"
-	hooked := &openHookFs{Fs: mem, mode: "readfail", failAfter: 1, match: func(name string) bool {
+	hooked := &openHookFs{Fs: mem, mode: "readfail", match: func(name string) bool {
 		return strings.HasSuffix(name, ".jpg")
 	}}
 	deps := newImageCacheDeps(t, hooked)
