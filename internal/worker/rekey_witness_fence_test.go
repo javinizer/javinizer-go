@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -136,12 +137,105 @@ func TestUpdateMovieSingleFencedByPromoteWitness(t *testing.T) {
 	assert.Contains(t, err.Error(), "promote witness unresolved")
 }
 
-// audit F5: stat probe on the rekey witness fails closed (transient error
-// isn't absence).
+// audit F-R6-1: inbound fence matches NewID by content — an edit or rescrape
+// resolving INTO a pending witness's destination is refused.
+func TestFenceMatchesRekeyWitnessNewID(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JOB-N"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-OLD-7.json"), []byte("{\"old_id\":\"OLD-7\",\"new_id\":\"NEW-7\"}"), 0o644))
+	err := posterWitnessConflict(fs, "/tmp", "JOB-N", "NEW-7")
+	require.Error(t, err, "NewID matched by content")
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+	require.NoError(t, posterWitnessConflict(fs, "/tmp", "JOB-N", "UNRELATED-7"), "unrelated passes")
+}
+
+// audit F-R6-1: relocation refuses to move bytes into an identity that a
+// pending witness names as its destination.
+func TestRekeyDestinationFencedByPendingWitness(t *testing.T) {
+	store, fs, dir := familyRelocationSetup(t)
+	w, _ := json.Marshal(rekeyWitness{OldID: "OTHER-X", NewID: "SSNI-N9"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-OTHER-X.json"), w, 0o644))
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+	assert.Contains(t, err.Error(), "destination")
+	for _, name := range []string{"SSNI-R1-full.jpg", "SSNI-R1.jpg"} {
+		_, statErr := fs.Stat(filepath.Join(dir, name))
+		assert.NoError(t, statErr, "originals untouched on destination fence")
+	}
+
+	// fail-closed on scan wedges
+	base2 := afero.NewMemMapFs()
+	dir2 := filepath.Join("/tmp", "posters", "JOB-W")
+	require.NoError(t, base2.MkdirAll(dir2, 0o755))
+	require.NoError(t, afero.WriteFile(base2, filepath.Join(dir2, ".rekey-x.json"), []byte("{}"), 0o644))
+	store2 := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store2, "/f/a.mp4", "res-1", "SSNI-R1", "")
+	pe2 := newEditorForStore(store2)
+	pe2.attachEnv(&posterEditEnv{fs: openFailSuffixFS{Fs: base2, suffix: ".rekey-x.json"}, tempDir: "/tmp", jobID: "JOB-W"})
+	m2 := &LockedMovieOps{pe: pe2, movieID: "SSNI-R1"}
+	err2 := m2.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err2)
+	assert.Contains(t, err2.Error(), "witness scan", "scan wedge ⇒ hard error")
+}
+
+// openFailAfterNFS wedges the FIRST n+1'th Open call on paths with the suffix
+// — drives the crop scan's ReadDir error while the rekey scan sees the dir.
+type openFailAfterNFS struct {
+	afero.Fs
+	suffix string
+	allow  int
+	count  int
+}
+
+func (f *openFailAfterNFS) Open(p string) (afero.File, error) {
+	if strings.HasSuffix(p, f.suffix) {
+		f.count++
+		if f.count > f.allow {
+			return nil, errors.New("open wedged")
+		}
+	}
+	return f.Fs.Open(p)
+}
+
+func TestRekeyWitnessIDsEdges(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	hit, err := rekeyWitnessIDsFor(fs, "/no/such/dir", "X-1")
+	assert.False(t, hit)
+	assert.NoError(t, err, "absent dir is not an error")
+
+	dir := "/tmp/posters/JE"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-x.json"), []byte("{corrupt"), 0o644))
+	hit, err = rekeyWitnessIDsFor(fs, dir, "X-1")
+	assert.False(t, hit)
+	assert.NoError(t, err, "corrupt payload skips to reconciler ownership")
+}
+
+func TestPosterWitnessFenceCropDirReadError(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := "/tmp/posters/JB"
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 1}
+	err := posterWitnessFence(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JB"}, "PI-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "crop witness scan")
+}
+
+// audit F5+F-R6-1: the content-based rekey scan fails closed — a wedge on
+// EITHER the directory listing or a witness file read must fence.
 func TestPosterWitnessFenceRekeyStatErrorFailsClosed(t *testing.T) {
 	mem := afero.NewMemMapFs()
-	require.NoError(t, mem.MkdirAll("/tmp/posters/JOB-9", 0o755))
-	fs := statFailSuffixFS{Fs: mem, suffix: ".rekey-SSNI-R1.json"}
+	dir := "/tmp/posters/JOB-9"
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, ".rekey-SSNI-R1.json"), []byte("{\"old_id\":\"SSNI-R1\"}"), 0o644))
+	fs := openFailSuffixFS{Fs: mem, suffix: ".rekey-SSNI-R1.json"}
 	err := posterWitnessFence(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"}, "SSNI-R1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rekey witness check")
@@ -161,5 +255,5 @@ func TestRekeyCropWitnessScanDirErrorFailsClosed(t *testing.T) {
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
 	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "crop witness scan")
+	assert.Contains(t, err.Error(), "witness scan", "listing wedges fail the poster-witness scans closed")
 }

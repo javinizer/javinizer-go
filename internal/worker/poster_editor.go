@@ -426,6 +426,40 @@ func posterWitnessFence(env *posterEditEnv, posterID string) error {
 	return posterWitnessConflict(env.fs, env.tempDir, env.jobID, posterID)
 }
 
+// rekeyWitnessIDsFor matches pending rekey witnesses by CONTENT (audit
+// F-R6-1): a transition touches BOTH identities — a fence that probes only
+// the OLD-spelled filename leaves the NEW side unprotected (foreign
+// rescrape/download resolve into it, park its stranded legs, discard them).
+// Reads fail closed only on scan IO errors; corrupt payloads skip to the
+// reconciler's ownership.
+func rekeyWitnessIDsFor(fs afero.Fs, dir, posterID string) (bool, error) {
+	entries, err := afero.ReadDir(fs, dir)
+	if err != nil {
+		if errors.Is(err, afero.ErrFileNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("rekey witness scan %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, rekeyWitnessPrefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, rerr := afero.ReadFile(fs, filepath.Join(dir, name))
+		if rerr != nil {
+			return false, fmt.Errorf("rekey witness scan %s: %w", name, rerr)
+		}
+		var w rekeyWitness
+		if json.Unmarshal(data, &w) != nil {
+			continue
+		}
+		if strings.EqualFold(w.OldID, posterID) || strings.EqualFold(w.NewID, posterID) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // posterWitnessConflict is the raw-seams core of posterWitnessFence (audit
 // F1): rescrape plumbing carries fs/tempDir/jobID without a posterEditEnv.
 func posterWitnessConflict(fs afero.Fs, tempDir, jobID, posterID string) error {
@@ -439,16 +473,14 @@ func posterWitnessConflict(fs afero.Fs, tempDir, jobID, posterID string) error {
 	} else if !errors.Is(err, afero.ErrFileNotFound) {
 		return fmt.Errorf("poster promote witness check: %w", err)
 	}
-	// audit F5: the self-rekey witness also fences NON-rekey edits — a plain
-	// PATCH's post-commit eviction could delete the old-ID pair while a leg
-	// is stranded mid-relocation, and the startup reconciler would then
-	// resurrect the stale leg beside missing bytes. (The relocation block
-	// keeps its own identical check as defense-in-depth.)
-	rw := filepath.Join(dir, ".rekey-"+posterID+".json")
-	if _, err := fs.Stat(rw); err == nil {
+	// audit F5+F-R6-1: rekey witnesses fence by CONTENT at BOTH identities —
+	// a plain PATCH's post-commit eviction could delete the old-ID pair while
+	// a leg is stranded mid-relocation, and a foreign rescue of the NEW id
+	// would overwrite the stranded bytes.
+	if hit, serr := rekeyWitnessIDsFor(fs, dir, posterID); serr != nil {
+		return fmt.Errorf("poster rekey witness check: %w", serr)
+	} else if hit {
 		return &EditAdmissionConflictError{Message: fmt.Sprintf("poster rekey witness unresolved for %s: the previous rekey left stranded moves — restart to reconcile before rekeying again", posterID)}
-	} else if !errors.Is(err, afero.ErrFileNotFound) {
-		return fmt.Errorf("poster rekey witness check %s: %w", rw, err)
 	}
 	entries, err := afero.ReadDir(fs, dir)
 	if err != nil && !errors.Is(err, afero.ErrFileNotFound) {
@@ -750,6 +782,14 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster rekey witness unresolved for %s: the previous rekey left stranded moves — restart to reconcile before rekeying again", canonicalOldPosterID)}
 				} else if !errors.Is(err, afero.ErrFileNotFound) {
 					return fmt.Errorf("poster rekey witness check %s: %w", witnessPath, err)
+				}
+				// audit F-R6-1: the NEW identity must be free of ANY pending
+				// rekey witness (as its Old OR New leg) — a stranded foreign
+				// relocation's reversal would otherwise steal this pair.
+				if hit, derr := rekeyWitnessIDsFor(env.fs, dir, newID); derr != nil {
+					return fmt.Errorf("poster rekey destination check: %w", derr)
+				} else if hit {
+					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster rekey destination %s has an unresolved witness — restart to reconcile", newID)}
 				}
 				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID, PrevRevision: prevRevision})
 				tmpPath := witnessPath + ".tmp"

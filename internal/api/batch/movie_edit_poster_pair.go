@@ -279,11 +279,10 @@ func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, r
 	// worker writer) means one poster leg may live under another ID; a
 	// download recreating the old-ID leg beside the stranded new one would
 	// corrupt the next startup's rekey reconciliation.
-	rp := filepath.Join(dir, ".rekey-"+posterID+".json")
-	if _, serr := fs.Stat(rp); serr == nil {
+	if hit, serr := rekeyWitnessIDsFor(fs, dir, posterID); serr != nil {
+		return "", fmt.Errorf("rekey witness check: %w", serr)
+	} else if hit {
 		return "", fmt.Errorf("%w for %s (rekey witness) — restart to reconcile before retrying", errPromoteWitnessPending, posterID)
-	} else if !os.IsNotExist(serr) {
-		return "", fmt.Errorf("rekey witness check %s: %w", rp, serr)
 	}
 	// codex P2: an unresolved CROP witness also fences the download. When the
 	// crop committed but its promote exhausted retries, promoting new bytes
@@ -349,6 +348,42 @@ func cropWitnessName(stageID string) string {
 	return cropWitnessPrefix + url.PathEscape(stageID) + ".json"
 }
 
+// rekeyWitnessIDsFor matches pending rekey witnesses by CONTENT (audit
+// F-R6-1 mirrors the worker-side helper): a transition touches BOTH
+// identities, so a fence probing only the OLD-spelled filename leaves the
+// NEW side unprotected. Scan IO errors fail closed; corrupt payloads skip.
+func rekeyWitnessIDsFor(fs afero.Fs, dir, posterID string) (bool, error) {
+	entries, err := afero.ReadDir(fs, dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("rekey witness scan %s: %w", dir, err)
+	}
+	var w struct {
+		OldID string `json:"old_id"`
+		NewID string `json:"new_id"`
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, ".rekey-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, rerr := afero.ReadFile(fs, filepath.Join(dir, name))
+		if rerr != nil {
+			return false, fmt.Errorf("rekey witness scan %s: %w", name, rerr)
+		}
+		w.OldID, w.NewID = "", ""
+		if json.Unmarshal(data, &w) != nil {
+			continue
+		}
+		if strings.EqualFold(w.OldID, posterID) || strings.EqualFold(w.NewID, posterID) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // cropWitnessConflict scans the poster dir for crop witnesses naming
 // posterID, returning the conflicting witness filename ("" when none). Both
 // admission guards (crop write + from-URL promote) share this scan so a
@@ -408,13 +443,15 @@ func writeCropWitnessGuarded(fs afero.Fs, tempDir, jobID string, w cropWitness) 
 	// reconciliation. Probe the exact names the writers use (promote escapes
 	// via PathEscape; rekey concatenates raw — mirror each) and fail CLOSED on
 	// stat errors.
-	for _, wf := range []string{promoteWitnessName(w.PosterID), ".rekey-" + w.PosterID + ".json"} {
-		p := filepath.Join(dir, wf)
-		if _, serr := fs.Stat(p); serr == nil {
-			return "", fmt.Errorf("%w for %s (fence: %s) — restart to reconcile before retrying", errCropWitnessPending, w.PosterID, wf)
-		} else if !os.IsNotExist(serr) {
-			return "", fmt.Errorf("crop witness scan %s: %w", p, serr)
-		}
+	if _, serr := fs.Stat(filepath.Join(dir, promoteWitnessName(w.PosterID))); serr == nil {
+		return "", fmt.Errorf("%w for %s (fence: promote witness) — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
+	} else if !os.IsNotExist(serr) {
+		return "", fmt.Errorf("crop witness scan %s: %w", promoteWitnessName(w.PosterID), serr)
+	}
+	if hit, serr := rekeyWitnessIDsFor(fs, dir, w.PosterID); serr != nil {
+		return "", fmt.Errorf("crop witness scan: %w", serr)
+	} else if hit {
+		return "", fmt.Errorf("%w for %s (fence: rekey witness) — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
 	}
 	conflict, cerr := cropWitnessConflict(fs, dir, w.PosterID)
 	if cerr != nil {

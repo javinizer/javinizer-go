@@ -430,7 +430,23 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(dir string) int {
 				witnessed[base] = struct{}{}
 			}
 		case strings.HasPrefix(name, rekeyWitnessPrefix) && strings.HasSuffix(name, ".json"):
-			witnessed[strings.TrimSuffix(strings.TrimPrefix(name, rekeyWitnessPrefix), ".json")] = struct{}{}
+			// audit F-R6-1: rekey witnesses are CONTENT-matched at BOTH legs —
+			// a filename-OLD-only belt would let a parked NEW-side leg be
+			// swept/restored under an unresolved relocation. Corrupt content
+			// falls back to the filename-derived OLD id (legacy parity).
+			rawBase := strings.TrimSuffix(strings.TrimPrefix(name, rekeyWitnessPrefix), ".json")
+			witnessed[rawBase] = struct{}{}
+			if data, rerr := afero.ReadFile(c.fs, filepath.Join(dir, name)); rerr == nil {
+				var w rekeyWitness
+				if json.Unmarshal(data, &w) == nil {
+					if w.OldID != "" {
+						witnessed[w.OldID] = struct{}{}
+					}
+					if w.NewID != "" {
+						witnessed[w.NewID] = struct{}{}
+					}
+				}
+			}
 		case strings.HasPrefix(name, cropWitnessPrefix) && strings.HasSuffix(name, ".json"):
 			data, rerr := afero.ReadFile(c.fs, filepath.Join(dir, name))
 			if rerr != nil {

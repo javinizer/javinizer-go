@@ -172,6 +172,28 @@ func TestReconcileParkedSkipsCropWitnessedPoster(t *testing.T) {
 	assert.Equal(t, 1, cl.reconcileParkedPosterBackups(dir), "corrupt witness does not fence")
 }
 
+// audit F-R6-1: a parked leg under the NEW id of a pending rekey witness is
+// swept no more than an OLD-side one — the belt reads witness CONTENT.
+func TestReconcileParkedBeltCoversRekeyNewID(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "NEW-1.jpg.rsbak.a1.b2"), []byte("stale"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-OLD-1.json"), []byte("{\"old_id\":\"OLD-1\",\"new_id\":\"NEW-1\"}"), 0o644))
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	assert.Equal(t, 0, cl.reconcileParkedPosterBackups(dir), "NEW-side parked leg fenced by witness content")
+	_, err := fs.Stat(filepath.Join(dir, "NEW-1.jpg.rsbak.a1.b2"))
+	assert.NoError(t, err, "not swept, not re-homed while witness pends")
+
+	// Corrupt payload → filename-derived OLD fence still applies (legacy parity)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "OLD-2.jpg.rsbak.a1.b2"), []byte("stale2"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "NEW-2.jpg.rsbak.a1.b2"), []byte("stale3"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-OLD-2.json"), []byte("{not-json"), 0o644))
+	assert.Equal(t, 1, cl.reconcileParkedPosterBackups(dir), "corrupt witness: NEW-side heals, OLD-side fenced by name")
+	_, err2 := fs.Stat(filepath.Join(dir, "OLD-2.jpg.rsbak.a1.b2"))
+	assert.NoError(t, err2, "OLD-side fenced by filename")
+	_, err3 := fs.Stat(filepath.Join(dir, "NEW-2.jpg"))
+	assert.NoError(t, err3, "NEW-side restored (content unknown ⇒ no fence)")
+}
+
 func TestIsBackupNonce(t *testing.T) {
 	assert.True(t, isBackupNonce("a1.b2"))
 	assert.True(t, isBackupNonce("19c34abc.1f"))

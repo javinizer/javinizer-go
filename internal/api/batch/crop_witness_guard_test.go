@@ -164,7 +164,7 @@ func TestWriteCropWitnessGuardedFencesRekeyWitness(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	dir := "/tmp/posters/JOB-RK"
 	require.NoError(t, fs.MkdirAll(dir, 0o755))
-	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-PI-1.json"), []byte("{}"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-PI-1.json"), []byte("{\"old_id\":\"PI-1\"}"), 0o644))
 	_, err := writeCropWitnessGuarded(fs, "/tmp", "JOB-RK", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
 	require.ErrorIs(t, err, errCropWitnessPending)
 }
@@ -178,10 +178,13 @@ func TestWriteCropWitnessGuardedPromoteStatErrorFailsClosed(t *testing.T) {
 }
 
 func TestWriteCropWitnessGuardedRekeyStatErrorFailsClosed(t *testing.T) {
-	fs := statErrTargetFS{Fs: afero.NewMemMapFs(), target: "/tmp/posters/JOB-RS/.rekey-PI-1.json"}
+	mem := afero.NewMemMapFs()
+	require.NoError(t, mem.MkdirAll("/tmp/posters/JOB-RS", 0o755))
+	require.NoError(t, afero.WriteFile(mem, "/tmp/posters/JOB-RS/.rekey-PI-1.json", []byte("{\"old_id\":\"PI-1\"}"), 0o644))
+	fs := &brokenFS{Fs: mem, failOpen: func(n string) bool { return strings.HasSuffix(n, ".rekey-PI-1.json") }}
 	_, err := writeCropWitnessGuarded(fs, "/tmp", "JOB-RS", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "crop witness scan")
+	assert.Contains(t, err.Error(), "rekey witness scan")
 }
 
 // codex P2: an outstanding CROP witness for the same poster fences the
@@ -220,7 +223,7 @@ func TestWritePromoteGuardedFencesRekeyWitness(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	dir := "/tmp/posters/JG-RK"
 	require.NoError(t, fs.MkdirAll(dir, 0o755))
-	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-PI-1.json"), []byte("{}"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-PI-1.json"), []byte("{\"old_id\":\"PI-1\"}"), 0o644))
 	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-RK", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
 	require.ErrorIs(t, err, errPromoteWitnessPending)
 	assert.Contains(t, err.Error(), "rekey witness")
@@ -228,10 +231,13 @@ func TestWritePromoteGuardedFencesRekeyWitness(t *testing.T) {
 
 // A transient stat error on the rekey probe fails closed (not absence).
 func TestWritePromoteGuardedRekeyStatErrorFailsClosed(t *testing.T) {
-	fs := statErrTargetFS{Fs: afero.NewMemMapFs(), target: "/tmp/posters/JG-RE/.rekey-PI-1.json"}
+	mem := afero.NewMemMapFs()
+	require.NoError(t, mem.MkdirAll("/tmp/posters/JG-RE", 0o755))
+	require.NoError(t, afero.WriteFile(mem, "/tmp/posters/JG-RE/.rekey-PI-1.json", []byte("{\"old_id\":\"PI-1\"}"), 0o644))
+	fs := &brokenFS{Fs: mem, failOpen: func(n string) bool { return strings.HasSuffix(n, ".rekey-PI-1.json") }}
 	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-RE", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rekey witness check")
+	assert.Contains(t, err.Error(), "rekey witness scan")
 }
 
 // audit F2: a backup with an unreadable leg must refuse the witness outright
@@ -250,6 +256,34 @@ func TestWritePromoteGuardedRefusesUnreadableBackup(t *testing.T) {
 	p, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-UB", "PI-1", "https://x", "res-1", 0, backupOK)
 	require.NoError(t, err)
 	assert.Contains(t, p, ".promote-PI-1.json")
+}
+
+// Rekey scan edges in the batch-side helpers: corrupt payloads skip to the
+// reconciler; the crop scan's own dir-read error still fails closed.
+func TestBatchRekeyWitnessCorruptSkips(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JG-COR"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-x.json"), []byte("{bad"), 0o644))
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-COR", "PI-1", "https://x", "res-1", 0, nil)
+	require.NoError(t, err, "corrupt rekey payload must not fence (reconciler owns)")
+}
+
+func TestCropGuardedSecondScanDirError(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := "/tmp/posters/JG-D2"
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	count := 0
+	fs := &brokenFS{Fs: mem, failOpen: func(n string) bool {
+		if filepath.ToSlash(n) != dir {
+			return false
+		}
+		count++
+		return count > 1 // rekey scan ReadDir ok, crop scan ReadDir wedges
+	}}
+	_, err := writeCropWitnessGuarded(fs, "/tmp", "JG-D2", cropWitness{PosterID: "PI-2", ResultID: "r1", StageID: "PI-2.crop-1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "crop witness scan")
 }
 
 // codex P2: a NON-absence read error on the canonical full-size source must

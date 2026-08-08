@@ -123,7 +123,7 @@ func TestHasUnresolvedPromoteWitnessAllKinds(t *testing.T) {
 
 	rekey1 := afero.NewMemMapFs()
 	require.NoError(t, rekey1.MkdirAll("/tmp/posters/JOB-9", 0o755))
-	require.NoError(t, afero.WriteFile(rekey1, "/tmp/posters/JOB-9/.rekey-PI-1.json", []byte("{}"), 0o644))
+	require.NoError(t, afero.WriteFile(rekey1, "/tmp/posters/JOB-9/.rekey-PI-1.json", []byte("{\"old_id\":\"PI-1\"}"), 0o644))
 	assert.True(t, newPE(rekey1).hasUnresolvedPromoteWitness("PI-1"), "rekey witness fences")
 }
 
