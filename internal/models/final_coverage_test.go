@@ -36,13 +36,6 @@ func TestSplitFullNameWhitespaceOnlyAndQueryResolution(t *testing.T) {
 	assert.Empty(t, first)
 	assert.Empty(t, last)
 
-	oldFields := splitNameFields
-	splitNameFields = func(string) []string { return nil }
-	first, last = SplitFullName("not empty")
-	splitNameFields = oldFields
-	assert.Empty(t, first)
-	assert.Empty(t, last)
-
 	assert.Equal(t, "mapped", mustResolvedQuery(t, queryResolvingScraper{query: " mapped ", matched: true}))
 	for _, scraper := range []Scraper{
 		queryResolvingScraper{query: "ignored", matched: false},

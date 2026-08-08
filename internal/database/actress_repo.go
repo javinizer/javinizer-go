@@ -108,6 +108,12 @@ func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 		if err := tx.Model(&models.ActressSyncTask{}).Where("actress_id = ?", id).Update("actress_id", nil).Error; err != nil {
 			return err
 		}
+		// movie_actresses carries no ON DELETE action and pragma FK enforcement
+		// is off, so join rows would otherwise dangle (and re-attach to any
+		// future row reusing this id).
+		if err := tx.Exec("DELETE FROM movie_actresses WHERE actress_id = ?", id).Error; err != nil {
+			return wrapDBErr("delete", fmt.Sprintf("actress %v movie links", id), err)
+		}
 		// DBC-02: remove the actress's translation rows outright — pragma FK
 		// enforcement is off, so the migration's ON DELETE CASCADE never fires.
 		if err := tx.Where("actress_id = ?", id).Delete(&models.ActressTranslation{}).Error; err != nil {

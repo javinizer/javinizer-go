@@ -2,8 +2,6 @@ package models
 
 import "strings"
 
-var splitNameFields = strings.Fields
-
 // FormatActressNameOptions holds configuration for actress name formatting.
 type FormatActressNameOptions struct {
 	JapaneseNames      bool
@@ -63,7 +61,7 @@ func SplitFullName(fullName string) (firstName, lastName string) {
 		return "", ""
 	}
 
-	parts := splitNameFields(fullName)
+	parts := strings.Fields(fullName)
 	if len(parts) == 0 {
 		return "", ""
 	} else if len(parts) == 1 {

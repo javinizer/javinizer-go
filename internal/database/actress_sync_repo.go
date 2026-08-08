@@ -15,6 +15,7 @@ import (
 
 const (
 	actressSyncAttemptCap        = 3
+	actressSyncStaleRetryCap     = 3
 	actressSyncTerminalRetention = 20
 )
 
@@ -107,11 +108,16 @@ func (r *ActressSyncRepository) CreateJob(job *models.ActressSyncJob, tasks []mo
 
 func createActressSyncTaskTx(tx *gorm.DB, task *models.ActressSyncTask, job *models.ActressSyncJob) error {
 	if err := tx.Create(task).Error; err != nil {
-		if !strings.Contains(strings.ToLower(err.Error()), "unique") {
+		if !IsUniqueConstraint(err) {
 			return err
 		}
 		var conflict models.ActressSyncTask
 		if lookupErr := tx.Where("dedupe_key = ? AND status IN ?", task.DedupeKey, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).First(&conflict).Error; lookupErr != nil {
+			if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+				// PK collision or another unique index: surface the real error
+				// instead of a misleading dedupe lookup failure.
+				return err
+			}
 			return lookupErr
 		}
 		var conflictJob models.ActressSyncJob
@@ -121,8 +127,9 @@ func createActressSyncTaskTx(tx *gorm.DB, task *models.ActressSyncTask, job *mod
 		if conflictJob.CancelRequested {
 			// The existing task's job is being cancelled: supersede it so the
 			// fresh request stays runnable, instead of skipping the duplicate
-			// and leaving nothing to run.
-			if updErr := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", conflict.ID, models.ActressSyncTaskRunning).Update("dedupe_key", fmt.Sprintf("actress:%d:superseded:%s", actressIDOrZero(conflict.ActressID), conflict.ID)).Error; updErr != nil {
+			// and leaving nothing to run. Match supersedeCancelledDedupeHolderTx:
+			// a pending (not just running) holder keeps the partial-index slot.
+			if updErr := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status IN ?", conflict.ID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Update("dedupe_key", fmt.Sprintf("actress:%d:superseded:%s", actressIDOrZero(conflict.ActressID), conflict.ID)).Error; updErr != nil {
 				return updErr
 			}
 			return tx.Create(task).Error
@@ -177,8 +184,11 @@ const (
 
 // ListTasks ...
 func (r *ActressSyncRepository) ListTasks(jobID string, limit int) ([]models.ActressSyncTask, error) {
-	if limit <= 0 || limit > listTasksMaxLimit {
+	if limit <= 0 {
 		limit = listTasksDefaultLimit
+	}
+	if limit > listTasksMaxLimit {
+		limit = listTasksMaxLimit // clamp, don't collapse: 1001 must not look identical to "no limit"
 	}
 	tasks := make([]models.ActressSyncTask, 0)
 	err := r.db.Where("job_id = ?", jobID).Order("created_at ASC, id ASC").Limit(limit).Find(&tasks).Error
@@ -197,6 +207,9 @@ func (r *ActressSyncRepository) ListDiagnosticTasks(jobID string, limit int) ([]
 	if limit <= 0 {
 		limit = 100
 	}
+	if limit > listTasksMaxLimit {
+		limit = listTasksMaxLimit
+	}
 	tasks := make([]models.ActressSyncTask, 0)
 	err := r.db.Where("job_id = ? AND (status IN ? OR TRIM(COALESCE(warning, '')) <> '' OR TRIM(COALESCE(error_message, '')) <> '')", jobID, []string{models.ActressSyncTaskSkipped, models.ActressSyncTaskConflict, models.ActressSyncTaskFailed, models.ActressSyncTaskCancelled}).
 		Order("completed_at DESC, created_at DESC, id DESC").Limit(limit).Find(&tasks).Error
@@ -207,6 +220,13 @@ func (r *ActressSyncRepository) ListDiagnosticTasks(jobID string, limit int) ([]
 // the given view: "" counts all, "active" counts running, "diagnostics"
 // mirrors ListDiagnosticTasks' filter.
 func (r *ActressSyncRepository) CountTasks(jobID, view string) (int64, error) {
+	switch view {
+	case "", "active", "diagnostics":
+	default:
+		// Same strictness as resolveActressFilter: an unknown view must not
+		// silently degrade to count-all, or phase-4 callers would misreport.
+		return 0, wrapDBErr("count", "actress sync tasks", ErrInvalidLookup)
+	}
 	query := r.db.Model(&models.ActressSyncTask{}).Where("job_id = ?", jobID)
 	switch view {
 	case "active":
@@ -636,7 +656,14 @@ func migrateActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, ac
 		}
 	}
 	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND actress_id = ? AND status IN ?", task.ID, *task.ActressID, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Updates(updates)
-	return result.Error
+	if result.Error != nil {
+		return result.Error
+	}
+	// Mirror the sibling migrations: a no-op must not look like success.
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("actress sync task %s state changed during merge", task.ID)
+	}
+	return nil
 }
 
 func skipActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask) error {
@@ -653,7 +680,13 @@ func skipActiveActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask) error
 		"status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
 		"dedupe_key": fmt.Sprintf("actress:%d:skipped:%s", actressIDRef, task.ID),
 	})
-	return result.Error
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("actress sync task %s was not pending during merge", task.ID)
+	}
+	return nil
 }
 
 func skipMergedActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, actressID uint) error {
@@ -662,7 +695,13 @@ func skipMergedActressSyncTaskTx(tx *gorm.DB, task models.ActressSyncTask, actre
 	result := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", task.ID, models.ActressSyncTaskPending).Updates(map[string]any{
 		"actress_id": actressID, "dedupe_key": fmt.Sprintf("actress:%d:merged:%s", actressID, task.ID), "status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
 	})
-	return result.Error
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("actress sync task %s was not pending during merge", task.ID)
+	}
+	return nil
 }
 
 func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token string, actressID, expectedActressID uint) error {
@@ -705,10 +744,14 @@ func (r *ActressSyncRepository) reassignTaskActressTx(tx *gorm.DB, id, token str
 		} else {
 			now := time.Now().UTC()
 			messages, _ := json.Marshal([]string{"coalesced_into_merged_task"})
-			if err := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", conflict.ID, models.ActressSyncTaskPending).Updates(map[string]any{
+			skipped := tx.Model(&models.ActressSyncTask{}).Where("id = ? AND status = ?", conflict.ID, models.ActressSyncTaskPending).Updates(map[string]any{
 				"status": models.ActressSyncTaskSkipped, "stage": "completed", "outcome": "skipped", "messages": string(messages), "completed_at": now,
-			}).Error; err != nil {
-				return err
+			})
+			if skipped.Error != nil {
+				return skipped.Error
+			}
+			if skipped.RowsAffected != 1 {
+				return fmt.Errorf("actress sync task %s was not pending during reassign", conflict.ID)
 			}
 			if err := r.refreshJobTx(tx, conflict.JobID, now); err != nil {
 				return err
@@ -891,6 +934,14 @@ func (r *ActressSyncRepository) RequeueTask(ctx context.Context, taskID, leaseTo
 			}
 			if !job.CancelRequested {
 				switch {
+				case opts.StaleRetry && task.StaleRetryCount >= actressSyncStaleRetryCap:
+					// Repo backstop for the phase-3 engine's policy cap: an
+					// over-stale task settles failed instead of cycling forever.
+					updates["status"] = models.ActressSyncTaskFailed
+					updates["stage"] = "completed"
+					updates["outcome"] = "failed"
+					updates["error_message"] = "stale_retry_cap_reached"
+					updates["completed_at"] = now
 				case opts.StaleRetry:
 					// Stale leases never consume the attempt under requeue:
 					// bump the persisted counter and hand the attempt back.
@@ -970,6 +1021,14 @@ func (r *ActressSyncRepository) CompleteTask(task *models.ActressSyncTask, token
 				if strings.TrimSpace(task.Warning) == "" {
 					task.Warning = "partial_sync_error"
 				}
+			}
+			// Terminal settle must carry a terminal status: pending/running here
+			// would park the row unclaimable beside spent attempts (the same
+			// limbo the requeue cap-settle avoids).
+			switch task.Status {
+			case models.ActressSyncTaskCompleted, models.ActressSyncTaskSkipped, models.ActressSyncTaskConflict, models.ActressSyncTaskFailed, models.ActressSyncTaskCancelled:
+			default:
+				task.Status, task.Outcome, task.ErrorMessage = models.ActressSyncTaskFailed, "failed", "invalid_terminal_status"
 			}
 			task.UpdatedFields = mergedFields
 			messages, _ := json.Marshal(task.Messages)

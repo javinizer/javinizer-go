@@ -295,6 +295,9 @@ func (m *actressMerger) executeMerge(ctx context.Context, plan *MergePlan, db *D
 	if plan == nil || db == nil {
 		return nil, fmt.Errorf("merge plan and database are required")
 	}
+	if plan.TargetID == 0 || plan.SourceID == 0 || plan.TargetID == plan.SourceID {
+		return nil, wrapDBErr("merge", "actresses", ErrInvalidLookup)
+	}
 	if taskHook == nil {
 		taskHook = func(tx *gorm.DB, canonicalID, duplicateID uint) error {
 			return migrateActiveActressSyncTasksTx(tx, canonicalID, duplicateID)
