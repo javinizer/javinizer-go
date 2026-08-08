@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -104,6 +106,50 @@ func (r *APIRuntime) prepareReload(cfg *config.Config, resolver models.ScraperCo
 	return nil
 }
 
+// actressOnlyPriorityWarnings reports per-field config warnings when a
+// field's override is satisfied only by actress-only resolvers. For the
+// actress field that means no cast can ever be aggregated for them to
+// enrich; for any other field it can never gain data from them. YAML-authored
+// configs skip API save-time validation, so boot/reload reports them loudly.
+func actressOnlyPriorityWarnings(reg *scraperutil.ScraperRegistry, cfg *config.Config) []config.ConfigWarning {
+	if reg == nil || cfg == nil {
+		return nil
+	}
+	fields := make([]string, 0, len(cfg.Metadata.Priority.Fields))
+	for field := range cfg.Metadata.Priority.Fields {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	var warnings []config.ConfigWarning
+	for _, field := range fields {
+		override := cfg.Metadata.Priority.Fields[field]
+		if len(override) == 0 {
+			continue
+		}
+		if len(override) == 1 && strings.EqualFold(strings.TrimSpace(override[0]), "__skip__") {
+			continue
+		}
+		recognized, capable := false, false
+		for _, name := range override {
+			inst, found := reg.GetInstance(strings.ToLower(strings.TrimSpace(name)))
+			if !found || inst == nil {
+				continue
+			}
+			recognized = true
+			if c, ok := inst.(models.MovieSearchCapable); !ok || c.SupportsMovieSearch() {
+				capable = true
+				break
+			}
+		}
+		if !recognized || capable {
+			continue
+		}
+		msg := fmt.Sprintf("metadata.priority.%s = [%s]: every listed scraper resolves actress metadata but never produces movie results; the field can never gain data from them — add a movie-capable scraper", field, strings.Join(override, ", "))
+		warnings = append(warnings, config.ConfigWarning{Field: field, Scrapers: override, Message: msg})
+	}
+	return warnings
+}
+
 func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.ScraperRegistry) error {
 	r18DumpLookup, r18DumpCloser, dumpErr := commandutil.OpenR18DevDumpLookup(cfg)
 	if dumpErr != nil {
@@ -119,6 +165,11 @@ func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.Scr
 		}
 		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
+	warnings := actressOnlyPriorityWarnings(newRegistry, cfg)
+	for _, warning := range warnings {
+		logging.Warnf("%s", warning.Message)
+	}
+	cfg.Warnings = append(cfg.Warnings, warnings...)
 	// Atomic publication (issue #44): swap the dump closer, publish cfg+registry,
 	// rebuild the APIConfig snapshot, and invalidate the cached factories all
 	// under one reloadMu.Lock so concurrent readers cannot observe a mix of
