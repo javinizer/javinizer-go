@@ -247,7 +247,18 @@ func (s *stubControlledJob) GetJobStatus() models.JobStatus                     
 func (s *stubControlledJob) GetStatus() *worker.BatchJobStatus                       { return s.status }
 func (s *stubControlledJob) GetMovieResult(string) (*resultstore.MovieResult, error) { return nil, nil }
 func (s *stubControlledJob) Subscribe() worker.JobEventSubscriber                    { return nil }
-func (s *stubControlledJob) FindFilePathsForMovieID(string) []string                 { return nil }
+func (s *stubControlledJob) GetCurrentPhase() string                                 { return "" }
+func (s *stubControlledJob) UpdateMovieFamily(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) error {
+	return nil
+}
+func (s *stubControlledJob) UpdateMovieFamilyWithEcho(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) (*uint64, map[string]uint64, error) {
+	return nil, nil, nil
+}
+func (s *stubControlledJob) ExcludeMovieFamily(context.Context, string) error { return nil }
+func (s *stubControlledJob) WithMovieEditLock(_ string, fn func(*worker.LockedMovieOps) error) error {
+	return fn(&worker.LockedMovieOps{})
+}
+func (s *stubControlledJob) FindFilePathsForMovieID(string) []string { return nil }
 func (s *stubControlledJob) FindMovieResultForMovieID(string) (*resultstore.MovieResult, error) {
 	return nil, nil
 }

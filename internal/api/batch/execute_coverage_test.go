@@ -62,6 +62,8 @@ func TestUpdateBatchMoviePosterFromURL_SuccessWithRealServer(t *testing.T) {
 		Movie:         &models.Movie{ID: "IPX-535", Title: "Test"},
 		StartedAt:     time.Now(),
 	})
+	// D16: edits require an admitted lifecycle — Pending is rejected with 409.
+	job.Controller().SetJobStatus(models.JobStatusCompleted)
 
 	router := gin.New()
 	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(testkit.GetTestRuntime(deps)))

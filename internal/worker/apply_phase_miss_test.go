@@ -705,7 +705,7 @@ func TestApplyPhase_Run_PersisterCalledOnPanic(t *testing.T) {
 	}
 
 	persisted := false
-	inputs.persister = persistFunc(func() { persisted = true })
+	inputs.persister = persistFunc(func() error { persisted = true; return nil })
 
 	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
 		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,17 @@ type applyFileOutcome struct {
 	DryRun    bool          // true if apply was a dry-run
 }
 
+// recoverRunPanic marks the job failed only when a panic recovered in Run's
+// defer counciled the main body (never nil on normal exit).
+func recoverRunPanic(inputs applyPhaseInputs, r any) {
+	if r == nil {
+		return
+	}
+	panicErr := panicutil.FormatRecover(r)
+	logging.Errorf("BatchJob.StartApply %s %v", inputs.JobID.String(), panicErr)
+	inputs.Lifecycle.MarkFailed()
+}
+
 // Run executes the apply phase: setup errgroup → iterate files → dispatch
 // applyFile → collect outcomes → track results → report status.
 func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
@@ -52,13 +64,14 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	persister := inputs.persister
 
 	defer func() {
-		if r := recover(); r != nil {
-			panicErr := panicutil.FormatRecover(r)
-			logging.Errorf("BatchJob.StartApply %s %v", inputs.JobID.String(), panicErr)
-			inputs.Lifecycle.MarkFailed()
-		}
+		// Extraction keeps the recovery arm testable: fanout workers forward
+		// panics, so ONLY main-body panics reach this defer — and a named fn is
+		// the honest seam for exercising MarkFailed on phase panic (codex P2-E).
+		recoverRunPanic(inputs, recover())
 		if persister != nil {
-			persister.Persist()
+			if err := persister.Persist(); err != nil {
+				logging.Warnf("[Apply] envelope persist failed: %v", err)
+			}
 		}
 	}()
 
@@ -151,6 +164,35 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 // It resolves the destination path, builds the command, and runs the
 // PreApply hook if configured (which may mutate the ApplyFileContext and
 // thus the returned ApplyCmd fields).
+// applyFamilyLock serializes an apply write-back against review edits on ALL
+// identity keys (codex r37 P2): edits lock the MATCHER alias
+// (FileMatchInfo.MovieID), while buildApplyCmd rewrote afc.Match.MovieID to
+// the canonical Movie.ID — applying under the canonical key alone lets the
+// atomic write-back run between an edit's candidate snapshot and its
+// post-transaction publication on the alias key.
+//
+// codex r42 P2: the lock acquisition MUST route through the registry's ONE
+// total order (AcquireMany folds keys uppercase then sorts). Any caller-side
+// ordering rule reproduces a DIFFERENT comparison (e.g. lowercase sort
+// orders "z" AFTER "_" while the fold orders "Z" BEFORE "_") — a concurrent
+// multi-key review edit then deadlocks against this write-back.
+func applyFamilyLock(inputs applyPhaseInputs, aliasID, canonicalID string) func() {
+	if inputs.EditLockFn == nil {
+		return func() {}
+	}
+	return inputs.EditLockFn(aliasID, canonicalID)
+}
+
+// applyFamilyKeyIDs extracts the matcher alias (edit-lock identity) and the
+// canonical Movie.ID (apply-rewritten identity) for a write-back.
+func applyFamilyKeyIDs(afc *ApplyFileContext) (aliasID, canonicalID string) {
+	canonicalID = afc.Match.MovieID
+	if afc.MovieResult != nil {
+		aliasID = afc.MovieResult.FileMatchInfo.MovieID
+	}
+	return aliasID, canonicalID
+}
+
 func buildApplyCmd(
 	filePath string,
 	movie *models.Movie,
@@ -275,14 +317,53 @@ func interpretApplyResult(
 		// failed-apply row loses its movie payload and /review/[jobId] can't
 		// render the movie card / poster preview. Same dropped-on-failure-path
 		// pattern fixed for FileMatchInfo in commit 6249de64.
-		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
-			FileMatchInfo: afc.Match,
-			Movie:         movie,
-			Status:        fileStatus,
-			Error:         errMsg,
-			StartedAt:     startTime,
-			EndedAt:       &now,
-		})
+		// Live-session merge (not whole-struct replace): the review-editable
+		// set keeps the LIVE value when the user edited it mid-phase
+		// (codex P6-B); phase-computed fields still come from the frozen
+		// movie. Falls back to whole-struct write when no result exists yet
+		// (early-fail paths in phase tests create rows on demand).
+		// Serialize with concurrent review edits (codex r11 P1): publication of
+		// the merged write-back happens under the movie family key.
+		// codex r37 P2: lock BOTH identity keys — edits hold the matcher
+		// alias while afc.Match.MovieID was rewritten to the canonical ID.
+		aliasID, canonicalID := applyFamilyKeyIDs(afc)
+		unlock := applyFamilyLock(inputs, aliasID, canonicalID)
+		defer unlock()
+
+		// codex P2-C/D: settled-rekey skip runs UNDER the family key; the
+		// callback's mismatch return is the net for rekeys landing mid-write.
+		// codex P2: fence the FAILURE write-back (and panic-converted failures
+		// land here too) behind outstanding promote witnesses — its revision
+		// bump would make startup arbitrate the failed refresh as committed.
+		if mid := strings.TrimSpace(movie.ID); mid != "" && inputs.PromoteWitnessFn != nil && inputs.PromoteWitnessFn(mid) {
+			logging.Warnf("[Apply] skipping failure write-back for %s — promote witness for %s unresolved; restart reconciles", filePath, mid)
+		} else if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
+			errUp := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+				if applyWritebackIdentityMismatch(movie, current) {
+					logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+					return current, nil
+				}
+				fm := applyMatchFollowedByLiveIdentity(afc.Match, current)
+				current.FileMatchInfo = fm
+				current.Movie = mergeLiveReviewEdits(movie, movie, current.Movie)
+				current.Status = fileStatus
+				current.Error = errMsg
+				current.StartedAt = startTime
+				current.EndedAt = &now
+				return current, nil
+			})
+			if errUp != nil {
+				inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
+					FileMatchInfo: afc.Match,
+					Movie:         movie,
+					Status:        fileStatus,
+					Error:         errMsg,
+					StartedAt:     startTime,
+					EndedAt:       &now,
+				})
+			}
+		}
+
 		if isCancelled {
 			if result != nil && result.OrganizeResult != nil {
 				auditOrganizeSuccess(inputs, movie, filePath, result, cfg)
@@ -325,11 +406,30 @@ func interpretApplyResult(
 	}
 
 	if result != nil && result.Movie != nil {
-		if err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-			current.Movie = result.Movie.Clone()
-			return current, nil
-		}); err != nil {
-			logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err)
+		// codex r37 P2: lock BOTH identity keys — edits hold the matcher alias.
+		aliasID, canonicalID := applyFamilyKeyIDs(afc)
+		unlock := applyFamilyLock(inputs, aliasID, canonicalID)
+		defer unlock()
+		// codex P2-C/D: settled-rekey skip runs UNDER the family key.
+		if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
+			if mid := result.Movie.ID; mid != "" && inputs.PromoteWitnessFn != nil && inputs.PromoteWitnessFn(mid) {
+				// codex P2: an unresolved promote witness arbitrates at startup by
+				// revision — this write-back bumps it, which would declare a
+				// failed refresh committed and discard its recovery state.
+				logging.Warnf("[Apply] skipping success write-back for %s — promote witness for %s unresolved; restart reconciles", filePath, mid)
+			} else {
+				err2 := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+					if applyWritebackIdentityMismatch(movie, current) {
+						logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+						return current, nil
+					}
+					current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
+					return current, nil
+				})
+				if err2 != nil {
+					logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err2)
+				}
+			}
 		}
 		outcome.Movie = result.Movie
 	}
@@ -395,11 +495,13 @@ func applyFile(
 		// path. Constructing a fresh struct here would silently zero multipart
 		// metadata for any file that panicked mid-apply, so /review/[jobId]
 		// would then show the file as single-part.
-		fmi:       fileResult.FileMatchInfo,
-		movie:     fileResult.Movie,
-		updater:   inputs.Updater,
-		broadcast: broadcastFailure(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply, "Apply"),
-		startTime: startTime,
+		fmi:              fileResult.FileMatchInfo,
+		movie:            fileResult.Movie,
+		updater:          inputs.Updater,
+		broadcast:        broadcastFailure(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply, "Apply"),
+		startTime:        startTime,
+		editLockFn:       inputs.EditLockFn,
+		promoteWitnessFn: inputs.PromoteWitnessFn,
 	}
 	defer withFileRecovery(rc, &outcome)()
 
@@ -410,6 +512,12 @@ func applyFile(
 		taskCtx, taskCancel = context.WithTimeout(egCtx, applyTimeout)
 		defer taskCancel()
 	}
+
+	// codex r51 P2c: freeze the phase-entry baseline BEFORE the workflow
+	// sees the pointer — stepDisplayTitle & friends mutate cmd.Movie/afc.Movie
+	// (= the same movie), and a mutated "baseline" misclassifies merges as
+	// concurrent review edits, restoring stale fields over the computed ones.
+	frozenBaseline := movie.Clone()
 
 	// Step 1: Build the ApplyCmd.
 	applyCmd, afc, shouldExecute := buildApplyCmd(filePath, movie, fileResult, inputs, cfg, taskCtx)
@@ -426,8 +534,9 @@ func applyFile(
 
 	result, applyErr := wf.Apply(taskCtx, applyCmd)
 
-	// Step 3: Interpret the result.
-	return interpretApplyResult(filePath, movie, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)
+	// Step 3: Interpret the result against the FROZEN baseline (workflow
+	// permutations may have rewritten fields on the live pointer mid-apply).
+	return interpretApplyResult(filePath, frozenBaseline, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)
 }
 
 // trackApplyResults processes collected applyFileOutcomes: increments counters

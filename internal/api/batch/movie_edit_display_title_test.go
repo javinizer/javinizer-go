@@ -36,6 +36,7 @@ func TestUpdateBatchMovie_ReDerivesDisplayTitleOnSave(t *testing.T) {
 	batchDeps := testkit.GetTestRuntime(deps)
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/TEST-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
@@ -86,6 +87,7 @@ func TestUpdateBatchMovie_DisplayTitleFallsBackToTitleWithoutTemplate(t *testing
 	batchDeps := testkit.GetTestRuntime(deps)
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/TEST-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,

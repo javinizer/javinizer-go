@@ -250,7 +250,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 
 		time.Sleep(10 * time.Millisecond) // Ensure time difference
 
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 
 		assert.Equal(t, models.JobStatusRunning, job.lifecycle.Status)
 		assert.True(t, job.StartedAt.After(initialStartTime), "StartedAt should be updated")
@@ -260,7 +260,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	t.Run("MarkCompleted", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 
 		beforeCompletion := time.Now()
 		job.lifecycle.MarkCompleted()
@@ -276,7 +276,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	t.Run("MarkFailed", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 
 		beforeFailure := time.Now()
 		job.lifecycle.MarkFailed()
@@ -291,7 +291,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	t.Run("MarkCancelled", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 
 		beforeCancellation := time.Now()
 		job.lifecycle.MarkCancelled()
@@ -306,7 +306,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	t.Run("MarkReverted", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 		job.lifecycle.MarkOrganized()
 
@@ -329,7 +329,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 		assert.Equal(t, models.JobStatusPending, job.lifecycle.Status)
 
 		// Mark as running
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		assert.Equal(t, models.JobStatusRunning, job.lifecycle.Status)
 		assert.Nil(t, job.lifecycle.CompletedAt)
 
@@ -356,7 +356,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	t.Run("Revert workflow: organized -> reverted", func(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 		job.lifecycle.MarkOrganized()
 
@@ -380,7 +380,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 		jq := NewJobStore(nil, nil, nil, "", nil, nil)
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJobBatch(files)
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 
 		now := time.Now()
 		job.results.UpdateFileResult("file1.mp4", &resultstore.MovieResult{
@@ -777,7 +777,7 @@ func TestBatchJob_SetCancelFunc(t *testing.T) {
 		}
 
 		// Set cancel function
-		job.lifecycle.setCancelFunc(cancelFunc)
+		job.lifecycle.CancelFunc = cancelFunc
 
 		// Trigger cancellation
 		job.lifecycle.Cancel()
@@ -927,7 +927,7 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 func TestMarkReverted_StatusAndTimestamp(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 	job.lifecycle.MarkOrganized()
 
@@ -943,7 +943,7 @@ func TestMarkReverted_StatusAndTimestamp(t *testing.T) {
 func TestMarkReverted_DoneChannelClosed(t *testing.T) {
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 	job.lifecycle.MarkOrganized()
 
@@ -1462,7 +1462,7 @@ func TestBatchJob_GetStatusSlim(t *testing.T) {
 		assert.Equal(t, job.ID.String(), job.GetID())
 		assert.Equal(t, models.JobStatusPending, job.lifecycle.GetJobStatus())
 
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	})
 
 }
@@ -1497,7 +1497,7 @@ func TestSnapshotForPersist_EncodeError(t *testing.T) {
 
 	jq := NewJobStore(nil, nil, nil, "", nil, nil)
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
-	dbJob, ok := snapshotForPersist(job)
-	assert.False(t, ok)
+	dbJob, err := snapshotForPersist(job)
+	assert.Error(t, err)
 	assert.Nil(t, dbJob)
 }

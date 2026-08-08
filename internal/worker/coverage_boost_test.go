@@ -307,7 +307,7 @@ func TestJobStore_setDepsFromConfig(t *testing.T) {
 		wf := &stubWorkflow{}
 		matcher := &stubMatcher{result: "ABC-001"}
 		mockEmitter := mocks.NewMockEventEmitter(t)
-		persistFn := func() {}
+		persistFn := func() error { return nil }
 
 		cfg := &JobConfig{
 			BatchJobDeps: BatchJobDeps{
@@ -388,7 +388,7 @@ func TestJobStore_DeleteJob_ErrorPaths(t *testing.T) {
 
 		err := jq.DeleteJob(job.ID.String())
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "already deleted")
+		assert.Contains(t, err.Error(), "job was deleted")
 	})
 
 	t.Run("returns error for running job", func(t *testing.T) {
@@ -1130,8 +1130,8 @@ func TestJobStore_SnapshotForPersist_DeletedJob(t *testing.T) {
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 	job.lifecycle.deleted = true
 
-	dbJob, ok := snapshotForPersist(job)
-	assert.False(t, ok)
+	dbJob, err := snapshotForPersist(job)
+	assert.NoError(t, err)
 	assert.Nil(t, dbJob)
 }
 
@@ -1146,8 +1146,8 @@ func TestJobStore_SnapshotForPersist_Success(t *testing.T) {
 	job.cfg.update = true
 	job.cfg.operationMode = operationmode.OperationModeOrganize
 
-	dbJob, ok := snapshotForPersist(job)
-	require.True(t, ok)
+	dbJob, err2 := snapshotForPersist(job)
+	require.NoError(t, err2)
 	require.NotNil(t, dbJob)
 	assert.Equal(t, job.ID.String(), dbJob.ID)
 	assert.Equal(t, models.JobStatusPending, dbJob.Status)

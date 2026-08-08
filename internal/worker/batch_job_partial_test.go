@@ -22,7 +22,7 @@ func TestBatchJob_UpdatePosterCrop_NoMatchingFiles_Partial(t *testing.T) {
 	})
 	// No results set for any file — UpdatePosterCrop should return nil
 	err := job.posterEditor.UpdatePosterCrop("NONEXISTENT-001", "cropped.jpg", nil, false)
-	assert.NoError(t, err, "should return nil when no matching files")
+	require.ErrorIs(t, err, ErrMovieFamilyEmpty) // typed empty-family (D1/D10)
 }
 
 // --- UpdatePosterCrop: nil movie skips file ---
@@ -41,7 +41,7 @@ func TestBatchJob_UpdatePosterCrop_NilMovie_Partial(t *testing.T) {
 	})
 
 	err := job.posterEditor.UpdatePosterCrop("ABC-001", "cropped.jpg", nil, false)
-	assert.NoError(t, err, "should skip files with nil Movie")
+	require.ErrorIs(t, err, ErrMovieFamilyEmpty)
 }
 
 // --- UpdatePosterCrop: multiple files for same movieID ---
@@ -98,7 +98,7 @@ func TestBatchJob_UpdatePosterFromURL_NoMatchingFiles_Partial(t *testing.T) {
 		},
 	})
 	err := job.posterEditor.UpdatePosterFromURL(context.TODO(), "NONEXISTENT-001", "poster.jpg", "crop.jpg")
-	assert.NoError(t, err)
+	require.ErrorIs(t, err, ErrMovieFamilyEmpty)
 }
 
 // --- UpdatePosterFromURL: nil movie skips file ---
@@ -117,7 +117,7 @@ func TestBatchJob_UpdatePosterFromURL_NilMovie_Partial(t *testing.T) {
 	})
 
 	err := job.posterEditor.UpdatePosterFromURL(context.TODO(), "ABC-001", "poster.jpg", "crop.jpg")
-	assert.NoError(t, err)
+	require.ErrorIs(t, err, ErrMovieFamilyEmpty)
 }
 
 // --- UpdatePosterFromURL: multiple files for same movieID ---
@@ -211,7 +211,7 @@ func TestBatchJob_ExcludeFile_CancelFuncCalled(t *testing.T) {
 	})
 
 	cancelCalled := false
-	job.lifecycle.setCancelFunc(func() { cancelCalled = true })
+	job.lifecycle.CancelFunc = func() { cancelCalled = true }
 
 	excludeFile(job, "file1.mp4")
 	assert.Equal(t, models.JobStatusCancelled, job.lifecycle.GetJobStatus())

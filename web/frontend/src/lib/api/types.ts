@@ -162,6 +162,10 @@ export interface PosterCropResponse {
 	original_poster_url?: string;
 	original_cropped_poster_url?: string;
 	original_should_crop_poster?: boolean | null;
+	/** Fresh post-commit revision — clients advance their CAS baseline from it. */
+	revision?: number;
+	/** Per-part post-commit revisions keyed by result_id (multipart-safe). */
+	revisions?: Record<string, number>;
 }
 
 export interface PosterFromURLRequest {
@@ -171,6 +175,10 @@ export interface PosterFromURLRequest {
 export interface PosterFromURLResponse {
 	cropped_poster_url: string;
 	poster_url: string;
+	/** Fresh post-commit revision (CAS baseline). */
+	revision?: number;
+	/** Per-part post-commit revisions keyed by result_id (multipart-safe). */
+	revisions?: Record<string, number>;
 }
 
 export interface ScraperRating {
@@ -229,6 +237,10 @@ export interface FieldOverrideResponse {
 	movie?: Movie;
 	field_sources?: Record<string, string>;
 	actress_sources?: Record<string, string>;
+	/** Fresh post-commit revision (CAS baseline). */
+	revision?: number;
+	/** Per-part post-commit revisions keyed by result_id (multipart-safe). */
+	revisions?: Record<string, number>;
 }
 
 export interface BatchRescrapeRequest {
@@ -249,6 +261,8 @@ export interface BatchRescrapeResponse {
 	movie: Movie;
 	field_sources?: Record<string, string>;
 	actress_sources?: Record<string, string>;
+	/** Fresh post-commit result revision (CAS baseline). */
+	revision?: number;
 }
 
 export interface BulkRescrapeRequest {
@@ -343,6 +357,8 @@ export interface FileResult {
 	file_path: string;
 	movie_id: string;
 	status: string;
+	/** POSTER-WRITE-HARDENING D12: server CAS token for review saves. */
+	revision?: number;
 	error?: string;
 	error_code?: ScraperErrorKind;
 	field_sources?: Record<string, string>;

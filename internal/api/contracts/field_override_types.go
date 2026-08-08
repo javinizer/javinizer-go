@@ -25,6 +25,8 @@ type FieldOverrideResponse struct {
 	Movie          *MovieView        `json:"movie"`
 	FieldSources   map[string]string `json:"field_sources,omitempty"`
 	ActressSources map[string]string `json:"actress_sources,omitempty"`
+	// Revision is the revision AFTER the override commit (D12).
+	Revision *uint64 `json:"revision,omitempty"`
 }
 
 // SourceResultsResponse is the raw per-scraper results for a movie, used by the

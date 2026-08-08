@@ -76,7 +76,7 @@ func TestBatchJob_StartApply_NoWorkflowUncovered(t *testing.T) {
 
 func TestBatchJob_MarkOrganized_FromCompletedUncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 	job.lifecycle.MarkOrganized()
 	assert.Equal(t, models.JobStatusOrganized, job.lifecycle.GetJobStatus())
@@ -92,7 +92,7 @@ func TestBatchJob_ExcludeFile_CancelsWhenAllExcludedUncovered(t *testing.T) {
 
 func TestBatchJob_Cancel_AlreadyCompletedUncovered(t *testing.T) {
 	job := newBatchJob([]string{"file1.mp4"})
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 	job.lifecycle.Cancel()
 	assert.Equal(t, models.JobStatusCompleted, job.lifecycle.GetJobStatus(), "cancel should not change completed status")
@@ -256,7 +256,7 @@ func TestPersistFunc_NilUncovered(t *testing.T) {
 
 func TestPersistFunc_NonNilUncovered(t *testing.T) {
 	called := false
-	p := persistFunc(func() { called = true })
+	p := persistFunc(func() error { called = true; return nil })
 	p.Persist()
 	assert.True(t, called)
 }
@@ -279,7 +279,7 @@ func TestNewConcurrencyConfigUncovered(t *testing.T) {
 func TestJobLifecycle_SetCancelFuncUncovered(t *testing.T) {
 	lc := &JobLifecycle{Status: models.JobStatusPending, done: make(chan struct{})}
 	called := false
-	lc.setCancelFunc(func() { called = true })
+	lc.CancelFunc = func() { called = true }
 	lc.cancelAndMarkCancelled()
 	assert.True(t, called)
 }
@@ -287,7 +287,7 @@ func TestJobLifecycle_SetCancelFuncUncovered(t *testing.T) {
 func TestJobLifecycle_CancelAndMarkCancelled_AlreadyCompletedUncovered(t *testing.T) {
 	lc := &JobLifecycle{Status: models.JobStatusCompleted, done: make(chan struct{})}
 	called := false
-	lc.setCancelFunc(func() { called = true })
+	lc.CancelFunc = func() { called = true }
 	lc.cancelAndMarkCancelled()
 	assert.True(t, called, "cancelFunc should still be called for terminal states")
 	assert.Equal(t, models.JobStatusCompleted, lc.Status, "status should not change from completed to cancelled")

@@ -26,13 +26,21 @@ import (
 // Per P-8: temp dir cleanup is delegated to TempDirCleaner rather than
 // implemented directly on JobStore.
 type JobStore struct {
-	jobs              map[models.JobID]*BatchJob
-	jobRepo           database.JobRepositoryInterface
-	batchFileOpRepo   database.BatchFileOperationRepositoryInterface
-	movieRepo         database.MovieRepositoryInterface
-	actressRepo       database.ActressRepositoryInterface
-	historyRepo       database.HistoryRepositoryInterface
-	persistence       JobPersistencer
+	jobs            map[models.JobID]*BatchJob
+	jobRepo         database.JobRepositoryInterface
+	batchFileOpRepo database.BatchFileOperationRepositoryInterface
+	movieRepo       database.MovieRepositoryInterface
+	actressRepo     database.ActressRepositoryInterface
+	historyRepo     database.HistoryRepositoryInterface
+	persistence     JobPersistencer
+	envLocks        *keyedMutexRegistry // POSTER-WRITE-HARDENING D2: per-job envelope persist lock
+	movieLocks      *keyedMutexRegistry // POSTER-WRITE-HARDENING D15: process-wide family lock registry shared by every job
+	// codex r38 P2: actress-row keys live on a DISJOINT registry — a movie
+	// rekeyed to a colliding ID like "actress:123" must never share a mutex
+	// with the actress-rename leg (same-registry re-lock deadlocks).
+	actressLocks      *keyedMutexRegistry
+	tombstones        *tombstoneRegistry // POSTER-WRITE-HARDENING D3: deleted-job 410 registry
+	editTx            EditTransactor     // POSTER-WRITE-HARDENING D4: composite tx seam (nil ⇒ legacy best-effort persists)
 	tempDir           string
 	templateEngine    template.EngineInterface
 	fs                afero.Fs
@@ -62,6 +70,16 @@ type JobStoreOption func(*JobStore)
 func WithPersistence(p JobPersistencer) JobStoreOption {
 	return func(s *JobStore) {
 		s.persistence = p
+	}
+}
+
+// WithEditTransactor wires the composite SQLite transaction seam used by
+// review-edit commits (POSTER-WRITE-HARDENING D4): movie-row writes, actress
+// renames, and the job envelope upsert land in ONE transaction. Typically
+// satisfied by *database.DB (its WithEditTx method builds tx-scoped repos).
+func WithEditTransactor(tx EditTransactor) JobStoreOption {
+	return func(s *JobStore) {
+		s.editTx = tx
 	}
 }
 
@@ -95,9 +113,13 @@ func WithHistoryRepo(r database.HistoryRepositoryInterface) JobStoreOption {
 // two separate functions.
 func NewInMemoryJobStore(opts ...JobStoreOption) *JobStore {
 	s := &JobStore{
-		jobs:        make(map[models.JobID]*BatchJob),
-		persistence: noopJobPersistence{},
-		tempCleaner: NewTempDirCleaner(nil, "", nil),
+		jobs:         make(map[models.JobID]*BatchJob),
+		persistence:  noopJobPersistence{},
+		envLocks:     newKeyedMutexRegistry(),
+		movieLocks:   newKeyedMutexRegistry(),
+		actressLocks: newKeyedMutexRegistry(),
+		tombstones:   newTombstoneRegistry(0),
+		tempCleaner:  NewTempDirCleaner(nil, "", nil),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -127,6 +149,10 @@ func NewJobStore(jobRepo database.JobRepositoryInterface, batchFileOpRepo databa
 		persistence: &dbJobPersistence{
 			jobRepo: jobRepo,
 		},
+		envLocks:       newKeyedMutexRegistry(),
+		movieLocks:     newKeyedMutexRegistry(),
+		actressLocks:   newKeyedMutexRegistry(),
+		tombstones:     newTombstoneRegistry(0),
 		tempDir:        tempDir,
 		templateEngine: engine,
 		fs:             filesystem,
@@ -136,6 +162,18 @@ func NewJobStore(jobRepo database.JobRepositoryInterface, batchFileOpRepo databa
 	// Apply options, which may override the default persistence.
 	for _, opt := range opts {
 		opt(s)
+	}
+
+	// codex r41 P2: reconcile rekey witnesses SYNCHRONOUSLY before job
+	// reconstruction — ClearMissingTempPosters runs inside reconstruction
+	// and would clear the old crop URL while the relocated bytes still sit
+	// at the new ID. The periodic stale-cleanup goroutine is not started by
+	// the production bootstrap, so this must not ride on
+	// StartStaleTempCleanup.
+	if n, err := s.tempCleaner.ReconcileRekeyWitnesses(context.Background()); err != nil {
+		logging.Warnf("rekey witness reconciliation failed at startup: %v", err)
+	} else if n > 0 {
+		logging.Infof("reversed %d orphaned poster rekey relocation(s) at startup", n)
 	}
 
 	s.loadFromDatabase()
@@ -187,6 +225,7 @@ func (s *JobStore) loadFromDatabase() {
 	for i := range jobs {
 		batchJob := s.reconstructBatchJob(&jobs[i])
 		if batchJob != nil {
+			s.tombstones.Unmark(batchJob.ID.String()) // live row wins (codex r36)
 			s.jobs[batchJob.ID] = batchJob
 		}
 	}
@@ -200,6 +239,165 @@ func (s *JobStore) loadFromDatabase() {
 // neither be cancelled (no worker to process the context cancellation) nor
 // deleted (DeleteJob refuses running jobs). Marking them failed restores
 // normal Cancel/Delete functionality and gives the user a clear signal.
+// attachEditDeps wires POSTER-WRITE-HARDENING edit-path dependencies onto a
+// job (composite tx seam + candidate envelope builder + persistence
+// fallback). Idempotent: safe to call after the editor is rebuilt.
+func (s *JobStore) attachEditDeps(job *BatchJob) {
+	if job == nil || job.posterEditor == nil {
+		return
+	}
+	var committer *EditCommitter
+	if s.editTx != nil {
+		committer = NewEditCommitter(s.editTx, s.envLocks, job.ID.String(), s.actressLocks)
+	}
+	job.posterEditor.setLockRegistry(s.movieLocks)
+	job.posterEditor.attachEnv(&posterEditEnv{
+		committer: committer,
+		jobID:     job.ID.String(),
+		tempDir:   job.GetTempDir(),
+		fs:        job.fs,
+		// Per-job override wins (a JobConfig-supplied ActressRepo outranks the
+		// store-level repo) so job-bound actress edits are never dropped in
+		// the legacy fallback path (codex r16).
+		actressRepo: func() database.ActressRepositoryInterface {
+			if job.deps.ActressRepo != nil {
+				return job.deps.ActressRepo
+			}
+			return s.actressRepo
+		}(),
+		envelope: func(overrides map[string]*resultstore.MovieResult, provOverrides map[string]*resultstore.ProvenanceData, excluded map[string]bool) (*models.Job, error) {
+			return s.candidateEnvelope(job, overrides, provOverrides, excluded)
+		},
+		persistFn: func() error { return s.PersistJobByID(job.ID.String()) },
+		lifecycle: job.lifecycle,
+	})
+}
+
+// IsTombstoned reports whether the job was explicitly deleted recently.
+func (s *JobStore) IsTombstoned(id string) bool { return s.tombstones.Contains(id) }
+
+// JobGone distinguishes 410-gone (explicitly deleted) from 404-unknown for
+// edit admission (POSTER-WRITE-HARDENING D3).
+func (s *JobStore) JobGone(id string) bool {
+	if s.tombstones.Contains(id) {
+		return true
+	}
+	s.mu.RLock()
+	job, ok := s.jobs[models.JobID(id)]
+	s.mu.RUnlock()
+	return ok && job.admission.IsGone()
+}
+
+// acquireAdmission is the shared spine of the admission gates: resolve the
+// job (410-gone via tombstone / 404-unknown), take a shared lease (delete
+// drain), then apply the caller's lifecycle gate. The returned lease MUST be
+// released by the caller (D1/D16).
+func (s *JobStore) acquireAdmission(id string, gate func(status models.JobStatus, phase string) error) (BatchJobInterface, func(), error) {
+	s.mu.RLock()
+	job, ok := s.jobs[models.JobID(id)]
+	s.mu.RUnlock()
+	if !ok {
+		if s.tombstones.Contains(id) {
+			return nil, nil, fmt.Errorf("%w: %s", ErrJobGone, id)
+		}
+		return nil, nil, fmt.Errorf("%w: %s", ErrJobNotFound, id)
+	}
+	release, err := job.admission.AdmitShared()
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %s", ErrJobGone, id)
+	}
+	// A job flagged deleted in its lifecycle is gone regardless of tombstone
+	// state — test fixtures and direct SetDeleted paths bypass the store's
+	// delete protocol but mean the same thing semantically.
+	if job.lifecycle.IsDeleted() {
+		release()
+		return nil, nil, fmt.Errorf("%w: %s", ErrJobGone, id)
+	}
+	if gate != nil {
+		if err := gate(job.lifecycle.GetJobStatus(), job.lifecycle.CurrentPhase()); err != nil {
+			release()
+			return nil, nil, err
+		}
+	}
+	jobAdapter, _ := s.GetBatchJob(id)
+	return jobAdapter, release, nil
+}
+
+// AcquireEditAccess admits review-edit operations (PATCH/crop/poster-from-URL/
+// field-override, D16): 409 while Pending or Running-with-scrape-phase; Running
+// with an unpersisted/unknown phase marker conservatively rejects. Completed,
+// Organized, Failed, and Running-with-apply accept.
+func (s *JobStore) AcquireEditAccess(id string) (BatchJobInterface, func(), error) {
+	return s.acquireAdmission(id, func(status models.JobStatus, phase string) error {
+		return editAdmissionError(id, status, phase)
+	})
+}
+
+// AcquireRescrapeAccess admits rescrape operations ATOMICALLY (codex P1-A):
+// job resolution, tombstone check, admission lease, and the lifecycle gate
+// all happen under one acquisition, so a concurrent StartScrape/StartApply
+// can never slip a Running transition past the status check. Rescrape is
+// admitted for Pending and Completed (legacy set) plus Running-with-apply;
+// rejected while Running-with-scrape/unknown-phase, or in terminal failure
+// states.
+//
+// Phase starts use TryBeginPhase, which fails busy while any shared lease
+// (including this rescrape's) is held — the admission is mutually exclusive
+// in both directions.
+func (s *JobStore) AcquireRescrapeAccess(id string) (ControlledJob, func(), error) {
+	job, release, err := s.acquireAdmission(id, func(status models.JobStatus, phase string) error {
+		switch status {
+		case models.JobStatusPending, models.JobStatusCompleted:
+			return nil
+		default:
+			// Running (any phase) rejects rescrape in Phase 1: apply-phase
+			// rescrape admission is deferred to Phase 2's merged write-back
+			// machinery (D5) — without it the apply worker's unconditional
+			// per-file write-back can clobber the rescrape's commit
+			// (codex P4-C).
+			return &EditPhaseBusyError{JobID: id, Status: status, Phase: phase}
+		}
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return job, release, nil
+}
+
+// AcquireSharedLease takes a gone-checked shared admission lease without a
+// lifecycle gate (phases and long-running operations like rescrape use this
+// so DeleteJob's exclusive drain cannot reclaim a job mid-operation, D3).
+// The returned release MUST run when the operation completes.
+func (s *JobStore) AcquireSharedLease(id string) (func(), error) {
+	s.mu.RLock()
+	job, ok := s.jobs[models.JobID(id)]
+	s.mu.RUnlock()
+	if !ok {
+		if s.tombstones.Contains(id) {
+			return nil, fmt.Errorf("%w: %s", ErrJobGone, id)
+		}
+		return nil, fmt.Errorf("%w: %s", ErrJobNotFound, id)
+	}
+	release, err := job.admission.AdmitShared()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrJobGone, id)
+	}
+	return release, nil
+}
+
+// AcquireExclusionAccess admits exclude operations (D16): 410/404 as above,
+// 409 while ANY phase is Running (both currentPhase values). Pending
+// exclusions stay admitted so the legacy all-excluded auto-cancel flow keeps
+// working.
+func (s *JobStore) AcquireExclusionAccess(id string) (BatchJobInterface, func(), error) {
+	return s.acquireAdmission(id, func(status models.JobStatus, phase string) error {
+		if status == models.JobStatusRunning {
+			return &EditPhaseBusyError{JobID: id, Status: status, Phase: phase}
+		}
+		return nil
+	})
+}
+
 func (s *JobStore) recoverOrphanedJobs() {
 	recovered := 0
 	for id, job := range s.jobs {
@@ -212,7 +410,13 @@ func (s *JobStore) recoverOrphanedJobs() {
 		job.lifecycle.mu.Unlock()
 
 		job.lifecycle.MarkFailed()
-		s.persistence.PersistJob(job)
+		// audit F4: this row's phase goroutine died with the old process — the
+		// marker would otherwise persist on a terminal row and 409 edits
+		// forever. Clear it BEFORE persisting the recovered state.
+		job.lifecycle.SetCurrentPhase("")
+		if err := s.persistence.PersistJob(job); err != nil {
+			logging.Warnf("Failed to persist recovered job %s: %v", id, err)
+		}
 		recovered++
 		logging.Warnf("Recovered orphaned job %s (was %s, marked failed)", id, status)
 	}
@@ -317,13 +521,16 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 		job.templateEngine = s.templateEngine
 	}
 
-	// Override posterEditor with the one that has movieRepo access
+	// Swap in the store-scoped movie repo on the SAME editor instance —
+	// replacing the editor would orphan the keyed-lock registry + env (D13).
 	if s.movieRepo != nil {
-		job.posterEditor = NewPosterEditor(job.results, job.results, s.movieRepo)
+		job.posterEditor.setMovieRepo(s.movieRepo)
 	}
 
 	// Set persistFn after job is constructed so the closure captures the correct pointer
-	job.deps.PersistFn = func() { s.persistence.PersistJob(job) }
+	// Route phase persists through the envelope-locked, tombstone-aware store
+	// entry point (D2: both persist entry points hold the section).
+	job.deps.PersistFn = func() error { return s.PersistJob(job) }
 
 	// Fallback: if JobConfig didn't provide these repos, use JobStore's
 	if job.deps.BatchFileOpRepo == nil {
@@ -342,8 +549,14 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 	s.mu.Lock()
 	s.jobs[job.ID] = job
 	s.mu.Unlock()
+	// Clear any stale tombstone when an explicit-ID job is recreated
+	// (deleted-job-recreation window codex r36).
+	s.tombstones.Unmark(job.ID.String())
+	s.attachEditDeps(job)
 
-	s.persistence.PersistJob(job)
+	if err := s.persistence.PersistJob(job); err != nil {
+		logging.Warnf("Failed to persist new job %s: %v", job.ID.String(), err)
+	}
 
 	return job
 }
@@ -443,56 +656,120 @@ func deleteJobFromDB(jobRepo database.JobRepositoryInterface, id string) error {
 // Returns error if job not found, job is running, or database deletion fails.
 // Per S-9: temp cleanup delegated to TempDirCleaner, DB deletion to deleteJobFromDB;
 // DeleteJob is now a thin lifecycle orchestrator.
+// DeleteJob implements the POSTER-WRITE-HARDENING D3 delete protocol:
+//
+//  1. Acquire the job's exclusive admission lease — in-flight edits hold
+//     shared leases, so this drains them (an edit either fully commits or
+//     fails cleanly before we proceed; never half-applied against
+//     unregistered state). Phases also hold shared leases, so a Running job's
+//     lease would block here — the status check below rejects Running first.
+//  2. DB row delete FIRST, inside the per-job envelope lock, so a concurrent
+//     persist either lands before the delete (delete wins) or after
+//     (tombstone blocks the upsert — no resurrection).
+//  3. Only on DB success: register the tombstone, mark the barrier gone,
+//     remove from the map, cancel/markDeleted, clean temps.
+//
+// Any DB failure leaves the job fully usable and unchanged.
 func (s *JobStore) DeleteJob(id string) error {
-	s.mu.Lock()
+	s.mu.RLock()
 	job, ok := s.jobs[models.JobID(id)]
+	s.mu.RUnlock()
 	if !ok {
-		s.mu.Unlock()
-		return fmt.Errorf("job %s not found", id)
+		if s.tombstones.Contains(id) {
+			return fmt.Errorf("%w: %s", ErrJobGone, id)
+		}
+		return fmt.Errorf("%w: %s", ErrJobNotFound, id)
 	}
 
-	// Check status under the store lock to prevent TOCTOU race:
-	// without holding the store lock, a concurrent StartScrape could transition
-	// the job to Running between the status check and the deletion below.
-	job.lifecycle.mu.RLock()
-	status := job.lifecycle.Status
-	deleted := job.lifecycle.deleted
-	job.lifecycle.mu.RUnlock()
-
-	if deleted {
-		s.mu.Unlock()
-		return fmt.Errorf("job %s already deleted", id)
-	}
-	if status == models.JobStatusRunning {
-		s.mu.Unlock()
+	// Fast-fail Running BEFORE taking the exclusive lease: the phase goroutine
+	// holds a shared lease through its final persist, so AdmitExclusive would
+	// stall for the entire phase (blocking every edit admission for that job)
+	// instead of returning "cannot delete running job" promptly. Still
+	// re-checked under the exclusive lease below — a phase may transition
+	// between the two.
+	preSnap := job.lifecycle.StatusSnapshot()
+	if preSnap.Status == models.JobStatusRunning {
 		return fmt.Errorf("cannot delete running job")
 	}
 
-	if status == models.JobStatusPending {
-		job.lifecycle.Cancel()
+	// Deadline-bounded exclusive acquisition (codex r13 delete-phase race):
+	// re-converge instead of parking: a Running holder fails fast; edit /
+	// rescrape holders drain right away on TryLock; a phase STARTING mid-wait
+	// flips the lifecycle and is caught on the next probe (never parks behind
+	// a phase).
+	// Writer-preference delete loop (codex r14-A): register delete intent
+	// BEFORE polling so new shared admissions park during the drain —
+	// sibling edits already in flight complete in milliseconds; Running
+	// transitions still fast-fail through the re-check below.
+	job.admission.EnterExclusiveWait()
+	var release func()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if rel, ok := job.admission.TryAdmitExclusive(); ok {
+			job.admission.CancelExclusiveWait()
+			release = rel
+			break
+		}
+		if rel, ok := job.admission.PollExclusiveWait(); ok {
+			release = rel
+			break
+		}
+		if job.lifecycle.GetJobStatus() == models.JobStatusRunning {
+			job.admission.CancelExclusiveWait()
+			return fmt.Errorf("cannot delete running job")
+		}
+		if job.lifecycle.IsDeleted() || job.admission.IsGone() {
+			job.admission.CancelExclusiveWait()
+			return fmt.Errorf("%w: %s", ErrJobGone, id)
+		}
+		if time.Now().After(deadline) {
+			job.admission.CancelExclusiveWait()
+			return fmt.Errorf("delete timed out waiting for an in-flight operation on job %s", id)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	defer release()
+
+	lcSnap := job.lifecycle.StatusSnapshot()
+	if lcSnap.IsDeleted {
+		return fmt.Errorf("%w: %s", ErrJobGone, id)
+	}
+	if lcSnap.Status == models.JobStatusRunning {
+		return fmt.Errorf("cannot delete running job")
 	}
 
-	// Remove from the map while still holding the store lock so no concurrent
-	// caller can observe or transition this job after we've decided to delete it.
+	// Envelope-locked: [row delete + tombstone] serialize against persists.
+	envRelease := s.envLocks.Acquire(id)
+	if err := s.persistence.DeleteJobFromDB(id); err != nil {
+		envRelease()
+		return err
+	}
+	s.tombstones.Mark(id)
+	envRelease()
+
+	// Row is gone: fence the job, then remove + cancel + clean up.
+	job.admission.MarkGone()
+	s.mu.Lock()
 	delete(s.jobs, models.JobID(id))
 	s.mu.Unlock()
 
-	// Wait for the job to finish outside the store lock — the job is already
-	// removed from the map so no new callers can reach it.
-	select {
-	case <-job.lifecycle.done:
-	case <-time.After(5 * time.Second):
-		logging.Warnf("DeleteJob: timed out waiting for job %s to finish, proceeding with cleanup", id)
+	if lcSnap.Status == models.JobStatusPending {
+		job.lifecycle.Cancel()
 	}
-
 	job.lifecycle.markDeleted()
 
-	// Clean up temp files and delete from DB
-	s.getTempCleaner().CleanJobTempDir(id)
-
-	if err := s.persistence.DeleteJobFromDB(id); err != nil {
-		return err
+	// Wait only for jobs that were cancelled from Pending here — terminal or
+	// never-started jobs have no worker goroutine to join (their done channel
+	// stays open, so an unconditional wait would stall 5s per delete).
+	if lcSnap.Status == models.JobStatusPending {
+		select {
+		case <-job.lifecycle.done:
+		case <-time.After(5 * time.Second):
+			logging.Warnf("DeleteJob: timed out waiting for job %s to finish, proceeding with cleanup", id)
+		}
 	}
+
+	s.getTempCleaner().CleanJobTempDir(id)
 
 	return nil
 }
@@ -501,22 +778,35 @@ func (s *JobStore) DeleteJob(id string) error {
 // this is the public persistence method. The former PersistManagedJob
 // is removed because it type-asserted to *BatchJob internally — callers that hold
 // a composite should use PersistJobByID instead.
-func (s *JobStore) PersistJob(job *BatchJob) {
-	s.persistence.PersistJob(job)
+// PersistJob saves a job to the database under the per-job envelope lock
+// (POSTER-WRITE-HARDENING D2): snapshot + upsert serialize, so the last
+// committed envelope can never regress a concurrently committed edit. A
+// tombstoned/deleted job row refuses the upsert so an in-flight persist
+// racing DeleteJob cannot resurrect the row (D3).
+func (s *JobStore) PersistJob(job *BatchJob) error {
+	release := s.envLocks.Acquire(job.ID.String())
+	defer release()
+	if s.tombstones.Contains(job.ID.String()) || job.Lifecycle().IsDeleted() {
+		return nil // tombstoned: skip resurrecting upsert
+	}
+	return s.persistence.PersistJob(job)
 }
 
 // PersistJobByID persists a job by its ID.
 // callers that hold a composite (EditableJob, ControlledJob)
 // use this instead of PersistJob — no type assertion needed. The store holds
 // the concrete *BatchJob internally. No-op if the job is not found.
-func (s *JobStore) PersistJobByID(id string) {
+func (s *JobStore) PersistJobByID(id string) error {
 	s.mu.RLock()
 	job, ok := s.jobs[models.JobID(id)]
 	s.mu.RUnlock()
 	if !ok {
-		return
+		if s.tombstones.Contains(id) {
+			return fmt.Errorf("%w: %s", ErrJobGone, id)
+		}
+		return fmt.Errorf("%w: %s", ErrJobNotFound, id)
 	}
-	s.persistence.PersistJob(job)
+	return s.PersistJob(job)
 }
 
 // ListJobs returns thread-safe snapshots of all jobs

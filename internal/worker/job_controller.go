@@ -2,12 +2,13 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
-	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -51,26 +52,86 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 		c.job.results.SetFileMatchInfoMap(cfg.FileMatchInfo)
 	}
 
+	// codex r46 P2: atomic launch claim — markStarted CAS-claims the
+	// lifecycle (Pending→Running + marker) BEFORE any phase admission, so a
+	// duplicate/cancelled queued launch never registers pendingPhase behind
+	// the winner's lease.
+	if c.job.admission.IsGone() {
+		return ErrJobGone // gone check first (admit-before-state contract)
+	}
 	ctx, cancel := context.WithCancel(ctx)
-	// Store the cancel func BEFORE markStarted so that a concurrent Cancel()
-	// call sets the status to Cancelled, causing markStarted to fail (status
-	// != expectedFrom) and preventing the goroutine from starting with an
-	// uncancelled context. If markStarted fails, the explicit cancel() call
-	// is a safe no-op on the already-cancelled context.
-	c.job.lifecycle.setCancelFunc(cancel)
-	pd, err := c.markStarted(models.JobStatusPending)
+	pd, err := c.markStarted(models.JobStatusPending, JobPhaseScrape, cancel)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			cancel()
+			return nil // cancelled before the claim — nothing runs
+		}
+		cancel()
+		return err // CAS loser: duplicate launch rejected up-front
+	}
+	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
-		return err
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// claimed-but-never-launched: legacy-observable Cancelled, marker
+			// cleared BEFORE the durable persist (codex r36/r37/r45).
+			c.job.lifecycle.Cancel()
+			c.job.lifecycle.SetCurrentPhase("")
+			close(pd)
+			if persistFn != nil {
+				if perr := persistFn(); perr != nil {
+					logging.Warnf("job %s: aborted-scrape cancel persist failed: %v", c.job.ID.String(), perr)
+				}
+			}
+			return nil
+		}
+		c.job.lifecycle.MarkFailed()
+		close(pd)
+		return err // ErrJobGone when deleted mid-wait
 	}
+	release := entry.Downgrade()
 	if persistFn != nil {
-		persistFn()
+		// D16 fail-closed: the current_phase marker must be durable before
+		// any scrape work begins; a failed marker persist aborts the start.
+		if err := persistFn(); err != nil {
+			release()
+			cancel()
+			c.job.lifecycle.MarkFailed()
+			close(pd) // no phase goroutine will run; Wait() joins on phaseDone
+			// codex P8: the terminal failure must ALSO be durable — a single
+			// best-effort retry so the DB row doesn't stay pending until
+			// restart reconverges it.
+			if err2 := persistFn(); err2 != nil {
+				logging.Warnf("[Scrape] post-abort persist failed for job %s: %v", c.job.ID.String(), err2)
+			}
+			return fmt.Errorf("job %s: persist phase-entry marker: %w", c.job.ID.String(), err)
+		}
 	}
 
 	go func() {
-		// Close phaseDone only after Run returns — its deferred persistence
-		// executes on return, after the terminal Mark* it calls mid-body.
+		// Admission lease spans goroutine start through the FINAL envelope
+		// persist (Run's defer) so DeleteJob's exclusive drain can never
+		// reclaim the job mid-flush (D1/D16).
+		// codex r44 P2: close phaseDone LAST — Wait() must join the ENTIRE
+		// quiesced defer stack (marker-clear persist + lease release), not fire
+		// while the final persist still runs. Defers execute LIFO, so register
+		// the close FIRST.
 		defer close(pd)
+		defer release()
+		// Clear the phase marker only after the worker's final write — a
+		// cancelled Running phase stays fenced until its last flush (codex r38).
+		defer func() {
+			c.job.lifecycle.SetCurrentPhase("")
+			// codex P2-I: persist the cleared marker too — the in-Run defer
+			// carries the marker SET into the final database row; without this
+			// second persist, a restart restores the stale marker and every edit
+			// on the terminated job is rejected by the admission guard.
+			if persistFn != nil {
+				if err := persistFn(); err != nil {
+					logging.Warnf("[BatchJob] %s marker-clear persist on phase end failed: %v", c.job.ID.String(), err)
+				}
+			}
+		}()
 		defer cancel()
 		inputs := c.buildScrapeInputs(wf, batchCfg, persistFn)
 		c.job.scrapePhase.Run(ctx, inputs, files, cfg)
@@ -94,14 +155,49 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	persistFn := c.job.deps.PersistFn
 	c.job.mu.RUnlock()
 
+	// codex r46 P2: atomic launch claim. markStarted CAS-claims the lifecycle
+	// BEFORE any phase admission — a duplicate or cancelled queued launch
+	// never gets the chance to register a pendingPhase behind the running
+	// winner (which would stall every shared admission for its whole run).
+	if c.job.admission.IsGone() {
+		return ErrJobGone // gone check first (documented admit-before-state order)
+	}
 	ctx, cancel := context.WithCancel(ctx)
-	// Same ordering as StartScrape: setCancelFunc before markStarted.
-	c.job.lifecycle.setCancelFunc(cancel)
-	pd, err := c.markStarted(models.JobStatusCompleted)
+	// codex P1-G: the admission winner installs the CancelFunc below — a
+	// queued start never supplants the running phase's cancel handle.
+	pd, err := c.markStarted(models.JobStatusCompleted, JobPhaseApply, cancel)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			cancel()
+			return nil
+		}
+		cancel()
+		return err // CAS loser: duplicate launch rejected up-front
+	}
+	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// claimed-but-never-launched: the legacy-observable Cancelled
+			// terminal with NO Running work — marker cleared FIRST so the
+			// persisted row is edit-admissible again (codex r36/r37/r45).
+			c.job.lifecycle.Cancel()
+			c.job.lifecycle.SetCurrentPhase("")
+			close(pd)
+			if persistFn != nil {
+				if perr := persistFn(); perr != nil {
+					logging.Warnf("job %s: aborted-apply cancel persist failed: %v", c.job.ID.String(), perr)
+				}
+			}
+			return nil
+		}
+		// ErrJobGone mid-wait: the delete path owns the row — close the join
+		// channel so Wait() doesn't hang; no envelope write (row going away).
+		c.job.lifecycle.MarkFailed()
+		close(pd)
 		return err
 	}
+	release := entry.Downgrade()
 
 	// Commit apply-phase config values ONLY after markStarted succeeds, so a
 	// losing concurrent StartApply cannot clobber the winner's values. Both
@@ -126,13 +222,36 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	c.job.mu.Unlock()
 
 	if persistFn != nil {
-		persistFn()
+		if err := persistFn(); err != nil {
+			release()
+			cancel()
+			c.job.lifecycle.MarkFailed()
+			close(pd) // no phase goroutine will run; Wait() joins on phaseDone
+			if err2 := persistFn(); err2 != nil {
+				logging.Warnf("[Apply] post-abort persist failed for job %s: %v", c.job.ID.String(), err2)
+			}
+			return fmt.Errorf("job %s: persist phase-entry marker: %w", c.job.ID.String(), err)
+		}
 	}
 
 	go func() {
-		// Close phaseDone only after Run returns — its deferred persistence
-		// executes on return, after the terminal Mark* it calls mid-body.
+		// Admission lease spans through Run's deferred final persist (D1/D16).
+		// codex r44 P2: close phaseDone LAST (register first — LIFO) so Wait()
+		// joins the whole quiesced stack incl. the marker-clear persist.
 		defer close(pd)
+		defer release()
+		defer func() {
+			c.job.lifecycle.SetCurrentPhase("")
+			// codex P2-I: persist the cleared marker too — the in-Run defer
+			// carries the marker SET into the final database row; without this
+			// second persist, a restart restores the stale marker and every edit
+			// on the terminated job is rejected by the admission guard.
+			if persistFn != nil {
+				if err := persistFn(); err != nil {
+					logging.Warnf("[BatchJob] %s marker-clear persist on phase end failed: %v", c.job.ID.String(), err)
+				}
+			}
+		}()
 		defer cancel()
 		inputs := c.buildApplyInputs(wf, batchCfg, cfg, persistFn)
 		c.job.applyPhase.Run(ctx, inputs, cfg)
@@ -153,28 +272,25 @@ func (c *jobController) Rescrape(ctx context.Context, cmd RescrapeCmd) (*Rescrap
 
 	inputs := c.buildRescrapeInputs(wf, batchCfg)
 
-	outcome, err := c.job.rescrapePhase.Rescrape(ctx, inputs, cmd)
+	// Network work runs WITHOUT the family key (codex r20): scraping is a
+	// long network section — holding the key there would stall every edit on
+	// the family until timeout. Serialization lives at the COMMIT leg (see
+	// familyKeyedResultMap in buildRescrapeInputs) and at provenance below.
+	var outcome *RescrapeResult
+	var err error
+	// Rescrape (network + scrape) runs WITHOUT the family key — that section
+	// is too long to hold locks (codex r20). The COMMIT leg serializes via
+	// familyKeyedResultMap on the store side, and provenance publishes inside
+	// the SAME keyed CommitResult section (codex r36 P1): no post-hoc locked
+	// tail, so a concurrent field override can never slip into a
+	// commit/provenance gap and have its attribution clobbered.
+	outcome, err = c.job.rescrapePhase.Rescrape(ctx, inputs, cmd)
 	if err != nil {
 		return outcome, err
 	}
-
-	// Provenance: set on ResultTracker after successful rescrape.
-	// This stays accessible through job.results because provenance propagation
-	// crosses the phase/results boundary.
-	if outcome.Status == models.RescrapeStatusSuccess && outcome.FilePath != "" &&
-		(outcome.FieldSources != nil || outcome.ActressSources != nil || outcome.ScraperResults != nil) {
-		c.job.results.SetProvenance(outcome.FilePath, &resultstore.ProvenanceData{
-			FieldSources:   outcome.FieldSources,
-			ActressSources: outcome.ActressSources,
-			ScraperResults: outcome.ScraperResults,
-		})
-	}
-
 	return outcome, nil
 }
 
-// Wait blocks until the job fully settles and returns any error.
-//
 // "Fully settles" means the phase goroutine has RETURNED, including its
 // deferred persistence — not merely that a terminal status was set. Run
 // marks the terminal status (closing lifecycle.done) before its deferred
@@ -213,14 +329,24 @@ func (c *jobController) Wait() error {
 // returns an error without modifying state.
 // This prevents the TOCTOU race where an API handler checks status == Completed but
 // another concurrent request transitions the job before this call acquires the lock.
-func (c *jobController) markStarted(expectedFrom models.JobStatus) (chan struct{}, error) {
+// codex r47-followup P1: the claim installs the phase's cancel handle in the
+// SAME critical section — a cancellation racing claim→bind previously marked
+// the job Cancelled while leaving this launch's ctx unbound, so BeginPhase
+// would start work after cancellation.
+func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhase, cancelFunc context.CancelFunc) (chan struct{}, error) {
 	c.job.lifecycle.mu.Lock()
 	if c.job.lifecycle.Status != expectedFrom {
 		actual := c.job.lifecycle.Status
 		c.job.lifecycle.mu.Unlock()
 		return nil, fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), expectedFrom, actual)
 	}
+	if c.job.lifecycle.cancelled {
+		c.job.lifecycle.mu.Unlock()
+		return nil, context.Canceled // a cancel landed before the claim
+	}
+	c.job.lifecycle.CancelFunc = cancelFunc
 	c.job.lifecycle.Status = models.JobStatusRunning
+	c.job.lifecycle.currentPhase = string(phase)
 	c.job.lifecycle.CompletedAt = nil
 	c.job.lifecycle.OrganizedAt = nil
 	c.job.lifecycle.done = make(chan struct{})
@@ -260,7 +386,7 @@ func (c *jobController) setDepsFromConfig(cfg *JobConfig) {
 	}
 	if cfg.MovieRepo != nil {
 		c.job.deps.MovieRepo = cfg.MovieRepo
-		c.job.posterEditor = NewPosterEditor(c.job.results, c.job.results, cfg.MovieRepo)
+		c.job.posterEditor.setMovieRepo(cfg.MovieRepo)
 	}
 	if cfg.ActressRepo != nil {
 		c.job.deps.ActressRepo = cfg.ActressRepo
@@ -287,7 +413,7 @@ func (c *jobController) setDepsFromConfig(cfg *JobConfig) {
 // that mixed copied values and shared pointers. The controller owns the
 // sub-managers for the duration of the phase, so there is no snapshot-vs-pointer
 // ambiguity — the inputs are constructed inline from live state.
-func (c *jobController) buildScrapeInputs(wf workflow.WorkflowInterface, batchCfg BatchJobConfig, persistFn func()) scrapePhaseInputs {
+func (c *jobController) buildScrapeInputs(wf workflow.WorkflowInterface, batchCfg BatchJobConfig, persistFn func() error) scrapePhaseInputs {
 	c.job.mu.RLock()
 	m := c.job.deps.Matcher
 	pg := c.job.deps.PosterGen
@@ -324,7 +450,7 @@ func (c *jobController) buildScrapeInputs(wf workflow.WorkflowInterface, batchCf
 
 // buildApplyInputs constructs applyPhaseInputs directly from the job's
 // sub-managers. Per DEEP-7: same rationale as buildScrapeInputs.
-func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg BatchJobConfig, cfg ApplyPhaseConfig, persistFn func()) applyPhaseInputs {
+func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg BatchJobConfig, cfg ApplyPhaseConfig, persistFn func() error) applyPhaseInputs {
 	c.job.batchJobEventSource.mu.RLock()
 	broadcaster := c.job.eventBroadcaster
 	c.job.batchJobEventSource.mu.RUnlock()
@@ -341,21 +467,23 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 	}
 
 	return applyPhaseInputs{
-		JobID:           c.job.ID,
-		Concurrency:     newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
-		NFOEnabled:      batchCfg.NFOEnabled,
-		WF:              wf,
-		Results:         snap.Results,
-		Excluded:        snap.Excluded,
-		Destination:     cfg.Destination,
-		Update:          upd,
-		HistoryRepo:     histRepo,
-		OperationMode:   opMode,
-		OrganizeSkipped: cfg.OrganizeOptions.Skip,
-		Broadcaster:     broadcaster,
-		Updater:         c.job.results,
-		Lifecycle:       c.job.lifecycle,
-		persister:       persistFunc(persistFn),
+		JobID:            c.job.ID,
+		EditLockFn:       func(movieIDs ...string) func() { return c.job.posterEditor.lockRegistry().AcquireMany(movieIDs) },
+		PromoteWitnessFn: c.job.posterEditor.hasUnresolvedPromoteWitness,
+		Concurrency:      newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
+		NFOEnabled:       batchCfg.NFOEnabled,
+		WF:               wf,
+		Results:          snap.Results,
+		Excluded:         snap.Excluded,
+		Destination:      cfg.Destination,
+		Update:           upd,
+		HistoryRepo:      histRepo,
+		OperationMode:    opMode,
+		OrganizeSkipped:  cfg.OrganizeOptions.Skip,
+		Broadcaster:      broadcaster,
+		Updater:          c.job.results,
+		Lifecycle:        c.job.lifecycle,
+		persister:        persistFunc(persistFn),
 	}
 }
 
@@ -375,7 +503,16 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 		WF:          wf,
 		PosterGen:   pg,
 		HistoryRepo: histRepo,
-		ResultMap:   c.job.results,
+		// Commit leg wraps through the family lock (codex r20): the scrape's network section stays unlocked; CommitResult serializes with concurrent family edits on the process-wide registry.
+		ResultMap: &familyKeyedResultMap{
+			ResultMapAccessor: c.job.results,
+			updater:           c.job.results,
+			registry:          c.job.posterEditor.lockRegistry(),
+			fs:                c.job.fs,
+			tempDir:           c.job.cfg.tempDir,
+			jobID:             c.job.ID.String(),
+		},
+		EditLockFn:  func(ids ...string) func() { return c.job.posterEditor.lockRegistry().AcquireMany(ids) },
 		Lifecycle:   c.job.lifecycle,
 		persister:   persistFunc(pfn),
 		Finder:      c.job.results,

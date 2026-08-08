@@ -64,7 +64,9 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 			inputs.Broadcaster.Close()
 		}
 		if inputs.persister != nil {
-			inputs.persister.Persist()
+			if err := inputs.persister.Persist(); err != nil {
+				logging.Warnf("[Scrape] envelope persist failed: %v", err)
+			}
 		}
 	}()
 

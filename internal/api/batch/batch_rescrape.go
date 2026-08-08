@@ -2,6 +2,7 @@ package batch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -128,21 +129,28 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		job, ok := deps.GetJobStore().GetBatchJob(jobID)
-		if !ok {
-			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
-			return
-		}
-
-		statusSnap := job.GetStatus()
-		if rescrapeNotAllowed(statusSnap) {
-			if statusSnap.IsDeleted {
+		// Atomic resolve→gate→lease (codex P1-A): tombstone-aware 410, the
+		// lifecycle gate AND the shared lease happen under one admission, so a
+		// concurrent phase start can never slip a Running transition past the
+		// check (phase starts fail busy while this lease is held — D3/D16).
+		_, lease, admitErr := deps.GetJobStore().AcquireRescrapeAccess(jobID)
+		if admitErr != nil {
+			switch {
+			case errors.Is(admitErr, worker.ErrJobGone):
 				writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
-			} else {
-				writeErrorResponse(c, http.StatusConflict, false, fmt.Sprintf("Cannot rescrape %s job", statusSnap.Status))
+			case errors.Is(admitErr, worker.ErrJobNotFound):
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
+			default:
+				status := models.JobStatusPending
+				var busy *worker.EditPhaseBusyError
+				if errors.As(admitErr, &busy) {
+					status = busy.Status
+				}
+				writeErrorResponse(c, http.StatusConflict, false, fmt.Sprintf("Cannot rescrape %s job", status))
 			}
 			return
 		}
+		defer lease()
 
 		// Delegate to orchestrator for resolve→construct→execute pipeline.
 		// Snapshot so the workflow factory and batch job factory see the same

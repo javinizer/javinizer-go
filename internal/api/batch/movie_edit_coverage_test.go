@@ -22,6 +22,7 @@ func TestUpdateBatchMovie_InvalidJSONBody(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 
 	router := gin.New()
 	router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
@@ -39,6 +40,7 @@ func TestUpdateBatchMovie_SuccessWithDBUpsert(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
@@ -62,6 +64,7 @@ func TestUpdateBatchMoviePosterCrop_InvalidJSONBody(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 
 	router := gin.New()
 	router.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(testkit.GetTestRuntime(deps)))
@@ -110,6 +113,7 @@ func TestUpdateBatchMoviePosterCrop_MovieNotInJob(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 
 	router := gin.New()
 	router.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(testkit.GetTestRuntime(deps)))
@@ -174,6 +178,7 @@ func TestUpdateBatchMoviePosterFromURL_MovieNotInJobResults(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 
 	router := gin.New()
 	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(testkit.GetTestRuntime(deps)))
@@ -192,6 +197,7 @@ func TestUpdateBatchMoviePosterFromURL_InvalidURLFormat(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
@@ -216,6 +222,7 @@ func TestUpdateBatchMoviePosterFromURL_LocalhostBlockedBySSRF(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
@@ -279,6 +286,7 @@ func TestUpdateBatchMovie_MultiPartFileUpdate(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535-CD1.mp4", "/path/to/IPX-535-CD2.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 	movie := &models.Movie{ID: "IPX-535", Title: "Original"}
 	setJobResult(job, "/path/to/IPX-535-CD1.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535-CD1.mp4", MovieID: "IPX-535"},

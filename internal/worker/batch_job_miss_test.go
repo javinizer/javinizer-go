@@ -161,7 +161,7 @@ func TestUpdatePosterFromURL_Miss_NoFilePaths(t *testing.T) {
 	job := jq.CreateJobBatch([]string{})
 
 	err := job.posterEditor.UpdatePosterFromURL(context.TODO(), "NOFILE-001", "https://example.com/poster.jpg", "https://example.com/cropped.jpg")
-	assert.NoError(t, err)
+	require.ErrorIs(t, err, ErrMovieFamilyEmpty)
 }
 
 // --- UpdatePosterCrop: no file paths for movie ID ---
@@ -171,7 +171,7 @@ func TestUpdatePosterCrop_Miss_NoFilePaths(t *testing.T) {
 	job := jq.CreateJobBatch([]string{})
 
 	err := job.posterEditor.UpdatePosterCrop("NOFILE-001", "https://example.com/cropped.jpg", nil, false)
-	assert.NoError(t, err)
+	require.ErrorIs(t, err, ErrMovieFamilyEmpty)
 }
 
 // --- FindFileForMovieID: movie not found (moved to resultstore.ResultTracker) ---
@@ -216,7 +216,7 @@ func TestStartApply_Miss_NoWorkflow(t *testing.T) {
 	job := jq.CreateJobBatch([]string{"file1.mp4"})
 
 	// StartApply requires Completed status (API-1+2: CAS fix for double-start race)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{})
@@ -257,7 +257,7 @@ func TestStartApply_Miss_CfgWFOverride(t *testing.T) {
 	job.deps.WF = &noopWorkflowForMissTest{}
 
 	// StartApply requires Completed status (API-1+2: CAS fix for double-start race)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{

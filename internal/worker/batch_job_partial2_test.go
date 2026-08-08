@@ -211,7 +211,7 @@ func TestBatchJob_StartApply_OperationModeOverride_Partial2(t *testing.T) {
 	})
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -243,7 +243,7 @@ func TestBatchJob_StartApply_EmptyOperationModeOverride_Partial2(t *testing.T) {
 	})
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -274,7 +274,7 @@ func TestBatchJob_StartApply_UpdateFlag_Partial2(t *testing.T) {
 	})
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -410,7 +410,7 @@ func TestBatchJob_StartApply_DestinationSet_Partial2(t *testing.T) {
 	})
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -442,7 +442,7 @@ func TestBatchJob_StartApply_TempDirSet_Partial2(t *testing.T) {
 	})
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

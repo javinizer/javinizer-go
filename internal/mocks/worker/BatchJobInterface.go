@@ -249,6 +249,63 @@ func (_c *MockBatchJobInterface_ExcludeFile_Call) RunAndReturn(run func(filePath
 	return _c
 }
 
+// ExcludeMovieFamily provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) ExcludeMovieFamily(ctx context.Context, movieID string) error {
+	ret := _mock.Called(ctx, movieID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ExcludeMovieFamily")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, movieID)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockBatchJobInterface_ExcludeMovieFamily_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExcludeMovieFamily'
+type MockBatchJobInterface_ExcludeMovieFamily_Call struct {
+	*mock.Call
+}
+
+// ExcludeMovieFamily is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieID string
+func (_e *MockBatchJobInterface_Expecter) ExcludeMovieFamily(ctx any, movieID any) *MockBatchJobInterface_ExcludeMovieFamily_Call {
+	return &MockBatchJobInterface_ExcludeMovieFamily_Call{Call: _e.mock.On("ExcludeMovieFamily", ctx, movieID)}
+}
+
+func (_c *MockBatchJobInterface_ExcludeMovieFamily_Call) Run(run func(ctx context.Context, movieID string)) *MockBatchJobInterface_ExcludeMovieFamily_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_ExcludeMovieFamily_Call) Return(err error) *MockBatchJobInterface_ExcludeMovieFamily_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_ExcludeMovieFamily_Call) RunAndReturn(run func(ctx context.Context, movieID string) error) *MockBatchJobInterface_ExcludeMovieFamily_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FindFilePathsForMovieID provides a mock function for the type MockBatchJobInterface
 func (_mock *MockBatchJobInterface) FindFilePathsForMovieID(movieID string) []string {
 	ret := _mock.Called(movieID)
@@ -360,6 +417,50 @@ func (_c *MockBatchJobInterface_FindMovieResultForMovieID_Call) Return(movieResu
 }
 
 func (_c *MockBatchJobInterface_FindMovieResultForMovieID_Call) RunAndReturn(run func(movieID string) (*resultstore.MovieResult, error)) *MockBatchJobInterface_FindMovieResultForMovieID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetCurrentPhase provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) GetCurrentPhase() string {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCurrentPhase")
+	}
+
+	var r0 string
+	if returnFunc, ok := ret.Get(0).(func() string); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	return r0
+}
+
+// MockBatchJobInterface_GetCurrentPhase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCurrentPhase'
+type MockBatchJobInterface_GetCurrentPhase_Call struct {
+	*mock.Call
+}
+
+// GetCurrentPhase is a helper method to define mock.On call
+func (_e *MockBatchJobInterface_Expecter) GetCurrentPhase() *MockBatchJobInterface_GetCurrentPhase_Call {
+	return &MockBatchJobInterface_GetCurrentPhase_Call{Call: _e.mock.On("GetCurrentPhase")}
+}
+
+func (_c *MockBatchJobInterface_GetCurrentPhase_Call) Run(run func()) *MockBatchJobInterface_GetCurrentPhase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_GetCurrentPhase_Call) Return(s string) *MockBatchJobInterface_GetCurrentPhase_Call {
+	_c.Call.Return(s)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_GetCurrentPhase_Call) RunAndReturn(run func() string) *MockBatchJobInterface_GetCurrentPhase_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1374,6 +1475,175 @@ func (_c *MockBatchJobInterface_UpdateMovie_Call) RunAndReturn(run func(ctx cont
 	return _c
 }
 
+// UpdateMovieFamily provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) UpdateMovieFamily(ctx context.Context, movieID string, resultID string, movie *models.Movie, opts worker.FamilySaveOptions) error {
+	ret := _mock.Called(ctx, movieID, resultID, movie, opts)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateMovieFamily")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) error); ok {
+		r0 = returnFunc(ctx, movieID, resultID, movie, opts)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockBatchJobInterface_UpdateMovieFamily_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateMovieFamily'
+type MockBatchJobInterface_UpdateMovieFamily_Call struct {
+	*mock.Call
+}
+
+// UpdateMovieFamily is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieID string
+//   - resultID string
+//   - movie *models.Movie
+//   - opts worker.FamilySaveOptions
+func (_e *MockBatchJobInterface_Expecter) UpdateMovieFamily(ctx any, movieID any, resultID any, movie any, opts any) *MockBatchJobInterface_UpdateMovieFamily_Call {
+	return &MockBatchJobInterface_UpdateMovieFamily_Call{Call: _e.mock.On("UpdateMovieFamily", ctx, movieID, resultID, movie, opts)}
+}
+
+func (_c *MockBatchJobInterface_UpdateMovieFamily_Call) Run(run func(ctx context.Context, movieID string, resultID string, movie *models.Movie, opts worker.FamilySaveOptions)) *MockBatchJobInterface_UpdateMovieFamily_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 *models.Movie
+		if args[3] != nil {
+			arg3 = args[3].(*models.Movie)
+		}
+		var arg4 worker.FamilySaveOptions
+		if args[4] != nil {
+			arg4 = args[4].(worker.FamilySaveOptions)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_UpdateMovieFamily_Call) Return(err error) *MockBatchJobInterface_UpdateMovieFamily_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_UpdateMovieFamily_Call) RunAndReturn(run func(ctx context.Context, movieID string, resultID string, movie *models.Movie, opts worker.FamilySaveOptions) error) *MockBatchJobInterface_UpdateMovieFamily_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateMovieFamilyWithEcho provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) UpdateMovieFamilyWithEcho(ctx context.Context, movieID string, resultID string, movie *models.Movie, opts worker.FamilySaveOptions) (*uint64, map[string]uint64, error) {
+	ret := _mock.Called(ctx, movieID, resultID, movie, opts)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateMovieFamilyWithEcho")
+	}
+
+	var r0 *uint64
+	var r1 map[string]uint64
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) (*uint64, map[string]uint64, error)); ok {
+		return returnFunc(ctx, movieID, resultID, movie, opts)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) *uint64); ok {
+		r0 = returnFunc(ctx, movieID, resultID, movie, opts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*uint64)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) map[string]uint64); ok {
+		r1 = returnFunc(ctx, movieID, resultID, movie, opts)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(map[string]uint64)
+		}
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) error); ok {
+		r2 = returnFunc(ctx, movieID, resultID, movie, opts)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateMovieFamilyWithEcho'
+type MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call struct {
+	*mock.Call
+}
+
+// UpdateMovieFamilyWithEcho is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieID string
+//   - resultID string
+//   - movie *models.Movie
+//   - opts worker.FamilySaveOptions
+func (_e *MockBatchJobInterface_Expecter) UpdateMovieFamilyWithEcho(ctx any, movieID any, resultID any, movie any, opts any) *MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call {
+	return &MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call{Call: _e.mock.On("UpdateMovieFamilyWithEcho", ctx, movieID, resultID, movie, opts)}
+}
+
+func (_c *MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call) Run(run func(ctx context.Context, movieID string, resultID string, movie *models.Movie, opts worker.FamilySaveOptions)) *MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 *models.Movie
+		if args[3] != nil {
+			arg3 = args[3].(*models.Movie)
+		}
+		var arg4 worker.FamilySaveOptions
+		if args[4] != nil {
+			arg4 = args[4].(worker.FamilySaveOptions)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call) Return(v *uint64, stringToUint64 map[string]uint64, err error) *MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call {
+	_c.Call.Return(v, stringToUint64, err)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call) RunAndReturn(run func(ctx context.Context, movieID string, resultID string, movie *models.Movie, opts worker.FamilySaveOptions) (*uint64, map[string]uint64, error)) *MockBatchJobInterface_UpdateMovieFamilyWithEcho_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdatePosterCrop provides a mock function for the type MockBatchJobInterface
 func (_mock *MockBatchJobInterface) UpdatePosterCrop(movieID string, croppedURL string, bounds *models.CropBounds, sourceFull bool) error {
 	ret := _mock.Called(movieID, croppedURL, bounds, sourceFull)
@@ -1552,6 +1822,63 @@ func (_c *MockBatchJobInterface_Wait_Call) Return(err error) *MockBatchJobInterf
 }
 
 func (_c *MockBatchJobInterface_Wait_Call) RunAndReturn(run func() error) *MockBatchJobInterface_Wait_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WithMovieEditLock provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) WithMovieEditLock(movieID string, fn func(m *worker.LockedMovieOps) error) error {
+	ret := _mock.Called(movieID, fn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WithMovieEditLock")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(string, func(m *worker.LockedMovieOps) error) error); ok {
+		r0 = returnFunc(movieID, fn)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockBatchJobInterface_WithMovieEditLock_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithMovieEditLock'
+type MockBatchJobInterface_WithMovieEditLock_Call struct {
+	*mock.Call
+}
+
+// WithMovieEditLock is a helper method to define mock.On call
+//   - movieID string
+//   - fn func(m *worker.LockedMovieOps) error
+func (_e *MockBatchJobInterface_Expecter) WithMovieEditLock(movieID any, fn any) *MockBatchJobInterface_WithMovieEditLock_Call {
+	return &MockBatchJobInterface_WithMovieEditLock_Call{Call: _e.mock.On("WithMovieEditLock", movieID, fn)}
+}
+
+func (_c *MockBatchJobInterface_WithMovieEditLock_Call) Run(run func(movieID string, fn func(m *worker.LockedMovieOps) error)) *MockBatchJobInterface_WithMovieEditLock_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 func(m *worker.LockedMovieOps) error
+		if args[1] != nil {
+			arg1 = args[1].(func(m *worker.LockedMovieOps) error)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_WithMovieEditLock_Call) Return(err error) *MockBatchJobInterface_WithMovieEditLock_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_WithMovieEditLock_Call) RunAndReturn(run func(movieID string, fn func(m *worker.LockedMovieOps) error) error) *MockBatchJobInterface_WithMovieEditLock_Call {
 	_c.Call.Return(run)
 	return _c
 }

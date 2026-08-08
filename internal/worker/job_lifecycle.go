@@ -12,12 +12,17 @@ import (
 //
 // Lock ordering: lifecycle.mu → results.mu → job.mu. Never acquire in reverse order.
 type JobLifecycle struct {
-	mu          sync.RWMutex
-	Status      models.JobStatus
-	CompletedAt *time.Time
-	OrganizedAt *time.Time
-	RevertedAt  *time.Time
-	done        chan struct{}
+	mu     sync.RWMutex
+	Status models.JobStatus
+	// currentPhase records which phase ("scrape"/"apply") owns a Running job.
+	// Persisted on the job envelope at phase entry so a restart can tell an
+	// apply-phase Running job (still editable) from a scrape-phase one
+	// (not editable). "" when no phase is running (POSTER-WRITE-HARDENING D16).
+	currentPhase string
+	CompletedAt  *time.Time
+	OrganizedAt  *time.Time
+	RevertedAt   *time.Time
+	done         chan struct{}
 	// phaseDone closes only when the phase goroutine fully RETURNS — after
 	// Run's deferred persistence, unlike done, which terminal Mark* calls close
 	// mid-Run. Wait() prefers phaseDone so callers join the phase (all DB
@@ -68,12 +73,6 @@ func (lc *JobLifecycle) IsDeleted() bool {
 	return lc.deleted
 }
 
-func (lc *JobLifecycle) setCancelFunc(cancelFunc context.CancelFunc) {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	lc.CancelFunc = cancelFunc
-}
-
 func (lc *JobLifecycle) cancelAndMarkCancelled() {
 	lc.mu.Lock()
 	if lc.cancelled {
@@ -81,16 +80,24 @@ func (lc *JobLifecycle) cancelAndMarkCancelled() {
 		lc.mu.Unlock()
 		return
 	}
-	lc.cancelled = true
 	cancelFunc := lc.CancelFunc
 	if lc.Status == models.JobStatusCompleted || lc.Status == models.JobStatusFailed || lc.Status == models.JobStatusOrganized || lc.Status == models.JobStatusReverted {
+		// codex r48 P2: a cancel RACING terminal completion must not pin
+		// cancelled=true on a COMPLETED job — the flag would permanently
+		// reject later phase launches (Cancel() semantics are live-phase
+		// scoped; the job already settled cleanly).
+		lc.clearCurrentPhaseLocked()
 		lc.mu.Unlock()
 		if cancelFunc != nil {
 			cancelFunc()
 		}
 		return
 	}
+	lc.cancelled = true
 	lc.Status = models.JobStatusCancelled
+	// codex r38: keep currentPhase set while the phase goroutine drains —
+	// clearing it here would admit edits mid-drain and let late scrape
+	// writes overwrite them. The phase goroutine's final persist clears it.
 	lc.CompletedAt = nowTimePtr()
 	lc.closeDoneLocked()
 	lc.mu.Unlock()
@@ -135,6 +142,7 @@ func (lc *JobLifecycle) MarkFailed() {
 	}
 	lc.Status = models.JobStatusFailed
 	lc.CompletedAt = nowTimePtr()
+	lc.clearCurrentPhaseLocked()
 	lc.closeDoneLocked()
 }
 
@@ -143,10 +151,12 @@ func (lc *JobLifecycle) MarkCancelled() {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
 	if lc.Status == models.JobStatusCompleted || lc.Status == models.JobStatusFailed || lc.Status == models.JobStatusOrganized || lc.Status == models.JobStatusReverted {
+		lc.clearCurrentPhaseLocked()
 		return
 	}
 	lc.Status = models.JobStatusCancelled
 	lc.CompletedAt = nowTimePtr()
+	lc.clearCurrentPhaseLocked()
 	lc.closeDoneLocked()
 }
 
@@ -163,6 +173,7 @@ func (lc *JobLifecycle) MarkOrganized() {
 	}
 	lc.Status = models.JobStatusOrganized
 	lc.OrganizedAt = nowTimePtr()
+	lc.clearCurrentPhaseLocked()
 	lc.closeDoneLocked()
 }
 
@@ -175,6 +186,7 @@ func (lc *JobLifecycle) MarkReverted() {
 	}
 	lc.Status = models.JobStatusReverted
 	lc.RevertedAt = nowTimePtr()
+	lc.clearCurrentPhaseLocked()
 	lc.closeDoneLocked()
 }
 
@@ -208,6 +220,7 @@ func (lc *JobLifecycle) MarkCompleted() {
 	}
 	lc.Status = models.JobStatusCompleted
 	lc.CompletedAt = nowTimePtr()
+	lc.clearCurrentPhaseLocked()
 	lc.closeDoneLocked()
 	if lc.markCompletedFn != nil {
 		lc.markCompletedFn()
@@ -218,11 +231,12 @@ func (lc *JobLifecycle) MarkCompleted() {
 // needed for batch job status snapshots. BatchJob consumes
 // its own sub-manager interfaces instead of reaching into internals.
 type LifecycleSnapshot struct {
-	Status      models.JobStatus
-	CompletedAt *time.Time
-	OrganizedAt *time.Time
-	RevertedAt  *time.Time
-	IsDeleted   bool
+	Status       models.JobStatus
+	CurrentPhase string
+	CompletedAt  *time.Time
+	OrganizedAt  *time.Time
+	RevertedAt   *time.Time
+	IsDeleted    bool
 }
 
 // StatusSnapshot returns a point-in-time copy of the lifecycle fields needed
@@ -232,11 +246,12 @@ func (lc *JobLifecycle) StatusSnapshot() LifecycleSnapshot {
 	lc.mu.RLock()
 	defer lc.mu.RUnlock()
 	return LifecycleSnapshot{
-		Status:      lc.Status,
-		CompletedAt: cloneTimePtr(lc.CompletedAt),
-		OrganizedAt: cloneTimePtr(lc.OrganizedAt),
-		RevertedAt:  cloneTimePtr(lc.RevertedAt),
-		IsDeleted:   lc.deleted,
+		Status:       lc.Status,
+		CurrentPhase: lc.currentPhase,
+		CompletedAt:  cloneTimePtr(lc.CompletedAt),
+		OrganizedAt:  cloneTimePtr(lc.OrganizedAt),
+		RevertedAt:   cloneTimePtr(lc.RevertedAt),
+		IsDeleted:    lc.deleted,
 	}
 }
 
@@ -244,13 +259,33 @@ func (lc *JobLifecycle) StatusSnapshot() LifecycleSnapshot {
 // The caller MUST be holding lifecycle.mu when calling this method.
 func (lc *JobLifecycle) statusSnapshotLocked() LifecycleSnapshot {
 	return LifecycleSnapshot{
-		Status:      lc.Status,
-		CompletedAt: cloneTimePtr(lc.CompletedAt),
-		OrganizedAt: cloneTimePtr(lc.OrganizedAt),
-		RevertedAt:  cloneTimePtr(lc.RevertedAt),
-		IsDeleted:   lc.deleted,
+		Status:       lc.Status,
+		CurrentPhase: lc.currentPhase,
+		CompletedAt:  cloneTimePtr(lc.CompletedAt),
+		OrganizedAt:  cloneTimePtr(lc.OrganizedAt),
+		RevertedAt:   cloneTimePtr(lc.RevertedAt),
+		IsDeleted:    lc.deleted,
 	}
 }
+
+// SetCurrentPhase records the phase that owns the Running state. Call at
+// phase entry (markStarted) before the phase-entry envelope persist so the
+// marker is durable before any phase work begins (D16 fail-closed).
+func (lc *JobLifecycle) SetCurrentPhase(phase string) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	lc.currentPhase = phase
+}
+
+// CurrentPhase returns the phase that owns the Running state ("" when idle).
+func (lc *JobLifecycle) CurrentPhase() string {
+	lc.mu.RLock()
+	defer lc.mu.RUnlock()
+	return lc.currentPhase
+}
+
+// clearCurrentPhaseLocked resets the phase marker. Callers MUST hold lc.mu.
+func (lc *JobLifecycle) clearCurrentPhaseLocked() { lc.currentPhase = "" }
 
 // Compile-time assertion: JobLifecycle satisfies JobCanceller.
 var _ JobCanceller = (*JobLifecycle)(nil)

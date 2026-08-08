@@ -69,6 +69,7 @@ func movieResultToResponse(mr *resultstore.MovieResult, prov *resultstore.Proven
 		Movie:       contracts.MovieViewFromModel(mr.Movie),
 		StartedAt:   contracts.FormatTime(mr.StartedAt),
 		EndedAt:     contracts.FormatTimePtr(mr.EndedAt),
+		Revision:    mr.Revision,
 	}
 	if prov != nil {
 		result.FieldSources = prov.FieldSources

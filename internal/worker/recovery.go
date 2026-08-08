@@ -2,6 +2,7 @@ package worker
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -21,12 +22,18 @@ type recoverableOutcome interface {
 // It decouples the recovery logic from the specific phase inputs, so both
 // applyFile and scrapeFile can share it.
 type recoveryContext struct {
-	filePath  string
-	fmi       models.FileMatchInfo
-	movie     *models.Movie // optional: prior scrape-phase Movie to preserve on apply panic (mirrors fix in interpretApplyResult's err branch)
-	updater   resultstore.ResultUpdater
-	broadcast func(panicErr string) // optional: send a JobEvent on panic (apply phase uses this)
-	startTime time.Time             // optional: included in MovieResult if non-zero
+	filePath   string
+	fmi        models.FileMatchInfo
+	editLockFn func(movieIDs ...string) func() // optional: serializes write-back with review edits (codex r11; variadic per codex r42 total-order rule)
+	movie      *models.Movie                   // optional: prior scrape-phase Movie to preserve on apply panic (mirrors fix in interpretApplyResult's err branch)
+	// promoteWitnessFn reports an unresolved .promote- witness for the family
+	// (codex P2: panics never funnel through the interpret failure branch —
+	// this recovery write-back is the ONLY panic publication, so it must
+	// fence or its revision bump flips startup arbitration to committed).
+	promoteWitnessFn func(posterID string) bool
+	updater          resultstore.ResultUpdater
+	broadcast        func(panicErr string) // optional: send a JobEvent on panic (apply phase uses this)
+	startTime        time.Time             // optional: included in MovieResult if non-zero
 }
 
 // withFileRecovery wraps a business-logic function with panic recovery.
@@ -50,25 +57,76 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 			logging.Errorf("Worker panic %s: %v", rc.filePath, panicErr)
 
 			now := time.Now()
-			mr := &resultstore.MovieResult{
-				FileMatchInfo: rc.fmi,
-				Status:        models.JobStatusFailed,
-				Error:         panicErr.Error(),
+			// Live-session merge on the panic path too (codex P6-B): an edit
+			// committed mid-phase must beat the frozen pre-phase movie for
+			// review-editable fields, while phase-side state stays intact.
+			// Falls back to whole-struct write when no prior result exists.
+			unlock := func() {}
+			if rc.editLockFn != nil && rc.fmi.MovieID != "" {
+				unlock = rc.editLockFn(rc.fmi.MovieID)
 			}
+			defer unlock()
+			// audit R3: witnesses are named by the CANONICAL movie ID while the
+			// match surface is the matcher alias — probe BOTH spellings or an
+			// alias-only fence misses the outstanding witness deterministically.
+			fenceIDs := []string{strings.TrimSpace(rc.fmi.MovieID)}
 			if rc.movie != nil {
-				// Preserve the prior scrape-phase Movie on the apply panic path —
-				// mirrors interpretApplyResult's err-branch fix. Without this,
-				// /review/[jobId] failed-apply rows lose their movie payload
-				// (UpdateFileResult replaces the whole struct, preserving only
-				// ResultID + Revision). Same field-drop-on-failure-path pattern
-				// fixed for FileMatchInfo/timestamps in commit 6249de64.
-				mr.Movie = rc.movie
+				fenceIDs = append(fenceIDs, strings.TrimSpace(rc.movie.ID))
 			}
-			if !rc.startTime.IsZero() {
-				mr.StartedAt = rc.startTime
-				mr.EndedAt = &now
+			fenceHit := ""
+			if rc.promoteWitnessFn != nil {
+				seen := map[string]struct{}{}
+				for _, fid := range fenceIDs {
+					if fid == "" {
+						continue
+					}
+					if _, dup := seen[strings.ToLower(fid)]; dup {
+						continue
+					}
+					seen[strings.ToLower(fid)] = struct{}{}
+					if rc.promoteWitnessFn(fid) {
+						fenceHit = fid
+						break
+					}
+				}
 			}
-			rc.updater.UpdateFileResult(rc.filePath, mr)
+			// codex P2-C/D: skip check runs UNDER the family key so a rekey that
+			// won the lock before us is observed; callback check remains the net
+			// for rekeys landing during the atomic write itself.
+			if fenceHit != "" {
+				logging.Warnf("[Recovery] skipping write-back for %s — promote witness for %s unresolved; restart reconciles", rc.filePath, fenceHit)
+			} else if !writebackPreSkipped(rc.updater, rc.movie, rc.filePath, "Recovery") {
+				errUp := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+					if applyWritebackIdentityMismatch(rc.movie, current) {
+						logging.Warnf("[Recovery] skipping write-back for %s — result rekeyed to %s mid-phase", rc.filePath, current.FileMatchInfo.MovieID)
+						return current, nil
+					}
+					current.FileMatchInfo = applyMatchFollowedByLiveIdentity(rc.fmi, current)
+					current.Movie = mergeLiveReviewEdits(rc.movie, rc.movie, current.Movie)
+					current.Status = models.JobStatusFailed
+					current.Error = panicErr.Error()
+					if !rc.startTime.IsZero() {
+						current.StartedAt = rc.startTime
+						current.EndedAt = &now
+					}
+					return current, nil
+				})
+				if errUp != nil {
+					mr := &resultstore.MovieResult{
+						FileMatchInfo: rc.fmi,
+						Status:        models.JobStatusFailed,
+						Error:         panicErr.Error(),
+					}
+					if rc.movie != nil {
+						mr.Movie = rc.movie
+					}
+					if !rc.startTime.IsZero() {
+						mr.StartedAt = rc.startTime
+						mr.EndedAt = &now
+					}
+					rc.updater.UpdateFileResult(rc.filePath, mr)
+				}
+			}
 
 			if rc.broadcast != nil {
 				rc.broadcast(panicErr.Error())

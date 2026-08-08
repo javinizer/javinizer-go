@@ -18,11 +18,15 @@ import (
 // were removed — callers use database repos directly via APIDeps.GetJobRepo() /
 // GetBatchFileOpRepo(). See architecture-review.md candidate #1.
 type JobPersistencer interface {
-	// PersistJob persists a concrete *BatchJob to the database.
-	PersistJob(job *BatchJob)
+	// PersistJob persists a concrete *BatchJob to the database. Returns a
+	// non-nil error when the envelope could not be encoded or the upsert
+	// failed (POSTER-WRITE-HARDENING D2: encode failures ride the same typed
+	// error channel as repo failures).
+	PersistJob(job *BatchJob) error
 
-	// PersistJobByID persists a job by its ID (no-op if not found).
-	PersistJobByID(id string)
+	// PersistJobByID persists a job by its ID. Returns ErrJobNotFound when no
+	// job resolves for id.
+	PersistJobByID(id string) error
 
 	// DeleteJobFromDB deletes a job from the database.
 	DeleteJobFromDB(id string) error
@@ -45,8 +49,8 @@ func NewNoopJobPersistence() JobPersistencer {
 // Used by NewInMemoryJobStore where database persistence is not needed.
 type noopJobPersistence struct{}
 
-func (noopJobPersistence) PersistJob(_ *BatchJob)                           {}
-func (noopJobPersistence) PersistJobByID(_ string)                          {}
+func (noopJobPersistence) PersistJob(_ *BatchJob) error                     { return nil }
+func (noopJobPersistence) PersistJobByID(_ string) error                    { return nil }
 func (noopJobPersistence) DeleteJobFromDB(_ string) error                   { return nil }
 func (noopJobPersistence) LoadJobs(_ context.Context) ([]models.Job, error) { return nil, nil }
 func (noopJobPersistence) UpsertJob(_ *models.Job) error                    { return nil }
@@ -65,17 +69,16 @@ type dbJobPersistence struct {
 	jobRepo database.JobRepositoryInterface
 }
 
-func (p *dbJobPersistence) PersistJob(job *BatchJob) {
-	persistToDatabase(p.jobRepo, job)
+func (p *dbJobPersistence) PersistJob(job *BatchJob) error {
+	return persistToDatabase(p.jobRepo, job)
 }
 
-func (p *dbJobPersistence) PersistJobByID(id string) {
+func (p *dbJobPersistence) PersistJobByID(id string) error {
 	// dbJobPersistence only holds the job repo, not the store's id→*BatchJob
 	// map, so it cannot resolve a job by ID. ID→job resolution lives in
 	// JobStore.PersistJobByID (which looks up s.jobs then calls PersistJob).
-	// Rather than silently dropping the update, report the inability to persist
-	// so callers using the JobPersistencer contract get a signal.
-	logging.Warnf("dbJobPersistence.PersistJobByID(%s) cannot resolve job by ID without the store map; update not persisted", id)
+	// Surface the inability as an error instead of silently dropping.
+	return fmt.Errorf("%w: dbJobPersistence.PersistJobByID(%s) cannot resolve job by ID without the store map", ErrJobNotFound, id)
 }
 
 func (p *dbJobPersistence) DeleteJobFromDB(id string) error {
@@ -101,20 +104,29 @@ func (p *dbJobPersistence) UpsertJob(dbJob *models.Job) error {
 }
 
 // persistToDatabase saves a BatchJob to the database via the job repository.
-func persistToDatabase(jobRepo database.JobRepositoryInterface, job *BatchJob) {
+// Encode (marshal) failures surface the same way as repository upsert
+// failures: typed error to the caller AND persisted onto persist_error state.
+func persistToDatabase(jobRepo database.JobRepositoryInterface, job *BatchJob) error {
 	if jobRepo == nil {
-		return
+		return nil
 	}
 
-	dbJob, ok := snapshotForPersist(job)
-	if !ok {
-		return
+	dbJob, err := snapshotForPersist(job)
+	if err != nil {
+		job.controller.SetPersistError(err.Error())
+		return err
+	}
+	if dbJob == nil {
+		return nil // deleted job — persist intentionally skipped
 	}
 
 	var persistMsg string
 	if err := jobRepo.Upsert(context.Background(), dbJob); err != nil {
 		logging.Warnf("Failed to upsert job %s in database: %v", job.ID.String(), err)
 		persistMsg = fmt.Sprintf("upsert failed: %v", err)
+		job.controller.SetPersistError(persistMsg)
+		return fmt.Errorf("persist job %s: %w", job.ID.String(), err)
 	}
-	job.controller.SetPersistError(persistMsg)
+	job.controller.SetPersistError("")
+	return nil
 }

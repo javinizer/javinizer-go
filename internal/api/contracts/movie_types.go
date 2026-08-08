@@ -26,6 +26,11 @@ type MovieResponse struct {
 	Movie      *MovieView            `json:"movie"`
 	Provenance map[string]DataSource `json:"provenance,omitempty"`  // Field-level data source tracking
 	MergeStats *MergeStatistics      `json:"merge_stats,omitempty"` // Merge statistics when NFO merging occurred
+	// Revision is the fresh post-commit result revision (POSTER-WRITE-HARDENING D12).
+	Revision *uint64 `json:"revision,omitempty"`
+	// Revisions carries EVERY family part's fresh revision keyed by
+	// result_id (multipart-safe CAS baselines, codex r26).
+	Revisions map[string]uint64 `json:"revisions,omitempty"`
 }
 
 // DataSource represents the source of a metadata field
@@ -59,6 +64,16 @@ type UpdateMovieRequest struct {
 	// per the poster-crop-persistence contract: omitted preserves stored
 	// geometry; explicit null clears it. Not part of the wire format.
 	PosterCropBoundsFieldPresent bool `json:"-"`
+
+	// ExpectedResultRevision (POSTER-WRITE-HARDENING D12): optional CAS
+	// guard — when set, the save 409s if the target result's current
+	// revision differs, so a stale-snapshot client cannot silently clobber a
+	// newer committed edit.
+	ExpectedResultRevision *uint64 `json:"expected_result_revision,omitempty"`
+	// ExpectedResultRevisions: per-part CAS for multipart families (codex
+	// r39) - EVERY listed result must currently sit at the mapped revision or
+	// the whole save 409s before any write.
+	ExpectedResultRevisions map[string]uint64 `json:"expected_result_revisions,omitempty"`
 }
 
 // UnmarshalJSON decodes the request while tracking presence of the
@@ -67,11 +82,15 @@ type UpdateMovieRequest struct {
 // null (clear geometry).
 func (r *UpdateMovieRequest) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Movie json.RawMessage `json:"movie"`
+		Movie                   json.RawMessage   `json:"movie"`
+		ExpectedResultRevision  *uint64           `json:"expected_result_revision"`
+		ExpectedResultRevisions map[string]uint64 `json:"expected_result_revisions"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	r.ExpectedResultRevision = raw.ExpectedResultRevision
+	r.ExpectedResultRevisions = raw.ExpectedResultRevisions
 	r.PosterCropBoundsFieldPresent = false
 	if string(raw.Movie) == "null" || len(raw.Movie) == 0 {
 		r.Movie = nil // binding:"required" reports this downstream
@@ -123,6 +142,11 @@ type PosterCropResponse struct {
 	OriginalPosterURL        string `json:"original_poster_url"`
 	OriginalCroppedPosterURL string `json:"original_cropped_poster_url"`
 	OriginalShouldCropPoster *bool  `json:"original_should_crop_poster"`
+	// Revision is the revision AFTER the crop commit (D12).
+	Revision *uint64 `json:"revision,omitempty"`
+	// Revisions carries EVERY family part's fresh revision keyed by
+	// result_id.
+	Revisions map[string]uint64 `json:"revisions,omitempty"`
 }
 
 // PosterFromURLRequest represents a request to download a poster from a URL.
@@ -134,6 +158,11 @@ type PosterFromURLRequest struct {
 type PosterFromURLResponse struct {
 	CroppedPosterURL string `json:"cropped_poster_url"`
 	PosterURL        string `json:"poster_url"`
+	// Revision is the revision AFTER the from-URL commit (D12).
+	Revision *uint64 `json:"revision,omitempty"`
+	// Revisions carries EVERY family part's fresh revision keyed by
+	// result_id.
+	Revisions map[string]uint64 `json:"revisions,omitempty"`
 }
 
 // NFOComparisonRequest represents a request to compare NFO with scraped data

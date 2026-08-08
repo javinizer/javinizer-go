@@ -63,10 +63,21 @@ export class JobClient extends BaseClient {
 		return this.request<{ jobs: BatchJobResponse[] }>('/api/v1/batch');
 	}
 
-	async updateBatchMovie(jobId: string, resultId: string, movie: Movie): Promise<{ movie: Movie }> {
+	async updateBatchMovie(
+		jobId: string,
+		resultId: string,
+		movie: Movie,
+		expectedResultRevision?: number | Record<string, number>,
+	): Promise<{ movie: Movie }> {
+		const body: Record<string, unknown> = { movie };
+		if (typeof expectedResultRevision === 'number') {
+			body.expected_result_revision = expectedResultRevision;
+		} else if (expectedResultRevision && typeof expectedResultRevision === 'object') {
+			body.expected_result_revisions = expectedResultRevision;
+		}
 		return this.request<{ movie: Movie }>(`/api/v1/batch/${jobId}/results/${resultId}`, {
 			method: 'PATCH',
-			body: JSON.stringify({ movie }),
+			body: JSON.stringify(body),
 		});
 	}
 

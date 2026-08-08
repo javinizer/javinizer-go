@@ -69,8 +69,13 @@ export function siblingResultFilePaths(
 	const entry = Object.values(results).find((r) => r?.result_id === resultId);
 	const movieId = entry?.movie_id;
 	if (!movieId) return [];
+	// audit F6: fold case like the save path's sameFamily predicate and the
+	// backend resultstore family index — case-variant multipart siblings must
+	// receive the post-crop echo too, or their stale overlay re-uploads
+	// pre-crop geometry on the next save.
+	const folded = movieId.toLowerCase();
 	return Object.entries(results)
-		.filter(([, r]) => r?.movie_id === movieId)
+		.filter(([, r]) => (r?.movie_id ?? '').toLowerCase() === folded)
 		.map(([filePath]) => filePath);
 }
 

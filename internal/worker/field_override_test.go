@@ -16,6 +16,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// codex r43 P2c: the override key set folds the stored ContentID into the
+// family lock ("cid:" surface) so a cross-job row collision serializes with
+// any PATCH/apply holding that key.
+func TestApplyFieldOverrideLocksContentIDKey(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	movie, prov := overrideFixture()
+	movie.ID = "FO-9"
+	movie.ContentID = "fo-9-content"
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-cid", Status: models.JobStatusCompleted, Movie: movie,
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "FO-9"},
+	})
+	store.SetProvenance("/f/a.mp4", prov)
+	pe := NewPosterEditor(store, store, nil)
+
+	hold := pe.lockRegistry().Acquire("cid:fo-9-content")
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := pe.ApplyFieldOverride(context.Background(), "res-cid", "FO-9", "maker", "dmm")
+		done <- err
+	}()
+	select {
+	case <-done:
+		t.Fatal("override ran while the cid key was held by a competing row write")
+	case <-time.After(150 * time.Millisecond):
+	}
+	hold()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("override deadlocked against the released cid key")
+	}
+}
+
 func TestApplyFieldOverride_StringFields(t *testing.T) {
 	movie, prov := overrideFixture()
 	err := applyFieldOverride(movie, prov, "maker", "dmm")
@@ -446,6 +481,11 @@ func TestUpdateMovie_DBPersistError(t *testing.T) {
 	movie, _ := overrideFixture()
 	filePath := "test.mp4"
 	tracker := resultstore.New(1, []string{filePath})
+	tracker.UpdateFileResult(filePath, &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movie.ID},
+		Movie:         movie.Clone(),
+		Status:        models.JobStatusCompleted,
+	})
 	repo := mocks.NewMockMovieRepositoryInterface(t)
 	repo.On("Upsert", mock.Anything, mock.Anything).Return(nil, errors.New("db down"))
 	je := &jobEditorImpl{store: tracker, movieRepo: repo}

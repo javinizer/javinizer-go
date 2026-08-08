@@ -155,7 +155,7 @@ func TestIntegration_ApplyPhase_ThroughBatchJob(t *testing.T) {
 	job.cfg.destination = "/output"
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{
@@ -222,7 +222,7 @@ func TestIntegration_RescrapePhase_ThroughBatchJob(t *testing.T) {
 		Status:        models.JobStatusCompleted,
 		Movie:         &models.Movie{ID: "INT-003"},
 	}
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-003.mp4", newResult, capturedRevision, "INT-003", "INT-003")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-003.mp4", newResult, capturedRevision, "INT-003", "INT-003", nil)
 	require.NoError(t, err, "CompleteRescrape should not return an error")
 	require.NotNil(t, outcome)
 	assert.Equal(t, models.RescrapeStatusSuccess, outcome.Status, "Status should be success")
@@ -337,7 +337,7 @@ func TestIntegration_ApplyPhase_WFOverride_ThroughBatchJob(t *testing.T) {
 	job.controller.SetWorkflow(overrideWF)
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{
@@ -377,7 +377,7 @@ func TestIntegration_ApplyPhase_NilWF_OverrideSucceeds(t *testing.T) {
 	job.deps.BatchCfg = BatchJobConfig{MaxWorkers: 1}
 
 	// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-	job.controller.markStarted(models.JobStatusPending)
+	job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 	job.lifecycle.MarkCompleted()
 
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{
@@ -484,7 +484,7 @@ func TestIntegration_CompleteRescrape_Conflict(t *testing.T) {
 		Movie:         &models.Movie{ID: "INT-005"},
 	}
 
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-004.mp4", newResult, capturedRevision, "INT-005", "INT-004")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-004.mp4", newResult, capturedRevision, "INT-005", "INT-004", nil)
 	// Conflict should be detected — the revision no longer matches
 	require.NoError(t, err) // CompleteRescrape returns conflict in outcome, not as error
 	require.NotNil(t, outcome)
@@ -570,7 +570,7 @@ func TestIntegration_OrphanDetection(t *testing.T) {
 		Movie:         &models.Movie{ID: "INT-006"},
 	}
 
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-005.mp4", newResult, capturedRevision, "INT-006", "INT-005")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-005.mp4", newResult, capturedRevision, "INT-006", "INT-005", nil)
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	assert.Contains(t, outcome.OrphanedMovieIDs, "INT-005", "Old movie ID should be orphaned when no other result uses it")
@@ -608,7 +608,7 @@ func TestIntegration_NoOrphanWhenSharedMovieID(t *testing.T) {
 		Movie:         &models.Movie{ID: "INT-008"},
 	}
 
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-007A.mp4", newResult, capturedRevision, "INT-008", "INT-007")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-007A.mp4", newResult, capturedRevision, "INT-008", "INT-007", nil)
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	// INT-007 should NOT be orphaned because INT-007B still uses it
@@ -649,7 +649,7 @@ func TestIntegration_MultipartMetadata_AppliedOnRescrape(t *testing.T) {
 		Movie:         &models.Movie{ID: "INT-009"},
 	}
 
-	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-009-pt1.mp4", newResult, capturedRevision, "INT-009", "INT-009")
+	outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "/source/INT-009-pt1.mp4", newResult, capturedRevision, "INT-009", "INT-009", nil)
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	assert.Empty(t, outcome.OrphanedMovieIDs)

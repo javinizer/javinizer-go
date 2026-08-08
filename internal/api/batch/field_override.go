@@ -72,7 +72,9 @@ func getBatchMovieSources(rt *core.APIRuntime) gin.HandlerFunc {
 // @Success 200 {object} contracts.FieldOverrideResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
-// @Failure 500 {object} contracts.ErrorResponse
+// @Failure 409 {object} contracts.ErrorResponse "job busy (pending or scrape-phase) or content-id change rejected"
+// @Failure 410 {object} contracts.ErrorResponse "job deleted"
+// @Failure 500 {object} contracts.ErrorResponse "transactional commit failed; all writes rolled back"
 // @Router /api/v1/batch/{id}/results/{resultId}/field-override [post]
 func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -86,24 +88,33 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		job, ok := deps.GetJobStore().GetBatchJob(jobID)
-		if !ok {
-			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
+		// Admission gate + lease (D16). The override commits movie row +
+		// provenance + envelope transactionally inside the op (D4) — no
+		// post-op PersistJobByID.
+		job, release, admitted := admitOrWriteError(c, deps.GetJobStore().AcquireEditAccess)
+		if !admitted {
 			return
 		}
+		defer release()
 
 		result, prov, err := job.ApplyFieldOverride(c.Request.Context(), resultID, req.Field, req.Source)
 		if err != nil {
-			status := http.StatusBadRequest
-			if strings.Contains(err.Error(), "not found") {
-				status = http.StatusNotFound
-			}
 			logging.Debugf("[FieldOverride] %s/%s field=%s source=%s: %v", jobID, resultID, req.Field, req.Source, err)
-			c.JSON(status, contracts.ErrorResponse{Error: err.Error()})
+			if mapBatchEditError(c, err) {
+				return
+			}
+			// Domain validation failures keep the historical 400; transactional
+			// commit failures (composite tx leg) are internal — 500 per the
+			// swagger contract, never silently swallowed as 400.
+			if strings.Contains(err.Error(), "unsupported field") ||
+				strings.Contains(err.Error(), "did not contribute") ||
+				strings.Contains(err.Error(), "no provenance available") {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-
-		deps.GetJobStore().PersistJobByID(jobID)
 
 		var movieView *contracts.MovieView
 		if result != nil && result.Movie != nil {
@@ -114,10 +125,19 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			fieldSources = prov.FieldSources
 			actressSources = prov.ActressSources
 		}
+		// audit F-R8-3: ApplyFieldOverride's result was read INSIDE the family
+		// key post-commit — echoing it directly sidesteps the off-key echo race
+		// (a concurrent commit in the gap would misheal the CAS baseline).
+		var revEcho *uint64
+		if result != nil {
+			rv := result.Revision
+			revEcho = &rv
+		}
 		c.JSON(http.StatusOK, contracts.FieldOverrideResponse{
 			Movie:          movieView,
 			FieldSources:   fieldSources,
 			ActressSources: actressSources,
+			Revision:       revEcho,
 		})
 	}
 }

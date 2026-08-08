@@ -79,18 +79,22 @@ type PhaseLifecycle interface {
 
 // persister persists job state. Called by phases after state mutations.
 // *BatchJob satisfies this interface via persistFunc adapter wrapping job.deps.PersistFn.
+// Phase-driven persists are best-effort: phases log-and-continue on error
+// (surfaced via persist_error on the job), review-edit paths surface errors
+// to the caller instead (POSTER-WRITE-HARDENING D2/D4).
 type persister interface {
-	Persist()
+	Persist() error
 }
 
-// persistFunc wraps a func() to satisfy the persister interface.
-// A nil persistFunc is safe to call — Persist() becomes a no-op.
-type persistFunc func()
+// persistFunc wraps a func() error to satisfy the persister interface.
+// A nil persistFunc is safe to call — Persist() becomes a nil-error no-op.
+type persistFunc func() error
 
-func (p persistFunc) Persist() {
+func (p persistFunc) Persist() error {
 	if p != nil {
-		p()
+		return p()
 	}
+	return nil
 }
 
 // scrapePhaseInputs carries only what the scrape phase needs.
@@ -123,10 +127,23 @@ type scrapePhaseInputs struct {
 // applyPhaseInputs carries only what the apply phase needs.
 // Not the full *BatchJob — each field is a narrow dependency.
 type applyPhaseInputs struct {
-	JobID       models.JobID
-	Concurrency concurrencyConfig
-	NFOEnabled  bool
-	WF          workflow.WorkflowInterface
+	JobID models.JobID
+	// EditLockFn acquires the per-movie-family edit key (POSTER-WRITE-HARDENING):
+	// per-file apply write-backs run under it, so a mid-phase committed review
+	// PATCH and the phase's result publication serialize rather than
+	// interleave stale candidates (codex r11). nil ⇒ skip locking.
+	// codex r42: variadic so multi-key acquisitions route through the
+	// registry's folded total order (AcquireMany) — caller-side ordering
+	// reproduces sort rules that diverge under case folding and deadlock.
+	EditLockFn func(movieIDs ...string) (release func())
+	// PromoteWitnessFn reports whether the poster family has an unresolved
+	// .promote- witness — the success write-back skips while it lingers
+	// (codex P2: its revision bump would flip startup arbitration of the
+	// pending promote to "committed"). nil ⇒ no fence.
+	PromoteWitnessFn func(posterID string) bool
+	Concurrency      concurrencyConfig
+	NFOEnabled       bool
+	WF               workflow.WorkflowInterface
 
 	// Current state snapshot (frozen at construction, not live)
 	Results     map[string]*resultstore.MovieResult
@@ -174,6 +191,12 @@ type rescrapePhaseInputs struct {
 	Fs          afero.Fs               // for poster cleanup
 	TempDir     string                 // for poster cleanup paths
 	FsCaseCache *fscase.FSCaseCache    // for orphaned poster detection
+
+	// EditLockFn acquires per-family edit keys (audit F-R3-1/R3-3): poster
+	// cleanup decisions (conflict closeout, orphan sweep) are revalidated
+	// UNDER the key so a concurrent commit can never interleave between the
+	// ownership check and the delete. nil ⇒ no revalidation (test seams).
+	EditLockFn func(movieIDs ...string) (release func())
 }
 
 // Compile-time assertions that concrete types satisfy the interfaces.

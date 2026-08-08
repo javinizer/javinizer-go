@@ -253,6 +253,7 @@ func TestBatchRescrapeMovies_RunningJobRejected(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 	setJobStatus(job, models.JobStatusRunning)
 	defer setJobStatus(job, models.JobStatusCompleted) // restore terminal status for teardown hygiene (setup-only Running state)
 
@@ -281,6 +282,7 @@ func TestPosterCrop_CropWithBoundsError(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/TEST-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
@@ -386,6 +388,7 @@ func TestPosterCrop_Miss2_UpdatePosterCropError(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/TEST-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
@@ -417,6 +420,7 @@ func TestPosterCrop_ResolvePosterIDError(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	// Set a result with a movie that has path traversal ID
 	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "../../../etc"},
@@ -474,6 +478,7 @@ func TestPosterFromURL_DatabaseFindError(t *testing.T) {
 
 	// Don't pre-insert the movie — FindByID will return nil/not-found
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/NEW-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/NEW-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/NEW-001.mp4", MovieID: "NEW-001"},
 		Status:        models.JobStatusCompleted,
@@ -540,6 +545,7 @@ func TestPosterFromURL_DatabasePersistencePath(t *testing.T) {
 	require.NoError(t, err)
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
@@ -594,6 +600,7 @@ func TestPosterFromURL_DownloadError_502(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
@@ -633,6 +640,7 @@ func TestPosterFromURL_DownloadError_Generic500(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
@@ -702,6 +710,7 @@ func TestPosterFromURL_Miss2_DownloadStatusError(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/TEST-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
@@ -782,6 +791,7 @@ func TestPosterFromURL_Miss2_MovieNotFoundInJob(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/OTHER-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 
 	router := gin.New()
 	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(testkit.GetTestRuntime(deps)))
@@ -814,6 +824,7 @@ func TestPosterFromURL_Miss2_SSRFError(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/TEST-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
@@ -842,6 +853,7 @@ func TestPosterFromURL_ResolvePosterIDError(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	// Set a result where the Movie.ID is a path traversal
 	setJobResult(job, "/path/to/file.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "safemovie"},
@@ -902,6 +914,7 @@ func TestPosterFromURL_UpdatePosterFromURLFailure(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,
@@ -1100,6 +1113,7 @@ func TestUpdateBatchMoviePosterFromURL_MovieNotFoundInJob(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 
 	router := gin.New()
 	router.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(testkit.GetTestRuntime(deps)))
@@ -1158,6 +1172,7 @@ func TestUpdateBatchMovie_Miss2_UpdateMovieError(t *testing.T) {
 
 	// Create a job and set a result
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/TEST-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
@@ -1192,6 +1207,7 @@ func TestUpdateBatchMovie_Miss2_UpsertError(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/TEST-001.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/TEST-001.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
 		Status:        models.JobStatusCompleted,
@@ -1211,9 +1227,10 @@ func TestUpdateBatchMovie_Miss2_UpsertError(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// Upsert with empty ID should fail — 500
-	assert.Equal(t, 500, w.Code, "Expected 500 for Upsert failure, body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "Failed to update movie")
+	// Empty movie IDs are now rejected at the family gate (codex P1-F) — an
+	// in-flight save can no longer restamp the family's matcher key with "".
+	assert.Equal(t, 409, w.Code, "Expected 409 for empty movie ID, body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "movie ID must not be empty")
 }
 
 func TestUpdateBatchMovie_Miss3_InvalidJSON(t *testing.T) {
@@ -1280,6 +1297,7 @@ func TestUpdateBatchMovie_MovieNotFoundInJob(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/file.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 
 	router := gin.New()
 	router.PATCH("/batch/:id/results/:resultId", updateBatchMovie(testkit.GetTestRuntime(deps)))
@@ -1301,6 +1319,7 @@ func TestUpdateBatchMovie_UpsertSuccess(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-535.mp4"})
+	job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission: completed job accepts edits
 	setJobResult(job, "/path/to/IPX-535.mp4", &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-535.mp4", MovieID: "IPX-535"},
 		Status:        models.JobStatusCompleted,

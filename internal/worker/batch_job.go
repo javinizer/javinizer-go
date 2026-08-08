@@ -38,7 +38,7 @@ type BatchJobDeps struct {
 	ActressRepo     database.ActressRepositoryInterface            // Actress persistence for explicit review-page edits
 	HistoryRepo     database.HistoryRepositoryInterface            // History repository
 	Emitter         eventlog.EventEmitter                          // Event emission for audit trail
-	PersistFn       func()                                         // Callback to persist job state to database
+	PersistFn       func() error                                   // Callback to persist job state to database; phases log-and-continue on error, phase starts fail closed on marker-persist error
 	Logger          logging.Logger                                 // Structured logger seam; defaults to GlobalLogger() when nil
 }
 
@@ -132,6 +132,11 @@ type BatchJob struct {
 	controller    *jobController `json:"-"` // Phase-launch orchestration (DEEP-1: owns StartScrape/StartApply/Rescrape)
 
 	fsCaseCache *fscase.FSCaseCache `json:"-"` // Per-job filesystem case-sensitivity cache
+
+	// POSTER-WRITE-HARDENING D1/D3: per-job edit serialization and
+	// delete-drain primitives. Created once per job in wireJobDeps.
+	editLocks *keyedMutexRegistry `json:"-"` // Per-(job,movie) edit lock registry
+	admission *admissionBarrier   `json:"-"` // Shared edit leases / exclusive delete-drain
 
 	adapters     *jobAdapters `json:"-"` // Cached adapters — built once, used by JobStore methods (D-6)
 	adaptersOnce sync.Once    `json:"-"` // Guards adapters lazy-init against concurrent JobStore RLock callers
@@ -299,6 +304,7 @@ func (job *BatchJob) snapshotFull() batchJobSnapshot {
 			ApplyPlan:             applyplan.Clone(job.cfg.applyPlan),
 			PersistError:          job.persistError,
 			IsDeleted:             lcSnap.IsDeleted,
+			CurrentPhase:          lcSnap.CurrentPhase,
 		},
 		results:     resultSnap.Results,
 		provenance:  resultSnap.Provenance,

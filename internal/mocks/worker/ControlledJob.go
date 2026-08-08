@@ -236,6 +236,50 @@ func (_c *MockControlledJob_FindMovieResultForMovieID_Call) RunAndReturn(run fun
 	return _c
 }
 
+// GetCurrentPhase provides a mock function for the type MockControlledJob
+func (_mock *MockControlledJob) GetCurrentPhase() string {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCurrentPhase")
+	}
+
+	var r0 string
+	if returnFunc, ok := ret.Get(0).(func() string); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	return r0
+}
+
+// MockControlledJob_GetCurrentPhase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCurrentPhase'
+type MockControlledJob_GetCurrentPhase_Call struct {
+	*mock.Call
+}
+
+// GetCurrentPhase is a helper method to define mock.On call
+func (_e *MockControlledJob_Expecter) GetCurrentPhase() *MockControlledJob_GetCurrentPhase_Call {
+	return &MockControlledJob_GetCurrentPhase_Call{Call: _e.mock.On("GetCurrentPhase")}
+}
+
+func (_c *MockControlledJob_GetCurrentPhase_Call) Run(run func()) *MockControlledJob_GetCurrentPhase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockControlledJob_GetCurrentPhase_Call) Return(s string) *MockControlledJob_GetCurrentPhase_Call {
+	_c.Call.Return(s)
+	return _c
+}
+
+func (_c *MockControlledJob_GetCurrentPhase_Call) RunAndReturn(run func() string) *MockControlledJob_GetCurrentPhase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFileMatchInfosForMovieID provides a mock function for the type MockControlledJob
 func (_mock *MockControlledJob) GetFileMatchInfosForMovieID(movieID string) []models.FileMatchInfo {
 	ret := _mock.Called(movieID)

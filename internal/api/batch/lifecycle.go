@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -208,6 +209,7 @@ func cancelBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
+// @Failure 410 {object} contracts.ErrorResponse "job already deleted (tombstone)"
 // @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/{id} [delete]
 func deleteBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
@@ -216,15 +218,18 @@ func deleteBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 		jobID := c.Param("id")
 
 		if err := deps.GetJobStore().DeleteJob(jobID); err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			switch {
+			case errors.Is(err, worker.ErrJobNotFound):
 				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error(), Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
-				return
-			}
-			if strings.Contains(err.Error(), "cannot delete running job") {
+			case errors.Is(err, worker.ErrJobGone):
+				// Recently deleted — distinguishable tombstone (410) so clients
+				// stop retrying instead of re-GET-ing a phantom row.
+				c.JSON(http.StatusGone, contracts.ErrorResponse{Error: err.Error(), Code: "JOB_GONE", Params: map[string]any{"job_id": jobID}})
+			case strings.Contains(err.Error(), "cannot delete running job"):
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
-				return
+			default:
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to delete job: %v", err)})
 			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to delete job: %v", err)})
 			return
 		}
 

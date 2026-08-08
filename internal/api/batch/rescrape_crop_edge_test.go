@@ -217,6 +217,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 
 	t.Run("invalid poster id derived from movie data", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-777.mp4"})
+		job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 		setJobResult(job, "/tmp/IPX-777.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-777.mp4", MovieID: "IPX-777"},
 			Status:        models.JobStatusCompleted,
@@ -234,6 +235,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 
 	t.Run("falls back to existing cropped image when full image is missing", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-778.mp4"})
+		job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 		setJobResult(job, "/tmp/IPX-778.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-778.mp4", MovieID: "IPX-778"},
 			Status:        models.JobStatusCompleted,
@@ -255,6 +257,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 
 	t.Run("movie lookup fallback by data movie id", func(t *testing.T) {
 		job := createJobWithWF(deps, cfg, []string{"/tmp/ALT-001.mp4"})
+		job.Controller().SetJobStatus(models.JobStatusCompleted) // D16 admission gate
 		setJobResult(job, "/tmp/ALT-001.mp4", &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ALT-001.mp4", MovieID: "LEGACY-001"},
 			Status:        models.JobStatusCompleted,
@@ -275,7 +278,9 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		result := status.Results["/tmp/ALT-001.mp4"]
 		require.NotNil(t, result)
 		require.NotNil(t, result.Movie)
-		assert.Equal(t, "ALT-001", result.FileMatchInfo.MovieID)
+		// Codex P3-A: poster edits never restamp the matcher alias — the
+		// canonical ID stays in Movie.ID and drives poster file naming.
+		assert.Equal(t, "LEGACY-001", result.FileMatchInfo.MovieID, "alias is untouched by poster ops")
 		assert.Contains(t, result.Movie.Poster.CroppedPosterURL, "/api/v1/temp/posters/"+job.GetID()+"/ALT-001.jpg")
 		assert.False(t, result.Movie.Poster.ShouldCropPoster)
 	})

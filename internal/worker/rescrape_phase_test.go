@@ -313,7 +313,7 @@ func TestRescrapePhase_CompleteRescrape_Success(t *testing.T) {
 	}
 
 	phase := NewRescrapePhase()
-	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 1, "IPX-778", "IPX-777")
+	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 1, "IPX-778", "IPX-777", nil)
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	assert.Equal(t, models.RescrapeStatusSuccess, outcome.Status, "Should be success")
@@ -342,7 +342,7 @@ func TestRescrapePhase_CompleteRescrape_Conflict(t *testing.T) {
 	}
 
 	phase := NewRescrapePhase()
-	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 1, "IPX-778", "IPX-777")
+	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 1, "IPX-778", "IPX-777", nil)
 	require.NoError(t, err) // CompleteRescrape doesn't return error for conflicts, just sets flag
 	require.NotNil(t, outcome)
 	assert.Equal(t, models.RescrapeStatusConflict, outcome.Status, "Should detect conflict when revision mismatches")
@@ -361,7 +361,7 @@ func TestRescrapePhase_CompleteRescrape_JobGone(t *testing.T) {
 	}
 
 	phase := NewRescrapePhase()
-	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 0, "IPX-778", "IPX-777")
+	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 0, "IPX-778", "IPX-777", nil)
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	assert.Equal(t, models.RescrapeStatusGone, outcome.Status, "Should report job is gone")
@@ -392,7 +392,7 @@ func TestRescrapePhase_CompleteRescrape_MultipartMetadata(t *testing.T) {
 	}
 
 	phase := NewRescrapePhase()
-	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777-pt1.mp4", newResult, 1, "IPX-777", "IPX-777")
+	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777-pt1.mp4", newResult, 1, "IPX-777", "IPX-777", nil)
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 
@@ -423,7 +423,7 @@ func TestRescrapePhase_CompleteRescrape_SameMovieID(t *testing.T) {
 	}
 
 	phase := NewRescrapePhase()
-	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 1, "IPX-777", "IPX-777")
+	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 1, "IPX-777", "IPX-777", nil)
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	assert.Empty(t, outcome.OrphanedMovieIDs, "No orphaned IDs when movie ID stays the same")
@@ -449,7 +449,7 @@ func TestRescrapePhase_CompleteRescrape_CommitResultError(t *testing.T) {
 	}
 
 	phase := NewRescrapePhase()
-	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 1, "IPX-778", "IPX-777")
+	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 1, "IPX-778", "IPX-777", nil)
 	require.Error(t, err, "Should return error when CommitResult fails")
 	require.Nil(t, outcome, "Should return nil outcome for non-conflict errors")
 }

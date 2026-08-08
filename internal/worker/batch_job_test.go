@@ -76,7 +76,7 @@ func TestNewBatchJobDeps(t *testing.T) {
 
 		// Verify optional fields can be set after construction
 		persistCalled := false
-		deps.PersistFn = func() { persistCalled = true }
+		deps.PersistFn = func() error { persistCalled = true; return nil }
 		deps.PersistFn()
 		assert.True(t, persistCalled)
 	})
@@ -122,7 +122,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 			Movie:         &models.Movie{ID: "NEW-001"},
 		}
 
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "OLD-001")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "OLD-001", nil)
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusSuccess, outcome.Status)
 		assert.Equal(t, uint64(2), job.snap().Results["file1.mp4"].Revision)
@@ -135,7 +135,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job.lifecycle.deleted = true
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusGone, outcome.Status)
 	})
@@ -146,7 +146,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job.lifecycle.Status = models.JobStatusRunning
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 0, "NEW-001", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusGone, outcome.Status)
 	})
@@ -161,7 +161,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		})
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 3, "NEW-001", "")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 3, "NEW-001", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, models.RescrapeStatusConflict, outcome.Status)
 	})
@@ -182,7 +182,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		})
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-001"}}
-		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001")
+		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001", nil)
 		require.NoError(t, err)
 		assert.Equal(t, uint64(2), job.snap().Results["file1.mp4"].Revision)
 	})
@@ -205,7 +205,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job.ID = "test-job-456"
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "NEW-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "NEW-001"}}
-		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "SHARED-001")
+		outcome, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "NEW-001", "SHARED-001", nil)
 		require.NoError(t, err)
 		assert.NotContains(t, outcome.OrphanedMovieIDs, "SHARED-001")
 	})
@@ -221,7 +221,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 		job.results.RecalculateProgress()
 
 		newResult := &resultstore.MovieResult{FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "ABC-001"}, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-001"}}
-		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001")
+		_, err := job.rescrapePhase.CompleteRescrape(rescrapePhaseInputs{ResultMap: job.results, Lifecycle: job.lifecycle}, "file1.mp4", newResult, 1, "ABC-001", "ABC-001", nil)
 		require.NoError(t, err)
 		assert.Equal(t, 1, job.prog().Completed)
 		assert.Equal(t, 50.0, job.prog().Progress)
@@ -411,7 +411,10 @@ func TestBuildRescrapeInputs(t *testing.T) {
 
 	assert.Equal(t, job.ID, inputs.JobID)
 	assert.Equal(t, wf, inputs.WF)
-	assert.Equal(t, job.results, inputs.ResultMap)
+	// ResultMap is wrapped by familyKeyedResultMap (codex r20 commit-leg serialization) — unwrap.
+	wrapped, ok := inputs.ResultMap.(*familyKeyedResultMap)
+	require.True(t, ok, "rescrape ResultMap should route commits through the family key")
+	assert.Equal(t, job.results, wrapped.ResultMapAccessor)
 	assert.Equal(t, job.lifecycle, inputs.Lifecycle)
 }
 
@@ -493,7 +496,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = true
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 
 		// Call StartApply with Update: nil — should preserve job.cfg.update = true
@@ -515,7 +518,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = false
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -536,7 +539,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = false
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 
 		updateTrue := true
@@ -558,7 +561,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 		job.cfg.update = true
 
 		// StartApply requires Completed lifecycle status (API-1+2: CAS fix)
-		job.controller.markStarted(models.JobStatusPending)
+		job.controller.markStarted(models.JobStatusPending, JobPhaseScrape, func() {})
 		job.lifecycle.MarkCompleted()
 
 		updateFalse := false
@@ -668,7 +671,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 		})
 
 		err := job.posterEditor.UpdatePosterCrop("ABC-001", "crop.jpg", nil, false)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, ErrMovieFamilyEmpty)
 	})
 
 	t.Run("preserves original ShouldCropPoster value despite subsequent false assignment", func(t *testing.T) {
@@ -757,7 +760,7 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 		})
 
 		err := job.posterEditor.UpdatePosterFromURL(context.TODO(), "ABC-001", "poster.jpg", "crop.jpg")
-		require.NoError(t, err)
+		require.ErrorIs(t, err, ErrMovieFamilyEmpty)
 	})
 }
 

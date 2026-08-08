@@ -27,7 +27,7 @@ import {
 	rescrapeClearedMovieKeys,
 	siblingResultFilePaths,
 } from './poster-crop-sync';
-import { buildMovieToSave } from './save-helpers';
+import { buildMovieToSave, rebaseOverlayOntoMovie } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
 interface ReviewMutationsDeps {
@@ -62,7 +62,7 @@ interface ReviewMutationsDeps {
 		body: { field: string; source: string },
 	) => Promise<FieldOverrideResponse>;
 	excludeBatchMovie: (jobId: string, resultId: string) => Promise<unknown>;
-	updateBatchMovie: (jobId: string, resultId: string, movie: Movie) => Promise<unknown>;
+	updateBatchMovie: (jobId: string, resultId: string, movie: Movie, expectedResultRevision?: number | Record<string, number>) => Promise<unknown>;
 	updateBatchMoviePosterCrop: (
 		jobId: string,
 		resultId: string,
@@ -124,6 +124,36 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					const r = updatedJob.results[filePath] as FileResult;
 					if (r?.movie) {
 						updatedJob.results[filePath] = { ...r, movie: fromUrlEcho(r.movie) };
+					}
+				}
+				// D12: advance the CAS baseline ONLY for the target part —
+				// siblings' fresh revisions arrive via the invalidated query
+				// (copying the target's revision onto them would lie, codex
+				// r24).
+				// Advance EVERY family part's CAS baseline from the committed
+				// revision map (codex r26); fall back to the single target
+				// field for older servers.
+				const advanceRevision = (filePath: string, rev: number) => {
+					const r = updatedJob.results[filePath] as FileResult | undefined;
+					if (r) updatedJob.results[filePath] = { ...r, revision: rev };
+				};
+				if (data.revisions && Object.keys(data.revisions).length > 0) {
+					const resultToPath = new Map(
+						Object.entries(updatedJob.results).map(([fp, r]) => [
+							(r as FileResult).result_id,
+							fp,
+						] as const),
+					);
+					for (const [rid, rev] of Object.entries(data.revisions)) {
+						const fp = resultToPath.get(rid);
+						if (fp) advanceRevision(fp, rev);
+					}
+				} else if (data.revision !== undefined) {
+					for (const [filePath, r0] of Object.entries(updatedJob.results)) {
+						const r = r0 as FileResult;
+						if (r?.result_id === resultId) {
+							updatedJob.results[filePath] = { ...r, revision: data.revision };
+						}
 					}
 				}
 				deps.skipJobSync();
@@ -199,27 +229,166 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 	const saveEditsMutation = createMutation(() => ({
 		mutationFn: async () => {
 			const job = deps.getJob();
-			const savePromises = Array.from(deps.getEditedMovies().entries()).map(([filePath, movie]) => {
+			// POSTER-WRITE-HARDENING D1/D14: the backend commits a whole-movie
+			// save transactionally for EVERY part of the family — fan out ONE
+			// request per movie, not one per part (parts sharing a movie_id are
+			// deduped to the first part's result).
+			// POSTER-WRITE-HARDENING D1/D14: the backend commits a whole-movie
+			// save transactionally for EVERY part of the family — fan out ONE
+			// request per movie, not one per part. Keep the LATEST edit entry
+			// per family (codex r9 P2): Map iteration is insertion-ordered, so
+			// if the user edited sibling parts differently, only the newest
+			// overlay is the intent worth persisting.
+			const latestByFamily = new Map<string, [string, Movie]>();
+			const familyPathsByKey = new Map<string, string[]>();
+			for (const [filePath, movie] of deps.getEditedMovies()) {
+				const resultEntry = job?.results?.[filePath];
+				const resultId = resultEntry?.result_id;
+				if (!resultId) continue;
+				const movieId = resultEntry?.movie_id ?? '';
+				// codex r43 FE P2: family dedup must fold case like sameFamily
+				// (and the backend resultstore index) — raw keys race two saves on
+				// case-variant multipart siblings (one 409s or overlays persist).
+				const key = movieId !== '' ? movieId.toLowerCase() : '__unpathed__' + filePath;
+				// Map.set on an existing key keeps the ORIGINAL insertion
+				// position; delete+set moves the entry to the tail so sibling
+				// edit order A,B,A resolves to A's newest overlay (codex r9-II).
+				latestByFamily.delete(key);
+				latestByFamily.set(key, [filePath, movie]);
+				// codex P2-E: family membership must be captured pre-save — the
+				// post-save refetch rekeys results, so movie_id lookups miss the
+				// clear below. FS paths stay stable through renames.
+				familyPathsByKey.set(key, [...(familyPathsByKey.get(key) ?? []), filePath]);
+			}
+			// codex P1 (rebase): capture each edited path's PRE-SAVE server baseline.
+			// When a save is rejected and the refetch installs newer revisions, keeping
+			// the stale whole-movie overlay against the fresh baseline would let the
+			// next save pass CAS and clobber the concurrent edit — onSuccess rebases
+			// the user's field deltas onto the refreshed movie instead.
+			const preSaveServer = new Map<string, Movie | undefined>();
+			for (const fp of deps.getEditedMovies().keys()) {
+				preSaveServer.set(fp, (job?.results?.[fp] as FileResult | undefined)?.movie);
+			}
+			const savePromises = Array.from(latestByFamily.entries()).map(([key, [filePath, movie]]) => {
+				const resultEntry = job?.results?.[filePath];
+				if (!resultEntry?.result_id) return null;
 				const movieToSave = buildMovieToSave(movie);
-				const resultId = job?.results?.[filePath]?.result_id;
-				if (!resultId) return null;
-				return deps.updateBatchMovie(deps.getJobId(), resultId, movieToSave);
+				// Codex r20+r39: multipart families need the whole family revision
+				// map (one sibling's stale baseline would otherwise silently pass
+				// target-only CAS and overwrite a newer sibling edit).
+				const partsRevisions: Record<string, number> = {};
+				for (const [fp, r0] of Object.entries(job?.results ?? {})) {
+					const r = r0 as FileResult;
+					// codex P2-G: the backend folds movie IDs to lower case — a
+					// case-variant sibling MUST bundle into the family CAS here.
+					const sameFamily =
+						(r.movie_id ?? '').toLowerCase() === (resultEntry?.movie_id ?? '').toLowerCase();
+					if (sameFamily && r.result_id && typeof r.revision === 'number') {
+						partsRevisions[r.result_id] = r.revision;
+					}
+				}
+				const isMultipart = Object.keys(partsRevisions).length > 1;
+				return deps.updateBatchMovie(
+					deps.getJobId(),
+					resultEntry.result_id,
+					movieToSave,
+					isMultipart ? partsRevisions : resultEntry.revision,
+				);
 			});
 
-			const sent = savePromises.filter((p): p is Promise<unknown> => p !== null);
-			if (sent.length > 0) {
-				await Promise.all(sent);
-			}
-			return sent.length;
+const ops = Array.from(latestByFamily.entries());
+			const settled = await Promise.allSettled(savePromises.filter((p): p is Promise<unknown> => p !== null));
+			// codex P2-F: paths come by family-key lookup — latestByFamily reorders
+			// (delete+set) on interleaved sibling edits, so positional indexing of
+			// familyPathsByKey would misalign them.
+			return {
+				rows: settled.map((s, i) => ({
+					key: ops[i]?.[0] ?? '',
+					status: s.status,
+					paths: familyPathsByKey.get(ops[i]?.[0] ?? '') ?? [],
+				})),
+				preSaveServer,
+			};
 		},
-		onSuccess: async (sent: number) => {
-			if (sent > 0) {
-				await invalidateJobQueries().catch(() => {});
+		onSuccess: async (payload: {
+			rows: Array<{ key: string; status: string; paths: string[] }>;
+			preSaveServer: Map<string, Movie | undefined>;
+		}) => {
+			const ops0 = payload.rows ?? [];
+			const preSaveServer = payload.preSaveServer;
+			const failed = ops0.filter((r) => r.status === 'rejected');
+			const succeeded = ops0.filter((r) => r.status === 'fulfilled');
+			// Always refetch after this batch: even the all-rejected case must
+			// advance the CAS baseline or a same-session retry loops on the
+			// same stale revision (codex r38).
+			// codex P3-B: if the refetch itself failed, the pane still carries
+			// PRE-save baselines; deleting overlays now would produce a 409 storm
+			// the next save. Keep them when the refresh failed (retry-prone but correct).
+			// codex P3-D: paused refetches keep dataUpdatedAt while reporting a
+			// prior success status. Gate on an ADVANCED dataUpdatedAt — only a
+			// completed fetch counts as refreshed.
+			const qk = ['batch-job', deps.getJobId()];
+			const before = queryClient.getQueryState(qk)?.dataUpdatedAt ?? 0;
+			await invalidateJobQueries().catch(() => {});
+			const post = queryClient.getQueryState(qk);
+			const refreshed = (() => {
+				if (post?.status !== 'success') return false;
+				return (post.dataUpdatedAt ?? 0) > before;
+			})();
+			if (succeeded.length > 0 && refreshed) {
+				const editedMovies = deps.getEditedMovies();
+				for (const ok of succeeded) {
+					// codex P2-E: delete by PRE-SAVE family membership (immunity to the
+					// post-commit rekey the refetch has already installed).
+					for (const fp of ok.paths) editedMovies.delete(fp);
+				}
 				deps.toastSuccess(m.review_changes_saved());
 			}
-			deps.clearEditedMovies();
+			if (failed.length > 0) {
+				// Partial failure: clean families were cleared above; rejected
+				// overlays stay + baseline advance via refetch, so retry works.
+				deps.toastError(m.review_save_edits_failed({ error: `${failed.length} movie(s) rejected` }));
+			}
+			if (failed.length > 0 && refreshed) {
+				// codex P1: rebase rejected overlays onto the refreshed server movie —
+				// otherwise the next save pairs the stale overlay with a FRESH CAS
+				// revision and silently overwrites whatever the concurrent op changed.
+				const freshJob = queryClient.getQueryData<BatchJobResponse>(qk);
+				const editedMovies = deps.getEditedMovies();
+				for (const bad of failed) {
+					for (const fp of bad.paths) {
+						const overlay = editedMovies.get(fp);
+						const baseline = preSaveServer.get(fp);
+						const freshMovie = (freshJob?.results?.[fp] as FileResult | undefined)?.movie;
+						if (overlay && baseline && freshMovie) {
+							editedMovies.set(fp, rebaseOverlayOntoMovie(baseline, overlay, freshMovie));
+						}
+					}
+				}
+			}
 			deps.clearPosterPreviewOverrides();
-			deps.clearEditStorage();
+			// codex r39: keep REJECTED edits reload-safe — write only the
+			// surviving rejected set back to sessionStorage instead of
+			// clearEditStorage()'s blanket wipe.
+			if (failed.length > 0) {
+				const remaining: Record<string, Movie> = {};
+				for (const [fp, mv] of deps.getEditedMovies()) remaining[fp] = mv;
+				try {
+					if (Object.keys(remaining).length > 0) {
+						sessionStorage.setItem(`javinizer.review.editedMovies.${deps.getJobId()}`, JSON.stringify(remaining));
+					} else {
+						sessionStorage.removeItem(`javinizer.review.editedMovies.${deps.getJobId()}`);
+					}
+				} catch {
+					// storage full → fall back to clearEditStorage behavior
+					deps.clearEditStorage();
+				}
+			} else if (refreshed) {
+				// codex P3-C: untouched overlays need their session copy intact —
+				// otherwise a pre-refetch page reload loses the pane's retained
+				// edits while the on-screen state still shows them.
+				deps.clearEditStorage();
+			}
 		},
 		onError: (err: Error) => {
 			deps.toastError(m.review_save_edits_failed({ error: err.message }));
@@ -259,6 +428,29 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					const r = updatedJob.results[filePath] as FileResult;
 					if (r?.movie) {
 						updatedJob.results[filePath] = { ...r, movie: applyCropEcho(r.movie, response) };
+					}
+				}
+				const advanceRevision = (filePath: string, rev: number) => {
+					const r = updatedJob.results[filePath] as FileResult | undefined;
+					if (r) updatedJob.results[filePath] = { ...r, revision: rev };
+				};
+				if (response.revisions && Object.keys(response.revisions).length > 0) {
+					const resultToPath = new Map(
+						Object.entries(updatedJob.results).map(([fp, r]) => [
+							(r as FileResult).result_id,
+							fp,
+						] as const),
+					);
+					for (const [rid, rev] of Object.entries(response.revisions)) {
+						const fp = resultToPath.get(rid);
+						if (fp) advanceRevision(fp, rev);
+					}
+				} else if (response.revision !== undefined) {
+					for (const [filePath, r0] of Object.entries(updatedJob.results)) {
+						const r = r0 as FileResult;
+						if (r?.result_id === resultId) {
+							updatedJob.results[filePath] = { ...r, revision: response.revision };
+						}
 					}
 				}
 				deps.skipJobSync();
@@ -427,6 +619,8 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 							movie: data.movie,
 							field_sources: data.field_sources ?? r.field_sources,
 							actress_sources: data.actress_sources ?? r.actress_sources,
+							// codex r24: advance the CAS baseline without a refetch.
+							...(data.revision !== undefined ? { revision: data.revision } : {}),
 						};
 					}
 				}

@@ -40,6 +40,9 @@ func setupOverrideJob(t *testing.T) (*core.APIDeps, *worker.BatchJob, string) {
 			{Source: "dmm", Maker: "DMMMaker", Title: "DMMTitle"},
 		},
 	})
+	// Edits are admitted only once the job is past the initial scrape — the
+	// D16 admission gate rejects Pending edits with 409.
+	job.Controller().SetJobStatus(models.JobStatusCompleted)
 	return deps, job, resultID
 }
 

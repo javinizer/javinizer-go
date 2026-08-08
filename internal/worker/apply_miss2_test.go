@@ -176,8 +176,9 @@ type stubPersister struct {
 	called *bool
 }
 
-func (s *stubPersister) Persist() {
+func (s *stubPersister) Persist() error {
 	*s.called = true
+	return nil
 }
 
 // --- ApplyPhase Run: context cancellation before processing ---

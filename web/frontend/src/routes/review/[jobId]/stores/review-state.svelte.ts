@@ -557,8 +557,8 @@ export function createReviewState(pageStore: Page) {
 			apiClient.overrideBatchMovieField(mutationJobId, resultId, body),
 		excludeBatchMovie: (mutationJobId, resultId) =>
 			apiClient.excludeBatchMovie(mutationJobId, resultId),
-		updateBatchMovie: (mutationJobId, resultId, movie) =>
-			apiClient.updateBatchMovie(mutationJobId, resultId, movie),
+		updateBatchMovie: (mutationJobId, resultId, movie, expectedResultRevision) =>
+			apiClient.updateBatchMovie(mutationJobId, resultId, movie, expectedResultRevision),
 		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight) =>
 			apiClient.updateBatchMoviePosterCrop(mutationJobId, resultId, {
 				...crop,
@@ -594,6 +594,10 @@ export function createReviewState(pageStore: Page) {
 		const isActuallyModified = !equal(movie, currentResult.movie);
 
 		if (isActuallyModified) {
+			// Post-HARDENING: delete-then-set re-inserts the entry at the tail,
+			// so editedMovies iteration order reflects real edit recency —
+			// multipart save dedupe picks the freshest sibling overlay (codex r11).
+			editedMovies.delete(currentResult.file_path);
 			editedMovies.set(currentResult.file_path, movie);
 
 			if (

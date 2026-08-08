@@ -17,8 +17,11 @@
 		get: (r: ScraperResult) => string;
 	}
 
+	// NOTE: content_id / movie id identity keys are intentionally NOT listed —
+	// POSTER-WRITE-HARDENING D17 rejects those overrides with 409; identity
+	// changes belong to rescrape flows. (Defensive accept on the server
+	// remains: see worker.LockedMovieOps.ApplyFieldOverride.)
 	const FIELDS: FieldDef[] = [
-		{ key: 'content_id', label: m.review_field_content_id(), kind: 'id', get: (r) => r.content_id ?? '' },
 		{ key: 'title', label: m.review_field_title(), kind: 'text', get: (r) => r.title ?? '' },
 		{ key: 'original_title', label: m.review_field_original_title(), kind: 'text', get: (r) => r.original_title ?? '' },
 		{ key: 'description', label: m.review_field_description(), kind: 'text', get: (r) => r.description ?? '' },

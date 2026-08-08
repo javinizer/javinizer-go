@@ -30,7 +30,7 @@ func (m *mockRescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePha
 	return nil, nil, nil
 }
 
-func (m *mockRescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+func (m *mockRescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string, prov *resultstore.ProvenanceData) (*RescrapeResult, error) {
 	if m.completeRescrapeFn != nil {
 		return m.completeRescrapeFn(inputs, filePath, result, capturedRevision, movieID, oldMovieID)
 	}
@@ -73,7 +73,7 @@ func (m *mockRescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseIn
 		return &RescrapeResult{Status: models.RescrapeStatusFailed, Error: err.Error()}, nil
 	}
 	// For mock simplicity, just return success from CompleteRescrape
-	outcome, err := m.CompleteRescrape(inputs, filePath, nil, 0, cmd.MovieID, "")
+	outcome, err := m.CompleteRescrape(inputs, filePath, nil, 0, cmd.MovieID, "", nil)
 	if err != nil {
 		return &RescrapeResult{Status: models.RescrapeStatusFailed, Error: err.Error()}, nil
 	}

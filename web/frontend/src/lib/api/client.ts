@@ -144,8 +144,9 @@ class APIClient {
 		jobId: string,
 		resultId: string,
 		movie: Parameters<JobClient['updateBatchMovie']>[2],
+		expectedResultRevision?: number | Record<string, number>,
 	) {
-		return this.jobs.updateBatchMovie(jobId, resultId, movie);
+		return this.jobs.updateBatchMovie(jobId, resultId, movie, expectedResultRevision);
 	}
 	async updateBatchMoviePosterCrop(
 		jobId: string,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 	timeoutPkg "github.com/javinizer/javinizer-go/internal/timeout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
+	"github.com/spf13/afero"
 )
 
 // RescrapePhase handles single-file rescrape operations.
@@ -22,7 +24,7 @@ import (
 // commit + cleanup). ScrapeSingle and CompleteRescrape remain for backward compat.
 type RescrapePhase interface {
 	ScrapeSingle(ctx context.Context, inputs rescrapePhaseInputs, filePath string, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error)
-	CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error)
+	CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string, prov *resultstore.ProvenanceData) (*RescrapeResult, error)
 	// Rescrape performs the full rescrape lifecycle: file lookup, scrape, poster generation,
 	// result commit, and cleanup.
 	Rescrape(ctx context.Context, inputs rescrapePhaseInputs, cmd RescrapeCmd) (*RescrapeResult, error)
@@ -86,7 +88,41 @@ func (p *rescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePhaseIn
 	return result, meta, scrapeErr
 }
 
-func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string) (*RescrapeResult, error) {
+// provenanceLockedCommitter is implemented by familyKeyedResultMap: the
+// result commit and the provenance publish share ONE family-locked section
+// (codex r36 P1).
+type provenanceLockedCommitter interface {
+	CommitResultWithProvenance(filePath string, result *resultstore.MovieResult, expectedRevision uint64, prov *resultstore.ProvenanceData) error
+}
+
+type provenanceSetter interface {
+	SetProvenance(filePath string, prov *resultstore.ProvenanceData)
+}
+
+// commitResultWithProvenance commits the rescrape result and publishes its
+// provenance. On the production wrapper both happen inside the same keyed
+// section; a bare ResultMapAccessor (tests, legacy seams) falls back to an
+// unlocked commit+publish, matching the historical non-keyed behavior.
+func commitResultWithProvenance(rm resultstore.ResultMapAccessor, filePath string, result *resultstore.MovieResult, rev uint64, prov *resultstore.ProvenanceData) error {
+	if prov != nil {
+		if pc, ok := rm.(provenanceLockedCommitter); ok {
+			return pc.CommitResultWithProvenance(filePath, result, rev, prov)
+		}
+	}
+	if err := rm.CommitResult(filePath, result, rev); err != nil {
+		return err
+	}
+	// Zero-value provenance carries no attribution — skip the write entirely
+	// (matches the retired controller tail's "any source non-nil" gate).
+	if prov != nil && (prov.FieldSources != nil || prov.ActressSources != nil || prov.ScraperResults != nil) {
+		if ps, ok := rm.(provenanceSetter); ok {
+			ps.SetProvenance(filePath, prov)
+		}
+	}
+	return nil
+}
+
+func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string, prov *resultstore.ProvenanceData) (*RescrapeResult, error) {
 	if inputs.ResultMap.IsGone() {
 		return &RescrapeResult{Status: models.RescrapeStatusGone}, nil
 	}
@@ -103,7 +139,9 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 	// CommitResult performs an atomic revision check to guard against races.
 	// Revision conflicts (TOCTOU race or stale capturedRevision) are handled via
 	// models.RescrapeStatusConflict — no error is returned. Real system errors are propagated.
-	if commitErr := inputs.ResultMap.CommitResult(filePath, result, capturedRevision); commitErr != nil {
+	// Result + provenance commit as one keyed leg where the seam supports it
+	// (codex r36 P1) — see commitResultWithProvenance.
+	if commitErr := commitResultWithProvenance(inputs.ResultMap, filePath, result, capturedRevision, prov); commitErr != nil {
 		if strings.HasPrefix(commitErr.Error(), "conflict:") {
 			return &RescrapeResult{Status: models.RescrapeStatusConflict}, nil
 		}
@@ -142,6 +180,11 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 	}
 
 	rescrapeResult := &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Status: models.RescrapeStatusSuccess}
+	// audit F-R15-1: carry the COMMITTED revision — the commit's update phase
+	// mutated result.Revision in the keyed section, so this echo reflects OUR
+	// landing, never whatever a racer did next.
+	rv := result.Revision
+	rescrapeResult.Revision = &rv
 	auditRescrapeSuccess(inputs, movieID, filePath)
 	return rescrapeResult, nil
 }
@@ -156,12 +199,133 @@ type rescrapeLifecycle struct {
 	lookup *resultstore.FileLookupResult
 }
 
+// rescrapeGenScope carries generation facts OUT of the scrape closure so the
+// closeout can tell "bytes this op created" from "pre-existing/winner bytes"
+// (audit R1: cleanup may only delete the former).
+type rescrapeGenScope struct {
+	// preExistedPair records whether canonical poster legs for the resolved
+	// movie ID existed BEFORE this rescrape generated bytes.
+	preExistedPair bool
+	// parked holds the pre-generation canonical bytes (audit F-R3-2a): the
+	// closeout restores them on any non-success outcome so committed state
+	// never loses its poster bytes to a losing rescrape.
+	parked *rescrapePosterBackup
+	// genSHA fingerprints what THIS rescrape wrote at the canonical names
+	// (audit F-R5-1): the closeout rewinds a leg only while it still holds
+	// our bytes.
+	genSHA map[string]string
+}
+
+// anyResultUsesMovieID is the SELF-INCLUSIVE ownership probe (audit F-R3-1):
+// a winner's concurrent commit references the same ID — excluding the losing
+// file alone still lets its closeout delete committed bytes. Any reference
+// (Movie.ID or matcher alias, case-folded) ⇒ the bytes are owned, never ours.
+func anyResultUsesMovieID(acc resultstore.ResultMapAccessor, movieID string) bool {
+	if acc == nil || movieID == "" {
+		return false
+	}
+	for _, r := range acc.SnapshotData().Results {
+		if r == nil {
+			continue
+		}
+		if r.Movie != nil && strings.EqualFold(strings.TrimSpace(r.Movie.ID), movieID) {
+			return true
+		}
+		if strings.EqualFold(strings.TrimSpace(r.FileMatchInfo.MovieID), movieID) {
+			return true
+		}
+	}
+	return false
+}
+
+// rescrapeOwnsPosterLegs reports whether THIS rescrape provably created the
+// canonical pair legs (generation succeeded, no pre-existing bytes, NO row
+// currently references the ID). Cleanup deletes them only then — never the
+// bytes of a concurrent winner or an untouched older state (audit R1/R3-1).
+func rescrapeOwnsPosterLegs(inputs rescrapePhaseInputs, scope *rescrapeGenScope, mr *resultstore.MovieResult, movieID string) bool {
+	if mr == nil || movieID == "" || !mr.PosterGenerated || mr.PosterError != nil || scope == nil || scope.preExistedPair {
+		return false
+	}
+	if inputs.ResultMap != nil && anyResultUsesMovieID(inputs.ResultMap, movieID) {
+		return false
+	}
+	return true
+}
+
+// closeoutRescrapePosterBytes runs the parked-restore AND the ownership
+// decision + delete UNDER the poster's family key (audit F-R3-1 + F-R4-2):
+// the winner's commit holds the same key, so restore/delete can never
+// interleave with it.
+func closeoutRescrapePosterBytes(inputs rescrapePhaseInputs, scope *rescrapeGenScope, mr *resultstore.MovieResult, mv *models.Movie) {
+	if mv == nil || mv.ID == "" {
+		return
+	}
+	release := func() {}
+	if inputs.EditLockFn != nil {
+		release = inputs.EditLockFn(mv.ID)
+	}
+	defer release()
+	// audit F-R5-1: rewind a leg only while it provably still holds THIS op's
+	// generated bytes — a concurrent winner's committed bytes never get
+	// rewound. Legs with no fingerprint keep legacy restore (PosterGen off).
+	verify := func(legPath string) (bool, bool) {
+		sha, ok := scope.genSHA[filepath.Base(legPath)]
+		data, rerr := afero.ReadFile(inputs.Fs, legPath)
+		if rerr != nil {
+			if errors.Is(rerr, os.ErrNotExist) {
+				return true, false // nothing there — restoring ours can't rewind anyone
+			}
+			// codex P2: UNREADABLE canon must fail closed — rewinding without
+			// proof would risk discarding a winner's committed bytes; the
+			// parked copy stays for the reconciler (in-flight fence holds).
+			logging.Warnf("rescrape restore verify %s: %v — skipping rewind (undecidable)", legPath, rerr)
+			return false, true
+		}
+		if !ok {
+			// audit F-R17-1: no fingerprint and canon EXISTS with unproven
+			// content — never rewind: dispose the obsolete parked copy.
+			return false, false
+		}
+		return shaContentHex(data) == sha, false
+	}
+	scope.parked.restore(verify)
+	if rescrapeOwnsPosterLegs(inputs, scope, mr, mv.ID) {
+		if len(scope.genSHA) > 0 {
+			// audit F-R19-2: remove ONLY legs whose CURRENT bytes provably
+			// match OUR generation output — whatever else sits at the name is
+			// a sibling's, never ours to delete.
+			pdir := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
+			for _, sfx := range []string{"-full.jpg", ".jpg"} {
+				base := mv.ID + sfx
+				want, ok := scope.genSHA[base]
+				if !ok {
+					continue
+				}
+				lp := filepath.Join(pdir, base)
+				data, rdErr := afero.ReadFile(inputs.Fs, lp)
+				if rdErr != nil {
+					continue
+				}
+				if shaContentHex(data) != want {
+					continue
+				}
+				if rmErr := inputs.Fs.Remove(lp); rmErr != nil && !os.IsNotExist(rmErr) {
+					logging.Warnf("rescrape own-leg delete %s: %v", lp, rmErr)
+				}
+			}
+		} else {
+			CleanupMoviePosters(inputs.Fs, inputs.TempDir, inputs.JobID, mv)
+		}
+	}
+}
+
 // withRescrapeStatus executes fn within a rescrape status-transition wrapper.
 // If fn returns an error, or the outcome is Gone/Conflict/Failed, poster
 // cleanup is performed automatically (rollback). On success, orphaned poster
 // paths are cleaned up instead.
-func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resultstore.MovieResult, error)) (*RescrapeResult, error) {
-	outcome, movieResult, err := fn()
+func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error)) (*RescrapeResult, error) {
+	scope := &rescrapeGenScope{}
+	outcome, movieResult, err := fn(scope)
 	cleanupMovie := func() *models.Movie {
 		if movieResult != nil {
 			return movieResult.Movie
@@ -169,7 +333,15 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 		return nil
 	}
 	if err != nil {
-		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+		// audit F1+R1: fence rejections skip cleanup entirely (witness owns the
+		// bytes); other failures delete ONLY legs this op provably created.
+		// audit F-R4-3: fence errors skip restore entirely (the witness owns
+		// those bytes); other failures restore (content-verified where a
+		// generation fingerprint exists) + decide under the family key.
+		var cfe *EditAdmissionConflictError
+		if !errors.As(err, &cfe) {
+			closeoutRescrapePosterBytes(lc.inputs, scope, movieResult, cleanupMovie())
+		}
 		if lc.inputs.HistoryRepo != nil {
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
@@ -184,8 +356,16 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 		return nil, nil
 	}
 	switch outcome.Status {
-	case models.RescrapeStatusGone, models.RescrapeStatusConflict, models.RescrapeStatusFailed:
+	case models.RescrapeStatusGone, models.RescrapeStatusFailed:
+		// audit F-R4-1: keep the legacy purge and drop parked bytes with it —
+		// restoring them after purging would resurrect the pre-op pair.
+		scope.parked.discard()
 		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+	case models.RescrapeStatusConflict:
+		// audit R1/F-R3-1/F-R4-2: on CAS conflict the canonical pair belongs to
+		// whoever won (or to the pre-op state) — under the family key: restore
+		// parked pre-op bytes + delete ONLY legs this rescrape provably created.
+		closeoutRescrapePosterBytes(lc.inputs, scope, movieResult, cleanupMovie())
 		if lc.inputs.HistoryRepo != nil {
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
@@ -200,12 +380,58 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 		return outcome, nil
 	}
 
-	// Success: clean up orphaned poster paths
+	// Success: clean up orphaned poster paths. audit F-R3-3: the orphan list
+	// was computed under the commit key but deletion ran unlocked — a PATCH
+	// can legally move bytes INTO a stale orphan ID between the two. Revalidate
+	// under the family keys: an ID any row now references is never orphaned.
 	newMovieID := ""
 	if movieResult != nil && movieResult.Movie != nil {
 		newMovieID = movieResult.Movie.ID
 	}
-	CleanupPosterPaths(lc.inputs.Fs, OrphanedPosterPaths(outcome.OrphanedMovieIDs, newMovieID, lc.inputs.TempDir, lc.inputs.JobID, lc.inputs.FsCaseCache))
+	// audit F-R4-1 + F-R16-1: restore fired already for the failure statuses
+	// above; success discards — EXCEPT when generation failed or never ran
+	// and the pair pre-existed: those bytes are the committed state, so route
+	// through the keyed content-verify restore instead of discarding them.
+	if outcome.Status == models.RescrapeStatusSuccess {
+		lostGeneration := movieResult != nil && (movieResult.PosterError != nil || !movieResult.PosterGenerated)
+		if lostGeneration && scope.preExistedPair {
+			closeoutRescrapePosterBytes(lc.inputs, scope, movieResult, cleanupMovie())
+		} else {
+			scope.parked.discard()
+		}
+	} else if outcome.Status != models.RescrapeStatusGone && outcome.Status != models.RescrapeStatusFailed && outcome.Status != models.RescrapeStatusConflict {
+		scope.parked.restore(nil)
+	}
+	if len(outcome.OrphanedMovieIDs) > 0 {
+		release := func() {}
+		if lc.inputs.EditLockFn != nil {
+			release = lc.inputs.EditLockFn(outcome.OrphanedMovieIDs...)
+		}
+		stillOrphaned := make([]string, 0, len(outcome.OrphanedMovieIDs))
+		var pdir string
+		if lc.inputs.Fs != nil && lc.inputs.TempDir != "" {
+			pdir = filepath.Join(lc.inputs.TempDir, "posters", lc.inputs.JobID.String())
+		}
+		for _, id := range outcome.OrphanedMovieIDs {
+			if anyResultUsesMovieID(lc.inputs.ResultMap, id) {
+				continue
+			}
+			if pdir != "" {
+				// audit F-R18-1: in-flight generation marker — a sibling op's
+				// uncommitted bytes sit at this ID's canonical names; row-only
+				// orphan probing structurally cannot see them. Skip it.
+				if inFlight, perr := rescrapeInFlightBackupPresent(lc.inputs.Fs, pdir, id); perr != nil {
+					logging.Warnf("orphan sweep marker probe for %s failed (%v) — kept (undecidable)", id, perr)
+					continue
+				} else if inFlight {
+					continue
+				}
+			}
+			stillOrphaned = append(stillOrphaned, id)
+		}
+		CleanupPosterPaths(lc.inputs.Fs, OrphanedPosterPaths(stillOrphaned, newMovieID, lc.inputs.TempDir, lc.inputs.JobID, lc.inputs.FsCaseCache))
+		release()
+	}
 	return outcome, nil
 }
 
@@ -284,7 +510,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 
 	lc := rescrapeLifecycle{inputs: inputs, lookup: lookup}
 
-	outcome, err := withRescrapeStatus(lc, func() (*RescrapeResult, *resultstore.MovieResult, error) {
+	outcome, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
 		// Scrape
 		scrapeResult, meta, scrapeErr := p.ScrapeSingle(ctx, inputs, lookup.FilePath, scrapeCmd)
 		if scrapeErr != nil {
@@ -332,13 +558,90 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			return nil, movieResult, err
 		}
 
-		// Poster generation
-		if inputs.PosterGen != nil && movieResult.Movie != nil {
-			if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
-				s := posterErr.Error()
-				movieResult.PosterError = &s
+		// audit F-R10-1: witness probes + park + generation run UNDER the
+		// family key — the keyless window let a committed relocation/promote
+		// land between our witness probe and our byte overwrite (steal), or
+		// let our generation overwrite a freshly promoted pair (clobber).
+		// The commit leg keys up separately afterwards, as before.
+		release := func() {}
+		genID := ""
+		if movieResult.Movie != nil {
+			genID = strings.TrimSpace(movieResult.Movie.ID)
+		}
+		if inputs.EditLockFn != nil && genID != "" {
+			release = inputs.EditLockFn(genID)
+		}
+		heldErr := func() error {
+			// audit F-R11-1: a panicking generation (untrusted HTTP bytes →
+			// decode/crop) must never leak the family mutex — release on ALL
+			// exits, including panic unwind.
+			defer release()
+			// audit F1: a witness outstanding means canonical poster bytes are
+			// mid-recovery (witness-holder owns them until restart reconcile) —
+			// generating over them would clobber recoverable state. Decline early;
+			// the commit-leg probe (familyKeyedResultMap) is the under-key net.
+			if movieResult.Movie != nil {
+				seen := map[string]struct{}{}
+				for _, pid := range []string{strings.TrimSpace(lookup.OldMovieID), strings.TrimSpace(movieResult.Movie.ID)} {
+					if pid == "" {
+						continue
+					}
+					if _, dup := seen[strings.ToLower(pid)]; dup {
+						continue
+					}
+					seen[strings.ToLower(pid)] = struct{}{}
+					if cerr := posterWitnessConflictCore(inputs.Fs, inputs.TempDir, inputs.JobID.String(), pid); cerr != nil {
+						return cerr
+					}
+				}
 			}
-			movieResult.PosterGenerated = true
+
+			// audit F-R3-1: record byte-ownership BEFORE generating — cleanup may
+			// only delete what this op created, and transient stat errors read as
+			// PRE-EXISTING (fail closed), never absent.
+			if movieResult.Movie != nil && inputs.Fs != nil && inputs.TempDir != "" {
+				pdir := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
+				fullPath := filepath.Join(pdir, movieResult.Movie.ID+"-full.jpg")
+				cropPath := filepath.Join(pdir, movieResult.Movie.ID+".jpg")
+				_, fe := inputs.Fs.Stat(fullPath)
+				_, ce := inputs.Fs.Stat(cropPath)
+				if fe == nil || ce == nil ||
+					(fe != nil && !os.IsNotExist(fe)) || (ce != nil && !os.IsNotExist(ce)) {
+					scope.preExistedPair = true
+				}
+				// audit F-R3-2a: park pre-existing canonical bytes aside so the
+				// closeout can restore committed state if this rescrape loses.
+				scope.parked = parkCanonicalPosterPair(inputs.Fs, pdir, movieResult.Movie.ID)
+				if scope.parked.parkErr != nil {
+					// codex P2: unrecoverable bytes — abort BEFORE generation.
+					return fmt.Errorf("poster backup park: %w", scope.parked.parkErr)
+				}
+			}
+
+			// Poster generation
+			if inputs.PosterGen != nil && movieResult.Movie != nil {
+				if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
+					s := posterErr.Error()
+					movieResult.PosterError = &s
+				}
+				movieResult.PosterGenerated = true
+			}
+
+			// audit F-R5-1: fingerprint whatever the generation wrote at canonical —
+			// the closeout's restore rewinds only while those exact bytes sit there.
+			if movieResult.PosterGenerated && movieResult.Movie != nil && inputs.Fs != nil && inputs.TempDir != "" {
+				pdir2 := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
+				scope.genSHA = map[string]string{}
+				for _, lp := range []string{filepath.Join(pdir2, movieResult.Movie.ID+"-full.jpg"), filepath.Join(pdir2, movieResult.Movie.ID+".jpg")} {
+					if data, rerr := afero.ReadFile(inputs.Fs, lp); rerr == nil {
+						scope.genSHA[filepath.Base(lp)] = shaContentHex(data)
+					}
+				}
+			}
+			return nil
+		}()
+		if heldErr != nil {
+			return nil, movieResult, heldErr
 		}
 
 		// Re-check after poster generation before committing.
@@ -389,8 +692,8 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// engine incidentally dropping the runtime-only field.
 		clearPosterCropGeometry(movieResult.Movie)
 
-		// Commit result
-		outcome, commitErr := p.CompleteRescrape(inputs, lookup.FilePath, movieResult, lookup.CapturedRevision, newMovieID, lookup.OldMovieID)
+		// Commit result (provenance rides the same keyed section via prov).
+		outcome, commitErr := p.CompleteRescrape(inputs, lookup.FilePath, movieResult, lookup.CapturedRevision, newMovieID, lookup.OldMovieID, prov)
 		if commitErr != nil {
 			return nil, movieResult, commitErr
 		}

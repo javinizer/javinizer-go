@@ -337,7 +337,7 @@ func TestScrapePhase_Run_PersistFnCalled(t *testing.T) {
 	wf := &stubWorkflow{scrapeResult: makeScrapeResult("TEST-001")}
 	inputs := makeInputs(wf)
 	persisted := false
-	inputs.persister = persistFunc(func() { persisted = true })
+	inputs.persister = persistFunc(func() error { persisted = true; return nil })
 
 	NewScrapePhase().Run(context.Background(), inputs, []string{"file.mp4"}, ScrapePhaseConfig{})
 
@@ -351,14 +351,14 @@ func TestPersistFunc_NilNoPanic(t *testing.T) {
 
 func TestPersistFunc_CallsFunction(t *testing.T) {
 	called := false
-	p := persistFunc(func() { called = true })
+	p := persistFunc(func() error { called = true; return nil })
 	p.Persist()
 	assert.True(t, called, "persistFunc should call the wrapped function")
 }
 
 func TestPersistFunc_SatisfiesPersister(t *testing.T) {
 	var _ persister = persistFunc(nil)
-	var _ persister = persistFunc(func() {})
+	var _ persister = persistFunc(func() error { return nil })
 }
 
 // TestScrapePhase_Run_EstablishesScrapedBaseline verifies the initial scrape

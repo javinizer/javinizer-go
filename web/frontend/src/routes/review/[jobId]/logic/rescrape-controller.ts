@@ -165,6 +165,9 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 					movie: updatedMovie,
 					field_sources: response.field_sources ?? newResults[filePath]?.field_sources,
 					actress_sources: response.actress_sources ?? newResults[filePath]?.actress_sources,
+					// the refetched movie landed a new server revision — advance
+					// the CAS baseline, or the next save reads back a 409 (codex r30).
+					...(response.revision !== undefined ? { revision: response.revision } : {}),
 				};
 				deps.setJob({ ...currentJob, results: newResults });
 			}
