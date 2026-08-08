@@ -242,10 +242,11 @@ func rescrapeOwnsPosterLegs(inputs rescrapePhaseInputs, scope *rescrapeGenScope,
 	return true
 }
 
-// cleanupOwnedPosterLegs runs the ownership decision and the deletion UNDER
-// the poster's family key (audit F-R3-1): the winner's commit holds the same
-// key, so check-then-delete is atomic against it.
-func cleanupOwnedPosterLegs(inputs rescrapePhaseInputs, scope *rescrapeGenScope, mr *resultstore.MovieResult, mv *models.Movie) {
+// closeoutRescrapePosterBytes runs the parked-restore AND the ownership
+// decision + delete UNDER the poster's family key (audit F-R3-1 + F-R4-2):
+// the winner's commit holds the same key, so restore/delete can never
+// interleave with it.
+func closeoutRescrapePosterBytes(inputs rescrapePhaseInputs, scope *rescrapeGenScope, mr *resultstore.MovieResult, mv *models.Movie) {
 	if mv == nil || mv.ID == "" {
 		return
 	}
@@ -254,10 +255,10 @@ func cleanupOwnedPosterLegs(inputs rescrapePhaseInputs, scope *rescrapeGenScope,
 		release = inputs.EditLockFn(mv.ID)
 	}
 	defer release()
-	if !rescrapeOwnsPosterLegs(inputs, scope, mr, mv.ID) {
-		return
+	scope.parked.restore()
+	if rescrapeOwnsPosterLegs(inputs, scope, mr, mv.ID) {
+		CleanupMoviePosters(inputs.Fs, inputs.TempDir, inputs.JobID, mv)
 	}
-	CleanupMoviePosters(inputs.Fs, inputs.TempDir, inputs.JobID, mv)
 }
 
 // withRescrapeStatus executes fn within a rescrape status-transition wrapper.
@@ -276,10 +277,11 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 	if err != nil {
 		// audit F1+R1: fence rejections skip cleanup entirely (witness owns the
 		// bytes); other failures delete ONLY legs this op provably created.
-		scope.parked.restore() // F-R3-2a: committed bytes back in place
+		// audit F-R4-3: fence errors skip restore entirely (the witness owns
+		// those bytes); other failures restore+decide under the family key.
 		var cfe *EditAdmissionConflictError
 		if !errors.As(err, &cfe) {
-			cleanupOwnedPosterLegs(lc.inputs, scope, movieResult, cleanupMovie())
+			closeoutRescrapePosterBytes(lc.inputs, scope, movieResult, cleanupMovie())
 		}
 		if lc.inputs.HistoryRepo != nil {
 			movieID := lc.lookup.OldMovieID
@@ -296,14 +298,15 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 	}
 	switch outcome.Status {
 	case models.RescrapeStatusGone, models.RescrapeStatusFailed:
+		// audit F-R4-1: keep the legacy purge and drop parked bytes with it —
+		// restoring them after purging would resurrect the pre-op pair.
+		scope.parked.discard()
 		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
 	case models.RescrapeStatusConflict:
-		// audit R1/F-R3-1: on CAS conflict the canonical pair belongs to
-		// whoever won (or to the pre-op state) — restore parked pre-op bytes,
-		// then delete ONLY legs this rescrape provably created, decided under
-		// the family key.
-		scope.parked.restore()
-		cleanupOwnedPosterLegs(lc.inputs, scope, movieResult, cleanupMovie())
+		// audit R1/F-R3-1/F-R4-2: on CAS conflict the canonical pair belongs to
+		// whoever won (or to the pre-op state) — under the family key: restore
+		// parked pre-op bytes + delete ONLY legs this rescrape provably created.
+		closeoutRescrapePosterBytes(lc.inputs, scope, movieResult, cleanupMovie())
 		if lc.inputs.HistoryRepo != nil {
 			movieID := lc.lookup.OldMovieID
 			if movieResult != nil && movieResult.Movie != nil {
@@ -326,9 +329,11 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 	if movieResult != nil && movieResult.Movie != nil {
 		newMovieID = movieResult.Movie.ID
 	}
+	// audit F-R4-1: restore fired already for the failure statuses above;
+	// success discards; any OTHER unexpected status restores.
 	if outcome.Status == models.RescrapeStatusSuccess {
 		scope.parked.discard()
-	} else {
+	} else if outcome.Status != models.RescrapeStatusGone && outcome.Status != models.RescrapeStatusFailed && outcome.Status != models.RescrapeStatusConflict {
 		scope.parked.restore()
 	}
 	if len(outcome.OrphanedMovieIDs) > 0 {

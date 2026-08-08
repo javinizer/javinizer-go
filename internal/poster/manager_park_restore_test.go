@@ -122,6 +122,105 @@ func TestDownloadFromURL_FinalizeFailureRestoresPair(t *testing.T) {
 	assert.Equal(t, "originalfull", string(got))
 }
 
+// audit F-R4-6: a wedged crop-leg park must abort fail-closed and undo the
+// fresh full promote — the old pair comes back whole.
+func TestDownloadFromURL_CropParkFailureRestoresFull(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(jpegBytes(300, 400))
+	}))
+	defer srv.Close()
+	base := afero.NewMemMapFs()
+	dir := "/tmp/javinizer-test/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/BAD-4-full.jpg", []byte("origfull"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/BAD-4.jpg", []byte("origcrop"), 0o644))
+	fs := renameFailWhereFS{Fs: base, fail: func(_, n string) bool { return strings.HasSuffix(n, "BAD-4.jpg.dlbak") }}
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	_, err := pm.DownloadFromURL(context.Background(), "job1", "BAD-4", srv.URL+"/img.jpg", "", "")
+	require.ErrorContains(t, err, "failed to park previous cropped poster")
+	full, ferr := afero.ReadFile(base, dir+"/BAD-4-full.jpg")
+	require.NoError(t, ferr)
+	assert.Equal(t, "origfull", string(full), "full leg restored after crop-park failure")
+	crop, cerr := afero.ReadFile(base, dir+"/BAD-4.jpg")
+	require.NoError(t, cerr)
+	assert.Equal(t, "origcrop", string(crop), "crop leg untouched")
+}
+
+// audit F-R4-6: the crop-park failure ALSO wedges the full-leg restore → the
+// warn arc fires (no silent swallow) and the parked originals stay on disk.
+func TestDownloadFromURL_CropParkFailureRestoreWarns(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(jpegBytes(300, 400))
+	}))
+	defer srv.Close()
+	base := afero.NewMemMapFs()
+	dir := "/tmp/javinizer-test/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/BAD-5-full.jpg", []byte("origfull"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/BAD-5.jpg", []byte("origcrop"), 0o644))
+	wedged := func(o, n string) bool {
+		return strings.HasSuffix(n, "BAD-5.jpg.dlbak") ||
+			(strings.HasSuffix(o, ".dlbak") && n == dir+"/BAD-5-full.jpg")
+	}
+	fs := renameFailWhereFS{Fs: base, fail: wedged}
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	_, err := pm.DownloadFromURL(context.Background(), "job1", "BAD-5", srv.URL+"/img.jpg", "", "")
+	require.ErrorContains(t, err, "failed to park previous cropped poster")
+	_, bakErr := base.Stat(dir + "/BAD-5-full.jpg.dlbak")
+	assert.NoError(t, bakErr, "full park survives its wedged restore")
+}
+
+// Failure-path restore warns: copy fails AND the deferred restores wedge —
+// logged, not swallowed; parked originals stay for salvage.
+func TestDownloadFromURL_DeferRestoreWarns(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("not an image"))
+	}))
+	defer srv.Close()
+	base := afero.NewMemMapFs()
+	dir := "/tmp/javinizer-test/posters/job2"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/BAD-6-full.jpg", []byte("origfull"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/BAD-6.jpg", []byte("origcrop"), 0o644))
+	fs := &doubleWedgeFS{
+		Fs:               base,
+		failCreateSuffix: "BAD-6.jpg",
+		failRename: func(o, n string) bool {
+			return strings.HasSuffix(o, ".dlbak") && (n == dir+"/BAD-6-full.jpg" || n == dir+"/BAD-6.jpg")
+		},
+	}
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	_, err := pm.DownloadFromURL(context.Background(), "job2", "BAD-6", srv.URL+"/img.jpg", "", "")
+	require.Error(t, err)
+	for _, p := range []string{dir + "/BAD-6-full.jpg.dlbak", dir + "/BAD-6.jpg.dlbak"} {
+		_, stErr := base.Stat(p)
+		assert.NoError(t, stErr, "wedged restore keeps the parked original: %s", p)
+	}
+}
+
+type doubleWedgeFS struct {
+	afero.Fs
+	failCreateSuffix string
+	failRename       func(o, n string) bool
+}
+
+func (f *doubleWedgeFS) Create(n string) (afero.File, error) {
+	if strings.HasSuffix(n, f.failCreateSuffix) {
+		return nil, errors.New("create wedged")
+	}
+	return f.Fs.Create(n)
+}
+
+func (f *doubleWedgeFS) Rename(o, n string) error {
+	if f.failRename(o, n) {
+		return errors.New("rename wedged")
+	}
+	return f.Fs.Rename(o, n)
+}
+
 // Success path: the new bytes land and the parked copies are discarded.
 func TestDownloadFromURL_SuccessDiscardsParkedPair(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

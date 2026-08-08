@@ -278,6 +278,7 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 		if rerr != nil {
 			continue
 		}
+		reversed += c.reconcileParkedPosterBackups(dir)
 		for _, e := range entries {
 			name := e.Name()
 			isRekey := strings.HasPrefix(name, rekeyWitnessPrefix) && strings.HasSuffix(name, ".json")
@@ -399,6 +400,46 @@ func arbitrateResults(job *models.Job) (map[string]*resultstore.MovieResult, boo
 		return nil, false
 	}
 	return snap.Results, true
+}
+
+// reconcileParkedPosterBackups re-homes .rsbak*/.dlbak* legs a crash or
+// panic stranded (audit F-R4-5): parked bytes are the ONLY copy of the
+// committed pair in that window. Rules: canonical missing ⇒ rename back;
+// canonical present ⇒ the parked leg is newer-inferior litter, remove it.
+// Every step is logged and per-leg idempotent across restarts.
+func (c *TempDirCleaner) reconcileParkedPosterBackups(dir string) int {
+	entries, err := afero.ReadDir(c.fs, dir)
+	if err != nil {
+		return 0
+	}
+	healed := 0
+	for _, e := range entries {
+		name := e.Name()
+		var canon string
+		if i := strings.Index(name, ".rsbak."); i > 0 {
+			canon = name[:i]
+		} else if j := strings.Index(name, ".dlbak"); j > 0 {
+			canon = name[:j]
+		} else {
+			continue
+		}
+		parked := filepath.Join(dir, name)
+		canonPath := filepath.Join(dir, canon)
+		if _, statErr := c.fs.Stat(canonPath); statErr == nil {
+			if rmErr := c.fs.Remove(parked); rmErr != nil {
+				logging.Warnf("parked backup sweep %s: %v", parked, rmErr)
+				continue
+			}
+			healed++
+			continue
+		}
+		if rnErr := c.fs.Rename(parked, canonPath); rnErr != nil {
+			logging.Warnf("parked backup restore %s→%s: %v", parked, canonPath, rnErr)
+			continue
+		}
+		healed++
+	}
+	return healed
 }
 
 // shaContentHex hashes a poster leg for witness arbitration.

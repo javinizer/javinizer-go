@@ -91,7 +91,8 @@ func TestQueryRaw_PreservesBlockedError(t *testing.T) {
 }
 
 func TestQueryRaw_PreservesTimeoutError(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	// Zero-margin deadline: the 1ms variant flaked under parallel hook load.
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
 	defer cancel()
 	time.Sleep(5 * time.Millisecond)
 	engine := newTestEngine(t, &stubScraper{name: "test", enabled: true, result: &models.ScraperResult{}})

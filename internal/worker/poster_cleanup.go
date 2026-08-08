@@ -1,9 +1,12 @@
 package worker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -40,39 +43,51 @@ func CleanupMoviePosters(fs afero.Fs, tempDir string, jobID models.JobID, movie 
 	}
 }
 
-// rescrapePosterBackup parks the pre-generation canonical pair aside
-// (<id>.rsbak) so a failed/conflicted rescrape can RESTORE the committed
-// state's bytes instead of leaving the loser's bytes at canonical names
-// (audit F-R3-2a). Crash leftovers are inert litter the staleness sweep owns.
+// rescrapePosterBackup parks the pre-generation canonical pair aside so a
+// failed/conflicted rescrape can RESTORE the committed state's bytes instead
+// of leaving the loser's bytes at canonical names (audit F-R3-2a). Park paths
+// carry a per-op nonce (audit F-R4-4): two concurrent ops on the same ID must
+// never clobber or restore each other's backups. Crash leftovers are re-homed
+// by TempDirCleaner.reconcileParkedPosterBackups (audit F-R4-5).
 type rescrapePosterBackup struct {
 	fs      afero.Fs
 	full    string
 	crop    string
+	fullBak string
+	cropBak string
 	hadFull bool
 	hadCrop bool
 }
+
+var rescrapeBackupSeq atomic.Int64
 
 // parkCanonicalPosterPair moves pre-existing canonical legs aside. Stat
 // errors are fail-closed (audit F-R3-1): an unreadable-but-existing leg marks
 // had=true so later cleanup never treats the leg as op-created.
 func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup {
-	b := &rescrapePosterBackup{fs: fs, full: filepath.Join(dir, id+"-full.jpg"), crop: filepath.Join(dir, id+".jpg")}
+	b := &rescrapePosterBackup{fs: fs}
 	if fs == nil || dir == "" || id == "" {
 		return b
 	}
+	b.full = filepath.Join(dir, id+"-full.jpg")
+	b.crop = filepath.Join(dir, id+".jpg")
+	nonce := fmt.Sprintf("%x.%x", time.Now().UnixNano(), rescrapeBackupSeq.Add(1))
+	b.fullBak = b.full + ".rsbak." + nonce
+	b.cropBak = b.crop + ".rsbak." + nonce
 	legs := []struct {
 		path string
+		bak  string
 		had  *bool
-	}{{b.full, &b.hadFull}, {b.crop, &b.hadCrop}}
+	}{{b.full, b.fullBak, &b.hadFull}, {b.crop, b.cropBak, &b.hadCrop}}
 	for _, leg := range legs {
 		if _, err := fs.Stat(leg.path); err != nil {
 			if !os.IsNotExist(err) {
 				logging.Warnf("rescrape pair backup stat %s: %v — treated as pre-existing", leg.path, err)
-				*leg.had = true
+				*leg.had = true // fail-closed (audit F-R3-1)
 			}
 			continue
 		}
-		if err := fs.Rename(leg.path, leg.path+".rsbak"); err != nil {
+		if err := fs.Rename(leg.path, leg.bak); err != nil {
 			logging.Warnf("rescrape pair backup park %s: %v", leg.path, err)
 			continue
 		}
@@ -89,18 +104,18 @@ func (b *rescrapePosterBackup) restore() {
 	}
 	legs := []struct {
 		path string
+		bak  string
 		had  bool
-	}{{b.full, b.hadFull}, {b.crop, b.hadCrop}}
+	}{{b.full, b.fullBak, b.hadFull}, {b.crop, b.cropBak, b.hadCrop}}
 	for _, leg := range legs {
 		if !leg.had {
 			continue
 		}
-		bak := leg.path + ".rsbak"
-		if _, err := b.fs.Stat(bak); err != nil {
+		if _, err := b.fs.Stat(leg.bak); err != nil {
 			continue
 		}
 		_ = b.fs.Remove(leg.path)
-		if err := b.fs.Rename(bak, leg.path); err != nil {
+		if err := b.fs.Rename(leg.bak, leg.path); err != nil {
 			logging.Warnf("rescrape pair restore %s: %v", leg.path, err)
 		}
 	}
@@ -111,7 +126,7 @@ func (b *rescrapePosterBackup) discard() {
 	if b == nil || b.fs == nil {
 		return
 	}
-	for _, p := range []string{b.full + ".rsbak", b.crop + ".rsbak"} {
+	for _, p := range []string{b.fullBak, b.cropBak} {
 		_ = b.fs.Remove(p)
 	}
 }

@@ -256,6 +256,62 @@ func rescrapeLifecycleShimFor(store resultstore.Store, jobID models.JobID, fs af
 	}
 }
 
+// audit F-R4-1: Gone must NOT restore parked bytes (that resurrects exactly
+// the pre-op state Gone exists to purge); parked backups are discarded.
+func TestWithRescrapeStatusGonePurgesAndDiscardsParked(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-1", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+	canon := filepath.Join(dir, "GONE-1.jpg")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op"), 0o644))
+	parked := parkCanonicalPosterPair(fs, dir, "GONE-1")
+	require.True(t, parked.hadCrop)
+	// losing op overwrote canonical with its own bytes:
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("gen-bytes"), 0o644))
+	outcome := &RescrapeResult{Status: models.RescrapeStatusGone}
+	mr := &resultstore.MovieResult{Movie: &models.Movie{ID: "GONE-1"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.parked = parked
+		return outcome, mr, nil
+	})
+	require.NoError(t, err)
+	_, statErr := fs.Stat(canon)
+	assert.Error(t, statErr, "Gone purge stands (no parked resurrection)")
+	_, parkErr := fs.Stat(parked.cropBak)
+	assert.Error(t, parkErr, "parked copy discarded, never revived")
+}
+
+// audit F-R4-3: a witness-fence error skips the restore ENTIRELY — the
+// witness owns those bytes; only the reconciler may arbitrate them.
+func TestWithRescrapeStatusFenceErrorSkipsRestore(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-1", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+	canon := filepath.Join(dir, "FNC-1.jpg")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("witness-era"), 0o644))
+	parked := parkCanonicalPosterPair(fs, dir, "FNC-1")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("gen-bytes"), 0o644))
+	fenceErr := &EditAdmissionConflictError{Message: "poster FNC-1 promote witness unresolved"}
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.parked = parked
+		return nil, &resultstore.MovieResult{Movie: &models.Movie{ID: "FNC-1"}}, fenceErr
+	})
+	require.Error(t, err)
+	got, rerr := afero.ReadFile(fs, canon)
+	require.NoError(t, rerr)
+	assert.Equal(t, "gen-bytes", string(got), "fence path leaves bytes untouched for the reconciler")
+	_, parkErr := fs.Stat(parked.cropBak)
+	assert.NoError(t, parkErr, "parked copy persists for manual repair")
+}
+
 // --- guard/backup matrix for poster_cleanup.go + predicate edges ---
 
 func TestParkCanonicalPosterPairGuards(t *testing.T) {
@@ -299,7 +355,7 @@ func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	require.True(t, bPark.hadFull)
 	bPark.fs = &seqRenameFailFS{Fs: mem3, failOn: map[int]bool{1: true}}
 	bPark.restore()
-	_, bakErr := mem3.Stat("/tmp/posters/J3/PA-9-full.jpg.rsbak")
+	_, bakErr := mem3.Stat(bPark.fullBak)
 	assert.NoError(t, bakErr, "failed restore leaves parked bytes for salvage")
 
 	// discard removes parked files
@@ -309,8 +365,21 @@ func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	bDisc := parkCanonicalPosterPair(mem4, "/tmp/posters/J4", "PA-9")
 	require.True(t, bDisc.hadCrop)
 	bDisc.discard()
-	_, dErr := mem4.Stat("/tmp/posters/J4/PA-9.jpg.rsbak")
+	_, dErr := mem4.Stat(bDisc.cropBak)
 	assert.Error(t, dErr, "parked bytes discarded")
+
+	// F-R4-4: two parks of the same ID never share a backup path; each
+	// restores ITS bytes even after both parked.
+	mem5 := afero.NewMemMapFs()
+	require.NoError(t, mem5.MkdirAll("/tmp/posters/J5", 0o755))
+	require.NoError(t, afero.WriteFile(mem5, "/tmp/posters/J5/PA-9.jpg", []byte("first"), 0o644))
+	b1 := parkCanonicalPosterPair(mem5, "/tmp/posters/J5", "PA-9")
+	require.NoError(t, afero.WriteFile(mem5, "/tmp/posters/J5/PA-9.jpg", []byte("second"), 0o644))
+	b2 := parkCanonicalPosterPair(mem5, "/tmp/posters/J5", "PA-9")
+	assert.NotEqual(t, b1.cropBak, b2.cropBak, "per-op nonce separates backups")
+	b1.restore()
+	got1, _ := afero.ReadFile(mem5, "/tmp/posters/J5/PA-9.jpg")
+	assert.Equal(t, "first", string(got1), "op1 restores ITS bytes, not op2's")
 }
 
 func TestAnyResultUsesMovieIDEdges(t *testing.T) {
@@ -327,8 +396,8 @@ func TestAnyResultUsesMovieIDEdges(t *testing.T) {
 
 func TestCleanupOwnedPosterLegsNilMovie(t *testing.T) {
 	// nil / empty-ID movies are no-ops (must not panic, must not delete)
-	cleanupOwnedPosterLegs(rescrapePhaseInputs{}, &rescrapeGenScope{}, nil, nil)
-	cleanupOwnedPosterLegs(rescrapePhaseInputs{}, &rescrapeGenScope{}, nil, &models.Movie{})
+	closeoutRescrapePosterBytes(rescrapePhaseInputs{}, &rescrapeGenScope{}, nil, nil)
+	closeoutRescrapePosterBytes(rescrapePhaseInputs{}, &rescrapeGenScope{}, nil, &models.Movie{})
 }
 
 // Nil entry in a snapshot must not crash the usage scan.

@@ -19,6 +19,7 @@ import (
 
 	httpclientiface "github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/spf13/afero"
 )
@@ -259,9 +260,18 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 	cropParked := tempCroppedPath + ".dlbak"
 	hadCrop := false
 	if _, stErr := pm.fs.Stat(tempCroppedPath); stErr == nil {
-		if rnErr := pm.fs.Rename(tempCroppedPath, cropParked); rnErr == nil {
-			hadCrop = true
+		if rnErr := pm.fs.Rename(tempCroppedPath, cropParked); rnErr != nil {
+			// audit F-R4-6: the crop leg parks fail-CLOSED like the full leg —
+			// undo the fresh full promote, then refuse the download.
+			_ = pm.fs.Remove(tempFullPath)
+			if hadFull {
+				if rrErr := pm.fs.Rename(fullParked, tempFullPath); rrErr != nil {
+					logging.Warnf("poster restore %s: %v", tempFullPath, rrErr)
+				}
+			}
+			return nil, fmt.Errorf("failed to park previous cropped poster: %w", rnErr)
 		}
+		hadCrop = true
 	}
 
 	// After rename, tempFullPath exists and must be cleaned up if we
@@ -272,10 +282,14 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 			_ = pm.fs.Remove(tempFullPath)
 			_ = pm.fs.Remove(tempCroppedPath)
 			if hadFull {
-				_ = pm.fs.Rename(fullParked, tempFullPath)
+				if rrErr := pm.fs.Rename(fullParked, tempFullPath); rrErr != nil {
+					logging.Warnf("poster restore %s: %v", tempFullPath, rrErr)
+				}
 			}
 			if hadCrop {
-				_ = pm.fs.Rename(cropParked, tempCroppedPath)
+				if rrErr := pm.fs.Rename(cropParked, tempCroppedPath); rrErr != nil {
+					logging.Warnf("poster restore %s: %v", tempCroppedPath, rrErr)
+				}
 			}
 			return
 		}
