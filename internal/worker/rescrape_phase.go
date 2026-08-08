@@ -270,9 +270,6 @@ func closeoutRescrapePosterBytes(inputs rescrapePhaseInputs, scope *rescrapeGenS
 	// rewound. Legs with no fingerprint keep legacy restore (PosterGen off).
 	verify := func(legPath string) (bool, bool) {
 		sha, ok := scope.genSHA[filepath.Base(legPath)]
-		if !ok {
-			return true, false // no fingerprint (generation off) — legacy verdict
-		}
 		data, rerr := afero.ReadFile(inputs.Fs, legPath)
 		if rerr != nil {
 			if errors.Is(rerr, os.ErrNotExist) {
@@ -283,6 +280,11 @@ func closeoutRescrapePosterBytes(inputs rescrapePhaseInputs, scope *rescrapeGenS
 			// parked copy stays for the reconciler (in-flight fence holds).
 			logging.Warnf("rescrape restore verify %s: %v — skipping rewind (undecidable)", legPath, rerr)
 			return false, true
+		}
+		if !ok {
+			// audit F-R17-1: no fingerprint and canon EXISTS with unproven
+			// content — never rewind: dispose the obsolete parked copy.
+			return false, false
 		}
 		return shaContentHex(data) == sha, false
 	}
@@ -586,7 +588,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 
 			// audit F-R5-1: fingerprint whatever the generation wrote at canonical —
 			// the closeout's restore rewinds only while those exact bytes sit there.
-			if movieResult.PosterGenerated && movieResult.Movie != nil && movieResult.PosterError == nil && inputs.Fs != nil && inputs.TempDir != "" {
+			if movieResult.PosterGenerated && movieResult.Movie != nil && inputs.Fs != nil && inputs.TempDir != "" {
 				pdir2 := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
 				scope.genSHA = map[string]string{}
 				for _, lp := range []string{filepath.Join(pdir2, movieResult.Movie.ID+"-full.jpg"), filepath.Join(pdir2, movieResult.Movie.ID+".jpg")} {

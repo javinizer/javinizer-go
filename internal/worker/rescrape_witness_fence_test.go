@@ -193,8 +193,11 @@ func TestWithRescrapeStatusErrPathDeletesOnlyOwned(t *testing.T) {
 	_, err = withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
 		scope.preExistedPair = true
 		scope.parked = parkCanonicalPosterPair(fs, dir, "REF-1")
-		// simulate the failed generation writing new bytes over canonical
+		// simulate the failed generation writing new bytes over canonical;
+		// production fingerprints whatever generation wrote (PosterGenerated
+		// gates it, PosterError no longer suppresses it) — model the same.
 		require.NoError(t, afero.WriteFile(fs, refCanon, []byte("loser-bytes"), 0o644))
+		scope.genSHA = map[string]string{"REF-1.jpg": shaContentHex([]byte("loser-bytes"))}
 		return nil, &resultstore.MovieResult{Movie: &models.Movie{ID: "REF-1"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}, errors.New("cancelled mid-flight")
 	})
 	require.Error(t, err)
