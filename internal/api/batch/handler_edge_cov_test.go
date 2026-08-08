@@ -116,8 +116,11 @@ func TestPosterCrop_FamilyMovedInsideKeyIsConflict(t *testing.T) {
 
 func TestPosterCrop_ManagerErrorRestoresBackupAnd400(t *testing.T) {
 	deps, job, router := cropJobFixture(t, "CROPE-2")
+	// Wedge the STAGED full-size read (post-codex-P2 the canonical read is
+	// fail-closed at staging — see TestPosterCrop_StagingSourceReadError);
+	// CropWithBounds then errors → cropErr → 400, canonical untouched.
 	deps.Fs = &brokenFS{Fs: deps.GetFs(), failOpen: func(n string) bool {
-		return strings.HasSuffix(filepath.Base(n), "CROPE-2-full.jpg")
+		return strings.Contains(filepath.Base(n), ".crop-") && strings.HasSuffix(filepath.Base(n), "-full.jpg")
 	}}
 	w := postCrop(t, router, job, "CROPE-2", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
 	assert.Equal(t, 400, w.Code)

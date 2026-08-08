@@ -340,6 +340,20 @@ func writeCropWitnessGuarded(fs afero.Fs, tempDir, jobID string, w cropWitness) 
 		fs = afero.NewOsFs()
 	}
 	dir := filepath.Join(tempDir, "posters", jobID)
+	// codex P2: rekey/promote witnesses for this poster also fence a new crop.
+	// A rekey that failed mid-relocation can leave one leg under the NEW id —
+	// admitting an old-id crop beside the stranded leg corrupts later rekey
+	// reconciliation. Probe the exact names the writers use (promote escapes
+	// via PathEscape; rekey concatenates raw — mirror each) and fail CLOSED on
+	// stat errors.
+	for _, wf := range []string{promoteWitnessName(w.PosterID), ".rekey-" + w.PosterID + ".json"} {
+		p := filepath.Join(dir, wf)
+		if _, serr := fs.Stat(p); serr == nil {
+			return "", fmt.Errorf("%w for %s (fence: %s) — restart to reconcile before retrying", errCropWitnessPending, w.PosterID, wf)
+		} else if !os.IsNotExist(serr) {
+			return "", fmt.Errorf("crop witness scan %s: %w", p, serr)
+		}
+	}
 	entries, err := afero.ReadDir(fs, dir)
 	switch {
 	case err == nil:

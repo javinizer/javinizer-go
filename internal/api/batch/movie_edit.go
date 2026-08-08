@@ -218,11 +218,21 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			dir := filepath.Join(tmpDir, "posters", jobID)
 			stageID := posterID + ".crop-" + fmt.Sprintf("%x", time.Now().UnixNano())
 			for _, leg := range [][2]string{{posterID + "-full.jpg", stageID + "-full.jpg"}, {posterID + ".jpg", stageID + ".jpg"}} {
-				if data, rerr := afero.ReadFile(fs, filepath.Join(dir, leg[0])); rerr == nil {
-					if werr := afero.WriteFile(fs, filepath.Join(dir, leg[1]), data, 0o644); werr != nil {
+				data, rerr := afero.ReadFile(fs, filepath.Join(dir, leg[0]))
+				if rerr != nil {
+					if !os.IsNotExist(rerr) {
+						// codex P2: only ABSENCE permits skipping a leg — a transient
+						// read error must abort, else CropWithBounds silently falls
+						// back to the cropped image while the UI measured its
+						// coordinates against the full-size source.
 						cleanupStagedPosterPair(fs, tmpDir, jobID, stageID)
-						return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster crop staging %s: %v", leg[1], werr)}
+						return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster crop staging source %s: %v", leg[0], rerr)}
 					}
+					continue
+				}
+				if werr := afero.WriteFile(fs, filepath.Join(dir, leg[1]), data, 0o644); werr != nil {
+					cleanupStagedPosterPair(fs, tmpDir, jobID, stageID)
+					return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster crop staging %s: %v", leg[1], werr)}
 				}
 			}
 			cropResult, err := snap.PosterManager().CropWithBounds(c.Request.Context(), jobID, stageID, req.X, req.Y, req.Width, req.Height, maxPosterHeight)

@@ -29,7 +29,8 @@ func TestWriteCropWitnessGuardedSkipsUnrelatedEntries(t *testing.T) {
 	dir := "/tmp/posters/JOB-U"
 	require.NoError(t, fs.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "note.txt"), []byte("x"), 0o644))
-	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), []byte("{}"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-OTHER-2.json"), []byte("{}"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-OTHER-3.json"), []byte("{}"), 0o644))
 	_, err := writeCropWitnessGuarded(fs, "/tmp", "JOB-U", cropWitness{PosterID: "OTHER-1", ResultID: "r1", StageID: "OTHER-1.crop-1"})
 	require.NoError(t, err, "seeding an other-poster crop witness")
 	_, err = writeCropWitnessGuarded(fs, "/tmp", "JOB-U", cropWitness{PosterID: "PI-1", ResultID: "r2", StageID: "PI-1.crop-2"})
@@ -144,4 +145,54 @@ func TestPosterCrop_FencedByOutstandingCropWitness(t *testing.T) {
 	w := postCrop(t, router, job, "FENCE-001", contracts.PosterCropRequest{X: 10, Y: 10, Width: 200, Height: 200})
 	require.Equal(t, 409, w.Code, "body: %s", w.Body.String())
 	assert.Contains(t, w.Body.String(), "crop witness")
+}
+
+// codex P2: an unresolved PROMOTE witness for this poster also fences a new
+// crop (recreating bytes beside an in-flight promotion corrupts arbitration).
+func TestWriteCropWitnessGuardedFencesPromoteWitness(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JOB-PM"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-PI-1.json"), []byte("{}"), 0o644))
+	_, err := writeCropWitnessGuarded(fs, "/tmp", "JOB-PM", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
+	require.ErrorIs(t, err, errCropWitnessPending)
+}
+
+// codex P2: an unresolved REKEY witness (.rekey-OLD.json — the worker writer
+// names it with the raw ID) fences a new crop for that poster.
+func TestWriteCropWitnessGuardedFencesRekeyWitness(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JOB-RK"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-PI-1.json"), []byte("{}"), 0o644))
+	_, err := writeCropWitnessGuarded(fs, "/tmp", "JOB-RK", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
+	require.ErrorIs(t, err, errCropWitnessPending)
+}
+
+// Witness stat probes fail CLOSED: a transient stat error is not absence.
+func TestWriteCropWitnessGuardedPromoteStatErrorFailsClosed(t *testing.T) {
+	fs := statErrTargetFS{Fs: afero.NewMemMapFs(), target: "/tmp/posters/JOB-PS/.promote-PI-1.json"}
+	_, err := writeCropWitnessGuarded(fs, "/tmp", "JOB-PS", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "crop witness scan")
+}
+
+func TestWriteCropWitnessGuardedRekeyStatErrorFailsClosed(t *testing.T) {
+	fs := statErrTargetFS{Fs: afero.NewMemMapFs(), target: "/tmp/posters/JOB-RS/.rekey-PI-1.json"}
+	_, err := writeCropWitnessGuarded(fs, "/tmp", "JOB-RS", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "crop witness scan")
+}
+
+// codex P2: a NON-absence read error on the canonical full-size source must
+// abort the crop (409) rather than silently falling back to the cropped leg
+// while the UI measured coordinates against full size.
+func TestPosterCrop_StagingSourceReadError(t *testing.T) {
+	deps, job, router := cropJobFixture(t, "RDERR-1")
+	deps.Fs = &brokenFS{Fs: deps.GetFs(), failOpen: func(n string) bool {
+		return strings.HasSuffix(n, "-full.jpg")
+	}}
+	w := postCrop(t, router, job, "RDERR-1", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
+	require.Equal(t, 409, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "staging source")
 }
