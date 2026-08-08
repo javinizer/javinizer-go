@@ -105,7 +105,7 @@ func TestFetch_GenericRenameError_ReturnsError(t *testing.T) {
 	tempDir := t.TempDir()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
 
-	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "", 0)
 	assert.NoError(t, result.err)
 	assert.Empty(t, result.cachedPath)
 	assert.True(t, result.persistFailed)

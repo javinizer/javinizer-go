@@ -214,7 +214,7 @@ func isCacheableMediaType(mediaType string) bool {
 	return false
 }
 
-func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchURL string, client *http.Client, userAgent, referer string) fetchResult {
+func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchURL string, client *http.Client, userAgent, referer string, maxCacheSizeMB int) fetchResult {
 	fetchCtx := context.WithoutCancel(ctx)
 	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, fetchURL, nil)
 	if err != nil {
@@ -346,6 +346,7 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 			}
 		}
 	}
+	evictImageCacheToSize(fs, cacheDir, maxCacheSizeMB, dstPath)
 	return fetchResult{cachedPath: dstPath, contentType: normalizedCT}
 }
 

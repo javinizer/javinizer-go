@@ -215,7 +215,7 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
 
 		v, ferr, _ := imageCacheGroup.Do(normalizedURL, func() (any, error) {
-			res := fetchAndCache(c.Request.Context(), fs, cacheDir, normalizedURL, fetchURL, httpClient, userAgent, referer)
+			res := fetchAndCache(c.Request.Context(), fs, cacheDir, normalizedURL, fetchURL, httpClient, userAgent, referer, tempCfg.ImageCacheMaxSizeMB)
 			if res.persistFailed && len(res.body) == 0 {
 				body, mediaType, berr := fetchBodyToMemory(c.Request.Context(), httpClient, fetchURL, userAgent, referer)
 				if berr == nil {
@@ -261,7 +261,6 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 			if _, err := io.Copy(c.Writer, cachedFile); err != nil {
 				c.AbortWithStatus(http.StatusBadGateway)
 			}
-			evictImageCacheToSize(fs, cacheDir, tempCfg.ImageCacheMaxSizeMB, result.cachedPath)
 			return
 		}
 

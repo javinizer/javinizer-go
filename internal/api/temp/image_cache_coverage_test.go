@@ -285,7 +285,7 @@ func TestCoverage_FetchAndCacheRequestError(t *testing.T) {
 	tempDir := t.TempDir()
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
 
-	result := fetchAndCache(context.Background(), fs, tempDir, "http://nonexistent.invalid/img.jpg", "http://nonexistent.invalid/img.jpg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, "http://nonexistent.invalid/img.jpg", "http://nonexistent.invalid/img.jpg", client, "test-agent", "", 0)
 	assert.Error(t, result.err)
 }
 
@@ -302,7 +302,7 @@ func TestCoverage_FetchAndCacheNon200Status(t *testing.T) {
 	tempDir := t.TempDir()
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
 
-	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "", 0)
 	assert.Error(t, result.err)
 	assert.False(t, result.persistFailed)
 }
@@ -321,7 +321,7 @@ func TestCoverage_FetchAndCacheMkdirShardError(t *testing.T) {
 	tempDir := t.TempDir()
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
 
-	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "", 0)
 	assert.Error(t, result.err)
 	assert.True(t, result.persistFailed)
 }
@@ -340,7 +340,7 @@ func TestCoverage_FetchAndCacheCreateTempError(t *testing.T) {
 	tempDir := t.TempDir()
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
 
-	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "", 0)
 	assert.Error(t, result.err)
 	assert.True(t, result.persistFailed)
 }
@@ -359,7 +359,7 @@ func TestCoverage_FetchAndCacheRenameFailureDegrades(t *testing.T) {
 	tempDir := t.TempDir()
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
 
-	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "", 0)
 	assert.NoError(t, result.err, "rename failure degrades to shared in-memory serve, not error")
 	assert.Equal(t, jpegBytes("persist-fail-test"), result.body, "downloaded bytes served from memory")
 	assert.True(t, result.persistFailed)
@@ -380,7 +380,7 @@ func TestCoverage_FetchAndCacheSniffsHeaderlessJpeg(t *testing.T) {
 	tempDir := t.TempDir()
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
 
-	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "", 0)
 	require.NoError(t, result.err)
 	assert.Equal(t, "image/jpeg", result.contentType)
 	assert.NotEmpty(t, result.cachedPath)
@@ -409,7 +409,7 @@ func TestCoverage_FetchAndCacheOldExtCleanup(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, oldPath, []byte("old-jpg"), 0o644))
 
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
-	result := fetchAndCache(context.Background(), fs, tempDir, cacheKey, cacheKey, client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, cacheKey, cacheKey, client, "test-agent", "", 0)
 	require.NoError(t, result.err)
 	assert.Equal(t, "image/png", result.contentType)
 

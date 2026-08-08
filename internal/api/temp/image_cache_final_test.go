@@ -49,7 +49,7 @@ func TestCoverageFinal_FetchAndCache_SVGRejectedNotMislabeled(t *testing.T) {
 	tempDir := t.TempDir()
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
 
-	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.svg", upstream.URL+"/img.svg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.svg", upstream.URL+"/img.svg", client, "test-agent", "", 0)
 	require.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "unsupported image content type")
 	assert.Empty(t, result.cachedPath)

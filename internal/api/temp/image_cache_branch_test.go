@@ -91,7 +91,7 @@ func TestBranch_Get_OpenFailureAfterResolveReturnsAbsent(t *testing.T) {
 func TestBranch_FetchAndCache_CreateRequestError(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), "key", "://no-scheme", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), "key", "://no-scheme", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "create request")
 }
@@ -120,7 +120,7 @@ func TestBranch_FetchAndCache_MkdirTmpError(t *testing.T) {
 
 	fs := &mkdirSuffixFailFs{Fs: afero.NewMemMapFs(), suffix: ".tmp"}
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/a.jpg", upstream.URL+"/a.jpg", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/a.jpg", upstream.URL+"/a.jpg", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.True(t, result.persistFailed)
 	assert.Contains(t, result.err.Error(), "mkdir tmp")
@@ -149,7 +149,7 @@ func TestBranch_FetchAndCache_ReadSideCopyError(t *testing.T) {
 	})}
 
 	fs := afero.NewMemMapFs()
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), "http://example.com/x.jpg", "http://example.com/x.jpg", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), "http://example.com/x.jpg", "http://example.com/x.jpg", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.False(t, result.persistFailed, "read-side failures must not mark the run as persist-failed")
 	assert.Contains(t, result.err.Error(), "write temp")
@@ -167,7 +167,7 @@ func TestBranch_FetchAndCache_RejectsNonImageContentType(t *testing.T) {
 
 	fs := afero.NewMemMapFs()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img", upstream.URL+"/img", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img", upstream.URL+"/img", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "non-image content type")
 	assert.False(t, result.persistFailed)
@@ -189,7 +189,7 @@ func TestBranch_FetchAndCache_RejectsHeaderlessHTML(t *testing.T) {
 
 	fs := afero.NewMemMapFs()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img", upstream.URL+"/img", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img", upstream.URL+"/img", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "uncacheable content")
 	assert.Empty(t, result.cachedPath)
@@ -319,7 +319,7 @@ func TestBranch_FetchAndCache_HeaderlessAvisBrandAccepted(t *testing.T) {
 
 	fs := afero.NewMemMapFs()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/clip.avif", upstream.URL+"/clip.avif", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/clip.avif", upstream.URL+"/clip.avif", client, "ua", "", 0)
 	require.NoError(t, result.err)
 	assert.Equal(t, "image/avif", result.contentType)
 	assert.Contains(t, result.cachedPath, ".avif")
@@ -337,7 +337,7 @@ func TestBranch_FetchAndCache_VerifyTempOpenFailure(t *testing.T) {
 
 	hooked := &openHookFs{Fs: afero.NewMemMapFs(), mode: "error", match: isTmpCacheFile}
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), hooked, t.TempDir(), upstream.URL+"/x.jpg", upstream.URL+"/x.jpg", client, "ua", "")
+	result := fetchAndCache(context.Background(), hooked, t.TempDir(), upstream.URL+"/x.jpg", upstream.URL+"/x.jpg", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.True(t, result.persistFailed)
 	assert.Contains(t, result.err.Error(), "verify temp")
@@ -355,7 +355,7 @@ func TestBranch_FetchAndCache_RejectsDeclaredImageButGarbageBytes(t *testing.T) 
 
 	fs := afero.NewMemMapFs()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/fake.jpg", upstream.URL+"/fake.jpg", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/fake.jpg", upstream.URL+"/fake.jpg", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "invalid image content")
 	assert.Empty(t, result.cachedPath)
@@ -385,7 +385,7 @@ func TestBranch_FetchAndCache_HeaderlessBinaryGarbageRejected(t *testing.T) {
 
 	fs := afero.NewMemMapFs()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/blob", upstream.URL+"/blob", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/blob", upstream.URL+"/blob", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "uncacheable content in headerless response")
 }
@@ -402,7 +402,7 @@ func TestBranch_FetchAndCache_OctetStreamCT_SniffedAsImage(t *testing.T) {
 
 	fs := afero.NewMemMapFs()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "ua", "", 0)
 	require.NoError(t, result.err)
 	assert.Equal(t, "image/jpeg", result.contentType)
 	assert.Contains(t, result.cachedPath, ".jpg")
@@ -420,7 +420,7 @@ func TestBranch_FetchAndCache_OctetStreamCT_WithGarbageRejected(t *testing.T) {
 
 	fs := afero.NewMemMapFs()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/x", upstream.URL+"/x", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/x", upstream.URL+"/x", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "uncacheable content")
 	assert.Empty(t, result.cachedPath)
@@ -458,7 +458,7 @@ func TestBranch_FetchAndCache_PersistFail_DrainUnusable_RefetchEmpty(t *testing.
 
 	fs := &atomicStubFs{Fs: afero.NewMemMapFs(), mkdirErr: errors.New("read-only fs")}
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/empty.jpg", upstream.URL+"/empty.jpg", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/empty.jpg", upstream.URL+"/empty.jpg", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.True(t, result.persistFailed)
 	assert.Empty(t, result.body, "an empty upstream body cannot be salvaged for degraded serving")
@@ -476,7 +476,7 @@ func TestBranch_FetchAndCache_PersistFail_DrainRejectsGarbage(t *testing.T) {
 
 	fs := &atomicStubFs{Fs: afero.NewMemMapFs(), mkdirErr: errors.New("read-only fs")}
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
-	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/junk.jpg", upstream.URL+"/junk.jpg", client, "ua", "")
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), upstream.URL+"/junk.jpg", upstream.URL+"/junk.jpg", client, "ua", "", 0)
 	require.Error(t, result.err)
 	assert.True(t, result.persistFailed)
 	assert.Empty(t, result.body, "junk drained from the failed persist must not be served")

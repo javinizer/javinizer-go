@@ -31,7 +31,7 @@ func TestRandFailure_FetchAndCache_ReturnsError(t *testing.T) {
 	randRead = func(b []byte) (int, error) { return 0, errors.New("rng exhausted") }
 	t.Cleanup(func() { randRead = orig })
 
-	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "", 0)
 	assert.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "rand")
 }
@@ -51,7 +51,7 @@ func TestDiskWriteFailure_FetchAndCache_PersistFailedTrue(t *testing.T) {
 	tempDir := t.TempDir()
 	client := ssrf.NewSSRFSafeClient(30 * time.Second)
 
-	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
+	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "", 0)
 	assert.Error(t, result.err)
 	assert.True(t, result.persistFailed)
 	assert.Contains(t, result.err.Error(), "write temp")
