@@ -23,16 +23,9 @@ func (s SetString) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
 	if s == "" {
 		return nil
 	}
-	if err := e.EncodeToken(start); err != nil {
-		return err
-	}
-	if err := e.EncodeElement(string(s), xml.StartElement{Name: xml.Name{Local: "name"}}); err != nil {
-		return err
-	}
-	if err := e.EncodeToken(start.End()); err != nil {
-		return err
-	}
-	return e.Flush()
+	return e.EncodeElement(struct {
+		Name string `xml:"name"`
+	}{Name: string(s)}, start)
 }
 
 // UnmarshalXML accepts both the tiered <set><name>...</name></set> form and
