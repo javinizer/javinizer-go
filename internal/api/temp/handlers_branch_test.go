@@ -360,3 +360,24 @@ func TestBranch_FreshCacheHit_MaxAgeCappedAt24h(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "private, max-age=86400", w.Header().Get("Cache-Control"))
 }
+
+func TestBranch_QueryOrderDistinctCacheKeys(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("body:" + r.URL.RawQuery))
+	}))
+	t.Cleanup(upstream.Close)
+
+	deps := newImageCacheDeps(t, afero.NewMemMapFs())
+
+	w1 := serveImageRequest(t, deps, upstream.URL+"/img?a=1&b=2")
+	assert.Equal(t, http.StatusOK, w1.Code)
+	assert.Equal(t, "body:a=1&b=2", w1.Body.String())
+
+	w2 := serveImageRequest(t, deps, upstream.URL+"/img?b=2&a=1")
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Equal(t, "body:b=2&a=1", w2.Body.String(), "differently-ordered query strings must not share a cache entry")
+}

@@ -176,7 +176,6 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 		fetchURL := parsedURL.String()
 		keyURL := *parsedURL
 		keyURL.Fragment = ""
-		keyURL.RawQuery = keyURL.Query().Encode()
 		normalizedURL := keyURL.String()
 		file, contentType, remaining, state := get(fs, cacheDir, normalizedURL, ttl)
 		if state == CacheFresh {
