@@ -66,15 +66,35 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 				unlock = rc.editLockFn(rc.fmi.MovieID)
 			}
 			defer unlock()
-			fenceID := strings.TrimSpace(rc.fmi.MovieID)
-			if fenceID == "" && rc.movie != nil {
-				fenceID = strings.TrimSpace(rc.movie.ID)
+			// audit R3: witnesses are named by the CANONICAL movie ID while the
+			// match surface is the matcher alias — probe BOTH spellings or an
+			// alias-only fence misses the outstanding witness deterministically.
+			fenceIDs := []string{strings.TrimSpace(rc.fmi.MovieID)}
+			if rc.movie != nil {
+				fenceIDs = append(fenceIDs, strings.TrimSpace(rc.movie.ID))
+			}
+			fenceHit := ""
+			if rc.promoteWitnessFn != nil {
+				seen := map[string]struct{}{}
+				for _, fid := range fenceIDs {
+					if fid == "" {
+						continue
+					}
+					if _, dup := seen[strings.ToLower(fid)]; dup {
+						continue
+					}
+					seen[strings.ToLower(fid)] = struct{}{}
+					if rc.promoteWitnessFn(fid) {
+						fenceHit = fid
+						break
+					}
+				}
 			}
 			// codex P2-C/D: skip check runs UNDER the family key so a rekey that
 			// won the lock before us is observed; callback check remains the net
 			// for rekeys landing during the atomic write itself.
-			if fenceID != "" && rc.promoteWitnessFn != nil && rc.promoteWitnessFn(fenceID) {
-				logging.Warnf("[Recovery] skipping write-back for %s — promote witness for %s unresolved; restart reconciles", rc.filePath, fenceID)
+			if fenceHit != "" {
+				logging.Warnf("[Recovery] skipping write-back for %s — promote witness for %s unresolved; restart reconciles", rc.filePath, fenceHit)
 			} else if !writebackPreSkipped(rc.updater, rc.movie, rc.filePath, "Recovery") {
 				errUp := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 					if applyWritebackIdentityMismatch(rc.movie, current) {

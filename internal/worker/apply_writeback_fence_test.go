@@ -107,6 +107,87 @@ func TestRecoveryFenceFallsBackToMovieID(t *testing.T) {
 	assert.Equal(t, before.Revision, final.Revision, "fenced via fallback movie-ID probe")
 }
 
+// audit R2: crop and rekey witnesses fence the write-back too (a crop's
+// arbitration degenerates to revision-only once the row carries the URL).
+func TestHasUnresolvedPromoteWitnessAllKinds(t *testing.T) {
+	newPE := func(base afero.Fs) *PosterEditor {
+		pe := newEditorForStore(resultstore.New(1, []string{"/f/a.mp4"}))
+		pe.attachEnv(&posterEditEnv{fs: base, tempDir: "/tmp", jobID: "JOB-9"})
+		return pe
+	}
+
+	crop1 := afero.NewMemMapFs()
+	require.NoError(t, crop1.MkdirAll("/tmp/posters/JOB-9", 0o755))
+	require.NoError(t, afero.WriteFile(crop1, "/tmp/posters/JOB-9/.crop-PI-1.crop-x.json", []byte("{\"poster_id\":\"PI-1\"}"), 0o644))
+	assert.True(t, newPE(crop1).hasUnresolvedPromoteWitness("PI-1"), "crop witness fences")
+
+	rekey1 := afero.NewMemMapFs()
+	require.NoError(t, rekey1.MkdirAll("/tmp/posters/JOB-9", 0o755))
+	require.NoError(t, afero.WriteFile(rekey1, "/tmp/posters/JOB-9/.rekey-PI-1.json", []byte("{}"), 0o644))
+	assert.True(t, newPE(rekey1).hasUnresolvedPromoteWitness("PI-1"), "rekey witness fences")
+}
+
+// audit R3: the fence probes alias AND canonical spellings — witnesses are
+// named by the canonical movie ID.
+func TestRecoveryFenceProbesCanonicalSpelling(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/c.mp4"})
+	store.UpdateFileResult("/f/c.mp4", &resultstore.MovieResult{
+		ResultID: "res-rc2", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "ABC-123", Title: "live"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/c.mp4", MovieID: "ABC123"},
+	})
+	before, err := store.GetMovieResult("/f/c.mp4")
+	require.NoError(t, err)
+	outcome := &applyFileOutcome{}
+	rc := recoveryContext{
+		// alias only on the match surface; canonical on the movie
+		filePath: "/f/c.mp4",
+		fmi:      models.FileMatchInfo{Path: "/f/c.mp4", MovieID: "ABC123"},
+		movie:    &models.Movie{ID: "ABC-123"},
+		updater:  store,
+		promoteWitnessFn: func(id string) bool {
+			return id == "ABC-123" // canonical-named witness only
+		},
+	}
+	recoverFn := withFileRecovery(rc, outcome)
+	func() {
+		defer recoverFn()
+		panic("boom")
+	}()
+	final, err := store.GetMovieResult("/f/c.mp4")
+	require.NoError(t, err)
+	assert.Equal(t, before.Revision, final.Revision, "fenced via the canonical spelling despite alias-only match info")
+}
+
+// Fence-id dedupe: when the match alias and canonical movie ID are the same
+// string, the witness probe runs exactly once.
+func TestRecoveryFenceDedupesIdenticalSpellings(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/d.mp4"})
+	store.UpdateFileResult("/f/d.mp4", &resultstore.MovieResult{
+		ResultID: "res-dup", Status: models.JobStatusRunning,
+		Movie:         &models.Movie{ID: "DUP-1"},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/d.mp4", MovieID: "DUP-1"},
+	})
+	calls := 0
+	outcome := &applyFileOutcome{}
+	rc := recoveryContext{
+		filePath: "/f/d.mp4",
+		fmi:      models.FileMatchInfo{Path: "/f/d.mp4", MovieID: "DUP-1"},
+		movie:    &models.Movie{ID: "DUP-1"},
+		updater:  store,
+		promoteWitnessFn: func(id string) bool {
+			calls++
+			return false
+		},
+	}
+	recoverFn := withFileRecovery(rc, outcome)
+	func() {
+		defer recoverFn()
+		panic("boom")
+	}()
+	assert.Equal(t, 1, calls, "alias==canonical probes once")
+}
+
 func TestHasUnresolvedPromoteWitness(t *testing.T) {
 	pe := newEditorForStore(resultstore.New(1, []string{"/f/a.mp4"}))
 	assert.False(t, pe.hasUnresolvedPromoteWitness("PI-1"), "nil env")

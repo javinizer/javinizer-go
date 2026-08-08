@@ -392,18 +392,15 @@ func isSafePosterFileID(id string) bool {
 // while recovery state can still exist.
 func (pe *PosterEditor) hasUnresolvedPromoteWitness(posterID string) bool {
 	env := pe.currentEnv()
-	if env == nil || env.fs == nil || env.tempDir == "" || env.jobID == "" || posterID == "" {
+	if env == nil || posterID == "" {
 		return false
 	}
-	p := filepath.Join(env.tempDir, "posters", env.jobID, ".promote-"+url.PathEscape(posterID)+".json")
-	_, err := env.fs.Stat(p)
-	if err != nil && !errors.Is(err, afero.ErrFileNotFound) {
-		// codex P2 fail-closed: a transient probe error could mean an EXISTING
-		// witness — admit nothing; the write-back's revision bump would
-		// misarbitrate a failed refresh as committed.
-		return true
-	}
-	return err == nil
+	// audit R2: ALL witness kinds fence the write-back — a crop witness's
+	// arbitration discriminator degenerates to revision-only once the row
+	// carries the deterministic crop URL, so a bumped revision would flip an
+	// UNCOMMITTED crop to committed. posterWitnessConflict fails closed on
+	// probe errors (any error fences conservatively).
+	return posterWitnessConflict(env.fs, env.tempDir, env.jobID, posterID) != nil
 }
 
 // posterWitnessFence refuses edits while a promote or crop witness for
@@ -1019,10 +1016,14 @@ func (m *LockedMovieOps) ExcludeFamily(ctx context.Context) error {
 		// codex r33 P2: encode Cancelled in the candidate envelope WITHOUT
 		// publishing it to the live lifecycle; the real transition is the
 		// post-commit Cancel() below.
-		excludedSnap := m.excludedSnapshot(filePaths)
-		terminal := allExcludedTerminal(env.lifecycle, excludedSnap, m.pe.lookup)
 		err := env.committer.Commit(ctx, &EditCommitPlan{
 			EnvelopeFn: func() (*models.Job, error) {
+				// audit R4: capture the exclusion map INSIDE the envelope-locked
+				// closure — a concurrent exclusion commit on another family holds
+				// a different family key, so a pre-captured stale map would erase
+				// its entry from the durable envelope.
+				excludedSnap := m.excludedSnapshot(filePaths)
+				terminal := allExcludedTerminal(env.lifecycle, excludedSnap, m.pe.lookup)
 				row, err := env.envelope(nil, nil, excludedSnap)
 				if err != nil || row == nil {
 					return row, err

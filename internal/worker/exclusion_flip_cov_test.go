@@ -30,6 +30,43 @@ func TestExcludeFamilyLegacyCancelsWhenAllExcluded(t *testing.T) {
 	assert.Equal(t, models.JobStatusCancelled, lc.GetJobStatus())
 }
 
+// audit R4: the candidate envelope's exclusion map must be computed under the
+// envelope lock — a racing exclusion commit on another family shares only the
+// in-memory store, and a pre-captured snapshot would erase its entry.
+func TestExcludeFamilyEnvelopeCapturesRacingExclusion(t *testing.T) {
+	store := resultstore.New(2, []string{"/f/a.mp4", "/f/b.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "FAM-A", "")
+	seedFamilyResult(store, "/f/b.mp4", "res-b", "FAM-B", "")
+	lc := &JobLifecycle{Status: models.JobStatusRunning, done: make(chan struct{})}
+	committer := NewEditCommitter(racingMarkTransactor{store: store}, newKeyedMutexRegistry(), "JOB-X", newKeyedMutexRegistry())
+	var captured map[string]bool
+	pe := NewPosterEditor(store, store, nil)
+	pe.attachEnv(&posterEditEnv{
+		committer: committer,
+		envelope: func(_ map[string]*resultstore.MovieResult, _ map[string]*resultstore.ProvenanceData, excluded map[string]bool) (*models.Job, error) {
+			captured = excluded
+			return nil, nil // nil row: skip the DB upsert leg in this fixture
+		},
+		lifecycle: lc,
+	})
+	m := &LockedMovieOps{pe: pe, movieID: "FAM-A"}
+	require.NoError(t, m.ExcludeFamily(context.Background()))
+	assert.True(t, captured["/f/a.mp4"], "op A's own exclusion present")
+	assert.True(t, captured["/f/b.mp4"], "racing exclusion from family B survives into the durable envelope")
+}
+
+// racingMarkTransactor lands a competing exclusion INSIDE the transaction
+// window (after any pre-commit capture would run) so the regression test pins
+// the in-lock recompute.
+type racingMarkTransactor struct {
+	store resultstore.ResultUpdater
+}
+
+func (tr racingMarkTransactor) WithEditTx(_ context.Context, fn func(database.EditUnit) error) error {
+	tr.store.MarkExcluded("/f/b.mp4") // B's racing exclusion lands mid-commit
+	return fn(database.EditUnit{})
+}
+
 // Marker-flip after the commit must STILL drive the full lifecycle Cancel()
 // (done channel close + CompletedAt + status transition) — Waiting on Done()
 // for a marked job must complete, not hang.
