@@ -503,3 +503,44 @@ func TestUnknownActressFilterRejected(t *testing.T) {
 	_, err = repo.ListFiltered(ctx, "", 50, 0, "name", "asc")
 	require.NoError(t, err)
 }
+
+// Codex P2: legacy/imported rows can carry NULL dmm_id; NULL satisfies
+// neither `> 0` nor `<= 0`, so without COALESCE they would be invisible to
+// candidates, the missing_dmm filter, and AssignDMMIDIfMissing.
+func TestNullDMMIDRowsAreCandidates(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	ctx := context.Background()
+	// Insert the NULL-dmm row raw (the gorm model omits zero values on create).
+	require.NoError(t, db.Exec("INSERT INTO actresses (japanese_name, dmm_id, created_at, updated_at) VALUES (?, NULL, ?, ?)",
+		"\u30ec\u30ac\u30b7\u30fc", time.Now().UTC(), time.Now().UTC()).Error)
+	var legacy models.Actress
+	require.NoError(t, db.Where("japanese_name = ?", "\u30ec\u30ac\u30b7\u30fc").First(&legacy).Error)
+
+	candidates, err := repo.ListSyncCandidates(ctx)
+	require.NoError(t, err)
+	found := false
+	for _, a := range candidates {
+		if a.ID == legacy.ID {
+			found = true
+		}
+	}
+	require.True(t, found, "NULL dmm_id row with a name must be a candidate")
+
+	filtered, err := repo.ListFiltered(ctx, "missing_dmm", 50, 0, "name", "asc")
+	require.NoError(t, err)
+	found = false
+	for _, a := range filtered {
+		if a.ID == legacy.ID {
+			found = true
+		}
+	}
+	require.True(t, found, "NULL dmm_id must match the missing_dmm filter")
+
+	ok, err := repo.AssignDMMIDIfMissing(ctx, legacy.ID, 4242)
+	require.NoError(t, err)
+	require.True(t, ok, "NULL dmm_id row must be assignable")
+	reloaded, err := repo.FindByDMMID(ctx, 4242)
+	require.NoError(t, err)
+	require.Equal(t, legacy.ID, reloaded.ID)
+}

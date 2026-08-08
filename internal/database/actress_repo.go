@@ -232,12 +232,12 @@ const missingActressThumbnailClause = "javinizer_missing_actress_thumbnail(COALE
 
 // actressFilterClauses ...
 var actressFilterClauses = map[string]string{
-	"missing_dmm":           "dmm_id <= 0",
-	"has_dmm":               "dmm_id > 0",
+	"missing_dmm":           "COALESCE(dmm_id, 0) <= 0",
+	"has_dmm":               "COALESCE(dmm_id, 0) > 0",
 	"missing_thumbnail":     missingActressThumbnailClause,
 	"missing_japanese_name": "TRIM(COALESCE(japanese_name,'')) = ''",
 	"japanese_name_only":    "TRIM(COALESCE(japanese_name,'')) <> '' AND TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = ''",
-	"missing_metadata":      "dmm_id > 0 AND (" + missingActressThumbnailClause + " OR TRIM(COALESCE(japanese_name,'')) = '' OR (TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = ''))",
+	"missing_metadata":      "COALESCE(dmm_id, 0) > 0 AND (" + missingActressThumbnailClause + " OR TRIM(COALESCE(japanese_name,'')) = '' OR (TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = ''))",
 }
 
 // ValidActressFilter ...

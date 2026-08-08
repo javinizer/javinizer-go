@@ -1121,11 +1121,13 @@ COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END),0) cancelled FROM
 // candidacy. The thumbnail arm delegates to the registered
 // javinizer_missing_actress_thumbnail SQL function (DBC-03): no hand-rolled
 // LIKE/INSTR duplicate rule may live here.
-const actressSyncCandidateClause = `(dmm_id > 0 AND (
+// NULL dmm_id satisfies neither comparison in SQL, so COALESCE first:
+// legacy/imported rows without a DMM ID must count as "missing".
+const actressSyncCandidateClause = `(COALESCE(dmm_id, 0) > 0 AND (
 TRIM(COALESCE(japanese_name,'')) = '' OR
 (TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = '') OR
 ` + missingActressThumbnailClause + `
-)) OR (dmm_id <= 0 AND (
+)) OR (COALESCE(dmm_id, 0) <= 0 AND (
 TRIM(COALESCE(japanese_name,'')) <> '' OR TRIM(COALESCE(aliases,'')) <> '' OR
 TRIM(COALESCE(first_name,'')) <> '' OR TRIM(COALESCE(last_name,'')) <> ''
 ))`
@@ -1396,7 +1398,8 @@ func (r *ActressRepository) assignDMMIDIfMissing(ctx context.Context, id uint, d
 			if err := ensureSyncTaskLeaseTx(tx, taskID, leaseToken); err != nil {
 				return err
 			}
-			query := tx.Model(&models.Actress{}).Where("id = ? AND dmm_id = 0", id)
+			// NULL counts as missing here too (legacy rows, direct imports).
+			query := tx.Model(&models.Actress{}).Where("id = ? AND COALESCE(dmm_id, 0) = 0", id)
 			if expectedSource.ID > 0 {
 				query = query.Where("first_name = ? AND last_name = ? AND japanese_name = ? AND thumb_url = ? AND aliases = ?", expectedSource.FirstName, expectedSource.LastName, expectedSource.JapaneseName, expectedSource.ThumbURL, expectedSource.Aliases)
 			}
