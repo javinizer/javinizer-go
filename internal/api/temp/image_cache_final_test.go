@@ -53,7 +53,6 @@ func TestCoverageFinal_FetchAndCache_SVGRejectedNotMislabeled(t *testing.T) {
 	require.Error(t, result.err)
 	assert.Contains(t, result.err.Error(), "unsupported image content type")
 	assert.Empty(t, result.cachedPath)
-	assert.Empty(t, result.tempPath)
 }
 
 func TestCoverageFinal_AtomicRename_IsExistRetry(t *testing.T) {

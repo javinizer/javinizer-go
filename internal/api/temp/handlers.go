@@ -216,10 +216,11 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 
 		v, ferr, _ := imageCacheGroup.Do(normalizedURL, func() (any, error) {
 			res := fetchAndCache(c.Request.Context(), fs, cacheDir, normalizedURL, fetchURL, httpClient, userAgent, referer)
-			if res.persistFailed {
-				body, berr := fetchBodyToMemory(c.Request.Context(), httpClient, fetchURL, userAgent, referer)
+			if res.persistFailed && len(res.body) == 0 {
+				body, mediaType, berr := fetchBodyToMemory(c.Request.Context(), httpClient, fetchURL, userAgent, referer)
 				if berr == nil {
 					res.body = body
+					res.contentType = mediaType
 				}
 			}
 			return res, nil
@@ -263,20 +264,10 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		if result.tempPath != "" {
-			c.Header("Content-Type", result.contentType)
+		if len(result.body) > 0 {
 			c.Header("Cache-Control", "private, max-age=300")
 			c.Header("X-Content-Type-Options", "nosniff")
-			tempFile, openErr := fs.Open(result.tempPath)
-			if openErr != nil {
-				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to open fetched image"})
-				return
-			}
-			defer func() { _ = tempFile.Close() }()
-			if _, err := io.Copy(c.Writer, tempFile); err != nil {
-				c.AbortWithStatus(http.StatusBadGateway)
-			}
-			return
+			c.Data(http.StatusOK, result.contentType, result.body)
 		}
 	}
 }

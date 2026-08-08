@@ -183,7 +183,6 @@ func get(fs afero.Fs, cacheDir, rawURL string, ttl time.Duration) (file afero.Fi
 
 type fetchResult struct {
 	cachedPath    string
-	tempPath      string
 	body          []byte
 	contentType   string
 	err           error
@@ -310,8 +309,13 @@ func fetchAndCache(ctx context.Context, fs afero.Fs, cacheDir, cacheKey, fetchUR
 	ext := extForContentType(persisted)
 	dstPath := filepath.Join(shardDir, hashPrefix+ext)
 	if err := atomicRename(fs, tmpPath, dstPath); err != nil {
-		logging.Warnf("image cache: rename %s -> %s failed, serving from temp: %v", tmpPath, dstPath, err)
-		return fetchResult{tempPath: tmpPath, contentType: normalizedCT}
+		body, readErr := afero.ReadFile(fs, tmpPath)
+		_ = fs.Remove(tmpPath)
+		if readErr != nil {
+			return fetchResult{err: fmt.Errorf("rename: %w", err), persistFailed: true}
+		}
+		logging.Warnf("image cache: rename %s -> %s failed, serving from memory: %v", tmpPath, dstPath, err)
+		return fetchResult{body: body, contentType: normalizedCT, persistFailed: true}
 	}
 
 	if matches, _, found := resolveAllEntries(fs, shardDir, hashPrefix); found {
@@ -352,10 +356,10 @@ func atomicRename(fs afero.Fs, src, dst string) error {
 	return fs.Rename(src, dst)
 }
 
-func fetchBodyToMemory(ctx context.Context, client *http.Client, fetchURL, userAgent, referer string) ([]byte, error) {
+func fetchBodyToMemory(ctx context.Context, client *http.Client, fetchURL, userAgent, referer string) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), http.MethodGet, fetchURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", imageTypeAvif+","+imageTypeWebp+","+imageTypeApng+","+imageTypeJpeg+","+imageTypePng+","+imageTypeGif)
@@ -365,27 +369,27 @@ func fetchBodyToMemory(ctx context.Context, client *http.Client, fetchURL, userA
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch: %w", err)
+		return nil, "", fmt.Errorf("fetch: %w", err)
 	}
 	defer func() { _ = httpclient.DrainAndClose(resp.Body) }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("image source returned non-200 status")
+		return nil, "", fmt.Errorf("image source returned non-200 status")
 	}
 
 	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0]))
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImageProxyResponseSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
+		return nil, "", fmt.Errorf("read body: %w", err)
 	}
 	if len(body) > maxImageProxyResponseSize {
-		return nil, fmt.Errorf("response exceeds %d byte cap", maxImageProxyResponseSize)
+		return nil, "", fmt.Errorf("response exceeds %d byte cap", maxImageProxyResponseSize)
 	}
 	if mediaType == "" {
-		mediaType = http.DetectContentType(body)
+		mediaType = sniffImageType(body)
 	}
 	if !isCacheableMediaType(mediaType) {
-		return nil, fmt.Errorf("uncacheable content type %q", mediaType)
+		return nil, "", fmt.Errorf("uncacheable content type %q", mediaType)
 	}
-	return body, nil
+	return body, mediaType, nil
 }

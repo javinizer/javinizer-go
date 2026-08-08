@@ -360,9 +360,9 @@ func TestCoverage_FetchAndCacheRenameFailureDegrades(t *testing.T) {
 	client := ssrf.NewSSRFSafeClient(60 * time.Second)
 
 	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
-	assert.NoError(t, result.err, "rename failure degrades to temp serve, not error")
-	assert.NotEmpty(t, result.tempPath, "should serve from temp file")
-	assert.False(t, result.persistFailed)
+	assert.NoError(t, result.err, "rename failure degrades to shared in-memory serve, not error")
+	assert.Equal(t, jpegBytes("persist-fail-test"), result.body, "downloaded bytes served from memory")
+	assert.True(t, result.persistFailed)
 }
 
 func TestCoverage_FetchAndCacheSniffsHeaderlessJpeg(t *testing.T) {

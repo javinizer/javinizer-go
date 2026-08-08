@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,8 +108,15 @@ func TestFetch_GenericRenameError_ReturnsError(t *testing.T) {
 	result := fetchAndCache(context.Background(), fs, tempDir, upstream.URL+"/img.jpg", upstream.URL+"/img.jpg", client, "test-agent", "")
 	assert.NoError(t, result.err)
 	assert.Empty(t, result.cachedPath)
-	assert.NotEmpty(t, result.tempPath)
-	content, readErr := afero.ReadFile(fs, result.tempPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, jpegBytes("rename-fail-test"), content)
+	assert.True(t, result.persistFailed)
+	assert.Equal(t, jpegBytes("rename-fail-test"), result.body)
+
+	var leftovers []string
+	_ = afero.Walk(fs, "/", func(p string, info os.FileInfo, werr error) error {
+		if werr == nil && info != nil && !info.IsDir() && strings.Contains(p, ".tmp") {
+			leftovers = append(leftovers, p)
+		}
+		return nil
+	})
+	assert.Empty(t, leftovers, "temp artifact must be reclaimed when the rename fails")
 }

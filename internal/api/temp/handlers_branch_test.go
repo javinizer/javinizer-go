@@ -150,7 +150,7 @@ func TestBranch_RenameFailure_ServesFromTemp(t *testing.T) {
 	assert.Equal(t, "private, max-age=300", w.Header().Get("Cache-Control"))
 }
 
-func TestBranch_RenameFailure_TempOpenFailure(t *testing.T) {
+func TestBranch_RenameFailure_TempUnreadable_FallsBackToSharedMemoryServe(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
@@ -167,11 +167,11 @@ func TestBranch_RenameFailure_TempOpenFailure(t *testing.T) {
 	deps := newImageCacheDeps(t, fs)
 
 	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
-	assert.Equal(t, http.StatusBadGateway, w.Code)
-	assert.Contains(t, w.Body.String(), "failed to open fetched image")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, jpegStr("temp-body"), w.Body.String(), "unreadable temp artifact degrades to shared in-memory bytes")
 }
 
-func TestBranch_RenameFailure_TempCopyFailure(t *testing.T) {
+func TestBranch_RenameFailure_TempReadbackFails_FallsBackToSharedMemoryServe(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
@@ -188,7 +188,8 @@ func TestBranch_RenameFailure_TempCopyFailure(t *testing.T) {
 	deps := newImageCacheDeps(t, fs)
 
 	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
-	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, jpegStr("temp-body"), w.Body.String(), "temp readback failure degrades to shared in-memory bytes")
 }
 
 func isTmpCacheFile(name string) bool {
@@ -300,6 +301,7 @@ func TestBranch_PersistFailure_FallsBackToUncached(t *testing.T) {
 	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, jpegStr("fallback-body"), w.Body.String())
+	assert.Equal(t, "image/jpeg", w.Header().Get("Content-Type"), "degraded fallback must preserve the validated media type")
 }
 
 func TestBranch_NonImageUpstream_ServesStaleEntry(t *testing.T) {
