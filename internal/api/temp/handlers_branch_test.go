@@ -575,3 +575,51 @@ func TestBranch_CacheFill_QuotaEnforcedAfterCommit(t *testing.T) {
 	})
 	assert.LessOrEqual(t, total, int64(1<<20), "after the second commit the on-disk cache must not exceed the configured quota")
 }
+
+func TestBranch_OverQuotaFill_AllWaitersServedFromSharedEntry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
+	t.Cleanup(cleanup)
+
+	payload := append([]byte("\xff\xd8\xff\xe0"), make([]byte, 1_200_000)...)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(120 * time.Millisecond)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(upstream.Close)
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = true
+	cfg.System.ImageCacheTTLHours = 24
+	cfg.System.ImageCacheMaxSizeMB = 1
+	cfg.System.TempDir = t.TempDir()
+	fs := afero.NewMemMapFs()
+	deps := &core.APIDeps{Fs: fs}
+	rt := core.NewAPIRuntime(deps)
+	rt.SetConfig(cfg)
+	testkit.SetTestRuntime(deps, rt)
+
+	router := gin.New()
+	router.GET("/temp/image", serveTempImage(testkit.GetTestRuntime(deps)))
+
+	const waiters = 3
+	results := make([]*httptest.ResponseRecorder, waiters)
+	var wg sync.WaitGroup
+	for i := 0; i < waiters; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodGet, "/temp/image?url="+url.QueryEscape(upstream.URL+"/big.jpg"), nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			results[idx] = w
+		}(i)
+	}
+	wg.Wait()
+
+	for _, w := range results {
+		require.Equal(t, http.StatusOK, w.Code, "every coalesced waiter must serve; eviction must not delete the shared fill")
+		assert.Equal(t, len(payload), w.Body.Len())
+	}
+}

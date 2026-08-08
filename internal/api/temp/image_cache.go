@@ -412,11 +412,11 @@ func fetchBodyToMemory(ctx context.Context, client *http.Client, fetchURL, userA
 	return body, ct, nil
 }
 
-func evictImageCacheToSize(fs afero.Fs, cacheDir string, maxSizeMB int) {
+func evictImageCacheToSize(fs afero.Fs, cacheDir string, maxSizeMB int, keep ...string) {
 	if maxSizeMB <= 0 {
 		return
 	}
-	if _, removed, err := worker.EvictImageCacheToSize(fs, cacheDir, int64(maxSizeMB)<<20); err != nil {
+	if _, removed, err := worker.EvictImageCacheToSize(fs, cacheDir, int64(maxSizeMB)<<20, keep...); err != nil {
 		logging.Warnf("image cache: size eviction failed: %v", err)
 	} else if removed > 0 {
 		logging.Infof("image cache: evicted %d entr(ies) to enforce the %d MB quota", removed, maxSizeMB)

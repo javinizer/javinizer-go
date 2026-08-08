@@ -318,7 +318,7 @@ func CleanupStaleImageCache(fs afero.Fs, tempDir string, ttl time.Duration) (int
 // directory is never counted or evicted (in-flight writes live there). Per-file
 // failures are logged and the sweep continues. Returns the pre-eviction total and
 // the number of entries removed.
-func EvictImageCacheToSize(fs afero.Fs, tempDir string, limitBytes int64) (int64, int, error) {
+func EvictImageCacheToSize(fs afero.Fs, tempDir string, limitBytes int64, keep ...string) (int64, int, error) {
 	if limitBytes <= 0 || fs == nil {
 		return 0, 0, nil
 	}
@@ -361,12 +361,19 @@ func EvictImageCacheToSize(fs afero.Fs, tempDir string, limitBytes int64) (int64
 		return total, 0, nil
 	}
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].mtime.Before(artifacts[j].mtime) })
+	keepSet := make(map[string]struct{}, len(keep))
+	for _, k := range keep {
+		keepSet[k] = struct{}{}
+	}
 	over := total - limitBytes
 	var freed int64
 	removed := 0
 	for _, a := range artifacts {
 		if freed >= over {
 			break
+		}
+		if _, protected := keepSet[a.path]; protected {
+			continue
 		}
 		if rerr := fsutil.AferoRemoveAll(fs, a.path); rerr != nil {
 			logging.Warnf("EvictImageCacheToSize: failed to remove %s: %v", a.path, rerr)

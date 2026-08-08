@@ -151,3 +151,36 @@ func TestEvict_RemovalFailureLoggedAndContinues(t *testing.T) {
 	exists, _ = afero.Exists(mem, other)
 	assert.False(t, exists)
 }
+
+func TestEvict_KeepPathExcluded(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	tempDir := t.TempDir()
+	oldest := seedSizedShardEntry(t, mem, tempDir, "ab", "old.jpg", 400, 3*time.Hour)
+	middle := seedSizedShardEntry(t, mem, tempDir, "ab", "mid.jpg", 400, 2*time.Hour)
+	newest := seedSizedShardEntry(t, mem, tempDir, "cd", "new.jpg", 400, 0)
+
+	total, removed, err := EvictImageCacheToSize(mem, tempDir, 800, oldest)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1200), total)
+	assert.Equal(t, 1, removed)
+
+	exists, _ := afero.Exists(mem, oldest)
+	assert.True(t, exists, "the protected entry survives even though it is oldest")
+	exists, _ = afero.Exists(mem, middle)
+	assert.False(t, exists, "eviction proceeds to the next-oldest unprotected entry")
+	exists, _ = afero.Exists(mem, newest)
+	assert.True(t, exists)
+}
+
+func TestEvict_OnlyProtectedEntryStaysOverQuota(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	tempDir := t.TempDir()
+	sole := seedSizedShardEntry(t, mem, tempDir, "ab", "sole.jpg", 400, 0)
+
+	total, removed, err := EvictImageCacheToSize(mem, tempDir, 100, sole)
+	require.NoError(t, err)
+	assert.Equal(t, int64(400), total)
+	assert.Zero(t, removed, "protected entries are never evicted; the next fill re-applies pressure")
+	exists, _ := afero.Exists(mem, sole)
+	assert.True(t, exists)
+}

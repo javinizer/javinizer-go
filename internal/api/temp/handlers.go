@@ -261,7 +261,7 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 			if _, err := io.Copy(c.Writer, cachedFile); err != nil {
 				c.AbortWithStatus(http.StatusBadGateway)
 			}
-			evictImageCacheToSize(fs, cacheDir, tempCfg.ImageCacheMaxSizeMB)
+			evictImageCacheToSize(fs, cacheDir, tempCfg.ImageCacheMaxSizeMB, result.cachedPath)
 			return
 		}
 
