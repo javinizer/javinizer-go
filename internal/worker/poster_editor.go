@@ -659,27 +659,33 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				// r56 P2: promote witnesses are named by posterID, but crop witnesses are
 				// named by stageID. Check promote by exact path; scan the dir for crop
 				// witnesses whose content references this posterID.
-				if _, err := env.fs.Stat(filepath.Join(dir, ".promote-"+canonicalOldPosterID+".json")); err == nil {
+				if _, err := env.fs.Stat(filepath.Join(dir, ".promote-"+url.PathEscape(canonicalOldPosterID)+".json")); err == nil {
 					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s promote witness unresolved: restart to reconcile", canonicalOldPosterID)}
 				} else if !errors.Is(err, afero.ErrFileNotFound) {
 					return fmt.Errorf("poster promote witness check: %w", err)
 				}
-				if entries, err := afero.ReadDir(env.fs, dir); err == nil {
-					for _, e := range entries {
-						name := e.Name()
-						if !strings.HasPrefix(name, ".crop-") || !strings.HasSuffix(name, ".json") {
-							continue
-						}
-						data, rerr := afero.ReadFile(env.fs, filepath.Join(dir, name))
-						if rerr != nil {
-							continue
-						}
-						var cw struct {
-							PosterID string `json:"poster_id"`
-						}
-						if json.Unmarshal(data, &cw) == nil && cw.PosterID == canonicalOldPosterID {
-							return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s crop witness unresolved: restart to reconcile", canonicalOldPosterID)}
-						}
+				entries, derr := afero.ReadDir(env.fs, dir)
+				if derr != nil && !errors.Is(derr, afero.ErrFileNotFound) {
+					return fmt.Errorf("poster crop witness scan %s: %w", dir, derr)
+				}
+				for _, e := range entries {
+					name := e.Name()
+					if !strings.HasPrefix(name, ".crop-") || !strings.HasSuffix(name, ".json") {
+						continue
+					}
+					data, rerr := afero.ReadFile(env.fs, filepath.Join(dir, name))
+					if rerr != nil {
+						// codex P2 fail-closed: a transient read error must NOT
+						// silently admit the rekey — if that witness holds a
+						// committed-but-unpromoted crop, startup would delete its
+						// staged bytes once the durable row names the new ID.
+						return fmt.Errorf("poster crop witness scan %s: %w", name, rerr)
+					}
+					var cw struct {
+						PosterID string `json:"poster_id"`
+					}
+					if len(data) > 0 && json.Unmarshal(data, &cw) == nil && cw.PosterID == canonicalOldPosterID {
+						return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s crop witness unresolved: restart to reconcile", canonicalOldPosterID)}
 					}
 				}
 				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID, PrevRevision: prevRevision})

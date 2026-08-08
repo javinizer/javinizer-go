@@ -1299,9 +1299,12 @@ func TestRekeyCropWitnessContentReadError(t *testing.T) {
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
-	// ReadDir finds the crop witness, ReadFile fails → continue → rekey proceeds
+	// codex P2 fail-closed: ReadDir finds the crop witness but ReadFile
+	// fails → the rekey must be REJECTED, not admitted — an admitted rekey
+	// would orphan the staged bytes of a committed-but-unpromoted crop.
 	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
-	require.NoError(t, err, "unreadable crop witness skipped")
+	require.Error(t, err, "unreadable crop witness must reject the rekey")
+	assert.Contains(t, err.Error(), "crop witness scan")
 }
 
 // --- r56 grind batch 5: OpenFile override for WriteFile errors ---
