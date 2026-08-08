@@ -142,7 +142,7 @@ func nfoToMovie(nfo *Movie) (*models.Movie, []string) {
 		Director:      nfo.Director,
 		Maker:         nfo.Maker,
 		Label:         nfo.Label,
-		Series:        nfo.Set,
+		Series:        string(nfo.Set),
 		Runtime:       nfo.Runtime,
 		ReleaseYear:   nfo.Year,
 	}

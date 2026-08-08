@@ -302,7 +302,7 @@ func (g *Generator) buildNFO(input nfoInput) *Movie {
 		Studio:        input.maker,
 		Maker:         input.maker,
 		Label:         input.label,
-		Set:           input.series,
+		Set:           SetString(input.series),
 	}
 
 	if input.contentID != "" {

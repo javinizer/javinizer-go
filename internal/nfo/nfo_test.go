@@ -90,7 +90,7 @@ func TestNFOXMLGeneration(t *testing.T) {
 					assert.Equal(t, "Test Studio", nfo.Studio)
 					assert.Equal(t, "Test Studio", nfo.Maker)
 					assert.Equal(t, "Test Label", nfo.Label)
-					assert.Equal(t, "Test Series Name", nfo.Set)
+					assert.Equal(t, "Test Series Name", string(nfo.Set))
 				},
 				func(t *testing.T, nfo *Movie) {
 					require.Len(t, nfo.UniqueID, 1)
