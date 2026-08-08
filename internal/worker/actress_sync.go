@@ -230,7 +230,11 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		}
 		result.UpdatedFields = append(result.UpdatedFields, recoveredFields...)
 	}
-	if !revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID {
+	// The field-priority override is exclusive: with an explicit actress
+	// priority config the cache may NOT supply fields (would bypass the
+	// configured source ranking or the __skip__ suppression sentinel).
+	cacheAllowed := !actressSyncSkipSentinel(actressFieldPriority) && len(actressFieldPriority) == 0
+	if !revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID && cacheAllowed {
 		fields, fillErr := fillMetadata(actress.ID, actress.DMMID, cacheMatch)
 		if fillErr != nil {
 			return nil, fillErr

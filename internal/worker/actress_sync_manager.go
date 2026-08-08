@@ -289,10 +289,17 @@ func (m *ActressSyncManager) dispatchLoop(ctx context.Context) {
 				break
 			}
 			timeout := m.taskTimeout(cfg)
+			// The backoff window check belongs at the loop, not inside
+			// claimAndTrack: otherwise the streak resets on every tick that
+			// fires inside the window and the backoff never grows (codex P2).
+			m.taskMu.Lock()
+			backoffOpen := !m.claimBackoffUntil.IsZero() && time.Now().Before(m.claimBackoffUntil)
+			m.taskMu.Unlock()
+			if backoffOpen {
+				break
+			}
 			task, err := m.claimAndTrack(ctx, timeout)
 			if err != nil {
-				// CON-05: exponential claim backoff (1s..60s) instead of a
-				// 1-per-second hot error loop; rate-limited logging.
 				m.claimFailStreak++
 				d := m.backoffDelay(m.claimFailStreak)
 				m.taskMu.Lock()
@@ -304,10 +311,11 @@ func (m *ActressSyncManager) dispatchLoop(ctx context.Context) {
 				break
 			}
 			if task == nil {
+				// Empty queue is a HEALTHY DB: reset the failure streak.
 				m.claimFailStreak = 0
 				break
 			}
-			m.claimFailStreak = 0
+			m.claimFailStreak = 0 // real claim succeeded
 			m.active.Add(1)
 			m.wg.Add(1)
 			go func() {

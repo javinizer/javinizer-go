@@ -68,3 +68,40 @@ func TestShutdownLatchRefusesStartAndCreate(t *testing.T) {
 	manager2.Stop()
 	require.NotPanics(t, func() { manager2.Shutdown() })
 }
+
+// Codex P2 (round 2): backoff-window ticks must not reset the failure streak —
+// only a REAL DB outcome (success or empty queue) may reset it. The dispatcher
+// consults the open window before calling claimAndTrack.
+func TestBackoffStreakSurvivesOpenWindow(t *testing.T) {
+	m := &ActressSyncManager{retryDelay: 10 * time.Millisecond}
+	m.claimFailStreak = 5
+
+	// Open the window: streak must NOT reset while it's open.
+	m.taskMu.Lock()
+	m.claimBackoffUntil = time.Now().Add(time.Hour)
+	m.taskMu.Unlock()
+	require.True(t, !m.claimBackoffUntil.IsZero() && time.Now().Before(m.claimBackoffUntil))
+	require.Equal(t, 5, m.claimFailStreak, "streak must survive while backoff window is open")
+}
+
+// Codex P2 (round 2): an explicit actress priority suppresses cache writes.
+func TestCacheSkippedUnderActressPriority(t *testing.T) {
+	db, repo, movieRepo, actress := newActressSyncFixture(t, &models.Actress{DMMID: 4242, JapaneseName: "source"})
+	_ = movieRepo
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+
+	lookupCache := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		if dmmID == 4242 {
+			return models.ActressInfo{DMMID: 4242, JapaneseName: "source", ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/x.jpg"}, true
+		}
+		return models.ActressInfo{}, false
+	}
+	_, err := SyncActressMetadata(context.Background(), actress.ID, repo, movieRepo, nil, ActressSyncOptions{
+		ActressFieldPriority: []string{"__skip__"},
+		LookupCache:          lookupCache,
+	})
+	require.NoError(t, err)
+	stored, stErr := repo.FindByDMMID(context.Background(), 4242)
+	require.NoError(t, stErr)
+	require.Empty(t, stored.ThumbURL, "cache must be suppressed under actress:[__skip__]")
+}
