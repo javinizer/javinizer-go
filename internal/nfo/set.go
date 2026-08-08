@@ -39,9 +39,11 @@ func (s SetString) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
 // the legacy flat <set>Name</set> form. When a <set> element contains both a
 // <name> child and bare character data, the <name> child value wins regardless
 // of document order. Other child elements (e.g. <overview>) are skipped.
-// Values are trimmed of surrounding whitespace.
+// All direct character data is accumulated (so a legacy flat value split
+// across multiple CharData tokens, e.g. via CDATA or comments, is preserved)
+// and trimmed of surrounding whitespace only at the closing element.
 func (s *SetString) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
-	var flat string
+	var flat strings.Builder
 	var name string
 	hasName := false
 	for {
@@ -51,9 +53,7 @@ func (s *SetString) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 		}
 		switch t := tok.(type) {
 		case xml.CharData:
-			if v := strings.TrimSpace(string(t)); v != "" && flat == "" {
-				flat = v
-			}
+			flat.Write(t)
 		case xml.StartElement:
 			if t.Name.Local == "name" {
 				var n string
@@ -69,7 +69,7 @@ func (s *SetString) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 			if hasName {
 				*s = SetString(name)
 			} else {
-				*s = SetString(flat)
+				*s = SetString(strings.TrimSpace(flat.String()))
 			}
 			return nil
 		}

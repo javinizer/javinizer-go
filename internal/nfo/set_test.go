@@ -128,13 +128,15 @@ func TestSetString_LegacyRoundTrip(t *testing.T) {
 		"remarshaled NFO should use the tiered format even when parsed from legacy flat form")
 }
 
-func TestSetString_UnmarshalFirstChardataWinsForMixedFlat(t *testing.T) {
+func TestSetString_UnmarshalAccumulatesSplitChardata(t *testing.T) {
+	// A legacy flat value split across multiple CharData tokens (here by an
+	// empty unknown child) is accumulated, not truncated to the first token.
 	xmlStr := `<movie><set>abc<overview/>def</set></movie>`
 	var movie Movie
 	err := xml.Unmarshal([]byte(xmlStr), &movie)
 	require.NoError(t, err)
-	assert.Equal(t, "abc", string(movie.Set),
-		"degenerate mixed flat+unknown content: first non-empty chardata wins (deterministic, spec-silent)")
+	assert.Equal(t, "abcdef", string(movie.Set),
+		"split flat chardata should be concatenated, matching plain string unmarshaling")
 }
 
 func TestSetString_UnmarshalEmptyNameWinsOverFlat(t *testing.T) {
@@ -211,4 +213,15 @@ func TestSetString_UnmarshalXMLNameDecodeError(t *testing.T) {
 	d.Token()
 	err := s.UnmarshalXML(d, xml.StartElement{Name: xml.Name{Local: "set"}})
 	require.Error(t, err, "malformed <name> child should surface a DecodeElement error")
+}
+
+func TestSetString_UnmarshalCDATAChardataPreserved(t *testing.T) {
+	// Regression for Codex P2: a legacy flat value split across CharData by a
+	// CDATA section must not be truncated to the first token.
+	xmlStr := `<movie><set>Part 1 <![CDATA[& Part 2]]></set></movie>`
+	var movie Movie
+	err := xml.Unmarshal([]byte(xmlStr), &movie)
+	require.NoError(t, err)
+	assert.Equal(t, "Part 1 & Part 2", string(movie.Set),
+		"chardata split by a CDATA section must be concatenated")
 }
