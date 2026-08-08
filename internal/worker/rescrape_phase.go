@@ -510,6 +510,10 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			release = inputs.EditLockFn(genID)
 		}
 		heldErr := func() error {
+			// audit F-R11-1: a panicking generation (untrusted HTTP bytes →
+			// decode/crop) must never leak the family mutex — release on ALL
+			// exits, including panic unwind.
+			defer release()
 			// audit F1: a witness outstanding means canonical poster bytes are
 			// mid-recovery (witness-holder owns them until restart reconcile) —
 			// generating over them would clobber recoverable state. Decline early;
@@ -570,7 +574,6 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			}
 			return nil
 		}()
-		release()
 		if heldErr != nil {
 			return nil, movieResult, heldErr
 		}

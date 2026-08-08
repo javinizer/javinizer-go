@@ -495,6 +495,52 @@ func (s *spyPosterGen) GeneratePoster(_ context.Context, _ string, _ *models.Mov
 	return nil
 }
 
+// audit F-R11-1: a panicking generation releases the family key — the op's
+// recovered-panic path (batch rescrape recover wraps) keeps the registry
+// usable and the marker sweeper reunites parked bytes at restart.
+func TestRescrapePanicInHeldSectionReleasesFamilyKey(t *testing.T) {
+	store := resultstore.New(1, []string{"f1.mp4"})
+	seedFamilyResult(store, "f1.mp4", "res-1", "PAN-1", "")
+	reg := newKeyedMutexRegistry()
+	unlock := reg.Acquire("PAN-1")
+	unlock()
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "PAN-1"}, Status: scrape.StatusCompleted}}
+	gen := &panicPosterGen{}
+	inputs := rescrapePhaseInputs{
+		WF: wf, ResultMap: store, Finder: store, JobID: models.NewJobID(),
+		PosterGen:  gen,
+		EditLockFn: func(ids ...string) func() { return reg.AcquireMany(ids) },
+		Fs:         afero.NewMemMapFs(), TempDir: "/tmp",
+	}
+	phase := NewRescrapePhase()
+	panicked := assert.Panics(t, func() {
+		_, _ = phase.Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "PAN-1", FilePath: "f1.mp4"})
+	}, "panic propagates to the caller-side recover")
+	if !panicked {
+		t.Skip("no panic observed")
+	}
+	selectRelease := make(chan struct{})
+	go func() {
+		release := reg.Acquire("PAN-1")
+		release()
+		close(selectRelease)
+	}()
+	select {
+	case <-selectRelease:
+	case <-time.After(3 * time.Second):
+		t.Fatal("family KEY leaked: re-acquire blocked forever after in-section panic")
+	}
+	// The mutex is free; the parked marker may linger until the startup sweep
+	// re-homes it (witness-analogous). That is by design.
+}
+
+// spy PosterGen that panics mid-generation.
+type panicPosterGen struct{}
+
+func (panicPosterGen) GeneratePoster(_ context.Context, _ string, _ *models.Movie) error {
+	panic("intentional test panic")
+}
+
 // --- guard/backup matrix for poster_cleanup.go + predicate edges ---
 
 func TestParkCanonicalPosterPairGuards(t *testing.T) {
