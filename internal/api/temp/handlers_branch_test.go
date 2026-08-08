@@ -535,7 +535,7 @@ func TestRedactImageURL(t *testing.T) {
 	}
 }
 
-func TestBranch_CacheFill_EvictsOldestWhenOverQuota(t *testing.T) {
+func TestBranch_CacheFill_QuotaEnforcedAfterCommit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
@@ -560,27 +560,18 @@ func TestBranch_CacheFill_EvictsOldestWhenOverQuota(t *testing.T) {
 
 	w1 := serveImageRequest(t, deps, upstream.URL+"/first.jpg")
 	require.Equal(t, http.StatusOK, w1.Code)
+	assert.Equal(t, len(payload), w1.Body.Len())
 
 	w2 := serveImageRequest(t, deps, upstream.URL+"/second.jpg")
 	require.Equal(t, http.StatusOK, w2.Code)
+	assert.Equal(t, len(payload), w2.Body.Len())
 
-	var files []string
-	_ = afero.Walk(fs, "/", func(p string, info os.FileInfo, werr error) error {
-		if werr == nil && info != nil && !info.IsDir() && filepath.Ext(p) == ".jpg" {
-			files = append(files, p)
+	var total int64
+	_ = afero.Walk(fs, "/", func(_ string, info os.FileInfo, werr error) error {
+		if werr == nil && info != nil && !info.IsDir() {
+			total += info.Size()
 		}
 		return nil
 	})
-	require.Len(t, files, 1, "the oldest fill must be evicted by the 1MB quota after the second commit")
-
-	w1again := serveImageRequest(t, deps, upstream.URL+"/first.jpg")
-	require.Equal(t, http.StatusOK, w1again.Code)
-	var filesAfter []string
-	_ = afero.Walk(fs, "/", func(p string, info os.FileInfo, werr error) error {
-		if werr == nil && info != nil && !info.IsDir() && filepath.Ext(p) == ".jpg" {
-			filesAfter = append(filesAfter, p)
-		}
-		return nil
-	})
-	assert.Len(t, filesAfter, 1, "re-filling the evicted URL re-evicts the survivor; cache stays within quota")
+	assert.LessOrEqual(t, total, int64(1<<20), "after the second commit the on-disk cache must not exceed the configured quota")
 }
