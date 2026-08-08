@@ -94,6 +94,12 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup 
 	// audit F-R19-1: ALWAYS write the in-flight sentinel — "nothing to park"
 	// no longer reads as "nothing in flight". Startup reconciliation removes
 	// stranded sentinels (a live process can't hold one across a restart).
+	// audit F-R20-1: the dir CAN be absent on a job where no download ran yet —
+	// creating it is matching DownloadFromURL's own first-step invariant.
+	if dErr := b.fs.MkdirAll(dir, 0o755); dErr != nil {
+		logging.Warnf("in-flight marker dir %s: %v", dir, dErr)
+		return b
+	}
 	b.markerPath = filepath.Join(dir, ".inflight-"+url.PathEscape(id)+"."+nonce)
 	if mErr := afero.WriteFile(b.fs, b.markerPath, nil, 0o644); mErr != nil {
 		logging.Warnf("in-flight marker write %s: %v", b.markerPath, mErr)

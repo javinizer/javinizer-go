@@ -320,6 +320,21 @@ func TestWritePromoteGuardedParkedScanErrorFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "rescrape backup scan")
 }
 
+// Batch mirror of F-R20-2 anchoring: plain-canonical ".inflight-" names never
+// fence the guards.
+func TestBatchInflightSentinelAnchoring(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JIG"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-PI-1.jpg"), []byte("canon"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-PI-1.nothex"), []byte("x"), 0o644))
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JIG", "PI-1", "https://x", "res-1", 0, nil)
+	require.NoError(t, err, "mis-shaped sentinel-likes must not fence")
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-PI-1.a14.f9"), nil, 0o644))
+	_, err = writePromoteWitnessGuarded(fs, "/tmp", "JIG", "PI-1", "https://x", "res-1", 0, nil)
+	require.ErrorIs(t, err, errPromoteWitnessPending, "well-shaped sentinel fences")
+}
+
 // audit F-R19-1: the batch admission guards also respect the worker's
 // in-flight sentinel (".inflight-<posterID>.<nonce>").
 func TestWriteCropWitnessGuardedFencesInflightSentinel(t *testing.T) {

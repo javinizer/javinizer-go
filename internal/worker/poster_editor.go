@@ -540,8 +540,12 @@ func rescrapeInFlightBackupPresent(fs afero.Fs, dir, posterID string) (bool, err
 	inflightPrefix := ".inflight-" + url.PathEscape(posterID) + "."
 	for _, e := range rEntries {
 		n := e.Name()
-		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") ||
-			strings.HasPrefix(n, inflightPrefix) {
+		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") {
+			return true, nil
+		}
+		// audit F-R20-2: marker probes are nonce-anchored — canonical files of
+		// an ID beginning ".inflight-" never read as an in-flight sentinel.
+		if markerAnchored(n) && strings.HasPrefix(n, inflightPrefix) {
 			return true, nil
 		}
 	}

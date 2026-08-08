@@ -389,6 +389,37 @@ func rekeyWitnessIDsFor(fs afero.Fs, dir, posterID string) (bool, error) {
 	return false, nil
 }
 
+// hexLowerHexTail mirrors the worker's anchored marker tail check (audit
+// F-R20-2, batch side): ".<lowhex>.<lowhex>".
+func hexLowerHexTail(s string) bool {
+	i1 := strings.LastIndexByte(s, '.')
+	if i1 < 2 || i1 == len(s)-1 {
+		return false
+	}
+	i0 := strings.LastIndexByte(s[:i1], '.')
+	if i0 < 1 {
+		return false
+	}
+	for _, part := range []string{s[i0+1 : i1], s[i1+1:]} {
+		if part == "" {
+			return false
+		}
+		for _, ch := range part {
+			if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// markerAnchoredBatch matches the in-flight sentinel shape only when its
+// tail carries the hex.hex nonce — plain-canonical ".inflight-*" names are
+// never markers.
+func markerAnchoredBatch(name, prefix string) bool {
+	return strings.HasPrefix(name, prefix) && len(name) > len(prefix) && hexLowerHexTail(name)
+}
+
 // parkedBackupConflictFor reports whether a rescrape's parked backup legs
 // (probe suffix .rsbak.) exist for posterID — admission signals for the
 // download/crop guards (audit F-R9-2: an in-flight rescrape's losing closeout
@@ -406,7 +437,7 @@ func parkedBackupConflictFor(fs afero.Fs, dir, posterID string) (bool, error) {
 	for _, e := range entries {
 		n := e.Name()
 		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") ||
-			strings.HasPrefix(n, inflightPrefix) {
+			markerAnchoredBatch(n, inflightPrefix) {
 			return true, nil
 		}
 	}

@@ -420,6 +420,38 @@ func arbitrateResults(job *models.Job) (map[string]*resultstore.MovieResult, boo
 	return snap.Results, true
 }
 
+// hexLowerHexTail reports whether a marker name ends in ".<lowhex>.<lowhex>"
+// — the anchored shape every in-flight marker carries (audit F-R20-2).
+func hexLowerHexTail(s string) bool {
+	i1 := strings.LastIndexByte(s, '.')
+	if i1 < 2 || i1 == len(s)-1 {
+		return false
+	}
+	i0 := strings.LastIndexByte(s[:i1], '.')
+	if i0 < 1 {
+		return false
+	}
+	return isHexLowerRun(s[i0+1:i1]) && isHexLowerRun(s[i1+1:])
+}
+
+func isHexLowerRun(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, ch := range s {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// markerAnchored is true iff name carries the inflight sentinel's anchored
+// shape: ".inflight-" + escaped ID + "." + <lowhex>.<lowhex> nonce.
+func markerAnchored(name string) bool {
+	return strings.HasPrefix(name, ".inflight-") && hexLowerHexTail(name)
+}
+
 // reconcileParkedPosterBackups re-homes .rsbak.*/.dlbak legs a crash or
 // panic stranded (audit F-R4-5): parked bytes are the ONLY copy of the
 // committed pair in that window. Runs AFTER witness arbitration (F-R5-2) and
@@ -476,7 +508,10 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(dir string) int {
 	for _, e := range entries {
 		name := e.Name()
 		var canon string
-		if strings.HasPrefix(name, ".inflight-") {
+		// audit F-R20-2: only nonce-anchored ".inflight-" names are sweep
+		// disposal targets — a leading-dot-canonical file must never be
+		// misread as a marker.
+		if markerAnchored(name) {
 			// audit F-R19-1 aftermath: stranded in-flight markers (crash) — a
 			// restarted process has no live generation windows; delete.
 			if rmErr := c.fs.Remove(filepath.Join(dir, name)); rmErr != nil {

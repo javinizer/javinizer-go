@@ -534,6 +534,51 @@ func TestWithRescrapeStatusFailedGenerationRestoresParkedPair(t *testing.T) {
 	assert.Equal(t, "fresh-bytes", string(got2), "healthy generation: discard stands")
 }
 
+// Marker sweep's Remove wedge: warn-only continue, marker survives.
+func TestMarkerSweepWedgeKeepsMarker(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-PI-W.a1.b2"), []byte("{}"), 0o644))
+	cl := &TempDirCleaner{fs: removeFailFS{Fs: fs}, tempDir: "/tmp", jobRepo: nil}
+	assert.Equal(t, 0, cl.reconcileParkedPosterBackups(dir))
+	_, err := fs.Stat(filepath.Join(dir, ".inflight-PI-W.a1.b2"))
+	assert.NoError(t, err, "wedged sweep keeps the marker for the next startup")
+}
+
+// audit F-R20-2 shape coverage: hex-hex tail anchor is exact.
+func TestMarkerAnchoredShapeMatrix(t *testing.T) {
+	assert.True(t, markerAnchored(".inflight-x.1.2"), "1-char nonce halves are valid")
+	assert.False(t, markerAnchored(".inflight-x.1"), "single segment")
+	assert.False(t, markerAnchored(".inflight-x.y.z"), "non-hex")
+	assert.False(t, markerAnchored(".inflight-x"))
+	assert.False(t, markerAnchored(".inflight-x.1.2.extra"))
+	assert.True(t, isHexLowerRun("09abcef"))
+	assert.False(t, isHexLowerRun(""))
+	assert.False(t, isHexLowerRun("09Ab"))
+	assert.False(t, hexLowerHexTail(".inflight-x"))
+	assert.True(t, hexLowerHexTail("..a1.b2"), "empty head segments still tail-parse (markerAnchored's prefix guards this path)")
+	assert.False(t, hexLowerHexTail(".x.a1."))
+}
+
+// A wedged MkdirAll on the marker dir degrades to no-marker (park still runs).
+func TestParkCanonicalMarkerMkdirFailure(t *testing.T) {
+	fs := statFailSuffixFS{} // placeholder unused fields safe
+	_ = fs
+	fs2 := &mkdirFailFS{Fs: afero.NewMemMapFs()}
+	require.NoError(t, fs2.MkdirAll("/tmp/base", 0o755)) // parent ok; only actual mkdir of job dir fails
+	b := parkCanonicalPosterPair(fs2, "/tmp/posters/JMK", "PI-M")
+	assert.Empty(t, b.markerPath, "mkdir wedge ⇒ marker headless")
+	assert.False(t, b.hadCrop)
+}
+
+type mkdirFailFS struct{ afero.Fs }
+
+func (f *mkdirFailFS) MkdirAll(p string, perm os.FileMode) error {
+	if strings.Contains(p, "/posters/") {
+		return errors.New("mkdir wedged")
+	}
+	return f.Fs.MkdirAll(p, perm)
+}
+
 // Marker write failure degrades to no-marker (never bricked parking); the op
 // proceeds with legacy rsbak-only markers.
 func TestParkCanonicalPosterPairMarkerWriteFailure(t *testing.T) {
@@ -630,6 +675,26 @@ func TestCloseoutDeleteGatedByFingerprint(t *testing.T) {
 	require.NoError(t, err)
 	got2, _ := afero.ReadFile(fs, canonFull)
 	assert.Equal(t, "sibling-full", string(got2), "sibling bytes never deleted by the losing closeout")
+}
+
+// audit F-R20-2: canonical files of IDs literally starting with ".inflight-"
+// must never be read as in-flight sentinels; sweep must not sweep them.
+func TestInflightMarkerAnchoringRejectsMisnames(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JAM", 0o755))
+	// canonical file of a leading-dot ID — NOT a marker
+	require.NoError(t, afero.WriteFile(fs, "/tmp/posters/JAM/.inflight-PI-7.jpg", []byte("alive"), 0o644))
+	// a marker-ish name without the hex.hex tail — NOT a marker
+	require.NoError(t, afero.WriteFile(fs, "/tmp/posters/JAM/.inflight-PI-7.nothex", []byte("x"), 0o644))
+	assert.False(t, markerAnchored(".inflight-PI-7.jpg"))
+	assert.False(t, markerAnchored(".inflight-PI-7.nothex"))
+	assert.True(t, markerAnchored(".inflight-PI-7.a14.f9"))
+	hit, err := rescrapeInFlightBackupPresent(fs, "/tmp/posters/JAM", "PI-7")
+	require.NoError(t, err)
+	assert.False(t, hit, "mis-shaped sentinel-likes must not fence")
+	require.NoError(t, afero.WriteFile(fs, "/tmp/posters/JAM/.inflight-PI-8.a14.f9", nil, 0o644))
+	hit2, _ := rescrapeInFlightBackupPresent(fs, "/tmp/posters/JAM", "PI-8")
+	assert.True(t, hit2, "well-shaped sentinel fences")
 }
 
 // audit F-R19-1: worker fence probes the inflight sentinel.
