@@ -1,9 +1,14 @@
 package httpclient
 
 import (
+	"context"
+	"net"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -316,4 +321,31 @@ func TestNewTransport_SOCKS5ClearsHTTPProxy(t *testing.T) {
 	if transport.DialContext == nil {
 		t.Error("Expected DialContext to be configured for SOCKS5")
 	}
+}
+func TestPinnedSocksForwardDialsLiteralEndpoint(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn != nil {
+			_ = conn.Close()
+		}
+	}()
+
+	addr := listener.Addr().String()
+	forward := &pinnedSocksForward{proxyURL: &url.URL{Scheme: "socks5", Host: addr}}
+
+	// DialContext path.
+	conn, err := forward.DialContext(context.Background(), "tcp", addr)
+	require.NoError(t, err)
+	require.NotNil(t, conn)
+	_ = conn.Close()
+
+	// Dial (non-context) delegates to DialContext.
+	conn, err = forward.Dial("tcp", addr)
+	require.NoError(t, err)
+	require.NotNil(t, conn)
+	_ = conn.Close()
 }
