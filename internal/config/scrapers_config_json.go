@@ -108,6 +108,9 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 			}
 			_, explicitEnabled := scraperRaw["enabled"]
 			ss.SetEnabledPresence(explicitEnabled)
+			_, explicitRate := scraperRaw["rate_limit"]
+			_, aliasRate := scraperRaw["request_delay"]
+			ss.SetRateLimitPresence(explicitRate || aliasRate)
 
 			s.Overrides[key] = &ss
 		}

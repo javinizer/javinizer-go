@@ -91,14 +91,16 @@ type ActressSyncManager struct {
 	// retryDelay is the CON-05 backoff base (1s in production; tests set it
 	// short). The streak exponent grows from it up to 60s.
 	retryDelay time.Duration
-	// CON-08 post-shutdown fencing lives at the api/core singleton level;
-	// the manager itself stays restartable across config hot-reloads.
-	ctx              context.Context
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	wake             chan struct{}
-	active           atomic.Int32
-	recoveryInterval time.Duration // test-tunable recovery ticker period
+	// Shutdown latches permanently (CON-08): after runtime shutdown, held
+	// manager references refuse Start/CreateJob. Hot-reload restarts use Stop,
+	// which does NOT latch, so the config-reload restart path keeps working.
+	permanentlyStopped atomic.Bool
+	ctx                context.Context
+	cancel             context.CancelFunc
+	wg                 sync.WaitGroup
+	wake               chan struct{}
+	active             atomic.Int32
+	recoveryInterval   time.Duration // test-tunable recovery ticker period
 	// taskMu guards runningTasks; it is separate from mu because Stop holds
 	// mu across wg.Wait while task goroutines still need to unregister.
 	taskMu     sync.Mutex
@@ -127,7 +129,7 @@ func NewActressSyncManager(deps ActressSyncManagerDeps) *ActressSyncManager {
 
 // Start ...
 func (m *ActressSyncManager) Start() {
-	if m == nil || m.repo == nil {
+	if m == nil || m.repo == nil || m.permanentlyStopped.Load() {
 		return
 	}
 	m.mu.Lock()
@@ -218,6 +220,18 @@ func (m *ActressSyncManager) Stop() {
 	m.cancel = nil
 }
 
+// Shutdown latches the manager permanently and stops it: after this, no Start
+// or CreateJob succeeds — held references must not resurrect the engine
+// post-shutdown (CON-08). api/core's runtime stop uses this, hot-reload uses
+// plain Stop. Idempotent.
+func (m *ActressSyncManager) Shutdown() {
+	if m == nil {
+		return
+	}
+	m.permanentlyStopped.Store(true)
+	m.Stop()
+}
+
 func (m *ActressSyncManager) signal() {
 	select {
 	case m.wake <- struct{}{}:
@@ -229,6 +243,7 @@ func (m *ActressSyncManager) signal() {
 // the loop after a panic with a short backoff (CON-06): a wedged dispatch
 // must never silently kill the engine.
 func (m *ActressSyncManager) runDispatch(ctx context.Context) {
+	defer m.wg.Done() // one Add per runDispatch; dispatchLoop never Done()s
 	for {
 		crashed := func() (panicked bool) {
 			defer func() {
@@ -251,8 +266,9 @@ func (m *ActressSyncManager) runDispatch(ctx context.Context) {
 	}
 }
 
+// dispatchLoop is pure: lifecycle (wg) belongs to the caller, so a
+// panic-recovered restart (runDispatch) cannot desync the WaitGroup.
 func (m *ActressSyncManager) dispatchLoop(ctx context.Context) {
-	defer m.wg.Done()
 	ticker := time.NewTicker(time.Second)
 	recovery := time.NewTicker(m.recoveryInterval) // CON-01: configurable, not hard-coded
 	defer ticker.Stop()
@@ -345,7 +361,9 @@ func (m *ActressSyncManager) startRetryDelay() time.Duration {
 }
 
 // backoffDelay maps a consecutive-failure streak to exponential backoff from
-// the manager base (retryDelay, default 1s) up to a 60s cap.
+// the manager base (retryDelay, default 1s) up to the 60s cap. Multiplication
+// with early cap, never a raw shift: time.Duration<<63 can yield 0 and would
+// defeat the backoff exactly during long outages.
 func (m *ActressSyncManager) backoffDelay(streak int) time.Duration {
 	if streak < 1 {
 		streak = 1
@@ -354,9 +372,12 @@ func (m *ActressSyncManager) backoffDelay(streak int) time.Duration {
 	if base <= 0 {
 		base = time.Second
 	}
-	d := base << uint(streak-1)
-	if d > 60*time.Second || d < 0 {
-		d = 60 * time.Second
+	d := base
+	for i := 1; i < streak; i++ {
+		d *= 2
+		if d >= 60*time.Second {
+			return 60 * time.Second
+		}
 	}
 	return d
 }
@@ -385,6 +406,9 @@ func (m *ActressSyncManager) taskTimeout(cfg *config.Config) time.Duration {
 // CreateJob ...
 func (m *ActressSyncManager) CreateJob(ctx context.Context, req ActressSyncCreateRequest) (*models.ActressSyncJob, []uint, error) {
 	if m == nil || m.repo == nil || m.deps.ActressRepo == nil {
+		return nil, nil, ErrActressSyncManagerUnavailable
+	}
+	if m.permanentlyStopped.Load() {
 		return nil, nil, ErrActressSyncManagerUnavailable
 	}
 	scope := strings.TrimSpace(req.Scope)

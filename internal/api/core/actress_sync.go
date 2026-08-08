@@ -48,6 +48,6 @@ func (r *APIRuntime) stopActressSyncManager() {
 	r.actressSyncStopped = true
 	r.actressSyncMu.Unlock()
 	if manager != nil {
-		manager.Stop()
+		manager.Shutdown() // permanent latch, not the hot-reload-restartable Stop
 	}
 }
