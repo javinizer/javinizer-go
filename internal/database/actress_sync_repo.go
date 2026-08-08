@@ -897,6 +897,15 @@ func (r *ActressSyncRepository) RequeueTask(ctx context.Context, taskID, leaseTo
 					updates["attempts"] = gorm.Expr("CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END")
 				case !opts.ConsumeAttempt:
 					updates["attempts"] = gorm.Expr("CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END")
+				case task.Attempts >= actressSyncAttemptCap:
+					// The final attempt is consumed: ClaimNext only offers
+					// attempts < cap, so requeueing to pending would park the task
+					// forever. Settle it as failed so the job can terminate.
+					updates["status"] = models.ActressSyncTaskFailed
+					updates["stage"] = "completed"
+					updates["outcome"] = "failed"
+					updates["error_message"] = "attempt_cap_reached"
+					updates["completed_at"] = now
 				}
 			} else {
 				updates["status"] = models.ActressSyncTaskCancelled

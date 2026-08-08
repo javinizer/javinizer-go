@@ -426,3 +426,38 @@ func TestReplaceThumbnailWhitespaceRawPredicate(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/def.jpg", stored.ThumbURL)
 }
+
+// P1: a consumptive requeue at the attempt cap must settle the task as
+// failed, not park it in unclaimable pending limbo forever.
+func TestRequeueConsumeAttemptCapTerminal(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo, job, first := claimActressCoverageTask(t, db, nil)
+	ctx := context.Background()
+	claimed := first
+	for i := 2; i <= actressSyncAttemptCap; i++ { // claims 2,3 reach the cap
+		_, err := repo.RequeueTask(ctx, claimed.ID, claimed.LeaseToken, ActressSyncRequeueOptions{ConsumeAttempt: true})
+		require.NoError(t, err)
+		next, err := repo.ClaimNext("owner", time.Now().UTC().Add(time.Hour))
+		require.NoError(t, err)
+		require.NotNil(t, next)
+		claimed = next
+	}
+	require.Equal(t, actressSyncAttemptCap, claimed.Attempts)
+
+	// Final consumptive requeue: settle terminal-failed, never re-pend.
+	_, err := repo.RequeueTask(ctx, claimed.ID, claimed.LeaseToken, ActressSyncRequeueOptions{ConsumeAttempt: true})
+	require.NoError(t, err)
+	stored, err := repo.ListTasks(job.ID, 0)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncTaskFailed, stored[0].Status)
+	require.Equal(t, "attempt_cap_reached", stored[0].ErrorMessage)
+
+	// The task can never be claimed again, and the job terminates.
+	next, err := repo.ClaimNext("owner", time.Now().UTC().Add(time.Hour))
+	require.NoError(t, err)
+	require.Nil(t, next)
+	storedJob, err := repo.FindJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ActressSyncJobCompleted, storedJob.Status)
+	require.Equal(t, 1, storedJob.Failed)
+}
