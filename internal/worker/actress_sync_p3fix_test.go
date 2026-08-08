@@ -243,3 +243,17 @@ func TestRetryableUntypedTransportLeaves(t *testing.T) {
 	)
 	require.True(t, isRetryableActressSyncError(joined))
 }
+
+// Codex P2 (r10): Start rechecks the permanent latch under the lock.
+func TestStartCannotResurrectAfterShutdown(t *testing.T) {
+	_, _, _, manager := newFinalManagerFixture(t, &models.Actress{DMMID: 97})
+	manager.Shutdown()
+	manager.Start()
+	manager.mu.Lock()
+	require.False(t, manager.started, "restart after Shutdown must be refused")
+	manager.mu.Unlock()
+	manager.mu.Lock()
+	manager.startLocked()
+	require.False(t, manager.started, "startLocked must fence on the latch too")
+	manager.mu.Unlock()
+}
