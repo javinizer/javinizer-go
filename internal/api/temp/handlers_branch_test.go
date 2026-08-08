@@ -158,7 +158,7 @@ func TestBranch_RenameFailure_TempOpenFailure(t *testing.T) {
 	hooked := &openHookFs{
 		Fs:    afero.NewMemMapFs(),
 		mode:  "error",
-		match: func(name string) bool { return strings.Contains(name, "/.tmp/") },
+		match: isTmpCacheFile,
 	}
 	fs := &renameAlwaysFailFs{Fs: hooked}
 	deps := newImageCacheDeps(t, fs)
@@ -178,13 +178,17 @@ func TestBranch_RenameFailure_TempCopyFailure(t *testing.T) {
 	hooked := &openHookFs{
 		Fs:    afero.NewMemMapFs(),
 		mode:  "readfail",
-		match: func(name string) bool { return strings.Contains(name, "/.tmp/") },
+		match: isTmpCacheFile,
 	}
 	fs := &renameAlwaysFailFs{Fs: hooked}
 	deps := newImageCacheDeps(t, fs)
 
 	w := serveImageRequest(t, deps, upstream.URL+"/img.jpg")
 	assert.Equal(t, http.StatusBadGateway, w.Code)
+}
+
+func isTmpCacheFile(name string) bool {
+	return filepath.Base(filepath.Dir(name)) == ".tmp"
 }
 
 func TestBranch_StaleEntry_OpenFailureFallsToForbidden(t *testing.T) {
