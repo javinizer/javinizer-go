@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"bytes"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,4 +171,44 @@ func TestSetString_WriteNFOEscaping(t *testing.T) {
 	require.NotNil(t, parsed.Movie)
 	assert.Equal(t, `Bob's "Best" <Series> & Co`, parsed.Movie.Series,
 		"set name with special characters must round-trip exactly through WriteNFO+ParseNFO")
+}
+
+func TestSetString_MarshalXMLEmptyDirectCall(t *testing.T) {
+	err := SetString("").MarshalXML(xml.NewEncoder(failingWriter{}), xml.StartElement{Name: xml.Name{Local: "set"}})
+	require.NoError(t, err, "empty SetString returns nil before touching the encoder")
+}
+
+func TestSetString_MarshalXMLEncoderError(t *testing.T) {
+	var s SetString = "Series"
+	// failAfterNWriter{remaining: 0} fails on the first write, so EncodeToken(start)
+	// (which flushes the start element) surfaces its error immediately.
+	err := s.MarshalXML(xml.NewEncoder(&failAfterNWriter{remaining: 0}), xml.StartElement{Name: xml.Name{Local: "set"}})
+	require.Error(t, err, "MarshalXML should surface the EncodeToken(start) write error")
+}
+
+func TestSetString_UnmarshalXMLTokenError(t *testing.T) {
+	var s SetString
+	// After consuming <set>, the trailing "<" is not a valid token, so the
+	// d.Token() call inside UnmarshalXML returns a syntax error.
+	d := xml.NewDecoder(bytes.NewReader([]byte("<set><")))
+	d.Token()
+	err := s.UnmarshalXML(d, xml.StartElement{Name: xml.Name{Local: "set"}})
+	require.Error(t, err, "invalid token input should surface a Token error")
+}
+
+func TestSetString_UnmarshalXMLUnknownChildSkipError(t *testing.T) {
+	var s SetString
+	d := xml.NewDecoder(bytes.NewReader([]byte("<set><bad><nested></name></set>")))
+	d.Token()
+	err := s.UnmarshalXML(d, xml.StartElement{Name: xml.Name{Local: "set"}})
+	require.Error(t, err, "malformed unknown child should surface a Skip error")
+}
+
+func TestSetString_UnmarshalXMLNameDecodeError(t *testing.T) {
+	var s SetString
+	// <name> with a mismatched nested element fails d.DecodeElement.
+	d := xml.NewDecoder(bytes.NewReader([]byte("<set><name><unclosed></name></set>")))
+	d.Token()
+	err := s.UnmarshalXML(d, xml.StartElement{Name: xml.Name{Local: "set"}})
+	require.Error(t, err, "malformed <name> child should surface a DecodeElement error")
 }
