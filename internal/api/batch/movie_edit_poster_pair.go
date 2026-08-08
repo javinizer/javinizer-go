@@ -284,6 +284,11 @@ func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, r
 	} else if hit {
 		return "", fmt.Errorf("%w for %s (rekey witness) — restart to reconcile before retrying", errPromoteWitnessPending, posterID)
 	}
+	if parked, perr := parkedBackupConflictFor(fs, dir, posterID); perr != nil {
+		return "", perr
+	} else if parked {
+		return "", fmt.Errorf("%w for %s (in-flight rescrape) — retry after it completes", errPromoteWitnessPending, posterID)
+	}
 	// codex P2: an unresolved CROP witness also fences the download. When the
 	// crop committed but its promote exhausted retries, promoting new bytes
 	// at the same canonical URL makes startup reconciliation misclassify the
@@ -384,6 +389,28 @@ func rekeyWitnessIDsFor(fs afero.Fs, dir, posterID string) (bool, error) {
 	return false, nil
 }
 
+// parkedBackupConflictFor reports whether a rescrape's parked backup legs
+// (probe suffix .rsbak.) exist for posterID — admission signals for the
+// download/crop guards (audit F-R9-2: an in-flight rescrape's losing closeout
+// can restore parked litter OVER freshly committed review bytes). Scan errors
+// fail closed.
+func parkedBackupConflictFor(fs afero.Fs, dir, posterID string) (bool, error) {
+	entries, err := afero.ReadDir(fs, dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("rescrape backup scan %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		n := e.Name()
+		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // cropWitnessConflict scans the poster dir for crop witnesses naming
 // posterID, returning the conflicting witness filename ("" when none). Both
 // admission guards (crop write + from-URL promote) share this scan so a
@@ -452,6 +479,11 @@ func writeCropWitnessGuarded(fs afero.Fs, tempDir, jobID string, w cropWitness) 
 		return "", fmt.Errorf("crop witness scan: %w", serr)
 	} else if hit {
 		return "", fmt.Errorf("%w for %s (fence: rekey witness) — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
+	}
+	if parked, perr := parkedBackupConflictFor(fs, dir, w.PosterID); perr != nil {
+		return "", perr
+	} else if parked {
+		return "", fmt.Errorf("%w for %s (fence: in-flight rescrape) — retry after it completes", errCropWitnessPending, w.PosterID)
 	}
 	conflict, cerr := cropWitnessConflict(fs, dir, w.PosterID)
 	if cerr != nil {

@@ -123,6 +123,32 @@ func TestRescrapeInFlightBackupPresentEdges(t *testing.T) {
 	assert.Error(t, err, "read wedge fails closed")
 }
 
+// audit F-R9-1: relocation refuses when a park backup exists under the NEW
+// identity too — a foreign family's rescrape litter its losing closeout
+// would otherwise restore over our committed bytes.
+func TestRekeyDestinationFencedByParkedBackup(t *testing.T) {
+	store, fs, dir := familyRelocationSetup(t)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "SSNI-N9.jpg.rsbak.a1.b2"), []byte("litter"), 0o644))
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
+	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
+	err := m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+	assert.Contains(t, err.Error(), "in-flight rescrape")
+	require.NoError(t, fs.Remove(filepath.Join(dir, "SSNI-N9.jpg.rsbak.a1.b2")))
+
+	// destination wedge fails CLOSED: second relocation scan (dest backup) —
+	// 5th dir Open: fence rekey(1), fence crop(2), dest witness content(3),
+	// source backup(4), dest backup(5 wedged)
+	fs2 := &openFailAfterNFS{Fs: fs, suffix: dir, allow: 4}
+	pe.attachEnv(&posterEditEnv{fs: fs2, tempDir: "/tmp", jobID: "JOB-9"})
+	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "backup-scan", "destination scan wedge fails the relocation")
+}
+
 // audit F-R7-1: relocation pins the initiating ResultID in the witness.
 func TestRekeyWitnessPinnedResultID(t *testing.T) {
 	store3 := resultstore.New(1, []string{"/f/a.mp4"})

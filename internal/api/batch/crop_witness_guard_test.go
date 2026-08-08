@@ -279,11 +279,75 @@ func TestCropGuardedSecondScanDirError(t *testing.T) {
 			return false
 		}
 		count++
-		return count > 1 // rekey scan ReadDir ok, crop scan ReadDir wedges
+		return count > 2 // rekey ReadDir #1 ok, parked-backup ReadDir #2 ok, crop scan ReadDir #3 wedges
 	}}
 	_, err := writeCropWitnessGuarded(fs, "/tmp", "JG-D2", cropWitness{PosterID: "PI-2", ResultID: "r1", StageID: "PI-2.crop-1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "crop witness scan")
+}
+
+// The crop guard's parked-scan wedge fails closed.
+func TestWriteCropGuardedParkedScanErrorFailsClosed(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	require.NoError(t, mem.MkdirAll("/tmp/posters/JG-CP", 0o755))
+	count := 0
+	fs := &brokenFS{Fs: mem, failOpen: func(n string) bool {
+		if filepath.ToSlash(n) != "/tmp/posters/JG-CP" {
+			return false
+		}
+		count++
+		return count > 1 // rekey scan (#1) passes; parked scan (#2) wedges
+	}}
+	_, err := writeCropWitnessGuarded(fs, "/tmp", "JG-CP", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rescrape backup scan")
+}
+
+// The promote guard's parked-backup scan wedges are hard errors (fail closed).
+func TestWritePromoteGuardedParkedScanErrorFailsClosed(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	require.NoError(t, mem.MkdirAll("/tmp/posters/JG-PE", 0o755))
+	count := 0
+	fs := &brokenFS{Fs: mem, failOpen: func(n string) bool {
+		if filepath.ToSlash(n) != "/tmp/posters/JG-PE" {
+			return false
+		}
+		count++
+		return count > 1 // rekey scan ok, parked scan wedges
+	}}
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-PE", "PI-1", "https://x", "res-1", 0, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rescrape backup scan")
+}
+
+// audit F-R9-2: parked rescrape backups fence both write guards — a losing
+// rescrape's legacy restore could otherwise clobber freshly committed bytes.
+func TestWriteCropWitnessGuardedFencesParkedBackup(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JG-PK"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1.jpg.rsbak.a1.b2"), []byte("litter"), 0o644))
+	_, err := writeCropWitnessGuarded(fs, "/tmp", "JG-PK", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
+	require.ErrorIs(t, err, errCropWitnessPending)
+	assert.Contains(t, err.Error(), "in-flight rescrape")
+	require.NoError(t, fs.Remove(filepath.Join(dir, "PI-1.jpg.rsbak.a1.b2")))
+	_, err = writeCropWitnessGuarded(fs, "/tmp", "JG-PK", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
+	require.NoError(t, err, "park cleared ⇒ crop admits")
+
+	// scan wedge fails closed
+	fs2 := &brokenFS{Fs: fs, failOpen: func(n string) bool { return filepath.ToSlash(n) == filepath.ToSlash(dir) }}
+	_, err = writeCropWitnessGuarded(fs2, "/tmp", "JG-PK", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
+	require.Error(t, err)
+}
+
+func TestWritePromoteGuardedFencesParkedBackup(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JG-PB"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "PI-1-full.jpg.rsbak.a1.b2"), []byte("litter"), 0o644))
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-PB", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
+	require.ErrorIs(t, err, errPromoteWitnessPending)
+	assert.Contains(t, err.Error(), "in-flight rescrape")
 }
 
 // codex P2: a NON-absence read error on the canonical full-size source must

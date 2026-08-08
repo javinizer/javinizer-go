@@ -835,6 +835,17 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				if inFlight {
 					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster pair %s has an in-flight rescrape — retry after it completes", canonicalOldPosterID)}
 				}
+				// audit F-R9-1: probe the destination too — an in-flight
+				// rescrape of a DIFFERENT family may have litter parked at the
+				// destination; its losing closeout would restore-over our
+				// freshly committed pair.
+				inFlight2, bErr2 := rescrapeInFlightBackupPresent(env.fs, dir, newID)
+				if bErr2 != nil {
+					return fmt.Errorf("poster rekey backup-scan %s: %w", dir, bErr2)
+				}
+				if inFlight2 {
+					return &EditAdmissionConflictError{Message: fmt.Sprintf("poster rekey target %s has an in-flight rescrape — retry after it completes", newID)}
+				}
 				wBytes, _ := json.Marshal(rekeyWitness{OldID: canonicalOldPosterID, NewID: newID, PrevRevision: prevRevision, ResultID: ownerResultID})
 				tmpPath := witnessPath + ".tmp"
 				if err := afero.WriteFile(env.fs, tmpPath, wBytes, 0o644); err != nil {
