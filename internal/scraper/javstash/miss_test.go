@@ -190,6 +190,25 @@ func TestParseScene_WithImagesAndURLs(t *testing.T) {
 	assert.Equal(t, "ja", result.Language)
 }
 
+func TestParseScene_EmptyCodeFallback(t *testing.T) {
+	s := &scraper{
+		baseURL:  "https://javstash.org/graphql",
+		language: "en",
+	}
+
+	// scene.Code is empty → ID and ContentID fall back to searchID
+	sc := &scene{
+		ID:    "scene789",
+		Code:  "",
+		Title: "Fallback Movie",
+	}
+
+	result, err := s.parseScene(sc, "FALLBACK-001")
+	require.NoError(t, err)
+	assert.Equal(t, "FALLBACK-001", result.ID, "ID should fall back to searchID when scene.Code is empty")
+	assert.Equal(t, "FALLBACK-001", result.ContentID, "ContentID should equal ID")
+}
+
 // --- parseScene: images with poster keyword ---
 
 func TestParseScene_ImagesWithPosterKeyword(t *testing.T) {

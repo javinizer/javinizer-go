@@ -401,3 +401,23 @@ func TestParseDetailPage_FallbackID(t *testing.T) {
 	assert.Equal(t, "javliay67q", result.ID, "ID should fall back to slug when video_id absent")
 	assert.Equal(t, "javliay67q", result.ContentID, "ContentID should equal ID")
 }
+
+func TestIsDirectPageURL(t *testing.T) {
+	assert.True(t, isDirectPageURL("https://www.javlibrary.com/en/javliay67q.html"))
+	assert.True(t, isDirectPageURL("https://www.javlibrary.com/en/?v=javmeABCDE"))
+	assert.False(t, isDirectPageURL("https://www.javlibrary.com/en/vl_searchbyid.php?keyword=IPX-123"))
+	assert.False(t, isDirectPageURL("not-a-url"))
+	assert.False(t, isDirectPageURL(""))
+}
+
+func TestRedactPageURL(t *testing.T) {
+	// Strips userinfo and non-v query params
+	result := redactPageURL("https://user:pass@www.javlibrary.com/en/?v=javmeABCDE&token=secret")
+	assert.NotContains(t, result, "user:pass")
+	assert.NotContains(t, result, "token=secret")
+	assert.Contains(t, result, "v=javmeABCDE")
+
+	// Invalid URL returns input as-is
+	result2 := redactPageURL("://invalid")
+	assert.Equal(t, "://invalid", result2)
+}
