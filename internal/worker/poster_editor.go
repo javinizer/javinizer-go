@@ -385,6 +385,21 @@ func isSafePosterFileID(id string) bool {
 		filepath.Base(id) == id && !strings.ContainsAny(id, "/\\")
 }
 
+// hasUnresolvedPromoteWitness reports whether a promote witness for posterID
+// exists on disk — the apply write-back fence's probe (codex P2): the
+// write-back bumps the result revision, and startup arbitration reads
+// revision>prev_revision as "promote committed", so the bump is poisonous
+// while recovery state can still exist.
+func (pe *PosterEditor) hasUnresolvedPromoteWitness(posterID string) bool {
+	env := pe.currentEnv()
+	if env == nil || env.fs == nil || env.tempDir == "" || env.jobID == "" || posterID == "" {
+		return false
+	}
+	p := filepath.Join(env.tempDir, "posters", env.jobID, ".promote-"+url.PathEscape(posterID)+".json")
+	_, err := env.fs.Stat(p)
+	return err == nil
+}
+
 // posterWitnessFence refuses edits while a promote or crop witness for
 // posterID is unresolved (codex P2 arbitration-integrity): an UNRELATED
 // same-family PATCH would advance the result revision while the durable row

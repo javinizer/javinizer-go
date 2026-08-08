@@ -135,10 +135,15 @@ type applyPhaseInputs struct {
 	// codex r42: variadic so multi-key acquisitions route through the
 	// registry's folded total order (AcquireMany) — caller-side ordering
 	// reproduces sort rules that diverge under case folding and deadlock.
-	EditLockFn  func(movieIDs ...string) (release func())
-	Concurrency concurrencyConfig
-	NFOEnabled  bool
-	WF          workflow.WorkflowInterface
+	EditLockFn func(movieIDs ...string) (release func())
+	// PromoteWitnessFn reports whether the poster family has an unresolved
+	// .promote- witness — the success write-back skips while it lingers
+	// (codex P2: its revision bump would flip startup arbitration of the
+	// pending promote to "committed"). nil ⇒ no fence.
+	PromoteWitnessFn func(posterID string) bool
+	Concurrency      concurrencyConfig
+	NFOEnabled       bool
+	WF               workflow.WorkflowInterface
 
 	// Current state snapshot (frozen at construction, not live)
 	Results     map[string]*resultstore.MovieResult

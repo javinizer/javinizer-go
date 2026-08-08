@@ -406,16 +406,23 @@ func interpretApplyResult(
 		defer unlock()
 		// codex P2-C/D: settled-rekey skip runs UNDER the family key.
 		if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
-			err2 := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-				if applyWritebackIdentityMismatch(movie, current) {
-					logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+			if mid := result.Movie.ID; mid != "" && inputs.PromoteWitnessFn != nil && inputs.PromoteWitnessFn(mid) {
+				// codex P2: an unresolved promote witness arbitrates at startup by
+				// revision — this write-back bumps it, which would declare a
+				// failed refresh committed and discard its recovery state.
+				logging.Warnf("[Apply] skipping success write-back for %s — promote witness for %s unresolved; restart reconciles", filePath, mid)
+			} else {
+				err2 := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+					if applyWritebackIdentityMismatch(movie, current) {
+						logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+						return current, nil
+					}
+					current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
 					return current, nil
+				})
+				if err2 != nil {
+					logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err2)
 				}
-				current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
-				return current, nil
-			})
-			if err2 != nil {
-				logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err2)
 			}
 		}
 		outcome.Movie = result.Movie

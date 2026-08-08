@@ -268,6 +268,16 @@ func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, r
 		// state. Fail closed.
 		return "", fmt.Errorf("promote witness check %s: %w", p, err)
 	}
+	// codex P2: an unresolved REKEY witness (.rekey-<rawID>.json, matching the
+	// worker writer) means one poster leg may live under another ID; a
+	// download recreating the old-ID leg beside the stranded new one would
+	// corrupt the next startup's rekey reconciliation.
+	rp := filepath.Join(dir, ".rekey-"+posterID+".json")
+	if _, serr := fs.Stat(rp); serr == nil {
+		return "", fmt.Errorf("%w for %s (rekey witness) — restart to reconcile before retrying", errPromoteWitnessPending, posterID)
+	} else if !os.IsNotExist(serr) {
+		return "", fmt.Errorf("rekey witness check %s: %w", rp, serr)
+	}
 	// codex P2: an unresolved CROP witness also fences the download. When the
 	// crop committed but its promote exhausted retries, promoting new bytes
 	// at the same canonical URL makes startup reconciliation misclassify the

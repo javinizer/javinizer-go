@@ -213,6 +213,27 @@ func TestWritePromoteGuardedCropScanReadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "crop witness scan")
 }
 
+// codex P2: an unresolved REKEY witness (.rekey-<id>.json, worker writer's
+// raw name) means one leg may live under another ID — the download must be
+// fenced or it can recreate the old-ID leg beside the stranded new one.
+func TestWritePromoteGuardedFencesRekeyWitness(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JG-RK"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".rekey-PI-1.json"), []byte("{}"), 0o644))
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-RK", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
+	require.ErrorIs(t, err, errPromoteWitnessPending)
+	assert.Contains(t, err.Error(), "rekey witness")
+}
+
+// A transient stat error on the rekey probe fails closed (not absence).
+func TestWritePromoteGuardedRekeyStatErrorFailsClosed(t *testing.T) {
+	fs := statErrTargetFS{Fs: afero.NewMemMapFs(), target: "/tmp/posters/JG-RE/.rekey-PI-1.json"}
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-RE", "PI-1", "https://x/new.jpg", "res-1", 0, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rekey witness check")
+}
+
 // codex P2: a NON-absence read error on the canonical full-size source must
 // abort the crop (409) rather than silently falling back to the cropped leg
 // while the UI measured coordinates against full size.
