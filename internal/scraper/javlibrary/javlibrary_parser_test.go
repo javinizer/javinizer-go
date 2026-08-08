@@ -14,6 +14,9 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func mustParseDoc(t testing.TB, html string) *goquery.Document {
@@ -600,4 +603,50 @@ func (t *urlRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	req.URL.Host = target.Host
 	req.Host = target.Host
 	return t.base.RoundTrip(req)
+}
+
+func TestSearch_DirectPageURL_FetchError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := resty.New()
+	client.SetTransport(&urlRewriteTransport{base: http.DefaultTransport, rewrite: server.URL})
+
+	s := &scraper{
+		client:      client,
+		enabled:     true,
+		baseURL:     server.URL,
+		language:    "en",
+		rateLimiter: ratelimit.NewLimiter(0),
+	}
+
+	_, err := s.Search(context.Background(), "https://www.javlibrary.com/en/javliay67q.html")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to fetch")
+}
+
+func TestSearch_DirectPageURL_NoVideoInfo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `<html><body>no video info here</body></html>`)
+	}))
+	defer server.Close()
+
+	client := resty.New()
+	client.SetTransport(&urlRewriteTransport{base: http.DefaultTransport, rewrite: server.URL})
+
+	s := &scraper{
+		client:      client,
+		enabled:     true,
+		baseURL:     server.URL,
+		language:    "en",
+		rateLimiter: ratelimit.NewLimiter(0),
+	}
+
+	_, err := s.Search(context.Background(), "https://www.javlibrary.com/en/javliay67q.html")
+	require.Error(t, err)
+	se, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, se.Kind)
 }
