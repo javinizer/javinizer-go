@@ -3,12 +3,19 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"gorm.io/gorm"
 )
 
 // ActressRepository persists and queries actress records, providing CRUD,
 // lookup, search, and merge operations on top of BaseRepository.
+// actressSearchCondition ...
+const actressSearchCondition = "first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ? OR CAST(dmm_id AS TEXT) LIKE ?"
+
+// ActressRepository ...
 type ActressRepository struct {
 	*BaseRepository[models.Actress, uint]
 	merger *actressMerger
@@ -16,6 +23,7 @@ type ActressRepository struct {
 
 // NewActressRepository constructs an ActressRepository backed by the given DB
 // with the default sort order for listing actresses.
+// NewActressRepository ...
 func NewActressRepository(db *DB) *ActressRepository {
 	repo := &ActressRepository{
 		BaseRepository: NewBaseRepository[models.Actress, uint](
@@ -48,6 +56,7 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 // other columns (created_at, dmm_id, thumb_url, aliases) the way a full-row
 // Save would. Callers should gate on a name-field change to avoid bumping
 // updated_at for unedited actresses.
+// RenameNameFields ...
 func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, firstName, lastName, japaneseName string) error {
 	if id == 0 {
 		return wrapDBErr("rename", "actress id 0", ErrInvalidLookup)
@@ -68,9 +77,55 @@ func (r *ActressRepository) FindByID(ctx context.Context, id uint) (*models.Actr
 	return r.BaseRepository.FindByID(ctx, id)
 }
 
-// Delete removes the actress with the given primary key.
+// Delete removes the actress and clears sync-task references explicitly:
+// production SQLite connections run with foreign-keys enforcement off, so the
+// migration's ON DELETE actions never fire; pending/running tasks are
+// cancelled first so they cannot complete against a deleted subject, then all
+// references are nulled so later reads cannot dereference a deleted actress.
 func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
-	return r.BaseRepository.Delete(ctx, id)
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		var jobIDs []string
+		if err := tx.Model(&models.ActressSyncTask{}).Distinct().Where("actress_id = ? AND status IN ?", id, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).Pluck("job_id", &jobIDs).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.ActressSyncTask{}).
+			Where("actress_id = ? AND status IN ?", id, []string{models.ActressSyncTaskPending, models.ActressSyncTaskRunning}).
+			Updates(map[string]any{
+				"status": models.ActressSyncTaskCancelled, "stage": "completed", "outcome": "cancelled",
+				"error_message": "actress_deleted", "completed_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		// Refresh the parent jobs affected by the per-task cancellations,
+		// otherwise a job whose every task just cancelled stays "running".
+		syncRepo := NewActressSyncRepository(r.GetDB())
+		for _, jobID := range jobIDs {
+			if err := syncRepo.refreshJobTx(tx, jobID, now); err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&models.ActressSyncTask{}).Where("actress_id = ?", id).Update("actress_id", nil).Error; err != nil {
+			return err
+		}
+		// movie_actresses carries no ON DELETE action and pragma FK enforcement
+		// is off, so join rows would otherwise dangle (and re-attach to any
+		// future row reusing this id).
+		if err := tx.Exec("DELETE FROM movie_actresses WHERE actress_id = ?", id).Error; err != nil {
+			return wrapDBErr("delete", fmt.Sprintf("actress %v movie links", id), err)
+		}
+		// DBC-02: remove the actress's translation rows outright — pragma FK
+		// enforcement is off, so the migration's ON DELETE CASCADE never fires.
+		if err := tx.Where("actress_id = ?", id).Delete(&models.ActressTranslation{}).Error; err != nil {
+			return wrapDBErr("delete", fmt.Sprintf("actress %v translations", id), err)
+		}
+		// Delete inside the transaction — BaseRepository.Delete would take a
+		// separate connection from the pool and deadlock on writer-locked SQLite.
+		if err := tx.Delete(&models.Actress{}, id).Error; err != nil {
+			return wrapDBErr("delete", fmt.Sprintf("actress %v", id), err)
+		}
+		return nil
+	})
 }
 
 // Count returns the total number of actress records.
@@ -80,6 +135,7 @@ func (r *ActressRepository) Count(ctx context.Context) (int64, error) {
 
 // FindByDMMID loads the actress with the given DMM identifier, returning
 // ErrNotFound when the id is zero and ErrInvalidLookup when negative.
+// FindByDMMID ...
 func (r *ActressRepository) FindByDMMID(ctx context.Context, dmmID int) (*models.Actress, error) {
 	if dmmID < 0 {
 		return nil, wrapDBErr("find", fmt.Sprintf("actress by dmm_id %d", dmmID), ErrInvalidLookup)
@@ -87,6 +143,7 @@ func (r *ActressRepository) FindByDMMID(ctx context.Context, dmmID int) (*models
 	if dmmID == 0 {
 		return nil, wrapDBErr("find", fmt.Sprintf("actress by dmm_id %d", dmmID), ErrNotFound)
 	}
+	// actress ...
 	var actress models.Actress
 	err := r.GetDB().WithContext(ctx).First(&actress, "dmm_id = ?", dmmID).Error
 	if err != nil {
@@ -97,7 +154,9 @@ func (r *ActressRepository) FindByDMMID(ctx context.Context, dmmID int) (*models
 
 // FindByJapaneseName loads the first actress matching the given Japanese name,
 // preferring higher DMM ids when duplicates exist.
+// FindByJapaneseName ...
 func (r *ActressRepository) FindByJapaneseName(ctx context.Context, name string) (*models.Actress, error) {
+	// actress ...
 	var actress models.Actress
 	err := r.GetDB().WithContext(ctx).Order("dmm_id DESC, id ASC").First(&actress, "japanese_name = ?", name).Error
 	if err != nil {
@@ -106,9 +165,21 @@ func (r *ActressRepository) FindByJapaneseName(ctx context.Context, name string)
 	return &actress, nil
 }
 
+// FindAllByJapaneseName ...
+func (r *ActressRepository) FindAllByJapaneseName(ctx context.Context, name string) ([]models.Actress, error) {
+	actresses := make([]models.Actress, 0)
+	err := r.GetDB().WithContext(ctx).Where("japanese_name = ? AND dmm_id > 0", name).Order("dmm_id DESC, id ASC").Find(&actresses).Error
+	if err != nil {
+		return nil, wrapDBErr("find", fmt.Sprintf("actresses %s", name), err)
+	}
+	return actresses, nil
+}
+
 // FindByFirstNameLastName loads the first actress matching the given first and
 // last name, preferring higher DMM ids when duplicates exist.
+// FindByFirstNameLastName ...
 func (r *ActressRepository) FindByFirstNameLastName(ctx context.Context, firstName, lastName string) (*models.Actress, error) {
+	// actress ...
 	var actress models.Actress
 	err := r.GetDB().WithContext(ctx).Order("dmm_id DESC, id ASC").First(&actress, "first_name = ? AND last_name = ?", firstName, lastName).Error
 	if err != nil {
@@ -119,7 +190,9 @@ func (r *ActressRepository) FindByFirstNameLastName(ctx context.Context, firstNa
 
 // FindByJapaneseNameAndDMMID loads an actress by Japanese name and DMM id,
 // falling back to whichever identifier is provided when only one is set.
+// FindByJapaneseNameAndDMMID ...
 func (r *ActressRepository) FindByJapaneseNameAndDMMID(ctx context.Context, name string, dmmID int) (*models.Actress, error) {
+	// actress ...
 	var actress models.Actress
 	if name != "" && dmmID > 0 {
 		err := r.GetDB().WithContext(ctx).First(&actress, "japanese_name = ? AND dmm_id = ?", name, dmmID).Error
@@ -142,6 +215,7 @@ func (r *ActressRepository) ListAll(ctx context.Context) ([]models.Actress, erro
 
 // FindOrCreate returns the existing actress with the given Japanese name, or
 // creates a new record when none is found.
+// FindOrCreate ...
 func (r *ActressRepository) FindOrCreate(ctx context.Context, actress *models.Actress) error {
 	if actress.JapaneseName != "" {
 		existing, err := r.FindByJapaneseName(ctx, actress.JapaneseName)
@@ -154,6 +228,134 @@ func (r *ActressRepository) FindOrCreate(ctx context.Context, actress *models.Ac
 	return r.Create(ctx, actress)
 }
 
+const missingActressThumbnailClause = "javinizer_missing_actress_thumbnail(COALESCE(thumb_url,'')) = 1"
+
+// actressFilterClauses ...
+var actressFilterClauses = map[string]string{
+	"missing_dmm":           "COALESCE(dmm_id, 0) <= 0",
+	"has_dmm":               "COALESCE(dmm_id, 0) > 0",
+	"missing_thumbnail":     missingActressThumbnailClause,
+	"missing_japanese_name": "TRIM(COALESCE(japanese_name,'')) = ''",
+	"japanese_name_only":    "TRIM(COALESCE(japanese_name,'')) <> '' AND TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = ''",
+	"missing_metadata":      "COALESCE(dmm_id, 0) > 0 AND (" + missingActressThumbnailClause + " OR TRIM(COALESCE(japanese_name,'')) = '' OR (TRIM(COALESCE(first_name,'')) = '' AND TRIM(COALESCE(last_name,'')) = ''))",
+}
+
+// ValidActressFilter ...
+func ValidActressFilter(filter string) (string, bool) {
+	clause, ok := actressFilterClauses[strings.TrimSpace(filter)]
+	return clause, ok
+}
+
+// resolveActressFilter maps a caller filter to its SQL clause. An empty
+// filter means no constraint; an unknown non-empty filter is rejected rather
+// than silently dropped — an unfiltered page would masquerade as a filtered
+// one and mislead API callers.
+func resolveActressFilter(filter string) (string, error) {
+	if strings.TrimSpace(filter) == "" {
+		return "", nil
+	}
+	clause, ok := ValidActressFilter(filter)
+	if !ok {
+		return "", wrapDBErr("filter", "actresses", ErrInvalidLookup)
+	}
+	return clause, nil
+}
+
+// ListFiltered ...
+func (r *ActressRepository) ListFiltered(ctx context.Context, filter string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error) {
+	// actresses ...
+	var actresses []models.Actress
+	sortBy, sortOrder, err := normalizeActressSort(sortBy, sortOrder)
+	if err != nil {
+		return nil, err
+	}
+	clause, err := resolveActressFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	dbq := r.GetDB().WithContext(ctx)
+	if clause != "" {
+		dbq = dbq.Where(clause)
+	}
+	for _, orderClause := range actressOrderClauses(sortBy, sortOrder) {
+		dbq = dbq.Order(orderClause)
+	}
+	err = dbq.Limit(limit).Offset(offset).Find(&actresses).Error
+	if err != nil {
+		return nil, wrapDBErr("find", "actresses", err)
+	}
+	return actresses, nil
+}
+
+// SearchFiltered ...
+func (r *ActressRepository) SearchFiltered(ctx context.Context, query, filter string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error) {
+	// actresses ...
+	var actresses []models.Actress
+	sortBy, sortOrder, err := normalizeActressSort(sortBy, sortOrder)
+	if err != nil {
+		return nil, err
+	}
+	searchPattern := "%" + query + "%"
+	clause, err := resolveActressFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	dbq := r.GetDB().WithContext(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern)
+	if clause != "" {
+		dbq = dbq.Where(clause)
+	}
+	for _, orderClause := range actressOrderClauses(sortBy, sortOrder) {
+		dbq = dbq.Order(orderClause)
+	}
+	err = dbq.Limit(limit).Offset(offset).Find(&actresses).Error
+	if err != nil {
+		return nil, wrapDBErr("search", "actresses", err)
+	}
+	return actresses, nil
+}
+
+// CountFiltered ...
+func (r *ActressRepository) CountFiltered(ctx context.Context, filter string) (int64, error) {
+	// count ...
+	var count int64
+	clause, err := resolveActressFilter(filter)
+	if err != nil {
+		return 0, err
+	}
+	dbq := r.GetDB().WithContext(ctx).Model(&models.Actress{})
+	if clause != "" {
+		dbq = dbq.Where(clause)
+	}
+	err = dbq.Count(&count).Error
+	if err != nil {
+		return 0, wrapDBErr("count", "actresses", err)
+	}
+	return count, nil
+}
+
+// CountSearchFiltered ...
+func (r *ActressRepository) CountSearchFiltered(ctx context.Context, query, filter string) (int64, error) {
+	// count ...
+	var count int64
+	searchPattern := "%" + query + "%"
+	dbq := r.GetDB().WithContext(ctx).Model(&models.Actress{}).
+		Where(actressSearchCondition,
+			searchPattern, searchPattern, searchPattern, searchPattern)
+	clause, err := resolveActressFilter(filter)
+	if err != nil {
+		return 0, err
+	}
+	if clause != "" {
+		dbq = dbq.Where(clause)
+	}
+	err = dbq.Count(&count).Error
+	if err != nil {
+		return 0, wrapDBErr("count", "search actresses", err)
+	}
+	return count, nil
+}
+
 // List returns a page of actresses limited by limit and offset.
 func (r *ActressRepository) List(ctx context.Context, limit, offset int) ([]models.Actress, error) {
 	return r.BaseRepository.List(ctx, limit, offset)
@@ -161,7 +363,9 @@ func (r *ActressRepository) List(ctx context.Context, limit, offset int) ([]mode
 
 // ListSorted returns a page of actresses ordered by the validated sortBy and
 // sortOrder columns.
+// ListSorted ...
 func (r *ActressRepository) ListSorted(ctx context.Context, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error) {
+	// actresses ...
 	var actresses []models.Actress
 
 	sortBy, sortOrder, err := normalizeActressSort(sortBy, sortOrder)
@@ -180,14 +384,16 @@ func (r *ActressRepository) ListSorted(ctx context.Context, limit, offset int, s
 	return actresses, nil
 }
 
-// SearchPaged returns a page of actresses whose names match the query, ordered
+// SearchPaged returns a page of actresses whose names or DMM IDs match the query, ordered
 // by the default sort.
+// SearchPaged ...
 func (r *ActressRepository) SearchPaged(ctx context.Context, query string, limit, offset int) ([]models.Actress, error) {
+	// actresses ...
 	var actresses []models.Actress
 
 	searchPattern := "%" + query + "%"
-	err := r.GetDB().WithContext(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-		searchPattern, searchPattern, searchPattern).
+	err := r.GetDB().WithContext(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern).
 		Order("japanese_name ASC, last_name ASC, first_name ASC, id ASC").
 		Limit(limit).
 		Offset(offset).
@@ -200,7 +406,9 @@ func (r *ActressRepository) SearchPaged(ctx context.Context, query string, limit
 
 // SearchPagedSorted returns a page of actresses matching the query, ordered by
 // the validated sortBy and sortOrder columns.
+// SearchPagedSorted ...
 func (r *ActressRepository) SearchPagedSorted(ctx context.Context, query string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error) {
+	// actresses ...
 	var actresses []models.Actress
 
 	sortBy, sortOrder, err := normalizeActressSort(sortBy, sortOrder)
@@ -209,8 +417,8 @@ func (r *ActressRepository) SearchPagedSorted(ctx context.Context, query string,
 	}
 	searchPattern := "%" + query + "%"
 
-	dbq := r.GetDB().WithContext(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-		searchPattern, searchPattern, searchPattern)
+	dbq := r.GetDB().WithContext(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern)
 	for _, clause := range actressOrderClauses(sortBy, sortOrder) {
 		dbq = dbq.Order(clause)
 	}
@@ -222,13 +430,14 @@ func (r *ActressRepository) SearchPagedSorted(ctx context.Context, query string,
 	return actresses, nil
 }
 
-// CountSearch returns the number of actresses whose names match the query.
+// CountSearch returns the number of actresses whose names or DMM IDs match the query.
 func (r *ActressRepository) CountSearch(ctx context.Context, query string) (int64, error) {
+	// count ...
 	var count int64
 	searchPattern := "%" + query + "%"
 	err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).
-		Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-			searchPattern, searchPattern, searchPattern).
+		Where(actressSearchCondition,
+			searchPattern, searchPattern, searchPattern, searchPattern).
 		Count(&count).Error
 	if err != nil {
 		return 0, wrapDBErr("count", "search actresses", err)
@@ -238,7 +447,9 @@ func (r *ActressRepository) CountSearch(ctx context.Context, query string) (int6
 
 // Search returns up to 50 actresses matching the query, or up to 100 when
 // the query is empty.
+// Search ...
 func (r *ActressRepository) Search(ctx context.Context, query string) ([]models.Actress, error) {
+	// actresses ...
 	var actresses []models.Actress
 
 	if query == "" {
@@ -250,8 +461,8 @@ func (r *ActressRepository) Search(ctx context.Context, query string) ([]models.
 	}
 
 	searchPattern := "%" + query + "%"
-	err := r.GetDB().WithContext(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-		searchPattern, searchPattern, searchPattern).
+	err := r.GetDB().WithContext(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern).
 		Order("japanese_name ASC, last_name ASC, first_name ASC").
 		Limit(50).
 		Find(&actresses).Error
@@ -263,12 +474,26 @@ func (r *ActressRepository) Search(ctx context.Context, query string) ([]models.
 
 // PreviewMerge computes a non-persistent preview of merging the source
 // actress into the target actress.
+// PreviewMerge ...
 func (r *ActressRepository) PreviewMerge(ctx context.Context, targetID, sourceID uint) (*ActressMergePreview, error) {
 	return r.merger.PreviewMerge(ctx, targetID, sourceID)
 }
 
 // Merge computes a merge plan for the source actress into the target and
 // executes it within a transaction.
+// Merge ...
 func (r *ActressRepository) Merge(ctx context.Context, targetID, sourceID uint, resolutions map[string]string) (*ActressMergeResult, error) {
 	return r.merger.Merge(ctx, targetID, sourceID, resolutions, r.GetDB())
+}
+
+// MergeWithVersions ...
+func (r *ActressRepository) MergeWithVersions(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, targetUpdatedAt, sourceUpdatedAt time.Time) (*ActressMergeResult, error) {
+	plan, err := r.merger.PlanMerge(ctx, targetID, sourceID, resolutions)
+	if err != nil {
+		return nil, err
+	}
+	plan.TargetUpdatedAt = targetUpdatedAt
+	plan.SourceUpdatedAt = sourceUpdatedAt
+	plan.Versioned = true
+	return r.merger.ExecuteMerge(ctx, plan, r.GetDB())
 }

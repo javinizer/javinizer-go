@@ -105,6 +105,9 @@ linters:
       - path: internal/database/actress_merge\.go
         linters:
           - goconst
+      - path: internal/database/actress_sync_repo\.go
+        linters:
+          - goconst
       - path: internal/database/actress_merge_domain\.go
         linters:
           - goconst
