@@ -174,7 +174,7 @@ func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*m
 	// Check context before any work to handle pre-cancelled/expired contexts.
 	select {
 	case <-ctx.Done():
-		return nil, classifyContextErrorForRaw(ctx.Err())
+		return nil, classifyContextError(scraperName, ctx.Err())
 	default:
 	}
 	// Resolve URL-shaped inputs to their extracted ID so the Search fallback
