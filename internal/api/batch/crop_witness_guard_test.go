@@ -387,6 +387,17 @@ func TestWritePromoteGuardedFencesParkedBackup(t *testing.T) {
 	assert.Contains(t, err.Error(), "in-flight rescrape")
 }
 
+// codex P2 (case): parked-backup probing folds case — a same-file marker
+// parked under a case variant reaches the same bytes on insensitive FSes.
+func TestParkedBackupConflictFoldsCaseBatch(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JCF-B"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "abc-1.jpg.rsbak.a1.b2"), []byte("litter"), 0o644))
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JCF-B", "ABC-1", "https://x", "res-1", 0, nil)
+	require.ErrorIs(t, err, errPromoteWitnessPending)
+}
+
 // codex P2: a NON-absence read error on the canonical full-size source must
 // abort the crop (409) rather than silently falling back to the cropped leg
 // while the UI measured coordinates against full size.

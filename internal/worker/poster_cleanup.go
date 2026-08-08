@@ -80,8 +80,7 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup 
 	}
 	// codex P1 (@poster_cleanup): park paths derive directly from the ID —
 	// isSafePosterFileID gates filepath construction, NOT the scraper-shaped
-	// manager validation that runs later, so a "../"-style ID never moves
-	// bytes outside the job's poster dir.
+
 	if !isSafePosterFileID(id) {
 		logging.Warnf("rescrape pair backup skipped: unsafe poster ID %q", id)
 		return b
@@ -203,6 +202,13 @@ func (b *rescrapePosterBackup) discard() {
 func OrphanedPosterPaths(orphanedIDs []string, newMovieID string, tempDir string, jobID models.JobID, cache *fscase.FSCaseCache) []string {
 	var paths []string
 	for _, id := range orphanedIDs {
+		// codex P1: orphaned IDs flow from committed scraper state that the
+		// poster manager's validation never rejected the COMMIT — a legacy
+		// "../victim" ID would join outside the job dir. Build nothing.
+		if !isSafePosterFileID(id) {
+			logging.Warnf("[Rescrape] orphan sweep skipped unsafe poster ID %q", id)
+			continue
+		}
 		if strings.EqualFold(id, newMovieID) {
 			posterDir := filepath.Join(tempDir, "posters", jobID.String())
 			if cache == nil || cache.IsCaseInsensitive(posterDir) {

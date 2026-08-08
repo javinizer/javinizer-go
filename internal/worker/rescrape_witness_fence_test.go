@@ -560,6 +560,32 @@ func TestMarkerBranchHandlesDottedRsbakIDs(t *testing.T) {
 	assert.Equal(t, "parked", string(got), "parked leg re-homed")
 }
 
+// codex P1: unsafe scraper-derived IDs never flow into orphan-sweep paths.
+func TestOrphanedPosterPathsSkipsUnsafeIDs(t *testing.T) {
+	ids := []string{"../victim", "safe-1", "with/slash"}
+	out := OrphanedPosterPaths(ids, "NEW-1", "/tmp", models.NewJobID(), nil)
+	assert.Len(t, out, 2, "only the safe ID survives path construction")
+	for _, p := range out {
+		assert.Contains(t, p, "safe-1")
+		assert.NotContains(t, p, "victim")
+	}
+	// case-folded equal IDs never sweep on case-insensitive filesystems
+	assert.Empty(t, OrphanedPosterPaths([]string{"sAmE"}, "SAME", "/tmp", models.NewJobID(), nil))
+}
+
+// codex P2 (case): probes fold candidate spellings — a marker parked under
+// the scraper's case variant reaches the same canonical file on
+// case-insensitive filesystems.
+func TestInFlightProbesFoldCase(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JCF"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "abc-1.jpg.rsbak.a1.b2"), []byte("parked"), 0o644))
+	hit, err := rescrapeInFlightBackupPresent(fs, dir, "ABC-1")
+	require.NoError(t, err)
+	assert.True(t, hit, "folded probe catches the variant-case marker")
+}
+
 // audit F-R20-2 shape coverage: hex-hex tail anchor is exact.
 func TestMarkerAnchoredShapeMatrix(t *testing.T) {
 	assert.True(t, markerAnchored(".inflight-x.1.2"), "1-char nonce halves are valid")

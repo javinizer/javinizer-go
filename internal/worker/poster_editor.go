@@ -538,14 +538,20 @@ func rescrapeInFlightBackupPresent(fs afero.Fs, dir, posterID string) (bool, err
 		return false, rerr
 	}
 	inflightPrefix := ".inflight-" + url.PathEscape(posterID) + "."
+	loFull := strings.ToLower(posterID + "-full.jpg.rsbak.")
+	loCrop := strings.ToLower(posterID + ".jpg.rsbak.")
+	loMark := strings.ToLower(inflightPrefix)
 	for _, e := range rEntries {
 		n := e.Name()
-		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") {
+		nl := strings.ToLower(n)
+		// audit codex P2: fold at the probe — a same-file marker parked under
+		// the scraper's case variant registers on case-insensitive filesystems.
+		if strings.HasPrefix(nl, loCrop) || strings.HasPrefix(nl, loFull) {
 			return true, nil
 		}
 		// audit F-R20-2: marker probes are nonce-anchored — canonical files of
 		// an ID beginning ".inflight-" never read as an in-flight sentinel.
-		if markerAnchored(n) && strings.HasPrefix(n, inflightPrefix) {
+		if markerAnchored(n) && strings.HasPrefix(nl, loMark) {
 			return true, nil
 		}
 	}

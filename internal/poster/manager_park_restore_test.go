@@ -219,7 +219,7 @@ func (f *doubleWedgeFS) Create(n string) (afero.File, error) {
 }
 
 func (f *doubleWedgeFS) Rename(o, n string) error {
-	if f.failRename(o, n) {
+	if f.failRename(filepath.ToSlash(o), filepath.ToSlash(n)) {
 		return errors.New("rename wedged")
 	}
 	return f.Fs.Rename(o, n)

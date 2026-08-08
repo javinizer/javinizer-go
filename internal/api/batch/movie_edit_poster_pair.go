@@ -434,10 +434,18 @@ func parkedBackupConflictFor(fs afero.Fs, dir, posterID string) (bool, error) {
 		return false, fmt.Errorf("rescrape backup scan %s: %w", dir, err)
 	}
 	inflightPrefix := ".inflight-" + url.PathEscape(posterID) + "."
+	loFull := strings.ToLower(posterID + "-full.jpg.rsbak.")
+	loCrop := strings.ToLower(posterID + ".jpg.rsbak.")
+	loMark := strings.ToLower(inflightPrefix)
 	for _, e := range entries {
 		n := e.Name()
-		if strings.HasPrefix(n, posterID+".jpg.rsbak.") || strings.HasPrefix(n, posterID+"-full.jpg.rsbak.") ||
-			markerAnchoredBatch(n, inflightPrefix) {
+		nl := strings.ToLower(n)
+		// audit codex P2: fold-case marker probing — case-insensitive fs + a
+		// case-variant scraper ID names the same bytes.
+		if strings.HasPrefix(nl, loCrop) || strings.HasPrefix(nl, loFull) {
+			return true, nil
+		}
+		if strings.HasPrefix(nl, loMark) && markerAnchoredBatch(n, inflightPrefix) {
 			return true, nil
 		}
 	}
