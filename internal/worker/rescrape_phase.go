@@ -361,10 +361,17 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 	if movieResult != nil && movieResult.Movie != nil {
 		newMovieID = movieResult.Movie.ID
 	}
-	// audit F-R4-1: restore fired already for the failure statuses above;
-	// success discards; any OTHER unexpected status restores.
+	// audit F-R4-1 + F-R16-1: restore fired already for the failure statuses
+	// above; success discards — EXCEPT when generation failed or never ran
+	// and the pair pre-existed: those bytes are the committed state, so route
+	// through the keyed content-verify restore instead of discarding them.
 	if outcome.Status == models.RescrapeStatusSuccess {
-		scope.parked.discard()
+		lostGeneration := movieResult != nil && (movieResult.PosterError != nil || !movieResult.PosterGenerated)
+		if lostGeneration && scope.preExistedPair {
+			closeoutRescrapePosterBytes(lc.inputs, scope, movieResult, cleanupMovie())
+		} else {
+			scope.parked.discard()
+		}
 	} else if outcome.Status != models.RescrapeStatusGone && outcome.Status != models.RescrapeStatusFailed && outcome.Status != models.RescrapeStatusConflict {
 		scope.parked.restore(nil)
 	}

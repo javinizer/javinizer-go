@@ -453,6 +453,48 @@ func (f *brokenWitnessFS) Open(n string) (afero.File, error) {
 	return f.Fs.Open(n)
 }
 
+// audit F-R16-1: a successful METADATA rescrape whose poster generation
+// FAILED must restore the parked pre-op pair — the commit installs no new
+// bytes, so the committed state's bytes must not be parked-and-discarded.
+func TestWithRescrapeStatusFailedGenerationRestoresParkedPair(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "RF-1", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+	canon := filepath.Join(dir, "RF-1.jpg")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("committed-orig"), 0o644))
+	parked := parkCanonicalPosterPair(fs, dir, "RF-1")
+	require.True(t, parked.hadCrop)
+	genErr := "download wedged"
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.parked = parked
+		scope.preExistedPair = true
+		return &RescrapeResult{Status: models.RescrapeStatusSuccess}, &resultstore.MovieResult{Movie: &models.Movie{ID: "RF-1"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true, PosterError: &genErr}}, nil
+	})
+	require.NoError(t, err)
+	got, rerr := afero.ReadFile(fs, canon)
+	require.NoError(t, rerr)
+	assert.Equal(t, "committed-orig", string(got), "committed bytes restored on failed generation")
+	_, parkErr := fs.Stat(parked.cropBak)
+	assert.Error(t, parkErr, "parked copy consumed by the restore")
+
+	// Healthy path still discards: new bytes generated cleanly.
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("committed-orig2"), 0o644))
+	parked2 := parkCanonicalPosterPair(fs, dir, "RF-1")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("fresh-bytes"), 0o644))
+	_, err = withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.parked = parked2
+		scope.preExistedPair = true
+		return &RescrapeResult{Status: models.RescrapeStatusSuccess}, &resultstore.MovieResult{Movie: &models.Movie{ID: "RF-1"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}, nil
+	})
+	require.NoError(t, err)
+	got2, _ := afero.ReadFile(fs, canon)
+	assert.Equal(t, "fresh-bytes", string(got2), "healthy generation: discard stands")
+}
+
 // audit F-R10-2: when a closeout's content-verify refuses the rewind (canon
 // holds winner bytes), the parked pre-op copy is OBSOLETE — disposed, never
 // left to brick every poster admission as "in-flight rescrape".
