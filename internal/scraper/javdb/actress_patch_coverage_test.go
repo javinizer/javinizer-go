@@ -129,7 +129,8 @@ func TestJavDBActorAvatarParsingRejectsMalformedVariants(t *testing.T) {
 func TestExtractJavDBActorMetadataCoversSelectorsMetaAndNames(t *testing.T) {
 	doc := docFromHTML(t, `<html><head><meta property="og:title" content=""><meta name="twitter:title" content="Solo - JavDB"></head><body><h1></h1><h2></h2><source srcset=","><img data-original="https://example.com/no.jpg"><img srcset="https://c0.jdbstatic.com/avatars/ab/AB.webp 1x, other 2x"></body></html>`)
 	got := extractJavDBActorMetadata(doc, 5, "AB")
-	require.Equal(t, "Solo", got.JapaneseName)
+	require.Equal(t, "Solo", got.FirstName) // one-token Latin name is romanized FirstName, not JapaneseName (codex)
+	require.Empty(t, got.JapaneseName)
 	require.Equal(t, "https://c0.jdbstatic.com/avatars/ab/AB.webp", got.ThumbURL)
 
 	doc = docFromHTML(t, `<html><head><title>Jane Mary Doe | Javdb</title></head></html>`)
@@ -190,4 +191,14 @@ func TestJavDBActressFieldsAdvertisesRomanizedNames(t *testing.T) {
 	require.True(t, fields["actress_url"])
 	require.True(t, fields["actress_first_name"], "parser emits it; it must not be filtered")
 	require.True(t, fields["actress_last_name"], "parser emits it; it must not be filtered")
+}
+
+// Codex latest phase-3 head: one-token Latin actor names are romanized
+// FirstName, not JapaneseName (DMM's parser made the same split).
+func TestExtractJavDBActorSingleTokenLatinNameIsFirstName(t *testing.T) {
+	doc := docFromHTML(t, `<html><head><title>Solo - JavDB</title></head></html>`)
+	got := extractJavDBActorMetadata(doc, 5, "AB")
+	require.Equal(t, "Solo", got.FirstName)
+	require.Empty(t, got.LastName)
+	require.Empty(t, got.JapaneseName)
 }

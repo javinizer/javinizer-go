@@ -1151,10 +1151,16 @@ func extractJavDBActorMetadata(doc *goquery.Document, dmmID int, actorID string)
 		metadata.JapaneseName = name
 	} else {
 		parts := strings.Fields(name)
-		if len(parts) >= 2 {
+		switch {
+		case len(parts) >= 2:
 			metadata.FirstName = parts[0]
 			metadata.LastName = strings.Join(parts[1:], " ")
-		} else {
+		case len(parts) == 1:
+			// Single-token Latin names (Solo handles, stage names) are romanized
+			// FirstName, NOT JapaneseName — matching DMM's parser contract.
+			// (codes round: Never write them to JapaneseName.)
+			metadata.FirstName = parts[0]
+		default:
 			metadata.JapaneseName = name
 		}
 	}

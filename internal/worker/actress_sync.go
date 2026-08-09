@@ -458,7 +458,12 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		logging.Debugf("Actress sync: selected %s thumbnail for DMM ID %d", preferredThumbnailSource, actress.DMMID)
 	}
 	candidate, conflict := resolveActressInfo(actress, matches, deterministic)
-	if preferredThumbnail != "" && (actressThumbnailNeedsResolution(actress.ThumbURL) || (revalidate && scraperThumbnailCanRefresh(actress.ThumbURL))) {
+	// Codex late head: when the stored thumb is missing, resolveActressInfo
+	// already picked the best-ranked candidate across linked + direct sources
+	// — overriding with the direct-only "preferred" pick would demote a
+	// higher-ranked linked thumbnail. Refresh-only override keeps the
+	// high-priority pick while preserving refresh through lower-ranked sources.
+	if preferredThumbnail != "" && revalidate && scraperThumbnailCanRefresh(actress.ThumbURL) && !actressThumbnailNeedsResolution(actress.ThumbURL) {
 		candidate.ThumbURL = preferredThumbnail
 	}
 	if conflict {
