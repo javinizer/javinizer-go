@@ -8471,6 +8471,23 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api_r18devdump.dumpMatchView": {
+            "type": "object",
+            "properties": {
+                "content_id": {
+                    "type": "string"
+                },
+                "dvd_id": {
+                    "type": "string"
+                },
+                "release_date": {
+                    "type": "string"
+                },
+                "service_code": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_r18devdump.dumpStatusResponse": {
             "type": "object",
             "properties": {
@@ -8515,7 +8532,16 @@ const docTemplate = `{
                 "dvd_id": {
                     "type": "string"
                 },
+                "matches": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api_r18devdump.dumpMatchView"
+                    }
+                },
                 "query": {
+                    "type": "string"
+                },
+                "state": {
                     "type": "string"
                 }
             }

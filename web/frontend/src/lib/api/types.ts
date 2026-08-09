@@ -1421,8 +1421,17 @@ export interface DumpStatus {
 	enabled: boolean;
 }
 
+export interface DumpSearchMatch {
+	content_id: string;
+	dvd_id?: string;
+	release_date?: string;
+	service_code?: string;
+}
+
 export interface DumpSearchResult {
 	query: string;
 	content_id: string | null;
 	dvd_id: string | null;
+	state?: 'mapped' | 'no_dvd_id';
+	matches?: DumpSearchMatch[];
 }

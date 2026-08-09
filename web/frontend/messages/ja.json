@@ -2215,6 +2215,7 @@
   "settings_r18dev_search_failed": "検索に失敗しました",
   "settings_r18dev_search_heading": "ダンプを検索",
   "settings_r18dev_search_no_match": "一致は見つかりませんでした",
+  "settings_r18dev_search_no_dvd_id": "ダンプ内に存在しますが、dvd_id がありません（dvd_id による検索では一致しません）：",
   "settings_r18dev_search_placeholder": "dvd_id または content_id (例: ABF-030)",
   "settings_r18dev_size": "サイズ",
   "settings_r18dev_source_date": "ソース日",

@@ -2,10 +2,12 @@ package r18dev
 
 import (
 	"testing"
+
+	"github.com/javinizer/javinizer-go/internal/r18devdump"
 )
 
 func TestGenerateContentIDVariations_PPVPrefix_SAN457(t *testing.T) {
-	vars := generateContentIDVariations("SAN-457")
+	vars := r18devdump.ContentIDCandidates("SAN-457")
 	want := "h_796san00457"
 	found := false
 	for _, v := range vars {
@@ -15,13 +17,13 @@ func TestGenerateContentIDVariations_PPVPrefix_SAN457(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("generateContentIDVariations(SAN-457) = %v, missing PPV content_id %q (h_796 prefix dropped)", vars, want)
+		t.Fatalf("r18devdump.ContentIDCandidates(SAN-457) = %v, missing PPV content_id %q (h_796 prefix dropped)", vars, want)
 	}
 	t.Logf("SAN-457 variations: %v", vars)
 }
 
 func TestContentIDPrefixLookup_HasPPVPrefixes(t *testing.T) {
-	prefixes, ok := contentIDPrefixLookup["san"]
+	prefixes, ok := r18devdump.ContentIDPrefixLookup["san"]
 	if !ok {
 		t.Fatal("san series missing from prefix lookup")
 	}
@@ -34,7 +36,7 @@ func TestContentIDPrefixLookup_HasPPVPrefixes(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("contentIDPrefixLookup[\"san\"] = %v, missing PPV prefix %q", prefixes, wantPrefix)
+		t.Fatalf("r18devdump.ContentIDPrefixLookup[\"san\"] = %v, missing PPV prefix %q", prefixes, wantPrefix)
 	}
 }
 

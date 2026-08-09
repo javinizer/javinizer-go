@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -339,9 +340,21 @@ func (h *dumpHandler) reloadDumpWith(path string, lockHeld bool) error {
 
 // searchResponse is the JSON shape returned by GET /search.
 type searchResponse struct {
-	Query     string  `json:"query"`
-	ContentID *string `json:"content_id"`
-	DVDID     *string `json:"dvd_id"`
+	Query     string          `json:"query"`
+	ContentID *string         `json:"content_id"`
+	DVDID     *string         `json:"dvd_id"`
+	State     string          `json:"state"`
+	Matches   []dumpMatchView `json:"matches"`
+}
+
+// dumpMatchView is one dump row matched by a search query. Matches are
+// returned in candidate priority order; DVDID is empty when the upstream row
+// has no dvd_id.
+type dumpMatchView struct {
+	ContentID   string `json:"content_id"`
+	DVDID       string `json:"dvd_id,omitempty"`
+	ReleaseDate string `json:"release_date,omitempty"`
+	ServiceCode string `json:"service_code,omitempty"`
 }
 
 // search godoc
@@ -384,25 +397,34 @@ func (h *dumpHandler) search(c *gin.Context) {
 	defer func() { _ = store.Close() }()
 
 	ctx := c.Request.Context()
-	resp := searchResponse{Query: query}
-
-	if cid, err := store.LookupByDVDID(ctx, query); err == nil {
-		resp.ContentID = &cid
-		c.JSON(http.StatusOK, resp)
+	matches, err := store.MatchByDisplayID(ctx, query)
+	if err != nil {
+		if !errors.Is(err, models.ErrDumpMiss) {
+			logging.Warnf("r18dev dump search: lookup failed for %s: %v", query, err)
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found in dump"})
 		return
-	} else if !errors.Is(err, models.ErrDumpMiss) {
-		logging.Warnf("r18dev dump search: dvd_id lookup failed for %s: %v", query, err)
 	}
 
-	if did, err := store.LookupByContentID(ctx, query); err == nil {
-		resp.DVDID = &did
-		c.JSON(http.StatusOK, resp)
-		return
-	} else if !errors.Is(err, models.ErrDumpMiss) {
-		logging.Warnf("r18dev dump search: content_id lookup failed for %s: %v", query, err)
+	resp := searchResponse{Query: query, Matches: make([]dumpMatchView, 0, len(matches))}
+	first := matches[0]
+	resp.State = "mapped"
+	if first.DVDID == "" {
+		resp.State = "no_dvd_id"
+	} else if strings.EqualFold(strings.TrimSpace(query), first.ContentID) {
+		resp.DVDID = &first.DVDID
+	} else {
+		resp.ContentID = &first.ContentID
 	}
-
-	c.JSON(http.StatusNotFound, gin.H{"error": "not found in dump"})
+	for _, m := range matches {
+		resp.Matches = append(resp.Matches, dumpMatchView{
+			ContentID:   m.ContentID,
+			DVDID:       m.DVDID,
+			ReleaseDate: m.ReleaseDate,
+			ServiceCode: m.ServiceCode,
+		})
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // clearDump godoc

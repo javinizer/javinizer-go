@@ -4,7 +4,7 @@
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import { apiClient as api } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
-	import type { DumpStatus } from '$lib/api/types';
+	import type { DumpSearchResult, DumpStatus } from '$lib/api/types';
 	import { Download, RefreshCw, Search, CheckCircle, AlertCircle, Database, Trash2 } from 'lucide-svelte';
 
 	interface Props {
@@ -17,7 +17,7 @@
 	let downloading = $state(false);
 	let downloadError = $state('');
 	let searchQuery = $state('');
-	let searchResult: { content_id: string | null; dvd_id: string | null } | null = $state(null);
+	let searchResult: DumpSearchResult | null = $state(null);
 	let searchError = $state('');
 	let error = $state('');
 	let dumpEnabled = $state(true);
@@ -433,7 +433,21 @@
 			</div>
 			{#if searchResult}
 				<div class="mt-2 p-2 rounded-md bg-muted text-sm">
-					{#if searchResult.content_id}
+					{#if searchResult.state === 'no_dvd_id'}
+						<span class="text-muted-foreground">{m.settings_r18dev_search_no_dvd_id()}</span>
+						{#if searchResult.matches?.length}
+							<ul class="mt-1 space-y-0.5">
+								{#each searchResult.matches as match (match.content_id)}
+									<li>
+										<span class="font-mono">{match.content_id}</span>
+										<span class="text-muted-foreground">
+											{match.release_date}{match.release_date && match.service_code ? ' · ' : ''}{match.service_code}
+										</span>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					{:else if searchResult.content_id}
 						<span class="text-muted-foreground">{m.settings_r18dev_search_content_id()}</span>
 						<span class="font-mono">{searchResult.content_id}</span>
 					{:else if searchResult.dvd_id}

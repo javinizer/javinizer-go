@@ -83,13 +83,13 @@ def main():
 
     # Generate Go source file
     lines = []
-    lines.append('package r18dev')
+    lines.append('package r18devdump')
     lines.append('')
     lines.append('//go:generate python3 scripts/generate_content_id_prefixes.py /tmp/r18dev_dump.sql content_id_prefixes.go')
     lines.append('')
-    lines.append('// contentIDPrefixLookup maps series names (lowercase) to their known DMM content_id prefixes.')
-    lines.append('// Built from r18.dev database dump. Regenerate with: go generate ./internal/scraper/r18dev/...')
-    lines.append('var contentIDPrefixLookup = map[string][]string{')
+    lines.append('// ContentIDPrefixLookup maps series names (lowercase) to their known DMM content_id prefixes.')
+    lines.append('// Built from r18.dev database dump. Regenerate with: go generate ./internal/r18devdump/...')
+    lines.append('var ContentIDPrefixLookup = map[string][]string{')
 
     for series in sorted(series_prefixes.keys()):
         prefixes = sorted(series_prefixes[series], key=prefix_sort_key)

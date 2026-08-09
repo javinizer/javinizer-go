@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"database/sql"
+
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -72,9 +73,17 @@ func TestImportAndLookup(t *testing.T) {
 	if err != nil || did != "IPX-535" {
 		t.Errorf("LookupByContentID = %q,%v, want IPX-535,nil", did, err)
 	}
-	// NULL dvd_id in dump -> miss.
-	if _, err := store.LookupByContentID(ctx, "118abw00001"); !errors.Is(err, models.ErrDumpMiss) {
-		t.Errorf("LookupByContentID for NULL dvd_id err = %v, want ErrDumpMiss", err)
+	// NULL dvd_id in dump -> present-without-dvd_id sentinel, still miss-compatible.
+	if _, err := store.LookupByContentID(ctx, "118abw00001"); !errors.Is(err, models.ErrDumpNoDVDID) {
+		t.Errorf("LookupByContentID for NULL dvd_id err = %v, want ErrDumpNoDVDID", err)
+	} else if !errors.Is(err, models.ErrDumpMiss) {
+		t.Errorf("ErrDumpNoDVDID err = %v, want errors.Is(..., ErrDumpMiss) true", err)
+	}
+	// Truly absent content_id -> ErrDumpMiss only, not ErrDumpNoDVDID.
+	if _, err := store.LookupByContentID(ctx, "zzzz99999"); !errors.Is(err, models.ErrDumpMiss) {
+		t.Errorf("LookupByContentID absent err = %v, want ErrDumpMiss", err)
+	} else if errors.Is(err, models.ErrDumpNoDVDID) {
+		t.Errorf("absent row err = %v, must not match ErrDumpNoDVDID", err)
 	}
 
 	// Stats.

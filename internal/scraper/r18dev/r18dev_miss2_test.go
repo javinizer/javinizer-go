@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/r18devdump"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -268,12 +269,12 @@ func TestContentIDMatchesExpected_Miss2_ShortIDs(t *testing.T) {
 
 func TestGenerateAlternateContentIDs_Miss2_ShortID(t *testing.T) {
 	// ID that doesn't match the regex
-	result := generateContentIDVariations("short")
+	result := r18devdump.ContentIDCandidates("short")
 	assert.Nil(t, result)
 }
 
 func TestGenerateAlternateContentIDs_Miss2_ValidID(t *testing.T) {
-	result := generateContentIDVariations("ipx00535")
+	result := r18devdump.ContentIDCandidates("ipx00535")
 	assert.NotEmpty(t, result)
 	// Should contain prefixed variants using the prefix lookup for "ipx"
 	found := false

@@ -327,9 +327,9 @@ func TestSearchFromDump_ContextCanceled(t *testing.T) {
 	s, _ := newScraperWithBlockedHTTP(t, dump)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	result, ok := s.searchFromDump(ctx, "IPX-535")
-	assert.False(t, ok, "canceled lookup should fall back to HTTP")
+	result, candidateURLs := s.searchFromDump(ctx, "IPX-535")
 	assert.Nil(t, result, "no result on cancellation")
+	assert.Empty(t, candidateURLs, "no candidate URLs on cancellation")
 }
 
 // TestSearchFromDump_ContextDeadlineExceeded covers the DeadlineExceeded arm
@@ -339,7 +339,7 @@ func TestSearchFromDump_ContextDeadlineExceeded(t *testing.T) {
 	s, _ := newScraperWithBlockedHTTP(t, dump)
 	ctx, cancel := context.WithTimeout(context.Background(), 0)
 	defer cancel()
-	result, ok := s.searchFromDump(ctx, "IPX-535")
-	assert.False(t, ok)
+	result, candidateURLs := s.searchFromDump(ctx, "IPX-535")
 	assert.Nil(t, result)
+	assert.Empty(t, candidateURLs)
 }

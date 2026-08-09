@@ -92,6 +92,9 @@ linters:
         text: "G703:"
       - linters:
           - gosec
+        source: 'IN \(" \+ placeholders'
+      - linters:
+          - gosec
         text: "G118:"
       - path: internal/config/translation_config\.go
         linters:
@@ -241,7 +244,7 @@ linters:
       - path: internal/scraper/r18dev/r18dev\.go
         linters:
           - unparam
-      - path: internal/scraper/r18dev/content_id_prefixes\.go
+      - path: internal/r18devdump/content_id_prefixes\.go
         linters:
           - misspell
       - path: internal/tui/update\.go

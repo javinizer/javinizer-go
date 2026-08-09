@@ -3083,6 +3083,17 @@ definitions:
       total:
         type: integer
     type: object
+  internal_api_r18devdump.dumpMatchView:
+    properties:
+      content_id:
+        type: string
+      dvd_id:
+        type: string
+      release_date:
+        type: string
+      service_code:
+        type: string
+    type: object
   internal_api_r18devdump.dumpStatusResponse:
     properties:
       enabled:
@@ -3112,7 +3123,13 @@ definitions:
         type: string
       dvd_id:
         type: string
+      matches:
+        items:
+          $ref: '#/definitions/internal_api_r18devdump.dumpMatchView'
+        type: array
       query:
+        type: string
+      state:
         type: string
     type: object
   internal_api_system.DeepLUsageRequest:

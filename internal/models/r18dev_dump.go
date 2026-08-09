@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // ErrDumpMiss is returned by R18DevDumpLookup lookups when the queried ID is
@@ -13,6 +14,23 @@ import (
 // logged at warn so a degraded dump does not silently revert to rate-limit-
 // prone HTTP.
 var ErrDumpMiss = errors.New("r18.dev dump: id not found")
+
+// ErrDumpNoDVDID is returned when the queried ID exists in the dump but the
+// row carries no dvd_id, so dvd_id-keyed lookups can never match it. It wraps
+// ErrDumpMiss (errors.Is(err, ErrDumpMiss) stays true) so existing
+// miss-handling consumers keep their current behavior; search surfaces must
+// test ErrDumpNoDVDID first to tell "present without dvd_id" from a genuine
+// absence.
+var ErrDumpNoDVDID = fmt.Errorf("%w: row present but dvd_id is NULL", ErrDumpMiss)
+
+// DumpMatch is one dump row matched by a display-ID query, in candidate
+// priority order (canonical content_id first).
+type DumpMatch struct {
+	ContentID   string
+	DVDID       string
+	ReleaseDate string
+	ServiceCode string
+}
 
 // DumpStats describes a locally cached r18.dev database dump.
 type DumpStats struct {
@@ -97,8 +115,18 @@ type R18DevDumpLookup interface {
 	LookupByDVDID(ctx context.Context, dvdID string) (contentID string, err error)
 
 	// LookupByContentID resolves a DMM content_id back to its display dvd_id.
-	// Returns ("", ErrDumpMiss) on a miss or when the dump's dvd_id is NULL.
+	// Returns ("", ErrDumpMiss) on a miss; when the row exists but its dump
+	// dvd_id is NULL it returns ("", ErrDumpNoDVDID), which also satisfies
+	// errors.Is(err, ErrDumpMiss) so existing miss-handling stays unchanged.
 	LookupByContentID(ctx context.Context, contentID string) (dvdID string, err error)
+
+	// MatchByDisplayID resolves a display ID to all matching dump rows, in
+	// candidate priority order: an exact dvd_id_norm hit (single match) if one
+	// exists, otherwise exact content_id matches against the expanded candidate
+	// set for the ID (e.g. LULU-441 → lulu00441 before lulu441). Rows with no
+	// dvd_id are returned with DVDID empty. Returns (nil, ErrDumpMiss) when
+	// nothing matches.
+	MatchByDisplayID(ctx context.Context, id string) ([]DumpMatch, error)
 
 	// LookupMovie resolves a display dvd_id to a fully-populated DumpMovie —
 	// titles, descriptions, runtime, release date, cover/poster/gallery URLs,
