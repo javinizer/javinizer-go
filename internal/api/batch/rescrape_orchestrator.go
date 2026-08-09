@@ -187,10 +187,18 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 		}
 	}
 
-	results := bulkRescrapePool(workCtx, job, movieIDs, req, o.factory, progressFn)
+	results, recoveryHandles := bulkRescrapePool(workCtx, job, movieIDs, req, o.factory, progressFn)
 
 	if err := o.persist.PersistJobByID(jobID); err != nil {
+		// codex cloud P1: persist failed — every bulk item's recovery trinity
+		// stays on disk; the startup reconciler arbitrates them.
 		logging.Warnf("[Rescrape] envelope persist failed for job %s: %v", jobID, err)
+	} else {
+		// codex cloud P1: recovery teardown belongs after the durable envelope —
+		// per-movie handles ride the pool, finalize happens only here.
+		for _, h := range recoveryHandles {
+			h.Finalize()
+		}
 	}
 
 	succeeded := 0

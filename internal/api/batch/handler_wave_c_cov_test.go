@@ -109,6 +109,65 @@ func TestRescrapeSingleFinalizesOnlyAfterPersist(t *testing.T) {
 	})
 }
 
+// codex cloud P1 (bulk): a successful per-movie rescrape's recovery handle
+// rides the pool result → the orchestrator finalizes ONLY after PersistJobByID.
+func TestProcessBulkRescrapeMovie_CarriesHandle(t *testing.T) {
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	handleFired := false
+	mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(&worker.RescrapeResult{
+		Status:         models.RescrapeStatusSuccess,
+		Movie:          &models.Movie{ID: "MV-H1"},
+		PosterRecovery: worker.NewRescapeRecoveryHandle(func() { handleFired = true }),
+	}, nil)
+	out, rec := processBulkRescrapeMovie(context.Background(), "MV-H1", mockJob, &contracts.BatchRescrapeRequest{}, minimalFactory{})
+	require.Equal(t, models.RescrapeStatusSuccess, out.Status)
+	require.NotNil(t, rec, "handle must ride out of the per-movie conversion")
+	assert.False(t, handleFired)
+	rec.Finalize()
+	assert.True(t, handleFired)
+}
+
+func TestBulkRescrapeRecoveryHandlesFinalizeByPersistOutcome(t *testing.T) {
+	t.Run("persist ok → all finalized", func(t *testing.T) {
+		fired := []bool{false, false}
+		mockJob := workermocks.NewMockBatchJobInterface(t)
+		mockJob.EXPECT().SetWorkflow(mock.Anything).Return()
+		mockJob.EXPECT().GetStatus().Return(&worker.BatchJobStatus{}).Maybe()
+		mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(&worker.RescrapeResult{Status: models.RescrapeStatusSuccess, Movie: &models.Movie{ID: "MV-1"}, PosterRecovery: worker.NewRescapeRecoveryHandle(func() { fired[0] = true })}, nil).Once()
+		mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(&worker.RescrapeResult{Status: models.RescrapeStatusSuccess, Movie: &models.Movie{ID: "MV-2"}, PosterRecovery: worker.NewRescapeRecoveryHandle(func() { fired[1] = true })}, nil).Once()
+		orch := NewRescrapeOrchestrator(RescrapeDeps{
+			JobStore:  &excludeEdgeStore{job: mockJob},
+			WfFactory: staticWfFactory{},
+			Factory:   minimalFactory{},
+			Persist:   &excludeEdgeStore{},
+		})
+		out, err := orch.BulkRescrape(context.Background(), "job-9", []string{"MV-1", "MV-2"}, &contracts.BatchRescrapeRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		for i, f := range fired {
+			assert.True(t, f, "handle %d finalized after the envelope landed", i)
+		}
+	})
+
+	t.Run("persist failure → none finalized", func(t *testing.T) {
+		fired := 0
+		mockJob := workermocks.NewMockBatchJobInterface(t)
+		mockJob.EXPECT().SetWorkflow(mock.Anything).Return()
+		mockJob.EXPECT().GetStatus().Return(&worker.BatchJobStatus{}).Maybe()
+		mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(&worker.RescrapeResult{Status: models.RescrapeStatusSuccess, Movie: &models.Movie{ID: "MV-1"}, PosterRecovery: worker.NewRescapeRecoveryHandle(func() { fired++ })}, nil).Once()
+		orch := NewRescrapeOrchestrator(RescrapeDeps{
+			JobStore:  &excludeEdgeStore{job: mockJob},
+			WfFactory: staticWfFactory{},
+			Factory:   minimalFactory{},
+			Persist:   failingPersist{err: errors.New("disk read-only")},
+		})
+		out, err := orch.BulkRescrape(context.Background(), "job-9", []string{"MV-1"}, &contracts.BatchRescrapeRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		assert.Equal(t, 0, fired, "no finalize before the durable envelope")
+	})
+}
+
 func TestRescrapeBulkPersistFailureIsWarned(t *testing.T) {
 	mockJob := workermocks.NewMockBatchJobInterface(t)
 	mockJob.EXPECT().SetWorkflow(mock.Anything).Return()
