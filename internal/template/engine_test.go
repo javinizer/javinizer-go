@@ -2771,3 +2771,24 @@ func TestEngine_ValidateTags_NestedConditionalRejected(t *testing.T) {
 	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes</IF><IF:ID>also</IF>"))
 	assert.Error(t, e.ValidateTags("<IF:TITLE><IF:ID>deep</IF></IF>"))
 }
+
+func TestEngine_ValidateTags_StrayElseRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("Featured<ELSE>Other"))
+	assert.Error(t, e.ValidateTags("<ELSE>oops"))
+	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes<ELSE>no</IF>"))
+}
+
+func TestEngine_ValidateTags_StrayEndIfRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("text</IF>"))
+}
+
+func TestEngine_ValidateTags_NumericModifierValidated(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<PART:2>"))
+	assert.NoError(t, e.ValidateTags("<DISC:3>"))
+	assert.NoError(t, e.ValidateTags("<INDEX:1>"))
+	assert.Error(t, e.ValidateTags("<PART:xyz>"))
+	assert.Error(t, e.ValidateTags("<DISC:abc>"))
+}

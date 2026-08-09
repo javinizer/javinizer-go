@@ -13,8 +13,9 @@ import (
 
 // Package-level compiled regexes for performance
 var (
-	cjkRegex              = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
-	conditionalTokenRegex = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>`)
+	cjkRegex                  = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
+	conditionalTokenRegex     = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>`)
+	conditionalStructureRegex = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>|<ELSE>`)
 )
 
 // DefaultMaxTemplateBytes, DefaultMaxOutputBytes, and DefaultMaxConditionalDepth are the default size and depth limits for template rendering.
@@ -415,6 +416,14 @@ func (e *Engine) ValidateTags(template string) error {
 		if !e.isKnownTag(tagName) {
 			return fmt.Errorf("unknown tag: %s", tagName)
 		}
+		if len(match) > 2 && match[2] != "" {
+			switch tagName {
+			case "PART", "DISC", "INDEX":
+				if !e.translationResolver.isNumericModifier(match[2]) {
+					return fmt.Errorf("invalid numeric modifier for %s: %s", tagName, match[2])
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -426,15 +435,24 @@ func (e *Engine) ValidateTags(template string) error {
 // through renderConfiguredText which must not write corrupted values.
 func (e *Engine) validateConditionalNesting(template string) error {
 	depth := 0
-	for _, token := range conditionalTokenRegex.FindAllString(template, -1) {
-		if strings.HasPrefix(strings.ToUpper(token), "<IF:") {
+	for _, token := range conditionalStructureRegex.FindAllString(template, -1) {
+		upper := strings.ToUpper(token)
+		switch {
+		case strings.HasPrefix(upper, "<IF:"):
 			depth++
 			if depth > 1 {
 				return fmt.Errorf("nested conditionals are not supported")
 			}
-			continue
+		case upper == "<ELSE>":
+			if depth < 1 {
+				return fmt.Errorf("<ELSE> outside of <IF> block")
+			}
+		default:
+			depth--
+			if depth < 0 {
+				return fmt.Errorf("unexpected </IF>")
+			}
 		}
-		depth--
 	}
 	return nil
 }

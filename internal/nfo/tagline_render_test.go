@@ -221,3 +221,15 @@ func TestMovieToNFO_TaglineNestedConditionalDropped(t *testing.T) {
 	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
 	assert.Equal(t, "", nfo.Tagline)
 }
+
+func TestMovieToNFO_TaglineStrayElseDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "Featured<ELSE>Other", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}
+
+func TestMovieToNFO_TaglineInvalidNumericModifierDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<PART:xyz>", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "-pt1", 1, true, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}
