@@ -12,6 +12,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/mediainfo"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
@@ -21,11 +22,12 @@ const defaultNFOFileName = "metadata"
 
 // Generator creates NFO files from movie metadata
 type Generator struct {
-	fs             afero.Fs
-	templateEngine template.EngineInterface
-	config         *Config
-	mediaAnalyzer  mediaAnalyzer
-	encodeFunc     func(io.Writer, *Movie) error
+	fs               afero.Fs
+	templateEngine   template.EngineInterface
+	config           *Config
+	mediaAnalyzer    mediaAnalyzer
+	encodeFunc       func(io.Writer, *Movie) error
+	mediaInfoAnalyze func(ctx context.Context, path string) (*mediainfo.VideoInfo, error)
 }
 
 // NewGenerator returns an NFO generator that writes to fs using the given config.
@@ -64,11 +66,12 @@ func newGeneratorWithAnalyzer(fs afero.Fs, cfg *Config, ma mediaAnalyzer) *Gener
 	}
 
 	return &Generator{
-		fs:             fs,
-		templateEngine: engine,
-		config:         &cfgCopy,
-		mediaAnalyzer:  ma,
-		encodeFunc:     writeNFOXML,
+		fs:               fs,
+		templateEngine:   engine,
+		config:           &cfgCopy,
+		mediaAnalyzer:    ma,
+		encodeFunc:       writeNFOXML,
+		mediaInfoAnalyze: mediainfo.Analyze,
 	}
 }
 

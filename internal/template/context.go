@@ -245,6 +245,15 @@ func (c *Context) Clone() *Context {
 // shared Context remains race-free. Clone does not carry it over.
 func (c *Context) SetExecCtx(ctx context.Context) { c.execCtx = ctx }
 
+// SetCachedMediaInfo pre-seeds the cached video metadata so getMediaInfo skips
+// its lazy mediainfo.Analyze call. Use when a caller has already analyzed the
+// video (e.g. for stream details) to avoid a duplicate expensive analysis.
+func (c *Context) SetCachedMediaInfo(info *mediainfo.VideoInfo) {
+	if info != nil {
+		c.cachedMediaInfo = info
+	}
+}
+
 // getMediaInfo lazy-loads and caches video metadata.
 // Thread-safe: uses sync.Once to ensure single initialization even under concurrent access.
 // Preserves pre-existing cached values from Clone() to avoid duplicate expensive analysis.

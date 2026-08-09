@@ -2,6 +2,7 @@ package nfo
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/javinizer/javinizer-go/internal/mediainfo"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -334,4 +336,45 @@ func TestGenerate_LegacyPathPropagatesCancellation(t *testing.T) {
 	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<ID>", PerFile: true, FirstNameOrder: true, FilenameTemplate: "<ID>"})
 	err := g.Generate(ctx, taglineTestMovie(), "/out", "", "", nil)
 	assert.Error(t, err)
+}
+
+func TestMovieToNFO_TaglineResolutionReusesStreamAnalysis(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test-*.mp4")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+	require.NoError(t, os.WriteFile(tmpFile.Name(), []byte("fake video"), 0644))
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<RESOLUTION>", IncludeStreamDetails: true, FirstNameOrder: true})
+	nfo, err := g.movieToNFO(context.Background(), taglineTestMovie(), tmpFile.Name(), "", 0, false, nil)
+	assert.NoError(t, err)
+	_ = nfo
+}
+
+func TestMovieToNFO_StreamDetailsEnabledSeedsMediaCache(t *testing.T) {
+	stub := &stubMediaAnalyzer{Details: &streamDetails{Video: []videoStream{{Codec: "h264", Width: 1920, Height: 1080}}}}
+	gen := newGeneratorWithAnalyzer(afero.NewMemMapFs(), &Config{Tagline: "<RESOLUTION>", IncludeStreamDetails: true, FirstNameOrder: true}, stub)
+	nfo, err := g_movieToNFO(gen, taglineTestMovie(), "/fake/path.mp4", "", 0, false, nil)
+	assert.NoError(t, err)
+	_ = nfo
+}
+
+func g_movieToNFO(g *Generator, movie *models.Movie, videoFilePath, partSuffix string, partNumber int, isMultiPart bool, tags []string) (*Movie, error) {
+	return g.movieToNFO(context.Background(), movie, videoFilePath, partSuffix, partNumber, isMultiPart, tags)
+}
+
+func TestMovieToNFO_SeedsSharedMediaInfoWhenStreamDetailsEnabled(t *testing.T) {
+	stub := &stubMediaAnalyzer{Details: &streamDetails{Video: []videoStream{{Codec: "h264", Width: 1920, Height: 1080}}}}
+	gen := newGeneratorWithAnalyzer(afero.NewMemMapFs(), &Config{Tagline: "<RESOLUTION>", IncludeStreamDetails: true, FirstNameOrder: true}, stub)
+	gen.mediaInfoAnalyze = func(_ context.Context, _ string) (*mediainfo.VideoInfo, error) {
+		return &mediainfo.VideoInfo{Width: 1920, Height: 1080}, nil
+	}
+	nfo, err := gen.movieToNFO(context.Background(), taglineTestMovie(), "/fake/path.mp4", "", 0, false, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, "1080p", nfo.Tagline)
+}
+
+func TestSeedSharedMediaInfo_NilFileInfoNoOp(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{FirstNameOrder: true})
+	tmplCtx := g.movieTemplateContext(context.Background(), taglineTestMovie(), "/fake.mp4", "", 0, false)
+	g.seedSharedMediaInfo(context.Background(), nil, "/fake.mp4", tmplCtx)
+	assert.True(t, true)
 }

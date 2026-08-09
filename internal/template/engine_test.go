@@ -2898,3 +2898,13 @@ func TestEngine_ValidateTags_ModifierWithAngleBracketRejected(t *testing.T) {
 	assert.NoError(t, e.ValidateTags("<TITLE:50>"))
 	assert.NoError(t, e.ValidateTags("<ACTORS:DELIM=/>"))
 }
+
+func TestContext_SetCachedMediaInfo_SkipsLazyAnalysis(t *testing.T) {
+	ctx := NewContextFromMovie(&models.Movie{ID: "X"})
+	ctx.VideoFilePath = "/nonexistent/video.mp4"
+	ctx.SetCachedMediaInfo(&mediainfo.VideoInfo{Width: 1920, Height: 1080})
+	info := ctx.getMediaInfo()
+	require.NotNil(t, info)
+	assert.Equal(t, 1920, info.Width)
+	assert.Nil(t, ctx.mediaInfoError)
+}

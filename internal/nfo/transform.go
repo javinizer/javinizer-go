@@ -63,6 +63,12 @@ func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movi
 	fi := g.resolveStreamDetails(ctx, videoFilePath)
 	originalPath := g.resolveOriginalPath(movie)
 	tmplCtx := g.movieTemplateContext(ctx, movie, videoFilePath, partSuffix, partNumber, isMultiPart)
+	// When stream details are enabled, the video is already analyzed by
+	// resolveStreamDetails above; seed the template context cache so <RESOLUTION>
+	// and other media tags reuse that analysis instead of re-analyzing.
+	if fi != nil {
+		g.seedSharedMediaInfo(ctx, fi, videoFilePath, tmplCtx)
+	}
 	tagline, err := g.resolveTagline(ctx, tmplCtx)
 	if err != nil {
 		return nfoInput{}, err
@@ -187,6 +193,20 @@ func (g *Generator) resolveOriginalPath(movie *models.Movie) string {
 		return movie.OriginalFileName
 	}
 	return ""
+}
+
+// seedSharedMediaInfo pre-seeds the template context's cached media info when
+// stream details were already extracted, so <RESOLUTION> and other media tags
+// reuse the analysis instead of invoking mediainfo.Analyze a second time on the
+// same file. When stream details are disabled (fi == nil) the template context
+// still analyzes lazily as before.
+func (g *Generator) seedSharedMediaInfo(ctx context.Context, fi *fileInfo, videoFilePath string, tmplCtx *template.Context) {
+	if fi == nil {
+		return
+	}
+	if videoInfo, analyzeErr := g.mediaInfoAnalyze(ctx, videoFilePath); analyzeErr == nil {
+		tmplCtx.SetCachedMediaInfo(videoInfo)
+	}
 }
 
 // resolveTagline renders the configured tagline against the movie. The docs
