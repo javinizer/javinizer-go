@@ -822,12 +822,31 @@ func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, job
 				// codex cloud P2 (@822): every same-base token is candidate evidence
 				// — with overlapping commits the FIRST is the older loser, never a
 				// reason alone to call content ambiguous.
+				// codex cloud P1: a foreign token is evidential only if ITS winner op
+				// provably committed durably — vet each candidate by its Sentinel's
+				// baseline vs the current durable revision first, or an
+				// in-memory-only commit's token would bless uncommitted bytes.
+				trusted := make([]commitToken, 0, len(fToks))
+				for _, t := range fToks {
+					wm, wok := stranded[t.nonce]
+					if !wok {
+						continue // token without its Sentinel context stays untrusted
+					}
+					rev, okRev := c.posterDurableRevision(ctx, jobID, wm.PosterID)
+					if okRev && rev > wm.PrevRevision {
+						trusted = append(trusted, t)
+					}
+				}
+				if len(trusted) == 0 {
+					logging.Warnf("parked backup sweep %s: commit tokens present but none provably durabled — kept both", parked)
+					continue
+				}
 				bakData, bErr := afero.ReadFile(c.fs, parked)
 				canonData, cErr := afero.ReadFile(c.fs, canonPath)
 				matchedCanon := false
 				matchedBak := false
 				if bErr == nil && cErr == nil {
-					for _, t := range fToks {
+					for _, t := range trusted {
 						wantSHA := tokenLegSHA(t.meta, p.canon)
 						if wantSHA == "" {
 							continue

@@ -86,11 +86,13 @@ func TestReconcileParkedForeignTokenFullLegCanonMatch(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-XL-9.a3.d4"), meta, 0o644))
 	seedCommitToken(t, fs, dir, "XL-9", "a2.c2", "gen-committed", true)
+	seedStrandedSentinel(t, fs, dir, "XL-9", "a2.c2", 4)
 	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "XL-9", 9), nil)
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
-	assert.Equal(t, 3, healed, "marker sweep + drop + token sweep")
+	assert.Equal(t, 4, healed, "both markers swept + drop + token sweep")
 	got, rerr := afero.ReadFile(fs, filepath.Join(dir, "XL-9-full.jpg"))
 	require.NoError(t, rerr)
 	assert.Equal(t, "gen-committed", string(got))
@@ -156,19 +158,82 @@ func TestTokenSweepFoldsPendingBase(t *testing.T) {
 	assert.NoError(t, tErr)
 }
 
+// codex cloud P1: a foreign commit token with an un-persisted winner's state
+// (its sentinel baseline NOT advanced past the durable row) is zero evidence —
+// the bytes may be in-memory-only output; both copies stay on disk.
+func TestReconcileParkedForeignTokenUntrustedWithoutDurability(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	seedArbitrationScene(t, fs, dir, "AR-U2", "a3.d4", "genA", "pre-op", 4)
+	seedCommitToken(t, fs, dir, "AR-U2", "a2.c2", "genA", false)
+	// winner's sentinel says prev=4; durable row STILL at 4 → never persisted.
+	seedStrandedSentinel(t, fs, dir, "AR-U2", "a2.c2", 4)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-U2", 4), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+
+	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	assert.Equal(t, 1, healed, "winner marker settles cleanly; nothing else moves")
+	got, err := afero.ReadFile(fs, filepath.Join(dir, "AR-U2.jpg"))
+	require.NoError(t, err)
+	assert.Equal(t, "genA", string(got), "canon untouched")
+	_, bErr := fs.Stat(filepath.Join(dir, "AR-U2.jpg.rsbak.a3.d4"))
+	assert.NoError(t, bErr, "backup kept")
+	_, tErr := fs.Stat(filepath.Join(dir, ".commit-AR-U2.a2.c2"))
+	assert.NoError(t, tErr, "token retained while its provenance stays pending")
+}
+
+// Trusted-lane wedges keep both copies — drop/restore faults never land bytes.
+func TestReconcileParkedTrustedLaneWedgesKeepBoth(t *testing.T) {
+	t.Run("canon-proven drop wedged", func(t *testing.T) {
+		fs, dir := witnessFixture(t)
+		seedArbitrationScene(t, fs, dir, "AR-TW1", "a3.d4", "winbytes", "orig", 4)
+		seedCommitToken(t, fs, dir, "AR-TW1", "a2.c2", "winbytes", false)
+		seedStrandedSentinel(t, fs, dir, "AR-TW1", "a2.c2", 4)
+		repo := mocks.NewMockJobRepositoryInterface(t)
+		repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-TW1", 9), nil)
+		cl := &TempDirCleaner{fs: selectiveFailRemoveFS{Fs: fs, failSuffix: ".rsbak.a3.d4"}, tempDir: "/tmp", jobRepo: repo}
+		healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+		_, bErr := fs.Stat(filepath.Join(dir, "AR-TW1.jpg.rsbak.a3.d4"))
+		assert.NoError(t, bErr, "backup kept — drop wedged")
+		_ = healed
+	})
+
+	t.Run("backup-recovery restore wedged", func(t *testing.T) {
+		base := afero.NewMemMapFs()
+		dir := "/tmp/posters/J-TW2"
+		require.NoError(t, base.MkdirAll(dir, 0o755))
+		require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "AR-TW2.jpg"), []byte("gen-lost"), 0o644))
+		require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "AR-TW2.jpg.rsbak.a1.b2"), []byte("winbytes"), 0o644))
+		seedStrandedSentinel(t, base, dir, "AR-TW2", "a1.b2", 4)
+		seedCommitToken(t, base, dir, "AR-TW2", "a2.c2", "winbytes", false)
+		seedStrandedSentinel(t, base, dir, "AR-TW2", "a2.c2", 4)
+		repo := mocks.NewMockJobRepositoryInterface(t)
+		repo.EXPECT().FindByID(mock.Anything, "TW2").Return(arbJobRow(t, "AR-TW2", 9), nil)
+		fs := &seqRenameFailFS{Fs: base, failOn: map[int]bool{1: true}}
+		cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+		healed := cl.reconcileParkedPosterBackups(context.Background(), "TW2", dir)
+		got, _ := afero.ReadFile(base, filepath.Join(dir, "AR-TW2.jpg"))
+		assert.Equal(t, "gen-lost", string(got), "canon untouched when restore wedges")
+		_ = healed
+	})
+}
+
 // codex cloud P2 (@822): first-token-match is not enough when commits stack.
 // With an older loser's token present alongside the winner's, arbitration must
 // accept ANY same-base token proving the backup holds the winner's bytes.
 func TestReconcileParkedMultipleForeignTokensArbitrateByAnyMatch(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	seedArbitrationScene(t, fs, dir, "AR-MX", "a3.d4", "lostgen", "winbytes", 4)
-	seedCommitToken(t, fs, dir, "AR-MX", "a1.c2", "oldgen", false)   // older token, matches NEITHER side
-	seedCommitToken(t, fs, dir, "AR-MX", "a2.c2", "winbytes", false) // winner: matched only via the backup
+	seedCommitToken(t, fs, dir, "AR-MX", "a1.c2", "oldgen", false)
+	seedStrandedSentinel(t, fs, dir, "AR-MX", "a1.c2", 4)
+	seedCommitToken(t, fs, dir, "AR-MX", "a2.c2", "winbytes", false)
+	seedStrandedSentinel(t, fs, dir, "AR-MX", "a2.c2", 4)
 	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-MX", 9), nil).Times(2)
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
-	assert.Equal(t, 4, healed, "marker + restore + BOTH settled tokens sweep")
+	assert.Equal(t, 6, healed, "parked marker + restore + both winner markers + BOTH settled tokens")
 	got, err := afero.ReadFile(fs, filepath.Join(dir, "AR-MX.jpg"))
 	require.NoError(t, err)
 	assert.Equal(t, "winbytes", string(got), "winner's committed bytes restored via the matching token")
@@ -186,11 +251,13 @@ func TestReconcileParkedTokenMissingLegSHAIsSkippedEvidence(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-AR-SK.a3.d4"), meta, 0o644))
 	seedCommitToken(t, fs, dir, "AR-SK", "a2.c2", "fulllegonly", true)
-	repo := mocks.NewMockJobRepositoryInterface(t) // ambiguity short-circuits before any lookup
+	seedStrandedSentinel(t, fs, dir, "AR-SK", "a2.c2", 4)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-SK", 9), nil)
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
-	assert.Equal(t, 0, healed, "empty-SHA token candidate skipped → ambiguity arm keeps both")
+	assert.Equal(t, 1, healed, "the token's own marker sweeps; ambiguity retains the bytes")
 	_, bErr := fs.Stat(filepath.Join(dir, "AR-SK.jpg.rsbak.a3.d4"))
 	assert.NoError(t, bErr, "backup kept — the token cannot prove this leg")
 }
@@ -234,6 +301,15 @@ func (f removeExactFailFS) Remove(n string) error {
 		return errors.New("remove wedged")
 	}
 	return f.Fs.Remove(n)
+}
+
+// seedStrandedSentinel writes the op's stranded in-flight marker so token
+// vetting has provenance: content carries prev_revision, name carries nonce.
+func seedStrandedSentinel(t *testing.T, fs afero.Fs, dir, id, nonce string, prevRev uint64) {
+	t.Helper()
+	meta, err := json.Marshal(inFlightMeta{PosterID: id, PrevRevision: prevRev})
+	require.NoError(t, err)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-"+id+"."+nonce), meta, 0o644))
 }
 
 // seedCommitToken fabricates the op-attributed commit marker startup
@@ -559,12 +635,14 @@ func TestReconcileParkedForeignTokenRestoresCommittedBytes(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	seedArbitrationScene(t, fs, dir, "AR-C", "a1.b2", "genB", "genA", 4)
 	seedCommitToken(t, fs, dir, "AR-C", "a2.c2", "genA", false) // winner A's token
-	repo := mocks.NewMockJobRepositoryInterface(t)              // token decides — no lookup needed for attribution
+	seedStrandedSentinel(t, fs, dir, "AR-C", "a2.c2", 4)        // its provenance — durable-advance check passes
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-C", 9), nil) // token decides — no lookup needed for attribution
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
 
-	assert.Equal(t, 3, healed, "marker sweep + restore + settled token sweep")
+	assert.Equal(t, 4, healed, "parked marker sweep + restore + winner marker sweep + token sweep")
 	got, err := afero.ReadFile(fs, filepath.Join(dir, "AR-C.jpg"))
 	require.NoError(t, err)
 	assert.Equal(t, "genA", string(got), "winner's committed bytes recovered")
@@ -576,12 +654,14 @@ func TestReconcileParkedForeignTokenCanonMatchDropsBackup(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	seedArbitrationScene(t, fs, dir, "AR-D", "a3.d4", "genB", "orig", 4)
 	seedCommitToken(t, fs, dir, "AR-D", "a2.c2", "genB", false)
+	seedStrandedSentinel(t, fs, dir, "AR-D", "a2.c2", 4) // FIXME
 	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-D", 9), nil)
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
 
-	assert.Equal(t, 3, healed, "marker sweep + drop + token sweep")
+	assert.Equal(t, 4, healed, "parked marker sweep + drop + winner marker sweep + token sweep")
 	got, err := afero.ReadFile(fs, filepath.Join(dir, "AR-D.jpg"))
 	require.NoError(t, err)
 	assert.Equal(t, "genB", string(got))
