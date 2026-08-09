@@ -193,7 +193,7 @@ func TestWithRescrapeStatusErrPathDeletesOnlyOwned(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, refCanon, []byte("orig-bytes"), 0o644))
 	_, err = withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
 		scope.preExistedPair = true
-		scope.parked = parkCanonicalPosterPair(fs, dir, "REF-1")
+		scope.parked = parkCanonicalPosterPair(fs, dir, "REF-1", 0)
 		// simulate the failed generation writing new bytes over canonical;
 		// production fingerprints whatever generation wrote (PosterGenerated
 		// gates it, PosterError no longer suppresses it) — model the same.
@@ -275,7 +275,7 @@ func TestWithRescrapeStatusConflictRestoreContentVerified(t *testing.T) {
 	lc := rescrapeLifecycleShim(jobID, fs, store)
 	canon := filepath.Join(dir, "CV-1.jpg")
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op-C0"), 0o644))
-	parked := parkCanonicalPosterPair(fs, dir, "CV-1")
+	parked := parkCanonicalPosterPair(fs, dir, "CV-1", 0)
 	require.True(t, parked.hadCrop)
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("ours-gen"), 0o644))
 	oursSHA := shaContentHex([]byte("ours-gen"))
@@ -293,7 +293,7 @@ func TestWithRescrapeStatusConflictRestoreContentVerified(t *testing.T) {
 
 	// Case B: canon now holds a winner's committed bytes → never rewind
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op-C0"), 0o644))
-	parked2 := parkCanonicalPosterPair(fs, dir, "CV-1")
+	parked2 := parkCanonicalPosterPair(fs, dir, "CV-1", 0)
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("ours-gen2"), 0o644))
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("winner-D"), 0o644))
 	_, err = withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
@@ -321,7 +321,7 @@ func TestWithRescrapeStatusConflictVerifyMissingCanonAllowsLegacy(t *testing.T) 
 	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-1", "")
 	lc := rescrapeLifecycleShim(jobID, fs, store)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "LF-1.jpg"), []byte("parked"), 0o644))
-	parked := parkCanonicalPosterPair(fs, dir, "LF-1")
+	parked := parkCanonicalPosterPair(fs, dir, "LF-1", 0)
 	require.True(t, parked.hadCrop)
 	// canonical missing entirely; fingerprint claims we SAW bytes post-gen
 	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
@@ -383,7 +383,7 @@ func TestWithRescrapeStatusGonePurgesAndDiscardsParked(t *testing.T) {
 	lc := rescrapeLifecycleShim(jobID, fs, store)
 	canon := filepath.Join(dir, "GONE-1.jpg")
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op"), 0o644))
-	parked := parkCanonicalPosterPair(fs, dir, "GONE-1")
+	parked := parkCanonicalPosterPair(fs, dir, "GONE-1", 0)
 	require.True(t, parked.hadCrop)
 	// losing op overwrote canonical with its own bytes:
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("gen-bytes"), 0o644))
@@ -412,7 +412,7 @@ func TestWithRescrapeStatusFenceErrorSkipsRestore(t *testing.T) {
 	lc := rescrapeLifecycleShim(jobID, fs, store)
 	canon := filepath.Join(dir, "FNC-1.jpg")
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("witness-era"), 0o644))
-	parked := parkCanonicalPosterPair(fs, dir, "FNC-1")
+	parked := parkCanonicalPosterPair(fs, dir, "FNC-1", 0)
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("gen-bytes"), 0o644))
 	fenceErr := &EditAdmissionConflictError{Message: "poster FNC-1 promote witness unresolved"}
 	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
@@ -460,7 +460,7 @@ func TestVerifySkipOnUnreadableCanonKeepsParked(t *testing.T) {
 	lc := rescrapeLifecycleShim(jobID, fs, store)
 	canon := filepath.Join(dir, "UPI-1.jpg")
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op"), 0o644))
-	parked := parkCanonicalPosterPair(fs, dir, "UPI-1")
+	parked := parkCanonicalPosterPair(fs, dir, "UPI-1", 0)
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("ours-gen"), 0o644))
 	// fs wrapper where ReadFile fails for the canonical leg ONLY
 	wedged := &brokenWitnessFS{Fs: fs, readFailSuffix: "UPI-1.jpg"}
@@ -505,7 +505,7 @@ func TestWithRescrapeStatusFailedGenerationRestoresParkedPair(t *testing.T) {
 	lc := rescrapeLifecycleShim(jobID, fs, store)
 	canon := filepath.Join(dir, "RF-1.jpg")
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("committed-orig"), 0o644))
-	parked := parkCanonicalPosterPair(fs, dir, "RF-1")
+	parked := parkCanonicalPosterPair(fs, dir, "RF-1", 0)
 	require.True(t, parked.hadCrop)
 	genErr := "download wedged"
 	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
@@ -522,7 +522,7 @@ func TestWithRescrapeStatusFailedGenerationRestoresParkedPair(t *testing.T) {
 
 	// Healthy path still discards: new bytes generated cleanly.
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("committed-orig2"), 0o644))
-	parked2 := parkCanonicalPosterPair(fs, dir, "RF-1")
+	parked2 := parkCanonicalPosterPair(fs, dir, "RF-1", 0)
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("fresh-bytes"), 0o644))
 	_, err = withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
 		scope.parked = parked2
@@ -539,7 +539,7 @@ func TestMarkerSweepWedgeKeepsMarker(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-PI-W.a1.b2"), []byte("{}"), 0o644))
 	cl := &TempDirCleaner{fs: removeFailFS{Fs: fs}, tempDir: "/tmp", jobRepo: nil}
-	assert.Equal(t, 0, cl.reconcileParkedPosterBackups(dir))
+	assert.Equal(t, 0, cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir))
 	_, err := fs.Stat(filepath.Join(dir, ".inflight-PI-W.a1.b2"))
 	assert.NoError(t, err, "wedged sweep keeps the marker for the next startup")
 }
@@ -551,7 +551,7 @@ func TestMarkerBranchHandlesDottedRsbakIDs(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-X.rsbak.aa.a1.b2"), []byte("{}"), 0o644))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "X.rsbak.aa.jpg.rsbak.a1.b2"), []byte("parked"), 0o644))
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
-	healed := cl.reconcileParkedPosterBackups(dir)
+	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
 	assert.Equal(t, 2, healed, "parked leg re-homed AND stranded marker swept")
 	_, mErr := fs.Stat(filepath.Join(dir, ".inflight-X.rsbak.aa.a1.b2"))
 	assert.Error(t, mErr, "marker swept (parked-parse rejected its tail)")
@@ -617,7 +617,7 @@ func TestParkCanonicalMarkerMkdirFailure(t *testing.T) {
 	_ = fs
 	fs2 := &mkdirFailFS{Fs: afero.NewMemMapFs()}
 	require.NoError(t, fs2.MkdirAll("/tmp/base", 0o755)) // parent ok; only actual mkdir of job dir fails
-	b := parkCanonicalPosterPair(fs2, "/tmp/posters/JMK", "PI-M")
+	b := parkCanonicalPosterPair(fs2, "/tmp/posters/JMK", "PI-M", 0)
 	assert.Empty(t, b.markerPath, "mkdir wedge ⇒ marker headless")
 	assert.False(t, b.hadCrop)
 }
@@ -637,7 +637,7 @@ func TestParkCanonicalPosterPairMarkerWriteFailure(t *testing.T) {
 	fs := &inflightFailFS{Fs: afero.NewMemMapFs()}
 	require.NoError(t, fs.MkdirAll("/tmp/posters/JMW", 0o755))
 	require.NoError(t, afero.WriteFile(fs, "/tmp/posters/JMW/PI-W.jpg", []byte("x"), 0o644))
-	b := parkCanonicalPosterPair(fs, "/tmp/posters/JMW", "PI-W")
+	b := parkCanonicalPosterPair(fs, "/tmp/posters/JMW", "PI-W", 0)
 	require.NotNil(t, b)
 	assert.Empty(t, b.markerPath, "wedged sentinel write degrades headlessly")
 	// the legs still parked fine
@@ -665,7 +665,7 @@ func TestRescrapeInFlightSentinelLifecycle(t *testing.T) {
 	require.NoError(t, fs.MkdirAll("/tmp/posters/JIF", 0o755))
 
 	// park with zero pre-existing legs still writes the sentinel
-	b := parkCanonicalPosterPair(fs, "/tmp/posters/JIF", "PI-4")
+	b := parkCanonicalPosterPair(fs, "/tmp/posters/JIF", "PI-4", 0)
 	require.NotEmpty(t, b.markerPath, "marker written even when no parkable legs")
 	hit, err := rescrapeInFlightBackupPresent(fs, "/tmp/posters/JIF", "PI-4")
 	require.NoError(t, err)
@@ -679,9 +679,9 @@ func TestRescrapeInFlightSentinelLifecycle(t *testing.T) {
 	assert.Error(t, statErr, "restore settles the marker")
 
 	// stranded marker dies at startup reconciliation
-	b2 := parkCanonicalPosterPair(fs, "/tmp/posters/JIF", "PI-5")
+	b2 := parkCanonicalPosterPair(fs, "/tmp/posters/JIF", "PI-5", 0)
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
-	healed := cl.reconcileParkedPosterBackups("/tmp/posters/JIF")
+	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", "/tmp/posters/JIF")
 	assert.GreaterOrEqual(t, healed, 1, "stranded marker swept")
 	_, statErr = fs.Stat(b2.markerPath)
 	assert.Error(t, statErr)
@@ -775,7 +775,7 @@ func TestWithRescrapeStatusConflictVerifySkipDisposesParked(t *testing.T) {
 	lc := rescrapeLifecycleShim(jobID, fs, store)
 	canon := filepath.Join(dir, "CV-2.jpg")
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op-C0"), 0o644))
-	parked := parkCanonicalPosterPair(fs, dir, "CV-2")
+	parked := parkCanonicalPosterPair(fs, dir, "CV-2", 0)
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("ours-gen"), 0o644))
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("winner-committed"), 0o644))
 	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
@@ -870,7 +870,7 @@ func TestWithRescrapeStatusUnusualStatusRestoresParked(t *testing.T) {
 	lc := rescrapeLifecycleShim(jobID, fs, store)
 	canon := filepath.Join(dir, "PEND-1.jpg")
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op"), 0o644))
-	parked := parkCanonicalPosterPair(fs, dir, "PEND-1")
+	parked := parkCanonicalPosterPair(fs, dir, "PEND-1", 0)
 	require.True(t, parked.hadCrop)
 	require.NoError(t, afero.WriteFile(fs, canon, []byte("gen-bytes"), 0o644))
 
@@ -1086,7 +1086,7 @@ func TestParkCanonicalPosterPairMarkerWriteFailRefusesGeneration(t *testing.T) {
 	base := afero.NewMemMapFs()
 	require.NoError(t, base.MkdirAll("/tmp/posters/JM", 0o755))
 	fs := createWedgeFS{Fs: base, contains: ".inflight-"}
-	b := parkCanonicalPosterPair(fs, "/tmp/posters/JM", "MK-1")
+	b := parkCanonicalPosterPair(fs, "/tmp/posters/JM", "MK-1", 0)
 	assert.Empty(t, b.markerPath)
 	require.Error(t, b.parkErr, "marker write failure aborts generation")
 	assert.Contains(t, b.parkErr.Error(), "in-flight marker write")
@@ -1095,7 +1095,7 @@ func TestParkCanonicalPosterPairMarkerWriteFailRefusesGeneration(t *testing.T) {
 // codex cloud P2 companion: when the poster dir itself cannot be created no
 // sentinel and no park are possible — refuse rather than run unfenced.
 func TestParkCanonicalPosterPairMkdirFailRefusesGeneration(t *testing.T) {
-	b := parkCanonicalPosterPair(mkdirWedgeFS{Fs: afero.NewMemMapFs()}, "/tmp/posters/JMD", "MK-2")
+	b := parkCanonicalPosterPair(mkdirWedgeFS{Fs: afero.NewMemMapFs()}, "/tmp/posters/JMD", "MK-2", 0)
 	require.Error(t, b.parkErr)
 	assert.Contains(t, b.parkErr.Error(), "poster backup dir")
 	assert.Empty(t, b.markerPath)
@@ -1103,10 +1103,10 @@ func TestParkCanonicalPosterPairMkdirFailRefusesGeneration(t *testing.T) {
 
 func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	// nil fs / empty dir+id: no-ops, restore/discard safe
-	bNil := parkCanonicalPosterPair(nil, "/x", "A-1")
+	bNil := parkCanonicalPosterPair(nil, "/x", "A-1", 0)
 	bNil.restore(nil)
 	bNil.discard()
-	bEmpty := parkCanonicalPosterPair(afero.NewMemMapFs(), "", "")
+	bEmpty := parkCanonicalPosterPair(afero.NewMemMapFs(), "", "", 0)
 	bEmpty.restore(nil)
 	bEmpty.discard()
 
@@ -1114,7 +1114,7 @@ func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	mem := afero.NewMemMapFs()
 	require.NoError(t, mem.MkdirAll("/tmp/posters/J", 0o755))
 	fsStatErr := statFailSuffixFS{Fs: mem, suffix: "PA-9-full.jpg"}
-	bStat := parkCanonicalPosterPair(fsStatErr, "/tmp/posters/J", "PA-9")
+	bStat := parkCanonicalPosterPair(fsStatErr, "/tmp/posters/J", "PA-9", 0)
 	assert.True(t, bStat.hadFull, "stat error => treated as pre-existing")
 	assert.Error(t, bStat.parkErr, "stat error => refuse generation, no overwrite-without-restore window (local codex review P1)")
 	assert.False(t, bStat.hadCrop)
@@ -1125,7 +1125,7 @@ func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	require.NoError(t, afero.WriteFile(mem2, "/tmp/posters/J2/PA-9-full.jpg", []byte("f"), 0o644))
 	require.NoError(t, afero.WriteFile(mem2, "/tmp/posters/J2/PA-9.jpg", []byte("c"), 0o644))
 	fsRn := &seqRenameFailFS{Fs: mem2, failOn: map[int]bool{1: true}}
-	bRn := parkCanonicalPosterPair(fsRn, "/tmp/posters/J2", "PA-9")
+	bRn := parkCanonicalPosterPair(fsRn, "/tmp/posters/J2", "PA-9", 0)
 	assert.False(t, bRn.hadFull, "failed park => not marked")
 	assert.True(t, bRn.hadCrop, "second leg parked fine")
 	got, _ := afero.ReadFile(mem2, "/tmp/posters/J2/PA-9-full.jpg")
@@ -1139,7 +1139,7 @@ func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	mem3 := afero.NewMemMapFs()
 	require.NoError(t, mem3.MkdirAll("/tmp/posters/J3", 0o755))
 	require.NoError(t, afero.WriteFile(mem3, "/tmp/posters/J3/PA-9-full.jpg", []byte("live"), 0o644))
-	bPark := parkCanonicalPosterPair(mem3, "/tmp/posters/J3", "PA-9")
+	bPark := parkCanonicalPosterPair(mem3, "/tmp/posters/J3", "PA-9", 0)
 	require.True(t, bPark.hadFull)
 	bPark.fs = &seqRenameFailFS{Fs: mem3, failOn: map[int]bool{1: true}}
 	bPark.restore(nil)
@@ -1150,7 +1150,7 @@ func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	mem4 := afero.NewMemMapFs()
 	require.NoError(t, mem4.MkdirAll("/tmp/posters/J4", 0o755))
 	require.NoError(t, afero.WriteFile(mem4, "/tmp/posters/J4/PA-9.jpg", []byte("c"), 0o644))
-	bDisc := parkCanonicalPosterPair(mem4, "/tmp/posters/J4", "PA-9")
+	bDisc := parkCanonicalPosterPair(mem4, "/tmp/posters/J4", "PA-9", 0)
 	require.True(t, bDisc.hadCrop)
 	bDisc.discard()
 	_, dErr := mem4.Stat(bDisc.cropBak)
@@ -1161,9 +1161,9 @@ func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	mem5 := afero.NewMemMapFs()
 	require.NoError(t, mem5.MkdirAll("/tmp/posters/J5", 0o755))
 	require.NoError(t, afero.WriteFile(mem5, "/tmp/posters/J5/PA-9.jpg", []byte("first"), 0o644))
-	b1 := parkCanonicalPosterPair(mem5, "/tmp/posters/J5", "PA-9")
+	b1 := parkCanonicalPosterPair(mem5, "/tmp/posters/J5", "PA-9", 0)
 	require.NoError(t, afero.WriteFile(mem5, "/tmp/posters/J5/PA-9.jpg", []byte("second"), 0o644))
-	b2 := parkCanonicalPosterPair(mem5, "/tmp/posters/J5", "PA-9")
+	b2 := parkCanonicalPosterPair(mem5, "/tmp/posters/J5", "PA-9", 0)
 	assert.NotEqual(t, b1.cropBak, b2.cropBak, "per-op nonce separates backups")
 	b1.restore(nil)
 	got1, _ := afero.ReadFile(mem5, "/tmp/posters/J5/PA-9.jpg")

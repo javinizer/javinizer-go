@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -72,8 +73,17 @@ var rescrapeBackupSeq atomic.Int64
 
 // parkCanonicalPosterPair moves pre-existing canonical legs aside. Stat
 // errors are fail-closed (audit F-R3-1): an unreadable-but-existing leg marks
+// inFlightMeta is the rescrape op's provenance, persisted inside the
+// in-flight sentinel: on a crashed-op restart the temp cleaner arbitrates
+// the stranded parked pair against the durable row (codex cloud P1) — never
+// deleting nor restoring committed bytes on canonical presence alone.
+type inFlightMeta struct {
+	PosterID     string `json:"poster_id"`
+	PrevRevision uint64 `json:"prev_revision"`
+}
+
 // had=true so later cleanup never treats the leg as op-created.
-func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup {
+func parkCanonicalPosterPair(fs afero.Fs, dir, id string, prevRev uint64) *rescrapePosterBackup {
 	b := &rescrapePosterBackup{fs: fs}
 	if fs == nil || dir == "" || id == "" {
 		return b
@@ -103,7 +113,13 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup 
 		return b
 	}
 	b.markerPath = filepath.Join(dir, ".inflight-"+url.PathEscape(id)+"."+nonce)
-	if mErr := afero.WriteFile(b.fs, b.markerPath, nil, 0o644); mErr != nil {
+	// codex cloud P1 (@temp_dir_cleaner): the sentinel doubles as the op's
+	// PROVENANCE — the captured pre-op revision lets startup reconciliation
+	// arbitrate a stranded parked backup against the durable row instead of
+	// trusting canonical presence alone (crash between GeneratePoster and
+	// CompleteRescrape leaves canon = uncommitted bytes).
+	payload, _ := json.Marshal(inFlightMeta{PosterID: id, PrevRevision: prevRev})
+	if mErr := afero.WriteFile(b.fs, b.markerPath, payload, 0o644); mErr != nil {
 		// codex cloud P2: an UNWRITABLE sentinel means generation would run
 		// unfenced — crop/download admission would see neither marker nor a
 		// parked leg between key release and CAS commit. Refuse like any

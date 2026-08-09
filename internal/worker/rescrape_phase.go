@@ -611,7 +611,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 				}
 				// audit F-R3-2a: park pre-existing canonical bytes aside so the
 				// closeout can restore committed state if this rescrape loses.
-				scope.parked = parkCanonicalPosterPair(inputs.Fs, pdir, movieResult.Movie.ID)
+				scope.parked = parkCanonicalPosterPair(inputs.Fs, pdir, movieResult.Movie.ID, lookup.CapturedRevision)
 				if scope.parked.parkErr != nil {
 					// codex P2: unrecoverable bytes — abort BEFORE generation.
 					return fmt.Errorf("poster backup park: %w", scope.parked.parkErr)

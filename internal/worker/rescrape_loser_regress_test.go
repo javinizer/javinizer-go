@@ -41,12 +41,12 @@ func TestWithRescrapeStatusLoserFailedGenMustNotRewindWinner(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, cropCanon, []byte("OLD-crop"), 0o644))
 
 	// t1 — R1 parks + its generation FAILS with no bytes written (PosterError).
-	parkedR1 := parkCanonicalPosterPair(fs, dir, "LG-1")
+	parkedR1 := parkCanonicalPosterPair(fs, dir, "LG-1", 0)
 	require.True(t, parkedR1.hadFull)
 	require.True(t, parkedR1.hadCrop)
 
 	// t2 — R2 parks (canonical empty thanks to R1) and generates healthy bytes.
-	parkedR2 := parkCanonicalPosterPair(fs, dir, "LG-1")
+	parkedR2 := parkCanonicalPosterPair(fs, dir, "LG-1", 0)
 	require.False(t, parkedR2.hadFull)
 	require.False(t, parkedR2.hadCrop)
 	require.NoError(t, afero.WriteFile(fs, fullCanon, []byte("WINNER-full"), 0o644))
@@ -101,7 +101,7 @@ func TestWithRescrapeStatusSuccessPosterErrorMustNotRewindWinner(t *testing.T) {
 
 	// R1 parks + failed generation (no bytes), commits successfully (its
 	// metadata refresh won the CAS), closeout delayed past R2's landing.
-	parkedR1 := parkCanonicalPosterPair(fs, dir, "LS-1")
+	parkedR1 := parkCanonicalPosterPair(fs, dir, "LS-1", 0)
 	require.True(t, parkedR1.hadFull)
 
 	// R2 refresh: commits a newer row AND its bytes landed at canonical

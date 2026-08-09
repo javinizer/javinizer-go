@@ -229,7 +229,7 @@ func TestParkCanonicalPosterPairRejectsTraversalID(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	bad := filepath.Join(t.TempDir(), "..", "escape-full.jpg") // resolution guard test
 	_ = bad
-	b := parkCanonicalPosterPair(fs, "/tmp/posters/JOB-X", "../escape")
+	b := parkCanonicalPosterPair(fs, "/tmp/posters/JOB-X", "../escape", 0)
 	assert.False(t, b.hadFull, "traversal ID: no parking of outside paths")
 	assert.False(t, b.hadCrop)
 	assert.Nil(t, b.parkErr) // leg-mark semantics unarmed; generation proceeds only via manager's own safety gates
