@@ -199,3 +199,13 @@ func TestMovieToNFO_TaglineMultipartConditional(t *testing.T) {
 	nfoSingle, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", false, nil)
 	assert.Equal(t, "Single", nfoSingle.Tagline)
 }
+
+func TestResolveAndGenerate_CanceledContextReturnsError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<ID>", FirstNameOrder: true})
+	nameCfg := NFONameConfig{FilenameTemplate: "<ID>"}
+	nfoPath, err := g.ResolveAndGenerate(ctx, taglineTestMovie(), "/out", nameCfg, "", nil)
+	assert.Error(t, err)
+	assert.Equal(t, "", nfoPath)
+}
