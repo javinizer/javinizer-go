@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -978,6 +979,92 @@ func TestRescrapeGenerationFingerprintCapture(t *testing.T) {
 	crop, cerr := afero.ReadFile(fs, filepath.Join(pdir, "GEN-9.jpg"))
 	require.NoError(t, cerr)
 	assert.Equal(t, "gen-crop", string(crop), "generated crop leg survives success closeout")
+}
+
+// codex cloud P1 closeout seam: a commit-token write failure is warn-only
+// — the durable commit stands and the backup survives for startup arbitration.
+func TestRescrapeCloseoutCommitTokenWriteFailWarnOnly(t *testing.T) {
+	base := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "CT-1-full.jpg"), []byte("cf"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "CT-1.jpg"), []byte("cc"), 0o644))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-C", "")
+
+	b := parkCanonicalPosterPair(base, dir, "CT-1", 3)
+	require.NoError(t, b.parkErr)
+	wedge := createWedgeFS{Fs: base, contains: ".commit-"}
+	b.fs = wedge
+	lc := rescrapeLifecycleShim(jobID, wedge, store)
+
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.parked = b
+		return &RescrapeResult{Status: models.RescrapeStatusSuccess}, &resultstore.MovieResult{Movie: &models.Movie{ID: "CT-1"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}, nil
+	})
+	require.NoError(t, err, "token write failure never fails the committed op")
+	_, bErr := base.Stat(filepath.Join(dir, "CT-1.jpg.rsbak."+b.nonce))
+	assert.Error(t, bErr, "closeout still discarded the backup (commit landed)")
+}
+
+type flipErrCtx struct {
+	context.Context
+	errs int64
+	when int64
+	err  error
+}
+
+func (c *flipErrCtx) Err() error {
+	calls := atomic.AddInt64(&c.errs, 1)
+	if calls >= c.when {
+		return c.err
+	}
+	return c.Context.Err()
+}
+
+// The re-check after poster generation: a cancelled context surfaces as the
+// op's error instead of a silent commit.
+func TestRescrapeCancelledPostGenerationCtxError(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	pdir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(pdir, 0o755))
+	store := resultstore.New(1, []string{"f1.mp4"})
+	seedFamilyResult(store, "f1.mp4", "res-1", "CX-9", "")
+	gen := &spyPosterGen{onGenerate: func() {
+		_ = afero.WriteFile(fs, filepath.Join(pdir, "CX-9-full.jpg"), []byte("cf"), 0o644)
+	}}
+	ctx := &flipErrCtx{Context: context.Background(), when: 2, err: context.Canceled} // 1st Err() = ScrapeSingle's funnel; 2nd = the fn-level guard
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "CX-9"}, Status: scrape.StatusCompleted}}
+	inputs := rescrapePhaseInputs{
+		WF: wf, ResultMap: store, Finder: store, JobID: jobID,
+		PosterGen:  gen,
+		EditLockFn: func(ids ...string) func() { return func() {} },
+		Fs:         fs, TempDir: "/tmp",
+	}
+	phase := NewRescrapePhase()
+	_, err := phase.Rescrape(ctx, inputs, RescrapeCmd{MovieID: "CX-9", FilePath: "f1.mp4"})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled), "post-generation ctx re-check surfaces cancellation")
+}
+
+// codex cloud P2: a live closeout whose restore leaves a wedged leg must// codex cloud P2: a live closeout whose restore leaves a wedged leg must
+// keep the in-flight marker too — it is the ONLY startup-arbitration record
+// pairing those bytes back to their op.
+func TestRestoreRetainsMarkerWhileBackupLegsRemain(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-RL"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "RL-1.jpg"), []byte("gen"), 0o644))
+	b := parkCanonicalPosterPair(base, dir, "RL-1", 9)
+	require.NoError(t, b.parkErr)
+	b.fs = &seqRenameFailFS{Fs: base, failOn: map[int]bool{1: true}}
+	b.restore(nil)
+	_, err := base.Stat(filepath.Join(dir, "RL-1.jpg.rsbak."+b.nonce))
+	assert.NoError(t, err, "restore wedged — parked leg stranding stands")
+	_, mErr := base.Stat(b.markerPath)
+	assert.NoError(t, mErr, "marker retained until every leg settles")
 }
 
 type readWedgeFS struct {

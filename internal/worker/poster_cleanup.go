@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -67,6 +69,11 @@ type rescrapePosterBackup struct {
 	// even when the op parked NOTHING, so orphan sweeps + edit fences can
 	// never see an in-flight generation's bytes as deleteable litter.
 	markerPath string
+	// nonce ties this op's sentinel, parked legs, and commit token; commitPath
+	// is the op-attributed commit marker (codex cloud P1: revision advance
+	// names the family, never the winner — the token names the op).
+	nonce      string
+	commitPath string
 }
 
 var rescrapeBackupSeq atomic.Int64
@@ -80,6 +87,41 @@ var rescrapeBackupSeq atomic.Int64
 type inFlightMeta struct {
 	PosterID     string `json:"poster_id"`
 	PrevRevision uint64 `json:"prev_revision"`
+} // commitMeta is the op-attributed commit token: written only AFTER this op's
+// CAS commit landed, carrying the SHA of each canonical leg the commit
+// installed. Startup arbitration attributes provenance by matching SHAs — a
+// same-family revision bump alone is no longer evidence enough (codex cloud P1).
+type commitMeta struct {
+	PosterID string `json:"poster_id"`
+	FullSHA  string `json:"full_sha,omitempty"`
+	CropSHA  string `json:"crop_sha,omitempty"`
+}
+
+// writeCommitToken atomically records the op's commit + the canonical content
+// it installed (per-leg SHA read AFTER the commit). A write failure is
+// warn-only: the durable row stands; startup simply falls back to keeping the
+// backup instead of deleting it.
+func writeCommitToken(fs afero.Fs, commitPath, dir, id string) error {
+	meta := commitMeta{PosterID: id}
+	if data, err := afero.ReadFile(fs, filepath.Join(dir, id+"-full.jpg")); err == nil {
+		sum := sha256.Sum256(data)
+		meta.FullSHA = hex.EncodeToString(sum[:])
+	}
+	if data, err := afero.ReadFile(fs, filepath.Join(dir, id+".jpg")); err == nil {
+		sum := sha256.Sum256(data)
+		meta.CropSHA = hex.EncodeToString(sum[:])
+	}
+	// static lap — Marshal of this struct cannot fail; no error arm needed.
+	payload, _ := json.Marshal(meta)
+	tmp := commitPath + ".tmp"
+	if wErr := afero.WriteFile(fs, tmp, payload, 0o644); wErr != nil {
+		return fmt.Errorf("commit token write %s: %w", commitPath, wErr)
+	}
+	if rErr := fs.Rename(tmp, commitPath); rErr != nil {
+		_ = fs.Remove(tmp)
+		return fmt.Errorf("commit token rename %s: %w", commitPath, rErr)
+	}
+	return nil
 }
 
 // had=true so later cleanup never treats the leg as op-created.
@@ -112,6 +154,8 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string, prevRev uint64) *rescr
 		b.parkErr = fmt.Errorf("poster backup dir %s: %w", dir, dErr)
 		return b
 	}
+	b.nonce = nonce
+	b.commitPath = filepath.Join(dir, ".commit-"+url.PathEscape(id)+"."+nonce)
 	b.markerPath = filepath.Join(dir, ".inflight-"+url.PathEscape(id)+"."+nonce)
 	// codex cloud P1 (@temp_dir_cleaner): the sentinel doubles as the op's
 	// PROVENANCE — the captured pre-op revision lets startup reconciliation
@@ -209,8 +253,22 @@ func (b *rescrapePosterBackup) restore(verify func(legPath string) (allowed bool
 	// audit F-R19-1 lifecycle: the in-flight sentinel belongs to this op —
 	// once its bytes are settled (restored/disposed), the marker's purpose is
 	// spent. Crash-tolerant restart also sweeps stranded markers.
+	// codex cloud P2 (@213): a leg that did NOT settle (wedged rename,
+	// undecidable canonical) keeps its .rsbak — and the marker must stay
+	// because it is the ONLY provenance startup arbitration can pair.
 	if b.markerPath != "" {
-		_ = b.fs.Remove(b.markerPath)
+		legsRemain := false
+		for _, p := range []string{b.fullBak, b.cropBak} {
+			if p == "" {
+				continue
+			}
+			if _, errStatus := b.fs.Stat(p); errStatus == nil || !os.IsNotExist(errStatus) {
+				legsRemain = true // exists, or undecidable (fail-closed)
+			}
+		}
+		if !legsRemain {
+			_ = b.fs.Remove(b.markerPath)
+		}
 	}
 }
 
@@ -219,8 +277,10 @@ func (b *rescrapePosterBackup) discard() {
 	if b == nil || b.fs == nil {
 		return
 	}
-	for _, p := range []string{b.fullBak, b.cropBak, b.markerPath} {
-		_ = b.fs.Remove(p)
+	for _, p := range []string{b.fullBak, b.cropBak, b.markerPath, b.commitPath} {
+		if p != "" {
+			_ = b.fs.Remove(p)
+		}
 	}
 }
 

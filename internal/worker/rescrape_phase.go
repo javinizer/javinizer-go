@@ -393,6 +393,16 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 	// and the pair pre-existed: those bytes are the committed state, so route
 	// through the keyed content-verify restore instead of discarding them.
 	if outcome.Status == models.RescrapeStatusSuccess {
+		// codex cloud P1 (@parked-arbitration): persist THIS op's commit token
+		// before any closeout — a same-family revision bump cannot tell WHICH
+		// overlapping rescrape won, so startup arbitration needs an op-scoped,
+		// content-addressed marker to distinguish winner from stranded loser.
+		if scope.parked != nil && scope.parked.fs != nil && scope.parked.commitPath != "" &&
+			movieResult != nil && movieResult.Movie != nil && movieResult.Movie.ID != "" && lc.inputs.TempDir != "" {
+			if wErr := writeCommitToken(scope.parked.fs, scope.parked.commitPath, filepath.Join(lc.inputs.TempDir, "posters", lc.inputs.JobID.String()), movieResult.Movie.ID); wErr != nil {
+				logging.Warnf("rescrape commit token write failed (backup retained for startup arbitration): %v", wErr)
+			}
+		}
 		lostGeneration := movieResult != nil && (movieResult.PosterError != nil || !movieResult.PosterGenerated)
 		if lostGeneration && scope.preExistedPair {
 			closeoutRescrapePosterBytes(lc.inputs, scope, movieResult, cleanupMovie())

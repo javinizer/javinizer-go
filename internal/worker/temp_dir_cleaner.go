@@ -522,23 +522,16 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 	strandedMeta := map[string]inFlightMeta{}
 	var pendingRsbak []pendingPark
 	var strandedMarkers []strandedMarker
+	var commitTokens []commitToken
 	for _, e := range entries {
 		name := e.Name()
 		var canon string
 		var rsbakNonce string
-		// audit F-R20-2 + F-R21-1: the marker branch runs FIRST — its
-		// anchor therefore requires that the name does NOT ALSO parse as a
-		// parked leg (whose ".rsbak."+nonce tail is subshape-compatible).
-		// Otherwise a leading-dot ID's parked bytes get eaten as "markers".
-		// audit F-R21-1 + F-R22-1: the marker branch's exclusion must parse,
-		// not substring: a name whose .rsbak. tail is hex.hex is a parked leg
-		// (re-home, never sweep); a marker whose ID CONTAINS ".rsbak." has a
-		// 3+-segment tail → parked-parse rejects → marker branch fires.
-		parkedParse := false
-		if ridx := strings.LastIndex(name, ".rsbak."); ridx >= 0 {
-			parkedParse = isBackupNonce(name[ridx+len(".rsbak."):])
-		}
-		if markerAnchored(name) && !parkedParse {
+		// codex cloud P2 (@541) shape disambiguation: a parked LEG's ".rsbak."
+		// always immediately follows the jpg suffix — any ".rsbak." deeper in
+		// the name belongs to the poster ID itself (a sentinel for an ID that
+		// literally ends in ".rsbak"; a parked leg for a leading-dot ID).
+		if markerAnchored(name) && !isParkedBackupName(name) {
 			// audit F-R19-1 aftermath: stranded in-flight markers (crash) — a
 			// restarted process has no live generation windows; delete.
 			// codex cloud P1: harvest the op provenance FIRST — parked backups
@@ -567,19 +560,35 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 			strandedMarkers = append(strandedMarkers, sm)
 			continue
 		}
+		if commitAnchored(name) {
+			// codex cloud P1: commit tokens name the WINNING op — harvest before
+			// any classification so stranded backups can attribute the commit
+			// (and never lean on bare family revision advance again).
+			if data, rdErr := afero.ReadFile(c.fs, filepath.Join(dir, name)); rdErr == nil {
+				var cm commitMeta
+				if json.Unmarshal(data, &cm) == nil && cm.PosterID != "" {
+					if i1 := strings.LastIndexByte(name, '.'); i1 >= 0 {
+						if i0 := strings.LastIndexByte(name[:i1], '.'); i0 >= 0 {
+							commitTokens = append(commitTokens, commitToken{name: name, base: strings.TrimSpace(cm.PosterID), nonce: name[i0+1:], meta: cm})
+						}
+					}
+				}
+			}
+			continue // tokens sweep at finalization once no base-parking legs pend
+		}
 		switch {
 		case strings.HasPrefix(name, promoteWitnessPrefix) || strings.HasPrefix(name, rekeyWitnessPrefix) || strings.HasPrefix(name, cropWitnessPrefix):
 			continue // witness files are never parked backups (F-R5-3 belt)
 		case strings.HasSuffix(name, ".dlbak"):
 			canon = strings.TrimSuffix(name, ".dlbak") // legacy + manager park
 		default:
-			// nonce-anchored rescrape park: <id>.jpg.rsbak.<hex>.<hex> — the
-			// LAST hit with a hex.hex tail, so ids containing ".rsbak." don't
-			// misparse (F-R5-3).
-			idx := strings.LastIndex(name, ".rsbak.")
-			if idx < 0 || !isBackupNonce(name[idx+len(".rsbak."):]) {
+			// codex cloud P2: ONLY jpg-adjacent ".rsbak." names are parked
+			// legs — anything with the token deeper in the name (e.g. inside a
+			// dotted poster ID) is not a rescrape park at all.
+			if !isParkedBackupName(name) {
 				continue
 			}
+			idx := strings.LastIndex(name, ".rsbak.")
 			canon = name[:idx]
 			rsbakNonce = name[idx+len(".rsbak."):]
 		}
@@ -622,7 +631,7 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 		healed++
 	}
 	if len(pendingRsbak) > 0 {
-		healed += c.arbitrateParkedRescrapeBackups(ctx, jobID, dir, pendingRsbak, strandedMeta)
+		healed += c.arbitrateParkedRescrapeBackups(ctx, jobID, dir, pendingRsbak, strandedMeta, commitTokens)
 	}
 
 	// codex cloud P2: marker removal — only after every dangling parked leg
@@ -646,6 +655,37 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 			}
 			if rmErr := c.fs.Remove(filepath.Join(dir, m.name)); rmErr != nil {
 				logging.Warnf("in-flight marker sweep %s: %v", m.name, rmErr)
+				continue
+			}
+			healed++
+		}
+	}
+	// codex cloud P1 leak guard: a commit token settles when no parked leg for
+	// its base pends anymore — attribution evidence only lives while bytes
+	// remain contestable. Independent of marker traffic (a dir can hold a lone
+	// settle-able token).
+	if len(commitTokens) > 0 {
+		pendingBases := map[string]bool{}
+		if entries3, rdErr := afero.ReadDir(c.fs, dir); rdErr == nil {
+			for _, e3 := range entries3 {
+				n3 := e3.Name()
+				if idx := strings.LastIndex(n3, ".rsbak."); idx >= 0 && isBackupNonce(n3[idx+len(".rsbak."):]) {
+					canon3 := n3[:idx]
+					if strings.HasSuffix(canon3, "-full.jpg") {
+						canon3 = strings.TrimSuffix(canon3, "-full.jpg")
+					} else {
+						canon3 = strings.TrimSuffix(canon3, ".jpg")
+					}
+					pendingBases[canon3] = true
+				}
+			}
+		}
+		for _, tok := range commitTokens {
+			if pendingBases[tok.base] {
+				continue
+			}
+			if rmErr := c.fs.Remove(filepath.Join(dir, tok.name)); rmErr != nil {
+				logging.Warnf("commit token sweep %s: %v", tok.name, rmErr)
 				continue
 			}
 			healed++
@@ -688,7 +728,7 @@ type pendingPark struct {
 // Missing provenance, a foreign provenance ID, or an undecidable durable row
 // keep BOTH copies — disk litter beats unrecoverable bytes. Multiple crashed
 // ops unwind newest-first (their confidence chain stacks).
-func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, jobID, dir string, pending []pendingPark, stranded map[string]inFlightMeta) int {
+func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, jobID, dir string, pending []pendingPark, stranded map[string]inFlightMeta, tokens []commitToken) int {
 	byCanon := map[string][]pendingPark{}
 	for _, p := range pending {
 		byCanon[p.canon] = append(byCanon[p.canon], p)
@@ -748,19 +788,62 @@ func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, job
 				logging.Warnf("parked backup sweep %s: provenance id %q mismatches owner %q — kept both", parked, meta.PosterID, base)
 				continue
 			}
+			// codex cloud P1 (@758): a family revision advance does NOT identify the
+			// winning op — attribute by commit token first:
+			//   own nonce token ⇒ this op committed ⇒ its backup is obsolete;
+			//   foreign token whose SHA the CANON currently carries ⇒ family whole
+			//     already ⇒ backup obsolete;
+			//   foreign token whose SHA this BACKUP carries ⇒ canon was lost to a
+			//     later uncommitted op ⇒ restoring this backup recovers committed bytes;
+			//   foreign token matching NEITHER ⇒ a newer-op unwind settles this leg
+			//     this run ⇒ keep both (never guess).
+			if tok := tokenForNonce(tokens, p.nonce); tok != nil {
+				if rmErr := c.fs.Remove(parked); rmErr != nil {
+					logging.Warnf("parked backup sweep %s: %v", parked, rmErr)
+					continue
+				}
+				healed++
+				continue
+			}
+			if fTok := foreignTokenForBase(tokens, base, p.nonce); fTok != nil {
+				wantSHA := tokenLegSHA(fTok.meta, p.canon)
+				bakData, bErr := afero.ReadFile(c.fs, parked)
+				canonData, cErr := afero.ReadFile(c.fs, canonPath)
+				if bErr == nil && cErr == nil && wantSHA != "" {
+					if shaContentHex(canonData) == wantSHA {
+						// canonical carries the committed content already (winner is
+						// whole) — the stranded backup is obsolete.
+						if rmErr := c.fs.Remove(parked); rmErr != nil {
+							logging.Warnf("parked backup sweep %s: %v", parked, rmErr)
+							continue
+						}
+						healed++
+						continue
+					}
+					if shaContentHex(bakData) == wantSHA {
+						// canon's current bytes belong to an UNCOMMITTED later op —
+						// this backup holds the winner's committed bytes: restore them.
+						if rnErr := c.fs.Rename(parked, canonPath); rnErr != nil {
+							logging.Warnf("parked backup restore %s→%s: %v", parked, canonPath, rnErr)
+							continue
+						}
+						healed++
+						continue
+					}
+				}
+				logging.Warnf("parked backup sweep %s: commit present but content ambiguous — kept both", parked)
+				continue
+			}
 			rev, decidable := c.posterDurableRevision(ctx, jobID, meta.PosterID)
 			if !decidable {
 				logging.Warnf("parked backup sweep %s: durable revision undecidable — kept both", parked)
 				continue
 			}
 			if rev > meta.PrevRevision {
-				// the op's commit landed (revision advanced past its capture):
-				// canonical bytes are the committed ones; drop the backup.
-				if rmErr := c.fs.Remove(parked); rmErr != nil {
-					logging.Warnf("parked backup sweep %s: %v", parked, rmErr)
-					continue
-				}
-				healed++
+				// codex cloud P1 bare-advance fallback: NO commit token exists for
+				// this base, so the advance is unattributable — an overlapping-op
+				// interleave could blame this op for another's commit. Keep both.
+				logging.Warnf("parked backup sweep %s: revision advanced without op-attributed commit token — kept both", parked)
 				continue
 			}
 			// the commit never landed: canonical holds stranded generation —
@@ -775,7 +858,62 @@ func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, job
 	return healed
 }
 
-// posterDurableRevision reports the highest durable revision among the job's
+// posterDurableRevision reports the highest durable revision among the job's// isParkedBackupName: the parked-leg shape REQUIRES ".rsbak." immediately
+// after the jpg suffix (full or cropped leg) — a deeper infix occurrence just
+// means a poster id containing the token (codex cloud P2 @541).
+func isParkedBackupName(name string) bool {
+	i := strings.LastIndex(name, ".rsbak.")
+	if i < 0 || !isBackupNonce(name[i+len(".rsbak."):]) {
+		return false
+	}
+	pre := name[:i]
+	return strings.HasSuffix(pre, "-full.jpg") || strings.HasSuffix(pre, ".jpg")
+} // commitToken couples an op-attributed commit payload with its filename parts.
+type commitToken struct {
+	name  string
+	base  string
+	nonce string
+	meta  commitMeta
+}
+
+const commitWitnessPrefix = ".commit-"
+
+// commitAnchored mirrors markerAnchored for the ".commit-" lane: prefix plus
+// the hex.hex nonce tail — never a parked-leg interpretation.
+func commitAnchored(name string) bool {
+	return strings.HasPrefix(name, commitWitnessPrefix) && hexLowerHexTail(name)
+}
+
+// tokenForNonce finds the commit token produced by the SAME op (nonce pair).
+func tokenForNonce(tokens []commitToken, nonce string) *commitToken {
+	for i := range tokens {
+		if tokens[i].nonce == nonce {
+			return &tokens[i]
+		}
+	}
+	return nil
+}
+
+// foreignTokenForBase finds a DIFFERENT op's commit token for the same poster
+// base — attribution evidence that a same-family commit exists but wasn't this
+// parked op's.
+func foreignTokenForBase(tokens []commitToken, base, nonce string) *commitToken {
+	for i := range tokens {
+		if tokens[i].nonce != nonce && strings.EqualFold(tokens[i].base, base) {
+			return &tokens[i]
+		}
+	}
+	return nil
+}
+
+// tokenLegSHA picks the token's SHA matching the canonical leg form.
+func tokenLegSHA(m commitMeta, canon string) string {
+	if strings.HasSuffix(canon, "-full.jpg") {
+		return m.FullSHA
+	}
+	return m.CropSHA
+}
+
 // results carrying the poster ID (Movie.ID first, match-info fallback). Any
 // incomparability (missing repo, missing job conclusively, undecodable
 // results, no matching row) is undecidable — matching state decides byte fate.
