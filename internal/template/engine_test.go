@@ -2817,3 +2817,29 @@ func TestEngine_ValidateTags_ElseModifierRejected(t *testing.T) {
 	assert.Error(t, e.ValidateTags("<IF:SERIES>a<ELSE:b>c</IF>"))
 	assert.NoError(t, e.ValidateTags("<IF:SERIES>a<ELSE>b</IF>"))
 }
+
+func TestEngine_ValidateTags_DegenerateConditionalsRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<IF:>oops"))
+	assert.Error(t, e.ValidateTags("<IF:SERIES>a<ELSE:>b</IF>"))
+	assert.Error(t, e.ValidateTags("</ELSE>"))
+	assert.Error(t, e.ValidateTags("</ENDIF>"))
+	assert.NoError(t, e.ValidateTags("A <3 B"))
+}
+
+func TestEngine_ValidateTags_SignedNumericModifierRejected(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<PART:2>"))
+	assert.Error(t, e.ValidateTags("<PART:+2>"))
+	assert.Error(t, e.ValidateTags("<PART:-2>"))
+	assert.Error(t, e.ValidateTags("<DISC:+1>"))
+}
+
+func TestStrictDigitModifier(t *testing.T) {
+	assert.False(t, strictDigitModifier(""))
+	assert.True(t, strictDigitModifier("2"))
+	assert.True(t, strictDigitModifier("02"))
+	assert.False(t, strictDigitModifier("+2"))
+	assert.False(t, strictDigitModifier("-2"))
+	assert.False(t, strictDigitModifier("2a"))
+}

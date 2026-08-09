@@ -284,3 +284,15 @@ func TestMovieToNFO_TaglineElseModifierDropped(t *testing.T) {
 	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
 	assert.Equal(t, "", nfo.Tagline)
 }
+
+func TestMovieToNFO_TaglineDegenerateIfColonDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<IF:>oops", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}
+
+func TestMovieToNFO_TaglineSignedNumericModifierDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<PART:+2>", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "-pt1", 1, true, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}

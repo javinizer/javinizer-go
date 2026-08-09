@@ -13,9 +13,10 @@ import (
 
 // Package-level compiled regexes for performance
 var (
-	cjkRegex                  = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
-	conditionalTokenRegex     = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>`)
-	conditionalStructureRegex = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>|<ELSE>`)
+	cjkRegex                   = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
+	conditionalTokenRegex      = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>`)
+	conditionalStructureRegex  = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>|<ELSE>`)
+	degenerateConditionalRegex = regexp.MustCompile(`(?i)<IF:>|<ELSE:>|</ELSE>|</ENDIF>|<ENDIF>`)
 )
 
 // DefaultMaxTemplateBytes, DefaultMaxOutputBytes, and DefaultMaxConditionalDepth are the default size and depth limits for template rendering.
@@ -398,6 +399,9 @@ func (e *Engine) ValidateTags(template string) error {
 	if err := e.validateConditionalNesting(template); err != nil {
 		return err
 	}
+	if degenerateConditionalRegex.MatchString(template) {
+		return fmt.Errorf("malformed conditional token")
+	}
 	matches := e.tagPattern.FindAllStringSubmatch(template, -1)
 	for _, match := range matches {
 		tagName := strings.ToUpper(match[1])
@@ -423,7 +427,7 @@ func (e *Engine) ValidateTags(template string) error {
 		if len(match) > 2 && match[2] != "" {
 			switch tagName {
 			case "PART", "DISC", "INDEX":
-				if !e.translationResolver.isNumericModifier(match[2]) {
+				if !strictDigitModifier(match[2]) {
 					return fmt.Errorf("invalid numeric modifier for %s: %s", tagName, match[2])
 				}
 			}
@@ -468,6 +472,21 @@ func (e *Engine) validateConditionalNesting(template string) error {
 		return fmt.Errorf("unclosed <IF> block")
 	}
 	return nil
+}
+
+// strictDigitModifier reports whether modifier is a non-empty string of ASCII
+// digits (no sign, no spaces), so <PART:+2> is rejected instead of rendering
+// "+1" via fmt's plus-flag reinterpretation.
+func strictDigitModifier(modifier string) bool {
+	if modifier == "" {
+		return false
+	}
+	for i := 0; i < len(modifier); i++ {
+		if modifier[i] < '0' || modifier[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // isKnownTag reports whether tagName resolves through resolveTag without an
