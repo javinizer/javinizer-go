@@ -335,7 +335,10 @@ const ops = Array.from(latestByFamily.entries());
 				if (post?.status !== 'success') return false;
 				return (post.dataUpdatedAt ?? 0) > before;
 			})();
-			if (succeeded.length > 0 && refreshed) {
+			// codex cloud P2 (@338): fulfilled families clear on PATCH SUCCESS alone — a
+			// failed refresh never strands them (a stale whole-movie overlay can
+			// resend the old snapshot and overwrite intervening changes).
+			if (succeeded.length > 0) {
 				const editedMovies = deps.getEditedMovies();
 				for (const ok of succeeded) {
 					// codex P2-E: delete by PRE-SAVE family membership (immunity to the

@@ -33,12 +33,23 @@ func TestUpdateMovieFamilyWrapperMultipartCASGuards(t *testing.T) {
 	seedFamilyResult(store, "/f/b.mp4", "res-b", "CAS-2", "")
 	pe := newEditorForStore(store)
 
+	t.Run("multipart map omitting the target is refused outright (codex cloud P2)", func(t *testing.T) {
+		bCur, _, ok := store.GetFileResultByResultID("res-b")
+		require.True(t, ok)
+		// every LISTED part validates — the target still needs its own revision.
+		err := pe.UpdateMovieFamily(context.Background(), "CAS-2", "res-a", &models.Movie{ID: "CAS-2"}, FamilySaveOptions{ExpectedResultRevisions: map[string]uint64{"res-b": bCur.Revision}})
+		require.ErrorContains(t, err, "omits the target result")
+	})
 	t.Run("vanished result", func(t *testing.T) {
-		err := pe.UpdateMovieFamily(context.Background(), "CAS-2", "res-a", &models.Movie{ID: "CAS-2"}, FamilySaveOptions{ExpectedResultRevisions: map[string]uint64{"res-ghost": 3}})
+		aCur, _, ok := store.GetFileResultByResultID("res-a")
+		require.True(t, ok)
+		err := pe.UpdateMovieFamily(context.Background(), "CAS-2", "res-a", &models.Movie{ID: "CAS-2"}, FamilySaveOptions{ExpectedResultRevisions: map[string]uint64{"res-a": aCur.Revision, "res-ghost": 3}})
 		require.ErrorContains(t, err, "vanished for CAS check")
 	})
 	t.Run("stale part revision", func(t *testing.T) {
-		err := pe.UpdateMovieFamily(context.Background(), "CAS-2", "res-a", &models.Movie{ID: "CAS-2"}, FamilySaveOptions{ExpectedResultRevisions: map[string]uint64{"res-b": 99}})
+		aCur, _, ok := store.GetFileResultByResultID("res-a")
+		require.True(t, ok)
+		err := pe.UpdateMovieFamily(context.Background(), "CAS-2", "res-a", &models.Movie{ID: "CAS-2"}, FamilySaveOptions{ExpectedResultRevisions: map[string]uint64{"res-a": aCur.Revision, "res-b": 99}})
 		require.ErrorContains(t, err, "revision stale")
 	})
 }

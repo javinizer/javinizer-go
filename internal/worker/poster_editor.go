@@ -1479,6 +1479,14 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 		// every current member must be accounted for (guarded set = target ∪
 		// map keys); callers without revision context keep documented LWW.
 		if opts.ExpectedResultRevision != nil || len(opts.ExpectedResultRevisions) > 0 {
+			// codex cloud P2 (@poster_editor): a multipart map must AUTH its target —
+			// letting the target ride into the guard set unvalidated means a stale
+			// target part is never CAS-checked.
+			if len(opts.ExpectedResultRevisions) > 0 {
+				if _, ok := opts.ExpectedResultRevisions[resultID]; !ok {
+					return &EditAdmissionConflictError{Message: "multipart expected_revisions omits the target result — no part goes unverified"}
+				}
+			}
 			guardSet := make(map[string]struct{}, len(opts.ExpectedResultRevisions)+1)
 			guardSet[resultID] = struct{}{}
 			for rid := range opts.ExpectedResultRevisions {

@@ -94,6 +94,23 @@ func mergeLiveReviewEdits(baseline, phaseOut, live *models.Movie) *models.Movie 
 	if live.ContentID != baseline.ContentID {
 		out.ContentID = live.ContentID
 	}
+	// codex cloud P2 (@apply_closeout): EVERY PATCH-editable field merges —
+	// the phase's stale value must never clobber a concurrent review edit.
+	if live.OriginalFileName != baseline.OriginalFileName {
+		out.OriginalFileName = live.OriginalFileName
+	}
+	if live.RatingWarning != baseline.RatingWarning {
+		out.RatingWarning = live.RatingWarning
+	}
+	if live.SourceName != baseline.SourceName {
+		out.SourceName = live.SourceName
+	}
+	if live.SourceURL != baseline.SourceURL {
+		out.SourceURL = live.SourceURL
+	}
+	if !reflect.DeepEqual(live.Translations, baseline.Translations) {
+		out.Translations = append([]models.MovieTranslation(nil), live.Translations...)
+	}
 	if !reflect.DeepEqual(live.Actresses, baseline.Actresses) {
 		out.Actresses = append([]models.Actress(nil), live.Actresses...)
 	}
