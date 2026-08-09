@@ -156,7 +156,8 @@ func TestMovieTemplateContext_ThreadsVideoFilePath(t *testing.T) {
 
 func TestMergeTags_ConfigTagThreadsVideoFilePath(t *testing.T) {
 	g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"<RESOLUTION>"}, FirstNameOrder: true})
-	tags, err := g.mergeTags(context.Background(), taglineTestMovie(), "/movies/IPX-535.mp4", nil, nil)
+	tmplCtx := g.movieTemplateContext(taglineTestMovie(), "/movies/IPX-535.mp4")
+	tags, err := g.mergeTags(context.Background(), tmplCtx, nil, nil)
 	assert.NoError(t, err)
 	_ = tags
 }

@@ -62,13 +62,14 @@ func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movi
 	trailerURL := g.resolveTrailer(movie)
 	fi := g.resolveStreamDetails(ctx, videoFilePath)
 	originalPath := g.resolveOriginalPath(movie)
-	tagline, err := g.resolveTagline(ctx, movie, videoFilePath)
+	tmplCtx := g.movieTemplateContext(movie, videoFilePath)
+	tagline, err := g.resolveTagline(ctx, tmplCtx)
 	if err != nil {
 		return nfoInput{}, err
 	}
 	credits := g.resolveCredits()
 
-	tagList, err := g.mergeTags(ctx, movie, videoFilePath, actors, tags)
+	tagList, err := g.mergeTags(ctx, tmplCtx, actors, tags)
 	if err != nil {
 		return nfoInput{}, err
 	}
@@ -194,8 +195,8 @@ func (g *Generator) resolveOriginalPath(movie *models.Movie) string {
 // Static text (no '<') and literal '<' sequences the tag pattern cannot match
 // pass through unchanged; template errors drop the tagline with a warning
 // rather than fail the whole NFO for an optional field.
-func (g *Generator) resolveTagline(ctx context.Context, movie *models.Movie, videoFilePath string) (string, error) {
-	return g.renderConfiguredText(ctx, movie, videoFilePath, "tagline", g.config.Tagline)
+func (g *Generator) resolveTagline(ctx context.Context, tmplCtx *template.Context) (string, error) {
+	return g.renderConfiguredText(ctx, tmplCtx, "tagline", g.config.Tagline)
 }
 
 // movieTemplateContext builds the template context for configured text fields
@@ -219,11 +220,11 @@ func (g *Generator) movieTemplateContext(movie *models.Movie, videoFilePath stri
 // renderConfiguredText expands a configured text field when it references
 // template tags; static text is returned byte-identical without touching the
 // engine. Returns "" (caller omits the value) on template error.
-func (g *Generator) renderConfiguredText(ctx context.Context, movie *models.Movie, videoFilePath, label, tmpl string) (string, error) {
-	if tmpl == "" || !strings.Contains(tmpl, "<") || movie == nil {
+func (g *Generator) renderConfiguredText(ctx context.Context, tmplCtx *template.Context, label, tmpl string) (string, error) {
+	if tmpl == "" || !strings.Contains(tmpl, "<") || tmplCtx == nil {
 		return tmpl, nil
 	}
-	rendered, err := g.templateEngine.ExecuteWithContext(ctx, tmpl, g.movieTemplateContext(movie, videoFilePath))
+	rendered, err := g.templateEngine.ExecuteWithContext(ctx, tmpl, tmplCtx)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return "", err
@@ -307,7 +308,7 @@ func (g *Generator) buildActors(movieActresses []models.Actress) []actor {
 
 // mergeTags combines actress-as-tag entries, caller-provided tags, and config tags,
 // deduplicating by name.
-func (g *Generator) mergeTags(ctx context.Context, movie *models.Movie, videoFilePath string, actors []actor, callerTags []string) ([]string, error) {
+func (g *Generator) mergeTags(ctx context.Context, tmplCtx *template.Context, actors []actor, callerTags []string) ([]string, error) {
 	var tags []string
 	tagSet := make(map[string]bool)
 
@@ -336,7 +337,7 @@ func (g *Generator) mergeTags(ctx context.Context, movie *models.Movie, videoFil
 
 	// Config tags (template-expanded — the Web UI advertises them as templates)
 	for _, tag := range g.config.Tag {
-		rendered, err := g.renderConfiguredText(ctx, movie, videoFilePath, "tag", tag)
+		rendered, err := g.renderConfiguredText(ctx, tmplCtx, "tag", tag)
 		if err != nil {
 			return nil, err
 		}
