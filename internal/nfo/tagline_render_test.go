@@ -239,3 +239,9 @@ func TestMovieToNFO_TaglineMultipleElseDropped(t *testing.T) {
 	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
 	assert.Equal(t, "", nfo.Tagline)
 }
+
+func TestMovieToNFO_TaglineMultilineConditionalRendered(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<IF:TITLE>\nFeatured\n</IF>", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
+	assert.Equal(t, "\nFeatured\n", nfo.Tagline)
+}

@@ -52,7 +52,8 @@ type Context struct {
 
 	// Media info
 	OriginalFilename string
-	VideoFilePath    string // Path to video file for mediainfo extraction
+	VideoFilePath    string          // Path to video file for mediainfo extraction
+	execCtx          context.Context // per-execution context for cancellation; not cloned
 
 	// Indexing (for screenshots, multi-part, etc.)
 	Index int
@@ -250,7 +251,11 @@ func (c *Context) getMediaInfo() *mediainfo.VideoInfo {
 			c.mediaInfoError = fmt.Errorf("no video file path")
 			return
 		}
-		c.cachedMediaInfo, c.mediaInfoError = mediainfo.Analyze(context.Background(), c.VideoFilePath)
+		analyzeCtx := c.execCtx
+		if analyzeCtx == nil {
+			analyzeCtx = context.Background()
+		}
+		c.cachedMediaInfo, c.mediaInfoError = mediainfo.Analyze(analyzeCtx, c.VideoFilePath)
 	})
 	return c.cachedMediaInfo
 }

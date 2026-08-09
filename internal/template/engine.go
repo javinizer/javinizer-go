@@ -114,7 +114,7 @@ func newEngineWithOptions(opts engineOptions) *Engine {
 		tagPattern: regexp.MustCompile(`(?i)<([A-Z_]+)(?::([^>]+))?>`),
 		// Matches: <IF:TAG>content</IF> or <IF:TAG>true<ELSE>false</IF>
 		// Case-insensitive to allow <if:tag>, <IF:TAG>, etc.
-		conditionalPattern:  regexp.MustCompile(`(?i)<IF:([A-Z_]+)>(.*?)(?:<ELSE>(.*?))?</IF>`),
+		conditionalPattern:  regexp.MustCompile(`(?is)<IF:([A-Z_]+)>(.*?)(?:<ELSE>(.*?))?</IF>`),
 		options:             opts,
 		tagRegistry:         newTagRegistry(),
 		translationResolver: newTranslationResolver(opts),
@@ -245,6 +245,9 @@ func (e *Engine) ExecuteWithContext(execCtx context.Context, template string, ct
 	if err := e.Validate(template); err != nil {
 		return "", err
 	}
+
+	ctx.execCtx = execCtx
+	defer func() { ctx.execCtx = nil }()
 
 	result := template
 
