@@ -1,9 +1,11 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/afero"
 
@@ -16,15 +18,21 @@ import (
 // can't complete on the next startup.
 type evictWitness struct {
 	OldID string `json:"old_id"`
+	// NewSourceURL is the post-commit effective poster source (the payload's
+	// resolved PosterURL|CoverURL per effectivePosterSourceOf) — startup
+	// arbitration needs it to decide whether the metadata commit landed
+	// (codex cloud P1 @witness arbitration).
+	NewSourceURL string `json:"new_source_url,omitempty"`
 }
 
-// reconcileEvictWitness completes an eviction: the committed envelope already
-// names the new source, so the old canonical legs leave, then the witness
-// sweeps. Transient faults retain the witness for the next startup.
-func (c *TempDirCleaner) reconcileEvictWitness(dir, wpath string) int {
+// reconcileEvictWitness completes a COMMITTED eviction: no commit ⇒ sweep the
+// witness without touching canon; commit ⇒ evict then sweep (codex cloud P1
+// @SJPs — a bootstrap-before-commit crash pits full witness-vs-row semantics
+// eternally; the row's effective poster source is the arbiter).
+func (c *TempDirCleaner) reconcileEvictWitness(ctx context.Context, dir, jobID, wpath string) int {
 	data, err := afero.ReadFile(c.fs, wpath)
 	var w evictWitness
-	if err != nil || json.Unmarshal(data, &w) != nil || w.OldID == "" {
+	if err != nil || json.Unmarshal(data, &w) != nil || w.OldID == "" || w.NewSourceURL == "" {
 		logging.Warnf("evict witness %s unreadable/corrupt — left in place", wpath)
 		return 0
 	}
@@ -32,16 +40,42 @@ func (c *TempDirCleaner) reconcileEvictWitness(dir, wpath string) int {
 		logging.Warnf("evict witness %s carries an unsafe id — left in place", wpath)
 		return 0
 	}
-	failed := false
-	for _, name := range []string{w.OldID + "-full.jpg", w.OldID + ".jpg"} {
-		if rmErr := c.fs.Remove(filepath.Join(dir, name)); rmErr != nil && !os.IsNotExist(rmErr) {
-			failed = true
-			logging.Warnf("evict reconcile removal %s: %v", name, rmErr)
-		}
+	if c.jobRepo == nil {
+		return 0 // no arbiter — keep everything
 	}
-	if failed {
+	job, jerr := c.jobRepo.FindByID(ctx, jobID)
+	if jerr != nil {
+		logging.Warnf("evict reconcile: job %s lookup failed: %v — witness retained", jobID, jerr)
 		return 0
 	}
+	res, ok := arbitrateResults(job)
+	if !ok {
+		return 0
+	}
+	committed := false
+	for _, r := range res {
+		if r == nil || r.Movie == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(r.Movie.ID), w.OldID) &&
+			effectivePosterSourceOf(r.Movie.Poster.PosterURL, r.Movie.Poster.CoverURL) == w.NewSourceURL {
+			committed = true
+			break
+		}
+	}
+	failed := false
+	if committed {
+		for _, name := range []string{w.OldID + "-full.jpg", w.OldID + ".jpg"} {
+			if rmErr := c.fs.Remove(filepath.Join(dir, name)); rmErr != nil && !os.IsNotExist(rmErr) {
+				failed = true
+				logging.Warnf("evict reconcile removal %s: %v", name, rmErr)
+			}
+		}
+		if failed {
+			return 0
+		}
+	}
+	// sweep the witness either way (uncommitted → nothing to do; committed → done)
 	if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {
 		logging.Warnf("evict witness sweep %s: %v", wpath, rmErr)
 		return 0

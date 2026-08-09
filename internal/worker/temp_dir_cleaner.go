@@ -309,7 +309,7 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 				continue
 			}
 			if isEvict {
-				reversed += c.reconcileEvictWitness(dir, filepath.Join(dir, name))
+				reversed += c.reconcileEvictWitness(ctx, dir, jobID, filepath.Join(dir, name))
 				continue
 			}
 			wpath := filepath.Join(dir, name)

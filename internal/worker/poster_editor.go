@@ -648,25 +648,19 @@ func (m *LockedMovieOps) evictStalePosterPair(posterID, wpath string) {
 		return
 	}
 	dir := filepath.Join(env.tempDir, "posters", env.jobID)
-	if wpath == "" {
-		// codex cloud P2 (@eviction): eviction is a crash window — process exit or
-		// a wedged Remove mid-way leaves OLD pieces beneath committed NEW metadata
-		// (the crop endpoint could measure them). Write the durable eviction
-		// witness first; swept on success; the startup reconciler completes it.
-		wpath = filepath.Join(dir, ".evict-"+url.PathEscape(posterID)+".json")
-		payload, _ := json.Marshal(evictWitness{OldID: posterID})
-		if wErr := writeFileAtomicForEvict(env.fs, wpath, payload); wErr != nil {
-			logging.Warnf("stale poster evict witness %s: %v — eviction deferred this run", wpath, wErr)
-			return
-		}
-	}
+	// codex cloud P2 (@rrHy): a failed leg remove keeps the witness — swept
+	// post-commit records orphan it if written over the remaining files.
+	failed := false
 	for _, name := range []string{posterID + "-full.jpg", posterID + ".jpg"} {
 		if err := env.fs.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, afero.ErrFileNotFound) {
-			logging.Warnf("stale poster evict %s: %v — witness retained for startup reconcile", name, err)
+			failed = true
+			logging.Warnf("stale poster evict %s: %v (witness kept for startup)", name, err)
 		}
 	}
-	if err := removeWithRetry(env.fs, wpath); err != nil {
-		logging.Warnf("stale poster evict witness sweep %s: %v", wpath, err)
+	if !failed && wpath != "" {
+		if err := removeWithRetry(env.fs, wpath); err != nil {
+			logging.Warnf("stale poster evict witness sweep %s: %v", wpath, err)
+		}
 	}
 }
 
@@ -695,9 +689,15 @@ func sweepEvictionWitness(fs afero.Fs, wpath string) {
 // writeEvictWitness persists the eviction record BEFORE the metadata commit —
 // a crash between the durable write and the physical removals still leaves the
 // reconcile-complete marker on disk (codex cloud P2).
-func writeEvictWitness(fs afero.Fs, dir, posterID string) (string, error) {
+// writeEvictWitness persists the eviction record inline-BEFORE the tag on the ✔
+func writeEvictWitness(fs afero.Fs, dir, posterID, newSourceURL string) (string, error) {
 	wpath := filepath.Join(dir, ".evict-"+url.PathEscape(posterID)+".json")
-	payload, _ := json.Marshal(evictWitness{OldID: posterID})
+	// codex cloud P2: a never-postered job has NO posters dir — MkdirAll allows
+	// the source-change witness to persist even when nothing was downloaded yet.
+	if mErr := fs.MkdirAll(dir, 0o755); mErr != nil {
+		return "", fmt.Errorf("evict witness dir %s: %w", dir, mErr)
+	}
+	payload, _ := json.Marshal(evictWitness{OldID: posterID, NewSourceURL: newSourceURL})
 	if err := writeFileAtomicForEvict(fs, wpath, payload); err != nil {
 		return "", fmt.Errorf("%w", err)
 	}
@@ -1057,7 +1057,13 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	if stalePosterID != "" {
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil && env.tempDir != "" && env.jobID != "" {
 			dir := filepath.Join(env.tempDir, "posters", env.jobID)
-			evictWitnessPath, err = writeEvictWitness(env.fs, dir, stalePosterID)
+			// codex cloud P2 (@SJPt): rekeyed saves move the pair BEFORE the commit;
+			// the witness must name the post-relocation identity, not the stale one.
+			evictID := stalePosterID
+			if len(relocatedPosterPair) > 0 && strings.TrimSpace(movie.ID) != "" {
+				evictID = strings.TrimSpace(movie.ID)
+			}
+			evictWitnessPath, err = writeEvictWitness(env.fs, dir, evictID, effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL))
 			if err != nil {
 				return fmt.Errorf("stale poster eviction witness %s: %w", evictWitnessPath, err)
 			}
