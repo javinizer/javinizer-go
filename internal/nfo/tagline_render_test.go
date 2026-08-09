@@ -307,3 +307,9 @@ func TestResolveAndGenerate_PartNumberGatedOnIsMultiPart(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Contains(t, string(data), "<tagline>Part </tagline>")
 }
+
+func TestMovieToNFO_TaglineModifierWithAngleBracketDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<IF:TITLE><TITLE:</IF>", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}

@@ -405,6 +405,9 @@ func (e *Engine) ValidateTags(template string) error {
 	matches := e.tagPattern.FindAllStringSubmatch(template, -1)
 	for _, match := range matches {
 		tagName := strings.ToUpper(match[1])
+		if match[2] != "" && strings.Contains(match[2], "<") {
+			return fmt.Errorf("invalid '<' in tag modifier: %s", match[2])
+		}
 		if tagName == "IF" {
 			if match[2] == "" {
 				return fmt.Errorf("<IF> missing condition tag")

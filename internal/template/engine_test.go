@@ -2890,3 +2890,11 @@ func TestEngine_ValidateTags_NonNumericModifierAccepted(t *testing.T) {
 	assert.NoError(t, e.ValidateTags("<TITLE:50>"))
 	assert.NoError(t, e.ValidateTags("<ID>"))
 }
+
+func TestEngine_ValidateTags_ModifierWithAngleBracketRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<TITLE:</IF>"))
+	assert.Error(t, e.ValidateTags("<IF:TITLE><ACTORS:DELIM=<ELSE>></IF>"))
+	assert.NoError(t, e.ValidateTags("<TITLE:50>"))
+	assert.NoError(t, e.ValidateTags("<ACTORS:DELIM=/>"))
+}
