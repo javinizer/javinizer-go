@@ -183,3 +183,51 @@ func TestIdentityCandidateMatchesSingletonFirstName(t *testing.T) {
 	// Baseline: full-name pair still matches existing contract.
 	require.True(t, identityCandidateMatches(names, models.ActressInfo{FirstName: "Mona", LastName: "Hashimoto"}))
 }
+
+// Codex round 11: with an actress priority ranking javdb above dmm, the
+// missing-scope path must not let the DMM-sourced cache pin fields javdb
+// would provide — the cache competes as a dmm-ranked match and backstops
+// only what higher-ranked sources leave blank.
+func TestMissingScopeCacheCompetesWithHigherRankedSource(t *testing.T) {
+	_, repo, movies, actress := newActressSyncFixture(t, &models.Actress{DMMID: 5577, JapaneseName: "涼子"})
+	lookup := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		if dmmID == 5577 {
+			return models.ActressInfo{DMMID: 5577, FirstName: "CacheFirst", LastName: "CacheLast"}, true
+		}
+		return models.ActressInfo{}, false
+	}
+	javdb := &namedMetadataResolver{actressSyncScraper: actressSyncScraper{name: "javdb"}, data: models.ActressInfo{DMMID: 5577, FirstName: "JavdbFirst", JapaneseName: "涼子"}}
+	on := true
+	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movies, &fixedScraperSet{enabled: []models.Scraper{javdb}},
+		ActressSyncOptions{ScrapeActress: &on, LookupCache: lookup, ActressFieldPriority: []string{"javdb", "dmm"}})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, javdb.calls, "higher-ranked source must run even on cache hit")
+	got, findErr := repo.FindByID(context.Background(), actress.ID)
+	require.NoError(t, findErr)
+	require.Equal(t, "JavdbFirst", got.FirstName, "javdb outranks the dmm cache")
+	require.Equal(t, "CacheLast", got.LastName, "cache backstops fields javdb leaves blank")
+}
+
+// The complementary fast path: when dmm leads the priority, the cache
+// snapshot is the highest-ranked source and the scrape is short-circuited.
+func TestMissingScopeCacheShortCircuitsWhenDMMTopsPriority(t *testing.T) {
+	_, repo, movies, actress := newActressSyncFixture(t, &models.Actress{DMMID: 5578, JapaneseName: "涼子"})
+	lookup := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		if dmmID == 5578 {
+			return models.ActressInfo{DMMID: 5578, FirstName: "CacheFirst", LastName: "CacheLast", ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/cache.jpg"}, true
+		}
+		return models.ActressInfo{}, false
+	}
+	javdb := &namedMetadataResolver{actressSyncScraper: actressSyncScraper{name: "javdb"}, data: models.ActressInfo{DMMID: 5578, FirstName: "JavdbFirst"}}
+	on := true
+	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movies, &fixedScraperSet{enabled: []models.Scraper{javdb}},
+		ActressSyncOptions{ScrapeActress: &on, LookupCache: lookup, ActressFieldPriority: []string{"dmm", "javdb"}})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 0, javdb.calls, "cache-complete actress must not trigger scraping when dmm leads")
+	got, findErr := repo.FindByID(context.Background(), actress.ID)
+	require.NoError(t, findErr)
+	require.Equal(t, "CacheFirst", got.FirstName)
+	require.Equal(t, "CacheLast", got.LastName)
+}

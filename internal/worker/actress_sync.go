@@ -244,22 +244,37 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	}
 	cacheAllowed := cacheAllowedForPriority(actressSyncSkipSentinel(actressFieldPriority), actressFieldPriority)
 	if !revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID && cacheAllowed {
-		fields, fillErr := fillMetadata(actress.ID, actress.DMMID, cacheMatch)
-		if fillErr != nil {
-			return nil, fillErr
-		}
-		result.UpdatedFields = append(result.UpdatedFields, fields...)
-		if len(fields) > 0 {
-			actress, err = actressRepo.FindByID(ctx, actress.ID)
-			if err != nil {
-				return nil, err
+		if actressCacheOutranksAll(actressFieldPriority) {
+			// DMM ranks first (default order, or the configured priority leads
+			// with dmm), so the DMM-sourced cache snapshot wins every field it
+			// carries — direct blank-fill matches what ranked resolution
+			// would produce and still short-circuits the scrape.
+			fields, fillErr := fillMetadata(actress.ID, actress.DMMID, cacheMatch)
+			if fillErr != nil {
+				return nil, fillErr
 			}
-		}
-		if !actressNeedsMetadata(actress) {
-			if len(result.UpdatedFields) == 0 {
-				result.Messages = append(result.Messages, "already_complete")
+			result.UpdatedFields = append(result.UpdatedFields, fields...)
+			if len(fields) > 0 {
+				actress, err = actressRepo.FindByID(ctx, actress.ID)
+				if err != nil {
+					return nil, err
+				}
 			}
-			return result, nil
+			if !actressNeedsMetadata(actress) {
+				if len(result.UpdatedFields) == 0 {
+					result.Messages = append(result.Messages, "already_complete")
+				}
+				return result, nil
+			}
+		} else {
+			// A higher-ranked source (e.g. javdb ahead of dmm) must still run
+			// and win its fields: direct blank-fill would pin cache values the
+			// preferred source is meant to replace (codex). Admit the cache as
+			// a dmm-ranked match so resolveActressInfo ranks it — it still
+			// backstops every field higher-ranked sources leave blank.
+			if len(actressInfoFields(cacheMatch)) > 0 {
+				appendMatch(cacheMatch, resolverNameDMM)
+			}
 		}
 	}
 	if !actressNeedsMetadata(actress) && !revalidate {
@@ -428,7 +443,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		// DMM-ranked source of fields; never suppress it — register its fields
 		// like any dmm-named source so resolveActressInfoByRank sees them.
 		if len(actressInfoFields(cacheMatch)) > 0 {
-			appendMatch(cacheMatch, "dmm")
+			appendMatch(cacheMatch, resolverNameDMM)
 		}
 	}
 	if needsLinkedActressFallback(actress, matches, deterministic) {
@@ -542,7 +557,7 @@ func authoritativeActressScrapers(registry scraperutil.ScraperInstancesInterface
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(scraper.Name())) {
-		case "dmm", "r18dev", "r18.dev":
+		case resolverNameDMM, "r18dev", "r18.dev":
 			result = append(result, scraper)
 		}
 	}
@@ -1018,7 +1033,7 @@ func actressMetadataScrapers(registry scraperutil.ScraperInstancesInterface, scr
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(scraper.Name())) {
-		case "dmm", "r18dev", "r18.dev", "javdb", "minnanoav":
+		case resolverNameDMM, "r18dev", "r18.dev", resolverNameJavDB, resolverNameMinnanoAV:
 			result = append(result, scraper)
 		}
 	}
@@ -1029,6 +1044,9 @@ const (
 	// Name-keyed resolvers: resolve only from a known Japanese name.
 	resolverNameJavDB     = "javdb"
 	resolverNameMinnanoAV = "minnanoav"
+	// resolverNameDMM names the authoritative DMM source; the built-in
+	// actress cache rides its rank/priority slot.
+	resolverNameDMM = "dmm"
 )
 
 // priorityListContains reports whether a configured priority list names the
@@ -1043,6 +1061,25 @@ func priorityListContains(priority []string, name string) bool {
 	return false
 }
 
+// actressCacheOutranksAll reports whether the built-in (DMM-sourced) cache
+// is the highest-ranked eligible source: true without an explicit field
+// priority (DMM leads the legacy order), otherwise iff the configured list
+// leads with dmm. When false, the cache competes as a ranked match instead
+// of filling blanks directly so higher-ranked sources can win their fields.
+func actressCacheOutranksAll(priority []string) bool {
+	if len(priority) == 0 {
+		return true
+	}
+	for _, name := range priority {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			continue
+		}
+		return key == resolverNameDMM
+	}
+	return true
+}
+
 // cacheAllowedForPriority reports whether the built-in (DMM-sourced) actress
 // cache may write fields. Skipped under __skip__; under an explicit priority it
 // is admitted iff DMM itself is (the cache is a snapshot of DMM-sourced data,
@@ -1051,7 +1088,7 @@ func cacheAllowedForPriority(skipped bool, priority []string) bool {
 	if skipped {
 		return false
 	}
-	return len(priority) == 0 || priorityListContains(priority, "dmm")
+	return len(priority) == 0 || priorityListContains(priority, resolverNameDMM)
 }
 
 // nameIsKeyed identifies resolvers whose lookup needs a Japanese name.
@@ -1243,7 +1280,7 @@ func actressSyncThumbnailRank(fieldPriority, global []string) func(string) int {
 // actressThumbnailSourcePriority ...
 func actressThumbnailSourcePriority(name string) int {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "dmm":
+	case resolverNameDMM:
 		return 0
 	case "minnanoav":
 		return 1
