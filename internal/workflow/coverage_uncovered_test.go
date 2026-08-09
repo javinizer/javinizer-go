@@ -1296,8 +1296,9 @@ func TestRevertLogConfig_ToNFONameConfig_WithNFOCfg(t *testing.T) {
 	require.NoError(t, err)
 	nfoCfg := nfo.ConfigFromAppConfig(appCfg, nfo.NFONameConfigFromAppConfig(appCfg))
 	cfg := &RevertLogConfig{AllowRevert: true, NFOCfg: nfoCfg}
-	result := cfg.ToNFONameConfig(false, "", 0)
+	result := cfg.ToNFONameConfig(false, "", 2)
 	assert.False(t, result.IsMultiPart)
+	assert.Equal(t, 2, result.PartNumber)
 }
 
 // ============================================================

@@ -510,7 +510,7 @@ metadata:
       - "Japanese"
 ```
 
-**tagline**: Custom tagline template. Supports template tags (see [Template System](./04-template-system.md)); static text without tags is written as-is. A tagline whose template fails to render is dropped (with a warning) instead of failing NFO generation.
+**tagline**: Custom tagline template. Supports template tags (see [Template System](./04-template-system.md)); static text without tags is written as-is. Render or validation errors drop the tagline (with a warning) instead of failing NFO generation; context cancellation still aborts NFO generation.
 
 **credits**: Additional credits to include.
 

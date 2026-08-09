@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -157,7 +158,7 @@ func TestMovieTemplateContext_ThreadsVideoFilePath(t *testing.T) {
 	assert.False(t, ctxEmpty.IsMultiPart)
 }
 
-func TestMergeTags_ConfigTagThreadsVideoFilePath(t *testing.T) {
+func TestMergeTags_MediaTagUnresolvableRendersEmpty(t *testing.T) {
 	g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"<RESOLUTION>"}, FirstNameOrder: true})
 	tmplCtx := g.movieTemplateContext(context.Background(), taglineTestMovie(), "/movies/IPX-535.mp4", "", 0, false)
 	tags, err := g.mergeTags(context.Background(), tmplCtx, nil, nil)
@@ -244,4 +245,30 @@ func TestMovieToNFO_TaglineMultilineConditionalRendered(t *testing.T) {
 	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<IF:TITLE>\nFeatured\n</IF>", FirstNameOrder: true})
 	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
 	assert.Equal(t, "\nFeatured\n", nfo.Tagline)
+}
+
+func TestResolveAndGenerate_PerFileGating(t *testing.T) {
+	t.Run("PerFile true threads part number into written tagline", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		g := NewGenerator(fs, &Config{Tagline: "Part <PART>", FirstNameOrder: true})
+		nameCfg := NFONameConfig{FilenameTemplate: "<ID>", PerFile: true, PartSuffix: "-pt1", PartNumber: 1, IsMultiPart: true}
+		path, err := g.ResolveAndGenerate(context.Background(), taglineTestMovie(), "/out", nameCfg, "", nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, path)
+		data, readErr := afero.ReadFile(fs, path)
+		require.NoError(t, readErr)
+		assert.Contains(t, string(data), "<tagline>Part 1</tagline>")
+	})
+
+	t.Run("PerFile false zeros part number in written tagline", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		g := NewGenerator(fs, &Config{Tagline: "Part <PART>", FirstNameOrder: true})
+		nameCfg := NFONameConfig{FilenameTemplate: "<ID>", PerFile: false, PartSuffix: "-pt1", PartNumber: 1, IsMultiPart: true}
+		path, err := g.ResolveAndGenerate(context.Background(), taglineTestMovie(), "/out", nameCfg, "", nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, path)
+		data, readErr := afero.ReadFile(fs, path)
+		require.NoError(t, readErr)
+		assert.Contains(t, string(data), "<tagline>Part </tagline>")
+	})
 }
