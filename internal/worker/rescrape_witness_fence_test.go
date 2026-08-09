@@ -1067,6 +1067,14 @@ func TestRestoreRetainsMarkerWhileBackupLegsRemain(t *testing.T) {
 	assert.NoError(t, mErr, "marker retained until every leg settles")
 }
 
+// discard/restore on accessors without paths run the no-op guard arms.
+func TestRescrapePosterBackupEmptyPathGuards(t *testing.T) {
+	(&rescrapePosterBackup{fs: afero.NewMemMapFs()}).discard()
+	// markerPath set but both bak paths empty → the restore retention loop
+	// hits the empty-leg continue before concluding "no legs remain".
+	(&rescrapePosterBackup{fs: afero.NewMemMapFs(), markerPath: "/t/marker"}).restore(nil)
+}
+
 type readWedgeFS struct {
 	afero.Fs
 	suffix string
