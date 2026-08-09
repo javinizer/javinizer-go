@@ -296,6 +296,13 @@ func TestMiss7_GetURLCtx_LowPriorityTriggersDirectURLs(t *testing.T) {
 // --- tryDirectURLs: cancelled context returns early ---
 
 func TestMiss7_TryDirectURLs_CancelledContext(t *testing.T) {
+	if testing.Short() {
+		// tryDirectURLs issues live GETs against www.dmm.co.jp even with a
+		// pre-cancelled context (resty retries past the cancellation), so
+		// the result depends on network reachability. Exclude from the
+		// short/pre-commit suite; CI's full (non-short) lane covers it.
+		t.Skip("requires live network access; covered by the full test lane")
+	}
 	s := &scraper{
 		client:      resty.New(),
 		enabled:     true,

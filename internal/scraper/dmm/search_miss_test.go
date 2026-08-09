@@ -185,6 +185,13 @@ func TestGetURLCtx_LowPrioritySearchSupplementedByDirect(t *testing.T) {
 // --- tryDirectURLs: cancelled context ---
 
 func TestTryDirectURLs_CancelledContext(t *testing.T) {
+	if testing.Short() {
+		// tryDirectURLs issues live GETs against www.dmm.co.jp even with a
+		// pre-cancelled context (resty retries past the cancellation), so
+		// the result depends on network reachability. Exclude from the
+		// short/pre-commit suite; CI's full (non-short) lane covers it.
+		t.Skip("requires live network access; covered by the full test lane")
+	}
 	s := &scraper{
 		enabled:     true,
 		rateLimiter: ratelimit.NewLimiter(0),
