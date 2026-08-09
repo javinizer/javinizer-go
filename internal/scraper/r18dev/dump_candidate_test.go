@@ -326,6 +326,44 @@ func TestSearchFromDump_ExactRowInputKeepsResolverParity(t *testing.T) {
 	assert.Equal(t, "lulu00441", result.ContentID, "scraper stays on HTTP-resolver canonical order for ambiguous inputs")
 }
 
+// TestSearchFromDump_CandidateLookupCanceled covers the quiet-cancel arm: a
+// candidate lookup that dies via context cancellation logs at debug and does
+// not report a degraded dump.
+func TestSearchFromDump_CandidateLookupCanceled(t *testing.T) {
+	dump := &stubDumpLookup{matchErr: context.Canceled}
+	s, _ := newScraperWithBlockedHTTP(t, dump)
+	result, candidates := s.searchFromDump(context.Background(), "IPX-535")
+	assert.Nil(t, result)
+	assert.Empty(t, candidates)
+}
+
+// TestFetchAndParseCombined_TransportError exercises the shared helper's
+// transport-error arm with a nil-returning RoundTripper (resty converts it to
+// a request error, never a nil response).
+func TestFetchAndParseCombined_TransportError(t *testing.T) {
+	cfg := createTestSettings(true)
+	cfg.Enabled = true
+	cfg.RetryCount = 0
+	s := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
+	s.client.SetRetryCount(0)
+	s.client.SetTransport(roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, nil
+	}))
+	_, err := s.fetchAndParseCombined(context.Background(), "https://example.invalid/x")
+	require.Error(t, err)
+}
+
+// TestSearchFromDump_EmptyCandidateRowsSkipped covers stub rows lacking a
+// ContentID: they are skipped, and a fully-empty candidate list degrades to
+// HTTP.
+func TestSearchFromDump_EmptyCandidateRowsSkipped(t *testing.T) {
+	dump := &stubDumpLookup{matches: []models.DumpMatch{{ContentID: ""}}}
+	s, _ := newScraperWithBlockedHTTP(t, dump)
+	result, candidates := s.searchFromDump(context.Background(), "IPX-535")
+	assert.Nil(t, result)
+	assert.Empty(t, candidates, "matches without content_id must not produce candidate URLs")
+}
+
 // TestSearchFromDump_CandidateMissFallsBackToResolver keeps the existing
 // behavior for truly absent IDs: no candidate URL, probe resolution runs.
 func TestSearchFromDump_CandidateMissFallsBackToResolver(t *testing.T) {

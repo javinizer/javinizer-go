@@ -504,9 +504,6 @@ func (s *scraper) fetchAndParseCombined(ctx context.Context, url string) (*model
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from R18.dev: %w", err)
 	}
-	if resp == nil {
-		return nil, fmt.Errorf("R18.dev returned nil response for %s", url)
-	}
 
 	if resp.StatusCode() != 200 {
 		return nil, models.NewScraperStatusError(

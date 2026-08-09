@@ -121,6 +121,38 @@ func TestContentIDCandidates_WhitespaceTolerant(t *testing.T) {
 	}
 }
 
+func TestSplitSeriesAndNumber_AndClassifiers(t *testing.T) {
+	assert.True(t, isAlpha("abcXYZ"))
+	assert.False(t, isAlpha("ab1"))
+	assert.False(t, isAlpha(""))
+	assert.True(t, isDigit("0123"))
+	assert.False(t, isDigit("12a"))
+	assert.False(t, isDigit(""))
+
+	// Dash form.
+	s, n := SplitSeriesAndNumber("ABF-123")
+	assert.Equal(t, "ABF", s)
+	assert.Equal(t, "123", n)
+
+	// Dash guard rejects, regex fallback also rejects.
+	s, n = SplitSeriesAndNumber("1ABC-12")
+	assert.Equal(t, "", s)
+	assert.Equal(t, "", n)
+
+	// Regex fallback path.
+	s, n = SplitSeriesAndNumber("118abf00030")
+	assert.Equal(t, "abf", s)
+	assert.Equal(t, "00030", n)
+
+	// No digits at all.
+	s, n = SplitSeriesAndNumber("plainword")
+	assert.Equal(t, "", s)
+}
+
+func TestContentIDCandidates_NumberOverflowRejected(t *testing.T) {
+	assert.Nil(t, ContentIDCandidates("ABC-99999999999999999999"), "number exceeding int range must not expand")
+}
+
 func TestContentIDCandidates_UnderscorePrefixedContentID(t *testing.T) {
 	assert.Equal(t, []string{"h_086mesu00103"}, ContentIDCandidates("h_086mesu00103"))
 }

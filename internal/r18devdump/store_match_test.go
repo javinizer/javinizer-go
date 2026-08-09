@@ -2,7 +2,10 @@ package r18devdump
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,6 +94,113 @@ func TestMatchByDisplayID_ExactContentIDRowLeadsCandidates(t *testing.T) {
 	matches, err = store.MatchByDisplayID(context.Background(), "LULU-441")
 	require.NoError(t, err)
 	require.Equal(t, "lulu00441", matches[0].ContentID)
+}
+
+// --- fault-injection coverage for defensive error branches ---
+
+// faultyRows is a driver.Rows whose behavior is controlled by mode sentinels:
+// empty (no rows), oneRow (one valid row), badcols (columns mismatch Scan),
+// and failingErr (rows.Err() non-nil after iteration).
+type faultyRows struct {
+	mode  string
+	dirty bool
+}
+
+func (r *faultyRows) Columns() []string {
+	if r.mode == "badcols" {
+		return []string{"content_id", "dvd_id"}
+	}
+	return []string{"content_id", "dvd_id", "release_date", "service_code"}
+}
+
+func (r *faultyRows) Close() error { return nil }
+
+func (r *faultyRows) Next(dest []driver.Value) error {
+	if (r.mode == "oneRow" || r.mode == "badcols" || r.mode == "failingErr") && !r.dirty {
+		r.dirty = true
+		dest[0] = "118ipx00535"
+		dest[1] = "IPX-535"
+		if r.mode != "badcols" {
+			dest[2] = "2013-03-01"
+			dest[3] = "digital"
+		}
+		return nil
+	}
+	if r.mode == "failingErr" {
+		return errors.New("simulated iteration failure")
+	}
+	return io.EOF
+}
+
+func (r *faultyRows) Err() error { return nil }
+
+type faultyConn struct{ mode string }
+
+func (c *faultyConn) Prepare(string) (driver.Stmt, error) { return nil, errors.New("no prepare") }
+func (c *faultyConn) Close() error                        { return nil }
+func (c *faultyConn) Begin() (driver.Tx, error)           { return nil, errors.New("no tx") }
+func (c *faultyConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+	if strings.Contains(query, "IN (") {
+		return &faultyRows{mode: c.mode}, nil
+	}
+	return &faultyRows{mode: "empty"}, nil
+}
+
+type faultyDriver struct{ mode string }
+
+func (d *faultyDriver) Open(string) (driver.Conn, error) { return &faultyConn{mode: d.mode}, nil }
+
+func newFaultyStore(t *testing.T, mode string) *Store {
+	t.Helper()
+	name := "faulty-" + mode + "-" + strings.ReplaceAll(t.Name(), "/", "_")
+	sql.Register(name, &faultyDriver{mode: mode})
+	db, err := sql.Open(name, "")
+	require.NoError(t, err)
+	return &Store{db: db, path: ":faulty:"}
+}
+
+func TestMatchByDisplayID_CandidateScanError(t *testing.T) {
+	s := newFaultyStore(t, "badcols")
+	defer func() { _ = s.Close() }()
+	_, err := s.MatchByDisplayID(context.Background(), "IPX-535")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scan")
+}
+
+func TestMatchByDisplayID_CandidateRowsErr(t *testing.T) {
+	s := newFaultyStore(t, "failingErr")
+	defer func() { _ = s.Close() }()
+	_, err := s.MatchByDisplayID(context.Background(), "IPX-535")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "candidate lookup failed")
+}
+
+func TestMatchByDisplayID_NormQueryErrorPropagated(t *testing.T) {
+	path := seedDump(t, "118ipx00535\tIPX-535")
+	corruptor, err := sql.Open("sqlite3", path)
+	require.NoError(t, err)
+	_, err = corruptor.Exec("DROP TABLE videos; CREATE TABLE videos (content_id TEXT PRIMARY KEY, dvd_id_norm TEXT)")
+	require.NoError(t, err)
+	require.NoError(t, corruptor.Close())
+
+	store, err := Open(path)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	_, err = store.MatchByDisplayID(context.Background(), "IPX-535")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dvd_id lookup failed")
+}
+
+func TestMatchByDisplayID_ClosedDBCandidateError(t *testing.T) {
+	store, err := Open(seedDump(t, "118ipx00535\tIPX-535"))
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	// "-" normalizes to an empty norm (norm branch skipped) and yields no
+	// generated candidates, so the probe set is just the exact-ID probe; the
+	// closed DB must surface a real error rather than a bare miss.
+	_, err = store.MatchByDisplayID(context.Background(), "-")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lookup failed")
 }
 
 func TestMatchByDisplayID_MissAndRejects(t *testing.T) {

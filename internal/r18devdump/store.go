@@ -133,39 +133,32 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	}
 
 	// An exact content_id row is honored before candidate expansion so a
-	// literal content_id query (or an unprefixed edition row like "lulu441")
-	// always surfaces its own row first, ahead of canonical zero-padded
-	// variants derived from the same display ID.
-	var exact *models.DumpMatch
+	// literal content_id query always surfaces its own row first, ahead of
+	// canonical zero-padded variants derived from the same display ID. The probe
+	// set is the exact input first, then the expanded candidates, deduped —
+	// order within the result follows probe order.
 	exactID := strings.ToLower(strings.TrimSpace(id))
+	candidates := ContentIDCandidates(id)
+
+	probe := make([]string, 0, len(candidates)+1)
+	seen := make(map[string]bool, len(candidates)+1)
 	if exactID != "" {
-		var m models.DumpMatch
-		var dvdID, rel, svc sql.NullString
-		err := s.db.QueryRowContext(ctx,
-			"SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE content_id = ?",
-			exactID,
-		).Scan(&m.ContentID, &dvdID, &rel, &svc)
-		if err == nil {
-			m.DVDID = dvdID.String
-			m.ReleaseDate = rel.String
-			m.ServiceCode = svc.String
-			exact = &m
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("dump exact content_id lookup failed for %q: %w", exactID, err)
+		seen[exactID] = true
+		probe = append(probe, exactID)
+	}
+	for _, cand := range candidates {
+		if !seen[cand] {
+			seen[cand] = true
+			probe = append(probe, cand)
 		}
 	}
-
-	candidates := ContentIDCandidates(id)
-	if len(candidates) == 0 {
-		if exact != nil {
-			return []models.DumpMatch{*exact}, nil
-		}
+	if len(probe) == 0 {
 		return nil, models.ErrDumpMiss
 	}
 
-	placeholders := strings.Repeat("?,", len(candidates)-1) + "?"
-	args := make([]any, len(candidates))
-	for i, cand := range candidates {
+	placeholders := strings.Repeat("?,", len(probe)-1) + "?"
+	args := make([]any, len(probe))
+	for i, cand := range probe {
 		args[i] = cand
 	}
 	query := "SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE content_id IN (" + placeholders + ")"
@@ -175,7 +168,7 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	}
 	defer func() { _ = rows.Close() }()
 
-	byContentID := make(map[string]models.DumpMatch, len(candidates))
+	byContentID := make(map[string]models.DumpMatch, len(probe))
 	for rows.Next() {
 		var m models.DumpMatch
 		var dvdID, rel, svc sql.NullString
@@ -191,14 +184,8 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 		return nil, fmt.Errorf("dump candidate lookup failed for %q: %w", id, err)
 	}
 
-	matches := make([]models.DumpMatch, 0, len(byContentID)+1)
-	if exact != nil {
-		matches = append(matches, *exact)
-	}
-	for _, cand := range candidates {
-		if exact != nil && cand == exact.ContentID {
-			continue
-		}
+	matches := make([]models.DumpMatch, 0, len(byContentID))
+	for _, cand := range probe {
 		if m, ok := byContentID[cand]; ok {
 			matches = append(matches, m)
 		}

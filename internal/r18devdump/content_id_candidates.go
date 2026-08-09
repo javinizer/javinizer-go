@@ -105,13 +105,8 @@ func ContentIDCandidates(id string) []string {
 // ids with padded numbers would reorder ahead of their canonical prefixed
 // variants.
 func looksLikeContentID(direct string) bool {
-	if underscoreContentIDRegex.MatchString(direct) {
-		return true
-	}
-	if direct == "" {
-		return false
-	}
-	return direct[0] >= '0' && direct[0] <= '9'
+	return underscoreContentIDRegex.MatchString(direct) ||
+		(direct != "" && direct[0] >= '0' && direct[0] <= '9')
 }
 
 // SplitSeriesAndNumber splits a dvd_id like "START-575" into ("START", "575")
