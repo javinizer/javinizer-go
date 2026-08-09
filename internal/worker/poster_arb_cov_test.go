@@ -115,6 +115,46 @@ func TestTokenSweepFoldsPendingBase(t *testing.T) {
 	_, tErr := fs.Stat(filepath.Join(dir, ".commit-WTA-1.a1.b2"))
 	assert.NoError(t, tErr)
 }
+
+// codex cloud P2 (@822): first-token-match is not enough when commits stack.
+// With an older loser's token present alongside the winner's, arbitration must
+// accept ANY same-base token proving the backup holds the winner's bytes.
+func TestReconcileParkedMultipleForeignTokensArbitrateByAnyMatch(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	seedArbitrationScene(t, fs, dir, "AR-MX", "a3.d4", "lostgen", "winbytes", 4)
+	seedCommitToken(t, fs, dir, "AR-MX", "a1.c2", "oldgen", false)   // older token, matches NEITHER side
+	seedCommitToken(t, fs, dir, "AR-MX", "a2.c2", "winbytes", false) // winner: matched only via the backup
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+
+	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	assert.Equal(t, 4, healed, "marker + restore + BOTH settled tokens sweep")
+	got, err := afero.ReadFile(fs, filepath.Join(dir, "AR-MX.jpg"))
+	require.NoError(t, err)
+	assert.Equal(t, "winbytes", string(got), "winner's committed bytes restored via the matching token")
+}
+
+// tokenLegSHA skip arm: a foreign token WITHOUT this leg's SHA is skipped as
+// arbitration evidence (empty SHA ⇒ no evidence, never "match").
+func TestReconcileParkedTokenMissingLegSHAIsSkippedEvidence(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	// scene: canon carries winner bytes; backup is loser's; foreign token has
+	// ONLY the full-leg SHA — crop-leg arbitration evidence lacks entirely.
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "AR-SK.jpg"), []byte("win"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "AR-SK.jpg.rsbak.a3.d4"), []byte("lost"), 0o644))
+	meta, err := json.Marshal(inFlightMeta{PosterID: "AR-SK", PrevRevision: 4})
+	require.NoError(t, err)
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-AR-SK.a3.d4"), meta, 0o644))
+	seedCommitToken(t, fs, dir, "AR-SK", "a2.c2", "fulllegonly", true)
+	repo := mocks.NewMockJobRepositoryInterface(t) // ambiguity short-circuits before any lookup
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+
+	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	assert.Equal(t, 0, healed, "empty-SHA token candidate skipped → ambiguity arm keeps both")
+	_, bErr := fs.Stat(filepath.Join(dir, "AR-SK.jpg.rsbak.a3.d4"))
+	assert.NoError(t, bErr, "backup kept — the token cannot prove this leg")
+}
+
 func TestReconcileParkedOwnTokenLookupUndecidableKeepsBoth(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	seedArbitrationScene(t, fs, dir, "AR-V", "a1.b2", "gen", "pre-op", 4)

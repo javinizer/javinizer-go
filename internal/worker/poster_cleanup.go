@@ -303,7 +303,13 @@ func (b *rescrapePosterBackup) discard() {
 		dir := filepath.Dir(b.commitPath)
 		baseID := strings.TrimSuffix(filepath.Base(b.crop), ".jpg")
 		keep := false
-		if entries, rerr := afero.ReadDir(b.fs, dir); rerr == nil {
+		if entries, rerr := afero.ReadDir(b.fs, dir); rerr != nil {
+			// codex cloud P2 (@306): an UNDECIDABLE rival scan must keep the
+			// token — sweeping on an unreadable ledger would orphan the rival's
+			// backup attribution permanently.
+			logging.Warnf("rival backup scan %s unreadable (%v) — commit token retained", dir, rerr)
+			keep = true
+		} else {
 			for _, e := range entries {
 				name := e.Name()
 				if !isParkedBackupName(name) {

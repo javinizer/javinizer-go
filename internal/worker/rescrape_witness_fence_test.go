@@ -1132,6 +1132,21 @@ func TestRescrapeSuccessNilFsParkedDiscardsLegacy(t *testing.T) {
 // nothing contestable pends, but RETAINS it while a same-base competitor's
 // .rsbak leg still needs attestation (startup would otherwise keep-both
 // forever + fence edits).
+// codex cloud P2 (@306): the rival-scan error is undecidable — the winner's
+// token must survive so the rival's pending backup remains attributable.
+func TestDiscardScanUndecidableKeepsWinnerToken(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-SC"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	b := parkCanonicalPosterPair(base, dir, "SC-1", 2)
+	require.NoError(t, b.parkErr)
+	require.NoError(t, afero.WriteFile(base, b.commitPath, []byte(`{"poster_id":"SC-1","crop_sha":"x"}`), 0o644))
+	b.fs = openExactFailFS{Fs: base, path: dir}
+	b.discard()
+	_, tErr := base.Stat(b.commitPath)
+	assert.NoError(t, tErr, "scan undecidable ⇒ token retained")
+}
+
 func TestDiscardKeepsWinnerTokenWhileCompetitorBackupPends(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	dir := "/tmp/posters/J-RET"

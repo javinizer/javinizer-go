@@ -818,33 +818,47 @@ func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, job
 				healed++
 				continue
 			}
-			if fTok := foreignTokenForBase(tokens, base, p.nonce); fTok != nil {
-				wantSHA := tokenLegSHA(fTok.meta, p.canon)
+			if fToks := foreignTokensForBase(tokens, base, p.nonce); len(fToks) > 0 {
+				// codex cloud P2 (@822): every same-base token is candidate evidence
+				// — with overlapping commits the FIRST is the older loser, never a
+				// reason alone to call content ambiguous.
 				bakData, bErr := afero.ReadFile(c.fs, parked)
 				canonData, cErr := afero.ReadFile(c.fs, canonPath)
-				if bErr == nil && cErr == nil && wantSHA != "" {
-					if shaContentHex(canonData) == wantSHA {
-						// canonical carries the committed content already (winner is
-						// whole) — the stranded backup is obsolete.
-						if rmErr := c.fs.Remove(parked); rmErr != nil {
-							logging.Warnf("parked backup sweep %s: %v", parked, rmErr)
+				matchedCanon := false
+				matchedBak := false
+				if bErr == nil && cErr == nil {
+					for _, t := range fToks {
+						wantSHA := tokenLegSHA(t.meta, p.canon)
+						if wantSHA == "" {
 							continue
 						}
-						healed++
-						continue
-					}
-					if shaContentHex(bakData) == wantSHA {
-						// canon's current bytes belong to an UNCOMMITTED later op —
-						// this backup holds the winner's committed bytes: restore them.
-						if rnErr := c.fs.Rename(parked, canonPath); rnErr != nil {
-							logging.Warnf("parked backup restore %s→%s: %v", parked, canonPath, rnErr)
-							continue
+						switch shaContentHex(canonData) == wantSHA {
+						case true:
+							matchedCanon = true
 						}
-						healed++
-						continue
+						if shaContentHex(bakData) == wantSHA {
+							matchedBak = true
+						}
 					}
 				}
-				logging.Warnf("parked backup sweep %s: commit present but content ambiguous — kept both", parked)
+				switch {
+				case matchedCanon:
+					if rmErr := c.fs.Remove(parked); rmErr != nil {
+						logging.Warnf("parked backup sweep %s: %v", parked, rmErr)
+						continue
+					}
+					healed++
+					continue
+				case matchedBak:
+					if rnErr := c.fs.Rename(parked, canonPath); rnErr != nil {
+						logging.Warnf("parked backup restore %s→%s: %v", parked, canonPath, rnErr)
+						continue
+					}
+					healed++
+					continue
+				default:
+					logging.Warnf("parked backup sweep %s: commit present but content ambiguous — kept both", parked)
+				}
 				continue
 			}
 			rev, decidable := c.posterDurableRevision(ctx, jobID, meta.PosterID)
@@ -907,19 +921,20 @@ func tokenForNonce(tokens []commitToken, nonce string) *commitToken {
 	return nil
 }
 
-// foreignTokenForBase finds a DIFFERENT op's commit token for the same poster
-// base — attribution evidence that a same-family commit exists but wasn't this
-// parked op's.
-func foreignTokenForBase(tokens []commitToken, base, nonce string) *commitToken {
+// foreignTokensForBase lists every OTHER op's commit token for this base —
+// stacked commits need any-match arbitration, never first-match truth
+// (codex cloud P2 @822).
+func foreignTokensForBase(tokens []commitToken, base, nonce string) []commitToken {
+	out := []commitToken{}
 	for i := range tokens {
 		if tokens[i].nonce != nonce && strings.EqualFold(tokens[i].base, base) {
-			return &tokens[i]
+			out = append(out, tokens[i])
 		}
 	}
-	return nil
+	return out
 }
 
-// tokenLegSHA picks the token's SHA matching the canonical leg form.
+// tokenLegSHA picks the token's SHA matching the canonical leg form.// tokenLegSHA picks the token's SHA matching the canonical leg form.
 func tokenLegSHA(m commitMeta, canon string) string {
 	if strings.HasSuffix(canon, "-full.jpg") {
 		return m.FullSHA
