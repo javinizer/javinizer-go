@@ -798,8 +798,26 @@ func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, job
 			//   foreign token matching NEITHER ⇒ a newer-op unwind settles this leg
 			//     this run ⇒ keep both (never guess).
 			if tok := tokenForNonce(tokens, p.nonce); tok != nil {
-				if rmErr := c.fs.Remove(parked); rmErr != nil {
-					logging.Warnf("parked backup sweep %s: %v", parked, rmErr)
+				// codex cloud P1 (deferral binding): this op's token proves its
+				// IN-MEMORY commit — the DURABLE envelope lands later. Only when the
+				// durable row also advanced past the captured baseline is the backup
+				// truly obsolete; a token without the durable advance means the
+				// envelope write never happened, so the canonical bytes must rewind.
+				rev, decidable := c.posterDurableRevision(ctx, jobID, meta.PosterID)
+				if !decidable {
+					logging.Warnf("parked backup sweep %s: durable revision undecidable — kept both", parked)
+					continue
+				}
+				if rev > meta.PrevRevision {
+					if rmErr := c.fs.Remove(parked); rmErr != nil {
+						logging.Warnf("parked backup sweep %s: %v", parked, rmErr)
+						continue
+					}
+					healed++
+					continue
+				}
+				if rnErr := c.fs.Rename(parked, canonPath); rnErr != nil {
+					logging.Warnf("parked backup restore %s→%s: %v", parked, canonPath, rnErr)
 					continue
 				}
 				healed++

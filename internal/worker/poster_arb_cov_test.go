@@ -58,7 +58,54 @@ func TestReconcileParkedForeignTokenFullLegCanonMatch(t *testing.T) {
 	assert.Error(t, bErr, "obsolete backup dropped via full-leg token leg")
 }
 
-// removeExactFailFS wedges one exact filename's removal.// removeExactFailFS wedges one exact filename's removal.
+// removeExactFailFS wedges one exact filename's removal.// codex cloud P1: own token proves only the IN-MEMORY commit — when the
+// durable row never advanced (envelope write lost), the canonical bytes
+// belong to nothing durable; restore the parked last-committed pair.
+func TestReconcileParkedOwnTokenUnpersistedRestores(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	seedArbitrationScene(t, fs, dir, "AR-U", "a1.b2", "gen-unpersisted", "committed", 4)
+	seedCommitToken(t, fs, dir, "AR-U", "a1.b2", "gen-unpersisted", false)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-U", 4), nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+
+	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	assert.Equal(t, 3, healed, "marker sweep + restore + settled token sweep")
+	got, err := afero.ReadFile(fs, filepath.Join(dir, "AR-U.jpg"))
+	require.NoError(t, err)
+	assert.Equal(t, "committed", string(got), "canon rewound — envelope never persisted")
+}
+
+// Own token but the durable row is unreadable: undecidable ⇒ keep both.// Own token but the durable row is unreadable: undecidable ⇒ keep both.
+func TestReconcileParkedOwnTokenLookupUndecidableKeepsBoth(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	seedArbitrationScene(t, fs, dir, "AR-V", "a1.b2", "gen", "pre-op", 4)
+	seedCommitToken(t, fs, dir, "AR-V", "a1.b2", "gen", false)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(nil, assert.AnError)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	assert.Equal(t, 0, healed, "undecidable ⇒ token+backup+marker all persist")
+}
+
+// Own token + durable row unmoved (envelope never persisted): the restore is
+// required — and a wedged restore keeps everything for the next startup.
+func TestReconcileParkedOwnTokenUnpersistedRestoreWedgedKeeps(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	seedArbitrationScene(t, fs, dir, "AR-W", "a1.b2", "gen", "pre-op", 4)
+	seedCommitToken(t, fs, dir, "AR-W", "a1.b2", "gen", false)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-W", 4), nil)
+	cl := &TempDirCleaner{fs: &seqRenameFailFS{Fs: fs, failOn: map[int]bool{1: true}}, tempDir: "/tmp", jobRepo: repo}
+	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	assert.Equal(t, 0, healed)
+	_, bErr := fs.Stat(filepath.Join(dir, "AR-W.jpg.rsbak.a1.b2"))
+	assert.NoError(t, bErr)
+	_, mErr := fs.Stat(filepath.Join(dir, ".inflight-AR-W.a1.b2"))
+	assert.NoError(t, mErr)
+}
+
+// removeExactFailFS wedges one exact filename's removal.
 type removeExactFailFS struct {
 	afero.Fs
 	name string
@@ -122,8 +169,9 @@ func TestReconcileParkedArbitratesUncommitted(t *testing.T) {
 func TestReconcileParkedArbitratesCommitted(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	seedArbitrationScene(t, fs, dir, "AR-2", "a1.b2", "gen-committed", "pre-op", 4)
-	// The own-token path resolves attribution without any job-repo lookup.
+	// Own token + durable advance ⇒ drop.
 	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-2", 9), nil)
 	seedCommitToken(t, fs, dir, "AR-2", "a1.b2", "gen-committed", false)
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
@@ -272,6 +320,7 @@ func TestReconcileParkedArbitrationCommittedFullLeg(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-ARF-9.aa.bb"), meta, 0o644))
 	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "ARF-9", 8), nil)
 	seedCommitToken(t, fs, dir, "ARF-9", "aa.bb", "gen-committed", true)
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
@@ -510,6 +559,7 @@ func TestReconcileParkedOwnTokenRemoveWedgedKeeps(t *testing.T) {
 	seedArbitrationScene(t, fs, dir, "AR-J", "a1.b2", "gen-committed", "pre-op", 4)
 	seedCommitToken(t, fs, dir, "AR-J", "a1.b2", "gen-committed", false)
 	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "AR-J", 9), nil)
 	wedged := selectiveFailRemoveFS{Fs: fs, failSuffix: ".rsbak.a1.b2"}
 	cl := &TempDirCleaner{fs: wedged, tempDir: "/tmp", jobRepo: repo}
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)

@@ -66,6 +66,49 @@ func TestRescrapeSinglePersistFailureIsWarned(t *testing.T) {
 	require.NotNil(t, out)
 }
 
+// codex cloud P1: the recovery teardown runs ONLY after the envelope write
+// lands; a persist failure leaves the trinity alone for startup arbitration.
+func TestRescrapeSingleFinalizesOnlyAfterPersist(t *testing.T) {
+	var finalized bool
+	resultWithRecovery := func() *worker.RescrapeResult {
+		return &worker.RescrapeResult{Status: models.RescrapeStatusSuccess, PosterRecovery: worker.NewRescapeRecoveryHandle(func() { finalized = true })}
+	}
+
+	t.Run("persist ok → finalized", func(t *testing.T) {
+		finalized = false
+		mockJob := workermocks.NewMockBatchJobInterface(t)
+		mockJob.EXPECT().SetWorkflow(mock.Anything).Return()
+		mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(resultWithRecovery(), nil)
+		orch := NewRescrapeOrchestrator(RescrapeDeps{
+			JobStore:  &excludeEdgeStore{job: mockJob},
+			WfFactory: staticWfFactory{},
+			Factory:   minimalFactory{},
+			Persist:   &excludeEdgeStore{},
+		})
+		out, err := orch.Rescrape(context.Background(), "job-9", "MV-9", "/f/mv9.mp4", &contracts.BatchRescrapeRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		assert.True(t, finalized, "teardown runs once the envelope landed")
+	})
+
+	t.Run("persist failure → decomposition retained", func(t *testing.T) {
+		finalized = false
+		mockJob := workermocks.NewMockBatchJobInterface(t)
+		mockJob.EXPECT().SetWorkflow(mock.Anything).Return()
+		mockJob.EXPECT().Rescrape(mock.Anything, mock.Anything).Return(resultWithRecovery(), nil)
+		orch := NewRescrapeOrchestrator(RescrapeDeps{
+			JobStore:  &excludeEdgeStore{job: mockJob},
+			WfFactory: staticWfFactory{},
+			Factory:   minimalFactory{},
+			Persist:   failingPersist{err: errors.New("disk read-only")},
+		})
+		out, err := orch.Rescrape(context.Background(), "job-9", "MV-9", "/f/mv9.mp4", &contracts.BatchRescrapeRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		assert.False(t, finalized, "teardown never runs before the durable envelope")
+	})
+}
+
 func TestRescrapeBulkPersistFailureIsWarned(t *testing.T) {
 	mockJob := workermocks.NewMockBatchJobInterface(t)
 	mockJob.EXPECT().SetWorkflow(mock.Anything).Return()

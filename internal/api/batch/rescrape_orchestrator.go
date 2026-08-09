@@ -117,7 +117,14 @@ func (o *RescrapeOrchestrator) Rescrape(ctx context.Context, jobID, movieID, fil
 	}
 
 	if err := o.persist.PersistJobByID(jobID); err != nil {
+		// codex cloud P1: persist failed — the recovery trinity intentionally
+		// remains on disk; the startup reconciler arbitrates it against the
+		// durable (older) row instead of stranding uncommitted bytes at canon.
 		logging.Warnf("[Rescrape] envelope persist failed for job %s: %v", jobID, err)
+	} else if result != nil && result.PosterRecovery != nil {
+		// codex cloud P1: parked-poster teardown belongs AFTER the durable
+		// envelope write, never before it.
+		result.PosterRecovery.Finalize()
 	}
 
 	return &SingleRescrapeResult{

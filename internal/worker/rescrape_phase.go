@@ -406,7 +406,12 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 		lostGeneration := movieResult != nil && (movieResult.PosterError != nil || !movieResult.PosterGenerated)
 		if lostGeneration && scope.preExistedPair {
 			closeoutRescrapePosterBytes(lc.inputs, scope, movieResult, cleanupMovie())
-		} else {
+		} else if outcome != nil && scope.parked != nil && scope.parked.fs != nil {
+			// codex cloud P1: the DURABLE commit (envelope persist) happens in the
+			// CALLER after this phase returns — pass the teardown out instead of
+			// discarding here, so a crash/failed persist keeps the arbitration set.
+			outcome.PosterRecovery = NewRescapeRecoveryHandle(scope.parked.discard)
+		} else if scope.parked != nil {
 			scope.parked.discard()
 		}
 	} else if outcome.Status != models.RescrapeStatusGone && outcome.Status != models.RescrapeStatusFailed && outcome.Status != models.RescrapeStatusConflict {

@@ -130,6 +130,35 @@ type RescrapeResult struct {
 	// captured inside the commit's keyed section (audit F-R15-1): the CAS
 	// echo never reads off-key, so a racer's commit cannot be mishealed.
 	Revision *uint64
+	// PosterRecovery is non-nil ONLY on a successful op that generated parked
+	// poster bytes: the trinity (backup pair, in-flight sentinel, commit token)
+	// is intentionally retained past return — the caller MUST invoke Finalize
+	// after the durable envelope write lands; with no finalize (or on process
+	// exit), startup reconciliation arbitrates the leftovers. (codex cloud P1:
+	// the in-memory commit precedes PersistJobByID, so discarding here could
+	// otherwise strand new image bytes under an old durable row.)
+	PosterRecovery *RescrapeRecoveryHandle
+}
+
+// RescrapeRecoveryHandle defers a successful rescrape's parked-poster
+// teardown to the durable-persist boundary; callers only ever .Finalize() it.
+type RescrapeRecoveryHandle struct {
+	finalize func()
+}
+
+// NewRescapeRecoveryHandle binds the deferred teardown (the phase's parked
+// trinity discard internally; a flag in tests).
+func NewRescapeRecoveryHandle(finalize func()) *RescrapeRecoveryHandle {
+	return &RescrapeRecoveryHandle{finalize: finalize}
+}
+
+// Finalize runs the deferred teardown. Safe to call at most once (nil-tolerant).
+func (h *RescrapeRecoveryHandle) Finalize() {
+	if h == nil || h.finalize == nil {
+		return
+	}
+	h.finalize()
+	h.finalize = nil
 }
 
 // ---------------------------------------------------------------------------
