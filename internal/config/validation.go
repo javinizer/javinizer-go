@@ -543,7 +543,7 @@ func validateTranslationProviderInternal(c *Config) error {
 		if strings.TrimSpace(t.DeepL.APIKey) == "" {
 			return fmt.Errorf("metadata.translation.deepl.api_key is required when provider=deepl")
 		}
-	case "google":
+	case "google": //nolint:goconst // provider key literal kept inline for readability
 		// Google free mode doesn't require API key; paid mode does
 		if googleMode == models.GoogleModePaid && strings.TrimSpace(t.Google.APIKey) == "" {
 			return fmt.Errorf("metadata.translation.google.api_key is required when provider=google and mode=paid")
