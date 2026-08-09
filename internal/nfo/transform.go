@@ -2,6 +2,7 @@ package nfo
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -50,7 +51,7 @@ type nfoInput struct {
 // transformMovieForNFO handles all data transformation: actress formatting and deduplication,
 // stream details extraction, date normalization, rating resolution, and tag merging.
 // The returned nfoInput is fully resolved — buildNFO maps it to *Movie with no further decisions.
-func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movie, videoFilePath string, tags []string) nfoInput {
+func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movie, videoFilePath string, tags []string) (nfoInput, error) {
 	title := g.resolveTitle(movie)
 	genres := g.resolveGenres(movie)
 	actors := g.buildActors(movie.Actresses)
@@ -61,11 +62,16 @@ func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movi
 	trailerURL := g.resolveTrailer(movie)
 	fi := g.resolveStreamDetails(ctx, videoFilePath)
 	originalPath := g.resolveOriginalPath(movie)
-	tagline := g.resolveTagline(ctx, movie)
+	tagline, err := g.resolveTagline(ctx, movie)
+	if err != nil {
+		return nfoInput{}, err
+	}
 	credits := g.resolveCredits()
 
-	// Tag merging: actress-as-tag + caller tags + config tags, deduplicated
-	tagList := g.mergeTags(ctx, movie, actors, tags)
+	tagList, err := g.mergeTags(ctx, movie, actors, tags)
+	if err != nil {
+		return nfoInput{}, err
+	}
 
 	return nfoInput{
 		id:            movie.ID,
@@ -91,7 +97,7 @@ func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movi
 		originalPath:  originalPath,
 		tagline:       tagline,
 		credits:       credits,
-	}
+	}, nil
 }
 
 // resolveTitle returns the display title, falling back to the base title.
@@ -188,7 +194,7 @@ func (g *Generator) resolveOriginalPath(movie *models.Movie) string {
 // Static text (no '<') and literal '<' sequences the tag pattern cannot match
 // pass through unchanged; template errors drop the tagline with a warning
 // rather than fail the whole NFO for an optional field.
-func (g *Generator) resolveTagline(ctx context.Context, movie *models.Movie) string {
+func (g *Generator) resolveTagline(ctx context.Context, movie *models.Movie) (string, error) {
 	return g.renderConfiguredText(ctx, movie, "tagline", g.config.Tagline)
 }
 
@@ -212,16 +218,19 @@ func (g *Generator) movieTemplateContext(movie *models.Movie) *template.Context 
 // renderConfiguredText expands a configured text field when it references
 // template tags; static text is returned byte-identical without touching the
 // engine. Returns "" (caller omits the value) on template error.
-func (g *Generator) renderConfiguredText(ctx context.Context, movie *models.Movie, label, tmpl string) string {
+func (g *Generator) renderConfiguredText(ctx context.Context, movie *models.Movie, label, tmpl string) (string, error) {
 	if tmpl == "" || !strings.Contains(tmpl, "<") || movie == nil {
-		return tmpl
+		return tmpl, nil
 	}
 	rendered, err := g.templateEngine.ExecuteWithContext(ctx, tmpl, g.movieTemplateContext(movie))
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
 		logging.Warnf("nfo: dropping %s %q: template error: %v", label, tmpl, err)
-		return ""
+		return "", nil
 	}
-	return rendered
+	return rendered, nil
 }
 
 // resolveCredits returns the configured credits as a comma-separated string.
@@ -293,7 +302,7 @@ func (g *Generator) buildActors(movieActresses []models.Actress) []actor {
 
 // mergeTags combines actress-as-tag entries, caller-provided tags, and config tags,
 // deduplicating by name.
-func (g *Generator) mergeTags(ctx context.Context, movie *models.Movie, actors []actor, callerTags []string) []string {
+func (g *Generator) mergeTags(ctx context.Context, movie *models.Movie, actors []actor, callerTags []string) ([]string, error) {
 	var tags []string
 	tagSet := make(map[string]bool)
 
@@ -322,10 +331,14 @@ func (g *Generator) mergeTags(ctx context.Context, movie *models.Movie, actors [
 
 	// Config tags (template-expanded — the Web UI advertises them as templates)
 	for _, tag := range g.config.Tag {
-		addTag(g.renderConfiguredText(ctx, movie, "tag", tag))
+		rendered, err := g.renderConfiguredText(ctx, movie, "tag", tag)
+		if err != nil {
+			return nil, err
+		}
+		addTag(rendered)
 	}
 
-	return tags
+	return tags, nil
 }
 
 // buildNFO maps a fully-resolved nfoInput to a *Movie XML struct.

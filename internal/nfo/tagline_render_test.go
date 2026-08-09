@@ -3,6 +3,7 @@ package nfo
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -64,7 +65,7 @@ func TestMovieToNFO_TaglineTemplating(t *testing.T) {
 				movie = &m
 			}
 			g := NewGenerator(afero.NewMemMapFs(), cfg)
-			nfo := g.movieToNFO(context.Background(), movie, "", nil)
+			nfo, _ := g.movieToNFO(context.Background(), movie, "", nil)
 			assert.Equal(t, tc.want, nfo.Tagline)
 		})
 	}
@@ -74,14 +75,14 @@ func TestMovieToNFO_TaglineTemplating_DefaultDelimiterRespected(t *testing.T) {
 	// An empty ActressDelimiter config must behave like the other template
 	// surfaces (folder/file formats): fall back to ", ", not render empty.
 	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<ACTRESSES>"})
-	nfo := g.movieToNFO(context.Background(), taglineTestMovie(), "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", nil)
 	assert.Equal(t, "Sakura Momo, Actress Test", nfo.Tagline)
 }
 
 func TestMovieToNFO_TagsTemplating(t *testing.T) {
 	t.Run("static tags pass through unchanged", func(t *testing.T) {
 		g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"Pool", "Collector"}, FirstNameOrder: true})
-		nfo := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"Manual"})
+		nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"Manual"})
 		assert.Contains(t, nfo.Tags, "Pool")
 		assert.Contains(t, nfo.Tags, "Collector")
 		assert.Contains(t, nfo.Tags, "Manual")
@@ -90,21 +91,21 @@ func TestMovieToNFO_TagsTemplating(t *testing.T) {
 
 	t.Run("config tag templates expand per movie", func(t *testing.T) {
 		g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"<ID>", "Pool"}, FirstNameOrder: true})
-		nfo := g.movieToNFO(context.Background(), taglineTestMovie(), "", nil)
+		nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", nil)
 		assert.Contains(t, nfo.Tags, "IPX-535")
 		assert.Contains(t, nfo.Tags, "Pool")
 	})
 
 	t.Run("caller (database) tags pass through verbatim", func(t *testing.T) {
 		g := NewGenerator(afero.NewMemMapFs(), &Config{FirstNameOrder: true})
-		nfo := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"<MAKER>"})
+		nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"<MAKER>"})
 		assert.Contains(t, nfo.Tags, "<MAKER>")
 		assert.NotContains(t, nfo.Tags, "Idea Pocket")
 	})
 
 	t.Run("broken config tag templates dropped; caller tags kept verbatim", func(t *testing.T) {
 		g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"<IF:ID>oops", "Kept"}, FirstNameOrder: true})
-		nfo := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"<NOTAREALTAG>", "AlsoKept"})
+		nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"<NOTAREALTAG>", "AlsoKept"})
 		assert.Contains(t, nfo.Tags, "Kept")
 		assert.Contains(t, nfo.Tags, "<NOTAREALTAG>")
 		assert.Contains(t, nfo.Tags, "AlsoKept")
@@ -113,7 +114,33 @@ func TestMovieToNFO_TagsTemplating(t *testing.T) {
 
 	t.Run("template result deduped against existing tag", func(t *testing.T) {
 		g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"<ID>"}, FirstNameOrder: true})
-		nfo := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"IPX-535"})
+		nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", []string{"IPX-535"})
 		assert.Equal(t, []string{"IPX-535"}, nfo.Tags)
 	})
+}
+
+func TestMovieToNFO_CanceledContextPropagatesTagline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<ID>", FirstNameOrder: true})
+	nfo, err := g.movieToNFO(ctx, taglineTestMovie(), "", nil)
+	assert.Error(t, err)
+	assert.Nil(t, nfo)
+}
+
+func TestMovieToNFO_DeadlineExceededPropagatesConfigTag(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"<ID>"}, FirstNameOrder: true})
+	nfo, err := g.movieToNFO(ctx, taglineTestMovie(), "", nil)
+	assert.Error(t, err)
+	assert.Nil(t, nfo)
+}
+
+func TestGenerateAtPath_CanceledContextReturnsError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<ID>", FirstNameOrder: true})
+	err := g.GenerateAtPath(ctx, taglineTestMovie(), "/out/test.nfo", "", nil)
+	assert.Error(t, err)
 }

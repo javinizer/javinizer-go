@@ -234,7 +234,10 @@ func (g *Generator) Generate(ctx context.Context, movie *models.Movie, outputPat
 // ResolveNFOFilename) should use this method to avoid dual path computation
 // and ensure the revert log and generator agree on the target path.
 func (g *Generator) GenerateAtPath(ctx context.Context, movie *models.Movie, nfoPath string, videoFilePath string, tags []string) error {
-	nfo := g.movieToNFO(ctx, movie, videoFilePath, tags)
+	nfo, err := g.movieToNFO(ctx, movie, videoFilePath, tags)
+	if err != nil {
+		return err
+	}
 	return g.WriteNFO(nfo, nfoPath)
 }
 
@@ -268,9 +271,12 @@ func (g *Generator) ResolveAndGenerate(ctx context.Context, movie *models.Movie,
 // movieToNFO converts a Movie model to NFO format.
 // videoFilePath: optional path to video file for extracting stream details (empty string to skip)
 // tags: pre-resolved tags from caller (e.g., tag database) — replaces internal DB call
-func (g *Generator) movieToNFO(ctx context.Context, movie *models.Movie, videoFilePath string, tags []string) *Movie {
-	input := g.transformMovieForNFO(ctx, movie, videoFilePath, tags)
-	return g.buildNFO(input)
+func (g *Generator) movieToNFO(ctx context.Context, movie *models.Movie, videoFilePath string, tags []string) (*Movie, error) {
+	input, err := g.transformMovieForNFO(ctx, movie, videoFilePath, tags)
+	if err != nil {
+		return nil, err
+	}
+	return g.buildNFO(input), nil
 }
 
 // WriteNFO encodes the NFO struct to the given path, creating parent directories as needed.
