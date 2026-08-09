@@ -68,12 +68,23 @@ describe('rebaseOverlayOntoMovie (codex P1)', () => {
 		expect(out.title).toBe('Server Title');
 	});
 
-	it('undefined overlay values never overwrite the fresh value', () => {
-		const baseline = makeMovie();
+	it('codex P2: an explicit clear of a previously-seen field SURVIVES the rebase', () => {
+		const baseline = makeMovie(); // maker present at the baseline
 		const overlay = makeMovie();
-		(overlay as unknown as Record<string, unknown>).maker = undefined;
+		(overlay as unknown as Record<string, unknown>).maker = undefined; // user cleared it
 		const fresh = makeMovie({ maker: 'Server Maker' });
 		const out = rebaseOverlayOntoMovie(baseline, overlay, fresh);
-		expect(out.maker).toBe('Server Maker');
+		expect(out.maker).toBeUndefined();
+	});
+
+	it('a clear-key whose baseline was absent stays skipped', () => {
+		const baseline = makeMovie();
+		delete (baseline as unknown as Record<string, unknown>).content_id; // never seen
+		const overlay = makeMovie();
+		(overlay as unknown as Record<string, unknown>).content_id = undefined;
+		const fresh = makeMovie();
+		(fresh as unknown as Record<string, unknown>).content_id = 'cid-x';
+		const out = rebaseOverlayOntoMovie(baseline, overlay, fresh);
+		expect((out as unknown as Record<string, unknown>).content_id).toBe('cid-x');
 	});
 });

@@ -11,6 +11,18 @@ import (
 	"github.com/spf13/afero"
 )
 
+// removeWithRetry mirrors the worker's bounded sweep retry: a transient
+// removal wedge must never poison family fences till a restart.
+func removeWithRetry(fs afero.Fs, path string, attempts int) error {
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = fs.Remove(path); err == nil || os.IsNotExist(err) {
+			return nil
+		}
+	}
+	return err
+}
+
 // promoteWitnessConflict reports errPromoteWitnessPending whenever a promote
 // witness for posterID exists — matched by CONTENT first (payload PosterID,
 // fold-cased) with a fold-cased NAME fallback for legacy contentless
