@@ -179,7 +179,7 @@ func TestBuildScrapeCmd_ManualInputTrimmedForMovieIDAndRawInput(t *testing.T) {
 	const file = "/videos/ABC-001.mp4"
 	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "ABC-001"}}
 
-	cmd, _ := buildScrapeCmd(file, inputs, ScrapePhaseConfig{RawInputOverride: map[string]string{file: "  IPX-123  "}})
+	cmd, _ := buildScrapeCmd(file, models.FileMatchInfo{}, inputs, ScrapePhaseConfig{RawInputOverride: map[string]string{file: "  IPX-123  "}})
 
 	assert.Equal(t, "IPX-123", cmd.MovieID, "MovieID is trimmed so failure JobEvents + row-identity identify the row, not '  IPX-123  '")
 	assert.Equal(t, "IPX-123", cmd.RawInput, "RawInput is trimmed (mirrors rescrape_phase.go:203 queryOverride = TrimSpace(ManualSearchInput))")
@@ -190,7 +190,7 @@ func TestBuildScrapeCmd_EmptyOrWhitespaceManualInputIsNoOverride(t *testing.T) {
 	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "ABC-001"}}
 
 	for _, raw := range []string{"", "   ", "\t\n"} {
-		cmd, _ := buildScrapeCmd(file, inputs, ScrapePhaseConfig{RawInputOverride: map[string]string{file: raw}})
+		cmd, _ := buildScrapeCmd(file, models.FileMatchInfo{}, inputs, ScrapePhaseConfig{RawInputOverride: map[string]string{file: raw}})
 		assert.Equal(t, "ABC-001", cmd.MovieID, "empty/whitespace input %q should be no override (auto-ID from matcher)", raw)
 		assert.Equal(t, "", cmd.RawInput, "empty/whitespace input %q should not set RawInput", raw)
 	}
@@ -201,14 +201,14 @@ func TestBuildScrapeCmd_URLInputBypassesBatchGlobalScrapers_IDInputKeepsThem(t *
 	batchGlobal := []string{"r18dev", "dmm"}
 	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "ABC-001"}}
 
-	urlCmd, _ := buildScrapeCmd(file, inputs, ScrapePhaseConfig{
+	urlCmd, _ := buildScrapeCmd(file, models.FileMatchInfo{}, inputs, ScrapePhaseConfig{
 		SelectedScrapers: batchGlobal,
 		RawInputOverride: map[string]string{file: "https://www.javbus.com/ABC-001"},
 	})
 	assert.Equal(t, "https://www.javbus.com/ABC-001", urlCmd.RawInput)
 	assert.Empty(t, urlCmd.SelectedScrapers, "URL rows bypass the batch-global scraper picker so resolveScrapeInput sets PriorityOverride")
 
-	idCmd, _ := buildScrapeCmd(file, inputs, ScrapePhaseConfig{
+	idCmd, _ := buildScrapeCmd(file, models.FileMatchInfo{}, inputs, ScrapePhaseConfig{
 		SelectedScrapers: batchGlobal,
 		RawInputOverride: map[string]string{file: "ABC-001"},
 	})
@@ -224,7 +224,7 @@ func TestBuildScrapeCmd_ManualURLInput_RedactsQueryFromMovieID(t *testing.T) {
 	const file = "/videos/ABC-001.mp4"
 	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "ABC-001"}}
 
-	cmd, _ := buildScrapeCmd(file, inputs, ScrapePhaseConfig{
+	cmd, _ := buildScrapeCmd(file, models.FileMatchInfo{}, inputs, ScrapePhaseConfig{
 		RawInputOverride: map[string]string{file: "https://www.javbus.com/ABC-001?token=secret&sig=abc"},
 	})
 
@@ -239,11 +239,38 @@ func TestBuildScrapeCmd_ManualIDInput_RedactionIsNoOp(t *testing.T) {
 	const file = "/videos/ABC-001.mp4"
 	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "ABC-001"}}
 
-	cmd, _ := buildScrapeCmd(file, inputs, ScrapePhaseConfig{
+	cmd, _ := buildScrapeCmd(file, models.FileMatchInfo{}, inputs, ScrapePhaseConfig{
 		RawInputOverride: map[string]string{file: "IPX-123"},
 	})
 	assert.Equal(t, "IPX-123", cmd.MovieID)
 	assert.Equal(t, "IPX-123", cmd.RawInput)
+}
+
+func TestBuildScrapeCmd_PrefersValidatedFileMatchInfoMovieID(t *testing.T) {
+	const file = "/videos/IPX-535E-4k.mp4"
+	m, err := matcher.NewMatcher(&matcher.Config{RegexEnabled: false})
+	require.NoError(t, err)
+	inputs := scrapePhaseInputs{Matcher: m}
+	// Validated FileMatchInfo carries the restored catalog ID (E not stripped, lone file)
+	fmi := models.FileMatchInfo{MovieID: "IPX-535E", Path: file, Name: "IPX-535E-4k.mp4", Extension: ".mp4"}
+
+	cmd, _ := buildScrapeCmd(file, fmi, inputs, ScrapePhaseConfig{})
+
+	assert.Equal(t, "IPX-535E", cmd.MovieID, "validated FileMatchInfo.MovieID must take precedence over MatchString's unvalidated heuristic")
+}
+
+func TestBuildScrapeCmd_MovieIDOverrideBeatsFileMatchInfoMovieID(t *testing.T) {
+	const file = "/videos/IPX-535E-4k.mp4"
+	m, err := matcher.NewMatcher(&matcher.Config{RegexEnabled: false})
+	require.NoError(t, err)
+	inputs := scrapePhaseInputs{Matcher: m}
+	fmi := models.FileMatchInfo{MovieID: "IPX-535E", Path: file, Name: "IPX-535E-4k.mp4", Extension: ".mp4"}
+
+	cmd, _ := buildScrapeCmd(file, fmi, inputs, ScrapePhaseConfig{
+		MovieIDOverride: map[string]string{file: "OVERRIDE-001"},
+	})
+
+	assert.Equal(t, "OVERRIDE-001", cmd.MovieID, "MovieIDOverride must take precedence over the validated FileMatchInfo.MovieID")
 }
 
 func TestBuildScrapeCmd_NoManualInputAutoIDsFromMatcher(t *testing.T) {
@@ -251,7 +278,7 @@ func TestBuildScrapeCmd_NoManualInputAutoIDsFromMatcher(t *testing.T) {
 	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "ABC-001"}}
 	cfg := ScrapePhaseConfig{}
 
-	cmd, _ := buildScrapeCmd(file, inputs, cfg)
+	cmd, _ := buildScrapeCmd(file, models.FileMatchInfo{}, inputs, cfg)
 
 	assert.Equal(t, "ABC-001", cmd.MovieID, "no manual input: the matcher result is used as the MovieID")
 	assert.Equal(t, "", cmd.RawInput, "no manual input: RawInput stays empty so resolveScrapeInput is a no-op")
@@ -262,7 +289,7 @@ func TestBuildScrapeCmd_ManualInputUsedAsIDBypassingMatcher(t *testing.T) {
 	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "MATCHED-001"}}
 	cfg := ScrapePhaseConfig{RawInputOverride: map[string]string{file: "MANUAL-123"}}
 
-	cmd, _ := buildScrapeCmd(file, inputs, cfg)
+	cmd, _ := buildScrapeCmd(file, models.FileMatchInfo{}, inputs, cfg)
 
 	assert.Equal(t, "MANUAL-123", cmd.MovieID, "manual input is used as the MovieID, not the matcher result")
 	assert.Equal(t, "MANUAL-123", cmd.RawInput, "RawInput carries the manual input so resolveScrapeInput parses it downstream")

@@ -24,7 +24,9 @@
   <studio>IdeaPocket</studio>
   <maker>IdeaPocket</maker>
   <label>IP Premium</label>
-  <set>Beautiful Days Series</set>
+  <set>
+    <name>Beautiful Days Series</name>
+  </set>
   <genre>Beautiful Girl</genre>
   <genre>Featured Actress</genre>
   <genre>Digital Mosaic</genre>

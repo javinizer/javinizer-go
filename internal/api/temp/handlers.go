@@ -1,6 +1,7 @@
 package temp
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,7 +15,9 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/spf13/afero"
 )
 
 // serveTempPoster serves temporarily cropped posters from the configured temp directory.
@@ -131,13 +134,17 @@ func serveCroppedPoster() gin.HandlerFunc {
 
 // serveTempImage proxies remote images for preview UI.
 // This is used for hotlink-protected sources (e.g., JavBus) where direct browser loads may return 403.
+// When server-side image caching is enabled (system.image_cache_enabled), fetched images are persisted
+// to disk under {temp_dir}/image-cache/ so they remain available when the source is unreachable.
+// Stale-if-error: an expired entry whose re-fetch fails is served from disk rather than erroring.
 // @Router /api/v1/temp/image [get]
 // @Summary Proxy remote images
-// @Description Proxies remote images for preview UI, handling hotlink protection and CORS issues.
+// @Description Proxies remote images for preview UI, handling hotlink protection and CORS issues. When image caching is enabled, fetched images are persisted server-side with stale-if-error semantics.
 // @Tags temp
 // @Param url query string true "Image URL"
 // @Success 200 {file} binary
 // @Failure 400 {object} contracts.ErrorResponse
+// @Failure 403 {object} contracts.ErrorResponse
 // @Failure 502 {object} contracts.ErrorResponse
 func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -156,16 +163,47 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		if err := ssrf.CheckURL(rawURL); err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		cacheEnabled := tempCfg.ImageCacheEnabled && tempCfg.ImageCacheTTLHours > 0
+		if !cacheEnabled {
+			serveTempImageUncached(c, tempCfg, parsedURL.String(), rawURL)
 			return
 		}
 
-		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
+		fs := rt.Deps().GetFs()
+		cacheDir := tempCfg.TempDir
+		ttl := time.Duration(tempCfg.ImageCacheTTLHours) * time.Hour
 
-		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, parsedURL.String(), nil)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create request"})
+		fetchURL := parsedURL.String()
+		keyURL := *parsedURL
+		keyURL.Fragment = ""
+		normalizedURL := keyURL.String()
+		file, contentType, remaining, state := get(fs, cacheDir, normalizedURL, ttl)
+		if state == CacheFresh {
+			defer func() { _ = file.Close() }()
+			c.Header("Content-Type", contentType)
+			c.Header("Cache-Control", cacheControlForTTL(remaining))
+			c.Header("X-Content-Type-Options", "nosniff")
+			if _, err := io.Copy(c.Writer, file); err != nil {
+				c.AbortWithStatus(http.StatusBadGateway)
+			}
+			return
+		}
+
+		var staleFile afero.File
+		var staleCT string
+		if state == CacheStale {
+			staleFile = file
+			staleCT = contentType
+		}
+		if staleFile != nil {
+			defer func() { _ = staleFile.Close() }()
+		}
+
+		if err := ssrf.CheckURL(rawURL); err != nil {
+			if staleFile != nil && serveStaleFile(c, staleFile, staleCT) {
+				return
+			}
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -173,39 +211,128 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 		if userAgent == "" {
 			userAgent = config.DefaultUserAgent
 		}
-		req.Header.Set("User-Agent", userAgent)
-		req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-		if referer := resolveTempImageReferer(parsedURL.String(), tempCfg.ScraperReferer); referer != "" {
-			req.Header.Set("Referer", referer)
-		}
+		referer := resolveTempImageReferer(fetchURL, tempCfg.ScraperReferer)
+		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
 
-		resp, err := httpClient.Do(req)
-		if err != nil {
+		v, ferr, _ := imageCacheGroup.Do(normalizedURL, func() (any, error) {
+			res := fetchAndCache(c.Request.Context(), fs, cacheDir, normalizedURL, fetchURL, httpClient, userAgent, referer, tempCfg.ImageCacheMaxSizeMB)
+			if res.persistFailed && len(res.body) == 0 {
+				body, mediaType, berr := fetchBodyToMemory(c.Request.Context(), httpClient, fetchURL, userAgent, referer)
+				if berr == nil {
+					res.body = body
+					res.contentType = mediaType
+				}
+			}
+			return res, nil
+		})
+		result := v.(fetchResult)
+		_ = ferr
+
+		if result.err != nil {
+			if result.persistFailed && len(result.body) > 0 {
+				c.Header("Cache-Control", "private, max-age=300")
+				c.Header("X-Content-Type-Options", "nosniff")
+				c.Data(http.StatusOK, result.contentType, result.body)
+				return
+			}
+			if staleFile != nil && serveStaleFile(c, staleFile, staleCT) {
+				return
+			}
+			if result.persistFailed {
+				logging.Warnf("image cache: persist failed for %s: %v", redactImageURL(normalizedURL), result.err)
+				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
+				return
+			}
+			logging.Warnf("image cache: fetch failed for %s: %v", redactImageURL(normalizedURL), result.err)
 			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
 			return
 		}
-		defer func() {
-			_ = httpclient.DrainAndClose(resp.Body)
-		}()
 
-		if resp.StatusCode != http.StatusOK {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "image source returned non-200 status"})
+		if result.cachedPath != "" {
+			c.Header("Content-Type", result.contentType)
+			c.Header("Cache-Control", cacheControlForTTL(ttl))
+			c.Header("X-Content-Type-Options", "nosniff")
+			cachedFile, openErr := fs.Open(result.cachedPath)
+			if openErr != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to open cached image"})
+				return
+			}
+			defer func() { _ = cachedFile.Close() }()
+			if _, err := io.Copy(c.Writer, cachedFile); err != nil {
+				c.AbortWithStatus(http.StatusBadGateway)
+			}
 			return
 		}
 
-		contentType := resp.Header.Get("Content-Type")
-		if contentType == "" {
-			contentType = "image/jpeg"
+		if len(result.body) > 0 {
+			c.Header("Cache-Control", "private, max-age=300")
+			c.Header("X-Content-Type-Options", "nosniff")
+			c.Data(http.StatusOK, result.contentType, result.body)
 		}
+	}
+}
 
-		c.Header("Content-Type", contentType)
-		c.Header("Cache-Control", "private, max-age=300")
+func serveStaleFile(c *gin.Context, f afero.File, contentType string) bool {
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Content-Type-Options", "nosniff")
+	if _, err := io.Copy(c.Writer, f); err != nil {
+		logging.Warnf("image cache: failed to serve stale entry: %v", err)
+		return false
+	}
+	return true
+}
 
-		const maxImageProxyResponseSize = 50 * 1024 * 1024 // 50MB
-		if _, err := io.Copy(c.Writer, io.LimitReader(resp.Body, maxImageProxyResponseSize)); err != nil {
-			c.AbortWithStatus(http.StatusBadGateway)
-			return
-		}
+func serveTempImageUncached(c *gin.Context, tempCfg *core.TempNarrowConfig, downloadURL, rawURL string) {
+	if err := ssrf.CheckURL(rawURL); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+
+	httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
+
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, downloadURL, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create request"})
+		return
+	}
+
+	userAgent := tempCfg.ScraperUserAgent
+	if userAgent == "" {
+		userAgent = config.DefaultUserAgent
+	}
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	if referer := resolveTempImageReferer(downloadURL, tempCfg.ScraperReferer); referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
+		return
+	}
+	defer func() {
+		_ = httpclient.DrainAndClose(resp.Body)
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "image source returned non-200 status"})
+		return
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = defaultContentType
+	}
+
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "private, max-age=300")
+	c.Header("X-Content-Type-Options", "nosniff")
+
+	if _, err := io.Copy(c.Writer, io.LimitReader(resp.Body, maxImageProxyResponseSize)); err != nil {
+		c.AbortWithStatus(http.StatusBadGateway)
+		return
 	}
 }
 
@@ -226,4 +353,23 @@ func isSafePathSegment(s string) bool {
 		return false
 	}
 	return s == filepath.Base(s)
+}
+
+func cacheControlForTTL(remaining time.Duration) string {
+	maxAge := int64(remaining.Seconds())
+	if maxAge > 86400 {
+		maxAge = 86400
+	}
+	return fmt.Sprintf("private, max-age=%d", maxAge)
+}
+
+func redactImageURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.ForceQuery = false
+	return u.String()
 }

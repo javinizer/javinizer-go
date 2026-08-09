@@ -37,10 +37,10 @@ type Movie struct {
 	Credits  string  `xml:"credits,omitempty"` // Writer/credits
 
 	// Production info
-	Studio string `xml:"studio,omitempty"` // Production studio
-	Maker  string `xml:"maker,omitempty"`  // Custom field for JAV maker
-	Label  string `xml:"label,omitempty"`  // Custom field for JAV label
-	Set    string `xml:"set,omitempty"`    // Series name
+	Studio string    `xml:"studio,omitempty"` // Production studio
+	Maker  string    `xml:"maker,omitempty"`  // Custom field for JAV maker
+	Label  string    `xml:"label,omitempty"`  // Custom field for JAV label
+	Set    SetString `xml:"set,omitempty"`    // Series name (tiered <set><name>...</name></set>)
 
 	// Categories
 	Genres []string `xml:"genre,omitempty"`

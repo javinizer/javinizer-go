@@ -181,11 +181,32 @@ func TestParseScene_WithImagesAndURLs(t *testing.T) {
 
 	result, err := s.parseScene(sc, "IPX-535")
 	require.NoError(t, err)
-	assert.Equal(t, "ipx00535", result.ContentID)
+	// ID and ContentID are now scene.Code (page-first), not the DMM content-id.
+	assert.Equal(t, "IPX-535", result.ID)
+	assert.Equal(t, "IPX-535", result.ContentID)
 	assert.Equal(t, "https://www.dmm.co.jp/digital/video/-/detail/=/cid=ipx00535/", result.SourceURL)
 	assert.NotEmpty(t, result.PosterURL)
 	assert.NotEmpty(t, result.CoverURL)
 	assert.Equal(t, "ja", result.Language)
+}
+
+func TestParseScene_EmptyCodeFallback(t *testing.T) {
+	s := &scraper{
+		baseURL:  "https://javstash.org/graphql",
+		language: "en",
+	}
+
+	// scene.Code is empty and searchID is also empty → ID and ContentID stay empty
+	sc := &scene{
+		ID:    "scene789",
+		Code:  "",
+		Title: "Empty Movie",
+	}
+
+	result, err := s.parseScene(sc, "")
+	require.NoError(t, err)
+	assert.Equal(t, "", result.ID, "ID should be empty when both scene.Code and searchID are empty")
+	assert.Equal(t, "", result.ContentID, "ContentID should equal ID")
 }
 
 // --- parseScene: images with poster keyword ---

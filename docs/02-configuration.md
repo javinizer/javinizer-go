@@ -1412,6 +1412,9 @@ system:
   version_check_enabled: true
   version_check_interval_hours: 24
   temp_dir: data/temp
+  image_cache_enabled: true
+  image_cache_ttl_hours: 168
+  image_cache_max_size_mb: 512
 ```
 
 ### NFO Defaults

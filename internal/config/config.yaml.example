@@ -82,6 +82,9 @@ system:
     # Base directory for temporary files (posters, etc.)
     # Can be overridden with JAVINIZER_TEMP_DIR environment variable
     temp_dir: data/temp
+    image_cache_enabled: true
+    image_cache_ttl_hours: 168
+    image_cache_max_size_mb: 512
 scrapers:
     user_agent: "" # Default: Chrome UA. r18dev uses Javinizer UA automatically.
     # Referer header for CDN compatibility (required by DMM/R18 CDN)
@@ -385,6 +388,9 @@ file_matching:
     regex_pattern: ([a-zA-Z|tT28]+-\d+[zZ]?[eE]?)(?:-pt)?(\d{1,2})?
 output:
     folder_format: <ID> [<STUDIO>] - <TITLE> (<YEAR>)
+    # Date tags: <YEAR> (4-digit year) or <RELEASEDATE> (full release date, e.g. 2020-09-13).
+    # <RELEASEDATE> supports custom formats: <RELEASEDATE:YYYY-MM-DD>, <RELEASEDATE:YYYYMMDD>, <RELEASEDATE:MM-DD-YYYY>.
+    # Example: <ID> - <TITLE> (<RELEASEDATE:YYYY-MM-DD>)
     # Multi-language template tags (for translated metadata):
     #   <TITLE:EN>      - English title translation
     #   <TITLE:JA>      - Japanese title translation

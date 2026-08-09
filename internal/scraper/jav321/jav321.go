@@ -210,12 +210,26 @@ func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 			return strings.ToUpper(id), nil
 		}
 	}
+	// Search URL: /search?sn=IPX-123 — extract the sn value as the ID so
+	// ParseInput/resolveScrapeInput sets MovieID correctly for the Search
+	// fallback path.
+	if sn := u.Query().Get("sn"); sn != "" {
+		return strings.ToUpper(sn), nil
+	}
 	return "", fmt.Errorf("failed to extract ID from URL")
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("Jav321", "URL not handled by Jav321 scraper")
+	}
+
+	// Only /video/ paths are direct detail pages. Search URLs (e.g.
+	// /search?sn=IPX-123) are not directly scrapable; return NotFound so the
+	// caller falls back to keyword Search with the extracted ID.
+	pu, perr := url.Parse(rawURL)
+	if perr != nil || !strings.HasPrefix(strings.Trim(pu.Path, "/"), "video/") {
+		return nil, models.NewScraperNotFoundError("Jav321", "URL is not a direct video page")
 	}
 
 	id, err := s.ExtractIDFromURL(rawURL)

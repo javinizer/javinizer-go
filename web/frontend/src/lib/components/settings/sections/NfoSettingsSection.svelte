@@ -13,6 +13,25 @@
 
 	let { config }: Props = $props();
 	const nfoEnabled = $derived(config?.metadata?.nfo?.enabled ?? true);
+
+	const NFO_TITLE_TEMPLATE_TAGS = [
+		'<ID>',
+		'<TITLE>',
+		'<ORIGINALTITLE>',
+		'<STUDIO>',
+		'<MAKER>',
+		'<LABEL>',
+		'<SERIES>',
+		'<SET>',
+		'<DIRECTOR>',
+		'<YEAR>',
+		'<RELEASEDATE>',
+		'<RUNTIME>',
+		'<RATING>',
+		'<ACTORS>',
+		'<ACTRESS>',
+		'<GENRES>'
+	];
 </script>
 
 <SettingsSection title={m.settings_nfo_title()} description={m.settings_nfo_desc()} defaultExpanded={false}>
@@ -44,6 +63,7 @@
 				value={config.metadata.nfo?.display_title ?? '[<ID>] <TITLE>'}
 				placeholder="[<ID>] <TITLE>"
 				showTagList={true}
+				tags={NFO_TITLE_TEMPLATE_TAGS}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
 					config.metadata.nfo.display_title = val;
@@ -203,6 +223,7 @@
 				value={(Array.isArray(config.metadata.nfo?.tag) ? config.metadata.nfo.tag.join(', ') : config.metadata.nfo?.tag) ?? '<SET>'}
 				placeholder="<SET>"
 				showTagList={true}
+				clickableTags={false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
 					config.metadata.nfo.tag = val

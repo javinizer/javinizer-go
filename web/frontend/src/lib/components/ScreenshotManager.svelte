@@ -225,7 +225,7 @@ import { tooltip } from '$lib/actions/tooltip';
 							<!-- Crop to show only right 47.2% of image (removes promotional text on left) -->
 							<!-- Only apply cropping if displayPosterUrl is not available (displayPosterUrl is already cropped if temp_poster_url) -->
 							<img
-								src={posterUrl}
+								src={previewImageURL(posterUrl)}
 								alt={m.screenshot_poster_alt()}
 								class="absolute h-full"
 								style="right: 0; width: auto; min-width: 211.8%; object-fit: cover; object-position: right center;" hidden={posterPreviewError}
@@ -234,7 +234,7 @@ import { tooltip } from '$lib/actions/tooltip';
 						{:else}
 							<!-- Use displayPosterUrl (temp_poster_url if available) or posterUrl directly without cropping -->
 							<img
-								src={displayPosterUrl || posterUrl}
+								src={previewImageURL(displayPosterUrl || posterUrl)}
 								alt={m.screenshot_poster_alt()}
 								class="w-full h-full object-contain" hidden={posterPreviewError}
 								onerror={() => { posterPreviewError = true; }}

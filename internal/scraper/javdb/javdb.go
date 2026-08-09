@@ -231,11 +231,11 @@ func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 			return nil, err
 		}
 		if !hasDetailMetadata(result, videoID) {
-			return nil, fmt.Errorf("JavDB returned non-detail content for %s", urlStr)
+			return nil, models.NewScraperNotFoundError("JavDB", fmt.Sprintf("non-detail content for %s", urlStr))
 		}
 	}
 
-	logging.Debugf("JavDB ScrapeURL: Successfully scraped %s (ID=%s, Title=%s)", urlStr, result.ID, result.Title)
+	logging.Debugf("JavDB ScrapeURL: Successfully scraped %s (ID=%s, Title=%s)", redactLogURL(urlStr), result.ID, result.Title)
 	return result, nil
 }
 
@@ -454,6 +454,36 @@ func (s *scraper) validateFetchURL(targetURL string) error {
 	return models.NewScraperStatusError("JavDB", 0, "non-JavDB host rejected: "+host)
 }
 
+// redactLogURL strips userinfo and secret query parameters from a URL for
+// safe logging. Non-secret identifiers (id, v, sn, keyword) are preserved.
+func redactLogURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	u.User = nil
+	u.Fragment = ""
+	q := u.Query()
+	for k := range q {
+		lk := strings.ToLower(k)
+		if lk == "keyword" {
+			continue
+		}
+		for _, frag := range []string{"sign", "secret", "token", "pass", "pwd", "cred", "auth", "session", "oauth", "key"} {
+			if strings.Contains(lk, frag) {
+				q.Del(k)
+				break
+			}
+		}
+	}
+	if len(q) > 0 {
+		u.RawQuery = q.Encode()
+	} else {
+		u.RawQuery = ""
+	}
+	return u.String()
+}
+
 func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, error) {
 	if err := s.validateFetchURL(targetURL); err != nil {
 		return "", err
@@ -468,9 +498,9 @@ func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, e
 		if !challengedetect.IsCloudflareChallengePage(html) {
 			return html, nil
 		}
-		logging.Warnf("JavDB: Direct request returned Cloudflare challenge, escalating to FlareSolverr: %s", targetURL)
+		logging.Warnf("JavDB: Direct request returned Cloudflare challenge, escalating to FlareSolverr: %s", redactLogURL(targetURL))
 	} else if err == nil && resp != nil {
-		logging.Debugf("JavDB: Direct request returned status %d for %s", resp.StatusCode(), targetURL)
+		logging.Debugf("JavDB: Direct request returned status %d for %s", resp.StatusCode(), redactLogURL(targetURL))
 	}
 
 	if s.settings.UseFlareSolverr && s.flaresolverr != nil {

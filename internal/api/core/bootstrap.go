@@ -88,6 +88,8 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	// Bound to rt.ServerCtx() so it stops cleanly on rt.Shutdown().
 	startUpdateChecker(rt, cfg, update.ServiceOptions{})
 
+	startImageCacheCleanup(rt, imageCacheCleanupOptions{})
+
 	// Temp poster cleanup is intentionally NOT started automatically.
 	// Running CleanupStaleTempDirs on startup (or on a periodic ticker) wipes
 	// temp poster artifacts for terminal/orphaned jobs, but the DB still holds

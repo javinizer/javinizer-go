@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -173,11 +174,107 @@ func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	path := strings.Trim(u.Path, "/")
 	parts := strings.Split(path, "/")
 	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i] != "" && len(parts[i]) > 4 {
-			return parts[i], nil
+		seg := parts[i]
+		if seg == "" {
+			continue
+		}
+		// A direct page URL (e.g. "/en/javliay67q.html") opens as-is via the
+		// ScrapeURL seam; here we only derive a stable ID so MovieID/cache
+		// identity never carries the raw URL (which may embed signed query
+		// params or userinfo).
+		if hasHTMLExt(seg) {
+			return pageIDFromURL(urlStr), nil
+		}
+		// Otherwise strip any stray extension and use the bare segment as the ID.
+		if ext := filepath.Ext(seg); ext != "" {
+			seg = strings.TrimSuffix(seg, ext)
+		}
+		if len(seg) > 4 {
+			return seg, nil
 		}
 	}
 	return "", fmt.Errorf("failed to extract ID from URL")
+}
+
+// hasHTMLExt reports whether p's trailing segment carries a page extension
+// (.html/.htm), marking a concrete JavLibrary page rather than a bare ID path.
+func hasHTMLExt(p string) bool {
+	lower := strings.ToLower(strings.TrimRight(p, "/"))
+	return strings.HasSuffix(lower, ".html") || strings.HasSuffix(lower, ".htm")
+}
+
+// isDirectPageURL reports whether rawURL points at a concrete JavLibrary page
+// (a ?v= product URL or .html/.htm page) that should be opened directly rather
+// than searched.
+func isDirectPageURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return u.Query().Get("v") != "" || hasHTMLExt(u.Path)
+}
+
+// languageFromURL returns the language segment of a JavLibrary URL when it is a
+// supported lang code, falling back to the configured language.
+// redactPageURL strips userinfo, query, and fragment from a URL so only the
+// stable scheme+host+path is retained as provenance (SourceURL).
+func redactPageURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	u.User = nil
+	u.Fragment = ""
+	q := u.Query()
+	for k := range q {
+		if k != "v" {
+			q.Del(k)
+		}
+	}
+	if len(q) > 0 {
+		u.RawQuery = q.Encode()
+	} else {
+		u.RawQuery = ""
+	}
+	return u.String()
+}
+
+func languageFromURL(rawURL string, fallback string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fallback
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) > 0 && isValidLanguage(parts[0]) {
+		return parts[0]
+	}
+	return fallback
+}
+
+// pageIDFromURL derives a best-effort display ID from a direct JavLibrary page
+// URL (the ?v= value, else the path basename minus a page extension).
+func pageIDFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	if v := u.Query().Get("v"); v != "" {
+		return v
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		seg := parts[i]
+		if seg == "" {
+			continue
+		}
+		if ext := filepath.Ext(seg); ext != "" {
+			seg = strings.TrimSuffix(seg, ext)
+		}
+		if seg != "" {
+			return seg
+		}
+	}
+	return ""
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
@@ -185,35 +282,28 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("JavLibrary", "URL not handled by JavLibrary scraper")
 	}
 
-	id, err := s.ExtractIDFromURL(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
+	// ScrapeURL is the direct-detail-page seam only. Search-shaped or unclear
+	// URLs are refused with a typed NotFound so the query layer falls back to
+	// the ID-based keyword search (which understands ?keyword= etc.).
+	if !isDirectPageURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("JavLibrary", "URL is not a direct page; use search instead")
 	}
 
-	var detailURL string
-	var resultLanguage string
-	if u, parseErr := url.Parse(rawURL); parseErr == nil && u.Query().Get("v") != "" {
-		detailURL = rawURL
-		path := strings.Trim(u.Path, "/")
-		parts := strings.Split(path, "/")
-		if len(parts) > 0 && isValidLanguage(parts[0]) {
-			resultLanguage = parts[0]
-		}
-	}
-	if detailURL == "" {
-		detailURL = fmt.Sprintf("%s/%s/?v=%s", s.baseURL, s.language, url.QueryEscape(id))
-	}
-	if resultLanguage == "" {
-		resultLanguage = s.language
-	}
+	resultLanguage := languageFromURL(rawURL, s.language)
 
-	html, err := s.fetchPageCtx(ctx, detailURL)
+	// Fetch the raw URL, but only ever surface a redacted copy as provenance
+	// (SourceURL): signed query tokens or userinfo must not be persisted.
+	html, err := s.fetchPageCtx(ctx, rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JavLibrary page: %w", err)
 	}
 
 	if strings.Contains(html, `id="video_info"`) {
-		return s.parseDetailPage(html, id, detailURL, resultLanguage)
+		// The page slug is passed as fallbackID; parseDetailPage extracts the
+		// canonical product code from <div id="video_id"> and uses it as
+		// result.ID, falling back to the slug only when extraction fails.
+		movieID := pageIDFromURL(rawURL)
+		return s.parseDetailPage(html, movieID, redactPageURL(rawURL), resultLanguage)
 	}
 
 	return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
@@ -231,6 +321,23 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("JavLibrary scraper is disabled")
+	}
+
+	// A direct page URL (e.g. ".../javliay67q.html" or a ?v= product URL) is
+	// opened and parsed as-is — no keyword search, no ID extraction.
+	if s.CanHandleURL(id) && isDirectPageURL(id) {
+		pageID := pageIDFromURL(id)
+		html, err := s.fetchPageCtx(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch JavLibrary page: %w", err)
+		}
+		if !strings.Contains(html, `id="video_info"`) {
+			return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
+		}
+		// The search term is passed as fallbackID; parseDetailPage extracts the
+		// canonical product code from <div id="video_id"> and uses it as
+		// result.ID, falling back to the search term only when extraction fails.
+		return s.parseDetailPage(html, pageID, redactPageURL(id), languageFromURL(id, s.language))
 	}
 
 	searchURL, err := s.getURLCtx(ctx, id)
@@ -283,6 +390,10 @@ func (s *scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 		return "", fmt.Errorf("JavLibrary: rate limit wait failed: %w", err)
 	}
 
+	// The raw URL is used only for the request; logs must carry a redacted copy
+	// so userinfo or signed query parameters never leak.
+	logURL := redactPageURL(url)
+
 	// Try direct request first and only escalate to FlareSolverr on blocked/challenge responses.
 	resp, err := s.client.R().SetContext(ctx).Get(url)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {
@@ -290,16 +401,16 @@ func (s *scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 		if !challengedetect.IsCloudflareChallengePage(html) {
 			return html, nil
 		}
-		logging.Warnf("JavLibrary: Direct request returned Cloudflare challenge, escalating to FlareSolverr: %s", url)
+		logging.Warnf("JavLibrary: Direct request returned Cloudflare challenge, escalating to FlareSolverr: %s", logURL)
 	} else if err == nil && resp != nil {
-		logging.Debugf("JavLibrary: Direct request returned status %d for %s", resp.StatusCode(), url)
+		logging.Debugf("JavLibrary: Direct request returned status %d for %s", resp.StatusCode(), logURL)
 	}
 
 	// Fallback to FlareSolverr if client was created.
 	// The flaresolverr client is only non-nil when it was successfully initialized,
 	// which happens when useFlareSolverr=true (based on scraper/global FlareSolverr config).
 	if s.flaresolverr != nil {
-		logging.Infof("JavLibrary: Using FlareSolverr for %s", url)
+		logging.Infof("JavLibrary: Using FlareSolverr for %s", logURL)
 		html, cookies, fsErr := s.flaresolverr.ResolveURL(url)
 		if fsErr == nil {
 			if challengedetect.IsCloudflareChallengePage(html) {
@@ -376,11 +487,20 @@ func extractIDFromURL(u *url.URL) string {
 }
 
 func (s *scraper) parseDetailPage(html string, id string, sourceURL string, language string) (*models.ScraperResult, error) {
+	// Page-first ID extraction: derive the canonical product code from the
+	// page's <div id="video_id"> div. The `id` parameter (URL slug or search
+	// term) is only a fallback when page extraction fails.
+	canonicalID := s.extractVideoID(html)
+	if canonicalID == "" {
+		canonicalID = id
+	}
+
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
 		Language:  language,
-		ID:        id,
+		ID:        canonicalID,
+		ContentID: canonicalID,
 	}
 
 	// Parse HTML document for goquery-based extraction
@@ -464,8 +584,15 @@ func (s *scraper) extractTitle(html string, id string) string {
 		title = title[:idx]
 	}
 
-	// Strip the ID prefix (e.g., "IPX-123 " from the beginning)
-	for _, prefix := range []string{id + " ", "[" + id + "] "} {
+	// Strip the canonical product-code prefix (e.g., "ONED-120 " or
+	// "[ONED-120] "). The code is derived from the page's video_id div,
+	// matching the page-first result ID, with the passed ID as fallback when
+	// extraction fails.
+	code := s.extractVideoID(html)
+	if code == "" {
+		code = id
+	}
+	for _, prefix := range []string{code + " ", "[" + code + "] "} {
 		title = strings.TrimPrefix(title, prefix)
 	}
 
@@ -543,6 +670,24 @@ func (s *scraper) extractRuntime(html string) int {
 
 // extractField extracts a field value from a video_info div by its ID
 // Works for video_director, video_maker, video_label
+// extractVideoID extracts the canonical product code from a detail page's
+// <div id="video_id">...</div> (e.g. "ONED-120"). Empty if absent. Used as the
+// primary source for result.ID in parseDetailPage and for title prefix stripping.
+func (s *scraper) extractVideoID(html string) string {
+	pattern := `id="video_id"[\s\S]*?</div>`
+	re := regexp.MustCompile(pattern)
+	vidBlock := re.FindString(html)
+	if vidBlock == "" {
+		return ""
+	}
+	codeRe := regexp.MustCompile(`<td\s+class="text">([^<]+)</td>`)
+	m := codeRe.FindStringSubmatch(vidBlock)
+	if len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
 func (s *scraper) extractField(html string, divID string) string {
 	// Pattern: <div id="video_director" ...> ... <a ...>Value</a> ...
 	pattern := fmt.Sprintf(`id="%s"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>`, divID)

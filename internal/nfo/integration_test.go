@@ -393,7 +393,7 @@ func verifyNFOContent(t *testing.T, nfo *Movie, movie *models.Movie, cfg *Config
 	if nfo.Label != movie.Label {
 		t.Errorf("Label mismatch: got %s, want %s", nfo.Label, movie.Label)
 	}
-	if nfo.Set != movie.Series {
+	if string(nfo.Set) != movie.Series {
 		t.Errorf("Set mismatch: got %s, want %s", nfo.Set, movie.Series)
 	}
 

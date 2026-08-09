@@ -79,8 +79,8 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 			// below) — off the errgroup-gated critical path, so SQLite's
 			// single-writer lock never serializes the per-file scrape workers
 			// (root cause of the 5→1 worker degradation).
-			cmd, fromMatcher := buildScrapeCmd(filePath, inputs, cfg)
 			fmi := inputs.FileMatchInfo[filePath]
+			cmd, fromMatcher := buildScrapeCmd(filePath, fmi, inputs, cfg)
 			outcome := scrapeFile(egCtx, filePath, fmi, cmd, fromMatcher, inputs, cfg)
 			// Broadcast per-file scrape progress over WebSocket so the frontend's
 			// messagesByFile populates and ProgressModal shows live per-file status.
@@ -151,6 +151,7 @@ func isManualURLInput(raw string) bool {
 // to use, and builds the command.
 func buildScrapeCmd(
 	filePath string,
+	fmi models.FileMatchInfo,
 	inputs scrapePhaseInputs,
 	cfg ScrapePhaseConfig,
 ) (scrape.ScrapeCmd, bool) {
@@ -171,8 +172,16 @@ func buildScrapeCmd(
 		manualURL = isManualURLInput(trimmed)
 	}
 	if movieID == "" {
+		// MovieIDOverride (per-file rescrape override) takes precedence over the
+		// validated FileMatchInfo.MovieID, then the matcher fallback.
 		if override, ok := cfg.MovieIDOverride[filePath]; ok {
 			movieID = override
+		} else if fmi.MovieID != "" {
+			// Prefer the directory-validated FileMatchInfo.MovieID (set by the scan/match
+			// phase, e.g. a restored E/Z catalog suffix) over the matcher's unvalidated
+			// heuristic — keeps the scrape ID consistent with the validated match result.
+			movieID = fmi.MovieID
+			movieIDFromMatcher = true
 		} else {
 			movieID = ""
 			if inputs.Matcher != nil {

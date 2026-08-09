@@ -45,6 +45,43 @@ func (r *redactStubResolver) GetInstancesByPriorityForInput([]string, string) []
 func (r *redactStubResolver) GetAllInstances() []models.Scraper { return r.instances }
 func (r *redactStubResolver) Names() []string                   { return nil }
 
+// urlExtractScraper claims to handle URLs and successfully extracts an ID.
+type urlExtractScraper struct {
+	name    string
+	enabled bool
+}
+
+func (s *urlExtractScraper) Name() string { return s.name }
+func (s *urlExtractScraper) Search(context.Context, string) (*models.ScraperResult, error) {
+	return nil, nil
+}
+func (s *urlExtractScraper) GetURL(context.Context, string) (string, error) { return "", nil }
+func (s *urlExtractScraper) IsEnabled() bool                                { return s.enabled }
+func (s *urlExtractScraper) Config() *models.ScraperSettings                { return nil }
+func (s *urlExtractScraper) Close() error                                   { return nil }
+func (s *urlExtractScraper) CanHandleURL(rawURL string) bool                { return true }
+func (s *urlExtractScraper) ExtractIDFromURL(rawURL string) (string, error) { return "IPX-123", nil }
+func (s *urlExtractScraper) ScrapeURL(context.Context, string) (*models.ScraperResult, error) {
+	return nil, nil
+}
+
+func TestResolveScrapeInput_URLSetsRawInput(t *testing.T) {
+	registry := &redactStubResolver{instances: []models.Scraper{
+		&urlExtractScraper{name: "test", enabled: true},
+	}}
+
+	cmd := ScrapeCmd{
+		MovieID: "https://example.com/video/IPX-123",
+	}
+
+	resolved, err := resolveScrapeInput(context.Background(), cmd, registry, &Config{})
+	require.NoError(t, err)
+	// When MovieID is a URL, it should be parsed and RawInput should be set
+	// to the trimmed source so the direct-page URL seam fires.
+	assert.NotEmpty(t, resolved.RawInput)
+	assert.NotEqual(t, "https://example.com/video/IPX-123", resolved.MovieID)
+}
+
 func TestResolveScrapeInput_RedactsQueryOnParseFailFallback(t *testing.T) {
 	registry := &redactStubResolver{instances: []models.Scraper{
 		&claimFailScraper{name: "test", enabled: true},
@@ -57,6 +94,8 @@ func TestResolveScrapeInput_RedactsQueryOnParseFailFallback(t *testing.T) {
 	assert.Equal(t, "https://example.com/v/123", got.MovieID,
 		"parse-fail fallback MovieID must be query-redacted (security F2)")
 	assert.NotContains(t, got.MovieID, "token=secret")
+	assert.Equal(t, "https://example.com/v/123?token=secret", got.RawInput,
+		"parse-fail fallback keeps the full URL in RawInput so URL-aware scrapers retain query params")
 	assert.Contains(t, got.ParseWarning, "could not be parsed",
 		"ParseWarning surfaces the parse failure (backend F5 follow-on)")
 }

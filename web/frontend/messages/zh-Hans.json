@@ -2079,7 +2079,7 @@
   "settings_output_file_template_desc": "多部分支持：<PART>（部分编号）、<PARTSUFFIX>（原始后缀）、<IF:MULTIPART>...</IF>",
   "settings_output_file_template_examples": "示例：<ID><PARTSUFFIX> 或 <ID>-CD<PART:2> 或 <ID><IF:MULTIPART>-pt<PART></IF>",
   "settings_output_file_template_label": "文件命名模板",
-  "settings_output_folder_template_desc": "可用标签：<ID>、<TITLE>、<STUDIO>、<YEAR>、<ACTRESS>、<ACTRESSES>、<ACTORNAME>",
+  "settings_output_folder_template_desc": "可用标签：<ID>、<TITLE>、<STUDIO>、<YEAR>、<RELEASEDATE>、<ACTRESS>、<ACTRESSES>、<ACTORNAME>。使用 <RELEASEDATE:YYYY-MM-DD> 自定义日期格式。",
   "settings_output_folder_template_label": "文件夹命名模板",
   "settings_output_folder_template_none": "无文件夹模板 — 整理模式将不会创建影片子文件夹。当目标与源相同时，将自动使用仅重命名文件模式。",
   "settings_output_group_actress_desc": "在模板中用组文件夹名替换多个女优（例如「@Group」）",
@@ -2620,5 +2620,11 @@
   "browse_plan_preset_conservative": "保守",
   "browse_plan_preset_gap_fill": "填充空缺",
   "browse_plan_preset_aggressive": "激进",
-  "review_media_replace_warning": "替换现有媒体具有破坏性，且不在整理回滚范围内。应用前请确认这些影响。"
+  "review_media_replace_warning": "替换现有媒体具有破坏性，且不在整理回滚范围内。应用前请确认这些影响。",
+  "settings_server_image_cache_enable_label": "缓存预览图像",
+  "settings_server_image_cache_enable_desc": "启用后，代理获取的预览图像将被缓存到服务端，以便在源无法访问时仍可使用。",
+  "settings_server_image_cache_max_size_label": "图像缓存最大大小（MB）",
+  "settings_server_image_cache_max_size_desc": "预览图像缓存的磁盘配额（MB）。超过限制时将逐出最旧的条目。0 表示无限制。",
+  "settings_server_image_cache_ttl_label": "图像缓存TTL（小时）",
+  "settings_server_image_cache_ttl_desc": "缓存的预览图像保持新鲜的时间（小时）。过期的条目将重新获取；如果重新获取失败，则通过stale-if-error提供。"
 }

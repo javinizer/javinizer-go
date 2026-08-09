@@ -1419,7 +1419,7 @@
   "settings_output_file_template_desc": "[ Mültí-pårt süppört: <PÅRT> (pårt ñümbër), <PÅRTŠÜFFÍX> (örígíñål süffíx), <ÍF:MÜLTÍPÅRT>...</ÍF> ]",
   "settings_output_file_template_examples": "[ Ëxåmplës: <ÍD><PÅRTŠÜFFÍX> ör <ÍD>-ÇD<PÅRT:2> ör <ÍD><ÍF:MÜLTÍPÅRT>-pt<PÅRT></ÍF> ]",
   "settings_output_file_template_label": "[ Fílë Ñåmíñg Tëmplåtë ]",
-  "settings_output_folder_template_desc": "[ Åvåílåblë tågs: <ÍD>, <TÍTLË>, <ŠTÜDÍÖ>, <YËÅR>, <ÅÇTRËŠŠ>, <ÅÇTRËŠŠËŠ>, <ÅÇTÖRÑÅMË> ]",
+  "settings_output_folder_template_desc": "[ Åvåílåblë tågs: <ÍD>, <TÍTLË>, <ŠTÜDÍÖ>, <YËÅR>, <RËLËÅŠËDÅTË>, <ÅÇTRËŠŠ>, <ÅÇTRËŠŠËŠ>, <ÅÇTÖRÑÅMË>. Üsë <RËLËÅŠËDÅTË:YYYY-MM-DD> för çüstöm dåtë förmåts. ]",
   "settings_output_folder_template_label": "[ Földër Ñåmíñg Tëmplåtë ]",
   "settings_output_folder_template_none": "[ Ñö földër tëmplåtë — Örgåñízë mödë wíll ñöt çrëåtë mövíë sübföldërs. Whëñ dëstíñåtíöñ måtçhës söürçë, Rëñåmë fílë öñly mödë ís üsëd åütömåtíçålly. ]",
   "settings_output_group_actress_desc": "[ Rëplåçë mültíplë åçtrëssës wíth å gröüp földër ñåmë íñ tëmplåtës (ë.g., '@Gröüp') ]",
@@ -1959,5 +1959,11 @@
   "browse_plan_preset_conservative": "[ Çöñsërvåtívë ]",
   "browse_plan_preset_gap_fill": "[ Gåp fíll ]",
   "browse_plan_preset_aggressive": "[ Åggrëssívë ]",
-  "review_media_replace_warning": "[ Rëplåçíñg ëxístíñg mëdíå ís dëstrüçtívë åñd ís ñöt çövërëd by örgåñízë röllbåçk. Vërífy thësë ëffëçts bëförë åpplyíñg. ]"
+  "review_media_replace_warning": "[ Rëplåçíñg ëxístíñg mëdíå ís dëstrüçtívë åñd ís ñöt çövërëd by örgåñízë röllbåçk. Vërífy thësë ëffëçts bëförë åpplyíñg. ]",
+  "settings_server_image_cache_enable_label": "[ Cäçhé Prévéw Ímägés ]",
+  "settings_server_image_cache_enable_desc": "[ Whén éñäbléd, prévéw ímägés fétchéd by thé próxy äré cächéd sërvër-sídé so théy rémäïñ äväïläblé whén thé sourcé ïs unréächäblé. ]",
+  "settings_server_image_cache_max_size_label": "[ Ímägé Cäché Mäx Sïzé (MB) ]",
+  "settings_server_image_cache_max_size_desc": "[ Dïsk quötä för thé prévïéw ïmägé cäché ïn mégäbytés. Öldést éntrïés äré évïctéd whén éxcéédéd. 0 dïsäblés thé lïmït. ]",
+  "settings_server_image_cache_ttl_label": "[ Ímägé Cäché TTL (höurs) ]",
+  "settings_server_image_cache_ttl_desc": "[ Höw loñg cächéd prévéw ímägés rémäïñ frésh (höurs). Expiréd éntréés äré ré-fétchéd; stälé-ïf-érrör sërvés thém ïf thé ré-fétch fäïls. ]"
 }

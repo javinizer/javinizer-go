@@ -44,6 +44,7 @@ func TestServeTempPoster(t *testing.T) {
 
 	// Create deps with config that has TempDir set to tempDir
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	cfg.System.TempDir = tempDir
 	deps := newTestDeps(cfg)
 
@@ -129,6 +130,7 @@ func TestServeTempPoster_PathTraversalDefenseInDepth(t *testing.T) {
 
 	// Create deps with config that has TempDir set to tempDir
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	cfg.System.TempDir = tempDir
 	deps := newTestDeps(cfg)
 
@@ -269,6 +271,7 @@ func TestServeTempPoster_ValidJpgExtensions(t *testing.T) {
 
 	// Create deps with config that has TempDir set to tempDir
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.ImageCacheEnabled = false
 	cfg.System.TempDir = tempDir
 	deps := newTestDeps(cfg)
 
@@ -398,6 +401,7 @@ func TestServeTempImage(t *testing.T) {
 			defer upstream.Close()
 
 			cfg := config.DefaultConfig(nil, nil)
+			cfg.System.ImageCacheEnabled = false
 			cfg.Scrapers.Referer = expectedReferer
 			deps := newTestDeps(cfg)
 

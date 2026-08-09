@@ -57,6 +57,10 @@ func TestExtractIDFromURL(t *testing.T) {
 		{"path with v", "https://www.javlibrary.com/?v=javli456", "javli456", false},
 		{"empty path", "https://www.javlibrary.com/", "", true},
 		{"short segment", "https://www.javlibrary.com/abc", "", true},
+		{"html page yields stable derived id", "https://www.javlibrary.com/en/javliay67q.html", "javliay67q", false},
+		{"html page with ja yields stable derived id", "https://www.javlibrary.com/ja/javc4dd12.html", "javc4dd12", false},
+		{"short html page yields derived id", "https://www.javlibrary.com/ab.html", "ab", false},
+		{"non-html extension stripped", "https://www.javlibrary.com/en/abcde.json", "abcde", false},
 	}
 
 	for _, tt := range tests {
@@ -338,4 +342,116 @@ func TestIntegration_Search(t *testing.T) {
 	t.Logf("Release: %s", result.ReleaseDate.Format("2006-01-02"))
 	t.Logf("Genres: %v", result.Genres)
 	t.Logf("Actresses: %+v", result.Actresses)
+}
+
+func TestExtractVideoID(t *testing.T) {
+	s := newScraper(&models.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+
+	html := `<div id="video_id" class="item"><table><tbody><tr><td class="header">ID:</td><td class="text">ONED-120</td></tr></tbody></table></div>`
+	assert.Equal(t, "ONED-120", s.extractVideoID(html))
+	assert.Equal(t, "", s.extractVideoID(`<div id="video_info">no video id</div>`))
+	// Bounded regex: a later td.text outside video_id must not be captured.
+	badHTML := `<div id="video_title"></div><div id="video_release_date"><table><td class="text">2024-01-01</td></table></div>`
+	assert.Equal(t, "", s.extractVideoID(badHTML), "must not capture td.text outside video_id element")
+
+	// video_id div exists but has no td.text element inside → return empty
+	emptyVidHTML := `<div id="video_id"><table><tr><td class="header">ID:</td></tr></table></div>`
+	assert.Equal(t, "", s.extractVideoID(emptyVidHTML), "must return empty when video_id has no td.text")
+}
+
+func TestExtractTitle_DirectPageSlugID(t *testing.T) {
+	s := newScraper(&models.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+
+	// The page slug is the result ID, but the title contains the canonical code.
+	html := `<title>ONED-120 Barely One - JAVLibrary</title><div id="video_id"><table><td class="text">ONED-120</td></table></div>`
+	title := s.extractTitle(html, "javliay67q")
+	assert.Equal(t, "Barely One", title)
+}
+
+func TestParseDetailPage_PageFirstID(t *testing.T) {
+	s := newScraper(&models.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+
+	// video_id present → ID = canonical code from page (not slug)
+	html := `<title>ONED-120 Barely One - JAVLibrary</title><div id="video_id"><table><td class="text">ONED-120</td></table></div><div id="video_info"></div>`
+	result, err := s.parseDetailPage(html, "javliay67q", "http://example.com", "en")
+	require.NoError(t, err)
+	assert.Equal(t, "ONED-120", result.ID, "ID should be canonical code from video_id, not slug")
+	assert.Equal(t, "ONED-120", result.ContentID, "ContentID should equal ID")
+	assert.Equal(t, "Barely One", result.Title)
+}
+
+func TestParseDetailPage_FallbackID(t *testing.T) {
+	s := newScraper(&models.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+
+	// video_id absent → ID falls back to the passed id (slug or search term)
+	html := `<title>Some Title - JAVLibrary</title><div id="video_info"></div>`
+	result, err := s.parseDetailPage(html, "javliay67q", "http://example.com", "en")
+	require.NoError(t, err)
+	assert.Equal(t, "javliay67q", result.ID, "ID should fall back to slug when video_id absent")
+	assert.Equal(t, "javliay67q", result.ContentID, "ContentID should equal ID")
+}
+
+func TestIsDirectPageURL(t *testing.T) {
+	assert.True(t, isDirectPageURL("https://www.javlibrary.com/en/javliay67q.html"))
+	assert.True(t, isDirectPageURL("https://www.javlibrary.com/en/?v=javmeABCDE"))
+	assert.False(t, isDirectPageURL("https://www.javlibrary.com/en/vl_searchbyid.php?keyword=IPX-123"))
+	assert.False(t, isDirectPageURL("not-a-url"))
+	assert.False(t, isDirectPageURL(""))
+}
+
+func TestRedactPageURL(t *testing.T) {
+	// Strips userinfo and non-v query params
+	result := redactPageURL("https://user:pass@www.javlibrary.com/en/?v=javmeABCDE&token=secret")
+	assert.NotContains(t, result, "user:pass")
+	assert.NotContains(t, result, "token=secret")
+	assert.Contains(t, result, "v=javmeABCDE")
+
+	// Invalid URL returns input as-is
+	result2 := redactPageURL("://invalid")
+	assert.Equal(t, "://invalid", result2)
+}
+
+func TestLanguageFromURL(t *testing.T) {
+	assert.Equal(t, "en", languageFromURL("https://www.javlibrary.com/en/javliay67q.html", "ja"))
+	assert.Equal(t, "ja", languageFromURL("https://www.javlibrary.com/ja/?v=javmeABCDE", "en"))
+	assert.Equal(t, "en", languageFromURL("https://www.javlibrary.com/en/?v=javmeABCDE", "ja"))
+	// Fallback when no language in path
+	assert.Equal(t, "ja", languageFromURL("https://www.javlibrary.com/?v=javmeABCDE", "ja"))
+	// Invalid URL returns fallback
+	assert.Equal(t, "en", languageFromURL("://invalid", "en"))
+}
+
+func TestPageIDFromURL(t *testing.T) {
+	// ?v= query parameter
+	assert.Equal(t, "javmeABCDE", pageIDFromURL("https://www.javlibrary.com/en/?v=javmeABCDE"))
+	// .html path basename
+	assert.Equal(t, "javliay67q", pageIDFromURL("https://www.javlibrary.com/en/javliay67q.html"))
+	// Path with extension stripped
+	assert.Equal(t, "test123", pageIDFromURL("https://www.javlibrary.com/en/test123.html"))
+	// Invalid URL returns empty
+	assert.Equal(t, "", pageIDFromURL("://invalid"))
+	// No path segments
+	assert.Equal(t, "", pageIDFromURL("https://www.javlibrary.com/"))
+}
+
+func TestIsDirectPageURL_ErrorBranch(t *testing.T) {
+	// Invalid URL should return false (covers parse error branch)
+	assert.False(t, isDirectPageURL("://invalid-url"))
+	assert.False(t, isDirectPageURL(""))
 }

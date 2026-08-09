@@ -32,9 +32,26 @@ func TestDetectPartSuffix(t *testing.T) {
 		{"IPX-535-Z", "IPX-535", 26, "-Z", PatternLetter},
 		{"ABW-121-C", "ABW-121", 3, "-C", PatternLetter}, // Chinese subtitle case
 
+		// Letter + trailing content (quality/resolution tag) - ambiguous, need directory validation
+		{"SVFLA-001a-4k", "SVFLA-001", 1, "-A", PatternLetter},
+		{"SVFLA-001b-1080p", "SVFLA-001", 2, "-B", PatternLetter},
+		{"IPX-535a-4k-60", "IPX-535", 1, "-A", PatternLetter},
+		{"IPX-535b-4k-60", "IPX-535", 2, "-B", PatternLetter},
+		{"IPX-535-C-1", "IPX-535", 1, "-1", PatternTrailing},
+		{"IPX-535-C-2", "IPX-535", 2, "-2", PatternTrailing},
+		{"SVFLA-001a-4k-HDR", "SVFLA-001", 1, "-A", PatternLetter},
+		{"SVFLA-001b-4k-h265", "SVFLA-001", 2, "-B", PatternLetter},
+		{"SVFLA-001a-1080", "SVFLA-001", 1, "-A", PatternLetter},
+		{"SVFLA-001b-1080", "SVFLA-001", 2, "-B", PatternLetter},
+		{"SVFLA-001a-[4k]", "SVFLA-001", 1, "-A", PatternLetter},
+		{"SVFLA-001b-[4k]", "SVFLA-001", 2, "-B", PatternLetter},
+
 		// No pattern
 		{"ABC-123", "ABC-123", 0, "", PatternNone},
 		{"IPX-535 no suffix", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-4k", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-1080p", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-FHD", "IPX-535", 0, "", PatternNone},
 	}
 
 	for _, tt := range tests {
@@ -43,6 +60,30 @@ func TestDetectPartSuffix(t *testing.T) {
 			assert.Equal(t, tt.wantNum, num, "PartNumber mismatch")
 			assert.Equal(t, tt.wantSuf, suf, "PartSuffix mismatch")
 			assert.Equal(t, tt.wantPattern, pattern, "PatternType mismatch")
+		})
+	}
+}
+
+func TestLetterPart_OutOfRange(t *testing.T) {
+	tests := []struct {
+		name   string
+		letter string
+		ok     bool
+	}{
+		{"digit zero", "0", false},
+		{"digit nine", "9", false},
+		{"symbol at", "@", false},
+		{"lowercase a", "a", true},
+		{"lowercase z", "z", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n, suf, ok := letterPart(tt.letter)
+			assert.Equal(t, tt.ok, ok)
+			if !ok {
+				assert.Equal(t, 0, n)
+				assert.Equal(t, "", suf)
+			}
 		})
 	}
 }

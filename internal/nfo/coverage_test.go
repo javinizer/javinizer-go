@@ -461,7 +461,7 @@ func TestMovieToNFO_AllFields(t *testing.T) {
 	assert.Equal(t, "Test Maker", nfo.Studio)
 	assert.Equal(t, "Test Maker", nfo.Maker)
 	assert.Equal(t, "Test Label", nfo.Label)
-	assert.Equal(t, "Test Series", nfo.Set)
+	assert.Equal(t, "Test Series", string(nfo.Set))
 	assert.Equal(t, 9.0, nfo.Ratings.Rating[0].Value)
 	assert.Equal(t, 100, nfo.Ratings.Rating[0].Votes)
 	assert.Len(t, nfo.Genres, 2)

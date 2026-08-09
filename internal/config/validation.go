@@ -385,6 +385,15 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 	if cfg.System.VersionCheckIntervalHours != 0 && (cfg.System.VersionCheckIntervalHours < 1 || cfg.System.VersionCheckIntervalHours > 168) {
 		return fmt.Errorf("system.version_check_interval_hours must be between 1 and 168 (1 week), or 0 for default")
 	}
+	if cfg.System.ImageCacheTTLHours < 0 || cfg.System.ImageCacheTTLHours > 87600 {
+		return fmt.Errorf("system.image_cache_ttl_hours must be between 0 and 87600 (10 years)")
+	}
+	if cfg.System.ImageCacheEnabled && cfg.System.ImageCacheTTLHours < 1 {
+		return fmt.Errorf("system.image_cache_ttl_hours must be >= 1 when image caching is enabled")
+	}
+	if cfg.System.ImageCacheMaxSizeMB < 0 {
+		return fmt.Errorf("system.image_cache_max_size_mb must be >= 0 (0 disables the quota)")
+	}
 
 	if cfg.Logging.MaxSizeMB < 0 {
 		return fmt.Errorf("logging.max_size_mb must be >= 0")

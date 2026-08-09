@@ -543,7 +543,7 @@ func (m *mockQueryResolverScraper) ResolveSearchQuery(input string) (string, boo
 
 func TestQuerySingle_NoResolver(t *testing.T) {
 	ms := &mockScraper{name: "basic", result: &models.ScraperResult{ID: "MOV-001", Title: "Direct"}, err: nil}
-	outcome := querySingle(context.Background(), "MOV-001", ms)
+	outcome := querySingle(context.Background(), "MOV-001", "", ms)
 	require.NotNil(t, outcome.result)
 	assert.Equal(t, "MOV-001", outcome.result.ID)
 }
@@ -554,7 +554,7 @@ func TestQuerySingle_ResolverUsesMappedQuery(t *testing.T) {
 		resolvedQuery: "MAPPED-001",
 		matched:       true,
 	}
-	outcome := querySingle(context.Background(), "MOV-001", ms)
+	outcome := querySingle(context.Background(), "MOV-001", "", ms)
 	require.NotNil(t, outcome.result)
 }
 
@@ -564,7 +564,7 @@ func TestQuerySingle_ResolverRetriesOnError(t *testing.T) {
 		resolvedQuery: "MAPPED-001",
 		matched:       true,
 	}
-	outcome := querySingle(context.Background(), "MOV-001", ms)
+	outcome := querySingle(context.Background(), "MOV-001", "", ms)
 	require.NotNil(t, outcome.result)
 	assert.Equal(t, "Retried", outcome.result.Title)
 }
@@ -576,7 +576,7 @@ func TestQuerySingle_ResolverBothFail(t *testing.T) {
 		matched:       true,
 		resolvedQuery: "MAPPED-001",
 	}
-	outcome := querySingle(context.Background(), "MOV-001", ms)
+	outcome := querySingle(context.Background(), "MOV-001", "", ms)
 	require.NotNil(t, outcome.failure)
 	assert.Equal(t, "fail", outcome.failure.Scraper)
 	assert.ErrorContains(t, outcome.failure, "mapped query failed",
@@ -587,7 +587,7 @@ func TestQuerySingle_CancelledContext(t *testing.T) {
 	ms := &mockScraper{name: "cancel", result: nil, err: nil}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	outcome := querySingle(ctx, "MOV-001", ms)
+	outcome := querySingle(ctx, "MOV-001", "", ms)
 	require.Nil(t, outcome.result)
 	require.NotNil(t, outcome.failure)
 	assert.ErrorIs(t, outcome.failure, context.Canceled)
@@ -599,7 +599,7 @@ func TestQuerySingle_ResolverReturnsNoMatch(t *testing.T) {
 		resolvedQuery: "",
 		matched:       false,
 	}
-	outcome := querySingle(context.Background(), "MOV-001", ms)
+	outcome := querySingle(context.Background(), "MOV-001", "", ms)
 	require.NotNil(t, outcome.result)
 	assert.Equal(t, "MOV-001", outcome.result.ID)
 	assert.Nil(t, outcome.failure)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -69,7 +70,7 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 // without significantly increasing CPU or memory pressure.
 var maxQueryConcurrency = runtime.NumCPU()
 
-func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string, scrapers []models.Scraper, startTime time.Time) ([]*models.ScraperResult, []models.ScraperError) {
+func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID, rawInput string, scrapers []models.Scraper, startTime time.Time) ([]*models.ScraperResult, []models.ScraperError) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -78,7 +79,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 		if len(scrapers) == 0 {
 			return nil, nil
 		}
-		outcome := querySingle(ctx, resolvedMovieID, scrapers[0])
+		outcome := querySingle(ctx, resolvedMovieID, rawInput, scrapers[0])
 		var results []*models.ScraperResult
 		var failures []models.ScraperError
 		if outcome.result != nil {
@@ -105,7 +106,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 				return gCtx.Err()
 			default:
 			}
-			outcomes[i] = querySingle(gCtx, resolvedMovieID, scraper)
+			outcomes[i] = querySingle(gCtx, resolvedMovieID, rawInput, scraper)
 			return nil // errors are captured in outcomes[i].failure
 		})
 	}
@@ -137,7 +138,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 	return results, failures
 }
 
-func querySingle(ctx context.Context, movieID string, scraper models.Scraper) (outcome queryOutcome) {
+func querySingle(ctx context.Context, movieID, rawInput string, scraper models.Scraper) (outcome queryOutcome) {
 	defer func() {
 		if r := recover(); r != nil {
 			outcome = queryOutcome{
@@ -148,6 +149,63 @@ func querySingle(ctx context.Context, movieID string, scraper models.Scraper) (o
 			}
 		}
 	}()
+
+	// A direct page URL is scraped as-is via the scraper's ScrapeURL seam rather
+	// than ID extraction + keyword search. Keeping the raw URL out of MovieID
+	// prevents credential leaks on signed URLs and gives a stable cache/identity
+	// key (the derived ID); URL shape is irrelevant for identity.
+	if rawInput != "" {
+		if uh, ok := scraper.(models.URLHandler); ok && uh.CanHandleURL(rawInput) {
+			// NOTE: The raw URL is passed to ScrapeURL because the handler must
+			// fetch it. Per-scraper log redaction (e.g. JavLibrary redactPageURL
+			// in fetchPageCtx, round 6) is the correct fix for credential leakage
+			// in handler logs; pipeline-level redaction before the call would
+			// break fetching. JavDB/R18.dev/DMM browser log internally and are
+			// pre-existing — out of scope for page-derived-scraper-identity
+			// (OpenSpec Decision 2). The P2 cache-miss (canonical ID != URL slug)
+			// is also an explicitly accepted design decision (Decision 2):
+			// URL scrapes cache-miss by design; the movie is persisted under its
+			// canonical identity so search-by-code hits.
+			result, err := safeScrapeURL(ctx, uh, rawInput)
+			if err == nil && result != nil {
+				// Validate the result has a meaningful identity. A non-detail page
+				// (e.g. DMM home/search/challenge) can return HTTP 200 with a
+				// non-nil but empty result. Treat results without an ID as
+				// NotFound so the ID-based keyword Search fallback fires.
+				if strings.TrimSpace(result.ID) == "" {
+					err = models.NewScraperNotFoundError(scraper.Name(), "direct URL returned result without ID")
+				} else {
+					outcome = queryOutcome{result: result}
+					return
+				}
+			}
+			if err == nil && result == nil {
+				// A nil result with nil error is a contract violation; treat as
+				// NotFound so the ID-based keyword Search fallback fires.
+				err = models.NewScraperNotFoundError(scraper.Name(), "URL handler returned no result")
+			}
+			if isContextError(ctx, err) {
+				outcome = queryOutcome{failure: classifyContextError(scraper.Name(), err)}
+				return
+			}
+			// Only a "not found"/unsupported URL shape (typed NotFound) falls
+			// through to the ID-based keyword Search. Availability errors (403,
+			// 429, challenges, 5xx) surface as failures instead of triggering a
+			// second request.
+			if se, ok := models.AsScraperError(err); ok {
+				if se.Kind != models.ScraperErrorKindNotFound {
+					// Normalize the scraper name to the registry name (scraper.Name())
+					// so display labels are consistent with the normal Search failure path.
+					se.Scraper = scraper.Name()
+					outcome = queryOutcome{failure: se}
+					return
+				}
+			} else {
+				outcome = queryOutcome{failure: classifyScraperError(scraper.Name(), err, "")}
+				return
+			}
+		}
+	}
 
 	scraperQuery := movieID
 	if mappedQuery, ok := models.ResolveSearchQueryForScraper(scraper, movieID); ok {
@@ -260,6 +318,77 @@ func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result 
 	result, err = scraper.Search(ctx, id)
 	if result != nil {
 		result.NormalizeMediaURLs()
+	}
+	return result, err
+}
+
+// safeScrapeURL invokes a scraper's direct-URL scrape path (ScrapeURL) with
+// urlRedactedError wraps an error with a redacted message while preserving
+// the original error's unwrap chain, so errors.Is(err, context.DeadlineExceeded)
+// and errors.Is(err, context.Canceled) remain detectable after URL scrubbing.
+type urlRedactedError struct {
+	msg   string
+	cause error
+}
+
+func (e *urlRedactedError) Error() string { return e.msg }
+func (e *urlRedactedError) Unwrap() error { return e.cause }
+
+// redactErrorURL scrubs any occurrence of rawURL from err's message, replacing
+// it with a redacted copy so signed/credential-bearing URLs never leak into
+// failure messages that batch results and events retain. ScraperError typing is
+// preserved; other errors are re-wrapped as urlRedactedError to preserve the
+// unwrap chain (so context errors remain detectable by errors.Is).
+func redactErrorURL(err error, rawURL string) error {
+	if err == nil || rawURL == "" {
+		return err
+	}
+	redacted := RedactSourceURL(rawURL)
+	if redacted == rawURL || !strings.Contains(err.Error(), rawURL) {
+		return err
+	}
+	if se, ok := models.AsScraperError(err); ok {
+		clone := *se
+		clone.Message = strings.ReplaceAll(clone.Message, rawURL, redacted)
+		if clone.Cause != nil {
+			clone.Cause = redactErrorURL(clone.Cause, rawURL)
+		}
+		return &clone
+	}
+	// Preserve the unwrap chain so context errors (DeadlineExceeded,
+	// Canceled) remain detectable by errors.Is after URL scrubbing.
+	return &urlRedactedError{
+		msg:   strings.ReplaceAll(err.Error(), rawURL, redacted),
+		cause: err,
+	}
+}
+
+// panic recovery, mirroring safeSearch.
+func safeScrapeURL(ctx context.Context, handler models.URLHandler, url string) (result *models.ScraperResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Scrub the raw URL from the recovered panic value before
+			// HandleRecover logs it, so signed tokens never reach logs.
+			redacted := strings.ReplaceAll(fmt.Sprint(r), url, RedactSourceURL(url))
+			err = panicutil.HandleRecover(redacted)
+			err = redactErrorURL(err, url)
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	result, err = handler.ScrapeURL(ctx, url)
+	if result != nil {
+		result.NormalizeMediaURLs()
+		// Credentials/signed tokens must never reach persisted provenance.
+		result.SourceURL = RedactSourceURL(result.SourceURL)
+	}
+	if err != nil {
+		// The raw URL may appear in HTTP/transport error messages; scrub it
+		// before classification or persistence so signed tokens never leak.
+		err = redactErrorURL(err, url)
 	}
 	return result, err
 }

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
@@ -170,7 +171,20 @@ func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*m
 	}
 	// Skip content-ID resolution in raw mode — it reads/writes the DB cache,
 	// which contradicts the no-persistence contract.
-	outcome := querySingle(ctx, movieID, scraper)
+	// Check context before any work to handle pre-cancelled/expired contexts.
+	select {
+	case <-ctx.Done():
+		return nil, classifyContextError(scraperName, ctx.Err())
+	default:
+	}
+	// Resolve URL-shaped inputs to their extracted ID so the Search fallback
+	// receives the product code, not the raw URL.
+	resolvedID := movieID
+	rawInput := strings.TrimSpace(movieID)
+	if parsed, parseErr := matcher.ParseInput(rawInput, s.registry); parseErr == nil && parsed.IsURL {
+		resolvedID = parsed.ID
+	}
+	outcome := querySingle(ctx, resolvedID, rawInput, scraper)
 	if outcome.failure != nil {
 		return nil, outcome.failure
 	}
@@ -228,14 +242,34 @@ func New(
 // to extract MovieID and determine optimal scrapers. Returns the resolved
 // ScrapeCmd or an error if MovieID is empty after resolution.
 func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInstanceResolver, cfg *Config) (ScrapeCmd, error) {
-	if cmd.RawInput != "" {
-		parsed, parseErr := matcher.ParseInput(cmd.RawInput, registry)
+	// Prefer RawInput (batch/manual seam); fall back to URL-shaped MovieIDs so
+	// plain CLI calls like `scrape <url>` (which pass the URL as MovieID with
+	// no RawInput) get the same resolution: MovieID becomes the derived ID and
+	// RawInput carries the URL for the direct-page seam.
+	source := cmd.RawInput
+	if source == "" {
+		source = cmd.MovieID
+	}
+	source = strings.TrimSpace(source)
+	if source != "" {
+		parsed, parseErr := matcher.ParseInput(source, registry)
 		if parseErr != nil {
-			logging.Warnf("[scrape] RawInput parse failed for %q: %v (using as-is for MovieID)", RedactURLQuery(cmd.RawInput), parseErr)
-			cmd.MovieID = RedactURLQuery(cmd.RawInput)
+			logging.Warnf("[scrape] input parse failed for %q: %v (using as-is for MovieID)", RedactURLQuery(source), parseErr)
+			// MovieID stays query-redacted for a stable/secret-free identity, but
+			// the full URL is kept in RawInput so URL-aware scrapers (via the
+			// ScrapeURL seam) still receive required query parameters, e.g.
+			// jp.jav321.com/search?sn=IPX-123.
+			cmd.MovieID = RedactURLQuery(source)
+			cmd.RawInput = source
 			cmd.ParseWarning = fmt.Sprintf("input could not be parsed: %v", parseErr)
 		} else {
 			cmd.MovieID = parsed.ID
+			// Keep the trimmed URL in RawInput so the direct-page URL seam
+			// (querySingle -> ScrapeURL) receives a clean URL even when the
+			// caller supplied surrounding whitespace.
+			if parsed.IsURL {
+				cmd.RawInput = source
+			}
 			if len(cmd.SelectedScrapers) == 0 && parsed.IsURL && len(parsed.CompatibleScrapers) > 0 {
 				cmd.PriorityOverride = matcher.CalculateOptimalScrapers(nil, cfg.ScrapersPriority, parsed)
 			} else if len(cmd.SelectedScrapers) > 0 {
@@ -330,7 +364,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	resolvedID := s.resolveContentID(ctx, cmd.MovieID, scraperNames)
 	scrapers := s.registry.GetInstancesByPriorityForInput(scraperNames, resolvedID)
 
-	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, scrapers, startTime)
+	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, cmd.RawInput, scrapers, startTime)
 	if len(results) == 0 {
 		return failedResult(cmd.MovieID, buildNoResultsError(failures), classifyFailures(failures), startTime), nil
 	}
