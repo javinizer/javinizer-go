@@ -39,7 +39,7 @@ func TestConfig_ToNFONameConfig(t *testing.T) {
 		PerFile:          true,
 		FirstNameOrder:   true,
 	}
-	result := c.ToNFONameConfig(true, "-A")
+	result := c.ToNFONameConfig(true, "-A", 0)
 	assert.Equal(t, "{id}", result.FilenameTemplate)
 	assert.True(t, result.GroupActress)
 	assert.True(t, result.IsMultiPart)

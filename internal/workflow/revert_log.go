@@ -93,9 +93,9 @@ func NewRevertLogConfig(allowRevert bool, nfoCfg *nfo.Config) *RevertLogConfig {
 
 // ToNFONameConfig converts RevertLogConfig to nfo.NFONameConfig, filling in
 // the caller-provided multipart fields.
-func (c *RevertLogConfig) ToNFONameConfig(isMultiPart bool, partSuffix string) nfo.NFONameConfig {
+func (c *RevertLogConfig) ToNFONameConfig(isMultiPart bool, partSuffix string, partNumber int) nfo.NFONameConfig {
 	if c.NFOCfg != nil {
-		return c.NFOCfg.ToNFONameConfig(isMultiPart, partSuffix)
+		return c.NFOCfg.ToNFONameConfig(isMultiPart, partSuffix, partNumber)
 	}
 	return nfo.NFONameConfig{
 		IsMultiPart: isMultiPart,
@@ -302,11 +302,12 @@ func (l *dbRevertLog) CaptureSnapshot(ctx context.Context, opID OperationID, cmd
 
 	var nameCfg nfo.NFONameConfig
 	if l.cfg != nil {
-		nameCfg = l.cfg.ToNFONameConfig(isMultiPart, partSuffix)
+		nameCfg = l.cfg.ToNFONameConfig(isMultiPart, partSuffix, cmd.Match.PartNumber)
 	} else {
 		nameCfg = nfo.NFONameConfig{
 			IsMultiPart: isMultiPart,
 			PartSuffix:  partSuffix,
+			PartNumber:  cmd.Match.PartNumber,
 		}
 	}
 

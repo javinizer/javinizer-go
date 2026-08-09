@@ -429,6 +429,7 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 	nameCfg := o.applyCfg.NFONameCfg
 	nameCfg.IsMultiPart = cmd.Match.IsMultiPart
 	nameCfg.PartSuffix = partSuffix
+	nameCfg.PartNumber = cmd.Match.PartNumber
 
 	// Use the post-organize video path when the file was moved, so that
 	// stream details (runtime/codec/resolution) can still be extracted.

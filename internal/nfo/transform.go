@@ -51,7 +51,7 @@ type nfoInput struct {
 // transformMovieForNFO handles all data transformation: actress formatting and deduplication,
 // stream details extraction, date normalization, rating resolution, and tag merging.
 // The returned nfoInput is fully resolved — buildNFO maps it to *Movie with no further decisions.
-func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movie, videoFilePath, partSuffix string, isMultiPart bool, tags []string) (nfoInput, error) {
+func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movie, videoFilePath, partSuffix string, partNumber int, isMultiPart bool, tags []string) (nfoInput, error) {
 	title := g.resolveTitle(movie)
 	genres := g.resolveGenres(movie)
 	actors := g.buildActors(movie.Actresses)
@@ -62,7 +62,7 @@ func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movi
 	trailerURL := g.resolveTrailer(movie)
 	fi := g.resolveStreamDetails(ctx, videoFilePath)
 	originalPath := g.resolveOriginalPath(movie)
-	tmplCtx := g.movieTemplateContext(movie, videoFilePath, partSuffix, isMultiPart)
+	tmplCtx := g.movieTemplateContext(movie, videoFilePath, partSuffix, partNumber, isMultiPart)
 	tagline, err := g.resolveTagline(ctx, tmplCtx)
 	if err != nil {
 		return nfoInput{}, err
@@ -203,10 +203,11 @@ func (g *Generator) resolveTagline(ctx context.Context, tmplCtx *template.Contex
 // (tagline, custom tags), threading the actress-rendering options so that
 // <ACTORS>/<ACTRESSES> resolve identically to folder/file/display-title
 // templates.
-func (g *Generator) movieTemplateContext(movie *models.Movie, videoFilePath, partSuffix string, isMultiPart bool) *template.Context {
+func (g *Generator) movieTemplateContext(movie *models.Movie, videoFilePath, partSuffix string, partNumber int, isMultiPart bool) *template.Context {
 	ctx := template.NewContextFromMovie(movie)
 	ctx.VideoFilePath = videoFilePath
 	ctx.PartSuffix = partSuffix
+	ctx.PartNumber = partNumber
 	ctx.IsMultiPart = isMultiPart
 	ctx.GroupActress = g.config.GroupActress
 	ctx.GroupActressMin = g.config.GroupActressMin

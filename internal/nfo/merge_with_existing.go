@@ -48,7 +48,7 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 
 	var nameCfg NFONameConfig
 	if nfoConfig != nil {
-		nameCfg = nfoConfig.ToNFONameConfig(isMultiPart, partSuffix)
+		nameCfg = nfoConfig.ToNFONameConfig(isMultiPart, partSuffix, 0)
 	} else {
 		nameCfg = NFONameConfig{
 			IsMultiPart: isMultiPart,
