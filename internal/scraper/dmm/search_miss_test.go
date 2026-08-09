@@ -185,17 +185,16 @@ func TestGetURLCtx_LowPrioritySearchSupplementedByDirect(t *testing.T) {
 // --- tryDirectURLs: cancelled context ---
 
 func TestTryDirectURLs_CancelledContext(t *testing.T) {
-	if testing.Short() {
-		// tryDirectURLs issues live GETs against www.dmm.co.jp even with a
-		// pre-cancelled context (resty retries past the cancellation), so
-		// the result depends on network reachability. Exclude from the
-		// short/pre-commit suite; CI's full (non-short) lane covers it.
-		t.Skip("requires live network access; covered by the full test lane")
-	}
+	// Deterministic transport (codex): no request may touch the network, so
+	// the outcome cannot depend on DMM's reachability. Every candidate URL
+	// 404s, so nothing qualifies regardless of the cancelled context.
+	client := resty.New()
+	client.SetTransport(&dmmStatusRoundTripper{status: http.StatusNotFound})
+	client.SetRetryCount(0)
 	s := &scraper{
 		enabled:     true,
 		rateLimiter: ratelimit.NewLimiter(0),
-		client:      resty.New(),
+		client:      client,
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
@@ -203,8 +202,7 @@ func TestTryDirectURLs_CancelledContext(t *testing.T) {
 	cancel()
 
 	candidates := s.tryDirectURLs(ctx, "test001")
-	// Should return empty or partial results due to cancelled context
-	assert.NotNil(t, candidates)
+	assert.Empty(t, candidates, "no direct URL may qualify when every request 404s")
 }
 
 // --- tryDirectURLs: nil response ---
