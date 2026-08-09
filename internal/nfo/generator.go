@@ -276,7 +276,7 @@ func (g *Generator) ResolveAndGenerate(ctx context.Context, movie *models.Movie,
 
 	contentPartSuffix := nameCfg.PartSuffix
 	contentPartNumber := nameCfg.PartNumber
-	if !nameCfg.PerFile {
+	if !nameCfg.PerFile || !nameCfg.IsMultiPart {
 		contentPartSuffix = ""
 		contentPartNumber = 0
 	}

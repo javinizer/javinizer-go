@@ -296,3 +296,14 @@ func TestMovieToNFO_TaglineSignedNumericModifierDropped(t *testing.T) {
 	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "-pt1", 1, true, nil)
 	assert.Equal(t, "", nfo.Tagline)
 }
+
+func TestResolveAndGenerate_PartNumberGatedOnIsMultiPart(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	g := NewGenerator(fs, &Config{Tagline: "Part <PART>", FirstNameOrder: true})
+	nameCfg := NFONameConfig{FilenameTemplate: "<ID>", PerFile: true, PartSuffix: "", PartNumber: 1, IsMultiPart: false}
+	path, err := g.ResolveAndGenerate(context.Background(), taglineTestMovie(), "/out", nameCfg, "", nil)
+	require.NoError(t, err)
+	data, readErr := afero.ReadFile(fs, path)
+	require.NoError(t, readErr)
+	assert.Contains(t, string(data), "<tagline>Part </tagline>")
+}

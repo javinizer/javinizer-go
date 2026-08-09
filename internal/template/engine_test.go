@@ -1,6 +1,7 @@
 package template
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -2842,4 +2843,50 @@ func TestStrictDigitModifier(t *testing.T) {
 	assert.False(t, strictDigitModifier("+2"))
 	assert.False(t, strictDigitModifier("-2"))
 	assert.False(t, strictDigitModifier("2a"))
+}
+
+func TestEngine_ValidateTags_TaintedStructuralKeywordsRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<IF:ID>a<ELSE >b</IF>"))
+	assert.Error(t, e.ValidateTags("<IF:ID>a</IF:x>"))
+	assert.Error(t, e.ValidateTags("<ENDIF>"))
+	assert.NoError(t, e.ValidateTags("<IF:ID>a<ELSE>b</IF>"))
+	assert.NoError(t, e.ValidateTags("<IF:ID>x</IF>"))
+}
+
+func TestEngine_ValidateTags_BoundedNumericModifier(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<PART:9>"))
+	assert.Error(t, e.ValidateTags("<PART:10>"))
+	assert.Error(t, e.ValidateTags("<PART:99999999>"))
+}
+
+func TestContext_SetExecCtx_HonoredByMediaInfo(t *testing.T) {
+	ctx := NewContextFromMovie(&models.Movie{ID: "X"})
+	ctx.VideoFilePath = "/nonexistent/video.mp4"
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctx.SetExecCtx(canceled)
+	info := ctx.getMediaInfo()
+	assert.Nil(t, info)
+}
+
+func TestContext_SetExecCtx_ConcurrentRenderingRaceFree(t *testing.T) {
+	ctx := NewContextFromMovie(&models.Movie{ID: "X"})
+	ctx.VideoFilePath = ""
+	ctx.SetExecCtx(context.Background())
+	e := NewEngine()
+	done := make(chan struct{})
+	for i := 0; i < 10; i++ {
+		go func() { _, _ = e.Execute("<ID>", ctx); done <- struct{}{} }()
+	}
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+}
+
+func TestEngine_ValidateTags_NonNumericModifierAccepted(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<TITLE:50>"))
+	assert.NoError(t, e.ValidateTags("<ID>"))
 }

@@ -16,7 +16,7 @@ var (
 	cjkRegex                   = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
 	conditionalTokenRegex      = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>`)
 	conditionalStructureRegex  = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>|<ELSE>`)
-	degenerateConditionalRegex = regexp.MustCompile(`(?i)<IF:>|<ELSE:>|</ELSE>|</ENDIF>|<ENDIF>`)
+	degenerateConditionalRegex = regexp.MustCompile(`(?i)<IF:>|<ELSE[:\s][^>]*>|</IF[:\s][^>]*>|</ELSE>|</ENDIF>|<ENDIF>`)
 )
 
 // DefaultMaxTemplateBytes, DefaultMaxOutputBytes, and DefaultMaxConditionalDepth are the default size and depth limits for template rendering.
@@ -406,7 +406,7 @@ func (e *Engine) ValidateTags(template string) error {
 	for _, match := range matches {
 		tagName := strings.ToUpper(match[1])
 		if tagName == "IF" {
-			if len(match) <= 2 || match[2] == "" {
+			if match[2] == "" {
 				return fmt.Errorf("<IF> missing condition tag")
 			}
 			condTag := strings.ToUpper(match[2])
@@ -416,9 +416,6 @@ func (e *Engine) ValidateTags(template string) error {
 			continue
 		}
 		if tagName == "ELSE" {
-			if len(match) > 2 && match[2] != "" {
-				return fmt.Errorf("<ELSE> takes no modifier")
-			}
 			continue
 		}
 		if !e.isKnownTag(tagName) {
@@ -486,7 +483,8 @@ func strictDigitModifier(modifier string) bool {
 			return false
 		}
 	}
-	return true
+	n, err := strconv.Atoi(modifier)
+	return err == nil && n >= 1 && n <= 9
 }
 
 // isKnownTag reports whether tagName resolves through resolveTag without an
