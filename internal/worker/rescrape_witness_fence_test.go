@@ -980,6 +980,55 @@ func TestRescrapeGenerationFingerprintCapture(t *testing.T) {
 	assert.Equal(t, "gen-crop", string(crop), "generated crop leg survives success closeout")
 }
 
+type readWedgeFS struct {
+	afero.Fs
+	suffix string
+}
+
+func (f readWedgeFS) Open(name string) (afero.File, error) {
+	if strings.HasSuffix(filepath.ToSlash(name), f.suffix) {
+		return nil, errors.New("read wedged")
+	}
+	return f.Fs.Open(name)
+}
+
+// codex cloud P2: a transient fingerprint read failure aborts the op and
+// restores the parked pair WHILE the key is held — the canonical never keeps
+// this op's uncommitted generation bytes, and the parked committed bytes are
+// never discarded against a silent fingerprint gap.
+func TestRescrapeFingerprintReadFailAbortsAndRestores(t *testing.T) {
+	base := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	pdir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, base.MkdirAll(pdir, 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(pdir, "FPR-1-full.jpg"), []byte("committed-full"), 0o644))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(pdir, "FPR-1.jpg"), []byte("committed-crop"), 0o644))
+	store := resultstore.New(1, []string{"f1.mp4"})
+	seedFamilyResult(store, "f1.mp4", "res-1", "FPR-1", "")
+	gen := &spyPosterGen{onGenerate: func() {
+		_ = afero.WriteFile(base, filepath.Join(pdir, "FPR-1-full.jpg"), []byte("gen-full"), 0o644)
+		_ = afero.WriteFile(base, filepath.Join(pdir, "FPR-1.jpg"), []byte("gen-crop"), 0o644)
+	}}
+	fs := readWedgeFS{Fs: base, suffix: "FPR-1.jpg"}
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "FPR-1"}, Status: scrape.StatusCompleted}}
+	inputs := rescrapePhaseInputs{
+		WF: wf, ResultMap: store, Finder: store, JobID: jobID,
+		PosterGen:  gen,
+		EditLockFn: func(ids ...string) func() { return func() {} },
+		Fs:         fs, TempDir: "/tmp",
+	}
+	phase := NewRescrapePhase()
+	_, err := phase.Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "FPR-1", FilePath: "f1.mp4"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "poster fingerprint capture")
+	full, ferr := afero.ReadFile(base, filepath.Join(pdir, "FPR-1-full.jpg"))
+	require.NoError(t, ferr)
+	assert.Equal(t, "committed-full", string(full), "this op's generation rewound under the key")
+	crop, cerr := afero.ReadFile(base, filepath.Join(pdir, "FPR-1.jpg"))
+	require.NoError(t, cerr)
+	assert.Equal(t, "committed-crop", string(crop), "unfingerprinted leg rewound, never discarded")
+}
+
 type midScrapeEditWorkflow struct {
 	*stubRescrapeWorkflow
 	onScrape func()

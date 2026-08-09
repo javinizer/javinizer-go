@@ -647,7 +647,17 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 				for _, lp := range []string{filepath.Join(pdir2, movieResult.Movie.ID+"-full.jpg"), filepath.Join(pdir2, movieResult.Movie.ID+".jpg")} {
 					if data, rerr := afero.ReadFile(inputs.Fs, lp); rerr == nil {
 						scope.genSHA[filepath.Base(lp)] = shaContentHex(data)
+						continue
+					} else if !os.IsNotExist(rerr) {
+						// codex cloud P2: a TRANSIENT fingerprint read failure must
+						// never record as a silent "missing" — the closeout would
+						// read the gap as fresh-committed ownership and discard the
+						// parked copy. Abort, restoring our own generation while
+						// THIS op still holds the family key.
+						scope.parked.restore(nil)
+						return fmt.Errorf("poster fingerprint capture %s: %w", lp, rerr)
 					}
+					// ENOENT: the leg was never generated — nothing to fingerprint.
 				}
 			}
 			return nil

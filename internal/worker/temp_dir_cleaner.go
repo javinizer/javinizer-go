@@ -1061,6 +1061,9 @@ func (c *TempDirCleaner) reconcileCropWitness(ctx context.Context, dir, jobID, w
 // up stale temp poster directories. Returns a stop channel that should be closed
 // on shutdown to stop the cleanup loop.
 func (c *TempDirCleaner) StartStaleTempCleanup() chan struct{} {
+	// Read the (test-overridable) interval on the CALLER's goroutine — reading
+	// it inside the spawned goroutine races a test's var restore.
+	interval := staleCleanupInterval
 	stop := make(chan struct{})
 	go func() {
 		// Run immediately on startup: rekey-witness reconciliation FIRST (a
@@ -1077,7 +1080,7 @@ func (c *TempDirCleaner) StartStaleTempCleanup() chan struct{} {
 			logging.Infof("Cleaned up %d stale temp poster director(ies) on startup", removed)
 		}
 
-		ticker := time.NewTicker(staleCleanupInterval)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		for {
