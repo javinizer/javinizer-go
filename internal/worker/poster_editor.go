@@ -560,7 +560,7 @@ func posterWitnessConflictCore(fs afero.Fs, tempDir, jobID, posterID string) err
 		var cw struct {
 			PosterID string `json:"poster_id"`
 		}
-		if json.Unmarshal(data, &cw) == nil && cw.PosterID == posterID {
+		if json.Unmarshal(data, &cw) == nil && strings.EqualFold(strings.TrimSpace(cw.PosterID), strings.TrimSpace(posterID)) {
 			return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s crop witness unresolved: restart to reconcile", posterID)}
 		}
 	}

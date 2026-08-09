@@ -1206,6 +1206,27 @@ func TestPosterWitnessConflictCore_FoldFencesAdmission(t *testing.T) {
 	require.ErrorAs(t, err, &cfe)
 }
 
+// codex cloud P2: a wedged backup-leg removal keeps the marker AND token —
+// deleting provenance while bytes persist strands the leg permanently and
+// fences the family until manual cleanup.
+func TestDiscardSkipsMarkerTokenWhenBackupRemoveWedges(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-DW"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	b := parkCanonicalPosterPair(base, dir, "DW-1", 2)
+	require.NoError(t, b.parkErr)
+	require.NoError(t, afero.WriteFile(base, b.commitPath, []byte(`{"poster_id":"DW-1"}`), 0o644))
+	// bake actual backup files so the wedged removals are observable
+	require.NoError(t, afero.WriteFile(base, b.fullBak, []byte("old-full"), 0o644))
+	require.NoError(t, afero.WriteFile(base, b.cropBak, []byte("old-crop"), 0o644))
+	b.fs = removeExactFailFS{Fs: base, name: filepath.ToSlash(b.fullBak)}
+	b.discard()
+	_, mErr := base.Stat(b.markerPath)
+	assert.NoError(t, mErr, "marker retained — parked full leg unsettled")
+	_, tErr := base.Stat(b.commitPath)
+	assert.NoError(t, tErr, "token retained alongside")
+}
+
 type readWedgeFS struct {
 	afero.Fs
 	suffix string

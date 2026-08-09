@@ -275,10 +275,25 @@ func (b *rescrapePosterBackup) discard() {
 	if b == nil || b.fs == nil {
 		return
 	}
-	for _, p := range []string{b.fullBak, b.cropBak, b.markerPath} {
-		if p != "" {
-			_ = b.fs.Remove(p)
+	// codex cloud P2: sweep the marker+token only AFTER every owned backup
+	// leg is confirmed absent — a wedged backup removal with swept records
+	// strands the byte's provenance forever (startup would keep the leg
+	// permanently + fence the family).
+	ownedClean := true
+	for _, p := range []string{b.fullBak, b.cropBak} {
+		if p == "" {
+			continue
 		}
+		if rErr := b.fs.Remove(p); rErr != nil && !os.IsNotExist(rErr) {
+			ownedClean = false
+			logging.Warnf("rescrape backup discard %s: %v", p, rErr)
+		}
+	}
+	if !ownedClean {
+		return
+	}
+	if b.markerPath != "" {
+		_ = b.fs.Remove(b.markerPath)
 	}
 	if b.commitPath != "" {
 		// codex cloud P1: the WINNER's token authenticates a competitor's

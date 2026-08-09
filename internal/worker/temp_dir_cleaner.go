@@ -634,20 +634,33 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 		healed += c.arbitrateParkedRescrapeBackups(ctx, jobID, dir, pendingRsbak, strandedMeta, commitTokens)
 	}
 
-	// codex cloud P2: marker removal — only after every dangling parked leg
-	// for this nonce settled this run. An UNSETTLED leg keeps its marker iff
-	// the marker may carry provenance (parsed payload or unreadable — safer to
-	// retain than to orphan the bytes); legacy EMPTY markers with pending legs
-	// still go (an empty file holds no record worth fencing behind).
-	if len(strandedMarkers) > 0 {
+	// codex cloud P2 (@644): ONE fold-aware ledger feeds both sweeps; an
+	// UNDECIDABLE rescan skips ALL finalization — the sweeps would otherwise
+	// delete the very provenance records a pending leg needs.
+	if len(strandedMarkers) > 0 || len(commitTokens) > 0 {
 		remaining := map[string]bool{}
-		if entries2, rdErr := afero.ReadDir(c.fs, dir); rdErr == nil {
-			for _, e2 := range entries2 {
-				n2 := e2.Name()
-				if idx := strings.LastIndex(n2, ".rsbak."); idx >= 0 && isBackupNonce(n2[idx+len(".rsbak."):]) {
-					remaining[n2[idx+len(".rsbak."):]] = true
-				}
+		pendingBases := map[string]bool{}
+		entries2, rdErr := afero.ReadDir(c.fs, dir)
+		if rdErr != nil {
+			logging.Warnf("recovery finalize: rescan %s undecidable (%v) — markers and tokens kept for the next startup", dir, rdErr)
+			return healed
+		}
+		for _, e2 := range entries2 {
+			n2 := e2.Name()
+			idx := strings.LastIndex(n2, ".rsbak.")
+			if idx < 0 || !isBackupNonce(n2[idx+len(".rsbak."):]) {
+				continue
 			}
+			remaining[n2[idx+len(".rsbak."):]] = true
+			cb := n2[:idx]
+			if strings.HasSuffix(cb, "-full.jpg") {
+				cb = strings.TrimSuffix(cb, "-full.jpg")
+			} else {
+				cb = strings.TrimSuffix(cb, ".jpg")
+			}
+			// codex cloud P2 (@685): case-fold the pending-base key — a winner's
+			// token must attribute either spelling of the stranded backup's ID.
+			pendingBases[strings.ToLower(strings.TrimSpace(cb))] = true
 		}
 		for _, m := range strandedMarkers {
 			if remaining[m.nonce] && (m.hasProvenance || m.readFailed) {
@@ -659,29 +672,11 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 			}
 			healed++
 		}
-	}
-	// codex cloud P1 leak guard: a commit token settles when no parked leg for
-	// its base pends anymore — attribution evidence only lives while bytes
-	// remain contestable. Independent of marker traffic (a dir can hold a lone
-	// settle-able token).
-	if len(commitTokens) > 0 {
-		pendingBases := map[string]bool{}
-		if entries3, rdErr := afero.ReadDir(c.fs, dir); rdErr == nil {
-			for _, e3 := range entries3 {
-				n3 := e3.Name()
-				if idx := strings.LastIndex(n3, ".rsbak."); idx >= 0 && isBackupNonce(n3[idx+len(".rsbak."):]) {
-					canon3 := n3[:idx]
-					if strings.HasSuffix(canon3, "-full.jpg") {
-						canon3 = strings.TrimSuffix(canon3, "-full.jpg")
-					} else {
-						canon3 = strings.TrimSuffix(canon3, ".jpg")
-					}
-					pendingBases[canon3] = true
-				}
-			}
-		}
+		// codex cloud P1 leak guard: a commit token settles when no parked leg for
+		// its base pends anymore — attribution evidence only lives while bytes
+		// remain contestable.
 		for _, tok := range commitTokens {
-			if pendingBases[tok.base] {
+			if pendingBases[strings.ToLower(strings.TrimSpace(tok.base))] {
 				continue
 			}
 			if rmErr := c.fs.Remove(filepath.Join(dir, tok.name)); rmErr != nil {

@@ -77,6 +77,44 @@ func TestReconcileParkedOwnTokenUnpersistedRestores(t *testing.T) {
 }
 
 // Own token but the durable row is unreadable: undecidable ⇒ keep both.// Own token but the durable row is unreadable: undecidable ⇒ keep both.
+// codex cloud P2: a wedged finalize rescan must skip ALL finalization —
+// otherwise the sweeps delete provenance while a failed arbitration repair
+// still pends in the same dir.
+func TestFinalizeRescanUndecidableKeepsRecords(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-FIN"
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, "FB-1.jpg"), []byte("live"), 0o644))
+	meta, err := json.Marshal(inFlightMeta{PosterID: "FB-1", PrevRevision: 2})
+	require.NoError(t, err)
+	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, ".inflight-FB-1.a1.b2"), meta, 0o644))
+	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, "FB-1.jpg.rsbak.a1.b2"), []byte("backup"), 0o644))
+	// main sweep's ReadDir passes; the finalize rescan wedges.
+	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 1}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	_ = cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	_, mErr := mem.Stat(filepath.Join(dir, ".inflight-FB-1.a1.b2"))
+	assert.NoError(t, mErr, "marker retained — finalization was undecidable")
+	_, bErr := mem.Stat(filepath.Join(dir, "FB-1.jpg.rsbak.a1.b2"))
+	assert.NoError(t, bErr, "backup retained")
+}
+
+// codex cloud P2: the token sweep's pending-base compare must fold — a
+// case-variant pending backup is the SAME contested base.
+func TestTokenSweepFoldsPendingBase(t *testing.T) {
+	fs, dir := witnessFixture(t)
+	// The RIVAL's spelling owns this dir — canon lowercase so the pending leg
+	// stays un-settle-able this run (unprovenanced keep-both), while the
+	// winner's folded base still matches on sweep.
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "wta-1.jpg"), []byte("live"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "wta-1.jpg.rsbak.a9.d9"), []byte("pending"), 0o644))
+	seedCommitToken(t, fs, dir, "WTA-1", "a1.b2", "live", false)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	assert.Equal(t, 0, healed, "folded pending base retains the token")
+	_, tErr := fs.Stat(filepath.Join(dir, ".commit-WTA-1.a1.b2"))
+	assert.NoError(t, tErr)
+}
 func TestReconcileParkedOwnTokenLookupUndecidableKeepsBoth(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	seedArbitrationScene(t, fs, dir, "AR-V", "a1.b2", "gen", "pre-op", 4)
