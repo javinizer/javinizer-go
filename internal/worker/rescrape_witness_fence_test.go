@@ -1128,7 +1128,33 @@ func TestRescrapeSuccessNilFsParkedDiscardsLegacy(t *testing.T) {
 	assert.Nil(t, outcome.PosterRecovery, "no fs ⇒ nothing deferrable exists")
 }
 
-// discard/restore on accessors without paths run the no-op guard arms.// discard/restore on accessors without paths run the no-op guard arms.
+// codex cloud P1: live finalization sweeps the winner's commit token when
+// nothing contestable pends, but RETAINS it while a same-base competitor's
+// .rsbak leg still needs attestation (startup would otherwise keep-both
+// forever + fence edits).
+func TestDiscardKeepsWinnerTokenWhileCompetitorBackupPends(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-RET"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	b := parkCanonicalPosterPair(fs, dir, "RET-1", 3)
+	require.NoError(t, b.parkErr)
+	// a rival op's parked leg for the same poster, still pending on disk:
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "RET-1.jpg.rsbak.a9.c9"), []byte("rival"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, b.commitPath, []byte(`{"poster_id":"RET-1"}`), 0o644))
+
+	b.discard()
+	_, tErr := fs.Stat(b.commitPath)
+	assert.NoError(t, tErr, "winner token retained while the rival's backup pends")
+	_, mErr := fs.Stat(b.markerPath)
+	assert.Error(t, mErr, "marker swept (its own op fully settled)")
+
+	// Rival settled: next discard sweeps the token too.
+	require.NoError(t, fs.Remove(filepath.Join(dir, "RET-1.jpg.rsbak.a9.c9")))
+	require.NoError(t, afero.WriteFile(fs, b.commitPath, []byte(`{"poster_id":"RET-1"}`), 0o644))
+	b.discard()
+	_, t2Err := fs.Stat(b.commitPath)
+	assert.Error(t, t2Err, "nothing pending ⇒ token swept at finalization")
+} // discard/restore on accessors without paths run the no-op guard arms.
 func TestRescrapePosterBackupEmptyPathGuards(t *testing.T) {
 	(&rescrapePosterBackup{fs: afero.NewMemMapFs()}).discard()
 	// markerPath set but both bak paths empty → the restore retention loop

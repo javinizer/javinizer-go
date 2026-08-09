@@ -399,7 +399,7 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 		// content-addressed marker to distinguish winner from stranded loser.
 		if scope.parked != nil && scope.parked.fs != nil && scope.parked.commitPath != "" &&
 			movieResult != nil && movieResult.Movie != nil && movieResult.Movie.ID != "" && lc.inputs.TempDir != "" {
-			if wErr := writeCommitToken(scope.parked.fs, scope.parked.commitPath, filepath.Join(lc.inputs.TempDir, "posters", lc.inputs.JobID.String()), movieResult.Movie.ID); wErr != nil {
+			if wErr := writeCommitToken(scope.parked.fs, scope.parked.commitPath, movieResult.Movie.ID, scope.genSHA); wErr != nil {
 				logging.Warnf("rescrape commit token write failed (backup retained for startup arbitration): %v", wErr)
 			}
 		}

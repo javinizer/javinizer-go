@@ -522,22 +522,23 @@ func TestWriteCommitTokenArms(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dir := "/tmp/posters/JW"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
-	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "W-1-full.jpg"), []byte("cf"), 0o644))
-	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "W-1.jpg"), []byte("cc"), 0o644))
+	shas := map[string]string{
+		"W-1-full.jpg": shaContentHex([]byte("cf")),
+		"W-1.jpg":      shaContentHex([]byte("cc")),
+	}
 	tok := filepath.Join(dir, ".commit-W-1.a1.b2")
-	require.NoError(t, writeCommitToken(base, tok, dir, "W-1"))
+	require.NoError(t, writeCommitToken(base, tok, "W-1", shas))
 	data, err := afero.ReadFile(base, tok)
 	require.NoError(t, err)
 	var meta commitMeta
 	require.NoError(t, json.Unmarshal(data, &meta))
 	assert.Equal(t, "W-1", meta.PosterID)
-	assert.Equal(t, shaContentHex([]byte("cf")), meta.FullSHA)
-	assert.Equal(t, shaContentHex([]byte("cc")), meta.CropSHA)
+	assert.Equal(t, shas["W-1-full.jpg"], meta.FullSHA)
+	assert.Equal(t, shas["W-1.jpg"], meta.CropSHA)
 
-	// ONLY the full leg exists → no crop SHA recorded
+	// Only the full leg fingerprinted → no crop SHA recorded
 	tok2 := filepath.Join(dir, ".commit-W-2.a1.b2")
-	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "W-2-full.jpg"), []byte("f2"), 0o644))
-	require.NoError(t, writeCommitToken(base, tok2, dir, "W-2"))
+	require.NoError(t, writeCommitToken(base, tok2, "W-2", map[string]string{"W-2-full.jpg": shaContentHex([]byte("f2"))}))
 	data2, _ := afero.ReadFile(base, tok2)
 	var meta2 commitMeta
 	_ = json.Unmarshal(data2, &meta2)
@@ -545,11 +546,11 @@ func TestWriteCommitTokenArms(t *testing.T) {
 	assert.Empty(t, meta2.CropSHA)
 
 	writeWedged := createWedgeFS{Fs: base, contains: ".tmp"}
-	err3 := writeCommitToken(writeWedged, filepath.Join(dir, ".commit-W-3.a1.b2"), dir, "W-1")
+	err3 := writeCommitToken(writeWedged, filepath.Join(dir, ".commit-W-3.a1.b2"), "W-1", shas)
 	require.ErrorContains(t, err3, "commit token write")
 
 	renameWedged := &seqRenameFailFS{Fs: base, failOn: map[int]bool{1: true}}
-	err4 := writeCommitToken(renameWedged, filepath.Join(dir, ".commit-W-4.a1.b2"), dir, "W-1")
+	err4 := writeCommitToken(renameWedged, filepath.Join(dir, ".commit-W-4.a1.b2"), "W-1", shas)
 	require.ErrorContains(t, err4, "commit token rename")
 }
 

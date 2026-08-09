@@ -1,8 +1,6 @@
 package worker
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -98,18 +96,18 @@ type commitMeta struct {
 }
 
 // writeCommitToken atomically records the op's commit + the canonical content
-// it installed (per-leg SHA read AFTER the commit). A write failure is
-// warn-only: the durable row stands; startup simply falls back to keeping the
-// backup instead of deleting it.
-func writeCommitToken(fs afero.Fs, commitPath, dir, id string) error {
+// it installed. SHAs come from the caller's under-key fingerprint capture
+// (codex cloud P1: re-reading canonical after the commit's key release races a
+// same-family op — the token must bind the bytes THIS op fingerprinted, not
+// whatever a competitor landed in the gap). A write failure is warn-only:
+// the durable row stands; startup simply keeps the backup instead of dropping.
+func writeCommitToken(fs afero.Fs, commitPath, id string, genSHA map[string]string) error {
 	meta := commitMeta{PosterID: id}
-	if data, err := afero.ReadFile(fs, filepath.Join(dir, id+"-full.jpg")); err == nil {
-		sum := sha256.Sum256(data)
-		meta.FullSHA = hex.EncodeToString(sum[:])
+	if sha, ok := genSHA[id+"-full.jpg"]; ok {
+		meta.FullSHA = sha
 	}
-	if data, err := afero.ReadFile(fs, filepath.Join(dir, id+".jpg")); err == nil {
-		sum := sha256.Sum256(data)
-		meta.CropSHA = hex.EncodeToString(sum[:])
+	if sha, ok := genSHA[id+".jpg"]; ok {
+		meta.CropSHA = sha
 	}
 	// static lap — Marshal of this struct cannot fail; no error arm needed.
 	payload, _ := json.Marshal(meta)
@@ -277,9 +275,35 @@ func (b *rescrapePosterBackup) discard() {
 	if b == nil || b.fs == nil {
 		return
 	}
-	for _, p := range []string{b.fullBak, b.cropBak, b.markerPath, b.commitPath} {
+	for _, p := range []string{b.fullBak, b.cropBak, b.markerPath} {
 		if p != "" {
 			_ = b.fs.Remove(p)
+		}
+	}
+	if b.commitPath != "" {
+		// codex cloud P1: the WINNER's token authenticates a competitor's
+		// stranded backup (its captured bytes CAN equal our committed canon);
+		// sweeping it early strands their arbitration with keep-both forever.
+		// Retain while any same-base .rsbak leg of ANOTHER op pends.
+		dir := filepath.Dir(b.commitPath)
+		baseID := strings.TrimSuffix(filepath.Base(b.crop), ".jpg")
+		keep := false
+		if entries, rerr := afero.ReadDir(b.fs, dir); rerr == nil {
+			for _, e := range entries {
+				name := e.Name()
+				if !isParkedBackupName(name) {
+					continue
+				}
+				cb := name[:strings.LastIndex(name, ".rsbak.")]
+				bb := strings.TrimSuffix(strings.TrimSuffix(cb, "-full.jpg"), ".jpg")
+				if strings.EqualFold(bb, baseID) && !strings.HasSuffix(name, "."+b.nonce) {
+					keep = true
+					break
+				}
+			}
+		}
+		if !keep {
+			_ = b.fs.Remove(b.commitPath)
 		}
 	}
 }
