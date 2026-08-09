@@ -100,6 +100,7 @@ func (c *RevertLogConfig) ToNFONameConfig(isMultiPart bool, partSuffix string, p
 	return nfo.NFONameConfig{
 		IsMultiPart: isMultiPart,
 		PartSuffix:  partSuffix,
+		PartNumber:  partNumber,
 	}
 }
 

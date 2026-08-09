@@ -2798,3 +2798,9 @@ func TestEngine_ValidateTags_MultipleElseRejected(t *testing.T) {
 	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes<ELSE>no</IF>"))
 	assert.Error(t, e.ValidateTags("<IF:SERIES>a<ELSE>b<ELSE>c</IF>"))
 }
+
+func TestEngine_ValidateTags_UnclosedIfRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<IF:ID>oops"))
+	assert.Error(t, e.ValidateTags("<IF:ID>yes<ELSE>no"))
+}

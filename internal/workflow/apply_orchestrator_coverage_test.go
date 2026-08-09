@@ -45,6 +45,7 @@ type stubNFOGen struct {
 	resolvedPath  string
 	err           error
 	lastVideoPath string
+	lastNameCfg   nfo.NFONameConfig
 }
 
 func (s *stubNFOGen) Generate(_ context.Context, _ *models.Movie, _, _, _ string, _ []string) error {
@@ -55,8 +56,9 @@ func (s *stubNFOGen) GenerateAtPath(_ context.Context, _ *models.Movie, _, _ str
 	return s.err
 }
 
-func (s *stubNFOGen) ResolveAndGenerate(_ context.Context, _ *models.Movie, _ string, _ nfo.NFONameConfig, videoPath string, _ []string) (string, error) {
+func (s *stubNFOGen) ResolveAndGenerate(_ context.Context, _ *models.Movie, _ string, nameCfg nfo.NFONameConfig, videoPath string, _ []string) (string, error) {
 	s.lastVideoPath = videoPath
+	s.lastNameCfg = nameCfg
 	return s.resolvedPath, s.err
 }
 
@@ -1117,4 +1119,31 @@ func TestApplyOrchImpl_Execute_PartialFailureReportsCompletedSteps(t *testing.T)
 	assert.True(t, result.Steps.DisplayTitle, "DisplayTitle should reflect the completed step")
 	assert.True(t, result.Steps.Downloaded, "Downloaded should be true — download succeeded before NFO failed")
 	assert.False(t, result.Steps.NFOGenerated, "NFOGenerated should be false — NFO generation failed")
+}
+
+func TestApplyOrchImpl_Execute_NFOGenerationThreadsMultipart(t *testing.T) {
+	nfoGen := &stubNFOGen{resolvedPath: "/dest/ABC-001.nfo"}
+	impl := &applyOrchImpl{
+		fs:     afero.NewMemMapFs(),
+		nfoGen: nfoGen,
+		nfo:    &applyStubNFO{},
+	}
+	match := models.FileMatchInfo{
+		Path:        "/src/ABC-001-cd1.mp4",
+		MovieID:     "ABC-001",
+		IsMultiPart: true,
+		PartNumber:  1,
+		PartSuffix:  "-cd1",
+	}
+	_, err := impl.Execute(context.Background(), ApplyCmd{
+		Movie:       &models.Movie{ID: "ABC-001", Title: "Test"},
+		Match:       match,
+		DestPath:    "/dest",
+		Organize:    OrganizeOptions{Skip: true},
+		GenerateNFO: true,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, nfoGen.lastNameCfg.PartNumber)
+	assert.Equal(t, "-cd1", nfoGen.lastNameCfg.PartSuffix)
+	assert.True(t, nfoGen.lastNameCfg.IsMultiPart)
 }

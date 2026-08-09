@@ -147,22 +147,22 @@ func TestGenerateAtPath_CanceledContextReturnsError(t *testing.T) {
 
 func TestMovieTemplateContext_ThreadsVideoFilePath(t *testing.T) {
 	g := NewGenerator(afero.NewMemMapFs(), &Config{FirstNameOrder: true})
-	ctx := g.movieTemplateContext(taglineTestMovie(), "/movies/IPX-535.mp4", "-pt1", 0, true)
+	ctx := g.movieTemplateContext(context.Background(), taglineTestMovie(), "/movies/IPX-535.mp4", "-pt1", 0, true)
 	assert.Equal(t, "/movies/IPX-535.mp4", ctx.VideoFilePath)
 	assert.Equal(t, "-pt1", ctx.PartSuffix)
 	assert.True(t, ctx.IsMultiPart)
 
-	ctxEmpty := g.movieTemplateContext(taglineTestMovie(), "", "", 0, false)
+	ctxEmpty := g.movieTemplateContext(context.Background(), taglineTestMovie(), "", "", 0, false)
 	assert.Equal(t, "", ctxEmpty.VideoFilePath)
 	assert.False(t, ctxEmpty.IsMultiPart)
 }
 
 func TestMergeTags_ConfigTagThreadsVideoFilePath(t *testing.T) {
 	g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"<RESOLUTION>"}, FirstNameOrder: true})
-	tmplCtx := g.movieTemplateContext(taglineTestMovie(), "/movies/IPX-535.mp4", "", 0, false)
+	tmplCtx := g.movieTemplateContext(context.Background(), taglineTestMovie(), "/movies/IPX-535.mp4", "", 0, false)
 	tags, err := g.mergeTags(context.Background(), tmplCtx, nil, nil)
 	assert.NoError(t, err)
-	_ = tags
+	assert.Empty(t, tags)
 }
 
 func TestMovieToNFO_ConfigTagWithUnknownTokenDropped(t *testing.T) {

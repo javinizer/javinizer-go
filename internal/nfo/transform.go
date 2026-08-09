@@ -62,7 +62,7 @@ func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movi
 	trailerURL := g.resolveTrailer(movie)
 	fi := g.resolveStreamDetails(ctx, videoFilePath)
 	originalPath := g.resolveOriginalPath(movie)
-	tmplCtx := g.movieTemplateContext(movie, videoFilePath, partSuffix, partNumber, isMultiPart)
+	tmplCtx := g.movieTemplateContext(ctx, movie, videoFilePath, partSuffix, partNumber, isMultiPart)
 	tagline, err := g.resolveTagline(ctx, tmplCtx)
 	if err != nil {
 		return nfoInput{}, err
@@ -203,8 +203,9 @@ func (g *Generator) resolveTagline(ctx context.Context, tmplCtx *template.Contex
 // (tagline, custom tags), threading the actress-rendering options so that
 // <ACTORS>/<ACTRESSES> resolve identically to folder/file/display-title
 // templates.
-func (g *Generator) movieTemplateContext(movie *models.Movie, videoFilePath, partSuffix string, partNumber int, isMultiPart bool) *template.Context {
+func (g *Generator) movieTemplateContext(applyCtx context.Context, movie *models.Movie, videoFilePath, partSuffix string, partNumber int, isMultiPart bool) *template.Context {
 	ctx := template.NewContextFromMovie(movie)
+	ctx.SetExecCtx(applyCtx)
 	ctx.VideoFilePath = videoFilePath
 	ctx.PartSuffix = partSuffix
 	ctx.PartNumber = partNumber

@@ -1284,9 +1284,10 @@ func TestApplyDisplayTitleFromSource_NilMovie(t *testing.T) {
 
 func TestRevertLogConfig_ToNFONameConfig_NilNFOCfg(t *testing.T) {
 	cfg := &RevertLogConfig{AllowRevert: true, NFOCfg: nil}
-	result := cfg.ToNFONameConfig(true, "-pt1", 0)
+	result := cfg.ToNFONameConfig(true, "-pt1", 2)
 	assert.True(t, result.IsMultiPart)
 	assert.Equal(t, "-pt1", result.PartSuffix)
+	assert.Equal(t, 2, result.PartNumber)
 }
 
 func TestRevertLogConfig_ToNFONameConfig_WithNFOCfg(t *testing.T) {

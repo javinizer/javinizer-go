@@ -226,7 +226,12 @@ func (g *Generator) Generate(ctx context.Context, movie *models.Movie, outputPat
 	filename += ".nfo"
 
 	fullPath := filepath.Join(outputPath, filename)
-	return g.generateAtPath(ctx, movie, fullPath, videoFilePath, partSuffix, 0, partSuffix != "" && g.config.PerFile, tags)
+	// Generate is the legacy write path and does not thread multipart metadata
+	// into the NFO content context (partSuffix is applied to the filename above).
+	// Use ResolveAndGenerate for multipart-aware taglines/tags (<PARTSUFFIX>,
+	// <PART>, <IF:MULTIPART>); Generate's content path mirrors pre-multipart
+	// behavior to avoid half-populated multipart state.
+	return g.generateAtPath(ctx, movie, fullPath, videoFilePath, "", 0, false, tags)
 }
 
 // GenerateAtPath creates an NFO file at the specified path without computing
@@ -269,7 +274,13 @@ func (g *Generator) ResolveAndGenerate(ctx context.Context, movie *models.Movie,
 	nfoFilename := ResolveNFOFilename(g.templateEngine, movie, nameCfg)
 	nfoPath := filepath.ToSlash(filepath.Join(destDir, nfoFilename))
 
-	if genErr := g.generateAtPath(ctx, movie, nfoPath, videoFilePath, nameCfg.PartSuffix, nameCfg.PartNumber, nameCfg.IsMultiPart, tags); genErr != nil {
+	contentPartSuffix := nameCfg.PartSuffix
+	contentPartNumber := nameCfg.PartNumber
+	if !nameCfg.PerFile {
+		contentPartSuffix = ""
+		contentPartNumber = 0
+	}
+	if genErr := g.generateAtPath(ctx, movie, nfoPath, videoFilePath, contentPartSuffix, contentPartNumber, nameCfg.IsMultiPart, tags); genErr != nil {
 		return "", genErr
 	}
 	return nfoPath, nil

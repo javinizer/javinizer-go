@@ -246,9 +246,6 @@ func (e *Engine) ExecuteWithContext(execCtx context.Context, template string, ct
 		return "", err
 	}
 
-	ctx.execCtx = execCtx
-	defer func() { ctx.execCtx = nil }()
-
 	result := template
 
 	// Step 1: Process conditional blocks first
@@ -462,6 +459,9 @@ func (e *Engine) validateConditionalNesting(template string) error {
 				return fmt.Errorf("unexpected </IF>")
 			}
 		}
+	}
+	if depth != 0 {
+		return fmt.Errorf("unclosed <IF> block")
 	}
 	return nil
 }

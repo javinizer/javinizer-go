@@ -239,6 +239,12 @@ func (c *Context) Clone() *Context {
 	return &clone
 }
 
+// SetExecCtx sets the execution context used for cancellable media analysis. It
+// must be called once at construction, before the Context is shared across
+// goroutines; ExecuteWithContext never mutates it, so concurrent rendering of a
+// shared Context remains race-free. Clone does not carry it over.
+func (c *Context) SetExecCtx(ctx context.Context) { c.execCtx = ctx }
+
 // getMediaInfo lazy-loads and caches video metadata.
 // Thread-safe: uses sync.Once to ensure single initialization even under concurrent access.
 // Preserves pre-existing cached values from Clone() to avoid duplicate expensive analysis.
