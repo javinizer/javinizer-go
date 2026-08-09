@@ -406,6 +406,9 @@ func (e *Engine) ValidateTags(template string) error {
 			}
 			continue
 		}
+		if tagName == "ELSE" {
+			continue
+		}
 		if !e.isKnownTag(tagName) {
 			return fmt.Errorf("unknown tag: %s", tagName)
 		}

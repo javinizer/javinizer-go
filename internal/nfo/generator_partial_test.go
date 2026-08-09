@@ -152,7 +152,7 @@ func TestMovieToNFO_DisplayTitleFallback_Partial(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "DT-001", Title: "Fallback Title", DisplayTitle: ""}
-	nfo, _ := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", false, nil)
 	assert.Equal(t, "Fallback Title", nfo.Title)
 }
 
@@ -163,7 +163,7 @@ func TestMovieToNFO_WithContentID_Partial(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "CID-001", ContentID: "cid001", DisplayTitle: "CID Test"}
-	nfo, _ := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", false, nil)
 	require.Len(t, nfo.UniqueID, 1)
 	assert.Equal(t, "contentid", nfo.UniqueID[0].Type)
 	assert.Equal(t, "cid001", nfo.UniqueID[0].Value)
@@ -177,7 +177,7 @@ func TestMovieToNFO_ReleaseDateNil_WithYear_Partial(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "YEAR-001", ReleaseYear: 2023, DisplayTitle: "Year Test"}
-	nfo, _ := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", false, nil)
 	assert.Equal(t, 2023, nfo.Year)
 	assert.Equal(t, "", nfo.ReleaseDate) // No full date available
 	assert.Equal(t, "", nfo.Premiered)   // No full date available
@@ -191,7 +191,7 @@ func TestMovieToNFO_WithReleaseDate_Partial(t *testing.T) {
 
 	rd := time.Date(2023, 6, 15, 0, 0, 0, 0, time.UTC)
 	movie := &models.Movie{ID: "RD-001", ReleaseDate: &rd, DisplayTitle: "RD Test"}
-	nfo, _ := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", false, nil)
 	assert.Equal(t, "2023-06-15", nfo.ReleaseDate)
 	assert.Equal(t, "2023-06-15", nfo.Premiered)
 	assert.Equal(t, 2023, nfo.Year)
@@ -204,7 +204,7 @@ func TestMovieToNFO_RuntimeZero_Partial(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "RT-001", Runtime: 0, DisplayTitle: "RT Test"}
-	nfo, _ := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", false, nil)
 	assert.Equal(t, 0, nfo.Runtime)
 }
 
@@ -215,7 +215,7 @@ func TestMovieToNFO_RuntimePositive_Partial(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "RT-002", Runtime: 120, DisplayTitle: "RT Test"}
-	nfo, _ := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", false, nil)
 	assert.Equal(t, 120, nfo.Runtime)
 }
 
@@ -226,7 +226,7 @@ func TestMovieToNFO_RatingPositive_Partial(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "RATE-001", RatingScore: 8.5, RatingVotes: 100, DisplayTitle: "Rate Test"}
-	nfo, _ := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", false, nil)
 	require.Len(t, nfo.Ratings.Rating, 1)
 	assert.Equal(t, 8.5, nfo.Ratings.Rating[0].Value)
 	assert.Equal(t, 100, nfo.Ratings.Rating[0].Votes)
@@ -242,7 +242,7 @@ func TestMovieToNFO_RatingZero_Partial(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "RATE-002", RatingScore: 0, DisplayTitle: "No Rate"}
-	nfo, _ := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", false, nil)
 	assert.Empty(t, nfo.Ratings.Rating)
 }
 
@@ -665,7 +665,7 @@ func TestMovieToNFO_Tagline_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, Tagline: "Best movie ever"}
 	g := NewGenerator(fs, cfg)
 
-	nfo, _ := g.movieToNFO(context.Background(), &models.Movie{ID: "TL-001", DisplayTitle: "Test"}, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), &models.Movie{ID: "TL-001", DisplayTitle: "Test"}, "", "", false, nil)
 	assert.Equal(t, "Best movie ever", nfo.Tagline)
 }
 
@@ -675,7 +675,7 @@ func TestMovieToNFO_TaglineEmpty_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, Tagline: ""}
 	g := NewGenerator(fs, cfg)
 
-	nfo, _ := g.movieToNFO(context.Background(), &models.Movie{ID: "TL-002", DisplayTitle: "Test"}, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), &models.Movie{ID: "TL-002", DisplayTitle: "Test"}, "", "", false, nil)
 	assert.Equal(t, "", nfo.Tagline)
 }
 
@@ -685,7 +685,7 @@ func TestMovieToNFO_Credits_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, Credits: []string{"Writer A", "Writer B"}}
 	g := NewGenerator(fs, cfg)
 
-	nfo, _ := g.movieToNFO(context.Background(), &models.Movie{ID: "CR-001", DisplayTitle: "Test"}, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), &models.Movie{ID: "CR-001", DisplayTitle: "Test"}, "", "", false, nil)
 	assert.Equal(t, "Writer A, Writer B", nfo.Credits)
 }
 
@@ -695,7 +695,7 @@ func TestMovieToNFO_NoCredits_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, Credits: nil}
 	g := NewGenerator(fs, cfg)
 
-	nfo, _ := g.movieToNFO(context.Background(), &models.Movie{ID: "CR-002", DisplayTitle: "Test"}, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), &models.Movie{ID: "CR-002", DisplayTitle: "Test"}, "", "", false, nil)
 	assert.Equal(t, "", nfo.Credits)
 }
 

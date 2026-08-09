@@ -2759,3 +2759,8 @@ func TestEngine_ValidateTags_MisspelledConditional(t *testing.T) {
 	assert.NoError(t, e.ValidateTags("<IF:YEAR><YEAR></IF>"))
 	assert.Error(t, e.ValidateTags("<IF:TITEL>Featured<ELSE>Other</IF>"))
 }
+
+func TestEngine_ValidateTags_ElseKeywordExempted(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:SERIES><SERIES><ELSE>Standalone</IF>"))
+}
