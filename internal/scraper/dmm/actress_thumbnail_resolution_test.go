@@ -76,3 +76,19 @@ func TestActressImageProbeDoesNotFollowRedirects(t *testing.T) {
 	require.False(t, actressImageExists(context.Background(), client, server.URL+"/redirect"))
 	require.Zero(t, imageRequests.Load())
 }
+func TestStreamingAncestorThumbRequiresPortraitPath(t *testing.T) {
+	// Codex: an ancestor containing the single actress link plus the product
+	// jacket must not donate the jacket as the actress thumbnail.
+	jacket := docFromHTMLDMM(t, `<html><body><div>
+		<img src="https://pics.dmm.co.jp/mono/movie/adult/ab123/ab123pl.jpg">
+		<a href="/av/list/?actress=42">Exact without image</a>
+	</div></body></html>`)
+	require.Empty(t, extractExactActressThumbFromStreamingDoc(jacket, 42))
+
+	// ...while a true portrait path in the same ancestor is still accepted.
+	portrait := docFromHTMLDMM(t, `<html><body><div>
+		<img src="https://pics.dmm.co.jp/mono/actjpgs/exact.jpg">
+		<a href="/av/list/?actress=42">Exact without image</a>
+	</div></body></html>`)
+	require.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/exact.jpg", extractExactActressThumbFromStreamingDoc(portrait, 42))
+}

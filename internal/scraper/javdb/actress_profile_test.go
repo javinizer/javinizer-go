@@ -55,6 +55,9 @@ func TestResolveActressMetadataFromActorProfile(t *testing.T) {
 	profileURL := "https://javdb.test/actors/ZX?locale=en"
 	client := resty.New()
 	client.SetTransport(&staticRoundTripper{responses: map[string]string{
+		// Codex: with a Japanese name present, the avatar-derived ID is
+		// trusted only after the exact-name search confirms the same actor.
+		"https://javdb.test/actors?locale=en&search=%E5%AE%89%E5%80%8D%E4%BA%9C%E6%B2%99%E7%BE%8E": `<a href="/actors/ZX" title="安倍亜沙美"><img class="avatar"></a>`,
 		profileURL: `<html><body><h1 class="title is-4">安倍亜沙美</h1><img src="https://c0.jdbstatic.com/avatars/zx/ZX.jpg"></body></html>`,
 	}})
 	scraper := &scraper{
@@ -70,4 +73,32 @@ func TestResolveActressMetadataFromActorProfile(t *testing.T) {
 	})
 	require.NoError(t, gotErr)
 	require.Equal(t, models.ActressInfo{DMMID: 19244, JapaneseName: "安倍亜沙美", ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"}, got)
+}
+
+// Codex: an avatar-derived actor ID must be confirmed by the exact-name
+// search — a stale or misassigned avatar must not fetch another actor's
+// profile into this record.
+func TestResolveActressMetadataDistrustsMismatchedAvatar(t *testing.T) {
+	search := "https://javdb.test/actors?locale=en&search=%E5%AE%89%E5%80%8D%E4%BA%9C%E6%B2%99%E7%BE%8E"
+
+	client := resty.New()
+	client.SetTransport(&staticRoundTripper{responses: map[string]string{
+		search:                                   `<a href="/actors/AB" title="安倍亜沙美"></a>`,
+		"https://javdb.test/actors/AB?locale=en": `<html><body><h1 class="title is-4">安倍亜沙美</h1><img src="https://c0.jdbstatic.com/avatars/ab/AB.jpg"></body></html>`,
+	}})
+	s := &scraper{client: client, enabled: true, baseURL: "https://javdb.test", rateLimiter: ratelimit.NewLimiter(0), settings: models.ScraperSettings{Enabled: true}}
+	got, err := s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 19244, JapaneseName: "安倍亜沙美", ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"})
+	require.NoError(t, err)
+	require.Equal(t, models.ActressInfo{DMMID: 19244, JapaneseName: "安倍亜沙美", ThumbURL: "https://c0.jdbstatic.com/avatars/ab/AB.jpg"}, got,
+		"must follow the name-confirmed actor, not the avatar")
+
+	// When the name resolves nowhere, the avatar ID is not trusted at all.
+	client2 := resty.New()
+	client2.SetTransport(&staticRoundTripper{responses: map[string]string{
+		search: `<a href="/actors/NO" title="誰か"></a>`,
+	}})
+	s2 := &scraper{client: client2, enabled: true, baseURL: "https://javdb.test", rateLimiter: ratelimit.NewLimiter(0), settings: models.ScraperSettings{Enabled: true}}
+	got2, err2 := s2.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 19244, JapaneseName: "安倍亜沙美", ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"})
+	require.NoError(t, err2)
+	require.Equal(t, models.ActressInfo{DMMID: 19244}, got2, "unconfirmed avatar must not be trusted")
 }

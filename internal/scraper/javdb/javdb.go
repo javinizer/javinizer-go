@@ -271,11 +271,18 @@ func (s *scraper) ResolveActressMetadata(ctx context.Context, actress models.Act
 	}
 
 	actorID := javdbActorIDFromAvatarURL(actress.ThumbURL)
-	if actorID == "" {
-		var findErr error
-		actorID, findErr = s.findActorID(ctx, actress.JapaneseName)
+	if scraperutil.CleanString(actress.JapaneseName) != "" {
+		// The exact-name search is authoritative for identity. An avatar URL
+		// can be stale, manually entered, or previously misassigned, so an
+		// avatar-derived ID is trusted only when the name search confirms the
+		// same actor (codex) — otherwise resolve from the name alone rather
+		// than fetch another actor's profile into this record.
+		nameID, findErr := s.findActorID(ctx, actress.JapaneseName)
 		if findErr != nil {
 			return metadata, findErr
+		}
+		if actorID == "" || nameID != actorID {
+			actorID = nameID
 		}
 	}
 	if actorID == "" {

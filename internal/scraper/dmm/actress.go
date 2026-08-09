@@ -473,8 +473,14 @@ func extractExactActressThumbFromStreamingDoc(doc *goquery.Document, dmmID int) 
 				break
 			}
 			if candidate := extractActressThumbURLWithin(root); candidate != "" {
-				thumbnail = candidate
-				return false
+				if depth == 0 || strings.Contains(candidate, "/mono/actjpgs/") {
+					thumbnail = candidate
+					return false
+				}
+				// An ancestor can pair the single actress link with an
+				// unrelated DMM-hosted image (e.g. the product jacket).
+				// Only portrait-pathed images are accepted above the link
+				// itself (codex); keep climbing otherwise.
 			}
 			root = root.Parent()
 		}

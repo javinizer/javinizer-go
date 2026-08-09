@@ -74,7 +74,9 @@ func TestResolveActressMetadataCoversFailureAndFallbackPaths(t *testing.T) {
 
 	parseActressProfileHTML = oldParser
 	fallback := actorTestScraper(&staticRoundTripper{responses: map[string]string{
-		"https://javdb.test/actors/ZX?locale=en": `<html><body><img src="https://c0.jdbstatic.com/avatars/zx/ZX.jpg"></body></html>`,
+		// Avatar-derived ZX must be confirmed by the exact-name search (codex).
+		"https://javdb.test/actors?locale=en&search=%E5%AE%89%E5%80%8D%E4%BA%9C%E6%B2%99%E7%BE%8E": `<a href="/actors/ZX" title="安倍亜沙美"></a>`,
+		"https://javdb.test/actors/ZX?locale=en":                                                   `<html><body><img src="https://c0.jdbstatic.com/avatars/zx/ZX.jpg"></body></html>`,
 	}})
 	got, fallbackErr := fallback.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 7, JapaneseName: " 安倍亜沙美 ", ThumbURL: "https://c0.jdbstatic.com/avatars/zx/ZX.jpg"})
 	require.NoError(t, fallbackErr)
