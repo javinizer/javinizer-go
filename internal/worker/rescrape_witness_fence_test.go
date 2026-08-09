@@ -1063,6 +1063,44 @@ func (panicPosterGen) GeneratePoster(_ context.Context, _ string, _ *models.Movi
 
 // --- guard/backup matrix for poster_cleanup.go + predicate edges ---
 
+type createWedgeFS struct {
+	afero.Fs
+	contains string
+}
+
+func (f createWedgeFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if flag&os.O_CREATE != 0 && strings.Contains(name, f.contains) {
+		return nil, errors.New("create wedged")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+type mkdirWedgeFS struct{ afero.Fs }
+
+func (mkdirWedgeFS) MkdirAll(string, os.FileMode) error { return errors.New("mkdirall wedged") }
+
+// codex cloud P2: an un-writable in-flight sentinel must refuse generation —
+// otherwise crop/download admission sees neither marker nor parked leg
+// between key release and CAS commit.
+func TestParkCanonicalPosterPairMarkerWriteFailRefusesGeneration(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/tmp/posters/JM", 0o755))
+	fs := createWedgeFS{Fs: base, contains: ".inflight-"}
+	b := parkCanonicalPosterPair(fs, "/tmp/posters/JM", "MK-1")
+	assert.Empty(t, b.markerPath)
+	require.Error(t, b.parkErr, "marker write failure aborts generation")
+	assert.Contains(t, b.parkErr.Error(), "in-flight marker write")
+}
+
+// codex cloud P2 companion: when the poster dir itself cannot be created no
+// sentinel and no park are possible — refuse rather than run unfenced.
+func TestParkCanonicalPosterPairMkdirFailRefusesGeneration(t *testing.T) {
+	b := parkCanonicalPosterPair(mkdirWedgeFS{Fs: afero.NewMemMapFs()}, "/tmp/posters/JMD", "MK-2")
+	require.Error(t, b.parkErr)
+	assert.Contains(t, b.parkErr.Error(), "poster backup dir")
+	assert.Empty(t, b.markerPath)
+}
+
 func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	// nil fs / empty dir+id: no-ops, restore/discard safe
 	bNil := parkCanonicalPosterPair(nil, "/x", "A-1")

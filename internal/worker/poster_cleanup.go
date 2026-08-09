@@ -96,13 +96,21 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup 
 	// audit F-R20-1: the dir CAN be absent on a job where no download ran yet —
 	// creating it is matching DownloadFromURL's own first-step invariant.
 	if dErr := b.fs.MkdirAll(dir, 0o755); dErr != nil {
-		logging.Warnf("in-flight marker dir %s: %v", dir, dErr)
+		// codex cloud P2: without the dir no sentinel and no park is possible —
+		// generation must not proceed unfenced (and legs, if any, unbacked).
+		logging.Warnf("in-flight marker dir %s: %v — refusing generation", dir, dErr)
+		b.parkErr = fmt.Errorf("poster backup dir %s: %w", dir, dErr)
 		return b
 	}
 	b.markerPath = filepath.Join(dir, ".inflight-"+url.PathEscape(id)+"."+nonce)
 	if mErr := afero.WriteFile(b.fs, b.markerPath, nil, 0o644); mErr != nil {
-		logging.Warnf("in-flight marker write %s: %v", b.markerPath, mErr)
+		// codex cloud P2: an UNWRITABLE sentinel means generation would run
+		// unfenced — crop/download admission would see neither marker nor a
+		// parked leg between key release and CAS commit. Refuse like any
+		// failed park.
+		logging.Warnf("in-flight marker write %s: %v — refusing generation", b.markerPath, mErr)
 		b.markerPath = ""
+		b.parkErr = fmt.Errorf("in-flight marker write %s: %w", b.markerPath, mErr)
 	}
 	legs := []struct {
 		path string
