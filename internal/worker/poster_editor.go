@@ -1417,6 +1417,28 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 				return &EditAdmissionConflictError{Message: fmt.Sprintf("result %s revision stale: expected %d, found %d", rid, expected, cur.Revision)}
 			}
 		}
+		// codex cloud P1: membership drift — CAS covers only the result IDs the
+		// caller listed. A concurrent rescrape can JOIN another result into this
+		// family after the client's snapshot; the commit would then overwrite a
+		// movie the client never saw. When any revision context was supplied,
+		// every current member must be accounted for (guarded set = target ∪
+		// map keys); callers without revision context keep documented LWW.
+		if opts.ExpectedResultRevision != nil || len(opts.ExpectedResultRevisions) > 0 {
+			guardSet := make(map[string]struct{}, len(opts.ExpectedResultRevisions)+1)
+			guardSet[resultID] = struct{}{}
+			for rid := range opts.ExpectedResultRevisions {
+				guardSet[rid] = struct{}{}
+			}
+			for _, fp := range m.pe.lookup.FindFilePathsForMovieID(strings.TrimSpace(movieID)) {
+				cur, gerr := m.pe.lookup.GetMovieResult(fp)
+				if gerr != nil || cur == nil || cur.ResultID == "" {
+					continue // unreadable or ID-less: not committable membership evidence
+				}
+				if _, ok := guardSet[cur.ResultID]; !ok {
+					return &EditAdmissionConflictError{Message: fmt.Sprintf("result set of family %s changed during save (unexpected member %s); retry", movieID, cur.ResultID)}
+				}
+			}
+		}
 		if opts.CarryCropGeometry && movie != nil && movie.Poster.PosterCropBounds == nil {
 			// Revalidate the omitted-bounds carry INSIDE the locked section
 			// (R29/D1): read the CURRENT stored geometry from the target

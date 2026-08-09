@@ -280,6 +280,106 @@ func TestUpdateMovieFamilyRejectsMovedFamilyInKey(t *testing.T) {
 	assert.NotEqual(t, "moved", cur.Movie.Title, "payload never committed to the old family's row")
 }
 
+// familyGrowLookup simulates a concurrent rescrape joining a new result into
+// the family between the client's snapshot and the keyed save.
+type familyGrowLookup struct {
+	resultstore.ResultReadFacade
+	extraPath   string
+	extraResult *resultstore.MovieResult
+}
+
+func (l *familyGrowLookup) FindFilePathsForMovieID(id string) []string {
+	return append(l.ResultReadFacade.FindFilePathsForMovieID(id), l.extraPath)
+}
+
+func (l *familyGrowLookup) GetMovieResult(fp string) (*resultstore.MovieResult, error) {
+	if fp == l.extraPath {
+		return l.extraResult, nil
+	}
+	return l.ResultReadFacade.GetMovieResult(fp)
+}
+
+// codex cloud P1: with revision context supplied, a member that joined the
+// family after the snapshot must conflict — the commit would otherwise
+// overwrite a movie the client never saw.
+func TestUpdateMovieFamilyConflictsWhenFamilyGrows(t *testing.T) {
+	base := flipStore(t)
+	cur, _, ok := base.GetFileResultByResultID("res-flip")
+	require.True(t, ok)
+	rev := cur.Revision
+	lk := &familyGrowLookup{
+		ResultReadFacade: base,
+		extraPath:        "/f/ghost.mp4",
+		extraResult:      &resultstore.MovieResult{ResultID: "res-ghost", Revision: 9, Movie: &models.Movie{ID: "PING-1"}},
+	}
+	pe := NewPosterEditor(lk, base, nil)
+	pe.attachEnv(&posterEditEnv{fs: afero.NewMemMapFs(), tempDir: "/tmp", jobID: "JOB-GW"})
+	err := pe.UpdateMovieFamily(context.Background(), "PING-1", "res-flip", &models.Movie{ID: "PING-1", Title: "save"}, FamilySaveOptions{ExpectedResultRevision: &rev})
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+	assert.Contains(t, err.Error(), "result set of family")
+	got, gerr := base.GetMovieResult("/f/a.mp4")
+	require.NoError(t, gerr)
+	assert.NotEqual(t, "save", got.Movie.Title, "old family's row untouched")
+}
+
+// codex cloud P1 multipart: the map path ingests every guarded ID and joins
+// the target — a grown member conflicts identically to the scalar form.
+func TestUpdateMovieFamilyMultipartMapConflictsOnGrownFamily(t *testing.T) {
+	base := flipStore(t)
+	cur, _, ok := base.GetFileResultByResultID("res-flip")
+	require.True(t, ok)
+	lk := &familyGrowLookup{
+		ResultReadFacade: base,
+		extraPath:        "/f/ghost.mp4",
+		extraResult:      &resultstore.MovieResult{ResultID: "res-ghost", Revision: 9, Movie: &models.Movie{ID: "PING-1"}},
+	}
+	pe := NewPosterEditor(lk, base, nil)
+	pe.attachEnv(&posterEditEnv{fs: afero.NewMemMapFs(), tempDir: "/tmp", jobID: "JOB-GM"})
+	err := pe.UpdateMovieFamily(context.Background(), "PING-1", "res-flip", &models.Movie{ID: "PING-1", Title: "save"}, FamilySaveOptions{ExpectedResultRevisions: map[string]uint64{"res-flip": cur.Revision}})
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+	assert.Contains(t, err.Error(), "result set of family")
+}
+
+// codex cloud P1 control: ID-less family rows are not membership evidence —
+// the drift check skips them and the guarded save proceeds.
+func TestUpdateMovieFamilyMembershipSkipsIDlessRows(t *testing.T) {
+	base := flipStore(t)
+	cur, _, ok := base.GetFileResultByResultID("res-flip")
+	require.True(t, ok)
+	rev := cur.Revision
+	lk := &familyGrowLookup{
+		ResultReadFacade: base,
+		extraPath:        "/f/idlest.mp4",
+		extraResult:      &resultstore.MovieResult{},
+	}
+	pe := NewPosterEditor(lk, base, nil)
+	pe.attachEnv(&posterEditEnv{fs: afero.NewMemMapFs(), tempDir: "/tmp", jobID: "JOB-IDL"})
+	err := pe.UpdateMovieFamily(context.Background(), "PING-1", "res-flip", &models.Movie{ID: "PING-1", Title: "save"}, FamilySaveOptions{ExpectedResultRevision: &rev})
+	require.NoError(t, err)
+	got, gerr := base.GetMovieResult("/f/a.mp4")
+	require.NoError(t, gerr)
+	assert.Equal(t, "save", got.Movie.Title, "guarded save committed")
+}
+
+// codex cloud P1 contract: without revision context the membership guard is
+// off — legacy callers keep documented LWW even when the family drifted.
+func TestUpdateMovieFamilyNoCASAllowsMembershipDrift(t *testing.T) {
+	base := resultstore.New(2, []string{"/f/a.mp4", "/f/b.mp4"})
+	seedFamilyResult(base, "/f/a.mp4", "res-flip", "PING-1", "")
+	seedFamilyResult(base, "/f/b.mp4", "res-ghost", "PING-1", "") // a second member — drift the snapshot would not know
+	pe := newEditorForStore(base)
+	pe.attachEnv(&posterEditEnv{fs: afero.NewMemMapFs(), tempDir: "/tmp", jobID: "JOB-LWW"})
+	err := pe.UpdateMovieFamily(context.Background(), "PING-1", "res-flip", &models.Movie{ID: "PING-1", Title: "save"}, FamilySaveOptions{})
+	require.NoError(t, err, "no revision context → documented LWW, no drift conflict")
+	got, gerr := base.GetMovieResult("/f/b.mp4")
+	require.NoError(t, gerr)
+	assert.Equal(t, "save", got.Movie.Title, "LWW applies family-wide without CAS")
+}
+
 // famIDClearedLookup strips FileMatchInfo.MovieID on a single result ID so
 // the echo-capture fallback arm is observable — post-commit results normally
 // carry a normalized MovieID, making the fallback defensive.
