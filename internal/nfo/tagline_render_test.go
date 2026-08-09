@@ -144,3 +144,19 @@ func TestGenerateAtPath_CanceledContextReturnsError(t *testing.T) {
 	err := g.GenerateAtPath(ctx, taglineTestMovie(), "/out/test.nfo", "", nil)
 	assert.Error(t, err)
 }
+
+func TestMovieTemplateContext_ThreadsVideoFilePath(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{FirstNameOrder: true})
+	ctx := g.movieTemplateContext(taglineTestMovie(), "/movies/IPX-535.mp4")
+	assert.Equal(t, "/movies/IPX-535.mp4", ctx.VideoFilePath)
+
+	ctxEmpty := g.movieTemplateContext(taglineTestMovie(), "")
+	assert.Equal(t, "", ctxEmpty.VideoFilePath)
+}
+
+func TestMergeTags_ConfigTagThreadsVideoFilePath(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"<RESOLUTION>"}, FirstNameOrder: true})
+	tags, err := g.mergeTags(context.Background(), taglineTestMovie(), "/movies/IPX-535.mp4", nil, nil)
+	assert.NoError(t, err)
+	_ = tags
+}

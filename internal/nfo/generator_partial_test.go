@@ -516,7 +516,7 @@ func TestMergeTags_ActressAsTag_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, ActressAsTag: true}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, []actor{{Name: "Actress A"}}, nil)
+	tags, _ := g.mergeTags(context.Background(), nil, "", []actor{{Name: "Actress A"}}, nil)
 	assert.Contains(t, tags, "Actress A")
 }
 
@@ -531,7 +531,7 @@ func TestMergeTags_ActressAsTag_SkipsUnknown_Partial(t *testing.T) {
 	}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, []actor{
+	tags, _ := g.mergeTags(context.Background(), nil, "", []actor{
 		{Name: "Unknown"},
 		{Name: "Actress B"},
 	}, nil)
@@ -550,7 +550,7 @@ func TestMergeTags_ActressAsTag_FallbackMode_Partial(t *testing.T) {
 	}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, []actor{{Name: "Unknown"}}, nil)
+	tags, _ := g.mergeTags(context.Background(), nil, "", []actor{{Name: "Unknown"}}, nil)
 	assert.Contains(t, tags, "Unknown")
 }
 
@@ -560,7 +560,7 @@ func TestMergeTags_ActressAsTag_SkipsEmpty_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, ActressAsTag: true}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, []actor{{Name: ""}}, nil)
+	tags, _ := g.mergeTags(context.Background(), nil, "", []actor{{Name: ""}}, nil)
 	assert.NotContains(t, tags, "")
 }
 
@@ -570,7 +570,7 @@ func TestMergeTags_ActressDedup_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, ActressAsTag: true}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, []actor{{Name: "Actress A"}}, []string{"Actress A"})
+	tags, _ := g.mergeTags(context.Background(), nil, "", []actor{{Name: "Actress A"}}, []string{"Actress A"})
 	// Should not duplicate
 	count := 0
 	for _, tag := range tags {
@@ -587,7 +587,7 @@ func TestMergeTags_CallerTags_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, nil, []string{"Tag1", "Tag2"})
+	tags, _ := g.mergeTags(context.Background(), nil, "", nil, []string{"Tag1", "Tag2"})
 	assert.Contains(t, tags, "Tag1")
 	assert.Contains(t, tags, "Tag2")
 }
@@ -598,7 +598,7 @@ func TestMergeTags_SkipsEmpty_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, nil, []string{"", "Tag1", ""})
+	tags, _ := g.mergeTags(context.Background(), nil, "", nil, []string{"", "Tag1", ""})
 	assert.NotContains(t, tags, "")
 	assert.Contains(t, tags, "Tag1")
 }
@@ -609,7 +609,7 @@ func TestMergeTags_CallerTagDedup_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, nil, []string{"Tag1", "Tag1"})
+	tags, _ := g.mergeTags(context.Background(), nil, "", nil, []string{"Tag1", "Tag1"})
 	count := 0
 	for _, tag := range tags {
 		if tag == "Tag1" {
@@ -625,7 +625,7 @@ func TestMergeTags_ConfigTags_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, Tag: []string{"ConfigTag1", "ConfigTag2"}}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, nil, nil)
+	tags, _ := g.mergeTags(context.Background(), nil, "", nil, nil)
 	assert.Contains(t, tags, "ConfigTag1")
 	assert.Contains(t, tags, "ConfigTag2")
 }
@@ -636,7 +636,7 @@ func TestMergeTags_ConfigTags_SkipsEmpty_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, Tag: []string{"", "ConfigTag1"}}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, nil, nil)
+	tags, _ := g.mergeTags(context.Background(), nil, "", nil, nil)
 	assert.NotContains(t, tags, "")
 	assert.Contains(t, tags, "ConfigTag1")
 }
@@ -647,7 +647,7 @@ func TestMergeTags_ConfigTags_Dedup_Partial(t *testing.T) {
 	cfg := &Config{FirstNameOrder: true, Tag: []string{"ExistingTag"}}
 	g := NewGenerator(fs, cfg)
 
-	tags, _ := g.mergeTags(context.Background(), nil, nil, []string{"ExistingTag"})
+	tags, _ := g.mergeTags(context.Background(), nil, "", nil, []string{"ExistingTag"})
 	count := 0
 	for _, tag := range tags {
 		if tag == "ExistingTag" {
