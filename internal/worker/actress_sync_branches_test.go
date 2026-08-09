@@ -255,3 +255,26 @@ func TestMissingScopeCacheCompetesWithGlobalPriorityFallback(t *testing.T) {
 	require.Equal(t, "JavdbFirst", got.FirstName, "javdb outranks the dmm cache via global priority")
 	require.Equal(t, "CacheLast", got.LastName, "cache backstops fields javdb leaves blank")
 }
+
+// Codex: a cache snapshot equal to the stored record must not count as
+// revalidation evidence — with every live resolver failing, the sync must
+// not report verified_no_changes.
+func TestRevalidationCacheIsNotVerificationEvidence(t *testing.T) {
+	_, repo, movies, actress := newActressSyncFixture(t, &models.Actress{
+		DMMID: 5590, JapaneseName: "涼子", FirstName: "Ryoko", LastName: "Suzuki",
+		ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/ryoko.jpg",
+	})
+	lookup := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		if dmmID == 5590 {
+			return models.ActressInfo{DMMID: 5590, JapaneseName: "涼子", FirstName: "Ryoko", LastName: "Suzuki", ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/ryoko.jpg"}, true
+		}
+		return models.ActressInfo{}, false
+	}
+	down := &namedMetadataResolver{actressSyncScraper: actressSyncScraper{name: "dmm"}, err: errors.New("upstream outage")}
+	on := true
+	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movies, &fixedScraperSet{enabled: []models.Scraper{down}},
+		ActressSyncOptions{ScrapeActress: &on, LookupCache: lookup, Revalidate: true})
+	require.NoError(t, err)
+	require.NotContains(t, result.Messages, "verified_no_changes",
+		"cache snapshot equality is not revalidation evidence")
+}

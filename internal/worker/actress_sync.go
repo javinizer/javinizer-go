@@ -148,6 +148,11 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	appendMatch := func(info models.ActressInfo, source string) {
 		matches = append(matches, rankedActressMatch{info: info, rank: thumbnailRank(source)})
 	}
+	// Cache-originated matches ride DMM's rank in field selection while being
+	// excluded from revalidation evidence (see rankedActressMatch.fromCache).
+	appendCacheMatch := func(info models.ActressInfo) {
+		matches = append(matches, rankedActressMatch{info: info, rank: thumbnailRank(resolverNameDMM), fromCache: true})
+	}
 	cachedSource := *actress
 	cacheMatch, cacheHit := lookupActressCache(actress, lookupCache)
 	mergeCachedDuplicate := func(existing *models.Actress) (bool, error) {
@@ -273,7 +278,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			// a dmm-ranked match so resolveActressInfo ranks it — it still
 			// backstops every field higher-ranked sources leave blank.
 			if len(actressInfoFields(cacheMatch)) > 0 {
-				appendMatch(cacheMatch, resolverNameDMM)
+				appendCacheMatch(cacheMatch)
 			}
 		}
 	}
@@ -443,7 +448,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		// DMM-ranked source of fields; never suppress it — register its fields
 		// like any dmm-named source so resolveActressInfoByRank sees them.
 		if len(actressInfoFields(cacheMatch)) > 0 {
-			appendMatch(cacheMatch, resolverNameDMM)
+			appendCacheMatch(cacheMatch)
 		}
 	}
 	if needsLinkedActressFallback(actress, matches, deterministic) {
@@ -1144,6 +1149,11 @@ func linkedActressMovies(ctx context.Context, repo *database.MovieRepository, ac
 type rankedActressMatch struct {
 	info models.ActressInfo
 	rank int
+	// fromCache marks snapshot data from the built-in DMM actress cache: it
+	// competes in ranked field selection but must never count as
+	// verification evidence — a static snapshot is not fresh upstream
+	// confirmation (codex).
+	fromCache bool
 }
 
 // resolveActressInfo ...
@@ -1333,7 +1343,7 @@ func actressMetadataVerified(actress *models.Actress, matches []rankedActressMat
 		return false
 	}
 	for _, match := range matches {
-		if match.info.DMMID != actress.DMMID {
+		if match.fromCache || match.info.DMMID != actress.DMMID {
 			continue
 		}
 		if strings.TrimSpace(match.info.JapaneseName) != "" && strings.TrimSpace(match.info.JapaneseName) == strings.TrimSpace(actress.JapaneseName) {
