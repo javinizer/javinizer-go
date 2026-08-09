@@ -275,10 +275,8 @@ func (b *rescrapePosterBackup) discard() {
 	if b == nil || b.fs == nil {
 		return
 	}
-	// codex cloud P2: sweep the marker+token only AFTER every owned backup
-	// leg is confirmed absent — a wedged backup removal with swept records
-	// strands the byte's provenance forever (startup would keep the leg
-	// permanently + fence the family).
+	// codex cloud P2: sweep owned backup legs first; a wedged removal keeps
+	// everything else (marker + token) as that leg's provenance chain.
 	ownedClean := true
 	for _, p := range []string{b.fullBak, b.cropBak} {
 		if p == "" {
@@ -292,40 +290,41 @@ func (b *rescrapePosterBackup) discard() {
 	if !ownedClean {
 		return
 	}
-	if b.markerPath != "" {
-		_ = b.fs.Remove(b.markerPath)
+	if b.commitPath == "" {
+		// no commit-token state: the marker always sweeps when legs settled.
+		if b.markerPath != "" {
+			_ = b.fs.Remove(b.markerPath)
+		}
+		return
 	}
-	if b.commitPath != "" {
-		// codex cloud P1: the WINNER's token authenticates a competitor's
-		// stranded backup (its captured bytes CAN equal our committed canon);
-		// sweeping it early strands their arbitration with keep-both forever.
-		// Retain while any same-base .rsbak leg of ANOTHER op pends.
-		dir := filepath.Dir(b.commitPath)
-		baseID := strings.TrimSuffix(filepath.Base(b.crop), ".jpg")
-		keep := false
-		if entries, rerr := afero.ReadDir(b.fs, dir); rerr != nil {
-			// codex cloud P2 (@306): an UNDECIDABLE rival scan must keep the
-			// token — sweeping on an unreadable ledger would orphan the rival's
-			// backup attribution permanently.
-			logging.Warnf("rival backup scan %s unreadable (%v) — commit token retained", dir, rerr)
-			keep = true
-		} else {
-			for _, e := range entries {
-				name := e.Name()
-				if !isParkedBackupName(name) {
-					continue
-				}
-				cb := name[:strings.LastIndex(name, ".rsbak.")]
-				bb := strings.TrimSuffix(strings.TrimSuffix(cb, "-full.jpg"), ".jpg")
-				if strings.EqualFold(bb, baseID) && !strings.HasSuffix(name, "."+b.nonce) {
-					keep = true
-					break
-				}
+	// codex cloud P1: retention is FUSED — the token alone names nothing once my
+	// vetting binds it to this sentinel's baseline, so marker and token sweep
+	// (or persist) together. Rival pending legs or an unreadable dir keep both.
+	dir := filepath.Dir(b.commitPath)
+	baseID := strings.TrimSuffix(filepath.Base(b.crop), ".jpg")
+	keep := false
+	if entries, rerr := afero.ReadDir(b.fs, dir); rerr != nil {
+		logging.Warnf("rival backup scan %s unreadable (%v) — commit token AND marker retained", dir, rerr)
+		keep = true
+	} else {
+		for _, e := range entries {
+			name := e.Name()
+			if !isParkedBackupName(name) {
+				continue
+			}
+			cb := name[:strings.LastIndex(name, ".rsbak.")]
+			bb := strings.TrimSuffix(strings.TrimSuffix(cb, "-full.jpg"), ".jpg")
+			if strings.EqualFold(bb, baseID) && !strings.HasSuffix(name, "."+b.nonce) {
+				keep = true
+				break
 			}
 		}
-		if !keep {
-			_ = b.fs.Remove(b.commitPath)
+	}
+	if !keep {
+		if b.markerPath != "" {
+			_ = b.fs.Remove(b.markerPath)
 		}
+		_ = b.fs.Remove(b.commitPath)
 	}
 }
 

@@ -1145,6 +1145,8 @@ func TestDiscardScanUndecidableKeepsWinnerToken(t *testing.T) {
 	b.discard()
 	_, tErr := base.Stat(b.commitPath)
 	assert.NoError(t, tErr, "scan undecidable ⇒ token retained")
+	_, mErr := base.Stat(b.markerPath)
+	assert.NoError(t, mErr, "marker retained with it (fused)")
 }
 
 func TestDiscardKeepsWinnerTokenWhileCompetitorBackupPends(t *testing.T) {
@@ -1161,7 +1163,7 @@ func TestDiscardKeepsWinnerTokenWhileCompetitorBackupPends(t *testing.T) {
 	_, tErr := fs.Stat(b.commitPath)
 	assert.NoError(t, tErr, "winner token retained while the rival's backup pends")
 	_, mErr := fs.Stat(b.markerPath)
-	assert.Error(t, mErr, "marker swept (its own op fully settled)")
+	assert.NoError(t, mErr, "marker follows the token — fused retention while rivals pend")
 
 	// Rival settled: next discard sweeps the token too.
 	require.NoError(t, fs.Remove(filepath.Join(dir, "RET-1.jpg.rsbak.a9.c9")))
@@ -1170,6 +1172,22 @@ func TestDiscardKeepsWinnerTokenWhileCompetitorBackupPends(t *testing.T) {
 	_, t2Err := fs.Stat(b.commitPath)
 	assert.Error(t, t2Err, "nothing pending ⇒ token swept at finalization")
 } // discard/restore on accessors without paths run the no-op guard arms.
+// A backup possessing only a marker (no commit token written) sweeps it on
+// discard — the fused token-parallel retention cannot apply (nothing to prove).
+func TestDiscardMarkerOnlyBackupSweeps(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-MO"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	mp := filepath.Join(dir, ".inflight-MO-1.a1.b2")
+	require.NoError(t, afero.WriteFile(fs, mp, nil, 0o644))
+	b := &rescrapePosterBackup{fs: fs, markerPath: mp}
+	b2 := &rescrapePosterBackup{fs: fs, commitPath: filepath.Join(dir, ".commit-MO-1.a1.b2"), markerPath: mp}
+	b.discard() // marker-only: commitPath empty → marker sweeps
+	b2.discard()
+	_, err := fs.Stat(mp)
+	assert.Error(t, err, "marker swept when no token evidence exists")
+}
+
 func TestRescrapePosterBackupEmptyPathGuards(t *testing.T) {
 	(&rescrapePosterBackup{fs: afero.NewMemMapFs()}).discard()
 	// markerPath set but both bak paths empty → the restore retention loop
