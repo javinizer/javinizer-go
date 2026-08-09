@@ -522,6 +522,60 @@ jobs:
         if-no-files-found: ignore
         retention-days: 30
 
+  # Job: Static-flavor E2E — serves the production adapter-static build
+  # through the real embedded-assets Go binary (web/frontend/build → web/dist
+  # → //go:embed all:dist → Gin NoRoute fallback, exactly as Docker/release
+  # binaries serve it) and asserts hard page loads render route content with
+  # zero __data.json server-data requests. This is the deployment flavor the
+  # Vite-dev-server suites (frontend-e2e, fullstack-e2e) cannot exercise.
+  static-e2e:
+    name: Static-flavor E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      with:
+        go-version-file: ${{ env.GO_VERSION_FILE }}
+        cache: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: web/frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      run: npm ci --prefix web/frontend
+
+    - name: Download Go dependencies
+      run: go mod download
+
+    - name: Install Playwright browsers
+      working-directory: web/frontend
+      run: npx playwright install --with-deps chromium
+
+    - name: Run static-flavor E2E suite
+      run: make test-static-e2e
+
+    - name: Upload Playwright artifacts
+      if: failure()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: static-e2e-artifacts
+        path: |
+          web/frontend/test-results/
+          web/frontend/playwright-report/
+        if-no-files-found: ignore
+        retention-days: 30
+
   # Job: CLI E2E — builds the real `javinizer` binary and drives its
   # subcommands (sort, version, --help, --dry-run) end-to-end via os/exec.
   # Hermetic + deterministic: JAVINIZER_E2E_SCRAPERS=true substitutes the

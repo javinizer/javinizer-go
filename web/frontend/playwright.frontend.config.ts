@@ -1,24 +1,32 @@
 /**
  * Frontend-only Playwright config.
  *
- * One of three test distinctions:
+ * One of four test distinctions:
  *   1. Frontend-only  — this config. Mocked API (page.route), no backend.
  *      Fast, deterministic, CI-runnable. Spawns only the Vite dev server.
  *   2. Full e2e       — playwright.fullstack.config.ts. Real backend + real
  *      transport + real SQLite. CI-runnable (`make test-e2e-fullstack`).
- *   3. Local-only     — test/e2e/live/. Real JAV sites over the public
+ *   3. Static-flavor  — playwright.static.config.ts. Production adapter-static
+ *      build embedded in the real Go binary (`make test-static-e2e`).
+ *   4. Local-only     — test/e2e/live/. Real JAV sites over the public
  *      internet. Never in CI (`make test-e2e-live`, local dev only).
  *
  * What this config pins: pure frontend rendering + interaction logic with
  * the API fully mocked via page.route — component states, env-gated UI (e.g.
  * install_environment=desktop), error/empty/loading states, keyboard nav —
  * without the latency or non-determinism of a real backend. Specs MUST mock
- * every /api endpoint they touch (including /api/v1/auth/status, which the
- * shared +layout onMount calls) so no real backend is required.
+ * every /api endpoint they touch (including /api/v1/auth/status, which both
+ * the universal +layout load's browser branch and the shared +layout onMount
+ * call from the browser) so no real backend is required.
  *
  * webServer spawns Vite (no backend). The regular vite.config.ts is fine:
- * its /api proxy to :8765 is never reached because page.route intercepts
- * /api requests in the browser before Vite's proxy sees them.
+ * page.route intercepts browser-side /api requests before Vite's proxy sees
+ * them. The one path page.route CANNOT intercept is the dev-SSR branch of the
+ * universal +layout load (server-side event.fetch on initial document loads,
+ * falling through to the :8765 proxy): with no backend it fails fast to a
+ * null authStatus and the page.route-mocked onMount retry governs assertions;
+ * if you keep a real backend on :8765 while running this suite, SSR HTML can
+ * carry genuine auth state — keep assertions post-hydration/mocked.
  *
  * Run with:
  *   make test-e2e-frontend
@@ -58,16 +66,5 @@ export default defineConfig({
 		cwd: FRONTEND_DIR,
 		reuseExistingServer: !process.env.CI,
 		timeout: 60_000,
-		env: {
-			...process.env,
-			// Keep the suite hermetic: +layout.server.ts SSR-fetches
-			// ${JAVINIZER_SSR_API_URL||http://127.0.0.1:8765}/api/v1/auth/status.
-			// If a real backend happens to run on :8765 on the dev machine, the
-			// SSR load succeeds server-side (page.route can't intercept it) and
-			// the app boots "unauthenticated", ignoring the spec's mocked
-			// /api/v1/auth/status. Point the SSR fetch at a dead port so it falls
-			// back to the client-side onMount refresh, which the mocks DO catch.
-			JAVINIZER_SSR_API_URL: 'http://127.0.0.1:59999',
-		},
 	},
 });

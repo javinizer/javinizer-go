@@ -1,6 +1,6 @@
 .PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
 .PHONY: coverage coverage-fast coverage-html coverage-check coverage-pkg coverage-patch coverage-patch-check coverage-func ci ci-full config-drift config-sync check-import-guard check-mocks i18n-check simulate-ci
-.PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-frontend test-e2e-field-drop test-e2e-cli test-e2e-live test-coverage
+.PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-frontend test-static-e2e test-e2e-field-drop test-e2e-cli test-e2e-live test-coverage
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: build-app-darwin build-app-local build-app-windows build-app-linux build-app-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
@@ -401,9 +401,20 @@ test-e2e-fullstack:
 # install_environment=desktop) without a real Go server. Specs MUST mock
 # every /api endpoint they touch (including /api/v1/auth/status). Spec
 # layout lives under web/frontend/tests/frontend/ — see
-# playwright.frontend.config.ts header for the 3-suite distinction map.
+# playwright.frontend.config.ts header for the 4-suite distinction map.
 test-e2e-frontend:
 	cd web/frontend && npx playwright test --config=playwright.frontend.config.ts
+
+# Static-flavor E2E suite — the SHIPPED deployment flavor: production
+# adapter-static build staged into web/dist (scripts/with_embedded_web.sh),
+# compiled into the real e2e binary (//go:embed all:dist), served by Gin's
+# NoRoute fallback exactly as Docker / release binaries serve it. Asserts
+# hard page loads render route content with zero __data.json server-data
+# requests — the regression class both dev-server suites mask. Specs live
+# under web/frontend/tests/static/ — see playwright.static.config.ts header.
+test-static-e2e: web-build
+	./scripts/with_embedded_web.sh go build -o bin/javinizer-e2e-static ./cmd/javinizer-e2e
+	cd web/frontend && npx playwright test --config=playwright.static.config.ts
 
 # Backward-compat alias — the field-drop regression suite runs as part
 # of the general fullstack suite now. Redirects to the new target.

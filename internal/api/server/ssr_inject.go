@@ -57,8 +57,8 @@ type normalizedBrowseBootstrap struct {
 // before </head> in the SPA index.html. This allows the production static SPA
 // (served by Gin without a Node SSR runtime) to read auth and browse-bootstrap
 // state from the injected script, eliminating flash-of-content on full reloads.
-// In dev mode, SvelteKit's own SSR provides this via +layout.server.ts; this
-// injection is the production equivalent for the adapter-static SPA fallback.
+// In dev mode, SvelteKit's SSR provides this via the universal +layout load;
+// this injection is what the adapter-static SPA fallback consumes in production.
 func injectSSRState(html []byte, rt *core.APIRuntime, c *gin.Context) []byte {
 	if rt == nil {
 		return html
