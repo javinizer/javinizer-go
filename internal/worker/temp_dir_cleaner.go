@@ -238,6 +238,11 @@ type promoteWitness struct {
 // the state commit lands.
 const cropWitnessPrefix = ".crop-"
 
+// evictWitnessPrefix names the crash-recovery record for a committed patch's
+// stale-poster eviction (codex cloud P2): complete-on-restart, no arbitration
+// needed (the DURABLE row already names the new source).
+const evictWitnessPrefix = ".evict-"
+
 type cropWitness struct {
 	PosterID     string `json:"poster_id"`
 	ResultID     string `json:"result_id"`
@@ -291,7 +296,8 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 			isRekey := strings.HasPrefix(name, rekeyWitnessPrefix) && strings.HasSuffix(name, ".json")
 			isPromote := strings.HasPrefix(name, promoteWitnessPrefix) && strings.HasSuffix(name, ".json")
 			isCrop := strings.HasPrefix(name, cropWitnessPrefix) && strings.HasSuffix(name, ".json")
-			if !isRekey && !isPromote && !isCrop {
+			isEvict := strings.HasPrefix(name, evictWitnessPrefix) && strings.HasSuffix(name, ".json")
+			if !isRekey && !isPromote && !isCrop && !isEvict {
 				continue
 			}
 			if isPromote {
@@ -300,6 +306,10 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 			}
 			if isCrop {
 				reversed += c.reconcileCropWitness(ctx, dir, jobID, filepath.Join(dir, name))
+				continue
+			}
+			if isEvict {
+				reversed += c.reconcileEvictWitness(dir, filepath.Join(dir, name))
 				continue
 			}
 			wpath := filepath.Join(dir, name)
@@ -726,7 +736,10 @@ type pendingPark struct {
 func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, jobID, dir string, pending []pendingPark, stranded map[string]inFlightMeta, tokens []commitToken) int {
 	byCanon := map[string][]pendingPark{}
 	for _, p := range pending {
-		byCanon[p.canon] = append(byCanon[p.canon], p)
+		// codex cloud P2: group by the case-folded canonical key — case-insensitive
+		// filesystems make two spellings address the same file; split stacks would
+		// unwind an older op first against real storage order.
+		byCanon[strings.ToLower(p.canon)] = append(byCanon[strings.ToLower(p.canon)], p)
 	}
 	nonceTime, nonceSeq := func(n string) uint64 {
 		p := strings.Split(n, ".")
@@ -738,7 +751,7 @@ func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, job
 		return v
 	}
 	healed := 0
-	for canon, list := range byCanon {
+	for _, list := range byCanon {
 		// newest-op FIRST: chained crashed ops form a stack — unwinding oldest
 		// first would re-restore older backup bytes over the newer op's rewind.
 		sort.Slice(list, func(i, j int) bool {
@@ -748,9 +761,12 @@ func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, job
 			}
 			return nonceSeq(list[i].nonce) > nonceSeq(list[j].nonce)
 		})
-		canonPath := filepath.Join(dir, canon)
 		for _, p := range list {
 			parked := filepath.Join(dir, p.name)
+			// codex cloud P2 (@819): the FOLDED key exists for GROUPING only —
+			// each entry's own spelling drives all fs operations on case-SENSITIVE
+			// filesystems (case-insensitive ones converge them physically anyway).
+			canonPath := filepath.Join(dir, p.canon)
 			if _, statErr := c.fs.Stat(canonPath); statErr != nil {
 				if !os.IsNotExist(statErr) {
 					// (unchanged invariant) undecidable canonical state: touch neither side

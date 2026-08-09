@@ -333,7 +333,7 @@ func removePromoteWitness(fs afero.Fs, p string) {
 	}
 	// codex cloud P2: retry the sweep of a COMMITTED witness — a transient wedge
 	// stranded it once, and every family fence poisoned poster edits till restart.
-	if err := removeWithRetry(fs, p, 3); err != nil {
+	if err := removeWithRetry(fs, p); err != nil {
 		logging.Warnf("promote witness sweep %s: %v", p, err)
 	}
 }
@@ -588,7 +588,7 @@ func removeCropWitness(fs afero.Fs, p string) {
 		fs = afero.NewOsFs()
 	}
 	// codex cloud P2: same bounded retry as the promote sweep.
-	if err := removeWithRetry(fs, p, 3); err != nil {
+	if err := removeWithRetry(fs, p); err != nil {
 		logging.Warnf("crop witness sweep %s: %v", p, err)
 	}
 }

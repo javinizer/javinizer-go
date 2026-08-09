@@ -524,9 +524,11 @@ func promoteWitnessPendingCore(fs afero.Fs, dir, posterID string) (bool, error) 
 // A wedged sweep of a COMMITTED witness used to strand it until the next
 // process start — poisoning every admission fence for the family meanwhile
 // (codex cloud P2).
-func removeWithRetry(fs afero.Fs, path string, attempts int) error {
+const witnessSweepRetries = 3
+
+func removeWithRetry(fs afero.Fs, path string) error {
 	var err error
-	for i := 0; i < attempts; i++ {
+	for i := 0; i < witnessSweepRetries; i++ {
 		if err = fs.Remove(path); err == nil || errors.Is(err, afero.ErrFileNotFound) {
 			return nil
 		}
@@ -646,11 +648,37 @@ func (m *LockedMovieOps) evictStalePosterPair(posterID string) {
 		return
 	}
 	dir := filepath.Join(env.tempDir, "posters", env.jobID)
+	// codex cloud P2 (@eviction): eviction is a crash window — process exit or
+	// a wedged Remove mid-way leaves OLD pieces beneath committed NEW metadata
+	// (the crop endpoint could measure them). Write the durable eviction
+	// witness first; swept on success; the startup reconciler completes it.
+	wpath := filepath.Join(dir, ".evict-"+url.PathEscape(posterID)+".json")
+	payload, _ := json.Marshal(evictWitness{OldID: posterID})
+	if wErr := writeFileAtomicForEvict(env.fs, wpath, payload); wErr != nil {
+		logging.Warnf("stale poster evict witness %s: %v — eviction deferred this run", wpath, wErr)
+		return
+	}
 	for _, name := range []string{posterID + "-full.jpg", posterID + ".jpg"} {
 		if err := env.fs.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, afero.ErrFileNotFound) {
-			logging.Warnf("stale poster evict %s: %v", name, err)
+			logging.Warnf("stale poster evict %s: %v — witness retained for startup reconcile", name, err)
 		}
 	}
+	if err := removeWithRetry(env.fs, wpath); err != nil {
+		logging.Warnf("stale poster evict witness sweep %s: %v", wpath, err)
+	}
+}
+
+// writeFileAtomicForEvict mirrors the witness write pattern: tmp + rename.
+func writeFileAtomicForEvict(fs afero.Fs, path string, payload []byte) error {
+	tmp := path + ".tmp"
+	if wErr := afero.WriteFile(fs, tmp, payload, 0o644); wErr != nil {
+		return wErr
+	}
+	if rErr := fs.Rename(tmp, path); rErr != nil {
+		_ = fs.Remove(tmp)
+		return rErr
+	}
+	return nil
 }
 
 // --- Cores (exported for adapter + handler composition; must ONLY run under the family key) ---
@@ -1015,7 +1043,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				}
 			}
 			if rollbackComplete && rekeyWitnessPath != "" {
-				if rmErr := removeWithRetry(env.fs, rekeyWitnessPath, 3); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+				if rmErr := removeWithRetry(env.fs, rekeyWitnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
 					logging.Warnf("poster rekey witness sweep %s: %v", rekeyWitnessPath, rmErr)
 				}
 			}
@@ -1029,7 +1057,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		// would poison every retry as an unresolved rekey until restart —
 		// sweep it unconditionally here.
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil {
-			if rmErr := removeWithRetry(env.fs, rekeyWitnessPath, 3); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+			if rmErr := removeWithRetry(env.fs, rekeyWitnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
 				logging.Warnf("poster rekey witness sweep %s: %v", rekeyWitnessPath, rmErr)
 			}
 		}
@@ -1038,7 +1066,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		// Commit landed: the witness's job is done (files remain at the new
 		// identity, coherent with the durable row).
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil {
-			if rmErr := removeWithRetry(env.fs, rekeyWitnessPath, 3); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+			if rmErr := removeWithRetry(env.fs, rekeyWitnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
 				logging.Warnf("poster rekey witness sweep %s: %v", rekeyWitnessPath, rmErr)
 			}
 		}

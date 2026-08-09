@@ -50,14 +50,14 @@ func TestRemoveWithRetry(t *testing.T) {
 
 	// transient wedge — succeeds inside the budget:
 	flaky := &flakyRemoveFS{Fs: base, name: "/tmp/x.json", failFirst: 2}
-	require.NoError(t, removeWithRetry(flaky, "/tmp/x.json", 3))
+	require.NoError(t, removeWithRetry(flaky, "/tmp/x.json"))
 	_, err := base.Stat("/tmp/x.json")
 	require.Error(t, err, "file gone after transient wedges healed")
 
 	// permanent wedge — surface after attempts:
 	require.NoError(t, afero.WriteFile(base, "/tmp/y.json", []byte("{}"), 0o644))
 	stuck := &flakyRemoveFS{Fs: base, name: "/tmp/y.json", stuckError: errors.New("permanent wedge")}
-	require.ErrorContains(t, removeWithRetry(stuck, "/tmp/y.json", 3), "permanent wedge")
+	require.ErrorContains(t, removeWithRetry(stuck, "/tmp/y.json"), "permanent wedge")
 }
 
 func arbJobRow(t *testing.T, id string, rev uint64) *models.Job {

@@ -13,9 +13,11 @@ import (
 
 // removeWithRetry mirrors the worker's bounded sweep retry: a transient
 // removal wedge must never poison family fences till a restart.
-func removeWithRetry(fs afero.Fs, path string, attempts int) error {
+const witnessSweepRetries = 3
+
+func removeWithRetry(fs afero.Fs, path string) error {
 	var err error
-	for i := 0; i < attempts; i++ {
+	for i := 0; i < witnessSweepRetries; i++ {
 		if err = fs.Remove(path); err == nil || os.IsNotExist(err) {
 			return nil
 		}
