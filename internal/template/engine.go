@@ -435,11 +435,13 @@ func (e *Engine) ValidateTags(template string) error {
 // through renderConfiguredText which must not write corrupted values.
 func (e *Engine) validateConditionalNesting(template string) error {
 	depth := 0
+	sawElse := false
 	for _, token := range conditionalStructureRegex.FindAllString(template, -1) {
 		upper := strings.ToUpper(token)
 		switch {
 		case strings.HasPrefix(upper, "<IF:"):
 			depth++
+			sawElse = false
 			if depth > 1 {
 				return fmt.Errorf("nested conditionals are not supported")
 			}
@@ -447,6 +449,10 @@ func (e *Engine) validateConditionalNesting(template string) error {
 			if depth < 1 {
 				return fmt.Errorf("<ELSE> outside of <IF> block")
 			}
+			if sawElse {
+				return fmt.Errorf("multiple <ELSE> in one <IF> block")
+			}
+			sawElse = true
 		default:
 			depth--
 			if depth < 0 {

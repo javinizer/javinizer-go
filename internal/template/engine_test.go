@@ -2792,3 +2792,9 @@ func TestEngine_ValidateTags_NumericModifierValidated(t *testing.T) {
 	assert.Error(t, e.ValidateTags("<PART:xyz>"))
 	assert.Error(t, e.ValidateTags("<DISC:abc>"))
 }
+
+func TestEngine_ValidateTags_MultipleElseRejected(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes<ELSE>no</IF>"))
+	assert.Error(t, e.ValidateTags("<IF:SERIES>a<ELSE>b<ELSE>c</IF>"))
+}

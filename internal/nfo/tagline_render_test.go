@@ -233,3 +233,9 @@ func TestMovieToNFO_TaglineInvalidNumericModifierDropped(t *testing.T) {
 	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "-pt1", 1, true, nil)
 	assert.Equal(t, "", nfo.Tagline)
 }
+
+func TestMovieToNFO_TaglineMultipleElseDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<IF:SERIES>a<ELSE>b<ELSE>c</IF>", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}
