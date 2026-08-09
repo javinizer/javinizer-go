@@ -197,8 +197,11 @@ func TestParsingHelpersCoverEdgeCases(t *testing.T) {
 	assert.False(t, ok)
 	assert.Empty(t, first)
 	assert.Empty(t, last)
-	_, _, ok = splitRomajiName("Single")
-	assert.False(t, ok)
+	// Codex latest head: singletons ARE admitted (as FirstName)
+	first2, last2, ok := splitRomajiName("Single")
+	assert.True(t, ok)
+	assert.Equal(t, "Single", first2)
+	assert.Empty(t, last2)
 
 	assert.Empty(t, stripQuery("  "))
 	assert.Equal(t, "%", stripQuery("%"))

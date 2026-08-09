@@ -274,3 +274,12 @@ func TestValidateActressThumbnailUsesConfiguredAndDefaultUserAgent(t *testing.T)
 	require.Contains(t, userAgents, config.DefaultUserAgent)
 	require.Contains(t, userAgents, "coverage-agent")
 }
+
+// Codex late head: singleton Latin (e.g. AIKA) is FirstName, never JapaneseName.
+func TestExtractDMMActressSingletonLatinName(t *testing.T) {
+	doc := docFromHTMLDMM(t, `<h1 class="list-title"><span class="bold">AIKA</span></h1>`)
+	got := extractActressProfileMetadata(doc, 7)
+	require.Equal(t, "AIKA", got.FirstName)
+	require.Empty(t, got.LastName)
+	require.Empty(t, got.JapaneseName)
+}

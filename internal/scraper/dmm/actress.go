@@ -608,6 +608,10 @@ func extractActressProfileMetadata(doc *goquery.Document, dmmID int) models.Actr
 	if len(parts) >= 2 {
 		metadata.FirstName = parts[0]
 		metadata.LastName = parts[1]
+	} else if len(parts) == 1 {
+		// Single-token Latin handles ('Solo' stage names) still carry identity:
+		// store them as FirstName — never JapaneseName (codex head).
+		metadata.FirstName = parts[0]
 	}
 	return metadata
 }

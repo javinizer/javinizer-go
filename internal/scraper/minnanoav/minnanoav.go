@@ -435,6 +435,10 @@ func splitRomajiName(romaji string) (string, string, bool) {
 	}
 	parts := strings.Fields(romaji)
 	if len(parts) < 2 {
+		// One-token romanization ('AIKA') is a FirstName (codex latest head).
+		if len(parts) == 1 {
+			return parts[0], "", true
+		}
 		return "", "", false
 	}
 	return parts[1], parts[0], true
