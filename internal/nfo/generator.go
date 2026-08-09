@@ -231,7 +231,11 @@ func (g *Generator) Generate(ctx context.Context, movie *models.Movie, outputPat
 	// Use ResolveAndGenerate for multipart-aware taglines/tags (<PARTSUFFIX>,
 	// <PART>, <IF:MULTIPART>); Generate's content path mirrors pre-multipart
 	// behavior to avoid half-populated multipart state.
-	return g.generateAtPath(ctx, movie, fullPath, videoFilePath, "", 0, false, tags)
+	nfo, err := g.movieToNFO(ctx, movie, videoFilePath, "", 0, false, tags)
+	if err != nil {
+		return err
+	}
+	return g.WriteNFO(nfo, fullPath)
 }
 
 // GenerateAtPath creates an NFO file at the specified path without computing

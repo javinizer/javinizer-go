@@ -313,3 +313,25 @@ func TestMovieToNFO_TaglineModifierWithAngleBracketDropped(t *testing.T) {
 	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
 	assert.Equal(t, "", nfo.Tagline)
 }
+
+func TestGenerate_LegacyPathWritesNFOWithoutPartContent(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	g := NewGenerator(fs, &Config{Tagline: "Part <PART>", PerFile: true, FirstNameOrder: true})
+	movie := taglineTestMovie()
+	err := g.Generate(context.Background(), movie, "/out", "-pt1", "", nil)
+	assert.NoError(t, err)
+	matches, _ := afero.Glob(fs, "/out/*.nfo")
+	require.NotEmpty(t, matches)
+	data, readErr := afero.ReadFile(fs, matches[0])
+	require.NoError(t, readErr)
+	// Legacy Generate path zeroes part content, so <PART> renders empty.
+	assert.Contains(t, string(data), "<tagline>Part </tagline>")
+}
+
+func TestGenerate_LegacyPathPropagatesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<ID>", PerFile: true, FirstNameOrder: true, FilenameTemplate: "<ID>"})
+	err := g.Generate(ctx, taglineTestMovie(), "/out", "", "", nil)
+	assert.Error(t, err)
+}
