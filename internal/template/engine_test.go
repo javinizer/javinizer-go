@@ -2804,3 +2804,16 @@ func TestEngine_ValidateTags_UnclosedIfRejected(t *testing.T) {
 	assert.Error(t, e.ValidateTags("<IF:ID>oops"))
 	assert.Error(t, e.ValidateTags("<IF:ID>yes<ELSE>no"))
 }
+
+func TestEngine_ValidateTags_BareIfRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("x <IF> y"))
+	assert.Error(t, e.ValidateTags("<IF>oops"))
+	assert.NoError(t, e.ValidateTags("<IF:ID>ok</IF>"))
+}
+
+func TestEngine_ValidateTags_ElseModifierRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<IF:SERIES>a<ELSE:b>c</IF>"))
+	assert.NoError(t, e.ValidateTags("<IF:SERIES>a<ELSE>b</IF>"))
+}

@@ -272,3 +272,15 @@ func TestResolveAndGenerate_PerFileGating(t *testing.T) {
 		assert.Contains(t, string(data), "<tagline>Part </tagline>")
 	})
 }
+
+func TestMovieToNFO_TaglineBareIfDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "A <IF> B", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}
+
+func TestMovieToNFO_TaglineElseModifierDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<IF:SERIES>a<ELSE:b>c</IF>", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}
