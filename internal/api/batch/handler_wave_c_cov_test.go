@@ -230,7 +230,12 @@ func TestPosterCrop_PromoteFailureRetainsWitness(t *testing.T) {
 	deps, job, router := cropJobFixture(t, "CROPE-7")
 	deps.Fs = &brokenFS{Fs: deps.GetFs(), failRenameAt: map[int]bool{2: true, 3: true, 4: true}}
 	w := postCrop(t, router, job, "CROPE-7", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
-	require.Equal(t, 200, w.Code, "commit landed; only the byte promote failed: %s", w.Body.String())
+	// local codex review P1: commit landed but canonical bytes are still stale —
+	// a false 200 with the fresh URL is forbidden; the deferred state is a 500.
+	require.Equal(t, 500, w.Code, "no false 200 while canonical bytes are stale: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "byte promotion")
+	stored := storedMovie(t, deps, job, "/path/to/CROPE-7.mp4")
+	require.NotNil(t, stored.Poster.PosterCropBounds, "crop commit persisted — 500 means committed-but-deferred, not failed")
 	matches, gerr := filepath.Glob(filepath.Join("data/temp/posters", job.GetID(), ".crop-*.json"))
 	require.NoError(t, gerr)
 	require.NotEmpty(t, matches, "unresolved witness must survive to fence subsequent crops")

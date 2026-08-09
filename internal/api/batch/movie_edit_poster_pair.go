@@ -415,9 +415,12 @@ func hexLowerHexTail(s string) bool {
 
 // markerAnchoredBatch matches the in-flight sentinel shape only when its
 // tail carries the hex.hex nonce — plain-canonical ".inflight-*" names are
-// never markers.
+// never markers. Both ends of the PREFIX match compare lowercase (codex P2):
+// a probe with ID "ABC-1" must hit a marker written by a variant "abc-1" —
+// same bytes on a case-insensitive filesystem.
 func markerAnchoredBatch(name, prefix string) bool {
-	return strings.HasPrefix(name, prefix) && len(name) > len(prefix) && hexLowerHexTail(name)
+	return strings.HasPrefix(strings.ToLower(name), strings.ToLower(prefix)) &&
+		len(name) > len(prefix) && hexLowerHexTail(name)
 }
 
 // parkedBackupConflictFor reports whether a rescrape's parked backup legs
@@ -590,7 +593,10 @@ func promoteCroppedLeg(fs afero.Fs, tempDir, jobID, stageID, posterID string) er
 	dst := filepath.Join(dir, posterID+".jpg")
 	if _, err := fs.Stat(src); err != nil {
 		if os.IsNotExist(err) {
-			return nil // manager never produced the leg: nothing to promote
+			// local codex review P1: the crop manager produced this leg BEFORE the
+			// commit, so absence here means the staged bytes vanished — never
+			// report success while canonical stays stale behind a committed crop.
+			return fmt.Errorf("crop promote source %s missing after commit: %w", src, err)
 		}
 		return fmt.Errorf("crop promote source stat %s: %w", src, err)
 	}

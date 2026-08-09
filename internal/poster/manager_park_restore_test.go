@@ -8,6 +8,7 @@ import (
 	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -249,4 +250,77 @@ func TestDownloadFromURL_SuccessDiscardsParkedPair(t *testing.T) {
 	}
 	full, _ := afero.ReadFile(base, dir+"/GOOD-1-full.jpg")
 	assert.NotEqual(t, "stalefull", string(full), "new bytes landed at canonical")
+}
+
+type statFailExactFS struct {
+	afero.Fs
+	path string
+}
+
+func (f statFailExactFS) Stat(n string) (os.FileInfo, error) {
+	if filepath.ToSlash(n) == filepath.ToSlash(f.path) {
+		return nil, os.ErrPermission
+	}
+	return f.Fs.Stat(n)
+}
+
+// local codex review P1 (full leg): an UNDECIDABLE stat on the canonical full
+// poster must refuse the download outright — treating it as absence would
+// remove/replace healthy bytes nothing parked.
+func TestDownloadFromURL_FullStatErrorRefusesDownload(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(jpegBytes(300, 400))
+	}))
+	defer srv.Close()
+	base := afero.NewMemMapFs()
+	dir := "/tmp/javinizer-test/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/FULLST-1-full.jpg", []byte("originalfull"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/FULLST-1.jpg", []byte("originalcrop"), 0o644))
+	fs := statFailExactFS{Fs: base, path: dir + "/FULLST-1-full.jpg"}
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+
+	_, err := pm.DownloadFromURL(context.Background(), "job1", "FULLST-1", srv.URL+"/img.jpg", "", "")
+	require.ErrorContains(t, err, "failed to inspect previous full poster")
+	full, ferr := afero.ReadFile(base, dir+"/FULLST-1-full.jpg")
+	require.NoError(t, ferr)
+	assert.Equal(t, "originalfull", string(full), "canon untouched on undecidable stat")
+	crop, cerr := afero.ReadFile(base, dir+"/FULLST-1.jpg")
+	require.NoError(t, cerr)
+	assert.Equal(t, "originalcrop", string(crop), "crop leg untouched on undecidable stat")
+	entries, _ := afero.ReadDir(base, dir)
+	for _, e := range entries {
+		assert.False(t, strings.HasSuffix(e.Name(), ".dlbak"), "no stray parked leg: %s", e.Name())
+	}
+}
+
+// local codex review P1 (crop leg): the undecidable-crop-stat arm must undo
+// the fresh full promote and restore the parked original before refusing.
+func TestDownloadFromURL_CropStatErrorRestoresFullLeg(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(jpegBytes(300, 400))
+	}))
+	defer srv.Close()
+	base := afero.NewMemMapFs()
+	dir := "/tmp/javinizer-test/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/CROPST-1-full.jpg", []byte("originalfull"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/CROPST-1.jpg", []byte("originalcrop"), 0o644))
+	fs := statFailExactFS{Fs: base, path: dir + "/CROPST-1.jpg"}
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+
+	_, err := pm.DownloadFromURL(context.Background(), "job1", "CROPST-1", srv.URL+"/img.jpg", "", "")
+	require.ErrorContains(t, err, "failed to inspect previous cropped poster")
+	full, ferr := afero.ReadFile(base, dir+"/CROPST-1-full.jpg")
+	require.NoError(t, ferr)
+	assert.Equal(t, "originalfull", string(full), "full leg restored after undo")
+	crop, cerr := afero.ReadFile(base, dir+"/CROPST-1.jpg")
+	require.NoError(t, cerr)
+	assert.Equal(t, "originalcrop", string(crop), "crop leg untouched")
+	entries, _ := afero.ReadDir(base, dir)
+	for _, e := range entries {
+		assert.False(t, strings.HasSuffix(e.Name(), ".dlbak"), "no stray parked leg: %s", e.Name())
+	}
 }

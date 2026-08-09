@@ -94,7 +94,9 @@ func TestPromoteCroppedLegNoStagedFile(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	require.NoError(t, fs.MkdirAll("/tmp/posters/JX", 0o755))
 	err := promoteCroppedLeg(fs, "/tmp", "JX", "stage-x", "PI-1")
-	require.NoError(t, err)
+	// local codex review P1: the crop manager produced the staged leg BEFORE
+	// the commit — absence is a durability violation, never silent success.
+	require.ErrorContains(t, err, "missing after commit")
 }
 
 func TestPromoteCroppedLegStatError(t *testing.T) {
@@ -177,9 +179,9 @@ func (failRemoveBatchFs) Remove(string) error { return errors.New("remove blocke
 
 // promoteCroppedLeg: nil fs fallback (calls NewOsFs)
 func TestPromoteCroppedLegNilFs(t *testing.T) {
-	// nil fs → NewOsFs → Stat on non-existent → IsNotExist → return nil
+	// nil fs → NewOsFs → Stat on non-existent → IsNotExist → missing-source error
 	err := promoteCroppedLeg(nil, "/nonexistent-tmp", "JNIL", "stage-nil", "PI-1")
-	require.NoError(t, err, "no staged file → nothing to promote")
+	require.Error(t, err, "no staged file → missing-after-commit error")
 }
 
 // posterPairBackup restore: croppedUnreadable → false
@@ -246,7 +248,7 @@ func TestWritePromoteWitnessGuardedNilFsRealOS(t *testing.T) {
 // promoteCroppedLeg nil-fs fallback
 func TestPromoteCroppedLegNilFsRealOS(t *testing.T) {
 	err := promoteCroppedLeg(nil, "/nonexistent-path-xyz", "JNIL", "stage-x", "PI-1")
-	require.NoError(t, err, "no staged file → nothing to promote")
+	require.Error(t, err, "no staged file → missing-after-commit error")
 }
 
 type failCreateForBatchFS struct {

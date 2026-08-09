@@ -246,6 +246,11 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 			return nil, fmt.Errorf("failed to park previous full poster: %w", rnErr)
 		}
 		hadFull = true
+	} else if !os.IsNotExist(stErr) {
+		// local codex review P1: an UNDECIDABLE stat is not absence — refuse the
+		// download before byte damage rather than replace a leg nothing parked.
+		_ = pm.fs.Remove(tempDownloadPath)
+		return nil, fmt.Errorf("failed to inspect previous full poster: %w", stErr)
 	}
 	// Remove any previous full image, then atomically rename.
 	_ = pm.fs.Remove(tempFullPath)
@@ -274,6 +279,16 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 			return nil, fmt.Errorf("failed to park previous cropped poster: %w", rnErr)
 		}
 		hadCrop = true
+	} else if !os.IsNotExist(stErr) {
+		// local codex review P1: same fail-closed posture as the rename-failure
+		// arm — undo the fresh full promote, restore, refuse the download.
+		_ = pm.fs.Remove(tempFullPath)
+		if hadFull {
+			if rrErr := pm.fs.Rename(fullParked, tempFullPath); rrErr != nil {
+				logging.Warnf("poster restore %s: %v", tempFullPath, rrErr)
+			}
+		}
+		return nil, fmt.Errorf("failed to inspect previous cropped poster: %w", stErr)
 	}
 
 	// After rename, tempFullPath exists and must be cleaned up if we

@@ -194,6 +194,7 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		var cropErr error
 		var echoRev *uint64
 		var echoFam map[string]uint64
+		var promoteErr error
 		opErr := job.WithMovieEditLock(movieID, func(m *worker.LockedMovieOps) error {
 			// Re-resolve the result family INSIDE the key (codex r38): if a
 			// rekey moved the result to another movie between the handler's
@@ -288,7 +289,9 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				// the witness — the startup reconciler completes the promote, and
 				// the guarded witness write FENCES any later crop for this poster
 				// (409) until reconciliation, so a stale stage can never promote
-				// over a newer crop (codex P2 fence-followup).
+				// over a newer crop (codex P2 fence-followup). The handler surfaces the
+				// deferred state as a 500 instead of a false 200 (local codex review P1).
+				promoteErr = pErr
 				logging.Warnf("crop promote %s→%s failed after retries (witness retained; crops fenced until reconciliation): %v", stageID, posterID, pErr)
 			} else {
 				removeCropWitness(fs, cwPath)
@@ -316,6 +319,12 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 		// No PersistJobByID here — the crop commit IS the envelope write (D4).
+		if promoteErr != nil {
+			// local codex review P1: never answer 200 with the fresh URL while the
+			// canonical bytes are still stale — report the deferred reconcile.
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("poster crop committed but canonical byte promotion failed after retries: %v — the stored image reconciles on next startup and further crop attempts are fenced until then", promoteErr)})
+			return
+		}
 
 		// Echo the server-side baseline snapshot so the client Reset flow
 		// restores exactly what the server would (no client-side guessing).

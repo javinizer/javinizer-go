@@ -576,6 +576,16 @@ func TestOrphanedPosterPathsSkipsUnsafeIDs(t *testing.T) {
 // codex P2 (case): probes fold candidate spellings — a marker parked under
 // the scraper's case variant reaches the same canonical file on
 // case-insensitive filesystems.
+
+func TestInFlightProbesFoldCaseSentinels(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JCV-W"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-abc-1.a1.b2"), []byte("{}"), 0o644))
+	hit, err := rescrapeInFlightBackupPresent(fs, dir, "ABC-1")
+	require.NoError(t, err)
+	assert.True(t, hit, "variant-case sentinel fences the canonical probe")
+}
 func TestInFlightProbesFoldCase(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	dir := "/tmp/posters/JCF"
@@ -902,6 +912,7 @@ func TestParkCanonicalPosterPairGuards(t *testing.T) {
 	fsStatErr := statFailSuffixFS{Fs: mem, suffix: "PA-9-full.jpg"}
 	bStat := parkCanonicalPosterPair(fsStatErr, "/tmp/posters/J", "PA-9")
 	assert.True(t, bStat.hadFull, "stat error => treated as pre-existing")
+	assert.Error(t, bStat.parkErr, "stat error => refuse generation, no overwrite-without-restore window (local codex review P1)")
 	assert.False(t, bStat.hadCrop)
 
 	// park rename failure: warn only, leg untouched, had stays false

@@ -112,8 +112,14 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string) *rescrapePosterBackup 
 	for _, leg := range legs {
 		if _, err := fs.Stat(leg.path); err != nil {
 			if !os.IsNotExist(err) {
-				logging.Warnf("rescrape pair backup stat %s: %v — treated as pre-existing", leg.path, err)
+				// local codex review P1 (F-R3-1 refinement): an UNDECIDABLE stat must
+				// REFUSE generation outright — marking the leg pre-existing without a
+				// successful park leaves nothing restorable after the overwrite.
+				logging.Warnf("rescrape pair backup stat %s: %v — refusing generation", leg.path, err)
 				*leg.had = true // fail-closed (audit F-R3-1)
+				if b.parkErr == nil {
+					b.parkErr = fmt.Errorf("poster backup stat %s: %w", leg.path, err)
+				}
 			}
 			continue
 		}

@@ -307,6 +307,10 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 				logging.Warnf("rekey witness %s unreadable/corrupt — left in place", wpath)
 				continue
 			}
+			if !witnessLegBasename(w.OldID) || !witnessLegBasename(w.NewID) {
+				logging.Warnf("rekey witness %s carries unsafe id fields — left in place", wpath)
+				continue
+			}
 			job, jerr := c.jobRepo.FindByID(ctx, jobID)
 			switch {
 			case errors.Is(jerr, database.ErrNotFound):
@@ -422,6 +426,14 @@ func arbitrateResults(job *models.Job) (map[string]*resultstore.MovieResult, boo
 
 // hexLowerHexTail reports whether a marker name ends in ".<lowhex>.<lowhex>"
 // — the anchored shape every in-flight marker carries (audit F-R20-2).
+// witnessLegBasename gates every witness-carried ID before it enters a
+// filepath.Join: a hostile or corrupt witness must never steer reconcile-time
+// Rename/Remove outside the job poster dir (local codex review P1).
+func witnessLegBasename(s string) bool {
+	return s != "" && s != "." && s != ".." && filepath.Base(s) == s &&
+		!strings.ContainsAny(s, "/\\")
+}
+
 func hexLowerHexTail(s string) bool {
 	i1 := strings.LastIndexByte(s, '.')
 	if i1 < 2 || i1 == len(s)-1 {
@@ -616,6 +628,10 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 		logging.Warnf("promote witness %s unreadable/corrupt — left in place", wpath)
 		return 0
 	}
+	if !witnessLegBasename(w.PosterID) {
+		logging.Warnf("promote witness %s carries an unsafe poster id — left in place", wpath)
+		return 0
+	}
 	job, jerr := c.jobRepo.FindByID(ctx, jobID)
 	switch {
 	case errors.Is(jerr, database.ErrNotFound):
@@ -755,6 +771,10 @@ func (c *TempDirCleaner) reconcileCropWitness(ctx context.Context, dir, jobID, w
 	var w cropWitness
 	if err != nil || json.Unmarshal(data, &w) != nil || w.PosterID == "" || w.ResultID == "" || w.StageID == "" || w.CroppedURL == "" {
 		logging.Warnf("crop witness %s unreadable/corrupt — left in place", wpath)
+		return 0
+	}
+	if !witnessLegBasename(w.PosterID) || !witnessLegBasename(w.StageID) {
+		logging.Warnf("crop witness %s carries unsafe id fields — left in place", wpath)
 		return 0
 	}
 	job, jerr := c.jobRepo.FindByID(ctx, jobID)
