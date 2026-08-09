@@ -62,8 +62,11 @@ func TestRescrapeSinglePersistFailureIsWarned(t *testing.T) {
 		Persist:   failingPersist{err: errors.New("disk read-only")},
 	})
 	out, err := orch.Rescrape(context.Background(), "job-9", "MV-9", "/f/mv9.mp4", &contracts.BatchRescrapeRequest{})
-	require.NoError(t, err, "persist failure must not fail the rescrape (it warns)")
-	require.NotNil(t, out)
+	// codex cloud P1: the envelope failure is an explicit error — the recovery
+	// trinity stays on disk so startup arbitration still matches the older row.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "envelope persist failed")
+	require.Nil(t, out)
 }
 
 // codex cloud P1: the recovery teardown runs ONLY after the envelope write
@@ -103,9 +106,10 @@ func TestRescrapeSingleFinalizesOnlyAfterPersist(t *testing.T) {
 			Persist:   failingPersist{err: errors.New("disk read-only")},
 		})
 		out, err := orch.Rescrape(context.Background(), "job-9", "MV-9", "/f/mv9.mp4", &contracts.BatchRescrapeRequest{})
-		require.NoError(t, err)
-		require.NotNil(t, out)
+		require.Error(t, err, "persist failure propagates")
+		assert.Nil(t, out)
 		assert.False(t, finalized, "teardown never runs before the durable envelope")
+		assert.Nil(t, out)
 	})
 }
 
@@ -162,8 +166,8 @@ func TestBulkRescrapeRecoveryHandlesFinalizeByPersistOutcome(t *testing.T) {
 			Persist:   failingPersist{err: errors.New("disk read-only")},
 		})
 		out, err := orch.BulkRescrape(context.Background(), "job-9", []string{"MV-1"}, &contracts.BatchRescrapeRequest{})
-		require.NoError(t, err)
-		require.NotNil(t, out)
+		require.Error(t, err, "bulk persist failure propagates")
+		assert.Nil(t, out)
 		assert.Equal(t, 0, fired, "no finalize before the durable envelope")
 	})
 }
@@ -180,9 +184,9 @@ func TestRescrapeBulkPersistFailureIsWarned(t *testing.T) {
 	})
 	// Empty movie list: pool runs zero items; the persist still runs and warns.
 	out, err := orch.BulkRescrape(context.Background(), "job-9", nil, &contracts.BatchRescrapeRequest{})
-	require.NoError(t, err)
-	require.NotNil(t, out)
-	assert.Equal(t, 0, out.Succeeded)
+	require.Error(t, err, "bulk persist failure propagates (codex cloud P1)")
+	assert.Contains(t, err.Error(), "envelope persist failed")
+	assert.Nil(t, out)
 }
 
 func TestRescrapeNotAllowedDeletedJob(t *testing.T) {
