@@ -17,6 +17,7 @@ var (
 	conditionalTokenRegex      = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>`)
 	conditionalStructureRegex  = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>|<ELSE>`)
 	degenerateConditionalRegex = regexp.MustCompile(`(?i)<IF:>|<ELSE[:\s][^>]*>|</IF[:\s][^>]*>|</ELSE>|</ENDIF>|<ENDIF>`)
+	malformedTagRegex          = regexp.MustCompile(`(?i)<[A-Z_]+[0-9][^>]*>`)
 )
 
 // DefaultMaxTemplateBytes, DefaultMaxOutputBytes, and DefaultMaxConditionalDepth are the default size and depth limits for template rendering.
@@ -401,6 +402,9 @@ func (e *Engine) ValidateTags(template string) error {
 	}
 	if degenerateConditionalRegex.MatchString(template) {
 		return fmt.Errorf("malformed conditional token")
+	}
+	if malformedTagRegex.MatchString(template) {
+		return fmt.Errorf("malformed template tag")
 	}
 	matches := e.tagPattern.FindAllStringSubmatch(template, -1)
 	for _, match := range matches {

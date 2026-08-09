@@ -378,3 +378,9 @@ func TestSeedSharedMediaInfo_NilFileInfoNoOp(t *testing.T) {
 	g.seedSharedMediaInfo(context.Background(), nil, "/fake.mp4", tmplCtx)
 	assert.True(t, true)
 }
+
+func TestMovieToNFO_TaglineMalformedTagWithDigitDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "Featured: <TITLE2>", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}

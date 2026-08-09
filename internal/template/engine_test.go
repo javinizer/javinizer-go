@@ -2908,3 +2908,12 @@ func TestContext_SetCachedMediaInfo_SkipsLazyAnalysis(t *testing.T) {
 	assert.Equal(t, 1920, info.Width)
 	assert.Nil(t, ctx.mediaInfoError)
 }
+
+func TestEngine_ValidateTags_MalformedTagWithDigitRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("Featured: <TITLE2>"))
+	assert.Error(t, e.ValidateTags("<ID2>"))
+	assert.NoError(t, e.ValidateTags("A <3 B"))
+	assert.NoError(t, e.ValidateTags("<ID>"))
+	assert.NoError(t, e.ValidateTags("<PART:2>"))
+}
