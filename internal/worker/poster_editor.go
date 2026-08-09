@@ -1387,6 +1387,20 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 	var echoRev *uint64
 	var echoFam map[string]uint64
 	err := pe.withKeyedSection(movieID, movie, func(m *LockedMovieOps) error {
+		// codex cloud P1: rekey race — a concurrent rescrape can move the
+		// target result to another family BETWEEN the handler's pre-key
+		// resolution and this acquisition; without CAS nothing re-checked the
+		// mapping. Refuse to commit to the old family's siblings while the
+		// target lives elsewhere (regardless of CAS being supplied).
+		if cur, _, ok := m.pe.lookup.GetFileResultByResultID(resultID); ok && cur != nil {
+			curFam := strings.TrimSpace(cur.FileMatchInfo.MovieID)
+			if curFam == "" && cur.Movie != nil {
+				curFam = strings.TrimSpace(cur.Movie.ID)
+			}
+			if curFam != "" && !strings.EqualFold(curFam, strings.TrimSpace(movieID)) {
+				return &EditAdmissionConflictError{Message: fmt.Sprintf("result %s moved to family %s during save; retry", resultID, curFam)}
+			}
+		}
 		if opts.ExpectedResultRevision != nil {
 			if cur, _, ok := m.pe.lookup.GetFileResultByResultID(resultID); ok && cur.Revision != *opts.ExpectedResultRevision {
 				return &EditAdmissionConflictError{Message: fmt.Sprintf("result revision stale: expected %d, found %d", *opts.ExpectedResultRevision, cur.Revision)}

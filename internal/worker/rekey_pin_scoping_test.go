@@ -262,6 +262,24 @@ func TestRescrapeParkFailureAbortsGeneration(t *testing.T) {
 	assert.Equal(t, "committed", string(got), "pre-existing bytes never moved nor overwritten")
 }
 
+// codex cloud P1: a target rekeyed to another family between handler
+// resolution and key acquisition must 409 — never commit the payload to the
+// old family's siblings while the target lives elsewhere.
+func TestUpdateMovieFamilyRejectsMovedFamilyInKey(t *testing.T) {
+	store := flipStore(t)
+	lk := &flipFMLookup{ResultReadFacade: store, byCall: map[int]string{1: "NEWB-1"}, vanish: map[int]bool{}}
+	pe := NewPosterEditor(lk, store, nil)
+	pe.attachEnv(&posterEditEnv{fs: afero.NewMemMapFs(), tempDir: "/tmp", jobID: "JOB-MV"})
+	err := pe.UpdateMovieFamily(context.Background(), "PING-1", "res-flip", &models.Movie{ID: "PING-1", Title: "moved"}, FamilySaveOptions{})
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe, "moved family surfaces as admission conflict (409 upstream)")
+	assert.Contains(t, err.Error(), "moved to family")
+	cur, gerr := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, gerr)
+	assert.NotEqual(t, "moved", cur.Movie.Title, "payload never committed to the old family's row")
+}
+
 // famIDClearedLookup strips FileMatchInfo.MovieID on a single result ID so
 // the echo-capture fallback arm is observable — post-commit results normally
 // carry a normalized MovieID, making the fallback defensive.
