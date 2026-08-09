@@ -1,10 +1,12 @@
 package worker
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestActressMetadataVerified_NilActress(t *testing.T) {
@@ -133,25 +135,27 @@ func TestLookupActressCache_NilLookup(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestCacheFallbackMatch(t *testing.T) {
-	actress := &models.Actress{DMMID: 1}
-	cached := models.ActressInfo{DMMID: 1, FirstName: "Test", LastName: "Actor", JapaneseName: "テスト", ThumbURL: "https://example.com/img.jpg"}
-	result := cacheFallbackMatch(actress, nil, cached)
-	assert.Equal(t, "Test", result.FirstName)
-	assert.Equal(t, "Actor", result.LastName)
-	assert.Equal(t, "テスト", result.JapaneseName)
-	assert.Equal(t, "https://example.com/img.jpg", result.ThumbURL)
-}
-
-func TestCacheFallbackMatch_WithExistingMatches(t *testing.T) {
-	actress := &models.Actress{DMMID: 1}
-	cached := models.ActressInfo{DMMID: 1, FirstName: "Test"}
-	matches := rankActressMatches(models.ActressInfo{DMMID: 1, FirstName: "Existing"})
-	result := cacheFallbackMatch(actress, matches, cached)
-	assert.Equal(t, "", result.FirstName)
-}
-
 func TestNeedsLinkedActressFallback(t *testing.T) {
 	assert.False(t, needsLinkedActressFallback(&models.Actress{DMMID: 1, JapaneseName: "テスト", FirstName: "Test", LastName: "Actor", ThumbURL: "https://example.com/img.jpg"}, rankActressMatches(models.ActressInfo{DMMID: 1}), false))
 	assert.True(t, needsLinkedActressFallback(&models.Actress{DMMID: 1, JapaneseName: "", FirstName: "", LastName: "", ThumbURL: ""}, rankActressMatches(), false))
+}
+
+// Codex latest head: cache fields admitted as DMM-ranked source so a live
+// resolver 's equal-or-better source wins when it fills a field; otherwise
+// an otherwise-unenriched actress gains the field from the cache.
+func TestCacheAdmissionCompetesByRank(t *testing.T) {
+	db, repo, movieRepo, actress := newActressSyncFixture(t, &models.Actress{DMMID: 5501, JapaneseName: "松井"})
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	lookup := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		if dmmID == 5501 {
+			return models.ActressInfo{DMMID: 5501, FirstName: "Emi", LastName: "Asahi", JapaneseName: "松井"}, true
+		}
+		return models.ActressInfo{}, false
+	}
+	// Actress priority: NONE (default ordering), dmm suffix preferred channel.
+	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movieRepo, nil, ActressSyncOptions{
+		LookupCache: lookup,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
 }

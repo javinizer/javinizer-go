@@ -424,9 +424,11 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		}
 	}
 	if revalidate && cacheAllowed && cacheHit && cacheMatch.DMMID == actress.DMMID {
-		if fallback := cacheFallbackMatch(actress, matches, cacheMatch); len(actressInfoFields(fallback)) > 0 {
-			// The runtime cache is built from DMM-sourced data.
-			appendMatch(fallback, "dmm")
+		// Codex latest head: the built-in cache is a DMM snapshot admitted as a
+		// DMM-ranked source of fields; never suppress it — register its fields
+		// like any dmm-named source so resolveActressInfoByRank sees them.
+		if len(actressInfoFields(cacheMatch)) > 0 {
+			appendMatch(cacheMatch, "dmm")
 		}
 	}
 	if needsLinkedActressFallback(actress, matches, deterministic) {
@@ -780,32 +782,8 @@ func hasJapaneseText(s string) bool {
 	return false
 }
 
-// cacheFallbackMatch ...
-func cacheFallbackMatch(actress *models.Actress, matches []rankedActressMatch, cached models.ActressInfo) models.ActressInfo {
-	fallback := models.ActressInfo{DMMID: cached.DMMID}
-	hasValue := func(value func(models.ActressInfo) string) bool {
-		for _, match := range matches {
-			if match.info.DMMID == cached.DMMID && strings.TrimSpace(value(match.info)) != "" {
-				return true
-			}
-		}
-		return false
-	}
-	if strings.TrimSpace(actress.FirstName) == "" && !hasValue(func(info models.ActressInfo) string { return info.FirstName }) {
-		fallback.FirstName = cached.FirstName
-	}
-	if strings.TrimSpace(actress.LastName) == "" && !hasValue(func(info models.ActressInfo) string { return info.LastName }) {
-		fallback.LastName = cached.LastName
-	}
-	if strings.TrimSpace(actress.JapaneseName) == "" && !hasValue(func(info models.ActressInfo) string { return info.JapaneseName }) {
-		fallback.JapaneseName = cached.JapaneseName
-	}
-	if actressThumbnailNeedsResolution(actress.ThumbURL) && !hasValue(func(info models.ActressInfo) string { return info.ThumbURL }) {
-		fallback.ThumbURL = cached.ThumbURL
-	}
-	return fallback
-}
-
+// rankForSource ties each cached-match field to its source's rank; the cache
+// is a DMM-sourced snapshot, so it ranks exactly like the live dmm name.
 // actressIdentityNames ...
 func actressIdentityNames(actress *models.Actress) []string {
 	if actress == nil {
