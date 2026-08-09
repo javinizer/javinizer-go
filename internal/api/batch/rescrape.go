@@ -128,15 +128,7 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 
 		rescrapeResult, err := orch.Rescrape(c.Request.Context(), job.GetID(), movieID, filePath, &req)
 		if err != nil {
-			// audit F-R14-2: typed admission-conflict errors must reach the
-			// client as 409, not flattened into a generic 500 — the frontend's
-			// conflict handling keys off status.
-			var cfe *worker.EditAdmissionConflictError
-			if errors.As(err, &cfe) {
-				writeErrorResponse(c, http.StatusConflict, true, cfe.Error())
-				return
-			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Rescrape failed: %v", err)})
+			writeRescrapeOpError(c, err)
 			return
 		}
 
@@ -169,4 +161,16 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			Revision:       rev,
 		})
 	}
+}
+
+// writeRescrapeOpError maps rescrape failures: audit F-R14-2 typed
+// admission-conflict errors must reach the client as 409, not flattened into
+// a generic 500 — the frontend's conflict handling keys off status.
+func writeRescrapeOpError(c *gin.Context, err error) {
+	var cfe *worker.EditAdmissionConflictError
+	if errors.As(err, &cfe) {
+		writeErrorResponse(c, http.StatusConflict, true, cfe.Error())
+		return
+	}
+	c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Rescrape failed: %v", err)})
 }

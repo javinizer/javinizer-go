@@ -262,6 +262,38 @@ func TestRescrapeParkFailureAbortsGeneration(t *testing.T) {
 	assert.Equal(t, "committed", string(got), "pre-existing bytes never moved nor overwritten")
 }
 
+// famIDClearedLookup strips FileMatchInfo.MovieID on a single result ID so
+// the echo-capture fallback arm is observable — post-commit results normally
+// carry a normalized MovieID, making the fallback defensive.
+type famIDClearedLookup struct {
+	resultstore.ResultReadFacade
+	clearID string
+}
+
+func (l famIDClearedLookup) GetFileResultByResultID(id string) (*resultstore.MovieResult, string, bool) {
+	r, fp, ok := l.ResultReadFacade.GetFileResultByResultID(id)
+	if !ok || r == nil || id != l.clearID {
+		return r, fp, ok
+	}
+	c := r.Clone()
+	c.FileMatchInfo.MovieID = ""
+	return c, fp, ok
+}
+
+// F-R15-1 fallback: an empty FileMatchInfo.MovieID falls back to the stored
+// Movie.ID for the family key before revision mapping.
+func TestUpdateMovieFamilyWithEchoFamIDFallsBackToMovieID(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/e.mp4"})
+	seedFamilyResult(store, "/f/e.mp4", "res-e2", "FALL-2", "")
+	pe := NewPosterEditor(famIDClearedLookup{ResultReadFacade: store, clearID: "res-e2"}, store, nil)
+	pe.attachEnv(&posterEditEnv{fs: afero.NewMemMapFs(), tempDir: "/tmp", jobID: "JOB-F2"})
+	rev, fam, err := pe.UpdateMovieFamilyWithEcho(context.Background(), "FALL-2", "res-e2", &models.Movie{ID: "FALL-2", Title: "fallback"}, FamilySaveOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, rev)
+	require.NotEmpty(t, fam)
+	require.Contains(t, fam, "res-e2")
+}
+
 // audit F-R15-1: the echo variant returns post-commit revisions captured
 // within the keyed section — they match the COMMITTED state, provably.
 func TestUpdateMovieFamilyWithEchoCapturesCommitRevision(t *testing.T) {

@@ -295,6 +295,57 @@ func TestDownloadFromURL_FullStatErrorRefusesDownload(t *testing.T) {
 	}
 }
 
+// local-review coverage: finalize wedges AND the parked restore wedges too —
+// the error surfaces and the original stays parked for salvage.
+func TestDownloadFromURL_FinalizeFailureRestoreAlsoFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(jpegBytes(300, 400))
+	}))
+	defer srv.Close()
+	base := afero.NewMemMapFs()
+	dir := "/tmp/javinizer-test/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/FIN-2-full.jpg", []byte("originalfull"), 0o644))
+	// Every rename landing ON the canonical full name fails: the finalize and
+	// the subsequent restore attempt alike.
+	fs := renameFailWhereFS{Fs: base, fail: func(_, n string) bool { return strings.HasSuffix(n, "/FIN-2-full.jpg") }}
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+
+	_, err := pm.DownloadFromURL(context.Background(), "job1", "FIN-2", srv.URL+"/img.jpg", "", "")
+	require.ErrorContains(t, err, "failed to finalize image download")
+	_, cErr := base.Stat(dir + "/FIN-2-full.jpg")
+	assert.Error(t, cErr, "canon removed pre-finalize; restore wedged — absent")
+	_, bakErr := base.Stat(dir + "/FIN-2-full.jpg.dlbak")
+	assert.NoError(t, bakErr, "parked original retained for salvage")
+}
+
+// local-review coverage: the undecidable-crop-stat arm whose restore rename
+// ALSO wedges still refuses the download and keeps the healthy crop canon.
+func TestDownloadFromURL_CropStatErrorRestoreAlsoFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(jpegBytes(300, 400))
+	}))
+	defer srv.Close()
+	base := afero.NewMemMapFs()
+	dir := "/tmp/javinizer-test/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/CST-2-full.jpg", []byte("originalfull"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/CST-2.jpg", []byte("originalcrop"), 0o644))
+	inner := renameFailWhereFS{Fs: base, fail: func(o, _ string) bool { return strings.HasSuffix(o, ".dlbak") }}
+	fs := statFailExactFS{Fs: inner, path: dir + "/CST-2.jpg"}
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+
+	_, err := pm.DownloadFromURL(context.Background(), "job1", "CST-2", srv.URL+"/img.jpg", "", "")
+	require.ErrorContains(t, err, "failed to inspect previous cropped poster")
+	crop, cerr := afero.ReadFile(base, dir+"/CST-2.jpg")
+	require.NoError(t, cerr)
+	assert.Equal(t, "originalcrop", string(crop), "healthy crop canon never touched")
+	_, bakErr := base.Stat(dir + "/CST-2-full.jpg.dlbak")
+	assert.NoError(t, bakErr, "restore wedged — parked full leg retained for salvage")
+}
+
 // local codex review P1 (crop leg): the undecidable-crop-stat arm must undo
 // the fresh full promote and restore the parked original before refusing.
 func TestDownloadFromURL_CropStatErrorRestoresFullLeg(t *testing.T) {

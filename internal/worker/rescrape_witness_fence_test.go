@@ -812,6 +812,172 @@ func TestPosterWitnessFenceFencesParkedBackup(t *testing.T) {
 
 // audit F-R10-1: park + generation run UNDER the family key — the lock is
 // acquired before generation starts and released after it finishes.
+// Patch-coverage: the own-leg grand delete READ-fail arm (a recorded leg that
+// vanished before closeout) is a silent skip, never an error.
+func TestCloseoutOwnLegSweepReadFailSkips(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-A", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.genSHA = map[string]string{"SWPR-9.jpg": "deadbeef"}
+		scope.preExistedPair = false
+		return &RescrapeResult{Status: models.RescrapeStatusConflict}, &resultstore.MovieResult{Movie: &models.Movie{ID: "SWPR-9"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}, nil
+	})
+	require.NoError(t, err)
+	entries, rdErr := afero.ReadDir(fs, dir)
+	require.NoError(t, rdErr)
+	assert.Empty(t, entries, "vanished leg: nothing deleted, nothing created")
+}
+
+// Patch-coverage: a matching-fingerprint leg whose delete wedges stays in
+// place (warn-only), the closeout never destroys unverifiable bytes.
+func TestCloseoutOwnLegSweepRemoveFailWarns(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, "SWPD-9-full.jpg"), []byte("mine-full"), 0o644))
+	fs := selectiveFailRemoveFS{Fs: mem, failSuffix: "-full.jpg"}
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-B", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.genSHA = map[string]string{"SWPD-9-full.jpg": shaContentHex([]byte("mine-full"))}
+		scope.preExistedPair = false
+		return &RescrapeResult{Status: models.RescrapeStatusConflict}, &resultstore.MovieResult{Movie: &models.Movie{ID: "SWPD-9"}, OrchestrationState: models.OrchestrationState{PosterGenerated: true}}, nil
+	})
+	require.NoError(t, err)
+	got, rdErr := afero.ReadFile(mem, filepath.Join(dir, "SWPD-9-full.jpg"))
+	require.NoError(t, rdErr)
+	assert.Equal(t, "mine-full", string(got), "delete failure keeps the leg in place")
+}
+
+// Patch-coverage: a transitional (non-terminal, non-success) outcome status
+// restores the parked pre-op pair verbatim — no content arbitration yet.
+func TestWithRescrapeStatusUnusualStatusRestoresParked(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "ORIG-C", "")
+	lc := rescrapeLifecycleShim(jobID, fs, store)
+	canon := filepath.Join(dir, "PEND-1.jpg")
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("pre-op"), 0o644))
+	parked := parkCanonicalPosterPair(fs, dir, "PEND-1")
+	require.True(t, parked.hadCrop)
+	require.NoError(t, afero.WriteFile(fs, canon, []byte("gen-bytes"), 0o644))
+
+	outcome := &RescrapeResult{Status: "pending"}
+	mr := &resultstore.MovieResult{Movie: &models.Movie{ID: "PEND-1"}}
+	_, err := withRescrapeStatus(lc, func(scope *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		scope.parked = parked
+		return outcome, mr, nil
+	})
+	require.NoError(t, err)
+	got, rdErr := afero.ReadFile(fs, canon)
+	require.NoError(t, rdErr)
+	assert.Equal(t, "pre-op", string(got), "transitional status rewinds to pre-op bytes")
+}
+
+type openFailDirFS struct {
+	afero.Fs
+	dir string
+}
+
+func (f openFailDirFS) Open(name string) (afero.File, error) {
+	if filepath.ToSlash(name) == filepath.ToSlash(f.dir) {
+		return nil, errors.New("open wedged")
+	}
+	return f.Fs.Open(name)
+}
+
+// Patch-coverage: an UNREADABLE poster dir during the orphan marker probe is
+// undecidable — the orphan is kept, never swept.
+func TestOrphanSweepProbeErrorKeepsOrphan(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, "OLD-9.jpg"), []byte("orphan-bytes"), 0o644))
+	fs := openFailDirFS{Fs: mem, dir: dir}
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "NEW-9", "")
+	lc := rescrapeLifecycle{
+		inputs: rescrapePhaseInputs{Fs: fs, TempDir: "/tmp", JobID: jobID, ResultMap: store, EditLockFn: func(ids ...string) func() { return func() {} }},
+		lookup: &resultstore.FileLookupResult{FilePath: "/f/a.mp4", OldMovieID: "OLD-9"},
+	}
+	outcome := &RescrapeResult{Status: models.RescrapeStatusSuccess, OrphanedMovieIDs: []string{"OLD-9"}}
+	_, err := withRescrapeStatus(lc, func(_ *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		return outcome, &resultstore.MovieResult{Movie: &models.Movie{ID: "NEW-9"}}, nil
+	})
+	require.NoError(t, err)
+	got, rdErr := afero.ReadFile(mem, filepath.Join(dir, "OLD-9.jpg"))
+	require.NoError(t, rdErr)
+	assert.Equal(t, "orphan-bytes", string(got), "undecidable probe keeps the orphan")
+}
+
+// Patch-coverage: with no EditLockFn configured the orphan sweep still runs
+// end-to-end on the default no-op release — sweeping works lock-free.
+func TestOrphanSweepDefaultReleaseWhenNoEditLock(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	dir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "OLD-7.jpg"), []byte("orphan"), 0o644))
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-a", "NEW-7", "")
+	lc := rescrapeLifecycle{
+		inputs: rescrapePhaseInputs{Fs: fs, TempDir: "/tmp", JobID: jobID, ResultMap: store}, // no EditLockFn
+		lookup: &resultstore.FileLookupResult{FilePath: "/f/a.mp4", OldMovieID: "OLD-7"},
+	}
+	outcome := &RescrapeResult{Status: models.RescrapeStatusSuccess, OrphanedMovieIDs: []string{"OLD-7"}}
+	_, err := withRescrapeStatus(lc, func(_ *rescrapeGenScope) (*RescrapeResult, *resultstore.MovieResult, error) {
+		return outcome, &resultstore.MovieResult{Movie: &models.Movie{ID: "NEW-7"}}, nil
+	})
+	require.NoError(t, err)
+	_, statErr := fs.Stat(filepath.Join(dir, "OLD-7.jpg"))
+	assert.Error(t, statErr, "orphan swept on the default release path")
+}
+
+// Patch-coverage: generation success captures content fingerprints of BOTH
+// canonical legs for the closeout's restore arbitration.
+func TestRescrapeGenerationFingerprintCapture(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	pdir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(pdir, 0o755))
+	store := resultstore.New(1, []string{"f1.mp4"})
+	seedFamilyResult(store, "f1.mp4", "res-1", "GEN-9", "")
+	gen := &spyPosterGen{onGenerate: func() {
+		_ = afero.WriteFile(fs, filepath.Join(pdir, "GEN-9-full.jpg"), []byte("gen-full"), 0o644)
+		_ = afero.WriteFile(fs, filepath.Join(pdir, "GEN-9.jpg"), []byte("gen-crop"), 0o644)
+	}}
+	wf := &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "GEN-9"}, Status: scrape.StatusCompleted}}
+	inputs := rescrapePhaseInputs{
+		WF: wf, ResultMap: store, Finder: store, JobID: jobID,
+		PosterGen:  gen,
+		EditLockFn: func(ids ...string) func() { return func() {} },
+		Fs:         fs, TempDir: "/tmp",
+	}
+	phase := NewRescrapePhase()
+	res, err := phase.Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "GEN-9", FilePath: "f1.mp4"})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	full, ferr := afero.ReadFile(fs, filepath.Join(pdir, "GEN-9-full.jpg"))
+	require.NoError(t, ferr)
+	assert.Equal(t, "gen-full", string(full), "generated full leg survives success closeout")
+	crop, cerr := afero.ReadFile(fs, filepath.Join(pdir, "GEN-9.jpg"))
+	require.NoError(t, cerr)
+	assert.Equal(t, "gen-crop", string(crop), "generated crop leg survives success closeout")
+}
+
 func TestRescrapeHoldsFamilyKeyThroughParkAndGenerate(t *testing.T) {
 	store := resultstore.New(1, []string{"f1.mp4"})
 	seedFamilyResult(store, "f1.mp4", "res-1", "KEY-1", "")
