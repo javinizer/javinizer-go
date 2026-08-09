@@ -86,10 +86,15 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 
 			// Presence BEFORE alias resolution: an explicit canonical zero must
 			// already count as "the user chose this" when aliases apply (codex
-			// P2 round 7).
+			// P2 round 7). The deprecated request_delay alias counts as explicit
+			// presence too — request_delay: 0 must survive MergeDefaultsFrom
+			// defaults (codex) — while canonical precedence is kept by
+			// applyJSONAliases.
 			_, explicitEnabled := scraperRaw["enabled"]
 			ss.SetEnabledPresence(explicitEnabled)
-			if _, explicitRate := scraperRaw["rate_limit"]; explicitRate {
+			_, canonicalRate := scraperRaw["rate_limit"]
+			_, aliasRate := scraperRaw["request_delay"]
+			if canonicalRate || aliasRate {
 				ss.SetRateLimitPresence(true)
 			}
 			if hasAliases {
@@ -126,7 +131,11 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 // and max_retries→retry_count.
 func (s *ScrapersConfig) applyJSONAliases(raw map[string]json.RawMessage, ss *models.ScraperSettings) {
 	// Canonical presence beats the alias: explicit rate_limit: 0 is a choice.
-	if rd, ok := raw["request_delay"]; ok && ss.RateLimit == 0 && !ss.RateLimitIsExplicit() {
+	// Alias presence counts as explicit (see caller), so precedence keys on
+	// the canonical key alone — otherwise an alias-only entry would never
+	// apply now that the alias marks rate_limit explicit.
+	_, canonicalRate := raw["rate_limit"]
+	if rd, ok := raw["request_delay"]; ok && !canonicalRate {
 		var v int
 		if err := json.Unmarshal(rd, &v); err == nil {
 			ss.RateLimit = v

@@ -267,10 +267,12 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 			}
 			ss.SetEnabledPresence(scraperYAMLHasEnabledKey(valNode))
 			// rate_limit presence matters: explicit 0 means "no delay", which
-			// differs from omitted (conservative 1s default).
-			// Canonical key only: aliases never count as explicit presence, so
-			// request_delay can still fill a genuinely omitted rate_limit.
-			ss.SetRateLimitPresence(scraperYAMLHasKey(valNode, "rate_limit"))
+			// differs from omitted (conservative 1s default). The canonical key
+			// counts, and so does its deprecated request_delay alias — an alias
+			// zero is still an explicit user choice and must survive
+			// MergeDefaultsFrom (codex). Canonical value precedence is kept by
+			// applyYAMLAliases.
+			ss.SetRateLimitPresence(scraperYAMLHasKey(valNode, "rate_limit") || scraperYAMLHasKey(valNode, "request_delay"))
 
 			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
 			// Walk the node content to find alias keys and apply them if the canonical
@@ -299,12 +301,16 @@ func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.Scraper
 	// Canonical presence (not merely a zero decode) wins: an explicit
 	// rate_limit: 0 is a real choice; the deprecated alias must not overwrite
 	// it (codex P2 round 7).
+	// Alias presence now counts as explicit (see caller), so key the
+	// precedence decision on the canonical key alone instead of the
+	// zero/explicit combo — otherwise an alias-only entry would never apply.
+	hasRateKey := scraperYAMLHasKey(valNode, "rate_limit")
 	hasRetryKey := scraperYAMLHasKey(valNode, "retry_count")
 	for i := 0; i < len(valNode.Content); i += 2 {
 		k := valNode.Content[i].Value
 		switch k {
 		case "request_delay":
-			if ss.RateLimit == 0 && !ss.RateLimitIsExplicit() {
+			if !hasRateKey {
 				var v int
 				if err := valNode.Content[i+1].Decode(&v); err == nil {
 					ss.RateLimit = v
