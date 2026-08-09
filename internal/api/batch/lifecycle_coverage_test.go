@@ -21,6 +21,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
+
+	workermocks "github.com/javinizer/javinizer-go/internal/mocks/worker"
 )
 
 func TestListBatchJobs_PersistedWithOpCounts(t *testing.T) {
@@ -188,6 +190,16 @@ func TestProcessBulkRescrapeMovie_Error(t *testing.T) {
 
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Contains(t, result.Error, "Rescrape failed")
+}
+
+// The bulk per-movie merge-error arm: a bad preset rejects with a failed
+// DTO and NO recovery handle.
+func TestProcessBulkRescrapeMovie_BadMergePreset(t *testing.T) {
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	out, rec := processBulkRescrapeMovie(context.Background(), "MV-BM", mockJob, &contracts.BatchRescrapeRequest{Preset: "bogus"}, minimalFactory{})
+	require.Equal(t, models.RescrapeStatusFailed, out.Status)
+	assert.Contains(t, out.Error, "invalid merge options")
+	assert.Nil(t, rec)
 }
 
 func TestProcessBulkRescrapeMovie_GoneStatus(t *testing.T) {

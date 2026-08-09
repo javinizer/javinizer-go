@@ -568,7 +568,9 @@ const ops = Array.from(latestByFamily.entries());
 				const editedMovies = deps.getEditedMovies();
 				for (const [filePath, result] of Object.entries(jobSnapshot.results ?? {})) {
 					const fr = result as FileResult;
-					if (!succeededIds.has(fr.movie_id)) continue;
+					// codex cloud P1: fold to match poster-crop-sync keys — an
+					// overlay keyed by the OLD ID spelling must clear too.
+					if (!succeededIds.has((fr.movie_id ?? '').toLowerCase())) continue;
 					const pending = editedMovies.get(filePath);
 					if (pending && (pending.poster_crop_bounds != null || pending.poster_crop_source_full)) {
 						editedMovies.set(filePath, clearCropGeometry(pending));

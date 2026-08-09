@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,13 +16,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// witnessOpenFailFS faults reads of the named witness file — the probe's
+// content-scan fail-closed seam (pitched after the codex cloud P1 fold).
+type witnessOpenFailFS struct {
+	afero.Fs
+	suffix string
+}
+
+func (f witnessOpenFailFS) Open(name string) (afero.File, error) {
+	if strings.HasSuffix(filepath.ToSlash(name), f.suffix) {
+		return nil, errors.New("open wedged")
+	}
+	return f.Fs.Open(name)
+}
+
 // codex P2: a transient Stat error on the witness probe must fence the
 // write-back (return true), not admit it as "no witness".
 func TestHasUnresolvedPromoteWitnessStatErrorFences(t *testing.T) {
 	mem := afero.NewMemMapFs()
 	require.NoError(t, mem.MkdirAll("/tmp/posters/JOB-9", 0o755))
 	pe := newEditorForStore(resultstore.New(1, []string{"/f/a.mp4"}))
-	pe.attachEnv(&posterEditEnv{fs: statFailSuffixFS{Fs: mem, suffix: ".promote-PI-1.json"}, tempDir: "/tmp", jobID: "JOB-9"})
+	// codex cloud P1 reseat: the folded content scan fails closed when the
+	// witness DIRECTORY itself cannot be enumerated (no witness file needed).
+	pe.attachEnv(&posterEditEnv{fs: witnessOpenFailFS{Fs: mem, suffix: "/tmp/posters/JOB-9"}, tempDir: "/tmp", jobID: "JOB-9"})
 	assert.True(t, pe.hasUnresolvedPromoteWitness("PI-1"), "probe error => conservatively fenced")
 }
 

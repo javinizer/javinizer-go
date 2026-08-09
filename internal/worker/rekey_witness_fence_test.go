@@ -142,11 +142,11 @@ func TestPosterWitnessConflictParkedScanErrorFailsClosed(t *testing.T) {
 	mem := afero.NewMemMapFs()
 	dir := "/tmp/posters/JXP"
 	require.NoError(t, mem.MkdirAll(dir, 0o755))
-	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 2} // promote stat + rekey scan ok; parked scan wedges
+	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 3} // promote stat + rekey scan ok; parked scan wedges
 	err := posterWitnessConflict(fs, "/tmp", "JXP", "PI-1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "backup-scan")
-	fresh := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 2} // fresh counter: same gating layout
+	fresh := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 3} // fresh counter: same gating layout
 	require.NoError(t, posterWitnessConflictCore(fresh, "/tmp", "JXP", "PI-1"), "core never reads the parked probe")
 }
 
@@ -235,7 +235,7 @@ func TestPosterWitnessFenceCropDirReadError(t *testing.T) {
 	mem := afero.NewMemMapFs()
 	dir := "/tmp/posters/JB"
 	require.NoError(t, mem.MkdirAll(dir, 0o755))
-	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 1}
+	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 2} // folded promote scan #1, rekey scan #2; the crop scan (#3) wedges now
 	err := posterWitnessFence(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JB"}, "PI-1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "crop witness scan")

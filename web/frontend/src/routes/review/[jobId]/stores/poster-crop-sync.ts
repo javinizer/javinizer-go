@@ -90,8 +90,11 @@ export function rescrapeClearedMovieKeys(
 	const keys = new Set<string>();
 	for (const r of results) {
 		if (r.status !== 'success') continue;
-		keys.add(r.movie_id);
-		if (r.movie?.id) keys.add(r.movie.id);
+		// codex cloud P1: keys fold case like family resolution (and the
+		// review-mutations cleanup compare) — a rescrape that corrects the ID's
+		// spelling must clear the overlay persisted under the OLD spelling.
+		if (r.movie_id) keys.add(r.movie_id.toLowerCase());
+		if (r.movie?.id) keys.add(r.movie.id.toLowerCase());
 	}
 	return keys;
 }

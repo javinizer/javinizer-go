@@ -269,13 +269,15 @@ func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, r
 	}
 	dir := filepath.Join(tempDir, "posters", jobID)
 	p := filepath.Join(dir, promoteWitnessName(posterID))
-	if _, err := fs.Stat(p); err == nil {
-		return "", fmt.Errorf("%w for %s — restart to reconcile before retrying", errPromoteWitnessPending, posterID)
-	} else if !os.IsNotExist(err) {
-		// codex r51 P2c: any OTHER stat error may still mean the witness file
-		// exists — overwriting it would blind the reconciler to the pending
-		// state. Fail closed.
-		return "", fmt.Errorf("promote witness check %s: %w", p, err)
+	// codex cloud P1 (case-fold probes): an exact-name Stat misses a pending
+	// witness written under a case-variant spelling of this poster. Content
+	// scan (with a name-fold fallback for legacy empty payloads) fences by
+	// identity, not by byte-spelling; read errors still fail closed.
+	if pwErr := promoteWitnessConflict(fs, dir, posterID); pwErr != nil {
+		if errors.Is(pwErr, errPromoteWitnessPending) {
+			return "", fmt.Errorf("%w for %s — restart to reconcile before retrying", errPromoteWitnessPending, posterID)
+		}
+		return "", fmt.Errorf("promote witness check %s: %w", p, pwErr)
 	}
 	// codex P2: an unresolved REKEY witness (.rekey-<rawID>.json, matching the
 	// worker writer) means one poster leg may live under another ID; a
@@ -457,6 +459,49 @@ func parkedBackupConflictFor(fs afero.Fs, dir, posterID string) (bool, error) {
 	return false, nil
 }
 
+// promoteWitnessConflict reports errPromoteWitnessPending whenever a promote
+// witness for posterID exists — matched by CONTENT first (payload PosterID,
+// fold-cased) with a fold-cased NAME fallback for legacy contentless
+// payloads. Read errors fail closed (codex cloud P1: case-fold fences).
+func promoteWitnessConflict(fs afero.Fs, dir, posterID string) error {
+	entries, err := afero.ReadDir(fs, dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("promote witness scan %s: %w", dir, err)
+	}
+	want := strings.TrimSpace(posterID)
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, promoteWitnessPrefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, rerr := afero.ReadFile(fs, filepath.Join(dir, name))
+		if rerr != nil {
+			return fmt.Errorf("promote witness scan %s: %w", name, rerr)
+		}
+		var w struct {
+			PosterID string `json:"poster_id"`
+		}
+		if json.Unmarshal(data, &w) == nil && w.PosterID != "" {
+			if strings.EqualFold(strings.TrimSpace(w.PosterID), want) {
+				return fmt.Errorf("%w for %s", errPromoteWitnessPending, posterID)
+			}
+			continue
+		}
+		// Legacy contentless witness: fold-compare by filename instead.
+		raw := strings.TrimSuffix(strings.TrimPrefix(name, promoteWitnessPrefix), ".json")
+		if id, uerr := url.PathUnescape(raw); uerr == nil {
+			raw = id
+		}
+		if strings.EqualFold(strings.TrimSpace(raw), want) {
+			return fmt.Errorf("%w for %s", errPromoteWitnessPending, posterID)
+		}
+	}
+	return nil
+}
+
 // cropWitnessConflict scans the poster dir for crop witnesses naming
 // posterID, returning the conflicting witness filename ("" when none). Both
 // admission guards (crop write + from-URL promote) share this scan so a
@@ -484,7 +529,10 @@ func cropWitnessConflict(fs afero.Fs, dir, posterID string) (string, error) {
 		if jerr := json.Unmarshal(data, &foreign); jerr != nil {
 			continue
 		}
-		if foreign.PosterID == posterID {
+		if strings.EqualFold(strings.TrimSpace(foreign.PosterID), strings.TrimSpace(posterID)) {
+			// codex cloud P1 (case-fold fences): family resolution folds case —
+			// a pending witness written under a case-variant spelling of the
+			// same poster must fence identically.
 			return name, nil
 		}
 	}
@@ -516,10 +564,13 @@ func writeCropWitnessGuarded(fs afero.Fs, tempDir, jobID string, w cropWitness) 
 	// reconciliation. Probe the exact names the writers use (promote escapes
 	// via PathEscape; rekey concatenates raw — mirror each) and fail CLOSED on
 	// stat errors.
-	if _, serr := fs.Stat(filepath.Join(dir, promoteWitnessName(w.PosterID))); serr == nil {
-		return "", fmt.Errorf("%w for %s (fence: promote witness) — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
-	} else if !os.IsNotExist(serr) {
-		return "", fmt.Errorf("crop witness scan %s: %w", promoteWitnessName(w.PosterID), serr)
+	// codex cloud P1 (case-fold probes): pending-state keyed by exact name
+	// missed case-variant spellings — promoteWitnessConflict folds.
+	if pwErr := promoteWitnessConflict(fs, dir, w.PosterID); pwErr != nil {
+		if errors.Is(pwErr, errPromoteWitnessPending) {
+			return "", fmt.Errorf("%w for %s (fence: promote witness) — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
+		}
+		return "", fmt.Errorf("crop witness scan %s: %w", promoteWitnessName(w.PosterID), pwErr)
 	}
 	if hit, serr := rekeyWitnessIDsFor(fs, dir, w.PosterID); serr != nil {
 		return "", fmt.Errorf("crop witness scan: %w", serr)

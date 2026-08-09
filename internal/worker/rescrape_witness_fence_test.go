@@ -1136,6 +1136,50 @@ func TestRescrapePosterBackupEmptyPathGuards(t *testing.T) {
 	(&rescrapePosterBackup{fs: afero.NewMemMapFs(), markerPath: "/t/marker"}).restore(nil)
 }
 
+// codex cloud P1 (case-fold probes) — worker-side promote-pending scan must
+// fence case-variant spellings exactly like exact ones.
+func TestPromoteWitnessPending_FoldMatters(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JPF"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+
+	// payload with variant spelling:
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-abx-1.json"),
+		[]byte(`{"poster_id":"abx-1","url":"https://x","result_id":"res-1"}`), 0o644))
+	hit, err := promoteWitnessPendingCore(fs, dir, "ABX-1")
+	require.NoError(t, err)
+	assert.True(t, hit, "case-variant pending witness fences")
+
+	// legacy contentless payload under a variant NAME fences via folded name:
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-abx-2.json"), []byte("{}"), 0o644))
+	hit2, err := promoteWitnessPendingCore(fs, dir, "ABX-2")
+	require.NoError(t, err)
+	assert.True(t, hit2)
+
+	// unrelated spelling: no fence:
+	hit3, err := promoteWitnessPendingCore(fs, dir, "ZZZ-9")
+	require.NoError(t, err)
+	assert.False(t, hit3)
+
+	// missing dir ⇒ no fence:
+	hit4, err := promoteWitnessPendingCore(fs, "/tmp/posters/NOPE", "ABX-1")
+	require.NoError(t, err)
+	assert.False(t, hit4)
+}
+
+// And the conflict entry point still surfaces a typed admission conflict.
+func TestPosterWitnessConflictCore_FoldFencesAdmission(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JPA"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-abx-8.json"),
+		[]byte(`{"poster_id":"abx-8","url":"https://x","result_id":"res-1"}`), 0o644))
+	err := posterWitnessConflictCore(fs, "/tmp", "JPA", "ABX-8")
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+}
+
 type readWedgeFS struct {
 	afero.Fs
 	suffix string

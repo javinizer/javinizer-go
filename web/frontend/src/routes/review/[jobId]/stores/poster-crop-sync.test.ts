@@ -163,10 +163,19 @@ describe('rescrapeClearedMovieKeys', () => {
 			{ movie_id: 'KEEP-002', status: 'success', movie: { id: 'KEEP-002' } },
 			{ movie_id: 'FAIL-003', status: 'failed' },
 		]);
-		expect(keys.has('OLD-001')).toBe(true);
-		expect(keys.has('NEW-001')).toBe(true);
-		expect(keys.has('KEEP-002')).toBe(true);
+		expect(keys.has('old-001')).toBe(true);
+		expect(keys.has('new-001')).toBe(true);
+		expect(keys.has('keep-002')).toBe(true);
 		expect(keys.has('FAIL-003')).toBe(false);
+	});
+
+	it('fold case: an overlay persisted under the OLD spelling clears (codex cloud P1)', () => {
+		const keys = rescrapeClearedMovieKeys([
+			{ movie_id: 'ipx-735', status: 'success', movie: { id: 'IPX-735' } },
+		]);
+		expect(keys.has('ipx-735'), 'old spelling folds in').toBe(true);
+		expect(keys.has('IPX-735'.toLowerCase()), 'new spelling folds to the same key').toBe(true);
+		expect(keys.has('oth-9')).toBe(false);
 	});
 
 	it('empty results clear nothing', () => {

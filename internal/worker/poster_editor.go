@@ -480,6 +480,46 @@ func posterWitnessConflict(fs afero.Fs, tempDir, jobID, posterID string) error {
 	return nil
 }
 
+// promoteWitnessPendingCore reports whether a promote witness names this
+// poster — by CONTENT (fold-cased payload ID) first, with a name-fallback
+// for legacy contentless payloads (codex cloud P1: probes must fence by family
+// identity regardless of the ID's byte spelling).
+func promoteWitnessPendingCore(fs afero.Fs, dir, posterID string) (bool, error) {
+	entries, err := afero.ReadDir(fs, dir)
+	if err != nil {
+		if errors.Is(err, afero.ErrFileNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("promote witness scan %s: %w", dir, err)
+	}
+	want := strings.TrimSpace(posterID)
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, promoteWitnessPrefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, rerr := afero.ReadFile(fs, filepath.Join(dir, name))
+		if rerr != nil {
+			return false, fmt.Errorf("promote witness scan %s: %w", name, rerr)
+		}
+		var w promoteWitness
+		if json.Unmarshal(data, &w) == nil && w.PosterID != "" {
+			if strings.EqualFold(strings.TrimSpace(w.PosterID), want) {
+				return true, nil
+			}
+			continue
+		}
+		raw := strings.TrimSuffix(strings.TrimPrefix(name, promoteWitnessPrefix), ".json")
+		if id, uerr := url.PathUnescape(raw); uerr == nil {
+			raw = id
+		}
+		if strings.EqualFold(strings.TrimSpace(raw), want) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // posterWitnessConflictCore probes promote/rekey/crop witnesses only — the
 // rescrape pipeline's own probes use it (rescrape-vs-rescrape last-writer-
 // wins stays legal: F-R10-1 keys the generation byte windows).
@@ -488,11 +528,12 @@ func posterWitnessConflictCore(fs afero.Fs, tempDir, jobID, posterID string) err
 		return nil
 	}
 	dir := filepath.Join(tempDir, "posters", jobID)
-	pw := filepath.Join(dir, ".promote-"+url.PathEscape(posterID)+".json")
-	if _, err := fs.Stat(pw); err == nil {
+	// codex cloud P1 (case-fold probes): an exact-name Stat missed witnesses
+	// written under a case-variant spelling — scan contents, fold identity.
+	if hit, pwErr := promoteWitnessPendingCore(fs, dir, posterID); pwErr != nil {
+		return fmt.Errorf("poster promote witness check: %w", pwErr)
+	} else if hit {
 		return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s promote witness unresolved: restart to reconcile", posterID)}
-	} else if !errors.Is(err, afero.ErrFileNotFound) {
-		return fmt.Errorf("poster promote witness check: %w", err)
 	}
 	// audit F5+F-R6-1: rekey witnesses fence by CONTENT at BOTH identities —
 	// a plain PATCH's post-commit eviction could delete the old-ID pair while

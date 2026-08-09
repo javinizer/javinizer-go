@@ -448,7 +448,10 @@ func TestRekeyPromoteWitnessCheckStatError(t *testing.T) {
 	dir := filepath.Join("/tmp", "posters", "JOB-9")
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "SSNI-R1-full.jpg"), []byte("x"), 0o644))
-	fs := statFailSuffixFS{Fs: base, suffix: ".promote-SSNI-R1.json"}
+	// codex cloud P1 reseat: pending witnesses are content-scanned now —
+	// wedge the witness READ; the probe must still fail closed.
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, ".promote-SSNI-R1.json"), []byte("{}"), 0o644))
+	fs := witnessOpenFailFS{Fs: base, suffix: ".promote-SSNI-R1.json"}
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}

@@ -60,7 +60,9 @@ func TestWritePromoteWitnessGuardedRejectsUnresolved(t *testing.T) {
 }
 
 func TestWritePromoteGuardedStatError(t *testing.T) {
-	fs := statErrTargetFS{Fs: afero.NewMemMapFs(), target: "/tmp/posters/JG/.promote-PI-1.json"}
+	// codex cloud P1 reseat: the pending-witness probe is a content scan —
+	// wedge the directory enumeration; still fails closed.
+	fs := &brokenFS{Fs: afero.NewMemMapFs(), failOpen: func(n string) bool { return filepath.ToSlash(n) == "/tmp/posters/JG" }}
 	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG", "PI-1", "https://x", "res-1", 0, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "promote witness check")
@@ -171,6 +173,92 @@ func TestRemoveCropWitnessRemoveError(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, p, []byte("{}"), 0o644))
 	failRm := &failRemoveBatchFs{Fs: fs}
 	removeCropWitness(failRm, p)
+}
+
+// codex cloud P1 (case-fold fences): family identity is fold-cased, so a
+// pending witness written under a case-variant spelling must still fence —
+// content match first, fold-cased name fallback for legacy contentless files.
+func TestPromoteWitnessConflict_FoldsCase(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JF"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+
+	// content-driven: payload carries the variant spelling
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-abc-1.json"),
+		[]byte(`{"poster_id":"abc-1","url":"https://x"}`), 0o644))
+	err := promoteWitnessConflict(fs, dir, "ABC-1")
+	require.ErrorIs(t, err, errPromoteWitnessPending)
+
+	// legacy contentless payload: name-derived fallback must also fold
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-def-2.json"), []byte("{}"), 0o644))
+	err = promoteWitnessConflict(fs, dir, "DEF-2")
+	require.ErrorIs(t, err, errPromoteWitnessPending)
+
+	// unrelated witness: no fence
+	require.NoError(t, promoteWitnessConflict(fs, dir, "OTH-9"))
+
+	// missing dir: no witnesses
+	require.NoError(t, promoteWitnessConflict(fs, "/tmp/posters/NOPE", "ABC-1"))
+}
+
+type witnessReadWedgeFS struct {
+	afero.Fs
+	suffix string
+}
+
+func (f witnessReadWedgeFS) Open(name string) (afero.File, error) {
+	if strings.HasSuffix(filepath.ToSlash(name), f.suffix) && strings.Contains(name, ".promote-") {
+		return nil, errors.New("read wedged")
+	}
+	return f.Fs.Open(name)
+}
+
+// A transient read failure during the witness scan fails CLOSED.
+func TestPromoteWitnessConflictReadErrorFailsClosed(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JRW"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-abc-1.json"), []byte("{}"), 0o644))
+	err := promoteWitnessConflict(witnessReadWedgeFS{Fs: fs, suffix: ".json"}, dir, "ABC-1")
+	require.Error(t, err)
+	require.NotErrorIs(t, err, errPromoteWitnessPending, "not a pending verdict — a fault verdict")
+}
+
+// codex cloud P1: a case-variant pedning witness fences the download.
+func TestWritePromoteWitnessGuarded_CaseVariantFence(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JCV2"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-abc-3.json"),
+		[]byte(`{"poster_id":"abc-3","url":"https://x"}`), 0o644))
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JCV2", "ABC-3", "https://y", "res-1", 0, nil)
+	require.ErrorIs(t, err, errPromoteWitnessPending)
+}
+
+// ...and the crop guarded-writer's promote fence folds identically.
+func TestWriteCropWitnessGuarded_PromoteFenceFoldsCase(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JCV3"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".promote-abc-4.json"),
+		[]byte(`{"poster_id":"abc-4","url":"https://x"}`), 0o644))
+	_, err := writeCropWitnessGuarded(fs, "/tmp", "JCV3", cropWitness{PosterID: "ABC-4", ResultID: "res-1", StageID: "stage-x", CroppedURL: "https://y"})
+	require.ErrorIs(t, err, errCropWitnessPending)
+}
+
+// cropWitnessConflict matches by content identity folded to family case.
+func TestCropWitnessConflict_FoldsCase(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JCF1"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".crop-stage-1.json"),
+		[]byte(`{"poster_id":"abc-9","stage_id":"stage-1"}`), 0o644))
+	name, err := cropWitnessConflict(fs, dir, "ABC-9")
+	require.NoError(t, err)
+	assert.Equal(t, ".crop-stage-1.json", name, "case-variant pending witness still fences")
+	name2, err := cropWitnessConflict(fs, dir, "OTH-9")
+	require.NoError(t, err)
+	assert.Empty(t, name2)
 }
 
 type failRemoveBatchFs struct{ afero.Fs }

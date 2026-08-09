@@ -170,8 +170,19 @@ func TestWriteCropWitnessGuardedFencesRekeyWitness(t *testing.T) {
 }
 
 // Witness stat probes fail CLOSED: a transient stat error is not absence.
+// The batch-side rekey scan's directory-read error arm fails closed.
+func TestRekeyScanDirReadError(t *testing.T) {
+	fs := &brokenFS{Fs: afero.NewMemMapFs(), failOpen: func(n string) bool { return filepath.ToSlash(n) == "/tmp/posters/JG-KD" }}
+	require.NoError(t, fs.MkdirAll("/tmp/posters/JG-KD", 0o755))
+	_, err := rekeyWitnessIDsFor(fs, "/tmp/posters/JG-KD", "PI-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rekey witness scan")
+}
+
 func TestWriteCropWitnessGuardedPromoteStatErrorFailsClosed(t *testing.T) {
-	fs := statErrTargetFS{Fs: afero.NewMemMapFs(), target: "/tmp/posters/JOB-PS/.promote-PI-1.json"}
+	// codex cloud P1 reseat: the promote-pending probe is a content scan —
+	// wedge the directory enumeration itself; still fail-closed.
+	fs := &brokenFS{Fs: afero.NewMemMapFs(), failOpen: func(n string) bool { return filepath.ToSlash(n) == "/tmp/posters/JOB-PS" }}
 	_, err := writeCropWitnessGuarded(fs, "/tmp", "JOB-PS", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "crop witness scan")
@@ -279,7 +290,7 @@ func TestCropGuardedSecondScanDirError(t *testing.T) {
 			return false
 		}
 		count++
-		return count > 2 // rekey ReadDir #1 ok, parked-backup ReadDir #2 ok, crop scan ReadDir #3 wedges
+		return count > 3 // folded promote scan #1, rekey #2, parked #3 ok; crop scan (#4) wedges
 	}}
 	_, err := writeCropWitnessGuarded(fs, "/tmp", "JG-D2", cropWitness{PosterID: "PI-2", ResultID: "r1", StageID: "PI-2.crop-1"})
 	require.Error(t, err)
@@ -296,7 +307,7 @@ func TestWriteCropGuardedParkedScanErrorFailsClosed(t *testing.T) {
 			return false
 		}
 		count++
-		return count > 1 // rekey scan (#1) passes; parked scan (#2) wedges
+		return count > 2 // folded promote scan #1 + rekey #2 pass; parked scan (#3) wedges
 	}}
 	_, err := writeCropWitnessGuarded(fs, "/tmp", "JG-CP", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
 	require.Error(t, err)
@@ -313,7 +324,7 @@ func TestWritePromoteGuardedParkedScanErrorFailsClosed(t *testing.T) {
 			return false
 		}
 		count++
-		return count > 1 // rekey scan ok, parked scan wedges
+		return count > 2 // folded promote scan #1 + rekey #2 pass; parked scan (#3) wedges
 	}}
 	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-PE", "PI-1", "https://x", "res-1", 0, nil)
 	require.Error(t, err)
