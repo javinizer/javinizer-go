@@ -29,6 +29,7 @@ func (e *errEngine) ExecuteWithMaxBytes(_ string, _ *template.Context, _ int) (s
 func (e *errEngine) TruncateTitle(title string, _ int) string      { return title }
 func (e *errEngine) TruncateTitleBytes(title string, _ int) string { return title }
 func (e *errEngine) ValidatePathLength(_ string, _ int) error      { return nil }
+func (e *errEngine) ValidateTags(_ string) error                   { return nil }
 
 // --- resolveBaseFileName: uncovered fallback branches ---
 

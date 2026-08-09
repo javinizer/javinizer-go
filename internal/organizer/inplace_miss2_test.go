@@ -29,6 +29,7 @@ func (e *selectiveErrorEngine) ExecuteWithMaxBytes(_ string, _ *template.Context
 func (e *selectiveErrorEngine) TruncateTitle(title string, _ int) string      { return title }
 func (e *selectiveErrorEngine) TruncateTitleBytes(title string, _ int) string { return title }
 func (e *selectiveErrorEngine) ValidatePathLength(path string, _ int) error   { return nil }
+func (e *selectiveErrorEngine) ValidateTags(_ string) error                   { return nil }
 
 // emptyFolderEngine returns empty string from ExecuteWithMaxBytes
 type emptyFolderEngine struct{}
@@ -45,6 +46,7 @@ func (e *emptyFolderEngine) ExecuteWithMaxBytes(_ string, _ *template.Context, _
 func (e *emptyFolderEngine) TruncateTitle(title string, _ int) string      { return title }
 func (e *emptyFolderEngine) TruncateTitleBytes(title string, _ int) string { return title }
 func (e *emptyFolderEngine) ValidatePathLength(path string, _ int) error   { return nil }
+func (e *emptyFolderEngine) ValidateTags(_ string) error                   { return nil }
 
 // --- Plan: ExecuteWithMaxBytes error when Execute succeeds ---
 // Lines 93-95: folderMaxBytes > 0, ExecuteWithMaxBytes fails

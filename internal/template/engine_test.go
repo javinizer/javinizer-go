@@ -2738,3 +2738,18 @@ func BenchmarkTemplateRender_Parallel(b *testing.B) {
 		}
 	})
 }
+
+func TestEngine_ValidateTags(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<ID> - <TITLE>"))
+	assert.NoError(t, e.ValidateTags("<ACTRESSES> / <RESOLUTION>"))
+	assert.NoError(t, e.ValidateTags("static text without tags"))
+	assert.NoError(t, e.ValidateTags("<IF:YEAR><YEAR></IF>"))
+	assert.Error(t, e.ValidateTags("<TITEL>"))
+	assert.Error(t, e.ValidateTags("Featured: <TITEL>"))
+}
+
+func TestEngine_ValidateTags_ConditionalKeywordSkipped(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:ID>keep</IF>"))
+}

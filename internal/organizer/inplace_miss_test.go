@@ -41,6 +41,7 @@ func (e *errorEngine) ExecuteWithMaxBytes(_ string, _ *template.Context, _ int) 
 func (e *errorEngine) TruncateTitle(title string, _ int) string      { return title }
 func (e *errorEngine) TruncateTitleBytes(title string, _ int) string { return title }
 func (e *errorEngine) ValidatePathLength(path string, _ int) error   { return nil }
+func (e *errorEngine) ValidateTags(_ string) error                   { return nil }
 
 // Lines 73-75: buildPlanContext returns error when file template fails
 func TestInPlaceMiss_Plan_BuildPlanContextError(t *testing.T) {

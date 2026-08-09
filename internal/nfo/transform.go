@@ -231,6 +231,10 @@ func (g *Generator) renderConfiguredText(ctx context.Context, movie *models.Movi
 		logging.Warnf("nfo: dropping %s %q: template error: %v", label, tmpl, err)
 		return "", nil
 	}
+	if vErr := g.templateEngine.ValidateTags(tmpl); vErr != nil {
+		logging.Warnf("nfo: dropping %s %q: %v", label, tmpl, vErr)
+		return "", nil
+	}
 	return rendered, nil
 }
 

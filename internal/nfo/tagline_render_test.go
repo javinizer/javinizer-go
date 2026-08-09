@@ -160,3 +160,17 @@ func TestMergeTags_ConfigTagThreadsVideoFilePath(t *testing.T) {
 	assert.NoError(t, err)
 	_ = tags
 }
+
+func TestMovieToNFO_ConfigTagWithUnknownTokenDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tag: []string{"Featured: <TITEL>", "Kept"}, FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", nil)
+	assert.NotContains(t, nfo.Tags, "Featured: ")
+	assert.NotContains(t, nfo.Tags, "Featured: <TITEL>")
+	assert.Contains(t, nfo.Tags, "Kept")
+}
+
+func TestMovieToNFO_TaglineWithUnknownTokenDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "Featured: <TITEL>", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", nil)
+	assert.Equal(t, "", nfo.Tagline)
+}

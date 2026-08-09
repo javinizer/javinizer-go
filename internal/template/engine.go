@@ -82,6 +82,7 @@ type EngineInterface interface {
 	TruncateTitle(title string, maxLen int) string
 	TruncateTitleBytes(title string, maxBytes int) string
 	ValidatePathLength(path string, maxLen int) error
+	ValidateTags(template string) error
 }
 
 var _ EngineInterface = (*Engine)(nil)
@@ -384,6 +385,38 @@ func (e *Engine) Validate(template string) error {
 	}
 
 	return nil
+}
+
+// ValidateTags reports whether every tag token in the template resolves to a
+// known tag. It does not execute the template; it only checks that tag names
+// are registered or are built-in actress/conditional keywords. Returns an
+// error naming the first unknown tag, or nil if all tags are known. This lets
+// callers detect typos like <TITEL> that ExecuteWithContext would silently
+// render as empty instead of failing.
+func (e *Engine) ValidateTags(template string) error {
+	matches := e.tagPattern.FindAllStringSubmatch(template, -1)
+	for _, match := range matches {
+		tagName := strings.ToUpper(match[1])
+		if tagName == "IF" {
+			continue
+		}
+		if !e.isKnownTag(tagName) {
+			return fmt.Errorf("unknown tag: %s", tagName)
+		}
+	}
+	return nil
+}
+
+// isKnownTag reports whether tagName resolves through resolveTag without an
+// "unknown tag" error. It covers the actress-family tags handled in the
+// resolveTag switch and every entry in the tag registry.
+func (e *Engine) isKnownTag(tagName string) bool {
+	switch tagName {
+	case "ACTORS", "ACTRESSES", "ACTRESS", "ACTORNAME", "ACTRESSNAME":
+		return true
+	}
+	_, ok := e.tagRegistry[tagName]
+	return ok
 }
 
 var errOutputLimit = fmt.Errorf("output exceeds maximum")
