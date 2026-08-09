@@ -277,7 +277,9 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
 			// Walk the node content to find alias keys and apply them if the canonical
 			// field is still zero (canonical takes precedence).
-			s.applyYAMLAliases(valNode, &ss)
+			if err := s.applyYAMLAliases(valNode, &ss); err != nil {
+				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
+			}
 
 			// Unknown-field checking: walk the node's Content pairs and compare
 			// against the known-fields set for ScraperSettings.
@@ -294,9 +296,9 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 
 // applyYAMLAliases handles deprecated YAML aliases request_delay→rate_limit
 // and max_retries→retry_count in a scraper entry's value node.
-func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.ScraperSettings) {
+func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.ScraperSettings) error {
 	if valNode.Kind != yaml.MappingNode {
-		return
+		return nil
 	}
 	// Canonical presence (not merely a zero decode) wins: an explicit
 	// rate_limit: 0 is a real choice; the deprecated alias must not overwrite
@@ -311,20 +313,27 @@ func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.Scraper
 		switch k {
 		case "request_delay":
 			if !hasRateKey {
+				// Propagate conversion failures: silently dropping a malformed
+				// alias whose presence is already recorded would accept the
+				// config AND pin the zero as explicit — MergeDefaultsFrom then
+				// skips the default and throttling ends up disabled (codex).
 				var v int
-				if err := valNode.Content[i+1].Decode(&v); err == nil {
-					ss.RateLimit = v
+				if err := valNode.Content[i+1].Decode(&v); err != nil {
+					return fmt.Errorf("request_delay must be an integer: %w", err)
 				}
+				ss.RateLimit = v
 			}
 		case "max_retries":
 			if !hasRetryKey && ss.RetryCount == 0 {
 				var v int
-				if err := valNode.Content[i+1].Decode(&v); err == nil {
-					ss.RetryCount = v
+				if err := valNode.Content[i+1].Decode(&v); err != nil {
+					return fmt.Errorf("max_retries must be an integer: %w", err)
 				}
+				ss.RetryCount = v
 			}
 		}
 	}
+	return nil
 }
 
 func scraperYAMLHasEnabledKey(valNode *yaml.Node) bool {

@@ -103,7 +103,9 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 				if err := json.Unmarshal(rawVal, &ss); err != nil {
 					return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 				}
-				s.applyJSONAliases(scraperRaw, &ss)
+				if err := s.applyJSONAliases(scraperRaw, &ss); err != nil {
+					return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
+				}
 
 				// Validate keys manually.
 				for k := range scraperRaw {
@@ -129,25 +131,32 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 
 // applyJSONAliases handles deprecated JSON aliases request_delay→rate_limit
 // and max_retries→retry_count.
-func (s *ScrapersConfig) applyJSONAliases(raw map[string]json.RawMessage, ss *models.ScraperSettings) {
+func (s *ScrapersConfig) applyJSONAliases(raw map[string]json.RawMessage, ss *models.ScraperSettings) error {
 	// Canonical presence beats the alias: explicit rate_limit: 0 is a choice.
 	// Alias presence counts as explicit (see caller), so precedence keys on
 	// the canonical key alone — otherwise an alias-only entry would never
 	// apply now that the alias marks rate_limit explicit.
 	_, canonicalRate := raw["rate_limit"]
 	if rd, ok := raw["request_delay"]; ok && !canonicalRate {
+		// Propagate conversion failures: silently dropping a malformed alias
+		// whose presence is already recorded would accept the config AND pin
+		// the zero as explicit — MergeDefaultsFrom then skips the default and
+		// throttling ends up disabled (codex).
 		var v int
-		if err := json.Unmarshal(rd, &v); err == nil {
-			ss.RateLimit = v
+		if err := json.Unmarshal(rd, &v); err != nil {
+			return fmt.Errorf("request_delay must be an integer: %w", err)
 		}
+		ss.RateLimit = v
 	}
 	_, canonicalRetry := raw["retry_count"]
 	if mr, ok := raw["max_retries"]; ok && !canonicalRetry && ss.RetryCount == 0 {
 		var v int
-		if err := json.Unmarshal(mr, &v); err == nil {
-			ss.RetryCount = v
+		if err := json.Unmarshal(mr, &v); err != nil {
+			return fmt.Errorf("max_retries must be an integer: %w", err)
 		}
+		ss.RetryCount = v
 	}
+	return nil
 }
 
 func (s *ScrapersConfig) marshalScrapersMap(effective bool) map[string]any {

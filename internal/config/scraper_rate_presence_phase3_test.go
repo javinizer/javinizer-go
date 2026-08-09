@@ -126,3 +126,37 @@ func TestScraperRateLimitPresence_JSONAliasZeroRecorded(t *testing.T) {
 	assert.Equal(t, 0, override3.RateLimit, "canonical rate_limit: 0 beats request_delay: 750")
 	assert.True(t, override3.RateLimitIsExplicit())
 }
+
+// Codex: a malformed alias whose presence is already recorded must not be
+// silently dropped — that would accept the config AND pin the zero as
+// explicit, so MergeDefaultsFrom skips the default and throttling ends up
+// unexpectedly disabled. The decode error must surface instead.
+func TestScraperAliasMalformed_YAMLErrorSurfaces(t *testing.T) {
+	input := `
+scrapers:
+    r18dev:
+        request_delay: bad
+`
+	var cfg Config
+	cfg.Scrapers.resolver = newEnabledResolver()
+	err := yaml.Unmarshal([]byte(input), &cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "request_delay")
+
+	// A malformed alias shadowed by an explicit canonical key is ignored.
+	var cfgOK Config
+	cfgOK.Scrapers.resolver = newEnabledResolver()
+	require.NoError(t, yaml.Unmarshal([]byte("scrapers:\n    r18dev:\n        rate_limit: 5\n        request_delay: bad\n"), &cfgOK))
+	assert.Equal(t, 5, cfgOK.Scrapers.Overrides["r18dev"].RateLimit)
+}
+
+func TestScraperAliasMalformed_JSONErrorSurfaces(t *testing.T) {
+	var cfg Config
+	err := cfg.Scrapers.UnmarshalJSON([]byte(`{"r18dev":{"request_delay":"bad"}}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "request_delay")
+
+	var cfgOK Config
+	require.NoError(t, cfgOK.Scrapers.UnmarshalJSON([]byte(`{"r18dev":{"rate_limit":5,"request_delay":"bad"}}`)))
+	assert.Equal(t, 5, cfgOK.Scrapers.Overrides["r18dev"].RateLimit)
+}
