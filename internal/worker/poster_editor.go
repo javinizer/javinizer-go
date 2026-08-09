@@ -520,6 +520,20 @@ func promoteWitnessPendingCore(fs afero.Fs, dir, posterID string) (bool, error) 
 	return false, nil
 }
 
+// removeWithRetry retries a transient fs removal a bounded number of times.
+// A wedged sweep of a COMMITTED witness used to strand it until the next
+// process start — poisoning every admission fence for the family meanwhile
+// (codex cloud P2).
+func removeWithRetry(fs afero.Fs, path string, attempts int) error {
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = fs.Remove(path); err == nil || errors.Is(err, afero.ErrFileNotFound) {
+			return nil
+		}
+	}
+	return err
+}
+
 // posterWitnessConflictCore probes promote/rekey/crop witnesses only — the
 // rescrape pipeline's own probes use it (rescrape-vs-rescrape last-writer-
 // wins stays legal: F-R10-1 keys the generation byte windows).
@@ -1001,7 +1015,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				}
 			}
 			if rollbackComplete && rekeyWitnessPath != "" {
-				if rmErr := env.fs.Remove(rekeyWitnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+				if rmErr := removeWithRetry(env.fs, rekeyWitnessPath, 3); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
 					logging.Warnf("poster rekey witness sweep %s: %v", rekeyWitnessPath, rmErr)
 				}
 			}
@@ -1015,7 +1029,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		// would poison every retry as an unresolved rekey until restart —
 		// sweep it unconditionally here.
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil {
-			if rmErr := env.fs.Remove(rekeyWitnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+			if rmErr := removeWithRetry(env.fs, rekeyWitnessPath, 3); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
 				logging.Warnf("poster rekey witness sweep %s: %v", rekeyWitnessPath, rmErr)
 			}
 		}
@@ -1024,7 +1038,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		// Commit landed: the witness's job is done (files remain at the new
 		// identity, coherent with the durable row).
 		if env := m.pe.currentEnv(); env != nil && env.fs != nil {
-			if rmErr := env.fs.Remove(rekeyWitnessPath); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
+			if rmErr := removeWithRetry(env.fs, rekeyWitnessPath, 3); rmErr != nil && !errors.Is(rmErr, afero.ErrFileNotFound) {
 				logging.Warnf("poster rekey witness sweep %s: %v", rekeyWitnessPath, rmErr)
 			}
 		}

@@ -20,6 +20,46 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
+// codex cloud P2: the sweep survives transient removal wedges (flaky then
+// ok) and reports permanent ones after the attempt budget.
+type flakyRemoveFS struct {
+	afero.Fs
+	name       string
+	failFirst  int
+	call       int
+	stuckError error
+}
+
+func (f *flakyRemoveFS) Remove(n string) error {
+	if filepath.ToSlash(n) == filepath.ToSlash(f.name) {
+		f.call++
+		if f.failFirst > 0 {
+			f.failFirst--
+			return errors.New("transient wedge")
+		}
+		if f.stuckError != nil {
+			return f.stuckError
+		}
+	}
+	return f.Fs.Remove(n)
+}
+
+func TestRemoveWithRetry(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(base, "/tmp/x.json", []byte("{}"), 0o644))
+
+	// transient wedge — succeeds inside the budget:
+	flaky := &flakyRemoveFS{Fs: base, name: "/tmp/x.json", failFirst: 2}
+	require.NoError(t, removeWithRetry(flaky, "/tmp/x.json", 3))
+	_, err := base.Stat("/tmp/x.json")
+	require.Error(t, err, "file gone after transient wedges healed")
+
+	// permanent wedge — surface after attempts:
+	require.NoError(t, afero.WriteFile(base, "/tmp/y.json", []byte("{}"), 0o644))
+	stuck := &flakyRemoveFS{Fs: base, name: "/tmp/y.json", stuckError: errors.New("permanent wedge")}
+	require.ErrorContains(t, removeWithRetry(stuck, "/tmp/y.json", 3), "permanent wedge")
+}
+
 func arbJobRow(t *testing.T, id string, rev uint64) *models.Job {
 	t.Helper()
 	res := map[string]*resultstore.MovieResult{
