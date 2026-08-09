@@ -155,6 +155,11 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	}
 	cachedSource := *actress
 	cacheMatch, cacheHit := lookupActressCache(actress, lookupCache)
+	// Hoisted: identity recovery below (assigning a DMM ID or merging into the
+	// cached identity) is a stronger write than field fill, so it rides the
+	// same admission gate — __skip__ or an exclusive priority omitting dmm
+	// must suppress cache-derived identity too (codex).
+	cacheAllowed := cacheAllowedForPriority(actressSyncSkipSentinel(actressFieldPriority), actressFieldPriority)
 	mergeCachedDuplicate := func(existing *models.Actress) (bool, error) {
 		if existing.ID == actress.ID {
 			actress = existing
@@ -173,7 +178,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		return true, nil
 	}
 	applyCachedIdentity := func() (bool, error) {
-		if actress.DMMID > 0 || !cacheHit || cacheMatch.DMMID <= 0 {
+		if actress.DMMID > 0 || !cacheAllowed || !cacheHit || cacheMatch.DMMID <= 0 {
 			return false, nil
 		}
 		existing, findErr := actressRepo.FindByDMMID(ctx, cacheMatch.DMMID)
@@ -247,7 +252,6 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 		}
 		result.UpdatedFields = append(result.UpdatedFields, recoveredFields...)
 	}
-	cacheAllowed := cacheAllowedForPriority(actressSyncSkipSentinel(actressFieldPriority), actressFieldPriority)
 	if !revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID && cacheAllowed {
 		if actressCacheOutranksAll(actressFieldPriority, scrapersPriority) {
 			// DMM ranks first (default order, or the configured priority leads

@@ -278,3 +278,57 @@ func TestRevalidationCacheIsNotVerificationEvidence(t *testing.T) {
 	require.NotContains(t, result.Messages, "verified_no_changes",
 		"cache snapshot equality is not revalidation evidence")
 }
+
+// Codex: cache-derived identity (DMM ID assignment / duplicate merge) rides
+// the same cache-admission gate as field fill — __skip__ or an exclusive
+// priority without dmm must suppress it, including the revalidation
+// fallback path.
+func TestCacheIdentityGatedBySkipSentinel(t *testing.T) {
+	_, repo, movies, actress := newActressSyncFixture(t, &models.Actress{DMMID: 0, JapaneseName: "今井絵理"})
+	lookup := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		return models.ActressInfo{DMMID: 6601, JapaneseName: "今井絵理", FirstName: "Eri", LastName: "Imai"}, true
+	}
+	on := true
+	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movies, &fixedScraperSet{},
+		ActressSyncOptions{ScrapeActress: &on, LookupCache: lookup, ActressFieldPriority: []string{"__skip__"}})
+	require.NoError(t, err)
+	require.NotContains(t, result.UpdatedFields, "dmm_id", "__skip__ must suppress cache-derived identity")
+	got, findErr := repo.FindByID(context.Background(), actress.ID)
+	require.NoError(t, findErr)
+	require.Zero(t, got.DMMID)
+	require.Contains(t, result.Messages, "missing_dmm_id")
+}
+
+func TestCacheIdentityGatedInRevalidationFallback(t *testing.T) {
+	_, repo, movies, actress := newActressSyncFixture(t, &models.Actress{DMMID: 0, JapaneseName: "今井絵理"})
+	lookup := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		return models.ActressInfo{DMMID: 6601, JapaneseName: "今井絵理", FirstName: "Eri", LastName: "Imai"}, true
+	}
+	down := &namedMetadataResolver{actressSyncScraper: actressSyncScraper{name: "javdb"}, err: errors.New("outage")}
+	on := true
+	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movies, &fixedScraperSet{enabled: []models.Scraper{down}},
+		ActressSyncOptions{ScrapeActress: &on, LookupCache: lookup, Revalidate: true, ActressFieldPriority: []string{"javdb"}})
+	require.NoError(t, err)
+	require.NotContains(t, result.UpdatedFields, "dmm_id", "dmm-less priority must suppress cache-derived identity in revalidation too")
+	got, findErr := repo.FindByID(context.Background(), actress.ID)
+	require.NoError(t, findErr)
+	require.Zero(t, got.DMMID)
+	require.Contains(t, result.Messages, "missing_dmm_id")
+}
+
+// Complement: with no explicit priority the cache identity path still works
+// (assignment remains the default behavior).
+func TestCacheIdentityAssignedWhenDMMNotExcluded(t *testing.T) {
+	_, repo, movies, actress := newActressSyncFixture(t, &models.Actress{DMMID: 0, JapaneseName: "今井絵理"})
+	lookup := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		return models.ActressInfo{DMMID: 6601, JapaneseName: "今井絵理", FirstName: "Eri", LastName: "Imai", ThumbURL: "https://pics.dmm.co.jp/mono/actjpgs/eri.jpg"}, true
+	}
+	on := true
+	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movies, &fixedScraperSet{},
+		ActressSyncOptions{ScrapeActress: &on, LookupCache: lookup})
+	require.NoError(t, err)
+	require.Contains(t, result.UpdatedFields, "dmm_id")
+	got, findErr := repo.FindByID(context.Background(), actress.ID)
+	require.NoError(t, findErr)
+	require.Equal(t, 6601, got.DMMID)
+}
