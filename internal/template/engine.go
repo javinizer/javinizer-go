@@ -394,6 +394,9 @@ func (e *Engine) Validate(template string) error {
 // callers detect typos like <TITEL> that ExecuteWithContext would silently
 // render as empty instead of failing.
 func (e *Engine) ValidateTags(template string) error {
+	if err := e.validateConditionalNesting(template); err != nil {
+		return err
+	}
 	matches := e.tagPattern.FindAllStringSubmatch(template, -1)
 	for _, match := range matches {
 		tagName := strings.ToUpper(match[1])
@@ -412,6 +415,26 @@ func (e *Engine) ValidateTags(template string) error {
 		if !e.isKnownTag(tagName) {
 			return fmt.Errorf("unknown tag: %s", tagName)
 		}
+	}
+	return nil
+}
+
+// validateConditionalNesting rejects nested <IF> blocks because the regex-based
+// conditional processor is single-pass and mis-renders them (e.g.
+// <IF:TITLE><IF:ID>deep</IF></IF> renders as "deep</IF>"). The shared Validate
+// allows nesting up to MaxConditionalDepth, but configured taglines/tags flow
+// through renderConfiguredText which must not write corrupted values.
+func (e *Engine) validateConditionalNesting(template string) error {
+	depth := 0
+	for _, token := range conditionalTokenRegex.FindAllString(template, -1) {
+		if strings.HasPrefix(strings.ToUpper(token), "<IF:") {
+			depth++
+			if depth > 1 {
+				return fmt.Errorf("nested conditionals are not supported")
+			}
+			continue
+		}
+		depth--
 	}
 	return nil
 }

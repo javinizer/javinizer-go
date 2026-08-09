@@ -2764,3 +2764,10 @@ func TestEngine_ValidateTags_ElseKeywordExempted(t *testing.T) {
 	e := NewEngine()
 	assert.NoError(t, e.ValidateTags("<IF:SERIES><SERIES><ELSE>Standalone</IF>"))
 }
+
+func TestEngine_ValidateTags_NestedConditionalRejected(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes</IF>"))
+	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes</IF><IF:ID>also</IF>"))
+	assert.Error(t, e.ValidateTags("<IF:TITLE><IF:ID>deep</IF></IF>"))
+}

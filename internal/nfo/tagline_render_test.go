@@ -215,3 +215,9 @@ func TestMovieToNFO_TaglinePartNumberRendered(t *testing.T) {
 	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "-pt1", 1, true, nil)
 	assert.Equal(t, "Part 1", nfo.Tagline)
 }
+
+func TestMovieToNFO_TaglineNestedConditionalDropped(t *testing.T) {
+	g := NewGenerator(afero.NewMemMapFs(), &Config{Tagline: "<IF:TITLE><IF:ID>deep</IF></IF>", FirstNameOrder: true})
+	nfo, _ := g.movieToNFO(context.Background(), taglineTestMovie(), "", "", 0, false, nil)
+	assert.Equal(t, "", nfo.Tagline)
+}
