@@ -320,6 +320,18 @@ func TestWritePromoteGuardedParkedScanErrorFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "rescrape backup scan")
 }
 
+// codex P2: a marker created under the scraper's case-variant spelling must
+// fence a probe of the canonical spelling on case-insensitive filesystems.
+func TestParkedBackupConflictFoldsMarkerCase(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/JCV"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".inflight-abc-1.a1.b2"), []byte("{}"), 0o644))
+	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JCV", "ABC-1", "https://x/new.jpg", "res-1", 0, nil)
+	require.ErrorIs(t, err, errPromoteWitnessPending)
+	assert.Contains(t, err.Error(), "in-flight rescrape")
+}
+
 // Batch mirror of F-R20-2 anchoring: plain-canonical ".inflight-" names never
 // fence the guards.
 func TestBatchInflightSentinelAnchoring(t *testing.T) {
