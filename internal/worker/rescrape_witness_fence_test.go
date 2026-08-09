@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
+	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -976,6 +978,74 @@ func TestRescrapeGenerationFingerprintCapture(t *testing.T) {
 	crop, cerr := afero.ReadFile(fs, filepath.Join(pdir, "GEN-9.jpg"))
 	require.NoError(t, cerr)
 	assert.Equal(t, "gen-crop", string(crop), "generated crop leg survives success closeout")
+}
+
+type midScrapeEditWorkflow struct {
+	*stubRescrapeWorkflow
+	onScrape func()
+}
+
+func (w *midScrapeEditWorkflow) Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+	if w.onScrape != nil {
+		w.onScrape()
+	}
+	return w.stubRescrapeWorkflow.Scrape(ctx, cmd)
+}
+
+// codex cloud P1: the sentinel's provenance binds to the POST-scrape baseline
+// read under the family key — an edit landing mid-scrape advances the durable
+// revision and must NOT later mark a crashed generation as "committed".
+func TestRescrapeSentinelBindsPostScrapeRevision(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	jobID := models.NewJobID()
+	pdir := filepath.Join("/tmp", "posters", jobID.String())
+	require.NoError(t, fs.MkdirAll(pdir, 0o755))
+	store := resultstore.New(1, []string{"f1.mp4"})
+	seedFamilyResult(store, "f1.mp4", "res-1", "PR-1", "")
+	pre, preErr := store.GetMovieResult("f1.mp4")
+	require.NoError(t, preErr)
+	require.Equal(t, uint64(1), pre.Revision, "pre-scrape baseline fixture")
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(pdir, "PR-1-full.jpg"), []byte("oldfull"), 0o644))
+
+	var sentinelPrev uint64
+	gen := &spyPosterGen{onGenerate: func() {
+		entries, _ := afero.ReadDir(fs, pdir)
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), ".inflight-") {
+				continue
+			}
+			if data, rerr := afero.ReadFile(fs, filepath.Join(pdir, e.Name())); rerr == nil {
+				var meta inFlightMeta
+				if json.Unmarshal(data, &meta) == nil {
+					sentinelPrev = meta.PrevRevision
+				}
+			}
+		}
+	}}
+	wf := &midScrapeEditWorkflow{
+		stubRescrapeWorkflow: &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "PR-1"}, Status: scrape.StatusCompleted}},
+		onScrape: func() {
+			// a concurrent (already-concluded) edit landing DURING the scrape:
+			// legal (no key held yet), advances the durable revision pre-park.
+			cur, uerr := store.GetMovieResult("f1.mp4")
+			if uerr == nil && cur != nil {
+				clone := cur.Clone()
+				clone.Movie.Title = "Edited Mid-Scrape"
+				store.UpdateFileResult("f1.mp4", clone)
+			}
+		},
+	}
+	inputs := rescrapePhaseInputs{
+		WF: wf, ResultMap: store, Finder: store, JobID: jobID,
+		PosterGen:  gen,
+		EditLockFn: func(ids ...string) func() { return func() {} },
+		Fs:         fs, TempDir: "/tmp",
+	}
+	phase := NewRescrapePhase()
+	res, err := phase.Rescrape(context.Background(), inputs, RescrapeCmd{MovieID: "PR-1", FilePath: "f1.mp4"})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Equal(t, uint64(2), sentinelPrev, "provenance binds the post-scrape (keyed) baseline, not the stale capture")
 }
 
 func TestRescrapeHoldsFamilyKeyThroughParkAndGenerate(t *testing.T) {

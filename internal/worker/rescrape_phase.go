@@ -611,7 +611,19 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 				}
 				// audit F-R3-2a: park pre-existing canonical bytes aside so the
 				// closeout can restore committed state if this rescrape loses.
-				scope.parked = parkCanonicalPosterPair(inputs.Fs, pdir, movieResult.Movie.ID, lookup.CapturedRevision)
+				// codex cloud P1: bind the sentinel's provenance to a POST-scrape
+				// baseline read under THIS key — lookup.CapturedRevision predates
+				// the scrape; an edit landing mid-scrape would otherwise read as
+				// "advanced" after a post-generation crash and misjudge the op as
+				// committed. The key is held across park→generate, so this row
+				// snapshot IS the parked bytes' era.
+				prevRev := lookup.CapturedRevision
+				if inputs.ResultMap != nil {
+					if row, ok := inputs.ResultMap.SnapshotData().Results[lookup.FilePath]; ok && row != nil {
+						prevRev = row.Revision
+					}
+				}
+				scope.parked = parkCanonicalPosterPair(inputs.Fs, pdir, movieResult.Movie.ID, prevRev)
 				if scope.parked.parkErr != nil {
 					// codex P2: unrecoverable bytes — abort BEFORE generation.
 					return fmt.Errorf("poster backup park: %w", scope.parked.parkErr)

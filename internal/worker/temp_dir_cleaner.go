@@ -521,6 +521,7 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 	healed := 0
 	strandedMeta := map[string]inFlightMeta{}
 	var pendingRsbak []pendingPark
+	var strandedMarkers []strandedMarker
 	for _, e := range entries {
 		name := e.Name()
 		var canon string
@@ -541,23 +542,29 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 			// audit F-R19-1 aftermath: stranded in-flight markers (crash) — a
 			// restarted process has no live generation windows; delete.
 			// codex cloud P1: harvest the op provenance FIRST — parked backups
-			// sharing this nonce must arbitrate against the durable row before
-			// anyone deletes or restores bytes, and this marker IS their record.
+			// sharing this nonce arbitrate against the durable row, and this
+			// marker IS their persisted record.
+			// codex cloud P2: REMOVAL is deferred until every parked leg sharing
+			// this nonce has settled (post-arbitration finalization) — deleting
+			// the only provenance before the bytes resolve permanently strands
+			// the legs (and a marker we failed to READ may carry records we
+			// haven't seen).
+			sm := strandedMarker{name: name}
+			if i1 := strings.LastIndexByte(name, '.'); i1 >= 0 {
+				if i0 := strings.LastIndexByte(name[:i1], '.'); i0 >= 0 {
+					sm.nonce = name[i0+1:]
+				}
+			}
 			if data, rdErr := afero.ReadFile(c.fs, filepath.Join(dir, name)); rdErr == nil {
 				var meta inFlightMeta
 				if json.Unmarshal(data, &meta) == nil && meta.PosterID != "" {
-					if i1 := strings.LastIndexByte(name, '.'); i1 >= 0 {
-						if i0 := strings.LastIndexByte(name[:i1], '.'); i0 >= 0 {
-							strandedMeta[name[i0+1:]] = meta
-						}
-					}
+					strandedMeta[sm.nonce] = meta
+					sm.hasProvenance = true
 				}
+			} else {
+				sm.readFailed = true
 			}
-			if rmErr := c.fs.Remove(filepath.Join(dir, name)); rmErr != nil {
-				logging.Warnf("in-flight marker sweep %s: %v", name, rmErr)
-				continue
-			}
-			healed++
+			strandedMarkers = append(strandedMarkers, sm)
 			continue
 		}
 		switch {
@@ -617,8 +624,52 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 	if len(pendingRsbak) > 0 {
 		healed += c.arbitrateParkedRescrapeBackups(ctx, jobID, dir, pendingRsbak, strandedMeta)
 	}
+
+	// codex cloud P2: marker removal — only after every dangling parked leg
+	// for this nonce settled this run. An UNSETTLED leg keeps its marker iff
+	// the marker may carry provenance (parsed payload or unreadable — safer to
+	// retain than to orphan the bytes); legacy EMPTY markers with pending legs
+	// still go (an empty file holds no record worth fencing behind).
+	if len(strandedMarkers) > 0 {
+		remaining := map[string]bool{}
+		if entries2, rdErr := afero.ReadDir(c.fs, dir); rdErr == nil {
+			for _, e2 := range entries2 {
+				n2 := e2.Name()
+				if idx := strings.LastIndex(n2, ".rsbak."); idx >= 0 && isBackupNonce(n2[idx+len(".rsbak."):]) {
+					remaining[n2[idx+len(".rsbak."):]] = true
+				}
+			}
+		}
+		for _, m := range strandedMarkers {
+			if remaining[m.nonce] && (m.hasProvenance || m.readFailed) {
+				continue // marker retained: legs unresolved — provenance must persist
+			}
+			if rmErr := c.fs.Remove(filepath.Join(dir, m.name)); rmErr != nil {
+				logging.Warnf("in-flight marker sweep %s: %v", m.name, rmErr)
+				continue
+			}
+			healed++
+		}
+	}
 	return healed
-} // pendingPark is a rescrape parked backup awaiting post-sweep arbitration.
+}
+
+// strandedMarker is a crashed op's in-flight sentinel sighted at startup;
+// removal waits until every parked leg sharing its nonce settles (codex
+// cloud P2), and only parsed-payload or unreadable markers can carry the
+// provenance legs need.
+type strandedMarker struct {
+	name          string
+	nonce         string
+	hasProvenance bool
+	readFailed    bool
+}
+
+// staleCleanupInterval is a package var so tests can accelerate the periodic
+// sweep without waiting real hours.
+var staleCleanupInterval = 24 * time.Hour
+
+// pendingPark is a rescrape parked backup awaiting post-sweep arbitration.
 type pendingPark struct {
 	name, canon, nonce string
 }
@@ -1026,7 +1077,7 @@ func (c *TempDirCleaner) StartStaleTempCleanup() chan struct{} {
 			logging.Infof("Cleaned up %d stale temp poster director(ies) on startup", removed)
 		}
 
-		ticker := time.NewTicker(24 * time.Hour)
+		ticker := time.NewTicker(staleCleanupInterval)
 		defer ticker.Stop()
 
 		for {

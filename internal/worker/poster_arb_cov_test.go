@@ -3,14 +3,18 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
@@ -91,11 +95,13 @@ func TestReconcileParkedArbitrationLookupErrorKeepsBoth(t *testing.T) {
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
 
-	assert.Equal(t, 1, healed, "only the marker sweep")
+	assert.Equal(t, 0, healed, "nothing settles — legs keep their marker (P2)")
 	_, cErr := fs.Stat(filepath.Join(dir, "AR-3.jpg"))
 	assert.NoError(t, cErr, "canonical kept")
 	_, bErr := fs.Stat(filepath.Join(dir, "AR-3.jpg.rsbak.a1.b2"))
 	assert.NoError(t, bErr, "backup kept")
+	_, mErr := fs.Stat(filepath.Join(dir, ".inflight-AR-3.a1.b2"))
+	assert.NoError(t, mErr, "provenance retained for the next startup")
 }
 
 // codex cloud P1: chained crashed ops unwind NEWEST-first — otherwise the
@@ -196,9 +202,11 @@ func TestReconcileParkedArbitrationProvenanceMismatchKeepsBoth(t *testing.T) {
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
-	assert.Equal(t, 1, healed, "marker sweep only")
+	assert.Equal(t, 0, healed, "mismatch settles nothing")
 	_, bErr := fs.Stat(filepath.Join(dir, "AR-9.jpg.rsbak.a9.c9"))
 	assert.NoError(t, bErr, "mismatched provenance never moves bytes")
+	_, mErr := fs.Stat(filepath.Join(dir, ".inflight-AR-9.a9.c9"))
+	assert.NoError(t, mErr, "marker retained while the leg pends")
 }
 
 // Committed arbitration also covers the -full.jpg leg's base trimming.
@@ -229,9 +237,11 @@ func TestReconcileParkedCommittedRemoveFailKeepsBackup(t *testing.T) {
 	cl := &TempDirCleaner{fs: selectiveFailRemoveFS{Fs: fs, failSuffix: ".rsbak.a1.b2"}, tempDir: "/tmp", jobRepo: repo}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
-	assert.Equal(t, 1, healed, "marker swept; backup kept on wedged remove")
+	assert.Equal(t, 0, healed, "backup kept on wedged remove — and so is its marker")
 	_, bErr := fs.Stat(filepath.Join(dir, "AR-5.jpg.rsbak.a1.b2"))
 	assert.NoError(t, bErr)
+	_, mErr := fs.Stat(filepath.Join(dir, ".inflight-AR-5.a1.b2"))
+	assert.NoError(t, mErr, "provenance retained while legs pend")
 }
 
 // Uncommitted-restore with a wedged Rename keeps stranded gen AND the backup.
@@ -243,7 +253,7 @@ func TestReconcileParkedUncommittedRestoreFailKeepsBoth(t *testing.T) {
 	cl := &TempDirCleaner{fs: &seqRenameFailFS{Fs: fs, failOn: map[int]bool{1: true}}, tempDir: "/tmp", jobRepo: repo}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
-	assert.Equal(t, 1, healed, "marker swept; restore wedged")
+	assert.Equal(t, 0, healed, "restore wedged — marker retained with the leg")
 	got, rerr := afero.ReadFile(fs, filepath.Join(dir, "AR-6.jpg"))
 	require.NoError(t, rerr)
 	assert.Equal(t, "gen-uncommitted", string(got), "canon untouched when restore wedges")
@@ -258,9 +268,11 @@ func TestReconcileParkedArbitrationNilRepoKeepsBoth(t *testing.T) {
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
-	assert.Equal(t, 1, healed, "marker sweep only")
+	assert.Equal(t, 0, healed, "undecidable — everything including the marker kept")
 	_, bErr := fs.Stat(filepath.Join(dir, "AR-7.jpg.rsbak.a1.b2"))
 	assert.NoError(t, bErr)
+	_, mErr := fs.Stat(filepath.Join(dir, ".inflight-AR-7.a1.b2"))
+	assert.NoError(t, mErr)
 }
 
 // An undecodable job envelope is undecidable evidence → keep both.
@@ -272,13 +284,102 @@ func TestReconcileParkedArbitrationGarbageResultsKeepBoth(t *testing.T) {
 	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
 
 	healed := cl.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
-	assert.Equal(t, 1, healed, "marker sweep only")
+	assert.Equal(t, 0, healed, "garbage results — nothing settles, marker retained")
 	_, bErr := fs.Stat(filepath.Join(dir, "AR-8.jpg.rsbak.a1.b2"))
 	assert.NoError(t, bErr)
 }
 
+type openSentryFailFS struct{ afero.Fs }
+
+func (f openSentryFailFS) Open(name string) (afero.File, error) {
+	if strings.Contains(filepath.ToSlash(name), ".inflight-") {
+		return nil, errors.New("sentry read wedged")
+	}
+	return f.Fs.Open(name)
+}
+
+// codex cloud P2: a marker we could not even READ may carry the legs'
+// arbitration record — legs AND marker are retained; a later startup with a
+// readable marker still arbitrates to a decision.
+func TestReconcileParkedMarkerReadFailRetainsProvenance(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/posters/JOB-W1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	seedArbitrationScene(t, base, dir, "TR-1", "a1.b2", "gen-uncommitted", "committed", 4)
+
+	// First startup: marker unreadable this run.
+	wedged := openSentryFailFS{Fs: base}
+	repo0 := mocks.NewMockJobRepositoryInterface(t) // zero expectations: lookup never reached
+	cl0 := &TempDirCleaner{fs: wedged, tempDir: "/tmp", jobRepo: repo0}
+	healed0 := cl0.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	assert.Equal(t, 0, healed0, "unreadable marker: nothing settles")
+	_, mErr := base.Stat(filepath.Join(dir, ".inflight-TR-1.a1.b2"))
+	assert.NoError(t, mErr, "marker retained — it IS the legs' provenance record")
+	_, bErr := base.Stat(filepath.Join(dir, "TR-1.jpg.rsbak.a1.b2"))
+	assert.NoError(t, bErr, "backup retained")
+
+	// Later startup: marker readable again — arbitration lands.
+	repo1 := mocks.NewMockJobRepositoryInterface(t)
+	repo1.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(arbJobRow(t, "TR-1", 4), nil)
+	cl1 := &TempDirCleaner{fs: base, tempDir: "/tmp", jobRepo: repo1}
+	healed1 := cl1.reconcileParkedPosterBackups(context.Background(), "JOB-W1", dir)
+	assert.Equal(t, 2, healed1, "marker sweep + uncommitted restore")
+	got, rerr := afero.ReadFile(base, filepath.Join(dir, "TR-1.jpg"))
+	require.NoError(t, rerr)
+	assert.Equal(t, "committed", string(got), "readable marker finally arbitrates the leg")
+	_, mErr2 := base.Stat(filepath.Join(dir, ".inflight-TR-1.a1.b2"))
+	assert.Error(t, mErr2, "settled legs release their marker")
+}
+
 // Row scanning skips nil rows and non-matching IDs and takes the match-info
 // fallback when Movie is absent — the committed decision still stands.
+type openExactFailFS struct {
+	afero.Fs
+	path string
+}
+
+func (f openExactFailFS) Open(name string) (afero.File, error) {
+	if filepath.ToSlash(name) == filepath.ToSlash(f.path) {
+		return nil, errors.New("dir read wedged")
+	}
+	return f.Fs.Open(name)
+}
+
+// The periodic stale sweep's ticker arm: sweep errors surface as warnings.
+func TestStaleCleanupTickerErrorWarn(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/stallroot/posters", 0o755))
+	fs := openExactFailFS{Fs: base, path: "/stallroot/posters"}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/stallroot", jobRepo: nil}
+	old := staleCleanupInterval
+	staleCleanupInterval = 10 * time.Millisecond
+	t.Cleanup(func() { staleCleanupInterval = old })
+	stop := cl.StartStaleTempCleanup()
+	time.Sleep(60 * time.Millisecond)
+	close(stop)
+}
+
+// ...and a tick that actually removes a stale dir logs the count.
+func TestStaleCleanupTickerRemovesStale(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/tickroot/posters", 0o755))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "STALE-9").Return(nil, database.ErrNotFound)
+	cl := &TempDirCleaner{fs: base, tempDir: "/tickroot", jobRepo: repo}
+	old := staleCleanupInterval
+	staleCleanupInterval = 10 * time.Millisecond
+	t.Cleanup(func() { staleCleanupInterval = old })
+	stop := cl.StartStaleTempCleanup()
+	// The stale dir appears only AFTER the startup sweep — the removal must
+	// land on a periodic TICK (exercising that arm), not at startup.
+	time.Sleep(40 * time.Millisecond)
+	require.NoError(t, base.MkdirAll("/tickroot/posters/STALE-9", 0o755))
+	time.Sleep(150 * time.Millisecond)
+	close(stop)
+	_, err := base.Stat("/tickroot/posters/STALE-9")
+	assert.Error(t, err, "stale dir removed across ticks")
+}
+
 func TestReconcileParkedArbitrationRowScanArms(t *testing.T) {
 	fs, dir := witnessFixture(t)
 	seedArbitrationScene(t, fs, dir, "AR-9", "a1.b2", "gen-committed", "pre-op", 4)
