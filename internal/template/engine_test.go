@@ -2753,3 +2753,9 @@ func TestEngine_ValidateTags_ConditionalKeywordSkipped(t *testing.T) {
 	e := NewEngine()
 	assert.NoError(t, e.ValidateTags("<IF:ID>keep</IF>"))
 }
+
+func TestEngine_ValidateTags_MisspelledConditional(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:YEAR><YEAR></IF>"))
+	assert.Error(t, e.ValidateTags("<IF:TITEL>Featured<ELSE>Other</IF>"))
+}

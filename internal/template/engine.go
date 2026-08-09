@@ -398,6 +398,12 @@ func (e *Engine) ValidateTags(template string) error {
 	for _, match := range matches {
 		tagName := strings.ToUpper(match[1])
 		if tagName == "IF" {
+			if len(match) > 2 && match[2] != "" {
+				condTag := strings.ToUpper(match[2])
+				if !e.isKnownTag(condTag) {
+					return fmt.Errorf("unknown tag: %s", condTag)
+				}
+			}
 			continue
 		}
 		if !e.isKnownTag(tagName) {
