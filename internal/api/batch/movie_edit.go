@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/afero"
 
@@ -221,7 +220,7 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			fs := rt.Deps().GetFs()
 			tmpDir := snap.APIConfig().TempDir
 			dir := filepath.Join(tmpDir, "posters", jobID)
-			stageID := posterID + ".crop-" + fmt.Sprintf("%x", time.Now().UnixNano())
+			stageID := nextPosterStageID(posterID, "crop")
 			for _, leg := range [][2]string{{posterID + "-full.jpg", stageID + "-full.jpg"}, {posterID + ".jpg", stageID + ".jpg"}} {
 				data, rerr := afero.ReadFile(fs, filepath.Join(dir, leg[0]))
 				if rerr != nil {
@@ -402,7 +401,7 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		// Revision captured BEFORE the download — a stale revision on the
 		// retry would compare against the post-download source.
 		scalarRev := result.Revision
-		stageID := posterID + ".stage-" + fmt.Sprintf("%x", time.Now().UnixNano())
+		stageID := nextPosterStageID(posterID, "stage")
 		var dlErr error
 		var croppedURL string
 		var echoRev *uint64

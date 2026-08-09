@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/spf13/afero"
 
@@ -635,4 +637,16 @@ func resolvePosterID(lookup resultstore.MovieLookup, movieID string) (string, er
 		return "", fmt.Errorf("invalid movie ID for poster operation")
 	}
 	return posterID, nil
+}
+
+// posterStageSeq makes same-tick stage IDs unique — a process-wide atomic
+// suffix, mirroring the worker's rescrapeBackupSeq (codex cloud P2: same-tick
+// twin downloads would otherwise write into each other's staged pair, and the
+// first lock winner would promote the OTHER request's bytes).
+var posterStageSeq atomic.Int64
+
+// nextPosterStageID builds the staged name for an out-of-key poster
+// fetch/crop: <posterID>.<kind>-<unixnano-hex>.<seq-hex>.
+func nextPosterStageID(posterID, kind string) string {
+	return posterID + "." + kind + "-" + fmt.Sprintf("%x.%x", time.Now().UnixNano(), posterStageSeq.Add(1))
 }
