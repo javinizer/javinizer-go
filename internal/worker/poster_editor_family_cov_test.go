@@ -524,8 +524,8 @@ func TestEvictStalePosterPairUnsafeIDNoop(t *testing.T) {
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-9"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-G"}
-	m.evictStalePosterPair("../../sentine") // would clean to a path outside JOB-9 if joined naively
-	m.evictStalePosterPair("")              // bare-name guard
+	m.evictStalePosterPair("../../sentine", "") // would clean to a path outside JOB-9 if joined naively
+	m.evictStalePosterPair("", "")              // bare-name guard
 	_, err := fs.Stat("/tmp/posters/sentinelfull.jpg")
 	assert.NoError(t, err, "no bytes outside the intended dir are ever removed for unsafe IDs")
 }
@@ -566,12 +566,39 @@ func TestIsSafePosterFileID(t *testing.T) {
 	}
 }
 
+// codex cloud P2: when the eviction witness cannot persist BEFORE the commit,
+// the save aborts pre-commit — never a durable commit with zero recovery record.
+
+func TestUpdateMovieFamilySourceChangeAbortOnWedgedEvictWitness(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/a.mp4"})
+	seedFamilyResult(store, "/f/a.mp4", "res-w", "SRCW-9", "")
+	mr, gerr := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, gerr)
+	require.NotNil(t, mr.Movie)
+	mr.Movie.Poster.PosterURL = "https://cook/old.jpg"
+	mr.Movie.Poster.CoverURL = "https://cook/old-cover.jpg"
+	store.UpdateFileResult("/f/a.mp4", mr)
+
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/tmp/posters/J-EW2", 0o755))
+	wedged := createWedgeFS{Fs: fs, contains: ".evict-"}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: wedged, tempDir: "/tmp", jobID: "JOB-EW2"})
+	err := pe.UpdateMovieFamily(context.Background(), "SRCW-9", "res-w", &models.Movie{ID: "SRCW-9", Poster: models.PosterState{PosterURL: "https://cook/new.jpg"}}, FamilySaveOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stale poster eviction witness")
+	// the save aborted BEFORE commitCandidate → family state untouched.
+	cur, cErr := store.GetMovieResult("/f/a.mp4")
+	require.NoError(t, cErr)
+	assert.Equal(t, "https://cook/old.jpg", cur.Movie.Poster.PosterURL, "pre-commit state unchanged by an aborted write")
+}
+
 func TestEvictStalePosterPairWarnsOnRemoveFailure(t *testing.T) {
 	store, base, dir := familyRelocationSetup(t)
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: removeFailFS{base}, tempDir: "/tmp", jobID: "JOB-9"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
-	m.evictStalePosterPair("SSNI-R1")
+	m.evictStalePosterPair("SSNI-R1", "")
 	_, statErr := base.Stat(filepath.Join(dir, "SSNI-R1.jpg"))
 	assert.NoError(t, statErr, "failed removals leave bytes in place")
 }
@@ -580,7 +607,7 @@ func TestEvictStalePosterPairNoopWithoutEnv(t *testing.T) {
 	store := resultstore.New(1, []string{"/f/a.mp4"})
 	pe := newEditorForStore(store)
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
-	m.evictStalePosterPair("SSNI-R1")
+	m.evictStalePosterPair("SSNI-R1", "")
 }
 
 // --- field overrides ---

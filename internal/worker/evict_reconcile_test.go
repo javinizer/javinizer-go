@@ -18,7 +18,47 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
-// codex cloud P2 (@evict): a committed PATCH's eviction outlives crashes via a
+// The eviction sweeper's failure arm: wedged repeated removals surface the
+// warn path with the file retained.
+func TestSweepEvictionWitnessPermanentWedgeWarns(t *testing.T) {
+	base := afero.NewMemMapFs()
+	wp := "/tmp/posters/J-XW/.evict-XW-1.json"
+	require.NoError(t, base.MkdirAll(filepath.Dir(wp), 0o755))
+	require.NoError(t, afero.WriteFile(base, wp, []byte("{}"), 0o644))
+	fs := removeExactFailFS{Fs: base, name: ".evict-XW-1.json"}
+	sweepEvictionWitness(fs, wp)
+	_, err := base.Stat(wp)
+	assert.NoError(t, err, "witness stays — it's the reconciler's remaining record")
+}
+
+// A wedged witness sweep at reconcile keeps the witness for the next startup.// A wedged witness sweep at reconcile keeps the witness for the next startup.
+func TestReconcileEvictWitnessSweepWedgeKeepsWitness(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-ESW"
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	payload, _ := json.Marshal(evictWitness{OldID: "ES-1"})
+	wp := filepath.Join(dir, ".evict-ES-1.json")
+	require.NoError(t, afero.WriteFile(mem, wp, payload, 0o644))
+	// legs already absent (the evictions landed); only the witness remove wedges.
+	fs := selectiveFailRemoveFS{Fs: mem, failSuffix: ".evict-ES-1.json"}
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: nil}
+	n := cl.reconcileEvictWitness(dir, wp)
+	assert.Equal(t, 0, n)
+	_, sErr := mem.Stat(wp)
+	assert.NoError(t, sErr, "witness kept while its last sweep is wedged")
+}
+
+// writeEvictWitness surfaces atomic-write failure to the caller.
+func TestWriteEvictWitnessFailsWhileAtomicWriteWedged(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-EWW"
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	fs := createWedgeFS{Fs: mem, contains: ".evict-"}
+	_, err := writeEvictWitness(fs, dir, "EE-1")
+	require.Error(t, err)
+}
+
+// codex cloud P2 (@evict): a committed PATCH's eviction outlives crashes via a// codex cloud P2 (@evict): a committed PATCH's eviction outlives crashes via a
 // durable witness; startup completes its removals and sweeps the witness.
 func TestReconcileEvictWitnessCompletes(t *testing.T) {
 	fs := afero.NewMemMapFs()
@@ -111,7 +151,7 @@ func TestEvictStalePosterPairWitnessWriteWedgedDefers(t *testing.T) {
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "J-EW"})
 	m := &LockedMovieOps{pe: pe, movieID: "EV-8"}
 
-	m.evictStalePosterPair("EV-8")
+	m.evictStalePosterPair("EV-8", "")
 
 	for _, n := range []string{"EV-8-full.jpg", "EV-8.jpg"} {
 		_, sErr := mem.Stat(filepath.Join(jobDir, n))
