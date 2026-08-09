@@ -244,7 +244,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	}
 	cacheAllowed := cacheAllowedForPriority(actressSyncSkipSentinel(actressFieldPriority), actressFieldPriority)
 	if !revalidate && cacheHit && cacheMatch.DMMID == actress.DMMID && cacheAllowed {
-		if actressCacheOutranksAll(actressFieldPriority) {
+		if actressCacheOutranksAll(actressFieldPriority, scrapersPriority) {
 			// DMM ranks first (default order, or the configured priority leads
 			// with dmm), so the DMM-sourced cache snapshot wins every field it
 			// carries — direct blank-fill matches what ranked resolution
@@ -1062,22 +1062,28 @@ func priorityListContains(priority []string, name string) bool {
 }
 
 // actressCacheOutranksAll reports whether the built-in (DMM-sourced) cache
-// is the highest-ranked eligible source: true without an explicit field
-// priority (DMM leads the legacy order), otherwise iff the configured list
-// leads with dmm. When false, the cache competes as a ranked match instead
-// of filling blanks directly so higher-ranked sources can win their fields.
-func actressCacheOutranksAll(priority []string) bool {
-	if len(priority) == 0 {
+// is the highest-ranked eligible source. The actress field priority ranks
+// first; when it is empty the global scrapers priority is the documented
+// fallback (codex); with neither configured the legacy order leads with dmm.
+// When false, the cache competes as a ranked match instead of filling
+// blanks directly so higher-ranked sources can win their fields.
+func actressCacheOutranksAll(fieldPriority, global []string) bool {
+	first := func(list []string) string {
+		for _, name := range list {
+			if key := strings.ToLower(strings.TrimSpace(name)); key != "" {
+				return key
+			}
+		}
+		return ""
+	}
+	top := first(fieldPriority)
+	if top == "" {
+		top = first(global)
+	}
+	if top == "" {
 		return true
 	}
-	for _, name := range priority {
-		key := strings.ToLower(strings.TrimSpace(name))
-		if key == "" {
-			continue
-		}
-		return key == resolverNameDMM
-	}
-	return true
+	return top == resolverNameDMM
 }
 
 // cacheAllowedForPriority reports whether the built-in (DMM-sourced) actress

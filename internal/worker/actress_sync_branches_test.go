@@ -231,3 +231,27 @@ func TestMissingScopeCacheShortCircuitsWhenDMMTopsPriority(t *testing.T) {
 	require.Equal(t, "CacheFirst", got.FirstName)
 	require.Equal(t, "CacheLast", got.LastName)
 }
+
+// Codex round 12: with no actress field priority, the global scrapers
+// priority is the ranking fallback — a cache hit must not short-circuit a
+// preferred resolver listed ahead of dmm there.
+func TestMissingScopeCacheCompetesWithGlobalPriorityFallback(t *testing.T) {
+	_, repo, movies, actress := newActressSyncFixture(t, &models.Actress{DMMID: 5580, JapaneseName: "涼子"})
+	lookup := func(dmmID int, jp, first, last string) (models.ActressInfo, bool) {
+		if dmmID == 5580 {
+			return models.ActressInfo{DMMID: 5580, FirstName: "CacheFirst", LastName: "CacheLast"}, true
+		}
+		return models.ActressInfo{}, false
+	}
+	javdb := &namedMetadataResolver{actressSyncScraper: actressSyncScraper{name: "javdb"}, data: models.ActressInfo{DMMID: 5580, FirstName: "JavdbFirst", JapaneseName: "涼子"}}
+	on := true
+	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movies, &fixedScraperSet{enabled: []models.Scraper{javdb}},
+		ActressSyncOptions{ScrapeActress: &on, LookupCache: lookup, ScrapersPriority: []string{"javdb", "dmm"}})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, javdb.calls, "globally preferred source must run even on cache hit")
+	got, findErr := repo.FindByID(context.Background(), actress.ID)
+	require.NoError(t, findErr)
+	require.Equal(t, "JavdbFirst", got.FirstName, "javdb outranks the dmm cache via global priority")
+	require.Equal(t, "CacheLast", got.LastName, "cache backstops fields javdb leaves blank")
+}
