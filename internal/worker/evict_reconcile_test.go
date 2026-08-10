@@ -54,6 +54,55 @@ func TestEvictStalePosterPairWitnessSweepWedgeKeepsWitness(t *testing.T) {
 }
 
 // A wedged witness sweep at reconcile keeps the witness for the next startup.
+// The pending-evict probe: matching fenced ids (content + name-fold), never
+// by unrelated content, and read errors fail closed (like every other lane).
+func TestPendingEvictWitnessCore(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-PE"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+
+	// miss: empty dir
+	hit, err := pendingEvictWitnessCore(fs, dir, "PE-1")
+	require.NoError(t, err)
+	assert.False(t, hit)
+
+	// content match with fold
+	payload, _ := json.Marshal(evictWitness{OldID: "pe-1", NewSourceURL: "https://n/y.jpg"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".evict-pe-1.json"), payload, 0o644))
+	hit, err = pendingEvictWitnessCore(fs, dir, "PE-1")
+	require.NoError(t, err)
+	assert.True(t, hit, "content match fences")
+
+	// non-matching → no fence
+	hit2, err := pendingEvictWitnessCore(fs, dir, "OTH-9")
+	require.NoError(t, err)
+	assert.False(t, hit2)
+
+	// legacy contentless witness still fences by name
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".evict-LG-9.json"), []byte("{}"), 0o644))
+	hit3, err := pendingEvictWitnessCore(fs, dir, "LG-9")
+	require.NoError(t, err)
+	assert.True(t, hit3)
+
+	// read-wedge on a DB containing one witness fails closed
+	fs2 := witnessOpenFailFS{Fs: fs, suffix: ".evict-pe-1.json"}
+	_, err2 := pendingEvictWitnessCore(fs2, dir, "PE-1")
+	require.Error(t, err2)
+}
+
+// codex cloud P2 (@snFs): a pending evict witness fences the whole admission path.
+func TestPosterWitnessConflictCoreFencesPendingEviction(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-WP"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	payload, _ := json.Marshal(evictWitness{OldID: "WP-1", NewSourceURL: "https://n/w.jpg"})
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".evict-WP-1.json"), payload, 0o644))
+	err := posterWitnessConflictCore(fs, "/tmp", "J-WP", "WP-1")
+	require.Error(t, err)
+	var cfe *EditAdmissionConflictError
+	require.ErrorAs(t, err, &cfe)
+}
+
 func TestSweepEvictionWitnessPermanentWedgeWarns(t *testing.T) {
 	base := afero.NewMemMapFs()
 	wp := "/tmp/posters/J-XW/.evict-XW-1.json"
@@ -303,4 +352,40 @@ func TestRouterRoutesEvictWitnesses(t *testing.T) {
 	assert.Error(t, e1, "cropped leg evicted via routed reconcile")
 	_, e2 := fs.Stat(filepath.Join(dir, ".evict-EVT-1.json"))
 	assert.Error(t, e2, "witness swept")
+}
+
+// Reading an eviction witness mid-watch fails closed (probe's own error arm).
+func TestPendingEvictWitnessCoreReadWedgeFailsClosed(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-PE2"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".evict-pe-2.json"), []byte("{}"), 0o644))
+	wedged := witnessOpenFailFS{Fs: fs, suffix: ".evict-pe-2.json"}
+	_, err := pendingEvictWitnessCore(wedged, dir, "PE-2")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "eviction witness scan")
+}
+
+// Same wedge through the fence entry point: poster's eviction-read failure
+// surfaces as the conflict-check error, never silently continues.
+func TestPosterWitnessConflictCoreEvictionReadWedgeFails(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-WP2"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, ".evict-wp-2.json"), []byte("{}"), 0o644))
+	wedged := witnessOpenFailFS{Fs: fs, suffix: ".evict-wp-2.json"}
+	err := posterWitnessConflictCore(wedged, "/tmp", "J-WP2", "WP-2")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "poster eviction witness check")
+}
+
+// Dir-level read failure also fails closed.
+func TestPendingEvictWitnessCoreDirWedgeFailsClosed(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-PE3"
+	require.NoError(t, mem.MkdirAll(dir, 0o755))
+	fs := witnessOpenFailFS{Fs: mem, suffix: dir}
+	_, err := pendingEvictWitnessCore(fs, dir, "PE-3")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "eviction witness scan")
 }

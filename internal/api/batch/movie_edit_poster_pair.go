@@ -303,6 +303,13 @@ func writePromoteWitnessGuarded(fs afero.Fs, tempDir, jobID, posterID, srcURL, r
 	} else if cropName != "" {
 		return "", fmt.Errorf("%w for %s (crop witness %s) — restart to reconcile before retrying", errPromoteWitnessPending, posterID, cropName)
 	}
+	// codex cloud P2 (@snFs): same for the from-URL download admission — a
+	// retained eviction witness means canon content is undecidable-vs-durable.
+	if pending, perr := pendingEvictFromDir(fs, dir, posterID); perr != nil {
+		return "", fmt.Errorf("eviction witness check %s: %w", posterID, perr)
+	} else if pending {
+		return "", fmt.Errorf("%w for %s (eviction witness) — restart to reconcile before retrying", errPromoteWitnessPending, posterID)
+	}
 	return writePromoteWitness(fs, tempDir, jobID, posterID, srcURL, resultID, prevRevision, backup)
 }
 
@@ -535,6 +542,14 @@ func writeCropWitnessGuarded(fs afero.Fs, tempDir, jobID string, w cropWitness) 
 		return "", fmt.Errorf("crop witness scan: %w", serr)
 	} else if hit {
 		return "", fmt.Errorf("%w for %s (fence: rekey witness) — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
+	}
+
+	// codex cloud P2 (@snFs): a retained eviction record for this poster means
+	// the committed edit's physical removals aren't done — refuse further ops.
+	if pending, perr := pendingEvictFromDir(fs, dir, w.PosterID); perr != nil {
+		return "", fmt.Errorf("crop witness scan: eviction probe: %w", perr)
+	} else if pending {
+		return "", fmt.Errorf("%w for %s (fence: eviction witness) — restart to reconcile before retrying", errCropWitnessPending, w.PosterID)
 	}
 	if parked, perr := parkedBackupConflictFor(fs, dir, w.PosterID); perr != nil {
 		return "", perr

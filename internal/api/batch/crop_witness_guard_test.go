@@ -290,7 +290,7 @@ func TestCropGuardedSecondScanDirError(t *testing.T) {
 			return false
 		}
 		count++
-		return count > 3 // folded promote scan #1, rekey #2, parked #3 ok; crop scan (#4) wedges
+		return count > 4 // promote #1, rekey #2, evict #3, parked #4 ok; crop scan (#5) wedges
 	}}
 	_, err := writeCropWitnessGuarded(fs, "/tmp", "JG-D2", cropWitness{PosterID: "PI-2", ResultID: "r1", StageID: "PI-2.crop-1"})
 	require.Error(t, err)
@@ -307,7 +307,7 @@ func TestWriteCropGuardedParkedScanErrorFailsClosed(t *testing.T) {
 			return false
 		}
 		count++
-		return count > 2 // folded promote scan #1 + rekey #2 pass; parked scan (#3) wedges
+		return count > 3 // promote #1, rekey #2, evict #3 ok; parked scan (#4) wedges
 	}}
 	_, err := writeCropWitnessGuarded(fs, "/tmp", "JG-CP", cropWitness{PosterID: "PI-1", ResultID: "r1", StageID: "PI-1.crop-1"})
 	require.Error(t, err)
@@ -324,7 +324,7 @@ func TestWritePromoteGuardedParkedScanErrorFailsClosed(t *testing.T) {
 			return false
 		}
 		count++
-		return count > 2 // folded promote scan #1 + rekey #2 pass; parked scan (#3) wedges
+		return count > 2 // parked scan is the 3rd dir-open
 	}}
 	_, err := writePromoteWitnessGuarded(fs, "/tmp", "JG-PE", "PI-1", "https://x", "res-1", 0, nil)
 	require.Error(t, err)

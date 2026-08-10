@@ -3,6 +3,9 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +14,46 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
+
+// pendingEvictWitnessCore: retained eviction witnesses fence further poster
+// ops for the same ID — a surviving witness means canon bytes are displaced
+// from the durable row until reconcile runs; edits measure at the stale image.
+func pendingEvictWitnessCore(fs afero.Fs, dir, posterID string) (bool, error) {
+	entries, err := afero.ReadDir(fs, dir)
+	if err != nil {
+		if errors.Is(err, afero.ErrFileNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("eviction witness scan %s: %w", dir, err)
+	}
+	want := strings.TrimSpace(posterID)
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, evictWitnessPrefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, rerr := afero.ReadFile(fs, filepath.Join(dir, name))
+		if rerr != nil {
+			return false, fmt.Errorf("eviction witness scan %s: %w", name, rerr)
+		}
+		var w evictWitness
+		if json.Unmarshal(data, &w) == nil && w.OldID != "" {
+			if strings.EqualFold(strings.TrimSpace(w.OldID), want) {
+				return true, nil
+			}
+			// legacy content-free witness: name-fold still fences sanely.
+			continue
+		}
+		raw := strings.TrimSuffix(strings.TrimPrefix(name, evictWitnessPrefix), ".json")
+		if id, uerr := url.PathUnescape(raw); uerr == nil {
+			raw = id
+		}
+		if strings.EqualFold(strings.TrimSpace(raw), want) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // evictWitness is the durable record of a committed PATCH's stale-poster
 // eviction (codex cloud P2): it lives between the commit and the final
@@ -32,7 +75,7 @@ type evictWitness struct {
 func (c *TempDirCleaner) reconcileEvictWitness(ctx context.Context, dir, jobID, wpath string) int {
 	data, err := afero.ReadFile(c.fs, wpath)
 	var w evictWitness
-	if err != nil || json.Unmarshal(data, &w) != nil || w.OldID == "" || w.NewSourceURL == "" {
+	if err != nil || json.Unmarshal(data, &w) != nil || w.OldID == "" {
 		logging.Warnf("evict witness %s unreadable/corrupt — left in place", wpath)
 		return 0
 	}

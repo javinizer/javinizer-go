@@ -80,7 +80,7 @@ func TestRekeyDestinationScanWedgeFailsClosed(t *testing.T) {
 	// probe ledger (codex cloud P1 folded scans): promote ReadDir #1, rekey
 	// ReadDir #2 + witness read #3, in-flight ReadDir #4, crop ReadDir #5 —
 	// wedge #6 = the relocation's destination content scan.
-	fs := &openFailAfterNFS{Fs: mem, suffix: "/tmp/posters/JOB-DW", allow: 4}
+	fs := &openFailAfterNFS{Fs: mem, suffix: "/tmp/posters/JOB-DW", allow: 5}
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-DW"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
@@ -147,7 +147,7 @@ func TestRekeyRefusedWhileParkedBackupsPending(t *testing.T) {
 	// fence rekey #1, fence parked #2, fence crop #3, migration destination #4,
 	// relocation backup #5 (wedge here).
 	require.NoError(t, fs.Remove(filepath.Join(dir, "SSNI-R1-full.jpg.rsbak.c3.d4")))
-	fs2 := &openFailAfterNFS{Fs: fs, suffix: dir, allow: 5}
+	fs2 := &openFailAfterNFS{Fs: fs, suffix: dir, allow: 6}
 	pe.attachEnv(&posterEditEnv{fs: fs2, tempDir: "/tmp", jobID: "JOB-9"})
 	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.Error(t, err)
@@ -176,7 +176,7 @@ func TestRekeyDestinationBackupScanWedgeFailsClosed(t *testing.T) {
 	dir := filepath.Join("/tmp", "posters", "JOB-DX")
 	require.NoError(t, mem.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(mem, filepath.Join(dir, "SSNI-R1-full.jpg"), []byte("x"), 0o644))
-	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 5}
+	fs := &openFailAfterNFS{Fs: mem, suffix: dir, allow: 6}
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "JOB-DX"})
 	m := &LockedMovieOps{pe: pe, movieID: "SSNI-R1"}
@@ -218,7 +218,7 @@ func TestRekeyDestinationFencedByParkedBackup(t *testing.T) {
 	// destination wedge fails CLOSED: second relocation scan (dest backup) —
 	// 5th dir Open: fence rekey(1), fence crop(2), dest witness content(3),
 	// source backup(4), dest backup(5 wedged)
-	fs2 := &openFailAfterNFS{Fs: fs, suffix: dir, allow: 5}
+	fs2 := &openFailAfterNFS{Fs: fs, suffix: dir, allow: 6}
 	pe.attachEnv(&posterEditEnv{fs: fs2, tempDir: "/tmp", jobID: "JOB-9"})
 	err = m.UpdateMovieFamily(context.Background(), &models.Movie{ID: "SSNI-N9"})
 	require.Error(t, err)

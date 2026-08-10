@@ -580,6 +580,14 @@ func posterWitnessConflictCore(fs afero.Fs, tempDir, jobID, posterID string) err
 			return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s crop witness unresolved: restart to reconcile", posterID)}
 		}
 	}
+	// codex cloud P2: an outstanding eviction witness fences further poster
+	// ops too — the surviving canon may predate the durable row until
+	// reconcile runs, so any edit must not commit geometry measured on it.
+	if pendingEvict, evErr := pendingEvictWitnessCore(fs, dir, posterID); evErr != nil {
+		return fmt.Errorf("poster eviction witness check: %w", evErr)
+	} else if pendingEvict {
+		return &EditAdmissionConflictError{Message: fmt.Sprintf("poster %s has unresolved eviction — restart to reconcile", posterID)}
+	}
 	return nil
 }
 
