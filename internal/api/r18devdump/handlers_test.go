@@ -497,24 +497,20 @@ func TestBroadcastProgress_WithFn(t *testing.T) {
 func TestRunImportHeartbeat_TickerFires(t *testing.T) {
 	h, _, _ := newTestHandlerWithHub(t)
 
-	orig := importHeartbeatInterval
-	importHeartbeatInterval = 1 * time.Millisecond
-
 	streamConsumed := make(chan struct{})
 	importDone := make(chan struct{})
 	close(streamConsumed) // simulate download stream EOF
 
 	exited := make(chan struct{})
 	go func() {
-		h.runImportHeartbeat(streamConsumed, importDone)
+		h.runImportHeartbeat(streamConsumed, importDone, 1*time.Millisecond)
 		close(exited)
 	}()
 
 	// Let the ticker fire several times so the <-ticker.C branch executes.
 	time.Sleep(20 * time.Millisecond)
 	close(importDone)
-	<-exited // wait for the goroutine to exit before restoring the interval
-	importHeartbeatInterval = orig
+	<-exited
 }
 
 func TestRunImportHeartbeat_ImportDoneFirst(t *testing.T) {
@@ -525,7 +521,7 @@ func TestRunImportHeartbeat_ImportDoneFirst(t *testing.T) {
 	close(importDone) // import finishes before stream is consumed
 
 	// Should return immediately without broadcasting.
-	h.runImportHeartbeat(streamConsumed, importDone)
+	h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval)
 }
 
 func TestRunImportHeartbeat_BothClosedBeforeSchedule(t *testing.T) {
@@ -547,7 +543,7 @@ func TestRunImportHeartbeat_BothClosedBeforeSchedule(t *testing.T) {
 		importDone := make(chan struct{})
 		close(streamConsumed)
 		close(importDone)
-		h.runImportHeartbeat(streamConsumed, importDone)
+		h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval)
 	}
 
 	mu.Lock()

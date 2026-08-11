@@ -22,7 +22,7 @@ import (
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 )
 
-var importHeartbeatInterval = 1500 * time.Millisecond
+const importHeartbeatInterval = 1500 * time.Millisecond
 
 const (
 	dumpJobID = "r18dev-dump-download"
@@ -247,7 +247,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			// being reported.
 			importDone := make(chan struct{})
 			streamConsumed := make(chan struct{})
-			go h.runImportHeartbeat(streamConsumed, importDone)
+			go h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval)
 			defer close(importDone)
 			r = &eofDetectReader{r: r, onEOF: sync.OnceFunc(func() { close(streamConsumed) })}
 			var unlockReload func()
@@ -572,7 +572,7 @@ func (e *eofDetectReader) Read(p []byte) (int, error) {
 // SQL import runs. It waits until streamConsumed is closed (the download
 // stream hit EOF) before starting, so "importing" frames never overlap with
 // "downloading" frames. It exits when importDone is closed.
-func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struct{}) {
+func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struct{}, interval time.Duration) {
 	select {
 	case <-streamConsumed:
 	case <-importDone:
@@ -584,7 +584,7 @@ func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struc
 	default:
 	}
 	h.broadcastProgress("importing", 0, 0)
-	ticker := time.NewTicker(importHeartbeatInterval)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
