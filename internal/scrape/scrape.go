@@ -136,6 +136,7 @@ type Scraper struct {
 	cfg         *Config
 	translator  Translator
 	fs          afero.Fs
+	breaker     *scraperCircuitBreaker
 }
 
 // ScraperInterface is the contract for executing a scrape operation.
@@ -235,6 +236,7 @@ func New(
 		cfg:         cfg,
 		translator:  translator,
 		fs:          fs,
+		breaker:     newScraperCircuitBreaker(circuitBreakerThreshold),
 	}
 }
 
