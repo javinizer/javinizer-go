@@ -240,3 +240,83 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 		expect(url, 'session + v params must be joined with &, not a duplicated ?').toMatch(/[?&]v=12345/);
 	});
 });
+
+describe('openPosterCropModal — canonical movie ID wins over stale result FK (issue: 300MIUM-1360)', () => {
+	// Regression: openPosterCropModal built the crop source URL from
+	// result.movie_id (a stale FK that can diverge from movie.id after a
+	// rescrape/ID canonicalization). The server names poster files by the
+	// canonical movie.id (internal/poster/manager.go: "%s-full.jpg", posterID
+	// where posterID = movie.id), so using result.movie_id requested a
+	// non-existent file -> 404 -> "Poster source is not available".
+	// Reported on review job 6c486399-37c5-44f5-b351-1755e22ef938 where
+	// result.movie_id = "MIUM-1360" but movie.id = "300MIUM-1360".
+
+	afterEach(() => {
+		BaseClient.setSessionID(null);
+	});
+
+	function makeDivergentIdController() {
+		BaseClient.setSessionID('sid-abc');
+		const setCropSourceURL = vi.fn();
+		const movie: Movie = {
+			id: '300MIUM-1360',
+			title: 'Test Movie',
+			poster_url: 'https://dmm/poster.jpg',
+		};
+		const result: FileResult = {
+			result_id: 'res-1',
+			file_path: '/tmp/300MIUM-1360.mp4',
+			movie_id: 'MIUM-1360',
+			status: 'completed',
+			started_at: '',
+			is_multi_part: false,
+			part_number: 0,
+			part_suffix: '',
+			movie: { id: '300MIUM-1360', title: 'Test Movie', poster_url: 'https://dmm/poster.jpg' },
+		};
+		const controller = createPosterCropController({
+			getBrowser: () => true,
+			getJobId: () => 'job-1',
+			getCurrentMovie: () => movie,
+			getCurrentResult: () => result,
+			getShowPosterCropModal: () => false,
+			setShowPosterCropModal: () => {},
+			setPosterCropLoadError: () => {},
+			getCropSourceURL: () => '',
+			setCropSourceURL,
+			getCropImageElement: () => null,
+			setCropImageElement: () => {},
+			getCropMetrics: () => null,
+			setCropMetrics: () => {},
+			getCropBox: () => null,
+			setCropBox: () => {},
+			getMaxPosterHeight: () => null,
+			setMaxPosterHeight: () => {},
+			getCropDragState: () => null,
+			setCropDragState: () => {},
+			getPosterCropStates: () => new Map<string, PosterCropState>(),
+			applyPosterFromUrlAsync: vi.fn(async () => {}),
+			mutatePosterCropAsync: vi.fn(async () => {}),
+			setCropApplying: () => {},
+			now: () => 12345,
+		});
+		return { controller, setCropSourceURL };
+	}
+
+	it('builds the crop source URL from the canonical movie.id, not the stale result.movie_id FK', () => {
+		const { controller, setCropSourceURL } = makeDivergentIdController();
+		controller.openPosterCropModal();
+
+		expect(setCropSourceURL).toHaveBeenCalledTimes(1);
+		const url = setCropSourceURL.mock.calls[0][0] as string;
+		expect(url, 'crop source URL must use the canonical movie.id (300MIUM-1360-full.jpg)').toContain(
+			'/api/v1/temp/posters/job-1/300MIUM-1360-full.jpg',
+		);
+		expect(url, 'crop source URL must NOT use the stale result.movie_id filename').not.toContain(
+			'/MIUM-1360-full.jpg',
+		);
+		expect(url, 'crop source URL must NOT use the stale result.movie_id filename').not.toContain(
+			'/MIUM-1360.jpg',
+		);
+	});
+});
