@@ -334,7 +334,9 @@ func TestPosterCrop_StagingWriteError(t *testing.T) {
 // poster's crops until reconciliation (codex P2 fence-followup).
 func TestPosterCrop_PromoteFailureRetainsWitness(t *testing.T) {
 	deps, job, router := cropJobFixture(t, "CROPE-7")
-	deps.Fs = &brokenFS{Fs: deps.GetFs(), failRenameAt: map[int]bool{2: true, 3: true, 4: true}}
+	// P2: the staged staged-crop install prepends a rename (#1); witness is
+	// now #2, bounded promote retries #3-#5.
+	deps.Fs = &brokenFS{Fs: deps.GetFs(), failRenameAt: map[int]bool{3: true, 4: true, 5: true}}
 	w := postCrop(t, router, job, "CROPE-7", contracts.PosterCropRequest{X: 0, Y: 0, Width: 100, Height: 100})
 	// local codex review P1: commit landed but canonical bytes are still stale —
 	// a false 200 with the fresh URL is forbidden; the deferred state is a 500.

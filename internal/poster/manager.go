@@ -54,6 +54,12 @@ type PosterManagerInterface interface {
 	// DownloadFromURL downloads an image from rawURL and creates both a
 	// full-size and a cropped poster file.
 	DownloadFromURL(ctx context.Context, jobID, posterID, rawURL, userAgent, referer string) (*cropResult, error)
+	// SnapshotAssets captures the (jobID, posterID) asset pair for later
+	// compensation (POSTER-WRITE-HARDENING P2).
+	SnapshotAssets(jobID, posterID string) (*PosterAssetSnapshot, error)
+	// RestoreAssets returns the pair to its snapshot state, removing any
+	// legs created after the snapshot.
+	RestoreAssets(snap *PosterAssetSnapshot) error
 }
 
 // ssrfCheckFunc is the function signature for URL SSRF validation.
@@ -133,8 +139,19 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	right := x + width
 	bottom := y + height
 
-	if err := imageutil.CropPosterWithBounds(pm.fs, sourcePath, croppedPath, left, top, right, bottom, maxPosterHeight); err != nil {
+	// P2: produce under a staged sibling name and install by rename only —
+	// readers-during-replace never see a partial write, and a failed install
+	// restores the previous preview (no .tmp/.bak residue).
+	stagedPath := uniqueStagedSibling(croppedPath, "tmp")
+	if err := imageutil.CropPosterWithBounds(pm.fs, sourcePath, stagedPath, left, top, right, bottom, maxPosterHeight); err != nil {
+		if rmErr := pm.fs.Remove(stagedPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			logging.Warnf("staged crop cleanup failed for %s: %v", stagedPath, rmErr)
+		}
 		return nil, fmt.Errorf("crop failed: %w", err)
+	}
+	if err := pm.installStagedPreview(croppedPath, stagedPath); err != nil {
+		_ = pm.fs.Remove(stagedPath)
+		return nil, err
 	}
 
 	croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg?v=%d", url.PathEscape(jobID), url.PathEscape(posterID), time.Now().UnixMilli())
