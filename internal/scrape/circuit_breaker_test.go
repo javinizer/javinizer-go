@@ -234,7 +234,7 @@ func TestQueryWithBreaker_RecordsSuccessAndResets(t *testing.T) {
 	assert.Nil(t, s.breaker.skipFailure(name), "success must leave the breaker untripped")
 }
 
-func TestScraper_ResolveContentID_DoesNotClearBreakerOnCacheHit(t *testing.T) {
+func TestScraper_ResolveContentID_ProbeClearsBreakerOnSuccess(t *testing.T) {
 	reg := &stubRegistry{instances: map[string]models.Scraper{
 		"dmm": &successContentIDResolver{name: "dmm"},
 	}}
@@ -247,16 +247,13 @@ func TestScraper_ResolveContentID_DoesNotClearBreakerOnCacheHit(t *testing.T) {
 	s.breaker.recordOutcome("dmm", &models.ScraperError{Kind: models.ScraperErrorKindUnavailable, Scraper: "dmm"})
 	require.NotNil(t, s.breaker.skipFailure("dmm"))
 
-	// Let cooldown elapse so isTripped returns false (half-open window).
+	// Let cooldown elapse so the half-open probe is allowed.
 	time.Sleep(20 * time.Millisecond)
-	assert.False(t, s.breaker.isTripped("dmm"), "cooldown elapsed, isTripped must be false")
 
-	// Resolver succeeds (cache hit, no HTTP), but must NOT clear the breaker —
-	// only queryWithBreaker records the actual query outcome.
+	// Resolver succeeds (consumes the probe via skipFailure, records success → clears).
 	got := s.resolveContentID(context.Background(), "MOVIE-001", []string{"dmm"})
 	assert.Equal(t, "RESOLVED-001", got)
-	// The breaker is still tripped (trippedAt was re-armed by the probe via skipFailure
-	// in queryWithBreaker, not here). resolveContentID uses isTripped, not skipFailure.
+	assert.Nil(t, s.breaker.skipFailure("dmm"), "successful resolver probe must clear the breaker so the query can run")
 }
 
 func TestScraper_ResolveContentID_SkipsTrippedResolver(t *testing.T) {
@@ -333,19 +330,26 @@ func (b *blockingContentIDResolver) ResolveContentIDCtx(_ context.Context, _ str
 	panic("ResolveContentIDCtx must not be called when the breaker is tripped")
 }
 
-func TestScraper_ResolveContentID_FailureDoesNotRecord(t *testing.T) {
+func TestScraper_ResolveContentID_FailureReTripsBreaker(t *testing.T) {
 	reg := &stubRegistry{instances: map[string]models.Scraper{
 		"dmm": &failingContentIDResolver{name: "dmm"},
 	}}
 	s := &Scraper{
 		registry: reg,
-		breaker:  newScraperCircuitBreaker(2),
+		breaker:  newScraperCircuitBreaker(1),
 	}
+	s.breaker.cooldown = 10 * time.Millisecond
+	// Trip the breaker.
+	s.breaker.recordOutcome("dmm", &models.ScraperError{Kind: models.ScraperErrorKindUnavailable, Scraper: "dmm"})
+	require.NotNil(t, s.breaker.skipFailure("dmm"))
 
-	// Resolver fails (transport error), but resolveContentID must NOT record it.
+	// Let cooldown elapse so the half-open probe is allowed.
+	time.Sleep(20 * time.Millisecond)
+
+	// Resolver fails (transport error), consumes the probe, records failure → re-trips.
 	got := s.resolveContentID(context.Background(), "MOVIE-001", []string{"dmm"})
 	assert.Equal(t, "MOVIE-001", got, "failed resolver must fall back to original movieID")
-	assert.False(t, s.breaker.isTripped("dmm"), "resolver failure must not trip the breaker (queryWithBreaker manages it)")
+	require.NotNil(t, s.breaker.skipFailure("dmm"), "failed resolver probe must re-trip the breaker")
 }
 
 // failingContentIDResolver is a ContentIDResolverCtx that always returns a transport error.
@@ -367,24 +371,6 @@ func (f *failingContentIDResolver) Config() *models.ScraperSettings {
 func (f *failingContentIDResolver) Close() error { return nil }
 func (f *failingContentIDResolver) ResolveContentIDCtx(_ context.Context, _ string) (string, error) {
 	return "", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
-}
-
-func TestScraperCircuitBreaker_IsTrippedDoesNotConsumeProbe(t *testing.T) {
-	b := newScraperCircuitBreaker(1)
-	b.cooldown = 10 * time.Millisecond
-	name := "libredmm"
-
-	b.recordOutcome(name, &models.ScraperError{Kind: models.ScraperErrorKindUnavailable, Scraper: name})
-	assert.True(t, b.isTripped(name), "breaker must be tripped")
-
-	// isTripped does not consume the probe: skipFailure still returns the skip error.
-	require.NotNil(t, b.skipFailure(name), "isTripped must not consume the half-open probe")
-
-	// After cooldown, isTripped returns false (without consuming the probe).
-	time.Sleep(20 * time.Millisecond)
-	assert.False(t, b.isTripped(name), "cooldown elapsed")
-	// skipFailure still hasn't been consumed by isTripped, so it can grant the probe.
-	assert.Nil(t, b.skipFailure(name), "probe must still be available for queryWithBreaker")
 }
 
 func TestClassifyScraperError_TypedUnknownTransportReclassified(t *testing.T) {

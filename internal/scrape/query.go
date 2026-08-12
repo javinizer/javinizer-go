@@ -43,21 +43,31 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 	if !exists || resolver == nil {
 		return movieID
 	}
-	// Skip content-ID resolution when the resolver scraper's circuit breaker is
-	// tripped: ResolveContentIDCtx can issue HTTP (DMM), so an unreachable host
-	// would otherwise block every file on the full client timeout even after the
-	// breaker has tripped. Use isTripped (not skipFailure) so the half-open
-	// probe permit is preserved for queryWithBreaker, which records the actual
-	// query outcome. A cached resolver hit does not prove the host is reachable,
-	// so resolver outcomes are not recorded here — only queryWithBreaker records.
-	if s.breaker != nil && s.breaker.isTripped(resolverName) {
-		return movieID
+	// Skip content-ID resolution when the resolver scraper's circuit breaker
+	// is tripped: ResolveContentIDCtx can issue HTTP (DMM), so an unreachable
+	// host would otherwise block every file on the full client timeout even
+	// after the breaker has tripped. Using skipFailure (consuming) limits the
+	// half-open probe to one worker — concurrent workers see the re-armed
+	// trippedAt and skip. The resolver outcome is recorded so a successful
+	// probe clears the breaker (letting the query run) and a failure re-trips
+	// (query's skipFailure skips).
+	if s.breaker != nil {
+		if skip := s.breaker.skipFailure(resolverName); skip != nil {
+			return movieID
+		}
 	}
 	// Prefer the context-aware resolver so cancellation/timeouts reach the
 	// lookup (DMM's ResolveContentID can issue HTTP). Fall back to the
 	// non-context ContentIDResolver for scrapers that only implement that.
 	if r, ok := resolver.(models.ContentIDResolverCtx); ok && r != nil {
 		contentID, err := r.ResolveContentIDCtx(ctx, movieID)
+		if s.breaker != nil && ctx.Err() == nil {
+			if err == nil {
+				s.breaker.recordOutcome(resolverName, nil)
+			} else {
+				s.breaker.recordOutcome(resolverName, classifyScraperError(resolverName, err, ""))
+			}
+		}
 		if err != nil {
 			logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
 			return movieID
