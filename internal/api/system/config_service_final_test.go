@@ -15,7 +15,7 @@ func TestConfigSvcFinal_ActressFieldScraperNotFound(t *testing.T) {
 	reg.RegisterInstance(&mockScraperNoMovieSys{})
 	deps := &core.APIDeps{CoreDeps: &commandutil.CoreDeps{ScraperRegistry: reg}}
 	cfg := config.DefaultConfig(nil, nil)
-	cfg.Metadata.Priority.Fields = map[string][]string{"actress": {"mocknomovie", "nonexistent"}}
+	cfg.Metadata.Priority.Fields = map[string][]string{"actress": {"dmm", "nonexistent"}}
 	err := validatePriorityFieldCapabilities(deps, cfg)
 	assert.NoError(t, err)
 }
