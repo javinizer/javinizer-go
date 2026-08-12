@@ -246,6 +246,22 @@ func rejectSharedArtifactPaths(opts options) error {
 			}
 		} else if resolvedParent, perr := filepath.EvalSymlinks(filepath.Dir(key)); perr == nil {
 			key = filepath.Join(resolvedParent, filepath.Base(key))
+		} else {
+			// Neither the key nor its immediate parent resolves: the path is
+			// below a not-yet-created directory (possibly inside a symlink).
+			// Walk up to the longest existing prefix, resolve that, then
+			// reattach the missing components so two spellings of the same
+			// not-yet-created artifact still collide.
+			dir := filepath.Dir(key)
+			tail := filepath.Base(key)
+			for dir != "/" && dir != "." {
+				if resolvedDir, derr := filepath.EvalSymlinks(dir); derr == nil {
+					key = filepath.Join(resolvedDir, tail)
+					break
+				}
+				tail = filepath.Join(filepath.Base(dir), tail)
+				dir = filepath.Dir(dir)
+			}
 		}
 		// Windows and most macOS volumes are case-insensitive: differently
 		// cased spellings then name the SAME artifact, and a positional
