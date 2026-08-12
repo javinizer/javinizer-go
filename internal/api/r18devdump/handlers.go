@@ -21,7 +21,12 @@ import (
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 )
 
-var importHeartbeatInterval = 1500 * time.Millisecond
+// defaultImportHeartbeatInterval is how often runImportHeartbeat broadcasts an
+// "importing" progress frame while the SQL import runs. It is a constant by
+// design: tests override the per-handler importHeartbeatInterval field instead
+// of mutating a package global, so background heartbeat goroutines started by
+// earlier tests can never race a later test's write.
+const defaultImportHeartbeatInterval = 1500 * time.Millisecond
 
 const (
 	dumpJobID = "r18dev-dump-download"
@@ -40,11 +45,15 @@ type dumpHandler struct {
 	reloadFn            func(cfg *config.Config, lockHeld bool) error
 	removeFn            func(string) error
 	broadcastProgressFn func(phase string, bytes, total int64)
-	done                chan struct{} // closed when the download goroutine finishes
+	// importHeartbeatInterval is the cadence for import-progress heartbeats.
+	// Tests override it per-handler; zero falls back to
+	// defaultImportHeartbeatInterval.
+	importHeartbeatInterval time.Duration
+	done                    chan struct{} // closed when the download goroutine finishes
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, removeFn: os.Remove}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, removeFn: os.Remove, importHeartbeatInterval: defaultImportHeartbeatInterval}
 	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
 		if lockHeld {
 			return h.rt.ReloadConfigLocked(cfg)
@@ -562,7 +571,11 @@ func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struc
 	default:
 	}
 	h.broadcastProgress("importing", 0, 0)
-	ticker := time.NewTicker(importHeartbeatInterval)
+	interval := h.importHeartbeatInterval
+	if interval <= 0 {
+		interval = defaultImportHeartbeatInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
