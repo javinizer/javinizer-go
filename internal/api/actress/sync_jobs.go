@@ -262,6 +262,10 @@ func writeActressSyncError(c *gin.Context, err error) {
 		c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "actress sync manager is unavailable"})
 		return
 	}
+	if errors.Is(err, database.ErrAlreadyTerminal) {
+		c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "job is already terminal"})
+		return
+	}
 	if database.IsNotFound(err) {
 		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error()})
 		return

@@ -3,6 +3,7 @@ package system
 import (
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
 
@@ -88,8 +89,14 @@ func supportsMovieSearch(scraper models.Scraper) bool {
 }
 
 func supportsActressMetadata(scraper models.Scraper) bool {
-	_, ok := scraper.(models.ActressMetadataResolver)
-	return ok
+	if _, ok := scraper.(models.ActressMetadataResolver); !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(scraper.Name())) {
+	case "dmm", "r18dev", "r18.dev", "javdb", "minnanoav":
+		return true
+	}
+	return false
 }
 
 func scraperProxyOptions(profileChoices []contracts.ScraperChoice) []contracts.ScraperOption {

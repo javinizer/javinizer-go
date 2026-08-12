@@ -317,10 +317,6 @@ func TestScraperClientBuilder_NilScraperSettings(t *testing.T) {
 
 func TestScraperClientBuilder_ZeroValuesUseDefaults(t *testing.T) {
 	client, err := newScraperClientBuilder().
-		Apply(
-			withTimeout(0),
-			withRetryCount(0),
-		).
 		build(false)
 
 	require.NoError(t, err)

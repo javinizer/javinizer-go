@@ -1078,6 +1078,7 @@ func (r *ActressSyncRepository) CancelJob(jobID string) error {
 				if n == 0 {
 					return ErrNotFound
 				}
+				return nil
 			}
 			if err := tx.Model(&models.ActressSyncTask{}).Where("job_id = ? AND status = ?", jobID, models.ActressSyncTaskPending).Updates(map[string]any{"status": models.ActressSyncTaskCancelled, "stage": "completed", "outcome": "cancelled", "completed_at": now}).Error; err != nil {
 				return err
