@@ -1114,3 +1114,14 @@ func TestScraperResult_Clone(t *testing.T) {
 		assert.Nil(t, clone.Translations)
 	})
 }
+
+// Codex P2 (round 3): ScraperResult.Clone deep-copies actress aliases.
+func TestScraperResultCloneDeepCopiesActressAliases(t *testing.T) {
+	src := &ScraperResult{
+		Actresses: []ActressInfo{{DMMID: 42, Aliases: []string{"原始"}}},
+	}
+	clone := src.Clone()
+	require.NotNil(t, clone)
+	clone.Actresses[0].Aliases[0] = "mutated"
+	require.Equal(t, "原始", src.Actresses[0].Aliases[0], "clone mutates original backing array")
+}

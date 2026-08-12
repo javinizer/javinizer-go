@@ -7406,6 +7406,12 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_models.ActressInfo": {
             "type": "object",
             "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "dmm_id": {
                     "description": "DMM actress ID for unique identification",
                     "type": "integer"

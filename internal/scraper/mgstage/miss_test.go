@@ -95,12 +95,11 @@ func buildMGStageMissDetailHTML(id, title, date, runtime, maker, label, series, 
 // ============================================================
 
 func TestMiss_Search_Disabled(t *testing.T) {
-	s := &scraper{
-		client:      resty.New(),
-		enabled:     false,
-		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    models.ScraperSettings{Enabled: false},
-	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(ts.Close)
+	s := newMGStageHTTPTScraper(ts, false)
 	_, err := s.Search(context.Background(), "GANA-2850")
 	require.Error(t, err)
 }
