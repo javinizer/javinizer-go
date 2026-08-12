@@ -326,14 +326,17 @@ func roundTripHTTPProxy(ctx context.Context, req *http.Request, proxyURL *url.UR
 	headerReader := &responseHeaderLimitReader{reader: conn, remaining: headerLimit}
 	bufferedReader := bufio.NewReader(headerReader)
 	headerTimeout := transport.ResponseHeaderTimeout
+	if headerTimeout > 0 {
+		// This manual ReadResponse path has no client/transport machinery
+		// above it: honor Transport.ResponseHeaderTimeout via a read
+		// deadline so a proxy that accepted the request but never answers
+		// cannot hang validation indefinitely. Set the deadline once before
+		// the 1xx loop: a proxy can send informational 1xx responses
+		// indefinitely, and resetting per-iteration would make the timeout
+		// an idle timer rather than bounding the complete header wait.
+		_ = conn.SetReadDeadline(time.Now().Add(headerTimeout))
+	}
 	for {
-		if headerTimeout > 0 {
-			// This manual ReadResponse path has no client/transport machinery
-			// above it: honor Transport.ResponseHeaderTimeout via a read
-			// deadline so a proxy that accepted the request but never answers
-			// cannot hang validation indefinitely.
-			_ = conn.SetReadDeadline(time.Now().Add(headerTimeout))
-		}
 		resp, err := http.ReadResponse(bufferedReader, req)
 		if err != nil {
 			return closeConn(err)

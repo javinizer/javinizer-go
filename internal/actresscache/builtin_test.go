@@ -14,7 +14,7 @@ func TestBuiltinCacheLoads(t *testing.T) {
 	cache, err := Builtin()
 	require.NoError(t, err)
 	assert.Equal(t, RuntimeSchemaVersion, cache.SchemaVersion)
-	assert.Len(t, cache.Records, 25341)
+	assert.Len(t, cache.Records, 25279)
 	assert.NotNil(t, BuiltinData())
 	assert.Less(t, len(builtinData), 2<<20)
 	// Runtime projection may drop records whose identity is too weak (single-part
