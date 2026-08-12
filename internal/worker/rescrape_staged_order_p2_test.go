@@ -344,7 +344,8 @@ func TestRescrape_StagedCommitFailureRecorded(t *testing.T) {
 	store := resultstore.New(1, []string{"f1.mp4"})
 	seedFamilyResult(store, "f1.mp4", "res-cf", "CF-9", "")
 	boom := errors.New("promote wedge")
-	gen := &stagingTrackerGen{commitErr: boom}
+	discarded := 0
+	gen := &stagingTrackerGen{commitErr: boom, discarded: &discarded}
 	inputs := rescrapePhaseInputs{
 		WF:        &stubRescrapeWorkflow{scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "CF-9"}, Status: scrape.StatusCompleted}},
 		ResultMap: store, Finder: store, JobID: jobID,
@@ -360,4 +361,5 @@ func TestRescrape_StagedCommitFailureRecorded(t *testing.T) {
 	require.NotNil(t, committed.PosterError)
 	assert.Contains(t, *committed.PosterError, boom.Error())
 	assert.True(t, committed.PosterGenerated)
+	assert.Equal(t, 1, discarded, "failed promote discards the staged residue")
 }

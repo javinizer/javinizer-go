@@ -679,6 +679,10 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 					// Nothing staged (nil movie/URL handled upstream).
 				default:
 					if posterErr := sgen.CommitStagedPoster(movieResult.Movie, stagedPoster); posterErr != nil {
+						// codex r1 P2: a failed promote leaves one or both uniquely
+						// named staged legs behind — discard them here or transient fs
+						// failures can pile them up until the poster dir exhausts disk.
+						sgen.DiscardStaged(stagedPoster)
 						s := posterErr.Error()
 						movieResult.PosterError = &s
 					}
