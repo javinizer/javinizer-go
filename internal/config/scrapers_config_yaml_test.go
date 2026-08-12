@@ -8,7 +8,7 @@ import (
 )
 
 func TestScrapersConfig_YAMLMaxRetriesDecodeError(t *testing.T) {
-	yamlStr := "scrapers:\n  dmm:\n    max_retries: not_a_number\n"
+	yamlStr := "dmm:\n  max_retries: not_a_number\n"
 	var cfg ScrapersConfig
 	err := yaml.Unmarshal([]byte(yamlStr), &cfg)
 	assert.Error(t, err)
