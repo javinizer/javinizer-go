@@ -500,7 +500,7 @@ metadata:
 
 **rating_source**: Source identifier for the rating. Defaults to the first scraper in `scrapers.priority` (`r18dev` with the default priority list). Common values: `r18dev`, `dmm`, `libredmm`, or any scraper name.
 
-**tag**: Array of custom tags to add to every NFO:
+**tag**: Array of custom tags to add to every NFO. Entries support template tags (e.g. `"<ID>"`); entries that fail to render are dropped. Example:
 
 ```yaml
 metadata:
@@ -510,7 +510,7 @@ metadata:
       - "Japanese"
 ```
 
-**tagline**: Custom tagline template (supports template tags).
+**tagline**: Custom tagline template. Supports template tags (see [Template System](./04-template-system.md)); static text without tags is written as-is. Render or validation errors drop the tagline (with a warning) instead of failing NFO generation; context cancellation still aborts NFO generation.
 
 **credits**: Additional credits to include.
 

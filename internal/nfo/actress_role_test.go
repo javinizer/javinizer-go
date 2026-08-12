@@ -48,7 +48,7 @@ func TestAddGenericRole(t *testing.T) {
 				},
 			}
 
-			nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+			nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 			require.Len(t, nfo.Actors, 2)
 			assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -106,7 +106,7 @@ func TestAltNameRole(t *testing.T) {
 				},
 			}
 
-			nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+			nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 			require.Len(t, nfo.Actors, 1)
 			assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -136,7 +136,7 @@ func TestBothRoleOptions(t *testing.T) {
 			},
 		}
 
-		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+		nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 		require.Len(t, nfo.Actors, 1)
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -163,7 +163,7 @@ func TestBothRoleOptions(t *testing.T) {
 			},
 		}
 
-		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+		nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 		require.Len(t, nfo.Actors, 1)
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -186,7 +186,7 @@ func TestRoleInXML(t *testing.T) {
 		},
 	}
 
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	// Marshal to XML
 	xmlData, err := xml.MarshalIndent(nfo, "", "  ")
@@ -218,7 +218,7 @@ func TestAltNameRoleInXML(t *testing.T) {
 		},
 	}
 
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	// Marshal to XML
 	xmlData, err := xml.MarshalIndent(nfo, "", "  ")

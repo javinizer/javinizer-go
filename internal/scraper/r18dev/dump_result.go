@@ -253,30 +253,88 @@ func (s *scraper) resolveDumpMediaURLs(d *models.DumpMovie, result *models.Scrap
 	}
 }
 
-// searchFromDump is the zero-HTTP dump fast path for Search. It returns a
-// complete ScraperResult when the dump has the movie, or (nil, false) on a
-// miss or error so the caller falls back to live HTTP. A genuine miss
-// (models.ErrDumpMiss) is logged at debug; a real database error is logged at
-// warn so a degraded dump does not silently revert to rate-limit-prone HTTP
-// with no signal.
-func (s *scraper) searchFromDump(ctx context.Context, id string) (*models.ScraperResult, bool) {
+// searchFromDump is the dump fast path for Search. On a dvd_id_norm hit it
+// returns a complete ScraperResult with zero HTTP. On a miss it expands the ID
+// into ordered content_id candidates (MatchByDisplayID) so Search can fetch
+// each combined= URL with content_id validation and per-candidate fallthrough
+// instead of running the multi-probe HTTP resolver — one request on the happy
+// path. The
+// candidate-hit dump row is never used as the metadata source — rows reachable
+// only via candidates have no dvd_id upstream and typically no title_en.
+//
+// A genuine miss from either lookup (models.ErrDumpMiss, which includes
+// ErrDumpNoDVDID) is logged at debug; a real database error is logged at warn
+// so a degraded dump does not silently revert to rate-limit-prone HTTP with
+// no signal. Context cancellation is logged at debug and skips candidate
+// expansion entirely so a cancelled scrape stops immediately.
+//
+// Returns (result, candidates): a nil result with non-empty candidates means
+// the dump resolved candidate content_ids (in HTTP-resolver variation order,
+// so the dump never resolves a different product than HTTP would); Search
+// fetches their combined= URLs in order with content_id validation. Both nil
+// means the caller must fall back to the live HTTP URL resolver.
+func (s *scraper) searchFromDump(ctx context.Context, id string) (*models.ScraperResult, []models.DumpMatch) {
 	if s.dumpLookup == nil {
-		return nil, false
+		return nil, nil
 	}
 	movie, err := s.dumpLookup.LookupMovie(ctx, id)
 	if err != nil {
 		switch {
 		case errors.Is(err, models.ErrDumpMiss):
-			logging.Debugf("R18: dump lookup miss for %s, falling back to HTTP", id)
+			// fall through to candidate resolution
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-			// Benign user-initiated cancellation — not a degraded dump. Log at
-			// debug so a cancel doesn't look like a dump failure.
 			logging.Debugf("R18: dump lookup cancelled for %s: %v", id, err)
+			return nil, nil
 		default:
 			logging.Warnf("R18: dump lookup error for %s, falling back to HTTP: %v", id, err)
+			return nil, nil
 		}
-		return nil, false
+
+		matches, mErr := s.dumpLookup.MatchByDisplayID(ctx, id)
+		if mErr != nil || len(matches) == 0 {
+			switch {
+			case mErr == nil || errors.Is(mErr, models.ErrDumpMiss):
+				logging.Debugf("R18: dump lookup miss for %s, falling back to HTTP", id)
+			case errors.Is(mErr, context.Canceled), errors.Is(mErr, context.DeadlineExceeded):
+				logging.Debugf("R18: dump candidate lookup cancelled for %s: %v", id, mErr)
+			default:
+				logging.Warnf("R18: dump candidate lookup error for %s, falling back to HTTP: %v", id, mErr)
+			}
+			return nil, nil
+		}
+		candidates := make([]models.DumpMatch, 0, len(matches))
+		for _, m := range matches {
+			if m.ContentID == "" {
+				continue
+			}
+			candidates = append(candidates, m)
+		}
+		if len(candidates) == 0 {
+			return nil, nil
+		}
+		// Parity gate: trust dump candidates only when they form a contiguous
+		// prefix of the full canonical expansion. A partial or stale dump must
+		// not short-circuit the HTTP resolver: a lone noncanonical row (e.g.
+		// only 436abf00030 for ABF-030) would resolve a product the canonical
+		// prefix order never picks, and a gappy list ([c0, c2]) would skip the
+		// intermediate candidate the resolver tries over the wire first.
+		all := r18devdump.ContentIDCandidates(id)
+		trusted := len(all) >= len(candidates)
+		if trusted {
+			for i, c := range candidates {
+				if c.ContentID != all[i] {
+					trusted = false
+					break
+				}
+			}
+		}
+		if !trusted {
+			logging.Debugf("R18: dump candidates for %s are not a canonical prefix, falling back to HTTP", id)
+			return nil, nil
+		}
+		logging.Debugf("R18: dump candidates for %s -> %s (+%d more)", id, candidates[0].ContentID, len(candidates)-1)
+		return nil, candidates
 	}
 	logging.Debugf("R18: dump lookup resolved %s -> full metadata (zero HTTP)", id)
-	return s.resultFromDump(movie), true
+	return s.resultFromDump(movie), nil
 }

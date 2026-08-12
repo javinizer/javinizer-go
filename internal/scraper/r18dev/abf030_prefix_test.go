@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/r18devdump"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -125,8 +126,8 @@ func TestSearch_ABF030_PrefersCorrectPrefixOverMislabeledDVDID(t *testing.T) {
 func TestSearch_FuzzyDVDFallback_WhenVariationsAllFail(t *testing.T) {
 	// zzqq is deliberately absent from contentIDPrefixLookup so the variation
 	// generator only tries the common fallback prefixes.
-	if _, ok := contentIDPrefixLookup["zzqq"]; ok {
-		t.Fatal("test assumes series 'zzqq' is absent from contentIDPrefixLookup")
+	if _, ok := r18devdump.ContentIDPrefixLookup["zzqq"]; ok {
+		t.Fatal("test assumes series 'zzqq' is absent from ContentIDPrefixLookup")
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +193,7 @@ func TestSearch_FuzzyDVDFallback_WhenVariationsAllFail(t *testing.T) {
 func TestSearch_VariationResponseMismatch_IsSkipped(t *testing.T) {
 	// abf has prefixes {"118", "436"} in contentIDPrefixLookup. Variation order:
 	//   118abf00030, 118abf030, 436abf00030, 436abf030
-	if got := contentIDPrefixLookup["abf"]; len(got) == 0 || got[0] != "118" || got[1] != "436" {
+	if got := r18devdump.ContentIDPrefixLookup["abf"]; len(got) == 0 || got[0] != "118" || got[1] != "436" {
 		t.Fatalf("test assumes abf prefixes are {118,436}, got %v", got)
 	}
 
@@ -271,7 +272,7 @@ func TestSearch_VariationResponseMismatch_IsSkipped(t *testing.T) {
 // returns the real movie. This complements the helper-level coverage with a
 // resolver-level integration check.
 func TestSearch_VariationInvalidResponse_ContinuesToNext(t *testing.T) {
-	if got := contentIDPrefixLookup["abf"]; len(got) < 2 || got[0] != "118" || got[1] != "436" {
+	if got := r18devdump.ContentIDPrefixLookup["abf"]; len(got) < 2 || got[0] != "118" || got[1] != "436" {
 		t.Fatalf("test assumes abf prefixes start with {118,436}, got %v", got)
 	}
 
@@ -550,7 +551,7 @@ func TestResolveURL_FuzzyFallbackSkipped_WhenContextCancelled(t *testing.T) {
 // skipped, so the resolver continues to a later variation that returns valid
 // JSON core-matching the requested id.
 func TestSearch_VariationHTML200_ContinuesToNext(t *testing.T) {
-	if got := contentIDPrefixLookup["abf"]; len(got) < 2 || got[0] != "118" || got[1] != "436" {
+	if got := r18devdump.ContentIDPrefixLookup["abf"]; len(got) < 2 || got[0] != "118" || got[1] != "436" {
 		t.Fatalf("test assumes abf prefixes start with {118,436}, got %v", got)
 	}
 

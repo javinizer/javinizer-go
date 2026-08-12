@@ -52,7 +52,8 @@ type Context struct {
 
 	// Media info
 	OriginalFilename string
-	VideoFilePath    string // Path to video file for mediainfo extraction
+	VideoFilePath    string          // Path to video file for mediainfo extraction
+	execCtx          context.Context // per-execution context for cancellation; not cloned
 
 	// Indexing (for screenshots, multi-part, etc.)
 	Index int
@@ -238,6 +239,21 @@ func (c *Context) Clone() *Context {
 	return &clone
 }
 
+// SetExecCtx sets the execution context used for cancellable media analysis. It
+// must be called once at construction, before the Context is shared across
+// goroutines; ExecuteWithContext never mutates it, so concurrent rendering of a
+// shared Context remains race-free. Clone does not carry it over.
+func (c *Context) SetExecCtx(ctx context.Context) { c.execCtx = ctx }
+
+// SetCachedMediaInfo pre-seeds the cached video metadata so getMediaInfo skips
+// its lazy mediainfo.Analyze call. Use when a caller has already analyzed the
+// video (e.g. for stream details) to avoid a duplicate expensive analysis.
+func (c *Context) SetCachedMediaInfo(info *mediainfo.VideoInfo) {
+	if info != nil {
+		c.cachedMediaInfo = info
+	}
+}
+
 // getMediaInfo lazy-loads and caches video metadata.
 // Thread-safe: uses sync.Once to ensure single initialization even under concurrent access.
 // Preserves pre-existing cached values from Clone() to avoid duplicate expensive analysis.
@@ -250,7 +266,11 @@ func (c *Context) getMediaInfo() *mediainfo.VideoInfo {
 			c.mediaInfoError = fmt.Errorf("no video file path")
 			return
 		}
-		c.cachedMediaInfo, c.mediaInfoError = mediainfo.Analyze(context.Background(), c.VideoFilePath)
+		analyzeCtx := c.execCtx
+		if analyzeCtx == nil {
+			analyzeCtx = context.Background()
+		}
+		c.cachedMediaInfo, c.mediaInfoError = mediainfo.Analyze(analyzeCtx, c.VideoFilePath)
 	})
 	return c.cachedMediaInfo
 }

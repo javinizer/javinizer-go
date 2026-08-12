@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.1] - 2026-08-12
+
+### Added
+
+- Resolve null-dvd_id titles via dump content-id candidates (#205)
+
+### Fixed
+
+- Use canonical movie ID for poster crop source URL (#206)
+- Eliminate import heartbeat data race in r18devdump (#207)
+
+## [v1.5.0] - 2026-08-09
+
+### Added
+
+- Add server-side image cache for review preview images (#197)
+- Write <set> in tiered Kodi 19+ collection format (#196)
+- Surface <RELEASEDATE> tag in folder/file naming UI (#194)
+- Add overwrite-media option with SSR-stable browse plan UI (#177)
+
+### Fixed
+
+- Render statically served SPA on hard navigation (#204)
+- Expand template tags in tagline and custom NFO tags (#202)
+- Page-derived identity for JavLibrary + JavStash, URL redaction hardening (#198)
+- Detect letter+quality-tag multipart suffixes (#193)
+- Persist manual poster crop through organize (#187)
+- Harden release version flow and add artifact assertions (#185)
+- Native export save + in-app import confirms (webview gaps) (#183)
+- Local project coverage matches Codecov + fail-loud test run (#181)
+
+### Changed
+
+- Skip live-network tryDirectURLs tests in short mode (#203)
+
 ## [v1.4.0] - 2026-07-29
 
 ### Added

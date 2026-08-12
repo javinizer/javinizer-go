@@ -11,11 +11,15 @@ import (
 // scraper's dump fast-path. LookupMovie returns lookupMovieResult when set,
 // otherwise derives a minimal DumpMovie from dvdToContent. A genuine miss
 // returns models.ErrDumpMiss; lookupErr (if set) is returned instead to let
-// tests exercise the degraded-dump path.
+// tests exercise the degraded-dump path. MatchByDisplayID returns matches
+// when set (candidate-resolution tests), otherwise mirrors dvdToContent or
+// reports a miss; matchErr overrides to simulate a degraded candidate lookup.
 type stubDumpLookup struct {
 	dvdToContent      map[string]string
 	lookupMovieResult *models.DumpMovie
 	lookupErr         error // when set, every lookup returns this error
+	matches           []models.DumpMatch
+	matchErr          error
 }
 
 func (s *stubDumpLookup) LookupByDVDID(ctx context.Context, dvdID string) (string, error) {
@@ -39,6 +43,22 @@ func (s *stubDumpLookup) LookupByContentID(ctx context.Context, contentID string
 		}
 	}
 	return "", models.ErrDumpMiss
+}
+
+func (s *stubDumpLookup) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpMatch, error) {
+	if s.matchErr != nil {
+		return nil, s.matchErr
+	}
+	if s.lookupErr != nil {
+		return nil, s.lookupErr
+	}
+	if s.matches != nil {
+		return s.matches, nil
+	}
+	if cid, ok := s.dvdToContent[normalizeIDWithoutStripping(id)]; ok {
+		return []models.DumpMatch{{ContentID: cid, DVDID: id}}, nil
+	}
+	return nil, models.ErrDumpMiss
 }
 
 func (s *stubDumpLookup) Stats(ctx context.Context) (models.DumpStats, error) {

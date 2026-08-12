@@ -336,7 +336,7 @@ func TestRoundTrip(t *testing.T) {
 	generator.config.IncludeFanart = true
 	generator.config.IncludeTrailer = true
 	generator.config.AltNameRole = true // Include Japanese names in role field for round-trip
-	nfoStruct := generator.movieToNFO(context.Background(), originalMovie, "", nil)
+	nfoStruct, _ := generator.movieToNFO(context.Background(), originalMovie, "", "", 0, false, nil)
 
 	// Write to temp file
 	tmpDir := t.TempDir()

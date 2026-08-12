@@ -24,7 +24,7 @@ var (
 	osRemoveFunc   = os.Remove
 	osReadFileFunc = os.ReadFile
 
-	lockRetryEnabled = runtime.GOOS == "windows"
+	lockRetryEnabled = runtime.GOOS == "windows" //nolint:goconst // OS literal repeated for readability
 )
 
 func makeConfigLockToken() string {

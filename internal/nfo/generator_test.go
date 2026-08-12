@@ -58,7 +58,7 @@ func TestMovieToNFO(t *testing.T) {
 		},
 	}
 
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	// Verify basic fields
 	if nfo.ID != "IPX-535" {
@@ -354,7 +354,7 @@ func TestNFOWithoutOptionalFields(t *testing.T) {
 		Title: "Minimal Movie",
 	}
 
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	if nfo.ID != "TEST-001" {
 		t.Errorf("Expected ID 'TEST-001', got '%s'", nfo.ID)
@@ -529,7 +529,7 @@ func TestIncludeOriginalPath(t *testing.T) {
 				OriginalFileName: tt.originalFileName,
 			}
 
-			nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+			nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 			if nfo.OriginalPath != tt.expectedPath {
 				t.Errorf("Expected OriginalPath '%s', got '%s'", tt.expectedPath, nfo.OriginalPath)
@@ -676,7 +676,7 @@ func TestActressAsTag(t *testing.T) {
 				Actresses: tt.actresses,
 			}
 
-			nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+			nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 			if len(nfo.Tags) != len(tt.expectedTags) {
 				t.Errorf("Expected %d tags, got %d tags: %v", len(tt.expectedTags), len(nfo.Tags), nfo.Tags)
@@ -778,7 +778,7 @@ func TestStaticNFOFields(t *testing.T) {
 		Title: "Test Movie",
 	}
 
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	// Verify static tags were added
 	assert.Contains(t, nfo.Tags, "JAV")
@@ -810,7 +810,7 @@ func TestStaticTagsWithActressAsTag(t *testing.T) {
 		},
 	}
 
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	// Verify both actress name and static tags are present
 	assert.Contains(t, nfo.Tags, "Yui Hatano")
@@ -832,7 +832,7 @@ func TestStaticFieldsEmpty(t *testing.T) {
 		Title: "Test Movie",
 	}
 
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	// Verify no static fields were added
 	assert.Empty(t, nfo.Tags)

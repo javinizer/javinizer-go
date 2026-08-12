@@ -171,7 +171,7 @@ func TestExtractStreamDetails(t *testing.T) {
 		}
 
 		// Pass non-existent video file path
-		nfo := gen.movieToNFO(context.Background(), movie, "/nonexistent/video.mp4", nil)
+		nfo, _ := gen.movieToNFO(context.Background(), movie, "/nonexistent/video.mp4", "", 0, false, nil)
 
 		// Should handle error gracefully (no stream details)
 		assert.Nil(t, nfo.FileInfo)
@@ -184,7 +184,7 @@ func TestExtractStreamDetails(t *testing.T) {
 		}
 
 		// Pass empty path
-		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+		nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 		// Should not attempt to extract stream details
 		assert.Nil(t, nfo.FileInfo)
@@ -204,7 +204,7 @@ func TestExtractStreamDetails(t *testing.T) {
 		tmpFile := filepath.Join(t.TempDir(), "video.mp4")
 		_ = os.WriteFile(tmpFile, []byte("fake video"), 0644)
 
-		nfo := genNoStream.movieToNFO(context.Background(), movie, tmpFile, nil)
+		nfo, _ := genNoStream.movieToNFO(context.Background(), movie, tmpFile, "", 0, false, nil)
 
 		// Should not include stream details when disabled
 		assert.Nil(t, nfo.FileInfo)
@@ -221,7 +221,7 @@ func TestExtractStreamDetails(t *testing.T) {
 		err := os.WriteFile(tmpFile, []byte("This is not a video file"), 0644)
 		require.NoError(t, err)
 
-		nfo := gen.movieToNFO(context.Background(), movie, tmpFile, nil)
+		nfo, _ := gen.movieToNFO(context.Background(), movie, tmpFile, "", 0, false, nil)
 
 		// Should handle invalid video file gracefully (mediainfo will fail)
 		assert.Nil(t, nfo.FileInfo)
@@ -340,7 +340,7 @@ func TestNewGenerator_ConfigDefaults(t *testing.T) {
 			},
 		}
 
-		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+		nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 		assert.Equal(t, "Unknown", nfo.Actors[0].Name)
 	})
 
@@ -383,7 +383,7 @@ func TestMovieToNFO_PreResolvedTags(t *testing.T) {
 
 	gen := NewGenerator(afero.NewOsFs(), nfoCfg)
 
-	nfo := gen.movieToNFO(context.Background(), movie, "", []string{"Tag1", "Tag2"})
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, []string{"Tag1", "Tag2"})
 
 	assert.Contains(t, nfo.Tags, "Tag1")
 	assert.Contains(t, nfo.Tags, "Tag2")
@@ -409,7 +409,7 @@ func TestMovieToNFO_TagDeduplication(t *testing.T) {
 	gen := NewGenerator(afero.NewOsFs(), nfoCfg)
 
 	// Pass "Yui Hatano" as pre-resolved tag — should deduplicate with actress-as-tag and config tag
-	nfo := gen.movieToNFO(context.Background(), movie, "", []string{"Yui Hatano"})
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, []string{"Yui Hatano"})
 
 	// Count occurrences of "Yui Hatano"
 	count := 0
@@ -448,7 +448,7 @@ func TestMovieToNFO_AllFields(t *testing.T) {
 		RatingVotes:   100,
 	}
 
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	// Verify all fields
 	assert.Equal(t, "IPX-001", nfo.ID)

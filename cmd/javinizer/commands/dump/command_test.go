@@ -401,9 +401,9 @@ func TestRunSearch_ContentIDLookupError(t *testing.T) {
 		if err := runDownload(context.Background(), &buf, "config.yaml", false); err != nil {
 			t.Fatalf("runDownload: %v", err)
 		}
-		// Recreate videos with only content_id + dvd_id_norm (no dvd_id column).
-		// LookupByDVDID succeeds (misses on a non-existent ID → ErrDumpMiss),
-		// then LookupByContentID fails (dvd_id column missing → real error).
+		// Recreate videos with only content_id + dvd_id_norm (no dvd_id
+		// column): every lookup query fails with a real schema error (not
+		// ErrDumpMiss), which runSearch must propagate instead of masking.
 		dbPath := filepath.Join("data", "r18dev", "r18dev_dump.db")
 		c, err := sql.Open("sqlite3", dbPath)
 		if err != nil {
@@ -416,8 +416,8 @@ func TestRunSearch_ContentIDLookupError(t *testing.T) {
 		c.Close()
 		buf.Reset()
 		err = runSearch(&buf, "config.yaml", "NOPE-999")
-		if err == nil || !strings.Contains(err.Error(), "content_id lookup failed") {
-			t.Fatalf("expected content_id lookup error, got: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "lookup failed") {
+			t.Fatalf("expected propagated lookup error, got: %v", err)
 		}
 	})
 }

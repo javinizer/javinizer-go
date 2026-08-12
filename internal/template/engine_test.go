@@ -1,6 +1,7 @@
 package template
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -2737,4 +2738,182 @@ func BenchmarkTemplateRender_Parallel(b *testing.B) {
 			}
 		}
 	})
+}
+
+func TestEngine_ValidateTags(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<ID> - <TITLE>"))
+	assert.NoError(t, e.ValidateTags("<ACTRESSES> / <RESOLUTION>"))
+	assert.NoError(t, e.ValidateTags("static text without tags"))
+	assert.NoError(t, e.ValidateTags("<IF:YEAR><YEAR></IF>"))
+	assert.Error(t, e.ValidateTags("<TITEL>"))
+	assert.Error(t, e.ValidateTags("Featured: <TITEL>"))
+}
+
+func TestEngine_ValidateTags_ConditionalKeywordSkipped(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:ID>keep</IF>"))
+}
+
+func TestEngine_ValidateTags_MisspelledConditional(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:YEAR><YEAR></IF>"))
+	assert.Error(t, e.ValidateTags("<IF:TITEL>Featured<ELSE>Other</IF>"))
+}
+
+func TestEngine_ValidateTags_ElseKeywordExempted(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:SERIES><SERIES><ELSE>Standalone</IF>"))
+}
+
+func TestEngine_ValidateTags_NestedConditionalRejected(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes</IF>"))
+	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes</IF><IF:ID>also</IF>"))
+	assert.Error(t, e.ValidateTags("<IF:TITLE><IF:ID>deep</IF></IF>"))
+}
+
+func TestEngine_ValidateTags_StrayElseRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("Featured<ELSE>Other"))
+	assert.Error(t, e.ValidateTags("<ELSE>oops"))
+	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes<ELSE>no</IF>"))
+}
+
+func TestEngine_ValidateTags_StrayEndIfRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("text</IF>"))
+}
+
+func TestEngine_ValidateTags_NumericModifierValidated(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<PART:2>"))
+	assert.NoError(t, e.ValidateTags("<DISC:3>"))
+	assert.NoError(t, e.ValidateTags("<INDEX:1>"))
+	assert.Error(t, e.ValidateTags("<PART:xyz>"))
+	assert.Error(t, e.ValidateTags("<DISC:abc>"))
+}
+
+func TestEngine_ValidateTags_MultipleElseRejected(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<IF:TITLE>yes<ELSE>no</IF>"))
+	assert.Error(t, e.ValidateTags("<IF:SERIES>a<ELSE>b<ELSE>c</IF>"))
+}
+
+func TestEngine_ValidateTags_UnclosedIfRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<IF:ID>oops"))
+	assert.Error(t, e.ValidateTags("<IF:ID>yes<ELSE>no"))
+}
+
+func TestEngine_ValidateTags_BareIfRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("x <IF> y"))
+	assert.Error(t, e.ValidateTags("<IF>oops"))
+	assert.NoError(t, e.ValidateTags("<IF:ID>ok</IF>"))
+}
+
+func TestEngine_ValidateTags_ElseModifierRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<IF:SERIES>a<ELSE:b>c</IF>"))
+	assert.NoError(t, e.ValidateTags("<IF:SERIES>a<ELSE>b</IF>"))
+}
+
+func TestEngine_ValidateTags_DegenerateConditionalsRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<IF:>oops"))
+	assert.Error(t, e.ValidateTags("<IF:SERIES>a<ELSE:>b</IF>"))
+	assert.Error(t, e.ValidateTags("</ELSE>"))
+	assert.Error(t, e.ValidateTags("</ENDIF>"))
+	assert.NoError(t, e.ValidateTags("A <3 B"))
+}
+
+func TestEngine_ValidateTags_SignedNumericModifierRejected(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<PART:2>"))
+	assert.Error(t, e.ValidateTags("<PART:+2>"))
+	assert.Error(t, e.ValidateTags("<PART:-2>"))
+	assert.Error(t, e.ValidateTags("<DISC:+1>"))
+}
+
+func TestStrictDigitModifier(t *testing.T) {
+	assert.False(t, strictDigitModifier(""))
+	assert.True(t, strictDigitModifier("2"))
+	assert.True(t, strictDigitModifier("02"))
+	assert.False(t, strictDigitModifier("+2"))
+	assert.False(t, strictDigitModifier("-2"))
+	assert.False(t, strictDigitModifier("2a"))
+}
+
+func TestEngine_ValidateTags_TaintedStructuralKeywordsRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<IF:ID>a<ELSE >b</IF>"))
+	assert.Error(t, e.ValidateTags("<IF:ID>a</IF:x>"))
+	assert.Error(t, e.ValidateTags("<ENDIF>"))
+	assert.NoError(t, e.ValidateTags("<IF:ID>a<ELSE>b</IF>"))
+	assert.NoError(t, e.ValidateTags("<IF:ID>x</IF>"))
+}
+
+func TestEngine_ValidateTags_BoundedNumericModifier(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<PART:9>"))
+	assert.Error(t, e.ValidateTags("<PART:10>"))
+	assert.Error(t, e.ValidateTags("<PART:99999999>"))
+}
+
+func TestContext_SetExecCtx_HonoredByMediaInfo(t *testing.T) {
+	ctx := NewContextFromMovie(&models.Movie{ID: "X"})
+	ctx.VideoFilePath = "/nonexistent/video.mp4"
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctx.SetExecCtx(canceled)
+	info := ctx.getMediaInfo()
+	assert.Nil(t, info)
+}
+
+func TestContext_SetExecCtx_ConcurrentRenderingRaceFree(t *testing.T) {
+	ctx := NewContextFromMovie(&models.Movie{ID: "X"})
+	ctx.VideoFilePath = ""
+	ctx.SetExecCtx(context.Background())
+	e := NewEngine()
+	done := make(chan struct{})
+	for i := 0; i < 10; i++ {
+		go func() { _, _ = e.Execute("<ID>", ctx); done <- struct{}{} }()
+	}
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+}
+
+func TestEngine_ValidateTags_NonNumericModifierAccepted(t *testing.T) {
+	e := NewEngine()
+	assert.NoError(t, e.ValidateTags("<TITLE:50>"))
+	assert.NoError(t, e.ValidateTags("<ID>"))
+}
+
+func TestEngine_ValidateTags_ModifierWithAngleBracketRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("<TITLE:</IF>"))
+	assert.Error(t, e.ValidateTags("<IF:TITLE><ACTORS:DELIM=<ELSE>></IF>"))
+	assert.NoError(t, e.ValidateTags("<TITLE:50>"))
+	assert.NoError(t, e.ValidateTags("<ACTORS:DELIM=/>"))
+}
+
+func TestContext_SetCachedMediaInfo_SkipsLazyAnalysis(t *testing.T) {
+	ctx := NewContextFromMovie(&models.Movie{ID: "X"})
+	ctx.VideoFilePath = "/nonexistent/video.mp4"
+	ctx.SetCachedMediaInfo(&mediainfo.VideoInfo{Width: 1920, Height: 1080})
+	info := ctx.getMediaInfo()
+	require.NotNil(t, info)
+	assert.Equal(t, 1920, info.Width)
+	assert.Nil(t, ctx.mediaInfoError)
+}
+
+func TestEngine_ValidateTags_MalformedTagWithDigitRejected(t *testing.T) {
+	e := NewEngine()
+	assert.Error(t, e.ValidateTags("Featured: <TITLE2>"))
+	assert.Error(t, e.ValidateTags("<ID2>"))
+	assert.NoError(t, e.ValidateTags("A <3 B"))
+	assert.NoError(t, e.ValidateTags("<ID>"))
+	assert.NoError(t, e.ValidateTags("<PART:2>"))
 }

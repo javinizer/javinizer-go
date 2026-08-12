@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,12 +22,7 @@ import (
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 )
 
-// defaultImportHeartbeatInterval is how often runImportHeartbeat broadcasts an
-// "importing" progress frame while the SQL import runs. It is a constant by
-// design: tests override the per-handler importHeartbeatInterval field instead
-// of mutating a package global, so background heartbeat goroutines started by
-// earlier tests can never race a later test's write.
-const defaultImportHeartbeatInterval = 1500 * time.Millisecond
+const importHeartbeatInterval = 1500 * time.Millisecond
 
 const (
 	dumpJobID = "r18dev-dump-download"
@@ -45,15 +41,11 @@ type dumpHandler struct {
 	reloadFn            func(cfg *config.Config, lockHeld bool) error
 	removeFn            func(string) error
 	broadcastProgressFn func(phase string, bytes, total int64)
-	// importHeartbeatInterval is the cadence for import-progress heartbeats.
-	// Tests override it per-handler; zero falls back to
-	// defaultImportHeartbeatInterval.
-	importHeartbeatInterval time.Duration
-	done                    chan struct{} // closed when the download goroutine finishes
+	done                chan struct{} // closed when the download goroutine finishes
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, removeFn: os.Remove, importHeartbeatInterval: defaultImportHeartbeatInterval}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, removeFn: os.Remove}
 	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
 		if lockHeld {
 			return h.rt.ReloadConfigLocked(cfg)
@@ -255,7 +247,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			// being reported.
 			importDone := make(chan struct{})
 			streamConsumed := make(chan struct{})
-			go h.runImportHeartbeat(streamConsumed, importDone)
+			go h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval)
 			defer close(importDone)
 			r = &eofDetectReader{r: r, onEOF: sync.OnceFunc(func() { close(streamConsumed) })}
 			var unlockReload func()
@@ -348,9 +340,21 @@ func (h *dumpHandler) reloadDumpWith(path string, lockHeld bool) error {
 
 // searchResponse is the JSON shape returned by GET /search.
 type searchResponse struct {
-	Query     string  `json:"query"`
-	ContentID *string `json:"content_id"`
-	DVDID     *string `json:"dvd_id"`
+	Query     string          `json:"query"`
+	ContentID *string         `json:"content_id"`
+	DVDID     *string         `json:"dvd_id"`
+	State     string          `json:"state"`
+	Matches   []dumpMatchView `json:"matches"`
+}
+
+// dumpMatchView is one dump row matched by a search query. Matches are
+// returned in candidate priority order; DVDID is empty when the upstream row
+// has no dvd_id.
+type dumpMatchView struct {
+	ContentID   string `json:"content_id"`
+	DVDID       string `json:"dvd_id,omitempty"`
+	ReleaseDate string `json:"release_date,omitempty"`
+	ServiceCode string `json:"service_code,omitempty"`
 }
 
 // search godoc
@@ -393,25 +397,34 @@ func (h *dumpHandler) search(c *gin.Context) {
 	defer func() { _ = store.Close() }()
 
 	ctx := c.Request.Context()
-	resp := searchResponse{Query: query}
-
-	if cid, err := store.LookupByDVDID(ctx, query); err == nil {
-		resp.ContentID = &cid
-		c.JSON(http.StatusOK, resp)
+	matches, err := store.MatchByDisplayID(ctx, query)
+	if err != nil {
+		if !errors.Is(err, models.ErrDumpMiss) {
+			logging.Warnf("r18dev dump search: lookup failed for %s: %v", query, err)
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found in dump"})
 		return
-	} else if !errors.Is(err, models.ErrDumpMiss) {
-		logging.Warnf("r18dev dump search: dvd_id lookup failed for %s: %v", query, err)
 	}
 
-	if did, err := store.LookupByContentID(ctx, query); err == nil {
-		resp.DVDID = &did
-		c.JSON(http.StatusOK, resp)
-		return
-	} else if !errors.Is(err, models.ErrDumpMiss) {
-		logging.Warnf("r18dev dump search: content_id lookup failed for %s: %v", query, err)
+	resp := searchResponse{Query: query, Matches: make([]dumpMatchView, 0, len(matches))}
+	first := matches[0]
+	resp.State = "mapped"
+	if first.DVDID == "" {
+		resp.State = "no_dvd_id"
+	} else if strings.EqualFold(strings.TrimSpace(query), first.ContentID) {
+		resp.DVDID = &first.DVDID
+	} else {
+		resp.ContentID = &first.ContentID
 	}
-
-	c.JSON(http.StatusNotFound, gin.H{"error": "not found in dump"})
+	for _, m := range matches {
+		resp.Matches = append(resp.Matches, dumpMatchView{
+			ContentID:   m.ContentID,
+			DVDID:       m.DVDID,
+			ReleaseDate: m.ReleaseDate,
+			ServiceCode: m.ServiceCode,
+		})
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // clearDump godoc
@@ -559,7 +572,7 @@ func (e *eofDetectReader) Read(p []byte) (int, error) {
 // SQL import runs. It waits until streamConsumed is closed (the download
 // stream hit EOF) before starting, so "importing" frames never overlap with
 // "downloading" frames. It exits when importDone is closed.
-func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struct{}) {
+func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struct{}, interval time.Duration) {
 	select {
 	case <-streamConsumed:
 	case <-importDone:
@@ -571,10 +584,6 @@ func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struc
 	default:
 	}
 	h.broadcastProgress("importing", 0, 0)
-	interval := h.importHeartbeatInterval
-	if interval <= 0 {
-		interval = defaultImportHeartbeatInterval
-	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

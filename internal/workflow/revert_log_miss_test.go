@@ -438,16 +438,18 @@ func TestMiss_NewRevertLogConfig(t *testing.T) {
 // RevertLogConfig.ToNFONameConfig with nil NFOCfg
 func TestMiss_RevertLogConfig_ToNFONameConfig_NilNFOCfg(t *testing.T) {
 	cfg := &RevertLogConfig{AllowRevert: true, NFOCfg: nil}
-	result := cfg.ToNFONameConfig(true, "-pt1")
+	result := cfg.ToNFONameConfig(true, "-pt1", 2)
 	assert.True(t, result.IsMultiPart)
 	assert.Equal(t, "-pt1", result.PartSuffix)
+	assert.Equal(t, 2, result.PartNumber)
 }
 
 // RevertLogConfig.ToNFONameConfig with NFOCfg
 func TestMiss_RevertLogConfig_ToNFONameConfig_WithNFOCfg(t *testing.T) {
 	cfg := &RevertLogConfig{AllowRevert: true, NFOCfg: &nfo.Config{FilenameTemplate: "<ID>"}}
-	result := cfg.ToNFONameConfig(false, "")
+	result := cfg.ToNFONameConfig(false, "", 2)
 	assert.False(t, result.IsMultiPart)
+	assert.Equal(t, 2, result.PartNumber)
 }
 
 // CaptureSnapshot: with NFO file found

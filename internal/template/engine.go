@@ -13,8 +13,11 @@ import (
 
 // Package-level compiled regexes for performance
 var (
-	cjkRegex              = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
-	conditionalTokenRegex = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>`)
+	cjkRegex                   = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
+	conditionalTokenRegex      = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>`)
+	conditionalStructureRegex  = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>|<ELSE>`)
+	degenerateConditionalRegex = regexp.MustCompile(`(?i)<IF:>|<ELSE[:\s][^>]*>|</IF[:\s][^>]*>|</ELSE>|</ENDIF>|<ENDIF>`)
+	malformedTagRegex          = regexp.MustCompile(`(?i)<[A-Z_]+[0-9][^>]*>`)
 )
 
 // DefaultMaxTemplateBytes, DefaultMaxOutputBytes, and DefaultMaxConditionalDepth are the default size and depth limits for template rendering.
@@ -82,6 +85,7 @@ type EngineInterface interface {
 	TruncateTitle(title string, maxLen int) string
 	TruncateTitleBytes(title string, maxBytes int) string
 	ValidatePathLength(path string, maxLen int) error
+	ValidateTags(template string) error
 }
 
 var _ EngineInterface = (*Engine)(nil)
@@ -112,7 +116,7 @@ func newEngineWithOptions(opts engineOptions) *Engine {
 		tagPattern: regexp.MustCompile(`(?i)<([A-Z_]+)(?::([^>]+))?>`),
 		// Matches: <IF:TAG>content</IF> or <IF:TAG>true<ELSE>false</IF>
 		// Case-insensitive to allow <if:tag>, <IF:TAG>, etc.
-		conditionalPattern:  regexp.MustCompile(`(?i)<IF:([A-Z_]+)>(.*?)(?:<ELSE>(.*?))?</IF>`),
+		conditionalPattern:  regexp.MustCompile(`(?is)<IF:([A-Z_]+)>(.*?)(?:<ELSE>(.*?))?</IF>`),
 		options:             opts,
 		tagRegistry:         newTagRegistry(),
 		translationResolver: newTranslationResolver(opts),
@@ -384,6 +388,122 @@ func (e *Engine) Validate(template string) error {
 	}
 
 	return nil
+}
+
+// ValidateTags reports whether every tag token in the template resolves to a
+// known tag. It does not execute the template; it only checks that tag names
+// are registered or are built-in actress/conditional keywords. Returns an
+// error naming the first unknown tag, or nil if all tags are known. This lets
+// callers detect typos like <TITEL> that ExecuteWithContext would silently
+// render as empty instead of failing.
+func (e *Engine) ValidateTags(template string) error {
+	if err := e.validateConditionalNesting(template); err != nil {
+		return err
+	}
+	if degenerateConditionalRegex.MatchString(template) {
+		return fmt.Errorf("malformed conditional token")
+	}
+	if malformedTagRegex.MatchString(template) {
+		return fmt.Errorf("malformed template tag")
+	}
+	matches := e.tagPattern.FindAllStringSubmatch(template, -1)
+	for _, match := range matches {
+		tagName := strings.ToUpper(match[1])
+		if match[2] != "" && strings.Contains(match[2], "<") {
+			return fmt.Errorf("invalid '<' in tag modifier: %s", match[2])
+		}
+		if tagName == "IF" {
+			if match[2] == "" {
+				return fmt.Errorf("<IF> missing condition tag")
+			}
+			condTag := strings.ToUpper(match[2])
+			if !e.isKnownTag(condTag) {
+				return fmt.Errorf("unknown tag: %s", condTag)
+			}
+			continue
+		}
+		if tagName == "ELSE" {
+			continue
+		}
+		if !e.isKnownTag(tagName) {
+			return fmt.Errorf("unknown tag: %s", tagName)
+		}
+		if len(match) > 2 && match[2] != "" {
+			switch tagName {
+			case "PART", "DISC", "INDEX":
+				if !strictDigitModifier(match[2]) {
+					return fmt.Errorf("invalid numeric modifier for %s: %s", tagName, match[2])
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validateConditionalNesting rejects nested <IF> blocks because the regex-based
+// conditional processor is single-pass and mis-renders them (e.g.
+// <IF:TITLE><IF:ID>deep</IF></IF> renders as "deep</IF>"). The shared Validate
+// allows nesting up to MaxConditionalDepth, but configured taglines/tags flow
+// through renderConfiguredText which must not write corrupted values.
+func (e *Engine) validateConditionalNesting(template string) error {
+	depth := 0
+	sawElse := false
+	for _, token := range conditionalStructureRegex.FindAllString(template, -1) {
+		upper := strings.ToUpper(token)
+		switch {
+		case strings.HasPrefix(upper, "<IF:"):
+			depth++
+			sawElse = false
+			if depth > 1 {
+				return fmt.Errorf("nested conditionals are not supported")
+			}
+		case upper == "<ELSE>":
+			if depth < 1 {
+				return fmt.Errorf("<ELSE> outside of <IF> block")
+			}
+			if sawElse {
+				return fmt.Errorf("multiple <ELSE> in one <IF> block")
+			}
+			sawElse = true
+		default:
+			depth--
+			if depth < 0 {
+				return fmt.Errorf("unexpected </IF>")
+			}
+		}
+	}
+	if depth != 0 {
+		return fmt.Errorf("unclosed <IF> block")
+	}
+	return nil
+}
+
+// strictDigitModifier reports whether modifier is a non-empty string of ASCII
+// digits (no sign, no spaces), so <PART:+2> is rejected instead of rendering
+// "+1" via fmt's plus-flag reinterpretation.
+func strictDigitModifier(modifier string) bool {
+	if modifier == "" {
+		return false
+	}
+	for i := 0; i < len(modifier); i++ {
+		if modifier[i] < '0' || modifier[i] > '9' {
+			return false
+		}
+	}
+	n, err := strconv.Atoi(modifier)
+	return err == nil && n >= 1 && n <= 9
+}
+
+// isKnownTag reports whether tagName resolves through resolveTag without an
+// "unknown tag" error. It covers the actress-family tags handled in the
+// resolveTag switch and every entry in the tag registry.
+func (e *Engine) isKnownTag(tagName string) bool {
+	switch tagName {
+	case "ACTORS", "ACTRESSES", "ACTRESS", "ACTORNAME", "ACTRESSNAME":
+		return true
+	}
+	_, ok := e.tagRegistry[tagName]
+	return ok
 }
 
 var errOutputLimit = fmt.Errorf("output exceeds maximum")

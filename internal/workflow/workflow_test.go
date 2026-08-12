@@ -142,7 +142,7 @@ func (f *testFixture) build() *Workflow {
 
 	return &Workflow{
 		scrape:    newScrapeOrchestrator(scraper, f.movieRepo, f.cfg.Metadata.NFO.Format.DisplayTitle, sharedEngine, nfo.NFONameConfig{}, nil),
-		apply:     newApplyOrchestrator(f.fs, f.org, f.dl, f.nfoGen, nfoIface, ApplyConfig{NFONameCfg: nfoCfg.ToNFONameConfig(false, ""), DisplayTitle: f.cfg.Metadata.NFO.Format.DisplayTitle}, sharedEngine, noOpRevertLog{}, database.NewMovieTagRepository(f.db), nil),
+		apply:     newApplyOrchestrator(f.fs, f.org, f.dl, f.nfoGen, nfoIface, ApplyConfig{NFONameCfg: nfoCfg.ToNFONameConfig(false, "", 0), DisplayTitle: f.cfg.Metadata.NFO.Format.DisplayTitle}, sharedEngine, noOpRevertLog{}, database.NewMovieTagRepository(f.db), nil),
 		compare:   newCompareOrchestrator(f.fs, nfoIface, scraper, nil),
 		preview:   noOpPreviewOrchestrator{},
 		scanMatch: noOpScanAndMatchOrchestrator{},

@@ -2215,6 +2215,7 @@
   "settings_r18dev_search_failed": "搜索失败",
   "settings_r18dev_search_heading": "搜索数据库",
   "settings_r18dev_search_no_match": "未找到匹配项",
+  "settings_r18dev_search_no_dvd_id": "存在于转储中但没有 dvd_id（按 dvd_id 检索无法匹配）：",
   "settings_r18dev_search_placeholder": "dvd_id 或 content_id（例如 ABF-030）",
   "settings_r18dev_size": "大小",
   "settings_r18dev_source_date": "来源日期",

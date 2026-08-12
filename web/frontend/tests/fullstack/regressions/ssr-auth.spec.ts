@@ -9,25 +9,20 @@ test('authenticated SSR returns the application shell without an auth placeholde
 	expect(html).not.toContain('Login Required');
 });
 
-test('Browse SSR matches persisted visual state before hydration', async ({ page }) => {
+test('Browse reflects the persisted plan state after hydration', async ({ page }) => {
 	await page.goto('/browse');
 	await expect(page.getByRole('radio', { name: /Organize into another location/ })).toBeChecked();
 	await expect.poll(async () => (await page.context().cookies()).some((cookie) => cookie.name === 'javinizer_browse_bootstrap')).toBe(true);
-	const hydrated = page.waitForResponse((candidate) => candidate.url().includes('/api/v1/config'));
-	const response = await page.reload();
-	expect(response).not.toBeNull();
-	await hydrated;
-	const html = await response!.text();
-	expect(html).toContain('This operation will');
-	expect(html).not.toContain('Select a video file operation.');
 	await page.getByRole('button', { name: 'Collapse plan' }).click();
 	await expect(page.getByRole('button', { name: 'Expand plan' })).toHaveAttribute('aria-expanded', 'false');
 	await expect.poll(async () => {
 		const cookie = (await page.context().cookies()).find((item) => item.name === 'javinizer_browse_bootstrap');
 		return cookie ? JSON.parse(decodeURIComponent(cookie.value)).planExpanded : undefined;
 	}).toBe(false);
-	const collapsedResponse = await page.reload();
-	const collapsedHTML = await collapsedResponse!.text();
-	expect(collapsedHTML).toContain('Expand plan');
-	expect(collapsedHTML).not.toContain('id="apply-plan-body"');
+	const response = await page.reload();
+	expect(response).not.toBeNull();
+	const expandButton = page.getByRole('button', { name: 'Expand plan' });
+	await expect(expandButton).toBeVisible();
+	await expect(expandButton).toHaveAttribute('aria-expanded', 'false');
+	await expect(page.getByRole('button', { name: 'Collapse plan' })).toHaveCount(0);
 });

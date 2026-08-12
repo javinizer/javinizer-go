@@ -98,7 +98,7 @@ func TestNewWorkflowFactory_ScanOnlyMode_MinimalDeps(t *testing.T) {
 				Trailer:     cfg.Output.Download.DownloadTrailer,
 			},
 		},
-		ApplyCfg:        ApplyConfig{NFONameCfg: nfoCfg.ToNFONameConfig(false, ""), DisplayTitle: cfg.Metadata.NFO.Format.DisplayTitle},
+		ApplyCfg:        ApplyConfig{NFONameCfg: nfoCfg.ToNFONameConfig(false, "", 0), DisplayTitle: cfg.Metadata.NFO.Format.DisplayTitle},
 		DownloadHTTPCfg: downloader.HTTPClientConfig{},
 		Fs:              fs,
 		TemplateEngine:  template.NewEngine(),
@@ -147,7 +147,7 @@ func TestNewWorkflowFactory_ScrapeOnlyMode_NilScraper(t *testing.T) {
 				Trailer:     cfg.Output.Download.DownloadTrailer,
 			},
 		},
-		ApplyCfg:        ApplyConfig{NFONameCfg: nfoCfg.ToNFONameConfig(false, ""), DisplayTitle: cfg.Metadata.NFO.Format.DisplayTitle},
+		ApplyCfg:        ApplyConfig{NFONameCfg: nfoCfg.ToNFONameConfig(false, "", 0), DisplayTitle: cfg.Metadata.NFO.Format.DisplayTitle},
 		DownloadHTTPCfg: downloader.HTTPClientConfig{},
 	}
 	// Per DEEP-8: NewWorkflowFactory succeeds even without a scraper (creates noOp).
@@ -1123,7 +1123,7 @@ func TestWorkflowFactoryConfig_NilScraper(t *testing.T) {
 				Trailer:     cfg.Output.Download.DownloadTrailer,
 			},
 		},
-		ApplyCfg:        ApplyConfig{NFONameCfg: nfoCfg.ToNFONameConfig(false, ""), DisplayTitle: cfg.Metadata.NFO.Format.DisplayTitle},
+		ApplyCfg:        ApplyConfig{NFONameCfg: nfoCfg.ToNFONameConfig(false, "", 0), DisplayTitle: cfg.Metadata.NFO.Format.DisplayTitle},
 		DownloadHTTPCfg: downloader.HTTPClientConfig{},
 		Matcher:         fileMatcher,
 		Repositories: database.Repositories{
@@ -1284,9 +1284,10 @@ func TestApplyDisplayTitleFromSource_NilMovie(t *testing.T) {
 
 func TestRevertLogConfig_ToNFONameConfig_NilNFOCfg(t *testing.T) {
 	cfg := &RevertLogConfig{AllowRevert: true, NFOCfg: nil}
-	result := cfg.ToNFONameConfig(true, "-pt1")
+	result := cfg.ToNFONameConfig(true, "-pt1", 2)
 	assert.True(t, result.IsMultiPart)
 	assert.Equal(t, "-pt1", result.PartSuffix)
+	assert.Equal(t, 2, result.PartNumber)
 }
 
 func TestRevertLogConfig_ToNFONameConfig_WithNFOCfg(t *testing.T) {
@@ -1295,8 +1296,9 @@ func TestRevertLogConfig_ToNFONameConfig_WithNFOCfg(t *testing.T) {
 	require.NoError(t, err)
 	nfoCfg := nfo.ConfigFromAppConfig(appCfg, nfo.NFONameConfigFromAppConfig(appCfg))
 	cfg := &RevertLogConfig{AllowRevert: true, NFOCfg: nfoCfg}
-	result := cfg.ToNFONameConfig(false, "")
+	result := cfg.ToNFONameConfig(false, "", 2)
 	assert.False(t, result.IsMultiPart)
+	assert.Equal(t, 2, result.PartNumber)
 }
 
 // ============================================================

@@ -1555,6 +1555,7 @@
   "settings_r18dev_search_failed": "[ Šëårçh fåílëd ]",
   "settings_r18dev_search_heading": "[ Šëårçh Dümp ]",
   "settings_r18dev_search_no_match": "[ Ñö måtçh föüñd ]",
+  "settings_r18dev_search_no_dvd_id": "[ Þrésént ín dúmp bút hâs ñó dvd_id (dvd_id-kéyed séarçhes çannot mátçh it): ]",
   "settings_r18dev_search_placeholder": "[ dvd_íd ör çöñtëñt_íd (ë.g. ÅBF-030) ]",
   "settings_r18dev_size": "[ Šízë ]",
   "settings_r18dev_source_date": "[ Šöürçë dåtë ]",

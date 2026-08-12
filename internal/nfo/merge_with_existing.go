@@ -48,11 +48,12 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 
 	var nameCfg NFONameConfig
 	if nfoConfig != nil {
-		nameCfg = nfoConfig.ToNFONameConfig(isMultiPart, partSuffix)
+		nameCfg = nfoConfig.ToNFONameConfig(isMultiPart, partSuffix, opts.Match.PartNumber)
 	} else {
 		nameCfg = NFONameConfig{
 			IsMultiPart: isMultiPart,
 			PartSuffix:  partSuffix,
+			PartNumber:  opts.Match.PartNumber,
 		}
 	}
 	foundPath := findNFOFile(fs, filepath.Dir(opts.Match.Path), movie, nameCfg, opts.Match.Path, templateEngine)

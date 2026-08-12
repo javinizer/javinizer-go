@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/r18devdump"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -59,7 +60,7 @@ func TestContentIDToIDDeep2(t *testing.T) {
 }
 
 func TestGenerateAlternateContentIDsDeep2(t *testing.T) {
-	ids := generateContentIDVariations("abw001")
+	ids := r18devdump.ContentIDCandidates("abw001")
 	assert.NotEmpty(t, ids)
 	// Should generate IDs using the prefix lookup table for "abw" which has prefix "118"
 	assert.Contains(t, ids, "118abw00001")

@@ -462,7 +462,7 @@ func TestMultipleActresses(t *testing.T) {
 	}
 
 	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	if len(nfo.Actors) != 3 {
 		t.Fatalf("Expected 3 actors, got %d", len(nfo.Actors))

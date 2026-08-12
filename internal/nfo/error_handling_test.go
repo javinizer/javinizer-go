@@ -56,7 +56,7 @@ func TestGenerator_NilFieldSafety(t *testing.T) {
 			gen := NewGenerator(fs, defaultConfig())
 
 			// Should not panic
-			nfo := gen.movieToNFO(context.Background(), tt.movie, "", nil)
+			nfo, _ := gen.movieToNFO(context.Background(), tt.movie, "", "", 0, false, nil)
 			assert.NotNil(t, nfo)
 
 			// Generate NFO to verify XML generation doesn't panic
@@ -434,7 +434,7 @@ func TestGenerator_DuplicateActresses(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		gen := NewGenerator(fs, defaultConfig())
 
-		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+		nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 		assert.Len(t, nfo.Actors, 2, "duplicate actress names should be deduplicated")
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -466,7 +466,7 @@ func TestGenerator_DuplicateActresses(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		gen := NewGenerator(fs, defaultConfig())
 
-		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+		nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 		assert.Len(t, nfo.Actors, 1, "duplicate DMMID entries should be deduplicated")
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -487,7 +487,7 @@ func TestGenerator_DuplicateActresses(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		gen := NewGenerator(fs, defaultConfig())
 
-		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+		nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 		assert.Len(t, nfo.Actors, 2, "name normalization should deduplicate mixed case/whitespace variants")
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)

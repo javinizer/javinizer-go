@@ -12,6 +12,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/mediainfo"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
@@ -21,11 +22,12 @@ const defaultNFOFileName = "metadata"
 
 // Generator creates NFO files from movie metadata
 type Generator struct {
-	fs             afero.Fs
-	templateEngine template.EngineInterface
-	config         *Config
-	mediaAnalyzer  mediaAnalyzer
-	encodeFunc     func(io.Writer, *Movie) error
+	fs               afero.Fs
+	templateEngine   template.EngineInterface
+	config           *Config
+	mediaAnalyzer    mediaAnalyzer
+	encodeFunc       func(io.Writer, *Movie) error
+	mediaInfoAnalyze func(ctx context.Context, path string) (*mediainfo.VideoInfo, error)
 }
 
 // NewGenerator returns an NFO generator that writes to fs using the given config.
@@ -64,11 +66,12 @@ func newGeneratorWithAnalyzer(fs afero.Fs, cfg *Config, ma mediaAnalyzer) *Gener
 	}
 
 	return &Generator{
-		fs:             fs,
-		templateEngine: engine,
-		config:         &cfgCopy,
-		mediaAnalyzer:  ma,
-		encodeFunc:     writeNFOXML,
+		fs:               fs,
+		templateEngine:   engine,
+		config:           &cfgCopy,
+		mediaAnalyzer:    ma,
+		encodeFunc:       writeNFOXML,
+		mediaInfoAnalyze: mediainfo.Analyze,
 	}
 }
 
@@ -226,7 +229,16 @@ func (g *Generator) Generate(ctx context.Context, movie *models.Movie, outputPat
 	filename += ".nfo"
 
 	fullPath := filepath.Join(outputPath, filename)
-	return g.GenerateAtPath(ctx, movie, fullPath, videoFilePath, tags)
+	// Generate is the legacy write path and does not thread multipart metadata
+	// into the NFO content context (partSuffix is applied to the filename above).
+	// Use ResolveAndGenerate for multipart-aware taglines/tags (<PARTSUFFIX>,
+	// <PART>, <IF:MULTIPART>); Generate's content path mirrors pre-multipart
+	// behavior to avoid half-populated multipart state.
+	nfo, err := g.movieToNFO(ctx, movie, videoFilePath, "", 0, false, tags)
+	if err != nil {
+		return err
+	}
+	return g.WriteNFO(nfo, fullPath)
 }
 
 // GenerateAtPath creates an NFO file at the specified path without computing
@@ -234,7 +246,17 @@ func (g *Generator) Generate(ctx context.Context, movie *models.Movie, outputPat
 // ResolveNFOFilename) should use this method to avoid dual path computation
 // and ensure the revert log and generator agree on the target path.
 func (g *Generator) GenerateAtPath(ctx context.Context, movie *models.Movie, nfoPath string, videoFilePath string, tags []string) error {
-	nfo := g.movieToNFO(ctx, movie, videoFilePath, tags)
+	return g.generateAtPath(ctx, movie, nfoPath, videoFilePath, "", 0, false, tags)
+}
+
+// generateAtPath is the shared write path that threads multipart metadata into
+// the NFO content template context so configured taglines/tags using <PARTSUFFIX>
+// or <IF:MULTIPART> resolve correctly in per-file mode.
+func (g *Generator) generateAtPath(ctx context.Context, movie *models.Movie, nfoPath string, videoFilePath, partSuffix string, partNumber int, isMultiPart bool, tags []string) error {
+	nfo, err := g.movieToNFO(ctx, movie, videoFilePath, partSuffix, partNumber, isMultiPart, tags)
+	if err != nil {
+		return err
+	}
 	return g.WriteNFO(nfo, nfoPath)
 }
 
@@ -259,7 +281,13 @@ func (g *Generator) ResolveAndGenerate(ctx context.Context, movie *models.Movie,
 	nfoFilename := ResolveNFOFilename(g.templateEngine, movie, nameCfg)
 	nfoPath := filepath.ToSlash(filepath.Join(destDir, nfoFilename))
 
-	if genErr := g.GenerateAtPath(ctx, movie, nfoPath, videoFilePath, tags); genErr != nil {
+	contentPartSuffix := nameCfg.PartSuffix
+	contentPartNumber := nameCfg.PartNumber
+	if !nameCfg.PerFile || !nameCfg.IsMultiPart {
+		contentPartSuffix = ""
+		contentPartNumber = 0
+	}
+	if genErr := g.generateAtPath(ctx, movie, nfoPath, videoFilePath, contentPartSuffix, contentPartNumber, nameCfg.IsMultiPart, tags); genErr != nil {
 		return "", genErr
 	}
 	return nfoPath, nil
@@ -268,9 +296,12 @@ func (g *Generator) ResolveAndGenerate(ctx context.Context, movie *models.Movie,
 // movieToNFO converts a Movie model to NFO format.
 // videoFilePath: optional path to video file for extracting stream details (empty string to skip)
 // tags: pre-resolved tags from caller (e.g., tag database) — replaces internal DB call
-func (g *Generator) movieToNFO(ctx context.Context, movie *models.Movie, videoFilePath string, tags []string) *Movie {
-	input := g.transformMovieForNFO(ctx, movie, videoFilePath, tags)
-	return g.buildNFO(input)
+func (g *Generator) movieToNFO(ctx context.Context, movie *models.Movie, videoFilePath, partSuffix string, partNumber int, isMultiPart bool, tags []string) (*Movie, error) {
+	input, err := g.transformMovieForNFO(ctx, movie, videoFilePath, partSuffix, partNumber, isMultiPart, tags)
+	if err != nil {
+		return nil, err
+	}
+	return g.buildNFO(input), nil
 }
 
 // WriteNFO encodes the NFO struct to the given path, creating parent directories as needed.

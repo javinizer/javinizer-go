@@ -29,6 +29,7 @@ func (e *errEngineSubfolder) ExecuteWithMaxBytes(tmpl string, ctx *template.Cont
 func (e *errEngineSubfolder) TruncateTitle(title string, _ int) string      { return title }
 func (e *errEngineSubfolder) TruncateTitleBytes(title string, _ int) string { return title }
 func (e *errEngineSubfolder) ValidatePathLength(_ string, _ int) error      { return nil }
+func (e *errEngineSubfolder) ValidateTags(_ string) error                   { return nil }
 
 // errEngineMaxBytes3 returns error on ExecuteWithMaxBytes only.
 type errEngineMaxBytes3 struct{}
@@ -45,6 +46,7 @@ func (e *errEngineMaxBytes3) ExecuteWithMaxBytes(_ string, _ *template.Context, 
 func (e *errEngineMaxBytes3) TruncateTitle(title string, _ int) string      { return title }
 func (e *errEngineMaxBytes3) TruncateTitleBytes(title string, _ int) string { return title }
 func (e *errEngineMaxBytes3) ValidatePathLength(_ string, _ int) error      { return nil }
+func (e *errEngineMaxBytes3) ValidateTags(_ string) error                   { return nil }
 
 // emptyFolderEngine3 produces empty string from ExecuteWithMaxBytes.
 type emptyFolderEngine3 struct{}
@@ -61,6 +63,7 @@ func (e *emptyFolderEngine3) ExecuteWithMaxBytes(_ string, _ *template.Context, 
 func (e *emptyFolderEngine3) TruncateTitle(title string, _ int) string      { return title }
 func (e *emptyFolderEngine3) TruncateTitleBytes(title string, _ int) string { return title }
 func (e *emptyFolderEngine3) ValidatePathLength(_ string, _ int) error      { return nil }
+func (e *emptyFolderEngine3) ValidateTags(_ string) error                   { return nil }
 
 // --- buildPlanContext: fileName empty with Path set (rename off) ---
 

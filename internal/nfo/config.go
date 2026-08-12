@@ -16,6 +16,7 @@ type NFONameConfig struct {
 	PerFile          bool
 	IsMultiPart      bool
 	PartSuffix       string
+	PartNumber       int
 	FirstNameOrder   bool
 
 	// Actress rendering options mirrored from the app config so that
@@ -113,7 +114,7 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg NFONameConfig) *Config {
 // ToNFONameConfig converts Config to NFONameConfig, filling in the caller-provided
 // multipart fields. This eliminates manual field-by-field mapping at every call site
 // that needs NFONameConfig from a Config.
-func (c *Config) ToNFONameConfig(isMultiPart bool, partSuffix string) NFONameConfig {
+func (c *Config) ToNFONameConfig(isMultiPart bool, partSuffix string, partNumber int) NFONameConfig {
 	return NFONameConfig{
 		FilenameTemplate:        c.FilenameTemplate,
 		GroupActress:            c.GroupActress,
@@ -122,6 +123,7 @@ func (c *Config) ToNFONameConfig(isMultiPart bool, partSuffix string) NFONameCon
 		PerFile:                 c.PerFile,
 		IsMultiPart:             isMultiPart,
 		PartSuffix:              partSuffix,
+		PartNumber:              partNumber,
 		FirstNameOrder:          c.FirstNameOrder,
 		GroupUnknownActressName: c.GroupUnknownActressName,
 		UnknownActressMode:      c.UnknownActressMode,

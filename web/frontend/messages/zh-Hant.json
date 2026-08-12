@@ -2215,6 +2215,7 @@
   "settings_r18dev_search_failed": "搜尋失敗",
   "settings_r18dev_search_heading": "搜尋傾印",
   "settings_r18dev_search_no_match": "找不到相符項目",
+  "settings_r18dev_search_no_dvd_id": "存在於傾印中但沒有 dvd_id（以 dvd_id 查詢無法比對）：",
   "settings_r18dev_search_placeholder": "dvd_id 或 content_id（例如 ABF-030）",
   "settings_r18dev_size": "大小",
   "settings_r18dev_source_date": "來源日期",

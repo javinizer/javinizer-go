@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/r18devdump"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper/image/placeholder"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
@@ -316,10 +317,11 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 	s := r.scraper
 
 	// The local r18.dev dump is consulted once, up front, by Search via
-	// searchFromDump (LookupMovie). By the time this resolver runs, the dump
-	// has already missed, so there is no point re-querying the same dvd_id_norm
-	// index here — fall straight through to HTTP resolution. ResolveURL is only
-	// called from Search, so it never runs before searchFromDump.
+	// searchFromDump (full-metadata hit or content-id candidate resolution).
+	// By the time this resolver runs, both dump paths have missed, so there is
+	// no point re-querying the dump here — fall straight through to HTTP
+	// resolution. ResolveURL is only called from Search, so it never runs
+	// before searchFromDump.
 
 	// Step 1: Try to lookup content_id using dvd_id with multiple ID variations.
 	// Only an EXACT dvd_id match is trusted immediately. When the dvd_id= endpoint
@@ -428,9 +430,13 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("R18.dev scraper is disabled")
 	}
 
-	// Zero-HTTP fast path: when the local r18.dev dump is present and has this
-	// movie, return a complete ScraperResult with no r18.dev API call at all.
-	if result, ok := s.searchFromDump(ctx, id); ok {
+	// Dump fast path: on a dvd_id hit the dump returns a complete
+	// ScraperResult with no r18.dev API call at all; on a norm miss it may
+	// resolve content_id candidates locally, in which case each candidate URL
+	// is fetched in order below — one request on the happy path, with
+	// per-candidate fallthrough so a stale dump row never dead-ends the scrape.
+	result, dumpCandidates := s.searchFromDump(ctx, id)
+	if result != nil {
 		return result, nil
 	}
 
@@ -439,6 +445,16 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// cancellation immediately so the caller stops cleanly.
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("R18.dev search cancelled before HTTP fallback: %w", err)
+	}
+
+	for _, candidate := range dumpCandidates {
+		candidateURL := fmt.Sprintf(apiURL, candidate.ContentID)
+		logging.Debugf("R18: Fetching dump-resolved candidate URL for %s: %s", id, candidateURL)
+		if res, fetchErr := s.fetchAndParseCandidate(ctx, candidateURL, candidate.ContentID); fetchErr == nil && res != nil {
+			return res, nil
+		} else if fetchErr != nil {
+			logging.Debugf("R18: dump-resolved candidate %s failed for %s: %v", candidateURL, id, fetchErr)
+		}
 	}
 
 	// HTTP fallback: resolve URL → fetch → parse
@@ -457,12 +473,36 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
 	}
 
-	resp, err := s.doRequestWithRetryCtx(ctx, finalURL)
+	return s.fetchAndParseCombined(ctx, finalURL)
+}
+
+// fetchAndParseCandidate fetches a dump-resolved candidate URL and validates
+// that the response actually describes the requested content_id. r18.dev can
+// answer a stale dump row with a 200 carrying a different movie (or an empty
+// payload); treat those as failures so the next candidate or the HTTP resolver
+// takes over, mirroring the resolver's core-match safeguard.
+func (s *scraper) fetchAndParseCandidate(ctx context.Context, url, wantContentID string) (*models.ScraperResult, error) {
+	res, err := s.fetchAndParseCombined(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil || res.ContentID == "" || !strings.EqualFold(res.ContentID, wantContentID) {
+		got := ""
+		if res != nil {
+			got = res.ContentID
+		}
+		return nil, fmt.Errorf("candidate %s mismatch: response content_id %q", wantContentID, got)
+	}
+	return res, nil
+}
+
+// fetchAndParseCombined fetches the combined-detail JSON for url and parses it
+// into a ScraperResult. Non-200 status codes, HTML payloads, and malformed
+// JSON all surface as errors so callers can fail over to the next candidate.
+func (s *scraper) fetchAndParseCombined(ctx context.Context, url string) (*models.ScraperResult, error) {
+	resp, err := s.doRequestWithRetryCtx(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from R18.dev: %w", err)
-	}
-	if resp == nil {
-		return nil, fmt.Errorf("R18.dev returned nil response for %s", finalURL)
 	}
 
 	if resp.StatusCode() != 200 {
@@ -487,7 +527,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("failed to parse R18.dev response (preview: %s): %w", bodyPreview, err)
 	}
 
-	return s.parseResponse(ctx, &data, finalURL)
+	return s.parseResponse(ctx, &data, url)
 }
 
 // parseResponse converts R18 API response to ScraperResult.
@@ -871,7 +911,7 @@ func stripDMMPrefix(id string) string {
 // r18.dev returning a 200 for a different movie that happens to share a prefix slot, so the
 // result does not depend solely on global prefix-table ordering.
 func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (string, error) {
-	variations := generateContentIDVariations(id)
+	variations := r18devdump.ContentIDCandidates(id)
 	if len(variations) == 0 {
 		return "", nil
 	}
@@ -929,7 +969,7 @@ func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (
 // don't always match awsimgsrc, so we use the prefix lookup to try variations.
 // Returns the first valid awsimgsrc ps.jpg URL that meets quality requirements.
 func (s *scraper) resolveAwsimgsrcPoster(ctx context.Context, contentID string, client *http.Client) string {
-	series, numStr := splitSeriesAndNumber(contentIDToID(contentID))
+	series, numStr := r18devdump.SplitSeriesAndNumber(contentIDToID(contentID))
 	if series == "" || numStr == "" {
 		return ""
 	}
@@ -944,7 +984,7 @@ func (s *scraper) resolveAwsimgsrcPoster(ctx context.Context, contentID string, 
 
 	// Look up known prefixes for this series
 	var prefixes []string
-	if lookup, ok := contentIDPrefixLookup[series]; ok {
+	if lookup, ok := r18devdump.ContentIDPrefixLookup[series]; ok {
 		prefixes = lookup
 	} else {
 		prefixes = []string{"", "1"}
@@ -967,92 +1007,6 @@ func (s *scraper) resolveAwsimgsrcPoster(ctx context.Context, contentID string, 
 	}
 
 	return ""
-}
-
-// generateContentIDVariations constructs possible content_id formats from a dvd_id.
-// For "START-575", generates: ["1start00575", "1start575"]
-// For "ABF-346", generates: ["118abf00346", "118abf346", "436abf00346", "436abf346"]
-// The r18.dev content_id format is: [DMM-prefix][series][zero-padded-number]
-// Uses the contentIDPrefixLookup table built from r18.dev database dumps to find
-// known prefixes per series. Falls back to common prefixes if the series is unknown.
-func generateContentIDVariations(id string) []string {
-	series, numStr := splitSeriesAndNumber(id)
-	if series == "" || numStr == "" {
-		return nil
-	}
-
-	series = strings.ToLower(series)
-	num, err := strconv.Atoi(numStr)
-	if err != nil {
-		return nil
-	}
-
-	padded3 := fmt.Sprintf("%03d", num)
-	padded5 := fmt.Sprintf("%05d", num)
-
-	// Look up known prefixes for this series from the r18.dev database dump
-	var prefixes []string
-	if lookup, ok := contentIDPrefixLookup[series]; ok {
-		prefixes = lookup
-	} else {
-		// Fallback: try common prefixes for unknown series
-		prefixes = []string{"", "1"}
-	}
-
-	var variations []string
-	seen := make(map[string]bool)
-
-	add := func(v string) {
-		if !seen[v] {
-			seen[v] = true
-			variations = append(variations, v)
-		}
-	}
-
-	for _, prefix := range prefixes {
-		// 5-digit padded (standard DMM content_id format)
-		add(prefix + series + padded5)
-		// 3-digit padded (used by many r18.dev content_ids)
-		add(prefix + series + padded3)
-	}
-
-	return variations
-}
-
-// splitSeriesAndNumber splits a dvd_id like "START-575" into ("START", "575")
-func splitSeriesAndNumber(id string) (string, string) {
-	// Try standard format: SERIES-NUMBER
-	if parts := strings.SplitN(id, "-", 2); len(parts) == 2 {
-		if isAlpha(parts[0]) && isDigit(parts[1]) {
-			return parts[0], parts[1]
-		}
-	}
-
-	// Try already-normalized format: series575 (from normalizeID)
-	lowered := strings.ToLower(id)
-	if m := contentIDFullRegex.FindStringSubmatch(lowered); len(m) >= 4 {
-		return m[2], m[3]
-	}
-
-	return "", ""
-}
-
-func isAlpha(s string) bool {
-	for _, r := range s {
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
-			return false
-		}
-	}
-	return len(s) > 0
-}
-
-func isDigit(s string) bool {
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return len(s) > 0
 }
 
 // contentIDToID converts content ID to standard ID format

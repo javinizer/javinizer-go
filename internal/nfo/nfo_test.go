@@ -221,7 +221,7 @@ func TestNFOXMLGeneration(t *testing.T) {
 		tt := tt // Rebind for safe parallel execution
 		t.Run(tt.name, func(t *testing.T) {
 			gen := NewGenerator(afero.NewOsFs(), tt.config)
-			nfo := gen.movieToNFO(context.Background(), tt.movie, "", nil)
+			nfo, _ := gen.movieToNFO(context.Background(), tt.movie, "", "", 0, false, nil)
 
 			// Run all checks
 			for _, check := range tt.checks {
@@ -252,7 +252,7 @@ func TestNFOXMLMarshalling(t *testing.T) {
 	}
 
 	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	// Marshal to XML
 	xmlData, err := xml.MarshalIndent(nfo, "", "  ")
@@ -317,7 +317,7 @@ func TestNFOFileWriteAndRead(t *testing.T) {
 		tt := tt // Rebind for safe parallel execution
 		t.Run(tt.name, func(t *testing.T) {
 			gen := NewGenerator(afero.NewOsFs(), defaultConfig())
-			nfo := gen.movieToNFO(context.Background(), tt.movie, "", nil)
+			nfo, _ := gen.movieToNFO(context.Background(), tt.movie, "", "", 0, false, nil)
 
 			// Write to temp directory
 			tmpDir := t.TempDir()
@@ -374,7 +374,7 @@ func TestNFOWithEmptyOptionalFields(t *testing.T) {
 	}
 
 	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	// Verify empty fields are not populated
 	assert.Equal(t, "EMP-001", nfo.ID)
@@ -415,7 +415,7 @@ func TestNFOWithMultipleActresses(t *testing.T) {
 	}
 
 	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	require.Len(t, nfo.Actors, 10)
 	for i, actor := range nfo.Actors {
@@ -440,7 +440,7 @@ func TestNFOWithManyGenres(t *testing.T) {
 	}
 
 	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	require.Len(t, nfo.Genres, 9)
 	assert.Contains(t, nfo.Genres, "Drama")
@@ -462,7 +462,7 @@ func TestNFOWithManyScreenshots(t *testing.T) {
 	}
 
 	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	require.NotNil(t, nfo.Fanart)
 	require.Len(t, nfo.Fanart.Thumbs, 15)
@@ -483,14 +483,14 @@ func TestNFOFanartDisabled(t *testing.T) {
 	cfg.IncludeFanart = false
 
 	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	assert.Nil(t, nfo.Fanart)
 
 	// Test enabled (default behavior)
 	cfgEnabled := defaultConfig()
 	genEnabled := NewGenerator(afero.NewOsFs(), cfgEnabled)
-	nfoEnabled := genEnabled.movieToNFO(context.Background(), movie, "", nil)
+	nfoEnabled, _ := genEnabled.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	require.NotNil(t, nfoEnabled.Fanart)
 	assert.Len(t, nfoEnabled.Fanart.Thumbs, 2)
@@ -508,14 +508,14 @@ func TestNFOTrailerDisabled(t *testing.T) {
 	cfg.IncludeTrailer = false
 
 	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	assert.Empty(t, nfo.Trailer)
 
 	// Test enabled (default behavior)
 	cfgEnabled := defaultConfig()
 	genEnabled := NewGenerator(afero.NewOsFs(), cfgEnabled)
-	nfoEnabled := genEnabled.movieToNFO(context.Background(), movie, "", nil)
+	nfoEnabled, _ := genEnabled.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	assert.Equal(t, "https://example.com/trailer.mp4", nfoEnabled.Trailer)
 }
@@ -533,7 +533,7 @@ func TestNFOCustomRatingSource(t *testing.T) {
 	cfg.RatingSource = "imdb"
 
 	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := gen.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 
 	require.Len(t, nfo.Ratings.Rating, 1)
 	assert.Equal(t, "imdb", nfo.Ratings.Rating[0].Name)
@@ -704,7 +704,7 @@ func TestMovieToNFO_EdgeCases(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			gen := NewGenerator(afero.NewOsFs(), tt.config)
-			nfo := gen.movieToNFO(context.Background(), tt.movie, "", nil)
+			nfo, _ := gen.movieToNFO(context.Background(), tt.movie, "", "", 0, false, nil)
 
 			for _, check := range tt.checks {
 				check(t, nfo)

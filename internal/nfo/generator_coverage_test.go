@@ -94,7 +94,7 @@ func TestMovieToNFO_OriginalPath(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "OP-001", ContentID: "op1", OriginalFileName: "original_file.mp4"}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	assert.Equal(t, "original_file.mp4", nfo.OriginalPath)
 }
 
@@ -104,7 +104,7 @@ func TestMovieToNFO_Tagline(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "TG-001", ContentID: "tg1"}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	assert.Equal(t, "Best Movie Ever", nfo.Tagline)
 }
 
@@ -114,7 +114,7 @@ func TestMovieToNFO_Credits(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "CR-001", ContentID: "cr1"}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	assert.Equal(t, "Director A, Writer B", nfo.Credits)
 }
 
@@ -127,7 +127,7 @@ func TestMovieToNFO_AddGenericRole(t *testing.T) {
 		ID: "GR-001", ContentID: "gr1",
 		Actresses: []models.Actress{{FirstName: "Yui", LastName: "Hatano"}},
 	}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	require.Len(t, nfo.Actors, 1)
 	assert.Equal(t, "Actress", nfo.Actors[0].Role)
 }
@@ -141,7 +141,7 @@ func TestMovieToNFO_AltNameRole(t *testing.T) {
 		ID: "ANR-001", ContentID: "anr1",
 		Actresses: []models.Actress{{FirstName: "Yui", LastName: "Hatano", JapaneseName: "波多野結衣"}},
 	}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	require.Len(t, nfo.Actors, 1)
 	assert.Equal(t, "波多野結衣", nfo.Actors[0].Role)
 }
@@ -158,7 +158,7 @@ func TestMovieToNFO_DuplicateActressDedup(t *testing.T) {
 			{DMMID: 100, FirstName: "Yui", LastName: "Hatano"},
 		},
 	}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	assert.Len(t, nfo.Actors, 1, "duplicate actresses by DMMID should be deduplicated")
 }
 
@@ -176,7 +176,7 @@ func TestMovieToNFO_UnknownActressSkip(t *testing.T) {
 		ID: "UAS-001", ContentID: "u1",
 		Actresses: []models.Actress{{FirstName: "Unknown", LastName: ""}},
 	}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	assert.NotContains(t, nfo.Tags, "Unknown")
 }
 
@@ -194,7 +194,7 @@ func TestMovieToNFO_UnknownActressFallback(t *testing.T) {
 		ID: "UAF-001", ContentID: "u2",
 		Actresses: []models.Actress{{FirstName: "Unknown", LastName: ""}},
 	}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	assert.Contains(t, nfo.Tags, "Unknown")
 }
 
@@ -204,7 +204,7 @@ func TestMovieToNFO_ReleaseYearOnly(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "RY-001", ContentID: "ry1", ReleaseYear: 2023}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	assert.Equal(t, 2023, nfo.Year)
 	assert.Empty(t, nfo.ReleaseDate, "ReleaseDate should be empty when only ReleaseYear is set")
 }
@@ -216,7 +216,7 @@ func TestMovieToNFO_ReleaseDateSetsYear(t *testing.T) {
 
 	d := time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)
 	movie := &models.Movie{ID: "RD-001", ContentID: "rd1", ReleaseDate: &d}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	assert.Equal(t, 2024, nfo.Year)
 	assert.Equal(t, "2024-06-15", nfo.ReleaseDate)
 }
@@ -227,7 +227,7 @@ func TestMovieToNFO_NoCoverURL(t *testing.T) {
 	g := NewGenerator(fs, cfg)
 
 	movie := &models.Movie{ID: "NC-001", ContentID: "nc1", Poster: models.PosterState{CoverURL: ""}}
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	assert.Empty(t, nfo.Thumb)
 }
 

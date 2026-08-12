@@ -98,9 +98,102 @@ func (s *Store) LookupByContentID(ctx context.Context, contentID string) (string
 		return "", fmt.Errorf("dump lookup by content_id %q: %w", contentID, err)
 	}
 	if !dvdID.Valid || dvdID.String == "" {
-		return "", models.ErrDumpMiss
+		return "", models.ErrDumpNoDVDID
 	}
 	return dvdID.String, nil
+}
+
+// MatchByDisplayID resolves a display ID to all matching dump rows in
+// candidate priority order. An exact dvd_id_norm hit wins and returns a single
+// match (identical to LookupByDVDID semantics). Otherwise the display ID is
+// expanded into content_id candidates (ContentIDCandidates) and rows are
+// matched exactly by content_id, ordered by candidate priority. Returns
+// models.ErrDumpMiss when nothing matches.
+func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpMatch, error) {
+	if s == nil {
+		return nil, models.ErrDumpMiss
+	}
+	norm := normalizeDVDID(id)
+	if norm != "" {
+		var m models.DumpMatch
+		var dvdID, rel, svc sql.NullString
+		err := s.db.QueryRowContext(ctx,
+			"SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE dvd_id_norm = ? ORDER BY content_id LIMIT 1",
+			norm,
+		).Scan(&m.ContentID, &dvdID, &rel, &svc)
+		if err == nil {
+			m.DVDID = dvdID.String
+			m.ReleaseDate = rel.String
+			m.ServiceCode = svc.String
+			return []models.DumpMatch{m}, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("dump dvd_id lookup failed for %q: %w", norm, err)
+		}
+	}
+
+	// An exact content_id row is honored before candidate expansion so a
+	// literal content_id query always surfaces its own row first, ahead of
+	// canonical zero-padded variants derived from the same display ID. The probe
+	// set is the exact input first, then the expanded candidates, deduped —
+	// order within the result follows probe order.
+	exactID := strings.ToLower(strings.TrimSpace(id))
+	candidates := ContentIDCandidates(id)
+
+	probe := make([]string, 0, len(candidates)+1)
+	seen := make(map[string]bool, len(candidates)+1)
+	if exactID != "" {
+		seen[exactID] = true
+		probe = append(probe, exactID)
+	}
+	for _, cand := range candidates {
+		if !seen[cand] {
+			seen[cand] = true
+			probe = append(probe, cand)
+		}
+	}
+	if len(probe) == 0 {
+		return nil, models.ErrDumpMiss
+	}
+
+	placeholders := strings.Repeat("?,", len(probe)-1) + "?"
+	args := make([]any, len(probe))
+	for i, cand := range probe {
+		args[i] = cand
+	}
+	query := "SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE content_id IN (" + placeholders + ")"
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("dump candidate lookup failed for %q: %w", id, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	byContentID := make(map[string]models.DumpMatch, len(probe))
+	for rows.Next() {
+		var m models.DumpMatch
+		var dvdID, rel, svc sql.NullString
+		if err := rows.Scan(&m.ContentID, &dvdID, &rel, &svc); err != nil {
+			return nil, fmt.Errorf("dump candidate lookup failed for %q: scan: %w", id, err)
+		}
+		m.DVDID = dvdID.String
+		m.ReleaseDate = rel.String
+		m.ServiceCode = svc.String
+		byContentID[m.ContentID] = m
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("dump candidate lookup failed for %q: %w", id, err)
+	}
+
+	matches := make([]models.DumpMatch, 0, len(byContentID))
+	for _, cand := range probe {
+		if m, ok := byContentID[cand]; ok {
+			matches = append(matches, m)
+		}
+	}
+	if len(matches) == 0 {
+		return nil, models.ErrDumpMiss
+	}
+	return matches, nil
 }
 
 // LookupMovie resolves a display dvd_id to a fully-populated DumpMovie with all

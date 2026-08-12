@@ -296,8 +296,14 @@ func TestMiss7_GetURLCtx_LowPriorityTriggersDirectURLs(t *testing.T) {
 // --- tryDirectURLs: cancelled context returns early ---
 
 func TestMiss7_TryDirectURLs_CancelledContext(t *testing.T) {
+	// Deterministic transport (codex): no request may touch the network, so
+	// the outcome cannot depend on DMM's reachability. Every candidate URL
+	// 404s, so nothing qualifies regardless of the cancelled context.
+	client := resty.New()
+	client.SetTransport(&dmmStatusRoundTripper{status: http.StatusNotFound})
+	client.SetRetryCount(0)
 	s := &scraper{
-		client:      resty.New(),
+		client:      client,
 		enabled:     true,
 		rateLimiter: ratelimit.NewLimiter(0),
 		settings:    models.ScraperSettings{Enabled: true},
@@ -307,8 +313,7 @@ func TestMiss7_TryDirectURLs_CancelledContext(t *testing.T) {
 	cancel()
 
 	candidates := s.tryDirectURLs(ctx, "ipx00535")
-	// Should return early with empty or partial results
-	assert.NotNil(t, candidates)
+	assert.Empty(t, candidates, "no direct URL may qualify when every request 404s")
 }
 
 // --- tryDirectURLs: 200/302 status returns candidate ---

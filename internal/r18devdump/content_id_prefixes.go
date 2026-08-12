@@ -1,10 +1,10 @@
-package r18dev
+package r18devdump
 
 //go:generate python3 scripts/generate_content_id_prefixes.py /tmp/r18dev_dump.sql content_id_prefixes.go
 
-// contentIDPrefixLookup maps series names (lowercase) to their known DMM content_id prefixes.
-// Built from r18.dev database dump. Regenerate with: go generate ./internal/scraper/r18dev/...
-var contentIDPrefixLookup = map[string][]string{
+// ContentIDPrefixLookup maps series names (lowercase) to their known DMM content_id prefixes.
+// Built from r18.dev database dump. Regenerate with: go generate ./internal/r18devdump/...
+var ContentIDPrefixLookup = map[string][]string{
 	"a":              {"44", "60", "186", "446", "447", "448", "449", "h_328", "n_641", "n_950"},
 	"aa":             {"", "13", "n_600", "n_605", "n_949"},
 	"aaa":            {"143", "171", "h_491"},

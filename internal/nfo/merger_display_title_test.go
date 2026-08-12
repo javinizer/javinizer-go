@@ -179,3 +179,21 @@ func TestMergeWithExistingNFO_EmptyScrapedTitlePreservesNFOFallback(t *testing.T
 	assert.Equal(t, "Ayaka Tomoda", result.Movie.Title, "stripped NFO <title> serves as base-title fallback")
 	assert.NotEqual(t, "[Unknown Title]", result.Movie.Title)
 }
+
+func TestMergeWithExistingNFO_NilNFOConfig_MultipartPartNumberThreaded(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/source", 0755))
+	nfoContent := "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<movie>\n  <id>ABC-001</id>\n</movie>"
+	require.NoError(t, afero.WriteFile(fs, "/source/ABC-001.nfo", []byte(nfoContent), 0644))
+	nfoImpl := nfoImplementor{
+		fs:             fs,
+		nfoConfig:      nil,
+		templateEngine: template.NewEngine(),
+	}
+	scraped := &models.Movie{ID: "ABC-001", Title: "Test"}
+	result := nfoImpl.MergeWithExistingNFO(scraped, MergeWithExistingOptions{
+		Match:          models.FileMatchInfo{Path: "/source/ABC-001-cd1.mp4", MovieID: "ABC-001", IsMultiPart: true, PartSuffix: "-cd1", PartNumber: 1},
+		ScalarStrategy: PreferNFO,
+	})
+	assert.True(t, result.Merged, "should merge with existing NFO even with nil nfoConfig")
+}

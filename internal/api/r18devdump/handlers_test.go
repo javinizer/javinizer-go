@@ -497,44 +497,17 @@ func TestBroadcastProgress_WithFn(t *testing.T) {
 func TestRunImportHeartbeat_TickerFires(t *testing.T) {
 	h, _, _ := newTestHandlerWithHub(t)
 
-	// Override the interval on this handler instance only; package-global
-	// mutation would race heartbeat goroutines still running from other tests.
-	h.importHeartbeatInterval = 1 * time.Millisecond
-
 	streamConsumed := make(chan struct{})
 	importDone := make(chan struct{})
 	close(streamConsumed) // simulate download stream EOF
 
 	exited := make(chan struct{})
 	go func() {
-		h.runImportHeartbeat(streamConsumed, importDone)
+		h.runImportHeartbeat(streamConsumed, importDone, 1*time.Millisecond)
 		close(exited)
 	}()
 
 	// Let the ticker fire several times so the <-ticker.C branch executes.
-	time.Sleep(20 * time.Millisecond)
-	close(importDone)
-	<-exited // wait for the goroutine to exit before returning
-}
-
-func TestRunImportHeartbeat_ZeroIntervalFallsBackToDefault(t *testing.T) {
-	h, _, _ := newTestHandlerWithHub(t)
-
-	// Leave h.importHeartbeatInterval at its zero value: runImportHeartbeat
-	// must fall back to defaultImportHeartbeatInterval instead of passing a
-	// non-positive duration to time.NewTicker.
-	streamConsumed := make(chan struct{})
-	importDone := make(chan struct{})
-	close(streamConsumed) // simulate download stream EOF
-
-	exited := make(chan struct{})
-	go func() {
-		h.runImportHeartbeat(streamConsumed, importDone)
-		close(exited)
-	}()
-
-	// Well under the 1500ms default: the ticker is created via the fallback
-	// path and never fires before importDone closes.
 	time.Sleep(20 * time.Millisecond)
 	close(importDone)
 	<-exited
@@ -548,7 +521,7 @@ func TestRunImportHeartbeat_ImportDoneFirst(t *testing.T) {
 	close(importDone) // import finishes before stream is consumed
 
 	// Should return immediately without broadcasting.
-	h.runImportHeartbeat(streamConsumed, importDone)
+	h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval)
 }
 
 func TestRunImportHeartbeat_BothClosedBeforeSchedule(t *testing.T) {
@@ -570,7 +543,7 @@ func TestRunImportHeartbeat_BothClosedBeforeSchedule(t *testing.T) {
 		importDone := make(chan struct{})
 		close(streamConsumed)
 		close(importDone)
-		h.runImportHeartbeat(streamConsumed, importDone)
+		h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval)
 	}
 
 	mu.Lock()

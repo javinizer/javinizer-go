@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -211,21 +212,31 @@ func runSearch(w io.Writer, configFile, id string) error {
 	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
-	if cid, err := store.LookupByDVDID(ctx, id); err == nil {
-		fmt.Fprintf(w, "%s -> content_id: %s\n", id, cid)
+	matches, err := store.MatchByDisplayID(ctx, id)
+	if err != nil {
+		if !errors.Is(err, models.ErrDumpMiss) {
+			return fmt.Errorf("dump search: lookup failed for %s: %w", id, err)
+		}
+		logging.Debugf("dump search: %s not found", id)
+		fmt.Fprintf(w, "No match for %s in the local dump.\n", id)
 		return nil
-	} else if !errors.Is(err, models.ErrDumpMiss) {
-		return fmt.Errorf("dvd_id lookup failed for %s: %w", id, err)
 	}
-	if did, err := store.LookupByContentID(ctx, id); err == nil {
-		fmt.Fprintf(w, "%s -> dvd_id: %s\n", id, did)
+
+	first := matches[0]
+	switch {
+	case first.DVDID == "":
+		fmt.Fprintf(w, "%s: present in dump but has no dvd_id (dvd_id-keyed lookups cannot match it):\n", id)
+		for _, m := range matches {
+			fmt.Fprintf(w, "  %s  %s  %s\n", m.ContentID, m.ReleaseDate, m.ServiceCode)
+		}
 		return nil
-	} else if !errors.Is(err, models.ErrDumpMiss) {
-		return fmt.Errorf("content_id lookup failed for %s: %w", id, err)
+	case strings.EqualFold(strings.TrimSpace(id), first.ContentID):
+		fmt.Fprintf(w, "%s -> dvd_id: %s\n", id, first.DVDID)
+		return nil
+	default:
+		fmt.Fprintf(w, "%s -> content_id: %s\n", id, first.ContentID)
+		return nil
 	}
-	logging.Debugf("dump search: %s not found", id)
-	fmt.Fprintf(w, "No match for %s in the local dump.\n", id)
-	return nil
 }
 
 func fileSize(path string) (int64, error) {

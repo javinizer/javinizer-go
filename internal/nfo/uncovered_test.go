@@ -128,7 +128,7 @@ func TestGenerator_MovieToNFO_WithContentID_Uncovered(t *testing.T) {
 		Genres:       []models.Genre{{Name: "Drama"}, {Name: "Romance"}},
 	}
 
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	require.NotNil(t, nfo)
 	assert.Equal(t, "CID-001", nfo.ID)
 	assert.Equal(t, "Content ID Test", nfo.Title)
@@ -151,7 +151,7 @@ func TestGenerator_MovieToNFO_WithFanart_Uncovered(t *testing.T) {
 		Screenshots:  []string{"http://example.com/ss1.jpg", "http://example.com/ss2.jpg"},
 	}
 
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	require.NotNil(t, nfo)
 	assert.NotNil(t, nfo.Fanart)
 	assert.GreaterOrEqual(t, len(nfo.Fanart.Thumbs), 2)
@@ -170,7 +170,7 @@ func TestGenerator_MovieToNFO_FanartDisabled_Uncovered(t *testing.T) {
 		Screenshots:  []string{"http://example.com/ss1.jpg"},
 	}
 
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	require.NotNil(t, nfo)
 	assert.Nil(t, nfo.Fanart)
 }
@@ -187,7 +187,7 @@ func TestGenerator_MovieToNFO_TrailerDisabled_Uncovered(t *testing.T) {
 		TrailerURL:   "http://example.com/trailer.mp4",
 	}
 
-	nfo := g.movieToNFO(context.Background(), movie, "", nil)
+	nfo, _ := g.movieToNFO(context.Background(), movie, "", "", 0, false, nil)
 	require.NotNil(t, nfo)
 	assert.Empty(t, nfo.Trailer)
 }

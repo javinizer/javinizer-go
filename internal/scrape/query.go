@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	neturl "net/url"
 	"runtime"
 	"strings"
 	"time"
@@ -41,11 +43,31 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 	if !exists || resolver == nil {
 		return movieID
 	}
+	// Skip content-ID resolution when the resolver scraper's circuit breaker
+	// is tripped: ResolveContentIDCtx can issue HTTP (DMM), so an unreachable
+	// host would otherwise block every file on the full client timeout even
+	// after the breaker has tripped. Using skipFailure (consuming) limits the
+	// half-open probe to one worker — concurrent workers see the re-armed
+	// trippedAt and skip. The resolver outcome is recorded so a successful
+	// probe clears the breaker (letting the query run) and a failure re-trips
+	// (query's skipFailure skips).
+	if s.breaker != nil {
+		if skip := s.breaker.skipFailure(resolverName); skip != nil {
+			return movieID
+		}
+	}
 	// Prefer the context-aware resolver so cancellation/timeouts reach the
 	// lookup (DMM's ResolveContentID can issue HTTP). Fall back to the
 	// non-context ContentIDResolver for scrapers that only implement that.
 	if r, ok := resolver.(models.ContentIDResolverCtx); ok && r != nil {
 		contentID, err := r.ResolveContentIDCtx(ctx, movieID)
+		if s.breaker != nil && ctx.Err() == nil {
+			if err == nil {
+				s.breaker.recordOutcome(resolverName, nil)
+			} else {
+				s.breaker.recordOutcome(resolverName, classifyScraperError(resolverName, err, ""))
+			}
+		}
 		if err != nil {
 			logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
 			return movieID
@@ -79,7 +101,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID, rawInp
 		if len(scrapers) == 0 {
 			return nil, nil
 		}
-		outcome := querySingle(ctx, resolvedMovieID, rawInput, scrapers[0])
+		outcome := s.queryWithBreaker(ctx, resolvedMovieID, rawInput, scrapers[0])
 		var results []*models.ScraperResult
 		var failures []models.ScraperError
 		if outcome.result != nil {
@@ -106,7 +128,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID, rawInp
 				return gCtx.Err()
 			default:
 			}
-			outcomes[i] = querySingle(gCtx, resolvedMovieID, rawInput, scraper)
+			outcomes[i] = s.queryWithBreaker(gCtx, resolvedMovieID, rawInput, scraper)
 			return nil // errors are captured in outcomes[i].failure
 		})
 	}
@@ -241,6 +263,23 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 	return
 }
 
+// isTransportError reports whether err is a network/transport-level failure
+// (connection refused, DNS failure, TLS reset, or a net/http *url.Error wrapping
+// one). These indicate the scraper host is unreachable and should count toward
+// the circuit breaker's Unavailable trip threshold. Context deadline/canceled
+// errors are handled separately by classifyContextError.
+func isTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var urlErr *neturl.Error
+	return errors.As(err, &urlErr)
+}
+
 // isContextError checks if the error is a context cancellation/deadline error,
 // either via errors.Is(err, ctx.Err()) or by checking the sentinel errors directly.
 // This catches cases where the scraper returns context.DeadlineExceeded from its
@@ -290,11 +329,36 @@ func classifyScraperError(scraperName string, err error, fallbackMsg string) *mo
 		if copied.Message == "" {
 			copied.Message = err.Error()
 		}
+		// Some scrapers wrap network errors in a ScraperError with Kind=Unknown
+		// and StatusCode=0 (e.g. JavDB's NewScraperStatusError("JavDB", 0, ...)).
+		// Reclassify these as Unavailable so the circuit breaker can trip on
+		// persistent transport failures, not just on raw unwrapped errors.
+		if copied.Kind == models.ScraperErrorKindUnknown && copied.StatusCode == 0 && isTransportError(copied.Cause) {
+			copied.Kind = models.ScraperErrorKindUnavailable
+			copied.Retryable = true
+			copied.Temporary = true
+		}
 		return &copied
 	}
 	msg := fallbackMsg
 	if msg == "" {
 		msg = err.Error()
+	}
+	// Transport-level failures (connection refused, DNS failures, TLS resets,
+	// network timeouts that escape the context deadline) indicate the scraper
+	// host is unreachable. Classify them as Unavailable so the circuit breaker
+	// can trip and stop re-attempting a dead host across the batch. A plain
+	// context.DeadlineExceeded/Canceled is handled by classifyContextError
+	// upstream, so here we only catch the raw net/url errors it misses.
+	if isTransportError(err) {
+		return &models.ScraperError{
+			Scraper:   scraperName,
+			Kind:      models.ScraperErrorKindUnavailable,
+			Message:   msg,
+			Retryable: true,
+			Temporary: true,
+			Cause:     err,
+		}
 	}
 	return &models.ScraperError{
 		Scraper: scraperName,
@@ -302,6 +366,31 @@ func classifyScraperError(scraperName string, err error, fallbackMsg string) *mo
 		Message: msg,
 		Cause:   err,
 	}
+}
+
+// queryWithBreaker invokes querySingle unless the scraper's circuit breaker
+// is tripped, and records the outcome so a persistent outage (timeouts, 5xx,
+// connection refused) stops re-attempting a dead host. A successful result
+// resets the breaker; a non-breakable failure (e.g. 404 NotFound) is recorded
+// but does not trip it. Outcomes observed while the parent context is already
+// cancelled are not recorded, so a user-initiated batch cancel or a per-file
+// context timeout does not pollute the breaker with false Unavailable counts.
+// The breaker is nil-safe for Scraper instances constructed without New.
+func (s *Scraper) queryWithBreaker(ctx context.Context, movieID, rawInput string, scraper models.Scraper) queryOutcome {
+	if s.breaker != nil {
+		if skip := s.breaker.skipFailure(scraper.Name()); skip != nil {
+			return queryOutcome{failure: skip}
+		}
+	}
+	outcome := querySingle(ctx, movieID, rawInput, scraper)
+	if s.breaker != nil && ctx.Err() == nil {
+		if outcome.result != nil {
+			s.breaker.recordOutcome(scraper.Name(), nil)
+		} else if outcome.failure != nil {
+			s.breaker.recordOutcome(scraper.Name(), outcome.failure)
+		}
+	}
+	return outcome
 }
 
 func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result *models.ScraperResult, err error) {

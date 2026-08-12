@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/r18devdump"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -107,11 +108,11 @@ func TestScraper_ContentIDMatchesExpected(t *testing.T) {
 
 func TestScraper_GenerateAlternateContentIDs(t *testing.T) {
 	t.Run("generates alternates for lowercase ID", func(t *testing.T) {
-		result := generateContentIDVariations("ipx635")
+		result := r18devdump.ContentIDCandidates("ipx635")
 		assert.NotEmpty(t, result)
 	})
 	t.Run("returns nil for non-matching input", func(t *testing.T) {
-		result := generateContentIDVariations("")
+		result := r18devdump.ContentIDCandidates("")
 		assert.Nil(t, result)
 	})
 }
