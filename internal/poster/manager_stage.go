@@ -229,6 +229,9 @@ func (pm *PosterManager) PromoteStagedPoster(staged *StagedPoster) (*cropResult,
 			if os.IsNotExist(err) {
 				continue
 			}
+			// codex r1 P3: legs before i are already asided — restore them before
+			// bailing, or the pair splits (byte loss under a transient stat wedge).
+			pm.restorePromotedBackups(legs[:i])
 			return nil, fmt.Errorf("promote canonical stat %s: %w", legs[i].finalPath, err)
 		}
 		legs[i].backupPath = uniqueStagedSibling(legs[i].finalPath, "bak")

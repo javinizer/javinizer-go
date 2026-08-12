@@ -377,3 +377,36 @@ var assertErr = assertAnError{}
 type assertAnError struct{}
 
 func (assertAnError) Error() string { return "assert manager wedge" }
+
+// codex P2 (PR211): a transient canonical-stat failure mid-phase-1 must
+// restore the legs ALREADY asided — the pair never tears (older leg gone
+// under a .bak while the later leg stays) under a transient wedge.
+func TestPromoteStagedPoster_CanonicalStatWedgedRestoresAsidedLeg(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/p2/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/PC-1-full.jpg", []byte("c-full"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/PC-1.jpg", []byte("c-crop"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/PC-1.stage-x-full.jpg", []byte("s-full"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/PC-1.stage-x.jpg", []byte("s-crop"), 0o644))
+
+	// The crop leg's canonical Stat fails transiently: the full leg has
+	// already been asided to .bak — the restore must put it back.
+	wedged := statFailExactFS{Fs: base, path: dir + "/PC-1.jpg"}
+	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "PC-1.stage-x", "PC-1", ""))
+	require.ErrorContains(t, err, "promote canonical stat")
+
+	gotFull, ferr := afero.ReadFile(base, dir+"/PC-1-full.jpg")
+	require.NoError(t, ferr, "first leg restored from its backup")
+	assert.Equal(t, "c-full", string(gotFull))
+	gotCrop, cerr := afero.ReadFile(base, dir+"/PC-1.jpg")
+	require.NoError(t, cerr, "untouched second leg intact")
+	assert.Equal(t, "c-crop", string(gotCrop))
+	// staged bytes untouched for a later retry
+	for _, s := range []string{"/PC-1.stage-x-full.jpg", "/PC-1.stage-x.jpg"} {
+		got, serr := afero.ReadFile(base, dir+s)
+		require.NoError(t, serr, "staged leg survives for retry: %s", s)
+		assert.True(t, strings.HasPrefix(string(got), "s-"))
+	}
+}
