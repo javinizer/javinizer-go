@@ -129,11 +129,6 @@ func TestRunTaskResult_RetryableRepoError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, claimed)
 
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		_ = db.Close()
-	}()
-
 	manager.active.Add(1)
 	manager.wg.Add(1)
 	manager.runTaskWithContext(context.Background(), claimed, 30*time.Second, nil, registry)
