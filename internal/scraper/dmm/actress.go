@@ -581,7 +581,7 @@ func (s *scraper) fetchActressPageDocErr(ctx context.Context, dmmID int) (*goque
 		return nil, err
 	}
 	if resp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("DMM actress page %d: HTTP %s", dmmID, resp.Status())
+		return nil, models.NewScraperStatusError("dmm", resp.StatusCode(), fmt.Sprintf("DMM actress page %d: HTTP %s", dmmID, resp.Status()))
 	}
 	doc, err := parseActressPageHTML(resp.String())
 	if err != nil {

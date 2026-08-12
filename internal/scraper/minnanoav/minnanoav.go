@@ -234,7 +234,7 @@ func (s *scraper) searchActress(ctx context.Context, name string) (string, strin
 		return "", "", fmt.Errorf("minnanoav search failed: %w", err)
 	}
 	if resp.StatusCode() < http.StatusOK || resp.StatusCode() >= http.StatusMultipleChoices {
-		return "", "", fmt.Errorf("minnanoav search: unexpected status %s", resp.Status())
+		return "", "", models.NewScraperStatusError("minnanoav", resp.StatusCode(), fmt.Sprintf("minnanoav search: unexpected status %s", resp.Status()))
 	}
 	finalURL := ""
 	if resp.RawResponse != nil && resp.RawResponse.Request != nil && resp.RawResponse.Request.URL != nil {
