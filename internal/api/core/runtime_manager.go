@@ -678,20 +678,6 @@ func (r *APIRuntime) SetConfig(cfg *config.Config) {
 
 // InvalidateWorkflowCaches and InvalidateWorkflowCachesOnRuntime are defined in hot_reload.go.
 
-// shutdownDeps gracefully shuts down runtime resources in APIRuntime.
-//
-//nolint:unused // used by same-package tests
-func shutdownDeps(rt *APIRuntime) {
-	if rt == nil {
-		return
-	}
-	rs := rt.GetRuntime()
-	if rs == nil {
-		return
-	}
-	rs.Shutdown()
-}
-
 // invalidateFactories is defined in hot_reload.go.
 
 // ---------------------------------------------------------------------------
