@@ -234,6 +234,24 @@ func TestQueryWithBreaker_RecordsSuccessAndResets(t *testing.T) {
 	assert.Nil(t, s.breaker.skipFailure(name), "success must leave the breaker untripped")
 }
 
+func TestScraper_ResolveContentID_SuccessClearsTrippedBreaker(t *testing.T) {
+	reg := &stubRegistry{instances: map[string]models.Scraper{
+		"dmm": &successContentIDResolver{name: "dmm"},
+	}}
+	s := &Scraper{
+		registry: reg,
+		breaker:  newScraperCircuitBreaker(1),
+	}
+	// Trip the breaker, then let the cooldown elapse so the half-open probe fires.
+	s.breaker.recordOutcome("dmm", &models.ScraperError{Kind: models.ScraperErrorKindUnavailable, Scraper: "dmm"})
+	s.breaker.cooldown = 10 * time.Millisecond
+	time.Sleep(20 * time.Millisecond)
+
+	got := s.resolveContentID(context.Background(), "MOVIE-001", []string{"dmm"})
+	assert.Equal(t, "RESOLVED-001", got, "resolver must be called and return the resolved ID")
+	assert.Nil(t, s.breaker.skipFailure("dmm"), "successful resolver outcome must clear the breaker")
+}
+
 func TestScraper_ResolveContentID_SkipsTrippedResolver(t *testing.T) {
 	// Build a Scraper with a tripped breaker for the resolver scraper and a
 	// registry that returns a ContentIDResolverCtx that would block if called.
@@ -306,6 +324,27 @@ func (b *blockingContentIDResolver) Config() *models.ScraperSettings {
 func (b *blockingContentIDResolver) Close() error { return nil }
 func (b *blockingContentIDResolver) ResolveContentIDCtx(_ context.Context, _ string) (string, error) {
 	panic("ResolveContentIDCtx must not be called when the breaker is tripped")
+}
+
+// successContentIDResolver is a ContentIDResolverCtx that always succeeds.
+type successContentIDResolver struct {
+	name string
+}
+
+func (s *successContentIDResolver) Name() string    { return s.name }
+func (s *successContentIDResolver) IsEnabled() bool { return true }
+func (s *successContentIDResolver) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+	return nil, errors.New("must not be called")
+}
+func (s *successContentIDResolver) GetURL(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+func (s *successContentIDResolver) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: true}
+}
+func (s *successContentIDResolver) Close() error { return nil }
+func (s *successContentIDResolver) ResolveContentIDCtx(_ context.Context, _ string) (string, error) {
+	return "RESOLVED-001", nil
 }
 
 // countingScraper is a minimal models.Scraper stub for breaker integration tests.

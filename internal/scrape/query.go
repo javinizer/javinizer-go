@@ -58,6 +58,13 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 	// non-context ContentIDResolver for scrapers that only implement that.
 	if r, ok := resolver.(models.ContentIDResolverCtx); ok && r != nil {
 		contentID, err := r.ResolveContentIDCtx(ctx, movieID)
+		if s.breaker != nil && ctx.Err() == nil {
+			if err == nil {
+				s.breaker.recordOutcome(resolverName, nil)
+			} else {
+				s.breaker.recordOutcome(resolverName, classifyScraperError(resolverName, err, ""))
+			}
+		}
 		if err != nil {
 			logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
 			return movieID
