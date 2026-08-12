@@ -98,4 +98,71 @@ func (g *ScrapePosterGenerator) GeneratePoster(ctx context.Context, jobID string
 // the same auto-derivation from the download URL when referer is empty.
 // Duplicating it here was redundant and meant both sites had to stay in sync.
 
+// StagingPosterGenerator splits poster generation into an unlocked network
+// stage and an in-lock promote/commit (POSTER-WRITE-HARDENING P2): the edit
+// lock window never covers a network fetch. Generators that lack staging
+// support keep serving GeneratePoster (the legacy in-lock path).
+type StagingPosterGenerator interface {
+	// StagePoster resolves the poster source (poster→cover fallback) and
+	// downloads it to a unique staged identity. Network/unlocked only.
+	StagePoster(ctx context.Context, jobID string, movie *models.Movie) (*StagedPoster, error)
+	// CommitStagedPoster promotes staged bytes to canonical names (fs-only
+	// — the caller's lock must be held) and updates the movie preview URL.
+	CommitStagedPoster(movie *models.Movie, staged *StagedPoster) error
+	// DiscardStaged removes staged residue after a declined/aborted op.
+	DiscardStaged(staged *StagedPoster)
+}
+
+// StagePoster resolves the poster URL (poster→cover fallback) and stages the
+// download under a unique identity. Errors are path-sanitized like
+// GeneratePoster.
+func (g *ScrapePosterGenerator) StagePoster(ctx context.Context, jobID string, movie *models.Movie) (*StagedPoster, error) {
+	if g.manager == nil || movie == nil {
+		return nil, nil
+	}
+	posterURL := movie.Poster.PosterURL
+	if posterURL == "" {
+		posterURL = movie.Poster.CoverURL
+	}
+	if posterURL == "" {
+		return nil, fmt.Errorf("no poster or cover URL available")
+	}
+	staged, err := g.manager.StagePosterDownload(ctx, StagePosterRequest{
+		JobID: jobID, PosterID: movie.ID, URL: posterURL,
+		UserAgent: g.userAgent, Referer: g.referer,
+	})
+	if err != nil {
+		logging.Warnf("[scrape] Failed to stage temp poster: %s (continuing anyway)", stripSensitivePaths(err))
+		return nil, sanitizedErrorFrom(err)
+	}
+	return staged, nil
+}
+
+// CommitStagedPoster promotes the staged pair under canonical names and sets
+// the movie's preview pointer. Call it with the caller's edit lock held,
+// immediately before the state commit.
+func (g *ScrapePosterGenerator) CommitStagedPoster(movie *models.Movie, staged *StagedPoster) error {
+	if g.manager == nil || movie == nil || staged == nil {
+		return nil
+	}
+	res, err := g.manager.PromoteStagedPoster(staged)
+	if err != nil {
+		sanitizedErr := sanitizedErrorFrom(err)
+		logging.Warnf("[scrape] Failed to promote temp poster: %s (continuing anyway)", stripSensitivePaths(err))
+		return sanitizedErr
+	}
+	movie.Poster.CroppedPosterURL = res.CroppedURL
+	return nil
+}
+
+// DiscardStaged removes staged residue (declines/cancel paths).
+func (g *ScrapePosterGenerator) DiscardStaged(staged *StagedPoster) {
+	if g.manager == nil {
+		return
+	}
+	g.manager.DiscardStagedPoster(staged)
+}
+
+var _ StagingPosterGenerator = (*ScrapePosterGenerator)(nil)
+
 var _ PosterGenerator = (*ScrapePosterGenerator)(nil)

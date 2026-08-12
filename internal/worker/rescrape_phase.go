@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
+	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	timeoutPkg "github.com/javinizer/javinizer-go/internal/timeout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
@@ -573,10 +574,22 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			return nil, movieResult, err
 		}
 
-		// audit F-R10-1: witness probes + park + generation run UNDER the
+		// P2 (D6): the poster download runs on a staged identity OUTSIDE the
+		// family key — only the fs-only promote plus the state commit sit
+		// inside the lock window. Generators without staging support keep the
+		// legacy in-lock path.
+		var stagedPoster *poster.StagedPoster
+		var stageErr error
+		if movieResult.Movie != nil && inputs.PosterGen != nil {
+			if sgen, ok := inputs.PosterGen.(poster.StagingPosterGenerator); ok {
+				stagedPoster, stageErr = sgen.StagePoster(ctx, inputs.JobID.String(), movieResult.Movie)
+			}
+		}
+
+		// audit F-R10-1: witness probes + park + promote run UNDER the
 		// family key — the keyless window let a committed relocation/promote
-		// land between our witness probe and our byte overwrite (steal), or
-		// let our generation overwrite a freshly promoted pair (clobber).
+		// land between our witness fence and our byte overwrite (steal), or
+		// let our promote overwrite a freshly promoted pair (clobber).
 		// The commit leg keys up separately afterwards, as before.
 		release := func() {}
 		genID := ""
@@ -645,13 +658,32 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 				}
 			}
 
-			// Poster generation
+			// Poster generation — the staged path promotes inside the lock;
+			// pre-lock staging errors reproduce the legacy error surface.
 			if inputs.PosterGen != nil && movieResult.Movie != nil {
-				if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
-					s := posterErr.Error()
+				sgen, canStage := inputs.PosterGen.(poster.StagingPosterGenerator)
+				switch {
+				case !canStage:
+					// Legacy generator: in-lock generate (test doubles and custom
+					// wiring; the production generator always stages).
+					if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
+						s := posterErr.Error()
+						movieResult.PosterError = &s
+					}
+					movieResult.PosterGenerated = true
+				case stageErr != nil:
+					s := stageErr.Error()
 					movieResult.PosterError = &s
+					movieResult.PosterGenerated = true
+				case stagedPoster == nil:
+					// Nothing staged (nil movie/URL handled upstream).
+				default:
+					if posterErr := sgen.CommitStagedPoster(movieResult.Movie, stagedPoster); posterErr != nil {
+						s := posterErr.Error()
+						movieResult.PosterError = &s
+					}
+					movieResult.PosterGenerated = true
 				}
-				movieResult.PosterGenerated = true
 			}
 
 			// audit F-R5-1: fingerprint whatever the generation wrote at canonical —
@@ -678,6 +710,13 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			return nil
 		}()
 		if heldErr != nil {
+			// Decline/cancel after staging: the staged bytes are residue —
+			// discard them instead of leaving unique-name litter for a sweep.
+			if stagedPoster != nil {
+				if sgen, ok := inputs.PosterGen.(poster.StagingPosterGenerator); ok {
+					sgen.DiscardStaged(stagedPoster)
+				}
+			}
 			return nil, movieResult, heldErr
 		}
 

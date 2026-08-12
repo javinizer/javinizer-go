@@ -1176,6 +1176,36 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 	}
 	sanitizePosterCropGeometry(movie, true, result.Movie.Poster.PosterURL, result.Movie.Poster.CoverURL, result.Movie.Poster.ShouldCropPoster)
 
+	// P2 (D6/R13): an override that changed the EFFECTIVE poster source
+	// carries the PATCH path's eviction contract — the witness is journaled
+	// BEFORE the commit, the stale pair is evicted after it lands, and a
+	// failed commit sweeps the never-armed witness. (The committed cropped
+	// URL is already cleared by the mutator.)
+	stalePosterID := ""
+	evictWitnessPath := ""
+	if effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL) != effectivePosterSourceOf(result.Movie.Poster.PosterURL, result.Movie.Poster.CoverURL) {
+		stalePosterID = strings.TrimSpace(result.Movie.ID)
+		if stalePosterID == "" {
+			stalePosterID = m.movieID
+		}
+		if !isSafePosterFileID(stalePosterID) {
+			// codex r33 parity: an unsafe legacy ID must never reach a join — but
+			// the state-side clearing above already keeps the row coherent.
+			logging.Warnf("override source-change eviction skipped: unsafe poster ID %q", stalePosterID)
+			stalePosterID = ""
+		}
+		if stalePosterID != "" {
+			if env := m.pe.currentEnv(); env != nil && env.fs != nil && env.tempDir != "" && env.jobID != "" {
+				dir := filepath.Join(env.tempDir, "posters", env.jobID)
+				wp, werr := writeEvictWitness(env.fs, dir, stalePosterID, effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL))
+				if werr != nil {
+					return nil, nil, fmt.Errorf("stale poster eviction witness %s: %w", wp, werr)
+				}
+				evictWitnessPath = wp
+			}
+		}
+	}
+
 	cand := result.Clone()
 	cand.Movie = movie
 	cand.FileMatchInfo.MovieID = movie.ID
@@ -1197,7 +1227,19 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 		plan.UpsertMovie = movie
 		plan.Renames = renames
 	}); err != nil {
+		if evictWitnessPath != "" {
+			// Commit never landed ⇒ the eviction never armed; the record is pure
+			// litter, swept best-effort (a durable failure leaves it for startup).
+			if env := m.pe.currentEnv(); env != nil && env.fs != nil {
+				sweepEvictionWitness(env.fs, evictWitnessPath)
+			}
+		}
 		return nil, nil, fmt.Errorf("persist field override: %w", err)
+	}
+	if evictWitnessPath != "" && stalePosterID != "" {
+		// Post-commit, always under this same locked section: remove the stale
+		// pair; a failed leg keeps the witness for startup reconcile.
+		m.evictStalePosterPair(stalePosterID, evictWitnessPath)
 	}
 	updated, _, _ := m.pe.lookup.GetFileResultByResultID(resultID)
 	updatedProv := m.pe.lookup.GetProvenance(filePath)

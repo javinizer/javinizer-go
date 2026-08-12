@@ -60,6 +60,14 @@ type PosterManagerInterface interface {
 	// RestoreAssets returns the pair to its snapshot state, removing any
 	// legs created after the snapshot.
 	RestoreAssets(snap *PosterAssetSnapshot) error
+	// StagePosterDownload downloads a poster to a unique staged identity
+	// (network, unlocked — never call under an edit lock).
+	StagePosterDownload(ctx context.Context, req StagePosterRequest) (*StagedPoster, error)
+	// PromoteStagedPoster installs staged bytes under their canonical names
+	// (fs-only — call inside the edit lock, immediately before the commit).
+	PromoteStagedPoster(staged *StagedPoster) (*cropResult, error)
+	// DiscardStagedPoster removes staged residue best-effort.
+	DiscardStagedPoster(staged *StagedPoster)
 }
 
 // ssrfCheckFunc is the function signature for URL SSRF validation.

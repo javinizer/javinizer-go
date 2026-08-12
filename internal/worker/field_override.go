@@ -144,6 +144,9 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		movie.Poster.PosterURL = result.PosterURL
 		setFieldSource("poster_url")
 		clearPosterCropGeometry(movie) // new source: stored geometry is stale
+		// P2 (D6/R13): the committed row must not point at bytes describing the
+		// old source once the pair eviction runs in ApplyFieldOverride.
+		movie.Poster.CroppedPosterURL = ""
 	case "cover_url":
 		movie.Poster.CoverURL = result.CoverURL
 		setFieldSource("cover_url")
@@ -152,6 +155,7 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		// keep a still-valid manual crop.
 		if movie.Poster.PosterURL == "" {
 			clearPosterCropGeometry(movie)
+			movie.Poster.CroppedPosterURL = "" // P2 (D6): bytes-about-to-evict pointer cleared
 		}
 	case "trailer_url":
 		movie.TrailerURL = result.TrailerURL
