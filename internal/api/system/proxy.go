@@ -182,7 +182,7 @@ func proxyTestPreservesHostnames(proxyProfile *models.ProxyProfile) bool {
 		return false
 	}
 	u, err := url.Parse(strings.TrimSpace(proxyProfile.URL))
-	return err == nil && strings.EqualFold(u.Scheme, "socks5")
+	return err == nil && ssrf.IsSOCKSProxyURL(u)
 }
 
 // TestDirectProxy tests direct proxy connectivity to a target URL.
