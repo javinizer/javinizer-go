@@ -1,6 +1,7 @@
 package scrape
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -180,6 +181,65 @@ func TestClassifyScraperError_WrappedBareNetErrorClassifiedAsUnavailable(t *test
 	require.NotNil(t, se)
 	assert.Equal(t, models.ScraperErrorKindUnavailable, se.Kind, "wrapped bare net.Error must classify as Unavailable")
 }
+
+func TestScraperCircuitBreaker_ThresholdBelowOneUsesDefault(t *testing.T) {
+	b := newScraperCircuitBreaker(0)
+	assert.Equal(t, circuitBreakerThreshold, b.threshold, "threshold<1 must fall back to the default")
+
+	b0 := newScraperCircuitBreaker(-1)
+	assert.Equal(t, circuitBreakerThreshold, b0.threshold)
+}
+
+func TestIsTransportError_NilAndNonTransport(t *testing.T) {
+	assert.False(t, isTransportError(nil), "nil must not be a transport error")
+	assert.False(t, isTransportError(errors.New("logic error")), "plain errors must not be transport errors")
+}
+
+func TestQueryWithBreaker_SkipsTrippedScraper(t *testing.T) {
+	s := &Scraper{breaker: newScraperCircuitBreaker(1)}
+	name := "deadscraper"
+	// Trip the breaker.
+	s.breaker.recordOutcome(name, &models.ScraperError{Kind: models.ScraperErrorKindUnavailable, Scraper: name})
+
+	call := &countingScraper{name: name}
+	outcome := s.queryWithBreaker(context.Background(), "MOVIE-001", "", call)
+	require.NotNil(t, outcome.failure, "tripped breaker must skip the scraper and return a failure")
+	assert.Equal(t, models.ScraperErrorKindUnavailable, outcome.failure.Kind)
+	assert.Equal(t, 0, call.searchCalls, "tripped scraper must not be invoked")
+}
+
+func TestQueryWithBreaker_RecordsSuccessAndResets(t *testing.T) {
+	s := &Scraper{breaker: newScraperCircuitBreaker(2)}
+	name := "flaky"
+
+	call := &countingScraper{name: name, result: &models.ScraperResult{Source: name, ID: "MOVIE-001"}}
+	outcome := s.queryWithBreaker(context.Background(), "MOVIE-001", "", call)
+	require.NotNil(t, outcome.result, "successful scrape must return the result")
+	assert.Nil(t, s.breaker.skipFailure(name), "success must leave the breaker untripped")
+}
+
+// countingScraper is a minimal models.Scraper stub for breaker integration tests.
+type countingScraper struct {
+	name        string
+	result      *models.ScraperResult
+	err         error
+	searchCalls int
+}
+
+func (c *countingScraper) Name() string    { return c.name }
+func (c *countingScraper) IsEnabled() bool { return true }
+func (c *countingScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+	c.searchCalls++
+	if c.err != nil {
+		return nil, c.err
+	}
+	return c.result, nil
+}
+func (c *countingScraper) GetURL(_ context.Context, _ string) (string, error) { return "", nil }
+func (c *countingScraper) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: true}
+}
+func (c *countingScraper) Close() error { return nil }
 
 // netTimeoutError is a minimal net.Error for testing.
 type netTimeoutError struct{}
