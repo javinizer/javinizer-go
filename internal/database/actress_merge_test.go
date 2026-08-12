@@ -1,10 +1,13 @@
 package database
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMergeFieldDecision(t *testing.T) {
@@ -339,4 +342,101 @@ func TestNonEmptyString(t *testing.T) {
 	assert.True(t, nonEmptyString("  hello  "))
 	assert.False(t, nonEmptyString(""))
 	assert.False(t, nonEmptyString("   "))
+}
+
+func TestExecuteMergeMigratesActiveSourceTasks(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	ctx := context.Background()
+	target := &models.Actress{JapaneseName: "target"}
+	source := &models.Actress{JapaneseName: "source"}
+	require.NoError(t, repo.Create(ctx, target))
+	require.NoError(t, repo.Create(ctx, source))
+
+	syncRepo := NewActressSyncRepository(db)
+	job := &models.ActressSyncJob{ID: "merge-task-job", Status: models.ActressSyncJobPending, Scope: "selected", CreatedAt: time.Now().UTC()}
+	task := models.ActressSyncTask{ID: "merge-task", JobID: job.ID, ActressID: &source.ID, Label: "source", DedupeKey: "source", Status: models.ActressSyncTaskPending, Stage: "queued", Messages: []string{}, UpdatedFields: []string{}, CreatedAt: time.Now().UTC()}
+	require.NoError(t, syncRepo.CreateJob(job, []models.ActressSyncTask{task}))
+
+	plan, err := repo.merger.PlanMerge(ctx, target.ID, source.ID, nil)
+	require.NoError(t, err)
+	_, err = repo.merger.ExecuteMerge(ctx, plan, db)
+	require.NoError(t, err)
+
+	tasks, err := syncRepo.ListTasks(job.ID, 0)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.NotNil(t, tasks[0].ActressID)
+	require.Equal(t, target.ID, *tasks[0].ActressID)
+}
+
+func TestExecuteMergeRecomputesCurrentTargetValues(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	target := &models.Actress{DMMID: 9001, FirstName: "Old", JapaneseName: "Canonical"}
+	source := &models.Actress{FirstName: "Source"}
+	require.NoError(t, repo.Create(context.Background(), target))
+	require.NoError(t, repo.Create(context.Background(), source))
+
+	plan, err := repo.merger.PlanMerge(context.Background(), target.ID, source.ID, nil)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", target.ID).Update("first_name", "Fresh").Error)
+
+	result, err := repo.merger.ExecuteMerge(context.Background(), plan, db)
+	require.NoError(t, err)
+	require.Equal(t, "Fresh", result.MergedActress.FirstName)
+}
+
+func TestMergeWithVersionsRejectsChangesAfterPreview(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	target := &models.Actress{DMMID: 9010, FirstName: "Target"}
+	source := &models.Actress{DMMID: 9011, FirstName: "Previewed"}
+	require.NoError(t, repo.Create(t.Context(), target))
+	require.NoError(t, repo.Create(t.Context(), source))
+	_, err := repo.MergeWithVersions(t.Context(), 0, source.ID, nil, target.UpdatedAt, source.UpdatedAt)
+	require.ErrorIs(t, err, ErrActressMergeInvalidID)
+	preview, err := repo.PreviewMerge(t.Context(), target.ID, source.ID)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", source.ID).Updates(map[string]any{
+		"first_name": "Changed",
+		"updated_at": preview.Source.UpdatedAt.Add(time.Second),
+	}).Error)
+	_, err = repo.MergeWithVersions(t.Context(), target.ID, source.ID, nil, preview.Target.UpdatedAt, preview.Source.UpdatedAt)
+	require.ErrorIs(t, err, ErrActressMergeStalePlan)
+	stored, err := repo.FindByID(t.Context(), source.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Changed", stored.FirstName)
+}
+
+func TestExecuteMergeRejectsStaleSourceResolution(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewActressRepository(db)
+	target := &models.Actress{DMMID: 9002, FirstName: "Old", JapaneseName: "Canonical"}
+	source := &models.Actress{FirstName: "Source"}
+	require.NoError(t, repo.Create(context.Background(), target))
+	require.NoError(t, repo.Create(context.Background(), source))
+
+	plan, err := repo.merger.PlanMerge(context.Background(), target.ID, source.ID, map[string]string{"first_name": "source"})
+	require.NoError(t, err)
+	freshTime := time.Now().UTC().Add(time.Second)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", target.ID).Updates(map[string]any{"first_name": "Fresh", "updated_at": freshTime}).Error)
+
+	_, err = repo.merger.ExecuteMerge(context.Background(), plan, db)
+	require.ErrorIs(t, err, ErrActressMergeStalePlan)
+	updated, err := repo.FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Fresh", updated.FirstName)
+	_, err = repo.FindByID(context.Background(), source.ID)
+	require.NoError(t, err)
+
+	plan, err = repo.merger.PlanMerge(context.Background(), target.ID, source.ID, map[string]string{"first_name": "source"})
+	require.NoError(t, err)
+	freshTime = freshTime.Add(time.Second)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", source.ID).Updates(map[string]any{"first_name": "New Source", "updated_at": freshTime}).Error)
+	_, err = repo.merger.ExecuteMerge(context.Background(), plan, db)
+	require.ErrorIs(t, err, ErrActressMergeStalePlan)
+	unchanged, err := repo.FindByID(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Fresh", unchanged.FirstName)
 }

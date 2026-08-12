@@ -33,13 +33,20 @@ type ActressRepositoryInterface interface {
 	List(ctx context.Context, limit, offset int) ([]models.Actress, error)
 	ListAll(ctx context.Context) ([]models.Actress, error)
 	ListSorted(ctx context.Context, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error)
+	ListFiltered(ctx context.Context, filter string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error)
 	Search(ctx context.Context, query string) ([]models.Actress, error)
 	SearchPagedSorted(ctx context.Context, query string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error)
+	SearchFiltered(ctx context.Context, query, filter string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error)
 	Count(ctx context.Context) (int64, error)
 	CountSearch(ctx context.Context, query string) (int64, error)
+	CountFiltered(ctx context.Context, filter string) (int64, error)
+	CountSearchFiltered(ctx context.Context, query, filter string) (int64, error)
 	Delete(ctx context.Context, id uint) error
 	PreviewMerge(ctx context.Context, targetID, sourceID uint) (*ActressMergePreview, error)
 	Merge(ctx context.Context, targetID, sourceID uint, resolutions map[string]string) (*ActressMergeResult, error)
+	// MergeWithVersions merges like Merge and additionally fences on the
+	// actresses' updated_at timestamps; zero timestamps skip the fence.
+	MergeWithVersions(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, targetUpdatedAt, sourceUpdatedAt time.Time) (*ActressMergeResult, error)
 }
 
 // GenreTranslationRepositoryInterface defines the contract for genre translation operations

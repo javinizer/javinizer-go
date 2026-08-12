@@ -6,6 +6,7 @@ import (
 
 	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
+	"gorm.io/gorm"
 )
 
 func TestWrapDBErrDeep2_Nil(t *testing.T) {
@@ -17,6 +18,15 @@ func TestWrapDBErrDeep2_WithError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "create movie")
 	assert.Contains(t, err.Error(), "test error")
+}
+
+func TestIsUniqueConstraint(t *testing.T) {
+	assert.True(t, IsUniqueConstraint(gorm.ErrDuplicatedKey))
+	assert.True(t, IsUniqueConstraint(sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintUnique}))
+	assert.True(t, IsUniqueConstraint(&sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintPrimaryKey}))
+	assert.True(t, IsUniqueConstraint(errors.New("UNIQUE constraint failed")))
+	assert.False(t, IsUniqueConstraint(errors.New("database is locked")))
+	assert.False(t, IsUniqueConstraint(nil))
 }
 
 func TestIsLockedDeep2_SQLiteBusy(t *testing.T) {
