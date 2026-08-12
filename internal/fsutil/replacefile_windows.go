@@ -1,6 +1,6 @@
 //go:build windows
 
-package downloader
+package fsutil
 
 import (
 	"errors"
@@ -10,9 +10,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-var errReplaceUnsupported = errors.New("replace existing destination unsupported")
+var ErrReplaceUnsupported = errors.New("replace existing destination unsupported")
 
-func replaceFile(fs afero.Fs, src, dst string) error {
+func ReplaceFile(fs afero.Fs, src, dst string) error {
 	if _, ok := fs.(*afero.OsFs); ok {
 		srcPtr, err := windows.UTF16PtrFromString(src)
 		if err != nil {
@@ -25,7 +25,7 @@ func replaceFile(fs afero.Fs, src, dst string) error {
 		return windows.MoveFileEx(srcPtr, dstPtr, windows.MOVEFILE_REPLACE_EXISTING)
 	}
 	if err := fs.Rename(src, dst); err != nil {
-		return fmt.Errorf("%w: %v", errReplaceUnsupported, err)
+		return fmt.Errorf("%w: %v", ErrReplaceUnsupported, err)
 	}
 	return nil
 }

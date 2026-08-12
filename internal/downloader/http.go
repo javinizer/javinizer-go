@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/spf13/afero"
 )
@@ -176,7 +177,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	if err := replaceFile(d.fs, tempPath, destPath); err != nil {
+	if err := fsutil.ReplaceFile(d.fs, tempPath, destPath); err != nil {
 		_ = d.fs.Remove(tempPath)
 		result.Error = fmt.Errorf("failed to replace file: %w", err)
 		result.Duration = time.Since(startTime)

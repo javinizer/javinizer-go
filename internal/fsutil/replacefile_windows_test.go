@@ -1,6 +1,6 @@
 //go:build windows
 
-package downloader
+package fsutil
 
 import (
 	"path/filepath"
@@ -19,7 +19,7 @@ func TestReplaceFileWindows_AtomicReplace(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, src, []byte("new"), 0644))
 	require.NoError(t, afero.WriteFile(fs, dst, []byte("old"), 0644))
 
-	require.NoError(t, replaceFile(fs, src, dst))
+	require.NoError(t, ReplaceFile(fs, src, dst))
 	got, err := afero.ReadFile(fs, dst)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("new"), got)

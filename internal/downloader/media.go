@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -134,7 +135,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	if overwriteExisting {
-		if err := replaceFile(d.fs, candidate, destPath); err != nil {
+		if err := fsutil.ReplaceFile(d.fs, candidate, destPath); err != nil {
 			fullResult.Error = fmt.Errorf("failed to replace poster: %w", err)
 			fullResult.Downloaded = false
 			fullResult.Replaced = false
