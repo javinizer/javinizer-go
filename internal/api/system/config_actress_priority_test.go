@@ -9,7 +9,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -48,12 +47,13 @@ func TestValidateActressPriorityCapability(t *testing.T) {
 		return cfg
 	}
 
-	require.Error(t, validatePriorityFieldCapabilities(deps, priority([]string{"minnanoav"})))
+	require.NoError(t, validatePriorityFieldCapabilities(deps, priority([]string{"minnanoav"})))
 	require.NoError(t, validatePriorityFieldCapabilities(deps, priority([]string{"minnanoav", "dmm"})))
 	require.NoError(t, validatePriorityFieldCapabilities(deps, priority([]string{"__skip__"})))
 	require.NoError(t, validatePriorityFieldCapabilities(deps, priority([]string{"unknown-only"})))
-} // Actresses-only overrides must not save: aggregation cannot produce a cast.
-func TestConfigUpdateService_ValidateAndApply_ActressOnlyPriorityRejected(t *testing.T) {
+} // Actress-only resolvers are valid on the actress field: the sync manager
+// consumes ActressFieldPriority and invokes ActressMetadataResolver directly.
+func TestConfigUpdateService_ValidateAndApply_ActressOnlyPriorityAccepted(t *testing.T) {
 	oldCfg := config.DefaultConfig(nil, nil)
 	tempConfigFile := t.TempDir() + "/config.yaml"
 	require.NoError(t, config.Save(oldCfg, tempConfigFile))
@@ -66,8 +66,7 @@ func TestConfigUpdateService_ValidateAndApply_ActressOnlyPriorityRejected(t *tes
 	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), tempConfigFile)
 	svc.reload = func(rt *core.APIRuntime, d *core.APIDeps, cfg *config.Config) error { return nil }
 	err := svc.ValidateAndApply(oldCfg, newCfg, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "movie results")
+	require.NoError(t, err)
 }
 
 // The same listing on a non-actress field must reject as well.

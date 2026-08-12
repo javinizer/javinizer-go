@@ -181,6 +181,20 @@ func validatePriorityFieldCapabilities(deps *core.APIDeps, cfg *config.Config) e
 			continue
 		}
 		if field == "actress" {
+			actressCapable := false
+			for _, name := range override {
+				scraper, found := deps.CoreDeps.ScraperRegistry.GetInstance(strings.ToLower(strings.TrimSpace(name)))
+				if !found || scraper == nil {
+					continue
+				}
+				if supportsActressMetadata(scraper) {
+					actressCapable = true
+					break
+				}
+			}
+			if actressCapable {
+				continue
+			}
 			return fmt.Errorf("metadata.priority.actress = [%s]: every listed scraper resolves actress metadata but never produces movie results, so aggregation would have no cast to resolve — add a movie-capable scraper", strings.Join(override, ", "))
 		}
 		// Actress-only resolvers are invalid in any non-actress override: the
