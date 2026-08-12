@@ -152,6 +152,22 @@ func TestClassifyScraperError_NonTransportErrorStaysUnknown(t *testing.T) {
 	assert.Equal(t, models.ScraperErrorKindUnknown, se.Kind, "non-transport errors must not trip the breaker")
 }
 
+func TestScraperCircuitBreaker_NonUnavailableResetsFailureCount(t *testing.T) {
+	b := newScraperCircuitBreaker(3)
+	name := "libredmm"
+
+	// One Unavailable failure (below threshold, not tripped).
+	b.recordOutcome(name, &models.ScraperError{Kind: models.ScraperErrorKindUnavailable, Scraper: name})
+	assert.Nil(t, b.skipFailure(name), "must not be tripped after 1 failure")
+
+	// A NotFound outcome proves the host is reachable: reset the count.
+	b.recordOutcome(name, &models.ScraperError{Kind: models.ScraperErrorKindNotFound, Scraper: name})
+
+	// A later isolated Unavailable must not trip (counter was reset, so this is count=1, not 2).
+	b.recordOutcome(name, &models.ScraperError{Kind: models.ScraperErrorKindUnavailable, Scraper: name})
+	assert.Nil(t, b.skipFailure(name), "non-Unavailable must reset the count so a later isolated failure doesn't trip")
+}
+
 func TestScraperCircuitBreaker_HalfOpenNotFoundProbeClearsTrip(t *testing.T) {
 	b := newScraperCircuitBreaker(1)
 	b.cooldown = 10 * time.Millisecond
@@ -216,6 +232,80 @@ func TestQueryWithBreaker_RecordsSuccessAndResets(t *testing.T) {
 	outcome := s.queryWithBreaker(context.Background(), "MOVIE-001", "", call)
 	require.NotNil(t, outcome.result, "successful scrape must return the result")
 	assert.Nil(t, s.breaker.skipFailure(name), "success must leave the breaker untripped")
+}
+
+func TestScraper_ResolveContentID_SkipsTrippedResolver(t *testing.T) {
+	// Build a Scraper with a tripped breaker for the resolver scraper and a
+	// registry that returns a ContentIDResolverCtx that would block if called.
+	reg := &stubRegistry{instances: map[string]models.Scraper{
+		"dmm": &blockingContentIDResolver{name: "dmm"},
+	}}
+	s := &Scraper{
+		registry: reg,
+		breaker:  newScraperCircuitBreaker(1),
+	}
+	s.breaker.recordOutcome("dmm", &models.ScraperError{Kind: models.ScraperErrorKindUnavailable, Scraper: "dmm"})
+
+	got := s.resolveContentID(context.Background(), "MOVIE-001", []string{"dmm"})
+	assert.Equal(t, "MOVIE-001", got, "tripped resolver must be skipped, falling back to the original movieID")
+}
+
+// stubRegistry is a minimal ScraperInstanceResolver for breaker integration tests.
+type stubRegistry struct {
+	instances map[string]models.Scraper
+}
+
+func (r *stubRegistry) GetInstance(name string) (models.Scraper, bool) {
+	s, ok := r.instances[name]
+	return s, ok
+}
+
+func (r *stubRegistry) GetInstancesByPriorityForInput(names []string, _ string) []models.Scraper {
+	var out []models.Scraper
+	for _, n := range names {
+		if s, ok := r.instances[n]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (r *stubRegistry) GetAllInstances() []models.Scraper {
+	var out []models.Scraper
+	for _, s := range r.instances {
+		out = append(out, s)
+	}
+	return out
+}
+
+func (r *stubRegistry) Names() []string {
+	var out []string
+	for n := range r.instances {
+		out = append(out, n)
+	}
+	return out
+}
+
+// blockingContentIDResolver is a ContentIDResolverCtx whose ResolveContentIDCtx
+// must never be called (it fails the test if invoked).
+type blockingContentIDResolver struct {
+	name string
+}
+
+func (b *blockingContentIDResolver) Name() string    { return b.name }
+func (b *blockingContentIDResolver) IsEnabled() bool { return true }
+func (b *blockingContentIDResolver) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+	return nil, errors.New("must not be called")
+}
+func (b *blockingContentIDResolver) GetURL(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+func (b *blockingContentIDResolver) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: true}
+}
+func (b *blockingContentIDResolver) Close() error { return nil }
+func (b *blockingContentIDResolver) ResolveContentIDCtx(_ context.Context, _ string) (string, error) {
+	panic("ResolveContentIDCtx must not be called when the breaker is tripped")
 }
 
 // countingScraper is a minimal models.Scraper stub for breaker integration tests.

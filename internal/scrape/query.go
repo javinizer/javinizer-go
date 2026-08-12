@@ -43,6 +43,16 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 	if !exists || resolver == nil {
 		return movieID
 	}
+	// Skip content-ID resolution when the resolver scraper's circuit breaker is
+	// tripped: ResolveContentIDCtx can issue HTTP (DMM), so an unreachable host
+	// would otherwise block every file on the full client timeout even after the
+	// breaker has tripped. Falling back to the original movieID is safe — the
+	// subsequent queryAll will also skip the tripped scraper.
+	if s.breaker != nil {
+		if skip := s.breaker.skipFailure(resolverName); skip != nil {
+			return movieID
+		}
+	}
 	// Prefer the context-aware resolver so cancellation/timeouts reach the
 	// lookup (DMM's ResolveContentID can issue HTTP). Fall back to the
 	// non-context ContentIDResolver for scrapers that only implement that.

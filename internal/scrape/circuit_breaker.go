@@ -95,14 +95,15 @@ func (b *scraperCircuitBreaker) recordOutcome(name string, failure *models.Scrap
 		return
 	}
 	if failure.Kind != models.ScraperErrorKindUnavailable {
-		// A non-Unavailable outcome (e.g. 404 NotFound, 403 Blocked) proves the
-		// host is reachable again. If the breaker is tripped, clear it so a
-		// recovered host isn't skipped for another cooldown window.
-		if b.tripped[name] {
-			delete(b.failures, name)
-			delete(b.tripped, name)
-			delete(b.trippedAt, name)
-		}
+		// A non-Unavailable outcome (e.g. 404 NotFound, 403 Blocked, 429
+		// RateLimited) proves the host is reachable, so the consecutive-failure
+		// count is reset. This prevents a later isolated Unavailable from
+		// tripping the breaker as if the prior failures were consecutive, and
+		// clears a tripped breaker so a recovered host isn't skipped for another
+		// cooldown window.
+		delete(b.failures, name)
+		delete(b.tripped, name)
+		delete(b.trippedAt, name)
 		return
 	}
 	b.failures[name]++
