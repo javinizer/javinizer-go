@@ -29,6 +29,10 @@ func (f *failAtomicUpdater) AtomicUpdateFileResult(string, func(*resultstore.Mov
 	return f.err
 }
 
+func (f *failAtomicUpdater) AtomicUpdateFileResultWithProvenance(string, func(*resultstore.MovieResult, *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)) error {
+	return f.err
+}
+
 type failTransactor struct{ err error }
 
 func (t failTransactor) WithEditTx(context.Context, func(database.EditUnit) error) error {

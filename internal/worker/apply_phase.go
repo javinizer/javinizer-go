@@ -338,10 +338,12 @@ func interpretApplyResult(
 		if mid := strings.TrimSpace(movie.ID); mid != "" && inputs.PromoteWitnessFn != nil && inputs.PromoteWitnessFn(mid) {
 			logging.Warnf("[Apply] skipping failure write-back for %s — promote witness for %s unresolved; restart reconciles", filePath, mid)
 		} else if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
-			errUp := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+			// R10-6: state+provenance publish under ONE acquisition — a persist
+			// snapshot between the two never observes mismatched halves.
+			errUp := inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 				if applyWritebackIdentityMismatch(movie, current) {
 					logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
-					return current, nil
+					return current, prov, nil
 				}
 				fm := applyMatchFollowedByLiveIdentity(afc.Match, current)
 				current.FileMatchInfo = fm
@@ -350,7 +352,7 @@ func interpretApplyResult(
 				current.Error = errMsg
 				current.StartedAt = startTime
 				current.EndedAt = &now
-				return current, nil
+				return current, mergeWriteBackProvenance(nil, prov), nil
 			})
 			if errUp != nil {
 				inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
@@ -418,13 +420,13 @@ func interpretApplyResult(
 				// failed refresh committed and discard its recovery state.
 				logging.Warnf("[Apply] skipping success write-back for %s — promote witness for %s unresolved; restart reconciles", filePath, mid)
 			} else {
-				err2 := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+				err2 := inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 					if applyWritebackIdentityMismatch(movie, current) {
 						logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
-						return current, nil
+						return current, prov, nil
 					}
 					current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
-					return current, nil
+					return current, mergeWriteBackProvenance(nil, prov), nil
 				})
 				if err2 != nil {
 					logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err2)

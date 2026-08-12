@@ -96,10 +96,10 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 			if fenceHit != "" {
 				logging.Warnf("[Recovery] skipping write-back for %s — promote witness for %s unresolved; restart reconciles", rc.filePath, fenceHit)
 			} else if !writebackPreSkipped(rc.updater, rc.movie, rc.filePath, "Recovery") {
-				errUp := rc.updater.AtomicUpdateFileResult(rc.filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+				errUp := rc.updater.AtomicUpdateFileResultWithProvenance(rc.filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 					if applyWritebackIdentityMismatch(rc.movie, current) {
 						logging.Warnf("[Recovery] skipping write-back for %s — result rekeyed to %s mid-phase", rc.filePath, current.FileMatchInfo.MovieID)
-						return current, nil
+						return current, prov, nil
 					}
 					current.FileMatchInfo = applyMatchFollowedByLiveIdentity(rc.fmi, current)
 					current.Movie = mergeLiveReviewEdits(rc.movie, rc.movie, current.Movie)
@@ -109,7 +109,7 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 						current.StartedAt = rc.startTime
 						current.EndedAt = &now
 					}
-					return current, nil
+					return current, mergeWriteBackProvenance(nil, prov), nil
 				})
 				if errUp != nil {
 					mr := &resultstore.MovieResult{

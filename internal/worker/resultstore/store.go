@@ -18,6 +18,10 @@ type ResultUpdater interface {
 	SetProvenance(filePath string, prov *ProvenanceData)
 	AtomicUpdateFileResult(filePath string, updateFn func(*MovieResult) (*MovieResult, error)) error // updateFn MUST NOT call methods on the same Store — it executes under the write lock and re-entering will deadlock
 
+	// AtomicUpdateFileResultWithProvenance commits a result and its provenance
+	// in ONE acquisition (R10-6) — see resultUpdater for the full contract.
+	AtomicUpdateFileResultWithProvenance(filePath string, updateFn func(*MovieResult, *ProvenanceData) (*MovieResult, *ProvenanceData, error)) error
+
 	// UpdateMovie atomically updates the movie for a file result.
 	UpdateMovie(filePath string, movie *models.Movie) error
 

@@ -81,6 +81,24 @@ func (s *stubUpdater) AtomicUpdateFileResult(fp string, fn func(*resultstore.Mov
 	return nil
 }
 
+func (s *stubUpdater) AtomicUpdateFileResultWithProvenance(fp string, fn func(*resultstore.MovieResult, *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.results[fp]
+	if current == nil {
+		return fmt.Errorf("not found: %s", fp)
+	}
+	updated, prov, err := fn(current, s.provenance[fp])
+	if err != nil {
+		return err
+	}
+	s.results[fp] = updated
+	if prov != nil {
+		s.provenance[fp] = prov
+	}
+	return nil
+}
+
 func (s *stubUpdater) UpdateMovie(fp string, movie *models.Movie) error {
 	return s.AtomicUpdateFileResult(fp, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		current.Movie = movie

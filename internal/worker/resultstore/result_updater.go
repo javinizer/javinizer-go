@@ -114,6 +114,61 @@ func (ru *resultUpdater) AtomicUpdateFileResult(filePath string, updateFn func(*
 	return nil
 }
 
+// AtomicUpdateFileResultWithProvenance performs a locked read-modify-write on
+// a file result AND its provenance in ONE acquisition (POSTER-WRITE-HARDENING
+// R10-6): separate AtomicUpdateFileResult + SetProvenance calls let a persist
+// snapshot observe new state beside old provenance; here both publish under a
+// single lock hold and a single revision bump. updateFn receives clones of the
+// current result and provenance (provenance may be nil); an error return
+// publishes NEITHER half. updateFn MUST NOT call methods on the same Store —
+// it executes under the write lock and re-entering will deadlock.
+func (ru *resultUpdater) AtomicUpdateFileResultWithProvenance(filePath string, updateFn func(*MovieResult, *ProvenanceData) (*MovieResult, *ProvenanceData, error)) error {
+	ru.mu.Lock()
+	defer ru.mu.Unlock()
+	current, exists := ru.Results[filePath]
+	if !exists || current == nil {
+		return fmt.Errorf("file result not found: %s", filePath)
+	}
+	var provCopy *ProvenanceData
+	if p := ru.Provenance[filePath]; p != nil {
+		provCopy = p.Clone()
+	}
+	updated, newProv, err := updateFn(current.Clone(), provCopy)
+	if err != nil {
+		return err
+	}
+
+	updated.Revision = current.Revision + 1
+	stateReindexFilePathLocked(ru.resultTrackerState, filePath, current, updated)
+	if !ru.Excluded[filePath] {
+		switch current.Status {
+		case models.JobStatusCompleted:
+			ru.Completed--
+		case models.JobStatusFailed:
+			ru.Failed--
+		}
+		switch updated.Status {
+		case models.JobStatusCompleted:
+			ru.Completed++
+		case models.JobStatusFailed:
+			ru.Failed++
+		}
+	}
+	if ru.Excluded[filePath] {
+		stateRecalculateProgress(ru.resultTrackerState)
+	} else {
+		stateUpdateProgressFromCounters(ru.resultTrackerState)
+	}
+	ru.Results[filePath] = updated
+	if newProv != nil {
+		if ru.Provenance == nil {
+			ru.Provenance = make(map[string]*ProvenanceData)
+		}
+		ru.Provenance[filePath] = newProv.Clone()
+	}
+	return nil
+}
+
 // UpdateMovie atomically updates the movie for a file result.
 func (ru *resultUpdater) UpdateMovie(filePath string, movie *models.Movie) error {
 	return ru.AtomicUpdateFileResult(filePath, func(current *MovieResult) (*MovieResult, error) {

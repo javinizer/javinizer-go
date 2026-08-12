@@ -144,8 +144,12 @@ type callbackOnlyUpdater struct {
 
 func (u *callbackOnlyUpdater) UpdateFileResult(string, *resultstore.MovieResult) {}
 func (u *callbackOnlyUpdater) SetProvenance(string, *resultstore.ProvenanceData) {}
-func (u *callbackOnlyUpdater) UpdateMovie(string, *models.Movie) error           { return nil }
-func (u *callbackOnlyUpdater) MarkExcluded(string)                               {}
+func (u *callbackOnlyUpdater) AtomicUpdateFileResultWithProvenance(fp string, fn func(*resultstore.MovieResult, *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)) error {
+	u.calls++
+	return u.inner.AtomicUpdateFileResultWithProvenance(fp, fn)
+}
+func (u *callbackOnlyUpdater) UpdateMovie(string, *models.Movie) error { return nil }
+func (u *callbackOnlyUpdater) MarkExcluded(string)                     {}
 func (u *callbackOnlyUpdater) AtomicUpdateFileResult(fp string, fn func(*resultstore.MovieResult) (*resultstore.MovieResult, error)) error {
 	u.calls++
 	return u.inner.AtomicUpdateFileResult(fp, fn)

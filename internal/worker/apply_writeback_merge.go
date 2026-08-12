@@ -123,6 +123,41 @@ func mergeLiveReviewEdits(baseline, phaseOut, live *models.Movie) *models.Movie 
 	return out
 }
 
+// mergeWriteBackProvenance merges per-file provenance for a write-back commit
+// (D5): live (phase-time edited) attribution wins the keys it covers; the
+// phase-frozen snapshot fills keys the user never touched. ScraperResults are
+// not merged here — their resolution is the envelope-wide rule (a rescrape
+// committed after phase start wins the live set outright, else the frozen
+// snapshot is kept), handled by the caller that owns both snapshots.
+func mergeWriteBackProvenance(frozen, live *resultstore.ProvenanceData) *resultstore.ProvenanceData {
+	switch {
+	case frozen == nil && live == nil:
+		return nil
+	case live == nil:
+		return frozen.Clone()
+	case frozen == nil:
+		return live.Clone()
+	}
+	out := frozen.Clone()
+	out.FieldSources = mergeSourceMap(frozen.FieldSources, live.FieldSources)
+	out.ActressSources = mergeSourceMap(frozen.ActressSources, live.ActressSources)
+	return out
+}
+
+func mergeSourceMap(frozen, live map[string]string) map[string]string {
+	if len(frozen) == 0 && len(live) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(frozen)+len(live))
+	for k, v := range frozen {
+		merged[k] = v
+	}
+	for k, v := range live {
+		merged[k] = v
+	}
+	return merged
+}
+
 // applyWritebackIdentityMismatch reports whether the live result already
 // belongs to a different movie family than the apply phase's frozen
 // baseline (codex r14-B): in that case the phase output was computed for
