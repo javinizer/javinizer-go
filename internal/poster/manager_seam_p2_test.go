@@ -8,12 +8,12 @@ import (
 	"image"
 	"image/jpeg"
 	"net/http"
-
-	"github.com/javinizer/javinizer-go/internal/models"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -286,7 +286,7 @@ func TestPromoteStagedPoster_BackupSweepWarnIsNonFatal(t *testing.T) {
 	res, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "ST-P9-stagez", "ST-P9", dir+"/ST-P9.jpg"))
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Equal(t, dir+"/ST-P9.jpg", res.CroppedPath)
+	assert.Equal(t, filepath.Join(dir, "ST-P9.jpg"), res.CroppedPath, "canonical preview path (platform separators)")
 	got, _ := afero.ReadFile(base, dir+"/ST-P9.jpg")
 	assert.Equal(t, "s", string(got), "promoted bytes landed")
 	entries, _ := afero.ReadDir(base, dir)
