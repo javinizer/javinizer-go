@@ -80,7 +80,7 @@ func redirectAllowlist(baseURL string) map[string]struct{} {
 
 func buildClient(settings *models.ScraperSettings, globalProxy *models.ProxyConfig) *resty.Client {
 	timeout := time.Duration(settings.Timeout) * time.Second
-	if timeout <= 0 {
+	if timeout <= 0 && !settings.TimeoutIsExplicit() {
 		timeout = 30 * time.Second
 	}
 	retries := settings.RetryCount
