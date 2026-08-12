@@ -42,19 +42,7 @@ type scraper struct {
 // New creates a new JavLibrary scraper.
 // newScraper creates a new JavLibrary scraper.
 func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
-	configForHTTP := &models.ScraperSettings{
-		Enabled:         settings.Enabled,
-		Language:        settings.Language,
-		RateLimit:       settings.RateLimit,
-		Timeout:         settings.Timeout,
-		RetryCount:      settings.RetryCount,
-		UserAgent:       settings.UserAgent,
-		Proxy:           settings.Proxy,
-		DownloadProxy:   settings.DownloadProxy,
-		UseFlareSolverr: settings.UseFlareSolverr,
-	}
-
-	client, flaresolverr, err := httpclient.FromScraperSettings(configForHTTP, globalProxy, globalFlareSolverr,
+	client, flaresolverr, err := httpclient.FromScraperSettings(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithHeaders(httpclient.StandardHTMLHeaders()),
 		httpclient.WithHeaders(httpclient.UserAgentHeader(settings.UserAgent)),
 	).BuildWithFlareSolverr()

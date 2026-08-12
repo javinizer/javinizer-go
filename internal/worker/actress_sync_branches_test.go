@@ -58,7 +58,8 @@ func TestSyncActressMetadataResolverFailureWarns(t *testing.T) {
 	on := true
 	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movies, &fixedScraperSet{enabled: []models.Scraper{bad}},
 		ActressSyncOptions{ScrapeActress: &on})
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "upstream burst")
 	require.Contains(t, result.Warning, "resolver_error")
 	require.Contains(t, result.Warning, "dmm")
 }
@@ -274,7 +275,7 @@ func TestRevalidationCacheIsNotVerificationEvidence(t *testing.T) {
 	on := true
 	result, err := SyncActressMetadata(context.Background(), actress.ID, repo, movies, &fixedScraperSet{enabled: []models.Scraper{down}},
 		ActressSyncOptions{ScrapeActress: &on, LookupCache: lookup, Revalidate: true})
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotContains(t, result.Messages, "verified_no_changes",
 		"cache snapshot equality is not revalidation evidence")
 }

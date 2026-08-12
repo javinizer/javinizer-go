@@ -307,6 +307,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	// (MinnanoAV/JavDB) needs to contribute its remaining fields.
 	known := resolverInput
 	var resolverFailures []string
+	var resolverErrors []error
 	var revisit []models.Scraper
 	initialJapaneseName := strings.TrimSpace(actress.JapaneseName)
 	if revalidate || actressNeedsMetadata(actress) {
@@ -324,6 +325,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 					// pretending the lookup verified nothing mislabels it as skipped.
 					logging.Warnf("Actress sync: %s failed for DMM ID %d: %v", name, actress.DMMID, resolverErr)
 					resolverFailures = append(resolverFailures, name)
+					resolverErrors = append(resolverErrors, resolverErr)
 					continue
 				}
 				if metadata.DMMID == actress.DMMID {
@@ -415,6 +417,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 				// so the task report doesn't claim success after a transient lookup.
 				logging.Warnf("Actress sync: revisit %s failed for DMM ID %d: %v", name, actress.DMMID, resolverErr)
 				resolverFailures = append(resolverFailures, name)
+				resolverErrors = append(resolverErrors, resolverErr)
 				continue
 			}
 			if metadata.DMMID != actress.DMMID {
@@ -525,6 +528,9 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			result.Verified = true
 			result.Messages = append(result.Messages, "verified_no_changes")
 			return result, nil
+		}
+		if len(resolverFailures) > 0 && len(metadataScrapers) > 0 && len(resolverFailures) == len(metadataScrapers) {
+			return result, errors.Join(resolverErrors...)
 		}
 		result.Messages = append(result.Messages, "no_verified_metadata")
 		return result, nil
