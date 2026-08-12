@@ -198,6 +198,9 @@ func isTmpCacheFile(name string) bool {
 }
 
 func TestBranch_StaleEntry_OpenFailureFallsToForbidden(t *testing.T) {
+	undoAllow := ssrf.AllowHostForTest("127.0.0.1")
+	undoAllow()
+	t.Cleanup(func() { ssrf.AllowHostForTest("127.0.0.1") })
 	gin.SetMode(gin.TestMode)
 	mem := afero.NewMemMapFs()
 	rawURL := "http://127.0.0.1:9/stale-open.jpg"
@@ -212,6 +215,9 @@ func TestBranch_StaleEntry_OpenFailureFallsToForbidden(t *testing.T) {
 }
 
 func TestBranch_StaleEntry_CopyFailureFallsToForbidden(t *testing.T) {
+	undoAllow := ssrf.AllowHostForTest("127.0.0.1")
+	undoAllow()
+	t.Cleanup(func() { ssrf.AllowHostForTest("127.0.0.1") })
 	gin.SetMode(gin.TestMode)
 	mem := afero.NewMemMapFs()
 	rawURL := "http://127.0.0.1:9/stale-copy.jpg"
