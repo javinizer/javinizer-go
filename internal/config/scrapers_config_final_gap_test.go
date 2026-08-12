@@ -1,21 +1,19 @@
 package config
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 )
 
-func TestScraperConfigFinalGap_MaxRetriesYAMLError(t *testing.T) {
-	input := `scrapers:
-    r18dev:
-        max_retries: not_a_number
-`
-	var cfg Config
-	cfg.Scrapers.resolver = newEnabledResolver()
-	err := yaml.Unmarshal([]byte(input), &cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "max_retries")
+func TestCovFinal_MaxRetriesJSONError(t *testing.T) {
+	s := &ScrapersConfig{Overrides: map[string]*models.ScraperSettings{}}
+	raw := map[string]json.RawMessage{
+		"max_retries": json.RawMessage(`"not_a_number"`),
+	}
+	ss := &models.ScraperSettings{}
+	err := s.applyJSONAliases(raw, ss)
+	assert.Error(t, err)
 }
