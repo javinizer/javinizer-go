@@ -56,6 +56,19 @@ func newScraperCircuitBreaker(threshold int) *scraperCircuitBreaker {
 	}
 }
 
+// isTripped reports whether the breaker for name is currently tripped and
+// within its cooldown, without consuming the half-open probe. Use this when a
+// caller needs to skip work conditionally (e.g. resolveContentID) but must not
+// consume the single half-open probe permit that skipFailure grants.
+func (b *scraperCircuitBreaker) isTripped(name string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.tripped[name] {
+		return false
+	}
+	return time.Since(b.trippedAt[name]) < b.cooldown
+}
+
 // skipFailure returns a ScraperError if the breaker for name is tripped (the
 // caller should skip the scraper), or nil if the scraper should be invoked.
 // When the cooldown has elapsed, it allows a single half-open probe through

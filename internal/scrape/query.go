@@ -46,25 +46,18 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 	// Skip content-ID resolution when the resolver scraper's circuit breaker is
 	// tripped: ResolveContentIDCtx can issue HTTP (DMM), so an unreachable host
 	// would otherwise block every file on the full client timeout even after the
-	// breaker has tripped. Falling back to the original movieID is safe — the
-	// subsequent queryAll will also skip the tripped scraper.
-	if s.breaker != nil {
-		if skip := s.breaker.skipFailure(resolverName); skip != nil {
-			return movieID
-		}
+	// breaker has tripped. Use isTripped (not skipFailure) so the half-open
+	// probe permit is preserved for queryWithBreaker, which records the actual
+	// query outcome. A cached resolver hit does not prove the host is reachable,
+	// so resolver outcomes are not recorded here — only queryWithBreaker records.
+	if s.breaker != nil && s.breaker.isTripped(resolverName) {
+		return movieID
 	}
 	// Prefer the context-aware resolver so cancellation/timeouts reach the
 	// lookup (DMM's ResolveContentID can issue HTTP). Fall back to the
 	// non-context ContentIDResolver for scrapers that only implement that.
 	if r, ok := resolver.(models.ContentIDResolverCtx); ok && r != nil {
 		contentID, err := r.ResolveContentIDCtx(ctx, movieID)
-		if s.breaker != nil && ctx.Err() == nil {
-			if err == nil {
-				s.breaker.recordOutcome(resolverName, nil)
-			} else {
-				s.breaker.recordOutcome(resolverName, classifyScraperError(resolverName, err, ""))
-			}
-		}
 		if err != nil {
 			logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
 			return movieID
@@ -325,6 +318,15 @@ func classifyScraperError(scraperName string, err error, fallbackMsg string) *mo
 		copied.Scraper = scraperName
 		if copied.Message == "" {
 			copied.Message = err.Error()
+		}
+		// Some scrapers wrap network errors in a ScraperError with Kind=Unknown
+		// and StatusCode=0 (e.g. JavDB's NewScraperStatusError("JavDB", 0, ...)).
+		// Reclassify these as Unavailable so the circuit breaker can trip on
+		// persistent transport failures, not just on raw unwrapped errors.
+		if copied.Kind == models.ScraperErrorKindUnknown && copied.StatusCode == 0 && isTransportError(copied.Cause) {
+			copied.Kind = models.ScraperErrorKindUnavailable
+			copied.Retryable = true
+			copied.Temporary = true
 		}
 		return &copied
 	}
