@@ -326,6 +326,46 @@ func (b *blockingContentIDResolver) ResolveContentIDCtx(_ context.Context, _ str
 	panic("ResolveContentIDCtx must not be called when the breaker is tripped")
 }
 
+func TestScraper_ResolveContentID_FailureRecordsAndTrips(t *testing.T) {
+	reg := &stubRegistry{instances: map[string]models.Scraper{
+		"dmm": &failingContentIDResolver{name: "dmm"},
+	}}
+	s := &Scraper{
+		registry: reg,
+		breaker:  newScraperCircuitBreaker(1),
+	}
+	s.breaker.cooldown = 10 * time.Millisecond
+
+	// First call: resolver fails (transport error), breaker records Unavailable + trips.
+	got := s.resolveContentID(context.Background(), "MOVIE-001", []string{"dmm"})
+	assert.Equal(t, "MOVIE-001", got, "failed resolver must fall back to original movieID")
+
+	// Wait for cooldown so the half-open probe is allowed.
+	time.Sleep(20 * time.Millisecond)
+	assert.Nil(t, s.breaker.skipFailure("dmm"), "half-open probe must be allowed after cooldown")
+}
+
+// failingContentIDResolver is a ContentIDResolverCtx that always returns a transport error.
+type failingContentIDResolver struct {
+	name string
+}
+
+func (f *failingContentIDResolver) Name() string    { return f.name }
+func (f *failingContentIDResolver) IsEnabled() bool { return true }
+func (f *failingContentIDResolver) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+	return nil, errors.New("must not be called")
+}
+func (f *failingContentIDResolver) GetURL(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+func (f *failingContentIDResolver) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: true}
+}
+func (f *failingContentIDResolver) Close() error { return nil }
+func (f *failingContentIDResolver) ResolveContentIDCtx(_ context.Context, _ string) (string, error) {
+	return "", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+}
+
 // successContentIDResolver is a ContentIDResolverCtx that always succeeds.
 type successContentIDResolver struct {
 	name string
