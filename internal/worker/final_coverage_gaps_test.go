@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ func TestCovFinal_StopLeaseReleaseError(t *testing.T) {
 	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"})
 	require.NoError(t, err)
 	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	t.Cleanup(func() { _ = db.Close() })
 	repo := database.NewActressSyncRepository(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &ActressSyncManager{repo: repo, owner: "test", ctx: ctx, cancel: cancel, started: true}
@@ -124,11 +126,16 @@ func TestCovFinal_HeartbeatSuccess(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go manager.heartbeat(ctx, claimed.ID, claimed.LeaseToken, 3*time.Second, done, func() {})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		manager.heartbeat(ctx, claimed.ID, claimed.LeaseToken, 3*time.Second, done, func() {})
+	}()
 	time.Sleep(1500 * time.Millisecond)
 	cancel()
 	close(done)
-	time.Sleep(100 * time.Millisecond)
+	wg.Wait()
 }
 
 func TestCovFinal_HeartbeatBackoff(t *testing.T) {
@@ -147,9 +154,14 @@ func TestCovFinal_HeartbeatBackoff(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go manager.heartbeat(ctx, claimed.ID, claimed.LeaseToken, 3*time.Second, done, func() {})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		manager.heartbeat(ctx, claimed.ID, claimed.LeaseToken, 3*time.Second, done, func() {})
+	}()
 	time.Sleep(2500 * time.Millisecond)
 	cancel()
 	close(done)
-	time.Sleep(100 * time.Millisecond)
+	wg.Wait()
 }
