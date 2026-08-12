@@ -97,6 +97,14 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 			if canonicalRate || aliasRate {
 				ss.SetRateLimitPresence(true)
 			}
+			_, canonicalRetry := scraperRaw["retry_count"]
+			_, aliasRetry := scraperRaw["max_retries"]
+			if canonicalRetry || aliasRetry {
+				ss.SetRetryCountPresence(true)
+			}
+			if _, hasTimeout := scraperRaw["timeout"]; hasTimeout {
+				ss.SetTimeoutPresence(true)
+			}
 			if hasAliases {
 				// Decode without strict mode, then apply aliases,
 				// then validate remaining keys.

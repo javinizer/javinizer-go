@@ -82,6 +82,9 @@
 //	cfg.Metadata.NFO.Feature.IncludeTrailer         → nfo
 //	cfg.Metadata.NFO.Feature.PerFile                → api/core, nfo, workflow
 //	cfg.Metadata.Priority                    → aggregator
+//	cfg.System.ImageCacheEnabled               → api/core, api/temp
+//	cfg.System.ImageCacheMaxSizeMB             → api/core, api/temp
+//	cfg.System.ImageCacheTTLHours              → api/core, api/temp
 //	cfg.Metadata.NFO.Format.RatingSource           → nfo
 //	cfg.Metadata.RequiredFields              → aggregator
 //	cfg.Metadata.NFO.Extra.Tag                    → nfo
@@ -153,9 +156,6 @@
 //	cfg.Server.Port                         → api/core
 //	cfg.System.TempDir                      → api/core, scrape
 //	cfg.System.VersionCheckEnabled          → api/core
-//	cfg.System.ImageCacheEnabled            → api/core
-//	cfg.System.ImageCacheTTLHours           → api/core
-//	cfg.System.ImageCacheMaxSizeMB          → api/core
 //
 // To update this index: grep for "Config-bridge reads:" across internal/ and
 // rebuild the tables above.

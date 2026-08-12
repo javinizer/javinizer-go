@@ -1,6 +1,10 @@
 package contracts
 
-import "github.com/javinizer/javinizer-go/internal/models"
+import (
+	"time"
+
+	"github.com/javinizer/javinizer-go/internal/models"
+)
 
 // ActressMergePreviewRequest represents a merge preview request for two actresses.
 type ActressMergePreviewRequest struct {
@@ -23,6 +27,8 @@ type ActressMergePreviewResponse struct {
 	ProposedMerged     models.Actress         `json:"proposed_merged"`
 	Conflicts          []ActressMergeConflict `json:"conflicts"`
 	DefaultResolutions map[string]string      `json:"default_resolutions"`
+	TargetUpdatedAt    time.Time              `json:"target_updated_at"`
+	SourceUpdatedAt    time.Time              `json:"source_updated_at"`
 }
 
 // ActressMergeRequest represents a merge request with conflict resolutions.
@@ -30,6 +36,11 @@ type ActressMergeRequest struct {
 	TargetID    uint              `json:"target_id" binding:"required" example:"12"`
 	SourceID    uint              `json:"source_id" binding:"required" example:"34"`
 	Resolutions map[string]string `json:"resolutions,omitempty" example:"japanese_name:source,dmm_id:target"`
+	// TargetUpdatedAt/SourceUpdatedAt fence the merge against concurrent edits
+	// observed in a merge preview. They are optional for backward compatibility:
+	// omitting them performs an unfenced merge (pre-versioning behavior).
+	TargetUpdatedAt time.Time `json:"target_updated_at,omitempty"`
+	SourceUpdatedAt time.Time `json:"source_updated_at,omitempty"`
 }
 
 // ActressMergeResponse represents a completed actress merge operation.
