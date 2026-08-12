@@ -429,8 +429,12 @@ type ScraperSettings struct {
 	enabledDecoded  bool `yaml:"-" json:"-"`
 	enabledExplicit bool `yaml:"-" json:"-"`
 
-	rateLimitDecoded  bool `yaml:"-" json:"-"`
-	rateLimitExplicit bool `yaml:"-" json:"-"`
+	rateLimitDecoded   bool `yaml:"-" json:"-"`
+	rateLimitExplicit  bool `yaml:"-" json:"-"`
+	retryCountDecoded  bool `yaml:"-" json:"-"`
+	retryCountExplicit bool `yaml:"-" json:"-"`
+	timeoutDecoded     bool `yaml:"-" json:"-"`
+	timeoutExplicit    bool `yaml:"-" json:"-"`
 }
 
 // MarshalYAML preserves the full unified scraper settings shape so config
@@ -444,14 +448,18 @@ func (s *ScraperSettings) MarshalYAML() (interface{}, error) {
 
 	result["enabled"] = s.Enabled
 	result["language"] = s.Language
-	result["timeout"] = s.Timeout
+	if s.Timeout != 0 || s.TimeoutIsExplicit() {
+		result["timeout"] = s.Timeout
+	}
 	// Emit rate_limit only when set or explicitly zeroed: an omitted key must
 	// re-merge defaults on next load instead of persisting a synthesized zero
 	// as an explicit no-throttle override.
 	if s.RateLimit != 0 || s.RateLimitIsExplicit() {
 		result["rate_limit"] = s.RateLimit
 	}
-	result["retry_count"] = s.RetryCount
+	if s.RetryCount != 0 || s.RetryCountIsExplicit() {
+		result["retry_count"] = s.RetryCount
+	}
 	result["user_agent"] = s.UserAgent
 	if s.Proxy != nil {
 		result["proxy"] = s.Proxy
@@ -561,10 +569,10 @@ func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
 		// the default when the key was omitted entirely.
 		s.RateLimit = defaults.RateLimit
 	}
-	if defaults.Timeout != 0 && s.Timeout == 0 {
+	if defaults.Timeout != 0 && s.Timeout == 0 && !s.TimeoutIsExplicit() {
 		s.Timeout = defaults.Timeout
 	}
-	if defaults.RetryCount != 0 && s.RetryCount == 0 {
+	if defaults.RetryCount != 0 && s.RetryCount == 0 && !s.RetryCountIsExplicit() {
 		s.RetryCount = defaults.RetryCount
 	}
 	if defaults.PlaceholderThresholdKB != 0 && s.PlaceholderThresholdKB == 0 {
@@ -601,6 +609,28 @@ func (s *ScraperSettings) SetRateLimitPresence(explicit bool) {
 // an omitted key.
 func (s *ScraperSettings) RateLimitIsExplicit() bool {
 	return s != nil && s.rateLimitDecoded && s.rateLimitExplicit
+}
+
+// SetRetryCountPresence records whether the retry_count key was present when decoding a scraper entry (including the deprecated max_retries alias). Programmatic literals must not call it.
+func (s *ScraperSettings) SetRetryCountPresence(explicit bool) {
+	s.retryCountDecoded = true
+	s.retryCountExplicit = explicit
+}
+
+// RetryCountIsExplicit reports whether retry_count was explicitly configured, letting scrapers honor an intentional 0 while still defaulting an omitted key.
+func (s *ScraperSettings) RetryCountIsExplicit() bool {
+	return s != nil && s.retryCountDecoded && s.retryCountExplicit
+}
+
+// SetTimeoutPresence records whether the timeout key was present when decoding a scraper entry. Programmatic literals must not call it.
+func (s *ScraperSettings) SetTimeoutPresence(explicit bool) {
+	s.timeoutDecoded = true
+	s.timeoutExplicit = explicit
+}
+
+// TimeoutIsExplicit reports whether timeout was explicitly configured, letting scrapers honor an intentional 0 (no timeout) while still defaulting an omitted key.
+func (s *ScraperSettings) TimeoutIsExplicit() bool {
+	return s != nil && s.timeoutDecoded && s.timeoutExplicit
 }
 
 // MergeEnabledDefault inherits defaults.Enabled when s was decoded with an

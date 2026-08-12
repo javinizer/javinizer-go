@@ -273,6 +273,8 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 			// MergeDefaultsFrom (codex). Canonical value precedence is kept by
 			// applyYAMLAliases.
 			ss.SetRateLimitPresence(scraperYAMLHasKey(valNode, "rate_limit") || scraperYAMLHasKey(valNode, "request_delay"))
+			ss.SetRetryCountPresence(scraperYAMLHasKey(valNode, "retry_count") || scraperYAMLHasKey(valNode, "max_retries"))
+			ss.SetTimeoutPresence(scraperYAMLHasKey(valNode, "timeout"))
 
 			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
 			// Walk the node content to find alias keys and apply them if the canonical
