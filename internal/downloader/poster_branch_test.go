@@ -68,10 +68,15 @@ func TestDownloadPoster_CroppedFilesystemBranches(t *testing.T) {
 		base := afero.NewMemMapFs()
 		path := nativePath("/output/POSTER-001-poster.jpg")
 		require.NoError(t, afero.WriteFile(base, path, []byte("old"), 0644))
-		fs := rejectExistingRenameFS{Fs: base}
-		result, err := posterBranchDownloader(server.Client(), fs).downloadPoster(context.Background(), movie, "/output", nil, true)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to replace poster")
+		// Wedge the staged byte install only; the aside/restore renames
+		// (from a .dlbak sibling) must survive so the old bytes restore.
+		fs := rejectStagedRenameFS{Fs: base}
+		result, err := posterBranchDownloader(server.Client(), fs).downloadPoster(context.Background(), movie, "/output", nil, true, downloadLedger{opID: "test-op-branch", recorder: &armedTestLedger{}})
+		require.ErrorContains(t, err, "staged install rejected")
 		assert.False(t, result.Downloaded)
+		assert.NotNil(t, result.Error)
+		got, rerr := afero.ReadFile(base, path)
+		require.NoError(t, rerr)
+		require.Equal(t, "old", string(got), "failed install restores the pre-existing bytes")
 	})
 }

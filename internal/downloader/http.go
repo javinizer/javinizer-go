@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/spf13/afero"
 )
@@ -67,12 +66,14 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	default:
 	}
 
-	existed := false
+	// Existence is classified TWICE on overwrite: here, fail-fast before any
+	// network fetch (stat wedges abort the download); then AGAIN inside the
+	// install-time destination lock (the bounded section that must be racing
+	// correct — two ops can never both classify "create" for one slot).
 	if overwriteExisting {
 		info, err := d.fs.Stat(destPath)
 		switch {
 		case err == nil:
-			existed = true
 			result.Size = info.Size()
 		case os.IsNotExist(err):
 		default:
@@ -187,16 +188,29 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	if err := fsutil.ReplaceFile(d.fs, tempPath, destPath); err != nil {
+	// P3: the byte install runs through the overwrite discipline — per-dest
+	// lock, in-lock existence classification, ledger-armed skip+warn for
+	// unrecorded replacements, backup-aside + restore-on-failure.
+	ledger := resolveDownloadLedger(options)
+	skipped, replaced, instErr := d.installOverwriting(ctx, tempPath, destPath, ledger)
+	if instErr != nil {
 		_ = d.fs.Remove(tempPath)
-		result.Error = fmt.Errorf("failed to replace file: %w", err)
+		result.Error = instErr
 		result.Duration = time.Since(startTime)
 		return result, result.Error
+	}
+	if skipped {
+		_ = d.fs.Remove(tempPath)
+		result.Skipped = true
+		result.Downloaded = false
+		result.LocalPath = destPath // the preserved existing artwork
+		result.Duration = time.Since(startTime)
+		return result, nil
 	}
 
 	result.Size = written
 	result.Downloaded = true
-	result.Replaced = existed
+	result.Replaced = replaced
 	result.Duration = time.Since(startTime)
 
 	return result, nil

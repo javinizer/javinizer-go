@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/afero"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
@@ -20,6 +21,11 @@ type Downloader struct {
 	httpClient     httpclient.HTTPClient
 	templateEngine template.EngineInterface // Shared template engine (safe for concurrent use)
 	pathResolver   *MediaPathResolver       // Shared path resolver for consistent media naming
+
+	// destLocks serializes create-vs-replace classification + every byte swap
+	// per destination path (POSTER-WRITE-HARDENING P3 D8). Defaults to the
+	// process-wide registry shared with the history reverter's restore path.
+	destLocks *fsutil.KeyedLockRegistry
 
 	// Name formatting resolved from config at construction time
 	actorFirstNameOrder bool // true = FirstName LastName, false = LastName FirstName
@@ -34,6 +40,13 @@ type DownloadCmd struct {
 	DownloadExtrafanart    *bool // Optional override for config.DownloadExtrafanart; nil = use config
 	OverwriteExistingMedia bool
 	Dedup                  *sync.Map
+	// OperationID + Recorder arm the revert ledger for destructive overwrites
+	// (POSTER-WRITE-HARDENING P3): any replaced pre-existing byte pair is
+	// journaled (backup-aside + record BEFORE the swap). An unarmed overwrite
+	// is refused with skip+warn — existing artwork is never destroyed without
+	// a recorded operation.
+	OperationID string
+	Recorder    ReplacementRecorder
 }
 
 // DownloadOutcome wraps the results of a Download call.
@@ -118,8 +131,17 @@ func NewDownloader(client httpclient.HTTPClient, fs afero.Fs, cfg *Config, engin
 		httpClient:          client,
 		templateEngine:      engine,
 		pathResolver:        NewMediaPathResolver(cfg.MediaFormatConfig, engine),
+		destLocks:           fsutil.SharedDestLocks(),
 		actorFirstNameOrder: cfg.ActorFirstNameOrder,
 	}
+}
+
+// WithDestLocks returns a copy sharing everything but the destination lock
+// registry — tests use isolated registries.
+func (d *Downloader) WithDestLocks(reg *fsutil.KeyedLockRegistry) *Downloader {
+	cp := *d
+	cp.destLocks = reg
+	return &cp
 }
 
 // buildTemplateContext creates a template.Context for media path resolution.
@@ -181,7 +203,7 @@ func (d *Downloader) Download(ctx context.Context, cmd DownloadCmd) (*DownloadOu
 		extrafanartEnabled = *cmd.DownloadExtrafanart
 	}
 
-	results, err := d.downloadAllWithExtrafanart(ctx, cmd.Movie, cmd.DestDir, cmd.Multipart, extrafanartEnabled, cmd.OverwriteExistingMedia, cmd.Dedup)
+	results, err := d.downloadAllWithExtrafanart(ctx, cmd.Movie, cmd.DestDir, cmd.Multipart, extrafanartEnabled, cmd.OverwriteExistingMedia, cmd.Dedup, downloadLedger{opID: cmd.OperationID, recorder: cmd.Recorder})
 	createdPaths := make([]string, 0, len(results))
 	downloadedPaths := make([]string, 0, len(results))
 	for _, r := range results {

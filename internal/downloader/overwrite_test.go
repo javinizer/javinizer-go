@@ -63,6 +63,8 @@ func TestDownload_OverwriteExistingReplacesAndClassifies(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, "/output/TEST-001-fanart.jpg", []byte("old bytes"), 0644))
 	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
 	outcome, err := d.Download(context.Background(), DownloadCmd{
+		OperationID:            "test-op-" + t.Name(),
+		Recorder:               &armedTestLedger{},
 		Movie:                  &models.Movie{ID: "TEST-001", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg"}},
 		DestDir:                "/output",
 		OverwriteExistingMedia: true,
@@ -364,7 +366,9 @@ func TestDownload_OverwriteReplacesEachEnabledMediaType(t *testing.T) {
 		require.NoError(t, afero.WriteFile(fs, path, []byte("old"), 0644))
 	}
 
-	outcome, err := d.Download(context.Background(), DownloadCmd{Movie: movie, DestDir: "/output", OverwriteExistingMedia: true, Dedup: &sync.Map{}})
+	outcome, err := d.Download(context.Background(), DownloadCmd{
+		OperationID: "test-op-" + t.Name(),
+		Recorder:    &armedTestLedger{}, Movie: movie, DestDir: "/output", OverwriteExistingMedia: true, Dedup: &sync.Map{}})
 	require.NoError(t, err)
 	require.NotNil(t, outcome)
 	for _, mediaType := range []MediaType{MediaTypeCover, MediaTypeExtrafanart, MediaTypeTrailer, MediaTypeActress} {
@@ -385,7 +389,9 @@ func TestDownload_OverwriteReplacesEachEnabledMediaType(t *testing.T) {
 
 	disabled := NewDownloader(server.Client(), fs, &Config{MediaFormatConfig: cfg.MediaFormatConfig}, nil)
 	before := requests.Load()
-	disabledOutcome, disabledErr := disabled.Download(context.Background(), DownloadCmd{Movie: movie, DestDir: "/output", OverwriteExistingMedia: true, Dedup: &sync.Map{}})
+	disabledOutcome, disabledErr := disabled.Download(context.Background(), DownloadCmd{
+		OperationID: "test-op-" + t.Name(),
+		Recorder:    &armedTestLedger{}, Movie: movie, DestDir: "/output", OverwriteExistingMedia: true, Dedup: &sync.Map{}})
 	require.NoError(t, disabledErr)
 	assert.Equal(t, before, requests.Load())
 	assert.Empty(t, disabledOutcome.DownloadedPaths)
@@ -477,6 +483,8 @@ func TestDownload_OverwritePartialOutcomeSeparatesReplacedAndCreated(t *testing.
 		},
 	}, nil)
 	outcome, err := d.Download(context.Background(), DownloadCmd{
+		OperationID: "test-op-" + t.Name(),
+		Recorder:    &armedTestLedger{},
 		Movie: &models.Movie{
 			ID:          "TEST-010",
 			Poster:      models.PosterState{CoverURL: server.URL + "/cover.jpg", PosterURL: server.URL + "/poster.jpg"},
@@ -573,7 +581,7 @@ func TestDownloadPoster_OverwriteDirectReplacesExisting(t *testing.T) {
 	result, err := d.downloadPoster(context.Background(), &models.Movie{
 		ID:     "TEST-007",
 		Poster: models.PosterState{PosterURL: server.URL + "/poster.jpg"},
-	}, "/output", nil, true, &sync.Map{})
+	}, "/output", nil, true, &sync.Map{}, downloadLedger{opID: "test-op-direct", recorder: &armedTestLedger{}})
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), requests.Load())
 	assert.True(t, result.Downloaded)
@@ -623,7 +631,7 @@ func TestDownloadPoster_OverwriteCroppedReplacesAndCleansTemps(t *testing.T) {
 		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
 	}, nil)
 	movie := &models.Movie{ID: "TEST-003", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg", ShouldCropPoster: true}}
-	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true, &sync.Map{})
+	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true, &sync.Map{}, downloadLedger{opID: "test-op-" + t.Name(), recorder: &armedTestLedger{}})
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 	assert.True(t, result.Replaced)
@@ -647,7 +655,7 @@ func TestDownloadPoster_OverwriteCropFailurePreservesExisting(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, posterPath, old, 0644))
 	d := NewDownloader(server.Client(), fs, &Config{DownloadPoster: true}, nil)
 	movie := &models.Movie{ID: "TEST-004", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg", ShouldCropPoster: true}}
-	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true, &sync.Map{})
+	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true, &sync.Map{}, downloadLedger{opID: "test-op-" + t.Name(), recorder: &armedTestLedger{}})
 	require.Error(t, err)
 	assert.False(t, result.Downloaded)
 	got, readErr := afero.ReadFile(fs, posterPath)
@@ -677,6 +685,10 @@ func TestDownload_OverwriteStatErrorDoesNotFetch(t *testing.T) {
 	assert.False(t, result.Downloaded)
 }
 
+// P3 rewrite of the replace-failure contract: the install-time wedge now
+// rolls the destination back to the PRE-EXISTING bytes via the aside backup
+// (previously the destination simply never got swapped). Error surfaces, dest
+// intact, no residue.
 func TestDownload_OverwriteReplaceFailurePreservesExisting(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -688,15 +700,21 @@ func TestDownload_OverwriteReplaceFailurePreservesExisting(t *testing.T) {
 	path := "/output/TEST-006-fanart.jpg"
 	old := []byte("old bytes")
 	require.NoError(t, afero.WriteFile(base, path, old, 0644))
-	fs := rejectExistingRenameFS{Fs: base}
+	fs := rejectStagedRenameFS{Fs: base}
 	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
-	result, err := d.download(context.Background(), server.URL+"/cover.jpg", path, MediaTypeCover, true, nil)
-	require.Error(t, err)
+	rec := &armedTestLedger{}
+	result, err := d.download(context.Background(), server.URL+"/cover.jpg", path, MediaTypeCover, true, nil, downloadLedger{opID: "test-op-006", recorder: rec})
+	require.Error(t, err, "staged install rejection surfaces")
 	assert.False(t, result.Downloaded)
 	got, readErr := afero.ReadFile(base, path)
 	require.NoError(t, readErr)
-	assert.Equal(t, old, got)
+	assert.Equal(t, old, got, "backup restored over the failed install")
 	assertNoUniqueTemps(t, base, "/output")
+	entries, _ := afero.ReadDir(base, "/output")
+	for _, e := range entries {
+		assert.False(t, strings.Contains(e.Name(), ".dlbak."), "backup swept after restore: %s", e.Name())
+	}
+	assert.Len(t, rec.get(), 1, "the replacement was journaled before the swap")
 }
 
 func TestDownload_DedupSharedDestinationClaimsOnce(t *testing.T) {
@@ -740,9 +758,12 @@ func TestDownload_DedupSharedDestinationClaimsOnce(t *testing.T) {
 	assert.Equal(t, 1, downloaded)
 	assert.Equal(t, 1, skipped)
 	assertNoUniqueTemps(t, fs, "/output")
-	result, err := d.download(context.Background(), server.URL+"/shared.jpg", path, MediaTypeTrailer, true, &sync.Map{})
+	// The trailing solo leg carries an armed ledger — the destination now
+	// exists, and destructive replaces always journal (P3 rule).
+	result, err := d.download(context.Background(), server.URL+"/shared.jpg", path, MediaTypeTrailer, true, &sync.Map{}, downloadLedger{opID: "test-op-solo", recorder: &armedTestLedger{}})
 	require.NoError(t, err)
 	assert.True(t, result.Downloaded)
+	assert.True(t, result.Replaced, "armed overwrite of the shared dest classifies as replace")
 	assert.Equal(t, int32(2), requests.Load())
 }
 
@@ -828,8 +849,21 @@ func TestDownload_UniqueTempsWithoutDedup(t *testing.T) {
 	assert.Equal(t, int32(2), client.requests.Load())
 	assert.NoError(t, errs[0])
 	assert.NoError(t, errs[1])
-	assert.True(t, results[0].Downloaded)
-	assert.True(t, results[1].Downloaded)
+	// P3 create-vs-create: no dedup map, no armed ledger — the race loser
+	// classifies "exists" inside the dest lock at install time and SKIPS
+	// instead of clobbering the winner's bytes (conflict over clobber).
+	downloaded := 0
+	skipped := 0
+	for _, r := range results {
+		if r.Downloaded {
+			downloaded++
+		}
+		if r.Skipped {
+			skipped++
+		}
+	}
+	assert.Equal(t, 1, downloaded, "exactly one winner installs its bytes")
+	assert.Equal(t, 1, skipped, "the race loser skips")
 	assertNoUniqueTemps(t, fs, "/output")
 }
 

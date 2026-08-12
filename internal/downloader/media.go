@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -24,12 +23,13 @@ func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, des
 	tmplCtx := d.buildTemplateContext(movie, multipart)
 	destPath := d.pathResolver.ResolveFanartPath(movie, nil, true, tmplCtx, destDir)
 
-	return d.download(ctx, movie.Poster.CoverURL, destPath, MediaTypeCover, overwriteExisting, dedup)
+	return d.download(ctx, movie.Poster.CoverURL, destPath, MediaTypeCover, overwriteExisting, dedup, resolveDownloadLedger(options))
 }
 
 func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, options ...any) (finalResult *DownloadResult, finalErr error) {
 	startTime := time.Now()
 	overwriteExisting, dedup := resolveDownloadOptions(options)
+	ledger := resolveDownloadLedger(options)
 	if !d.config.DownloadPoster {
 		return &DownloadResult{Type: MediaTypePoster, Downloaded: false}, nil
 	}
@@ -49,7 +49,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
 
 	if !geometryUsable && !movie.Poster.ShouldCropPoster {
-		return d.download(ctx, posterURL, destPath, MediaTypePoster, overwriteExisting, dedup)
+		return d.download(ctx, posterURL, destPath, MediaTypePoster, overwriteExisting, dedup, ledger)
 	}
 
 	result := &DownloadResult{
@@ -104,7 +104,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	fullPath := uniqueTempPath(destPath, "full.tmp")
 	defer func() { _ = d.fs.Remove(fullPath) }()
 
-	fullResult, err := d.download(ctx, posterURL, fullPath, MediaTypePoster, overwriteExisting, nil)
+	fullResult, err := d.download(ctx, posterURL, fullPath, MediaTypePoster, overwriteExisting, nil, ledger)
 	fullResult.LocalPath = ""
 	if err != nil || !fullResult.Downloaded {
 		fullResult.Downloaded = false
@@ -135,23 +135,42 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	if overwriteExisting {
-		if err := fsutil.ReplaceFile(d.fs, candidate, destPath); err != nil {
-			fullResult.Error = fmt.Errorf("failed to replace poster: %w", err)
+		skipped, replaced, instErr := d.installOverwriting(ctx, candidate, destPath, ledger)
+		switch {
+		case instErr != nil:
+			fullResult.Error = instErr
 			fullResult.Downloaded = false
 			fullResult.Replaced = false
 			fullResult.LocalPath = ""
 			fullResult.Duration = time.Since(startTime)
 			return fullResult, fullResult.Error
+		case skipped:
+			// Ledger-less destructive overwrite refused: keep existing artwork,
+			// report skip (reuse the existing path for downstream state).
+			fullResult.Skipped = true
+			fullResult.Downloaded = false
+			fullResult.LocalPath = destPath
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, nil
+		default:
+			fullResult.Downloaded = true
+			fullResult.Replaced = replaced
+			d.finalizePosterResult(fullResult, destPath)
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, nil
 		}
-	} else if rerr := d.fs.Rename(candidate, destPath); rerr != nil {
-		logging.Warnf("downloadPoster: failed to promote %s: %v", candidate, rerr)
-		fullResult.Downloaded = false
-		fullResult.Replaced = false
-		fullResult.LocalPath = ""
-		fullResult.Size = 0
-		fullResult.Error = fmt.Errorf("failed to finalize poster: %w", rerr)
-		fullResult.Duration = time.Since(startTime)
-		return fullResult, fullResult.Error
+	}
+	if !overwriteExisting {
+		if rerr := d.fs.Rename(candidate, destPath); rerr != nil {
+			logging.Warnf("downloadPoster: failed to promote %s: %v", candidate, rerr)
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.LocalPath = ""
+			fullResult.Size = 0
+			fullResult.Error = fmt.Errorf("failed to finalize poster: %w", rerr)
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, fullResult.Error
+		}
 	}
 
 	fullResult.Downloaded = true
@@ -241,7 +260,7 @@ func (d *Downloader) downloadExtrafanart(ctx context.Context, movie *models.Movi
 			break
 		}
 		destPath := filepath.Join(extrafanartDir, screenshotNames[i])
-		result, err := d.download(ctx, url, destPath, MediaTypeExtrafanart, overwriteExisting, dedup)
+		result, err := d.download(ctx, url, destPath, MediaTypeExtrafanart, overwriteExisting, dedup, resolveDownloadLedger(options))
 		if err != nil {
 			result.Error = err
 		}
@@ -267,7 +286,7 @@ func (d *Downloader) downloadTrailer(ctx context.Context, movie *models.Movie, d
 
 	var lastResult *DownloadResult
 	retryErr := op.ExecuteWithRetry(ctx, func() error {
-		res, err := d.download(ctx, movie.TrailerURL, destPath, MediaTypeTrailer, overwriteExisting, dedup)
+		res, err := d.download(ctx, movie.TrailerURL, destPath, MediaTypeTrailer, overwriteExisting, dedup, resolveDownloadLedger(options))
 		if err == nil {
 			lastResult = res
 		}
@@ -324,7 +343,7 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 		}
 		destPath := filepath.Join(actressDir, filename)
 
-		result, err := d.download(ctx, actress.ThumbURL, destPath, MediaTypeActress, overwriteExisting, dedup)
+		result, err := d.download(ctx, actress.ThumbURL, destPath, MediaTypeActress, overwriteExisting, dedup, resolveDownloadLedger(options))
 		if err != nil {
 			result.Error = err
 		}
@@ -340,7 +359,8 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 	criticalAttempted := 0
 	criticalSucceeded := 0
 
-	coverResult, _ := d.downloadCover(ctx, movie, destDir, multipart, overwriteExisting, dedup)
+	coverResult, _ := d.downloadCover(ctx, movie, destDir, multipart, overwriteExisting, dedup, resolveDownloadLedger(options))
+
 	if coverResult != nil {
 		if coverResult.Error != nil {
 			logging.Warnf("downloadAll: cover download failed for %s: %v", movie.ID, coverResult.Error)
@@ -354,7 +374,7 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 		results = append(results, *coverResult)
 	}
 
-	posterResult, _ := d.downloadPoster(ctx, movie, destDir, multipart, overwriteExisting, dedup)
+	posterResult, _ := d.downloadPoster(ctx, movie, destDir, multipart, overwriteExisting, dedup, resolveDownloadLedger(options))
 	if posterResult != nil {
 		if posterResult.Error != nil {
 			logging.Warnf("downloadAll: poster download failed for %s: %v", movie.ID, posterResult.Error)
@@ -374,7 +394,7 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 		results = append(results, *posterResult)
 	}
 
-	extrafanart, _ := d.downloadExtrafanart(ctx, movie, destDir, multipart, extrafanartEnabled, overwriteExisting, dedup)
+	extrafanart, _ := d.downloadExtrafanart(ctx, movie, destDir, multipart, extrafanartEnabled, overwriteExisting, dedup, resolveDownloadLedger(options))
 	for i := range extrafanart {
 		if extrafanart[i].Error != nil {
 			logging.Warnf("downloadAll: extrafanart[%d] download failed for %s: %v", i, movie.ID, extrafanart[i].Error)
@@ -382,7 +402,7 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 	}
 	results = append(results, extrafanart...)
 
-	if trailerResult, _ := d.downloadTrailer(ctx, movie, destDir, multipart, overwriteExisting, dedup); trailerResult != nil {
+	if trailerResult, _ := d.downloadTrailer(ctx, movie, destDir, multipart, overwriteExisting, dedup, resolveDownloadLedger(options)); trailerResult != nil {
 		if trailerResult.Error != nil {
 			logging.Warnf("downloadAll: trailer download failed for %s: %v", movie.ID, trailerResult.Error)
 		}
@@ -394,7 +414,7 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 		partNumber = multipart.PartNumber
 	}
 	if partNumber == 0 || partNumber == 1 || overwriteExisting {
-		actresses, err := d.downloadActressImages(ctx, movie, destDir, overwriteExisting, dedup)
+		actresses, err := d.downloadActressImages(ctx, movie, destDir, overwriteExisting, dedup, resolveDownloadLedger(options))
 		if err != nil {
 			logging.Warnf("downloadAll: actress image download aborted for %s: %v", movie.ID, err)
 		}
