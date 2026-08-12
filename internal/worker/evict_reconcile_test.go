@@ -186,6 +186,89 @@ func TestReconcileEvictWitnessWedgeRetains(t *testing.T) {
 	assert.Equal(t, "old-crop", string(got), "wedged leg untouched")
 }
 
+// An undecodable results column refuses arbitration — the witness (and the
+// poster legs) stay in place until a decodable row can prove the outcome.
+func TestReconcileEvictWitnessUndecodableResultsRetained(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-EVD"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "EV-3.jpg"), []byte("old-crop"), 0o644))
+	payload, _ := json.Marshal(evictWitness{OldID: "EV-3", NewSourceURL: "https://new/z.jpg"})
+	wp := filepath.Join(dir, ".evict-EV-3.json")
+	require.NoError(t, afero.WriteFile(fs, wp, payload, 0o644))
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(&models.Job{Results: "{not-json"}, nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n := cl.reconcileEvictWitness(context.Background(), dir, "JOB-W1", wp)
+	assert.Equal(t, 0, n)
+	_, wErr := fs.Stat(wp)
+	assert.NoError(t, wErr, "witness retained — the outcome is unprovable")
+	_, lErr := fs.Stat(filepath.Join(dir, "EV-3.jpg"))
+	assert.NoError(t, lErr, "no leg touched without arbitration")
+}
+
+// Decoded results can carry non-nil entries whose Movie is nil (e.g. a
+// failed row persisted without a movie): the arbitration scan skips them
+// instead of dereferencing nil or treating them as commit evidence.
+func TestReconcileEvictWitnessNilMovieEntriesSkipped(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-EVN"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "EV-4.jpg"), []byte("old-crop"), 0o644))
+	payload, _ := json.Marshal(evictWitness{OldID: "EV-4", NewSourceURL: "https://new/n.jpg"})
+	wp := filepath.Join(dir, ".evict-EV-4.json")
+	require.NoError(t, afero.WriteFile(fs, wp, payload, 0o644))
+	res := map[string]*resultstore.MovieResult{
+		// Nil-Movie row: must be skipped by the scan, never a crash or a match.
+		"/f/no-movie.mp4": {
+			ResultID:      "res-nm",
+			Status:        models.JobStatusCompleted,
+			FileMatchInfo: models.FileMatchInfo{Path: "/f/no-movie.mp4", MovieID: "EV-M"},
+		},
+		// Real row carrying the OLD source: proves the commit, so the nil-movie
+		// row's skip is exercised deterministically regardless of map order.
+		"/f/ev.mp4": {
+			ResultID:      "res-ev",
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "EV-4", Poster: models.PosterState{PosterURL: "https://old-site/still.jpg"}},
+			FileMatchInfo: models.FileMatchInfo{Path: "/f/ev.mp4", MovieID: "EV-4"},
+		},
+	}
+	data, err := json.Marshal(res)
+	require.NoError(t, err)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(&models.Job{Results: string(data)}, nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n := cl.reconcileEvictWitness(context.Background(), dir, "JOB-W1", wp)
+	assert.Equal(t, 1, n, "nothing committed — witness swept after skipping the nil-movie row")
+	_, wErr := fs.Stat(wp)
+	assert.Error(t, wErr, "witness swept")
+	_, lErr := fs.Stat(filepath.Join(dir, "EV-4.jpg"))
+	assert.NoError(t, lErr, "uncommitted legs untouched")
+}
+
+// A wedged witness sweep AFTER committed-leg removal keeps the witness so the
+// eviction record retries at the next startup.
+func TestReconcileEvictWitnessSweepErrorRetains(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-EVS"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(dir, "EV-5.jpg"), []byte("old-crop"), 0o644))
+	payload, _ := json.Marshal(evictWitness{OldID: "EV-5", NewSourceURL: "https://new/s.jpg"})
+	wp := filepath.Join(dir, ".evict-EV-5.json")
+	require.NoError(t, afero.WriteFile(base, wp, payload, 0o644))
+	wedged := selectiveFailRemoveFS{Fs: base, failSuffix: ".evict-EV-5.json"}
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-W1").Return(evictWitnessJobRowsFor(t, "EV-5", "https://new/s.jpg"), nil)
+	cl := &TempDirCleaner{fs: wedged, tempDir: "/tmp", jobRepo: repo}
+	n := cl.reconcileEvictWitness(context.Background(), dir, "JOB-W1", wp)
+	assert.Equal(t, 0, n, "sweep wedge keeps the witness for retry")
+	_, wErr := base.Stat(wp)
+	assert.NoError(t, wErr, "witness retained")
+	_, lErr := base.Stat(filepath.Join(dir, "EV-5.jpg"))
+	assert.Error(t, lErr, "committed leg was removed before the sweep wedge")
+}
+
 // An unsafe witness ID never steers any removal outside the job poster dir.
 func TestReconcileEvictWitnessUnsafeIDKept(t *testing.T) {
 	fs := afero.NewMemMapFs()
