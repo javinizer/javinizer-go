@@ -105,6 +105,9 @@ func mergeActresses(deps ActressDeps) gin.HandlerFunc {
 		var err error
 		if req.TargetUpdatedAt.IsZero() && req.SourceUpdatedAt.IsZero() {
 			result, err = deps.ActressRepo.Merge(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions)
+		} else if req.TargetUpdatedAt.IsZero() || req.SourceUpdatedAt.IsZero() {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "target_updated_at and source_updated_at must both be provided or both omitted"})
+			return
 		} else {
 			result, err = deps.ActressRepo.MergeWithVersions(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions, req.TargetUpdatedAt, req.SourceUpdatedAt)
 		}

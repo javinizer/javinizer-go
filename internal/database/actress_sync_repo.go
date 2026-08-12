@@ -360,6 +360,9 @@ func (r *ActressSyncRepository) releaseOwnerTask(tx *gorm.DB, task models.Actres
 	switch {
 	case cancelRequested:
 		updates["status"], updates["stage"], updates["outcome"], updates["completed_at"] = models.ActressSyncTaskCancelled, "completed", "cancelled", now
+		if task.Attempts > 0 {
+			updates["attempts"] = task.Attempts - 1
+		}
 	case task.Attempts >= actressSyncAttemptCap:
 		updates["status"], updates["stage"], updates["outcome"], updates["error_message"], updates["completed_at"] = models.ActressSyncTaskFailed, "completed", "failed", "attempt_cap_reached", now
 	}
