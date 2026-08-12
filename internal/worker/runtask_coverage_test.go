@@ -14,7 +14,7 @@ import (
 
 type timeoutResolverScraper struct{}
 
-func (s *timeoutResolverScraper) Name() string { return "timeout" }
+func (s *timeoutResolverScraper) Name() string { return "dmm" }
 func (s *timeoutResolverScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
 	return nil, nil
 }
@@ -54,7 +54,7 @@ func TestRunTaskCov_DeadlineExceeded(t *testing.T) {
 
 type retryableResolverScraper struct{}
 
-func (s *retryableResolverScraper) Name() string { return "retryable" }
+func (s *retryableResolverScraper) Name() string { return "dmm" }
 func (s *retryableResolverScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
 	return nil, nil
 }
@@ -95,7 +95,7 @@ func TestRunTaskCov_RetryableError(t *testing.T) {
 
 type verifiedResolverScraper struct{}
 
-func (s *verifiedResolverScraper) Name() string { return "verified" }
+func (s *verifiedResolverScraper) Name() string { return "dmm" }
 func (s *verifiedResolverScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
 	return nil, nil
 }
