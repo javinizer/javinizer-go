@@ -1,0 +1,659 @@
+package actresscache
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/http"
+	"net/url"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/javinizer/javinizer-go/internal/ssrf"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// The proxied-request exemption follows the request's chosen proxy endpoint
+// AND pins it: net/http dials the proxy (canonical scheme default port
+// included) with the marker, and the resolved+validated answers are dialed,
+// not the freshly-re-resolvable hostname.
+func TestProxyDialExemptionFollowsTheProxiedRequest(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, _ string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("198.51.100.7")}, nil
+	}
+	sentinel := errors.New("reached proxy endpoint")
+	var dialed []string
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy.example"}),
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://img.example/thumb.jpg")
+	require.ErrorIs(t, err, sentinel)
+	require.Equal(t, []string{"198.51.100.7:80"}, dialed, "proxy dial is pinned to the resolved answer")
+}
+
+// An unresolvable configured proxy fails the request loudly instead of
+// silently re-resolving on someone else's resolver.
+func TestProxyDialExemptionFailsWhenProxyUnresolvable(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, _ string) ([]net.IP, error) { return nil, errors.New("nxdomain") }
+	sentinel := errors.New("must not dial")
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy.example"}),
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://img.example/thumb.jpg")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, sentinel)
+	assert.Contains(t, err.Error(), "resolve configured proxy")
+}
+
+// A dial to the SAME authority without the request marker (direct routing
+// via NO_PROXY, or rebinding past preflight) must stay guarded.
+func TestDialWithoutRequestMarkerStaysGuarded(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("10.0.0.99")}, nil
+	}
+	sentinel := errors.New("raw fallback leaked without marker")
+	var dialed []string
+	record := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		return nil, sentinel
+	}
+	transport := &http.Transport{
+		Proxy:       http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy.example:3128"}),
+		DialContext: record,
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	inner := fetcher.client.Transport.(*proxyPinningTransport).base.(*http.Transport)
+
+	_, err = inner.DialContext(context.Background(), "tcp", "proxy.example:3128")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, sentinel)
+	assert.Empty(t, dialed, "markerless dial must never reach the raw fallback")
+}
+
+// Targets routed directly (proxy func returns nil for them) are not stamped:
+// the dial resolves locally, validates, and pins.
+func TestDirectTargetIsNotStampedAndStaysPinned(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	sentinel := errors.New("dialed")
+	var dialed []string
+	noProxy := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "direct.example" {
+			return nil, nil
+		}
+		return &url.URL{Scheme: "http", Host: "proxy.example:3128"}, nil
+	}
+	transport := &http.Transport{
+		Proxy: noProxy,
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://direct.example/thumb.jpg")
+	require.ErrorIs(t, err, sentinel)
+	require.Equal(t, []string{"93.184.216.34:443"}, dialed, "direct target is pinned to the validated IP")
+}
+
+// Literal-IP proxy endpoints dial through untouched (no resolution needed).
+func TestProxyDialExemptionLiteralIPPassthrough(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		t.Fatal("literal proxy endpoints must not resolve")
+		return nil, nil
+	}
+	sentinel := errors.New("reached literal proxy")
+	var dialed string
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "192.0.2.5:3128"}),
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = addr
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://img.example/thumb.jpg")
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, "192.0.2.5:3128", dialed)
+}
+
+// An empty resolver answer set fails loudly, never riding the raw fallback.
+func TestProxyDialExemptionFailsOnEmptyAnswers(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) { return nil, nil }
+	sentinel := errors.New("must not dial")
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy.example"}),
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://img.example/thumb.jpg")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, sentinel)
+	assert.Contains(t, err.Error(), "no addresses")
+}
+
+func TestCanonicalProxyDialTargetSchemeDefaults(t *testing.T) {
+	assert.Equal(t, "proxy.example:443", canonicalProxyDialTarget("https", "Proxy.EXAMPLE", ""))
+	assert.Equal(t, "proxy.example:1080", canonicalProxyDialTarget("socks5", "proxy.example", ""))
+	assert.Equal(t, "proxy.example:1080", canonicalProxyDialTarget("socks5h", "proxy.example", ""))
+	assert.Equal(t, "proxy.example:80", canonicalProxyDialTarget("http", "proxy.example", ""))
+	assert.Equal(t, "proxy.example:8443", canonicalProxyDialTarget("http", "proxy.example", "8443"))
+}
+
+// The preflight (checkFetchTarget) must evaluate the proxy decision on the
+// REQUEST that will actually run -- headers included. A User-Agent-keyed
+// proxy whose target cannot be resolved locally must fail closed
+// (unverifiable), not sail into a CONNECT the proxy resolves privately.
+func TestGetFailsClosedForHeaderKeyedProxyWhenLocalDNSFails(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(context.Context, string, string) ([]net.IP, error) {
+		return nil, errors.New("nxdomain: home-view only")
+	}
+	uaKeyed := func(req *http.Request) (*url.URL, error) {
+		if req.Header.Get("User-Agent") == "cache-builder" {
+			return &url.URL{Scheme: "http", Host: "corp.proxy:3128"}, nil
+		}
+		return nil, nil
+	}
+	transport := &http.Transport{Proxy: uaKeyed, DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("no dial should happen")
+	}}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "cache-builder", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(context.Background(), "https://mirror.lan.local/thumb.jpg", "image/*", 1<<20)
+	var unsure *ssrf.UnverifiableHostError
+	require.ErrorAs(t, err, &unsure, "header-matched proxy + unverifiable local DNS must fail closed")
+}
+
+// A rotating Proxy func answers differently per call; the marker, rejection,
+// and dial must all follow the SAME decision -- the wrapper evaluates once,
+// and the base transport replays it from the request ledger.
+func TestProxiedDialFollowsTheEvaluatedDecision(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		switch host {
+		case "proxy-a.example":
+			return []net.IP{net.ParseIP("198.51.100.11")}, nil
+		case "proxy-b.example":
+			return []net.IP{net.ParseIP("198.51.100.22")}, nil
+		}
+		return nil, errors.New("unreachable target (fine: proxies answer)")
+	}
+	calls := 0
+	rotating := func(*http.Request) (*url.URL, error) {
+		calls++
+		if calls%2 == 1 {
+			return &url.URL{Scheme: "http", Host: "proxy-a.example:3128"}, nil
+		}
+		return &url.URL{Scheme: "http", Host: "proxy-b.example:3128"}, nil
+	}
+	sentinel := errors.New("dial observed")
+	var dialed []string
+	transport := &http.Transport{
+		Proxy: rotating,
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("https://media.example/thumb.jpg")
+	require.ErrorIs(t, err, sentinel)
+	require.Len(t, dialed, 1)
+	assert.Equal(t, "198.51.100.11:3128", dialed[0],
+		"the dial must use the FIRST evaluated decision (marker cannot disagree)")
+}
+
+// The ledgered Proxy func falls back to the original policy for requests the
+// wrapper never evaluated (defensive: internal callers + future paths).
+func TestProxyLedgerFallsBackToOriginalPolicy(t *testing.T) {
+	transport := &http.Transport{Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: "proxy-c.example:8080"})}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	inner := fetcher.client.Transport.(*proxyPinningTransport).base.(*http.Transport)
+	got, err := inner.Proxy(&http.Request{URL: &url.URL{Scheme: "https", Host: "direct-target.example"}})
+	require.NoError(t, err)
+	assert.Equal(t, "proxy-c.example:8080", got.Host)
+}
+
+// Get evaluates the proxy policy ONCE; preflight and the actual hop must
+// replay the same decision even for a stateful policy.
+func TestGetBindsPreflightToSingleProxyEvaluation(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if host == "media.example" {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		}
+		return nil, errors.New("proxy hosts resolve only in the rotation answer")
+	}
+	calls := 0
+	rotating := func(*http.Request) (*url.URL, error) {
+		calls++
+		if calls == 1 {
+			return nil, nil // preflight says: direct
+		}
+		return &url.URL{Scheme: "http", Host: "proxy.example:3128"}, nil // flip: proxied
+	}
+	sentinel := errors.New("dial observed")
+	var dialed []string
+	transport := &http.Transport{
+		Proxy: rotating,
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(context.Background(), "https://media.example/x", "image/*", 1<<20)
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, 1, calls, "policy evaluated exactly once (retries replay the stamp)")
+	require.NotEmpty(t, dialed)
+	for _, addr := range dialed {
+		assert.Equal(t, "93.184.216.34:443", addr, "every attempt replays the direct decision and pins the target")
+	}
+}
+
+// Redirect hops must get their OWN proxy decision: a policy that proxies the
+// first URL but not the redirect target must not inherit hop 1's answer.
+func TestRedirectHopsReEvaluateProxyDecisions(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		if host == "hop-proxy.example" {
+			return []net.IP{net.ParseIP("198.51.100.20")}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	// Proxies ONLY the first hop; the redirect target is direct.
+	hopPolicy := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "93.184.216.1" {
+			return &url.URL{Scheme: "http", Host: "hop-proxy.example:3128"}, nil
+		}
+		return nil, nil
+	}
+	sentinel := errors.New("canned")
+	var dialed []string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		switch addr {
+		case "198.51.100.20:3128":
+			return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.9/y\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+		case "93.184.216.9:80":
+			return serveOnce("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")(context.Background(), "tcp", addr)
+		default:
+			return nil, sentinel
+		}
+	}
+	transport := &http.Transport{Proxy: hopPolicy, DialContext: dial}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	resp, err := fetcher.client.Get("http://93.184.216.1/x")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Len(t, dialed, 2)
+	assert.Equal(t, "198.51.100.20:3128", dialed[0], "hop 1 goes through its evaluated proxy")
+	assert.Equal(t, "93.184.216.9:80", dialed[1], "hop 2 re-evaluates and pins the direct target")
+}
+
+// A proxy policy that fails at Get must fail closed there.
+func TestGetFailsOnProxyDecisionError(t *testing.T) {
+	transport := &http.Transport{Proxy: func(*http.Request) (*url.URL, error) {
+		return nil, errors.New("proxy conf unreadable")
+	}}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(context.Background(), "https://media.example/x", "image/*", 1<<20)
+	require.ErrorContains(t, err, "proxy conf unreadable")
+}
+
+// A policy that fails on a LATER hop must abort the chain, not ship hop 1's
+// evaluation.
+func TestRedirectHopProxyDecisionError(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	policy := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "93.184.216.9" {
+			return nil, errors.New("hop-2 decision exploded")
+		}
+		return nil, nil
+	}
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.9/y\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+	}
+	transport := &http.Transport{Proxy: policy, DialContext: dial}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("http://93.184.216.1/x")
+	require.ErrorContains(t, err, "hop-2 decision exploded")
+}
+
+// A caller redirect callback rewriting the URL, followed by a policy error
+// on the REWRITTEN target, must surface that decision error.
+func TestRedirectRewriteThenDecisionError(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	policy := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "93.184.216.9" {
+			return nil, errors.New("rewritten-hop policy exploded")
+		}
+		return nil, nil
+	}
+	mutator := func(req *http.Request, _ []*http.Request) error {
+		u, _ := url.Parse("http://93.184.216.9/rewritten")
+		req.URL = u
+		return nil
+	}
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.5/mid\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+	}
+	transport := &http.Transport{Proxy: policy, DialContext: dial}
+	client := &http.Client{Transport: transport, CheckRedirect: mutator}
+	fetcher, err := NewFetcherWithOptions(client, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, err = fetcher.client.Get("http://93.184.216.1/x")
+	require.ErrorContains(t, err, "rewritten-hop policy exploded")
+}
+
+// A callback that does NOT rewrite the request must leave the hop's
+// evaluation alone -- re-evaluating could flip a stateful policy mid-hop.
+func TestRedirectNoOpCallbackKeepsSingleEvaluation(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	evals := 0
+	policy := func(*http.Request) (*url.URL, error) {
+		evals++
+		return nil, nil
+	}
+	var dials int
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dials++
+		switch dials {
+		case 1:
+			return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.9/next\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+		default:
+			return serveOnce("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx")(context.Background(), "tcp", addr)
+		}
+	}
+	transport := &http.Transport{Proxy: policy, DialContext: dial}
+	callback := func(*http.Request, []*http.Request) error { return nil } // touches nothing
+	client := &http.Client{Transport: transport, CheckRedirect: callback}
+	fetcher, err := NewFetcherWithOptions(client, 0, "test", nil, false)
+	require.NoError(t, err)
+	resp, err := fetcher.client.Get("http://93.184.216.1/a")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, 2, evals, "one evaluation per hop; the no-op callback must not add one")
+	assert.Equal(t, 2, dials)
+}
+
+// A restamped hop that fails its limiter wait (request ctx canceled while the
+// per-host slot is taken) must surface the wait error from the redirect
+// callback chain. The limiter slot is taken by the first hop's wait; the
+// second hop's callback mutates the fingerprint and cancels the request ctx,
+// so the restamp-path wait observes the cancellation.
+func TestRedirectRestampPropagatesLimiterWaitError(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	dial := func(_ context.Context, network, addr string) (net.Conn, error) {
+		return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.217.5/next\r\nContent-Length: 0\r\n\r\n")(context.Background(), network, addr)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	mutations := 0
+	mutateAndCancel := func(req *http.Request, _ []*http.Request) error {
+		mutations++
+		req.Header.Set("X-Test-Mutation", strconv.Itoa(mutations))
+		if mutations >= 2 {
+			cancel()
+		}
+		return nil
+	}
+	client := &http.Client{Transport: &http.Transport{DialContext: dial, DisableKeepAlives: true}, CheckRedirect: mutateAndCancel}
+	fetcher, err := NewFetcherWithOptions(client, 200*time.Millisecond, "ua", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(ctx, "http://93.184.217.5/start", "application/json", 1<<20)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 2, mutations, "the error must come from the second hop's restamp wait")
+}
+
+// A callback touching ONLY headers (not the URL) must still restamp the
+// decision: header-keyed proxy policies route on UA/Host.
+func TestRedirectHeaderMutationRestampsDecision(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		if host == "ua-proxy.example" {
+			return []net.IP{net.ParseIP("198.51.100.30")}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	policy := func(req *http.Request) (*url.URL, error) {
+		if req.Header.Get("User-Agent") == "via-proxy" {
+			return &url.URL{Scheme: "http", Host: "ua-proxy.example:3128"}, nil
+		}
+		return nil, nil
+	}
+	var dialed []string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		switch len(dialed) {
+		case 1:
+			return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.217.5/next\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+		default:
+			return serveOnce("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx")(context.Background(), "tcp", addr)
+		}
+	}
+	mutateUA := func(req *http.Request, _ []*http.Request) error {
+		req.Header.Set("User-Agent", "via-proxy") // header-only rewrite
+		return nil
+	}
+	client := &http.Client{Transport: &http.Transport{Proxy: policy, DialContext: dial}, CheckRedirect: mutateUA}
+	fetcher, err := NewFetcherWithOptions(client, 0, "direct-agent", nil, false)
+	require.NoError(t, err)
+	resp, err := fetcher.client.Get("http://93.184.216.1/start")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Len(t, dialed, 2)
+	assert.Equal(t, "93.184.216.1:80", dialed[0], "hop 1 took the direct lane (UA unmutated)")
+	assert.Equal(t, "198.51.100.30:3128", dialed[1], "hop 2 restamps after the header change and proxies via the pinned proxy endpoint")
+}
+
+// Rewriting to a different host must re-apply that host's throttle -- without
+// it, redirects bypass configured per-host delays entirely.
+func TestRedirectRewriteReappliesHostThrottle(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IP{ip}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	var dialed []string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		switch len(dialed) {
+		case 1:
+			return serveOnce("HTTP/1.1 302 Found\r\nLocation: http://93.184.216.111/rewritten\r\nContent-Length: 0\r\n\r\n")(context.Background(), "tcp", addr)
+		default:
+			return serveOnce("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx")(context.Background(), "tcp", addr)
+		}
+	}
+	rewrite := func(req *http.Request, _ []*http.Request) error {
+		u, _ := url.Parse("http://93.184.216.111/rewritten")
+		req.URL = u
+		return nil
+	}
+	client := &http.Client{Transport: &http.Transport{DialContext: dial}, CheckRedirect: rewrite}
+	fetcher, err := NewFetcherWithOptions(client, 120*time.Millisecond, "test", nil, false)
+	require.NoError(t, err)
+	// Prime the REWRITTEN host's limiter: its first wait within the configured
+	// interval then blocks, so a missing re-wait is measurable.
+	require.NoError(t, fetcher.limiterForHost("93.184.216.111").Wait(context.Background()))
+	start := time.Now()
+	resp, err := fetcher.client.Get("http://93.184.216.1/start")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	elapsed := time.Since(start)
+	require.Len(t, dialed, 2)
+	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond,
+		"the rewritten hop must wait on the rewritten host's limiter (second dial is the rewritten target)")
+}
+
+// Proxied hop -> redirect to a DIRECT target: the endpoint exemption marker
+// from hop 1 must NOT linger; the new hop dials through the guarded, pinned
+// lane even if it literally targets the old proxy's authority.
+// Marker hygiene at RoundTrip level: after a proxied hop, a redirect hop
+// whose policy evaluates DIRECT must clear the exemption marker before the
+// base transport dials -- otherwise a DNS rebind-to-private could ride the
+// previous hop's raw lane.
+func TestMarkerClearedWhenHopGoesDirect(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	resolveCalls := 0
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if host == "legacy-proxy.example" {
+			resolveCalls++
+			if resolveCalls == 1 {
+				return []net.IP{net.ParseIP("198.51.100.40")}, nil // hop 1: public
+			}
+			return []net.IP{net.ParseIP("10.9.9.9")}, nil // hop 2: REBOUND private
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+
+	// Proxy only for the first hop's target.
+	policy := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "media.example" {
+			return &url.URL{Scheme: "http", Host: "legacy-proxy.example:3128"}, nil
+		}
+		return nil, nil
+	}
+	sentinel := errors.New("dial end")
+	var dialed []string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = append(dialed, addr)
+		return nil, sentinel
+	}
+	transport := &http.Transport{Proxy: policy, DialContext: dial}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	pinning := fetcher.client.Transport.(*proxyPinningTransport)
+
+	// Hop 1: proxied decision -> marker set -> raw pinned proxy dial exempted.
+	req1, err := http.NewRequest(http.MethodGet, "https://media.example/", nil)
+	require.NoError(t, err)
+	_, _ = pinning.RoundTrip(req1)
+	require.Equal(t, []string{"198.51.100.40:3128"}, dialed)
+
+	// Simulate net/http's redirect: hop 2 inherits a context that carries the
+	// STALE marker from hop 1 (exactly how net/http forwards cloned contexts).
+	req2, err := http.NewRequestWithContext(
+		context.WithValue(req1.Context(), proxiedDialCtxKey{}, "legacy-proxy.example:3128"),
+		http.MethodGet, "https://legacy-proxy.example:3128/", nil)
+	require.NoError(t, err)
+	// The redirect wrapper restamped hop 2's OWN decision (direct) first.
+	require.NoError(t, fetcher.stampProxyDecision(req2))
+	_, hop2err := pinning.RoundTrip(req2)
+	require.Error(t, hop2err, "rebounD proxy-authority answer must be blocked")
+	assert.Contains(t, hop2err.Error(), "internal address")
+	require.Len(t, dialed, 1, "no dial on hop 2: the stale marker must not sneak it onto the unvalidated lane")
+}
+
+// A target resolvable ONLY by the SOCKS proxy must pass preflight (local
+// DNS failure is fine): decision = socks5, so the hop keeps the hostname and
+// rides the pinned endpoint.
+func TestProxyOnlyTargetUnresolvableViaNativeSocksProceeds(t *testing.T) {
+	prevLookup := lookupIP
+	defer func() { lookupIP = prevLookup }()
+	lookupIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if host == "legacy-socks.example" {
+			return []net.IP{net.ParseIP("198.51.100.60")}, nil
+		}
+		return nil, errors.New("unresolvable: " + host)
+	}
+	sentinel := errors.New("dial observed")
+	var dialed []string
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(&url.URL{Scheme: "socks5", Host: "legacy-socks.example:1080"}),
+		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			return nil, sentinel
+		},
+	}
+	fetcher, err := NewFetcherWithOptions(&http.Client{Transport: transport}, 0, "test", nil, false)
+	require.NoError(t, err)
+	_, _, err = fetcher.Get(context.Background(), "http://proxy-only.example/thumb.jpg", "image/*", 1<<20)
+	require.ErrorIs(t, err, sentinel, "no UnverifiableHostError: the socks tunnel owns resolution")
+	require.NotEmpty(t, dialed)
+	for _, addr := range dialed {
+		assert.Equal(t, "198.51.100.60:1080", addr, "every attempt dials the pinned socks endpoint")
+	}
+}

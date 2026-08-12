@@ -29,6 +29,7 @@ func TestProxyCov_DirectSuccessWithToken(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -83,6 +84,7 @@ func TestProxyCov_DirectSuccessNoTokenStore(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -135,6 +137,7 @@ func TestProxyCov_DefaultTargetURL(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	cfg := config.DefaultConfig(nil, nil)
 	deps := newTestDeps(cfg)
@@ -157,6 +160,9 @@ func TestProxyCov_DefaultTargetURL(t *testing.T) {
 
 func TestProxyCov_SSRFBlock(t *testing.T) {
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy.Enabled = true
+	cfg.Scrapers.Proxy.DefaultProfile = "p1"
+	cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{"p1": {URL: "http://proxy.example:3128"}}
 	deps := newTestDeps(cfg)
 
 	router := gin.New()
@@ -197,6 +203,7 @@ func TestProxyCov_FlareSolverrWithProxy(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
@@ -242,6 +249,7 @@ func TestProxyCov_FlareSolverrSuccessWithToken(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -278,6 +286,7 @@ func TestProxyCov_DirectWithCustomUserAgent(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	var receivedUA string
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -357,6 +366,7 @@ func TestProxyCov_DirectTokenScopeIsGlobal(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -425,4 +435,60 @@ func TestProxyCov_DirectTokenScopeIsGlobal(t *testing.T) {
 		"direct proxy test token should validate with scope 'global' and match the save-endpoint hash")
 	assert.False(t, tokenStore.Validate(response.VerificationToken, "direct", hash),
 		"direct proxy test token should NOT have scope 'direct'")
+}
+
+// A SOCKS5 direct probe: the SOCKS dialer resolves the target itself, so a
+// locally-unresolvable hostname must NOT hit the API-level SSRF preflight
+// (403) -- it reaches the dial, which fails politely (200 + failure payload).
+func TestProxyCov_SOCKS5LocallyUnresolvableTargetAllowed(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy.Enabled = true
+	cfg.Scrapers.Proxy.DefaultProfile = "p1"
+	cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{"p1": {URL: "socks5://127.0.0.1:1"}}
+	deps := newTestDeps(cfg)
+
+	router := gin.New()
+	router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
+
+	reqBody := `{"mode":"direct","target_url":"http://magic.internal.only/","proxy":{"enabled":true}}`
+	req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "lexical-only preflight (no local DNS) for SOCKS5")
+	assert.Contains(t, w.Body.String(), "\"success\":false") // no SOCKS listener: fails fast at dial
+}
+
+// private literal hop even under SOCKS5 profile stays 403.
+func TestProxyCov_SOCKS5PrivateLiteralStillBlocked(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy.Enabled = true
+	cfg.Scrapers.Proxy.DefaultProfile = "p1"
+	cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{"p1": {URL: "socks5://127.0.0.1:1"}}
+	deps := newTestDeps(cfg)
+
+	router := gin.New()
+	router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
+	reqBody := `{"mode":"direct","target_url":"http://127.0.0.1:8080/","proxy":{"enabled":true}}`
+	req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// FlareSolverr mode keeps the full resolution guard: private targets 403.
+func TestProxyCov_FlareSolverrPrivateTargetBlocked(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	deps := newTestDeps(cfg)
+	router := gin.New()
+	router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
+
+	reqBody := `{"mode":"flaresolverr","target_url":"http://127.0.0.1:8080/","flaresolverr":{"enabled":true,"url":"http://127.0.0.1:8191"}}`
+	req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
 }
