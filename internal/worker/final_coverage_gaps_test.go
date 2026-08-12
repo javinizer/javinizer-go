@@ -46,7 +46,7 @@ func TestCovFinal_DispatchPanicAndRecovery(t *testing.T) {
 	}
 	manager.wg.Add(1)
 	go manager.runDispatch(ctx)
-	time.Sleep(2 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 	cancel()
 	manager.wg.Wait()
 }
@@ -125,7 +125,7 @@ func TestCovFinal_HeartbeatSuccess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go manager.heartbeat(ctx, claimed.ID, claimed.LeaseToken, 3*time.Second, done, func() {})
-	time.Sleep(2 * time.Second)
+	time.Sleep(1500 * time.Millisecond)
 	cancel()
 	close(done)
 	time.Sleep(100 * time.Millisecond)
@@ -148,7 +148,7 @@ func TestCovFinal_HeartbeatBackoff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go manager.heartbeat(ctx, claimed.ID, claimed.LeaseToken, 3*time.Second, done, func() {})
-	time.Sleep(3 * time.Second)
+	time.Sleep(2500 * time.Millisecond)
 	cancel()
 	close(done)
 	time.Sleep(100 * time.Millisecond)
