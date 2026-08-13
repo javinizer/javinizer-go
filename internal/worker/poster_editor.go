@@ -1194,6 +1194,27 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 			logging.Warnf("override source-change eviction skipped: unsafe poster ID %q", stalePosterID)
 			stalePosterID = ""
 		}
+		// codex PR#211 round 5: the canonical pair is IDENTITY-keyed — sibling
+		// results sharing the same movie ID keep preview URLs pointing at those
+		// bytes. While any sibling still references it, never evict (the override
+		// row's new source gets its own download flow later).
+		if stalePosterID != "" && m.pe.lookup != nil {
+			snap := m.pe.lookup.SnapshotData()
+			bysider := ""
+			for fp, row := range snap.Results {
+				if fp == filePath || row == nil || row.Movie == nil {
+					continue
+				}
+				if strings.EqualFold(strings.TrimSpace(row.Movie.ID), stalePosterID) {
+					bysider = fp
+					break
+				}
+			}
+			if bysider != "" {
+				logging.Infof("override source-change eviction skipped for %s: %s still shares the pair", stalePosterID, bysider)
+				stalePosterID = ""
+			}
+		}
 		if stalePosterID != "" {
 			if env := m.pe.currentEnv(); env != nil && env.fs != nil && env.tempDir != "" && env.jobID != "" {
 				dir := filepath.Join(env.tempDir, "posters", env.jobID)

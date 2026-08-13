@@ -322,3 +322,48 @@ func TestApplyFieldOverride_CoverURLSameEffectiveValueKeepsPreview(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, "v1-crops/OV-C.jpg", out.Movie.Poster.CroppedPosterURL)
 }
+
+// codex P2 round 5 (PR211): the canonical pair is keyed by MOVIE ID and can
+// be shared by sibling results in the same job. Overriding ONE of them must
+// keep the pair until no sibling references it — the other sibling's preview
+// must not 404.
+func TestApplyFieldOverride_EvictionGatedOnSiblingShare(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-OV"
+	seedPair(t, fs, dir, "SIB-1")
+	store := resultstore.New(2, []string{"/f/a.mp4", "/f/b.mp4"})
+	for _, rec := range []struct{ fp, resID string }{{"/f/a.mp4", "res-a"}, {"/f/b.mp4", "res-b"}} {
+		store.UpdateFileResult(rec.fp, &resultstore.MovieResult{
+			ResultID:      rec.resID,
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "SIB-1", Poster: models.PosterState{PosterURL: "https://old.example/p.jpg", CroppedPosterURL: "v1/SIB-1.jpg"}},
+			FileMatchInfo: models.FileMatchInfo{Path: rec.fp, MovieID: "SIB-1"},
+		})
+	}
+	store.SetProvenance("/f/a.mp4", &resultstore.ProvenanceData{
+		ScraperResults: []*models.ScraperResult{{Source: "dmm", PosterURL: "https://new.example/p.jpg"}},
+	})
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "J-OV"})
+
+	out, _, err := pe.ApplyFieldOverride(context.Background(), "res-a", "SIB-1", "poster_url", "dmm")
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	assert.Equal(t, "https://new.example/p.jpg", out.Movie.Poster.PosterURL)
+	assert.Empty(t, out.Movie.Poster.CroppedPosterURL, "the overridden row releases its old-source pointer")
+
+	sib, serr := store.GetMovieResult("/f/b.mp4")
+	require.NoError(t, serr)
+	assert.Equal(t, "https://old.example/p.jpg", sib.Movie.Poster.PosterURL)
+	assert.Equal(t, "v1/SIB-1.jpg", sib.Movie.Poster.CroppedPosterURL, "sibling preview untouched")
+
+	for _, suffix := range []string{"-full.jpg", ".jpg"} {
+		_, serr := fs.Stat(dir + "/SIB-1" + suffix)
+		assert.NoError(t, serr, "pair stays while a sibling references it")
+	}
+	entries, gerr := afero.ReadDir(fs, dir)
+	require.NoError(t, gerr)
+	for _, e := range entries {
+		assert.NotContains(t, e.Name(), ".evict-", "no eviction witness written")
+	}
+}
