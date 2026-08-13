@@ -91,6 +91,7 @@ func TestCreateJobSkipsMergedAwayActresses(t *testing.T) {
 
 	job, _, err := manager.CreateJob(context.Background(), ActressSyncCreateRequest{Scope: "selected", ActressIDs: []uint{valid.ID, 999999}})
 	require.NoError(t, err)
+	manager.Stop()
 	tasks, err := manager.ListTasks(job.ID, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
