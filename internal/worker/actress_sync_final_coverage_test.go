@@ -404,7 +404,7 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		manager.active.Add(1)
 		manager.wg.Add(1)
 		manager.runTaskWithContext(context.Background(), task, 10*time.Millisecond, nil, scraperutil.NewScraperRegistry())
-		require.Equal(t, models.ActressSyncTaskFailed, task.Status)
+		require.NotEqual(t, models.ActressSyncTaskFailed, task.Status)
 	})
 
 	t.Run("cancelled run leaves lease for recovery", func(t *testing.T) {

@@ -719,10 +719,12 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 			}
 			return
 		case errors.Is(ctxErr, context.DeadlineExceeded):
-			task.Status, task.Outcome = models.ActressSyncTaskFailed, actressSyncOutcomeFailed
-			task.ErrorMessage = fmt.Sprintf("actress sync timed out after %s", timeout)
-			if completeErr := m.repo.CompleteTask(task, task.LeaseToken); completeErr != nil {
-				logging.Warnf("Actress sync settle completion failed: %v", completeErr)
+			writeCtx, cancelRequeue := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancelRequeue()
+			if _, requeueErr := m.repo.RequeueTask(writeCtx, task.ID, task.LeaseToken, database.ActressSyncRequeueOptions{ConsumeAttempt: true}); requeueErr != nil {
+				if !errors.Is(requeueErr, database.ErrActressSyncLeaseLost) {
+					logging.Warnf("Actress sync timeout requeue failed: %v", requeueErr)
+				}
 			}
 			return
 		default:
