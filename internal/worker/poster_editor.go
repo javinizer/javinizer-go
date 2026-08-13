@@ -1194,24 +1194,29 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 			logging.Warnf("override source-change eviction skipped: unsafe poster ID %q", stalePosterID)
 			stalePosterID = ""
 		}
-		// codex PR#211 round 5: the canonical pair is IDENTITY-keyed — sibling
-		// results sharing the same movie ID keep preview URLs pointing at those
-		// bytes. While any sibling still references it, never evict (the override
-		// row's new source gets its own download flow later).
+		// codex PR#211 rounds 5+6: the canonical pair is IDENTITY-keyed, but
+		// only a sibling whose rows still reference the OLD effective source
+		// reads those bytes. A share-by-ID alone must not pin the pair forever
+		// (already-migrated siblings would keep the stale bytes alive),
+		// while an untouched sibling mustn't lose its preview.
 		if stalePosterID != "" && m.pe.lookup != nil {
+			oldEffective := effectivePosterSourceOf(result.Movie.Poster.PosterURL, result.Movie.Poster.CoverURL)
 			snap := m.pe.lookup.SnapshotData()
 			bysider := ""
 			for fp, row := range snap.Results {
 				if fp == filePath || row == nil || row.Movie == nil {
 					continue
 				}
-				if strings.EqualFold(strings.TrimSpace(row.Movie.ID), stalePosterID) {
+				if !strings.EqualFold(strings.TrimSpace(row.Movie.ID), stalePosterID) {
+					continue
+				}
+				if effectivePosterSourceOf(row.Movie.Poster.PosterURL, row.Movie.Poster.CoverURL) == oldEffective {
 					bysider = fp
 					break
 				}
 			}
 			if bysider != "" {
-				logging.Infof("override source-change eviction skipped for %s: %s still shares the pair", stalePosterID, bysider)
+				logging.Infof("override source-change eviction skipped for %s: %s still uses the old source", stalePosterID, bysider)
 				stalePosterID = ""
 			}
 		}

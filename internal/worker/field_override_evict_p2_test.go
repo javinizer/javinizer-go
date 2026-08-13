@@ -343,6 +343,9 @@ func TestApplyFieldOverride_EvictionGatedOnSiblingShare(t *testing.T) {
 	store.SetProvenance("/f/a.mp4", &resultstore.ProvenanceData{
 		ScraperResults: []*models.ScraperResult{{Source: "dmm", PosterURL: "https://new.example/p.jpg"}},
 	})
+	store.SetProvenance("/f/b.mp4", &resultstore.ProvenanceData{
+		ScraperResults: []*models.ScraperResult{{Source: "dmm", PosterURL: "https://new.example/p.jpg"}},
+	})
 	pe := newEditorForStore(store)
 	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "J-OV"})
 
@@ -365,5 +368,16 @@ func TestApplyFieldOverride_EvictionGatedOnSiblingShare(t *testing.T) {
 	require.NoError(t, gerr)
 	for _, e := range entries {
 		assert.NotContains(t, e.Name(), ".evict-", "no eviction witness written")
+	}
+
+	// codex P2 round 6: once the LAST sibling migrates off the old source,
+	// its own override must finally evict — nobody references the old bytes.
+	out2, _, err2 := pe.ApplyFieldOverride(context.Background(), "res-b", "SIB-1", "poster_url", "dmm")
+	require.NoError(t, err2)
+	require.NotNil(t, out2)
+	assert.Empty(t, out2.Movie.Poster.CroppedPosterURL)
+	for _, suffix := range []string{"-full.jpg", ".jpg"} {
+		_, serr := fs.Stat(dir + "/SIB-1" + suffix)
+		assert.Error(t, serr, "last-sibling migration evicts the old pair: %s", suffix)
 	}
 }
