@@ -396,11 +396,13 @@ func TestActressSyncManagerRunTaskFinalBranches(t *testing.T) {
 		actress, err := repo.FindByDMMID(context.Background(), 103)
 		require.NoError(t, err)
 		task := claimFinalTask(t, manager, actress.ID, "timeout-run", "selected")
-		require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:block_actress_query", func(tx *gorm.DB) {
+		callbackName := "test:block_actress_query_" + t.Name()
+		require.NoError(t, db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
 			if tx.Statement.Table == "actresses" {
 				<-tx.Statement.Context.Done()
 			}
 		}))
+		t.Cleanup(func() { _ = db.Callback().Query().Before("gorm:query").Remove(callbackName) })
 		manager.active.Add(1)
 		manager.wg.Add(1)
 		manager.runTaskWithContext(context.Background(), task, 10*time.Millisecond, nil, scraperutil.NewScraperRegistry())
