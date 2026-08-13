@@ -69,7 +69,7 @@ func TestAtomicReplaceRemoveNotExistLeg(t *testing.T) {
 	atomicRename = func(_, _ string) error {
 		calls++
 		if calls == 1 {
-			return fmt.Errorf("windows replace collision: %w", os.ErrPermission)
+			return fmt.Errorf("windows replace collision: %w", os.ErrExist)
 		}
 		return nil
 	}

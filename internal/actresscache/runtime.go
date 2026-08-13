@@ -201,7 +201,7 @@ func atomicReplace(src, dst string) error {
 	// (destination exists / locked by a reader). Missing source, genuine
 	// permission failures, and cross-volume moves cannot be healed by
 	// deleting dst first -- doing so would destroy the last-good artifact.
-	if !errors.Is(err, os.ErrExist) && !errors.Is(err, os.ErrPermission) {
+	if !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	if rmErr := atomicRemove(dst); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
