@@ -632,8 +632,14 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 	ctx, cancel := context.WithTimeout(runCtx, timeout)
 	defer cancel()
 	done := make(chan struct{})
-	go m.heartbeat(ctx, task.ID, task.LeaseToken, timeout, done, cancel)
+	var hbWG sync.WaitGroup
+	hbWG.Add(1)
+	go func() {
+		defer hbWG.Done()
+		m.heartbeat(ctx, task.ID, task.LeaseToken, timeout, done, cancel)
+	}()
 	defer close(done)
+	defer hbWG.Wait()
 	defer func() {
 		if value := recover(); value != nil {
 			task.Status, task.Outcome, task.ErrorMessage = models.ActressSyncTaskFailed, actressSyncOutcomeFailed, fmt.Sprintf("panic: %v", value)

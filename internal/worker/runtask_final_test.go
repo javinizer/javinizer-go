@@ -96,5 +96,5 @@ func TestRunTaskFinal_UpdatedWithWarning(t *testing.T) {
 	require.NotNil(t, claimed)
 	manager.active.Add(1)
 	manager.wg.Add(1)
-	manager.runTaskWithContext(context.Background(), claimed, 30*time.Second, nil, registry)
+	manager.runTaskWithContext(context.Background(), claimed, 3*time.Second, nil, registry)
 }

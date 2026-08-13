@@ -48,7 +48,7 @@ func TestRunTaskResult_ConflictResult(t *testing.T) {
 	require.NotNil(t, claimed)
 	manager.active.Add(1)
 	manager.wg.Add(1)
-	manager.runTaskWithContext(context.Background(), claimed, 30*time.Second, nil, registry)
+	manager.runTaskWithContext(context.Background(), claimed, 3*time.Second, nil, registry)
 }
 
 type verifiedResolverScraper2 struct{}
@@ -89,7 +89,7 @@ func TestRunTaskResult_VerifiedResult(t *testing.T) {
 	require.NotNil(t, claimed)
 	manager.active.Add(1)
 	manager.wg.Add(1)
-	manager.runTaskWithContext(context.Background(), claimed, 30*time.Second, nil, registry)
+	manager.runTaskWithContext(context.Background(), claimed, 3*time.Second, nil, registry)
 }
 
 type retryableRepoErrorScraper struct{}
@@ -131,5 +131,5 @@ func TestRunTaskResult_RetryableRepoError(t *testing.T) {
 
 	manager.active.Add(1)
 	manager.wg.Add(1)
-	manager.runTaskWithContext(context.Background(), claimed, 30*time.Second, nil, registry)
+	manager.runTaskWithContext(context.Background(), claimed, 3*time.Second, nil, registry)
 }
