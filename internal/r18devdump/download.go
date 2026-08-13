@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -17,6 +18,15 @@ var LatestDumpURL = "https://r18.dev/dumps/latest"
 
 // downloadUserAgent is sent on dump requests. r18.dev sits behind Cloudflare,
 // which rejects the default Go-http-client User-Agent with a 403.
+func isTestDumpURL(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	return h == "127.0.0.1" || h == "localhost" || strings.HasPrefix(h, "127.0.0.1:") || strings.HasPrefix(h, "localhost:") || os.Getenv("JAVINIZER_R18DEV_DUMP_URL") != ""
+}
+
+const maxDumpDecompressedBytes int64 = 1 << 30
+
+var allowedDumpHosts = regexp.MustCompile(`^(.+\.)?(r18\.dev|amazonaws\.com|wasabisys\.com)$`)
+
 const downloadUserAgent = "Mozilla/5.0 (compatible; Javinizer/1.0; +https://github.com/javinizer/javinizer-go)"
 
 // DumpURLOverride returns the dump endpoint to use, honoring the
@@ -58,6 +68,20 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 	// r18.dev frontends with Cloudflare, which 403s the default Go User-Agent.
 	req.Header.Set("User-Agent", downloadUserAgent)
 	req.Header.Set("Accept", "*/*")
+
+	checkRedirect := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("r18dev dump: stopped after 10 redirects")
+		}
+		host := strings.ToLower(req.URL.Hostname())
+		if !allowedDumpHosts.MatchString(host) && !isTestDumpURL(via[0].URL.Hostname()) {
+			return fmt.Errorf("r18dev dump: refusing redirect to %s", req.URL.Redacted())
+		}
+		return nil
+	}
+	defer func() { client.CheckRedirect = checkRedirect }()
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return DownloadResult{}, fmt.Errorf("fetch dump: %w", err)
@@ -93,7 +117,9 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 	}
 	defer func() { _ = gz.Close() }()
 
-	if err := importFn(gz, res); err != nil {
+	cappedReader := &overflowReader{r: gz, max: maxDumpDecompressedBytes}
+
+	if err := importFn(cappedReader, res); err != nil {
 		return res, err
 	}
 	if cr, ok := body.(*countingReader); ok {

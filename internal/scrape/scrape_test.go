@@ -160,14 +160,15 @@ func (f *testFixture) withHTTPClient() *testFixture {
 func (f *testFixture) build() *Scraper {
 	f.agg = f.buildAggregator()
 	cfg := &Config{
-		ScrapersPriority:      f.cfg.Scrapers.Priority,
-		ScrapeActress:         f.cfg.Scrapers.ScrapeActress,
-		TranslationEnabled:    f.cfg.Metadata.Translation.Enabled,
-		TranslationTargetLang: f.cfg.Metadata.Translation.TargetLanguage,
-		ActressDBEnabled:      f.cfg.Metadata.ActressDatabase.Enabled,
-		UserAgent:             f.cfg.Scrapers.UserAgent,
-		Referer:               f.cfg.Scrapers.Referer,
-		TempDir:               f.cfg.System.TempDir,
+		ScrapersPriority:         f.cfg.Scrapers.Priority,
+		ScrapeActress:            f.cfg.Scrapers.ScrapeActress,
+		TranslationEnabled:       f.cfg.Metadata.Translation.Enabled,
+		TranslationTargetLang:    f.cfg.Metadata.Translation.TargetLanguage,
+		ActressDBEnabled:         f.cfg.Metadata.ActressDatabase.Enabled,
+		UserAgent:                f.cfg.Scrapers.UserAgent,
+		Referer:                  f.cfg.Scrapers.Referer,
+		TempDir:                  f.cfg.System.TempDir,
+		ValidateActressThumbnail: func(context.Context, string) error { return nil },
 	}
 	if cfg.TranslationEnabled {
 		cfg.TranslationSettingsHash = f.cfg.Metadata.Translation.SettingsHash()

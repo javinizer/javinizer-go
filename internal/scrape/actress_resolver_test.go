@@ -50,7 +50,7 @@ func TestEnrichActressesFromResolversFillsBlankFields(t *testing.T) {
 		},
 	})
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 19244}}}
-	cfg := &Config{ScrapeActress: true}
+	cfg := &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}
 
 	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg)
 	require.Equal(t, 1, enriched)
@@ -73,7 +73,7 @@ func TestEnrichActressesFromResolversSkipsCompleteActresses(t *testing.T) {
 		DMMID: 19244, FirstName: "Asami", LastName: "Abe",
 		JapaneseName: "安倍亜沙美", ThumbURL: "https://example.com/thumb.jpg",
 	}}}
-	cfg := &Config{ScrapeActress: true}
+	cfg := &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}
 
 	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg)
 	assert.Zero(t, enriched)
@@ -102,7 +102,7 @@ func TestEnrichActressesFromResolversHonorsPerScraperOptOut(t *testing.T) {
 	}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 1}}}
 
-	enriched := enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(disabledResolver, enabledResolver), &Config{ScrapeActress: true})
+	enriched := enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(disabledResolver, enabledResolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }})
 	assert.Equal(t, 1, enriched)
 	assert.Zero(t, disabledResolver.calls)
 	assert.Equal(t, 1, enabledResolver.calls)
@@ -119,7 +119,7 @@ func TestEnrichActressesFromResolversRepairsKnownInvalidThumbnail(t *testing.T) 
 		ThumbURL: "https://pics.dmm.co.jp/mono/noimage/now_printing.jpg",
 	}}}
 
-	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, &Config{ScrapeActress: true})
+	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }})
 	require.Equal(t, 1, enriched)
 	assert.Equal(t, resolver.metadata.ThumbURL, movie.Actresses[0].ThumbURL)
 }
@@ -135,7 +135,7 @@ func TestEnrichActressesFromResolversComposesAcrossResolvers(t *testing.T) {
 	}
 	registry := newTestRegistry(namesOnly, thumbsOnly)
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 100}}}
-	cfg := &Config{ScrapeActress: true}
+	cfg := &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}
 
 	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg)
 	require.Equal(t, 1, enriched)
@@ -241,5 +241,5 @@ func TestEnrichActressesFromResolversHonorsPriority(t *testing.T) {
 	require.Equal(t, "Minnano", selected.Actresses[0].FirstName)
 }
 func TestCollectMetadataResolversSkipsNilInstances(t *testing.T) {
-	require.Empty(t, collectMetadataResolvers(newTestRegistry(nil), []string{"missing"}, &Config{ScrapeActress: true}, false))
+	require.Empty(t, collectMetadataResolvers(newTestRegistry(nil), []string{"missing"}, &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, false))
 }

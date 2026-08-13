@@ -2,6 +2,7 @@ package scrape
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/actresscache"
@@ -167,7 +168,7 @@ func validateResolverActressThumbnail(ctx context.Context, resolver models.Actre
 	if fallback != nil {
 		return fallback(ctx, rawURL)
 	}
-	return nil
+	return fmt.Errorf("no thumbnail validator configured: cannot verify %s", rawURL)
 }
 
 func actressNeedsMetadata(a models.Actress) bool {

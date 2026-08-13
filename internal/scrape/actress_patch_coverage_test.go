@@ -114,7 +114,7 @@ func TestPostProcessRunsThumbnailAndResolverPasses(t *testing.T) {
 	t.Cleanup(func() { lookupBuiltinActress = old })
 	resolver := &testMetadataResolver{name: "resolver", enabled: true, metadata: models.ActressInfo{DMMID: 5, FirstName: "Resolved", LastName: "Name", JapaneseName: "解決", ThumbURL: "https://example.com/new.jpg"}}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 5, ThumbURL: "https://pics.dmm.co.jp/mono/noimage/now_printing.jpg"}}}
-	result, err := postProcessScraped(t.Context(), movie, nil, nil, newTestRegistry(resolver), &Config{ScrapeActress: true}, nil, nil, ScrapeCmd{}, false, time.Now())
+	result, err := postProcessScraped(t.Context(), movie, nil, nil, newTestRegistry(resolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, nil, nil, ScrapeCmd{}, false, time.Now())
 	assert.NoError(t, err)
 	assert.Equal(t, "Resolved", result.Movie.Actresses[0].FirstName)
 	assert.Equal(t, "https://example.com/new.jpg", result.Movie.Actresses[0].ThumbURL)
