@@ -228,38 +228,36 @@ func (pm *PosterManager) PromoteStagedPoster(staged *StagedPoster) (*cropResult,
 		legs = append(legs, l)
 	}
 
-	// Phase 1: aside the previous canonical legs (staged bytes stay put).
+	// Phase 1: COPY the previous canonical bytes aside (never move). The
+	// canonical leg stays present throughout the promote — a lock-free reader
+	// on /temp/posters can never observe a 404 window (codex P2 round 4).
 	for i := range legs {
 		if _, err := pm.fs.Stat(legs[i].finalPath); err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			// codex r1 P3: legs before i are already asided — restore them before
-			// bailing, or the pair splits (byte loss under a transient stat wedge).
-			pm.restorePromotedBackups(legs[:i])
+			pm.sweepPromotedBackups(legs[:i]) // earlier copies are pure litter
 			return nil, fmt.Errorf("promote canonical stat %s: %w", legs[i].finalPath, err)
 		}
 		legs[i].backupPath = uniqueStagedSibling(legs[i].finalPath, "bak")
-		if err := pm.fs.Rename(legs[i].finalPath, legs[i].backupPath); err != nil {
-			pm.restorePromotedBackups(legs[:i])
-			return nil, fmt.Errorf("promote staged poster: set aside %s: %w", legs[i].finalPath, err)
+		if err := fsutil.CopyFileFs(pm.fs, legs[i].finalPath, legs[i].backupPath); err != nil {
+			pm.sweepPromotedBackups(legs[:i])
+			return nil, fmt.Errorf("promote staged poster: back up %s: %w", legs[i].finalPath, err)
 		}
 	}
-	// Phase 2: move staged into canonical (rename-only).
+	// Phase 2: staged bytes land via atomic REPLACE (the canonical entry
+	// never disappears) — POSIX rename replaces; MoveFileEx on Windows.
 	for i := range legs {
-		if err := pm.fs.Rename(legs[i].stagedPath, legs[i].finalPath); err != nil {
-			pm.restorePromotedBackups(legs)
+		if err := fsutil.ReplaceFile(pm.fs, legs[i].stagedPath, legs[i].finalPath); err != nil {
+			// Restored legs return to their pre-promotion bytes; legs never
+			// displaced just shed the backup copies.
+			pm.restorePromotedBackups(legs[:i])
+			pm.sweepPromotedBackups(legs[i:])
 			return nil, fmt.Errorf("promote staged poster: %w", err)
 		}
 	}
 	// Success: drop the per-op backups best-effort.
-	for _, l := range legs {
-		if l.backupPath != "" {
-			if err := pm.fs.Remove(l.backupPath); err != nil {
-				logging.Warnf("poster promote backup sweep %s: %v", l.backupPath, err)
-			}
-		}
-	}
+	pm.sweepPromotedBackups(legs)
 
 	res := &cropResult{SourceFull: true}
 	for _, l := range legs {
@@ -282,15 +280,28 @@ func (pm *PosterManager) PromoteStagedPoster(staged *StagedPoster) (*cropResult,
 func (pm *PosterManager) restorePromotedBackups(legs []promoteLegMove) {
 	for _, l := range legs {
 		if l.backupPath == "" {
-			// Nothing was aside for this leg — remove a possibly installed new final.
+			// Nothing was backed up for this leg — remove a possibly installed new final.
 			_ = pm.fs.Remove(l.finalPath)
 			continue
 		}
-		// Prefer the bytes' identity over the address: delete a partial new
-		// final first so the restore rename lands even on strict filesystems.
+		// Remove the partial new install first so the restore rename lands even
+		// on strict filesystems, then restore the backup in its place.
 		_ = pm.fs.Remove(l.finalPath)
 		if err := pm.fs.Rename(l.backupPath, l.finalPath); err != nil {
 			logging.Warnf("poster promote restore %s failed (%v) — bytes survive at %s", l.finalPath, err, l.backupPath)
+		}
+	}
+}
+
+// sweepPromotedBackups deletes the per-op backup COPIES of legs whose
+// canonical bytes were never displaced (phase-1 copies) or that already
+// landed successfully. Warn-only on wedge (inspect-friendly).
+func (pm *PosterManager) sweepPromotedBackups(legs []promoteLegMove) {
+	for _, l := range legs {
+		if l.backupPath != "" {
+			if err := pm.fs.Remove(l.backupPath); err != nil {
+				logging.Warnf("poster promote backup sweep %s: %v", l.backupPath, err)
+			}
 		}
 	}
 }

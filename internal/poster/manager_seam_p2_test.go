@@ -227,7 +227,7 @@ func TestPromoteStagedPoster_AsideFailureRestoresEarlierLegs(t *testing.T) {
 	}}
 	pm := NewPosterManager(wedged, "/tmp/p2", nil)
 	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "ST-P6.stage-x", "ST-P6", ""))
-	require.ErrorContains(t, err, "set aside")
+	require.ErrorContains(t, err, "back up")
 	got, _ := afero.ReadFile(base, dir+"/ST-P6-full.jpg")
 	assert.Equal(t, "c-full", string(got), "first leg restored after second leg's aside wedge")
 	got2, _ := afero.ReadFile(base, dir+"/ST-P6.jpg")
@@ -409,4 +409,47 @@ func TestPromoteStagedPoster_CanonicalStatWedgedRestoresAsidedLeg(t *testing.T) 
 		require.NoError(t, serr, "staged leg survives for retry: %s", s)
 		assert.True(t, strings.HasPrefix(string(got), "s-"))
 	}
+}
+
+// Phase-2 failure on a LATER leg with the restore rename wedged: the error
+// reports the restore failure while the earlier leg's bytes stay findable at
+// their .bak copy (nothing silently lost mid-pair).
+func TestPromoteStagedPoster_RestoreRenameWedgedKeepsBackup(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/p2/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/R-4-full.jpg", []byte("c-full"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/R-4.jpg", []byte("c-crop"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/R-4.stage-x-full.jpg", []byte("s-full"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/R-4.stage-x.jpg", []byte("s-crop"), 0o644))
+
+	wedged := renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
+		// crop-leg phase-2 install wedges; the full-leg restore rename wedges too.
+		if strings.Contains(o, ".stage-") && strings.HasSuffix(n, "/R-4.jpg") {
+			return true
+		}
+		return strings.Contains(o, ".bak") && strings.HasSuffix(n, "/R-4-full.jpg")
+	}}
+	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "R-4.stage-x", "R-4", ""))
+	require.ErrorContains(t, err, "promote staged poster")
+
+	// The crop leg was never displaced under the never-absent contract.
+	gotCrop, cerr := afero.ReadFile(base, dir+"/R-4.jpg")
+	require.NoError(t, cerr)
+	assert.Equal(t, "c-crop", string(gotCrop))
+	// The full leg's prior bytes survive at the backup copy (restore rename
+	// wedged; the warn path ran, bytes intact).
+	entries, derr := afero.ReadDir(base, dir)
+	require.NoError(t, derr)
+	var bak []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "R-4-full.jpg.") && strings.HasSuffix(e.Name(), ".bak") {
+			bak = append(bak, filepath.Join(dir, e.Name()))
+		}
+	}
+	require.Len(t, bak, 1)
+	content, rerr := afero.ReadFile(base, bak[0])
+	require.NoError(t, rerr)
+	assert.Equal(t, "c-full", string(content), "prior bytes recoverable from the backup")
 }
