@@ -638,8 +638,8 @@ func (m *ActressSyncManager) runTaskWithContext(runCtx context.Context, task *mo
 		defer hbWG.Done()
 		m.heartbeat(ctx, task.ID, task.LeaseToken, timeout, done, cancel)
 	}()
-	defer close(done)
 	defer hbWG.Wait()
+	defer close(done)
 	defer func() {
 		if value := recover(); value != nil {
 			task.Status, task.Outcome, task.ErrorMessage = models.ActressSyncTaskFailed, actressSyncOutcomeFailed, fmt.Sprintf("panic: %v", value)
