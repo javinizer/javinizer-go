@@ -338,7 +338,7 @@ func TestReconcileEvictWitnessRepoErrorKeepsEverything(t *testing.T) {
 // MkdirAll failure on the witness dir surfaces as an error, never hidden.
 func TestWriteEvictWitnessMkdirFailureSurfaces(t *testing.T) {
 	fs := mkdirWedgeFS{Fs: afero.NewMemMapFs()}
-	_, err := writeEvictWitness(fs, "/tmp/posters/J-MW", "MW-1", "https://n/x.jpg")
+	_, err := writeEvictWitness(fs, "/tmp/posters/J-MW", "MW-1", "https://n/x.jpg", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "evict witness dir")
 }
@@ -351,7 +351,7 @@ func TestEvictStalePosterPairWitnessWriteWedgedDefers(t *testing.T) {
 	require.NoError(t, afero.WriteFile(mem, filepath.Join(jobDir, "EV-8-full.jpg"), []byte("of"), 0o644))
 	require.NoError(t, afero.WriteFile(mem, filepath.Join(jobDir, "EV-8.jpg"), []byte("oc"), 0o644))
 	fs := createWedgeFS{Fs: mem, contains: ".evict-"}
-	_, err := writeEvictWitness(fs, jobDir, "EV-8", "https://new/q.jpg")
+	_, err := writeEvictWitness(fs, jobDir, "EV-8", "https://new/q.jpg", "")
 	require.Error(t, err)
 	_, f1 := mem.Stat(filepath.Join(jobDir, "EV-8-full.jpg"))
 	assert.NoError(t, f1, "legs untouched while the record can't persist")
@@ -471,4 +471,83 @@ func TestPendingEvictWitnessCoreDirWedgeFailsClosed(t *testing.T) {
 	_, err := pendingEvictWitnessCore(fs, dir, "PE-3")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "eviction witness scan")
+}
+
+// codex P2 round 8 (PR211): the witness's arbitration is scoped to its OWN
+// row — a same-ID sibling that already migrated to the new source must NOT
+// mark an interrupted override committed (which would evict the pair while
+// the witness's row still references it).
+func TestReconcileEvictWitness_ScopedToNamedRow(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-MW9"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "MW-9-full.jpg"), []byte("old-full"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "MW-9.jpg"), []byte("old-crop"), 0o644))
+	payload, _ := json.Marshal(evictWitness{OldID: "MW-9", NewSourceURL: "https://new-site/x.jpg", FilePath: "/f/own-row.mp4"})
+	wp := filepath.Join(dir, ".evict-MW-9.json")
+	require.NoError(t, afero.WriteFile(fs, wp, payload, 0o644))
+
+	res := map[string]*resultstore.MovieResult{
+		// sibling row: already migrated to the new source — under legacy
+		// any-row arbitration this would falsely mark the witness committed.
+		"/f/sibling.mp4": {
+			ResultID:      "res-sib",
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "MW-9", Poster: models.PosterState{PosterURL: "https://new-site/x.jpg"}},
+			FileMatchInfo: models.FileMatchInfo{Path: "/f/sibling.mp1", MovieID: "MW-9"},
+		},
+		// the witness's own row: still on the OLD source (commit never ran).
+		"/f/own-row.mp4": {
+			ResultID:      "res-own",
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "MW-9", Poster: models.PosterState{PosterURL: "https://old-site/s.jpg"}},
+			FileMatchInfo: models.FileMatchInfo{Path: "/f/own-row.mp4", MovieID: "MW-9"},
+		},
+	}
+	data, err := json.Marshal(res)
+	require.NoError(t, err)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-SC").Return(&models.Job{Results: string(data)}, nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n := cl.reconcileEvictWitness(context.Background(), dir, "JOB-SC", wp)
+	assert.Equal(t, 1, n, "uncommitted witness swept")
+	_, fErr := fs.Stat(filepath.Join(dir, "MW-9-full.jpg"))
+	assert.NoError(t, fErr, "full leg NOT evicted — sibling migration is not the commit of this row")
+	_, cErr := fs.Stat(filepath.Join(dir, "MW-9.jpg"))
+	assert.NoError(t, cErr, "crop leg NOT evicted")
+	_, wErr := fs.Stat(wp)
+	assert.Error(t, wErr, "witness swept")
+}
+
+// Contrast: when the witness's OWN row carries the new source, eviction
+// completes normally.
+func TestReconcileEvictWitness_ScopedCompletesWhenOwnRowCommitted(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-MWC"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "MC-2-full.jpg"), []byte("old-full"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "MC-2.jpg"), []byte("old-crop"), 0o644))
+	payload, _ := json.Marshal(evictWitness{OldID: "MC-2", NewSourceURL: "https://new-site/x.jpg", FilePath: "/f/own-row.mp4"})
+	wp := filepath.Join(dir, ".evict-MC-2.json")
+	require.NoError(t, afero.WriteFile(fs, wp, payload, 0o644))
+
+	res := map[string]*resultstore.MovieResult{
+		"/f/own-row.mp4": {
+			ResultID:      "res-own",
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "MC-2", Poster: models.PosterState{PosterURL: "https://new-site/x.jpg"}},
+			FileMatchInfo: models.FileMatchInfo{Path: "/f/own-row.mp4", MovieID: "MC-2"},
+		},
+	}
+	data, err := json.Marshal(res)
+	require.NoError(t, err)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-SC").Return(&models.Job{Results: string(data)}, nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n := cl.reconcileEvictWitness(context.Background(), dir, "JOB-SC", wp)
+	assert.Equal(t, 1, n)
+	_, fErr := fs.Stat(filepath.Join(dir, "MC-2-full.jpg"))
+	assert.Error(t, fErr, "own-row commit ⇒ eviction completed")
+	_, wErr := fs.Stat(wp)
+	assert.Error(t, wErr, "witness swept")
 }

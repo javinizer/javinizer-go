@@ -698,14 +698,14 @@ func sweepEvictionWitness(fs afero.Fs, wpath string) {
 // a crash between the durable write and the physical removals still leaves the
 // reconcile-complete marker on disk (codex cloud P2).
 // writeEvictWitness persists the eviction record inline-BEFORE the tag on the ✔
-func writeEvictWitness(fs afero.Fs, dir, posterID, newSourceURL string) (string, error) {
+func writeEvictWitness(fs afero.Fs, dir, posterID, newSourceURL, forFilePath string) (string, error) {
 	wpath := filepath.Join(dir, ".evict-"+url.PathEscape(posterID)+".json")
 	// codex cloud P2: a never-postered job has NO posters dir — MkdirAll allows
 	// the source-change witness to persist even when nothing was downloaded yet.
 	if mErr := fs.MkdirAll(dir, 0o755); mErr != nil {
 		return "", fmt.Errorf("evict witness dir %s: %w", dir, mErr)
 	}
-	payload, _ := json.Marshal(evictWitness{OldID: posterID, NewSourceURL: newSourceURL})
+	payload, _ := json.Marshal(evictWitness{OldID: posterID, NewSourceURL: newSourceURL, FilePath: forFilePath})
 	if err := writeFileAtomicForEvict(fs, wpath, payload); err != nil {
 		return "", fmt.Errorf("%w", err)
 	}
@@ -1071,7 +1071,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 			if len(relocatedPosterPair) > 0 && strings.TrimSpace(movie.ID) != "" {
 				evictID = strings.TrimSpace(movie.ID)
 			}
-			evictWitnessPath, err = writeEvictWitness(env.fs, dir, evictID, effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL))
+			evictWitnessPath, err = writeEvictWitness(env.fs, dir, evictID, effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL), filePaths[0])
 			if err != nil {
 				return fmt.Errorf("stale poster eviction witness %s: %w", evictWitnessPath, err)
 			}
@@ -1223,7 +1223,7 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 		if stalePosterID != "" {
 			if env := m.pe.currentEnv(); env != nil && env.fs != nil && env.tempDir != "" && env.jobID != "" {
 				dir := filepath.Join(env.tempDir, "posters", env.jobID)
-				wp, werr := writeEvictWitness(env.fs, dir, stalePosterID, effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL))
+				wp, werr := writeEvictWitness(env.fs, dir, stalePosterID, effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL), filePath)
 				if werr != nil {
 					return nil, nil, fmt.Errorf("stale poster eviction witness %s: %w", wp, werr)
 				}

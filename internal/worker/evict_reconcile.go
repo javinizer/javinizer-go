@@ -66,6 +66,11 @@ type evictWitness struct {
 	// arbitration needs it to decide whether the metadata commit landed
 	// (codex cloud P1 @witness arbitration).
 	NewSourceURL string `json:"new_source_url,omitempty"`
+	// FilePath pins the arbitration to ONE row of the envelope when set
+	// (codex PR#211 crash-safety finding): a family can hold same-ID rows on
+	// different sources mid-migration — only the row the witness was written
+	// for may prove the commit, never a sibling.
+	FilePath string `json:"file_path,omitempty"`
 }
 
 // reconcileEvictWitness completes a COMMITTED eviction: no commit ⇒ sweep the
@@ -96,14 +101,25 @@ func (c *TempDirCleaner) reconcileEvictWitness(ctx context.Context, dir, jobID, 
 		return 0
 	}
 	committed := false
-	for _, r := range res {
-		if r == nil || r.Movie == nil {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(r.Movie.ID), w.OldID) &&
+	if w.FilePath != "" {
+		// Scoped arbitration: ONLY the witness's own row can prove its commit
+		// landed — never a same-ID sibling that migrated earlier.
+		if r, ok := res[w.FilePath]; ok && r != nil && r.Movie != nil &&
+			strings.EqualFold(strings.TrimSpace(r.Movie.ID), w.OldID) &&
 			effectivePosterSourceOf(r.Movie.Poster.PosterURL, r.Movie.Poster.CoverURL) == w.NewSourceURL {
 			committed = true
-			break
+		}
+	} else {
+		// Legacy content-less witnesses arbitrate family-wide (pre-P3 records).
+		for _, r := range res {
+			if r == nil || r.Movie == nil {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(r.Movie.ID), w.OldID) &&
+				effectivePosterSourceOf(r.Movie.Poster.PosterURL, r.Movie.Poster.CoverURL) == w.NewSourceURL {
+				committed = true
+				break
+			}
 		}
 	}
 	failed := false
