@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	neturl "net/url"
 	"runtime"
 	"strings"
 	"time"
+
+	neturl "net/url"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -19,6 +20,20 @@ import (
 type queryOutcome struct {
 	result  *models.ScraperResult
 	failure *models.ScraperError
+}
+
+func filterMovieScrapers(scrapers []models.Scraper) []models.Scraper {
+	filtered := make([]models.Scraper, 0, len(scrapers))
+	for _, s := range scrapers {
+		if s == nil {
+			continue
+		}
+		if c, ok := s.(models.MovieSearchCapable); ok && !c.SupportsMovieSearch() {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered
 }
 
 func resolveScraperNames(selectedScrapers, priorityOverride []string, cfg *Config) []string {
@@ -35,55 +50,50 @@ func resolveScraperNames(selectedScrapers, priorityOverride []string, cfg *Confi
 }
 
 func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperNames []string) string {
-	if len(scraperNames) == 0 {
+	if len(scraperNames) == 0 || s.registry == nil {
 		return movieID
 	}
-	resolverName := scraperNames[0]
-	resolver, exists := s.registry.GetInstance(resolverName)
-	if !exists || resolver == nil {
-		return movieID
-	}
-	// Skip content-ID resolution when the resolver scraper's circuit breaker
-	// is tripped: ResolveContentIDCtx can issue HTTP (DMM), so an unreachable
-	// host would otherwise block every file on the full client timeout even
-	// after the breaker has tripped. Using skipFailure (consuming) limits the
-	// half-open probe to one worker — concurrent workers see the re-armed
-	// trippedAt and skip. The resolver outcome is recorded so a successful
-	// probe clears the breaker (letting the query run) and a failure re-trips
-	// (query's skipFailure skips).
-	if s.breaker != nil {
-		if skip := s.breaker.skipFailure(resolverName); skip != nil {
-			return movieID
+
+	for _, resolverName := range scraperNames {
+		resolver, exists := s.registry.GetInstance(resolverName)
+		if !exists || resolver == nil || !resolver.IsEnabled() {
+			continue
 		}
-	}
-	// Prefer the context-aware resolver so cancellation/timeouts reach the
-	// lookup (DMM's ResolveContentID can issue HTTP). Fall back to the
-	// non-context ContentIDResolver for scrapers that only implement that.
-	if r, ok := resolver.(models.ContentIDResolverCtx); ok && r != nil {
-		contentID, err := r.ResolveContentIDCtx(ctx, movieID)
-		if s.breaker != nil && ctx.Err() == nil {
-			if err == nil {
-				s.breaker.recordOutcome(resolverName, nil)
-			} else {
-				s.breaker.recordOutcome(resolverName, classifyScraperError(resolverName, err, ""))
+		if s.breaker != nil {
+			if skip := s.breaker.skipFailure(resolverName); skip != nil {
+				continue
 			}
 		}
-		if err != nil {
-			logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
-			return movieID
+		// Prefer the context-aware resolver so cancellation/timeouts reach the
+		// lookup (DMM's ResolveContentID can issue HTTP). Fall back to the
+		// non-context ContentIDResolver for scrapers that only implement that.
+		if r, ok := resolver.(models.ContentIDResolverCtx); ok && r != nil {
+			contentID, err := r.ResolveContentIDCtx(ctx, movieID)
+			if s.breaker != nil && ctx.Err() == nil {
+				if err == nil {
+					s.breaker.recordOutcome(resolverName, nil)
+				} else {
+					s.breaker.recordOutcome(resolverName, classifyScraperError(resolverName, err, ""))
+				}
+			}
+			if err != nil {
+				logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
+				return movieID
+			}
+			logging.Debugf("[scrape] Resolved content-ID: %s → %s", movieID, contentID)
+			return contentID
 		}
-		logging.Debugf("[scrape] Resolved content-ID: %s → %s", movieID, contentID)
-		return contentID
-	}
-	if r, ok := resolver.(models.ContentIDResolver); ok && r != nil {
-		contentID, err := r.ResolveContentID(movieID)
-		if err != nil {
-			logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
-			return movieID
+		if r, ok := resolver.(models.ContentIDResolver); ok && r != nil {
+			contentID, err := r.ResolveContentID(movieID)
+			if err != nil {
+				logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
+				return movieID
+			}
+			logging.Debugf("[scrape] Resolved content-ID: %s → %s", movieID, contentID)
+			return contentID
 		}
-		logging.Debugf("[scrape] Resolved content-ID: %s → %s", movieID, contentID)
-		return contentID
 	}
+
 	return movieID
 }
 
@@ -92,7 +102,7 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 // without significantly increasing CPU or memory pressure.
 var maxQueryConcurrency = runtime.NumCPU()
 
-func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID, rawInput string, scrapers []models.Scraper, startTime time.Time) ([]*models.ScraperResult, []models.ScraperError) {
+func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string, scrapers []models.Scraper, startTime time.Time) ([]*models.ScraperResult, []models.ScraperError) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -101,7 +111,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID, rawInp
 		if len(scrapers) == 0 {
 			return nil, nil
 		}
-		outcome := s.queryWithBreaker(ctx, resolvedMovieID, rawInput, scrapers[0])
+		outcome := querySingle(ctx, resolvedMovieID, scrapers[0])
 		var results []*models.ScraperResult
 		var failures []models.ScraperError
 		if outcome.result != nil {
@@ -128,7 +138,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID, rawInp
 				return gCtx.Err()
 			default:
 			}
-			outcomes[i] = s.queryWithBreaker(gCtx, resolvedMovieID, rawInput, scraper)
+			outcomes[i] = querySingle(gCtx, resolvedMovieID, scraper)
 			return nil // errors are captured in outcomes[i].failure
 		})
 	}
@@ -160,7 +170,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID, rawInp
 	return results, failures
 }
 
-func querySingle(ctx context.Context, movieID, rawInput string, scraper models.Scraper) (outcome queryOutcome) {
+func querySingle(ctx context.Context, movieID string, scraper models.Scraper) (outcome queryOutcome) {
 	defer func() {
 		if r := recover(); r != nil {
 			outcome = queryOutcome{
@@ -171,63 +181,6 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 			}
 		}
 	}()
-
-	// A direct page URL is scraped as-is via the scraper's ScrapeURL seam rather
-	// than ID extraction + keyword search. Keeping the raw URL out of MovieID
-	// prevents credential leaks on signed URLs and gives a stable cache/identity
-	// key (the derived ID); URL shape is irrelevant for identity.
-	if rawInput != "" {
-		if uh, ok := scraper.(models.URLHandler); ok && uh.CanHandleURL(rawInput) {
-			// NOTE: The raw URL is passed to ScrapeURL because the handler must
-			// fetch it. Per-scraper log redaction (e.g. JavLibrary redactPageURL
-			// in fetchPageCtx, round 6) is the correct fix for credential leakage
-			// in handler logs; pipeline-level redaction before the call would
-			// break fetching. JavDB/R18.dev/DMM browser log internally and are
-			// pre-existing — out of scope for page-derived-scraper-identity
-			// (OpenSpec Decision 2). The P2 cache-miss (canonical ID != URL slug)
-			// is also an explicitly accepted design decision (Decision 2):
-			// URL scrapes cache-miss by design; the movie is persisted under its
-			// canonical identity so search-by-code hits.
-			result, err := safeScrapeURL(ctx, uh, rawInput)
-			if err == nil && result != nil {
-				// Validate the result has a meaningful identity. A non-detail page
-				// (e.g. DMM home/search/challenge) can return HTTP 200 with a
-				// non-nil but empty result. Treat results without an ID as
-				// NotFound so the ID-based keyword Search fallback fires.
-				if strings.TrimSpace(result.ID) == "" {
-					err = models.NewScraperNotFoundError(scraper.Name(), "direct URL returned result without ID")
-				} else {
-					outcome = queryOutcome{result: result}
-					return
-				}
-			}
-			if err == nil && result == nil {
-				// A nil result with nil error is a contract violation; treat as
-				// NotFound so the ID-based keyword Search fallback fires.
-				err = models.NewScraperNotFoundError(scraper.Name(), "URL handler returned no result")
-			}
-			if isContextError(ctx, err) {
-				outcome = queryOutcome{failure: classifyContextError(scraper.Name(), err)}
-				return
-			}
-			// Only a "not found"/unsupported URL shape (typed NotFound) falls
-			// through to the ID-based keyword Search. Availability errors (403,
-			// 429, challenges, 5xx) surface as failures instead of triggering a
-			// second request.
-			if se, ok := models.AsScraperError(err); ok {
-				if se.Kind != models.ScraperErrorKindNotFound {
-					// Normalize the scraper name to the registry name (scraper.Name())
-					// so display labels are consistent with the normal Search failure path.
-					se.Scraper = scraper.Name()
-					outcome = queryOutcome{failure: se}
-					return
-				}
-			} else {
-				outcome = queryOutcome{failure: classifyScraperError(scraper.Name(), err, "")}
-				return
-			}
-		}
-	}
 
 	scraperQuery := movieID
 	if mappedQuery, ok := models.ResolveSearchQueryForScraper(scraper, movieID); ok {
@@ -261,23 +214,6 @@ func querySingle(ctx context.Context, movieID, rawInput string, scraper models.S
 
 	outcome = queryOutcome{result: scraperResult}
 	return
-}
-
-// isTransportError reports whether err is a network/transport-level failure
-// (connection refused, DNS failure, TLS reset, or a net/http *url.Error wrapping
-// one). These indicate the scraper host is unreachable and should count toward
-// the circuit breaker's Unavailable trip threshold. Context deadline/canceled
-// errors are handled separately by classifyContextError.
-func isTransportError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	var urlErr *neturl.Error
-	return errors.As(err, &urlErr)
 }
 
 // isContextError checks if the error is a context cancellation/deadline error,
@@ -329,68 +265,28 @@ func classifyScraperError(scraperName string, err error, fallbackMsg string) *mo
 		if copied.Message == "" {
 			copied.Message = err.Error()
 		}
-		// Some scrapers wrap network errors in a ScraperError with Kind=Unknown
-		// and StatusCode=0 (e.g. JavDB's NewScraperStatusError("JavDB", 0, ...)).
-		// Reclassify these as Unavailable so the circuit breaker can trip on
-		// persistent transport failures, not just on raw unwrapped errors.
-		if copied.Kind == models.ScraperErrorKindUnknown && copied.StatusCode == 0 && isTransportError(copied.Cause) {
-			copied.Kind = models.ScraperErrorKindUnavailable
-			copied.Retryable = true
-			copied.Temporary = true
-		}
 		return &copied
 	}
 	msg := fallbackMsg
 	if msg == "" {
 		msg = err.Error()
 	}
-	// Transport-level failures (connection refused, DNS failures, TLS resets,
-	// network timeouts that escape the context deadline) indicate the scraper
-	// host is unreachable. Classify them as Unavailable so the circuit breaker
-	// can trip and stop re-attempting a dead host across the batch. A plain
-	// context.DeadlineExceeded/Canceled is handled by classifyContextError
-	// upstream, so here we only catch the raw net/url errors it misses.
+	kind := models.ScraperErrorKindUnknown
+	retryable := false
+	temporary := false
 	if isTransportError(err) {
-		return &models.ScraperError{
-			Scraper:   scraperName,
-			Kind:      models.ScraperErrorKindUnavailable,
-			Message:   msg,
-			Retryable: true,
-			Temporary: true,
-			Cause:     err,
-		}
+		kind = models.ScraperErrorKindUnavailable
+		retryable = true
+		temporary = true
 	}
 	return &models.ScraperError{
-		Scraper: scraperName,
-		Kind:    models.ScraperErrorKindUnknown,
-		Message: msg,
-		Cause:   err,
+		Scraper:   scraperName,
+		Kind:      kind,
+		Message:   msg,
+		Cause:     err,
+		Retryable: retryable,
+		Temporary: temporary,
 	}
-}
-
-// queryWithBreaker invokes querySingle unless the scraper's circuit breaker
-// is tripped, and records the outcome so a persistent outage (timeouts, 5xx,
-// connection refused) stops re-attempting a dead host. A successful result
-// resets the breaker; a non-breakable failure (e.g. 404 NotFound) is recorded
-// but does not trip it. Outcomes observed while the parent context is already
-// cancelled are not recorded, so a user-initiated batch cancel or a per-file
-// context timeout does not pollute the breaker with false Unavailable counts.
-// The breaker is nil-safe for Scraper instances constructed without New.
-func (s *Scraper) queryWithBreaker(ctx context.Context, movieID, rawInput string, scraper models.Scraper) queryOutcome {
-	if s.breaker != nil {
-		if skip := s.breaker.skipFailure(scraper.Name()); skip != nil {
-			return queryOutcome{failure: skip}
-		}
-	}
-	outcome := querySingle(ctx, movieID, rawInput, scraper)
-	if s.breaker != nil && ctx.Err() == nil {
-		if outcome.result != nil {
-			s.breaker.recordOutcome(scraper.Name(), nil)
-		} else if outcome.failure != nil {
-			s.breaker.recordOutcome(scraper.Name(), outcome.failure)
-		}
-	}
-	return outcome
 }
 
 func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result *models.ScraperResult, err error) {
@@ -411,23 +307,50 @@ func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result 
 	return result, err
 }
 
-// safeScrapeURL invokes a scraper's direct-URL scrape path (ScrapeURL) with
-// urlRedactedError wraps an error with a redacted message while preserving
-// the original error's unwrap chain, so errors.Is(err, context.DeadlineExceeded)
-// and errors.Is(err, context.Canceled) remain detectable after URL scrubbing.
+//nolint:unused // used by circuit_breaker_test.go
+func (s *Scraper) queryWithBreaker(ctx context.Context, movieID, rawInput string, scraper models.Scraper) queryOutcome {
+	if s.breaker != nil {
+		if skip := s.breaker.skipFailure(scraper.Name()); skip != nil {
+			return queryOutcome{failure: skip}
+		}
+	}
+	outcome := querySingle(ctx, movieID, scraper)
+	if s.breaker != nil && ctx.Err() == nil {
+		if outcome.result != nil {
+			s.breaker.recordOutcome(scraper.Name(), nil)
+		} else if outcome.failure != nil {
+			s.breaker.recordOutcome(scraper.Name(), outcome.failure)
+		}
+	}
+	return outcome
+}
+
+//nolint:unused // used by circuit_breaker_test.go
+func isTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var urlErr *neturl.Error
+	return errors.As(err, &urlErr)
+}
+
+//nolint:unused // used by redact_error_test.go
 type urlRedactedError struct {
 	msg   string
 	cause error
 }
 
+//nolint:unused // used by redact_error_test.go
 func (e *urlRedactedError) Error() string { return e.msg }
+
+//nolint:unused // used by redact_error_test.go
 func (e *urlRedactedError) Unwrap() error { return e.cause }
 
-// redactErrorURL scrubs any occurrence of rawURL from err's message, replacing
-// it with a redacted copy so signed/credential-bearing URLs never leak into
-// failure messages that batch results and events retain. ScraperError typing is
-// preserved; other errors are re-wrapped as urlRedactedError to preserve the
-// unwrap chain (so context errors remain detectable by errors.Is).
+//nolint:unused // used by redact_error_test.go
 func redactErrorURL(err error, rawURL string) error {
 	if err == nil || rawURL == "" {
 		return err
@@ -444,20 +367,16 @@ func redactErrorURL(err error, rawURL string) error {
 		}
 		return &clone
 	}
-	// Preserve the unwrap chain so context errors (DeadlineExceeded,
-	// Canceled) remain detectable by errors.Is after URL scrubbing.
 	return &urlRedactedError{
 		msg:   strings.ReplaceAll(err.Error(), rawURL, redacted),
 		cause: err,
 	}
 }
 
-// panic recovery, mirroring safeSearch.
+//nolint:unused // used by url_dispatch_test.go
 func safeScrapeURL(ctx context.Context, handler models.URLHandler, url string) (result *models.ScraperResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			// Scrub the raw URL from the recovered panic value before
-			// HandleRecover logs it, so signed tokens never reach logs.
 			redacted := strings.ReplaceAll(fmt.Sprint(r), url, RedactSourceURL(url))
 			err = panicutil.HandleRecover(redacted)
 			err = redactErrorURL(err, url)
@@ -471,12 +390,9 @@ func safeScrapeURL(ctx context.Context, handler models.URLHandler, url string) (
 	result, err = handler.ScrapeURL(ctx, url)
 	if result != nil {
 		result.NormalizeMediaURLs()
-		// Credentials/signed tokens must never reach persisted provenance.
 		result.SourceURL = RedactSourceURL(result.SourceURL)
 	}
 	if err != nil {
-		// The raw URL may appear in HTTP/transport error messages; scrub it
-		// before classification or persistence so signed tokens never leak.
 		err = redactErrorURL(err, url)
 	}
 	return result, err

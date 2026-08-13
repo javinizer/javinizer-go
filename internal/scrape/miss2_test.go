@@ -67,6 +67,25 @@ func TestScrapeMiss2_ResolveContentID_ResolverSuccess(t *testing.T) {
 	assert.Equal(t, "abc123", result)
 }
 
+func TestScrapeMiss2_ResolveContentID_SkipsNonResolverPriority(t *testing.T) {
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(&mockScraper{name: "actress-only", enabled: true})
+	registry.RegisterInstance(&cidResolverScraper{name: "mock-resolver", resolvedID: "abc123"})
+	s := &Scraper{registry: registry}
+	result := s.resolveContentID(context.Background(), "ABC-123", []string{"actress-only", "mock-resolver"})
+	assert.Equal(t, "abc123", result)
+}
+
+func TestScrapeMiss2_ResolveContentID_SkipsDisabledResolver(t *testing.T) {
+	registry := scraperutil.NewScraperRegistry()
+	resolver := &disabledCIDResolver{cidResolverScraper: cidResolverScraper{name: "disabled", resolvedID: "rewritten"}}
+	registry.RegisterInstance(resolver)
+	s := &Scraper{registry: registry}
+	result := s.resolveContentID(context.Background(), "ABC-123", []string{"disabled"})
+	assert.Equal(t, "ABC-123", result)
+	assert.Zero(t, resolver.calls)
+}
+
 // --- queryAll: nil context gets background context ---
 
 func TestScrapeMiss2_QueryAll_NilContext(t *testing.T) {
@@ -74,7 +93,7 @@ func TestScrapeMiss2_QueryAll_NilContext(t *testing.T) {
 	scrapers := []models.Scraper{
 		&mockScraper{name: "test", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
 	}
-	results, failures := s.queryAll(nil, "TEST-001", "test-001", "", scrapers, time.Now())
+	results, failures := s.queryAll(nil, "TEST-001", "test-001", scrapers, time.Now())
 	assert.Len(t, results, 1)
 	assert.Empty(t, failures)
 }
@@ -83,7 +102,7 @@ func TestScrapeMiss2_QueryAll_NilContext(t *testing.T) {
 
 func TestScrapeMiss2_QueryAll_EmptyScrapers(t *testing.T) {
 	s := &Scraper{}
-	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", "", nil, time.Now())
+	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", nil, time.Now())
 	assert.Nil(t, results)
 	assert.Nil(t, failures)
 }
@@ -95,7 +114,7 @@ func TestScrapeMiss2_QueryAll_SingleScraperError(t *testing.T) {
 	scrapers := []models.Scraper{
 		&mockScraper{name: "fail", enabled: true, err: errors.New("network error")},
 	}
-	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", "", scrapers, time.Now())
+	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", scrapers, time.Now())
 	assert.Empty(t, results)
 	assert.Len(t, failures, 1)
 	assert.Equal(t, "fail", failures[0].Scraper)
@@ -109,7 +128,7 @@ func TestScrapeMiss2_QueryAll_MultipleScrapers(t *testing.T) {
 		&mockScraper{name: "ok", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
 		&mockScraper{name: "fail", enabled: true, err: errors.New("network error")},
 	}
-	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", "", scrapers, time.Now())
+	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", scrapers, time.Now())
 	assert.Len(t, results, 1)
 	assert.Len(t, failures, 1)
 }
@@ -125,7 +144,7 @@ func TestScrapeMiss2_QueryAll_ContextCancelled(t *testing.T) {
 		&mockScraper{name: "test1", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
 		&mockScraper{name: "test2", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
 	}
-	_, failures := s.queryAll(ctx, "TEST-001", "test-001", "", scrapers, time.Now())
+	_, failures := s.queryAll(ctx, "TEST-001", "test-001", scrapers, time.Now())
 	// The appended parent-context failure must be friendly and typed, never
 	// the raw "context canceled" sentinel leaking into buildNoResultsError.
 	var contextFailure *models.ScraperError
@@ -145,7 +164,7 @@ func TestScrapeMiss2_QueryAll_ContextCancelled(t *testing.T) {
 
 func TestScrapeMiss2_QuerySingle_PanicRecovery(t *testing.T) {
 	panickingScraper := &panicScraper{name: "panic"}
-	outcome := querySingle(context.Background(), "TEST-001", "", panickingScraper)
+	outcome := querySingle(context.Background(), "TEST-001", panickingScraper)
 	assert.Nil(t, outcome.result)
 	require.NotNil(t, outcome.failure)
 	// safeSearch recovers the panic and returns it as an error,
@@ -160,7 +179,7 @@ func TestScrapeMiss2_QuerySingle_ContextCancelled(t *testing.T) {
 	cancel()
 
 	scraper := &mockScraper{name: "test", enabled: true, result: &models.ScraperResult{}}
-	outcome := querySingle(ctx, "TEST-001", "", scraper)
+	outcome := querySingle(ctx, "TEST-001", scraper)
 	assert.Nil(t, outcome.result)
 	require.NotNil(t, outcome.failure)
 	assert.Equal(t, "test", outcome.failure.Scraper)
@@ -175,7 +194,7 @@ func TestScrapeMiss2_QuerySingle_ErrorWithMappedQueryRetry(t *testing.T) {
 		err:         errors.New("not found with mapped"),
 		result:      &models.ScraperResult{ID: "TEST-001"},
 	}
-	outcome := querySingle(context.Background(), "TEST-001", "", scraper)
+	outcome := querySingle(context.Background(), "TEST-001", scraper)
 	require.NotNil(t, outcome.result)
 	assert.Equal(t, "TEST-001", outcome.result.ID)
 }
@@ -189,7 +208,7 @@ func TestScrapeMiss2_QuerySingle_ErrorWithMappedQueryRetryFails(t *testing.T) {
 		err:         errors.New("not found"),
 		retryErr:    errors.New("also not found"),
 	}
-	outcome := querySingle(context.Background(), "TEST-001", "", scraper)
+	outcome := querySingle(context.Background(), "TEST-001", scraper)
 	assert.Nil(t, outcome.result)
 	require.NotNil(t, outcome.failure)
 	assert.Contains(t, outcome.failure.Message, "mapped query")
@@ -199,7 +218,7 @@ func TestScrapeMiss2_QuerySingle_ErrorWithMappedQueryRetryFails(t *testing.T) {
 
 func TestScrapeMiss2_QuerySingle_ErrorNoMappedQuery(t *testing.T) {
 	scraper := &mockScraper{name: "fail", enabled: true, err: errors.New("network error")}
-	outcome := querySingle(context.Background(), "TEST-001", "", scraper)
+	outcome := querySingle(context.Background(), "TEST-001", scraper)
 	assert.Nil(t, outcome.result)
 	require.NotNil(t, outcome.failure)
 	assert.Equal(t, "fail", outcome.failure.Scraper)
@@ -233,6 +252,7 @@ type cidResolverScraper struct {
 	name       string
 	resolvedID string
 	err        error
+	calls      int
 }
 
 func (c *cidResolverScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
@@ -248,11 +268,18 @@ func (c *cidResolverScraper) Config() *models.ScraperSettings {
 }
 func (c *cidResolverScraper) Close() error { return nil }
 func (c *cidResolverScraper) ResolveContentID(_ string) (string, error) {
+	c.calls++
 	if c.err != nil {
 		return "", c.err
 	}
 	return c.resolvedID, nil
 }
+
+type disabledCIDResolver struct {
+	cidResolverScraper
+}
+
+func (*disabledCIDResolver) IsEnabled() bool { return false }
 
 type panicScraper struct {
 	name string

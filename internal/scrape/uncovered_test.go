@@ -179,14 +179,14 @@ func TestEnrichActressFields_PartialUpdateUncovered(t *testing.T) {
 
 func TestTryCache_NilMovieRepoUncovered(t *testing.T) {
 	s := New(nil, nil, nil, nil, nil, &Config{}, nil, nil)
-	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, time.Time{})
+	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, false, time.Time{})
 	assert.Nil(t, result)
 }
 
 func TestTryCache_FindByIDNotFoundUncovered(t *testing.T) {
 	mockMovieRepo := &mockMovieRepository{findErr: database.ErrNotFound}
 	s := New(nil, nil, nil, mockMovieRepo, nil, &Config{}, nil, nil)
-	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, time.Time{})
+	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, false, time.Time{})
 	assert.Nil(t, result)
 }
 
@@ -195,7 +195,7 @@ func TestTryCache_CacheHitNoTranslationUncovered(t *testing.T) {
 	f.withCachedMovie("TEST-001", "Cached Movie")
 	s := f.build()
 
-	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, time.Time{})
+	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "TEST-001"}, nil, false, time.Time{})
 	require.NotNil(t, result)
 	assert.Equal(t, StatusCompleted, result.Status)
 	assert.Equal(t, "Cached Movie", result.Movie.Title)
@@ -231,7 +231,7 @@ func TestResolveScraperNames_PriorityOverrideOnlyUncovered(t *testing.T) {
 
 func TestQuerySingle_PanicRecoveryUncovered(t *testing.T) {
 	panicScraper := &panicScraperUncovered{name: "panic"}
-	outcome := querySingle(context.Background(), "MOV-001", "", panicScraper)
+	outcome := querySingle(context.Background(), "MOV-001", panicScraper)
 	assert.NotNil(t, outcome.failure)
 	assert.Equal(t, "panic", outcome.failure.Scraper)
 	// safeSearch catches the panic and returns an error, which querySingle stores as Cause
@@ -241,7 +241,7 @@ func TestQuerySingle_PanicRecoveryUncovered(t *testing.T) {
 
 func TestQueryAll_EmptyScrapersUncovered(t *testing.T) {
 	s := New(nil, nil, nil, nil, nil, &Config{}, nil, nil)
-	results, failures := s.queryAll(context.Background(), "MOV-001", "MOV-001", "", nil, time.Now())
+	results, failures := s.queryAll(context.Background(), "MOV-001", "MOV-001", nil, time.Now())
 	assert.Nil(t, results)
 	assert.Nil(t, failures)
 }
@@ -251,7 +251,7 @@ func TestQueryAll_SingleScraperUncovered(t *testing.T) {
 	registry.RegisterInstance(&mockScraper{name: "test", enabled: true, result: &models.ScraperResult{ID: "MOV-001", Title: "Test"}, err: nil})
 	scrapers := registry.GetInstancesByPriorityForInput([]string{"test"}, "")
 	s := New(registry, nil, nil, nil, nil, &Config{}, nil, nil)
-	results, failures := s.queryAll(context.Background(), "MOV-001", "MOV-001", "", scrapers, time.Now())
+	results, failures := s.queryAll(context.Background(), "MOV-001", "MOV-001", scrapers, time.Now())
 	require.Len(t, results, 1)
 	assert.Equal(t, "MOV-001", results[0].ID)
 	_ = failures

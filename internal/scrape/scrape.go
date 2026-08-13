@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
@@ -172,20 +171,7 @@ func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*m
 	}
 	// Skip content-ID resolution in raw mode — it reads/writes the DB cache,
 	// which contradicts the no-persistence contract.
-	// Check context before any work to handle pre-cancelled/expired contexts.
-	select {
-	case <-ctx.Done():
-		return nil, classifyContextError(scraperName, ctx.Err())
-	default:
-	}
-	// Resolve URL-shaped inputs to their extracted ID so the Search fallback
-	// receives the product code, not the raw URL.
-	resolvedID := movieID
-	rawInput := strings.TrimSpace(movieID)
-	if parsed, parseErr := matcher.ParseInput(rawInput, s.registry); parseErr == nil && parsed.IsURL {
-		resolvedID = parsed.ID
-	}
-	outcome := querySingle(ctx, resolvedID, rawInput, scraper)
+	outcome := querySingle(ctx, movieID, scraper)
 	if outcome.failure != nil {
 		return nil, outcome.failure
 	}
@@ -236,7 +222,6 @@ func New(
 		cfg:         cfg,
 		translator:  translator,
 		fs:          fs,
-		breaker:     newScraperCircuitBreaker(circuitBreakerThreshold),
 	}
 }
 
@@ -244,34 +229,14 @@ func New(
 // to extract MovieID and determine optimal scrapers. Returns the resolved
 // ScrapeCmd or an error if MovieID is empty after resolution.
 func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInstanceResolver, cfg *Config) (ScrapeCmd, error) {
-	// Prefer RawInput (batch/manual seam); fall back to URL-shaped MovieIDs so
-	// plain CLI calls like `scrape <url>` (which pass the URL as MovieID with
-	// no RawInput) get the same resolution: MovieID becomes the derived ID and
-	// RawInput carries the URL for the direct-page seam.
-	source := cmd.RawInput
-	if source == "" {
-		source = cmd.MovieID
-	}
-	source = strings.TrimSpace(source)
-	if source != "" {
-		parsed, parseErr := matcher.ParseInput(source, registry)
+	if cmd.RawInput != "" {
+		parsed, parseErr := matcher.ParseInput(cmd.RawInput, registry)
 		if parseErr != nil {
-			logging.Warnf("[scrape] input parse failed for %q: %v (using as-is for MovieID)", RedactURLQuery(source), parseErr)
-			// MovieID stays query-redacted for a stable/secret-free identity, but
-			// the full URL is kept in RawInput so URL-aware scrapers (via the
-			// ScrapeURL seam) still receive required query parameters, e.g.
-			// jp.jav321.com/search?sn=IPX-123.
-			cmd.MovieID = RedactURLQuery(source)
-			cmd.RawInput = source
+			logging.Warnf("[scrape] RawInput parse failed for %q: %v (using as-is for MovieID)", RedactURLQuery(cmd.RawInput), parseErr)
+			cmd.MovieID = RedactURLQuery(cmd.RawInput)
 			cmd.ParseWarning = fmt.Sprintf("input could not be parsed: %v", parseErr)
 		} else {
 			cmd.MovieID = parsed.ID
-			// Keep the trimmed URL in RawInput so the direct-page URL seam
-			// (querySingle -> ScrapeURL) receives a clean URL even when the
-			// caller supplied surrounding whitespace.
-			if parsed.IsURL {
-				cmd.RawInput = source
-			}
 			if len(cmd.SelectedScrapers) == 0 && parsed.IsURL && len(parsed.CompatibleScrapers) > 0 {
 				cmd.PriorityOverride = matcher.CalculateOptimalScrapers(nil, cfg.ScrapersPriority, parsed)
 			} else if len(cmd.SelectedScrapers) > 0 {
@@ -287,9 +252,11 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 	return cmd, nil
 }
 
+var runPostProcessScraped = postProcessScraped
+
 // postProcessScraped enriches the aggregated movie with actress DB data,
 // translation, and assembles the final ScrapeResult.
-func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, startTime time.Time) (*ScrapeResult, error) {
+func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, registry ScraperInstanceResolver, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, explicitSelection bool, startTime time.Time) (*ScrapeResult, error) {
 	var fieldSources map[string]string
 	var resolvedPriorities map[string][]string
 	if aggResult != nil {
@@ -302,6 +269,26 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	if actressRepo != nil {
 		if enriched := enrichActressesFromDB(ctx, scraped, actressRepo, cfg); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from database", enriched)
+		}
+	}
+	if enriched := enrichActressesFromBuiltinCache(scraped); enriched > 0 {
+		logging.Debugf("[scrape] Enriched %d actresses from built-in cache", enriched)
+	}
+
+	if invalid := validateActressThumbnails(scraped, cfg); invalid > 0 {
+		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails", invalid)
+	}
+
+	if registry != nil {
+		// Only an explicit selection restricts enrichment resolvers; the
+		// default global priority list must not make them exclusive, or
+		// actress-only resolvers absent from it would never run.
+		var resolverOverride []string
+		if explicitSelection {
+			resolverOverride = resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, cfg)
+		}
+		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg, resolverOverride); enriched > 0 {
+			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers", enriched)
 		}
 	}
 
@@ -339,6 +326,11 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 0, "Starting...")
 
 	// Phase 1: Resolve input
+	// Capture caller-supplied selections before resolveScrapeInput can
+	// synthesize PriorityOverride from URL parsing; synthesized overrides
+	// must not make actress enrichment exclusive later.
+	explicitSelection := len(cmd.SelectedScrapers) > 0 || len(cmd.PriorityOverride) > 0
+
 	cmd, err := resolveScrapeInput(ctx, cmd, s.registry, s.cfg)
 	if err != nil {
 		return nil, err
@@ -352,7 +344,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	skipCache := cmd.ForceRefresh || len(cmd.SelectedScrapers) > 0
 
 	if !skipCache {
-		result := s.tryCache(ctx, cmd, actressRepo, startTime)
+		result := s.tryCache(ctx, cmd, actressRepo, explicitSelection, startTime)
 		if result != nil {
 			progress.FromContext(ctx).Report(progress.ProgressStepScrape, 1, "Found in cache")
 			return result, nil
@@ -364,9 +356,9 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	// Phase 2: Query + aggregate
 	scraperNames := resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, s.cfg)
 	resolvedID := s.resolveContentID(ctx, cmd.MovieID, scraperNames)
-	scrapers := s.registry.GetInstancesByPriorityForInput(scraperNames, resolvedID)
+	scrapers := filterMovieScrapers(s.registry.GetInstancesByPriorityForInput(scraperNames, resolvedID))
 
-	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, cmd.RawInput, scrapers, startTime)
+	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, scrapers, startTime)
 	if len(results) == 0 {
 		return failedResult(cmd.MovieID, buildNoResultsError(failures), classifyFailures(failures), startTime), nil
 	}
@@ -390,7 +382,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	}
 
 	// Phase 3: Post-process
-	result, err := postProcessScraped(ctx, scraped, results, aggResult, s.cfg, s.translator, actressRepo, cmd, startTime)
+	result, err := runPostProcessScraped(ctx, scraped, results, aggResult, s.registry, s.cfg, s.translator, actressRepo, cmd, explicitSelection, startTime)
 	if err != nil {
 		return nil, err
 	}
