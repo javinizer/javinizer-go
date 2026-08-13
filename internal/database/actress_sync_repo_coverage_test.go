@@ -684,7 +684,7 @@ func TestActressSyncCancelMissingAndCompletedJobs(t *testing.T) {
 	require.ErrorIs(t, repo.CancelJob("missing"), ErrNotFound)
 	repo, job, _ := newActressSyncJobAndTask(t, db, nil, "cancel-twice")
 	require.NoError(t, repo.CancelJob(job.ID))
-	require.NoError(t, repo.CancelJob(job.ID))
+	require.ErrorIs(t, repo.CancelJob(job.ID), ErrAlreadyTerminal)
 }
 
 func TestActressRepositoryChangedQueryErrors(t *testing.T) {
