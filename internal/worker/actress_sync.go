@@ -531,7 +531,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			result.Messages = append(result.Messages, "verified_no_changes")
 			return result, nil
 		}
-		if len(resolverFailures) > 0 && resolverCount > 0 && len(resolverFailures) == resolverCount {
+		if len(resolverErrors) > 0 {
 			return result, errors.Join(resolverErrors...)
 		}
 		result.Messages = append(result.Messages, "no_verified_metadata")
