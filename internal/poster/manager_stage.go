@@ -41,6 +41,11 @@ func (pm *PosterManager) installStagedPreview(finalPath, stagedPath string) erro
 		if err := pm.fs.Rename(finalPath, backupPath); err != nil {
 			return fmt.Errorf("failed to set aside previous preview: %w", err)
 		}
+	} else if !os.IsNotExist(err) {
+		// codex P2: fail closed on an undecidable stat — treating it as
+		// "absent" would let a replacing-rename destroy the previous preview
+		// with no backup staged for restore (parity with PromoteStagedPoster).
+		return fmt.Errorf("failed to probe preview %s before install: %w", finalPath, err)
 	}
 	if err := pm.fs.Rename(stagedPath, finalPath); err != nil {
 		if backupPath != "" {

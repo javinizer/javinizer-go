@@ -384,3 +384,31 @@ func TestPosterManager_CropWithBounds_StagedCleanupWarnOnFailure(t *testing.T) {
 	_, err := pm.CropWithBounds(context.Background(), "job1", "ST-6", 0, 0, 99999, 99999, 0)
 	require.ErrorContains(t, err, "crop failed")
 }
+
+// codex P2 (PR211, third finding): an undecidable destination Stat (neither
+// success nor clean absence) fails closed — the staged bytes never install
+// over a possibly-existing preview we couldn't back up.
+func TestInstallStagedPreview_StatWedgeFailsClosed(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/p2/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/FC-1.jpg", []byte("old-preview"), 0o644))
+	wedged := statFailExactFS{Fs: base, path: dir + "/FC-1.jpg"}
+	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+
+	staged := dir + "/FC-1.jpg.staged.tmp"
+	require.NoError(t, afero.WriteFile(base, staged, []byte("new-preview"), 0o644))
+	err := pm.installStagedPreview(dir+"/FC-1.jpg", staged)
+	require.ErrorContains(t, err, "failed to probe preview")
+
+	got, rerr := afero.ReadFile(base, dir+"/FC-1.jpg")
+	require.NoError(t, rerr)
+	assert.Equal(t, "old-preview", string(got), "prior preview intact under the wedge")
+	stagedBytes, serr := afero.ReadFile(base, staged)
+	require.NoError(t, serr)
+	assert.Equal(t, "new-preview", string(stagedBytes), "staged bytes preserved for a retry")
+	entries, _ := afero.ReadDir(base, dir)
+	for _, e := range entries {
+		assert.NotContains(t, e.Name(), ".bak", "no partial backup from the fail-closed arm")
+	}
+}
