@@ -308,12 +308,14 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 	known := resolverInput
 	var resolverFailures []string
 	var resolverErrors []error
+	var resolverCount int
 	var revisit []models.Scraper
 	initialJapaneseName := strings.TrimSpace(actress.JapaneseName)
 	if revalidate || actressNeedsMetadata(actress) {
 		for _, scraper := range metadataScrapers {
 			name := strings.ToLower(strings.TrimSpace(scraper.Name()))
 			if resolver, ok := scraper.(models.ActressMetadataResolver); ok {
+				resolverCount++
 				logging.Debugf("Actress sync: resolving DMM ID %d with %s", actress.DMMID, name)
 				sourceInput := known
 				if name != resolverNameJavDB {
@@ -529,7 +531,7 @@ func SyncActressMetadata(ctx context.Context, actressID uint, actressRepo *datab
 			result.Messages = append(result.Messages, "verified_no_changes")
 			return result, nil
 		}
-		if len(resolverFailures) > 0 && len(metadataScrapers) > 0 && len(resolverFailures) == len(metadataScrapers) {
+		if len(resolverFailures) > 0 && resolverCount > 0 && len(resolverFailures) == resolverCount {
 			return result, errors.Join(resolverErrors...)
 		}
 		result.Messages = append(result.Messages, "no_verified_metadata")
