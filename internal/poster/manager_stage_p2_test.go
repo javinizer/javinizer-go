@@ -191,19 +191,22 @@ type errWedgeType struct{}
 
 func (errWedgeType) Error() string { return "wedged" }
 
-// The aside step itself wedging: the crop aborts BEFORE any byte damage, the
-// previous preview is intact, and the staged temp is cleaned by the caller.
+// The backup-aside step (a COPY under P3's never-absent contract) wedging:
+// the crop aborts BEFORE any byte damage, the previous preview is intact,
+// and the staged temp is cleaned by the caller.
 func TestPosterManager_CropWithBounds_AsideFailureKeepsEverything(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dir := "/tmp/p2/posters/job1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-3-full.jpg", jpegBytes(200, 300), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-3.jpg", []byte("old-preview"), 0o644))
-	wedged := renameFailWhereFS{Fs: base, fail: func(_, n string) bool { return strings.Contains(n, ".bak") }}
+	wedged := openFileFailWhereFS{Fs: base, fail: func(n string, flag int) bool {
+		return strings.Contains(n, ".bak") && flag&os.O_CREATE != 0
+	}}
 	pm := NewPosterManager(wedged, "/tmp/p2", nil)
 
 	_, err := pm.CropWithBounds(context.Background(), "job1", "ST-3", 0, 0, 100, 150, 0)
-	require.ErrorContains(t, err, "set aside previous preview")
+	require.ErrorContains(t, err, "back up previous preview")
 	got, rerr := afero.ReadFile(base, dir+"/ST-3.jpg")
 	require.NoError(t, rerr)
 	assert.Equal(t, "old-preview", string(got))
@@ -215,34 +218,34 @@ func TestPosterManager_CropWithBounds_AsideFailureKeepsEverything(t *testing.T) 
 	}
 }
 
-// Total-loss leg: the staged install fails AND the restore fails — the error
-// reports both, and the previous preview is still recoverable at its per-op
-// backup path (bytes never silently destroyed).
-func TestPosterManager_CropWithBounds_InstallAndRestoreBothWedge(t *testing.T) {
+// Total-loss leg: the staged install itself wedges. With the never-absent
+// canonical contract there is NO opportunistic restore arm — the old preview
+// sits untouched throughout, and the (copied) backup is swept.
+func TestPosterManager_CropWithBounds_InstallFailureKeepsOld(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dir := "/tmp/p2/posters/job1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-4-full.jpg", jpegBytes(200, 300), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-4.jpg", []byte("old-preview"), 0o644))
-	wedged := renameFailWhereFS{Fs: base, fail: func(_, n string) bool { return strings.HasSuffix(n, "/ST-4.jpg") }}
+	wedged := renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
+		return strings.Contains(o, ".tmp") && strings.HasSuffix(n, "/ST-4.jpg")
+	}}
 	pm := NewPosterManager(wedged, "/tmp/p2", nil)
 
 	_, err := pm.CropWithBounds(context.Background(), "job1", "ST-4", 0, 0, 100, 150, 0)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "restore of previous preview also failed")
-	// The old preview survives at its backup location, never deleted.
-	entries, derr := afero.ReadDir(base, dir)
-	require.NoError(t, derr)
-	var backups []string
-	for _, e := range entries {
-		if strings.Contains(e.Name(), "ST-4.jpg.") && strings.HasSuffix(e.Name(), ".bak") {
-			backups = append(backups, filepath.Join(dir, e.Name()))
-		}
-	}
-	require.Len(t, backups, 1, "previous preview recoverable at exactly one backup path")
-	got, rerr := afero.ReadFile(base, backups[0])
+	assert.Contains(t, err.Error(), "failed to install staged preview")
+	// Old preview untouched at canonical; any backup copy swept; no staged
+	// residue. Nothing was ever absent (the canonical entry stayed put).
+	got, rerr := afero.ReadFile(base, dir+"/ST-4.jpg")
 	require.NoError(t, rerr)
 	assert.Equal(t, "old-preview", string(got))
+	entries, derr := afero.ReadDir(base, dir)
+	require.NoError(t, derr)
+	for _, e := range entries {
+		assert.NotContains(t, e.Name(), ".tmp", "no staged residue: %s", e.Name())
+		assert.NotContains(t, e.Name(), ".bak", "backup swept on failure: %s", e.Name())
+	}
 }
 
 // A wedged backup sweep after a successful install: the crop succeeds, the
@@ -411,4 +414,44 @@ func TestInstallStagedPreview_StatWedgeFailsClosed(t *testing.T) {
 	for _, e := range entries {
 		assert.NotContains(t, e.Name(), ".bak", "no partial backup from the fail-closed arm")
 	}
+}
+
+// codex P2 (PR211, round-3 finding): a staged install NEVER lets the
+// canonical preview disappear — even if removing the final path is wedged
+// mid-op (modeling a reader holding it), the swap still lands atomically.
+func TestInstallStagedPreview_NeverRemovesCanonical(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/p2/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/NG-1.jpg", []byte("old"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/NG-1.jpg.staged.tmp", []byte("new"), 0o644))
+	wedgeRemoveFinal := removeFailWhereFS{Fs: base, fail: func(n string) bool {
+		return strings.HasSuffix(n, "/NG-1.jpg")
+	}}
+	pm := NewPosterManager(wedgeRemoveFinal, "/tmp/p2", nil)
+
+	err := pm.installStagedPreview(dir+"/NG-1.jpg", dir+"/NG-1.jpg.staged.tmp")
+	require.NoError(t, err, "no Remove(final) step exists at all — swap is rename-atomic")
+	got, rerr := afero.ReadFile(base, dir+"/NG-1.jpg")
+	require.NoError(t, rerr)
+	assert.Equal(t, "new", string(got))
+}
+
+// Failed-install backup sweep is warn-only when the sweep itself wedges.
+func TestInstallStagedPreview_FailedInstallBackupSweepWarnOnly(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/p2/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/NG-2.jpg", []byte("old"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/NG-2.jpg.staged.tmp", []byte("new"), 0o644))
+	combo := removeFailWhereFS{Fs: renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
+		return strings.Contains(o, ".tmp") && strings.HasSuffix(n, "/NG-2.jpg")
+	}}, fail: func(n string) bool { return strings.HasSuffix(n, ".bak") }}
+	pm := NewPosterManager(combo, "/tmp/p2", nil)
+
+	err := pm.installStagedPreview(dir+"/NG-2.jpg", dir+"/NG-2.jpg.staged.tmp")
+	require.ErrorContains(t, err, "failed to install staged preview")
+	got, rerr := afero.ReadFile(base, dir+"/NG-2.jpg")
+	require.NoError(t, rerr)
+	assert.Equal(t, "old", string(got))
 }

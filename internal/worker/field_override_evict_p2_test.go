@@ -258,3 +258,67 @@ var errWedgeWorker = errWedgeTypeWorker{}
 type errWedgeTypeWorker struct{}
 
 func (errWedgeTypeWorker) Error() string { return "tx wedged" }
+
+// codex P2 (PR211, round-3): re-selecting the SAME effective source via an
+// override must not clear the committed preview pointer — no eviction runs,
+// so the cached pair stays valid.
+func TestApplyFieldOverride_PosterURLSameValueKeepsPreview(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-OV"
+	seedPair(t, fs, dir, "OV-S")
+	store := resultstore.New(1, []string{"/f/ov.mp4"})
+	store.UpdateFileResult("/f/ov.mp4", &resultstore.MovieResult{
+		ResultID: "res-ov",
+		Status:   models.JobStatusCompleted,
+		Movie: &models.Movie{ID: "OV-S", Poster: models.PosterState{
+			PosterURL:        "https://old.example/p.jpg",
+			CroppedPosterURL: "v1-crops/OV-S.jpg",
+			PosterCropBounds: &models.CropBounds{X: 0.1, Y: 0.1, Width: 0.5, Height: 0.5},
+		}},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/ov.mp4", MovieID: "OV-S"},
+	})
+	store.SetProvenance("/f/ov.mp4", &resultstore.ProvenanceData{
+		ScraperResults: []*models.ScraperResult{{Source: "dmm", PosterURL: "https://old.example/p.jpg"}}, // SAME url
+	})
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "J-OV"})
+
+	out, _, err := pe.ApplyFieldOverride(context.Background(), "res-ov", "OV-S", "poster_url", "dmm")
+	require.NoError(t, err)
+	assert.Equal(t, "v1-crops/OV-S.jpg", out.Movie.Poster.CroppedPosterURL, "same-source override keeps the preview")
+	// Geometry is still invalidated conservatively (pre-P2 behavior), but the
+	// pair bytes stay — the crop can be re-measured against the cached source.
+	for _, suffix := range []string{"-full.jpg", ".jpg"} {
+		_, serr := fs.Stat(dir + "/OV-S" + suffix)
+		assert.NoError(t, serr, "no eviction under an unchanged effective source")
+	}
+	entries, gerr := afero.ReadDir(fs, dir)
+	require.NoError(t, gerr)
+	for _, e := range entries {
+		assert.NotContains(t, e.Name(), ".evict-", "no eviction witness staged")
+	}
+}
+
+// Same-source invariant for the cover-as-effective-source arm.
+func TestApplyFieldOverride_CoverURLSameEffectiveValueKeepsPreview(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	store := resultstore.New(1, []string{"/f/ov.mp4"})
+	store.UpdateFileResult("/f/ov.mp4", &resultstore.MovieResult{
+		ResultID: "res-ov",
+		Status:   models.JobStatusCompleted,
+		Movie: &models.Movie{ID: "OV-C", Poster: models.PosterState{
+			CoverURL:         "https://old.example/c.jpg",
+			CroppedPosterURL: "v1-crops/OV-C.jpg",
+		}},
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/ov.mp4", MovieID: "OV-C"},
+	})
+	store.SetProvenance("/f/ov.mp4", &resultstore.ProvenanceData{
+		ScraperResults: []*models.ScraperResult{{Source: "dmm", CoverURL: "https://old.example/c.jpg"}},
+	})
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "J-OV"})
+
+	out, _, err := pe.ApplyFieldOverride(context.Background(), "res-ov", "OV-C", "cover_url", "dmm")
+	require.NoError(t, err)
+	assert.Equal(t, "v1-crops/OV-C.jpg", out.Movie.Poster.CroppedPosterURL)
+}

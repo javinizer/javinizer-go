@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/spf13/afero"
 )
@@ -29,30 +30,29 @@ func uniqueStagedSibling(destPath, suffix string) string {
 	return fmt.Sprintf("%s.%d-%d.%s", destPath, time.Now().UnixNano(), stagedNameCounter.Add(1), suffix)
 }
 
-// installStagedPreview moves the current preview aside into a per-operation
-// backup name and renames the staged bytes into place — readers always see
-// either the old or the new bytes, never a partial write. Any failure
-// restores the previous preview best-effort and reports the error; no staged
-// or backup residue survives, success or failure.
+// installStagedPreview installs staged bytes onto finalPath so the canonical
+// path is NEVER absent mid-replace (codex P2): the previous preview is COPIED
+// aside (not moved), and the staged bytes land via fsutil.ReplaceFile, which
+// is rename-based on POSIX and MoveFileEx-based on Windows — both atomic
+// replaces. A lock-free reader (serveTempPoster) sees old bytes until the
+// swap, then new bytes; failure to replace leaves old bytes untouched.
 func (pm *PosterManager) installStagedPreview(finalPath, stagedPath string) error {
 	backupPath := ""
 	if _, err := pm.fs.Stat(finalPath); err == nil {
 		backupPath = uniqueStagedSibling(finalPath, "bak")
-		if err := pm.fs.Rename(finalPath, backupPath); err != nil {
-			return fmt.Errorf("failed to set aside previous preview: %w", err)
+		if err := fsutil.CopyFileFs(pm.fs, finalPath, backupPath); err != nil {
+			return fmt.Errorf("failed to back up previous preview: %w", err)
 		}
 	} else if !os.IsNotExist(err) {
-		// codex P2: fail closed on an undecidable stat — treating it as
-		// "absent" would let a replacing-rename destroy the previous preview
-		// with no backup staged for restore (parity with PromoteStagedPoster).
+		// codex P2: fail closed on an undecidable stat — never replace blind.
 		return fmt.Errorf("failed to probe preview %s before install: %w", finalPath, err)
 	}
-	if err := pm.fs.Rename(stagedPath, finalPath); err != nil {
+	if err := fsutil.ReplaceFile(pm.fs, stagedPath, finalPath); err != nil {
+		// Nothing moved over finalPath (atomic replace either lands or doesn't
+		// — the prior bytes are still there); the backup copy is pure litter.
 		if backupPath != "" {
-			// Losing the just-staged bytes is preferable to leaving the
-			// destination empty — old content beats none.
-			if rErr := pm.fs.Rename(backupPath, finalPath); rErr != nil {
-				return fmt.Errorf("failed to install staged preview: %w (restore of previous preview also failed: %v)", err, rErr)
+			if rmErr := pm.fs.Remove(backupPath); rmErr != nil {
+				logging.Warnf("failed install backup sweep %s: %v", backupPath, rmErr)
 			}
 		}
 		return fmt.Errorf("failed to install staged preview: %w", err)

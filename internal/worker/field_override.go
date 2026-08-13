@@ -141,21 +141,31 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		movie.Screenshots = append([]string(nil), result.ScreenshotURL...)
 		setFieldSource("screenshot_urls")
 	case "poster_url":
+		prevEffective := effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL)
 		movie.Poster.PosterURL = result.PosterURL
 		setFieldSource("poster_url")
 		clearPosterCropGeometry(movie) // new source: stored geometry is stale
 		// P2 (D6/R13): the committed row must not point at bytes describing the
-		// old source once the pair eviction runs in ApplyFieldOverride.
-		movie.Poster.CroppedPosterURL = ""
+		// old source once the pair eviction runs in ApplyFieldOverride. But when
+		// the override re-selects the SAME source, no eviction runs — keep the
+		// still-valid preview pointer (codex P2 review round on PR #211).
+		if effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL) != prevEffective {
+			movie.Poster.CroppedPosterURL = ""
+		}
 	case "cover_url":
+		prevCover := movie.Poster.CoverURL
 		movie.Poster.CoverURL = result.CoverURL
 		setFieldSource("cover_url")
 		// Only clears when the cover IS the effective poster source
 		// (poster_url empty): swapping fanart under an explicit poster must
 		// keep a still-valid manual crop.
 		if movie.Poster.PosterURL == "" {
+			prevEffective := effectivePosterSourceOf(movie.Poster.PosterURL, prevCover)
 			clearPosterCropGeometry(movie)
-			movie.Poster.CroppedPosterURL = "" // P2 (D6): bytes-about-to-evict pointer cleared
+			// Same-source override ⇒ no eviction ⇒ pointer stays valid.
+			if effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL) != prevEffective {
+				movie.Poster.CroppedPosterURL = ""
+			}
 		}
 	case "trailer_url":
 		movie.TrailerURL = result.TrailerURL
