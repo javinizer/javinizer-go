@@ -231,10 +231,6 @@ func (pm *PosterManager) PromoteStagedPoster(staged *StagedPoster) (*cropResult,
 		}
 		legs = append(legs, l)
 	}
-	if len(legs) == 0 {
-		return nil, fmt.Errorf("promote staged poster: incomplete stage — no staged legs to install")
-	}
-
 	// Phase 1: COPY the previous canonical bytes aside (never move). The
 	// canonical leg stays present throughout the promote — a lock-free reader
 	// on /temp/posters can never observe a 404 window (codex P2 round 4).

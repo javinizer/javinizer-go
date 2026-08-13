@@ -331,13 +331,17 @@ func TestApplyFieldOverride_EvictionGatedOnSiblingShare(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	dir := "/tmp/posters/J-OV"
 	seedPair(t, fs, dir, "SIB-1")
-	store := resultstore.New(2, []string{"/f/a.mp4", "/f/b.mp4"})
-	for _, rec := range []struct{ fp, resID string }{{"/f/a.mp4", "res-a"}, {"/f/b.mp4", "res-b"}} {
+	store := resultstore.New(3, []string{"/f/a.mp4", "/f/b.mp4", "/f/c.mp4"})
+	for _, rec := range []struct{ fp, resID string }{{"/f/a.mp4", "res-a"}, {"/f/b.mp4", "res-b"}, {"/f/c.mp4", "res-other"}} {
+		movieID := "SIB-1"
+		if rec.resID == "res-other" {
+			movieID = "OTHER-9" // non-matching sibling exercises the loop's ID filter
+		}
 		store.UpdateFileResult(rec.fp, &resultstore.MovieResult{
 			ResultID:      rec.resID,
 			Status:        models.JobStatusCompleted,
-			Movie:         &models.Movie{ID: "SIB-1", Poster: models.PosterState{PosterURL: "https://old.example/p.jpg", CroppedPosterURL: "v1/SIB-1.jpg"}},
-			FileMatchInfo: models.FileMatchInfo{Path: rec.fp, MovieID: "SIB-1"},
+			Movie:         &models.Movie{ID: movieID, Poster: models.PosterState{PosterURL: "https://old.example/p.jpg", CroppedPosterURL: "v1/SIB-1.jpg"}},
+			FileMatchInfo: models.FileMatchInfo{Path: rec.fp, MovieID: movieID},
 		})
 	}
 	store.SetProvenance("/f/a.mp4", &resultstore.ProvenanceData{
