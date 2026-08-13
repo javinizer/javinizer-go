@@ -1207,7 +1207,14 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 				if fp == filePath || row == nil || row.Movie == nil {
 					continue
 				}
-				if !strings.EqualFold(strings.TrimSpace(row.Movie.ID), stalePosterID) {
+				// codex PR#211 round 9: legacy rows can carry an EMPTY canonical
+				// Movie.ID — their shared identity lives on the matcher alias
+				// (FileMatchInfo.MovieID); compare the effective row identity.
+				rowID := strings.TrimSpace(row.Movie.ID)
+				if rowID == "" {
+					rowID = strings.TrimSpace(row.FileMatchInfo.MovieID)
+				}
+				if !strings.EqualFold(rowID, stalePosterID) {
 					continue
 				}
 				if effectivePosterSourceOf(row.Movie.Poster.PosterURL, row.Movie.Poster.CoverURL) == oldEffective {

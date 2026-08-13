@@ -104,10 +104,19 @@ func (c *TempDirCleaner) reconcileEvictWitness(ctx context.Context, dir, jobID, 
 	if w.FilePath != "" {
 		// Scoped arbitration: ONLY the witness's own row can prove its commit
 		// landed — never a same-ID sibling that migrated earlier.
-		if r, ok := res[w.FilePath]; ok && r != nil && r.Movie != nil &&
-			strings.EqualFold(strings.TrimSpace(r.Movie.ID), w.OldID) &&
-			effectivePosterSourceOf(r.Movie.Poster.PosterURL, r.Movie.Poster.CoverURL) == w.NewSourceURL {
-			committed = true
+		if r, ok := res[w.FilePath]; ok && r != nil && r.Movie != nil {
+			// codex PR#211 round 9: legacy rows whose canonical Movie.ID is
+			// empty share their identity through the matcher alias — an eviction
+			// targeted at the alias must accept the alias (or its canonical ID)
+			// as the persisted witness's identity.
+			liveID := strings.TrimSpace(r.Movie.ID)
+			if liveID == "" {
+				liveID = strings.TrimSpace(r.FileMatchInfo.MovieID)
+			}
+			if strings.EqualFold(liveID, w.OldID) &&
+				effectivePosterSourceOf(r.Movie.Poster.PosterURL, r.Movie.Poster.CoverURL) == w.NewSourceURL {
+				committed = true
+			}
 		}
 	} else {
 		// Legacy content-less witnesses arbitrate family-wide (pre-P3 records).

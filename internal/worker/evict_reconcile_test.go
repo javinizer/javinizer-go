@@ -551,3 +551,38 @@ func TestReconcileEvictWitness_ScopedCompletesWhenOwnRowCommitted(t *testing.T) 
 	_, wErr := fs.Stat(wp)
 	assert.Error(t, wErr, "witness swept")
 }
+
+// codex P2 round 9 (PR211): the persisted row carrying an EMPTY canonical ID
+// shares its identity through the matcher alias (FileMatchInfo.MovieID).
+// "The alias is the persistent identity" — the witness arbitration must
+// accept it so a committed override's eviction completes at startup.
+func TestReconcileEvictWitness_LegacyEmptyIDAliasArbitrates(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-LEG"
+	require.NoError(t, fs.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "LEG-9-full.jpg"), []byte("old-full"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "LEG-9.jpg"), []byte("old-crop"), 0o644))
+	payload, _ := json.Marshal(evictWitness{OldID: "LEG-9", NewSourceURL: "https://new-site/l.jpg", FilePath: "/f/leg.mp4"})
+	wp := filepath.Join(dir, ".evict-LEG-9.json")
+	require.NoError(t, afero.WriteFile(fs, wp, payload, 0o644))
+
+	ownRow := map[string]*resultstore.MovieResult{
+		"/f/leg.mp4": {
+			ResultID:      "res-leg",
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "", Poster: models.PosterState{PosterURL: "https://new-site/l.jpg"}}, // canonical ID empty
+			FileMatchInfo: models.FileMatchInfo{Path: "/f/leg.mp4", MovieID: "LEG-9"},
+		},
+	}
+	data, err := json.Marshal(ownRow)
+	require.NoError(t, err)
+	repo := mocks.NewMockJobRepositoryInterface(t)
+	repo.EXPECT().FindByID(mock.Anything, "JOB-LEG").Return(&models.Job{Results: string(data)}, nil)
+	cl := &TempDirCleaner{fs: fs, tempDir: "/tmp", jobRepo: repo}
+	n := cl.reconcileEvictWitness(context.Background(), dir, "JOB-LEG", wp)
+	assert.Equal(t, 1, n)
+	_, fErr := fs.Stat(filepath.Join(dir, "LEG-9-full.jpg"))
+	assert.Error(t, fErr, "committed override on alias-identified rows still evicts")
+	_, wErr := fs.Stat(wp)
+	assert.Error(t, wErr, "witness swept")
+}

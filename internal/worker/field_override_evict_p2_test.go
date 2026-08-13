@@ -385,3 +385,44 @@ func TestApplyFieldOverride_EvictionGatedOnSiblingShare(t *testing.T) {
 		assert.Error(t, serr, "last-sibling migration evicts the old pair: %s", suffix)
 	}
 }
+
+// codex P2 round 9 (PR211): on legacy rows whose canonical Movie.ID is
+// empty, the pair's shared identity is the matcher alias — a sibling still
+// on the OLD source must block eviction (its preview references the alias
+// pair); once the last sibling migrates, eviction proceeds.
+func TestApplyFieldOverride_SiblingShareLegacyAliasBlocksEviction(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir := "/tmp/posters/J-LEG"
+	seedPair(t, fs, dir, "LEG-9")
+	store := resultstore.New(2, []string{"/f/a.mp4", "/f/b.mp4"})
+	for _, rec := range []struct{ fp, resID string }{{"/f/a.mp4", "res-a"}, {"/f/b.mp4", "res-b"}} {
+		store.UpdateFileResult(rec.fp, &resultstore.MovieResult{
+			ResultID:      rec.resID,
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "", Poster: models.PosterState{PosterURL: "https://old.example/leg.jpg", CroppedPosterURL: "v1/LEG-9.jpg"}},
+			FileMatchInfo: models.FileMatchInfo{Path: rec.fp, MovieID: "LEG-9"},
+		})
+		store.SetProvenance(rec.fp, &resultstore.ProvenanceData{
+			ScraperResults: []*models.ScraperResult{{Source: "dmm", PosterURL: "https://new.example/leg.jpg"}},
+		})
+	}
+	pe := newEditorForStore(store)
+	pe.attachEnv(&posterEditEnv{fs: fs, tempDir: "/tmp", jobID: "J-LEG"})
+
+	out1, _, err1 := pe.ApplyFieldOverride(context.Background(), "res-b", "LEG-9", "poster_url", "dmm")
+	require.NoError(t, err1)
+	require.NotNil(t, out1)
+	for _, suffix := range []string{"-full.jpg", ".jpg"} {
+		_, serr := fs.Stat(dir + "/LEG-9" + suffix)
+		assert.NoError(t, serr, "sibling's preview preserved while she references the old source")
+	}
+
+	// Second sibling migrates too: nobody reads the old pair now.
+	out2, _, err2 := pe.ApplyFieldOverride(context.Background(), "res-a", "LEG-9", "poster_url", "dmm")
+	require.NoError(t, err2)
+	require.NotNil(t, out2)
+	for _, suffix := range []string{"-full.jpg", ".jpg"} {
+		_, serr := fs.Stat(dir + "/LEG-9" + suffix)
+		assert.Error(t, serr, "last-sibling migration evicts the alias pair: %s", suffix)
+	}
+}
