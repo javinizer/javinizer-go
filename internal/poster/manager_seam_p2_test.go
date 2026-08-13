@@ -201,7 +201,8 @@ func TestPromoteStagedPoster_CanonicalStatErrorAborts(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dir := "/tmp/p2/posters/job1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
-	require.NoError(t, afero.WriteFile(base, dir+"/ST-P5.stage-x-full.jpg", []byte("s"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/ST-P5.stage-x-full.jpg", []byte("s-full"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/ST-P5.stage-x.jpg", []byte("s-crop"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P5-full.jpg", []byte("c"), 0o644))
 	wedged := statFailExactFS{Fs: base, path: dir + "/ST-P5-full.jpg"}
 	pm := NewPosterManager(wedged, "/tmp/p2", nil)
@@ -279,6 +280,7 @@ func TestPromoteStagedPoster_BackupSweepWarnIsNonFatal(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dir := "/tmp/p2/posters/job1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dir+"/ST-P9-stagez-full.jpg", []byte("s-full"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P9-stagez.jpg", []byte("s"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P9.jpg", []byte("c"), 0o644))
 	wedged := removeFailWhereFS{Fs: base, fail: func(n string) bool { return strings.HasSuffix(n, ".bak") }}
@@ -452,4 +454,37 @@ func TestPromoteStagedPoster_RestoreRenameWedgedKeepsBackup(t *testing.T) {
 	content, rerr := afero.ReadFile(base, bak[0])
 	require.NoError(t, rerr)
 	assert.Equal(t, "c-full", string(content), "prior bytes recoverable from the backup")
+}
+
+// codex P2 round 7 (PR211): a successful stage ALWAYS produced both legs —
+// a missing staged leg means the stage was disturbed mid-op (temp sweep).
+// Promote must fail instead of installing a partial pair or committing a
+// dangling URL over nothing.
+func TestPromoteStagedPoster_IncompleteStageFails(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/tmp/p2/posters/job1"
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	// Stage exists partially (full leg swept between stage and promote).
+	require.NoError(t, afero.WriteFile(base, dir+"/INC-1.stage-x.jpg", []byte("s-crop"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/INC-1-full.jpg", []byte("c-full"), 0o644))
+	require.NoError(t, afero.WriteFile(base, dir+"/INC-1.jpg", []byte("c-crop"), 0o644))
+	pm := NewPosterManager(base, "/tmp/p2", nil)
+
+	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "INC-1.stage-x", "INC-1", ""))
+	require.ErrorContains(t, err, "incomplete stage")
+
+	// Canonical untouched.
+	for _, suffix := range []string{"-full.jpg", ".jpg"} {
+		got, rerr := afero.ReadFile(base, dir+"/INC-1"+suffix)
+		require.NoError(t, rerr)
+		assert.True(t, strings.HasPrefix(string(got), "c-"), "unpromoted: %s stays old", suffix)
+	}
+
+	// And an empty stage (both legs gone) errors too.
+	require.NoError(t, afero.WriteFile(base, dir+"/INC-2.jpg", []byte("c-crop"), 0o644))
+	_, err2 := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "INC-2.stage-x", "INC-2", ""))
+	require.ErrorContains(t, err2, "incomplete stage")
+	got, rerr := afero.ReadFile(base, dir+"/INC-2.jpg")
+	require.NoError(t, rerr)
+	assert.Equal(t, "c-crop", string(got))
 }

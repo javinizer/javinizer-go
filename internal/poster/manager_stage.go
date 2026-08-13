@@ -221,11 +221,18 @@ func (pm *PosterManager) PromoteStagedPoster(staged *StagedPoster) (*cropResult,
 		}
 		if _, err := pm.fs.Stat(l.stagedPath); err != nil {
 			if os.IsNotExist(err) {
-				continue // leg never staged (e.g. crop failed with no fallback)
+				// codex P2 round 7: a successful stage ALWAYS produced both legs
+				// (crop failures fall back to a copy). A missing leg therefore
+				// means the stage was disturbed (temp sweep mid-op); promoting a
+				// remainder would commit a dangling crop URL or mix generations.
+				return nil, fmt.Errorf("promote staged poster: incomplete stage, staged leg absent: %s", l.stagedPath)
 			}
 			return nil, fmt.Errorf("promote staging stat %s: %w", l.stagedPath, err)
 		}
 		legs = append(legs, l)
+	}
+	if len(legs) == 0 {
+		return nil, fmt.Errorf("promote staged poster: incomplete stage — no staged legs to install")
 	}
 
 	// Phase 1: COPY the previous canonical bytes aside (never move). The
