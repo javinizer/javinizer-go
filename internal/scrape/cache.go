@@ -58,7 +58,6 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 
 	scrapedToReturn := cached
 	fieldSources := buildFieldSourcesFromCachedMovie(cached)
-	actressSources := buildActressSourcesFromCachedMovie(cached)
 
 	if actressRepo != nil {
 		if enriched := enrichActressesFromDB(ctx, scrapedToReturn, actressRepo, s.cfg); enriched > 0 {
@@ -84,6 +83,8 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers after cache hit", enriched)
 		}
 	}
+
+	actressSources := buildActressSourcesFromCachedMovie(scrapedToReturn)
 
 	now := time.Now()
 	if len(resolverWarnings) > 0 {
