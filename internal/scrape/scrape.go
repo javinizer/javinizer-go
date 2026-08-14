@@ -281,7 +281,7 @@ var runPostProcessScraped = postProcessScraped
 
 // postProcessScraped enriches the aggregated movie with actress DB data,
 // translation, and assembles the final ScrapeResult.
-func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, registry ScraperInstanceResolver, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, explicitSelection bool, startTime time.Time) (*ScrapeResult, error) {
+func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, registry ScraperInstanceResolver, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, explicitSelection bool, startTime time.Time, breaker *scraperCircuitBreaker) (*ScrapeResult, error) {
 	var fieldSources map[string]string
 	var resolvedPriorities map[string][]string
 	if aggResult != nil {
@@ -323,7 +323,7 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		if explicitSelection {
 			resolverOverride = resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, cfg)
 		}
-		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg, &resolverWarnings, resolverOverride); enriched > 0 {
+		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg, &resolverWarnings, breaker, resolverOverride); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers", enriched)
 		}
 	}
@@ -450,7 +450,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	}
 
 	// Phase 3: Post-process
-	result, err := runPostProcessScraped(ctx, scraped, results, aggResult, s.registry, s.cfg, s.translator, actressRepo, cmd, explicitSelection, startTime)
+	result, err := runPostProcessScraped(ctx, scraped, results, aggResult, s.registry, s.cfg, s.translator, actressRepo, cmd, explicitSelection, startTime, s.breaker)
 	if err != nil {
 		return nil, err
 	}

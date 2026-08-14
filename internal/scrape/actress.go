@@ -207,7 +207,7 @@ func actressThumbNeedsResolution(thumbURL string) bool {
 	return strings.TrimSpace(thumbURL) == "" || models.IsKnownInvalidDMMActressThumbnail(thumbURL)
 }
 
-func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, registry ScraperInstanceResolver, cfg *Config, warnings *[]string, priorityOverride ...[]string) int {
+func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, registry ScraperInstanceResolver, cfg *Config, warnings *[]string, breaker *scraperCircuitBreaker, priorityOverride ...[]string) int {
 	// cfg.ScrapeActress is only the global default here: collectMetadataResolvers
 	// applies per-scraper overrides, so a global false with a scraper-specific
 	// true still enriches (documented three-state behavior).
@@ -300,6 +300,12 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			return true, worst
 		}
 		for idx, resolver := range resolvers {
+			if breaker != nil {
+				if skip := breaker.skipFailure(resolverName(resolver)); skip != nil {
+					logging.Debugf("Actress resolver %s skipped by circuit breaker for %s", resolverName(resolver), actress.FullName())
+					continue
+				}
+			}
 			// Each resolver sees the best-known values so far, not the raw
 			// actress: an earlier source may have discovered the Japanese name
 			// a name-keyed source (MinnanoAV/JavDB) needs to contribute.

@@ -59,7 +59,7 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		if explicitSelection {
 			resolverOverride = resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, s.cfg)
 		}
-		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg, &resolverWarnings, resolverOverride); enriched > 0 {
+		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg, &resolverWarnings, s.breaker, resolverOverride); enriched > 0 {
 			needsPersistence = true
 			actressEnriched = true
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers after cache hit", enriched)

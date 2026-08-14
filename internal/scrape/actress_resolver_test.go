@@ -52,7 +52,7 @@ func TestEnrichActressesFromResolversFillsBlankFields(t *testing.T) {
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 19244}}}
 	cfg := &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}
 
-	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg, &[]string{})
+	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg, &[]string{}, nil)
 	require.Equal(t, 1, enriched)
 	assert.Equal(t, "Asami", movie.Actresses[0].FirstName)
 	assert.Equal(t, "Abe", movie.Actresses[0].LastName)
@@ -75,7 +75,7 @@ func TestEnrichActressesFromResolversSkipsCompleteActresses(t *testing.T) {
 	}}}
 	cfg := &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}
 
-	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg, &[]string{})
+	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg, &[]string{}, nil)
 	assert.Zero(t, enriched)
 	assert.Equal(t, "Asami", movie.Actresses[0].FirstName)
 }
@@ -85,7 +85,7 @@ func TestEnrichActressesFromResolversGatedByScrapeActress(t *testing.T) {
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 1}}}
 	cfg := &Config{ScrapeActress: false}
 
-	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg, &[]string{})
+	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg, &[]string{}, nil)
 	assert.Zero(t, enriched)
 }
 
@@ -102,7 +102,7 @@ func TestEnrichActressesFromResolversHonorsPerScraperOptOut(t *testing.T) {
 	}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 1}}}
 
-	enriched := enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(disabledResolver, enabledResolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{})
+	enriched := enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(disabledResolver, enabledResolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{}, nil)
 	assert.Equal(t, 1, enriched)
 	assert.Zero(t, disabledResolver.calls)
 	assert.Equal(t, 1, enabledResolver.calls)
@@ -119,7 +119,7 @@ func TestEnrichActressesFromResolversRepairsKnownInvalidThumbnail(t *testing.T) 
 		ThumbURL: "https://pics.dmm.co.jp/mono/noimage/now_printing.jpg",
 	}}}
 
-	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{})
+	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{}, nil)
 	require.Equal(t, 1, enriched)
 	assert.Equal(t, resolver.metadata.ThumbURL, movie.Actresses[0].ThumbURL)
 }
@@ -137,7 +137,7 @@ func TestEnrichActressesFromResolversComposesAcrossResolvers(t *testing.T) {
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 100}}}
 	cfg := &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}
 
-	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg, &[]string{})
+	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, cfg, &[]string{}, nil)
 	require.Equal(t, 1, enriched)
 	assert.Equal(t, "Yui", movie.Actresses[0].FirstName)
 	assert.Equal(t, "Hatano", movie.Actresses[0].LastName)
@@ -221,7 +221,7 @@ func TestCachedAndFreshActressEnrichmentUseResolvedPriority(t *testing.T) {
 	require.Equal(t, "Minnano", result.Movie.Actresses[0].FirstName)
 
 	fresh := &models.Movie{Actresses: []models.Actress{{DMMID: 77}}}
-	require.Equal(t, 1, enrichActressesFromResolvers(t.Context(), fresh, registry, cfg, &[]string{}, []string{"minnanoav", "dmm"}))
+	require.Equal(t, 1, enrichActressesFromResolvers(t.Context(), fresh, registry, cfg, &[]string{}, nil, []string{"minnanoav", "dmm"}))
 	require.Equal(t, "Minnano", fresh.Actresses[0].FirstName)
 }
 
@@ -233,11 +233,11 @@ func TestEnrichActressesFromResolversHonorsPriority(t *testing.T) {
 	registry.RegisterInstance(minnano)
 
 	configured := &models.Movie{Actresses: []models.Actress{{DMMID: 77}}}
-	require.Equal(t, 1, enrichActressesFromResolvers(t.Context(), configured, registry, &Config{ScrapeActress: true, ScrapersPriority: []string{"minnanoav", "dmm"}}, &[]string{}))
+	require.Equal(t, 1, enrichActressesFromResolvers(t.Context(), configured, registry, &Config{ScrapeActress: true, ScrapersPriority: []string{"minnanoav", "dmm"}}, &[]string{}, nil))
 	require.Equal(t, "Minnano", configured.Actresses[0].FirstName)
 
 	selected := &models.Movie{Actresses: []models.Actress{{DMMID: 77}}}
-	require.Equal(t, 1, enrichActressesFromResolvers(t.Context(), selected, registry, &Config{ScrapeActress: true, ScrapersPriority: []string{"dmm", "minnanoav"}}, &[]string{}, []string{"minnanoav", "dmm"}))
+	require.Equal(t, 1, enrichActressesFromResolvers(t.Context(), selected, registry, &Config{ScrapeActress: true, ScrapersPriority: []string{"dmm", "minnanoav"}}, &[]string{}, nil, []string{"minnanoav", "dmm"}))
 	require.Equal(t, "Minnano", selected.Actresses[0].FirstName)
 }
 func TestCollectMetadataResolversSkipsNilInstances(t *testing.T) {

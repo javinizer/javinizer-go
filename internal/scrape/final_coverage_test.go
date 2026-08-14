@@ -84,12 +84,12 @@ func TestValidateAndResolverEnrichmentRemainingBranches(t *testing.T) {
 
 	complete := models.Actress{FirstName: "Complete", LastName: "Name", JapaneseName: "完全", ThumbURL: "https://example.com/thumb.jpg"}
 	resolver := &testMetadataResolver{name: "unused", enabled: true}
-	assert.Zero(t, enrichActressesFromResolvers(t.Context(), &models.Movie{Actresses: []models.Actress{complete}}, newTestRegistry(resolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{}))
+	assert.Zero(t, enrichActressesFromResolvers(t.Context(), &models.Movie{Actresses: []models.Actress{complete}}, newTestRegistry(resolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{}, nil))
 	assert.Zero(t, resolver.calls)
 
 	first := &testMetadataResolver{name: "first", enabled: true, metadata: models.ActressInfo{FirstName: "First", LastName: "Last", JapaneseName: "完全", ThumbURL: "https://example.com/thumb.jpg"}}
 	second := &testMetadataResolver{name: "second", enabled: true}
-	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), &models.Movie{Actresses: []models.Actress{{}}}, newTestRegistry(first, second), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{}))
+	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), &models.Movie{Actresses: []models.Actress{{}}}, newTestRegistry(first, second), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{}, nil))
 	assert.Zero(t, second.calls)
 }
 
@@ -170,7 +170,7 @@ func TestPostProcessAllOptionalEnrichmentsAndTranslation(t *testing.T) {
 	}
 	translator := &finalTranslator{}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 1}, {DMMID: 2}}}
-	result, err := postProcessScraped(t.Context(), movie, nil, nil, nil, &Config{ActressDBEnabled: true, TranslationEnabled: true}, translator, &finalScrapeActressRepo{}, ScrapeCmd{}, false, time.Now())
+	result, err := postProcessScraped(t.Context(), movie, nil, nil, nil, &Config{ActressDBEnabled: true, TranslationEnabled: true}, translator, &finalScrapeActressRepo{}, ScrapeCmd{}, false, time.Now(), nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, translator.calls)
 	assert.Equal(t, "BuiltIn", result.Movie.Actresses[1].FirstName)
@@ -199,7 +199,7 @@ func TestScrapeNilContextAggregationErrorFallbackAndPostProcessError(t *testing.
 	assert.Equal(t, "mapped", result.Movie.ContentID)
 
 	oldPostProcess := runPostProcessScraped
-	runPostProcessScraped = func(context.Context, *models.Movie, []*models.ScraperResult, *aggregator.AggregateResult, ScraperInstanceResolver, *Config, Translator, database.ActressRepositoryInterface, ScrapeCmd, bool, time.Time) (*ScrapeResult, error) {
+	runPostProcessScraped = func(context.Context, *models.Movie, []*models.ScraperResult, *aggregator.AggregateResult, ScraperInstanceResolver, *Config, Translator, database.ActressRepositoryInterface, ScrapeCmd, bool, time.Time, *scraperCircuitBreaker) (*ScrapeResult, error) {
 		return nil, errors.New("post-process failed")
 	}
 	_, err = engine.Scrape(t.Context(), ScrapeCmd{MovieID: "original", ForceRefresh: true})

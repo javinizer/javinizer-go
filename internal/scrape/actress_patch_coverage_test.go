@@ -41,7 +41,7 @@ func TestResolverEnrichmentSkipsMismatchesAndRejectedThumbnails(t *testing.T) {
 	rejected := &testMetadataResolver{name: "rejected", enabled: true, metadata: models.ActressInfo{DMMID: 7, FirstName: "Right", LastName: "Name", JapaneseName: "正", ThumbURL: "https://example.com/rejected.jpg"}}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
 	cfg := &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return errors.New("bad image") }}
-	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), movie, newTestRegistry(mismatch, rejected), cfg, &[]string{}))
+	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), movie, newTestRegistry(mismatch, rejected), cfg, &[]string{}, nil))
 	assert.Equal(t, "Right", movie.Actresses[0].FirstName)
 	assert.Empty(t, movie.Actresses[0].ThumbURL)
 	assert.Equal(t, 1, mismatch.calls)
@@ -73,7 +73,7 @@ func TestResolverEnrichmentPrefersSessionValidation(t *testing.T) {
 	}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 8}}}
 
-	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), movie, newTestRegistry(resolver), cfg, &[]string{}))
+	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), movie, newTestRegistry(resolver), cfg, &[]string{}, nil))
 	assert.Equal(t, 1, resolver.validationCalls)
 	assert.Zero(t, fallbackCalls)
 	assert.Equal(t, resolver.metadata.ThumbURL, movie.Actresses[0].ThumbURL)
@@ -91,7 +91,7 @@ func TestResolverEnrichmentSkipsReplacementValidationForExistingThumbnail(t *tes
 	}}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 8, ThumbURL: "https://existing.example/thumb.jpg"}}}
 
-	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), movie, newTestRegistry(resolver), cfg, &[]string{}))
+	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), movie, newTestRegistry(resolver), cfg, &[]string{}, nil))
 	assert.Zero(t, resolver.validationCalls)
 	assert.Zero(t, fallbackCalls)
 	assert.Equal(t, "https://existing.example/thumb.jpg", movie.Actresses[0].ThumbURL)
@@ -114,7 +114,7 @@ func TestPostProcessRunsThumbnailAndResolverPasses(t *testing.T) {
 	t.Cleanup(func() { lookupBuiltinActress = old })
 	resolver := &testMetadataResolver{name: "resolver", enabled: true, metadata: models.ActressInfo{DMMID: 5, FirstName: "Resolved", LastName: "Name", JapaneseName: "解決", ThumbURL: "https://example.com/new.jpg"}}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 5, ThumbURL: "https://pics.dmm.co.jp/mono/noimage/now_printing.jpg"}}}
-	result, err := postProcessScraped(t.Context(), movie, nil, nil, newTestRegistry(resolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, nil, nil, ScrapeCmd{}, false, time.Now())
+	result, err := postProcessScraped(t.Context(), movie, nil, nil, newTestRegistry(resolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, nil, nil, ScrapeCmd{}, false, time.Now(), nil)
 	assert.NoError(t, err)
 	assert.Equal(t, "Resolved", result.Movie.Actresses[0].FirstName)
 	assert.Equal(t, "https://example.com/new.jpg", result.Movie.Actresses[0].ThumbURL)
