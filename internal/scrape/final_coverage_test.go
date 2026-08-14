@@ -82,7 +82,7 @@ func TestValidateAndResolverEnrichmentRemainingBranches(t *testing.T) {
 	movie := &models.Movie{Actresses: []models.Actress{{ThumbURL: "   "}}}
 	assert.Zero(t, validateActressThumbnails(movie, &Config{}))
 
-	complete := models.Actress{FirstName: "Complete", JapaneseName: "完全", ThumbURL: "https://example.com/thumb.jpg"}
+	complete := models.Actress{FirstName: "Complete", LastName: "Name", JapaneseName: "完全", ThumbURL: "https://example.com/thumb.jpg"}
 	resolver := &testMetadataResolver{name: "unused", enabled: true}
 	assert.Zero(t, enrichActressesFromResolvers(t.Context(), &models.Movie{Actresses: []models.Actress{complete}}, newTestRegistry(resolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{}))
 	assert.Zero(t, resolver.calls)

@@ -200,7 +200,7 @@ func validateResolverActressThumbnail(ctx context.Context, resolver models.Actre
 func actressNeedsMetadata(a models.Actress) bool {
 	return actressThumbNeedsResolution(a.ThumbURL) ||
 		strings.TrimSpace(a.JapaneseName) == "" ||
-		(strings.TrimSpace(a.FirstName) == "" && strings.TrimSpace(a.LastName) == "")
+		(strings.TrimSpace(a.FirstName) == "" || strings.TrimSpace(a.LastName) == "")
 }
 
 func actressThumbNeedsResolution(thumbURL string) bool {
