@@ -74,7 +74,7 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 	clientCopy := *client
 	hardenedClient := &clientCopy
 	dumpURL := DumpURLOverride()
-	if !isTestDumpURL(dumpURL) {
+	if os.Getenv("JAVINIZER_R18DEV_DUMP_URL") == "" && !isTestDumpURL(dumpURL) {
 		transport, ok := client.Transport.(*http.Transport)
 		if !ok {
 			if client.Transport == nil {
