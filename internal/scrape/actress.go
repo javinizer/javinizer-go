@@ -328,15 +328,15 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			actress.ThumbURL = picks["actress_url"].value
 			actressEnriched = true
 		}
-		if actress.FirstName == "" && picks["actress_first_name"].set {
+		if strings.TrimSpace(actress.FirstName) == "" && picks["actress_first_name"].set {
 			actress.FirstName = picks["actress_first_name"].value
 			actressEnriched = true
 		}
-		if actress.LastName == "" && picks["actress_last_name"].set {
+		if strings.TrimSpace(actress.LastName) == "" && picks["actress_last_name"].set {
 			actress.LastName = picks["actress_last_name"].value
 			actressEnriched = true
 		}
-		if actress.JapaneseName == "" && picks["actress_japanese_name"].set {
+		if strings.TrimSpace(actress.JapaneseName) == "" && picks["actress_japanese_name"].set {
 			actress.JapaneseName = picks["actress_japanese_name"].value
 			actressEnriched = true
 		}

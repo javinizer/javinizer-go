@@ -39,6 +39,17 @@ const downloadUserAgent = "Mozilla/5.0 (compatible; Javinizer/1.0; +https://gith
 
 // DumpURLOverride returns the dump endpoint to use, honoring the
 // JAVINIZER_R18DEV_DUMP_URL env var when set.
+func isOverrideHost(redirectHost string) bool {
+	if override := os.Getenv("JAVINIZER_R18DEV_DUMP_URL"); override != "" {
+		if u, err := neturl.Parse(override); err == nil {
+			return strings.EqualFold(strings.ToLower(redirectHost), strings.ToLower(u.Hostname()))
+		}
+	}
+	return false
+}
+
+// DumpURLOverride returns the dump endpoint to use, honoring the
+// JAVINIZER_R18DEV_DUMP_URL env var when set.
 func DumpURLOverride() string {
 	if u := os.Getenv("JAVINIZER_R18DEV_DUMP_URL"); u != "" {
 		return u
@@ -93,7 +104,7 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 			return fmt.Errorf("r18dev dump: stopped after 10 redirects")
 		}
 		host := strings.ToLower(req.URL.Hostname())
-		if !allowedDumpHosts.MatchString(host) && !isTestDumpURL(via[0].URL.String()) {
+		if !allowedDumpHosts.MatchString(host) && !isTestDumpURL(via[0].URL.String()) && !isOverrideHost(host) {
 			return fmt.Errorf("r18dev dump: refusing redirect to %s", req.URL.Redacted())
 		}
 		if checkRedirect != nil {

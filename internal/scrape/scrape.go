@@ -237,8 +237,10 @@ func New(
 // ScrapeCmd or an error if MovieID is empty after resolution.
 func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInstanceResolver, cfg *Config) (ScrapeCmd, error) {
 	if cmd.RawInput == "" && cmd.MovieID != "" {
-		if parsed, parseErr := matcher.ParseInput(cmd.MovieID, registry); parseErr == nil && parsed.IsURL {
-			cmd.RawInput = cmd.MovieID
+		if parsed, parseErr := matcher.ParseInput(cmd.MovieID, registry); parseErr == nil {
+			if parsed.IsURL {
+				cmd.RawInput = cmd.MovieID
+			}
 			cmd.MovieID = parsed.ID
 			if len(cmd.SelectedScrapers) == 0 && len(parsed.CompatibleScrapers) > 0 {
 				cmd.PriorityOverride = matcher.CalculateOptimalScrapers(nil, cfg.ScrapersPriority, parsed)
