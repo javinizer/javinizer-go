@@ -281,15 +281,6 @@ var runPostProcessScraped = postProcessScraped
 
 // postProcessScraped enriches the aggregated movie with actress DB data,
 // translation, and assembles the final ScrapeResult.
-func scraperListContains(list []string, name string) bool {
-	for _, s := range list {
-		if strings.EqualFold(strings.TrimSpace(s), name) {
-			return true
-		}
-	}
-	return false
-}
-
 func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*models.ScraperResult, aggResult *aggregator.AggregateResult, registry ScraperInstanceResolver, cfg *Config, translator Translator, actressRepo database.ActressRepositoryInterface, cmd ScrapeCmd, explicitSelection bool, startTime time.Time) (*ScrapeResult, error) {
 	var fieldSources map[string]string
 	var resolvedPriorities map[string][]string
@@ -303,7 +294,8 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 			logging.Debugf("[scrape] Enriched %d actresses from database", enriched)
 		}
 	}
-	if builtinCacheAllowedForPriority(cfg) && (!explicitSelection || scraperListContains(resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, cfg), "dmm")) {
+	effectivePriority := resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, cfg)
+	if builtinCacheAllowedForPriority(cfg, effectivePriority) {
 		if enriched := enrichActressesFromBuiltinCache(scraped); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from built-in cache", enriched)
 		}

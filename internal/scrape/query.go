@@ -59,6 +59,11 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 		if !exists || resolver == nil || !resolver.IsEnabled() {
 			continue
 		}
+		if _, ok := resolver.(models.ContentIDResolverCtx); !ok {
+			if _, ok := resolver.(models.ContentIDResolver); !ok {
+				continue
+			}
+		}
 		if s.breaker != nil {
 			if skip := s.breaker.skipFailure(resolverName); skip != nil {
 				continue

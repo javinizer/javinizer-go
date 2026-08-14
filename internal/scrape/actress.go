@@ -13,12 +13,14 @@ import (
 
 var lookupBuiltinActress = actresscache.Lookup
 
-func builtinCacheAllowedForPriority(cfg *Config) bool {
+func builtinCacheAllowedForPriority(cfg *Config, effectivePriority []string) bool {
 	if cfg == nil {
 		return true
 	}
 	var priority []string
-	if len(cfg.ActressFieldPriority) > 0 {
+	if len(effectivePriority) > 0 {
+		priority = effectivePriority
+	} else if len(cfg.ActressFieldPriority) > 0 {
 		priority = cfg.ActressFieldPriority
 	} else {
 		priority = cfg.ScrapersPriority
