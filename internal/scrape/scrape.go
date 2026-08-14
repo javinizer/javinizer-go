@@ -248,6 +248,7 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 		} else if parseErr != nil {
 			logging.Warnf("[scrape] MovieID parse failed for %q: %v (using as-is)", RedactURLQuery(cmd.MovieID), parseErr)
 			cmd.ParseWarning = fmt.Sprintf("input could not be parsed: %v", parseErr)
+			cmd.RawInput = cmd.MovieID
 			cmd.MovieID = RedactURLQuery(cmd.MovieID)
 		}
 	}
@@ -286,8 +287,6 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		resolvedPriorities = aggResult.ResolvedPriorities
 	}
 
-	actressSources := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)
-
 	if actressRepo != nil {
 		if enriched := enrichActressesFromDB(ctx, scraped, actressRepo, cfg); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from database", enriched)
@@ -296,6 +295,8 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	if enriched := enrichActressesFromBuiltinCache(scraped); enriched > 0 {
 		logging.Debugf("[scrape] Enriched %d actresses from built-in cache", enriched)
 	}
+
+	actressSources := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)
 
 	if invalid := validateActressThumbnails(scraped, cfg); invalid > 0 {
 		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails", invalid)
