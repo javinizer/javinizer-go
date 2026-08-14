@@ -246,6 +246,7 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 		} else if parseErr != nil {
 			logging.Warnf("[scrape] MovieID parse failed for %q: %v (using as-is)", RedactURLQuery(cmd.MovieID), parseErr)
 			cmd.ParseWarning = fmt.Sprintf("input could not be parsed: %v", parseErr)
+			cmd.MovieID = RedactURLQuery(cmd.MovieID)
 		}
 	}
 	if cmd.RawInput != "" {

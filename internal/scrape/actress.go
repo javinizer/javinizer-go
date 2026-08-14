@@ -252,13 +252,13 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 		if needsThumb {
 			needed = append(needed, "actress_url")
 		}
-		if actress.FirstName == "" {
+		if strings.TrimSpace(actress.FirstName) == "" {
 			needed = append(needed, "actress_first_name")
 		}
-		if actress.LastName == "" {
+		if strings.TrimSpace(actress.LastName) == "" {
 			needed = append(needed, "actress_last_name")
 		}
-		if actress.JapaneseName == "" {
+		if strings.TrimSpace(actress.JapaneseName) == "" {
 			needed = append(needed, "actress_japanese_name")
 		}
 		allSet := func() (bool, int) {
