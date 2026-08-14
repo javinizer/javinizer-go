@@ -64,9 +64,11 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 			logging.Debugf("[scrape] Enriched %d actresses from database after cache hit", enriched)
 		}
 	}
-	if enriched := enrichActressesFromBuiltinCache(scrapedToReturn); enriched > 0 {
-		needsPersistence = true
-		logging.Debugf("[scrape] Enriched %d actresses from built-in cache after cache hit", enriched)
+	if builtinCacheAllowedForPriority(s.cfg) {
+		if enriched := enrichActressesFromBuiltinCache(scrapedToReturn); enriched > 0 {
+			needsPersistence = true
+			logging.Debugf("[scrape] Enriched %d actresses from built-in cache after cache hit", enriched)
+		}
 	}
 	if invalid := validateActressThumbnails(scrapedToReturn, s.cfg); invalid > 0 {
 		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails after cache hit", invalid)

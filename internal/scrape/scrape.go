@@ -294,8 +294,10 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 			logging.Debugf("[scrape] Enriched %d actresses from database", enriched)
 		}
 	}
-	if enriched := enrichActressesFromBuiltinCache(scraped); enriched > 0 {
-		logging.Debugf("[scrape] Enriched %d actresses from built-in cache", enriched)
+	if builtinCacheAllowedForPriority(cfg) {
+		if enriched := enrichActressesFromBuiltinCache(scraped); enriched > 0 {
+			logging.Debugf("[scrape] Enriched %d actresses from built-in cache", enriched)
+		}
 	}
 
 	actressSources := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)

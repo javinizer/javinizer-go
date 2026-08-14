@@ -13,6 +13,21 @@ import (
 
 var lookupBuiltinActress = actresscache.Lookup
 
+func builtinCacheAllowedForPriority(cfg *Config) bool {
+	if cfg == nil || len(cfg.ActressFieldPriority) == 0 {
+		return true
+	}
+	if len(cfg.ActressFieldPriority) == 1 && strings.EqualFold(strings.TrimSpace(cfg.ActressFieldPriority[0]), "__skip__") {
+		return false
+	}
+	for _, name := range cfg.ActressFieldPriority {
+		if strings.EqualFold(strings.TrimSpace(name), "dmm") {
+			return true
+		}
+	}
+	return false
+}
+
 func enrichActressesFromBuiltinCache(scraped *models.Movie) int {
 	if scraped == nil {
 		return 0
