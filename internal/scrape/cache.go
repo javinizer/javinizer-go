@@ -73,19 +73,20 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails after cache hit", invalid)
 		needsPersistence = true
 	}
+	var resolverWarnings []string
 	if s.registry != nil {
 		var resolverOverride []string
 		if explicitSelection {
 			resolverOverride = resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, s.cfg)
 		}
-		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg, resolverOverride); enriched > 0 {
+		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg, &resolverWarnings, resolverOverride); enriched > 0 {
 			needsPersistence = true
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers after cache hit", enriched)
 		}
 	}
 
 	now := time.Now()
-	if len(s.cfg.ResolverWarnings) > 0 {
+	if len(resolverWarnings) > 0 {
 		result := &ScrapeResult{
 			Movie:              scrapedToReturn,
 			FieldSources:       fieldSources,
@@ -98,7 +99,7 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 			NeedsPersistence:   needsPersistence,
 			StartedAt:          startTime,
 			EndedAt:            now,
-			Warning:            strings.Join(s.cfg.ResolverWarnings, "; "),
+			Warning:            strings.Join(resolverWarnings, "; "),
 		}
 		return result
 	}

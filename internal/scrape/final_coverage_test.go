@@ -84,12 +84,12 @@ func TestValidateAndResolverEnrichmentRemainingBranches(t *testing.T) {
 
 	complete := models.Actress{FirstName: "Complete", JapaneseName: "完全", ThumbURL: "https://example.com/thumb.jpg"}
 	resolver := &testMetadataResolver{name: "unused", enabled: true}
-	assert.Zero(t, enrichActressesFromResolvers(t.Context(), &models.Movie{Actresses: []models.Actress{complete}}, newTestRegistry(resolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}))
+	assert.Zero(t, enrichActressesFromResolvers(t.Context(), &models.Movie{Actresses: []models.Actress{complete}}, newTestRegistry(resolver), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{}))
 	assert.Zero(t, resolver.calls)
 
 	first := &testMetadataResolver{name: "first", enabled: true, metadata: models.ActressInfo{FirstName: "First", LastName: "Last", JapaneseName: "完全", ThumbURL: "https://example.com/thumb.jpg"}}
 	second := &testMetadataResolver{name: "second", enabled: true}
-	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), &models.Movie{Actresses: []models.Actress{{}}}, newTestRegistry(first, second), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}))
+	assert.Equal(t, 1, enrichActressesFromResolvers(t.Context(), &models.Movie{Actresses: []models.Actress{{}}}, newTestRegistry(first, second), &Config{ScrapeActress: true, ValidateActressThumbnail: func(context.Context, string) error { return nil }}, &[]string{}))
 	assert.Zero(t, second.calls)
 }
 

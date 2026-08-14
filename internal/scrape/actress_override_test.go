@@ -15,14 +15,14 @@ func TestResolverEnrichmentPerScraperOverrideBeatsGlobal(t *testing.T) {
 	opIn := true
 	resolver := &testMetadataResolver{name: "optin", enabled: true, scrapeActress: &opIn, metadata: models.ActressInfo{DMMID: 7, FirstName: "Via", LastName: "Override"}}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
-	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(resolver), &Config{ScrapeActress: false}))
+	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(resolver), &Config{ScrapeActress: false}, &[]string{}))
 	assert.Equal(t, "Via", movie.Actresses[0].FirstName)
 	assert.Equal(t, 1, resolver.calls)
 
 	optOut := false
 	muted := &testMetadataResolver{name: "optout", enabled: true, scrapeActress: &optOut, metadata: models.ActressInfo{DMMID: 7, FirstName: "No"}}
 	movie2 := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
-	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), movie2, newTestRegistry(muted), &Config{ScrapeActress: true}))
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), movie2, newTestRegistry(muted), &Config{ScrapeActress: true}, &[]string{}))
 	assert.Equal(t, 0, muted.calls)
 }
 
@@ -34,13 +34,13 @@ func TestResolverEnrichmentActressFieldOverrideIsExclusive(t *testing.T) {
 
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
 	excl := &Config{ScrapeActress: true, ActressFieldPriority: []string{"minnanoav"}}
-	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(first, second), excl))
+	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(first, second), excl, &[]string{}))
 	assert.Equal(t, "MinnanoName", movie.Actresses[0].FirstName)
 	assert.Equal(t, 0, first.calls, "override-unlisted resolver must not run")
 
 	movie2 := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
 	skip := &Config{ScrapeActress: true, ActressFieldPriority: []string{"__skip__"}}
-	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), movie2, newTestRegistry(first), skip))
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), movie2, newTestRegistry(first), skip, &[]string{}))
 	assert.Equal(t, 0, first.calls)
 }
 
@@ -70,7 +70,7 @@ func TestResolverEnrichmentContinuesPastResolverFailure(t *testing.T) {
 	offender := &failingMetadataResolver{testMetadataResolver{name: "dmm", enabled: true}}
 	backup := &testMetadataResolver{name: "minnanoav", enabled: true, metadata: models.ActressInfo{DMMID: 5, FirstName: "Backup"}}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 5}}}
-	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(offender, backup), &Config{ScrapeActress: true}))
+	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(offender, backup), &Config{ScrapeActress: true}, &[]string{}))
 	assert.Equal(t, "Backup", movie.Actresses[0].FirstName)
 }
 
@@ -79,7 +79,7 @@ func TestResolverEnrichmentExclusiveUnknownSelection(t *testing.T) {
 	resolver := &testMetadataResolver{name: "dmm", enabled: true, metadata: models.ActressInfo{DMMID: 9, FirstName: "A"}}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 9}}}
 	cfg := &Config{ScrapeActress: true, ActressFieldPriority: []string{"nonexistent"}}
-	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(resolver), cfg))
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(resolver), cfg, &[]string{}))
 	assert.Equal(t, 0, resolver.calls)
 }
 
@@ -87,9 +87,9 @@ func TestResolverEnrichmentExclusiveUnknownSelection(t *testing.T) {
 // even when the lower one comes first in registry order, and must skip the
 // early-exit when a later resolver can still improve a pick.
 func TestResolverEnrichmentNilGuards(t *testing.T) {
-	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), &models.Movie{}, newTestRegistry(), nil))
-	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), nil, newTestRegistry(), &Config{ScrapeActress: true}))
-	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), &models.Movie{}, nil, &Config{ScrapeActress: true}))
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), &models.Movie{}, newTestRegistry(), nil, &[]string{}))
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), nil, newTestRegistry(), &Config{ScrapeActress: true}, &[]string{}))
+	assert.Equal(t, 0, enrichActressesFromResolvers(context.Background(), &models.Movie{}, nil, &Config{ScrapeActress: true}, &[]string{}))
 }
 
 // Blank entries in a rank list must not occupy a rank slot.
@@ -103,7 +103,7 @@ func TestResolverEnrichmentContinuesWhenLaterResolverCanImprove(t *testing.T) {
 	higherLater := &testMetadataResolver{name: "Higher", enabled: true, metadata: models.ActressInfo{DMMID: 9, FirstName: "Higher"}}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 9}}}
 	cfg := &Config{ScrapeActress: true, ActressFieldPriority: []string{"Higher", "Lower"}}
-	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(lowerFirst, higherLater), cfg))
+	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(lowerFirst, higherLater), cfg, &[]string{}))
 	assert.Equal(t, "Higher", movie.Actresses[0].FirstName)
 	assert.Equal(t, 1, lowerFirst.calls)
 	assert.Equal(t, 1, higherLater.calls)
@@ -115,7 +115,7 @@ func TestResolverEnrichmentThreadsEarlierDiscoveries(t *testing.T) {
 		name: "minnanoav", enabled: true, metadata: models.ActressInfo{DMMID: 7, FirstName: "Filled"},
 	}}
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
-	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(discoverer, recorder), &Config{ScrapeActress: true}))
+	assert.Equal(t, 1, enrichActressesFromResolvers(context.Background(), movie, newTestRegistry(discoverer, recorder), &Config{ScrapeActress: true}, &[]string{}))
 	assert.Equal(t, "発見", recorder.lastInput.JapaneseName)
 	assert.Equal(t, "Filled", movie.Actresses[0].FirstName)
 }
@@ -175,7 +175,7 @@ func TestCollectMetadataResolversExplicitSelectionIsExclusive(t *testing.T) {
 	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 7}}}
 	first.metadata = models.ActressInfo{DMMID: 7, FirstName: "ViaDmm"}
 	second.metadata = models.ActressInfo{DMMID: 7, FirstName: "ViaMinnanoAV"}
-	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, &Config{ScrapeActress: true}, []string{"dmm"})
+	enriched := enrichActressesFromResolvers(context.Background(), movie, registry, &Config{ScrapeActress: true}, &[]string{}, []string{"dmm"})
 	assert.Equal(t, 1, enriched)
 	assert.Equal(t, "ViaDmm", movie.Actresses[0].FirstName)
 	assert.Equal(t, 0, second.calls)

@@ -181,7 +181,7 @@ func actressThumbNeedsResolution(thumbURL string) bool {
 	return strings.TrimSpace(thumbURL) == "" || models.IsKnownInvalidDMMActressThumbnail(thumbURL)
 }
 
-func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, registry ScraperInstanceResolver, cfg *Config, priorityOverride ...[]string) int {
+func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, registry ScraperInstanceResolver, cfg *Config, warnings *[]string, priorityOverride ...[]string) int {
 	// cfg.ScrapeActress is only the global default here: collectMetadataResolvers
 	// applies per-scraper overrides, so a global false with a scraper-specific
 	// true still enriches (documented three-state behavior).
@@ -286,7 +286,7 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			})
 			if resolverErr != nil {
 				logging.Warnf("Actress resolver %s failed for %s: %v", resolverName(resolver), actress.FullName(), resolverErr)
-				cfg.ResolverWarnings = append(cfg.ResolverWarnings, fmt.Sprintf("%s: %v", resolverName(resolver), resolverErr))
+				*warnings = append(*warnings, fmt.Sprintf("%s: %v", resolverName(resolver), resolverErr))
 				continue
 			}
 			if metadata.DMMID != actress.DMMID && actress.DMMID > 0 {

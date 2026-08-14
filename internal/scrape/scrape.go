@@ -253,6 +253,7 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 			cmd.MovieID = RedactURLQuery(cmd.MovieID)
 		}
 	}
+	cmd.RawInput = strings.TrimSpace(cmd.RawInput)
 	if cmd.RawInput != "" {
 		parsed, parseErr := matcher.ParseInput(cmd.RawInput, registry)
 		if parseErr != nil {
@@ -303,6 +304,7 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails", invalid)
 	}
 
+	var resolverWarnings []string
 	if registry != nil {
 		// Only an explicit selection restricts enrichment resolvers; the
 		// default global priority list must not make them exclusive, or
@@ -311,7 +313,7 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		if explicitSelection {
 			resolverOverride = resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, cfg)
 		}
-		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg, resolverOverride); enriched > 0 {
+		if enriched := enrichActressesFromResolvers(ctx, scraped, registry, cfg, &resolverWarnings, resolverOverride); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers", enriched)
 		}
 	}
@@ -335,11 +337,11 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		StartedAt:          startTime,
 		EndedAt:            now,
 	}
-	if len(cfg.ResolverWarnings) > 0 {
+	if len(resolverWarnings) > 0 {
 		if result.Warning != "" {
 			result.Warning += "; "
 		}
-		result.Warning += strings.Join(cfg.ResolverWarnings, "; ")
+		result.Warning += strings.Join(resolverWarnings, "; ")
 	}
 
 	return result, nil
