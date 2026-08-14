@@ -87,7 +87,9 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 		if err != nil {
 			return DownloadResult{}, fmt.Errorf("r18dev dump: failed to install pinned dial transport: %w", err)
 		}
-		hardenedClient = &http.Client{Transport: pinned, CheckRedirect: client.CheckRedirect, Timeout: client.Timeout}
+		copied := *client
+		copied.Transport = pinned
+		hardenedClient = &copied
 		logging.Debugf("r18dev dump: installed SSRF pinned dial transport")
 	}
 
@@ -108,7 +110,13 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 			return fmt.Errorf("r18dev dump: refusing redirect to %s", req.URL.Redacted())
 		}
 		if checkRedirect != nil {
-			return checkRedirect(req, via)
+			if err := checkRedirect(req, via); err != nil {
+				return err
+			}
+			host = strings.ToLower(req.URL.Hostname())
+			if !allowedDumpHosts.MatchString(host) && !isTestDumpURL(via[0].URL.String()) && !isOverrideHost(host) {
+				return fmt.Errorf("r18dev dump: callback redirected to unallowed host %s", req.URL.Redacted())
+			}
 		}
 		return nil
 	}
