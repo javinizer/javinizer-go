@@ -17,26 +17,19 @@ func builtinCacheAllowedForPriority(cfg *Config) bool {
 	if cfg == nil {
 		return true
 	}
-	if len(cfg.ActressFieldPriority) == 0 {
-		if len(cfg.ScrapersPriority) == 0 {
-			return true
-		}
-		for _, name := range cfg.ScrapersPriority {
-			if strings.EqualFold(strings.TrimSpace(name), "dmm") {
-				return true
-			}
-		}
+	var priority []string
+	if len(cfg.ActressFieldPriority) > 0 {
+		priority = cfg.ActressFieldPriority
+	} else {
+		priority = cfg.ScrapersPriority
+	}
+	if len(priority) == 0 {
+		return true
+	}
+	if len(priority) == 1 && strings.EqualFold(strings.TrimSpace(priority[0]), "__skip__") {
 		return false
 	}
-	if len(cfg.ActressFieldPriority) == 1 && strings.EqualFold(strings.TrimSpace(cfg.ActressFieldPriority[0]), "__skip__") {
-		return false
-	}
-	for _, name := range cfg.ActressFieldPriority {
-		if strings.EqualFold(strings.TrimSpace(name), "dmm") {
-			return true
-		}
-	}
-	return false
+	return strings.EqualFold(strings.TrimSpace(priority[0]), "dmm")
 }
 
 func enrichActressesFromBuiltinCache(scraped *models.Movie) int {

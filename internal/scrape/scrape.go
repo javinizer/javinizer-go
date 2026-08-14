@@ -298,8 +298,6 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		resolvedPriorities = aggResult.ResolvedPriorities
 	}
 
-	actressSources := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)
-
 	if actressRepo != nil {
 		if enriched := enrichActressesFromDB(ctx, scraped, actressRepo, cfg); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from database", enriched)
@@ -328,6 +326,8 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers", enriched)
 		}
 	}
+
+	actressSources := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)
 
 	var translationWarning string
 	var translationOutput *translation.TranslationOutput
