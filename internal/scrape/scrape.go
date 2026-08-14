@@ -325,6 +325,9 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	}
 
 	actressSources := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)
+	if actressSources == nil {
+		actressSources = make(map[string]string)
+	}
 	for k, v := range actressSourcesPreEnrichment {
 		if _, ok := actressSources[k]; !ok {
 			actressSources[k] = v

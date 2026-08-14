@@ -31,12 +31,7 @@ func builtinCacheAllowedForPriority(cfg *Config, effectivePriority []string) boo
 	if len(priority) == 1 && strings.EqualFold(strings.TrimSpace(priority[0]), "__skip__") {
 		return false
 	}
-	for _, name := range priority {
-		if strings.EqualFold(strings.TrimSpace(name), "dmm") {
-			return true
-		}
-	}
-	return false
+	return strings.EqualFold(strings.TrimSpace(priority[0]), "dmm")
 }
 
 func enrichActressesFromBuiltinCache(scraped *models.Movie) int {
