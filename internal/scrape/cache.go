@@ -72,11 +72,12 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		hasValidTranslation := false
 		if actressEnriched {
 			hasValidTranslation = false
-		}
-		for _, trans := range cached.Translations {
-			if trans.Language == targetLang && trans.SettingsHash == currentHash {
-				hasValidTranslation = true
-				break
+		} else {
+			for _, trans := range cached.Translations {
+				if trans.Language == targetLang && trans.SettingsHash == currentHash {
+					hasValidTranslation = true
+					break
+				}
 			}
 		}
 		if !hasValidTranslation {
