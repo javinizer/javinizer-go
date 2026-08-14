@@ -30,15 +30,18 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 
 	scrapedToReturn := cached
 	fieldSources := buildFieldSourcesFromCachedMovie(cached)
+	actressEnriched := false
 
 	if actressRepo != nil {
 		if enriched := enrichActressesFromDB(ctx, scrapedToReturn, actressRepo, s.cfg); enriched > 0 {
 			logging.Debugf("[scrape] Enriched %d actresses from database after cache hit", enriched)
+			actressEnriched = true
 		}
 	}
 	if builtinCacheAllowedForPriority(s.cfg) {
 		if enriched := enrichActressesFromBuiltinCache(scrapedToReturn); enriched > 0 {
 			needsPersistence = true
+			actressEnriched = true
 			logging.Debugf("[scrape] Enriched %d actresses from built-in cache after cache hit", enriched)
 		}
 	}
@@ -54,6 +57,7 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		}
 		if enriched := enrichActressesFromResolvers(ctx, scrapedToReturn, s.registry, s.cfg, &resolverWarnings, resolverOverride); enriched > 0 {
 			needsPersistence = true
+			actressEnriched = true
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers after cache hit", enriched)
 		}
 	}
@@ -66,6 +70,9 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		currentHash := s.cfg.TranslationSettingsHash
 		targetLang := s.cfg.TranslationTargetLang
 		hasValidTranslation := false
+		if actressEnriched {
+			hasValidTranslation = false
+		}
 		for _, trans := range cached.Translations {
 			if trans.Language == targetLang && trans.SettingsHash == currentHash {
 				hasValidTranslation = true
