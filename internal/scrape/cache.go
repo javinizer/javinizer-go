@@ -11,11 +11,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/translation"
 )
 
-// tryCache checks the movie database for a previously scraped result.
-// On cache hit, returns a ScrapeResult with the cached movie data.
-// Poster generation is intentionally NOT triggered for cache hits — the poster
-// already exists on disk from the original scrape, and re-generating it would
-// be redundant (posters are keyed by movie ID + format, not translation hash).
 func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo database.ActressRepositoryInterface, explicitSelection bool, startTime time.Time) *ScrapeResult {
 	if s.movieRepo == nil {
 		return nil
@@ -32,29 +27,6 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 	logging.Debugf("[scrape] Found %s in cache (Title=%s, Maker=%s)", cmd.MovieID, cached.Title, cached.Maker)
 
 	needsPersistence := false
-	translationWarning := ""
-	var translationOutput *translation.TranslationOutput
-	if s.cfg != nil && s.cfg.TranslationEnabled {
-		currentHash := s.cfg.TranslationSettingsHash
-		targetLang := s.cfg.TranslationTargetLang
-		hasValidTranslation := false
-		for _, trans := range cached.Translations {
-			if trans.Language == targetLang && trans.SettingsHash == currentHash {
-				hasValidTranslation = true
-				break
-			}
-		}
-		if !hasValidTranslation {
-			logging.Infof("[scrape] Translation settings changed, re-translating cached result for %s", cmd.MovieID)
-			warn, transOutput := applyTranslation(ctx, cached, s.translator)
-			if warn != "" {
-				translationWarning = warn
-				logging.Warnf("[scrape] Partial translation warning for cached %s: %s", cmd.MovieID, warn)
-			}
-			translationOutput = transOutput
-			needsPersistence = true
-		}
-	}
 
 	scrapedToReturn := cached
 	fieldSources := buildFieldSourcesFromCachedMovie(cached)
@@ -88,23 +60,34 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 
 	actressSources := buildActressSourcesFromCachedMovie(scrapedToReturn)
 
-	now := time.Now()
-	if len(resolverWarnings) > 0 {
-		result := &ScrapeResult{
-			Movie:              scrapedToReturn,
-			FieldSources:       fieldSources,
-			ActressSources:     actressSources,
-			ScraperResults:     []*models.ScraperResult{ScraperResultFromCachedMovie(cached)},
-			Cached:             true,
-			TranslationWarning: translationWarning,
-			TranslationOutput:  translationOutput,
-			Status:             StatusCompleted,
-			NeedsPersistence:   needsPersistence,
-			StartedAt:          startTime,
-			EndedAt:            now,
-			Warning:            strings.Join(resolverWarnings, "; "),
+	translationWarning := ""
+	var translationOutput *translation.TranslationOutput
+	if s.cfg != nil && s.cfg.TranslationEnabled {
+		currentHash := s.cfg.TranslationSettingsHash
+		targetLang := s.cfg.TranslationTargetLang
+		hasValidTranslation := false
+		for _, trans := range cached.Translations {
+			if trans.Language == targetLang && trans.SettingsHash == currentHash {
+				hasValidTranslation = true
+				break
+			}
 		}
-		return result
+		if !hasValidTranslation {
+			logging.Infof("[scrape] Translation settings changed, re-translating cached result for %s", cmd.MovieID)
+			warn, transOutput := applyTranslation(ctx, scrapedToReturn, s.translator)
+			if warn != "" {
+				translationWarning = warn
+				logging.Warnf("[scrape] Partial translation warning for cached %s: %s", cmd.MovieID, warn)
+			}
+			translationOutput = transOutput
+			needsPersistence = true
+		}
+	}
+
+	now := time.Now()
+	warning := ""
+	if len(resolverWarnings) > 0 {
+		warning = strings.Join(resolverWarnings, "; ")
 	}
 	return &ScrapeResult{
 		Movie:              scrapedToReturn,
@@ -118,5 +101,6 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		NeedsPersistence:   needsPersistence,
 		StartedAt:          startTime,
 		EndedAt:            now,
+		Warning:            warning,
 	}
 }

@@ -23,8 +23,7 @@ import (
 // signal (set then cleared during persistence) that does not propagate to MovieResult.
 type OrchestrationMeta struct {
 	models.OrchestrationState `json:",inline"`
-	NeedsPersistence          bool   `json:"needs_persistence,omitempty"`
-	ResolverWarning           string `json:"resolver_warning,omitempty"`
+	NeedsPersistence          bool `json:"needs_persistence,omitempty"`
 }
 
 // scrapeOrchestrator is the internal interface for the Scrape phase.
@@ -96,7 +95,7 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*sc
 			meta.TranslationWarning = &s
 		}
 		if result.Warning != "" {
-			meta.OrchestrationState.ResolverWarning = result.Warning
+			meta.ResolverWarning = result.Warning
 		}
 		if result.NeedsPersistence {
 			meta.NeedsPersistence = true
